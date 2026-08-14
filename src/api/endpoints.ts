@@ -451,7 +451,6 @@ export const projectsApi = {
 }
 
 // ----- Search --------------------------------------------------------------
-
 export interface SearchHit {
   conversation_id: string
   title: string
@@ -514,7 +513,15 @@ export const searchApi = {
 
 export interface ConversationCompactionResult {
   compacted: boolean
-  reason: 'compacted' | 'nothing_to_compact' | 'disabled' | 'generation_in_progress'
+  reason:
+    | 'compacted'
+    | 'nothing_to_compact'
+    | 'disabled'
+    | 'generation_in_progress'
+    | 'conversation_changed'
+    | 'compaction_failed'
+    | 'persistence_failed'
+    | 'timed_out'
   dropped_messages: number
   kept_messages: number
   summary_tokens: number

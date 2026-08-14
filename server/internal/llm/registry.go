@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -64,10 +65,22 @@ var ErrUnknownProvider = errors.New("unknown provider")
 //   - "openai" → openai
 //   - "google" / "gemini" → google
 func (r *Registry) Get(channelType string) (Provider, error) {
+	if r == nil {
+		return nil, ErrUnknownProvider
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if providerID := providerIDForChannelType(channelType); providerID != "" {
-		return r.providers[providerID], nil
+		provider, ok := r.providers[providerID]
+		if !ok || provider == nil {
+			// A registry can be intentionally assembled with only a subset of
+			// providers in tests or during a hot-reload. Returning a nil provider
+			// with a nil error makes callers panic at Stream; surface the same
+			// typed error as an unknown channel so task-level model fallback can
+			// select another configured compaction model.
+			return nil, fmt.Errorf("%w: %s provider is not registered", ErrUnknownProvider, providerID)
+		}
+		return provider, nil
 	}
 	return nil, ErrUnknownProvider
 }

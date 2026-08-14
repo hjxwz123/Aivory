@@ -28,6 +28,8 @@ var (
 	analyticsWindow2                  = envcfg.Int("AIVORY_API_ANALYTICS_WINDOW_2", 365)
 )
 
+const contextCompactionPromptMaxBytes = 16 * 1024
+
 // ===== Channels =====
 
 func listChannelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
@@ -1346,7 +1348,7 @@ func analyticsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 
 var settingsKeys = []string{
 	"default_model_id", "task_model_id", "context_compaction_model_id", "tool_route_model_id", "embedding_model_id",
-	"keep_recent_rounds", "summary_max_tokens", "summary_target_percent", "summary_merge_max_tokens", "context_compaction_prompt", "compaction_enabled",
+	"keep_recent_rounds", "summary_max_tokens", "summary_target_percent", "summary_merge_max_tokens", "compaction_request_max_tokens", "context_compaction_prompt", "compaction_enabled",
 	"compaction_token_trigger", "compaction_token_cap", "compaction_retention_percentage",
 	"memory_enabled", "daily_message_limit", "daily_image_limit", "signup_open",
 	"email_verification_required", "daily_token_limit", "max_concurrent_generations",
@@ -1511,7 +1513,7 @@ func adminSettingsSet(d Deps, w http.ResponseWriter, r *http.Request) {
 	if capabilitiesPresent {
 		capabilitiesBefore = currentGlobalCapabilitySnapshot(d)
 	}
-	if _, err := applyAdminSettingsPatch(d, body, true); err != nil {
+	if _, err := applyAdminSettingsPatch(r.Context(), d, body, true); err != nil {
 		if errors.Is(err, errInvalidInput) {
 			writeError(w, 400, errInvalidInput)
 			return
@@ -1531,8 +1533,12 @@ func adminSettingsSet(d Deps, w http.ResponseWriter, r *http.Request) {
 	adminSettingsGet(d, w, r)
 }
 
-func applyAdminSettingsPatch(d Deps, body map[string]json.RawMessage, skipNull bool) (int64, error) {
-	var n int64
+func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.RawMessage, skipNull bool) (int64, error) {
+	type settingWrite struct {
+		key   string
+		value json.RawMessage
+	}
+	writes := make([]settingWrite, 0, len(body))
 	for _, k := range settingsKeys {
 		if v, ok := body[k]; ok {
 			if skipNull && strings.TrimSpace(string(v)) == "null" {
@@ -1547,7 +1553,7 @@ func applyAdminSettingsPatch(d Deps, body map[string]json.RawMessage, skipNull b
 			// token_trigger inverts the early-exit guard and a zero/negative
 			// summary length makes the tiered merge churn the cache every turn.
 			switch k {
-			case "keep_recent_rounds", "summary_max_tokens", "summary_target_percent", "summary_merge_max_tokens", "compaction_token_trigger", "compaction_token_cap", "compaction_retention_percentage",
+			case "keep_recent_rounds", "summary_max_tokens", "summary_target_percent", "summary_merge_max_tokens", "compaction_request_max_tokens", "compaction_token_trigger", "compaction_token_cap", "compaction_retention_percentage",
 				"daily_message_limit", "daily_image_limit", "daily_token_limit",
 				"max_concurrent_generations", "register_ip_daily_limit", "fallback_ttft_sec":
 				var n int
@@ -1564,6 +1570,9 @@ func applyAdminSettingsPatch(d Deps, body map[string]json.RawMessage, skipNull b
 					return 0, errInvalidInput
 				}
 				if (k == "summary_max_tokens" || k == "summary_merge_max_tokens") && n < 256 {
+					return 0, errInvalidInput
+				}
+				if k == "compaction_request_max_tokens" && n < 8192 {
 					return 0, errInvalidInput
 				}
 			case "credits_per_usd":
@@ -1640,6 +1649,28 @@ func applyAdminSettingsPatch(d Deps, body map[string]json.RawMessage, skipNull b
 					return 0, errInvalidInput
 				}
 				v, _ = json.Marshal(strings.TrimSpace(text))
+			case "context_compaction_prompt":
+				var prompt string
+				if json.Unmarshal(v, &prompt) != nil {
+					return 0, errInvalidInput
+				}
+				prompt = strings.TrimSpace(prompt)
+				if len(prompt) > contextCompactionPromptMaxBytes {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(prompt)
+			case "context_compaction_model_id":
+				normalized, err := normalizeContextCompactionModelSetting(ctx, d, v)
+				if err != nil {
+					return 0, err
+				}
+				v = normalized
+			case "compaction_enabled":
+				var enabled bool
+				if json.Unmarshal(v, &enabled) != nil {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(enabled)
 			case "embedding_model_id":
 				if err := ensureEmbeddingModelSettingCanChange(d, v); err != nil {
 					return 0, err
@@ -1654,13 +1685,79 @@ func applyAdminSettingsPatch(d Deps, body map[string]json.RawMessage, skipNull b
 				}
 				v = normalized
 			}
-			if err := store.SetSetting(d.DB, k, json.RawMessage(v)); err != nil {
-				return n, err
-			}
-			n++
+			writes = append(writes, settingWrite{key: k, value: append(json.RawMessage(nil), v...)})
 		}
 	}
-	return n, nil
+	if len(writes) == 0 {
+		return 0, nil
+	}
+	tx, err := d.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := time.Now().Unix()
+	for _, write := range writes {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO settings(key, value, updated_at) VALUES(?, ?, ?)
+			ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`,
+			write.key, string(write.value), now); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	// Direct transactional writes bypass store.SetSetting's per-key invalidation.
+	// Clear the local cache before callers compare post-write capability state or
+	// render the saved settings response; adminSettingsSet broadcasts the same
+	// invalidation to other instances immediately afterwards.
+	store.InvalidateConfig()
+	return int64(len(writes)), nil
+}
+
+func normalizeContextCompactionModelSetting(ctx context.Context, d Deps, raw json.RawMessage) (json.RawMessage, error) {
+	var modelID string
+	if json.Unmarshal(raw, &modelID) != nil {
+		return nil, errInvalidInput
+	}
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		return json.RawMessage(`""`), nil
+	}
+	model, err := store.GetModel(ctx, d.DB, modelID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, errInvalidInput
+		}
+		return nil, err
+	}
+	if !model.Enabled || model.Kind != "chat" {
+		return nil, errInvalidInput
+	}
+	channel, err := store.GetChannel(ctx, d.DB, model.ChannelID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, errInvalidInput
+		}
+		return nil, err
+	}
+	if !channel.Enabled {
+		return nil, errInvalidInput
+	}
+	if !isSupportedContextCompactionChannelType(channel.Type) {
+		return nil, errInvalidInput
+	}
+	normalized, _ := json.Marshal(modelID)
+	return normalized, nil
+}
+
+func isSupportedContextCompactionChannelType(channelType string) bool {
+	switch strings.ToLower(strings.TrimSpace(channelType)) {
+	case "openai", "anthropic", "claude", "google", "gemini":
+		return true
+	default:
+		return false
+	}
 }
 
 func ensureEmbeddingModelSettingCanChange(d Deps, next json.RawMessage) error {

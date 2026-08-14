@@ -22,6 +22,7 @@ const OWNED_KEYS = [
   'summary_max_tokens',
   'summary_target_percent',
   'summary_merge_max_tokens',
+  'compaction_request_max_tokens',
   'context_compaction_prompt',
   'compaction_enabled',
   'context_compaction_model_id',
@@ -91,6 +92,7 @@ export default function AdminContextMemory() {
     const keepRounds = readNumber('keep_recent_rounds', 6)
     const summaryTokens = readNumber('summary_max_tokens', 8192)
     const mergedSummaryTokens = readNumber('summary_merge_max_tokens', 8192)
+    const requestTokens = readNumber('compaction_request_max_tokens', 32768)
     if (
       retention < 10 ||
       retention > 50 ||
@@ -98,7 +100,8 @@ export default function AdminContextMemory() {
       target > 80 ||
       keepRounds < 1 ||
       summaryTokens < 256 ||
-      mergedSummaryTokens < 256
+      mergedSummaryTokens < 256 ||
+      requestTokens < 8192
     ) {
       toast.error(t('admin:settings.fields.compactionRangeError'))
       return
@@ -362,6 +365,26 @@ export default function AdminContextMemory() {
               </Field>
 
               <Field
+                label={t('admin:settings.fields.compactionRequestTokens')}
+                htmlFor="compaction-request-max-tokens"
+                hint={t('admin:settings.fields.compactionRequestTokensHint')}
+              >
+                <Input
+                  id="compaction-request-max-tokens"
+                  type="number"
+                  min={8192}
+                  step={1024}
+                  value={String(readNumber('compaction_request_max_tokens', 32768))}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      compaction_request_max_tokens: Math.max(8192, Math.floor(Number(event.target.value) || 8192)),
+                    }))
+                  }
+                />
+              </Field>
+
+              <Field
                 label={t('admin:settings.fields.compactionPrompt')}
                 htmlFor="context-compaction-prompt"
                 hint={t('admin:settings.fields.compactionPromptHint')}
@@ -370,6 +393,7 @@ export default function AdminContextMemory() {
                 <Textarea
                   id="context-compaction-prompt"
                   rows={7}
+                  maxLength={16384}
                   value={readString('context_compaction_prompt')}
                   onChange={(event) =>
                     setDraft((current) => ({ ...current, context_compaction_prompt: event.target.value }))

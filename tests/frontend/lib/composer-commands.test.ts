@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   MAX_SELECTED_USER_SKILLS,
   addSelectedUserSkill,
+  createScopedCommandGate,
   findComposerCommandQuery,
   normalizeSelectedUserSkillIds,
   selectedUserSkillIdsForRequest,
@@ -77,6 +78,46 @@ describe('composer commands', () => {
       from: 1,
       to: 11,
     })
+  })
+})
+
+describe('scoped command gate', () => {
+  it('rejects same-tick duplicate starts for the same conversation', () => {
+    const gate = createScopedCommandGate()
+    const first = gate.begin('conversation-1')
+
+    expect(first).not.toBeNull()
+    expect(gate.begin('conversation-1')).toBeNull()
+    expect(gate.owns(first!.run)).toBe(true)
+  })
+
+  it('invalidates an old conversation without letting it release the replacement', () => {
+    const gate = createScopedCommandGate()
+    const first = gate.begin('conversation-1')!
+    const second = gate.begin('conversation-2')!
+
+    expect(second.replaced).toEqual(first.run)
+    expect(gate.owns(first.run)).toBe(false)
+    expect(gate.release(first.run)).toBe(false)
+    expect(gate.owns(second.run)).toBe(true)
+    expect(gate.release(second.run)).toBe(true)
+  })
+
+  it('clears ownership when the composer leaves the command scope', () => {
+    const gate = createScopedCommandGate()
+    const run = gate.begin('conversation-1')!.run
+
+    expect(gate.invalidateExcept('conversation-2')).toEqual(run)
+    expect(gate.owns(run)).toBe(false)
+  })
+
+  it('invalidates an in-flight command when the composer unmounts', () => {
+    const gate = createScopedCommandGate()
+    const run = gate.begin('conversation-1')!.run
+
+    expect(gate.clear()).toEqual(run)
+    expect(gate.owns(run)).toBe(false)
+    expect(gate.release(run)).toBe(false)
   })
 })
 

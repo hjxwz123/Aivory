@@ -30,6 +30,8 @@ var (
 const (
 	anthropicScannerBufInit = 64 * 1024
 	anthropicScannerBufMax  = 1024 * 1024
+	// Anthropic rejects enabled thinking budgets below 1024 tokens.
+	anthropicThinkingMinimumTokens = 1024
 )
 
 // AnthropicProvider calls the Messages API (`POST /v1/messages`, SSE). The
@@ -136,7 +138,7 @@ func stripThinkingFromMessages(messages []map[string]any, historyLen int) ([]map
 	return out, newHistoryLen
 }
 
-func applyAnthropicThinkingSettings(body map[string]any, requestID string, maxTok *int) {
+func applyAnthropicThinkingSettings(body map[string]any, requestID string, maxTok *int, strictMax bool) {
 	if body == nil || maxTok == nil {
 		return
 	}
@@ -161,10 +163,27 @@ func applyAnthropicThinkingSettings(body map[string]any, requestID string, maxTo
 	if !ok || budget <= 0 {
 		return
 	}
-	// max_tokens must exceed budget_tokens because extended thinking spends
-	// from the same Anthropic output budget.
-	if *maxTok < budget+anthropicThinkingHeadroomTokens {
-		*maxTok = budget + anthropicThinkingHeadroomTokens
+	// max_tokens must exceed budget_tokens because extended thinking spends from
+	// the same Anthropic output budget. Most chat calls preserve the historical
+	// behavior and enlarge max_tokens. Compaction has a hard complete-request
+	// budget, so instead shrink thinking when valid or disable it when there is no
+	// room for Anthropic's minimum budget plus visible-summary headroom.
+	headroom := anthropicThinkingHeadroomTokens
+	if headroom < 1 {
+		headroom = 1
+	}
+	required := budget + headroom
+	if *maxTok < required {
+		if strictMax {
+			available := *maxTok - headroom
+			if available < anthropicThinkingMinimumTokens {
+				delete(body, "thinking")
+				return
+			}
+			cfg["budget_tokens"] = available
+			return
+		}
+		*maxTok = required
 		body["max_tokens"] = *maxTok
 	}
 }
@@ -235,14 +254,14 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 	// §4.13 prompt-mode: the model has no native function calling, so drive the
 	// text-protocol loop instead of the native tool_use loop.
 	if req.ToolModePrompt {
-		_, blocks, usage, cites, images, err := RunPromptToolLoop(
+		_, blocks, usage, cites, images, raw, err := RunPromptToolLoopWithRaw(
 			ctx, req.SystemPrompt, req.History, req.Tools,
 			p.promptRunOnce(req), tools, onEvent,
 		)
 		if err != nil {
-			return promptToolErrorResult(ctx, blocks, usage, cites, images, err)
+			return promptToolErrorResult(ctx, blocks, raw, usage, cites, images, err)
 		}
-		return &UnifiedResult{Blocks: blocks, StopReason: "end_turn", Usage: usage, Citations: cites, GeneratedImages: images}, nil
+		return &UnifiedResult{Blocks: blocks, Raw: raw, StopReason: "end_turn", Usage: usage, Citations: cites, GeneratedImages: images}, nil
 	}
 
 	maxIter := envcfg.Int("AIVORY_LLM_MAX_ITER", 20)
@@ -296,7 +315,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 			if thinkingStripped {
 				delete(body, "thinking")
 			}
-			applyAnthropicThinkingSettings(body, req.Model.RequestID, &maxTok)
+			applyAnthropicThinkingSettings(body, req.Model.RequestID, &maxTok, req.StrictMaxOutputTokens)
 			_, hasThinking := body["thinking"]
 			buf, _ := json.Marshal(body)
 			return buf, hasThinking
@@ -338,6 +357,9 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 				}
 				var readErr error
 				stopReason, toolCalls, hostedCalls, text, thinkingBlocks, citations, nativeContent, usage, readErr = readAnthropicStream(resp.Body, emit)
+				// A hidden task may transparently retry on the fallback channel. Attach
+				// the primary attempt before the next consume resets usage.
+				attachProviderRequestUsage(ctx, usage)
 				return readErr
 			}, onEvent)
 		}
@@ -358,9 +380,6 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 			buf, _ = buildBody()
 			err = send(buf)
 		}
-		// §B5-per-request usage rows: pin this iteration's usage to the request
-		// that produced it (also on cancel — the partial stream was still billed).
-		attachProviderRequestUsage(ctx, usage)
 		if err != nil {
 			partialBlocks := append([]UnifiedBlock{}, allBlocks...)
 			thinkingText := joinThinkingText(thinkingBlocks)
@@ -478,6 +497,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 				Kind: "tool_call", ToolName: tc.Name, ToolID: tc.ID,
 				Input: tc.Input, Summary: truncate(out, toolResultSummaryTruncationAnthropic),
 			})
+			allBlocks = append(allBlocks, canonicalToolOutputBlock(tc.Name, tc.ID, out, status))
 			resultBlocks = append(resultBlocks, map[string]any{
 				"type":        "tool_result",
 				"tool_use_id": tc.ID,
@@ -520,6 +540,7 @@ func (p *AnthropicProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunn
 			return PromptToolRound{
 				Text: promptRoundText(result.Blocks), Blocks: result.Blocks, Usage: result.Usage,
 				Citations: result.Citations, GeneratedImages: result.GeneratedImages,
+				Raw:                  result.Raw,
 				UsageAlreadyAttached: true,
 			}, err
 		}
@@ -541,7 +562,7 @@ func (p *AnthropicProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunn
 		body = MergeRequestParams(body, req.ExtraParams, req.ParamControls, req.ParamOverrides)
 		body = StripToolFields(body, false)
 		body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
-		applyAnthropicThinkingSettings(body, req.Model.RequestID, &maxTok)
+		applyAnthropicThinkingSettings(body, req.Model.RequestID, &maxTok, req.StrictMaxOutputTokens)
 		buf, _ := json.Marshal(body)
 		var (
 			text  string
@@ -665,7 +686,7 @@ func historyToAnthropic(h []UnifiedMessage, vision bool) []map[string]any {
 		// Same-vendor raw replay (§2.3-C): the stored native exchange contains
 		// the assistant turn(s) + tool_result turns exactly as Anthropic emitted
 		// them — splice them in verbatim for maximal fidelity.
-		if m.Role == "assistant" && len(m.Raw) > 2 {
+		if m.Role == "assistant" && len(m.Raw) > 2 && !isPromptToolRawEnvelope(m.Raw) {
 			var turns []map[string]any
 			if err := json.Unmarshal(m.Raw, &turns); err == nil && len(turns) > 0 {
 				out = append(out, turns...)

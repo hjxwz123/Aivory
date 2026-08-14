@@ -255,6 +255,14 @@ func (partialPromptToolRunner) Run(context.Context, string, []byte) (string, []C
 	return "tool output", nil, nil
 }
 
+type promptToolTestRunner struct {
+	output string
+}
+
+func (r promptToolTestRunner) Run(context.Context, string, []byte) (string, []Citation, error) {
+	return r.output, nil, nil
+}
+
 func TestPromptToolLoopPreservesSafeVisiblePrefixAndUsageOnStreamError(t *testing.T) {
 	round := 0
 	var events []SseEvent
@@ -284,6 +292,41 @@ func TestPromptToolLoopPreservesSafeVisiblePrefixAndUsageOnStreamError(t *testin
 	assertPartialBlock(t, blocks, "text", "", text)
 	if !hasSSEEvent(events, "tool_start") || !hasSSEEvent(events, "tool_result") || !hasSSEEvent(events, "text_delta") {
 		t.Fatalf("events = %+v, want tool trace and visible text", events)
+	}
+}
+
+func TestPromptToolLoopPreservesToolEnvelopeAfterLaterProviderError(t *testing.T) {
+	round := 0
+	const completeToolResult = "full paper result with PMID=PMC999 and conclusion=approved"
+	text, blocks, _, _, _, raw, err := RunPromptToolLoopWithRaw(
+		context.Background(), "system", nil,
+		[]ToolDef{{Name: "paper_lookup", InputSchema: []byte(`{"type":"object"}`)}},
+		func(context.Context, []UnifiedMessage, string) (PromptToolRound, error) {
+			round++
+			if round == 1 {
+				return PromptToolRound{Text: `<tool_call>{"name":"paper_lookup","arguments":{"q":"rag"}}</tool_call>`}, nil
+			}
+			return PromptToolRound{Text: "partial answer after tool"}, errors.New("provider disconnected")
+		},
+		promptToolTestRunner{output: completeToolResult},
+		func(SseEvent) {},
+	)
+	if err == nil || !strings.Contains(err.Error(), "provider disconnected") {
+		t.Fatalf("error=%v, want provider error", err)
+	}
+	if text != "partial answer after tool" {
+		t.Fatalf("visible text=%q, want partial answer", text)
+	}
+	if len(raw) == 0 {
+		t.Fatal("prompt tool Raw envelope was dropped after later provider error")
+	}
+	envelope, ok := parsePromptToolRawEnvelope(raw)
+	if !ok || len(envelope.Outputs) != 1 || envelope.Outputs[0].Output != completeToolResult {
+		t.Fatalf("prompt envelope=%+v ok=%v, want complete tool output", envelope, ok)
+	}
+	toolOutput := assertPartialBlock(t, blocks, "tool_output", "paper_lookup", completeToolResult)
+	if toolOutput.Text != completeToolResult {
+		t.Fatalf("canonical tool output=%q, want complete result", toolOutput.Text)
 	}
 }
 

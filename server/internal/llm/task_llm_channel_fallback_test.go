@@ -193,6 +193,165 @@ func TestTaskLLMFallbackSuccessLogsPrimaryErrorAndFallbackUsage(t *testing.T) {
 	}
 }
 
+func TestTaskLLMFallbackPreservesConsumedPrimaryUsageAndChannelAttribution(t *testing.T) {
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = io.WriteString(w, strings.Join([]string{
+			`data: {"choices":[{"delta":{"content":"discarded primary"}}],"usage":{"prompt_tokens":5,"completion_tokens":2}}`,
+			`data: {not-json}`,
+			``,
+		}, "\n\n"))
+	}))
+	t.Cleanup(primary.Close)
+
+	fallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = io.WriteString(w, strings.Join([]string{
+			`data: {"choices":[{"delta":{"content":"fallback answer"},"finish_reason":"stop"}],"usage":{"prompt_tokens":7,"completion_tokens":3}}`,
+			`data: [DONE]`,
+			``,
+		}, "\n\n"))
+	}))
+	t.Cleanup(fallback.Close)
+
+	db := openTaskChannelFallbackTestDB(t)
+	model, primaryChannel, fallbackChannel := createTaskChannelFallbackModel(t, db, primary.URL, fallback.URL)
+	answer, err := newTaskChannelFallbackRunner(db).Run(context.Background(), TaskTitle, "hello", RunOpts{
+		ModelID: model.ID,
+		UserID:  taskFallbackTestUserID,
+	})
+	if err != nil {
+		t.Fatalf("TaskLLM.Run: %v", err)
+	}
+	if answer != "fallback answer" {
+		t.Fatalf("answer = %q, want fallback answer", answer)
+	}
+
+	var billingRows, inputTokens, outputTokens int
+	if err := db.QueryRow(`
+		SELECT COUNT(1), COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0)
+		  FROM billing_usage WHERE user_id=? AND model_id=? AND purpose=?`,
+		taskFallbackTestUserID, model.ID, string(TaskTitle),
+	).Scan(&billingRows, &inputTokens, &outputTokens); err != nil {
+		t.Fatal(err)
+	}
+	if billingRows != 1 || inputTokens != 12 || outputTokens != 5 {
+		t.Fatalf("aggregate billing rows/usage = %d/%d/%d, want 1/12/5", billingRows, inputTokens, outputTokens)
+	}
+
+	usageRows := taskFallbackUsageRows(t, db, model.ID)
+	if len(usageRows) != 3 {
+		t.Fatalf("matching usage rows = %d, want primary error + two consumed channel rows", len(usageRows))
+	}
+	var primaryUsage, fallbackUsage *taskFallbackUsageRow
+	for i := range usageRows {
+		row := &usageRows[i]
+		if row.Status != "ok" {
+			continue
+		}
+		switch row.ChannelID {
+		case primaryChannel.ID:
+			primaryUsage = row
+		case fallbackChannel.ID:
+			fallbackUsage = row
+		}
+	}
+	if primaryUsage == nil || primaryUsage.Fallback != 0 || primaryUsage.InputTokens != 5 || primaryUsage.OutputTokens != 2 {
+		t.Fatalf("primary consumed usage row = %+v, want 5/2 on primary", primaryUsage)
+	}
+	if fallbackUsage == nil || fallbackUsage.Fallback != 1 || fallbackUsage.InputTokens != 7 || fallbackUsage.OutputTokens != 3 {
+		t.Fatalf("fallback consumed usage row = %+v, want 7/3 on fallback", fallbackUsage)
+	}
+}
+
+func TestTaskLLMFallbackEstimatesPrimaryOutputWithoutTerminalUsage(t *testing.T) {
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		// The primary emitted visible model output, then the stream became
+		// malformed before its terminal usage frame. The transparent fallback
+		// must not make that consumed primary request disappear from billing.
+		_, _ = io.WriteString(w, strings.Join([]string{
+			`data: {"choices":[{"delta":{"content":"discarded primary prefix"}}]}`,
+			`data: {not-json}`,
+			``,
+		}, "\n\n"))
+	}))
+	t.Cleanup(primary.Close)
+
+	fallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = io.WriteString(w, strings.Join([]string{
+			`data: {"choices":[{"delta":{"content":"fallback answer"},"finish_reason":"stop"}],"usage":{"prompt_tokens":7,"completion_tokens":3}}`,
+			`data: [DONE]`,
+			``,
+		}, "\n\n"))
+	}))
+	t.Cleanup(fallback.Close)
+
+	db := openTaskChannelFallbackTestDB(t)
+	model, primaryChannel, fallbackChannel := createTaskChannelFallbackModel(t, db, primary.URL, fallback.URL)
+	answer, err := newTaskChannelFallbackRunner(db).Run(context.Background(), TaskTitle, "hello", RunOpts{
+		ModelID: model.ID,
+		UserID:  taskFallbackTestUserID,
+	})
+	if err != nil {
+		t.Fatalf("TaskLLM.Run: %v", err)
+	}
+	if answer != "fallback answer" {
+		t.Fatalf("answer = %q, want fallback answer", answer)
+	}
+
+	var billingRows, inputTokens, outputTokens int
+	if err := db.QueryRow(`
+		SELECT COUNT(1), COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0)
+		  FROM billing_usage WHERE user_id=? AND model_id=? AND purpose=?`,
+		taskFallbackTestUserID, model.ID, string(TaskTitle),
+	).Scan(&billingRows, &inputTokens, &outputTokens); err != nil {
+		t.Fatal(err)
+	}
+	usageRows := taskFallbackUsageRows(t, db, model.ID)
+	if len(usageRows) != 3 {
+		t.Fatalf("matching usage rows = %d, want primary error + two consumed channel rows", len(usageRows))
+	}
+	var primaryError, primaryUsage, fallbackUsage *taskFallbackUsageRow
+	for i := range usageRows {
+		row := &usageRows[i]
+		if row.Status == "error" && row.ChannelID == primaryChannel.ID {
+			primaryError = row
+			continue
+		}
+		if row.Status != "ok" {
+			continue
+		}
+		switch row.ChannelID {
+		case primaryChannel.ID:
+			primaryUsage = row
+		case fallbackChannel.ID:
+			fallbackUsage = row
+		}
+	}
+	if primaryUsage == nil || primaryUsage.Fallback != 0 || primaryUsage.InputTokens <= 0 || primaryUsage.OutputTokens <= 0 {
+		t.Fatalf("estimated primary usage row = %+v, want positive input/output on primary", primaryUsage)
+	}
+	if primaryUsage.Cost <= 0 {
+		t.Fatalf("estimated primary usage row was attributed but not priced: %+v", primaryUsage)
+	}
+	if fallbackUsage == nil || fallbackUsage.Fallback != 1 || fallbackUsage.InputTokens != 7 || fallbackUsage.OutputTokens != 3 {
+		t.Fatalf("fallback usage row = %+v, want 7/3 on fallback", fallbackUsage)
+	}
+	if primaryError == nil || !strings.Contains(primaryError.Error, "invalid JSON") ||
+		primaryError.InputTokens != 0 || primaryError.OutputTokens != 0 || primaryError.Cost != 0 {
+		t.Fatalf("primary diagnostic error row changed semantics: %+v", primaryError)
+	}
+	if billingRows != 1 || inputTokens != primaryUsage.InputTokens+fallbackUsage.InputTokens ||
+		outputTokens != primaryUsage.OutputTokens+fallbackUsage.OutputTokens {
+		t.Fatalf("aggregate billing rows/usage = %d/%d/%d, channel rows = primary %d/%d fallback %d/%d",
+			billingRows, inputTokens, outputTokens,
+			primaryUsage.InputTokens, primaryUsage.OutputTokens,
+			fallbackUsage.InputTokens, fallbackUsage.OutputTokens)
+	}
+}
+
 func TestTaskLLMFinalFailureLogsBothChannelErrors(t *testing.T) {
 	var primaryHits atomic.Int32
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

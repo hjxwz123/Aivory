@@ -579,6 +579,16 @@ CREATE INDEX IF NOT EXISTS idx_conv_user ON conversations(user_id);
 CREATE INDEX IF NOT EXISTS idx_conv_project ON conversations(project_id);
 CREATE INDEX IF NOT EXISTS idx_conv_user_updated ON conversations(user_id, archived, pinned DESC, updated_at DESC);
 
+-- A database-backed lease keeps context compaction exclusive even when several
+-- application replicas are running without a shared Redis cache.
+CREATE TABLE IF NOT EXISTS conversation_compaction_leases (
+  conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+  owner_token     TEXT NOT NULL,
+  expires_at      INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_conversation_compaction_leases_expires
+  ON conversation_compaction_leases(expires_at);
+
 CREATE TABLE IF NOT EXISTS messages (
   id                 TEXT PRIMARY KEY,
   conversation_id    TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,

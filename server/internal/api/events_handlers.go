@@ -201,6 +201,14 @@ func (h *eventsHubT) deliver(userID, payload string) {
 // of this user on every instance. `origin` (the sender tab's X-Device-Id) lets
 // receivers suppress their own echo. Fire-and-forget: never fails the caller.
 func publishUserEvent(d Deps, r *http.Request, userID, eventType, conversationID string) {
+	publishUserEventWithOperationID(d, r, userID, eventType, conversationID, "")
+}
+
+func publishCompactionEvent(d Deps, userID, conversationID, operationID, status string) {
+	publishUserEventWithOperationID(d, nil, userID, "compaction."+status, conversationID, operationID)
+}
+
+func publishUserEventWithOperationID(d Deps, r *http.Request, userID, eventType, conversationID, operationID string) {
 	if d.Cache == nil || userID == "" {
 		return
 	}
@@ -208,6 +216,9 @@ func publishUserEvent(d Deps, r *http.Request, userID, eventType, conversationID
 	ev := map[string]string{"type": eventType}
 	if conversationID != "" {
 		ev["conversation_id"] = conversationID
+	}
+	if operationID = strings.TrimSpace(operationID); operationID != "" && len(operationID) <= 128 {
+		ev["operation_id"] = operationID
 	}
 	if r != nil {
 		if origin := strings.TrimSpace(r.Header.Get("X-Device-Id")); origin != "" && len(origin) <= 64 {

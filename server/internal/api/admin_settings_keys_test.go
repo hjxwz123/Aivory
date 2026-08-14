@@ -1,12 +1,16 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"aivory/server/internal/store"
 )
 
 func TestAdminSettingsKeysAreUniqueAndExcludeRetiredPurchasingSettings(t *testing.T) {
@@ -39,6 +43,7 @@ func TestAdminSettingsRejectNegativeNumericValues(t *testing.T) {
 		"keep_recent_rounds",
 		"summary_max_tokens",
 		"summary_merge_max_tokens",
+		"compaction_request_max_tokens",
 		"compaction_token_trigger",
 		"compaction_token_cap",
 		"daily_message_limit",
@@ -89,9 +94,10 @@ func TestAdminSettingsRejectCompactionValuesThatRuntimeWouldReplace(t *testing.T
 	d := Deps{DB: db}
 
 	for key, values := range map[string][]int{
-		"keep_recent_rounds":       {0},
-		"summary_max_tokens":       {0, 255},
-		"summary_merge_max_tokens": {0, 255},
+		"keep_recent_rounds":            {0},
+		"summary_max_tokens":            {0, 255},
+		"summary_merge_max_tokens":      {0, 255},
+		"compaction_request_max_tokens": {0, 8191},
 	} {
 		for _, value := range values {
 			req := httptest.NewRequest(http.MethodPatch, "/api/admin/settings", strings.NewReader(fmt.Sprintf(`{"%s":%d}`, key, value)))
@@ -109,6 +115,16 @@ func TestAdminSettingsAcceptCompactionConfiguration(t *testing.T) {
 	db := openMigrated(t, filepath.Join(t.TempDir(), "compaction-admin-settings.db"))
 	defer db.Close()
 	d := Deps{DB: db}
+	channel, err := store.CreateChannel(context.Background(), db, "Summary", "openai", "chat", "https://example.invalid/v1", "key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := store.CreateModel(context.Background(), db, store.Model{
+		ID: "summary-model", ChannelID: channel.ID, Kind: "chat", RequestID: "summary-model", Label: "Summary", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/admin/settings", strings.NewReader(`{
 		"context_compaction_model_id":"summary-model",
@@ -118,6 +134,7 @@ func TestAdminSettingsAcceptCompactionConfiguration(t *testing.T) {
 		"summary_max_tokens":8192,
 		"summary_target_percent":35,
 		"summary_merge_max_tokens":8192,
+		"compaction_request_max_tokens":32768,
 		"context_compaction_prompt":"Preserve decisions and pending work."
 	}`))
 	req.Header.Set("content-type", "application/json")
@@ -127,10 +144,12 @@ func TestAdminSettingsAcceptCompactionConfiguration(t *testing.T) {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 	for key, want := range map[string]string{
+		"context_compaction_model_id":     `"` + model.ID + `"`,
 		"compaction_token_cap":            "80000",
 		"compaction_retention_percentage": "40",
 		"summary_target_percent":          "35",
 		"summary_merge_max_tokens":        "8192",
+		"compaction_request_max_tokens":   "32768",
 	} {
 		var got string
 		if err := db.QueryRow(`SELECT value FROM settings WHERE key=?`, key).Scan(&got); err != nil {
@@ -140,6 +159,196 @@ func TestAdminSettingsAcceptCompactionConfiguration(t *testing.T) {
 			t.Fatalf("%s = %q, want %q", key, got, want)
 		}
 	}
+}
+
+func TestAdminSettingsRejectNonIntegerCompactionRequestBudgetAtomically(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "compaction-request-budget-type.db"))
+	defer db.Close()
+	d := Deps{DB: db}
+	if err := store.SetSetting(db, "keep_recent_rounds", 6); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, value := range map[string]string{
+		"float":   `8192.5`,
+		"string":  `"32768"`,
+		"boolean": `true`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPatch, "/api/admin/settings", strings.NewReader(`{"keep_recent_rounds":9,"compaction_request_max_tokens":`+value+`}`))
+			req.Header.Set("content-type", "application/json")
+			rec := httptest.NewRecorder()
+			adminSettingsSet(d, rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+			}
+
+			var raw string
+			if err := db.QueryRow(`SELECT value FROM settings WHERE key='keep_recent_rounds'`).Scan(&raw); err != nil {
+				t.Fatal(err)
+			}
+			if raw != "6" {
+				t.Fatalf("failed patch partially changed keep_recent_rounds to %q", raw)
+			}
+		})
+	}
+}
+
+func TestAdminSettingsCompactionPatchIsAtomic(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "compaction-atomic-settings.db"))
+	defer db.Close()
+	d := Deps{DB: db}
+	if err := store.SetSetting(db, "keep_recent_rounds", 6); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/admin/settings", strings.NewReader(`{
+		"keep_recent_rounds":9,
+		"context_compaction_prompt":123
+	}`))
+	req.Header.Set("content-type", "application/json")
+	rec := httptest.NewRecorder()
+	adminSettingsSet(d, rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+
+	var raw string
+	if err := db.QueryRow(`SELECT value FROM settings WHERE key='keep_recent_rounds'`).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if raw != "6" {
+		t.Fatalf("failed patch partially changed keep_recent_rounds to %q", raw)
+	}
+}
+
+func TestAdminSettingsValidateContextCompactionPrompt(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "compaction-prompt-settings.db"))
+	defer db.Close()
+	d := Deps{DB: db}
+
+	for name, value := range map[string]string{
+		"number":    `123`,
+		"object":    `{"instruction":"summarize"}`,
+		"oversized": string(mustJSON(t, strings.Repeat("界", contextCompactionPromptMaxBytes/3+1))),
+	} {
+		t.Run(name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPatch, "/api/admin/settings", strings.NewReader(`{"context_compaction_prompt":`+value+`}`))
+			req.Header.Set("content-type", "application/json")
+			rec := httptest.NewRecorder()
+			adminSettingsSet(d, rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+			}
+		})
+	}
+
+	boundary := strings.Repeat("x", contextCompactionPromptMaxBytes)
+	req := httptest.NewRequest(http.MethodPatch, "/api/admin/settings", strings.NewReader(`{"context_compaction_prompt":`+string(mustJSON(t, "  "+boundary+"  "))+`}`))
+	req.Header.Set("content-type", "application/json")
+	rec := httptest.NewRecorder()
+	adminSettingsSet(d, rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("boundary status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var stored string
+	if raw, err := store.GetSetting(db, "context_compaction_prompt"); err != nil {
+		t.Fatal(err)
+	} else if err := json.Unmarshal(raw, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored != boundary {
+		t.Fatalf("stored prompt length = %d, want trimmed boundary length %d", len(stored), len(boundary))
+	}
+}
+
+func TestAdminSettingsValidateContextCompactionModel(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "compaction-model-settings.db"))
+	defer db.Close()
+	d := Deps{DB: db}
+	ctx := context.Background()
+	enabledChannel, err := store.CreateChannel(ctx, db, "Enabled", "openai", "chat", "https://example.invalid/v1", "key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabledChannel, err := store.CreateChannel(ctx, db, "Disabled", "anthropic", "", "https://example.invalid", "key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unsupportedChannel, err := store.CreateChannel(ctx, db, "Unsupported", "unsupported", "", "https://example.invalid", "key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	createModel := func(id, kind, channelID string, enabled bool) *store.Model {
+		t.Helper()
+		model, createErr := store.CreateModel(ctx, db, store.Model{
+			ID: id, ChannelID: channelID, Kind: kind, RequestID: id, Label: id, Enabled: enabled,
+		})
+		if createErr != nil {
+			t.Fatal(createErr)
+		}
+		return model
+	}
+	valid := createModel("summary-valid", "chat", enabledChannel.ID, true)
+	disabledModel := createModel("summary-disabled", "chat", enabledChannel.ID, false)
+	embeddingModel := createModel("summary-embedding", "embedding", enabledChannel.ID, true)
+	disabledChannelModel := createModel("summary-channel-disabled", "chat", disabledChannel.ID, true)
+	unsupportedChannelModel := createModel("summary-channel-unsupported", "chat", unsupportedChannel.ID, true)
+	if _, err := db.Exec(`UPDATE channels SET enabled=0 WHERE id=?`, disabledChannel.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	set := func(value string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPatch, "/api/admin/settings", strings.NewReader(`{"context_compaction_model_id":`+value+`}`))
+		req.Header.Set("content-type", "application/json")
+		rec := httptest.NewRecorder()
+		adminSettingsSet(d, rec, req)
+		return rec
+	}
+	if rec := set(string(mustJSON(t, "  "+valid.ID+"  "))); rec.Code != http.StatusOK {
+		t.Fatalf("valid model status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+
+	for name, value := range map[string]string{
+		"non-string":          `123`,
+		"missing":             `"missing-model"`,
+		"disabled model":      string(mustJSON(t, disabledModel.ID)),
+		"non-chat model":      string(mustJSON(t, embeddingModel.ID)),
+		"disabled channel":    string(mustJSON(t, disabledChannelModel.ID)),
+		"unsupported channel": string(mustJSON(t, unsupportedChannelModel.ID)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := set(value)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+			}
+			var stored string
+			raw, err := store.GetSetting(db, "context_compaction_model_id")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(raw, &stored); err != nil {
+				t.Fatal(err)
+			}
+			if stored != valid.ID {
+				t.Fatalf("invalid patch changed model to %q, want %q", stored, valid.ID)
+			}
+		})
+	}
+
+	if rec := set(`""`); rec.Code != http.StatusOK {
+		t.Fatalf("inherit status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func mustJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }
 
 func TestAdminSettingsRejectInvalidStorageArchiveTTL(t *testing.T) {

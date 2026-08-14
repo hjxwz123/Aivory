@@ -18,12 +18,12 @@ func truncate(s string, n int) string {
 	return s[:cut] + "…"
 }
 
-// estimateTokens is a cheap, provider-agnostic token estimate. ASCII text is
-// ~4/3 tokens per word; CJK characters count ~1 token each; other non-ASCII runes
-// (emoji, Cyrillic/Greek/Arabic/Thai, CJK Extension B+) count ~0.75 token each so
-// a whitespace-free run can't collapse to ~1 word (strings.Fields would otherwise
-// estimate 50 emoji as 2 tokens vs a real ~50-150). Used for context budgeting
-// (compaction) and usage heuristics — not for billing precision.
+// estimateTokens is a cheap, provider-agnostic token estimate. ASCII text uses
+// the larger of a word estimate and byte/4 so minified JSON, code, long URLs and
+// other whitespace-free runs cannot collapse to one token. CJK characters count
+// ~1 token each; other non-ASCII runes (emoji, Cyrillic/Greek/Arabic/Thai, CJK
+// Extension B+) count ~0.75 token each. Used for context budgeting (compaction)
+// and usage heuristics — not for billing precision.
 func estimateTokens(s string) int {
 	if s == "" {
 		return 0
@@ -42,7 +42,8 @@ func estimateTokens(s string) int {
 		}
 	}
 	w := len(strings.Fields(string(ascii)))
-	tot := cjk + w*4/3 + other*3/4
+	asciiTokens := max(w*4/3, (len(ascii)+3)/4)
+	tot := cjk + asciiTokens + other*3/4
 	if tot == 0 {
 		return 0
 	}

@@ -13,7 +13,19 @@ import (
 	"aivory/server/internal/store"
 )
 
-var dailyImageLimitResetWindow = envcfg.Dur("AIVORY_TOOLS_DAILY_IMAGE_LIMIT_RESET_WINDOW", 24*time.Hour)
+const defaultImageDocumentFlatTokenAllowance = 1024
+
+var (
+	dailyImageLimitResetWindow      = envcfg.Dur("AIVORY_TOOLS_DAILY_IMAGE_LIMIT_RESET_WINDOW", 24*time.Hour)
+	imageDocumentFlatTokenAllowance = envcfg.Int("AIVORY_LLM_IMAGE_DOCUMENT_FLAT_TOKEN_ALLOWANCE", defaultImageDocumentFlatTokenAllowance)
+)
+
+func effectiveImageDocumentFlatTokenAllowance() int {
+	if imageDocumentFlatTokenAllowance <= 0 {
+		return defaultImageDocumentFlatTokenAllowance
+	}
+	return imageDocumentFlatTokenAllowance
+}
 
 // Per-model, per-group usage quotas (§ user groups). A quota row grants that
 // group a free allowance. A missing row, including a model with no rows at all,
@@ -533,7 +545,7 @@ func estimateRequestTokens(req UnifiedChatRequest) int {
 		}
 	}
 	for _, m := range req.History {
-		t += msgStructuralOverhead
+		t += effectiveMessageStructuralOverhead()
 		if len(m.Raw) > 2 {
 			t += estimateTokens(string(m.Raw))
 			continue
@@ -541,7 +553,7 @@ func estimateRequestTokens(req UnifiedChatRequest) int {
 		for _, b := range m.Blocks {
 			switch b.Kind {
 			case "image", "document":
-				t += envcfg.Int("AIVORY_LLM_IMAGE_DOCUMENT_FLAT_TOKEN_ALLOWANCE", 1024) // base64 isn't text-tokenised; rough flat allowance
+				t += effectiveImageDocumentFlatTokenAllowance() // base64 isn't text-tokenised; rough flat allowance
 			default:
 				t += estimateTokens(b.Text) + estimateTokens(b.Summary)
 				if len(b.Input) > 0 {

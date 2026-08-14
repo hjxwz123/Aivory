@@ -82,15 +82,15 @@ func validPartialToolInput(input json.RawMessage) json.RawMessage {
 	return nil
 }
 
-func promptToolErrorResult(ctx context.Context, blocks []UnifiedBlock, usage Usage, citations []Citation, images []GeneratedImage, err error) (*UnifiedResult, error) {
+func promptToolErrorResult(ctx context.Context, blocks []UnifiedBlock, raw json.RawMessage, usage Usage, citations []Citation, images []GeneratedImage, err error) (*UnifiedResult, error) {
 	stopReason := "error"
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		stopReason = "stopped"
 	}
 	visible := providerVisibleOutputFromContext(ctx)
-	if stopReason == "stopped" || len(blocks) > 0 || len(citations) > 0 || len(images) > 0 || usageHasValue(usage) || (visible != nil && visible.Load()) {
+	if stopReason == "stopped" || len(blocks) > 0 || len(raw) > 0 || len(citations) > 0 || len(images) > 0 || usageHasValue(usage) || (visible != nil && visible.Load()) {
 		return &UnifiedResult{
-			Blocks: blocks, StopReason: stopReason, Usage: usage, Citations: citations, GeneratedImages: images,
+			Blocks: blocks, Raw: raw, StopReason: stopReason, Usage: usage, Citations: citations, GeneratedImages: images,
 		}, err
 	}
 	return nil, err

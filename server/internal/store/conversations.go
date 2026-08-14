@@ -1475,6 +1475,21 @@ func updateMessageContent(ctx context.Context, db *sql.DB, id, expectedConvID, u
 			return ErrNotFound
 		}
 	}
+	// Context compaction locks this same conversation row before validating and
+	// appending a summary block. Serialize every edit with that write even for the
+	// unscoped maintenance primitive, closing the validate-then-write race where
+	// stale text could be reintroduced after pruneSummaryBlocksForDeleteTx ran.
+	if expectedConvID == "" {
+		lockResult, lockErr := tx.ExecContext(ctx, `UPDATE conversations SET id=id WHERE id=?`, convID)
+		if lockErr != nil {
+			return lockErr
+		}
+		if n, rowsErr := lockResult.RowsAffected(); rowsErr != nil {
+			return rowsErr
+		} else if n != 1 {
+			return ErrNotFound
+		}
+	}
 	updateSQL := `UPDATE messages SET blocks=?, raw='', search_text=?, feedback='' WHERE id=?`
 	updateArgs := []any{string(blocks), searchTextFromBlocks(blocks), id}
 	if expectedConvID != "" {

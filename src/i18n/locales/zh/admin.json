@@ -254,13 +254,21 @@
     "disabledTag": "已禁用",
     "editorTitle": "编辑提示词",
     "newTitle": "新建提示词",
-    "fields": { "name": "名称", "description": "展示描述", "content": "提示词内容", "enabled": "启用" },
+    "fields": {
+      "name": "名称",
+      "description": "展示描述",
+      "content": "提示词内容",
+      "enabled": "启用"
+    },
     "removeTitle": "删除提示词？",
     "removeBody": "将删除「{{name}}」。已经添加到用户个人库的副本不会受影响。",
     "created": "提示词已创建",
     "updated": "提示词已更新",
     "removed": "提示词已删除",
-    "errors": { "missingFields": "请填写名称、描述和提示词内容。", "nameExists": "已存在同名提示词。" }
+    "errors": {
+      "missingFields": "请填写名称、描述和提示词内容。",
+      "nameExists": "已存在同名提示词。"
+    }
   },
   "oauth": {
     "title": "登录方式",
@@ -731,17 +739,19 @@
       "summaryTargetPercentHint": "摘要相对于来源 token 的目标长度。范围：5–80%，最终仍受摘要 token 预算限制。",
       "summaryMergeTokens": "合并摘要预算",
       "summaryMergeTokensHint": "旧摘要块开始合并前允许的摘要累计上限，最小为 256。",
+      "compactionRequestTokens": "压缩请求 token 预算",
+      "compactionRequestTokensHint": "每次摘要请求的估算输入与预留输出总上限。更长历史会自动分批处理，最小为 8192。",
       "compactionPrompt": "自定义摘要指令",
       "compactionPromptHint": "选填，会放在 Aivory 内置的延续摘要提示词之前。",
       "compactionPromptPlaceholder": "留空以使用内置摘要指令。",
-      "compactionRangeError": "至少保留 1 轮；消息比例须为 10–50%，摘要目标须为 5–80%，两个摘要预算均不得低于 256 token。",
+      "compactionRangeError": "至少保留 1 轮；消息比例须为 10–50%，摘要目标须为 5–80%，两个摘要预算不得低于 256 token，请求预算不得低于 8192 token。",
       "compactionModel": "摘要模型",
-      "compactionModelHint": "选填。使用此对话模型压缩上下文；未指定时依次使用任务模型和当前对话模型。",
-      "compactionModelInherited": "使用任务／对话模型",
+      "compactionModelHint": "选填。使用此对话模型压缩上下文；未指定时依次使用当前对话模型和任务模型。",
+      "compactionModelInherited": "使用对话／任务模型",
       "compactionModelUnavailable": "不可用的模型（{{id}}）",
       "compactionModelsLoading": "正在加载对话模型…",
       "compactionModelsLoadFailed": "无法加载对话模型，其他压缩设置仍可使用。",
-      "compactionModelsEmpty": "尚未配置对话模型，将使用任务模型或当前对话模型。",
+      "compactionModelsEmpty": "尚未配置对话模型，将使用当前对话模型或任务模型。",
       "compactionEnabled": "启用压缩",
       "memoryEnabled": "启用记忆",
       "signupOpen": "开放新注册",

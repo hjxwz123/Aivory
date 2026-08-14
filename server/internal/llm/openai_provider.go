@@ -42,6 +42,32 @@ type OpenAIProvider struct {
 // ID returns "openai".
 func (p *OpenAIProvider) ID() string { return "openai" }
 
+// enforceOpenAIOutputTokenCap keeps a strict internal-task budget authoritative
+// even when a model's admin extra_params still contains an output-limit alias
+// for the other OpenAI API format. Chat Completions accepts max_tokens or the
+// newer max_completion_tokens, while Responses uses max_output_tokens. Sending
+// conflicting aliases can either be rejected upstream or let a larger alias win.
+// Ordinary chat calls retain their configured parameters unchanged.
+func enforceOpenAIOutputTokenCap(body map[string]any, req UnifiedChatRequest, responses bool) {
+	if !req.StrictMaxOutputTokens || req.MaxOutputTokens <= 0 {
+		return
+	}
+	if responses {
+		delete(body, "max_tokens")
+		delete(body, "max_completion_tokens")
+		body["max_output_tokens"] = req.MaxOutputTokens
+		return
+	}
+
+	delete(body, "max_output_tokens")
+	if _, usesCompletionTokens := body["max_completion_tokens"]; usesCompletionTokens {
+		delete(body, "max_tokens")
+		body["max_completion_tokens"] = req.MaxOutputTokens
+		return
+	}
+	body["max_tokens"] = req.MaxOutputTokens
+}
+
 // Stream runs one model turn against either OpenAI format.
 func (p *OpenAIProvider) Stream(ctx context.Context, req UnifiedChatRequest, tools ToolRunner, onEvent func(SseEvent)) (*UnifiedResult, error) {
 	if req.Model.APIKey == "" && req.Model.Fallback == nil {
@@ -72,14 +98,14 @@ func officialImageGenerationEnabled(req UnifiedChatRequest) bool {
 func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest, tools ToolRunner, onEvent func(SseEvent)) (*UnifiedResult, error) {
 	// §4.13 prompt-mode: no native function calling — drive the text protocol.
 	if req.ToolModePrompt {
-		_, blocks, usage, cites, images, err := RunPromptToolLoop(
+		_, blocks, usage, cites, images, raw, err := RunPromptToolLoopWithRaw(
 			ctx, req.SystemPrompt, req.History, req.Tools,
 			p.promptRunOnce(req), tools, onEvent,
 		)
 		if err != nil {
-			return promptToolErrorResult(ctx, blocks, usage, cites, images, err)
+			return promptToolErrorResult(ctx, blocks, raw, usage, cites, images, err)
 		}
-		return &UnifiedResult{Blocks: blocks, StopReason: "end_turn", Usage: usage, Citations: cites, GeneratedImages: images}, nil
+		return &UnifiedResult{Blocks: blocks, Raw: raw, StopReason: "end_turn", Usage: usage, Citations: cites, GeneratedImages: images}, nil
 	}
 
 	messages := []map[string]any{}
@@ -91,7 +117,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 			continue
 		}
 		// Same-vendor raw replay (§2.3-C).
-		if m.Role == "assistant" && len(m.Raw) > 2 && (req.Model.Vision || !nativeRawContainsImage(m.Raw)) {
+		if m.Role == "assistant" && len(m.Raw) > 2 && !isPromptToolRawEnvelope(m.Raw) && (req.Model.Vision || !nativeRawContainsImage(m.Raw)) {
 			var turns []map[string]any
 			if err := json.Unmarshal(m.Raw, &turns); err == nil && len(turns) > 0 && turns[0]["role"] != nil {
 				messages = append(messages, turns...)
@@ -165,6 +191,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 		body = MergeRequestParams(body, req.ExtraParams, req.ParamControls, req.ParamOverrides)
 		body = StripToolFields(body, len(req.Tools) > 0 && !req.ToolModePrompt)
 		body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
+		enforceOpenAIOutputTokenCap(body, req, false)
 		raw, _ := json.Marshal(body)
 		var (
 			text      string
@@ -190,10 +217,11 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 			}
 			var readErr error
 			text, reasoning, calls, finish, u, readErr = readOpenAIChatStream(resp.Body, emit)
+			// Bind usage before doProviderParsedRequest can retry this hidden task
+			// against fallback credentials. The next attempt resets u.
+			attachProviderRequestUsage(ctx, u)
 			return readErr
 		}, onEvent)
-		// §B5-per-request usage rows: pin this iteration's usage to its request.
-		attachProviderRequestUsage(ctx, u)
 		if err != nil {
 			partialBlocks := append([]UnifiedBlock{}, allBlocks...)
 			if reasoning != "" {
@@ -283,6 +311,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 				Kind: "tool_call", ToolName: tc.Name, ToolID: tc.ID,
 				Input: tc.Input, Summary: truncate(out, toolResultSummaryTruncationOpenAI),
 			})
+			allBlocks = append(allBlocks, canonicalToolOutputBlock(tc.Name, tc.ID, out, status))
 			messages = append(messages, map[string]any{
 				"role":         "tool",
 				"tool_call_id": tc.ID,
@@ -313,13 +342,30 @@ func (p *OpenAIProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner 
 				continue
 			}
 			text := strings.Builder{}
+			imageParts := []map[string]any{}
 			for _, b := range m.Blocks {
 				if b.Kind == "text" {
 					text.WriteString(b.Text)
 					text.WriteString("\n")
 				}
+				if req.Model.Vision && m.Role == "user" && b.Kind == "image" && b.Data != "" {
+					imageParts = append(imageParts, map[string]any{
+						"type":      "image_url",
+						"image_url": map[string]any{"url": "data:" + b.MimeType + ";base64," + b.Data},
+					})
+				}
 			}
-			messages = append(messages, map[string]any{"role": m.Role, "content": strings.TrimRight(text.String(), "\n")})
+			messageText := strings.TrimRight(text.String(), "\n")
+			if len(imageParts) > 0 {
+				content := make([]map[string]any, 0, len(imageParts)+1)
+				if messageText != "" {
+					content = append(content, map[string]any{"type": "text", "text": messageText})
+				}
+				content = append(content, imageParts...)
+				messages = append(messages, map[string]any{"role": m.Role, "content": content})
+				continue
+			}
+			messages = append(messages, map[string]any{"role": m.Role, "content": messageText})
 		}
 		body := map[string]any{
 			"model":    req.Model.RequestID,
@@ -333,6 +379,7 @@ func (p *OpenAIProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner 
 		body = MergeRequestParams(body, req.ExtraParams, req.ParamControls, req.ParamOverrides)
 		body = StripToolFields(body, false)
 		body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
+		enforceOpenAIOutputTokenCap(body, req, false)
 		raw, _ := json.Marshal(body)
 		var (
 			text string
@@ -383,6 +430,7 @@ func (p *OpenAIProvider) promptResponsesRunOnce(req UnifiedChatRequest) PromptTo
 		return PromptToolRound{
 			Text: promptRoundText(result.Blocks), Blocks: result.Blocks, Usage: result.Usage,
 			Citations: result.Citations, GeneratedImages: result.GeneratedImages,
+			Raw:                  result.Raw,
 			UsageAlreadyAttached: true,
 		}, err
 	}
@@ -684,14 +732,14 @@ func readOpenAIChatStream(body io.Reader, onEvent func(SseEvent)) (string, strin
 //     pane updates live.
 func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatRequest, tools ToolRunner, onEvent func(SseEvent)) (*UnifiedResult, error) {
 	if req.ToolModePrompt {
-		_, blocks, usage, cites, images, err := RunPromptToolLoop(
+		_, blocks, usage, cites, images, raw, err := RunPromptToolLoopWithRaw(
 			ctx, req.SystemPrompt, req.History, req.Tools,
 			p.promptResponsesRunOnce(req), tools, onEvent,
 		)
 		if err != nil {
-			return promptToolErrorResult(ctx, blocks, usage, cites, images, err)
+			return promptToolErrorResult(ctx, blocks, raw, usage, cites, images, err)
 		}
-		return &UnifiedResult{Blocks: blocks, StopReason: "end_turn", Usage: usage, Citations: cites, GeneratedImages: images}, nil
+		return &UnifiedResult{Blocks: blocks, Raw: raw, StopReason: "end_turn", Usage: usage, Citations: cites, GeneratedImages: images}, nil
 	}
 
 	// Build the input list from history. Hosted image output is persisted as an
@@ -710,7 +758,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		// output/input items (`message`, `reasoning`, `function_call`,
 		// `function_call_output`). Accept only the latter so switching an OpenAI
 		// model between chat/responses formats cannot poison the request body.
-		if m.Role == "assistant" && len(m.Raw) > 2 && !nativeRawContainsImage(m.Raw) {
+		if m.Role == "assistant" && len(m.Raw) > 2 && !isPromptToolRawEnvelope(m.Raw) && !nativeRawContainsImage(m.Raw) {
 			var items []map[string]any
 			if err := json.Unmarshal(m.Raw, &items); err == nil && len(items) > 0 && items[0]["type"] != nil {
 				input = append(input, items...)
@@ -800,6 +848,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		body = MergeRequestParams(body, req.ExtraParams, req.ParamControls, req.ParamOverrides)
 		body = StripToolFields(body, len(respTools) > 0)
 		body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
+		enforceOpenAIOutputTokenCap(body, req, true)
 		// Ask the API to return the sources the hosted web_search consulted, so
 		// we can surface them as citations. For stateless Responses tool loops
 		// (`store:false`), also carry encrypted reasoning items forward; otherwise
@@ -854,6 +903,9 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 				}
 				var readErr error
 				text, reasoning, calls, hosted, citations, u, outputItems, readErr = readOpenAIResponsesStream(resp.Body, emit)
+				// Record this exact attempt before a transparent channel fallback or
+				// the one-shot unexpected-EOF retry overwrites u.
+				attachProviderRequestUsage(ctx, u)
 				if readErr != nil {
 					return readErr
 				}
@@ -870,8 +922,6 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 			err = runRequest()
 		}
 		allGeneratedImages = append(allGeneratedImages, generated...)
-		// §B5-per-request usage rows: pin this iteration's usage to its request.
-		attachProviderRequestUsage(ctx, u)
 		if err != nil {
 			partialBlocks := append([]UnifiedBlock{}, allBlocks...)
 			if reasoning != "" {
@@ -894,6 +944,20 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 			partialUsage.InputTokens += u.InputTokens
 			partialUsage.OutputTokens += u.OutputTokens
 			partialInput := append([]map[string]any{}, input...)
+			completedToolResult := false
+			// A hosted Responses tool can finish before a later relay/provider error
+			// terminates the round. Keep only completed items that contain a
+			// recognized tool result. This preserves their full compaction evidence
+			// without replaying a dangling local function_call or arbitrary partial
+			// provider state on the next chat turn.
+			for _, item := range outputItems {
+				itemRaw, marshalErr := json.Marshal(item)
+				if marshalErr != nil || len(extractCompactionRawToolOutputs(itemRaw)) == 0 {
+					continue
+				}
+				completedToolResult = true
+				partialInput = append(partialInput, item)
+			}
 			if text != "" {
 				// Keep the visible partial answer in replay history, but never retain
 				// a current-round function/hosted call without its required output.
@@ -908,7 +972,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 				return &UnifiedResult{Blocks: partialBlocks, Raw: partialRaw, StopReason: "stopped", Usage: partialUsage, Citations: partialCitations, GeneratedImages: allGeneratedImages}, err
 			}
 			visible := providerVisibleOutputFromContext(ctx)
-			if len(partialBlocks) > 0 || len(partialCitations) > len(allCitations) || partialUsage.InputTokens > 0 || partialUsage.OutputTokens > 0 || (visible != nil && visible.Load()) {
+			if len(partialBlocks) > 0 || completedToolResult || len(partialCitations) > len(allCitations) || partialUsage.InputTokens > 0 || partialUsage.OutputTokens > 0 || (visible != nil && visible.Load()) {
 				return &UnifiedResult{Blocks: partialBlocks, Raw: partialRaw, StopReason: "error", Usage: partialUsage, Citations: partialCitations, GeneratedImages: allGeneratedImages}, err
 			}
 			return nil, err
@@ -993,6 +1057,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 				Kind: "tool_call", ToolName: c.Name, ToolID: c.ID,
 				Input: c.Input, Summary: truncate(out, toolResultSummaryTruncationOpenAI),
 			})
+			allBlocks = append(allBlocks, canonicalToolOutputBlock(c.Name, c.ID, out, status))
 			input = append(input, map[string]any{
 				"type":    "function_call_output",
 				"call_id": c.ID,

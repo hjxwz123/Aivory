@@ -4,10 +4,10 @@
 >
 > 版本 v2.0 · 2026-07-15 · 由整仓源码生成（对应本次改动：所有此前「硬编码但值得调整」的参数均已改为环境变量可覆盖）
 >
-> **这 306 个环境变量全部是可选的，未在 `.env.example` 中列出。** 不设置任何一个，Aivory 使用下表所列的默认值。只有当你需要调整某个具体参数时，才在部署环境里添加对应的变量。
+> **这 315 个环境变量全部是可选的，未在 `.env.example` 中列出。** 不设置任何一个，Aivory 使用下表所列的默认值。只有当你需要调整某个具体参数时，才在部署环境里添加对应的变量。
 > 如果需要调整，把用到的变量抄一份加进你自己的 `.env` 即可（`.env.example` 保持精简，不会自动包含这些高级选项）。
 >
-> **后端（Go）**：277 个，读取自进程环境变量，改动后**需重启 `aivory-api` 进程**生效。
+> **后端（Go）**：286 个，读取自进程环境变量，改动后**需重启 `aivory-api` 进程**生效。
 > **前端（Vite）**：23 个 `VITE_*` 变量，在**构建时**内联（`npm run build` / `vite build`），必须在构建环境设置，**运行时**改容器环境变量无效，需要重新构建产物。
 > **沙盒服务（Python）**：6 个 `SANDBOX_*` 变量（与已有的 `SANDBOX_*` 变量同一命名空间），读取自 `sandbox-service` 进程环境，改动后**需重启该进程**生效。
 > 类型：`duration`（Go 时长字符串，如 `90s`/`5m`/`2h`/`500ms`；对 Vite/Python 变量用纯数字，单位见默认值列）、`int`/`int64`、`float`、`bool`（`1/true/yes/on` 与 `0/false/no/off`）、`string`。
@@ -30,12 +30,12 @@
 
 ## 0. 总览
 
-共 **306** 个环境变量，按子系统分布：
+共 **315** 个环境变量，按子系统分布：
 
 | 子系统 | 变量数 |
 | --- | --- |
-| 1. LLM 对话 / 编排 / 内部模型调用 | 67 |
-| 2. RAG 文档解析 / 向量检索 | 60 |
+| 1. LLM 对话 / 编排 / 内部模型调用 | 75 |
+| 2. RAG 文档解析 / 向量检索 | 61 |
 | 3. 沙盒代码执行 | 9 |
 | 4. 内置工具（搜索 / Python / 网络安全） | 11 |
 | 5. 会话 / 消息 / 流式 API | 73 |
@@ -44,7 +44,7 @@
 | 8. 管理后台任务（备份 / 向量维护 / 兑换码） | 27 |
 | 9. 服务器启动 / 配置加载 | 3 |
 | 10. 前端 | 23 |
-| **合计** | **306** |
+| **合计** | **315** |
 
 ---
 
@@ -58,19 +58,28 @@
 | `AIVORY_LLM_MAX_ITER` | `int` | `20` | `llm/anthropic_provider.go:160` | Anthropic 流式 Stream 循环中原生工具调用轮次（Messages API 调用次数）的硬性上限。 |
 | `AIVORY_LLM_MAX_TOK` | `int` | `64000` | `llm/anthropic_provider.go:169` | 流式工具循环中每次 Anthropic Messages 请求发送的默认 max_tokens（除非请求自身覆盖）。 |
 | `AIVORY_LLM_MAX_TOK_2` | `int` | `64000` | `llm/anthropic_provider.go:322` | 提示词工具模式（promptRunOnce）下单次 Anthropic 调用的默认 max_tokens（除非请求覆盖）。 |
-| `AIVORY_LLM_INFLIGHT_GRACE` | `duration` | `15*time.Minute` | `llm/compaction.go:55` | status=streaming 的助手消息行在被视为崩溃残留之前免于被摘要处理的宽限时长。 |
+| `AIVORY_LLM_INFLIGHT_GRACE` | `duration` | `2*time.Hour` | `llm/compaction.go` | status=streaming 的助手消息行在被视为崩溃残留之前免于被摘要处理的宽限时长；低于 `AIVORY_API_MAX_GEN_DURATION` 加最终落库余量的值会被自动抬高。 |
 | `AIVORY_LLM_T` | `int` | `4` | `llm/compaction.go:62` | 在压缩 token 估算中为每条消息追加的结构性 token 开销（角色标记、外框）。 |
 | `AIVORY_LLM_MESSAGE_TOKEN_MEMO_CACHE_BOUND` | `int` | `100000` | `llm/compaction.go:63` | 每消息 token 估算记忆缓存 map 在被原地重置以限制内存前允许的最大条目数。 |
 | `AIVORY_LLM_SUMMARY_TOKENS_CLAMP_FLOOR` | `int` | `256` | `llm/compaction.go:64` | 管理端 summary_max_tokens 设置的下限；配置值小于该下限时重置为默认摘要预算。 |
+| `AIVORY_LLM_SUMMARY_TARGET_MIN_TOKENS` | `int` | `384` | `llm/compaction.go` | 在管理员配置的硬输出上限允许时，新压缩摘要请求的最小细节目标。 |
+| `AIVORY_LLM_SUMMARY_TARGET_PER_ROUND_TOKENS` | `int` | `96` | `llm/compaction.go` | 每个用户轮次对自适应摘要目标的 token 贡献，避免大量简短决策被压成泛泛一段。 |
+| `AIVORY_LLM_SUMMARY_TARGET_HEADROOM_NUM` | `int` | `5` | `llm/compaction.go` | 自适应摘要目标上方输出余量比例的分子（默认 5/4）。 |
+| `AIVORY_LLM_SUMMARY_TARGET_HEADROOM_DEN` | `int` | `4` | `llm/compaction.go` | 自适应摘要目标上方输出余量比例的分母（默认 5/4）。 |
+| `AIVORY_LLM_SUMMARY_SHORT_RETRY_THRESHOLD_NUM` | `int` | `1` | `llm/compaction.go` | 摘要草稿被判定为明显过短并触发重试的长度比例分子（默认低于目标的 1/4）。 |
+| `AIVORY_LLM_SUMMARY_SHORT_RETRY_THRESHOLD_DEN` | `int` | `4` | `llm/compaction.go` | 摘要明显过短重试阈值的分母（默认目标的 1/4）。 |
+| `AIVORY_LLM_SUMMARY_SHORT_RETRY_SOURCE_FACTOR` | `int` | `2` | `llm/compaction.go` | 短摘要重试前要求的最小“源内容/目标”倍数，避免对本就稀疏的内容强行填充。 |
 | `AIVORY_LLM_BIG_TOKEN_OVERFLOW_NUM` | `int` | `5` | `llm/compaction.go:65` | 本轮触发内联摘要的 token 触发阈值倍数（num/den，默认 5/4 = 1.25 倍）的分子。 |
 | `AIVORY_LLM_BIG_TOKEN_OVERFLOW_DEN` | `int` | `4` | `llm/compaction.go:66` | 本轮触发内联摘要的 token 触发阈值倍数（num/den，默认 5/4 = 1.25 倍）的分母。 |
 | `AIVORY_LLM_INLINE_COMPACTION_BACKLOG_FACTOR` | `int` | `3` | `llm/compaction.go:67` | 未摘要尾部长度相对 keepRounds*2 的倍数，超过则本轮强制内联（而非异步）压缩。 |
-| `AIVORY_LLM_SUMMARY_MERGE_BUDGET` | `int` | `2048` | `llm/compaction.go:76` | 触发把旧摘要块折叠为更粗块的累计摘要 token 阈值。 |
-| `AIVORY_LLM_DETERMINISTIC_SUMMARY_CLIP_BUDGET` | `int` | `300` | `llm/compaction.go:68` | 当任务模型摘要返回为空时，对较旧轮次做确定性回退裁剪所用的 token 预算。 |
 | `AIVORY_LLM_ATTEMPT` | `int` | `4` | `llm/compaction.go:69` | 向会话 summary_blocks 追加新摘要块时的最大比较并交换（CAS）重试次数。 |
 | `AIVORY_LLM_ITER` | `int` | `3` | `llm/compaction.go:70` | 为把某会话路径的摘要 token 压回预算内所执行的最大重复折叠迭代次数。 |
-| `AIVORY_LLM_MAX_OUTPUT_TOKENS_5` | `int` | `2` | `llm/compaction.go:71` | 作用于合并预算以推导折叠调用的 MaxOutputTokens 及确定性裁剪长度的除数。 |
+| `AIVORY_LLM_TOOL_OUTPUT_TOKENS` | `int` | `2048` | `llm/compaction.go` | 当无法从提供商 Raw 恢复完整且可识别的原生工具结果时，规范化内部工具结果块使用的单项 token 上限。已识别并恢复的完整结果不再在此截断，而由无损压缩 map-reduce 分片限制每次模型请求大小；界面展示的短预览保持不变。 |
+| `AIVORY_LLM_TOOL_INPUT_TOKENS` | `int` | `2048` | `llm/compaction.go` | 将工具调用参数渲染到压缩请求时，每个工具调用的输入 token 上限。 |
+| `AIVORY_LLM_COMPACTION_METADATA_TOKENS` | `int` | `512` | `llm/compaction.go` | 将附件、引用、文档和产物元数据渲染到压缩请求时，每项参考内容的 token 上限。 |
+| `AIVORY_LLM_COMPACTION_MEDIA_INLINE_BYTES` | `int64` | `20*1024*1024` | `llm/compaction_media.go` | 为视觉模型恢复压缩图片时的总字节预算；所有图片引用都会持久化，未恢复的引用会以元数据形式标明。 |
 | `AIVORY_LLM_CHUNK_SIZE` | `int` | `400` | `llm/compaction.go:810` | 重新校验已摘要消息是否仍存在时每条 SQL IN(...) 查询的消息 ID 批大小（用于规避驱动占位符上限分块）。 |
+| `AIVORY_LLM_COMPACTION_LEASE_TTL` | `duration` | `2*time.Hour` | `llm/orchestrator.go` | 数据库支持的每会话压缩租约有效期，防止内联、异步和手动摘要并发执行；即使多副本未配置 Redis 也会互斥。低于 `AIVORY_API_MAX_GEN_DURATION` 加最终落库余量的值会被自动抬高。 |
 | `AIVORY_LLM_DR_MAX_ROUNDS` | `int` | `4` | `llm/deep_research.go:47` | 深度研究引擎运行的 搜索再验证 轮次数量的硬性上限。 |
 | `AIVORY_LLM_DR_QUERIES_PER_ROUND` | `int` | `6` | `llm/deep_research.go:48` | 每个深度研究轮次派发的最大搜索查询数。 |
 | `AIVORY_LLM_DR_FETCH_PER_ROUND` | `int` | `5` | `llm/deep_research.go:49` | 每个深度研究轮次挑选并读取的最大新来源候选数。 |

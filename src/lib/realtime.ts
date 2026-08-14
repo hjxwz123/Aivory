@@ -32,6 +32,11 @@ import { streamSSEGet } from '@/api/client'
 import { conversationsApi } from '@/api/endpoints'
 import { checkForUpdate } from '@/lib/app-update'
 import { invalidateAccessState } from '@/lib/access-events'
+import {
+  dismissCompactionNotifications,
+  handleCompactionNotification,
+  type CompactionEventType,
+} from '@/lib/compaction-notifications'
 import { getDeviceId } from '@/lib/device-id'
 import { isConversationTombstoned, markConversationsDeleted } from '@/lib/sync-guards'
 import { useAuth } from '@/store/auth'
@@ -60,6 +65,7 @@ const META_REFRESH_MAX = 5
 interface RealtimeEvent {
   type?: string
   conversation_id?: string
+  operation_id?: string
   origin?: string
 }
 
@@ -88,6 +94,12 @@ export function initRealtime(): void {
     currentConnectionKey = connectionKey
     if (userChanged) {
       resetListSync()
+    } else {
+      // A same-user group change also replaces the SSE connection. Its first
+      // `hello` is not considered a reconnect by the new loop, so a terminal
+      // compaction event lost between the two connections could otherwise leave
+      // the old indeterminate toast open forever.
+      dismissCompactionNotifications()
     }
     const gen = ++loopGen
     if (uid && connectionKey) void runLoop(uid, connectionKey, gen)
@@ -122,6 +134,9 @@ async function runLoop(uid: string, connectionKey: string, gen: number): Promise
           void checkForUpdate()
           void reconcileAccessState('account')
           if (everConnected) {
+            // A completion event may have been lost during the network gap. Do
+            // not leave an indeterminate progress toast stuck after reconnect.
+            dismissCompactionNotifications()
             scheduleListSync(true)
           }
           everConnected = true
@@ -145,6 +160,10 @@ async function runLoop(uid: string, connectionKey: string, gen: number): Promise
 }
 
 function handleEvent(ev: RealtimeEvent): void {
+  if (ev.type?.startsWith('compaction.')) {
+    handleCompactionEvent(ev)
+    return
+  }
   switch (ev.type) {
     case 'account.permissions_updated':
       void reconcileAccessState('account')
@@ -236,6 +255,17 @@ function reconcileAccessState(kind: 'account' | 'workspace'): Promise<void> {
   return accessReconcile
 }
 
+function handleCompactionEvent(ev: RealtimeEvent): void {
+  const conversationId = ev.conversation_id
+  if (!conversationId) return
+  switch (ev.type as CompactionEventType) {
+    case 'compaction.started':
+    case 'compaction.completed':
+    case 'compaction.failed':
+      handleCompactionNotification(ev.type as CompactionEventType, conversationId, ev.operation_id)
+  }
+}
+
 function applyRemoteDelete(id: string): void {
   // Cascade like the local delete: inline sub-conversations anchored to the
   // deleted conversation die with it (mirrors the backend cascade), and every
@@ -264,6 +294,7 @@ const pendingMetaIds = new Set<string>()
 
 /** Drop all queued sync work (user switched — none of it is theirs anymore). */
 function resetListSync(): void {
+  dismissCompactionNotifications()
   if (syncTimer) {
     clearTimeout(syncTimer)
     syncTimer = null

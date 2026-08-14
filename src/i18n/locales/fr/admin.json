@@ -250,13 +250,21 @@
     "disabledTag": "Désactivée",
     "editorTitle": "Modifier l’invite",
     "newTitle": "Nouvelle invite",
-    "fields": { "name": "Nom", "description": "Description d’affichage", "content": "Contenu de l’invite", "enabled": "Activée" },
+    "fields": {
+      "name": "Nom",
+      "description": "Description d’affichage",
+      "content": "Contenu de l’invite",
+      "enabled": "Activée"
+    },
     "removeTitle": "Supprimer l’invite ?",
     "removeBody": "« {{name}} » sera supprimée. Les copies déjà ajoutées aux bibliothèques personnelles restent inchangées.",
     "created": "Invite créée",
     "updated": "Invite mise à jour",
     "removed": "Invite supprimée",
-    "errors": { "missingFields": "Renseignez le nom, la description et le contenu de l’invite.", "nameExists": "Une invite portant ce nom existe déjà." }
+    "errors": {
+      "missingFields": "Renseignez le nom, la description et le contenu de l’invite.",
+      "nameExists": "Une invite portant ce nom existe déjà."
+    }
   },
   "oauth": {
     "title": "Méthodes de connexion",
@@ -727,17 +735,19 @@
       "summaryTargetPercentHint": "Longueur cible du résumé en proportion des tokens source. Plage : 5–80 %, toujours limitée par le budget du résumé.",
       "summaryMergeTokens": "Budget des résumés fusionnés",
       "summaryMergeTokensHint": "Taille cumulée maximale des résumés avant de fusionner les blocs les plus anciens. Minimum : 256.",
+      "compactionRequestTokens": "Budget de requête de compactage",
+      "compactionRequestTokensHint": "Total estimé maximal de l'entrée et de la sortie réservée pour chaque requête de résumé. Les historiques plus longs sont traités par lots. Minimum : 8192.",
       "compactionPrompt": "Instructions de résumé personnalisées",
       "compactionPromptHint": "Instructions facultatives placées avant le prompt intégré de résumé de continuation d'Aivory.",
       "compactionPromptPlaceholder": "Laissez vide pour utiliser les instructions de résumé intégrées.",
-      "compactionRangeError": "Conservez au moins 1 tour ; les messages doivent être entre 10 et 50 %, la cible entre 5 et 80 %, et les deux budgets de résumé au moins à 256 tokens.",
+      "compactionRangeError": "Conservez au moins 1 tour ; les messages doivent être entre 10 et 50 %, la cible entre 5 et 80 %, les deux budgets de résumé au moins à 256 tokens et le budget de requête au moins à 8192 tokens.",
       "compactionModel": "Modèle de résumé",
-      "compactionModelHint": "Facultatif. Utilise ce modèle de chat pour le compactage ; sinon utilise le modèle de tâches, puis celui de la conversation en cours.",
-      "compactionModelInherited": "Utiliser le modèle de tâches/conversation",
+      "compactionModelHint": "Facultatif. Utilise ce modèle de chat pour le compactage ; sinon utilise le modèle de la conversation en cours, puis le modèle de tâches.",
+      "compactionModelInherited": "Utiliser le modèle de conversation/tâches",
       "compactionModelUnavailable": "Modèle indisponible ({{id}})",
       "compactionModelsLoading": "Chargement des modèles de chat…",
       "compactionModelsLoadFailed": "Impossible de charger les modèles de chat. Les autres paramètres de compactage restent disponibles.",
-      "compactionModelsEmpty": "Aucun modèle de chat n'est configuré. Le modèle de tâches ou celui de la conversation sera utilisé.",
+      "compactionModelsEmpty": "Aucun modèle de chat n'est configuré. Le modèle de la conversation ou le modèle de tâches sera utilisé.",
       "compactionEnabled": "Compactage activé",
       "memoryEnabled": "Mémoires activées",
       "signupOpen": "Nouvelles inscriptions ouvertes",

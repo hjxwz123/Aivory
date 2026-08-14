@@ -37,7 +37,7 @@ var backupTableOrder = []string{
 	"channels", "mcp_servers", "skills", "prompts", "user_skills", "user_prompts", "oauth_providers",
 	"models", "model_group_quotas", "model_tags", "image_styles",
 	"redeem_codes", "redeem_redemptions",
-	"model_skills", "knowledge_bases", "knowledge_base_shares", "workspace_kb_member_permissions", "projects", "conversations", "messages", "message_feedback", "user_feedback",
+	"model_skills", "knowledge_bases", "knowledge_base_shares", "workspace_kb_member_permissions", "projects", "conversations", "conversation_compaction_leases", "messages", "message_feedback", "user_feedback",
 	"conversation_shares", "files", "documents", "chunks", "memories",
 	"usage_stats", "usage_logs", "artifacts", "refresh_tokens", "oauth_identities",
 	"pending_storage_cleanup",
@@ -129,6 +129,12 @@ func dbTypeIsBinary(name string) bool {
 func ExportTable(ctx context.Context, q RowQuerier, table string, w io.Writer) (int64, error) {
 	if !backupTableSet[table] {
 		return 0, fmt.Errorf("backup: unknown table %q", table)
+	}
+	if transientBackupTable(table) {
+		// A compaction lease names a live worker, not user data. Exporting it could
+		// leave a restored conversation blocked for its old TTL, so include the
+		// table in the schema-aware order but always export an empty stream.
+		return 0, nil
 	}
 	order := ""
 	if table == "messages" {
@@ -223,6 +229,12 @@ func RestoreTable(ctx context.Context, ex RowExecer, table string, r io.Reader) 
 	if !backupTableSet[table] {
 		return 0, fmt.Errorf("backup: unknown table %q", table)
 	}
+	if transientBackupTable(table) {
+		// Full restore already wiped this table in reverse FK order. Ignore even a
+		// hand-crafted old archive so only currently-running workers own leases.
+		_, _ = io.Copy(io.Discard, r)
+		return 0, nil
+	}
 	liveCols, isBin, err := tableColumns(ctx, ex, table)
 	if err != nil {
 		return 0, err
@@ -273,6 +285,10 @@ func RestoreTable(ctx context.Context, ex RowExecer, table string, r io.Reader) 
 		n++
 	}
 	return n, nil
+}
+
+func transientBackupTable(table string) bool {
+	return table == "conversation_compaction_leases"
 }
 
 // applyLegacyConversationVisibilityDefaults preserves the behavior of

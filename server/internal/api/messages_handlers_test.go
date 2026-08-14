@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log"
 	"path/filepath"
@@ -137,8 +138,16 @@ func TestEnsureAttachedDocumentsReadyAllowsSandboxSheet(t *testing.T) {
 // keeping `fast:true` so the client renders 快速. A normal turn's identity is
 // untouched.
 func TestRedactCostMasksFastModelIdentity(t *testing.T) {
+	blocks, err := json.Marshal([]llm.UnifiedBlock{
+		{Kind: "text", Text: "visible answer"},
+		{Kind: "tool_call", ToolName: "lookup", Summary: "short preview"},
+		{Kind: "tool_output", ToolName: "lookup", Text: "private complete output"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	ems := []enrichedMessage{
-		{Message: store.Message{ID: "m1", Fast: true, ModelID: "secret_id", ModelLabel: "SecretModel", Provider: "anthropic", Cost: 1.23, Currency: "USD"}},
+		{Message: store.Message{ID: "m1", Fast: true, ModelID: "secret_id", ModelLabel: "SecretModel", Provider: "anthropic", Cost: 1.23, Currency: "USD", Blocks: blocks}},
 		{Message: store.Message{ID: "m2", Fast: false, ModelID: "gpt", ModelLabel: "GPT", Provider: "openai", Cost: 0.5, Currency: "USD"}},
 	}
 	out := redactCost(ems)
@@ -154,6 +163,19 @@ func TestRedactCostMasksFastModelIdentity(t *testing.T) {
 	// Cost is redacted for both regardless (pre-existing behaviour).
 	if out[0].Cost != 0 || out[1].Cost != 0 {
 		t.Fatalf("cost not redacted: %v %v", out[0].Cost, out[1].Cost)
+	}
+	var publicBlocks []llm.UnifiedBlock
+	if err := json.Unmarshal(out[0].Blocks, &publicBlocks); err != nil {
+		t.Fatal(err)
+	}
+	if len(publicBlocks) != 2 || publicBlocks[0].Kind != "text" || publicBlocks[1].Kind != "tool_call" {
+		t.Fatalf("user response exposed internal tool output or lost visible blocks: %+v", publicBlocks)
+	}
+}
+
+func TestRedactInternalMessageBlocksFailsClosedForMalformedPayload(t *testing.T) {
+	if got := string(redactInternalMessageBlocks(json.RawMessage(`[{not-json]`))); got != "[]" {
+		t.Fatalf("malformed user-facing blocks = %q, want []", got)
 	}
 }
 

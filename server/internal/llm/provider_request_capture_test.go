@@ -93,6 +93,66 @@ func TestProviderRequestRecorderContextTokensFollowProviderCacheSemantics(t *tes
 	}
 }
 
+func TestProviderRequestBillingSnapshotsEstimateOnlyOutputProducingFailures(t *testing.T) {
+	snapshots := []providerRequestSnapshot{
+		// A sent request that failed before emitting any output remains a free
+		// diagnostic row.
+		{Attempt: 1, EstimatedInputTokens: 80, Error: "http 503"},
+		// A stream that emitted output but never delivered terminal usage is
+		// conservatively billable on its own channel.
+		{Attempt: 2, EstimatedInputTokens: 120, EstimatedOutputTokens: 9, Error: "unexpected EOF"},
+		// A completed request's provider usage wins over the rough estimator.
+		{Attempt: 3, EstimatedInputTokens: 200, EstimatedOutputTokens: 90,
+			Usage: Usage{InputTokens: 7, OutputTokens: 3}, HasUsage: true},
+	}
+	got := providerRequestBillingSnapshots(snapshots)
+	if len(got) != 2 {
+		t.Fatalf("billable snapshots = %d, want output-producing failure + completed request", len(got))
+	}
+	if got[0].Attempt != 2 || got[0].Usage.InputTokens != 120 || got[0].Usage.OutputTokens != 9 || got[0].Error != "" {
+		t.Fatalf("estimated snapshot = %+v, want 120/9 with cleared error", got[0])
+	}
+	if got[1].Attempt != 3 || got[1].Usage != (Usage{InputTokens: 7, OutputTokens: 3}) {
+		t.Fatalf("terminal usage was overwritten: %+v", got[1])
+	}
+	total := providerRequestUsageTotal(snapshots)
+	if total.InputTokens != 127 || total.OutputTokens != 12 {
+		t.Fatalf("usage total = %+v, want 127/12", total)
+	}
+}
+
+func TestMergeProviderRequestUsagePrefersFallbackSnapshotSumAfterError(t *testing.T) {
+	snapshots := []providerRequestSnapshot{
+		{Attempt: 1, Usage: Usage{InputTokens: 2, OutputTokens: 20}, HasUsage: true, Error: "primary parse failure"},
+		{Attempt: 2, Usage: Usage{InputTokens: 100, OutputTokens: 1}, HasUsage: true, Fallback: true},
+	}
+	got := mergeProviderRequestUsage(Usage{InputTokens: 100, OutputTokens: 1}, snapshots)
+	if got != (Usage{InputTokens: 102, OutputTokens: 21}) {
+		t.Fatalf("merged usage = %+v, want primary+fallback 102/21", got)
+	}
+}
+
+func TestMergeProviderRequestUsagePrefersFailedPrimaryEstimateWhenFallbackUsageIsLarger(t *testing.T) {
+	snapshots := []providerRequestSnapshot{
+		{Attempt: 1, EstimatedInputTokens: 4, EstimatedOutputTokens: 2, Error: "primary parse failure"},
+		{Attempt: 2, Usage: Usage{InputTokens: 100, OutputTokens: 20}, HasUsage: true, Fallback: true},
+	}
+	got := mergeProviderRequestUsage(Usage{InputTokens: 100, OutputTokens: 20}, snapshots)
+	if got.InputTokens != 104 || got.OutputTokens != 22 {
+		t.Fatalf("merged usage = %+v, want estimated primary + fallback 104/22", got)
+	}
+}
+
+func TestMergeProviderRequestUsageKeepsProviderResidualWithoutError(t *testing.T) {
+	snapshots := []providerRequestSnapshot{
+		{Attempt: 1, Usage: Usage{InputTokens: 5, OutputTokens: 2}, HasUsage: true},
+	}
+	got := mergeProviderRequestUsage(Usage{InputTokens: 8, OutputTokens: 4}, snapshots)
+	if got != (Usage{InputTokens: 8, OutputTokens: 4}) {
+		t.Fatalf("merged usage = %+v, want provider residual 8/4", got)
+	}
+}
+
 func TestProviderRequestRecorderRedactsLargeJSONBeforeTruncating(t *testing.T) {
 	rec := newProviderRequestRecorder()
 	ctx := contextWithProviderRequestRecorder(context.Background(), rec)

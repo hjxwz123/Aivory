@@ -614,6 +614,19 @@ func TestNativeRawForPersistedModelDropsTTFTFallbackExchange(t *testing.T) {
 	}
 }
 
+func TestNativeRawForPersistedModelKeepsPromptToolEnvelopeOnTTFTFallback(t *testing.T) {
+	raw := marshalPromptToolRawEnvelope([]promptToolRawOutput{{
+		Name: "paper_lookup", ID: "pt_0", Output: "complete result", Status: "complete",
+	}})
+	if len(raw) == 0 {
+		t.Fatal("marshalPromptToolRawEnvelope returned empty Raw")
+	}
+	got := nativeRawForPersistedModel(raw, "Fallback model")
+	if string(got) != string(raw) {
+		t.Fatalf("prompt tool Raw changed on TTFT fallback: got=%s want=%s", got, raw)
+	}
+}
+
 func TestBuildFallbackRequestDropsIncompatibleNativeRaw(t *testing.T) {
 	orchestrator, _, model, _, _, db := setupToolRouteTest(t)
 	responsesChannel, err := store.CreateChannel(context.Background(), db, "Responses fallback", "openai", "responses", "https://example.invalid", "key")

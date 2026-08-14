@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"aivory/server/internal/cache"
 	"aivory/server/internal/config"
 	"aivory/server/internal/oauth"
 	paymentcore "aivory/server/internal/payment"
@@ -84,8 +85,12 @@ func TestBackupExportImportEndToEnd(t *testing.T) {
 	mustExec(t, tgtDB, `INSERT INTO users(id,email,password_hash,name,role,status,password_set) VALUES('adm','admin@example.test','admin-hash','Admin','admin','active',1)`)
 	mustExec(t, tgtDB, `INSERT INTO refresh_tokens(jti,user_id,expires_at) VALUES('adm-refresh','adm',9999999999)`)
 
+	tgtCache := cache.NewMemory()
+	configInvalidations, unsubscribeConfigInvalidations := tgtCache.Subscribe("cfg:invalidate")
+	defer unsubscribeConfigInvalidations()
 	tgtDeps := Deps{
 		DB:     tgtDB,
+		Cache:  tgtCache,
 		Config: config.Config{UploadDir: tgtUploads, ArtifactDir: tgtArtifacts},
 		Logger: log.New(io.Discard, "", 0),
 	}
@@ -99,6 +104,14 @@ func TestBackupExportImportEndToEnd(t *testing.T) {
 	importBackupAdmin(tgtDeps, irec, ireq)
 	if irec.Code != 200 {
 		t.Fatalf("import status = %d, body=%s", irec.Code, irec.Body.String())
+	}
+	select {
+	case payload := <-configInvalidations:
+		if payload != "1" {
+			t.Fatalf("config invalidation payload = %q, want 1", payload)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("full backup restore did not broadcast configuration invalidation")
 	}
 	var res struct {
 		OK            bool             `json:"ok"`
@@ -1482,6 +1495,437 @@ func TestNormalizeSettingsArchiveRemovesRetiredBuiltinTool(t *testing.T) {
 	}
 	if row.Key != "disabled_tools" || row.Value != `["python_execute"]` {
 		t.Fatalf("normalized settings row=%+v", row)
+	}
+}
+
+func TestNormalizeSettingsArchiveValidatesContextCompactionPrompt(t *testing.T) {
+	boundary := strings.Repeat("x", contextCompactionPromptMaxBytes)
+	boundaryJSON, err := json.Marshal("  " + boundary + "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var input bytes.Buffer
+	if err := json.NewEncoder(&input).Encode(map[string]any{
+		"key": "context_compaction_prompt", "value": string(boundaryJSON), "updated_at": 0,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	normalized, err := normalizeSettingsArchiveRows(&input)
+	if err != nil {
+		t.Fatalf("normalize boundary prompt: %v", err)
+	}
+	var row struct {
+		Value string `json:"value"`
+	}
+	if err := json.NewDecoder(normalized).Decode(&row); err != nil {
+		t.Fatal(err)
+	}
+	var prompt string
+	if err := json.Unmarshal([]byte(row.Value), &prompt); err != nil {
+		t.Fatalf("decode normalized prompt: %v", err)
+	}
+	if prompt != boundary {
+		t.Fatalf("normalized prompt length=%d, want trimmed boundary length=%d", len(prompt), len(boundary))
+	}
+
+	for name, value := range map[string]string{
+		"non-string": "123",
+		"null":       "null",
+		"oversized":  string(mustJSON(t, strings.Repeat("界", contextCompactionPromptMaxBytes/3+1))),
+	} {
+		t.Run(name, func(t *testing.T) {
+			var invalid bytes.Buffer
+			if err := json.NewEncoder(&invalid).Encode(map[string]any{
+				"key": "context_compaction_prompt", "value": value, "updated_at": 0,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := normalizeSettingsArchiveRows(&invalid); !errors.Is(err, errInvalidCompactionConfigArchive) {
+				t.Fatalf("normalize invalid prompt error=%v, want %v", err, errInvalidCompactionConfigArchive)
+			}
+		})
+	}
+}
+
+func TestNormalizeSettingsArchiveValidatesCompactionRequestBudget(t *testing.T) {
+	encodeRow := func(t *testing.T, value string) *bytes.Buffer {
+		t.Helper()
+		var input bytes.Buffer
+		if err := json.NewEncoder(&input).Encode(map[string]any{
+			"key": "compaction_request_max_tokens", "value": value, "updated_at": 0,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return &input
+	}
+
+	normalized, err := normalizeSettingsArchiveRows(encodeRow(t, "32768"))
+	if err != nil {
+		t.Fatalf("normalize valid request budget: %v", err)
+	}
+	var row struct {
+		Value string `json:"value"`
+	}
+	if err := json.NewDecoder(normalized).Decode(&row); err != nil {
+		t.Fatal(err)
+	}
+	if row.Value != "32768" {
+		t.Fatalf("normalized request budget = %q, want 32768", row.Value)
+	}
+
+	for name, value := range map[string]string{
+		"below minimum": "8191",
+		"float":         "8192.5",
+		"string":        `"32768"`,
+		"boolean":       "true",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := normalizeSettingsArchiveRows(encodeRow(t, value)); !errors.Is(err, errInvalidCompactionConfigArchive) {
+				t.Fatalf("normalize invalid request budget error=%v, want %v", err, errInvalidCompactionConfigArchive)
+			}
+		})
+	}
+}
+
+func TestNormalizeSettingsArchiveValidatesAllContextCompactionSettings(t *testing.T) {
+	encodeRow := func(t *testing.T, key string, value any) *bytes.Buffer {
+		t.Helper()
+		var input bytes.Buffer
+		if err := json.NewEncoder(&input).Encode(map[string]any{
+			"key": key, "value": value, "updated_at": 0,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return &input
+	}
+	decodeValue := func(t *testing.T, key, value string) string {
+		t.Helper()
+		normalized, err := normalizeSettingsArchiveRows(encodeRow(t, key, value))
+		if err != nil {
+			t.Fatalf("normalize %s=%s: %v", key, value, err)
+		}
+		var row struct {
+			Value string `json:"value"`
+		}
+		if err := json.NewDecoder(normalized).Decode(&row); err != nil {
+			t.Fatal(err)
+		}
+		return row.Value
+	}
+
+	for _, tc := range []struct {
+		key, value, want string
+	}{
+		{key: "compaction_enabled", value: "true", want: "true"},
+		{key: "keep_recent_rounds", value: "1", want: "1"},
+		{key: "summary_max_tokens", value: "256", want: "256"},
+		{key: "summary_merge_max_tokens", value: "256", want: "256"},
+		{key: "summary_target_percent", value: "80", want: "80"},
+		{key: "compaction_retention_percentage", value: "10", want: "10"},
+		{key: "compaction_token_trigger", value: "0", want: "0"},
+		{key: "compaction_token_cap", value: "0", want: "0"},
+		{key: "compaction_request_max_tokens", value: "8192", want: "8192"},
+	} {
+		t.Run("valid "+tc.key, func(t *testing.T) {
+			if got := decodeValue(t, tc.key, tc.value); got != tc.want {
+				t.Fatalf("normalized %s=%q, want %q", tc.key, got, tc.want)
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		name, key, value string
+	}{
+		{name: "enabled number", key: "compaction_enabled", value: "1"},
+		{name: "enabled string", key: "compaction_enabled", value: `"true"`},
+		{name: "enabled null", key: "compaction_enabled", value: "null"},
+		{name: "recent below minimum", key: "keep_recent_rounds", value: "0"},
+		{name: "summary below minimum", key: "summary_max_tokens", value: "255"},
+		{name: "merge below minimum", key: "summary_merge_max_tokens", value: "255"},
+		{name: "target below minimum", key: "summary_target_percent", value: "4"},
+		{name: "target above maximum", key: "summary_target_percent", value: "81"},
+		{name: "retention below minimum", key: "compaction_retention_percentage", value: "9"},
+		{name: "retention above maximum", key: "compaction_retention_percentage", value: "51"},
+		{name: "negative trigger", key: "compaction_token_trigger", value: "-1"},
+		{name: "negative cap", key: "compaction_token_cap", value: "-1"},
+		{name: "request below minimum", key: "compaction_request_max_tokens", value: "8191"},
+		{name: "integer string", key: "keep_recent_rounds", value: `"6"`},
+		{name: "integer float", key: "keep_recent_rounds", value: "6.0"},
+		{name: "integer boolean", key: "keep_recent_rounds", value: "true"},
+		{name: "integer null", key: "compaction_token_cap", value: "null"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := normalizeSettingsArchiveRows(encodeRow(t, tc.key, tc.value)); !errors.Is(err, errInvalidCompactionConfigArchive) {
+				t.Fatalf("normalize invalid %s=%s error=%v, want %v", tc.key, tc.value, err, errInvalidCompactionConfigArchive)
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		name  string
+		value any
+	}{
+		{name: "missing value", value: nil},
+		{name: "outer number", value: 6},
+		{name: "outer null", value: json.RawMessage("null")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			row := map[string]any{"key": "keep_recent_rounds", "updated_at": 0}
+			if tc.name != "missing value" {
+				row["value"] = tc.value
+			}
+			var input bytes.Buffer
+			if err := json.NewEncoder(&input).Encode(row); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := normalizeSettingsArchiveRows(&input); !errors.Is(err, errInvalidCompactionConfigArchive) {
+				t.Fatalf("normalize %s error=%v, want %v", tc.name, err, errInvalidCompactionConfigArchive)
+			}
+		})
+	}
+}
+
+func TestConfigImportValidatesContextCompactionFinalState(t *testing.T) {
+	t.Run("unrelated import rejects invalid existing model setting and rolls back", func(t *testing.T) {
+		db := openMigrated(t, filepath.Join(t.TempDir(), "compaction-config-unrelated.db"))
+		defer db.Close()
+		if err := store.SetSetting(db, "context_compaction_model_id", "legacy-missing-model"); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.SetSetting(db, "site_title", "Original"); err != nil {
+			t.Fatal(err)
+		}
+		d := Deps{DB: db, Config: config.Config{UploadDir: t.TempDir(), ArtifactDir: t.TempDir()}, Logger: log.New(io.Discard, "", 0)}
+		archive := paymentConfigArchiveForTest(t, map[string][]map[string]any{
+			"settings": {{"key": "site_title", "value": `"Imported title"`, "updated_at": 2}},
+		})
+		rec := importPaymentConfigArchiveForTest(t, d, archive)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), errInvalidCompactionConfigArchive.Error()) {
+			t.Fatalf("invalid final state import status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		var raw string
+		if err := db.QueryRow(`SELECT value FROM settings WHERE key='site_title'`).Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		if raw != `"Original"` {
+			t.Fatalf("rejected unrelated import changed site_title to %q", raw)
+		}
+	})
+
+	t.Run("accepts model imported after setting", func(t *testing.T) {
+		db := openMigrated(t, filepath.Join(t.TempDir(), "compaction-config-valid.db"))
+		defer db.Close()
+		d := Deps{DB: db, Config: config.Config{UploadDir: t.TempDir(), ArtifactDir: t.TempDir()}, Logger: log.New(io.Discard, "", 0)}
+		archive := paymentConfigArchiveForTest(t, map[string][]map[string]any{
+			"settings": {{"key": "context_compaction_model_id", "value": `"  imported-summary  "`, "updated_at": 2}},
+			"channels": {{"id": "ch_imported_summary", "name": "Imported summary", "type": "openai", "enabled": 1}},
+			"models": {{
+				"id": "imported-summary", "channel_id": "ch_imported_summary", "kind": "chat",
+				"request_id": "imported-summary", "label": "Imported summary", "enabled": 1,
+			}},
+		})
+		rec := importPaymentConfigArchiveForTest(t, d, archive)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("valid config import status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		var raw string
+		if err := db.QueryRow(`SELECT value FROM settings WHERE key='context_compaction_model_id'`).Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		if raw != `"imported-summary"` {
+			t.Fatalf("normalized imported model setting=%q", raw)
+		}
+	})
+
+	t.Run("rejects disabled model and rolls back", func(t *testing.T) {
+		db := openMigrated(t, filepath.Join(t.TempDir(), "compaction-config-invalid.db"))
+		defer db.Close()
+		if err := store.SetSetting(db, "site_title", "Original"); err != nil {
+			t.Fatal(err)
+		}
+		d := Deps{DB: db, Config: config.Config{UploadDir: t.TempDir(), ArtifactDir: t.TempDir()}, Logger: log.New(io.Discard, "", 0)}
+		archive := paymentConfigArchiveForTest(t, map[string][]map[string]any{
+			"settings": {
+				{"key": "site_title", "value": `"Changed"`, "updated_at": 2},
+				{"key": "context_compaction_model_id", "value": `"disabled-summary"`, "updated_at": 2},
+			},
+			"channels": {{"id": "ch_disabled_summary", "name": "Disabled summary", "type": "openai", "enabled": 1}},
+			"models": {{
+				"id": "disabled-summary", "channel_id": "ch_disabled_summary", "kind": "chat",
+				"request_id": "disabled-summary", "label": "Disabled summary", "enabled": 0,
+			}},
+		})
+		rec := importPaymentConfigArchiveForTest(t, d, archive)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), errInvalidCompactionConfigArchive.Error()) {
+			t.Fatalf("invalid config import status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		var raw string
+		if err := db.QueryRow(`SELECT value FROM settings WHERE key='site_title'`).Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		if raw != `"Original"` {
+			t.Fatalf("rejected config import changed site_title to %q", raw)
+		}
+	})
+
+	for _, tc := range []struct {
+		name  string
+		table string
+		row   map[string]any
+	}{
+		{name: "archive disables selected model without setting", table: "models", row: map[string]any{
+			"id": "existing-summary", "channel_id": "ch_existing_summary", "kind": "chat",
+			"request_id": "existing-summary", "label": "Existing summary", "enabled": 0,
+		}},
+		{name: "archive disables selected channel without setting", table: "channels", row: map[string]any{
+			"id": "ch_existing_summary", "name": "Existing summary", "type": "openai", "enabled": 0,
+		}},
+		{name: "archive changes selected model kind without setting", table: "models", row: map[string]any{
+			"id": "existing-summary", "channel_id": "ch_existing_summary", "kind": "embedding",
+			"request_id": "existing-summary", "label": "Existing summary", "enabled": 1,
+		}},
+		{name: "archive changes selected channel type without setting", table: "channels", row: map[string]any{
+			"id": "ch_existing_summary", "name": "Existing summary", "type": "unsupported", "enabled": 1,
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openMigrated(t, filepath.Join(t.TempDir(), "compaction-config-final-state.db"))
+			defer db.Close()
+			mustExec(t, db, `INSERT INTO channels(id,name,type,enabled) VALUES('ch_existing_summary','Existing summary','openai',1)`)
+			mustExec(t, db, `INSERT INTO models(id,channel_id,kind,request_id,label,enabled) VALUES('existing-summary','ch_existing_summary','chat','existing-summary','Existing summary',1)`)
+			if err := store.SetSetting(db, "context_compaction_model_id", "existing-summary"); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.SetSetting(db, "site_title", "Original"); err != nil {
+				t.Fatal(err)
+			}
+			d := Deps{DB: db, Config: config.Config{UploadDir: t.TempDir(), ArtifactDir: t.TempDir()}, Logger: log.New(io.Discard, "", 0)}
+			archive := paymentConfigArchiveForTest(t, map[string][]map[string]any{
+				"settings": {{"key": "site_title", "value": `"Changed"`, "updated_at": 2}},
+				tc.table:   {tc.row},
+			})
+			rec := importPaymentConfigArchiveForTest(t, d, archive)
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), errInvalidCompactionConfigArchive.Error()) {
+				t.Fatalf("invalid final state import status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			var title string
+			if err := db.QueryRow(`SELECT value FROM settings WHERE key='site_title'`).Scan(&title); err != nil {
+				t.Fatal(err)
+			}
+			if title != `"Original"` {
+				t.Fatalf("rejected final state import changed site_title to %q", title)
+			}
+			var modelEnabled, channelEnabled int
+			if err := db.QueryRow(`SELECT enabled FROM models WHERE id='existing-summary'`).Scan(&modelEnabled); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.QueryRow(`SELECT enabled FROM channels WHERE id='ch_existing_summary'`).Scan(&channelEnabled); err != nil {
+				t.Fatal(err)
+			}
+			if modelEnabled != 1 || channelEnabled != 1 {
+				t.Fatalf("rejected import persisted enabled state model=%d channel=%d", modelEnabled, channelEnabled)
+			}
+		})
+	}
+
+	t.Run("invalid setting rolls back earlier setting upsert", func(t *testing.T) {
+		db := openMigrated(t, filepath.Join(t.TempDir(), "compaction-config-setting-rollback.db"))
+		defer db.Close()
+		if err := store.SetSetting(db, "site_title", "Original"); err != nil {
+			t.Fatal(err)
+		}
+		d := Deps{DB: db, Config: config.Config{UploadDir: t.TempDir(), ArtifactDir: t.TempDir()}, Logger: log.New(io.Discard, "", 0)}
+		archive := paymentConfigArchiveForTest(t, map[string][]map[string]any{
+			"settings": {
+				{"key": "site_title", "value": `"Changed"`, "updated_at": 2},
+				{"key": "summary_target_percent", "value": "81", "updated_at": 3},
+			},
+		})
+		rec := importPaymentConfigArchiveForTest(t, d, archive)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), errInvalidCompactionConfigArchive.Error()) {
+			t.Fatalf("invalid setting import status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		var raw string
+		if err := db.QueryRow(`SELECT value FROM settings WHERE key='site_title'`).Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		if raw != `"Original"` {
+			t.Fatalf("rejected setting import changed site_title to %q", raw)
+		}
+	})
+}
+
+func TestFullBackupRestoreValidatesContextCompactionFinalState(t *testing.T) {
+	t.Run("accepts enabled chat model on supported channel", func(t *testing.T) {
+		db := openMigrated(t, filepath.Join(t.TempDir(), "compaction-backup-valid.db"))
+		defer db.Close()
+		d := Deps{DB: db, Config: config.Config{UploadDir: t.TempDir(), ArtifactDir: t.TempDir()}, Logger: log.New(io.Discard, "", 0)}
+		zr, man := backupRowsArchiveForTest(t, map[string][]map[string]any{
+			"settings": {{"key": "context_compaction_model_id", "value": `"backup-summary"`, "updated_at": 2}},
+			"channels": {{"id": "ch_backup_summary", "name": "Backup summary", "type": "gemini", "enabled": 1}},
+			"models": {{
+				"id": "backup-summary", "channel_id": "ch_backup_summary", "kind": "chat",
+				"request_id": "backup-summary", "label": "Backup summary", "enabled": 1,
+			}},
+		})
+		if _, err := restoreDatabase(t.Context(), d, zr, man, ""); err != nil {
+			t.Fatalf("restore valid compaction backup: %v", err)
+		}
+	})
+
+	t.Run("rejects unsupported channel and rolls back", func(t *testing.T) {
+		db := openMigrated(t, filepath.Join(t.TempDir(), "compaction-backup-invalid.db"))
+		defer db.Close()
+		if err := store.SetSetting(db, "site_title", "Original"); err != nil {
+			t.Fatal(err)
+		}
+		d := Deps{DB: db, Config: config.Config{UploadDir: t.TempDir(), ArtifactDir: t.TempDir()}, Logger: log.New(io.Discard, "", 0)}
+		zr, man := backupRowsArchiveForTest(t, map[string][]map[string]any{
+			"settings": {
+				{"key": "site_title", "value": `"Changed"`, "updated_at": 2},
+				{"key": "context_compaction_model_id", "value": `"backup-summary"`, "updated_at": 2},
+			},
+			"channels": {{"id": "ch_backup_summary", "name": "Backup summary", "type": "unsupported", "enabled": 1}},
+			"models": {{
+				"id": "backup-summary", "channel_id": "ch_backup_summary", "kind": "chat",
+				"request_id": "backup-summary", "label": "Backup summary", "enabled": 1,
+			}},
+		})
+		if _, err := restoreDatabase(t.Context(), d, zr, man, ""); !errors.Is(err, errInvalidCompactionConfigArchive) {
+			t.Fatalf("restore invalid compaction backup error=%v", err)
+		}
+		var raw string
+		if err := db.QueryRow(`SELECT value FROM settings WHERE key='site_title'`).Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		if raw != `"Original"` {
+			t.Fatalf("rejected full restore changed site_title to %q", raw)
+		}
+	})
+}
+
+func TestFullBackupRestoreRejectsInvalidContextCompactionSettingAndRollsBack(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "compaction-backup-setting-invalid.db"))
+	defer db.Close()
+	if err := store.SetSetting(db, "site_title", "Original"); err != nil {
+		t.Fatal(err)
+	}
+	d := Deps{DB: db, Config: config.Config{UploadDir: t.TempDir(), ArtifactDir: t.TempDir()}, Logger: log.New(io.Discard, "", 0)}
+	zr, man := backupRowsArchiveForTest(t, map[string][]map[string]any{
+		"settings": {
+			{"key": "site_title", "value": `"Changed"`, "updated_at": 2},
+			{"key": "compaction_enabled", "value": "null", "updated_at": 2},
+		},
+	})
+	if _, err := restoreDatabase(t.Context(), d, zr, man, ""); !errors.Is(err, errInvalidCompactionConfigArchive) {
+		t.Fatalf("restore invalid compaction setting error=%v", err)
+	}
+	var raw string
+	if err := db.QueryRow(`SELECT value FROM settings WHERE key='site_title'`).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if raw != `"Original"` {
+		t.Fatalf("rejected full restore changed site_title to %q", raw)
 	}
 }
 

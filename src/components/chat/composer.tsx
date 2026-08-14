@@ -74,6 +74,7 @@ import { cn, uid, modKey } from '@/lib/utils'
 import { attachmentKindLabel, attachmentTileClass, fileIconFor } from '@/lib/file-icon'
 import {
   addSelectedUserSkill,
+  createScopedCommandGate,
   selectedUserSkillIdsForRequest,
 } from '@/lib/composer-commands'
 import { skillDisplayDescription } from '@/lib/skill-description'
@@ -648,7 +649,21 @@ export function Composer({
   const libraryLoadRequestRef = useRef(0)
   const [commandQuery, setCommandQuery] = useState<ComposerCommandQuery | null>(null)
   const [commandIndex, setCommandIndex] = useState(0)
-  const [executingCommand, setExecutingCommand] = useState<'compact' | null>(null)
+  const [executingCommand, setExecutingCommand] = useState<{
+    kind: 'compact'
+    conversationId: string
+    token: number
+  } | null>(null)
+  const compactCommandRunRef = useRef<{
+    conversationId: string
+    token: number
+    progressToast: string
+  } | null>(null)
+  const compactCommandGateRef = useRef(createScopedCommandGate())
+  const commandConversationIdRef = useRef(conversationId)
+  commandConversationIdRef.current = conversationId
+  const executingCurrentCommand =
+    executingCommand && executingCommand.conversationId === conversationId ? executingCommand.kind : null
   const [dismissedCommandKey, setDismissedCommandKey] = useState('')
   const commandMenuRef = useRef<HTMLDivElement>(null)
   const composerRootRef = useRef<HTMLDivElement>(null)
@@ -779,6 +794,26 @@ export function Composer({
   // composer, re-adding the just-sent file. These ids are filtered out of any
   // late restore so a sent attachment never bounces back into the input.
   const committedAttachmentIds = useRef<Set<string>>(new Set())
+
+  useEffect(() => {
+    const invalidated = compactCommandGateRef.current.invalidateExcept(conversationId)
+    if (!invalidated) return
+    const active = compactCommandRunRef.current
+    if (!active || active.token !== invalidated.token) return
+    useToastStore.getState().dismiss(active.progressToast)
+    compactCommandRunRef.current = null
+    setExecutingCommand((current) => (current?.token === active.token ? null : current))
+  }, [conversationId])
+
+  useEffect(
+    () => () => {
+      const active = compactCommandRunRef.current
+      if (active) useToastStore.getState().dismiss(active.progressToast)
+      compactCommandGateRef.current.clear()
+      compactCommandRunRef.current = null
+    },
+    [],
+  )
   // Latest onAttachmentsDrained, readable from async upload callbacks without
   // capturing a stale closure.
   const onAttachmentsDrainedRef = useRef(onAttachmentsDrained)
@@ -1360,7 +1395,7 @@ export function Composer({
     !hasUnsupportedImageAttachment &&
     !imagePermissionDenied &&
     !selectedModelUnavailable &&
-    !executingCommand
+    !executingCurrentCommand
 
   async function handleSubmit() {
     if (submittingRef.current) return
@@ -1375,7 +1410,7 @@ export function Composer({
       await runCompactCommand()
       return
     }
-    if (voiceActive || streaming || uploading || restoringAttachments || documentNotReady || executingCommand) return
+    if (voiceActive || streaming || uploading || restoringAttachments || documentNotReady || executingCurrentCommand) return
     if (imagePermissionDenied) {
       toast.error(
         t('messages.error.drawingPermission', {
@@ -2307,43 +2342,74 @@ export function Composer({
   }, [commandIndex])
 
   async function runCompactCommand() {
-    if (!commandsEnabled || !conversationId) {
+    const targetConversationId = conversationId
+    if (!commandsEnabled || !targetConversationId) {
       toast.info(t('composer.commands.noConversation'))
       return
     }
-    if (streaming || executingCommand) {
-      if (streaming) toast.warning(t('composer.commands.inProgress'))
+    if (streaming) {
+      toast.warning(t('composer.commands.inProgress'))
       return
     }
-    setExecutingCommand('compact')
+    const started = compactCommandGateRef.current.begin(targetConversationId)
+    if (!started) return
+    const active = compactCommandRunRef.current
+    if (started.replaced && active?.token === started.replaced.token) {
+      // The same Composer instance may survive a /chat/:id route change. The
+      // old request may finish server-side, but it no longer owns this surface.
+      useToastStore.getState().dismiss(active.progressToast)
+      compactCommandRunRef.current = null
+    }
+    const { token } = started.run
     const progressToast = toast.custom({
       title: t('composer.commands.compacting'),
       variant: 'info',
       duration: 0,
     })
+    const run = { conversationId: targetConversationId, token, progressToast }
+    // Set the ref synchronously before the first await. React state alone has a
+    // same-tick window where a double click or repeated Enter starts two POSTs.
+    compactCommandRunRef.current = run
+    setExecutingCommand({ kind: 'compact', conversationId: targetConversationId, token })
+    const stillOwnsSurface = () =>
+      commandConversationIdRef.current === targetConversationId &&
+      compactCommandGateRef.current.owns(started.run) &&
+      compactCommandRunRef.current?.token === token &&
+      compactCommandRunRef.current.conversationId === targetConversationId
     try {
-      const result = await conversationsApi.compact(conversationId)
+      const result = await conversationsApi.compact(targetConversationId)
+      if (!stillOwnsSurface()) return
       if (result.compacted) {
         toast.success(t('composer.commands.compacted', { count: result.dropped_messages }))
       } else {
         toast.info(t('composer.commands.nothingToCompact'))
       }
     } catch (error) {
-      if (error instanceof ApiError && error.status === 409) {
+      if (!stillOwnsSurface()) return
+      if (error instanceof ApiError) {
         const reason = (error.body as { reason?: string } | null)?.reason
-        toast.warning(
-          reason === 'disabled'
-            ? t('composer.commands.disabled')
-            : reason === 'generation_in_progress'
-              ? t('composer.commands.inProgress')
-              : t('composer.commands.failed'),
-        )
+        if (reason === 'disabled') {
+          toast.warning(t('composer.commands.disabled'))
+        } else if (reason === 'generation_in_progress') {
+          toast.warning(t('composer.commands.inProgress'))
+        } else if (reason === 'conversation_changed') {
+          toast.warning(t('composer.commands.conversationChanged'))
+        } else {
+          // compaction_failed, persistence_failed and timed_out are all
+          // terminal failures. Their stable reason remains available to callers
+          // while this compact surface keeps one localized failure message.
+          toast.error(t('composer.commands.failed'))
+        }
       } else {
         toast.error(t('composer.commands.failed'))
       }
     } finally {
-      useToastStore.getState().dismiss(progressToast)
-      setExecutingCommand(null)
+      if (stillOwnsSurface()) {
+        useToastStore.getState().dismiss(progressToast)
+        compactCommandGateRef.current.release(started.run)
+        compactCommandRunRef.current = null
+        setExecutingCommand((current) => (current?.token === token ? null : current))
+      }
     }
   }
 
@@ -2534,7 +2600,7 @@ export function Composer({
               : 'bg-[var(--color-bg-muted)] text-[var(--color-fg-faint)]',
           )}
         >
-          {uploading || executingCommand ? <Loader2 size={15} className="animate-spin" aria-hidden /> : <ArrowUp size={15} aria-hidden />}
+          {uploading || executingCurrentCommand ? <Loader2 size={15} className="animate-spin" aria-hidden /> : <ArrowUp size={15} aria-hidden />}
         </span>
       </button>
     </Tooltip>
@@ -2671,11 +2737,11 @@ export function Composer({
                             onMouseDown={(event) => event.preventDefault()}
                             onMouseEnter={() => setCommandIndex(index)}
                             onClick={() => chooseCommand(item)}
-                            disabled={item.kind === 'command' && Boolean(executingCommand)}
-                            aria-busy={item.kind === 'command' && executingCommand === item.id ? true : undefined}
+                            disabled={item.kind === 'command' && Boolean(executingCurrentCommand)}
+                            aria-busy={item.kind === 'command' && executingCurrentCommand === item.id ? true : undefined}
                             className={cn(
                               'flex min-h-9 w-full min-w-0 items-center gap-2 rounded-[10px] px-2.5 py-1.5 text-left interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:min-h-10',
-                              item.kind === 'command' && executingCommand && 'cursor-wait opacity-60',
+                              item.kind === 'command' && executingCurrentCommand && 'cursor-wait opacity-60',
                               active
                                 ? 'bg-[var(--color-bg-muted)]'
                                 : 'hover:bg-[var(--color-bg-muted)]',
@@ -2699,7 +2765,7 @@ export function Composer({
                               ) : item.kind === 'knowledge-base' ? (
                                 <BookOpen size={16} aria-hidden />
                               ) : item.kind === 'command' ? (
-                                executingCommand === item.id ? (
+                                executingCurrentCommand === item.id ? (
                                   <Loader2 size={16} className="animate-spin" aria-hidden />
                                 ) : (
                                   <PackageOpen size={16} aria-hidden />

@@ -13,6 +13,7 @@ import (
 
 type emptyThenTextTaskProvider struct {
 	maxOutputTokens []int
+	strictMaxOutput []bool
 	alwaysEmpty     bool
 }
 
@@ -25,6 +26,7 @@ func (p *emptyThenTextTaskProvider) Stream(
 	_ func(SseEvent),
 ) (*UnifiedResult, error) {
 	p.maxOutputTokens = append(p.maxOutputTokens, req.MaxOutputTokens)
+	p.strictMaxOutput = append(p.strictMaxOutput, req.StrictMaxOutputTokens)
 	result := &UnifiedResult{
 		Blocks:     []UnifiedBlock{{Kind: "thinking", Text: "internal reasoning"}},
 		StopReason: "end_turn",
@@ -107,6 +109,64 @@ func TestTaskLLMEmptyRetryHonorsExplicitBudget(t *testing.T) {
 	}
 	if len(provider.maxOutputTokens) != 2 || provider.maxOutputTokens[0] != 600 || provider.maxOutputTokens[1] != 600 {
 		t.Fatalf("bounded compact retry attempts = %v, want [600 600]", provider.maxOutputTokens)
+	}
+	if len(provider.strictMaxOutput) != 2 || !provider.strictMaxOutput[0] || !provider.strictMaxOutput[1] {
+		t.Fatalf("compact strict output flags = %v, want [true true]", provider.strictMaxOutput)
+	}
+}
+
+func TestAnthropicThinkingCannotRaiseStrictCompactionOutputCap(t *testing.T) {
+	body := map[string]any{
+		"max_tokens": float64(1200),
+		"thinking": map[string]any{
+			"type":          "enabled",
+			"budget_tokens": float64(8000),
+		},
+	}
+	maxTokens := 1200
+	applyAnthropicThinkingSettings(body, "claude-test", &maxTokens, true)
+	if maxTokens != 1200 || body["max_tokens"] != float64(1200) {
+		t.Fatalf("strict compaction output cap was raised: max=%d body=%#v", maxTokens, body)
+	}
+	if _, ok := body["thinking"]; ok {
+		t.Fatalf("thinking should be disabled when the strict cap cannot fit its minimum budget: %#v", body)
+	}
+
+	body = map[string]any{
+		"max_tokens": float64(4096),
+		"thinking": map[string]any{
+			"type":          "enabled",
+			"budget_tokens": float64(8000),
+		},
+	}
+	maxTokens = 4096
+	applyAnthropicThinkingSettings(body, "claude-test", &maxTokens, true)
+	thinking, ok := body["thinking"].(map[string]any)
+	if !ok {
+		t.Fatalf("thinking was unexpectedly disabled with a valid bounded budget: %#v", body)
+	}
+	wantBudget := 4096 - anthropicThinkingHeadroomTokens
+	if got, ok := intFromJSONNumber(thinking["budget_tokens"]); !ok || got != wantBudget {
+		t.Fatalf("bounded thinking budget = %#v, want %d", thinking["budget_tokens"], wantBudget)
+	}
+	if maxTokens != 4096 {
+		t.Fatalf("bounded thinking raised max tokens to %d", maxTokens)
+	}
+}
+
+func TestAnthropicThinkingKeepsLegacyExpansionOutsideStrictCalls(t *testing.T) {
+	body := map[string]any{
+		"max_tokens": float64(1200),
+		"thinking": map[string]any{
+			"type":          "enabled",
+			"budget_tokens": float64(2000),
+		},
+	}
+	maxTokens := 1200
+	applyAnthropicThinkingSettings(body, "claude-test", &maxTokens, false)
+	want := 2000 + anthropicThinkingHeadroomTokens
+	if maxTokens != want || body["max_tokens"] != want {
+		t.Fatalf("ordinary chat thinking max=%d body=%#v, want %d", maxTokens, body, want)
 	}
 }
 
