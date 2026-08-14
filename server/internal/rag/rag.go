@@ -1392,6 +1392,11 @@ func (s *Service) retrieve(ctx context.Context, userID, convID string, kbIDs []s
 		chunkSources[row.ID] = snippetSource(row.KBID)
 		chunkKBIDs[row.ID] = row.KBID
 	}
+	rerankTopN := maxResults
+	if rerankTopN <= 0 {
+		rerankTopN = len(ranked)
+	}
+	ranked = s.rerankKnowledgeBaseCandidates(ctx, kbIDs, query, ranked, chunkKBIDs, rerankTopN)
 	if maxResults > 0 && len(kbIDs) > 1 {
 		ranked = interleaveKnowledgeBaseCandidates(ranked, kbIDs, chunkKBIDs)
 	}

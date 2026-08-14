@@ -475,6 +475,15 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/admin/users/:id/images", requireAdmin(d, listUserImagesAdmin))
 	mux.handle("GET", "/api/admin/users/:id/kbs", requireAdmin(d, listUserKBsAdmin))
 	mux.handle("GET", "/api/admin/kbs/:id/documents", requireAdmin(d, listKBDocumentsAdmin))
+	// Global administrator resource inventory. Project-owned libraries stay under
+	// their project so the knowledge-base list contains no duplicate resources.
+	mux.handle("GET", "/api/admin/resources/knowledge-bases", requireAdmin(d, listKnowledgeBasesAdminResource))
+	mux.handle("GET", "/api/admin/resources/knowledge-bases/:id", requireAdmin(d, getKnowledgeBaseAdminResource))
+	mux.handle("GET", "/api/admin/resources/projects", requireAdmin(d, listProjectsAdminResource))
+	mux.handle("GET", "/api/admin/resources/projects/:id/conversations", requireAdmin(d, listProjectConversationsAdminResource))
+	mux.handle("GET", "/api/admin/resources/projects/:id", requireAdmin(d, getProjectAdminResource))
+	mux.handle("GET", "/api/admin/resources/images", requireAdmin(d, listGeneratedImagesAdmin))
+	mux.handle("GET", "/api/admin/resources/images/:id", requireAdmin(d, getGeneratedImageAdmin))
 	mux.handle("GET", "/api/admin/conversations/:id", requireAdmin(d, getConversationAdmin))
 	mux.handle("GET", "/api/admin/conversations/:id/sandbox", requireAdmin(d, sandboxFilesAdmin))
 	mux.handle("GET", "/api/admin/conversations/:id/sandbox/file", requireAdmin(d, sandboxFileGetAdmin))

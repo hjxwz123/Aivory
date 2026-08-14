@@ -178,6 +178,9 @@ func Migrate(db *sql.DB) error {
 	// Actual prompt footprint of the final successful upstream request. 0 means
 	// the provider did not return usage for the turn.
 	addMsgContextTokens := `ALTER TABLE messages ADD COLUMN context_tokens INTEGER NOT NULL DEFAULT 0`
+	// Tool origin for artifacts. Gallery queries use this to distinguish actual
+	// image-generation output from images produced by python_execute.
+	addArtifactSource := `ALTER TABLE artifacts ADD COLUMN source TEXT NOT NULL DEFAULT ''`
 	// §verify: per-message auditor (Verify mode) result JSON ('' = never audited).
 	addMsgVerify := `ALTER TABLE messages ADD COLUMN verify TEXT NOT NULL DEFAULT ''`
 	// Workspaces (§workspaces): '' = personal. Conversations/projects/KBs inside
@@ -315,6 +318,7 @@ func Migrate(db *sql.DB) error {
 		addMsgSearchText = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS search_text TEXT NOT NULL DEFAULT ''`
 		addImageTimeout = `ALTER TABLE models ADD COLUMN IF NOT EXISTS image_timeout_sec INTEGER NOT NULL DEFAULT 0`
 		addModelCompactionTokenThreshold = `ALTER TABLE models ADD COLUMN IF NOT EXISTS compaction_token_threshold INTEGER NOT NULL DEFAULT 0`
+		addArtifactSource = `ALTER TABLE artifacts ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT ''`
 		addMsgContextTokens = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS context_tokens BIGINT NOT NULL DEFAULT 0`
 		addMsgVerify = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS verify TEXT NOT NULL DEFAULT ''`
 		addConvWorkspace = `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS workspace_id TEXT NOT NULL DEFAULT ''`
@@ -398,7 +402,7 @@ func Migrate(db *sql.DB) error {
 		addUserPermCredits, addUserPermCreditsMicros, addUserCreditCycleAnchor, addUserQuotaCycleAnchor, addCreditLedgerAmountMicros, addUserSortOrder, addUsageCredits, addMsgCredits,
 		addMsgModelLabel, addMsgSearchText,
 		addImageTimeout,
-		addModelCompactionTokenThreshold, addMsgContextTokens,
+		addModelCompactionTokenThreshold, addMsgContextTokens, addArtifactSource,
 		addMsgVerify,
 		addConvWorkspace, addConvIsPublic, addProjWorkspace, addKBWorkspace, addMsgAuthor, addUsageWorkspace, addGroupMaxWorkspaces, addGroupMaxStorage, addGroupIsPublic, addGroupIsPurchasable, addGroupPermissions,
 		addModelFallbackChannel, addUsageChannel, addUsageFallback, addUsageStatus, addUsageError,
@@ -506,6 +510,7 @@ func Migrate(db *sql.DB) error {
 		"credit_reservations":             {"user_id", "amount_micros", "actual_micros", "source_type", "source_id", "status", "expires_at"},
 		"quota_ledger":                    {"user_id", "scope_type", "model_id", "group_id", "cycle_anchor", "window_start", "limit_type", "reserved_micros", "actual_micros", "status", "expires_at"},
 		"billing_usage":                   {"user_id", "message_id", "model_id", "purpose", "cost_micros", "images_count", "input_tokens", "output_tokens", "currency"},
+		"artifacts":                       {"source"},
 		"models":                          {"official_tools", "builtin_tools", "mcp_server_ids", "moderation_enabled", "moderation_mode", "tags", "extra_params", "image_timeout_sec", "research_enabled", "fallback_channel_id", "fast", "compaction_token_threshold"},
 		"mcp_servers":                     {"id", "name", "icon", "description", "url", "headers", "enabled", "discovered_tools", "protocol_version", "last_error", "last_synced_at", "created_at", "updated_at"},
 		"refresh_tokens":                  {"session_id", "user_agent", "ip", "location", "last_seen"},
@@ -942,6 +947,12 @@ func Seed(db *sql.DB, cfg config.Config) error {
 		"rag_top_k":                `8`,
 		"rag_dynamic_topk":         `false`,
 		"rag_similarity_threshold": `0.5`,
+		// Optional OpenAI-compatible reranking is configured independently from
+		// chat/model channels and only participates in knowledge-base retrieval.
+		"rag_rerank_enabled": `false`,
+		"rag_rerank_api_url": `""`,
+		"rag_rerank_api_key": `""`,
+		"rag_rerank_model":   `""`,
 		// §credits pre-flight: on a credit-charged turn, estimate the assembled
 		// prompt's tokens before generating and refuse if the user can't afford it.
 		"credit_preflight_enabled":        `true`,

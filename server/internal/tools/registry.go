@@ -443,6 +443,6 @@ func (r *Registry) mcpClient(server *store.MCPServer) (*mcp.Client, error) {
 // SaveArtifact lets provider-hosted tools use the same durable artifact path as
 // local tools without introducing an llm -> tools import cycle.
 func (r *Registry) SaveArtifact(ctx context.Context, tc *llm.ToolContext, name, mime string, data []byte) error {
-	_, err := saveArtifact(ctx, tc, r.cfg.ArtifactDir, name, mime, data)
+	_, err := saveArtifact(ctx, tc, r.cfg.ArtifactDir, name, mime, store.ArtifactSourceHostedImageGeneration, data)
 	return err
 }

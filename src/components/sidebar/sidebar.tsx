@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { type CSSProperties, type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
   Search,
@@ -12,7 +12,7 @@ import {
   MoreHorizontal,
   Share2,
   ChevronRight,
-  BookText,
+  Database,
   ImagePlus,
   ShieldCheck,
   Layers,
@@ -189,6 +189,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
   // Projects, Files, and Skills are their own routes — highlight their entry
   // when the current path is under them.
   const filesActive = location.pathname === '/files'
+  const knowledgeBasesActive = location.pathname === '/kb' || location.pathname.startsWith('/kb/')
   const skillsActive = location.pathname === '/skills' || location.pathname.startsWith('/skills/')
   const sortedProjects = useMemo(
     () =>
@@ -527,6 +528,14 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
           </Tooltip>
         )}
 
+        <div
+          aria-hidden
+          className={cn(
+            'my-1.5 h-px shrink-0 bg-[var(--color-divider)]',
+            collapsed ? 'w-5' : 'mx-2',
+          )}
+        />
+
         {/* § user files page — every upload (chat + KB) with the storage meter.
             The page is scoped to the user's PERSONAL uploads (GET /me/files),
             so it's hidden inside a workspace where files are shared, not owned. */}
@@ -551,8 +560,34 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
           </Tooltip>
         )}
 
+        {canUseKnowledgeBases && (
+          <Tooltip
+            content={collapsed ? tNav('knowledgeBases', { defaultValue: 'Knowledge' }) : ''}
+            side="right"
+          >
+            <Link
+              to="/kb"
+              onClick={onClose}
+              aria-current={knowledgeBasesActive ? 'page' : undefined}
+              className={cn(
+                'inline-flex h-9 items-center gap-2 rounded-[10px] text-sm interactive max-lg:h-[var(--tap-min)] max-sm:!h-9 max-sm:gap-1.5 max-sm:rounded-[8px] max-sm:text-[13px]',
+                knowledgeBasesActive
+                  ? 'bg-[var(--color-bg-muted)] text-[var(--color-fg)] font-medium'
+                  : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                collapsed ? 'w-9 justify-center px-0' : 'w-full justify-start px-3 max-sm:px-2.5',
+              )}
+            >
+              <Database size={15} aria-hidden />
+              {!collapsed && (
+                <span>{tNav('knowledgeBases', { defaultValue: 'Knowledge' })}</span>
+              )}
+            </Link>
+          </Tooltip>
+        )}
+
         <Tooltip
-          content={collapsed ? tNav('skillsPrompts', { defaultValue: 'Skills & prompts' }) : ''}
+          content={collapsed ? tNav('resources', { defaultValue: 'Library' }) : ''}
           side="right"
         >
           <Link
@@ -569,7 +604,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             )}
           >
             <LibraryBig size={15} aria-hidden />
-            {!collapsed && <span>{tNav('skillsPrompts', { defaultValue: 'Skills & prompts' })}</span>}
+            {!collapsed && <span>{tNav('resources', { defaultValue: 'Library' })}</span>}
           </Link>
         </Tooltip>
       </div>
@@ -698,6 +733,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
                                   active={conversation.id === currentId}
                                   onSelect={onClose}
                                   t={t}
+                                  reducedMotion={reducedMotion}
                                   nested
                                   dense={variant === 'sheet'}
                                 />
@@ -720,12 +756,29 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             </section>
 
             {starred.length > 0 && (
-              <Group label={t('sidebar.starred')} items={starred} currentId={currentId} onSelect={onClose} t={t} dense={variant === 'sheet'} />
+              <Group
+                label={t('sidebar.starred')}
+                items={starred}
+                currentId={currentId}
+                onSelect={onClose}
+                t={t}
+                reducedMotion={reducedMotion}
+                dense={variant === 'sheet'}
+              />
             )}
             {groupOrder.map(
               (g) =>
                 grouped[g].length > 0 && (
-                  <Group key={g} label={t(`buckets.${g}`)} items={grouped[g]} currentId={currentId} onSelect={onClose} t={t} dense={variant === 'sheet'} />
+                  <Group
+                    key={g}
+                    label={t(`buckets.${g}`)}
+                    items={grouped[g]}
+                    currentId={currentId}
+                    onSelect={onClose}
+                    t={t}
+                    reducedMotion={reducedMotion}
+                    dense={variant === 'sheet'}
+                  />
                 ),
             )}
             {hasMore && (
@@ -786,6 +839,7 @@ function Group({
   currentId,
   onSelect,
   t,
+  reducedMotion,
   dense = false,
 }: {
   label: string
@@ -793,6 +847,7 @@ function Group({
   currentId: string | undefined
   onSelect?: () => void
   t: TFunction<'chat'>
+  reducedMotion: boolean
   dense?: boolean
 }) {
   return (
@@ -802,7 +857,15 @@ function Group({
       </h3>
       <ul>
         {items.map((c) => (
-          <ConversationItem key={c.id} conversation={c} active={c.id === currentId} onSelect={onSelect} t={t} dense={dense} />
+          <ConversationItem
+            key={c.id}
+            conversation={c}
+            active={c.id === currentId}
+            onSelect={onSelect}
+            t={t}
+            reducedMotion={reducedMotion}
+            dense={dense}
+          />
         ))}
       </ul>
     </div>
@@ -883,6 +946,7 @@ function ConversationItem({
   active,
   onSelect,
   t,
+  reducedMotion,
   nested = false,
   dense = false,
 }: {
@@ -890,6 +954,7 @@ function ConversationItem({
   active: boolean
   onSelect?: () => void
   t: TFunction<'chat'>
+  reducedMotion: boolean
   nested?: boolean
   dense?: boolean
 }) {
@@ -905,6 +970,7 @@ function ConversationItem({
   const [renaming, setRenaming] = useState(false)
   const [draft, setDraft] = useState(conversation.title)
   const [confirm, setConfirm] = useState(false)
+  const displayTitle = `${conversation.starred ? '☆ ' : ''}${conversation.title || t('untitled')}`
 
   // Create (or refresh) a public share and copy its link in one tap (§ sharing).
   // Managing / revoking the share lives in the conversation's Share dialog.
@@ -936,21 +1002,20 @@ function ConversationItem({
           to={`/chat/${conversation.id}`}
           onClick={onSelect}
           className={cn(
-            'block rounded-[10px] px-2.5 pr-9 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+            'conversation-title-link block rounded-[10px] px-2.5 pr-9 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
             dense ? 'py-1.5 pr-8' : cn('max-lg:pr-12', nested ? 'py-1.5 max-lg:py-2.5' : 'py-2 max-lg:py-2.5'),
           )}
         >
           <span className="flex items-center gap-2">
-            <span
+            <OverflowingConversationTitle
+              title={displayTitle}
+              reducedMotion={reducedMotion}
               className={cn(
-                'min-w-0 flex-1 truncate leading-snug',
+                'min-w-0 flex-1 leading-snug',
                 dense ? 'text-[12.5px]' : cn('max-lg:text-[15px]', nested ? 'text-[12.5px]' : 'text-[13.5px]'),
                 active ? 'text-[var(--color-fg)] font-medium' : 'text-[var(--color-fg-muted)]',
               )}
-            >
-              {conversation.starred ? '☆ ' : ''}
-              {conversation.title || t('untitled')}
-            </span>
+            />
             {conversation.workspaceId && !conversation.isPublic ? (
               <Tooltip content={t('visibility.privateTooltip')}>
                 <span
@@ -1090,6 +1155,68 @@ function ConversationItem({
   )
 }
 
+function OverflowingConversationTitle({
+  title,
+  reducedMotion,
+  className,
+}: {
+  title: string
+  reducedMotion: boolean
+  className?: string
+}) {
+  const viewportRef = useRef<HTMLSpanElement>(null)
+  const trackRef = useRef<HTMLSpanElement>(null)
+  const [overflow, setOverflow] = useState(0)
+
+  useEffect(() => {
+    const viewport = viewportRef.current
+    const track = trackRef.current
+    if (!viewport || !track) return
+
+    let disposed = false
+    const measure = () => {
+      if (disposed) return
+      const next = Math.max(0, Math.ceil(track.getBoundingClientRect().width - viewport.clientWidth))
+      setOverflow((current) => (current === next ? current : next))
+    }
+
+    measure()
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure)
+    observer?.observe(viewport)
+    observer?.observe(track)
+    window.addEventListener('resize', measure)
+    void document.fonts?.ready.then(measure)
+
+    return () => {
+      disposed = true
+      observer?.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [title])
+
+  const scrollable = overflow > 0 && !reducedMotion
+  const durationMs = Math.min(9000, Math.max(3000, Math.round(overflow * 18)))
+  const style = {
+    '--conversation-title-distance': `${overflow}px`,
+    '--conversation-title-duration': `${durationMs}ms`,
+  } as CSSProperties
+
+  return (
+    <span
+      ref={viewportRef}
+      data-scrollable={scrollable ? 'true' : undefined}
+      title={overflow > 0 && reducedMotion ? title : undefined}
+      className={cn('conversation-title-viewport', className)}
+      style={style}
+    >
+      <span className="conversation-title-static">{title}</span>
+      <span ref={trackRef} aria-hidden className="conversation-title-track">
+        {title}
+      </span>
+    </span>
+  )
+}
+
 interface UserMenuProps {
   collapsed?: boolean
   /** Header placement keeps the same account actions while adapting the trigger
@@ -1106,7 +1233,6 @@ export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuP
   const displayName = user?.name || user?.email?.split('@')[0] || 'Aivory'
   const avatarUrl = (user?.settings as Record<string, unknown> | undefined)?.avatar_url as string | undefined
   const isAdmin = user?.role === 'admin'
-  const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases')
   const lang = useLanguage((s) => s.lang)
   const setLang = useLanguage((s) => s.setLang)
   const [archivedOpen, setArchivedOpen] = useState(false)
@@ -1157,12 +1283,6 @@ export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuP
           <Settings size={13} aria-hidden />
           {t('settings:user.settings')}
         </DropdownMenuItem>
-        {canUseKnowledgeBases ? (
-          <DropdownMenuItem onClick={() => navigate('/kb')}>
-            <BookText size={13} aria-hidden />
-            {t('chat:userMenu.knowledge', { defaultValue: 'Knowledge' })}
-          </DropdownMenuItem>
-        ) : null}
         <DropdownMenuItem onClick={() => navigate('/subscription')}>
           <Layers size={13} aria-hidden />
           {t('chat:userMenu.subscription', { defaultValue: 'Subscription' })}

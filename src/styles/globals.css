@@ -796,6 +796,56 @@
     transition-timing-function: var(--ease-out);
   }
 
+  /* Conversation titles keep their normal ellipsis until the pointer rests on
+     an actually overflowing label. The duplicate visual track is aria-hidden;
+     keyboard focus on the parent link triggers the same reveal. */
+  .conversation-title-viewport {
+    position: relative;
+    display: block;
+    overflow: hidden;
+  }
+
+  .conversation-title-static {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: opacity var(--duration-instant) var(--ease-out);
+  }
+
+  .conversation-title-track {
+    position: absolute;
+    inset-block-start: 0;
+    inset-inline-start: 0;
+    max-width: none;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateX(0);
+    transition:
+      opacity var(--duration-instant) var(--ease-out),
+      transform 0ms linear var(--duration-instant);
+  }
+
+  .conversation-title-viewport[data-scrollable='true']:hover .conversation-title-static,
+  .conversation-title-link:focus-visible
+    .conversation-title-viewport[data-scrollable='true']
+    .conversation-title-static {
+    opacity: 0;
+  }
+
+  .conversation-title-viewport[data-scrollable='true']:hover .conversation-title-track,
+  .conversation-title-link:focus-visible
+    .conversation-title-viewport[data-scrollable='true']
+    .conversation-title-track {
+    opacity: 1;
+    transform: translateX(calc(0px - var(--conversation-title-distance, 0px)));
+    will-change: transform;
+    transition:
+      opacity var(--duration-instant) var(--ease-out),
+      transform var(--conversation-title-duration, 3000ms) linear var(--duration-base);
+  }
+
   /* Variable-font optical sizing — display serif opens up at large sizes. */
   .font-optical {
     font-optical-sizing: auto;

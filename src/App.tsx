@@ -68,6 +68,7 @@ const AdminModeration = lazy(() => import('@/pages/admin/AdminModeration'))
 const AdminAnnouncement = lazy(() => import('@/pages/admin/AdminAnnouncement'))
 const AdminDocuments = lazy(() => import('@/pages/admin/AdminDocuments'))
 const AdminFiles = lazy(() => import('@/pages/admin/AdminFiles'))
+const AdminResources = lazy(() => import('@/pages/admin/AdminResources'))
 const AdminFeedback = lazy(() => import('@/pages/admin/AdminFeedback'))
 const UserFiles = lazy(() => import('@/pages/files/UserFiles'))
 const SkillsPrompts = lazy(() => import('@/pages/library/SkillsPrompts'))
@@ -288,6 +289,7 @@ export default function App() {
               <Route path="usage" element={<AdminUsage />} />
               <Route path="analytics" element={<AdminAnalytics />} />
               <Route path="documents" element={<AdminDocuments />} />
+              <Route path="resources" element={<AdminResources />} />
               <Route path="files" element={<AdminFiles />} />
               <Route path="feedback" element={<AdminFeedback />} />
               <Route path="tools" element={<AdminTools />} />

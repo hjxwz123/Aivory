@@ -946,6 +946,140 @@ export interface ApiDocument {
   created_at: number
 }
 
+/** Shared paginated envelope for administrator-wide content inventories. */
+export interface ApiAdminResourcePage<T> {
+  items: T[]
+  total: number
+  limit: number
+  offset: number
+}
+
+/** Administrator projection of one standalone knowledge base and its owner. */
+export interface ApiAdminKnowledgeBaseResource {
+  id: string
+  name: string
+  description: string
+  creator_id: string
+  creator_name: string
+  creator_email: string
+  creator_avatar_url?: string
+  workspace_id?: string
+  workspace_name?: string
+  workspace_owner_id?: string
+  workspace_owner_name?: string
+  workspace_owner_email?: string
+  embedding_model_id: string
+  embedding_model_label: string
+  embedding_model_enabled: boolean
+  embedding_dim: number
+  document_count: number
+  ready_document_count: number
+  failed_document_count: number
+  processing_document_count: number
+  total_size_bytes: number
+  chunk_count: number
+  share_count: number
+  created_at: number
+  last_activity_at: number
+}
+
+export interface ApiAdminKnowledgeBaseResourceDetail extends ApiAdminKnowledgeBaseResource {
+  shares: ApiKnowledgeBaseShare[]
+}
+
+/** Administrator projection of one project and its dedicated knowledge base. */
+export interface ApiAdminProjectResource {
+  id: string
+  name: string
+  description: string
+  accent: string
+  emoji: string
+  pinned: boolean
+  auto_add_uploads: boolean
+  creator_id: string
+  creator_name: string
+  creator_email: string
+  creator_avatar_url?: string
+  workspace_id?: string
+  workspace_name?: string
+  workspace_owner_id?: string
+  workspace_owner_name?: string
+  workspace_owner_email?: string
+  kb_id?: string
+  kb_name?: string
+  kb_description?: string
+  embedding_model_id?: string
+  embedding_model_label?: string
+  embedding_model_enabled: boolean
+  embedding_dim: number
+  document_count: number
+  ready_document_count: number
+  failed_document_count: number
+  processing_document_count: number
+  total_size_bytes: number
+  chunk_count: number
+  conversation_count: number
+  active_conversation_count: number
+  archived_conversation_count: number
+  created_at: number
+  updated_at: number
+  last_activity_at: number
+}
+
+export interface ApiAdminProjectResourceDetail extends ApiAdminProjectResource {
+  instructions: string
+}
+
+export interface ApiAdminProjectConversation {
+  id: string
+  creator_id: string
+  creator_name: string
+  creator_email: string
+  creator_avatar_url?: string
+  title: string
+  provider: string
+  model_id: string
+  model_label: string
+  fast: boolean
+  pinned: boolean
+  archived: boolean
+  starred: boolean
+  is_public: boolean
+  workspace_id?: string
+  created_at: number
+  updated_at: number
+}
+
+export interface ApiAdminGeneratedImageResource {
+  id: string
+  conversation_id: string
+  conversation_title: string
+  message_id: string
+  filename: string
+  mime_type: string
+  size_bytes: number
+  created_at: number
+  user_id: string
+  user_email: string
+  user_name: string
+  workspace_id: string
+  workspace_name: string
+  model_id: string
+  model_label: string
+  prompt: string
+  url: string
+}
+
+export interface ApiAdminGeneratedImageModel {
+  id: string
+  label: string
+}
+
+export interface ApiAdminGeneratedImagePage
+  extends ApiAdminResourcePage<ApiAdminGeneratedImageResource> {
+  models: ApiAdminGeneratedImageModel[]
+}
+
 /** Credit balance for the subscription page (§ credits). */
 export interface ApiCredits {
   enabled: boolean

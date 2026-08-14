@@ -609,7 +609,7 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 
 	// Persist produced files as artifacts + surface them to the orchestrator.
 	for _, f := range res.Files {
-		if _, err := saveArtifact(ctx, tc, t.artifactDir, f.Name, f.MimeType, f.Data); err != nil {
+		if _, err := saveArtifact(ctx, tc, t.artifactDir, f.Name, f.MimeType, store.ArtifactSourcePythonExecute, f.Data); err != nil {
 			return "", nil, fmt.Errorf("persist artifact %q: %w", f.Name, err)
 		}
 	}
@@ -638,7 +638,7 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 // saveArtifact writes a tool-produced file to ArtifactDir, records it, and
 // notifies the orchestrator so it streams an artifact event + persists a block.
 // Shared by python_execute (sandbox outputs) and image_generate.
-func saveArtifact(ctx context.Context, tc *llm.ToolContext, artifactDir, name, mime string, data []byte) (*store.Artifact, error) {
+func saveArtifact(ctx context.Context, tc *llm.ToolContext, artifactDir, name, mime, source string, data []byte) (*store.Artifact, error) {
 	if tc == nil || tc.DB == nil || tc.MessageID == "" {
 		return nil, errors.New("artifact context is incomplete")
 	}
@@ -667,6 +667,7 @@ func saveArtifact(ctx context.Context, tc *llm.ToolContext, artifactDir, name, m
 		StoragePath: path,
 		MimeType:    mime,
 		SizeBytes:   int64(len(data)),
+		Source:      source,
 	}, tc.ConvID, tc.UserID)
 	if err != nil || art == nil {
 		_ = os.Remove(path)
@@ -1029,7 +1030,7 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	for i, img := range images {
 		ext := extForMime(img.mime)
 		name := fmt.Sprintf("image_%d%s", i+1, ext)
-		if _, saveErr := saveArtifact(persistCtx, tc, t.artifactDir, name, img.mime, img.data); saveErr != nil {
+		if _, saveErr := saveArtifact(persistCtx, tc, t.artifactDir, name, img.mime, store.ArtifactSourceImageGenerate, img.data); saveErr != nil {
 			return "", nil, fmt.Errorf("persist generated image %d: %w", i+1, saveErr)
 		}
 	}

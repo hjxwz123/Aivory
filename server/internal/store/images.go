@@ -147,6 +147,14 @@ type AdminImageArtifact struct {
 	URL string `json:"url,omitempty"`
 }
 
+// generatedImageArtifactPredicate is the common gallery boundary. Provenance
+// is checked per artifact, so one turn may expose image_generate output while
+// keeping a python_execute chart out. Rows created before source was recorded
+// are deliberately hidden: message-level billing, model, blocks, and raw data
+// cannot prove which artifact came from which tool in a mixed legacy turn.
+const generatedImageArtifactPredicate = `a.mime_type LIKE 'image/%'
+ AND a.source IN ('image_generate','image_generation')`
+
 // ListUserImageArtifacts returns the image artifacts attributed to a user for
 // the admin audit gallery. It intentionally does not require the target user to
 // retain access to the source workspace: administrators must be able to inspect
@@ -184,7 +192,7 @@ func listUserImageArtifacts(ctx context.Context, db *sql.DB, predicate string, a
 		 JOIN messages m ON m.id = a.message_id
 		 JOIN conversations c ON c.id = m.conversation_id
 		 WHERE `+predicate+`
-		   AND a.mime_type LIKE 'image/%'
+		   AND `+generatedImageArtifactPredicate+`
 		 ORDER BY a.created_at DESC, a.id DESC
 		 LIMIT ? OFFSET ?`,
 		args...)

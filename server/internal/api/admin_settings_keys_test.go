@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"aivory/server/internal/config"
 	"aivory/server/internal/store"
 )
 
@@ -31,6 +32,181 @@ func TestAdminSettingsKeysAreUniqueAndExcludeRetiredPurchasingSettings(t *testin
 		if _, exists := seen[retired]; exists {
 			t.Fatalf("retired setting %q is still exposed by the admin settings API", retired)
 		}
+	}
+
+	for _, key := range []string{
+		"rag_rerank_enabled",
+		"rag_rerank_api_url",
+		"rag_rerank_api_key",
+		"rag_rerank_model",
+	} {
+		if _, exists := seen[key]; !exists {
+			t.Fatalf("rerank setting %q is not exposed by the admin settings API", key)
+		}
+	}
+}
+
+func TestRerankSettingsSeedDisabled(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "rerank-seed-settings.db"))
+	defer db.Close()
+	if err := store.Seed(db, config.Config{}); err != nil {
+		t.Fatal(err)
+	}
+
+	for key, want := range map[string]string{
+		"rag_rerank_enabled": "false",
+		"rag_rerank_api_url": `""`,
+		"rag_rerank_api_key": `""`,
+		"rag_rerank_model":   `""`,
+	} {
+		var got string
+		if err := db.QueryRow(`SELECT value FROM settings WHERE key=?`, key).Scan(&got); err != nil {
+			t.Fatalf("read %s: %v", key, err)
+		}
+		if got != want {
+			t.Fatalf("%s = %q, want %q", key, got, want)
+		}
+	}
+}
+
+func TestAdminRerankSettingsValidateNormalizeAndMask(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "rerank-admin-settings.db"))
+	defer db.Close()
+	d := Deps{DB: db}
+	patch := func(body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPatch, "/api/admin/settings", strings.NewReader(body))
+		req.Header.Set("content-type", "application/json")
+		rec := httptest.NewRecorder()
+		adminSettingsSet(d, rec, req)
+		return rec
+	}
+
+	for key, value := range map[string]string{
+		"rag_rerank_enabled": `"true"`,
+		"rag_rerank_api_url": `123`,
+		"rag_rerank_api_key": `false`,
+		"rag_rerank_model":   `{"name":"reranker"}`,
+	} {
+		rec := patch(`{"` + key + `":` + value + `}`)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s accepted invalid type: status=%d body=%s", key, rec.Code, rec.Body.String())
+		}
+	}
+	for _, baseURL := range []string{
+		"https://rerank.example.com",
+		"https://rerank.example.com/v1/rerank",
+		"ftp://rerank.example.com/v1",
+		"/v1",
+		"https://rerank.example.com/v1?tenant=one",
+	} {
+		rec := patch(`{"rag_rerank_api_url":` + string(mustJSON(t, baseURL)) + `}`)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("base URL %q: status=%d body=%s", baseURL, rec.Code, rec.Body.String())
+		}
+	}
+	if rec := patch(`{"rag_rerank_enabled":true}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("incomplete enable status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec := patch(`{
+		"rag_rerank_enabled":true,
+		"rag_rerank_api_url":"  https://rerank.example.com/openai/v1/  ",
+		"rag_rerank_api_key":"  secret-token  ",
+		"rag_rerank_model":"  BAAI/bge-reranker-v2-m3  "
+	}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("valid settings status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var response map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	var masked string
+	if err := json.Unmarshal(response["rag_rerank_api_key"], &masked); err != nil || masked != "••••••" {
+		t.Fatalf("masked API key = %q, err=%v", masked, err)
+	}
+	for key, want := range map[string]string{
+		"rag_rerank_api_url": `"https://rerank.example.com/openai/v1"`,
+		"rag_rerank_api_key": `"secret-token"`,
+		"rag_rerank_model":   `"BAAI/bge-reranker-v2-m3"`,
+	} {
+		var got string
+		if err := db.QueryRow(`SELECT value FROM settings WHERE key=?`, key).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("%s = %q, want %q", key, got, want)
+		}
+	}
+
+	// A masked secret is a no-op, while another field in the same partial PATCH
+	// is validated against the already-stored enabled configuration.
+	if rec := patch(`{"rag_rerank_api_key":"••••••","rag_rerank_model":"  reranker-v2  "}`); rec.Code != http.StatusOK {
+		t.Fatalf("partial patch status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	for key, want := range map[string]string{
+		"rag_rerank_api_key": `"secret-token"`,
+		"rag_rerank_model":   `"reranker-v2"`,
+	} {
+		var got string
+		if err := db.QueryRow(`SELECT value FROM settings WHERE key=?`, key).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("%s after partial patch = %q, want %q", key, got, want)
+		}
+	}
+}
+
+func TestAdminRerankSettingsRejectInvalidEffectivePatchAtomically(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "rerank-atomic-settings.db"))
+	defer db.Close()
+	d := Deps{DB: db}
+	for key, value := range map[string]any{
+		"rag_rerank_enabled": true,
+		"rag_rerank_api_url": "https://rerank.example.com/v1",
+		"rag_rerank_model":   "reranker-v1",
+	} {
+		if err := store.SetSetting(db, key, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/admin/settings", strings.NewReader(`{
+		"rag_rerank_api_url":"https://replacement.example.com/v1",
+		"rag_rerank_model":"  "
+	}`))
+	req.Header.Set("content-type", "application/json")
+	rec := httptest.NewRecorder()
+	adminSettingsSet(d, rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	for key, want := range map[string]string{
+		"rag_rerank_api_url": `"https://rerank.example.com/v1"`,
+		"rag_rerank_model":   `"reranker-v1"`,
+	} {
+		var got string
+		if err := db.QueryRow(`SELECT value FROM settings WHERE key=?`, key).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("failed patch changed %s to %q, want %q", key, got, want)
+		}
+	}
+
+	// Disabling and clearing the independent service in one PATCH is valid.
+	req = httptest.NewRequest(http.MethodPatch, "/api/admin/settings", strings.NewReader(`{
+		"rag_rerank_enabled":false,
+		"rag_rerank_api_url":"",
+		"rag_rerank_model":""
+	}`))
+	req.Header.Set("content-type", "application/json")
+	rec = httptest.NewRecorder()
+	adminSettingsSet(d, rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("disable status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
 

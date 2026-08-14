@@ -1467,6 +1467,9 @@ var settingsKeys = []string{
 	// embed + retrieve).
 	"rag_full_text_threshold", "rag_top_k", "rag_dynamic_topk", "rag_similarity_threshold",
 	"rag_code_full_text_max_lines",
+	// Optional OpenAI-compatible reranking service. This has its own endpoint,
+	// credential and model name; it deliberately does not reuse a model channel.
+	"rag_rerank_enabled", "rag_rerank_api_url", "rag_rerank_api_key", "rag_rerank_model",
 	// §credits pre-flight token/affordability check.
 	"credit_preflight_enabled",
 	// §B5 request logging: log_full_requests turns on persisting the full
@@ -1551,6 +1554,7 @@ func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.R
 		value json.RawMessage
 	}
 	writes := make([]settingWrite, 0, len(body))
+	rerankWrites := make(map[string]json.RawMessage, 4)
 	for _, k := range settingsKeys {
 		if v, ok := body[k]; ok {
 			if skipNull && strings.TrimSpace(string(v)) == "null" {
@@ -1683,6 +1687,28 @@ func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.R
 					return 0, errInvalidInput
 				}
 				v, _ = json.Marshal(enabled)
+			case "rag_rerank_enabled":
+				var enabled bool
+				if json.Unmarshal(v, &enabled) != nil {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(enabled)
+			case "rag_rerank_api_url":
+				var baseURL string
+				if json.Unmarshal(v, &baseURL) != nil {
+					return 0, errInvalidInput
+				}
+				normalized, err := normalizeOpenAIChannelBaseURL(baseURL)
+				if err != nil {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(normalized)
+			case "rag_rerank_api_key", "rag_rerank_model":
+				var value string
+				if json.Unmarshal(v, &value) != nil {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(strings.TrimSpace(value))
 			case "embedding_model_id":
 				if err := ensureEmbeddingModelSettingCanChange(d, v); err != nil {
 					return 0, err
@@ -1697,7 +1723,15 @@ func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.R
 				}
 				v = normalized
 			}
+			if strings.HasPrefix(k, "rag_rerank_") {
+				rerankWrites[k] = append(json.RawMessage(nil), v...)
+			}
 			writes = append(writes, settingWrite{key: k, value: append(json.RawMessage(nil), v...)})
+		}
+	}
+	if len(rerankWrites) > 0 {
+		if err := validateEffectiveRerankSettings(d.DB, rerankWrites); err != nil {
+			return 0, err
 		}
 	}
 	if len(writes) == 0 {
@@ -1725,6 +1759,57 @@ func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.R
 	// invalidation to other instances immediately afterwards.
 	store.InvalidateConfig()
 	return int64(len(writes)), nil
+}
+
+func validateEffectiveRerankSettings(db *sql.DB, patch map[string]json.RawMessage) error {
+	type rerankSettings struct {
+		enabled bool
+		baseURL string
+		model   string
+	}
+	effective := rerankSettings{}
+
+	readCurrent := func(key string, dst any) error {
+		var raw string
+		err := db.QueryRow(`SELECT value FROM settings WHERE key=?`, key).Scan(&raw)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		// Runtime treats malformed optional settings as disabled/blank. Preserve
+		// that fail-closed behavior so an administrator can repair legacy rows.
+		_ = json.Unmarshal([]byte(raw), dst)
+		return nil
+	}
+	if err := readCurrent("rag_rerank_enabled", &effective.enabled); err != nil {
+		return err
+	}
+	if err := readCurrent("rag_rerank_api_url", &effective.baseURL); err != nil {
+		return err
+	}
+	if err := readCurrent("rag_rerank_model", &effective.model); err != nil {
+		return err
+	}
+
+	if raw, ok := patch["rag_rerank_enabled"]; ok && json.Unmarshal(raw, &effective.enabled) != nil {
+		return errInvalidInput
+	}
+	if raw, ok := patch["rag_rerank_api_url"]; ok && json.Unmarshal(raw, &effective.baseURL) != nil {
+		return errInvalidInput
+	}
+	if raw, ok := patch["rag_rerank_model"]; ok && json.Unmarshal(raw, &effective.model) != nil {
+		return errInvalidInput
+	}
+
+	if effective.enabled {
+		baseURL, err := normalizeOpenAIChannelBaseURL(effective.baseURL)
+		if err != nil || baseURL == "" || strings.TrimSpace(effective.model) == "" {
+			return errInvalidInput
+		}
+	}
+	return nil
 }
 
 func normalizeContextCompactionModelSetting(ctx context.Context, d Deps, raw json.RawMessage) (json.RawMessage, error) {

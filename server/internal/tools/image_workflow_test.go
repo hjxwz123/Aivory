@@ -303,7 +303,7 @@ func TestArtifactPersistenceFailureReturnsErrorWithoutImageUsage(t *testing.T) {
 	}
 
 	cleanupDir := t.TempDir()
-	if _, err := saveArtifact(context.Background(), &llm.ToolContext{DB: tool.db, MessageID: "missing_message"}, cleanupDir, "orphan.png", "image/png", imageData); err == nil {
+	if _, err := saveArtifact(context.Background(), &llm.ToolContext{DB: tool.db, MessageID: "missing_message"}, cleanupDir, "orphan.png", "image/png", store.ArtifactSourceImageGenerate, imageData); err == nil {
 		t.Fatal("missing artifact message must fail the database insert")
 	}
 	entries, readErr := os.ReadDir(cleanupDir)

@@ -22,6 +22,24 @@ import { PanelFallback } from '@/components/ui/panel-fallback'
 
 type Settings = Record<string, unknown>
 
+function isOpenAIRerankBaseURL(value: string): boolean {
+  try {
+    const parsed = new URL(value)
+    const path = parsed.pathname.replace(/\/+$/, '')
+    return (
+      (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+      parsed.hostname !== '' &&
+      parsed.username === '' &&
+      parsed.password === '' &&
+      parsed.search === '' &&
+      parsed.hash === '' &&
+      path.endsWith('/v1')
+    )
+  } catch {
+    return false
+  }
+}
+
 // Keys this page owns. Used to PATCH only the relevant subset, so concurrent
 // edits on other admin pages aren't clobbered.
 const OWNED_KEYS = [
@@ -31,6 +49,10 @@ const OWNED_KEYS = [
   'rag_top_k',
   'rag_dynamic_topk',
   'rag_similarity_threshold',
+  'rag_rerank_enabled',
+  'rag_rerank_api_url',
+  'rag_rerank_api_key',
+  'rag_rerank_model',
   'mineru_api_url',
   'mineru_api_token',
 ] as const
@@ -62,6 +84,20 @@ export default function AdminDocuments() {
   }, [])
 
   async function save() {
+    const rerankEnabled = readBool('rag_rerank_enabled', false)
+    const rerankBaseURL = readString('rag_rerank_api_url').trim()
+    if (
+      rerankEnabled &&
+      (!rerankBaseURL || !readString('rag_rerank_model').trim())
+    ) {
+      toast.error(t('admin:documents.ragRerankConfigRequired'))
+      return
+    }
+    if (rerankEnabled && !isOpenAIRerankBaseURL(rerankBaseURL)) {
+      toast.error(t('admin:documents.ragRerankBaseUrlInvalid'))
+      return
+    }
+
     setSaving(true)
     try {
       const patch: Settings = {}
@@ -266,6 +302,66 @@ export default function AdminDocuments() {
                   />
                 </Field>
               )}
+              <div className="border-t border-[var(--color-divider)] pt-5">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="text-sm text-[var(--color-fg)]">
+                      {t('admin:documents.ragRerankEnabled')}
+                    </div>
+                    <div className="mt-0.5 max-w-3xl text-xs text-[var(--color-fg-subtle)]">
+                      {t('admin:documents.ragRerankEnabledHint')}
+                    </div>
+                  </div>
+                  <Switch
+                    aria-label={t('admin:documents.ragRerankEnabled')}
+                    checked={readBool('rag_rerank_enabled', false)}
+                    onCheckedChange={(v) => setDraft({ ...draft, rag_rerank_enabled: v })}
+                  />
+                </div>
+                {readBool('rag_rerank_enabled', false) && (
+                  <div className="mt-5 flex flex-col gap-5">
+                    <Field
+                      label={t('admin:documents.ragRerankBaseUrl')}
+                      htmlFor="rag-rerank-url"
+                      hint={t('admin:documents.ragRerankBaseUrlHint')}
+                    >
+                      <Input
+                        id="rag-rerank-url"
+                        type="url"
+                        placeholder="https://api.example.com/v1"
+                        value={readString('rag_rerank_api_url')}
+                        onChange={(e) => setDraft({ ...draft, rag_rerank_api_url: e.target.value })}
+                      />
+                    </Field>
+                    <Field
+                      label={t('admin:documents.ragRerankApiKey')}
+                      htmlFor="rag-rerank-api-key"
+                      hint={t('admin:documents.ragRerankApiKeyHint')}
+                    >
+                      <Input
+                        id="rag-rerank-api-key"
+                        type="password"
+                        autoComplete="off"
+                        placeholder="sk-..."
+                        value={readString('rag_rerank_api_key')}
+                        onChange={(e) => setDraft({ ...draft, rag_rerank_api_key: e.target.value })}
+                      />
+                    </Field>
+                    <Field
+                      label={t('admin:documents.ragRerankModel')}
+                      htmlFor="rag-rerank-model"
+                      hint={t('admin:documents.ragRerankModelHint')}
+                    >
+                      <Input
+                        id="rag-rerank-model"
+                        placeholder="BAAI/bge-reranker-v2-m3"
+                        value={readString('rag_rerank_model')}
+                        onChange={(e) => setDraft({ ...draft, rag_rerank_model: e.target.value })}
+                      />
+                    </Field>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 

@@ -785,6 +785,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
   storage_path TEXT NOT NULL,
   mime_type    TEXT NOT NULL DEFAULT 'application/octet-stream',
   size_bytes   BIGINT NOT NULL DEFAULT 0,
+  source       TEXT NOT NULL DEFAULT '',
   created_at   BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
 CREATE INDEX IF NOT EXISTS idx_artifacts_message ON artifacts(message_id);
