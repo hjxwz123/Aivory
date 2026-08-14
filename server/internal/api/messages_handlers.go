@@ -42,12 +42,27 @@ var (
 const chatRunErrorMessage = "The message could not be processed. Please try again."
 
 func chatRunErrorEvent(err error, messageID string) llm.SseEvent {
-	if errors.Is(err, store.ErrStorageQuotaExceeded) {
+	switch {
+	case errors.Is(err, store.ErrStorageQuotaExceeded):
 		return llm.SseEvent{
 			Type:      "error",
 			Message:   "Storage is full. Free up space in Files and try again.",
 			MessageID: messageID,
 			Code:      store.ErrStorageQuotaExceeded.Error(),
+		}
+	case errors.Is(err, llm.ErrDrawingPermission):
+		return llm.SseEvent{
+			Type:      "error",
+			Message:   "Drawing is not available for this user group.",
+			MessageID: messageID,
+			Code:      errDrawingGroupPermission.Error(),
+		}
+	case errors.Is(err, llm.ErrKnowledgeBasePermission):
+		return llm.SseEvent{
+			Type:      "error",
+			Message:   "Knowledge bases are not available for this user group.",
+			MessageID: messageID,
+			Code:      errKnowledgeBaseGroupPermission.Error(),
 		}
 	}
 	return llm.SseEvent{Type: "error", Message: chatRunErrorMessage, MessageID: messageID}
@@ -163,11 +178,109 @@ func workspaceGenerationRevocationKey(workspaceID string) string {
 	return "workspace-generation-revoked:" + workspaceID
 }
 
+func knowledgeBaseGenerationRevocationTopic(kbID string) string {
+	return "knowledge-base:" + strings.TrimSpace(kbID) + ":generation-revoked"
+}
+
+func knowledgeBaseUserGenerationRevocationTopic(kbID, userID string) string {
+	return "knowledge-base:" + strings.TrimSpace(kbID) + ":user:" + strings.TrimSpace(userID) + ":generation-revoked"
+}
+
+func knowledgeBaseGenerationRevocationKey(kbID string) string {
+	return "knowledge-base-generation-revoked:" + strings.TrimSpace(kbID)
+}
+
+func knowledgeBaseUserAccessEpochKey(kbID, userID string) string {
+	return "knowledge-base-access-epoch:" + strings.TrimSpace(kbID) + ":" + strings.TrimSpace(userID)
+}
+
+func knowledgeBaseUserGenerationRevocationKey(kbID, userID, epoch string) string {
+	return "knowledge-base-user-generation-revoked:" + strings.TrimSpace(kbID) + ":" + strings.TrimSpace(userID) + ":" + epoch
+}
+
+func currentKnowledgeBaseUserAccessEpoch(d Deps, kbID, userID string) string {
+	if d.Cache == nil {
+		return "0"
+	}
+	if epoch, ok := d.Cache.Get(knowledgeBaseUserAccessEpochKey(kbID, userID)); ok {
+		return epoch
+	}
+	return "0"
+}
+
+// revokeKnowledgeBaseUserGenerations advances the access generation without
+// poisoning a future re-share. Active turns retain their old epoch in the
+// stream deny-list, while newly authorized turns capture the incremented one.
+func revokeKnowledgeBaseUserGenerations(d Deps, kbID, userID string) {
+	kbID = strings.TrimSpace(kbID)
+	userID = strings.TrimSpace(userID)
+	if d.Cache == nil || kbID == "" || userID == "" {
+		return
+	}
+	epochKey := knowledgeBaseUserAccessEpochKey(kbID, userID)
+	epoch := currentKnowledgeBaseUserAccessEpoch(d, kbID, userID)
+	d.Cache.Set(knowledgeBaseUserGenerationRevocationKey(kbID, userID, epoch), "1", genstream.RevocationTTL())
+	d.Cache.Incr(epochKey, 0)
+	d.Cache.Publish(knowledgeBaseUserGenerationRevocationTopic(kbID, userID), "1")
+}
+
+func revokeKnowledgeBaseGenerations(d Deps, kbID string) {
+	kbID = strings.TrimSpace(kbID)
+	if d.Cache == nil || kbID == "" {
+		return
+	}
+	d.Cache.Set(knowledgeBaseGenerationRevocationKey(kbID), "1", genstream.RevocationTTL())
+	d.Cache.Publish(knowledgeBaseGenerationRevocationTopic(kbID), "1")
+}
+
+type generationKnowledgeBaseAccessSnapshot struct {
+	UserID         string
+	ConversationID string
+	WorkspaceID    string
+	IDs            []string
+	UserEpochs     map[string]string
+}
+
+func captureGenerationKnowledgeBaseAccess(
+	d Deps, userID, conversationID, workspaceID string, ids []string,
+) *generationKnowledgeBaseAccessSnapshot {
+	if len(ids) == 0 {
+		return nil
+	}
+	snapshot := &generationKnowledgeBaseAccessSnapshot{
+		UserID: userID, ConversationID: conversationID, WorkspaceID: workspaceID,
+		IDs: append([]string(nil), ids...), UserEpochs: make(map[string]string, len(ids)),
+	}
+	for _, kbID := range snapshot.IDs {
+		snapshot.UserEpochs[kbID] = currentKnowledgeBaseUserAccessEpoch(d, kbID, userID)
+	}
+	return snapshot
+}
+
+func generationKnowledgeBaseDenyKeys(snapshot *generationKnowledgeBaseAccessSnapshot) []string {
+	if snapshot == nil {
+		return nil
+	}
+	keys := make([]string, 0, len(snapshot.IDs)*2)
+	for _, kbID := range snapshot.IDs {
+		keys = append(keys, knowledgeBaseGenerationRevocationKey(kbID))
+		keys = append(keys, knowledgeBaseUserGenerationRevocationKey(kbID, snapshot.UserID, snapshot.UserEpochs[kbID]))
+	}
+	return keys
+}
+
 func generationStreamDenyKeys(workspaceID string) []string {
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil
 	}
 	return []string{workspaceGenerationRevocationKey(workspaceID)}
+}
+
+func generationStreamDenyKeysForAccess(
+	workspaceID string, knowledgeBases *generationKnowledgeBaseAccessSnapshot,
+) []string {
+	keys := generationStreamDenyKeys(workspaceID)
+	return append(keys, generationKnowledgeBaseDenyKeys(knowledgeBases)...)
 }
 
 func revokeMessageGenerationStreams(d Deps, messageIDs []string) error {
@@ -243,18 +356,64 @@ func subscribePermanentRevocation(
 }
 
 type generationAccessRevocationWatcher struct {
-	d              Deps
-	ctx            context.Context
-	cancel         context.CancelFunc
-	workspaceUnsub func()
-	messageOnce    sync.Once
-	messageUnsub   func()
+	d                 Deps
+	ctx               context.Context
+	cancel            context.CancelFunc
+	workspaceUnsub    func()
+	permissionUnsubs  []func()
+	knowledgeUnsubs   []func()
+	knowledgeBases    *generationKnowledgeBaseAccessSnapshot
+	knowledgeRevoked  atomic.Bool
+	permissionRevoked atomic.Bool
+	permissions       *requestPermissionSnapshot
+	conversationID    string
+	userID            string
+	messageMu         sync.Mutex
+	messageID         string
+	groupExpiryTimer  *time.Timer
+	messageOnce       sync.Once
+	messageUnsub      func()
+}
+
+func subscribeAccessRevocationTopic(
+	d Deps, ctx context.Context, cancel context.CancelFunc, topic string,
+) func() {
+	if d.Cache == nil || strings.TrimSpace(topic) == "" {
+		return func() {}
+	}
+	ch, unsubscribe := d.Cache.Subscribe(topic)
+	var closing atomic.Bool
+	go func() {
+		select {
+		case _, ok := <-ch:
+			// A lost cross-replica subscription is security-significant for a
+			// detached generation. Match the workspace watcher and fail closed,
+			// except when this request is deliberately releasing its subscription.
+			if !ok && !closing.Load() {
+				cancel()
+				return
+			}
+			if ok {
+				cancel()
+			}
+		case <-ctx.Done():
+		}
+	}()
+	return func() {
+		closing.Store(true)
+		unsubscribe()
+	}
 }
 
 func newGenerationAccessRevocationWatcher(
-	d Deps, ctx context.Context, cancel context.CancelFunc, workspaceID string,
+	d Deps, ctx context.Context, cancel context.CancelFunc, conversationID, workspaceID string,
+	permissions *requestPermissionSnapshot,
+	knowledgeBases *generationKnowledgeBaseAccessSnapshot,
 ) *generationAccessRevocationWatcher {
-	watcher := &generationAccessRevocationWatcher{d: d, ctx: ctx, cancel: cancel, workspaceUnsub: func() {}}
+	watcher := &generationAccessRevocationWatcher{
+		d: d, ctx: ctx, cancel: cancel, workspaceUnsub: func() {}, knowledgeBases: knowledgeBases,
+		permissions: permissions, conversationID: strings.TrimSpace(conversationID),
+	}
 	if strings.TrimSpace(workspaceID) != "" {
 		key := workspaceGenerationRevocationKey(workspaceID)
 		watcher.workspaceUnsub = subscribePermanentRevocation(
@@ -262,7 +421,169 @@ func newGenerationAccessRevocationWatcher(
 			func() bool { _, revoked := d.Cache.Get(key); return revoked },
 		)
 	}
+	if permissions != nil {
+		watcher.userID = permissions.UserID
+		watcher.permissionUnsubs = append(watcher.permissionUnsubs,
+			subscribeAccessRevocationTopic(d, ctx, watcher.revokePermissionAccess, globalCapabilityRevocationTopic),
+			subscribeAccessRevocationTopic(d, ctx, watcher.revokePermissionAccess, userPermissionRevocationTopic(permissions.UserID)),
+		)
+		if strings.TrimSpace(permissions.GroupID) != "" {
+			watcher.permissionUnsubs = append(watcher.permissionUnsubs,
+				subscribeAccessRevocationTopic(d, ctx, watcher.revokePermissionAccess, groupPermissionRevocationTopic(permissions.GroupID)),
+			)
+		}
+		if permissions.GroupExpiresAt > 0 {
+			untilExpiry := time.Until(time.Unix(permissions.GroupExpiresAt, 0))
+			if untilExpiry <= 0 {
+				watcher.revokePermissionAccess()
+			} else {
+				watcher.groupExpiryTimer = time.AfterFunc(untilExpiry, watcher.revokePermissionAccess)
+			}
+		}
+		// Subscribe first, then compare the version captured with the database
+		// policy. A revoke racing setup is observed by either its topic or this
+		// version check.
+		if !watcher.permissionAccessStillCurrent() {
+			watcher.revokePermissionAccess()
+		}
+	}
+	if knowledgeBases != nil {
+		for _, kbID := range knowledgeBases.IDs {
+			watcher.knowledgeUnsubs = append(watcher.knowledgeUnsubs,
+				watcher.subscribeKnowledgeBaseRevocation(knowledgeBaseGenerationRevocationTopic(kbID)),
+				watcher.subscribeKnowledgeBaseRevocation(knowledgeBaseUserGenerationRevocationTopic(kbID, knowledgeBases.UserID)),
+			)
+		}
+		// Subscribe before checking the epochs and database. A revoke racing the
+		// initial selection is observed either by its topic, the epoch comparison,
+		// the permanent deny key, or this authoritative access recheck.
+		if !watcher.knowledgeBaseAccessStillCurrent() {
+			watcher.revokeKnowledgeBaseAccess()
+		}
+	}
 	return watcher
+}
+
+func (watcher *generationAccessRevocationWatcher) permissionAccessStillCurrent() bool {
+	if watcher == nil || watcher.permissions == nil {
+		return true
+	}
+	permissions := watcher.permissions
+	if permissionGenerationEpoch(watcher.d, "global", "") != permissions.GlobalEpoch ||
+		permissionGenerationEpoch(watcher.d, "user", permissions.UserID) != permissions.UserEpoch {
+		return false
+	}
+	return strings.TrimSpace(permissions.GroupID) == "" ||
+		permissionGenerationEpoch(watcher.d, "group", permissions.GroupID) == permissions.GroupEpoch
+}
+
+func (watcher *generationAccessRevocationWatcher) revokePermissionAccess() {
+	if watcher == nil {
+		return
+	}
+	watcher.permissionRevoked.Store(true)
+	watcher.cancel()
+	watcher.messageMu.Lock()
+	messageID := watcher.messageID
+	watcher.messageMu.Unlock()
+	if messageID != "" {
+		_ = genstream.Revoke(watcher.d.Cache, messageID)
+		if watcher.d.Cache != nil {
+			watcher.d.Cache.Publish(genstream.RevocationTopic(messageID), "1")
+		}
+		watcher.scrubRevokedMessage(messageID, "permission")
+	}
+}
+
+func (watcher *generationAccessRevocationWatcher) subscribeKnowledgeBaseRevocation(topic string) func() {
+	if watcher == nil || watcher.d.Cache == nil || strings.TrimSpace(topic) == "" {
+		return func() {}
+	}
+	ch, unsubscribe := watcher.d.Cache.Subscribe(topic)
+	var closing atomic.Bool
+	go func() {
+		select {
+		case _, ok := <-ch:
+			if ok || !closing.Load() {
+				watcher.revokeKnowledgeBaseAccess()
+			}
+		case <-watcher.ctx.Done():
+		}
+	}()
+	return func() {
+		closing.Store(true)
+		unsubscribe()
+	}
+}
+
+func (watcher *generationAccessRevocationWatcher) knowledgeBaseAccessStillCurrent() bool {
+	if watcher == nil || watcher.knowledgeBases == nil {
+		return true
+	}
+	for _, kbID := range watcher.knowledgeBases.IDs {
+		if currentKnowledgeBaseUserAccessEpoch(watcher.d, kbID, watcher.knowledgeBases.UserID) != watcher.knowledgeBases.UserEpochs[kbID] {
+			return false
+		}
+		if watcher.d.Cache != nil {
+			if _, revoked := watcher.d.Cache.Get(knowledgeBaseGenerationRevocationKey(kbID)); revoked {
+				return false
+			}
+		}
+		kb, err := store.GetKB(watcher.ctx, watcher.d.DB, kbID, watcher.knowledgeBases.UserID)
+		if err != nil || kb.WorkspaceID != watcher.knowledgeBases.WorkspaceID {
+			return false
+		}
+	}
+	return true
+}
+
+func (watcher *generationAccessRevocationWatcher) revokeKnowledgeBaseAccess() {
+	if watcher == nil {
+		return
+	}
+	watcher.knowledgeRevoked.Store(true)
+	watcher.cancel()
+	watcher.messageMu.Lock()
+	messageID := watcher.messageID
+	watcher.messageMu.Unlock()
+	if messageID != "" {
+		_ = genstream.Revoke(watcher.d.Cache, messageID)
+		if watcher.d.Cache != nil {
+			watcher.d.Cache.Publish(genstream.RevocationTopic(messageID), "1")
+		}
+		watcher.scrubRevokedMessage(messageID, "knowledge-base")
+	}
+}
+
+func (watcher *generationAccessRevocationWatcher) scrubRevokedMessage(messageID, cause string) {
+	if watcher == nil || strings.TrimSpace(messageID) == "" || watcher.conversationID == "" || watcher.userID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	changed, err := store.ScrubAccessRevokedGeneration(
+		ctx,
+		watcher.d.DB,
+		messageID,
+		watcher.conversationID,
+		watcher.userID,
+	)
+	if err != nil {
+		if watcher.d.Logger != nil {
+			watcher.d.Logger.Printf(
+				"access-revoked generation scrub failed: cause=%q conversation_id=%q message_id=%q user_id=%q error=%q",
+				cause,
+				watcher.conversationID,
+				messageID,
+				watcher.userID,
+				err.Error(),
+			)
+		}
+		return
+	}
+	if changed {
+		msgcache.Bump(watcher.d.Cache, watcher.conversationID)
+	}
 }
 
 func (watcher *generationAccessRevocationWatcher) watchMessage(messageID string) {
@@ -270,10 +591,27 @@ func (watcher *generationAccessRevocationWatcher) watchMessage(messageID string)
 		return
 	}
 	watcher.messageOnce.Do(func() {
+		watcher.messageMu.Lock()
+		watcher.messageID = messageID
+		watcher.messageMu.Unlock()
 		watcher.messageUnsub = subscribePermanentRevocation(
 			watcher.d, watcher.ctx, watcher.cancel, genstream.RevocationTopic(messageID),
 			func() bool { return genstream.IsRevoked(watcher.d.Cache, messageID) },
 		)
+		if watcher.permissionRevoked.Load() {
+			_ = genstream.Revoke(watcher.d.Cache, messageID)
+			if watcher.d.Cache != nil {
+				watcher.d.Cache.Publish(genstream.RevocationTopic(messageID), "1")
+			}
+			watcher.scrubRevokedMessage(messageID, "permission")
+		}
+		if watcher.knowledgeRevoked.Load() {
+			_ = genstream.Revoke(watcher.d.Cache, messageID)
+			if watcher.d.Cache != nil {
+				watcher.d.Cache.Publish(genstream.RevocationTopic(messageID), "1")
+			}
+			watcher.scrubRevokedMessage(messageID, "knowledge-base")
+		}
 	})
 }
 
@@ -283,6 +621,15 @@ func (watcher *generationAccessRevocationWatcher) close() {
 	}
 	if watcher.messageUnsub != nil {
 		watcher.messageUnsub()
+	}
+	if watcher.groupExpiryTimer != nil {
+		watcher.groupExpiryTimer.Stop()
+	}
+	for _, unsubscribe := range watcher.permissionUnsubs {
+		unsubscribe()
+	}
+	for _, unsubscribe := range watcher.knowledgeUnsubs {
+		unsubscribe()
 	}
 	if watcher.workspaceUnsub != nil {
 		watcher.workspaceUnsub()
@@ -530,6 +877,39 @@ func resolveTurnKnowledgeBaseSelection(
 	return ids, true, nil
 }
 
+func generationKnowledgeBaseIDs(
+	ctx context.Context,
+	db *sql.DB,
+	userID string,
+	conv *store.Conversation,
+	turnIDs []string,
+	turnSelectionConfigured bool,
+) []string {
+	ids := append([]string(nil), turnIDs...)
+	if !turnSelectionConfigured && conv != nil && len(conv.KBIDs) > 0 {
+		var persisted []string
+		if json.Unmarshal(conv.KBIDs, &persisted) == nil {
+			ids = store.OwnedKBIDs(ctx, db, userID, conv.WorkspaceID, persisted)
+		}
+	}
+	if conv != nil && conv.ProjectID != "" {
+		if project, err := store.GetProject(ctx, db, conv.ProjectID, userID); err == nil && project.KBID != "" {
+			ids = append(ids, project.KBID)
+		}
+	}
+	seen := make(map[string]bool, len(ids))
+	normalized := make([]string, 0, len(ids))
+	for _, raw := range ids {
+		id := strings.TrimSpace(raw)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		normalized = append(normalized, id)
+	}
+	return normalized
+}
+
 // normalizeTurnFlags enforces feature mutual exclusion server-side. Deep
 // Research always needs tools; forced web search is the explicit-disabled
 // fallback and cannot be combined with auto/enabled policies.
@@ -559,6 +939,20 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
+	permissionSnapshot, err := requestPermissionSnapshotFor(d, r)
+	if err != nil {
+		writeError(w, http.StatusForbidden, errPermissionDenied)
+		return
+	}
+	permissions := permissionSnapshot.Permissions
+	if !permissions.AllowFileUpload && len(req.Attachments) > 0 {
+		writeError(w, http.StatusForbidden, errFileUploadGroupPermission)
+		return
+	}
+	if !permissions.AllowKnowledgeBases && turnUsesKnowledgeBase(conv, req.KBIDs) {
+		writeError(w, http.StatusForbidden, errKnowledgeBaseGroupPermission)
+		return
+	}
 	if req.GenerationID != "" && !validGenerationID(req.GenerationID) {
 		writeError(w, 400, errors.New("invalid generation_id"))
 		return
@@ -579,9 +973,17 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	_, normalizedSkillIDs, err := store.ResolveUserSkillSelection(r.Context(), d.DB, u.ID, req.SelectedUserSkillIDs, true)
+	knowledgeBaseAccess := captureGenerationKnowledgeBaseAccess(
+		d, u.ID, id, conv.WorkspaceID,
+		generationKnowledgeBaseIDs(r.Context(), d.DB, u.ID, conv, turnKBIDs, turnKBSelectionConfigured),
+	)
+	_, normalizedSkillIDs, err := resolvePermittedUserSkillSelection(
+		r.Context(), d.DB, u.ID, req.SelectedUserSkillIDs, true, permissions.Skills,
+	)
 	if err != nil {
-		if errors.Is(err, store.ErrInvalidUserSkillSelection) {
+		if errors.Is(err, errSkillGroupPermission) {
+			writeError(w, http.StatusForbidden, errSkillGroupPermission)
+		} else if errors.Is(err, store.ErrInvalidUserSkillSelection) {
 			writeError(w, http.StatusBadRequest, err)
 		} else {
 			writeError(w, http.StatusInternalServerError, err)
@@ -621,6 +1023,17 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, err)
 		return
 	}
+	if !permissions.AllowDrawing {
+		model, modelErr := resolveEffectiveConversationModel(r.Context(), d.DB, conv, req.ModelID, req.Fast)
+		if modelErr != nil {
+			writeError(w, imageCapabilityErrorStatus(modelErr), modelErr)
+			return
+		}
+		if model.Kind == "image" {
+			writeError(w, http.StatusForbidden, errDrawingGroupPermission)
+			return
+		}
+	}
 	if err := ensureAttachedDocumentsReadyForUser(r.Context(), d.DB, id, u.ID, req.Attachments); err != nil {
 		writeError(w, 409, err)
 		return
@@ -643,6 +1056,10 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	selectedToolIDs, selectedToolsConfigured = applyTurnToolPermissions(permissions, selectedToolIDs, selectedToolsConfigured)
+	if !toolPolicyAllowsID(permissions, "builtin:aivory_web_search") {
+		req.WebSearch = false
+	}
 	// Deep Research is a per-group capability (§ user groups). If the user's
 	// group isn't entitled, silently downgrade to a normal turn (the client also
 	// hides the button, so this is defense-in-depth, not the primary UX).
@@ -655,7 +1072,7 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		toolMode = llm.ToolModeEnabled
 		req.WebSearch = false
 	}
-	if req.Mode == "deep-research" && u.Role != "admin" && !userGroupHasFeature(r.Context(), d, u.GroupID, "research") {
+	if req.Mode == "deep-research" && u.Role != "admin" && !userGroupHasFeature(r.Context(), d, permissionSnapshot.GroupID, "research") {
 		req.Mode = ""
 	}
 	toolMode, req.WebSearch = normalizeTurnFlags(req.Mode, toolMode, req.WebSearch)
@@ -690,7 +1107,7 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build the cancellable context: HTTP disconnect + per-conversation stop +
-	// per-user kill (real-time ban, §8.1 — banUserAdmin publishes user:{id}:kill).
+	// access revocation (including the user kill topic used by real-time bans).
 	// The reply must survive the user closing the page mid-stream: detach the
 	// generation from the HTTP request so a browser disconnect no longer aborts
 	// (and loses) the answer — it finishes server-side and is persisted, ready
@@ -698,19 +1115,17 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// cancel it now.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), maxGenDuration)
 	defer cancel()
-	accessRevocation := newGenerationAccessRevocationWatcher(d, ctx, cancel, conv.WorkspaceID)
+	accessRevocation := newGenerationAccessRevocationWatcher(
+		d, ctx, cancel, id, conv.WorkspaceID, &permissionSnapshot, knowledgeBaseAccess,
+	)
 	defer accessRevocation.close()
 	scopedStop := newGenerationStopWatcher(d, ctx, cancel, u.ID, id, req.GenerationID)
 	defer scopedStop.close()
 	stopCh, unsub := d.Cache.Subscribe(conversationStopTopic(u.ID, id))
 	defer unsub()
-	killCh, unsubKill := d.Cache.Subscribe("user:" + u.ID + ":kill")
-	defer unsubKill()
 	go func() {
 		select {
 		case <-stopCh:
-			cancel()
-		case <-killCh:
 			cancel()
 		case <-ctx.Done():
 		}
@@ -735,19 +1150,20 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	streamMessageID := ""
 	terminalSent := false
 	sendEvent := func(ev llm.SseEvent) {
-		// A provider may ignore cancellation briefly or return buffered deltas after
-		// Stop/ban/workspace revocation. Never forward those late contents; only the
-		// synthetic stopped terminal is valid once the turn context is canceled.
-		if ctx.Err() != nil && (ev.Type != "done" || ev.StopReason != "stopped") {
-			return
-		}
 		if ev.Type == "message_start" && ev.MessageID != "" {
 			streamMessageID = ev.MessageID
 			// Install message-scoped cancellation before exposing the persisted id
-			// to the browser, so an immediate Stop cannot outrun the subscription.
+			// to the browser. Capture it even after a concurrent revoke canceled the
+			// context, so that revoke can still scrub the just-created placeholder.
 			scopedStop.watchMessage(streamMessageID)
 			scopedStop.activate()
 			accessRevocation.watchMessage(streamMessageID)
+		}
+		// A provider may ignore cancellation briefly or return buffered deltas after
+		// Stop/ban/workspace revocation. Never forward those late contents; only the
+		// synthetic stopped terminal is valid once the turn context is canceled.
+		if ctx.Err() != nil && ev.Type != "message_start" && (ev.Type != "done" || ev.StopReason != "stopped") {
+			return
 		}
 		if streamMessageID != "" && ev.MessageID == "" {
 			ev.MessageID = streamMessageID
@@ -757,7 +1173,8 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		}
 		if streamMessageID != "" {
 			eventID, appended, revoked := genstream.Append(
-				d.Cache, streamMessageID, ev, generationStreamDenyKeys(conv.WorkspaceID)...,
+				d.Cache, streamMessageID, ev,
+				generationStreamDenyKeysForAccess(conv.WorkspaceID, knowledgeBaseAccess)...,
 			)
 			if revoked {
 				cancel()
@@ -777,13 +1194,13 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if ctx.Err() != nil && (ev.Type != "done" || ev.StopReason != "stopped") {
+		if ctx.Err() != nil && ev.Type != "message_start" && (ev.Type != "done" || ev.StopReason != "stopped") {
 			return
 		}
 		_ = writer.Send(ev, ev.Type)
 	}
 
-	_, err = d.Orchestrator.Run(ctx, llm.RunRequest{
+	runResult, runErr := d.Orchestrator.Run(ctx, llm.RunRequest{
 		UserID:                           u.ID,
 		ConversationID:                   id,
 		ModelID:                          req.ModelID,
@@ -797,6 +1214,7 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		SelectedUserSkillIDs:             req.SelectedUserSkillIDs,
 		SelectedToolIDs:                  selectedToolIDs,
 		SelectedToolsConfigured:          selectedToolsConfigured,
+		ToolAccessPolicy:                 runToolAccessPolicy(permissions),
 		ForceWebSearch:                   req.WebSearch,
 		Fast:                             req.Fast,
 		ParamOverrides:                   req.ParamOverrides,
@@ -805,6 +1223,22 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		KnowledgeBaseIDs:                 turnKBIDs,
 		KnowledgeBaseSelectionConfigured: turnKBSelectionConfigured,
 	}, sendEvent)
+	err = runErr
+	if streamMessageID == "" && runResult != nil && runResult.AssistantMessage != nil {
+		streamMessageID = runResult.AssistantMessage.ID
+	}
+	if !accessRevocation.permissionAccessStillCurrent() {
+		accessRevocation.revokePermissionAccess()
+	}
+	if !accessRevocation.knowledgeBaseAccessStillCurrent() {
+		accessRevocation.revokeKnowledgeBaseAccess()
+	}
+	if accessRevocation.permissionRevoked.Load() {
+		accessRevocation.scrubRevokedMessage(streamMessageID, "permission")
+	}
+	if accessRevocation.knowledgeRevoked.Load() {
+		accessRevocation.scrubRevokedMessage(streamMessageID, "knowledge-base")
+	}
 	if ctx.Err() != nil && !terminalSent {
 		sendEvent(llm.SseEvent{Type: "done", Message: "", MessageID: streamMessageID, StopReason: "stopped"})
 		publishUserEvent(d, r, u.ID, "conversation.updated", id)
@@ -982,6 +1416,16 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
+	permissionSnapshot, err := requestPermissionSnapshotFor(d, r)
+	if err != nil {
+		writeError(w, http.StatusForbidden, errPermissionDenied)
+		return
+	}
+	permissions := permissionSnapshot.Permissions
+	if !permissions.AllowKnowledgeBases && turnUsesKnowledgeBase(conv, body.KBIDs) {
+		writeError(w, http.StatusForbidden, errKnowledgeBaseGroupPermission)
+		return
+	}
 	turnKBIDs, turnKBSelectionConfigured, err := resolveTurnKnowledgeBaseSelection(
 		r.Context(), d.DB, u.ID, conv, body.KBIDs,
 	)
@@ -998,6 +1442,10 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	knowledgeBaseAccess := captureGenerationKnowledgeBaseAccess(
+		d, u.ID, id, conv.WorkspaceID,
+		generationKnowledgeBaseIDs(r.Context(), d.DB, u.ID, conv, turnKBIDs, turnKBSelectionConfigured),
+	)
 	toolMode, err := resolveTurnToolMode(body.ToolMode, body.NoTools)
 	if err != nil {
 		writeError(w, 400, err)
@@ -1008,6 +1456,21 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	selectedToolIDs, selectedToolsConfigured = applyTurnToolPermissions(permissions, selectedToolIDs, selectedToolsConfigured)
+	if !toolPolicyAllowsID(permissions, "builtin:aivory_web_search") {
+		body.WebSearch = false
+	}
+	if !permissions.AllowDrawing {
+		model, modelErr := resolveEffectiveConversationModel(r.Context(), d.DB, conv, body.ModelID, body.Fast)
+		if modelErr != nil {
+			writeError(w, imageCapabilityErrorStatus(modelErr), modelErr)
+			return
+		}
+		if model.Kind == "image" {
+			writeError(w, http.StatusForbidden, errDrawingGroupPermission)
+			return
+		}
+	}
 	// §fast-mode overrides all other turn flags (see postMessageHandler).
 	if body.Fast {
 		body.Mode = ""
@@ -1017,7 +1480,7 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	// Keep regenerate aligned with the normal send path: users without the
 	// Deep Research group feature cannot force it by calling /regenerate.
-	if body.Mode == "deep-research" && u.Role != "admin" && !userGroupHasFeature(r.Context(), d, u.GroupID, "research") {
+	if body.Mode == "deep-research" && u.Role != "admin" && !userGroupHasFeature(r.Context(), d, permissionSnapshot.GroupID, "research") {
 		body.Mode = ""
 	}
 	toolMode, body.WebSearch = normalizeTurnFlags(body.Mode, toolMode, body.WebSearch)
@@ -1058,6 +1521,18 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
+	var persistedSkillIDs []string
+	_ = json.Unmarshal(user.SelectedUserSkillIDs, &persistedSkillIDs)
+	if _, _, skillErr := resolvePermittedUserSkillSelection(
+		r.Context(), d.DB, u.ID, persistedSkillIDs, false, permissions.Skills,
+	); skillErr != nil {
+		if errors.Is(skillErr, errSkillGroupPermission) {
+			writeError(w, http.StatusForbidden, errSkillGroupPermission)
+		} else {
+			writeError(w, http.StatusInternalServerError, skillErr)
+		}
+		return
+	}
 	// Extract text from the parent user message — purely so the orchestrator's
 	// existing prompt path has a UserText to reference. The new assistant
 	// message will be parented to `user.ID`, NOT to a new sibling.
@@ -1086,19 +1561,17 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// cancel it now.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), maxGenDuration)
 	defer cancel()
-	accessRevocation := newGenerationAccessRevocationWatcher(d, ctx, cancel, conv.WorkspaceID)
+	accessRevocation := newGenerationAccessRevocationWatcher(
+		d, ctx, cancel, id, conv.WorkspaceID, &permissionSnapshot, knowledgeBaseAccess,
+	)
 	defer accessRevocation.close()
 	scopedStop := newGenerationStopWatcher(d, ctx, cancel, u.ID, id, body.GenerationID)
 	defer scopedStop.close()
 	stopCh, unsub := d.Cache.Subscribe(conversationStopTopic(u.ID, id))
 	defer unsub()
-	killCh, unsubKill := d.Cache.Subscribe("user:" + u.ID + ":kill")
-	defer unsubKill()
 	go func() {
 		select {
 		case <-stopCh:
-			cancel()
-		case <-killCh:
 			cancel()
 		case <-ctx.Done():
 		}
@@ -1121,14 +1594,14 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	streamMessageID := ""
 	terminalSent := false
 	sendEvent := func(ev llm.SseEvent) {
-		if ctx.Err() != nil && (ev.Type != "done" || ev.StopReason != "stopped") {
-			return
-		}
 		if ev.Type == "message_start" && ev.MessageID != "" {
 			streamMessageID = ev.MessageID
 			scopedStop.watchMessage(streamMessageID)
 			scopedStop.activate()
 			accessRevocation.watchMessage(streamMessageID)
+		}
+		if ctx.Err() != nil && ev.Type != "message_start" && (ev.Type != "done" || ev.StopReason != "stopped") {
+			return
 		}
 		if streamMessageID != "" && ev.MessageID == "" {
 			ev.MessageID = streamMessageID
@@ -1138,7 +1611,8 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		}
 		if streamMessageID != "" {
 			eventID, appended, revoked := genstream.Append(
-				d.Cache, streamMessageID, ev, generationStreamDenyKeys(conv.WorkspaceID)...,
+				d.Cache, streamMessageID, ev,
+				generationStreamDenyKeysForAccess(conv.WorkspaceID, knowledgeBaseAccess)...,
 			)
 			if revoked {
 				cancel()
@@ -1156,13 +1630,13 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if ctx.Err() != nil && (ev.Type != "done" || ev.StopReason != "stopped") {
+		if ctx.Err() != nil && ev.Type != "message_start" && (ev.Type != "done" || ev.StopReason != "stopped") {
 			return
 		}
 		_ = writer.Send(ev, ev.Type)
 	}
 
-	_, err = d.Orchestrator.Run(ctx, llm.RunRequest{
+	runResult, runErr := d.Orchestrator.Run(ctx, llm.RunRequest{
 		UserID:                           u.ID,
 		ConversationID:                   id,
 		ModelID:                          body.ModelID,
@@ -1174,6 +1648,7 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		ToolMode:                         toolMode,
 		SelectedToolIDs:                  selectedToolIDs,
 		SelectedToolsConfigured:          selectedToolsConfigured,
+		ToolAccessPolicy:                 runToolAccessPolicy(permissions),
 		ForceWebSearch:                   body.WebSearch,
 		Fast:                             body.Fast,
 		ParamOverrides:                   body.ParamOverrides,
@@ -1181,6 +1656,22 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		KnowledgeBaseIDs:                 turnKBIDs,
 		KnowledgeBaseSelectionConfigured: turnKBSelectionConfigured,
 	}, sendEvent)
+	err = runErr
+	if streamMessageID == "" && runResult != nil && runResult.AssistantMessage != nil {
+		streamMessageID = runResult.AssistantMessage.ID
+	}
+	if !accessRevocation.permissionAccessStillCurrent() {
+		accessRevocation.revokePermissionAccess()
+	}
+	if !accessRevocation.knowledgeBaseAccessStillCurrent() {
+		accessRevocation.revokeKnowledgeBaseAccess()
+	}
+	if accessRevocation.permissionRevoked.Load() {
+		accessRevocation.scrubRevokedMessage(streamMessageID, "permission")
+	}
+	if accessRevocation.knowledgeRevoked.Load() {
+		accessRevocation.scrubRevokedMessage(streamMessageID, "knowledge-base")
+	}
 	if ctx.Err() != nil && !terminalSent {
 		sendEvent(llm.SseEvent{Type: "done", MessageID: streamMessageID, StopReason: "stopped"})
 		publishUserEvent(d, r, u.ID, "conversation.updated", id)
@@ -1226,7 +1717,7 @@ func streamMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
-	accessRevocation := newGenerationAccessRevocationWatcher(d, ctx, cancel, conv.WorkspaceID)
+	accessRevocation := newGenerationAccessRevocationWatcher(d, ctx, cancel, convID, conv.WorkspaceID, nil, nil)
 	defer accessRevocation.close()
 	accessRevocation.watchMessage(msgID)
 

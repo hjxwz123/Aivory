@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"database/sql"
 	"errors"
 	"net/http"
 	"strings"
@@ -33,6 +35,11 @@ type projectResponse struct {
 	CreatedAt      int64  `json:"created_at"`
 	UpdatedAt      int64  `json:"updated_at"`
 	WorkspaceID    string `json:"workspace_id,omitempty"`
+	// Effective capabilities are populated on detail responses. List responses
+	// omit them to avoid authorization queries per project.
+	CanUploadFiles   *bool `json:"can_upload_files,omitempty"`
+	CanDeleteContent *bool `json:"can_delete_content,omitempty"`
+	CanDelete        *bool `json:"can_delete,omitempty"`
 }
 
 func userProject(p store.Project) projectResponse {
@@ -42,6 +49,43 @@ func userProject(p store.Project) projectResponse {
 		KBID: p.KBID, AutoAddUploads: p.AutoAddUploads, CreatedAt: p.CreatedAt,
 		UpdatedAt: p.UpdatedAt, WorkspaceID: p.WorkspaceID,
 	}
+}
+
+func userProjectWithLibraryPermissions(
+	ctx context.Context,
+	db *sql.DB,
+	p store.Project,
+	userID string,
+	permissions store.UserGroupPermissions,
+) (projectResponse, error) {
+	response := userProject(p)
+	canManage, err := store.CanManageProject(ctx, db, p.ID, userID)
+	if err != nil {
+		return projectResponse{}, err
+	}
+	response.CanDelete = &canManage
+
+	if strings.TrimSpace(p.KBID) == "" {
+		canUpload, canDelete := false, false
+		response.CanUploadFiles = &canUpload
+		response.CanDeleteContent = &canDelete
+		return response, nil
+	}
+	kb, err := store.GetKB(ctx, db, p.KBID, userID)
+	if errors.Is(err, store.ErrNotFound) {
+		canUpload, canDelete := false, false
+		response.CanUploadFiles = &canUpload
+		response.CanDeleteContent = &canDelete
+		return response, nil
+	}
+	if err != nil {
+		return projectResponse{}, err
+	}
+	canUpload := permissions.AllowKnowledgeBases && permissions.AllowFileUpload && kb.CanUpload
+	canDelete := permissions.AllowKnowledgeBases && kb.CanDeleteContent
+	response.CanUploadFiles = &canUpload
+	response.CanDeleteContent = &canDelete
+	return response, nil
 }
 
 func userProjects(rows []store.Project) []projectResponse {
@@ -104,6 +148,9 @@ func groupCapFor(d Deps, r *http.Request, userID, groupID string) (maxProjects, 
 // createProjectHandler creates a project + its dedicated knowledge base.
 func createProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
+	if !requireKnowledgeBasePermission(d, w, r) {
+		return
+	}
 	var req createProjectReq
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, 400, errInvalidInput)
@@ -116,8 +163,13 @@ func createProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
 	if req.WorkspaceID != "" {
-		if role, merr := store.IsWorkspaceMember(r.Context(), d.DB, req.WorkspaceID, u.ID); merr != nil || role == "" {
+		workspace, workspaceErr := store.GetWorkspaceForMember(r.Context(), d.DB, req.WorkspaceID, u.ID)
+		if workspaceErr != nil {
 			writeError(w, 404, errNotFound)
+			return
+		}
+		if !workspace.CanCreateProjects {
+			writeError(w, http.StatusForbidden, errWorkspaceProjectCreationPermission)
 			return
 		}
 	}
@@ -142,6 +194,10 @@ func createProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			Accent: req.Accent, Emoji: req.Emoji, WorkspaceID: req.WorkspaceID,
 		}, maxProjects)
 		if err != nil {
+			if errors.Is(err, store.ErrNotFound) && req.WorkspaceID != "" {
+				writeError(w, http.StatusForbidden, errWorkspaceProjectCreationPermission)
+				return
+			}
 			if errors.Is(err, store.ErrProjectLimitExceeded) {
 				writeError(w, http.StatusForbidden, errProjectLimit)
 				return
@@ -165,6 +221,10 @@ func createProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: req.WorkspaceID,
 	}, maxProjects)
 	if err != nil {
+		if errors.Is(err, store.ErrNotFound) && req.WorkspaceID != "" {
+			writeError(w, http.StatusForbidden, errWorkspaceProjectCreationPermission)
+			return
+		}
 		if errors.Is(err, store.ErrProjectLimitExceeded) {
 			writeError(w, http.StatusForbidden, errProjectLimit)
 			return
@@ -192,13 +252,23 @@ func getProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
+	permissions, permissionErr := requestPermissions(d, r)
+	if permissionErr != nil {
+		writeError(w, http.StatusForbidden, errPermissionDenied)
+		return
+	}
+	project, err := userProjectWithLibraryPermissions(r.Context(), d.DB, *p, u.ID, permissions)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 	docs := []store.Document{}
-	if p.KBID != "" {
+	if permissions.AllowKnowledgeBases && p.KBID != "" {
 		docs, _ = store.ListDocumentsForUser(r.Context(), d.DB, "kb", p.KBID, u.ID)
 	}
 	convs, _ := store.ListConversations(r.Context(), d.DB, u.ID, p.ID, "active", projectDetailConversationsPageSize, 0)
 	writeJSON(w, 200, map[string]any{
-		"project":       userProject(*p),
+		"project":       project,
 		"documents":     userDocuments(docs),
 		"conversations": convs,
 	})
@@ -212,6 +282,26 @@ func updateProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if err := decodeJSON(r, &p); err != nil {
 		writeError(w, 400, errInvalidInput)
 		return
+	}
+	if p.AutoAddUploads != nil && *p.AutoAddUploads {
+		if !requireKnowledgeBasePermission(d, w, r) {
+			return
+		}
+		if !requireUserCapabilityError(d, w, r, errFileUploadGroupPermission, func(permissions store.UserGroupPermissions) bool {
+			return permissions.AllowFileUpload
+		}) {
+			return
+		}
+		project, err := store.GetProject(r.Context(), d.DB, id, u.ID)
+		if err != nil || strings.TrimSpace(project.KBID) == "" {
+			writeError(w, http.StatusNotFound, errNotFound)
+			return
+		}
+		kb, err := store.GetKB(r.Context(), d.DB, project.KBID, u.ID)
+		if err != nil || !kb.CanUpload {
+			writeError(w, http.StatusForbidden, errFileUploadGroupPermission)
+			return
+		}
 	}
 	if p.Name != nil {
 		name := strings.TrimSpace(*p.Name)
@@ -244,14 +334,44 @@ func updateProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 func deleteProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	id := pathParam(r, "id")
+	project, projectErr := store.GetProject(r.Context(), d.DB, id, u.ID)
+	if projectErr != nil {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	canManage, managerErr := store.CanManageProject(r.Context(), d.DB, id, u.ID)
+	if managerErr != nil {
+		writeError(w, http.StatusInternalServerError, managerErr)
+		return
+	}
+	if !canManage {
+		writeError(w, http.StatusNotFound, errNotFound)
+		return
+	}
+	accessUsers := map[string][]string{}
+	if project.KBID != "" {
+		if userIDs, err := store.ListKnowledgeBaseAccessUserIDs(r.Context(), d.DB, project.KBID); err == nil {
+			accessUsers[project.KBID] = userIDs
+		}
+		revokeKnowledgeBaseGenerations(d, project.KBID)
+	}
 	deletion, err := store.DeleteProjectWithState(r.Context(), d.DB, id, u.ID, d.Config.UploadDir, d.Config.ArtifactDir)
 	if err != nil {
+		if project.KBID != "" && d.Cache != nil {
+			d.Cache.Delete(knowledgeBaseGenerationRevocationKey(project.KBID))
+		}
 		writeError(w, 404, errNotFound)
 		return
 	}
 	// DeleteProject atomically removes the project's dedicated KB and its DB
 	// chunks. Keep the external vector/object stores in sync after that commit.
 	for _, kbID := range deletion.KnowledgeBaseIDs {
+		if kbID != project.KBID {
+			revokeKnowledgeBaseGenerations(d, kbID)
+		}
+		for _, userID := range accessUsers[kbID] {
+			publishUserEvent(d, nil, userID, "knowledge_base.access_updated", "")
+		}
 		cleanupRAGKB(r.Context(), d, kbID, "delete project "+id)
 	}
 	cleanupStoragePaths(r.Context(), d, deletion.StoragePaths, "delete project "+id)
@@ -291,7 +411,11 @@ func uploadProjectDocHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	doc, err := receiveDocument(d, r, p.KBID, "")
 	if err != nil {
 		status := 400
-		if errors.Is(err, errStorageQuotaExceeded) {
+		if errors.Is(err, errFileUploadGroupPermission) {
+			status = http.StatusForbidden
+		} else if errors.Is(err, errKnowledgeBaseGroupPermission) {
+			status = http.StatusForbidden
+		} else if errors.Is(err, errStorageQuotaExceeded) {
 			status = http.StatusInsufficientStorage
 		}
 		writeError(w, status, err)
@@ -343,11 +467,16 @@ func renameProjectDocHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Filename string `json:"filename"`
 	}
-	if err := decodeJSON(r, &body); err != nil || body.Filename == "" {
+	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
-	if err := store.RenameDocumentForUser(r.Context(), d.DB, docID, "kb", p.KBID, u.ID, body.Filename); err != nil {
+	filename, valid := normalizeDocumentFilename(body.Filename)
+	if !valid {
+		writeError(w, http.StatusBadRequest, errInvalidInput)
+		return
+	}
+	if err := store.RenameDocumentForUser(r.Context(), d.DB, docID, "kb", p.KBID, u.ID, filename); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, 404, errNotFound)
 			return

@@ -131,6 +131,7 @@ func createShareHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		if len(blocks) == 0 {
 			blocks = json.RawMessage("[]")
 		}
+		blocks = redactInternalMessageBlocks(blocks)
 		cites := m.Citations
 		if len(cites) == 0 {
 			cites = json.RawMessage("[]")
@@ -250,9 +251,27 @@ func publicSharedHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{
 		"title":      share.Title,
-		"messages":   share.Snapshot,
+		"messages":   redactPublicShareSnapshot(share.Snapshot),
 		"created_at": share.CreatedAt,
 	})
+}
+
+// redactPublicShareSnapshot also protects snapshots created by older builds.
+// Public reads and clones must not trust that the stored JSON passed the current
+// creation-time redaction boundary.
+func redactPublicShareSnapshot(raw json.RawMessage) json.RawMessage {
+	var messages []publicShareMessage
+	if json.Unmarshal(raw, &messages) != nil {
+		return json.RawMessage("[]")
+	}
+	for i := range messages {
+		messages[i].Blocks = redactInternalMessageBlocks(messages[i].Blocks)
+	}
+	redacted, err := json.Marshal(messages)
+	if err != nil {
+		return json.RawMessage("[]")
+	}
+	return redacted
 }
 
 // cloneSharedConversationHandler lets a signed-in viewer copy a public share
@@ -268,7 +287,7 @@ func cloneSharedConversationHandler(d Deps, w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var snap []publicShareMessage
-	if err := json.Unmarshal(share.Snapshot, &snap); err != nil {
+	if err := json.Unmarshal(redactPublicShareSnapshot(share.Snapshot), &snap); err != nil {
 		writeError(w, 500, err)
 		return
 	}
@@ -295,7 +314,7 @@ func cloneSharedConversationHandler(d Deps, w http.ResponseWriter, r *http.Reque
 		if m.Role != "user" && m.Role != "assistant" {
 			continue
 		}
-		blocks := rewriteShareAssetURLsInRaw(token, m.Blocks)
+		blocks := rewriteShareAssetURLsInRaw(token, redactInternalMessageBlocks(m.Blocks))
 		atts := rewriteShareAssetURLsInRaw(token, m.Attachments)
 		cites := normalizeJSONList(m.Citations)
 		created, err := store.CreateMessage(r.Context(), d.DB, store.Message{

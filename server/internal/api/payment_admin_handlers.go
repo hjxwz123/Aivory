@@ -758,6 +758,10 @@ func reconcilePaymentOrderAdmin(d Deps, w http.ResponseWriter, r *http.Request) 
 	}
 	if appliedOrder != nil && appliedOrder.UserID != "" {
 		invalidateAuthUser(d, appliedOrder.UserID)
+		if appliedOrder.ProductType == store.PaymentProductUserGroup {
+			revokeUserPermissionSnapshots(d, appliedOrder.UserID)
+			publishUserEvent(d, nil, appliedOrder.UserID, "account.permissions_updated", "")
+		}
 	}
 	updated, err := store.MarkPaymentOrderReconciled(r.Context(), d.DB, order.ID, "")
 	if err != nil {

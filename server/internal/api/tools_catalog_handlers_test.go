@@ -77,13 +77,16 @@ func TestSelectableToolsCatalogIsFlatSafeAndDeduplicatesMCPService(t *testing.T)
 	for _, row := range rows {
 		for key := range row {
 			switch key {
-			case "id", "name", "description", "icon":
+			case "id", "name", "description", "icon", "allowed", "default_selected":
 			default:
 				t.Fatalf("catalog exposed unexpected field %q: %#v", key, row)
 			}
 		}
 		id, _ := row["id"].(string)
 		counts[id]++
+		if allowed, ok := row["allowed"].(bool); !ok || !allowed {
+			t.Fatalf("unrestricted catalog row is not allowed: %#v", row)
+		}
 	}
 	for _, id := range []string{"builtin:aivory_web_search", "hosted:web_search", "mcp:" + remote.ID} {
 		if counts[id] != 1 {
@@ -92,6 +95,53 @@ func TestSelectableToolsCatalogIsFlatSafeAndDeduplicatesMCPService(t *testing.T)
 	}
 	if counts["mcp:"+remote.ID] != 1 {
 		t.Fatalf("MCP service with multiple methods was not deduplicated: %#v", rows)
+	}
+}
+
+func TestSelectableToolsCatalogKeepsRestrictedCandidatesDisabled(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "tools-catalog-restricted.db"))
+	t.Cleanup(func() { _ = db.Close() })
+	ctx := context.Background()
+	permissions := store.DefaultUserGroupPermissions()
+	permissions.Tools = store.ResourceAccessPolicy{Mode: store.ResourceAccessSelected, IDs: []string{"builtin:web_fetch"}}
+	permissionsRaw, err := json.Marshal(permissions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, db, `INSERT INTO user_groups(id,name,features,permissions) VALUES('restricted','Restricted','[]',?)`, string(permissionsRaw))
+	mustExec(t, db, `INSERT INTO users(id,email,password_hash,role,status,group_id) VALUES('u1','restricted@example.test','hash','user','active','restricted')`)
+	channel, err := store.CreateChannel(ctx, db, "Restricted tools", "openai", "responses", "https://provider.example.test/v1", "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := store.CreateModel(ctx, db, store.Model{
+		ChannelID: channel.ID, Kind: "chat", RequestID: "restricted-tools", Label: "Restricted tools",
+		Enabled: true, ToolMode: "native", BuiltinTools: json.RawMessage(`["web_fetch","python_execute"]`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := toolregistry.NewRegistry(db, config.Config{}, log.New(io.Discard, "", 0))
+	req := httptest.NewRequest(http.MethodGet, "/api/tools?model_id="+model.ID, nil)
+	req = req.WithContext(context.WithValue(req.Context(), userCtxKey{}, &store.User{ID: "u1", Role: "user", Status: "active"}))
+	recorder := httptest.NewRecorder()
+	listSelectableToolsHandler(Deps{DB: db, Tools: registry}, recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var rows []selectableToolResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &rows); err != nil {
+		t.Fatal(err)
+	}
+	allowedByID := map[string]bool{}
+	for _, row := range rows {
+		allowedByID[row.ID] = row.Allowed
+	}
+	if !allowedByID["builtin:web_fetch"] {
+		t.Fatalf("allowed tool disabled: %#v", rows)
+	}
+	if value, ok := allowedByID["builtin:python_execute"]; !ok || value {
+		t.Fatalf("restricted tool was hidden or enabled: %#v", rows)
 	}
 }
 

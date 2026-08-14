@@ -25,19 +25,24 @@ func attachGroupInfo(d Deps, r *http.Request, u *store.User) {
 	if u == nil {
 		return
 	}
+	// Keep the transient /me payload aligned with authorization. Legacy or
+	// temporarily dangling group references use the permissive compatibility
+	// policy instead of serializing an all-false Go zero value.
+	u.Permissions = store.DefaultUserGroupPermissions()
 	gid := u.GroupID
 	if gid == "" {
 		gid = store.DefaultGroupID
 	}
 	if g, err := store.GetUserGroup(r.Context(), d.DB, gid); err == nil && g != nil {
 		u.GroupName = g.Name
+		u.Permissions = g.Permissions
 		var feats []string
 		if json.Unmarshal(g.Features, &feats) == nil {
 			u.Features = feats
 		}
 	}
 	// Global memory master switch → lets the client show/hide the per-user toggle.
-	u.MemoryAvailable = store.MemoryEnabledGlobal(d.DB)
+	u.MemoryAvailable = store.MemoryEnabledGlobal(d.DB) && u.Permissions.AllowMemory
 }
 
 type updateMeReq struct {
@@ -209,6 +214,17 @@ func updateMeSettingsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if err := normalizeToolModeSettingsPatch(patch); err != nil {
 		writeError(w, 400, err)
 		return
+	}
+	permissions, permissionErr := requestPermissions(d, r)
+	if permissionErr != nil {
+		writeError(w, http.StatusForbidden, errPermissionDenied)
+		return
+	}
+	if !permissions.AllowMemory {
+		delete(patch, "memory_enabled")
+	}
+	if !permissions.AllowDrawing {
+		delete(patch, "image_model_id")
 	}
 	upd, err := store.UpdateUserSettings(r.Context(), d.DB, u.ID, patch)
 	if err != nil {

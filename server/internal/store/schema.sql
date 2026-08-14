@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS user_groups (
   credit_allowance_micros INTEGER NOT NULL DEFAULT 0, -- authoritative fixed-point allowance
   credit_period_seconds INTEGER NOT NULL DEFAULT 0, -- refresh cycle length (0 = no timed credits)
   is_purchasable INTEGER NOT NULL DEFAULT 1,      -- displayed tier may temporarily pause checkout
+  permissions TEXT NOT NULL DEFAULT '{}',          -- normalized group capability/resource policy
   created_at  INTEGER NOT NULL DEFAULT (strftime('%s','now')),
   updated_at  INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
@@ -411,7 +412,7 @@ CREATE TABLE IF NOT EXISTS models (
   param_controls    TEXT NOT NULL DEFAULT '[]',
   extra_params      TEXT NOT NULL DEFAULT '{}', -- admin-only upstream request defaults; native request fields win
   official_tools    TEXT NOT NULL DEFAULT '[]', -- provider-hosted [{name,icon,request}]; legacy string arrays are migrated
-  builtin_tools     TEXT DEFAULT NULL, -- local-tool allowlist; NULL=all (backwards compatible), []=none
+  builtin_tools     TEXT DEFAULT NULL, -- local-tool defaults; NULL=all (backwards compatible), []=none
   tags              TEXT NOT NULL DEFAULT '[]', -- model_tags ids for the picker filter (§ model tags)
   moderation_enabled INTEGER NOT NULL DEFAULT 0,      -- screen prompts before generation (§ moderation)
   moderation_mode   TEXT NOT NULL DEFAULT 'keyword',  -- keyword | model
@@ -519,6 +520,16 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
 
 CREATE INDEX IF NOT EXISTS idx_kbs_user ON knowledge_bases(user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_kbs_user_name_unique ON knowledge_bases(user_id, lower(trim(name)));
+
+CREATE TABLE IF NOT EXISTS knowledge_base_shares (
+  kb_id      TEXT NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role       TEXT NOT NULL CHECK(role IN ('read','write')),
+  created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  PRIMARY KEY (kb_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_kb_shares_user ON knowledge_base_shares(user_id, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS projects (
   id               TEXT PRIMARY KEY,
@@ -700,6 +711,7 @@ CREATE TABLE IF NOT EXISTS documents (
   error           TEXT NOT NULL DEFAULT '',
   chunk_count     INTEGER NOT NULL DEFAULT 0,
   storage_path    TEXT NOT NULL DEFAULT '',
+  uploaded_by_user_id TEXT NOT NULL DEFAULT '',
   ingest_updated_at INTEGER NOT NULL DEFAULT 0,
   created_at      INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
@@ -915,10 +927,28 @@ CREATE TABLE IF NOT EXISTS workspaces (
 CREATE INDEX IF NOT EXISTS idx_workspaces_owner ON workspaces(owner_id);
 
 CREATE TABLE IF NOT EXISTS workspace_members (
-  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  role         TEXT NOT NULL DEFAULT 'member',
-  joined_at    INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  workspace_id             TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  user_id                  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role                     TEXT NOT NULL DEFAULT 'member',
+  can_create_projects      INTEGER NOT NULL DEFAULT 1,
+  can_private_conversations INTEGER NOT NULL DEFAULT 1,
+  can_create_kb            INTEGER NOT NULL DEFAULT 1,
+  can_add_kb_files         INTEGER NOT NULL DEFAULT 1,
+  can_delete_kb_content    INTEGER NOT NULL DEFAULT 1,
+  joined_at                INTEGER NOT NULL DEFAULT (strftime('%s','now')),
   PRIMARY KEY (workspace_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_ws_members_user ON workspace_members(user_id);
+
+-- Per-library workspace overrides. Missing rows deliberately mean "allowed" so
+-- existing workspaces and newly invited members retain the historical shared
+-- editing behavior until a library manager explicitly restricts them.
+CREATE TABLE IF NOT EXISTS workspace_kb_member_permissions (
+  kb_id              TEXT NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+  user_id            TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  can_add_files      INTEGER NOT NULL DEFAULT 1,
+  can_delete_content INTEGER NOT NULL DEFAULT 1,
+  updated_at         INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  PRIMARY KEY (kb_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ws_kb_permissions_user ON workspace_kb_member_permissions(user_id);

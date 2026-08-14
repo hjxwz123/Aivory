@@ -9,10 +9,12 @@ import (
 )
 
 type selectableToolResponse struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Icon        string `json:"icon"`
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	Description     string `json:"description"`
+	Icon            string `json:"icon"`
+	Allowed         bool   `json:"allowed"`
+	DefaultSelected bool   `json:"default_selected"`
 }
 
 var builtinToolDisplay = map[string]struct{ name, icon string }{
@@ -44,6 +46,11 @@ func listSelectableToolsHandler(d Deps, w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusNotFound, errNotFound)
 		return
 	}
+	permissions, permissionErr := catalogPermissions(d, r)
+	if permissionErr != nil {
+		writeError(w, http.StatusForbidden, errToolGroupPermission)
+		return
+	}
 	items := []selectableToolResponse{}
 	if model.ToolMode == "none" || d.Tools == nil {
 		writeJSON(w, http.StatusOK, items)
@@ -65,11 +72,28 @@ func listSelectableToolsHandler(d Deps, w http.ResponseWriter, r *http.Request) 
 			}
 		}
 	}
-	user := authUser(r)
-	if user == nil || !store.MemoryEnabledForUser(r.Context(), d.DB, user.ID) {
+	// Instance-wide availability removes a candidate entirely. Group policy is
+	// represented by Allowed below so users can see restricted tools without
+	// being able to select or invoke them. save_memory is the exception: when
+	// memory is unavailable globally or to this group it must not be exposed.
+	if !store.MemoryEnabledGlobal(d.DB) {
 		disabled["save_memory"] = true
 	}
+	if user := authUser(r); user != nil && !store.MemoryEnabledForUser(r.Context(), d.DB, user.ID) {
+		disabled["save_memory"] = true
+	}
+	if !permissions.AllowMemory {
+		disabled["save_memory"] = true
+	}
+	defaultBuiltinTools := make(map[string]bool)
 	for _, name := range effectivePublicBuiltinTools(*model, registered, disabled) {
+		defaultBuiltinTools[name] = true
+	}
+	for _, name := range registered {
+		if disabled[name] {
+			continue
+		}
+		id := "builtin:" + name
 		display := builtinToolDisplay[name]
 		label := display.name
 		if label == "" {
@@ -80,7 +104,8 @@ func listSelectableToolsHandler(d Deps, w http.ResponseWriter, r *http.Request) 
 			icon = "Wrench"
 		}
 		items = append(items, selectableToolResponse{
-			ID: "builtin:" + name, Name: label, Description: byName[name], Icon: icon,
+			ID: id, Name: label, Description: byName[name], Icon: icon,
+			Allowed: toolPolicyAllowsID(permissions, id), DefaultSelected: defaultBuiltinTools[name],
 		})
 	}
 
@@ -90,6 +115,7 @@ func listSelectableToolsHandler(d Deps, w http.ResponseWriter, r *http.Request) 
 			if name == "" {
 				continue
 			}
+			id := "hosted:" + name
 			description := hostedToolDescriptions[name]
 			if description == "" {
 				description = "Use " + name + " when it is useful for the request."
@@ -99,7 +125,8 @@ func listSelectableToolsHandler(d Deps, w http.ResponseWriter, r *http.Request) 
 				icon = "Wrench"
 			}
 			items = append(items, selectableToolResponse{
-				ID: "hosted:" + name, Name: name, Description: description, Icon: icon,
+				ID: id, Name: name, Description: description, Icon: icon,
+				Allowed: toolPolicyAllowsID(permissions, id), DefaultSelected: true,
 			})
 		}
 	}
@@ -110,9 +137,11 @@ func listSelectableToolsHandler(d Deps, w http.ResponseWriter, r *http.Request) 
 			continue
 		}
 		seenMCP[definition.ServerID] = true
+		id := "mcp:" + definition.ServerID
 		items = append(items, selectableToolResponse{
-			ID: "mcp:" + definition.ServerID, Name: definition.DisplayName,
+			ID: id, Name: definition.DisplayName,
 			Description: definition.DisplayDescription, Icon: definition.Icon,
+			Allowed: toolPolicyAllowsID(permissions, id), DefaultSelected: true,
 		})
 	}
 

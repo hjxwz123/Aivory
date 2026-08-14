@@ -174,6 +174,31 @@ func maybeExpireGroup(ctx context.Context, db *sql.DB, u *User) {
 	u.PreviousGroupID = ""
 }
 
+// ExpireDueUserGroups normalizes every elapsed temporary membership before an
+// administrator paginates or counts a group. Doing this once ahead of both
+// queries prevents a page from reporting a total that still includes users
+// which ListUsersByGroup then lazily moves to another tier row by row.
+func ExpireDueUserGroups(ctx context.Context, db *sql.DB) error {
+	now := time.Now().Unix()
+	_, err := db.ExecContext(ctx, `UPDATE users
+		SET group_id=CASE
+		        WHEN trim(previous_group_id)<>'' AND EXISTS (
+		          SELECT 1 FROM user_groups expiry_previous_group
+		           WHERE expiry_previous_group.id=users.previous_group_id
+		        ) THEN previous_group_id
+		        ELSE ?
+		    END,
+		    group_expires_at=0,
+		    previous_group_id='',
+		    credit_cycle_anchor=CASE
+		        WHEN credit_cycle_anchor>=? THEN credit_cycle_anchor+1 ELSE ? END,
+		    quota_cycle_anchor=CASE
+		        WHEN quota_cycle_anchor>=? THEN quota_cycle_anchor+1 ELSE ? END
+		WHERE group_expires_at>0 AND group_expires_at<=?`,
+		DefaultGroupID, now, now, now, now, now)
+	return err
+}
+
 // PasswordFor reads the bcrypt hash for the user.
 func PasswordFor(ctx context.Context, db *sql.DB, userID string) (string, error) {
 	var h string
@@ -406,6 +431,9 @@ func MemoryEnabledGlobal(db *sql.DB) bool {
 // turns memory off in Personalization gets no memory in any conversation.
 func MemoryEnabledForUser(ctx context.Context, db *sql.DB, userID string) bool {
 	if !MemoryEnabledGlobal(db) {
+		return false
+	}
+	if permissions, err := UserGroupPermissionsForUser(ctx, db, userID); err != nil || !permissions.AllowMemory {
 		return false
 	}
 	if raw, err := GetUserSettingKey(ctx, db, userID, "memory_enabled"); err == nil && len(raw) > 0 {
@@ -873,6 +901,47 @@ func CountUsersBySearch(ctx context.Context, db *sql.DB, search string) (int, er
 		err = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&n)
 	}
 	return n, err
+}
+
+// ListUsersByGroup returns one group's members using the same stable ordering
+// and expiry normalization as the administrator's main user list.
+func ListUsersByGroup(ctx context.Context, db *sql.DB, groupID, search string, limit, offset int) ([]User, error) {
+	if limit <= 0 {
+		limit = listUsersBySearchDefault
+	}
+	if limit > listUsersBySearchMax {
+		limit = listUsersBySearchMax
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	q := `SELECT ` + userSelectCols + ` FROM users WHERE group_id=?`
+	args := []any{groupID}
+	if search = strings.TrimSpace(search); search != "" {
+		like := "%" + strings.ToLower(search) + "%"
+		q += ` AND (LOWER(email) LIKE ? OR LOWER(name) LIKE ?)`
+		args = append(args, like, like)
+	}
+	q += ` ORDER BY sort_order, created_at DESC, id LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
+	rows, err := db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	return scanUsers(rows)
+}
+
+func CountUsersByGroup(ctx context.Context, db *sql.DB, groupID, search string) (int, error) {
+	q := `SELECT COUNT(*) FROM users WHERE group_id=?`
+	args := []any{groupID}
+	if search = strings.TrimSpace(search); search != "" {
+		like := "%" + strings.ToLower(search) + "%"
+		q += ` AND (LOWER(email) LIKE ? OR LOWER(name) LIKE ?)`
+		args = append(args, like, like)
+	}
+	var count int
+	err := db.QueryRowContext(ctx, q, args...).Scan(&count)
+	return count, err
 }
 
 // SetPermanentCredits overwrites a user's non-expiring credit balance (admin

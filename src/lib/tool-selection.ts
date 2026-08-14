@@ -1,13 +1,13 @@
-/** Preserve the wire contract: undefined means the complete available catalog,
- * while an explicit empty array means no candidate tools. An empty catalog
- * therefore must not make those two states collapse into each other. */
+/** Preserve the wire contract: undefined means the serving model's current
+ * defaults, while an explicit empty array means no candidate tools. */
 export function committedToolSelection(
   availableIds: readonly string[],
+  defaultIds: readonly string[],
   selectedIds: ReadonlySet<string>,
-  allSelected: boolean,
 ): string[] | undefined {
   const selected = availableIds.filter((id) => selectedIds.has(id))
-  if (allSelected || (availableIds.length > 0 && selected.length === availableIds.length)) {
+  const defaults = availableIds.filter((id) => defaultIds.includes(id))
+  if (selected.length === defaults.length && selected.every((id, index) => id === defaults[index])) {
     return undefined
   }
   return selected

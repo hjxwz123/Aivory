@@ -1016,8 +1016,8 @@ func TestUserGroupPaymentUsesCalendarRenewal(t *testing.T) {
 	).Scan(&groupID, &expiry, &previousGroup, &creditAnchor, &tokenVersion); err != nil {
 		t.Fatalf("read monthly membership: %v", err)
 	}
-	if groupID != pro.ID || expiry != wantMonthly || creditAnchor != 12345 || tokenVersion != 1 {
-		t.Fatalf("monthly membership = group %q expiry %d anchor %d token %d, want %q/%d/12345/1", groupID, expiry, creditAnchor, tokenVersion, pro.ID, wantMonthly)
+	if groupID != pro.ID || expiry != wantMonthly || creditAnchor != 12345 || tokenVersion != 0 {
+		t.Fatalf("monthly membership = group %q expiry %d anchor %d token %d, want %q/%d/12345/0", groupID, expiry, creditAnchor, tokenVersion, pro.ID, wantMonthly)
 	}
 
 	yearly := createGroupOrder(pro.ID, PaymentBillingYearly)
@@ -1028,8 +1028,8 @@ func TestUserGroupPaymentUsesCalendarRenewal(t *testing.T) {
 	).Scan(&groupID, &expiry, &previousGroup, &creditAnchor, &tokenVersion); err != nil {
 		t.Fatalf("read yearly membership: %v", err)
 	}
-	if groupID != pro.ID || expiry != wantYearly || creditAnchor != 12345 || tokenVersion != 2 {
-		t.Fatalf("yearly membership = group %q expiry %d anchor %d token %d, want %q/%d/12345/2", groupID, expiry, creditAnchor, tokenVersion, pro.ID, wantYearly)
+	if groupID != pro.ID || expiry != wantYearly || creditAnchor != 12345 || tokenVersion != 0 {
+		t.Fatalf("yearly membership = group %q expiry %d anchor %d token %d, want %q/%d/12345/0", groupID, expiry, creditAnchor, tokenVersion, pro.ID, wantYearly)
 	}
 
 	before := time.Now().UTC()

@@ -107,6 +107,10 @@
     "incompatibleKnowledgeBase": "Cette bibliothèque ne peut pas être utilisée avec la sélection actuelle",
     "knowledgeBaseMentionLabel": "Joindre une base de connaissances",
     "knowledgeBaseMentionEmpty": "Aucune base de connaissances correspondante",
+    "permissions": {
+      "knowledgeBases": "Votre groupe d'utilisateurs n'a pas accès aux bases de connaissances.",
+      "fileUpload": "Votre groupe d'utilisateurs ne peut pas téléverser de fichiers."
+    },
     "removeKnowledgeBase": "Retirer la base de connaissances {{name}}",
     "style": "Style",
     "styleHeading": "Style d'image",
@@ -136,6 +140,7 @@
       "entry": "Choisir les outils",
       "entryDescription": "Choisissez les outils disponibles pour ce tour.",
       "summaryAll": "Tous",
+      "summaryDefault": "Sélection du modèle",
       "summaryCount": "{{count}} sélectionné(s)",
       "selectedChip": "{{count}} outil(s)",
       "reset": "Utiliser tous les outils disponibles",
@@ -150,6 +155,8 @@
       "retry": "Réessayer",
       "noResults": "Aucun outil correspondant.",
       "empty": "Aucun outil n’est disponible pour ce modèle.",
+      "groupRestricted": "Indisponible pour votre groupe d'utilisateurs",
+      "defaultSelected": "Sélection du modèle · {{count}} outil(s)",
       "allSelected": "Tous les outils sont sélectionnés ({{count}})",
       "selectedCount": "{{count}} outil(s) sélectionné(s)",
       "cancel": "Annuler",
@@ -271,6 +278,9 @@
     "error": {
       "title": "Échec de la réponse — veuillez réessayer",
       "interrupted": "Génération interrompue. Veuillez réessayer.",
+      "permissionChanged": "Autorisations modifiées",
+      "drawingPermission": "Votre groupe d’utilisateurs n’est plus autorisé à utiliser les modèles de dessin ni les outils de génération d’images.",
+      "knowledgeBasePermission": "Votre groupe d’utilisateurs n’est plus autorisé à utiliser les bases de connaissances.",
       "retry": "Réessayer"
     }
   },
@@ -520,6 +530,8 @@
     "moreSoon": "D'autres modèles arrivent bientôt",
     "current": "Modèle actuel",
     "label": "Modèle : {{name}}",
+    "unavailable": "Modèle indisponible",
+    "unavailableHint": "Ce modèle n’est plus disponible. Choisissez un autre modèle.",
     "upgrade": "Mettre à niveau pour débloquer",
     "allTags": "Tous",
     "noneForTag": "Aucun modèle avec cette étiquette.",
@@ -635,12 +647,15 @@
     "members": "Membres",
     "membersBody": "{{count}} membres",
     "membersLoading": "Chargement des membres…",
+    "membersLoadFailed": "Impossible de charger les membres de l’espace de travail.",
     "inviteLink": "Lien d'invitation",
     "rotateInvite": "Réinitialiser le lien (l'ancien devient invalide)",
     "inviteRotated": "Nouveau lien généré — l'ancien est mort.",
     "inviteRotateFailed": "Impossible de réinitialiser le lien.",
     "kick": "Retirer le membre",
     "kickFailed": "Impossible de retirer le membre.",
+    "deleteFailed": "Impossible de supprimer l’espace de travail.",
+    "leaveFailed": "Impossible de quitter l’espace de travail.",
     "delete": "Supprimer l'espace",
     "leave": "Quitter l'espace",
     "backToPersonal": "Revenir à l'espace personnel",
@@ -652,7 +667,34 @@
     "backHome": "Retour au chat",
     "roleOwner": "Propriétaire",
     "roleMember": "Membre",
-    "switchSpace": "Changer d'espace"
+    "switchSpace": "Changer d'espace",
+    "managePermissions": "Gérer les permissions",
+    "memberPermissions": "Permissions du membre",
+    "memberPermissionsBody": "Définissez ce que {{name}} peut créer et gérer dans cet espace de travail.",
+    "permissionsSaved": "Permissions du membre mises à jour.",
+    "permissionsSaveFailed": "Impossible de mettre à jour les permissions du membre.",
+    "permissions": {
+      "can_create_projects": {
+        "label": "Créer des projets",
+        "description": "Créer de nouveaux projets et leurs bases de connaissances."
+      },
+      "can_private_conversations": {
+        "label": "Conversations privées",
+        "description": "Créer des conversations visibles uniquement par soi-même."
+      },
+      "can_create_kb": {
+        "label": "Créer des bases de connaissances",
+        "description": "Créer de nouvelles bases dans l'espace de travail."
+      },
+      "can_add_kb_files": {
+        "label": "Ajouter des fichiers aux bases",
+        "description": "Téléverser ou coller du contenu dans les bases de l'espace."
+      },
+      "can_delete_kb_content": {
+        "label": "Supprimer le contenu des bases",
+        "description": "Supprimer, relancer ou gérer du contenu lorsque la base concernée l'autorise aussi."
+      }
+    }
   },
   "attachmentDeleted": "Fichier supprimé"
 }

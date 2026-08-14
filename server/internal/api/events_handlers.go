@@ -47,20 +47,23 @@ var (
 	eventsConnBuffer = envcfg.Int("AIVORY_API_EVENTS_CONN_BUFFER", 16)
 )
 
-// eventsTopic is the single cross-instance Pub/Sub topic. Envelopes carry the
-// target user id so each instance can route locally without per-user topics
-// (a Redis subscription per user/connection would not scale).
+// eventsTopic is the single cross-instance Pub/Sub topic. Envelopes carry a
+// target user or group id so each instance can route locally without per-user
+// subscriptions (a Redis subscription per user/connection would not scale).
 const eventsTopic = "user-events"
 
 type userEventEnvelope struct {
-	UserID  string `json:"u"`
+	UserID  string `json:"u,omitempty"`
+	GroupID string `json:"g,omitempty"`
+	Global  bool   `json:"a,omitempty"`
 	Payload string `json:"p"`
 }
 
 // eventsConn is one open /api/events stream.
 type eventsConn struct {
-	ch   chan string
-	done chan struct{} // closed on eviction (per-user cap)
+	ch      chan string
+	done    chan struct{} // closed on eviction (per-user cap)
+	groupID string
 }
 
 type eventsHubT struct {
@@ -84,16 +87,49 @@ func (h *eventsHubT) ensureStarted(c cache.Cache) {
 		go func() {
 			for raw := range ch {
 				var env userEventEnvelope
-				if err := json.Unmarshal([]byte(raw), &env); err == nil && env.UserID != "" && env.Payload != "" {
-					h.deliver(env.UserID, env.Payload)
+				if err := json.Unmarshal([]byte(raw), &env); err == nil && env.Payload != "" {
+					switch {
+					case env.UserID != "":
+						h.deliver(env.UserID, env.Payload)
+					case env.GroupID != "":
+						h.deliverGroup(env.GroupID, env.Payload)
+					case env.Global:
+						h.deliverAll(env.Payload)
+					}
 				}
 			}
 		}()
 	})
 }
 
+// deliverAll fans a global capability change to every locally connected tab.
+// Each account still re-fetches its own authorized /me and catalog responses;
+// the shared event carries no policy contents or user data.
+func (h *eventsHubT) deliverAll(payload string) {
+	h.mu.Lock()
+	conns := make([]*eventsConn, 0)
+	for _, userConns := range h.conns {
+		conns = append(conns, userConns...)
+	}
+	h.mu.Unlock()
+	for _, conn := range conns {
+		select {
+		case conn.ch <- payload:
+		default:
+		}
+	}
+}
+
 func (h *eventsHubT) register(userID string) *eventsConn {
-	conn := &eventsConn{ch: make(chan string, eventsConnBuffer), done: make(chan struct{})}
+	return h.registerForGroup(userID, "")
+}
+
+func (h *eventsHubT) registerForGroup(userID, groupID string) *eventsConn {
+	conn := &eventsConn{
+		ch:      make(chan string, eventsConnBuffer),
+		done:    make(chan struct{}),
+		groupID: strings.TrimSpace(groupID),
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	list := h.conns[userID]
@@ -104,6 +140,28 @@ func (h *eventsHubT) register(userID string) *eventsConn {
 	}
 	h.conns[userID] = append(list, conn)
 	return conn
+}
+
+// deliverGroup fans one policy-change event to the locally connected members
+// of a user group. The cross-instance envelope carries only the group id; this
+// avoids enumerating every account when an administrator edits a large tier.
+func (h *eventsHubT) deliverGroup(groupID, payload string) {
+	h.mu.Lock()
+	conns := make([]*eventsConn, 0)
+	for _, userConns := range h.conns {
+		for _, conn := range userConns {
+			if conn.groupID == groupID {
+				conns = append(conns, conn)
+			}
+		}
+	}
+	h.mu.Unlock()
+	for _, conn := range conns {
+		select {
+		case conn.ch <- payload:
+		default:
+		}
+	}
 }
 
 func (h *eventsHubT) unregister(userID string, conn *eventsConn) {
@@ -167,6 +225,44 @@ func publishUserEvent(d Deps, r *http.Request, userID, eventType, conversationID
 	d.Cache.Publish(eventsTopic, string(env))
 }
 
+// publishGroupEvent invalidates the client-side account snapshot for every
+// currently connected member of a group. The event is deliberately thin: each
+// client re-fetches /me, so policy contents always come from an authorized
+// database read and a dropped event can be repaired on reconnect.
+func publishGroupEvent(d Deps, groupID, eventType string) {
+	if d.Cache == nil || strings.TrimSpace(groupID) == "" {
+		return
+	}
+	eventsHub.ensureStarted(d.Cache)
+	payload, err := json.Marshal(map[string]string{"type": eventType})
+	if err != nil {
+		return
+	}
+	env, err := json.Marshal(userEventEnvelope{GroupID: groupID, Payload: string(payload)})
+	if err != nil {
+		return
+	}
+	d.Cache.Publish(eventsTopic, string(env))
+}
+
+// publishGlobalEvent invalidates account-dependent client state for every
+// connected user after a platform-wide capability switch changes.
+func publishGlobalEvent(d Deps, eventType string) {
+	if d.Cache == nil || strings.TrimSpace(eventType) == "" {
+		return
+	}
+	eventsHub.ensureStarted(d.Cache)
+	payload, err := json.Marshal(map[string]string{"type": eventType})
+	if err != nil {
+		return
+	}
+	env, err := json.Marshal(userEventEnvelope{Global: true, Payload: string(payload)})
+	if err != nil {
+		return
+	}
+	d.Cache.Publish(eventsTopic, string(env))
+}
+
 // eventsStreamHandler is the long-lived per-tab notification stream. It only
 // ever WRITES server events; nothing here reads request data beyond auth, and
 // it holds no DB or model resources — just a channel registration + heartbeat.
@@ -190,7 +286,7 @@ func eventsStreamHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// Disable proxy buffering (nginx) so events flush immediately.
 	w.Header().Set("X-Accel-Buffering", "no")
 
-	conn := eventsHub.register(u.ID)
+	conn := eventsHub.registerForGroup(u.ID, u.GroupID)
 	defer eventsHub.unregister(u.ID, conn)
 
 	// Realtime ban (§8.1): banUserAdmin publishes user:{id}:kill and every

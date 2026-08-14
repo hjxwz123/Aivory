@@ -107,6 +107,10 @@
     "incompatibleKnowledgeBase": "此知识库暂时不能与当前选择一起使用",
     "knowledgeBaseMentionLabel": "附加知识库",
     "knowledgeBaseMentionEmpty": "没有匹配的知识库",
+    "permissions": {
+      "knowledgeBases": "所在用户组无知识库权限。",
+      "fileUpload": "所在用户组无文件上传权限。"
+    },
     "removeKnowledgeBase": "移除知识库 {{name}}",
     "style": "风格",
     "styleHeading": "图片风格",
@@ -136,6 +140,7 @@
       "entry": "工具选择",
       "entryDescription": "选择本轮对话可以使用的工具。",
       "summaryAll": "全部",
+      "summaryDefault": "模型默认",
       "summaryCount": "已选 {{count}} 个",
       "selectedChip": "{{count}} 个工具",
       "reset": "使用全部可用工具",
@@ -150,6 +155,8 @@
       "retry": "重试",
       "noResults": "没有匹配的工具。",
       "empty": "当前模型暂无可用工具。",
+      "groupRestricted": "所在用户组不可使用",
+      "defaultSelected": "模型默认 · 已选择 {{count}} 个",
       "allSelected": "已选择全部 {{count}} 个工具",
       "selectedCount": "已选择 {{count}} 个工具",
       "cancel": "取消",
@@ -271,6 +278,9 @@
     "error": {
       "title": "回复失败，请重试",
       "interrupted": "生成中断，请重试",
+      "permissionChanged": "权限已变化",
+      "drawingPermission": "所在用户组已无绘图模型和图片生成工具使用权限。",
+      "knowledgeBasePermission": "所在用户组已无知识库使用权限。",
       "retry": "重试"
     }
   },
@@ -520,6 +530,8 @@
     "moreSoon": "更多模型即将上线",
     "current": "当前模型",
     "label": "模型：{{name}}",
+    "unavailable": "模型不可用",
+    "unavailableHint": "当前模型已不可用，请重新选择模型。",
     "upgrade": "升级套餐解锁",
     "allTags": "全部",
     "noneForTag": "该标签下暂无模型。",
@@ -635,12 +647,15 @@
     "members": "成员",
     "membersBody": "{{count}} 名成员",
     "membersLoading": "正在加载成员…",
+    "membersLoadFailed": "无法加载工作空间成员。",
     "inviteLink": "邀请链接",
     "rotateInvite": "重置链接（旧链接立即失效）",
     "inviteRotated": "已生成新邀请链接，旧链接已失效。",
     "inviteRotateFailed": "重置邀请链接失败。",
     "kick": "移除成员",
     "kickFailed": "移除成员失败。",
+    "deleteFailed": "无法删除工作空间。",
+    "leaveFailed": "无法退出工作空间。",
     "delete": "删除工作空间",
     "leave": "退出工作空间",
     "backToPersonal": "切回个人空间",
@@ -652,7 +667,34 @@
     "backHome": "返回对话",
     "roleOwner": "创建者",
     "roleMember": "成员",
-    "switchSpace": "切换空间"
+    "switchSpace": "切换空间",
+    "managePermissions": "管理权限",
+    "memberPermissions": "成员权限",
+    "memberPermissionsBody": "设置 {{name}} 在此工作空间中可以创建和管理的内容。",
+    "permissionsSaved": "成员权限已更新。",
+    "permissionsSaveFailed": "成员权限更新失败。",
+    "permissions": {
+      "can_create_projects": {
+        "label": "创建项目",
+        "description": "创建新项目及其项目知识库。"
+      },
+      "can_private_conversations": {
+        "label": "私密对话",
+        "description": "创建仅自己可见的对话。"
+      },
+      "can_create_kb": {
+        "label": "创建知识库",
+        "description": "创建新的工作空间知识库。"
+      },
+      "can_add_kb_files": {
+        "label": "添加知识库文件",
+        "description": "向工作空间知识库上传文件或粘贴内容。"
+      },
+      "can_delete_kb_content": {
+        "label": "删除知识库内容",
+        "description": "具体知识库同时允许时，可删除、重试或管理其中内容。"
+      }
+    }
   },
   "attachmentDeleted": "文件已删除"
 }

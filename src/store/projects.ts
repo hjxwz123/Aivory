@@ -24,20 +24,20 @@ interface ProjectStore {
   loadOne: (id: string) => Promise<Project | undefined>
 
   createProject: (init?: Partial<Pick<Project, 'name' | 'description' | 'instructions' | 'accent' | 'emoji'>>) => Promise<Project | null>
-  renameProject: (id: string, name: string) => Promise<void>
-  updateProject: (id: string, patch: Partial<Pick<Project, 'name' | 'description' | 'instructions' | 'accent' | 'emoji' | 'autoAddUploads'>>) => Promise<void>
+  renameProject: (id: string, name: string) => Promise<boolean>
+  updateProject: (id: string, patch: Partial<Pick<Project, 'name' | 'description' | 'instructions' | 'accent' | 'emoji' | 'autoAddUploads'>>) => Promise<boolean>
   togglePin: (id: string) => Promise<void>
-  deleteProject: (id: string) => Promise<void>
+  deleteProject: (id: string) => Promise<boolean>
 
   addFile: (id: string, file: Omit<ProjectFile, 'id' | 'addedAt'> & { content?: string }) => Promise<ProjectFile | null>
   /** Upload a real file (multipart) into the project library. */
   uploadFile: (
     id: string,
     file: File,
-    opts?: { onProgress?: (progress: UploadProgress) => void },
+    opts?: { onProgress?: (progress: UploadProgress) => void; signal?: AbortSignal },
   ) => Promise<ProjectFile | null>
-  removeFile: (id: string, fileId: string) => Promise<void>
-  renameFile: (id: string, fileId: string, name: string) => Promise<void>
+  removeFile: (id: string, fileId: string) => Promise<boolean>
+  renameFile: (id: string, fileId: string, name: string) => Promise<boolean>
 
   getProject: (id: string) => Project | undefined
 }
@@ -49,6 +49,7 @@ const ACCENT_FALLBACK: ProjectAccent = 'violet'
 // a stale response can't overwrite the new space's list, and a fresh load is
 // never silently skipped because an older one is still in flight.
 let projLoadEpoch = 0
+const projectDetailEpoch = new Map<string, number>()
 
 export const useProjects = create<ProjectStore>((set, get) => ({
   projects: [],
@@ -61,9 +62,23 @@ export const useProjects = create<ProjectStore>((set, get) => ({
     set({ loading: true, error: null })
     try {
       const rows = await projectsApi.list(activeWorkspaceId())
-      const projects = await Promise.all(rows.map(async (p) => toLocalProject(p, [])))
+      const listed = await Promise.all(rows.map(async (p) => toLocalProject(p, [])))
       if (epoch !== projLoadEpoch) return // superseded by a workspace switch
-      set({ projects, loaded: true, loading: false })
+      set((state) => ({
+        projects: listed.map((project) => {
+          const detailed = state.projects.find((item) => item.id === project.id)
+          if (!detailed || detailed.canDelete === undefined) return project
+          return {
+            ...project,
+            files: detailed.files,
+            canUploadFiles: detailed.canUploadFiles,
+            canDeleteContent: detailed.canDeleteContent,
+            canDelete: detailed.canDelete,
+          }
+        }),
+        loaded: true,
+        loading: false,
+      }))
     } catch (e) {
       if (epoch !== projLoadEpoch) return
       set({ error: errorMessage(e, 'Failed to load projects'), loading: false })
@@ -71,14 +86,21 @@ export const useProjects = create<ProjectStore>((set, get) => ({
   },
 
   async loadOne(id) {
+    const requestEpoch = (projectDetailEpoch.get(id) ?? 0) + 1
+    projectDetailEpoch.set(id, requestEpoch)
     try {
       const resp = await projectsApi.get(id)
+      if (projectDetailEpoch.get(id) !== requestEpoch) return undefined
       const project = await toLocalProject(resp.project, resp.documents)
       set((s) => ({
         projects: replaceOrPrepend(s.projects, project),
       }))
       return project
-    } catch {
+    } catch (error) {
+      if (projectDetailEpoch.get(id) !== requestEpoch) return undefined
+      if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
+        set((state) => ({ projects: state.projects.filter((project) => project.id !== id) }))
+      }
       return undefined
     }
   },
@@ -104,30 +126,29 @@ export const useProjects = create<ProjectStore>((set, get) => ({
 
   async renameProject(id, name) {
     const trimmed = name.trim()
-    if (!trimmed) return
-    const prev = get().projects.find((p) => p.id === id)
-    set((s) => ({
-      projects: s.projects.map((p) => (p.id === id ? { ...p, name: trimmed, updatedAt: Date.now() } : p)),
-    }))
+    if (!trimmed) return false
     try {
-      await projectsApi.update(id, { name: trimmed })
+      const updated = await projectsApi.update(id, { name: trimmed })
+      set((s) => ({
+        projects: s.projects.map((p) => (p.id === id ? mergeApiProject(p, updated) : p)),
+      }))
+      return true
     } catch (e) {
-      // Roll back the optimistic name and surface the failure.
-      if (prev) set((s) => ({ projects: s.projects.map((p) => (p.id === id ? prev : p)) }))
       toast.error(errorMessage(e, 'Failed to rename project'))
+      return false
     }
   },
 
   async updateProject(id, patch) {
-    const prev = get().projects.find((p) => p.id === id)
-    set((s) => ({
-      projects: s.projects.map((p) => (p.id === id ? { ...p, ...patch, updatedAt: Date.now() } : p)),
-    }))
     try {
-      await projectsApi.update(id, toApiPatch(patch))
+      const updated = await projectsApi.update(id, toApiPatch(patch))
+      set((s) => ({
+        projects: s.projects.map((p) => (p.id === id ? mergeApiProject(p, updated) : p)),
+      }))
+      return true
     } catch (e) {
-      if (prev) set((s) => ({ projects: s.projects.map((p) => (p.id === id ? prev : p)) }))
       toast.error(errorMessage(e, 'Failed to update project'))
+      return false
     }
   },
 
@@ -147,14 +168,14 @@ export const useProjects = create<ProjectStore>((set, get) => ({
   },
 
   async deleteProject(id) {
-    const prev = get().projects
-    set((s) => ({ projects: s.projects.filter((p) => p.id !== id) }))
     try {
       await projectsApi.remove(id)
+      projectDetailEpoch.set(id, (projectDetailEpoch.get(id) ?? 0) + 1)
+      set((s) => ({ projects: s.projects.filter((p) => p.id !== id) }))
+      return true
     } catch (e) {
-      // Restore the removed project so the UI doesn't lie about the delete.
-      set({ projects: prev })
       toast.error(errorMessage(e, 'Failed to delete project'))
+      return false
     }
   },
 
@@ -200,40 +221,40 @@ export const useProjects = create<ProjectStore>((set, get) => ({
   },
 
   async removeFile(id, fileId) {
-    const prev = get().projects.find((p) => p.id === id)
-    set((s) => ({
-      projects: s.projects.map((p) =>
-        p.id === id ? { ...p, files: p.files.filter((f) => f.id !== fileId), updatedAt: Date.now() } : p,
-      ),
-    }))
     try {
       await projectsApi.removeDoc(id, fileId)
+      set((s) => ({
+        projects: s.projects.map((p) =>
+          p.id === id ? { ...p, files: p.files.filter((f) => f.id !== fileId), updatedAt: Date.now() } : p,
+        ),
+      }))
+      return true
     } catch (e) {
-      if (prev) set((s) => ({ projects: s.projects.map((p) => (p.id === id ? prev : p)) }))
       toast.error(errorMessage(e, 'Failed to remove file'))
+      return false
     }
   },
 
   async renameFile(id, fileId, name) {
     const trimmed = name.trim()
-    if (!trimmed) return
-    const prev = get().projects.find((p) => p.id === id)
-    set((s) => ({
-      projects: s.projects.map((p) =>
-        p.id === id
-          ? {
-              ...p,
-              files: p.files.map((f) => (f.id === fileId ? { ...f, name: trimmed } : f)),
-              updatedAt: Date.now(),
-            }
-          : p,
-      ),
-    }))
+    if (!trimmed) return false
     try {
       await projectsApi.renameDoc(id, fileId, trimmed)
+      set((s) => ({
+        projects: s.projects.map((p) =>
+          p.id === id
+            ? {
+                ...p,
+                files: p.files.map((f) => (f.id === fileId ? { ...f, name: trimmed } : f)),
+                updatedAt: Date.now(),
+              }
+            : p,
+        ),
+      }))
+      return true
     } catch (e) {
-      if (prev) set((s) => ({ projects: s.projects.map((p) => (p.id === id ? prev : p)) }))
       toast.error(errorMessage(e, 'Failed to rename file'))
+      return false
     }
   },
 
@@ -254,8 +275,25 @@ async function toLocalProject(p: ApiProject, docs: ApiDocument[]): Promise<Proje
     emoji: p.emoji || undefined,
     autoAddUploads: p.auto_add_uploads,
     pinned: p.pinned,
+    canUploadFiles: p.can_upload_files,
+    canDeleteContent: p.can_delete_content,
+    canDelete: p.can_delete,
     createdAt: p.created_at * 1000,
     updatedAt: p.updated_at * 1000,
+  }
+}
+
+function mergeApiProject(project: Project, updated: ApiProject): Project {
+  return {
+    ...project,
+    name: updated.name,
+    description: updated.description,
+    instructions: updated.instructions,
+    accent: (updated.accent as ProjectAccent) || ACCENT_FALLBACK,
+    emoji: updated.emoji || undefined,
+    autoAddUploads: updated.auto_add_uploads,
+    pinned: updated.pinned,
+    updatedAt: updated.updated_at * 1000,
   }
 }
 

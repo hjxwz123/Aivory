@@ -2034,7 +2034,7 @@ func FulfillPaymentOrder(ctx context.Context, db *sql.DB, input PaymentFulfillme
 		}
 		result, err := tx.ExecContext(ctx,
 			`UPDATE users
-			    SET group_id=?, group_expires_at=?, previous_group_id=?, credit_cycle_anchor=?, quota_cycle_anchor=?, token_ver=token_ver+1
+			    SET group_id=?, group_expires_at=?, previous_group_id=?, credit_cycle_anchor=?, quota_cycle_anchor=?
 			  WHERE id=?`,
 			order.UserGroupID, newExpiry, newPrevious, newCreditAnchor, newQuotaAnchor, order.UserID)
 		if err != nil {

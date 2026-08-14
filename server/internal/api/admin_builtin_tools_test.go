@@ -258,8 +258,8 @@ func TestPublicModelsExposeResolvedBuiltinToolCapabilities(t *testing.T) {
 	if !gotAvailable[nativeOfficialModel.ID] {
 		t.Fatal("hosted-only model did not advertise unified tool availability")
 	}
-	if gotAvailable[noneModel.ID] {
-		t.Fatal("model with neither configured category advertised tools")
+	if !gotAvailable[noneModel.ID] {
+		t.Fatal("model with an empty default did not advertise manually selectable tools")
 	}
 }
 

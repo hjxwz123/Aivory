@@ -160,6 +160,12 @@ func (w *MemoryWorker) Process(ctx context.Context, convID string) error {
 	if len(candidates) == 0 {
 		return nil
 	}
+	// Permission may be revoked while the task model is extracting candidates.
+	// Re-check after that external call so an in-flight job cannot write memories
+	// merely because it passed the check at worker start.
+	if !store.MemoryEnabledForUser(ctx, w.db, userID) {
+		return nil
+	}
 
 	// Write-time adjudication (§4.16). Runs off the request path, so it can
 	// afford a Tier-1 LLM adjudication call when a slot conflicts.
@@ -172,6 +178,9 @@ func (w *MemoryWorker) Process(ctx context.Context, convID string) error {
 // adjudicateAndWrite resolves one candidate against existing same-slot memories
 // and writes the result with the correct STALE-model status + provenance.
 func (w *MemoryWorker) adjudicateAndWrite(ctx context.Context, userID, convID string, msgIDs []string, c memoryCandidate) {
+	if !store.MemoryEnabledForUser(ctx, w.db, userID) {
+		return
+	}
 	text := strings.TrimSpace(c.MemoryText)
 	if text == "" {
 		return
@@ -193,7 +202,9 @@ func (w *MemoryWorker) adjudicateAndWrite(ctx context.Context, userID, convID st
 	// model whether this fact is already saved under ANY slot; if so, just refresh
 	// the existing memory and stop, so we never store the same meaning twice.
 	if dupID := w.findSemanticDuplicate(ctx, userID, convID, c); dupID != "" {
-		_, _ = w.db.ExecContext(ctx, `UPDATE memories SET updated_at=? WHERE id=?`, now, dupID)
+		if store.MemoryEnabledForUser(ctx, w.db, userID) {
+			_, _ = w.db.ExecContext(ctx, `UPDATE memories SET updated_at=? WHERE id=?`, now, dupID)
+		}
 		return
 	}
 
@@ -213,7 +224,9 @@ func (w *MemoryWorker) adjudicateAndWrite(ctx context.Context, userID, convID st
 	// Same value already recorded → just refresh and stop (avoid duplicates).
 	for _, e := range existing {
 		if strings.EqualFold(strings.TrimSpace(e.Value), strings.TrimSpace(c.Value)) && e.Status == "ACTIVE" {
-			_, _ = w.db.ExecContext(ctx, `UPDATE memories SET updated_at=? WHERE id=?`, now, e.ID)
+			if store.MemoryEnabledForUser(ctx, w.db, userID) {
+				_, _ = w.db.ExecContext(ctx, `UPDATE memories SET updated_at=? WHERE id=?`, now, e.ID)
+			}
 			return
 		}
 	}
@@ -378,6 +391,9 @@ func (w *MemoryWorker) findSemanticDuplicate(ctx context.Context, userID, convID
 }
 
 func (w *MemoryWorker) createMemory(ctx context.Context, userID, convID string, msgIDs []string, c memoryCandidate, conf float64, status string, supersedes []string) string {
+	if !store.MemoryEnabledForUser(ctx, w.db, userID) {
+		return ""
+	}
 	m, err := store.CreateMemory(ctx, w.db, store.Memory{
 		UserID:           userID,
 		MemoryText:       strings.TrimSpace(c.MemoryText),
@@ -399,6 +415,11 @@ func (w *MemoryWorker) createMemory(ctx context.Context, userID, convID string, 
 }
 
 func (w *MemoryWorker) setStatus(ctx context.Context, id, status, reason string, supersededBy []string) {
+	var userID string
+	if err := w.db.QueryRowContext(ctx, `SELECT user_id FROM memories WHERE id=?`, id).Scan(&userID); err != nil ||
+		!store.MemoryEnabledForUser(ctx, w.db, userID) {
+		return
+	}
 	now := time.Now().Unix()
 	if supersededBy != nil {
 		by, _ := json.Marshal(supersededBy)
@@ -420,7 +441,7 @@ type MemoryEnqueuer interface {
 }
 
 // EnqueueIfReady is what the orchestrator calls after the assistant message is
-// finalised. It checks settings.memory_enabled and dispatches to the queue.
+// finalised. Process re-checks every current memory permission at execution.
 func (w *MemoryWorker) EnqueueIfReady(q MemoryEnqueuer, convID string) {
 	if w == nil || q == nil {
 		return

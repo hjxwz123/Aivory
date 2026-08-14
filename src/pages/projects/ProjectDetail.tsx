@@ -63,17 +63,24 @@ import {
 import { conversationsApi } from '@/api/endpoints'
 import type { ApiConversation } from '@/api/types'
 import { resolveNewConversationFastMode } from '@/lib/chat-defaults'
+import { userCan } from '@/lib/user-permissions'
+import { subscribeAccessInvalidation } from '@/lib/access-events'
 
 type ProjectUploadHandlers = {
   onFileStart: (file: File) => void
   onProgress: (file: File, percent: number) => void
   onProcessing: (file: File) => void
+  signal: AbortSignal
 }
 
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const { t } = useTranslation(['projects', 'chat', 'common'])
+  const { t } = useTranslation(['projects', 'chat', 'common', 'kb'])
+  const user = useAuth((s) => s.user)
+  const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases')
+  const canUseKnowledgeBasesRef = useRef(canUseKnowledgeBases)
+  canUseKnowledgeBasesRef.current = canUseKnowledgeBases
 
   const project = useProjects((s) => s.projects.find((p) => p.id === id))
   const loadOne = useProjects((s) => s.loadOne)
@@ -104,7 +111,7 @@ export default function ProjectDetail() {
     return () => {
       current = false
     }
-  }, [id, loadOne])
+  }, [canUseKnowledgeBases, id, loadOne])
 
   // Summary-only subscription so a streaming conversation's per-token updates
   // don't re-render this page (same fix as sidebar/command-menu).
@@ -114,7 +121,6 @@ export default function ProjectDetail() {
   const adoptConversation = useConversations((s) => s.adoptConversation)
   const defaultModelId = useModels((s) => s.defaultId)
   const fastAvailable = useModels((s) => s.fastAvailable)
-  const user = useAuth((s) => s.user)
   const userId = user?.id
   const workspaceId = useWorkspaces((s) => s.activeId ?? undefined)
   const setGlobalDefaultModel = useModels((s) => s.setDefaultId)
@@ -171,6 +177,9 @@ export default function ProjectDetail() {
   const [deleting, setDeleting] = useState(false)
   const [addFileOpen, setAddFileOpen] = useState(false)
   const [renameFileState, setRenameFileState] = useState<{ id: string; draft: string } | null>(null)
+  const [renaming, setRenaming] = useState(false)
+  const [savingDetails, setSavingDetails] = useState(false)
+  const [fileMutationID, setFileMutationID] = useState<string | null>(null)
   const pendingConvRef = useRef<ApiConversation | null>(null)
   const pendingCreateRef = useRef<Promise<string | undefined> | null>(null)
   const pendingConsumedRef = useRef(false)
@@ -190,6 +199,59 @@ export default function ProjectDetail() {
   const pendingStorageKeyRef = useRef(pendingStorageKey)
   pendingStorageKeyRef.current = pendingStorageKey
 
+  const canUploadProjectFiles = canUseKnowledgeBases && project?.canUploadFiles === true
+  const canDeleteProjectContent = canUseKnowledgeBases && project?.canDeleteContent === true
+  const canDeleteProject = project?.canDelete === true
+  const canUploadProjectFilesRef = useRef(canUploadProjectFiles)
+  canUploadProjectFilesRef.current = canUploadProjectFiles
+
+  useEffect(() => {
+    if (canUploadProjectFiles) return
+    setAddFileOpen(false)
+  }, [canUploadProjectFiles])
+
+  useEffect(() => {
+    if (canDeleteProjectContent) return
+    setRenameFileState(null)
+  }, [canDeleteProjectContent])
+
+  useEffect(() => {
+    if (canDeleteProject) return
+    setConfirmDelete(false)
+  }, [canDeleteProject])
+
+  useEffect(
+    () =>
+      subscribeAccessInvalidation((event) => {
+        if (!id || (event.kind !== 'account' && event.kind !== 'workspace' && event.kind !== 'knowledge-base')) return
+        // Remove stale mutation capabilities before the refetch resolves. This
+        // also unmounts AddFileDialog, whose cleanup aborts any active upload.
+        useProjects.setState((state) => ({
+          projects: state.projects.map((item) =>
+            item.id === id
+              ? { ...item, canUploadFiles: undefined, canDeleteContent: undefined, canDelete: undefined }
+              : item,
+          ),
+        }))
+        setAddFileOpen(false)
+        setRenameFileState(null)
+        setConfirmDelete(false)
+        void loadOne(id)
+      }),
+    [id, loadOne],
+  )
+
+  useEffect(() => {
+    if (canUseKnowledgeBases) return
+    draftAbandonedRef.current = true
+    setSelectedKnowledgeBaseIds([])
+    const pending = pendingConvRef.current
+    pendingConvRef.current = null
+    clearPendingConversation(pendingStorageKey)
+    setPendingConversationId(undefined)
+    if (pending) void conversationsApi.remove(pending.id).catch(() => {})
+  }, [canUseKnowledgeBases, pendingStorageKey])
+
   useEffect(() => {
     pendingConvRef.current = null
     pendingCreateRef.current = null
@@ -202,7 +264,7 @@ export default function ProjectDetail() {
   // Project composers use the same durable draft handoff as the chat home.
   // Refreshing keeps the hidden conversation and lets Composer restore its files.
   useEffect(() => {
-    if (!project?.id) return
+    if (!project?.id || !canUseKnowledgeBases) return
     const savedID = readPendingConversation(pendingStorageKey)
     setPendingConversationId(savedID)
     if (!savedID) return
@@ -232,10 +294,10 @@ export default function ProjectDetail() {
     return () => {
       cancelled = true
     }
-  }, [pendingStorageKey, project?.id])
+  }, [canUseKnowledgeBases, pendingStorageKey, project?.id])
 
   function ensureProjectConversation(): Promise<string | undefined> {
-    if (!project) return Promise.resolve(undefined)
+    if (!project || !canUseKnowledgeBasesRef.current) return Promise.resolve(undefined)
     // A fresh attach revives an abandoned draft scope (see discardDraftConversation).
     draftAbandonedRef.current = false
     if (pendingConvRef.current) return Promise.resolve(pendingConvRef.current.id)
@@ -253,6 +315,7 @@ export default function ProjectDetail() {
           if (
             pendingConsumedRef.current ||
             draftAbandonedRef.current ||
+            !canUseKnowledgeBasesRef.current ||
             activeProjectIdRef.current !== projectId ||
             pendingStorageKeyRef.current !== storageKey
           ) {
@@ -312,11 +375,11 @@ export default function ProjectDetail() {
     if (!project) return
     setSavingInstructions(true)
     try {
-      await updateProject(project.id, { instructions: instructionsDraft })
-      setEditingInstructions(false)
-      toast.success(t('projects:detail.instructionsSaved'))
-    } catch {
-      toast.error(t('projects:detail.instructionsSaveFailed', { defaultValue: 'Failed to save instructions' }))
+      const saved = await updateProject(project.id, { instructions: instructionsDraft })
+      if (saved) {
+        setEditingInstructions(false)
+        toast.success(t('projects:detail.instructionsSaved'))
+      }
     } finally {
       setSavingInstructions(false)
     }
@@ -327,11 +390,17 @@ export default function ProjectDetail() {
     setRenameDraft(project.name)
     setRenameOpen(true)
   }
-  function submitRename() {
-    if (!project) return
-    renameProject(project.id, renameDraft)
-    setRenameOpen(false)
-    toast.success(t('projects:detail.renamed'))
+  async function submitRename() {
+    if (!project || renaming || !renameDraft.trim()) return
+    setRenaming(true)
+    try {
+      if (await renameProject(project.id, renameDraft)) {
+        setRenameOpen(false)
+        toast.success(t('projects:detail.renamed'))
+      }
+    } finally {
+      setRenaming(false)
+    }
   }
 
   function openEdit() {
@@ -345,38 +414,50 @@ export default function ProjectDetail() {
     })
     setEditOpen(true)
   }
-  function submitEdit() {
-    if (!project) return
+  async function submitEdit() {
+    if (!project || savingDetails) return
     // Send empty strings (not undefined) so clearing the description/marker is
     // actually transmitted — JSON.stringify drops undefined fields, which would
     // silently keep the old value on the backend.
-    updateProject(project.id, {
+    const patch: Parameters<typeof updateProject>[1] = {
       name: editDraft.name.trim() || project.name,
       description: editDraft.description.trim(),
       accent: editDraft.accent,
       emoji: editDraft.emoji.trim().slice(0, 2),
-      autoAddUploads: editDraft.autoAddUploads,
-    })
-    setEditOpen(false)
-    toast.success(t('projects:detail.edited'))
+    }
+    if (canUploadProjectFiles) {
+      patch.autoAddUploads = editDraft.autoAddUploads
+    }
+    setSavingDetails(true)
+    try {
+      if (await updateProject(project.id, patch)) {
+        setEditOpen(false)
+        toast.success(t('projects:detail.edited'))
+      }
+    } finally {
+      setSavingDetails(false)
+    }
   }
 
   async function submitDelete() {
-    if (!project) return
+    if (!project || !canDeleteProject) return
     if (deletingRef.current) return
     deletingRef.current = true
     setDeleting(true)
     try {
-      const setProj = useConversations.getState().setProject
-      for (const c of allConversations) {
-        if (c.projectId === project.id) await setProj(c.id, undefined)
-      }
-      await deleteProject(project.id)
+      if (!(await deleteProject(project.id))) return
+      // The backend atomically detaches conversations while deleting. Mirror
+      // that committed result locally without issuing pre-delete mutations.
+      useConversations.setState((state) => ({
+        conversations: state.conversations.map((conversation) =>
+          conversation.projectId === project.id
+            ? { ...conversation, projectId: undefined }
+            : conversation,
+        ),
+      }))
       setConfirmDelete(false)
       toast.success(t('projects:detail.deleted'))
       navigate('/projects')
-    } catch {
-      toast.error(t('projects:detail.deleteFailed', { defaultValue: 'Failed to delete project' }))
     } finally {
       deletingRef.current = false
       setDeleting(false)
@@ -397,9 +478,16 @@ export default function ProjectDetail() {
       fast?: boolean
     },
   ) {
-    if (!project) return
+    if (!project || !canUseKnowledgeBasesRef.current) {
+      toast.error(t('kb:groupPermissionRequired'))
+      return
+    }
     if (!pendingConvRef.current && pendingCreateRef.current) {
       await pendingCreateRef.current
+    }
+    if (!canUseKnowledgeBasesRef.current) {
+      toast.error(t('kb:groupPermissionRequired'))
+      return
     }
     pendingConsumedRef.current = true
     const pending = pendingConvRef.current
@@ -466,11 +554,15 @@ export default function ProjectDetail() {
                 {project.pinned ? <PinOff size={13} aria-hidden /> : <Pin size={13} aria-hidden />}
                 {project.pinned ? t('projects:detail.menu.unpin') : t('projects:detail.menu.pin')}
               </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem destructive onSelect={() => setConfirmDelete(true)}>
-                <Trash2 size={13} aria-hidden />
-                {t('projects:detail.menu.delete')}
-              </DropdownMenuItem>
+              {canDeleteProject ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem destructive onSelect={() => setConfirmDelete(true)}>
+                    <Trash2 size={13} aria-hidden />
+                    {t('projects:detail.menu.delete')}
+                  </DropdownMenuItem>
+                </>
+              ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
         }
@@ -486,7 +578,9 @@ export default function ProjectDetail() {
               </p>
             ) : null}
             <dl className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11.5px] text-[var(--color-fg-subtle)] tabular-nums">
-              <Meta>{t('projects:card.files', { count: project.files.length })}</Meta>
+              {canUseKnowledgeBases ? (
+                <Meta>{t('projects:card.files', { count: project.files.length })}</Meta>
+              ) : null}
               <Meta>{t('projects:card.chats', { count: projectChats.length })}</Meta>
               <Meta>{t('projects:card.updated', { when: formatRelativeDate(project.updatedAt) })}</Meta>
               {project.pinned ? (
@@ -500,31 +594,44 @@ export default function ProjectDetail() {
 
           {/* Composer. Centered, with a small inline label so the project
               context is unmistakable. */}
-          <section className="mt-12 sm:mt-16">
-            <div className="mx-auto max-w-[44rem]">
-              <p className="mb-3 text-[12px] text-[var(--color-fg-subtle)]">
-                {t('projects:detail.newChat')}
-              </p>
-              <Composer
-                modelId={effectiveProjectModelId}
-                fast={projectFast}
-                onFastChange={setPickedFast}
-                onModelChange={(modelId) => {
-                  setProjectComposerModelId(modelId)
-                  useSettings.getState().setModels({ defaultModelId: modelId })
-                  setGlobalDefaultModel(modelId)
-                  void persistUserSettings({ default_model_id: modelId }).catch(() => {})
-                }}
-                onSubmit={(text, atts, opts) => void startProjectChat(text, atts, opts)}
-                conversationId={pendingConversationId}
-                kbIds={selectedKnowledgeBaseIds}
-                projectKBId={project.kbId}
-                onKBChange={setSelectedKnowledgeBaseIds}
-                ensureConversationId={ensureProjectConversation}
-                onAttachmentsDrained={discardDraftConversation}
-              />
-            </div>
-          </section>
+          {canUseKnowledgeBases ? (
+            <section className="mt-12 sm:mt-16">
+              <div className="mx-auto max-w-[44rem]">
+                <p className="mb-3 text-[12px] text-[var(--color-fg-subtle)]">
+                  {t('projects:detail.newChat')}
+                </p>
+                <Composer
+                  modelId={effectiveProjectModelId}
+                  fast={projectFast}
+                  onFastChange={setPickedFast}
+                  onModelChange={(modelId) => {
+                    setProjectComposerModelId(modelId)
+                    useSettings.getState().setModels({ defaultModelId: modelId })
+                    setGlobalDefaultModel(modelId)
+                    void persistUserSettings({ default_model_id: modelId }).catch(() => {})
+                  }}
+                  onSubmit={(text, atts, opts) => void startProjectChat(text, atts, opts)}
+                  conversationId={pendingConversationId}
+                  kbIds={selectedKnowledgeBaseIds}
+                  projectKBId={project.kbId}
+                  onKBChange={setSelectedKnowledgeBaseIds}
+                  ensureConversationId={ensureProjectConversation}
+                  onAttachmentsDrained={discardDraftConversation}
+                />
+              </div>
+            </section>
+          ) : (
+            <section className="mt-12 border-y border-[var(--color-divider)] py-8 sm:mt-16">
+              <div className="mx-auto max-w-[44rem]">
+                <h2 className="text-[15px] font-medium text-[var(--color-fg)]">
+                  {t('kb:groupPermissionTitle')}
+                </h2>
+                <p className="mt-1.5 text-[13px] leading-relaxed text-[var(--color-fg-muted)]">
+                  {t('kb:groupPermissionRequired')}
+                </p>
+              </div>
+            </section>
+          )}
 
           {/* Instructions, files, and chats are separate full-width bands. This
               keeps the reading order stable at every viewport width. */}
@@ -602,11 +709,13 @@ export default function ProjectDetail() {
             )}
           </section>
 
+          {canUseKnowledgeBases ? (
           <section className="mt-12 border-t border-[var(--color-divider)] pt-8 sm:mt-14 sm:pt-10">
             <SectionHeader
               title={t('projects:detail.filesSection')}
               count={project.files.length}
               action={
+                canUploadProjectFiles ? (
                 <Button
                   size="xs"
                   variant="ghost"
@@ -616,10 +725,12 @@ export default function ProjectDetail() {
                 >
                   {t('projects:detail.filesAdd')}
                 </Button>
+                ) : null
               }
             />
 
             {project.files.length === 0 ? (
+              canUploadProjectFiles ? (
               <button
                 type="button"
                 onClick={() => setAddFileOpen(true)}
@@ -637,6 +748,11 @@ export default function ProjectDetail() {
                   <Plus size={12} aria-hidden /> {t('projects:detail.filesAdd')}
                 </span>
               </button>
+              ) : (
+                <p className="mt-4 max-w-[60ch] text-[13.5px] leading-relaxed text-[var(--color-fg-subtle)]">
+                  {t('kb:fileUploadPermissionRequired')}
+                </p>
+              )
             ) : (
               <ul className="mt-3 flex flex-col divide-y divide-[var(--color-divider)] border-t border-[var(--color-divider)]">
                 {project.files.map((f) => {
@@ -668,6 +784,7 @@ export default function ProjectDetail() {
                             </p>
                           ) : null}
                         </div>
+                        {canDeleteProjectContent ? (
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <button
@@ -680,6 +797,7 @@ export default function ProjectDetail() {
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem
+                              disabled={fileMutationID === f.id}
                               onSelect={() => setRenameFileState({ id: f.id, draft: f.name })}
                             >
                               <Pencil size={13} aria-hidden /> {t('chat:sidebar.rename')}
@@ -687,15 +805,26 @@ export default function ProjectDetail() {
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
                               destructive
+                              disabled={fileMutationID === f.id}
                               onSelect={() => {
-                                removeFile(project.id, f.id)
-                                toast.success(t('projects:detail.filesRemoved'))
+                                void (async () => {
+                                  if (fileMutationID || !canDeleteProjectContent) return
+                                  setFileMutationID(f.id)
+                                  try {
+                                    if (await removeFile(project.id, f.id)) {
+                                      toast.success(t('projects:detail.filesRemoved'))
+                                    }
+                                  } finally {
+                                    setFileMutationID(null)
+                                  }
+                                })()
                               }}
                             >
                               <Trash2 size={13} aria-hidden /> {t('common:actions.delete')}
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
+                        ) : null}
                       </div>
                     </li>
                   )
@@ -703,6 +832,7 @@ export default function ProjectDetail() {
               </ul>
             )}
           </section>
+          ) : null}
 
           {/* Conversations TOC */}
           <section className="mt-12 border-t border-[var(--color-divider)] pt-8 sm:mt-14 sm:pt-10">
@@ -789,7 +919,7 @@ export default function ProjectDetail() {
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
                   e.preventDefault()
-                  submitRename()
+                  void submitRename()
                 }
               }}
             />
@@ -798,7 +928,9 @@ export default function ProjectDetail() {
             <Button variant="ghost" onClick={() => setRenameOpen(false)}>
               {t('common:actions.cancel')}
             </Button>
-            <Button onClick={submitRename}>{t('projects:detail.renameSave')}</Button>
+            <Button onClick={() => void submitRename()} loading={renaming} disabled={!renameDraft.trim()}>
+              {t('projects:detail.renameSave')}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -865,36 +997,40 @@ export default function ProjectDetail() {
                 />
               </Field>
             </div>
-            <label
-              htmlFor="ep-auto-add"
-              className="flex items-start justify-between gap-4 rounded-[12px] border border-[var(--color-border)] p-3.5"
-            >
-              <span className="min-w-0">
-                <span className="block text-[13.5px] font-medium text-[var(--color-fg)]">
-                  {t('projects:detail.editAutoAddLabel')}
+            {canUploadProjectFiles ? (
+              <label
+                htmlFor="ep-auto-add"
+                className="flex items-start justify-between gap-4 rounded-[12px] border border-[var(--color-border)] p-3.5"
+              >
+                <span className="min-w-0">
+                  <span className="block text-[13.5px] font-medium text-[var(--color-fg)]">
+                    {t('projects:detail.editAutoAddLabel')}
+                  </span>
+                  <span className="mt-0.5 block text-[12px] text-[var(--color-fg-subtle)] leading-relaxed">
+                    {t('projects:detail.editAutoAddHint')}
+                  </span>
                 </span>
-                <span className="mt-0.5 block text-[12px] text-[var(--color-fg-subtle)] leading-relaxed">
-                  {t('projects:detail.editAutoAddHint')}
-                </span>
-              </span>
-              <Switch
-                id="ep-auto-add"
-                checked={editDraft.autoAddUploads}
-                onCheckedChange={(v) => setEditDraft((d) => ({ ...d, autoAddUploads: v }))}
-              />
-            </label>
+                <Switch
+                  id="ep-auto-add"
+                  checked={editDraft.autoAddUploads}
+                  onCheckedChange={(v) => setEditDraft((d) => ({ ...d, autoAddUploads: v }))}
+                />
+              </label>
+            ) : null}
           </DialogBody>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setEditOpen(false)}>
               {t('common:actions.cancel')}
             </Button>
-            <Button onClick={submitEdit}>{t('projects:detail.editSave')}</Button>
+            <Button onClick={() => void submitEdit()} loading={savingDetails}>
+              {t('projects:detail.editSave')}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Confirm delete */}
-      <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+      <Dialog open={confirmDelete && canDeleteProject} onOpenChange={setConfirmDelete}>
         <DialogContent size="sm">
           <DialogHeader>
             <DialogTitle>{t('projects:detail.deleteTitle')}</DialogTitle>
@@ -912,15 +1048,18 @@ export default function ProjectDetail() {
       </Dialog>
 
       {/* Add file */}
+      {canUploadProjectFiles ? (
       <AddFileDialog
-        open={addFileOpen}
+        open={addFileOpen && canUploadProjectFiles}
         onOpenChange={setAddFileOpen}
         projectName={project.name}
         onUpload={async (files, upload) => {
           let ok = 0
           for (const file of files) {
+            if (upload.signal.aborted || !canUploadProjectFilesRef.current) break
             upload.onFileStart(file)
             const res = await uploadFile(project.id, file, {
+              signal: upload.signal,
               onProgress: (progress) => {
                 if (typeof progress.percent !== 'number') return
                 upload.onProgress(file, progress.percent)
@@ -933,15 +1072,17 @@ export default function ProjectDetail() {
           }
           // Re-pull the document list so freshly-uploaded docs (and their
           // server-assigned size / status) replace the optimistic entries.
-          await loadOne(project.id)
+          if (!upload.signal.aborted && canUploadProjectFilesRef.current) await loadOne(project.id)
+          if (upload.signal.aborted) return
           if (ok > 0) toast.success(t('projects:detail.filesAdded', { count: ok }))
           if (ok < files.length) toast.error(t('projects:detail.filesAddFailed'))
         }}
       />
+      ) : null}
 
       {/* Rename file */}
       <Dialog
-        open={Boolean(renameFileState)}
+        open={Boolean(renameFileState) && canDeleteProjectContent}
         onOpenChange={(open) => {
           if (!open) setRenameFileState(null)
         }}
@@ -964,12 +1105,22 @@ export default function ProjectDetail() {
               {t('common:actions.cancel')}
             </Button>
             <Button
+              loading={Boolean(renameFileState && fileMutationID === renameFileState.id)}
+              disabled={!renameFileState?.draft.trim()}
               onClick={() => {
-                if (renameFileState) {
-                  renameFile(project.id, renameFileState.id, renameFileState.draft)
-                  setRenameFileState(null)
-                  toast.success(t('projects:detail.filesRenamed'))
-                }
+                void (async () => {
+                  if (!renameFileState || fileMutationID || !canDeleteProjectContent) return
+                  const state = renameFileState
+                  setFileMutationID(state.id)
+                  try {
+                    if (await renameFile(project.id, state.id, state.draft)) {
+                      setRenameFileState(null)
+                      toast.success(t('projects:detail.filesRenamed'))
+                    }
+                  } finally {
+                    setFileMutationID(null)
+                  }
+                })()
               }}
             >
               {t('common:actions.save')}
@@ -1046,12 +1197,26 @@ function AddFileDialog({
 }) {
   const { t } = useTranslation(['projects', 'common'])
   const fileInput = useRef<HTMLInputElement>(null)
+  const uploadController = useRef<AbortController | null>(null)
   const [uploading, setUploading] = useState(false)
   const [uploadJob, setUploadJob] = useState<{ name: string; progress: number; phase: 'uploading' | 'processing' } | null>(null)
+
+  useEffect(() => {
+    if (open) return
+    uploadController.current?.abort()
+    uploadController.current = null
+    setUploading(false)
+    setUploadJob(null)
+  }, [open])
+
+  useEffect(() => () => uploadController.current?.abort(), [])
 
   async function handleFiles(list: FileList | null) {
     if (!list || list.length === 0) return
     const selected = Array.from(list)
+    const controller = new AbortController()
+    uploadController.current?.abort()
+    uploadController.current = controller
     setUploading(true)
     setUploadJob({ name: selected[0].name, progress: 0, phase: 'uploading' })
     try {
@@ -1059,11 +1224,15 @@ function AddFileDialog({
         onFileStart: (file) => setUploadJob({ name: file.name, progress: 0, phase: 'uploading' }),
         onProgress: (file, percent) => setUploadJob({ name: file.name, progress: percent, phase: 'uploading' }),
         onProcessing: (file) => setUploadJob({ name: file.name, progress: 100, phase: 'processing' }),
+        signal: controller.signal,
       })
-      onOpenChange(false)
+      if (!controller.signal.aborted) onOpenChange(false)
     } finally {
-      setUploading(false)
-      setUploadJob(null)
+      if (uploadController.current === controller) {
+        uploadController.current = null
+        setUploading(false)
+        setUploadJob(null)
+      }
     }
   }
 
@@ -1075,7 +1244,10 @@ function AddFileDialog({
     : t('projects:detail.filesUploading')
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(next) => {
+      if (!next) uploadController.current?.abort()
+      onOpenChange(next)
+    }}>
       <DialogContent size="md">
         <DialogHeader>
           <DialogTitle>{t('projects:detail.filesAddTitle', { name: projectName })}</DialogTitle>
@@ -1123,7 +1295,10 @@ function AddFileDialog({
           </button>
         </DialogBody>
         <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={uploading}>
+          <Button variant="ghost" onClick={() => {
+            uploadController.current?.abort()
+            onOpenChange(false)
+          }}>
             {t('common:actions.cancel')}
           </Button>
         </DialogFooter>

@@ -109,6 +109,26 @@ func TestPublishUserEventOmitsEmptyFields(t *testing.T) {
 	}
 }
 
+func TestPublishGlobalEventDeliversToEveryConnectedUser(t *testing.T) {
+	d := eventsTestDeps()
+	connA := eventsHub.registerForGroup("global-user-a", "global-group-a")
+	defer eventsHub.unregister("global-user-a", connA)
+	connB := eventsHub.registerForGroup("global-user-b", "global-group-b")
+	defer eventsHub.unregister("global-user-b", connB)
+
+	publishGlobalEvent(d, "account.permissions_updated")
+	for label, conn := range map[string]*eventsConn{"a": connA, "b": connB} {
+		payload := waitEvent(t, conn.ch, 2*time.Second)
+		var event map[string]string
+		if err := json.Unmarshal([]byte(payload), &event); err != nil {
+			t.Fatalf("decode global event for %s: %v", label, err)
+		}
+		if event["type"] != "account.permissions_updated" {
+			t.Fatalf("global event for %s = %v", label, event)
+		}
+	}
+}
+
 func TestEventsHubCapEvictsOldest(t *testing.T) {
 	user := "user-cap"
 	first := eventsHub.register(user)

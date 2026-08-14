@@ -47,4 +47,8 @@ export interface Project {
   createdAt: number
   updatedAt: number
   pinned?: boolean
+  /** Present after the detail endpoint has resolved effective authorization. */
+  canUploadFiles?: boolean
+  canDeleteContent?: boolean
+  canDelete?: boolean
 }

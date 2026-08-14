@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"aivory/server/internal/llm"
 	"aivory/server/internal/store"
 )
 
@@ -17,5 +18,35 @@ func TestChatRunErrorEventMapsStorageQuotaWithoutLeakingInternalError(t *testing
 	}
 	if ev.Message == "" || ev.Message == chatRunErrorMessage {
 		t.Fatalf("message=%q, want actionable storage message", ev.Message)
+	}
+}
+
+func TestChatRunErrorEventMapsRuntimePermissionChanges(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		code string
+	}{
+		{
+			name: "drawing",
+			err:  fmt.Errorf("runtime policy: %w", llm.ErrDrawingPermission),
+			code: errDrawingGroupPermission.Error(),
+		},
+		{
+			name: "knowledge base",
+			err:  fmt.Errorf("runtime policy: %w", llm.ErrKnowledgeBasePermission),
+			code: errKnowledgeBaseGroupPermission.Error(),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ev := chatRunErrorEvent(tt.err, "message-1")
+			if ev.Type != "error" || ev.MessageID != "message-1" || ev.Code != tt.code {
+				t.Fatalf("event=%#v, want scoped permission error code %q", ev, tt.code)
+			}
+			if ev.Message == "" || ev.Message == chatRunErrorMessage || ev.Message == tt.err.Error() {
+				t.Fatalf("message=%q, want actionable public copy", ev.Message)
+			}
+		})
 	}
 }

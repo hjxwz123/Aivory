@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"aivory/server/internal/store"
@@ -12,8 +13,53 @@ import (
 
 // ===== User groups (membership tiers) =====
 
-// listUserGroupsPublic lists groups for any signed-in user (subscription page).
-// Returns the same rows admins see — prices/features are public marketing info.
+// publicUserGroupResponse excludes administrator-only capability policies and
+// catalog allowlists from subscription and landing-page responses.
+type publicUserGroupResponse struct {
+	ID                      string          `json:"id"`
+	Name                    string          `json:"name"`
+	Description             string          `json:"description"`
+	Features                json.RawMessage `json:"features"`
+	MonthlyPriceAmountMinor int64           `json:"monthly_price_amount_minor"`
+	YearlyPriceAmountMinor  int64           `json:"yearly_price_amount_minor"`
+	SettlementCurrency      string          `json:"settlement_currency"`
+	IsDefault               bool            `json:"is_default"`
+	SortOrder               int             `json:"sort_order"`
+	MaxProjects             int             `json:"max_projects"`
+	MaxKBs                  int             `json:"max_kbs"`
+	CreditAllowance         float64         `json:"credit_allowance"`
+	CreditPeriodSeconds     int             `json:"credit_period_seconds"`
+	MaxWorkspaces           int             `json:"max_workspaces"`
+	MaxStorageMB            int             `json:"max_storage_mb"`
+	IsPublic                bool            `json:"is_public"`
+	IsPurchasable           bool            `json:"is_purchasable"`
+	CreatedAt               int64           `json:"created_at"`
+	UpdatedAt               int64           `json:"updated_at"`
+}
+
+func publicUserGroup(g store.UserGroup, currency string) publicUserGroupResponse {
+	return publicUserGroupResponse{
+		ID: g.ID, Name: g.Name, Description: g.Description, Features: g.Features,
+		MonthlyPriceAmountMinor: g.MonthlyPriceAmountMinor,
+		YearlyPriceAmountMinor:  g.YearlyPriceAmountMinor,
+		SettlementCurrency:      currency,
+		IsDefault:               g.IsDefault,
+		SortOrder:               g.SortOrder,
+		MaxProjects:             g.MaxProjects,
+		MaxKBs:                  g.MaxKBs,
+		CreditAllowance:         g.CreditAllowance,
+		CreditPeriodSeconds:     g.CreditPeriodSeconds,
+		MaxWorkspaces:           g.MaxWorkspaces,
+		MaxStorageMB:            g.MaxStorageMB,
+		IsPublic:                g.IsPublic,
+		IsPurchasable:           g.IsPurchasable,
+		CreatedAt:               g.CreatedAt,
+		UpdatedAt:               g.UpdatedAt,
+	}
+}
+
+// listUserGroupsPublic lists subscription metadata without exposing internal
+// authorization policy.
 func listUserGroupsPublic(d Deps, w http.ResponseWriter, r *http.Request) {
 	rows, err := store.ListUserGroups(r.Context(), d.DB)
 	if err != nil {
@@ -23,11 +69,10 @@ func listUserGroupsPublic(d Deps, w http.ResponseWriter, r *http.Request) {
 	// Public/subscription page lists only tiers the admin marked visible
 	// (is_public). Admins keep the full list via listUserGroupsAdmin.
 	currency := globalSettlementCurrency(d)
-	visible := make([]store.UserGroup, 0, len(rows))
+	visible := make([]publicUserGroupResponse, 0, len(rows))
 	for _, g := range rows {
 		if g.IsPublic {
-			g.SettlementCurrency = currency
-			visible = append(visible, g)
+			visible = append(visible, publicUserGroup(g, currency))
 		}
 	}
 	writeJSON(w, 200, visible)
@@ -55,7 +100,8 @@ func createUserGroupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var purchase struct {
-		IsPurchasable *bool `json:"is_purchasable"`
+		IsPurchasable *bool            `json:"is_purchasable"`
+		Permissions   *json.RawMessage `json:"permissions"`
 	}
 	if err := json.Unmarshal(raw, &purchase); err != nil {
 		writeError(w, 400, errInvalidInput)
@@ -81,9 +127,9 @@ func createUserGroupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	if purchase.IsPurchasable != nil {
 		isPurchasable = *purchase.IsPurchasable
 	}
-	created, err := store.CreateUserGroupWithPurchaseAvailability(r.Context(), d.DB, g, isPurchasable)
+	created, err := store.CreateUserGroupWithPermissions(r.Context(), d.DB, g, isPurchasable, purchase.Permissions)
 	if err != nil {
-		if errors.Is(err, store.ErrInvalidCreditConfig) {
+		if errors.Is(err, store.ErrInvalidCreditConfig) || errors.Is(err, store.ErrInvalidUserGroupPermissions) {
 			writeError(w, 400, errInvalidInput)
 			return
 		}
@@ -143,9 +189,9 @@ func updateUserGroupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
-	upd, err := store.UpdateUserGroup(r.Context(), d.DB, id, p)
+	upd, permissionsChanged, err := store.UpdateUserGroupWithPermissionChange(r.Context(), d.DB, id, p)
 	if err != nil {
-		if errors.Is(err, store.ErrInvalidCreditConfig) {
+		if errors.Is(err, store.ErrInvalidCreditConfig) || errors.Is(err, store.ErrInvalidUserGroupPermissions) {
 			writeError(w, 400, errInvalidInput)
 			return
 		}
@@ -160,8 +206,67 @@ func updateUserGroupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
+	if permissionsChanged {
+		revokeGroupPermissionSnapshots(d, id)
+		publishGroupEvent(d, id, "account.permissions_updated")
+	}
 	upd.SettlementCurrency = globalSettlementCurrency(d)
 	writeJSON(w, 200, upd)
+}
+
+func listUserGroupUsersAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
+	groupID := pathParam(r, "id")
+	if _, err := store.GetUserGroup(r.Context(), d.DB, groupID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, errNotFound)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	query := r.URL.Query()
+	search := strings.TrimSpace(query.Get("search"))
+	limit, _ := strconv.Atoi(query.Get("limit"))
+	offset, _ := strconv.Atoi(query.Get("offset"))
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if err := store.ExpireDueUserGroups(r.Context(), d.DB); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	total, err := store.CountUsersByGroup(r.Context(), d.DB, groupID, search)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	users, err := store.ListUsersByGroup(r.Context(), d.DB, groupID, search, limit, offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	type groupUserSummary struct {
+		ID     string `json:"id"`
+		Email  string `json:"email"`
+		Name   string `json:"name"`
+		Role   string `json:"role"`
+		Status string `json:"status"`
+	}
+	summaries := make([]groupUserSummary, 0, len(users))
+	for _, user := range users {
+		summaries = append(summaries, groupUserSummary{
+			ID: user.ID, Email: user.Email, Name: user.Name, Role: user.Role, Status: user.Status,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"users": summaries, "total": total, "limit": limit, "offset": offset,
+	})
 }
 
 func attachSettlementCurrency(groups []store.UserGroup, currency string) {
@@ -176,6 +281,10 @@ func deleteUserGroupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err)
 		return
 	}
+	// Existing streams are still registered under the deleted id. Fan out before
+	// they reconnect so every affected account refreshes to the default group.
+	revokeGroupPermissionSnapshots(d, id)
+	publishGroupEvent(d, id, "account.permissions_updated")
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -196,6 +305,8 @@ func setUserGroupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	invalidateAuthUser(d, id)
+	revokeUserPermissionSnapshots(d, id)
+	publishUserEvent(d, nil, id, "account.permissions_updated", "")
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 

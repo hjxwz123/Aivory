@@ -113,6 +113,8 @@
     "submit": "プロジェクトを作成",
     "cancel": "キャンセル",
     "created": "プロジェクトを作成しました",
+    "limitReached": "プランのプロジェクト作成上限に達しました。",
+    "workspacePermissionRequired": "このワークスペースでプロジェクトを作成する権限がありません。",
     "nameExists": "同じ名前のプロジェクトが既に存在します。"
   },
   "accent": {

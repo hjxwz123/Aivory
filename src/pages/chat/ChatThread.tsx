@@ -33,6 +33,7 @@ import { ConversationOutline } from '@/components/chat/conversation-outline'
 import { ConversationMinimap } from '@/components/chat/conversation-minimap'
 import { accentClasses } from '@/lib/project-helpers'
 import { cn, truncate } from '@/lib/utils'
+import { userCan } from '@/lib/user-permissions'
 import type { Attachment } from '@/types/chat'
 import type { ToolMode } from '@/lib/tool-mode'
 
@@ -46,7 +47,7 @@ export default function ChatThread() {
   // jump re-fires even though the message id (?m=) is unchanged.
   const jumpKey = searchParams.get('j') || undefined
   const navigate = useNavigate()
-  const { t } = useTranslation(['chat', 'common', 'projects'])
+  const { t } = useTranslation(['chat', 'common', 'projects', 'kb'])
   const conversation = useConversations((s) => s.conversations.find((c) => c.id === id))
   const [loadStatus, setLoadStatus] = useState<'idle' | 'loading' | 'done'>('idle')
   const loadOne = useConversations((s) => s.loadOne)
@@ -61,7 +62,10 @@ export default function ChatThread() {
   const archive = useConversations((s) => s.archiveConversation)
   const sendMessage = useConversations((s) => s.sendMessage)
   const abortStream = useConversations((s) => s.abortStream)
-  const meId = useAuth((s) => s.user?.id)
+  const user = useAuth((s) => s.user)
+  const meId = user?.id
+  const canShare = userCan(user, 'allow_sharing')
+  const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases')
   const project = useProjects((s) =>
     conversation?.projectId ? s.projects.find((p) => p.id === conversation.projectId) : undefined,
   )
@@ -73,6 +77,11 @@ export default function ChatThread() {
   // switch settles. switchTo() flips `switching` false only AFTER the new
   // space's list landed, so this loadOne can't be clobbered by that fetch.
   const wsSwitching = useWorkspaces((s) => s.switching)
+  const conversationWorkspace = useWorkspaces((s) =>
+    conversation?.workspaceId
+      ? s.workspaces.find((workspace) => workspace.id === conversation.workspaceId)
+      : undefined,
+  )
   const openFilesDrawer = useConversationFiles((s) => s.openDrawer)
   const closeFilesDrawer = useConversationFiles((s) => s.close)
   const filesDrawerOpen = useConversationFiles((s) => s.open)
@@ -107,6 +116,10 @@ export default function ChatThread() {
     () => conversation?.messages.some((m) => m.streaming),
     [conversation?.messages],
   )
+
+  useEffect(() => {
+    if (conversationWorkspace?.can_private_conversations === false) setConfirmPrivate(false)
+  }, [conversationWorkspace?.can_private_conversations])
 
   // Hydrate the active conversation + its messages from the backend whenever
   // the id changes — and again after a workspace switch settles (the switch
@@ -287,7 +300,12 @@ export default function ChatThread() {
   }
 
   async function changeVisibility(nextPublic: boolean) {
-    if (!conversation || visibilityBusy || conversation.creatorId !== meId) return
+    if (
+      !conversation ||
+      visibilityBusy ||
+      conversation.creatorId !== meId ||
+      (!nextPublic && !canMakePrivate)
+    ) return
     setVisibilityBusy(true)
     const changed = await setConversationPublic(conversation.id, nextPublic)
     setVisibilityBusy(false)
@@ -300,7 +318,7 @@ export default function ChatThread() {
   }
 
   function requestVisibilityToggle() {
-    if (!conversation || visibilityBusy || conversation.creatorId !== meId) return
+    if (!conversation || visibilityBusy || !canChangeVisibility) return
     if (conversation.isPublic) {
       setConfirmPrivate(true)
       return
@@ -308,7 +326,8 @@ export default function ChatThread() {
     void changeVisibility(true)
   }
 
-  const canChangeVisibility = conversation.creatorId === meId
+  const canMakePrivate = conversationWorkspace?.can_private_conversations !== false
+  const canChangeVisibility = conversation.creatorId === meId && (!conversation.isPublic || canMakePrivate)
   const visibilityLabel = conversation.isPublic
     ? t('chat:visibility.public')
     : t('chat:visibility.private')
@@ -316,12 +335,16 @@ export default function ChatThread() {
     ? conversation.isPublic
       ? t('chat:visibility.makePrivate')
       : t('chat:visibility.makePublic')
-    : t('chat:visibility.creatorOnly')
+    : conversation.creatorId === meId
+      ? t('chat:visibility.privatePermissionRequired', { defaultValue: 'Your workspace role cannot create private conversations' })
+      : t('chat:visibility.creatorOnly')
   const visibilityTooltip = canChangeVisibility
     ? conversation.isPublic
       ? t('chat:visibility.publicTooltip')
       : t('chat:visibility.privateTooltip')
-    : t('chat:visibility.creatorOnly')
+    : conversation.creatorId === meId
+      ? t('chat:visibility.privatePermissionRequired', { defaultValue: 'Your workspace role cannot create private conversations' })
+      : t('chat:visibility.creatorOnly')
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -410,9 +433,11 @@ export default function ChatThread() {
               <DropdownMenuItem onSelect={() => void star(conversation.id)}>
                 <Star size={13} aria-hidden /> {conversation.starred ? t('common:actions.unstar') : t('common:actions.star')}
               </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => setShareOpen(true)}>
-                <Share2 size={13} aria-hidden /> {t('chat:sidebar.share')}
-              </DropdownMenuItem>
+              {canShare ? (
+                <DropdownMenuItem onSelect={() => setShareOpen(true)}>
+                  <Share2 size={13} aria-hidden /> {t('chat:sidebar.share')}
+                </DropdownMenuItem>
+              ) : null}
               <DropdownMenuSeparator />
               <DropdownMenuItem onSelect={async () => { toast.info(t('chat:sidebar.archiving', { defaultValue: 'Archiving…' })); await archive(conversation.id); toast.success(t('chat:sidebar.archived')); navigate('/chat') }}>
                 <Archive size={13} aria-hidden /> {t('chat:sidebar.archive')}
@@ -520,22 +545,33 @@ export default function ChatThread() {
           </button>
         )}
         <div className="mx-auto w-full max-w-[var(--layout-message-max-w)] px-3 sm:px-6 lg:px-8 pb-3 sm:pb-5 pt-1.5 sm:pt-2">
-          <Composer
-            modelId={conversation.modelId}
-            onModelChange={(id) => void setModel(conversation.id, id)}
-            fast={conversation.fast}
-            onFastChange={handleFastChange}
-            onSubmit={submit}
-            onStop={stopAll}
-            streaming={Boolean(streaming)}
-            autoFocus
-            conversationId={conversation.id}
-            commandsEnabled
-            kbIds={conversation.kbIds}
-            projectKBId={project?.kbId}
-            onKBChange={(ids) => void setKBs(conversation.id, ids)}
-            modelPickerInHeader
-          />
+          {conversation.projectId && !canUseKnowledgeBases ? (
+            <div className="border-t border-[var(--color-divider)] py-4 text-center">
+              <p className="text-[13px] font-medium text-[var(--color-fg)]">
+                {t('kb:groupPermissionTitle', { defaultValue: 'Knowledge bases unavailable' })}
+              </p>
+              <p className="mt-1 text-[12px] leading-relaxed text-[var(--color-fg-muted)]">
+                {t('kb:groupPermissionRequired', { defaultValue: 'Your user group does not have knowledge-base access.' })}
+              </p>
+            </div>
+          ) : (
+            <Composer
+              modelId={conversation.modelId}
+              onModelChange={(id) => void setModel(conversation.id, id)}
+              fast={conversation.fast}
+              onFastChange={handleFastChange}
+              onSubmit={submit}
+              onStop={stopAll}
+              streaming={Boolean(streaming)}
+              autoFocus
+              conversationId={conversation.id}
+              commandsEnabled={conversation.creatorId === meId}
+              kbIds={conversation.kbIds}
+              projectKBId={project?.kbId}
+              onKBChange={(ids) => void setKBs(conversation.id, ids)}
+              modelPickerInHeader
+            />
+          )}
         </div>
       </div>
 
@@ -601,7 +637,10 @@ export default function ChatThread() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={confirmPrivate} onOpenChange={(open) => { if (!visibilityBusy) setConfirmPrivate(open) }}>
+      <Dialog
+        open={confirmPrivate && canMakePrivate}
+        onOpenChange={(open) => { if (!visibilityBusy) setConfirmPrivate(open) }}
+      >
         <DialogContent size="sm">
           <DialogHeader>
             <DialogTitle>{t('chat:visibility.privateConfirmTitle')}</DialogTitle>
@@ -658,11 +697,13 @@ export default function ChatThread() {
                 onClick={() => { setActionsOpen(false); requestVisibilityToggle() }}
               />
             ) : null}
-            <ThreadActionRow
-              icon={<Share2 size={18} aria-hidden />}
-              label={t('chat:sidebar.share')}
-              onClick={() => { setActionsOpen(false); setShareOpen(true) }}
-            />
+            {canShare ? (
+              <ThreadActionRow
+                icon={<Share2 size={18} aria-hidden />}
+                label={t('chat:sidebar.share')}
+                onClick={() => { setActionsOpen(false); setShareOpen(true) }}
+              />
+            ) : null}
             {project ? (
               <ThreadActionRow
                 icon={<FolderKanban size={18} aria-hidden />}
@@ -686,11 +727,13 @@ export default function ChatThread() {
         </SheetContent>
       </Sheet>
 
-      <ShareConversationDialog
-        conversationId={conversation.id}
-        open={shareOpen}
-        onOpenChange={setShareOpen}
-      />
+      {canShare ? (
+        <ShareConversationDialog
+          conversationId={conversation.id}
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+        />
+      ) : null}
     </div>
   )
 }

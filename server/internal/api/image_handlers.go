@@ -17,6 +17,11 @@ import (
 // listImageStylesPublic returns the enabled styles for the composer's style
 // picker. The hidden_prompt is stripped — users must never see it.
 func listImageStylesPublic(d Deps, w http.ResponseWriter, r *http.Request) {
+	permissions, permissionErr := catalogPermissions(d, r)
+	if permissionErr != nil || !permissions.AllowDrawing {
+		writeJSON(w, http.StatusOK, []any{})
+		return
+	}
 	styles, err := store.ListImageStyles(r.Context(), d.DB, true)
 	if err != nil {
 		writeError(w, 500, err)
@@ -160,6 +165,11 @@ func deleteImageStyleAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 // Each item links back to the conversation that produced it; bytes are served by
 // the existing /api/artifacts/:id (ownership-checked).
 func listMyImages(d Deps, w http.ResponseWriter, r *http.Request) {
+	permissions, permissionErr := requestPermissions(d, r)
+	if permissionErr != nil || !permissions.AllowDrawing {
+		writeJSON(w, http.StatusOK, []any{})
+		return
+	}
 	u := authUser(r)
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))

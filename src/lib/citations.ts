@@ -1,4 +1,5 @@
 import type { Citation } from '@/types/chat'
+import { apiUrl } from '@/api/client'
 
 const DOCUMENT_CITATION_PREFIX = 'doc://'
 const KNOWLEDGE_BASE_CITATION_PREFIX = 'kbdoc://'
@@ -56,7 +57,7 @@ export function documentCitationContentUrl(
 ): string | undefined {
   if (!isKnowledgeBaseCitation(citation)) return undefined
   const documentID = documentIdFromCitationUrl(citation.url)
-  return documentID ? `/api/documents/${encodeURIComponent(documentID)}/content` : undefined
+  return documentID ? apiUrl(`/documents/${encodeURIComponent(documentID)}/content`) : undefined
 }
 
 export function boundedCitationSnippet(snippet?: string, maxCharacters = 280): string {

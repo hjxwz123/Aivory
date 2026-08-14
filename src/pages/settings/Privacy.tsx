@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { SettingsRow, SettingsSection } from './SettingsLayout'
 import { Button } from '@/components/ui/button'
@@ -15,15 +15,32 @@ import {
 import { toast } from '@/hooks/use-toast'
 import { conversationsApi, memoriesApi } from '@/api'
 import { useConversations } from '@/store/conversations'
+import { useAuth } from '@/store/auth'
+import { userCan } from '@/lib/user-permissions'
 
 export default function Privacy() {
+  const user = useAuth((s) => s.user)
+  const canExportConversations = userCan(user, 'allow_conversation_export')
+  const canUseMemory = userCan(user, 'allow_memory') && user?.memory_available !== false
   const [confirmClear, setConfirmClear] = useState(false)
   const [clearing, setClearing] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const exportAttemptRef = useRef(0)
   const [importing, setImporting] = useState(false)
   const importRef = useRef<HTMLInputElement>(null)
   const { t } = useTranslation(['settings', 'common'])
   const reloadConvs = useConversations((s) => s.load)
+
+  useEffect(() => {
+    if (!canExportConversations) {
+      exportAttemptRef.current += 1
+      setExporting(false)
+    }
+  }, [canExportConversations, user?.id])
+
+  useEffect(() => () => {
+    exportAttemptRef.current += 1
+  }, [])
 
   /** Import conversations from a JSON export — another platform's, or this
    *  page's own "Export all data" file (parseConversationExport auto-detects
@@ -70,12 +87,16 @@ export default function Privacy() {
   /** Export user data: fetch all conversations + messages + memories and
    *  download as a JSON file. */
   async function performExport() {
-    if (exporting) return
+    if (exporting || !canExportConversations) return
+    const userID = user?.id
+    if (!userID) return
+    const attempt = exportAttemptRef.current + 1
+    exportAttemptRef.current = attempt
     setExporting(true)
     try {
       const [{ conversations: convs }, mems] = await Promise.all([
         conversationsApi.list(),
-        memoriesApi.list(),
+        canUseMemory ? memoriesApi.list() : Promise.resolve([]),
       ])
       // Fetch full messages for each conversation.
       const detailed = await Promise.all(
@@ -88,6 +109,12 @@ export default function Privacy() {
           }
         }),
       )
+      const latestUser = useAuth.getState().user
+      if (
+        exportAttemptRef.current !== attempt ||
+        latestUser?.id !== userID ||
+        !userCan(latestUser, 'allow_conversation_export')
+      ) return
       const blob = new Blob(
         [JSON.stringify({ conversations: detailed, memories: mems, exported_at: new Date().toISOString() }, null, 2)],
         { type: 'application/json' },
@@ -102,9 +129,11 @@ export default function Privacy() {
       URL.revokeObjectURL(url)
       toast.success(t('settings:privacy.exportDone', { defaultValue: 'Export downloaded' }))
     } catch (e) {
-      toast.error(t('common:actions.failed', { defaultValue: 'Export failed' }), e instanceof Error ? e.message : undefined)
+      if (exportAttemptRef.current === attempt) {
+        toast.error(t('common:actions.failed', { defaultValue: 'Export failed' }), e instanceof Error ? e.message : undefined)
+      }
     } finally {
-      setExporting(false)
+      if (exportAttemptRef.current === attempt) setExporting(false)
     }
   }
 
@@ -118,7 +147,7 @@ export default function Privacy() {
     try {
       const [{ conversations: convs }, mems] = await Promise.all([
         conversationsApi.list(),
-        memoriesApi.list(),
+        canUseMemory ? memoriesApi.list() : Promise.resolve([]),
       ])
       await Promise.allSettled([
         ...convs.map((c) => conversationsApi.remove(c.id)),
@@ -182,19 +211,21 @@ export default function Privacy() {
             {t('common:actions.import', { defaultValue: 'Import' })}
           </Button>
         </SettingsRow>
-        <SettingsRow
-          label={t('settings:privacy.exportAll')}
-          description={t('settings:privacy.exportAllBody')}
-        >
-          <Button
-            variant="secondary"
-            leadingIcon={<Download size={13} aria-hidden />}
-            loading={exporting}
-            onClick={() => void performExport()}
+        {canExportConversations ? (
+          <SettingsRow
+            label={t('settings:privacy.exportAll')}
+            description={t('settings:privacy.exportAllBody')}
           >
-            {t('common:actions.export')}
-          </Button>
-        </SettingsRow>
+            <Button
+              variant="secondary"
+              leadingIcon={<Download size={13} aria-hidden />}
+              loading={exporting}
+              onClick={() => void performExport()}
+            >
+              {t('common:actions.export')}
+            </Button>
+          </SettingsRow>
+        ) : null}
         <SettingsRow
           label={t('settings:privacy.clearAll')}
           description={t('settings:privacy.clearAllBody')}

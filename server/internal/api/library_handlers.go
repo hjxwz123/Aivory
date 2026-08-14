@@ -117,6 +117,11 @@ func containsForbiddenPrivateSkillKey(value any) bool {
 }
 
 func listLibraryCatalogHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	permissions, permissionErr := requestPermissions(d, r)
+	if permissionErr != nil {
+		writeError(w, http.StatusForbidden, errPermissionDenied)
+		return
+	}
 	skills, err := store.ListSkills(r.Context(), d.DB, true)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -135,6 +140,9 @@ func listLibraryCatalogHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 
 	safeSkills := make([]catalogSkill, 0, len(skills))
 	for _, skill := range skills {
+		if !store.ResourcePolicyAllows(permissions.Skills, skill.ID) {
+			continue
+		}
 		displayDescription := strings.TrimSpace(skill.DisplayDescription)
 		safeSkills = append(safeSkills, catalogSkill{
 			ID: skill.ID, Name: skill.Name, Description: displayDescription,
@@ -143,6 +151,9 @@ func listLibraryCatalogHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	safePrompts := make([]catalogPrompt, 0, len(prompts))
 	for _, prompt := range prompts {
+		if !store.ResourcePolicyAllows(permissions.Prompts, prompt.ID) {
+			continue
+		}
 		safePrompts = append(safePrompts, catalogPrompt{
 			ID: prompt.ID, Name: prompt.Name, Description: prompt.Description,
 			Icon: prompt.Icon, Source: "admin", Added: addedPrompts[prompt.ID],
@@ -253,15 +264,31 @@ func deletePromptAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 // ===== User skills =====
 
 func listMySkillsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	permissions, permissionErr := requestPermissions(d, r)
+	if permissionErr != nil {
+		writeError(w, http.StatusForbidden, errSkillGroupPermission)
+		return
+	}
 	rows, err := store.ListUserSkills(r.Context(), d.DB, authUser(r).ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, rows)
+	filtered := rows[:0]
+	for _, skill := range rows {
+		if store.UserSkillPolicyAllows(permissions.Skills, skill) {
+			filtered = append(filtered, skill)
+		}
+	}
+	writeJSON(w, http.StatusOK, filtered)
 }
 
 func createMySkillHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	permissions, permissionErr := requestPermissions(d, r)
+	if permissionErr != nil || permissions.Skills.Mode != store.ResourceAccessAll {
+		writeError(w, http.StatusForbidden, errSkillGroupPermission)
+		return
+	}
 	var body userSkillPayload
 	if err := decodePrivateLibraryPayload(r, &body, map[string]bool{"name": true, "description": true, "instructions": true}); err != nil {
 		writeError(w, http.StatusBadRequest, errInvalidInput)
@@ -295,6 +322,11 @@ func updateMySkillHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeLibraryStoreError(w, err)
 		return
 	}
+	permissions, permissionErr := requestPermissions(d, r)
+	if permissionErr != nil || !store.UserSkillPolicyAllows(permissions.Skills, *current) {
+		writeError(w, http.StatusForbidden, errSkillGroupPermission)
+		return
+	}
 	var body userSkillPayload
 	if err := decodePrivateLibraryPayload(r, &body, map[string]bool{"name": true, "description": true, "instructions": true}); err != nil {
 		writeError(w, http.StatusBadRequest, errInvalidInput)
@@ -324,7 +356,19 @@ func updateMySkillHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 }
 
 func deleteMySkillHandler(d Deps, w http.ResponseWriter, r *http.Request) {
-	if err := store.DeleteUserSkill(r.Context(), d.DB, pathParam(r, "id"), authUser(r).ID); err != nil {
+	ownerID := authUser(r).ID
+	id := pathParam(r, "id")
+	current, err := store.GetUserSkill(r.Context(), d.DB, id, ownerID)
+	if err != nil {
+		writeLibraryStoreError(w, err)
+		return
+	}
+	permissions, permissionErr := requestPermissions(d, r)
+	if permissionErr != nil || !store.UserSkillPolicyAllows(permissions.Skills, *current) {
+		writeError(w, http.StatusForbidden, errSkillGroupPermission)
+		return
+	}
+	if err := store.DeleteUserSkill(r.Context(), d.DB, id, ownerID); err != nil {
 		writeLibraryStoreError(w, err)
 		return
 	}
@@ -346,6 +390,11 @@ func copySkillFromCatalogHandler(d Deps, w http.ResponseWriter, r *http.Request)
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	permissions, permissionErr := requestPermissions(d, r)
+	if permissionErr != nil || !store.ResourcePolicyAllows(permissions.Skills, source.ID) {
+		writeError(w, http.StatusForbidden, errSkillGroupPermission)
 		return
 	}
 	skill := store.UserSkill{
@@ -395,15 +444,31 @@ func privateSkillNameFromCatalog(name, sourceID string) string {
 // ===== User prompts =====
 
 func listMyPromptsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	permissions, permissionErr := requestPermissions(d, r)
+	if permissionErr != nil {
+		writeError(w, http.StatusForbidden, errPromptGroupPermission)
+		return
+	}
 	rows, err := store.ListUserPrompts(r.Context(), d.DB, authUser(r).ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, rows)
+	filtered := rows[:0]
+	for _, prompt := range rows {
+		if store.UserPromptPolicyAllows(permissions.Prompts, prompt) {
+			filtered = append(filtered, prompt)
+		}
+	}
+	writeJSON(w, http.StatusOK, filtered)
 }
 
 func createMyPromptHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	permissions, permissionErr := requestPermissions(d, r)
+	if permissionErr != nil || permissions.Prompts.Mode != store.ResourceAccessAll {
+		writeError(w, http.StatusForbidden, errPromptGroupPermission)
+		return
+	}
 	var body userPromptPayload
 	if err := decodePrivateLibraryPayload(r, &body, map[string]bool{"name": true, "description": true, "content": true}); err != nil {
 		writeError(w, http.StatusBadRequest, errInvalidInput)
@@ -437,6 +502,11 @@ func updateMyPromptHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeLibraryStoreError(w, err)
 		return
 	}
+	permissions, permissionErr := requestPermissions(d, r)
+	if permissionErr != nil || !store.UserPromptPolicyAllows(permissions.Prompts, *current) {
+		writeError(w, http.StatusForbidden, errPromptGroupPermission)
+		return
+	}
 	var body userPromptPayload
 	if err := decodePrivateLibraryPayload(r, &body, map[string]bool{"name": true, "description": true, "content": true}); err != nil {
 		writeError(w, http.StatusBadRequest, errInvalidInput)
@@ -466,7 +536,19 @@ func updateMyPromptHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 }
 
 func deleteMyPromptHandler(d Deps, w http.ResponseWriter, r *http.Request) {
-	if err := store.DeleteUserPrompt(r.Context(), d.DB, pathParam(r, "id"), authUser(r).ID); err != nil {
+	ownerID := authUser(r).ID
+	id := pathParam(r, "id")
+	current, err := store.GetUserPrompt(r.Context(), d.DB, id, ownerID)
+	if err != nil {
+		writeLibraryStoreError(w, err)
+		return
+	}
+	permissions, permissionErr := requestPermissions(d, r)
+	if permissionErr != nil || !store.UserPromptPolicyAllows(permissions.Prompts, *current) {
+		writeError(w, http.StatusForbidden, errPromptGroupPermission)
+		return
+	}
+	if err := store.DeleteUserPrompt(r.Context(), d.DB, id, ownerID); err != nil {
 		writeLibraryStoreError(w, err)
 		return
 	}
@@ -488,6 +570,11 @@ func copyPromptFromCatalogHandler(d Deps, w http.ResponseWriter, r *http.Request
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	permissions, permissionErr := requestPermissions(d, r)
+	if permissionErr != nil || !store.ResourcePolicyAllows(permissions.Prompts, source.ID) {
+		writeError(w, http.StatusForbidden, errPromptGroupPermission)
 		return
 	}
 	prompt := store.UserPrompt{

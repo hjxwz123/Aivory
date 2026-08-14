@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -178,13 +179,29 @@ func updateMCPServerAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeMCPServerError(w, err)
 		return
 	}
+	if mcpRuntimeCapabilityTightened(*current, *updated) {
+		revokeGlobalCapabilitySnapshots(d)
+		publishGlobalEvent(d, "account.permissions_updated")
+	} else if mcpRuntimeCapabilityChanged(*current, *updated) || mcpCatalogPresentationChanged(*current, *updated) {
+		publishGlobalEvent(d, "account.permissions_updated")
+	}
 	writeJSON(w, http.StatusOK, adminMCPServerJSON(*updated))
 }
 
 func deleteMCPServerAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
-	if err := store.DeleteMCPServer(r.Context(), d.DB, pathParam(r, "id")); err != nil {
+	id := pathParam(r, "id")
+	current, err := store.GetMCPServer(r.Context(), d.DB, id)
+	if err != nil {
 		writeMCPServerError(w, err)
 		return
+	}
+	if err := store.DeleteMCPServer(r.Context(), d.DB, id); err != nil {
+		writeMCPServerError(w, err)
+		return
+	}
+	if mcpServerHasTools(*current) {
+		revokeGlobalCapabilitySnapshots(d)
+		publishGlobalEvent(d, "account.permissions_updated")
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
@@ -235,7 +252,76 @@ func runMCPDiscoveryAdmin(d Deps, w http.ResponseWriter, r *http.Request, persis
 		writeMCPServerError(w, err)
 		return
 	}
+	if persistTools && server.Enabled && !jsonValuesEqual(server.DiscoveredTools, updated.DiscoveredTools) {
+		revokeGlobalCapabilitySnapshots(d)
+		publishGlobalEvent(d, "account.permissions_updated")
+	}
 	writeJSON(w, http.StatusOK, adminMCPServerJSON(*updated))
+}
+
+func mcpServerHasTools(server store.MCPServer) bool {
+	if !server.Enabled {
+		return false
+	}
+	var tools []json.RawMessage
+	return json.Unmarshal(server.DiscoveredTools, &tools) == nil && len(tools) > 0
+}
+
+func mcpRuntimeCapabilityChanged(before, after store.MCPServer) bool {
+	beforeAvailable := mcpServerHasTools(before)
+	afterAvailable := mcpServerHasTools(after)
+	if beforeAvailable != afterAvailable {
+		return true
+	}
+	if !beforeAvailable && !afterAvailable {
+		return false
+	}
+	return before.URL != after.URL || !stringMapsEqual(before.Headers, after.Headers)
+}
+
+// A capability addition only needs to refresh connected clients. Cancelling
+// generations is reserved for changes that can invalidate a tool snapshot
+// already in use: disabling an available server or replacing its endpoint or
+// credentials while it remains available.
+func mcpRuntimeCapabilityTightened(before, after store.MCPServer) bool {
+	beforeAvailable := mcpServerHasTools(before)
+	afterAvailable := mcpServerHasTools(after)
+	if !beforeAvailable {
+		return false
+	}
+	if !afterAvailable {
+		return true
+	}
+	return before.URL != after.URL || !stringMapsEqual(before.Headers, after.Headers)
+}
+
+func mcpCatalogPresentationChanged(before, after store.MCPServer) bool {
+	if !mcpServerHasTools(before) && !mcpServerHasTools(after) {
+		return false
+	}
+	return before.Name != after.Name || before.Icon != after.Icon || before.Description != after.Description
+}
+
+func stringMapsEqual(left, right map[string]string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for key, value := range left {
+		if right[key] != value {
+			return false
+		}
+	}
+	return true
+}
+
+func jsonValuesEqual(left, right json.RawMessage) bool {
+	var leftValue, rightValue any
+	if json.Unmarshal(left, &leftValue) != nil || json.Unmarshal(right, &rightValue) != nil {
+		return bytes.Equal(bytes.TrimSpace(left), bytes.TrimSpace(right))
+	}
+	leftJSON, leftErr := json.Marshal(leftValue)
+	rightJSON, rightErr := json.Marshal(rightValue)
+	return leftErr == nil && rightErr == nil && bytes.Equal(leftJSON, rightJSON)
 }
 
 func writeMCPDiscoveryFailure(

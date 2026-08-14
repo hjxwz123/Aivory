@@ -86,6 +86,19 @@ func TestComposeSystemPromptDocGenSkill(t *testing.T) {
 		t.Error("admin-defined description should win over the built-in")
 	}
 
+	// A selected group skill policy cannot name the code-defined skill (it has no
+	// catalog ID), so neither its index entry nor its inline recipes may leak.
+	selected := composeSystemPrompt(systemPromptOpts{
+		ToolMode:           "native",
+		ToolNames:          []string{"python_execute", "use_skill"},
+		SkillToolAvailable: true,
+		SkillsAllowed:      true,
+		SkillMode:          "selected",
+	})
+	if strings.Contains(selected, DocGenSkillName) || strings.Contains(selected, "## Document-generation recipes") {
+		t.Errorf("selected skill policy leaked built-in document skill: %q", selected)
+	}
+
 	// An explicit use_skill policy denial blocks both assigned skills and the
 	// built-in DocGen recipes, even while python_execute remains available.
 	denied := composeSystemPrompt(systemPromptOpts{

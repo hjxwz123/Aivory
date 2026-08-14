@@ -107,6 +107,10 @@
     "incompatibleKnowledgeBase": "此知識庫暫時無法與目前選擇一起使用",
     "knowledgeBaseMentionLabel": "附加知識庫",
     "knowledgeBaseMentionEmpty": "沒有符合的知識庫",
+    "permissions": {
+      "knowledgeBases": "所在使用者組無知識庫權限。",
+      "fileUpload": "所在使用者組無檔案上傳權限。"
+    },
     "removeKnowledgeBase": "移除知識庫 {{name}}",
     "style": "風格",
     "styleHeading": "圖片風格",
@@ -136,6 +140,7 @@
       "entry": "工具選擇",
       "entryDescription": "選擇本輪對話可以使用的工具。",
       "summaryAll": "全部",
+      "summaryDefault": "模型預設",
       "summaryCount": "已選 {{count}} 個",
       "selectedChip": "{{count}} 個工具",
       "reset": "使用全部可用工具",
@@ -150,6 +155,8 @@
       "retry": "重試",
       "noResults": "沒有符合的工具。",
       "empty": "目前模型沒有可用工具。",
+      "groupRestricted": "所在使用者組不可使用",
+      "defaultSelected": "模型預設 · 已選取 {{count}} 個",
       "allSelected": "已選擇全部 {{count}} 個工具",
       "selectedCount": "已選擇 {{count}} 個工具",
       "cancel": "取消",
@@ -271,6 +278,9 @@
     "error": {
       "title": "回覆失敗，請重試",
       "interrupted": "生成中斷，請重試",
+      "permissionChanged": "權限已變更",
+      "drawingPermission": "所在使用者群組已無繪圖模型與圖片生成工具使用權限。",
+      "knowledgeBasePermission": "所在使用者群組已無知識庫使用權限。",
       "retry": "重試"
     }
   },
@@ -520,6 +530,8 @@
     "moreSoon": "更多模型即將上線",
     "current": "當前模型",
     "label": "模型：{{name}}",
+    "unavailable": "模型無法使用",
+    "unavailableHint": "目前模型已無法使用，請重新選擇模型。",
     "upgrade": "升級套餐解鎖",
     "allTags": "全部",
     "noneForTag": "此標籤下暫無模型。",
@@ -635,12 +647,15 @@
     "members": "成員",
     "membersBody": "{{count}} 名成員",
     "membersLoading": "正在載入成員…",
+    "membersLoadFailed": "無法載入工作空間成員。",
     "inviteLink": "邀請連結",
     "rotateInvite": "重設連結（舊連結立即失效）",
     "inviteRotated": "已產生新邀請連結，舊連結已失效。",
     "inviteRotateFailed": "重設邀請連結失敗。",
     "kick": "移除成員",
     "kickFailed": "移除成員失敗。",
+    "deleteFailed": "無法刪除工作空間。",
+    "leaveFailed": "無法退出工作空間。",
     "delete": "刪除工作空間",
     "leave": "退出工作空間",
     "backToPersonal": "切回個人空間",
@@ -652,7 +667,34 @@
     "backHome": "返回對話",
     "roleOwner": "建立者",
     "roleMember": "成員",
-    "switchSpace": "切換空間"
+    "switchSpace": "切換空間",
+    "managePermissions": "管理權限",
+    "memberPermissions": "成員權限",
+    "memberPermissionsBody": "設定 {{name}} 在此工作空間中可以建立和管理的內容。",
+    "permissionsSaved": "成員權限已更新。",
+    "permissionsSaveFailed": "成員權限更新失敗。",
+    "permissions": {
+      "can_create_projects": {
+        "label": "建立專案",
+        "description": "建立新專案及其專案知識庫。"
+      },
+      "can_private_conversations": {
+        "label": "私人對話",
+        "description": "建立僅自己可見的對話。"
+      },
+      "can_create_kb": {
+        "label": "建立知識庫",
+        "description": "建立新的工作空間知識庫。"
+      },
+      "can_add_kb_files": {
+        "label": "新增知識庫檔案",
+        "description": "向工作空間知識庫上傳檔案或貼上內容。"
+      },
+      "can_delete_kb_content": {
+        "label": "刪除知識庫內容",
+        "description": "具體知識庫同時允許時，可刪除、重試或管理其中內容。"
+      }
+    }
   },
   "attachmentDeleted": "檔案已刪除"
 }

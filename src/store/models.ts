@@ -10,6 +10,8 @@ import { create } from 'zustand'
 import { modelsApi, ApiError } from '@/api'
 import type { ApiModel, ApiModelTag } from '@/api/types'
 import { useSettings } from '@/store/settings'
+import { useAuth } from '@/store/auth'
+import { userCan } from '@/lib/user-permissions'
 
 interface ModelStore {
   models: ApiModel[]
@@ -36,6 +38,11 @@ interface ModelStore {
   getById: (id: string) => ApiModel | undefined
 }
 
+// Permission/model invalidations can arrive while the initial picker request is
+// still running. Remember one trailing reload so the latest server state always
+// wins instead of silently dropping the invalidation.
+let reloadRequested = false
+
 export const useModels = create<ModelStore>((set, get) => ({
   models: [],
   imageModels: [],
@@ -49,10 +56,14 @@ export const useModels = create<ModelStore>((set, get) => ({
   error: null,
 
   async load() {
-    if (get().loading) return
+    if (get().loading) {
+      reloadRequested = true
+      return
+    }
     const tagsAtLoadStart = get().tags
     set({ loading: true, error: null })
     try {
+      const canDraw = userCan(useAuth.getState().user, 'allow_drawing')
       // Tags + image models are optional decoration for the picker — never let
       // their fetch failing block the chat model list.
       const [resp, tagResult, img] = await Promise.all([
@@ -61,7 +72,9 @@ export const useModels = create<ModelStore>((set, get) => ({
           (tags) => ({ ok: true as const, tags }),
           () => ({ ok: false as const, tags: [] as ApiModelTag[] }),
         ),
-        modelsApi.listImage().catch(() => ({ models: [], default_id: '' })),
+        canDraw
+          ? modelsApi.listImage().catch(() => ({ models: [], default_id: '' }))
+          : Promise.resolve({ models: [], default_id: '' }),
       ])
       const userDefaultId = useSettings.getState().models.defaultModelId
       const firstEnabled = resp.models.find((m) => m.enabled)
@@ -73,7 +86,9 @@ export const useModels = create<ModelStore>((set, get) => ({
         : undefined
       set((state) => ({
         models: resp.models,
-        imageModels: img.models,
+        // A group permission can change while these requests are in flight.
+        // Re-check at commit time so a stale response never restores drawing.
+        imageModels: userCan(useAuth.getState().user, 'allow_drawing') ? img.models : [],
         // An admin mutation may have updated the shared picker cache while
         // these requests were in flight. Never replace that newer state with
         // a stale response, and preserve the cache when optional tag loading
@@ -89,6 +104,12 @@ export const useModels = create<ModelStore>((set, get) => ({
     } catch (e) {
       const msg = e instanceof ApiError ? e.message : 'Failed to load models'
       set({ error: msg, loading: false })
+    } finally {
+      if (reloadRequested) {
+        reloadRequested = false
+        set({ loading: false })
+        void get().load()
+      }
     }
   },
 

@@ -31,6 +31,7 @@
 import { streamSSEGet } from '@/api/client'
 import { conversationsApi } from '@/api/endpoints'
 import { checkForUpdate } from '@/lib/app-update'
+import { invalidateAccessState } from '@/lib/access-events'
 import { getDeviceId } from '@/lib/device-id'
 import { isConversationTombstoned, markConversationsDeleted } from '@/lib/sync-guards'
 import { useAuth } from '@/store/auth'
@@ -42,7 +43,8 @@ import {
   preservePendingKnowledgeBaseSelection,
   MSG_PAGE,
 } from '@/store/conversations'
-import { activeWorkspaceId } from '@/store/workspaces'
+import { activeWorkspaceId, useWorkspaces } from '@/store/workspaces'
+import { useModels } from '@/store/models'
 import { envNum } from '@/lib/env-config'
 import type { Conversation } from '@/types/chat'
 import type { KnowledgeBaseSelectionRequestGuard } from '@/store/conversations'
@@ -63,6 +65,7 @@ interface RealtimeEvent {
 
 let initialized = false
 let currentUserId: string | null = null
+let currentConnectionKey: string | null = null
 let controller: AbortController | null = null
 // Generation counter: a runLoop sleeping in its backoff can't be aborted, so a
 // fast A→B→A user switch could wake a stale loop whose uid matches again. Each
@@ -74,27 +77,42 @@ export function initRealtime(): void {
   if (initialized) return
   initialized = true
   const sync = () => {
-    const uid = useAuth.getState().user?.id ?? null
-    if (uid === currentUserId) return
+    const user = useAuth.getState().user
+    const uid = user?.id ?? null
+    const connectionKey = uid ? `${uid}:${user?.group_id ?? ''}` : null
+    if (connectionKey === currentConnectionKey) return
+    const userChanged = uid !== currentUserId
     controller?.abort()
     controller = null
     currentUserId = uid
-    resetListSync()
+    currentConnectionKey = connectionKey
+    if (userChanged) {
+      resetListSync()
+    }
     const gen = ++loopGen
-    if (uid) void runLoop(uid, gen)
+    if (uid && connectionKey) void runLoop(uid, connectionKey, gen)
   }
   useAuth.subscribe(sync)
   sync()
 }
 
-async function runLoop(uid: string, gen: number): Promise<void> {
+async function runLoop(uid: string, connectionKey: string, gen: number): Promise<void> {
   let attempt = 0
   let everConnected = false
-  while (currentUserId === uid && gen === loopGen) {
+  while (currentUserId === uid && currentConnectionKey === connectionKey && gen === loopGen) {
     const ctl = new AbortController()
     controller = ctl
     try {
       for await (const frame of streamSSEGet('/events', ctl.signal, undefined, { silentReconnect: true })) {
+        // An async iterator may yield one already-buffered frame after abort.
+        // Re-check ownership for every frame so an old account/group connection
+        // cannot recreate notifications or mutate the new session after cleanup.
+        if (
+          ctl.signal.aborted ||
+          currentUserId !== uid ||
+          currentConnectionKey !== connectionKey ||
+          gen !== loopGen
+        ) return
         const ev = (frame.data ?? null) as RealtimeEvent | null
         if (!ev || typeof ev !== 'object') continue
         if (ev.type === 'hello') {
@@ -102,7 +120,10 @@ async function runLoop(uid: string, gen: number): Promise<void> {
           // A reconnect usually means a backend deploy or a network gap: check
           // the app version, and re-sync anything missed while disconnected.
           void checkForUpdate()
-          if (everConnected) scheduleListSync(true)
+          void reconcileAccessState('account')
+          if (everConnected) {
+            scheduleListSync(true)
+          }
           everConnected = true
           continue
         }
@@ -111,7 +132,12 @@ async function runLoop(uid: string, gen: number): Promise<void> {
     } catch {
       /* connection failed — fall through to backoff */
     }
-    if (ctl.signal.aborted || currentUserId !== uid || gen !== loopGen) return
+    if (
+      ctl.signal.aborted ||
+      currentUserId !== uid ||
+      currentConnectionKey !== connectionKey ||
+      gen !== loopGen
+    ) return
     attempt++
     const delay = Math.min(RECONNECT_MAX_MS, 1000 * 2 ** Math.min(attempt, 5)) + Math.floor(Math.random() * 500)
     await new Promise((resolve) => setTimeout(resolve, delay))
@@ -119,6 +145,19 @@ async function runLoop(uid: string, gen: number): Promise<void> {
 }
 
 function handleEvent(ev: RealtimeEvent): void {
+  switch (ev.type) {
+    case 'account.permissions_updated':
+      void reconcileAccessState('account')
+      return
+    case 'workspace.permissions_updated':
+    case 'workspace.membership_updated':
+      void reconcileAccessState('workspace')
+      return
+    case 'knowledge_base.access_updated':
+      invalidateAccessState({ kind: 'knowledge-base' })
+      scheduleListSync(true)
+      return
+  }
   // Own echo: this tab caused the change and already shows it optimistically.
   // Still converge the sidebar via a throttled list sync — a background sync
   // fetched BEFORE this mutation but merged AFTER it may have clobbered the
@@ -164,6 +203,37 @@ function handleEvent(ev: RealtimeEvent): void {
       break
     }
   }
+}
+
+let accessReconcile: Promise<void> | null = null
+let accessNeedsAccount = false
+let accessNeedsWorkspace = false
+
+function reconcileAccessState(kind: 'account' | 'workspace'): Promise<void> {
+  if (kind === 'account') accessNeedsAccount = true
+  else accessNeedsWorkspace = true
+  if (accessReconcile) return accessReconcile
+  const uid = currentUserId
+  accessReconcile = (async () => {
+    while ((accessNeedsAccount || accessNeedsWorkspace) && uid && useAuth.getState().user?.id === uid) {
+      const refreshAccount = accessNeedsAccount
+      const refreshWorkspace = accessNeedsWorkspace
+      accessNeedsAccount = false
+      accessNeedsWorkspace = false
+      if (refreshAccount) await useAuth.getState().refreshProfile()
+      if (useAuth.getState().user?.id !== uid) return
+      await Promise.all([
+        refreshAccount || refreshWorkspace ? useWorkspaces.getState().load() : Promise.resolve(),
+        refreshAccount ? useModels.getState().load() : Promise.resolve(),
+      ])
+      if (useAuth.getState().user?.id !== uid) return
+      invalidateAccessState({ kind: refreshAccount ? 'account' : 'workspace' })
+      scheduleListSync(true)
+    }
+  })().finally(() => {
+    accessReconcile = null
+  })
+  return accessReconcile
 }
 
 function applyRemoteDelete(id: string): void {

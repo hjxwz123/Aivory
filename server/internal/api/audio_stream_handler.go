@@ -89,11 +89,27 @@ func audioCapabilitiesHandler(d Deps, w http.ResponseWriter, _ *http.Request) {
 // requireAuth before we get here (the auth_token cookie travels with the
 // handshake).
 func audioStreamHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	watcher, err := startCapabilityAccessWatcher(
+		d, r.Context(), u.ID, errVoiceGroupPermission,
+		func(permissions store.UserGroupPermissions) bool { return permissions.AllowVoiceTranscription },
+	)
+	if err != nil {
+		if isCapabilityDenied(err, errVoiceGroupPermission) {
+			writeError(w, http.StatusForbidden, errVoiceGroupPermission)
+		} else {
+			writeError(w, http.StatusInternalServerError, err)
+		}
+		return
+	}
+	defer watcher.Close()
+	r = r.WithContext(watcher.Context())
+
 	if settingString(d, "audio_transcribe_provider", "gpt") != "volcano" {
 		writeError(w, 400, errors.New("live transcription is not enabled"))
 		return
 	}
-	if u := authUser(r); u != nil && !rateLimitUser(d, u.ID, "audio_stream", audioStreamUserRateLimit, time.Minute) {
+	if !rateLimitUser(d, u.ID, "audio_stream", audioStreamUserRateLimit, time.Minute) {
 		writeError(w, 429, errors.New("voice rate limit exceeded — try again shortly"))
 		return
 	}
@@ -122,11 +138,14 @@ func audioStreamHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	defer bconn.Close()
 
-	ctx, cancel := context.WithTimeout(r.Context(), audioStreamMaxDur)
+	ctx, cancel := context.WithTimeout(watcher.Context(), audioStreamMaxDur)
 	defer cancel()
 
 	vsess, err := dialVolcano(ctx, cfg)
 	if err != nil {
+		if watcher.Revoked() {
+			return
+		}
 		writeStreamEvent(bconn, streamEvent{Type: "error", Message: "couldn't reach the transcription service"})
 		if d.Logger != nil {
 			d.Logger.Printf("volcano dial failed: %v", err)

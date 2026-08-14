@@ -22,19 +22,52 @@ type Workspace struct {
 	InviteToken string `json:"invite_token,omitempty"`
 	CreatedAt   int64  `json:"created_at"`
 	// Enriched (not columns):
-	Role        string `json:"role,omitempty"`         // requesting user's role
-	MemberCount int    `json:"member_count,omitempty"` // filled by list queries
-	OwnerName   string `json:"owner_name,omitempty"`
+	Role                    string `json:"role,omitempty"`         // requesting user's role
+	MemberCount             int    `json:"member_count,omitempty"` // filled by list queries
+	OwnerName               string `json:"owner_name,omitempty"`
+	CanCreateProjects       bool   `json:"can_create_projects"`
+	CanPrivateConversations bool   `json:"can_private_conversations"`
+	CanCreateKB             bool   `json:"can_create_kb"`
+	CanAddKBFiles           bool   `json:"can_add_kb_files"`
+	CanDeleteKBContent      bool   `json:"can_delete_kb_content"`
 }
 
 // WorkspaceMember is one member row enriched with user identity for display.
 type WorkspaceMember struct {
-	UserID    string `json:"user_id"`
-	Role      string `json:"role"`
-	JoinedAt  int64  `json:"joined_at"`
-	Name      string `json:"name"`
-	Email     string `json:"email"`
-	AvatarURL string `json:"avatar_url"`
+	UserID                  string `json:"user_id"`
+	Role                    string `json:"role"`
+	CanCreateProjects       bool   `json:"can_create_projects"`
+	CanPrivateConversations bool   `json:"can_private_conversations"`
+	CanCreateKB             bool   `json:"can_create_kb"`
+	CanAddKBFiles           bool   `json:"can_add_kb_files"`
+	CanDeleteKBContent      bool   `json:"can_delete_kb_content"`
+	JoinedAt                int64  `json:"joined_at"`
+	Name                    string `json:"name"`
+	Email                   string `json:"email"`
+	AvatarURL               string `json:"avatar_url"`
+}
+
+type WorkspaceMemberPermissions struct {
+	CanCreateProjects       bool `json:"can_create_projects"`
+	CanPrivateConversations bool `json:"can_private_conversations"`
+	CanCreateKB             bool `json:"can_create_kb"`
+	CanAddKBFiles           bool `json:"can_add_kb_files"`
+	CanDeleteKBContent      bool `json:"can_delete_kb_content"`
+}
+
+func fullWorkspaceMemberPermissions() WorkspaceMemberPermissions {
+	return WorkspaceMemberPermissions{
+		CanCreateProjects: true, CanPrivateConversations: true, CanCreateKB: true,
+		CanAddKBFiles: true, CanDeleteKBContent: true,
+	}
+}
+
+func applyWorkspacePermissions(workspace *Workspace, permissions WorkspaceMemberPermissions) {
+	workspace.CanCreateProjects = permissions.CanCreateProjects
+	workspace.CanPrivateConversations = permissions.CanPrivateConversations
+	workspace.CanCreateKB = permissions.CanCreateKB
+	workspace.CanAddKBFiles = permissions.CanAddKBFiles
+	workspace.CanDeleteKBContent = permissions.CanDeleteKBContent
 }
 
 // workspaceResourceAccessPredicate is the authoritative access boundary for a
@@ -133,6 +166,23 @@ func workspaceAcceptsResourceCreationPredicate(alias string) string {
 	)`
 }
 
+// workspaceMemberCapabilityPredicate is used inside mutations that already
+// lock the workspace row. The canonical owner always has every capability;
+// ordinary members must still exist and have the requested total permission.
+// capability is a trusted column name supplied only by store code.
+func workspaceMemberCapabilityPredicate(workspaceAlias, capability string) string {
+	return `(` + workspaceAlias + `.owner_id=? OR EXISTS (
+		SELECT 1 FROM workspace_members capability_member
+		 WHERE capability_member.workspace_id=` + workspaceAlias + `.id
+		   AND capability_member.user_id=?
+		   AND capability_member.` + capability + `=1
+	))`
+}
+
+func workspaceMemberCapabilityArgs(userID string) []any {
+	return []any{userID, userID}
+}
+
 func beginWorkspaceMutationTx(ctx context.Context, db *sql.DB, workspaceID string) (*sql.Tx, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -197,6 +247,7 @@ func CreateWorkspace(ctx context.Context, db *sql.DB, ownerID, name string) (*Wo
 	// and without this it stays hidden until a page reload re-fetches the list.
 	w.Role = "owner"
 	w.MemberCount = 1
+	applyWorkspacePermissions(w, fullWorkspaceMemberPermissions())
 	return w, nil
 }
 
@@ -223,12 +274,22 @@ func GetWorkspaceForMember(ctx context.Context, db *sql.DB, id, userID string) (
 	var w Workspace
 	err := db.QueryRowContext(ctx,
 		`SELECT w.id, w.name, w.owner_id, w.invite_token, w.created_at,
-		        CASE WHEN w.owner_id=? THEN 'owner' ELSE COALESCE(m.role,'') END
+		        CASE WHEN w.owner_id=? THEN 'owner' ELSE COALESCE(m.role,'') END,
+		        CASE WHEN w.owner_id=? THEN 1 ELSE COALESCE(m.can_create_projects,0) END,
+		        CASE WHEN w.owner_id=? THEN 1 ELSE COALESCE(m.can_private_conversations,0) END,
+		        CASE WHEN w.owner_id=? THEN 1 ELSE COALESCE(m.can_create_kb,0) END,
+		        CASE WHEN w.owner_id=? THEN 1 ELSE COALESCE(m.can_add_kb_files,0) END,
+		        CASE WHEN w.owner_id=? THEN 1 ELSE COALESCE(m.can_delete_kb_content,0) END
 		   FROM workspaces w
 		   LEFT JOIN workspace_members m ON m.workspace_id=w.id AND m.user_id=?
 		  WHERE w.id=? AND (w.owner_id=? OR m.user_id=?)`,
-		userID, userID, id, userID, userID,
-	).Scan(&w.ID, &w.Name, &w.OwnerID, &w.InviteToken, &w.CreatedAt, &w.Role)
+		userID, userID, userID, userID, userID, userID,
+		userID, id, userID, userID,
+	).Scan(
+		&w.ID, &w.Name, &w.OwnerID, &w.InviteToken, &w.CreatedAt, &w.Role,
+		&w.CanCreateProjects, &w.CanPrivateConversations, &w.CanCreateKB,
+		&w.CanAddKBFiles, &w.CanDeleteKBContent,
+	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -266,11 +327,17 @@ func ListWorkspacesForUser(ctx context.Context, db *sql.DB, userID string) ([]Wo
 	rows, err := db.QueryContext(ctx,
 		`SELECT w.id, w.name, w.owner_id, w.invite_token, w.created_at,
 		        CASE WHEN w.owner_id=? THEN 'owner' ELSE COALESCE(m.role,'') END,
+		        CASE WHEN w.owner_id=? THEN 1 ELSE COALESCE(m.can_create_projects,0) END,
+		        CASE WHEN w.owner_id=? THEN 1 ELSE COALESCE(m.can_private_conversations,0) END,
+		        CASE WHEN w.owner_id=? THEN 1 ELSE COALESCE(m.can_create_kb,0) END,
+		        CASE WHEN w.owner_id=? THEN 1 ELSE COALESCE(m.can_add_kb_files,0) END,
+		        CASE WHEN w.owner_id=? THEN 1 ELSE COALESCE(m.can_delete_kb_content,0) END,
 		        (SELECT COUNT(*) FROM workspace_members mm WHERE mm.workspace_id=w.id)
 		   FROM workspaces w
 		   LEFT JOIN workspace_members m ON m.workspace_id=w.id AND m.user_id=?
 		  WHERE w.owner_id=? OR m.user_id=? ORDER BY w.created_at ASC`,
-		userID, userID, userID, userID)
+		userID, userID, userID, userID, userID, userID,
+		userID, userID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -278,7 +345,11 @@ func ListWorkspacesForUser(ctx context.Context, db *sql.DB, userID string) ([]Wo
 	out := []Workspace{}
 	for rows.Next() {
 		var w Workspace
-		if err := rows.Scan(&w.ID, &w.Name, &w.OwnerID, &w.InviteToken, &w.CreatedAt, &w.Role, &w.MemberCount); err != nil {
+		if err := rows.Scan(
+			&w.ID, &w.Name, &w.OwnerID, &w.InviteToken, &w.CreatedAt, &w.Role,
+			&w.CanCreateProjects, &w.CanPrivateConversations, &w.CanCreateKB,
+			&w.CanAddKBFiles, &w.CanDeleteKBContent, &w.MemberCount,
+		); err != nil {
 			return nil, err
 		}
 		if w.Role != "owner" {
@@ -317,8 +388,16 @@ func IsWorkspaceMember(ctx context.Context, db *sql.DB, workspaceID, userID stri
 // ListWorkspaceMembers returns members joined with display identity.
 func ListWorkspaceMembers(ctx context.Context, db *sql.DB, workspaceID string) ([]WorkspaceMember, error) {
 	rows, err := db.QueryContext(ctx,
-		`SELECT m.user_id, m.role, m.joined_at, COALESCE(u.name,''), COALESCE(u.email,''), COALESCE(u.settings,'')
-		   FROM workspace_members m LEFT JOIN users u ON u.id = m.user_id
+		`SELECT m.user_id, CASE WHEN w.owner_id=m.user_id THEN 'owner' ELSE m.role END,
+		        CASE WHEN w.owner_id=m.user_id THEN 1 ELSE m.can_create_projects END,
+		        CASE WHEN w.owner_id=m.user_id THEN 1 ELSE m.can_private_conversations END,
+		        CASE WHEN w.owner_id=m.user_id THEN 1 ELSE m.can_create_kb END,
+		        CASE WHEN w.owner_id=m.user_id THEN 1 ELSE m.can_add_kb_files END,
+		        CASE WHEN w.owner_id=m.user_id THEN 1 ELSE m.can_delete_kb_content END,
+		        m.joined_at, COALESCE(u.name,''), COALESCE(u.email,''), COALESCE(u.settings,'')
+		   FROM workspace_members m
+		   JOIN workspaces w ON w.id=m.workspace_id
+		   LEFT JOIN users u ON u.id = m.user_id
 		  WHERE m.workspace_id=? ORDER BY m.joined_at ASC`, workspaceID)
 	if err != nil {
 		return nil, err
@@ -328,13 +407,65 @@ func ListWorkspaceMembers(ctx context.Context, db *sql.DB, workspaceID string) (
 	for rows.Next() {
 		var m WorkspaceMember
 		var settings string
-		if err := rows.Scan(&m.UserID, &m.Role, &m.JoinedAt, &m.Name, &m.Email, &settings); err != nil {
+		if err := rows.Scan(
+			&m.UserID, &m.Role, &m.CanCreateProjects, &m.CanPrivateConversations,
+			&m.CanCreateKB, &m.CanAddKBFiles, &m.CanDeleteKBContent,
+			&m.JoinedAt, &m.Name, &m.Email, &settings,
+		); err != nil {
 			return nil, err
 		}
 		m.AvatarURL = avatarFromSettings(settings)
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+func UpdateWorkspaceMemberPermissions(
+	ctx context.Context,
+	db *sql.DB,
+	workspaceID, ownerID, memberID string,
+	permissions WorkspaceMemberPermissions,
+) (*WorkspaceMember, error) {
+	tx, err := beginWorkspaceMutationTx(ctx, db, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	res, err := tx.ExecContext(ctx, `UPDATE workspace_members
+		SET can_create_projects=?, can_private_conversations=?, can_create_kb=?,
+		    can_add_kb_files=?, can_delete_kb_content=?
+		WHERE workspace_id=? AND user_id=? AND role<>'owner'
+		  AND EXISTS (SELECT 1 FROM workspaces w WHERE w.id=workspace_members.workspace_id AND w.owner_id=?)`,
+		boolInt(permissions.CanCreateProjects), boolInt(permissions.CanPrivateConversations),
+		boolInt(permissions.CanCreateKB), boolInt(permissions.CanAddKBFiles),
+		boolInt(permissions.CanDeleteKBContent), workspaceID, memberID, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	if n, rowsErr := res.RowsAffected(); rowsErr != nil {
+		return nil, rowsErr
+	} else if n != 1 {
+		return nil, ErrNotFound
+	}
+	var member WorkspaceMember
+	var settings string
+	err = tx.QueryRowContext(ctx, `SELECT m.user_id,m.role,m.can_create_projects,m.can_private_conversations,
+		m.can_create_kb,m.can_add_kb_files,m.can_delete_kb_content,m.joined_at,
+		COALESCE(u.name,''),COALESCE(u.email,''),COALESCE(u.settings,'')
+		FROM workspace_members m LEFT JOIN users u ON u.id=m.user_id
+		WHERE m.workspace_id=? AND m.user_id=?`, workspaceID, memberID).Scan(
+		&member.UserID, &member.Role, &member.CanCreateProjects, &member.CanPrivateConversations,
+		&member.CanCreateKB, &member.CanAddKBFiles, &member.CanDeleteKBContent,
+		&member.JoinedAt, &member.Name, &member.Email, &settings,
+	)
+	if err != nil {
+		return nil, err
+	}
+	member.AvatarURL = avatarFromSettings(settings)
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &member, nil
 }
 
 // JoinWorkspace adds userID as a member (idempotent — re-joining is a no-op).
@@ -393,6 +524,7 @@ func JoinWorkspaceByInviteToken(ctx context.Context, db *sql.DB, token, userID s
 	if workspace.OwnerID == userID {
 		workspace.Role = "owner"
 	}
+	applyWorkspacePermissions(&workspace, fullWorkspaceMemberPermissions())
 	return &workspace, nil
 }
 
@@ -445,6 +577,13 @@ func LeaveWorkspaceWithRevokedGenerations(ctx context.Context, db *sql.DB, works
 		    SELECT 1 FROM conversations c
 		     WHERE c.id=conversation_shares.conversation_id AND c.workspace_id=?
 		  )`, userID, workspaceID); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM workspace_kb_member_permissions
+		WHERE user_id=? AND EXISTS (
+			SELECT 1 FROM knowledge_bases k
+			 WHERE k.id=workspace_kb_member_permissions.kb_id AND k.workspace_id=?
+		)`, userID, workspaceID); err != nil {
 		return nil, err
 	}
 	revokedMessageIDs, err := scrubWorkspaceUserStreamingMessagesTx(ctx, tx, workspaceID, userID)
@@ -501,6 +640,13 @@ func RemoveWorkspaceMemberWithRevokedGenerations(ctx context.Context, db *sql.DB
 		    SELECT 1 FROM conversations c
 		     WHERE c.id=conversation_shares.conversation_id AND c.workspace_id=?
 		  )`, memberID, workspaceID); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM workspace_kb_member_permissions
+		WHERE user_id=? AND EXISTS (
+			SELECT 1 FROM knowledge_bases k
+			 WHERE k.id=workspace_kb_member_permissions.kb_id AND k.workspace_id=?
+		)`, memberID, workspaceID); err != nil {
 		return nil, err
 	}
 	revokedMessageIDs, err := scrubWorkspaceUserStreamingMessagesTx(ctx, tx, workspaceID, memberID)

@@ -50,19 +50,25 @@ func mustCreditMicros(amount float64) int64 {
 	return micros
 }
 
-const userGroupCols = `id, name, description, features, COALESCE(monthly_price_amount_minor,0), COALESCE(yearly_price_amount_minor,0), is_default, sort_order, COALESCE(max_projects,0), COALESCE(max_kbs,0), COALESCE(credit_allowance,0), COALESCE(credit_period_seconds,0), COALESCE(max_workspaces,0), COALESCE(is_public,1), COALESCE(is_purchasable,1), COALESCE(max_storage_mb,0), created_at, updated_at`
+const userGroupCols = `id, name, description, features, COALESCE(monthly_price_amount_minor,0), COALESCE(yearly_price_amount_minor,0), is_default, sort_order, COALESCE(max_projects,0), COALESCE(max_kbs,0), COALESCE(credit_allowance,0), COALESCE(credit_period_seconds,0), COALESCE(max_workspaces,0), COALESCE(is_public,1), COALESCE(is_purchasable,1), COALESCE(max_storage_mb,0), COALESCE(permissions,'{}'), created_at, updated_at`
 
 func scanUserGroup(s scanner) (UserGroup, error) {
 	var g UserGroup
 	var features string
+	var permissions string
 	var def, isPub, isPurchasable int
-	if err := s.Scan(&g.ID, &g.Name, &g.Description, &features, &g.MonthlyPriceAmountMinor, &g.YearlyPriceAmountMinor, &def, &g.SortOrder, &g.MaxProjects, &g.MaxKBs, &g.CreditAllowance, &g.CreditPeriodSeconds, &g.MaxWorkspaces, &isPub, &isPurchasable, &g.MaxStorageMB, &g.CreatedAt, &g.UpdatedAt); err != nil {
+	if err := s.Scan(&g.ID, &g.Name, &g.Description, &features, &g.MonthlyPriceAmountMinor, &g.YearlyPriceAmountMinor, &def, &g.SortOrder, &g.MaxProjects, &g.MaxKBs, &g.CreditAllowance, &g.CreditPeriodSeconds, &g.MaxWorkspaces, &isPub, &isPurchasable, &g.MaxStorageMB, &permissions, &g.CreatedAt, &g.UpdatedAt); err != nil {
 		return g, err
 	}
 	g.IsDefault = def == 1
 	g.IsPublic = isPub == 1
 	g.IsPurchasable = isPurchasable == 1
 	g.Features = json.RawMessage(orDefaultJSON(features))
+	var err error
+	g.Permissions, err = NormalizeUserGroupPermissions(json.RawMessage(permissions))
+	if err != nil {
+		return g, err
+	}
 	return g, nil
 }
 
@@ -120,6 +126,23 @@ func CreateUserGroup(ctx context.Context, db *sql.DB, g UserGroup) (*UserGroup, 
 	return createUserGroup(ctx, db, g, true)
 }
 
+// CreateUserGroupWithPermissions is the API-facing create path. permissions is
+// nil only when an older client omitted the field, in which case the new group
+// inherits the backwards-compatible permissive policy. A present JSON object is
+// normalized as submitted, including an intentional all-false capability set.
+func CreateUserGroupWithPermissions(ctx context.Context, db *sql.DB, g UserGroup, isPurchasable bool, permissions *json.RawMessage) (*UserGroup, error) {
+	if permissions == nil {
+		g.Permissions = DefaultUserGroupPermissions()
+	} else {
+		normalized, err := NormalizeUserGroupPermissions(*permissions)
+		if err != nil {
+			return nil, err
+		}
+		g.Permissions = normalized
+	}
+	return createUserGroup(ctx, db, g, isPurchasable)
+}
+
 // CreateUserGroupWithPurchaseAvailability inserts a non-default group and
 // explicitly sets whether members may purchase it. CreateUserGroup retains the
 // historical default of allowing purchases for callers that predate this flag.
@@ -136,14 +159,30 @@ func createUserGroup(ctx context.Context, db *sql.DB, g UserGroup, isPurchasable
 	if len(g.Features) == 0 {
 		g.Features = json.RawMessage("[]")
 	}
+	permissions := g.Permissions
+	if isZeroUserGroupPermissions(permissions) {
+		permissions = DefaultUserGroupPermissions()
+	}
+	permissionsRaw, err := json.Marshal(permissions)
+	if err != nil {
+		return nil, err
+	}
+	permissions, err = NormalizeUserGroupPermissions(permissionsRaw)
+	if err != nil {
+		return nil, err
+	}
+	permissionsText, err := permissionsJSON(permissions)
+	if err != nil {
+		return nil, err
+	}
 	if err := validateUserGroupBilling(g); err != nil {
 		return nil, err
 	}
 	now := time.Now().Unix()
-	_, err := db.ExecContext(ctx,
-		`INSERT INTO user_groups(id, name, description, features, monthly_price_amount_minor, yearly_price_amount_minor, is_default, sort_order, max_projects, max_kbs, credit_allowance, credit_allowance_micros, credit_period_seconds, max_workspaces, is_public, is_purchasable, max_storage_mb, created_at, updated_at)
-		 VALUES(?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		g.ID, g.Name, g.Description, string(g.Features), g.MonthlyPriceAmountMinor, g.YearlyPriceAmountMinor, g.SortOrder, g.MaxProjects, g.MaxKBs, g.CreditAllowance, mustCreditMicros(g.CreditAllowance), g.CreditPeriodSeconds, g.MaxWorkspaces, boolInt(g.IsPublic), boolInt(isPurchasable), g.MaxStorageMB, now, now)
+	_, err = db.ExecContext(ctx,
+		`INSERT INTO user_groups(id, name, description, features, monthly_price_amount_minor, yearly_price_amount_minor, is_default, sort_order, max_projects, max_kbs, credit_allowance, credit_allowance_micros, credit_period_seconds, max_workspaces, is_public, is_purchasable, max_storage_mb, permissions, created_at, updated_at)
+		 VALUES(?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		g.ID, g.Name, g.Description, string(g.Features), g.MonthlyPriceAmountMinor, g.YearlyPriceAmountMinor, g.SortOrder, g.MaxProjects, g.MaxKBs, g.CreditAllowance, mustCreditMicros(g.CreditAllowance), g.CreditPeriodSeconds, g.MaxWorkspaces, boolInt(g.IsPublic), boolInt(isPurchasable), g.MaxStorageMB, permissionsText, now, now)
 	if err != nil {
 		if isUniqueIndexErr(err, "idx_user_groups_name_unique", "user_groups.name") {
 			return nil, ErrUserGroupNameExists
@@ -151,6 +190,15 @@ func createUserGroup(ctx context.Context, db *sql.DB, g UserGroup, isPurchasable
 		return nil, err
 	}
 	return GetUserGroup(ctx, db, g.ID)
+}
+
+func isZeroUserGroupPermissions(p UserGroupPermissions) bool {
+	return p.Prompts.Mode == "" && len(p.Prompts.IDs) == 0 &&
+		p.Skills.Mode == "" && len(p.Skills.IDs) == 0 &&
+		p.Tools.Mode == "" && len(p.Tools.IDs) == 0 &&
+		!p.AllowSharing && !p.AllowKnowledgeBases && !p.AllowKnowledgeBaseSharing && !p.AllowFileUpload &&
+		!p.AllowConversationExport && !p.AllowVoiceTranscription &&
+		!p.AllowMemory && !p.AllowDrawing
 }
 
 // ReorderUserGroups assigns sort_order = position for each id in one
@@ -187,12 +235,21 @@ type UserGroupPatch struct {
 	MaxStorageMB            *int             `json:"max_storage_mb"`
 	IsPublic                *bool            `json:"is_public"`
 	IsPurchasable           *bool            `json:"is_purchasable"`
+	Permissions             *json.RawMessage `json:"permissions"`
 }
 
 func UpdateUserGroup(ctx context.Context, db *sql.DB, id string, p UserGroupPatch) (*UserGroup, error) {
+	updated, _, err := UpdateUserGroupWithPermissionChange(ctx, db, id, p)
+	return updated, err
+}
+
+// UpdateUserGroupWithPermissionChange compares permissions under the same row
+// lock as the write, so concurrent administrator saves cannot make revocation
+// events use a stale before-value.
+func UpdateUserGroupWithPermissionChange(ctx context.Context, db *sql.DB, id string, p UserGroupPatch) (*UserGroup, bool, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	currentQuery := `SELECT ` + userGroupCols + ` FROM user_groups WHERE id=?`
@@ -201,10 +258,10 @@ func UpdateUserGroup(ctx context.Context, db *sql.DB, id string, p UserGroupPatc
 	}
 	current, err := scanUserGroup(tx.QueryRowContext(ctx, currentQuery, id))
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
+		return nil, false, ErrNotFound
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	allowance := current.CreditAllowance
 	periodSeconds := current.CreditPeriodSeconds
@@ -215,7 +272,7 @@ func UpdateUserGroup(ctx context.Context, db *sql.DB, id string, p UserGroupPatc
 		periodSeconds = *p.CreditPeriodSeconds
 	}
 	if err := validateCreditConfig(allowance, periodSeconds); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if p.MonthlyPriceAmountMinor != nil && *p.MonthlyPriceAmountMinor < 0 ||
 		p.YearlyPriceAmountMinor != nil && *p.YearlyPriceAmountMinor < 0 ||
@@ -223,9 +280,10 @@ func UpdateUserGroup(ctx context.Context, db *sql.DB, id string, p UserGroupPatc
 		p.MaxKBs != nil && *p.MaxKBs < 0 ||
 		p.MaxWorkspaces != nil && *p.MaxWorkspaces < 0 ||
 		p.MaxStorageMB != nil && *p.MaxStorageMB < 0 {
-		return nil, ErrInvalidCreditConfig
+		return nil, false, ErrInvalidCreditConfig
 	}
 	creditConfigChanged := allowance != current.CreditAllowance || periodSeconds != current.CreditPeriodSeconds
+	permissionsChanged := false
 
 	parts := []string{}
 	args := []any{}
@@ -285,16 +343,29 @@ func UpdateUserGroup(ctx context.Context, db *sql.DB, id string, p UserGroupPatc
 		parts = append(parts, "is_purchasable=?")
 		args = append(args, boolInt(*p.IsPurchasable))
 	}
+	if p.Permissions != nil {
+		permissions, err := NormalizeUserGroupPermissions(*p.Permissions)
+		if err != nil {
+			return nil, false, err
+		}
+		permissionsChanged = !UserGroupPermissionsEqual(current.Permissions, permissions)
+		permissionsText, err := permissionsJSON(permissions)
+		if err != nil {
+			return nil, false, err
+		}
+		parts = append(parts, "permissions=?")
+		args = append(args, permissionsText)
+	}
 	if len(parts) == 0 {
-		return &current, nil
+		return &current, false, nil
 	}
 	parts = append(parts, "updated_at=?")
 	args = append(args, time.Now().Unix(), id)
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf("UPDATE user_groups SET %s WHERE id=?", strings.Join(parts, ", ")), args...); err != nil {
 		if isUniqueIndexErr(err, "idx_user_groups_name_unique", "user_groups.name") {
-			return nil, ErrUserGroupNameExists
+			return nil, false, ErrUserGroupNameExists
 		}
-		return nil, err
+		return nil, false, err
 	}
 	if creditConfigChanged {
 		now := time.Now().Unix()
@@ -310,17 +381,17 @@ func UpdateUserGroup(ctx context.Context, db *sql.DB, id string, p UserGroupPatc
 			        END
 			  WHERE group_id=?`,
 			now, now, now, now, id); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 	}
 	updated, err := scanUserGroup(tx.QueryRowContext(ctx, `SELECT `+userGroupCols+` FROM user_groups WHERE id=?`, id))
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return &updated, nil
+	return &updated, permissionsChanged, nil
 }
 
 // ValidatePaymentUserGroupPurchasable checks that a membership tier may still
@@ -401,9 +472,10 @@ func DeleteUserGroup(ctx context.Context, db *sql.DB, id string) error {
 	return tx.Commit()
 }
 
-// SetUserGroup assigns a user to a group (admin action). Bumps the token version
-// so the group change and its quota limits take effect immediately (same pattern
-// as SetUserRole / SetUserStatus).
+// SetUserGroup assigns a user to a group (admin action). Group identity is not
+// stored in access-token claims; request authorization and quota scopes resolve
+// it from the database. Preserve active sessions so an administrator changing a
+// plan refreshes capabilities instead of unexpectedly signing the user out.
 // expiresAt is the unix-seconds expiry (0 = permanent). When set, the group
 // downgrades back to the default tier once it passes (see maybeExpireGroup), so
 // previous_group_id is cleared.
@@ -427,7 +499,7 @@ func SetUserGroup(ctx context.Context, db *sql.DB, userID, groupID string, expir
 		                CASE WHEN quota_cycle_anchor>=? THEN quota_cycle_anchor+1 ELSE ? END
 		            ELSE quota_cycle_anchor
 		        END,
-		        group_id=?, group_expires_at=?, previous_group_id='', token_ver=token_ver+1
+		        group_id=?, group_expires_at=?, previous_group_id=''
 		  WHERE id=?`,
 		groupID, now, now, now, groupID, now, now, now, groupID, expiresAt, userID); err != nil {
 		return err

@@ -92,10 +92,15 @@ function formatTimestamp(value?: number): string {
   }).format(new Date(milliseconds))
 }
 
+function isMCPServer(value: ApiMCPServer | { ok: true }): value is ApiMCPServer {
+  return 'id' in value
+}
+
 export default function AdminMCP() {
   const { t } = useTranslation(['admin', 'common'])
   const [rows, setRows] = useState<ApiMCPServer[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadFailed, setLoadFailed] = useState(false)
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [busyAction, setBusyAction] = useState('')
@@ -104,6 +109,8 @@ export default function AdminMCP() {
   const [editor, setEditor] = useState<EditorState>({ open: false, draft: newDraft() })
   const savingRef = useRef(false)
   const deletingRef = useRef(false)
+  const togglingRef = useRef('')
+  const busyActionRef = useRef('')
 
   async function refreshRows() {
     setRows(await adminApi.mcpServers())
@@ -111,9 +118,12 @@ export default function AdminMCP() {
 
   async function load() {
     setLoading(true)
+    setLoadFailed(false)
     try {
       await refreshRows()
     } catch (error) {
+      setRows([])
+      setLoadFailed(true)
       toast.error(error instanceof ApiError ? error.message : t('admin:common.failed'))
     } finally {
       setLoading(false)
@@ -216,14 +226,15 @@ export default function AdminMCP() {
     setSaving(true)
     try {
       if (editor.row) {
-        await adminApi.updateMCPServer(editor.row.id, payload)
+        const updated = await adminApi.updateMCPServer(editor.row.id, payload)
+        setRows((current) => current.map((row) => row.id === updated.id ? updated : row))
         toast.success(t('admin:mcp.updated'))
       } else {
-        await adminApi.createMCPServer(payload)
+        const created = await adminApi.createMCPServer(payload)
+        setRows((current) => [...current, created])
         toast.success(t('admin:mcp.created'))
       }
       setEditor((current) => ({ ...current, open: false }))
-      await refreshRows()
     } catch (error) {
       toast.error(error instanceof ApiError ? error.message : t('admin:common.failed'))
     } finally {
@@ -238,9 +249,9 @@ export default function AdminMCP() {
     setDeleting(true)
     try {
       await adminApi.removeMCPServer(server.id)
+      setRows((current) => current.filter((row) => row.id !== server.id))
       toast.success(t('admin:mcp.removed'))
       setConfirmDelete(null)
-      await refreshRows()
     } catch (error) {
       toast.error(error instanceof ApiError ? error.message : t('admin:common.failed'))
     } finally {
@@ -250,7 +261,8 @@ export default function AdminMCP() {
   }
 
   async function toggleEnabled(server: ApiMCPServer, enabled: boolean) {
-    if (togglingID) return
+    if (togglingRef.current) return
+    togglingRef.current = server.id
     setTogglingID(server.id)
     setRows((current) => current.map((row) => row.id === server.id ? { ...row, enabled } : row))
     try {
@@ -260,19 +272,31 @@ export default function AdminMCP() {
       setRows((current) => current.map((row) => row.id === server.id ? server : row))
       toast.error(error instanceof ApiError ? error.message : t('admin:common.failed'))
     } finally {
+      togglingRef.current = ''
       setTogglingID('')
     }
   }
 
   async function runAction(server: ApiMCPServer, action: 'test' | 'sync') {
     const key = `${action}:${server.id}`
-    if (busyAction) return
+    if (busyActionRef.current) return
+    busyActionRef.current = key
     setBusyAction(key)
     try {
-      if (action === 'test') await adminApi.testMCPServer(server.id)
-      else await adminApi.syncMCPServer(server.id)
+      const result = action === 'test'
+        ? await adminApi.testMCPServer(server.id)
+        : await adminApi.syncMCPServer(server.id)
+      if (isMCPServer(result)) {
+        setRows((current) => current.map((row) => row.id === result.id ? result : row))
+      } else {
+        try {
+          await refreshRows()
+        } catch {
+          // Older servers may only return { ok: true }. The action still
+          // succeeded, so a follow-up list failure must not turn it into an error.
+        }
+      }
       toast.success(t(action === 'test' ? 'admin:mcp.testSucceeded' : 'admin:mcp.syncSucceeded'))
-      await refreshRows()
     } catch (error) {
       toast.error(error instanceof ApiError ? error.message : t('admin:common.failed'))
       try {
@@ -281,6 +305,7 @@ export default function AdminMCP() {
         // Keep the original action error visible; the next page load can retry the list.
       }
     } finally {
+      busyActionRef.current = ''
       setBusyAction('')
     }
   }
@@ -297,6 +322,7 @@ export default function AdminMCP() {
         <Button
           leadingIcon={<Plus size={15} aria-hidden />}
           onClick={openNew}
+          disabled={loading || loadFailed}
           className="max-sm:min-h-[var(--tap-min)]"
         >
           {t('admin:mcp.new')}
@@ -306,6 +332,20 @@ export default function AdminMCP() {
       <section className="mt-8" aria-label={t('admin:mcp.listLabel')}>
         {loading ? (
           <PanelFallback />
+        ) : loadFailed ? (
+          <div className="flex min-h-64 flex-col items-center justify-center rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center">
+            <AlertCircle size={22} aria-hidden className="text-[var(--color-danger)]" />
+            <p className="mt-3 text-sm font-medium text-[var(--color-fg)]">{t('admin:mcp.loadFailed')}</p>
+            <Button
+              className="mt-4"
+              size="sm"
+              variant="secondary"
+              leadingIcon={<RefreshCw size={14} aria-hidden />}
+              onClick={() => void load()}
+            >
+              {t('common:actions.tryAgain')}
+            </Button>
+          </div>
         ) : rows.length === 0 ? (
           <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center">
             <p className="text-sm font-medium text-[var(--color-fg)]">{t('admin:mcp.emptyTitle')}</p>
@@ -370,7 +410,7 @@ export default function AdminMCP() {
                       <Switch
                         id={`mcp-enabled-${server.id}`}
                         checked={server.enabled}
-                        disabled={Boolean(togglingID)}
+                        disabled={Boolean(togglingID) || Boolean(busyAction)}
                         onCheckedChange={(value) => void toggleEnabled(server, value)}
                       />
                       {server.enabled ? t('admin:mcp.status.enabled') : t('admin:mcp.status.disabled')}
@@ -381,7 +421,7 @@ export default function AdminMCP() {
                         variant="ghost"
                         leadingIcon={<Cable size={13} aria-hidden />}
                         loading={busyAction === testKey}
-                        disabled={Boolean(busyAction)}
+                        disabled={Boolean(busyAction) || Boolean(togglingID)}
                         onClick={() => void runAction(server, 'test')}
                       >
                         {t('admin:mcp.actions.test')}
@@ -391,7 +431,7 @@ export default function AdminMCP() {
                         variant="ghost"
                         leadingIcon={<RefreshCw size={13} aria-hidden />}
                         loading={busyAction === syncKey}
-                        disabled={Boolean(busyAction)}
+                        disabled={Boolean(busyAction) || Boolean(togglingID)}
                         onClick={() => void runAction(server, 'sync')}
                       >
                         {t('admin:mcp.actions.sync')}
@@ -401,6 +441,7 @@ export default function AdminMCP() {
                         variant="ghost"
                         leadingIcon={<Pencil size={13} aria-hidden />}
                         aria-label={`${t('admin:common.edit')}: ${server.name}`}
+                        disabled={Boolean(busyAction) || Boolean(togglingID)}
                         onClick={() => openEdit(server)}
                         className="max-sm:size-[var(--tap-min)] max-sm:gap-0 max-sm:px-0"
                       >
@@ -411,6 +452,7 @@ export default function AdminMCP() {
                         variant="ghost"
                         leadingIcon={<Trash2 size={13} aria-hidden />}
                         aria-label={`${t('admin:common.remove')}: ${server.name}`}
+                        disabled={Boolean(busyAction) || Boolean(togglingID)}
                         onClick={() => setConfirmDelete(server)}
                         className="max-sm:size-[var(--tap-min)] max-sm:gap-0 max-sm:px-0"
                       >

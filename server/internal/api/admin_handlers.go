@@ -1504,6 +1504,13 @@ func adminSettingsSet(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
+	_, toolsPresent := body["disabled_tools"]
+	_, memoryPresent := body["memory_enabled"]
+	capabilitiesPresent := toolsPresent || memoryPresent
+	capabilitiesBefore := globalCapabilitySnapshot{}
+	if capabilitiesPresent {
+		capabilitiesBefore = currentGlobalCapabilitySnapshot(d)
+	}
 	if _, err := applyAdminSettingsPatch(d, body, true); err != nil {
 		if errors.Is(err, errInvalidInput) {
 			writeError(w, 400, errInvalidInput)
@@ -1515,6 +1522,10 @@ func adminSettingsSet(d Deps, w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, 500, err)
 		return
+	}
+	if capabilitiesPresent && !globalCapabilitySnapshotsEqual(capabilitiesBefore, currentGlobalCapabilitySnapshot(d)) {
+		revokeGlobalCapabilitySnapshots(d)
+		publishGlobalEvent(d, "account.permissions_updated")
 	}
 	broadcastConfigInvalidate(d) // §2.4: clear the settings cache on every instance
 	adminSettingsGet(d, w, r)

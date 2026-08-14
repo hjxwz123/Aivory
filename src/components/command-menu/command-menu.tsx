@@ -1,4 +1,4 @@
-import { activeWorkspaceId } from '@/store/workspaces'
+import { activeWorkspaceId, useWorkspaces } from '@/store/workspaces'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -41,6 +41,8 @@ import { useLanguage } from '@/store/language'
 import { SUPPORTED_LANGUAGES } from '@/i18n'
 import { truncate, modKey } from '@/lib/utils'
 import { cn } from '@/lib/utils'
+import { useAuth } from '@/store/auth'
+import { userCan } from '@/lib/user-permissions'
 
 export function CommandMenu() {
   const open = useCommandMenu((s) => s.open)
@@ -71,6 +73,12 @@ export function CommandMenu() {
   const currentLang = useLanguage((s) => s.lang)
   const setLang = useLanguage((s) => s.setLang)
   const [newProjectOpen, setNewProjectOpen] = useState(false)
+  const activeWorkspace = useWorkspaces((state) =>
+    state.activeId ? state.workspaces.find((workspace) => workspace.id === state.activeId) : undefined,
+  )
+  const user = useAuth((state) => state.user)
+  const canCreateProject = userCan(user, 'allow_knowledge_bases') &&
+    (!activeWorkspace || activeWorkspace.can_create_projects)
 
   // ── Content search ────────────────────────────────────────────────────────
   // The typed query, debounced, drives a backend search over message CONTENT
@@ -213,13 +221,15 @@ export function CommandMenu() {
               <CommandSeparator />
 
               <CommandGroup heading={t('projects:commandMenu.group')}>
-                <CommandItem
-                  value="new project"
-                  onSelect={() => run(() => setNewProjectOpen(true))}
-                >
-                  <Plus size={14} aria-hidden />
-                  {t('projects:commandMenu.newProject')}
-                </CommandItem>
+                {canCreateProject ? (
+                  <CommandItem
+                    value="new project"
+                    onSelect={() => run(() => setNewProjectOpen(true))}
+                  >
+                    <Plus size={14} aria-hidden />
+                    {t('projects:commandMenu.newProject')}
+                  </CommandItem>
+                ) : null}
                 <CommandItem
                   value="all projects"
                   onSelect={() => run(() => navigate('/projects'))}
@@ -355,7 +365,7 @@ export function CommandMenu() {
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>
-    <NewProjectDialog open={newProjectOpen} onOpenChange={setNewProjectOpen} />
+    <NewProjectDialog open={newProjectOpen && canCreateProject} onOpenChange={setNewProjectOpen} />
     </>
   )
 }

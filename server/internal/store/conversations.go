@@ -324,6 +324,22 @@ func CreateConversation(ctx context.Context, db *sql.DB, c Conversation) (*Conve
 			return nil, txErr
 		}
 		defer tx.Rollback() //nolint:errcheck
+		if !c.IsPublic {
+			var canPrivate int
+			if err := tx.QueryRowContext(ctx, `SELECT CASE WHEN w.owner_id=? THEN 1 ELSE COALESCE(m.can_private_conversations,0) END
+				FROM workspaces w LEFT JOIN workspace_members m ON m.workspace_id=w.id AND m.user_id=?
+				WHERE w.id=? AND (w.owner_id=? OR m.user_id=?)`,
+				c.UserID, c.UserID, c.WorkspaceID, c.UserID, c.UserID).Scan(&canPrivate); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return nil, ErrNotFound
+				}
+				return nil, err
+			}
+			if canPrivate != 1 {
+				c.IsPublic = true
+				insertArgs[len(insertArgs)-1] = boolInt(true)
+			}
+		}
 		res, err = tx.ExecContext(ctx, insertColumns+`
 			 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 			   FROM workspaces create_workspace
@@ -469,6 +485,14 @@ func UpdateConversation(ctx context.Context, db *sql.DB, id, userID string, p Co
 		// conversations otherwise retain their collaborative mutation behavior.
 		q += " AND user_id=? AND COALESCE(workspace_id,'')<>''"
 		args = append(args, userID)
+		if !*p.IsPublic {
+			q += ` AND EXISTS (
+				SELECT 1 FROM workspaces private_workspace
+				 WHERE private_workspace.id=conversations.workspace_id
+				   AND ` + workspaceMemberCapabilityPredicate("private_workspace", "can_private_conversations") + `
+			)`
+			args = append(args, workspaceMemberCapabilityArgs(userID)...)
+		}
 	}
 	if workspaceID == "" {
 		res, err := db.ExecContext(ctx, q, args...)

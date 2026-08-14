@@ -199,6 +199,9 @@ func Migrate(db *sql.DB) error {
 	// Whether a public tier can currently be purchased. Existing tiers retain
 	// their previous behavior because the migration defaults to enabled.
 	addGroupIsPurchasable := `ALTER TABLE user_groups ADD COLUMN is_purchasable INTEGER NOT NULL DEFAULT 1`
+	// Group capability switches and administrator-catalog allowlists. Legacy
+	// empty objects normalize to the permissive policy in user_groups.go.
+	addGroupPermissions := `ALTER TABLE user_groups ADD COLUMN permissions TEXT NOT NULL DEFAULT '{}'`
 	// §fallback channel: per-model backup channel retried on primary request
 	// failure ('' = none); usage rows record which channel served the request,
 	// whether the fallback was used, and error requests are logged too.
@@ -221,6 +224,14 @@ func Migrate(db *sql.DB) error {
 	// Persisted ingest heartbeat lets the RAG watchdog distinguish a live long-
 	// running parse from a task abandoned by timeout, crash, or lease expiry.
 	addDocumentIngestUpdatedAt := `ALTER TABLE documents ADD COLUMN ingest_updated_at INTEGER NOT NULL DEFAULT 0`
+	// Direct KB uploads record their actor so shared collaborators may delete
+	// their own files while the KB owner retains full content management.
+	addDocumentUploader := `ALTER TABLE documents ADD COLUMN uploaded_by_user_id TEXT NOT NULL DEFAULT ''`
+	addWorkspaceCanCreateProjects := `ALTER TABLE workspace_members ADD COLUMN can_create_projects INTEGER NOT NULL DEFAULT 1`
+	addWorkspaceCanPrivateConversations := `ALTER TABLE workspace_members ADD COLUMN can_private_conversations INTEGER NOT NULL DEFAULT 1`
+	addWorkspaceCanCreateKB := `ALTER TABLE workspace_members ADD COLUMN can_create_kb INTEGER NOT NULL DEFAULT 1`
+	addWorkspaceCanAddKBFiles := `ALTER TABLE workspace_members ADD COLUMN can_add_kb_files INTEGER NOT NULL DEFAULT 1`
+	addWorkspaceCanDeleteKBContent := `ALTER TABLE workspace_members ADD COLUMN can_delete_kb_content INTEGER NOT NULL DEFAULT 1`
 	// §fast-mode: the admin's single fast model, plus the per-conversation and
 	// per-message markers that let the user boundary mask the real model name.
 	addModelFast := `ALTER TABLE models ADD COLUMN fast INTEGER NOT NULL DEFAULT 0`
@@ -314,6 +325,7 @@ func Migrate(db *sql.DB) error {
 		addGroupMaxStorage = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS max_storage_mb INTEGER NOT NULL DEFAULT 0`
 		addGroupIsPublic = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS is_public INTEGER NOT NULL DEFAULT 1`
 		addGroupIsPurchasable = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS is_purchasable INTEGER NOT NULL DEFAULT 1`
+		addGroupPermissions = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS permissions TEXT NOT NULL DEFAULT '{}'`
 		addModelFallbackChannel = `ALTER TABLE models ADD COLUMN IF NOT EXISTS fallback_channel_id TEXT NOT NULL DEFAULT ''`
 		addUsageChannel = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS channel_id TEXT NOT NULL DEFAULT ''`
 		addUsageFallback = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS fallback INTEGER NOT NULL DEFAULT 0`
@@ -326,6 +338,12 @@ func Migrate(db *sql.DB) error {
 		addUsageTTFTFallback = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS ttft_fallback_model TEXT NOT NULL DEFAULT ''`
 		addFileDraft = `ALTER TABLE files ADD COLUMN IF NOT EXISTS draft INTEGER NOT NULL DEFAULT 0`
 		addDocumentIngestUpdatedAt = `ALTER TABLE documents ADD COLUMN IF NOT EXISTS ingest_updated_at BIGINT NOT NULL DEFAULT 0`
+		addDocumentUploader = `ALTER TABLE documents ADD COLUMN IF NOT EXISTS uploaded_by_user_id TEXT NOT NULL DEFAULT ''`
+		addWorkspaceCanCreateProjects = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_create_projects INTEGER NOT NULL DEFAULT 1`
+		addWorkspaceCanPrivateConversations = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_private_conversations INTEGER NOT NULL DEFAULT 1`
+		addWorkspaceCanCreateKB = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_create_kb INTEGER NOT NULL DEFAULT 1`
+		addWorkspaceCanAddKBFiles = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_add_kb_files INTEGER NOT NULL DEFAULT 1`
+		addWorkspaceCanDeleteKBContent = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_delete_kb_content INTEGER NOT NULL DEFAULT 1`
 		addModelFast = `ALTER TABLE models ADD COLUMN IF NOT EXISTS fast INTEGER NOT NULL DEFAULT 0`
 		addConvFast = `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS fast INTEGER NOT NULL DEFAULT 0`
 		addMsgFast = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS fast INTEGER NOT NULL DEFAULT 0`
@@ -380,10 +398,11 @@ func Migrate(db *sql.DB) error {
 		addImageTimeout,
 		addModelCompactionTokenThreshold, addMsgContextTokens,
 		addMsgVerify,
-		addConvWorkspace, addConvIsPublic, addProjWorkspace, addKBWorkspace, addMsgAuthor, addUsageWorkspace, addGroupMaxWorkspaces, addGroupMaxStorage, addGroupIsPublic, addGroupIsPurchasable,
+		addConvWorkspace, addConvIsPublic, addProjWorkspace, addKBWorkspace, addMsgAuthor, addUsageWorkspace, addGroupMaxWorkspaces, addGroupMaxStorage, addGroupIsPublic, addGroupIsPurchasable, addGroupPermissions,
 		addModelFallbackChannel, addUsageChannel, addUsageFallback, addUsageStatus, addUsageError,
 		addUsageRequestMethod, addUsageRequestURL, addUsageRequestHeaders, addUsageRequestBody, addUsageTTFTFallback,
-		addFileDraft, addDocumentIngestUpdatedAt,
+		addFileDraft, addDocumentIngestUpdatedAt, addDocumentUploader,
+		addWorkspaceCanCreateProjects, addWorkspaceCanPrivateConversations, addWorkspaceCanCreateKB, addWorkspaceCanAddKBFiles, addWorkspaceCanDeleteKBContent,
 		addModelFast, addConvFast, addMsgFast,
 		addSkillDisplayDescription, addUserSkillIcon, addMsgSelectedUserSkills,
 		addRedeemKind, addRedeemCredits, addRedemptionCredits,
@@ -411,6 +430,15 @@ func Migrate(db *sql.DB) error {
 	// system currency. Preserve that exact meaning for upgraded databases.
 	_, _ = db.Exec(`UPDATE payment_orders SET provider_amount_minor=amount_minor WHERE provider_amount_minor<=0`)
 	_, _ = db.Exec(`UPDATE payment_orders SET provider_currency=currency WHERE trim(provider_currency)=''`)
+	// Recover upload attribution for rows created before documents stored it.
+	// A same-path files row is the strongest source; otherwise the container
+	// creator is the only authoritative historical actor available.
+	_, _ = db.Exec(`UPDATE documents SET uploaded_by_user_id=COALESCE(
+		(SELECT f.user_id FROM files f WHERE f.storage_path=documents.storage_path AND trim(f.storage_path)<>'' ORDER BY f.created_at DESC LIMIT 1),
+		(SELECT k.user_id FROM knowledge_bases k WHERE k.id=documents.kb_id),
+		(SELECT c.user_id FROM conversations c WHERE c.id=documents.conversation_id),
+		''
+	) WHERE trim(uploaded_by_user_id)=''`)
 	if err := dropLegacyChunkEmbeddingColumn(db); err != nil {
 		return fmt.Errorf("drop legacy chunks.embedding column: %w", err)
 	}
@@ -420,6 +448,7 @@ func Migrate(db *sql.DB) error {
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_conv_inline ON conversations(inline_source_conv)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_session ON refresh_tokens(user_id, session_id)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_docs_kb_uploader ON documents(kb_id, uploaded_by_user_id, created_at DESC)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_files_conversation_id ON files(conversation_id)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_files_storage_draft ON files(storage_path, draft)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_docs_ingest_state ON documents(status, ingest_updated_at)`)
@@ -470,7 +499,7 @@ func Migrate(db *sql.DB) error {
 		"users":               {"group_id", "totp_secret", "totp_enabled", "group_expires_at", "previous_group_id", "password_set", "password_changed_at", "last_seen_at", "credits_permanent", "credits_permanent_micros", "credit_cycle_anchor", "quota_cycle_anchor", "sort_order"},
 		"usage_logs":          {"credits", "workspace_id", "channel_id", "fallback", "status", "error", "request_method", "request_url", "request_headers", "request_body", "ttft_fallback_model"},
 		"usage_stats":         {"source_log_id", "user_id", "conversation_id", "message_id", "model_id", "purpose", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "images_count", "cost", "currency", "credits", "workspace_id", "channel_id", "fallback", "ttft_fallback_model", "created_at"},
-		"user_groups":         {"monthly_price_amount_minor", "yearly_price_amount_minor", "max_projects", "max_kbs", "credit_allowance", "credit_allowance_micros", "credit_period_seconds", "max_workspaces", "is_public", "is_purchasable", "max_storage_mb"},
+		"user_groups":         {"monthly_price_amount_minor", "yearly_price_amount_minor", "max_projects", "max_kbs", "credit_allowance", "credit_allowance_micros", "credit_period_seconds", "max_workspaces", "is_public", "is_purchasable", "max_storage_mb", "permissions"},
 		"credit_ledger":       {"amount", "amount_micros", "source_type", "source_id"},
 		"credit_reservations": {"user_id", "amount_micros", "actual_micros", "source_type", "source_id", "status", "expires_at"},
 		"quota_ledger":        {"user_id", "scope_type", "model_id", "group_id", "cycle_anchor", "window_start", "limit_type", "reserved_micros", "actual_micros", "status", "expires_at"},
@@ -483,7 +512,10 @@ func Migrate(db *sql.DB) error {
 		"knowledge_bases":     {"workspace_id"},
 		"chunks":              {"image_ref"},
 		"files":               {"draft"},
-		"documents":           {"ingest_updated_at"},
+		"documents":           {"ingest_updated_at", "uploaded_by_user_id"},
+		"knowledge_base_shares": {"kb_id", "user_id", "role", "created_at", "updated_at"},
+		"workspace_members":     {"workspace_id", "user_id", "role", "can_create_projects", "can_private_conversations", "can_create_kb", "can_add_kb_files", "can_delete_kb_content", "joined_at"},
+		"workspace_kb_member_permissions": {"kb_id", "user_id", "can_add_files", "can_delete_content", "updated_at"},
 		"redeem_codes":        {"kind", "credits"},
 		"redeem_redemptions":  {"credits"},
 		"payment_channels":    {"environment"},

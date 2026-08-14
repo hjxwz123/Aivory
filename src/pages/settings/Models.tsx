@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/hooks/use-toast'
+import { userCan } from '@/lib/user-permissions'
 import { persistUserSettings } from '@/lib/user-settings'
 
 export default function Models() {
@@ -25,6 +26,8 @@ export default function Models() {
   const modelsLoaded = useModels((s) => s.loaded)
   const load = useModels((s) => s.load)
   const setGlobalDefaultModel = useModels((s) => s.setDefaultId)
+  const user = useAuth((s) => s.user)
+  const canDraw = userCan(user, 'allow_drawing')
   const { t } = useTranslation(['settings', 'common'])
 
   // Image-generation model pre-selection (§4.12-B). Persists to user settings.
@@ -124,26 +127,28 @@ export default function Models() {
         </SettingsRow>
       </SettingsSection>
 
-      <SettingsSection title={t('settings:models.imageTitle')}>
-        <SettingsRow label={t('settings:models.imageModel')} description={t('settings:models.imageModelBody')}>
-          <Select value={imageModelId} onValueChange={onPickImageModel} disabled={imageModels.length === 0}>
-            <SelectTrigger className="w-64" aria-label={t('settings:models.imageModel')}>
-              <SelectValue
-                placeholder={
-                  imageModels.length === 0 ? t('settings:models.imageNone') : t('settings:models.imagePick')
-                }
-              />
-            </SelectTrigger>
-            <SelectContent>
-              {imageModels.map((m) => (
-                <SelectItem key={m.id} value={m.id}>
-                  <span className="inline-flex items-center gap-2">{m.label}</span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </SettingsRow>
-      </SettingsSection>
+      {canDraw ? (
+        <SettingsSection title={t('settings:models.imageTitle')}>
+          <SettingsRow label={t('settings:models.imageModel')} description={t('settings:models.imageModelBody')}>
+            <Select value={imageModelId} onValueChange={onPickImageModel} disabled={imageModels.length === 0}>
+              <SelectTrigger className="w-64" aria-label={t('settings:models.imageModel')}>
+                <SelectValue
+                  placeholder={
+                    imageModels.length === 0 ? t('settings:models.imageNone') : t('settings:models.imagePick')
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {imageModels.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    <span className="inline-flex items-center gap-2">{m.label}</span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </SettingsRow>
+        </SettingsSection>
+      ) : null}
 
       <SettingsSection
         title={t('settings:models.custom')}

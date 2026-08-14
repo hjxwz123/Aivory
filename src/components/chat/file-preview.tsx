@@ -18,17 +18,21 @@ import {
 } from '@/components/ui/dialog'
 import type { Attachment } from '@/types/chat'
 import { cn } from '@/lib/utils'
+import { getAccessToken } from '@/api/client'
 
 interface PreviewFile {
   name: string
   url?: string
   kind: Attachment['kind']
+  /** Send the in-memory access token only for trusted application API URLs. */
+  authenticated?: boolean
 }
 
 interface FilePreviewProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   file: PreviewFile | null
+  onLoadError?: (status?: number) => void
 }
 
 interface LoadedPreview {
@@ -39,7 +43,7 @@ interface LoadedPreview {
   error?: string
 }
 
-export function FilePreview({ open, onOpenChange, file }: FilePreviewProps) {
+export function FilePreview({ open, onOpenChange, file, onLoadError }: FilePreviewProps) {
   const { t } = useTranslation(['chat', 'common', 'files'])
   const [attempt, setAttempt] = useState(0)
   const [preview, setPreview] = useState<LoadedPreview>({ loading: false })
@@ -62,11 +66,16 @@ export function FilePreview({ open, onOpenChange, file }: FilePreviewProps) {
 
     void (async () => {
       try {
+        const token = file.authenticated ? getAccessToken() : null
         const response = await fetch(sourceUrl, {
           credentials: 'include',
+          headers: token ? { authorization: `Bearer ${token}` } : undefined,
           signal: controller.signal,
         })
-        if (!response.ok) throw new Error(`preview failed (${response.status})`)
+        if (!response.ok) {
+          onLoadError?.(response.status)
+          throw new Error(`preview failed (${response.status})`)
+        }
         const blob = await response.blob()
         const data = await blob.arrayBuffer()
         if (disposed) return
@@ -90,10 +99,10 @@ export function FilePreview({ open, onOpenChange, file }: FilePreviewProps) {
         objectUrlRef.current = null
       }
     }
-  }, [attempt, file?.url, open, t])
+  }, [attempt, file?.authenticated, file?.url, onLoadError, open, t])
 
   if (!file) return null
-  const actionUrl = preview.objectUrl ?? file.url
+  const actionUrl = preview.objectUrl ?? (file.authenticated ? undefined : file.url)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

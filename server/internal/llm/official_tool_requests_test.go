@@ -502,8 +502,13 @@ func TestAnthropicPauseTurnReplaysNativeHostedContentAndContinues(t *testing.T) 
 	if len(requests) != 2 {
 		t.Fatalf("prompt provider requests = %d, want hosted pause continuation", len(requests))
 	}
-	if promptResult == nil || len(promptResult.Raw) != 0 {
-		t.Fatalf("prompt result should keep canonical content without native replay: %+v", promptResult)
+	if promptResult == nil {
+		t.Fatal("prompt result is nil")
+	}
+	promptEnvelope, ok := parsePromptToolRawEnvelope(promptResult.Raw)
+	if !ok || len(promptEnvelope.Outputs) != 1 || promptEnvelope.Outputs[0].Name != "web_search" ||
+		!strings.Contains(promptEnvelope.Outputs[0].Output, "https://release.test") {
+		t.Fatalf("prompt hosted result was not preserved in the neutral envelope: raw=%s envelope=%+v", promptResult.Raw, promptEnvelope)
 	}
 	promptHosted := 0
 	for _, block := range promptResult.Blocks {

@@ -29,7 +29,9 @@ func TestWorkspaceDraftHTTPBoundaries(t *testing.T) {
 	mustExec(t, db, `INSERT INTO conversations(id,user_id,title,workspace_id,is_public) VALUES('c1','owner','Shared chat','ws1',1)`)
 	mustExec(t, db, `INSERT INTO channels(id,name,type) VALUES('ch1','Embedding','openai')`)
 	mustExec(t, db, `INSERT INTO models(id,channel_id,kind,request_id,label,dim) VALUES('emb1','ch1','embedding','emb','Embedding',3)`)
-	mustExec(t, db, `INSERT INTO knowledge_bases(id,user_id,name,embedding_model_id,embedding_dim,workspace_id) VALUES('kb1','owner','Project KB','emb1',3,'ws1')`)
+	mustExec(t, db, `INSERT INTO knowledge_bases(id,user_id,name,embedding_model_id,embedding_dim,workspace_id) VALUES
+		('kb1','owner','Project KB','emb1',3,'ws1'),
+		('kb2','owner','Workspace KB','emb1',3,'ws1')`)
 	mustExec(t, db, `INSERT INTO projects(id,user_id,name,kb_id,auto_add_uploads,workspace_id) VALUES('p1','owner','Shared project','kb1',1,'ws1')`)
 	mustExec(t, db, `UPDATE knowledge_bases SET project_id='p1' WHERE id='kb1'`)
 	mustExec(t, db, `UPDATE conversations SET project_id='p1' WHERE id='c1'`)
@@ -47,8 +49,9 @@ func TestWorkspaceDraftHTTPBoundaries(t *testing.T) {
 	insertFile("member-draft", "member", 1, "member draft")
 	mustExec(t, db, `INSERT INTO documents(id,conversation_id,filename,mime_type,size_bytes,status,error,storage_path)
 		VALUES('doc-owner-draft','c1','owner-draft.txt','text/plain',11,'failed','parse failed',?)`, paths["owner-draft"])
-	mustExec(t, db, `INSERT INTO documents(id,kb_id,filename,mime_type,size_bytes,status,error,storage_path)
-		VALUES('doc-owner-kb-draft','kb1','owner-draft.txt','text/plain',11,'failed','parse failed',?)`, paths["owner-draft"])
+	mustExec(t, db, `INSERT INTO documents(id,kb_id,filename,mime_type,size_bytes,status,error,storage_path) VALUES
+		('doc-owner-project-draft','kb1','owner-draft.txt','text/plain',11,'failed','parse failed',?),
+		('doc-owner-kb-draft','kb2','owner-draft.txt','text/plain',11,'failed','parse failed',?)`, paths["owner-draft"], paths["owner-draft"])
 
 	deps := Deps{DB: db, Config: config.Config{UploadDir: uploadDir}}
 
@@ -98,8 +101,8 @@ func TestWorkspaceDraftHTTPBoundaries(t *testing.T) {
 		t.Fatalf("owner conversation docs status=%d docs=%#v; want own draft", rec.Code, docs)
 	}
 
-	listKBReq := httptest.NewRequest(http.MethodGet, "/api/kbs/kb1/documents", nil)
-	listKBCtx := context.WithValue(listKBReq.Context(), pathCtxKey{}, map[string]string{"id": "kb1"})
+	listKBReq := httptest.NewRequest(http.MethodGet, "/api/kbs/kb2/documents", nil)
+	listKBCtx := context.WithValue(listKBReq.Context(), pathCtxKey{}, map[string]string{"id": "kb2"})
 	listKBCtx = context.WithValue(listKBCtx, userCtxKey{}, &store.User{ID: "member", Role: "user", Status: "active"})
 	listKBReq = listKBReq.WithContext(listKBCtx)
 	listKBRec := httptest.NewRecorder()
@@ -139,8 +142,8 @@ func TestWorkspaceDraftHTTPBoundaries(t *testing.T) {
 	if promoteRec.Code != http.StatusNotFound {
 		t.Fatalf("member promote owner draft doc status=%d body=%s; want 404", promoteRec.Code, promoteRec.Body.String())
 	}
-	deleteKBReq := httptest.NewRequest(http.MethodDelete, "/api/kbs/kb1/documents/doc-owner-kb-draft", nil)
-	deleteKBCtx := context.WithValue(deleteKBReq.Context(), pathCtxKey{}, map[string]string{"id": "kb1", "docId": "doc-owner-kb-draft"})
+	deleteKBReq := httptest.NewRequest(http.MethodDelete, "/api/kbs/kb2/documents/doc-owner-kb-draft", nil)
+	deleteKBCtx := context.WithValue(deleteKBReq.Context(), pathCtxKey{}, map[string]string{"id": "kb2", "docId": "doc-owner-kb-draft"})
 	deleteKBCtx = context.WithValue(deleteKBCtx, userCtxKey{}, &store.User{ID: "member", Role: "user", Status: "active"})
 	deleteKBReq = deleteKBReq.WithContext(deleteKBCtx)
 	deleteKBRec := httptest.NewRecorder()
@@ -217,8 +220,8 @@ func TestWorkspaceDraftHTTPBoundaries(t *testing.T) {
 	if rec, docs := listDocs("member"); rec.Code != http.StatusOK || len(docs) != 1 || docs[0].ID != "doc-owner-draft" {
 		t.Fatalf("member conversation docs after commit status=%d docs=%#v; want shared", rec.Code, docs)
 	}
-	listKBReq = httptest.NewRequest(http.MethodGet, "/api/kbs/kb1/documents", nil)
-	listKBCtx = context.WithValue(listKBReq.Context(), pathCtxKey{}, map[string]string{"id": "kb1"})
+	listKBReq = httptest.NewRequest(http.MethodGet, "/api/kbs/kb2/documents", nil)
+	listKBCtx = context.WithValue(listKBReq.Context(), pathCtxKey{}, map[string]string{"id": "kb2"})
 	listKBCtx = context.WithValue(listKBCtx, userCtxKey{}, &store.User{ID: "member", Role: "user", Status: "active"})
 	listKBReq = listKBReq.WithContext(listKBCtx)
 	listKBRec = httptest.NewRecorder()
@@ -234,7 +237,7 @@ func TestWorkspaceDraftHTTPBoundaries(t *testing.T) {
 	listProjectRec = httptest.NewRecorder()
 	listProjectDocsHandler(deps, listProjectRec, listProjectReq)
 	projectDocs = nil
-	if err := json.Unmarshal(listProjectRec.Body.Bytes(), &projectDocs); err != nil || listProjectRec.Code != http.StatusOK || len(projectDocs) != 1 || projectDocs[0].ID != "doc-owner-kb-draft" {
+	if err := json.Unmarshal(listProjectRec.Body.Bytes(), &projectDocs); err != nil || listProjectRec.Code != http.StatusOK || len(projectDocs) != 1 || projectDocs[0].ID != "doc-owner-project-draft" {
 		t.Fatalf("member project docs after commit status=%d docs=%#v decode=%v", listProjectRec.Code, projectDocs, err)
 	}
 }
