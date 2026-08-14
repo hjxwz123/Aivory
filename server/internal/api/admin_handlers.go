@@ -370,6 +370,12 @@ func createModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	} else {
 		m.BuiltinTools = builtinTools
 	}
+	if mcpServerIDs, err := store.NormalizeMCPServerIDs(m.MCPServerIDs); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	} else {
+		m.MCPServerIDs = mcpServerIDs
+	}
 	if err := normalizeModelExtraParams(&m); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -460,6 +466,12 @@ func updateModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	} else {
 		m.BuiltinTools = builtinTools
+	}
+	if mcpServerIDs, err := store.NormalizeMCPServerIDs(m.MCPServerIDs); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	} else {
+		m.MCPServerIDs = mcpServerIDs
 	}
 	if err := normalizeModelExtraParams(&m); err != nil {
 		writeError(w, http.StatusBadRequest, err)

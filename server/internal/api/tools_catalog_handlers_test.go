@@ -31,6 +31,7 @@ func TestSelectableToolsCatalogIsFlatSafeAndDeduplicatesMCPService(t *testing.T)
 		ChannelID: channel.ID, Kind: "chat", RequestID: "catalog-model", Label: "Catalog model",
 		Enabled: true, Stream: true, ToolMode: "native",
 		BuiltinTools: json.RawMessage(`["aivory_web_search"]`),
+		MCPServerIDs: json.RawMessage(`[]`),
 		OfficialTools: json.RawMessage(`[
 			{"name":"web_search","icon":"Search","request":{"tools":[{"type":"web_search","private":"must-not-leak"}]}}
 		]`),
@@ -86,6 +87,11 @@ func TestSelectableToolsCatalogIsFlatSafeAndDeduplicatesMCPService(t *testing.T)
 		counts[id]++
 		if allowed, ok := row["allowed"].(bool); !ok || !allowed {
 			t.Fatalf("unrestricted catalog row is not allowed: %#v", row)
+		}
+		if id == "mcp:"+remote.ID {
+			if selected, ok := row["default_selected"].(bool); !ok || selected {
+				t.Fatalf("model explicit-none MCP default was not reflected: %#v", row)
+			}
 		}
 	}
 	for _, id := range []string{"builtin:aivory_web_search", "hosted:web_search", "mcp:" + remote.ID} {

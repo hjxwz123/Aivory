@@ -118,6 +118,33 @@ func TestSelectedToolIDsOmittedMeansAllAndExplicitEmptyMeansNone(t *testing.T) {
 	})
 }
 
+func TestModelMCPDefaultsFilterOmittedSelectionButNotExplicitUserSelection(t *testing.T) {
+	orchestrator, provider, model, conversation, _, db := setupToolRouteTest(t)
+	orchestrator.tools = &selectedToolsRegistry{}
+	if _, err := db.Exec(`UPDATE models SET mcp_server_ids='["rail"]' WHERE id=?`, model.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	runToolRouteTurn(t, orchestrator, model.ID, conversation.ID, RunRequest{ToolMode: ToolModeEnabled})
+	request := provider.mainRequests[0]
+	if !requestHasTool(request, "mcp_train_lookup_abc123") || requestHasTool(request, "mcp_paper_search_def456") {
+		t.Fatalf("model MCP defaults were not applied: %+v", request.Tools)
+	}
+
+	orchestrator, provider, model, conversation, _, db = setupToolRouteTest(t)
+	orchestrator.tools = &selectedToolsRegistry{}
+	if _, err := db.Exec(`UPDATE models SET mcp_server_ids='["rail"]' WHERE id=?`, model.ID); err != nil {
+		t.Fatal(err)
+	}
+	runToolRouteTurn(t, orchestrator, model.ID, conversation.ID, RunRequest{
+		ToolMode: ToolModeEnabled, SelectedToolsConfigured: true, SelectedToolIDs: []string{"mcp:papers"},
+	})
+	request = provider.mainRequests[0]
+	if requestHasTool(request, "mcp_train_lookup_abc123") || !requestHasTool(request, "mcp_paper_search_def456") {
+		t.Fatalf("explicit user selection did not override model defaults: %+v", request.Tools)
+	}
+}
+
 func TestAutomaticRouterReceivesOnlySelectedCandidates(t *testing.T) {
 	orchestrator, provider, model, conversation, _, _ := setupToolRouteTest(t)
 	orchestrator.tools = &selectedToolsRegistry{}
@@ -169,5 +196,26 @@ func TestFallbackRebuildPreservesSelectedToolSubset(t *testing.T) {
 	}
 	if len(request.OfficialToolNames) != 1 || request.OfficialToolNames[0] != "web_search" {
 		t.Fatalf("fallback hosted tools=%v", request.OfficialToolNames)
+	}
+}
+
+func TestFallbackRebuildUsesFallbackModelMCPDefaults(t *testing.T) {
+	orchestrator, _, model, _, _, db := setupToolRouteTest(t)
+	orchestrator.tools = &selectedToolsRegistry{}
+	fallback, err := store.CreateModel(context.Background(), db, store.Model{
+		ChannelID: model.ChannelID, Kind: "chat", RequestID: "mcp-default-fallback", Label: "MCP default fallback",
+		Enabled: true, Stream: true, ToolMode: "native", MCPServerIDs: json.RawMessage(`["papers"]`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, _, _, err := orchestrator.buildFallbackRequest(context.Background(), UnifiedChatRequest{
+		UserID: "u1", ToolsEnabled: true,
+	}, fallback.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(request.Tools) == 0 || requestHasTool(request, "mcp_train_lookup_abc123") || !requestHasTool(request, "mcp_paper_search_def456") {
+		t.Fatalf("fallback MCP defaults were not applied: %+v", request.Tools)
 	}
 }

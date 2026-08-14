@@ -535,6 +535,37 @@ func filterModelBuiltinTools(defs []ToolDef, allowed map[string]bool) []ToolDef 
 	return out
 }
 
+// modelMCPServerIDSet resolves the model's default MCP selection. nil means all
+// currently eligible services; explicit [] and malformed non-null data both
+// fail closed to an empty set.
+func modelMCPServerIDSet(raw json.RawMessage) map[string]bool {
+	ids, configured, err := store.ParseMCPServerIDs(raw)
+	if err != nil {
+		return map[string]bool{}
+	}
+	if !configured {
+		return nil
+	}
+	allowed := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		allowed[id] = true
+	}
+	return allowed
+}
+
+func filterModelMCPTools(defs []MCPToolDef, allowed map[string]bool) []MCPToolDef {
+	if allowed == nil {
+		return defs
+	}
+	out := make([]MCPToolDef, 0, len(defs))
+	for _, definition := range defs {
+		if allowed[definition.ServerID] {
+			out = append(out, definition)
+		}
+	}
+	return out
+}
+
 func toolAccessPolicyAllows(policy *ToolAccessPolicy, id string) bool {
 	if policy == nil {
 		return true
@@ -1457,6 +1488,7 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 		req.ExtraParams = m.ExtraParams
 	}
 	fallbackBuiltinTools := modelBuiltinToolSet(m.BuiltinTools)
+	fallbackMCPServers := modelMCPServerIDSet(m.MCPServerIDs)
 	globalDisabledTools := o.disabledToolSet()
 	fallbackToolMode := m.ToolMode
 	if fallbackToolMode == "" {
@@ -1488,6 +1520,8 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 		mcpDefs := filterMCPToolsByAccess(o.listMCPTools(m.ID), base.ToolAccessPolicy)
 		if base.SelectedToolsConfigured {
 			mcpDefs = filterMCPToolsBySelection(mcpDefs, selectedTools)
+		} else {
+			mcpDefs = filterModelMCPTools(mcpDefs, fallbackMCPServers)
 		}
 		req.Tools = append(builtinDefs, flattenMCPToolDefs(mcpDefs)...)
 		req.OfficialToolNames, req.OfficialToolRequests = configuredOfficialToolRequests(m.OfficialTools, req.Fast)
@@ -2503,6 +2537,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// fast paths and never leave this process.
 	sandboxFiles := listSandboxFiles(ctx, o.db, conv.ID, req.UserID, o.uploadDir)
 	builtinTools := modelBuiltinToolSet(model.BuiltinTools)
+	mcpServers := modelMCPServerIDSet(model.MCPServerIDs)
 	globalDisabledTools := o.disabledToolSet()
 	selectedTools := selectedToolIDSet(req.SelectedToolIDs, req.SelectedToolsConfigured)
 	memoryEnabled := store.MemoryEnabledForUser(ctx, o.db, req.UserID)
@@ -2559,6 +2594,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		mcpDefs := filterMCPToolsByAccess(o.listMCPTools(model.ID), req.ToolAccessPolicy)
 		if req.SelectedToolsConfigured {
 			mcpDefs = filterMCPToolsBySelection(mcpDefs, selectedTools)
+		} else {
+			mcpDefs = filterModelMCPTools(mcpDefs, mcpServers)
 		}
 		toolDefs = append(builtinDefs, flattenMCPToolDefs(mcpDefs)...)
 	}
