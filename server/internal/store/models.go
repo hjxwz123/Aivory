@@ -61,6 +61,9 @@ type User struct {
 	// memory). Transient — populated alongside the group fields on auth/me; never
 	// persisted on the users table.
 	MemoryAvailable bool `json:"memory_available"`
+	// Permissions is the normalized capability policy inherited from the user's
+	// membership group. It is populated only on auth/me responses.
+	Permissions UserGroupPermissions `json:"permissions"`
 }
 
 // UserGroup is a membership tier (§ user groups). Features is a JSON array of
@@ -100,8 +103,12 @@ type UserGroup struct {
 	// rate is a global setting, not a per-group field.
 	CreditAllowance     float64 `json:"credit_allowance"`
 	CreditPeriodSeconds int     `json:"credit_period_seconds"`
-	CreatedAt           int64   `json:"created_at"`
-	UpdatedAt           int64   `json:"updated_at"`
+	// Permissions is a JSON policy for group-scoped product capabilities and
+	// resource allowlists. Empty/legacy values normalize to the permissive policy
+	// so existing deployments retain their behavior after migration.
+	Permissions UserGroupPermissions `json:"permissions"`
+	CreatedAt   int64                `json:"created_at"`
+	UpdatedAt   int64                `json:"updated_at"`
 }
 
 // ModelGroupQuota caps a group's usage of one model within a fixed window.
@@ -165,9 +172,9 @@ type Model struct {
 	// entry carries name/icon/request; legacy string arrays remain readable.
 	// Empty means this model exposes no provider-hosted tools.
 	OfficialTools json.RawMessage `json:"official_tools"`
-	// BuiltinTools is the optional allowlist for Aivory's locally-executed tools.
-	// nil/null means the backwards-compatible default (all registered tools);
-	// an explicit [] means no local tools. Only chat orchestration consumes it.
+	// BuiltinTools controls which locally-executed tools are selected by default.
+	// nil/null selects all registered tools; an explicit [] selects none. Global
+	// and group policy still cap availability when chat orchestration consumes it.
 	BuiltinTools json.RawMessage `json:"builtin_tools"`
 	// Tags is a JSON array of model_tags ids assigned to this model — used by the
 	// model picker's tag filter (§ model tags). Empty = untagged.
@@ -474,21 +481,74 @@ type KnowledgeBase struct {
 	CreatedAt        int64  `json:"created_at"`
 	// '' = personal; set = shared with the workspace's members (§workspaces).
 	WorkspaceID string `json:"workspace_id"`
+	// AccessRole is transient and user-relative: owner, read, write, or workspace.
+	// It is populated by user-facing list/get queries and never persisted.
+	AccessRole       string `json:"access_role,omitempty"`
+	OwnerName        string `json:"owner_name,omitempty"`
+	CanShare         bool   `json:"can_share"`
+	CanUpload        bool   `json:"can_upload"`
+	CanDelete        bool   `json:"can_delete"`
+	CanDeleteContent bool   `json:"can_delete_content"`
+	CanManageMembers bool   `json:"can_manage_members"`
+}
+
+// KnowledgeBaseShare grants another user read-only or collaborative access to
+// one personal knowledge base. Workspace knowledge bases never use this table.
+type KnowledgeBaseShare struct {
+	KBID      string `json:"kb_id"`
+	UserID    string `json:"user_id"`
+	Role      string `json:"role"` // read | write
+	Name      string `json:"name"`
+	Email     string `json:"email"`
+	AvatarURL string `json:"avatar_url,omitempty"`
+	CreatedAt int64  `json:"created_at"`
+	UpdatedAt int64  `json:"updated_at"`
+}
+
+// KnowledgeBaseUploader is the identity-only shape used by document uploader
+// filters. It deliberately does not pretend to carry a share role or share
+// timestamps.
+type KnowledgeBaseUploader struct {
+	UserID    string `json:"user_id"`
+	Name      string `json:"name"`
+	Email     string `json:"email"`
+	AvatarURL string `json:"avatar_url,omitempty"`
+}
+
+// WorkspaceKnowledgeBaseMemberPermission is a per-library override shown only
+// to that workspace KB's creator or the workspace owner. The two Total fields
+// are read-only upper bounds from workspace_members.
+type WorkspaceKnowledgeBaseMemberPermission struct {
+	KBID                    string `json:"kb_id"`
+	UserID                  string `json:"user_id"`
+	Role                    string `json:"role"`
+	Name                    string `json:"name"`
+	Email                   string `json:"email"`
+	AvatarURL               string `json:"avatar_url,omitempty"`
+	CanAddFiles             bool   `json:"can_add_files"`
+	CanDeleteContent        bool   `json:"can_delete_content"`
+	TotalCanAddKBFiles      bool   `json:"total_can_add_kb_files"`
+	TotalCanDeleteKBContent bool   `json:"total_can_delete_kb_content"`
+	Locked                  bool   `json:"locked"`
 }
 
 // Document — §5 documents row. status: pending|parsing|embedding|ready|failed.
 type Document struct {
-	ID             string `json:"id"`
-	KBID           string `json:"kb_id"`
-	ConversationID string `json:"conversation_id"`
-	Filename       string `json:"filename"`
-	MimeType       string `json:"mime_type"`
-	SizeBytes      int64  `json:"size_bytes"`
-	Status         string `json:"status"`
-	Error          string `json:"error"`
-	ChunkCount     int    `json:"chunk_count"`
-	StoragePath    string `json:"-"`
-	CreatedAt      int64  `json:"created_at"`
+	ID               string `json:"id"`
+	KBID             string `json:"kb_id"`
+	ConversationID   string `json:"conversation_id"`
+	Filename         string `json:"filename"`
+	MimeType         string `json:"mime_type"`
+	SizeBytes        int64  `json:"size_bytes"`
+	Status           string `json:"status"`
+	Error            string `json:"error"`
+	ChunkCount       int    `json:"chunk_count"`
+	StoragePath      string `json:"-"`
+	UploadedByUserID string `json:"uploaded_by_user_id"`
+	UploadedByName   string `json:"uploaded_by_name"`
+	UploadedByEmail  string `json:"uploaded_by_email,omitempty"`
+	CanDelete        bool   `json:"can_delete"`
+	CreatedAt        int64  `json:"created_at"`
 }
 
 // Memory — §4.16 row.

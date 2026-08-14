@@ -738,7 +738,7 @@ export default function AdminModelEdit() {
                   label={t('admin:models.fields.builtinToolsLabel', { defaultValue: 'Built-in tools' })}
                   hint={t('admin:models.fields.builtinToolsHint', {
                     defaultValue:
-                      'Limit the platform tools this model may use through tool calling. Default all also includes tools registered in the future.',
+                      'Choose the tools selected by default for this model. Users may adjust them; globally disabled tools remain unavailable.',
                   })}
                   className="min-w-0 sm:col-span-2"
                 >

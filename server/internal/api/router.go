@@ -25,6 +25,7 @@ import (
 	"aivory/server/internal/mail"
 	"aivory/server/internal/queue"
 	"aivory/server/internal/rag"
+	"aivory/server/internal/store"
 	"aivory/server/internal/tools"
 )
 
@@ -225,10 +226,10 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("POST", "/api/me/2fa/setup", rateLimitedIP(d, "2fa", rl2faSetupMax, rl2faSetupWindow, requireAuth(d, twofaSetupHandler)))
 	mux.handle("POST", "/api/me/2fa/enable", rateLimitedIP(d, "2fa", rl2faSetupMax, rl2faSetupWindow, requireAuth(d, twofaEnableHandler)))
 	mux.handle("POST", "/api/me/2fa/disable", rateLimitedIP(d, "2fa", rl2faSetupMax, rl2faSetupWindow, requireAuth(d, twofaDisableHandler)))
-	mux.handle("GET", "/api/me/memories", requireAuth(d, listMemoriesHandler))
-	mux.handle("POST", "/api/me/memories", requireAuth(d, createMemoryHandler))
-	mux.handle("PATCH", "/api/me/memories/:id", requireAuth(d, updateMemoryHandler))
-	mux.handle("DELETE", "/api/me/memories/:id", requireAuth(d, deleteMemoryHandler))
+	mux.handle("GET", "/api/me/memories", requireAuth(d, requireMemoryHandler(listMemoriesHandler)))
+	mux.handle("POST", "/api/me/memories", requireAuth(d, requireMemoryHandler(createMemoryHandler)))
+	mux.handle("PATCH", "/api/me/memories/:id", requireAuth(d, requireMemoryHandler(updateMemoryHandler)))
+	mux.handle("DELETE", "/api/me/memories/:id", requireAuth(d, requireMemoryHandler(deleteMemoryHandler)))
 	// Redeem a code → grants the user a configured user-group for a configured
 	// duration (§ redeem codes). Tight rate limit so a stolen code can't be
 	// brute-force-typed by an attacker who knows the alphabet.
@@ -269,13 +270,14 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/payments/orders", requireAuth(d, listPaymentOrdersForUserHandler))
 	mux.handle("GET", "/api/payments/orders/:id", requireAuth(d, getPaymentOrderHandler))
 	mux.handle("POST", "/api/payments/orders/:id/resume", rateLimitedIP(d, "payment-resume", rlPaymentCheckoutMax, rlPaymentCheckoutWindow, requireAuth(d, resumePaymentOrderHandler)))
-	mux.handle("POST", "/api/audio/transcriptions", requireAuth(d, transcribeAudioHandler))
+	voicePermission := func(p store.UserGroupPermissions) bool { return p.AllowVoiceTranscription }
+	mux.handle("POST", "/api/audio/transcriptions", requireAuth(d, requireCapabilityHandler(errVoiceGroupPermission, voicePermission, transcribeAudioHandler)))
 	// Which STT provider is active (gpt = record-then-transcribe, volcano = live
 	// streaming), so the composer picks the right mic flow.
-	mux.handle("GET", "/api/audio/capabilities", requireAuth(d, audioCapabilitiesHandler))
+	mux.handle("GET", "/api/audio/capabilities", requireAuth(d, requireCapabilityHandler(errVoiceGroupPermission, voicePermission, audioCapabilitiesHandler)))
 	// Live Volcano (火山引擎 豆包) ASR relay: browser streams 16 kHz PCM over this
 	// WebSocket, we proxy it to Volcano and stream transcripts back.
-	mux.handle("GET", "/api/audio/stream", requireAuth(d, audioStreamHandler))
+	mux.handle("GET", "/api/audio/stream", requireAuth(d, requireCapabilityHandler(errVoiceGroupPermission, voicePermission, audioStreamHandler)))
 
 	// Workspaces (§workspaces) — collaborative spaces. Join is invite-link-only;
 	// the token resolver + join are rate-limited per IP (uniform 404 on unknown
@@ -284,6 +286,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("POST", "/api/workspaces", requireAuth(d, createWorkspaceHandler))
 	mux.handle("DELETE", "/api/workspaces/:id", requireAuth(d, deleteWorkspaceHandler))
 	mux.handle("GET", "/api/workspaces/:id/members", requireAuth(d, workspaceMembersHandler))
+	mux.handle("PATCH", "/api/workspaces/:id/members/:uid/permissions", requireAuth(d, updateWorkspaceMemberPermissionsHandler))
 	mux.handle("DELETE", "/api/workspaces/:id/members/:uid", requireAuth(d, kickWorkspaceMemberHandler))
 	mux.handle("POST", "/api/workspaces/:id/leave", requireAuth(d, leaveWorkspaceHandler))
 	mux.handle("POST", "/api/workspaces/:id/invite/rotate", requireAuth(d, rotateWorkspaceInviteHandler))
@@ -295,10 +298,10 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/projects/:id", requireAuth(d, getProjectHandler))
 	mux.handle("PATCH", "/api/projects/:id", requireAuth(d, updateProjectHandler))
 	mux.handle("DELETE", "/api/projects/:id", requireAuth(d, deleteProjectHandler))
-	mux.handle("GET", "/api/projects/:id/documents", requireAuth(d, listProjectDocsHandler))
-	mux.handle("POST", "/api/projects/:id/documents", requireAuth(d, uploadProjectDocHandler))
-	mux.handle("DELETE", "/api/projects/:id/documents/:docId", requireAuth(d, deleteProjectDocHandler))
-	mux.handle("PATCH", "/api/projects/:id/documents/:docId", requireAuth(d, renameProjectDocHandler))
+	mux.handle("GET", "/api/projects/:id/documents", requireAuth(d, requireKnowledgeBaseHandler(listProjectDocsHandler)))
+	mux.handle("POST", "/api/projects/:id/documents", requireAuth(d, requireKnowledgeBaseHandler(requireCapabilityHandler(errFileUploadGroupPermission, func(p store.UserGroupPermissions) bool { return p.AllowFileUpload }, uploadProjectDocHandler))))
+	mux.handle("DELETE", "/api/projects/:id/documents/:docId", requireAuth(d, requireKnowledgeBaseHandler(deleteProjectDocHandler)))
+	mux.handle("PATCH", "/api/projects/:id/documents/:docId", requireAuth(d, requireKnowledgeBaseHandler(renameProjectDocHandler)))
 
 	mux.handle("GET", "/api/search", requireAuth(d, searchHandler))
 	mux.handle("GET", "/api/conversations", requireAuth(d, listConversationsHandler))
@@ -323,18 +326,19 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("POST", "/api/conversations/:id/inline-threads", requireAuth(d, createInlineThreadHandler))
 	mux.handle("GET", "/api/conversations/:id/documents", requireAuth(d, listConversationDocsHandler))
 	mux.handle("POST", "/api/conversations/:id/documents/:docId/retry", requireAuth(d, retryConversationDocumentHandler))
-	mux.handle("POST", "/api/conversations/:id/documents/:docId/promote", requireAuth(d, promoteDocumentHandler))
+	mux.handle("POST", "/api/conversations/:id/documents/:docId/promote", requireAuth(d, requireKnowledgeBaseHandler(requireCapabilityHandler(errFileUploadGroupPermission, func(p store.UserGroupPermissions) bool { return p.AllowFileUpload }, promoteDocumentHandler))))
 	// Conversation files drawer (§ conversation files): the authoritative set of
 	// files the conversation references. Upload reuses POST /api/files; remove
 	// detaches + drops the RAG doc.
 	mux.handle("GET", "/api/conversations/:id/files", requireAuth(d, listConversationFilesHandler))
 	mux.handle("DELETE", "/api/conversations/:id/files/:fileId", requireAuth(d, deleteConversationFileHandler))
-	mux.handle("GET", "/api/conversations/:id/share", requireAuth(d, getShareHandler))
-	mux.handle("POST", "/api/conversations/:id/share", requireAuth(d, createShareHandler))
-	mux.handle("DELETE", "/api/conversations/:id/share", requireAuth(d, deleteShareHandler))
+	sharingPermission := func(p store.UserGroupPermissions) bool { return p.AllowSharing }
+	mux.handle("GET", "/api/conversations/:id/share", requireAuth(d, requireCapabilityHandler(errSharingGroupPermission, sharingPermission, getShareHandler)))
+	mux.handle("POST", "/api/conversations/:id/share", requireAuth(d, requireCapabilityHandler(errSharingGroupPermission, sharingPermission, createShareHandler)))
+	mux.handle("DELETE", "/api/conversations/:id/share", requireAuth(d, requireCapabilityHandler(errSharingGroupPermission, sharingPermission, deleteShareHandler)))
 	mux.handle("POST", "/api/shared/:token/clone", requireAuth(d, cloneSharedConversationHandler))
 
-	mux.handle("POST", "/api/files", requireAuth(d, uploadFileHandler))
+	mux.handle("POST", "/api/files", requireAuth(d, requireCapabilityHandler(errFileUploadGroupPermission, func(p store.UserGroupPermissions) bool { return p.AllowFileUpload }, uploadFileHandler)))
 	mux.handle("GET", "/api/files/:id", requireAuth(d, downloadFileHandler))
 	mux.handle("GET", "/api/documents/:id/content", requireAuth(d, documentContentHandler))
 	// User files page (§ user files page): inventory, meter, delete, preview.
@@ -344,13 +348,22 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/me/storage", requireAuth(d, myStorageHandler))
 	mux.handle("GET", "/api/artifacts/:id", requireAuth(d, downloadArtifactHandler))
 
-	mux.handle("GET", "/api/kbs", requireAuth(d, listKBsHandler))
-	mux.handle("POST", "/api/kbs", requireAuth(d, createKBHandler))
-	mux.handle("DELETE", "/api/kbs/:id", requireAuth(d, deleteKBHandler))
-	mux.handle("POST", "/api/kbs/:id/documents", requireAuth(d, uploadKBDocHandler))
-	mux.handle("GET", "/api/kbs/:id/documents", requireAuth(d, listKBDocsHandler))
-	mux.handle("POST", "/api/kbs/:id/documents/:docId/retry", requireAuth(d, retryKBDocHandler))
-	mux.handle("DELETE", "/api/kbs/:id/documents/:docId", requireAuth(d, deleteKBDocHandler))
+	mux.handle("GET", "/api/kbs", requireAuth(d, requireKnowledgeBaseHandler(listKBsHandler)))
+	mux.handle("POST", "/api/kbs", requireAuth(d, requireKnowledgeBaseHandler(createKBHandler)))
+	mux.handle("GET", "/api/kbs/:id", requireAuth(d, requireKnowledgeBaseHandler(getKBHandler)))
+	mux.handle("DELETE", "/api/kbs/:id", requireAuth(d, requireKnowledgeBaseHandler(deleteKBHandler)))
+	mux.handle("POST", "/api/kbs/:id/documents", requireAuth(d, requireKnowledgeBaseHandler(uploadKBDocHandler)))
+	mux.handle("GET", "/api/kbs/:id/documents", requireAuth(d, requireKnowledgeBaseHandler(listKBDocsHandler)))
+	mux.handle("GET", "/api/kbs/:id/uploaders", requireAuth(d, requireKnowledgeBaseHandler(listKBDocumentUploadersHandler)))
+	mux.handle("POST", "/api/kbs/:id/documents/:docId/retry", requireAuth(d, requireKnowledgeBaseHandler(retryKBDocHandler)))
+	mux.handle("PATCH", "/api/kbs/:id/documents/:docId", requireAuth(d, requireKnowledgeBaseHandler(renameKBDocHandler)))
+	mux.handle("DELETE", "/api/kbs/:id/documents/:docId", requireAuth(d, requireKnowledgeBaseHandler(deleteKBDocHandler)))
+	mux.handle("GET", "/api/kbs/:id/shares", requireAuth(d, requireKnowledgeBaseHandler(listKBSharesHandler)))
+	mux.handle("PUT", "/api/kbs/:id/shares", requireAuth(d, requireKnowledgeBaseHandler(upsertKBShareHandler)))
+	mux.handle("DELETE", "/api/kbs/:id/shares/:uid", requireAuth(d, requireKnowledgeBaseHandler(deleteKBShareHandler)))
+	mux.handle("GET", "/api/kbs/:id/share-candidates", requireAuth(d, requireKnowledgeBaseHandler(listKBShareCandidatesHandler)))
+	mux.handle("GET", "/api/kbs/:id/workspace-members", requireAuth(d, requireKnowledgeBaseHandler(listWorkspaceKBMembersHandler)))
+	mux.handle("PATCH", "/api/kbs/:id/workspace-members/:uid", requireAuth(d, requireKnowledgeBaseHandler(updateWorkspaceKBMemberHandler)))
 
 	// Admin endpoints.
 	mux.handle("GET", "/api/admin/channels", requireAdmin(d, listChannelsAdmin))
@@ -394,6 +407,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("PATCH", "/api/admin/user-groups/reorder", requireAdmin(d, reorderUserGroupsAdmin))
 	mux.handle("PATCH", "/api/admin/user-groups/:id", requireAdmin(d, updateUserGroupAdmin))
 	mux.handle("DELETE", "/api/admin/user-groups/:id", requireAdmin(d, deleteUserGroupAdmin))
+	mux.handle("GET", "/api/admin/user-groups/:id/users", requireAdmin(d, listUserGroupUsersAdmin))
 	mux.handle("GET", "/api/admin/credit-packages", requireAdmin(d, listCreditPackagesAdmin))
 	mux.handle("POST", "/api/admin/credit-packages", requireAdmin(d, createCreditPackageAdmin))
 	mux.handle("PATCH", "/api/admin/credit-packages/reorder", requireAdmin(d, reorderCreditPackagesAdmin))

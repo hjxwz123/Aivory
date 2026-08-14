@@ -12,6 +12,8 @@ import type {
   ApiAdminLoginHistoryPage,
   ApiWorkspace,
   ApiWorkspaceMember,
+  ApiWorkspaceMemberPermissions,
+  ApiWorkspaceKnowledgeBaseMemberPermission,
   ApiAnalytics,
   ApiAuthResponse,
   ApiBuiltinTool,
@@ -24,6 +26,9 @@ import type {
   ApiDocument,
   ApiKnowledgeBase,
   ApiAdminKnowledgeBase,
+  ApiKnowledgeBaseShare,
+  ApiKnowledgeBaseUploader,
+  ApiGroupUsersPage,
   ApiMemory,
   ApiMessage,
   ApiModel,
@@ -425,7 +430,11 @@ export const projectsApi = {
   addDoc: (id: string, body: { filename: string; content: string; mime_type?: string }) =>
     api<ApiDocument>(`/projects/${encodeURIComponent(id)}/documents`, { method: 'POST', body }),
   /** Upload a real file (multipart) into the project's knowledge library. */
-  uploadDoc: (id: string, file: File, opts: { onProgress?: (progress: UploadProgress) => void } = {}) => {
+  uploadDoc: (
+    id: string,
+    file: File,
+    opts: { onProgress?: (progress: UploadProgress) => void; signal?: AbortSignal } = {},
+  ) => {
     const fd = new FormData()
     fd.append('file', file)
     return apiUpload<ApiDocument>(`/projects/${encodeURIComponent(id)}/documents`, fd, opts)
@@ -460,6 +469,11 @@ export const workspacesApi = {
   create: (name: string) => api<ApiWorkspace>('/workspaces', { method: 'POST', body: { name } }),
   remove: (id: string) => api<{ ok: true }>(`/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   members: (id: string) => api<{ members: ApiWorkspaceMember[] }>(`/workspaces/${encodeURIComponent(id)}/members`),
+  updateMemberPermissions: (id: string, userId: string, body: ApiWorkspaceMemberPermissions) =>
+    api<ApiWorkspaceMember>(
+      `/workspaces/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}/permissions`,
+      { method: 'PATCH', body },
+    ),
   kick: (id: string, userId: string) =>
     api<{ ok: true }>(`/workspaces/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`, { method: 'DELETE' }),
   leave: (id: string) => api<{ ok: true }>(`/workspaces/${encodeURIComponent(id)}/leave`, { method: 'POST' }),
@@ -639,14 +653,51 @@ export const sharedApi = {
 export const kbsApi = {
   list: (workspaceId?: string) =>
     api<ApiKnowledgeBase[]>(`/kbs${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`),
+  get: (id: string) => api<ApiKnowledgeBase>(`/kbs/${encodeURIComponent(id)}`),
   create: (body: { name: string; description?: string; workspace_id?: string }) =>
     api<ApiKnowledgeBase>('/kbs', { method: 'POST', body }),
   remove: (id: string) => api<{ ok: true }>(`/kbs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  listDocs: (id: string) => api<ApiDocument[]>(`/kbs/${encodeURIComponent(id)}/documents`),
-  addDoc: (id: string, body: { filename: string; content: string; mime_type?: string }) =>
-    api<ApiDocument>(`/kbs/${encodeURIComponent(id)}/documents`, { method: 'POST', body }),
+  listDocs: (id: string, params: { search?: string; uploaded_by_user_id?: string } = {}) => {
+    const query = new URLSearchParams()
+    if (params.search?.trim()) query.set('search', params.search.trim())
+    if (params.uploaded_by_user_id?.trim()) query.set('uploaded_by_user_id', params.uploaded_by_user_id.trim())
+    const suffix = query.toString() ? `?${query}` : ''
+    return api<ApiDocument[]>(`/kbs/${encodeURIComponent(id)}/documents${suffix}`)
+  },
+  uploaders: (id: string) => api<ApiKnowledgeBaseUploader[]>(`/kbs/${encodeURIComponent(id)}/uploaders`),
+  shares: (id: string) => api<ApiKnowledgeBaseShare[]>(`/kbs/${encodeURIComponent(id)}/shares`),
+  shareCandidates: (id: string, search: string) =>
+    api<ApiKnowledgeBaseShare[]>(
+      `/kbs/${encodeURIComponent(id)}/share-candidates?search=${encodeURIComponent(search)}`,
+    ),
+  upsertShare: (id: string, body: { user_id: string; role: 'read' | 'write' }) =>
+    api<ApiKnowledgeBaseShare>(`/kbs/${encodeURIComponent(id)}/shares`, { method: 'PUT', body }),
+  removeShare: (id: string, userId: string) =>
+    api<{ ok: true }>(`/kbs/${encodeURIComponent(id)}/shares/${encodeURIComponent(userId)}`, { method: 'DELETE' }),
+  workspaceMembers: (id: string) =>
+    api<ApiWorkspaceKnowledgeBaseMemberPermission[]>(`/kbs/${encodeURIComponent(id)}/workspace-members`),
+  updateWorkspaceMember: (
+    id: string,
+    userId: string,
+    body: { can_add_files: boolean; can_delete_content: boolean },
+  ) =>
+    api<ApiWorkspaceKnowledgeBaseMemberPermission>(
+      `/kbs/${encodeURIComponent(id)}/workspace-members/${encodeURIComponent(userId)}`,
+      { method: 'PATCH', body },
+    ),
+  addDoc: (
+    id: string,
+    body: { filename: string; content: string; mime_type?: string },
+    signal?: AbortSignal,
+  ) =>
+    api<ApiDocument>(`/kbs/${encodeURIComponent(id)}/documents`, { method: 'POST', body, signal }),
   retryDoc: (id: string, docId: string) =>
     api<{ ok: true }>(`/kbs/${encodeURIComponent(id)}/documents/${encodeURIComponent(docId)}/retry`, { method: 'POST' }),
+  renameDoc: (id: string, docId: string, filename: string) =>
+    api<{ ok: true }>(`/kbs/${encodeURIComponent(id)}/documents/${encodeURIComponent(docId)}`, {
+      method: 'PATCH',
+      body: { filename },
+    }),
   removeDoc: (id: string, docId: string) =>
     api<{ ok: true }>(`/kbs/${encodeURIComponent(id)}/documents/${encodeURIComponent(docId)}`, { method: 'DELETE' }),
 }
@@ -874,6 +925,10 @@ export const adminApi = {
     api<ApiUserGroup>(`/admin/user-groups/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
   removeUserGroup: (id: string) =>
     api<{ ok: true }>(`/admin/user-groups/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  userGroupUsers: (id: string, search = '', limit = 20, offset = 0) =>
+    api<ApiGroupUsersPage>(
+      `/admin/user-groups/${encodeURIComponent(id)}/users?search=${encodeURIComponent(search)}&limit=${limit}&offset=${offset}`,
+    ),
   creditPackages: () => api<ApiCreditPackage[]>('/admin/credit-packages'),
   createCreditPackage: (body: Partial<ApiCreditPackage>) =>
     api<ApiCreditPackage>('/admin/credit-packages', { method: 'POST', body }),

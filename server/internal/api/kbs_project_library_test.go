@@ -25,6 +25,8 @@ func TestStandaloneKBAPIHidesAndProtectsProjectLibrary(t *testing.T) {
 		('standalone-kb','u1','Standalone','emb1',3),
 		('project-kb','u1','Project library','emb1',3)`)
 	mustExec(t, db, `INSERT INTO projects(id,user_id,name,kb_id) VALUES('project-1','u1','Project','project-kb')`)
+	mustExec(t, db, `INSERT INTO documents(id,kb_id,filename,mime_type,size_bytes,status,storage_path,uploaded_by_user_id)
+		VALUES('project-doc','project-kb','project.txt','text/plain',7,'failed','/tmp/project.txt','u1')`)
 
 	user := &store.User{ID: "u1", Role: "user", Status: "active"}
 	listReq := httptest.NewRequest(http.MethodGet, "/api/kbs", nil)
@@ -42,6 +44,73 @@ func TestStandaloneKBAPIHidesAndProtectsProjectLibrary(t *testing.T) {
 		t.Fatalf("listed KBs=%#v, want only standalone-kb", listed)
 	}
 	assertNoRetrievalImplementationFields(t, listed[0], "embedding_model_id", "embedding_dim")
+
+	get := func(id string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/kbs/"+id, nil)
+		ctx := context.WithValue(req.Context(), pathCtxKey{}, map[string]string{"id": id})
+		req = req.WithContext(context.WithValue(ctx, userCtxKey{}, user))
+		rec := httptest.NewRecorder()
+		getKBHandler(Deps{DB: db}, rec, req)
+		return rec
+	}
+	standaloneRec := get("standalone-kb")
+	if standaloneRec.Code != http.StatusOK {
+		t.Fatalf("get standalone KB status=%d body=%s", standaloneRec.Code, standaloneRec.Body.String())
+	}
+	var standalone map[string]any
+	if err := json.Unmarshal(standaloneRec.Body.Bytes(), &standalone); err != nil {
+		t.Fatalf("decode standalone KB: %v", err)
+	}
+	assertNoRetrievalImplementationFields(t, standalone, "embedding_model_id", "embedding_dim")
+	if projectRec := get("project-kb"); projectRec.Code != http.StatusNotFound {
+		t.Fatalf("get project KB status=%d body=%s, want 404", projectRec.Code, projectRec.Body.String())
+	}
+
+	projectRequest := func(method, target, body string, params map[string]string, endpoint handler) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, target, strings.NewReader(body))
+		req.Header.Set("content-type", "application/json")
+		ctx := context.WithValue(req.Context(), pathCtxKey{}, params)
+		req = req.WithContext(context.WithValue(ctx, userCtxKey{}, user))
+		rec := httptest.NewRecorder()
+		endpoint(Deps{DB: db}, rec, req)
+		return rec
+	}
+	for _, request := range []struct {
+		name     string
+		method   string
+		target   string
+		body     string
+		params   map[string]string
+		endpoint handler
+	}{
+		{"documents", http.MethodGet, "/api/kbs/project-kb/documents", "", map[string]string{"id": "project-kb"}, listKBDocsHandler},
+		{"uploaders", http.MethodGet, "/api/kbs/project-kb/uploaders", "", map[string]string{"id": "project-kb"}, listKBDocumentUploadersHandler},
+		{"upload", http.MethodPost, "/api/kbs/project-kb/documents", `{"filename":"forged.txt","content":"forged"}`, map[string]string{"id": "project-kb"}, uploadKBDocHandler},
+		{"retry", http.MethodPost, "/api/kbs/project-kb/documents/project-doc/retry", "", map[string]string{"id": "project-kb", "docId": "project-doc"}, retryKBDocHandler},
+		{"rename", http.MethodPatch, "/api/kbs/project-kb/documents/project-doc", `{"filename":"renamed.txt"}`, map[string]string{"id": "project-kb", "docId": "project-doc"}, renameKBDocHandler},
+		{"delete document", http.MethodDelete, "/api/kbs/project-kb/documents/project-doc", "", map[string]string{"id": "project-kb", "docId": "project-doc"}, deleteKBDocHandler},
+	} {
+		rec := projectRequest(request.method, request.target, request.body, request.params, request.endpoint)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("project KB %s status=%d body=%s, want 404", request.name, rec.Code, rec.Body.String())
+		}
+	}
+	var projectDocFilename, projectDocStatus string
+	if err := db.QueryRow(`SELECT filename,status FROM documents WHERE id='project-doc'`).Scan(&projectDocFilename, &projectDocStatus); err != nil {
+		t.Fatalf("read project document after rejected standalone mutations: %v", err)
+	}
+	if projectDocFilename != "project.txt" || projectDocStatus != "failed" {
+		t.Fatalf("project document changed to filename=%q status=%q", projectDocFilename, projectDocStatus)
+	}
+	var forgedDocCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM documents WHERE kb_id='project-kb' AND id<>'project-doc'`).Scan(&forgedDocCount); err != nil {
+		t.Fatalf("count forged project documents: %v", err)
+	}
+	if forgedDocCount != 0 {
+		t.Fatalf("standalone routes created %d project documents", forgedDocCount)
+	}
 
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/kbs/project-kb", nil)
 	deleteCtx := context.WithValue(deleteReq.Context(), pathCtxKey{}, map[string]string{"id": "project-kb"})
@@ -100,6 +169,11 @@ func TestCreateKBUsesAdministratorConfigurationAndHidesImplementation(t *testing
 		t.Fatalf("decode create response: %v", err)
 	}
 	assertNoRetrievalImplementationFields(t, body, "embedding_model_id", "embedding_dim")
+	for _, field := range []string{"can_share", "can_upload", "can_delete", "can_delete_content"} {
+		if value, ok := body[field].(bool); !ok || !value {
+			t.Fatalf("create response %s=%#v, want true creator capability", field, body[field])
+		}
+	}
 
 	var modelID string
 	var dim int

@@ -19,8 +19,8 @@ export interface PersistedComposerPrefs {
   // reset the live toolMode to this complete value (including auto/enabled), so
   // a prior conversation's override cannot leak into the next one.
   defaultToolMode: ToolMode
-  /** Per-model explicit tool subsets. A missing model key means all currently
-   * available tools; a present empty array means the user selected none. */
+  /** Per-model explicit tool subsets. A missing model key means the model's
+   * current defaults; a present empty array means the user selected none. */
   selectedToolIdsByModel: Record<string, string[]>
   paramValuesByModel: Record<string, ComposerParamValues>
   draftsByScope: Record<string, string>

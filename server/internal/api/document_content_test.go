@@ -50,6 +50,9 @@ func TestDocumentContentEnforcesKnowledgeBaseAccess(t *testing.T) {
 		if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
 			t.Fatalf("%s X-Content-Type-Options=%q, want nosniff", userID, got)
 		}
+		if got := rec.Header().Get("Cache-Control"); got != "private, no-store" {
+			t.Fatalf("%s Cache-Control=%q, want private, no-store", userID, got)
+		}
 	}
 
 	if rec := request("outsider"); rec.Code != http.StatusNotFound {

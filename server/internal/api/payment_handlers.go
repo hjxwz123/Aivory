@@ -481,6 +481,10 @@ func applyPaymentResumeReconciliationEvent(r *http.Request, d Deps, order store.
 	}
 	if appliedOrder != nil && appliedOrder.UserID != "" {
 		invalidateAuthUser(d, appliedOrder.UserID)
+		if appliedOrder.ProductType == store.PaymentProductUserGroup {
+			revokeUserPermissionSnapshots(d, appliedOrder.UserID)
+			publishUserEvent(d, nil, appliedOrder.UserID, "account.permissions_updated", "")
+		}
 	}
 	updated, err := store.GetPaymentOrderForUser(r.Context(), d.DB, order.ID, order.UserID)
 	if err != nil {
@@ -613,6 +617,10 @@ func paymentWebhookHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	if appliedOrder != nil && appliedOrder.UserID != "" {
 		invalidateAuthUser(d, appliedOrder.UserID)
+		if appliedOrder.ProductType == store.PaymentProductUserGroup {
+			revokeUserPermissionSnapshots(d, appliedOrder.UserID)
+			publishUserEvent(d, nil, appliedOrder.UserID, "account.permissions_updated", "")
+		}
 	}
 	writePaymentWebhookResponse(w, provider, channel.Config, true, http.StatusOK)
 }

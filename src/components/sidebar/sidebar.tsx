@@ -81,6 +81,7 @@ import { conversationsApi, ApiError } from '@/api'
 import { duration } from '@/lib/design-tokens'
 import { accentClasses } from '@/lib/project-helpers'
 import { partitionConversationNavigation } from '@/lib/conversation-navigation'
+import { userCan } from '@/lib/user-permissions'
 import { type DateBucket, bucketFor, modKey, cn, truncate } from '@/lib/utils'
 import { toast } from '@/hooks/use-toast'
 import { useTranslation } from 'react-i18next'
@@ -99,7 +100,11 @@ function isConversationStreaming(conversation: Conversation): boolean {
 }
 
 export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
+  const user = useAuth((s) => s.user)
+  const canDraw = userCan(user, 'allow_drawing')
+  const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases')
   const activeWorkspace = useWorkspaces((s) => (s.activeId ? s.workspaces.find((w) => w.id === s.activeId) : undefined))
+  const canCreateProject = canUseKnowledgeBases && (!activeWorkspace || activeWorkspace.can_create_projects)
   const navigate = useNavigate()
   const { id: currentId } = useParams<{ id?: string }>()
   const location = useLocation()
@@ -168,7 +173,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
   const projectConversationsById = navigationConversations.byProject
   const projects = useProjects((s) => s.projects)
   // §4.20: show the Draw entry only when an image model is configured.
-  const hasImageModels = useModels((s) => s.imageModels.length > 0)
+  const hasImageModels = useModels((s) => s.imageModels.length > 0) && canDraw
   // Draw links to '/?mode=draw' — same pathname as New chat, so its active
   // state must read the query string (NavLink's isActive ignores search).
   // Gated on hasImageModels: when the Draw row isn't rendered, New chat keeps
@@ -593,16 +598,18 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
                     {tNav('projects')}
                   </Link>
                 </h3>
-                <Tooltip content={tProjects('nav.newProject')}>
-                  <button
-                    type="button"
-                    onClick={() => setNewProjectOpen(true)}
-                    aria-label={tProjects('nav.newProject')}
-                    className="inline-flex size-6 shrink-0 items-center justify-center rounded-[6px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-lg:size-10 max-sm:!size-8"
-                  >
-                    <Plus size={12} aria-hidden />
-                  </button>
-                </Tooltip>
+                {canCreateProject ? (
+                  <Tooltip content={tProjects('nav.newProject')}>
+                    <button
+                      type="button"
+                      onClick={() => setNewProjectOpen(true)}
+                      aria-label={tProjects('nav.newProject')}
+                      className="inline-flex size-6 shrink-0 items-center justify-center rounded-[6px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-lg:size-10 max-sm:!size-8"
+                    >
+                      <Plus size={12} aria-hidden />
+                    </button>
+                  </Tooltip>
+                ) : null}
               </div>
 
               {sortedProjects.length === 0 ? (
@@ -756,7 +763,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
         </div>
       </div>
 
-      <NewProjectDialog open={newProjectOpen} onOpenChange={setNewProjectOpen} />
+      <NewProjectDialog open={newProjectOpen && canCreateProject} onOpenChange={setNewProjectOpen} />
 
       {/* Keep the visual separator at the edge, but place it last in DOM order so
           keyboard focus reaches the sidebar's navigation before its resize control. */}
@@ -886,7 +893,9 @@ function ConversationItem({
   nested?: boolean
   dense?: boolean
 }) {
-  const meId = useAuth((s) => s.user?.id)
+  const user = useAuth((s) => s.user)
+  const meId = user?.id
+  const canShare = userCan(user, 'allow_sharing')
   const rename = useConversations((s) => s.renameConversation)
   const remove = useConversations((s) => s.deleteConversation)
   const star = useConversations((s) => s.toggleStar)
@@ -993,10 +1002,12 @@ function ConversationItem({
                 <Star size={13} aria-hidden />
                 {conversation.starred ? t('common:actions.unstar') : t('common:actions.star')}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => void shareConversation()}>
-                <Share2 size={13} aria-hidden />
-                {t('sidebar.share')}
-              </DropdownMenuItem>
+              {canShare ? (
+                <DropdownMenuItem onClick={() => void shareConversation()}>
+                  <Share2 size={13} aria-hidden />
+                  {t('sidebar.share')}
+                </DropdownMenuItem>
+              ) : null}
               <DropdownMenuSeparator />
               <MoveToProjectSub conversationId={conversation.id} currentProjectId={conversation.projectId} />
               <DropdownMenuSeparator />
@@ -1095,6 +1106,7 @@ export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuP
   const displayName = user?.name || user?.email?.split('@')[0] || 'Aivory'
   const avatarUrl = (user?.settings as Record<string, unknown> | undefined)?.avatar_url as string | undefined
   const isAdmin = user?.role === 'admin'
+  const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases')
   const lang = useLanguage((s) => s.lang)
   const setLang = useLanguage((s) => s.setLang)
   const [archivedOpen, setArchivedOpen] = useState(false)
@@ -1145,10 +1157,12 @@ export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuP
           <Settings size={13} aria-hidden />
           {t('settings:user.settings')}
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => navigate('/kb')}>
-          <BookText size={13} aria-hidden />
-          {t('chat:userMenu.knowledge', { defaultValue: 'Knowledge' })}
-        </DropdownMenuItem>
+        {canUseKnowledgeBases ? (
+          <DropdownMenuItem onClick={() => navigate('/kb')}>
+            <BookText size={13} aria-hidden />
+            {t('chat:userMenu.knowledge', { defaultValue: 'Knowledge' })}
+          </DropdownMenuItem>
+        ) : null}
         <DropdownMenuItem onClick={() => navigate('/subscription')}>
           <Layers size={13} aria-hidden />
           {t('chat:userMenu.subscription', { defaultValue: 'Subscription' })}

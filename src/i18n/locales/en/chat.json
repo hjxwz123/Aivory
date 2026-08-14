@@ -107,6 +107,10 @@
     "incompatibleKnowledgeBase": "This library cannot be used with the current selection",
     "knowledgeBaseMentionLabel": "Attach a knowledge base",
     "knowledgeBaseMentionEmpty": "No matching knowledge bases",
+    "permissions": {
+      "knowledgeBases": "Your user group does not have knowledge-base access.",
+      "fileUpload": "Your user group cannot upload files."
+    },
     "removeKnowledgeBase": "Remove knowledge base {{name}}",
     "style": "Style",
     "styleHeading": "Image style",
@@ -136,6 +140,7 @@
       "entry": "Choose tools",
       "entryDescription": "Choose which tools are available for this turn.",
       "summaryAll": "All",
+      "summaryDefault": "Model default",
       "summaryCount_one": "{{count}} selected",
       "summaryCount_other": "{{count}} selected",
       "selectedChip_one": "{{count}} tool",
@@ -152,6 +157,9 @@
       "retry": "Try again",
       "noResults": "No matching tools.",
       "empty": "No tools are available for this model.",
+      "groupRestricted": "Not available to your user group",
+      "defaultSelected_one": "Model default · {{count}} selected",
+      "defaultSelected_other": "Model default · {{count}} selected",
       "allSelected_one": "All {{count}} tool selected",
       "allSelected_other": "All {{count}} tools selected",
       "selectedCount_one": "{{count}} tool selected",
@@ -275,6 +283,9 @@
     "error": {
       "title": "Reply failed — please try again",
       "interrupted": "Generation interrupted. Please try again.",
+      "permissionChanged": "Permission changed",
+      "drawingPermission": "Your user group no longer has permission to use drawing models or image-generation tools.",
+      "knowledgeBasePermission": "Your user group no longer has permission to use knowledge bases.",
       "retry": "Retry"
     }
   },
@@ -524,6 +535,8 @@
     "moreSoon": "More models coming soon",
     "current": "Current model",
     "label": "Model: {{name}}",
+    "unavailable": "Model unavailable",
+    "unavailableHint": "This model is no longer available. Choose another model.",
     "upgrade": "Upgrade to unlock",
     "allTags": "All",
     "noneForTag": "No models with this tag.",
@@ -639,12 +652,15 @@
     "members": "Members",
     "membersBody": "{{count}} members",
     "membersLoading": "Loading members…",
+    "membersLoadFailed": "Could not load workspace members.",
     "inviteLink": "Invite link",
     "rotateInvite": "Reset link (invalidates the old one)",
     "inviteRotated": "New invite link generated — the old one is dead.",
     "inviteRotateFailed": "Could not rotate the invite link.",
     "kick": "Remove member",
     "kickFailed": "Could not remove the member.",
+    "deleteFailed": "Could not delete the workspace.",
+    "leaveFailed": "Could not leave the workspace.",
     "delete": "Delete workspace",
     "leave": "Leave workspace",
     "backToPersonal": "Switch to personal space",
@@ -656,7 +672,34 @@
     "backHome": "Back to chat",
     "roleOwner": "Owner",
     "roleMember": "Member",
-    "switchSpace": "Switch space"
+    "switchSpace": "Switch space",
+    "managePermissions": "Manage permissions",
+    "memberPermissions": "Member permissions",
+    "memberPermissionsBody": "Set what {{name}} can create and manage across this workspace.",
+    "permissionsSaved": "Member permissions updated.",
+    "permissionsSaveFailed": "Could not update member permissions.",
+    "permissions": {
+      "can_create_projects": {
+        "label": "Create projects",
+        "description": "Create new projects and their project knowledge bases."
+      },
+      "can_private_conversations": {
+        "label": "Private conversations",
+        "description": "Create conversations visible only to themselves."
+      },
+      "can_create_kb": {
+        "label": "Create knowledge bases",
+        "description": "Create new workspace knowledge bases."
+      },
+      "can_add_kb_files": {
+        "label": "Add knowledge-base files",
+        "description": "Upload and paste content into workspace knowledge bases."
+      },
+      "can_delete_kb_content": {
+        "label": "Delete knowledge-base content",
+        "description": "Delete, retry, or manage content when the specific knowledge base also allows it."
+      }
+    }
   },
   "attachmentDeleted": "File deleted"
 }

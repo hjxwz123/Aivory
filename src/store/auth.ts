@@ -16,6 +16,7 @@ import type { ApiUser } from '@/api/types'
 // operation may write user/status, otherwise a late 401 from the old hydrate can
 // sign out a freshly logged-in user.
 let authOpSeq = 0
+let profileRefresh: { userId: string; promise: Promise<ApiUser | null> } | null = null
 function beginAuthOp(): number {
   authOpSeq += 1
   return authOpSeq
@@ -61,6 +62,10 @@ interface AuthState {
   pendingTwoFactor: { ticket: string } | null
 
   hydrate: () => Promise<void>
+  /** Refresh the server-authoritative profile without changing auth status or
+   *  invalidating an in-flight login/logout transition. Permission events and
+   *  expiring plans use this to converge an already-open tab. */
+  refreshProfile: () => Promise<ApiUser | null>
   login: (email: string, password: string, captchaToken?: string) => Promise<boolean | '2fa'>
   loginTwoFactor: (code: string) => Promise<boolean>
   register: (
@@ -173,6 +178,28 @@ export const useAuth = create<AuthState>((set, get) => ({
         set({ setupProbed: true })
       }
     }
+  },
+
+  async refreshProfile() {
+    const expectedUserId = get().user?.id
+    if (!expectedUserId || get().status !== 'authenticated') return null
+    if (profileRefresh?.userId === expectedUserId) return profileRefresh.promise
+    const promise = authApi
+      .me()
+      .then((fresh) => {
+        const current = get()
+        if (current.status === 'authenticated' && current.user?.id === expectedUserId && fresh.id === expectedUserId) {
+          set({ user: fresh, error: null })
+          return fresh
+        }
+        return null
+      })
+      .catch(() => null)
+      .finally(() => {
+        if (profileRefresh?.promise === promise) profileRefresh = null
+      })
+    profileRefresh = { userId: expectedUserId, promise }
+    return promise
   },
 
   async setup(name, email, password) {

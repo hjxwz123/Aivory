@@ -87,9 +87,14 @@ type UnifiedChatRequest struct {
 	OfficialToolRequests []json.RawMessage
 	// SelectedToolIDs preserves the user's per-model candidate subset across a
 	// transparent TTFT fallback. SelectedToolsConfigured distinguishes omitted
-	// (all available tools) from an explicit empty selection.
+	// (use each serving model's administrator defaults) from an explicit empty
+	// selection.
 	SelectedToolIDs         []string
 	SelectedToolsConfigured bool
+	// ToolAccessPolicy is the current user's server-authoritative group ceiling.
+	// It is carried into transparent model fallback so a fallback cannot broaden
+	// access even when its own default tool set is larger.
+	ToolAccessPolicy *ToolAccessPolicy
 	// ToolsEnabled records the resolved turn policy independently of whether the
 	// primary model happens to configure any tools. TTFT fallback uses it to rebuild
 	// the fallback model's complete administrator-configured tool collection.
@@ -121,6 +126,21 @@ type UnifiedChatRequest struct {
 	// orchestrator reads it after Stream to flag the turn's usage row as fallback
 	// (§fallback channel). nil = untracked.
 	FallbackUsed *atomic.Bool
+}
+
+// ToolAccessPolicy is independent from model defaults. Model builtin_tools
+// decides which local tools start selected; this policy decides which catalog
+// entries the current user may ever declare or execute.
+type ToolAccessPolicy struct {
+	Mode         string
+	IDs          []string
+	AllowDrawing bool
+	AllowMemory  bool
+	AllowSkills  bool
+	// SkillMode and SkillIDs independently cap administrator-managed skills.
+	// A group may allow use_skill as a tool while exposing only selected skills.
+	SkillMode string
+	SkillIDs  []string
 }
 
 // ModelInfo is the slim subset of store.Model the provider needs.

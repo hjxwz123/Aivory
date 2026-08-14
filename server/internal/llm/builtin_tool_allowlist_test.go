@@ -50,7 +50,9 @@ func (r *snippetSearchRegistry) Run(_ context.Context, name string, _ []byte, _ 
 }
 
 type toolContextRecordingRegistry struct {
-	modelIDs []string
+	modelIDs       []string
+	allowedSkills  []bool
+	disallowedSeen []bool
 }
 
 func (r *toolContextRecordingRegistry) List(string) []ToolDef {
@@ -59,6 +61,8 @@ func (r *toolContextRecordingRegistry) List(string) []ToolDef {
 
 func (r *toolContextRecordingRegistry) Run(_ context.Context, _ string, _ []byte, tc *ToolContext) (string, []Citation, error) {
 	r.modelIDs = append(r.modelIDs, tc.ModelID)
+	r.allowedSkills = append(r.allowedSkills, tc.AllowsAdminSkill("allowed-skill"))
+	r.disallowedSeen = append(r.disallowedSeen, tc.AllowsAdminSkill("denied-skill"))
 	return "ok", nil, nil
 }
 
@@ -72,7 +76,7 @@ func (memoryToolRegistry) Run(_ context.Context, name string, _ []byte, _ *ToolC
 	return "ran " + name, nil, nil
 }
 
-func TestBuiltinToolAllowlistFiltersNativeDeclarationsAndFinalRunner(t *testing.T) {
+func TestBuiltinToolDefaultsApplyUntilUserExplicitlySelects(t *testing.T) {
 	orchestrator, provider, model, conversation, _, db := setupToolRouteTest(t)
 	if _, err := db.Exec(`UPDATE models SET builtin_tools='["aivory_web_search"]' WHERE id=?`, model.ID); err != nil {
 		t.Fatal(err)
@@ -85,6 +89,101 @@ func TestBuiltinToolAllowlistFiltersNativeDeclarationsAndFinalRunner(t *testing.
 	}
 	if provider.toolRunErr == nil || !strings.Contains(provider.toolRunErr.Error(), "not enabled") {
 		t.Fatalf("forged native call reached execution: %v", provider.toolRunErr)
+	}
+
+	orchestrator, provider, model, conversation, _, db = setupToolRouteTest(t)
+	if _, err := db.Exec(`UPDATE models SET builtin_tools='["aivory_web_search"]' WHERE id=?`, model.ID); err != nil {
+		t.Fatal(err)
+	}
+	provider.invokeTool = "python_execute"
+	runToolRouteTurn(t, orchestrator, model.ID, conversation.ID, RunRequest{
+		ToolMode: ToolModeEnabled, SelectedToolsConfigured: true,
+		SelectedToolIDs: []string{"builtin:python_execute"},
+	})
+	request = provider.mainRequests[0]
+	if len(request.Tools) != 1 || request.Tools[0].Name != "python_execute" {
+		t.Fatalf("explicit selection remained capped by model defaults: %+v", request.Tools)
+	}
+	if provider.toolRunErr != nil {
+		t.Fatalf("explicitly selected tool was denied: %v", provider.toolRunErr)
+	}
+}
+
+func TestGroupToolPolicyCapsExplicitSelectionAndFinalRunner(t *testing.T) {
+	orchestrator, provider, model, conversation, _, _ := setupToolRouteTest(t)
+	provider.invokeTool = "python_execute"
+	runToolRouteTurn(t, orchestrator, model.ID, conversation.ID, RunRequest{
+		ToolMode: ToolModeEnabled, SelectedToolsConfigured: true,
+		SelectedToolIDs: []string{"builtin:aivory_web_search", "builtin:python_execute"},
+		ToolAccessPolicy: &ToolAccessPolicy{
+			Mode: store.ResourceAccessSelected, IDs: []string{"builtin:aivory_web_search"},
+			AllowDrawing: true, AllowMemory: true, AllowSkills: true,
+		},
+	})
+	request := provider.mainRequests[0]
+	if len(request.Tools) != 1 || request.Tools[0].Name != "aivory_web_search" {
+		t.Fatalf("group ceiling exposed the wrong definitions: %+v", request.Tools)
+	}
+	if provider.toolRunErr == nil || !strings.Contains(provider.toolRunErr.Error(), "not enabled") {
+		t.Fatalf("group-restricted forged call reached execution: %v", provider.toolRunErr)
+	}
+}
+
+func TestGroupSelectedSkillPolicyFiltersPromptAndAutoRouting(t *testing.T) {
+	orchestrator, provider, model, conversation, _, db := setupToolRouteTest(t)
+	allowed, err := store.CreateSkill(context.Background(), db, store.Skill{
+		ID: "group-skill-allowed", Name: "GROUP-ALLOWED-SKILL", Description: "GROUP-ALLOWED-DESCRIPTION",
+		Instructions: "GROUP-ALLOWED-INSTRUCTIONS", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	denied, err := store.CreateSkill(context.Background(), db, store.Skill{
+		ID: "group-skill-denied", Name: "GROUP-DENIED-SKILL", Description: "GROUP-DENIED-DESCRIPTION",
+		Instructions: "GROUP-DENIED-INSTRUCTIONS", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetSkillsForModel(context.Background(), db, model.ID, []string{allowed.ID, denied.ID}); err != nil {
+		t.Fatal(err)
+	}
+	policy := &ToolAccessPolicy{
+		AllowDrawing: true, AllowMemory: true, AllowSkills: true,
+		SkillMode: store.ResourceAccessSelected, SkillIDs: []string{allowed.ID},
+	}
+
+	runToolRouteTurn(t, orchestrator, model.ID, conversation.ID, RunRequest{
+		ToolMode: ToolModeEnabled, ToolAccessPolicy: policy,
+	})
+	request := provider.mainRequests[len(provider.mainRequests)-1]
+	for _, want := range []string{allowed.Name, allowed.Description} {
+		if !strings.Contains(request.SystemPrompt, want) {
+			t.Fatalf("selected skill prompt missing %q:\n%s", want, request.SystemPrompt)
+		}
+	}
+	for _, forbidden := range []string{denied.Name, denied.Description, denied.Instructions} {
+		if strings.Contains(request.SystemPrompt, forbidden) {
+			t.Fatalf("selected skill prompt leaked %q:\n%s", forbidden, request.SystemPrompt)
+		}
+	}
+
+	provider.routeResponse = "0"
+	provider.taskRequests = nil
+	provider.routeCalls = 0
+	runToolRouteTurn(t, orchestrator, model.ID, conversation.ID, RunRequest{
+		ToolMode: ToolModeAuto, ToolAccessPolicy: policy, UserText: "Use " + denied.Name,
+	})
+	if provider.routeCalls != 1 {
+		t.Fatalf("denied skill name bypassed automatic routing; route calls=%d", provider.routeCalls)
+	}
+
+	provider.taskRequests = nil
+	runToolRouteTurn(t, orchestrator, model.ID, conversation.ID, RunRequest{
+		ToolMode: ToolModeAuto, ToolAccessPolicy: policy, UserText: "Use " + allowed.Name,
+	})
+	if provider.routeCalls != 1 || len(provider.taskRequests) != 0 {
+		t.Fatalf("allowed skill name did not take the deterministic route: calls=%d task=%d", provider.routeCalls, len(provider.taskRequests))
 	}
 }
 
@@ -454,6 +553,16 @@ func TestForcedSearchAndFallbackRespectBuiltinToolAllowlist(t *testing.T) {
 		if err := store.SetSkillsForModel(context.Background(), db, fallback.ID, []string{fallbackSkill.ID}); err != nil {
 			t.Fatal(err)
 		}
+		deniedSkill, err := store.CreateSkill(context.Background(), db, store.Skill{
+			ID: "fallback-denied-skill", Name: "FALLBACK-DENIED-SKILL", Description: "FALLBACK-DENIED-DESCRIPTION",
+			Instructions: "FALLBACK-DENIED-INSTRUCTIONS", Enabled: true,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.SetSkillsForModel(context.Background(), db, fallback.ID, []string{fallbackSkill.ID, deniedSkill.ID}); err != nil {
+			t.Fatal(err)
+		}
 		options := systemPromptOpts{
 			ModelLabel: "Primary", ToolMode: "native", ToolNames: []string{"use_skill"},
 			Skills:             []SkillIndex{{Name: "PRIMARY-SKILL-MARKER", When: "PRIMARY-DESCRIPTION-MARKER"}},
@@ -462,6 +571,9 @@ func TestForcedSearchAndFallbackRespectBuiltinToolAllowlist(t *testing.T) {
 		}
 		request, _, _, err := orchestrator.buildFallbackRequest(context.Background(), UnifiedChatRequest{
 			SystemPrompt: composeSystemPrompt(options), SystemPromptOptions: &options, Tools: []ToolDef{{Name: "use_skill"}},
+			ToolAccessPolicy: &ToolAccessPolicy{
+				AllowSkills: true, SkillMode: store.ResourceAccessSelected, SkillIDs: []string{fallbackSkill.ID},
+			},
 		}, fallback.ID)
 		if err != nil {
 			t.Fatal(err)
@@ -469,7 +581,10 @@ func TestForcedSearchAndFallbackRespectBuiltinToolAllowlist(t *testing.T) {
 		if !strings.Contains(request.SystemPrompt, "FALLBACK-SKILL-MARKER") || !strings.Contains(request.SystemPrompt, "FALLBACK-DESCRIPTION-MARKER") {
 			t.Fatalf("fallback prompt did not advertise its bound skill:\n%s", request.SystemPrompt)
 		}
-		for _, forbidden := range []string{"PRIMARY-SKILL-MARKER", "PRIMARY-DESCRIPTION-MARKER", "PRIMARY-INSTRUCTIONS-MARKER"} {
+		for _, forbidden := range []string{
+			"PRIMARY-SKILL-MARKER", "PRIMARY-DESCRIPTION-MARKER", "PRIMARY-INSTRUCTIONS-MARKER",
+			"FALLBACK-DENIED-SKILL", "FALLBACK-DENIED-DESCRIPTION", "FALLBACK-DENIED-INSTRUCTIONS",
+		} {
 			if strings.Contains(request.SystemPrompt, forbidden) {
 				t.Fatalf("fallback prompt retained primary skill %q:\n%s", forbidden, request.SystemPrompt)
 			}
@@ -599,7 +714,10 @@ func TestFallbackToolRunnerUsesFallbackModelContext(t *testing.T) {
 	orchestrator := &Orchestrator{tools: registry}
 	primary := &orchToolRunner{
 		orch: orchestrator,
-		ctx:  &ToolContext{ModelID: "primary-model", BuiltinTools: map[string]bool{"use_skill": true}},
+		ctx: &ToolContext{
+			ModelID: "primary-model", BuiltinTools: map[string]bool{"use_skill": true},
+			AdminSkillIDs: map[string]bool{"allowed-skill": true},
+		},
 	}
 	runner := toolDefAllowlistRunner{next: primary, allowed: map[string]bool{"use_skill": true}}
 	fallbackRunner := toolRunnerForModelRequest(runner, "fallback-model", []ToolDef{{Name: "use_skill"}})
@@ -608,6 +726,9 @@ func TestFallbackToolRunnerUsesFallbackModelContext(t *testing.T) {
 	}
 	if len(registry.modelIDs) != 1 || registry.modelIDs[0] != "fallback-model" {
 		t.Fatalf("fallback execution used model contexts %v", registry.modelIDs)
+	}
+	if len(registry.allowedSkills) != 1 || !registry.allowedSkills[0] || registry.disallowedSeen[0] {
+		t.Fatalf("fallback execution broadened skill policy: allowed=%v denied=%v", registry.allowedSkills, registry.disallowedSeen)
 	}
 }
 

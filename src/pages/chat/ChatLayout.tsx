@@ -1,5 +1,5 @@
-import { Suspense, useEffect } from 'react'
-import { Outlet, useLocation } from 'react-router-dom'
+import { Suspense, useEffect, useRef } from 'react'
+import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { PanelLeftOpen, Menu } from 'lucide-react'
 import { Sidebar } from '@/components/sidebar/sidebar'
@@ -20,6 +20,7 @@ import { useHotkeys } from '@/hooks/use-hotkeys'
 import { Logo } from '@/components/brand/logo'
 import { RouteFade } from '@/components/ui/route-fade'
 import { chatRouteKeys } from '@/lib/chat-route'
+import { workspaceSwitchDestination } from '@/lib/workspace-navigation'
 import { cn } from '@/lib/utils'
 
 export default function ChatLayout() {
@@ -31,6 +32,9 @@ export default function ChatLayout() {
   const setDrawerOpen = useUI((s) => s.setNavOpen)
   const pageOwnsTopBar = useUI((s) => s.pageOwnsTopBar)
   const activeWsId = useWorkspaces((s) => s.activeId)
+  const workspaceSwitching = useWorkspaces((s) => s.switching)
+  const navigate = useNavigate()
+  const previousWorkspaceRef = useRef(activeWsId)
   // Coarse section key for page transitions: collapse param routes (e.g.
   // /chat/:id, /projects/:id, /kb/:id) to their first segment so switching
   // conversations within a section doesn't re-fade — only section-to-section
@@ -41,6 +45,18 @@ export default function ChatLayout() {
   const routeKeys = chatRouteKeys(pathname)
 
   useEffect(() => syncSystem(), [syncSystem])
+
+  useEffect(() => {
+    const destination = workspaceSwitchDestination(previousWorkspaceRef.current, activeWsId)
+    previousWorkspaceRef.current = activeWsId
+    if (!destination) return
+    // Detail endpoints deliberately support direct links independent of the
+    // sidebar's active scope. Keeping a /chat/:id, /projects/:id, or /kb/:id
+    // route across a workspace switch would therefore reload the old resource
+    // under the new workspace header. A scope change always starts at the new
+    // chat home, where every draft and knowledge-base selection is fresh.
+    navigate(destination, { replace: true })
+  }, [activeWsId, navigate])
 
   useHotkeys([
     {
@@ -133,7 +149,11 @@ export default function ChatLayout() {
                 the target location + sidebar state immediately and confines
                 loading feedback to this content pane. */}
             <Suspense key={routeKeys.content} fallback={<PanelFallback />}>
-              <Outlet />
+              {/* activeId changes before the new space-scoped stores finish
+                  loading. Hide the old route during that interval so a stale
+                  conversation, project, or knowledge base cannot be acted on
+                  under the newly selected workspace. */}
+              {workspaceSwitching ? <PanelFallback /> : <Outlet />}
             </Suspense>
           </RouteFade>
         </div>

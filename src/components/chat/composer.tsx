@@ -99,6 +99,9 @@ import { ToolSelectionDialog } from './tool-selection-dialog'
 import { modelHasBuiltinTools, modelSupportsBuiltinTool } from '@/lib/builtin-tools'
 import { hasImageAttachment, hasSendableMessageContent } from '@/lib/chat-message-input'
 import { knowledgeBaseSelectionContext } from '@/lib/knowledge-base-selection'
+import { userCan } from '@/lib/user-permissions'
+import { subscribeAccessInvalidation } from '@/lib/access-events'
+import { findSelectedModel, isSelectedModelUnavailable } from '@/lib/model-selection'
 
 interface ComposerProps {
   modelId: string
@@ -306,6 +309,10 @@ function restoreConversationFile(file: ApiConversationFile, scopeId: string): Pe
     documentId: file.document_id,
     ingest: restoredIngestStatus(file.document_status),
   }
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
 }
 
 // One toggleable turn feature in the composer "+" menu (§4.13-B). Rendered as an
@@ -593,6 +600,13 @@ export function Composer({
   const { t } = useTranslation(['chat', 'library'])
   const navigate = useNavigate()
   const { pathname } = useLocation()
+  const user = useAuth((state) => state.user)
+  const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases')
+  const canUploadFiles = userCan(user, 'allow_file_upload')
+  const canUploadFilesRef = useRef(canUploadFiles)
+  canUploadFilesRef.current = canUploadFiles
+  const canUseVoice = userCan(user, 'allow_voice_transcription')
+  const canDraw = userCan(user, 'allow_drawing')
   const workspaceId = useWorkspaces((state) => state.activeId ?? undefined)
   const mode = useComposerPrefs((s) => s.mode)
   const setMode = useComposerPrefs((s) => s.setMode)
@@ -631,6 +645,7 @@ export function Composer({
   const [libraryPrompts, setLibraryPrompts] = useState<ApiUserPrompt[]>([])
   const [libraryLoading, setLibraryLoading] = useState(true)
   const [selectedSkills, setSelectedSkills] = useState<ApiUserSkill[]>([])
+  const libraryLoadRequestRef = useRef(0)
   const [commandQuery, setCommandQuery] = useState<ComposerCommandQuery | null>(null)
   const [commandIndex, setCommandIndex] = useState(0)
   const [executingCommand, setExecutingCommand] = useState<'compact' | null>(null)
@@ -668,7 +683,21 @@ export function Composer({
     (ids: string[] | undefined) => setSelectedToolIds(modelId, ids),
     [modelId, setSelectedToolIds],
   )
+  const handleSelectedToolIdsApply = useCallback(() => {
+    // Older preferences may still carry an explicit disabled mode. Confirming a
+    // tool selection must make those tools usable instead of leaving the dialog
+    // and the wire request in contradictory states.
+    if (toolMode === 'disabled') setToolMode('auto')
+  }, [setToolMode, toolMode])
   const loadKBList = useCallback(async () => {
+    if (!canUseKnowledgeBases) {
+      kbLoadRequestRef.current += 1
+      setKBList([])
+      setKBLoading(false)
+      setKBLoaded(true)
+      setKBLoadFailed(false)
+      return
+    }
     const requestID = ++kbLoadRequestRef.current
     setKBLoading(true)
     setKBLoadFailed(false)
@@ -677,6 +706,10 @@ export function Composer({
       if (requestID !== kbLoadRequestRef.current) return
       setKBList(rows)
       setKBLoaded(true)
+      const allowed = new Set(rows.map((row) => row.id))
+      const current = kbIds ?? []
+      const valid = current.filter((id) => id === projectKBId || allowed.has(id))
+      if (valid.length !== current.length) onKBChange?.(valid)
     } catch {
       if (requestID !== kbLoadRequestRef.current) return
       setKBLoadFailed(true)
@@ -684,7 +717,27 @@ export function Composer({
     } finally {
       if (requestID === kbLoadRequestRef.current) setKBLoading(false)
     }
-  }, [workspaceId])
+  }, [canUseKnowledgeBases, kbIds, onKBChange, projectKBId, workspaceId])
+
+  const loadLibrary = useCallback(async () => {
+    const requestID = ++libraryLoadRequestRef.current
+    setLibraryLoading(true)
+    try {
+      const [skills, prompts] = await Promise.all([libraryApi.skills(), libraryApi.prompts()])
+      if (requestID !== libraryLoadRequestRef.current) return
+      setLibrarySkills(skills)
+      setLibraryPrompts(prompts)
+      const allowedSkills = new Set(skills.map((skill) => skill.id))
+      setSelectedSkills((current) => current.filter((skill) => allowedSkills.has(skill.id)))
+    } catch {
+      if (requestID !== libraryLoadRequestRef.current) return
+      setLibrarySkills([])
+      setLibraryPrompts([])
+      setSelectedSkills([])
+    } finally {
+      if (requestID === libraryLoadRequestRef.current) setLibraryLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
     // KB visibility is workspace-scoped. Invalidate both cached rows and any
@@ -697,7 +750,13 @@ export function Composer({
     setKBLoadFailed(false)
     setKBPopoverOpen(false)
     setCommandQuery(null)
-  }, [workspaceId])
+  }, [canUseKnowledgeBases, workspaceId])
+
+  useEffect(() => {
+    if (canUseKnowledgeBases) return
+    setKBPopoverOpen(false)
+    if ((kbIds ?? []).some((id) => id && id !== projectKBId)) onKBChange?.([])
+  }, [canUseKnowledgeBases, kbIds, onKBChange, projectKBId])
   const ref = useRef<RichComposerEditorHandle>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const imageFileRef = useRef<HTMLInputElement>(null)
@@ -710,6 +769,7 @@ export function Composer({
   // Active ingest-status pollers, keyed by attachment id, so they can be
   // cancelled on remove / submit / unmount.
   const pollTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  const activeUploadControllers = useRef<Map<string, AbortController>>(new Map())
   // Local ids explicitly removed while an upload is still in flight. If the
   // request completes after removal, immediately delete the backend file/doc.
   const removedAttachmentIds = useRef<Set<string>>(new Set())
@@ -744,26 +804,24 @@ export function Composer({
   const hasAttachments = attachments.length > 0
 
   useEffect(() => {
-    let current = true
-    setLibraryLoading(true)
-    void Promise.all([libraryApi.skills(), libraryApi.prompts()])
-      .then(([skills, prompts]) => {
-        if (!current) return
-        setLibrarySkills(skills)
-        setLibraryPrompts(prompts)
-      })
-      .catch(() => {
-        if (!current) return
-        setLibrarySkills([])
-        setLibraryPrompts([])
-      })
-      .finally(() => {
-        if (current) setLibraryLoading(false)
-      })
+    void loadLibrary()
     return () => {
-      current = false
+      libraryLoadRequestRef.current += 1
     }
-  }, [])
+  }, [loadLibrary])
+
+  useEffect(
+    () =>
+      subscribeAccessInvalidation((event) => {
+        if (event.kind === 'account') void loadLibrary()
+        if (event.kind === 'account' || event.kind === 'workspace' || event.kind === 'knowledge-base') {
+          setKBLoaded(false)
+          setKBPopoverOpen(false)
+          void loadKBList()
+        }
+      }),
+    [loadKBList, loadLibrary],
+  )
 
   useEffect(() => {
     setSelectedSkills([])
@@ -788,6 +846,7 @@ export function Composer({
   // Only ONE composer is ever mounted (home / thread / project routes are
   // mutually exclusive), so a single window listener set never double-handles.
   useEffect(() => {
+    if (!canUploadFiles) return
     const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files')
     const onDragEnter = (e: DragEvent) => {
       if (!hasFiles(e)) return
@@ -827,7 +886,7 @@ export function Composer({
       window.removeEventListener('dragleave', onDragLeave)
       window.removeEventListener('drop', onDrop)
     }
-  }, [])
+  }, [canUploadFiles])
   useEffect(() => {
     const timers = pollTimers.current
     return () => {
@@ -838,6 +897,24 @@ export function Composer({
   useEffect(() => {
     attachmentsRef.current = attachments
   }, [attachments])
+  useEffect(() => {
+    if (canUploadFiles) return
+    dragDepthRef.current = 0
+    setDragOver(false)
+    activeUploadControllers.current.forEach((controller) => controller.abort())
+    activeUploadControllers.current.clear()
+    pollTimers.current.forEach((timer) => clearTimeout(timer))
+    pollTimers.current.clear()
+    draftFilesLoadedRef.current = false
+    setAttachments((items) => {
+      if (items.length === 0) return items
+      for (const item of items) {
+        removedAttachmentIds.current.add(item.id)
+        if (item.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(item.previewUrl)
+      }
+      return []
+    })
+  }, [canUploadFiles])
   // Voice input (§ whisper). Record via MediaRecorder, then transcribe through
   // the admin-configured /audio/transcriptions endpoint and insert the text.
   const [recording, setRecording] = useState(false)
@@ -860,8 +937,33 @@ export function Composer({
   // can create an orphan MediaRecorder or retain the microphone.
   const voiceStartAttemptRef = useRef(0)
   const voiceStartingRef = useRef(false)
+  const transcriptionAttemptRef = useRef(0)
 
   useEffect(() => {
+    if (!canUseVoice) {
+      voiceStartAttemptRef.current += 1
+      voiceStartingRef.current = false
+      transcriptionAttemptRef.current += 1
+      streamAttemptRef.current += 1
+      streamCtlRef.current?.cancel()
+      streamCtlRef.current = null
+      const recorder = recorderRef.current
+      if (recorder && recorder.state !== 'inactive') {
+        recorder.ondataavailable = null
+        recorder.onstop = null
+        recorder.stop()
+      }
+      recordingStreamRef.current?.getTracks().forEach((track) => track.stop())
+      recordingStreamRef.current = null
+      recorderRef.current = null
+      chunksRef.current = []
+      setVoiceStarting(false)
+      setStreamConnecting(false)
+      setRecording(false)
+      setTranscribing(false)
+      setVoiceEnabled(false)
+      return
+    }
     let live = true
     void loadSttCapability().then((capability) => {
       if (live) {
@@ -872,7 +974,7 @@ export function Composer({
     return () => {
       live = false
     }
-  }, [])
+  }, [canUseVoice])
 
   // Never leave the mic hot / a socket open when the composer unmounts. The
   // recorded-clip path needs explicit track cleanup too; stopping only the live
@@ -881,6 +983,7 @@ export function Composer({
     () => () => {
       voiceStartAttemptRef.current += 1
       voiceStartingRef.current = false
+      transcriptionAttemptRef.current += 1
       streamAttemptRef.current += 1
       streamCtlRef.current?.cancel()
       const recorder = recorderRef.current
@@ -935,7 +1038,7 @@ export function Composer({
   // Mic toggle. Volcano streams live; every other provider records a clip and
   // transcribes it. A second click always stops whatever is active.
   async function toggleVoice() {
-    if (!voiceEnabled || transcribing) return
+    if (!canUseVoice || !voiceEnabled || transcribing) return
     if (voiceStartingRef.current || recording || streamConnecting || streamCtlRef.current) {
       stopVoice()
       return
@@ -1080,6 +1183,8 @@ export function Composer({
   // (explicit duration, speech-model-native rate); fall back to the raw recording
   // if the browser can't decode it.
   async function transcribeRecording(blob: Blob) {
+    const attempt = transcriptionAttemptRef.current + 1
+    transcriptionAttemptRef.current = attempt
     try {
       let sendBlob = blob
       let filename = blob.type.includes('mp4') ? 'audio.mp4' : 'audio.webm'
@@ -1090,23 +1195,35 @@ export function Composer({
         /* browser can't decode — send the original recording as-is */
       }
       const { text } = await audioApi.transcribe(sendBlob, filename)
-      if (text) {
+      if (text && canUseVoice && transcriptionAttemptRef.current === attempt) {
         const current = valueRef.current
         updateValue((current.trim() ? current.trimEnd() + ' ' : '') + text)
         requestAnimationFrame(() => ref.current?.focus('end'))
       }
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('composer.voiceFailed'))
+      if (canUseVoice && transcriptionAttemptRef.current === attempt) {
+        toast.error(e instanceof ApiError ? e.message : t('composer.voiceFailed'))
+      }
     } finally {
-      setTranscribing(false)
+      if (transcriptionAttemptRef.current === attempt) setTranscribing(false)
     }
   }
-  const currentModel = useModels(
-    (s) => s.models.find((m) => m.id === modelId) ?? s.imageModels.find((m) => m.id === modelId),
-  )
+  const currentModel = useModels((s) => findSelectedModel(modelId, s.models, s.imageModels))
+  const modelsLoaded = useModels((s) => s.loaded)
+  const fastAvailable = useModels((s) => s.fastAvailable)
+  const fastVision = useModels((s) => s.fastVision)
+  const effectiveFast = Boolean(fast) && fastAvailable
+  const selectedModelUnavailable = isSelectedModelUnavailable({
+    modelId,
+    currentModel,
+    modelsLoaded,
+    fast,
+    fastAvailable,
+  })
   // §4.20 image mode: when the selected model draws, the composer shows a style
   // picker and hides chat-only controls (research / knowledge bases).
-  const isImageMode = currentModel?.kind === 'image'
+  const imagePermissionDenied = currentModel?.kind === 'image' && !canDraw
+  const isImageMode = currentModel?.kind === 'image' && canDraw
   const hasDraftImage = hasImageAttachment(attachments)
   const imagePromptRequired = isImageMode && hasDraftImage && value.trim().length === 0
   const effectivePlaceholder =
@@ -1115,9 +1232,7 @@ export function Composer({
   const [imageStyleId, setImageStyleId] = useState('')
   // Deep Research is both a per-group capability and a per-model exposure flag.
   // Admins bypass the group feature but still respect the current model's flag.
-  const groupResearchEnabled = useAuth(
-    (s) => s.user?.role === 'admin' || Boolean(s.user?.features?.includes('research')),
-  )
+  const groupResearchEnabled = user?.role === 'admin' || Boolean(user?.features?.includes('research'))
   const builtinToolsAvailable = !isImageMode && modelHasBuiltinTools(currentModel)
   const configuredToolsAvailable = Boolean(
     !isImageMode &&
@@ -1143,9 +1258,6 @@ export function Composer({
   // §fast-mode: a fast turn disallows Verify / Deep Research / tool policy / the "+"
   // menu (the picker is a chat model, so isImageMode is already false). When fast
   // is active every other feature is forced off.
-  const fastAvailable = useModels((s) => s.fastAvailable)
-  const fastVision = useModels((s) => s.fastVision)
-  const effectiveFast = Boolean(fast) && fastAvailable
   const imageAttachmentCapability = resolveImageAttachmentCapability(currentModel, {
     fast: effectiveFast,
     fastVision,
@@ -1239,12 +1351,15 @@ export function Composer({
   const voiceActive = recording || streamConnecting || transcribing || voiceStarting
   const canSubmit =
     hasSendableMessageContent(value, attachments, isImageMode) &&
+    (canUploadFiles || attachments.length === 0) &&
     !voiceActive &&
     !streaming &&
     !uploading &&
     !restoringAttachments &&
     !documentNotReady &&
     !hasUnsupportedImageAttachment &&
+    !imagePermissionDenied &&
+    !selectedModelUnavailable &&
     !executingCommand
 
   async function handleSubmit() {
@@ -1261,6 +1376,26 @@ export function Composer({
       return
     }
     if (voiceActive || streaming || uploading || restoringAttachments || documentNotReady || executingCommand) return
+    if (imagePermissionDenied) {
+      toast.error(
+        t('messages.error.drawingPermission', {
+          defaultValue: 'Your user group no longer has permission to use drawing models or image-generation tools.',
+        }),
+      )
+      return
+    }
+    if (selectedModelUnavailable) {
+      toast.error(
+        t('modelPicker.unavailableHint', {
+          defaultValue: 'This model is no longer available. Choose another model.',
+        }),
+      )
+      return
+    }
+    if (!canUploadFiles && attachments.length > 0) {
+      toast.error(t('composer.permissions.fileUpload', { defaultValue: 'Your user group cannot upload files.' }))
+      return
+    }
     if (!text && isImageMode && hasImageAttachment(attachments)) {
       toast.warning(t('composer.imagePromptRequired'))
       return
@@ -1342,6 +1477,18 @@ export function Composer({
   // (`/api/files/<id>`) BEFORE revoking the blob — otherwise the user-bubble
   // image preview later renders a dead URL once handleSubmit clears the draft.
   async function uploadAttachment(file: File, local: PendingAttachment, scopeId?: string): Promise<PendingAttachment | null> {
+    if (!canUploadFilesRef.current) {
+      removedAttachmentIds.current.delete(local.id)
+      if (local.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(local.previewUrl)
+      setAttachments((items) => {
+        const next = items.filter((item) => item.id !== local.id)
+        if (next.length === 0 && items.length > 0) queueMicrotask(() => maybeSignalDrained())
+        return next
+      })
+      return null
+    }
+    const controller = new AbortController()
+    activeUploadControllers.current.set(local.id, controller)
     try {
       const form = new FormData()
       form.append('file', file)
@@ -1368,6 +1515,7 @@ export function Composer({
       query.set('fast', effectiveFast ? '1' : '0')
       const url = `/files?${query.toString()}`
       const res = await apiUpload<ApiAttachment & { id: string; url?: string; document_id?: string }>(url, form, {
+        signal: controller.signal,
         onProgress: (progress) => {
           if (typeof progress.percent !== 'number') return
           setAttachments((items) =>
@@ -1375,6 +1523,12 @@ export function Composer({
           )
         },
       })
+      if (!canUploadFilesRef.current) {
+        removedAttachmentIds.current.delete(local.id)
+        setAttachments((items) => items.filter((item) => item.id !== local.id && item.id !== res.id))
+        if (scopeId) void conversationsApi.removeFile(scopeId, res.id).catch(() => {})
+        return null
+      }
       // Persistent URL replaces the blob URL. Fall back to /api/files/<id>
       // when the response omits `url` (older backends).
       const persistentUrl = res.url || `/api/files/${encodeURIComponent(res.id)}`
@@ -1434,10 +1588,14 @@ export function Composer({
       if (e instanceof ApiError && e.status === 507) {
         // § user files page: group storage quota exhausted — link to /files.
         toastStorageQuotaFull(navigate)
-      } else {
+      } else if (!isAbortError(e)) {
         toast.error(t('composer.uploadFailed', { defaultValue: 'Upload failed' }), e instanceof Error ? e.message : undefined)
       }
       return null
+    } finally {
+      if (activeUploadControllers.current.get(local.id) === controller) {
+        activeUploadControllers.current.delete(local.id)
+      }
     }
   }
 
@@ -1487,6 +1645,10 @@ export function Composer({
     // New (or absent) scope: the server file set is not yet known, so block the
     // drain signal until listDraftFiles confirms it below.
     draftFilesLoadedRef.current = false
+    if (!canUploadFiles) {
+      setRestoringAttachments(false)
+      return
+    }
     if (!conversationId) {
       setRestoringAttachments(false)
       return
@@ -1543,7 +1705,7 @@ export function Composer({
     return () => {
       cancelled = true
     }
-  }, [conversationId, startIngestPoll, t])
+  }, [canUploadFiles, conversationId, startIngestPoll, t])
 
   async function retryAttachmentIngest(a: PendingAttachment) {
     if (!a.uploadScopeId || !a.documentId) return
@@ -1571,6 +1733,10 @@ export function Composer({
   // input into an attachment (attachTextAsFile) can tell success from failure.
   async function handleAttach(files: FileList | null): Promise<number> {
     if (!files || !files.length) return 0
+    if (!canUploadFiles) {
+      toast.error(t('composer.permissions.fileUpload', { defaultValue: 'Your user group cannot upload files.' }))
+      return 0
+    }
     const filtered = filterFilesForImageCapability(Array.from(files), imageAttachmentCapability)
     if (filtered.rejectedImages.length > 0) {
       toast.error(
@@ -1605,6 +1771,15 @@ export function Composer({
     // silently dropped at chat time (base64 inline cap); documents would fail the
     // server cap after a wasted upload.
     const limits = await getUploadLimits()
+    if (!canUploadFilesRef.current) {
+      const candidateIDs = new Set(candidates.map(({ attachment }) => attachment.id))
+      for (const { attachment } of candidates) {
+        removedAttachmentIds.current.delete(attachment.id)
+        if (attachment.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(attachment.previewUrl)
+      }
+      setAttachments((current) => current.filter((attachment) => !candidateIDs.has(attachment.id)))
+      return 0
+    }
     const overImage = candidates.filter(
       ({ file }) => isImageFileLike(file) && file.size > limits.max_image_bytes,
     )
@@ -1686,7 +1861,7 @@ export function Composer({
   // model still sees the content either way. Document uploads need a
   // conversation scope, so this is only offered where one exists or can be
   // lazily created (all current composer mounts qualify).
-  const canAttachLongText = Boolean(conversationId || ensureConversationId)
+  const canAttachLongText = canUploadFiles && Boolean(conversationId || ensureConversationId)
   async function attachTextAsFile(text: string): Promise<boolean> {
     const d = new Date()
     const pad = (n: number, w = 2) => String(n).padStart(w, '0')
@@ -1772,7 +1947,7 @@ export function Composer({
         count: selectedToolIds.length,
         defaultValue: '{{count}} selected',
       })
-    : t('composer.toolSelection.summaryAll', { defaultValue: 'All' })
+    : t('composer.toolSelection.summaryDefault', { defaultValue: 'Model default' })
 
   const webSearchItem: FeatureItem | undefined =
     showToolUseSelector && supportsWebSearch && availableToolMode === 'disabled'
@@ -1874,11 +2049,11 @@ export function Composer({
   const knowledgeBaseSelection = useMemo(
     () =>
       knowledgeBaseSelectionContext(
-        kbList,
-        kbIds ?? [],
-        projectKBId,
+        canUseKnowledgeBases ? kbList : [],
+        canUseKnowledgeBases ? kbIds ?? [] : [],
+        canUseKnowledgeBases ? projectKBId : undefined,
       ),
-    [kbIds, kbList, projectKBId],
+    [canUseKnowledgeBases, kbIds, kbList, projectKBId],
   )
   const {
     options: selectableKnowledgeBases,
@@ -1894,7 +2069,7 @@ export function Composer({
   const hasActiveTool =
     anyFeatureActive ||
     hasActiveParamControl ||
-    (!isImageMode && Boolean(onKBChange) && selectedKnowledgeBaseIds.length > 0)
+    (canUseKnowledgeBases && !isImageMode && Boolean(onKBChange) && selectedKnowledgeBaseIds.length > 0)
 
   const openKnowledgeBaseManager = () => {
     setMoreOpen(false)
@@ -2065,13 +2240,14 @@ export function Composer({
   }, [commandKey, enabledCommandIndices])
 
   useEffect(() => {
-    const shouldLoadForMention = commandQuery?.trigger === '@' && !isImageMode && Boolean(onKBChange)
-    const shouldLoadSelectedNames = !isImageMode && Boolean(onKBChange) && selectedKnowledgeBaseIds.length > 0
+    const shouldLoadForMention = commandQuery?.trigger === '@' && canUseKnowledgeBases && !isImageMode && Boolean(onKBChange)
+    const shouldLoadSelectedNames = canUseKnowledgeBases && !isImageMode && Boolean(onKBChange) && selectedKnowledgeBaseIds.length > 0
     if ((shouldLoadForMention || shouldLoadSelectedNames) && !kbLoaded && !kbLoading) {
       void loadKBList()
     }
   }, [
     commandQuery?.trigger,
+    canUseKnowledgeBases,
     isImageMode,
     kbLoaded,
     kbLoading,
@@ -2242,7 +2418,7 @@ export function Composer({
   // fully settles; a streaming transcript can populate `value` before the mic
   // has actually stopped, and must not strand the user without a stop action.
   const hasDraftText = value.trim().length > 0
-  const showVoiceAction = voiceActive || (!hasDraftText && !hasDraftImage)
+  const showVoiceAction = canUseVoice && (voiceActive || (!hasDraftText && !hasDraftImage))
   const voiceStatusLabel = transcribing
     ? t('composer.voiceTranscribing')
     : recording
@@ -2324,7 +2500,21 @@ export function Composer({
       </button>
     </Tooltip>
   ) : (
-    <Tooltip content={imagePromptRequired ? t('composer.imagePromptRequired') : t('composer.send', { kbd: modKey() })}>
+    <Tooltip
+      content={
+        selectedModelUnavailable
+          ? t('modelPicker.unavailableHint', {
+              defaultValue: 'This model is no longer available. Choose another model.',
+            })
+          : imagePermissionDenied
+            ? t('messages.error.drawingPermission', {
+                defaultValue: 'Your user group no longer has permission to use drawing models or image-generation tools.',
+              })
+            : imagePromptRequired
+              ? t('composer.imagePromptRequired')
+              : t('composer.send', { kbd: modKey() })
+      }
+    >
       <button
         type="button"
         onClick={handleSubmit}
@@ -2366,7 +2556,7 @@ export function Composer({
           inline transform that would otherwise become the fixed containing block.
           pointer-events-none: the window listeners own the drop, and the overlay
           must never intercept it. */}
-      {dragOver &&
+      {canUploadFiles && dragOver &&
         createPortal(
           <div className="pointer-events-none fixed inset-0 z-[var(--z-max)] grid place-items-center bg-[var(--color-overlay)] p-6 backdrop-blur-[2px] animate-[fade-in_var(--duration-base)_var(--ease-out)]">
             <div className="flex flex-col items-center gap-3 rounded-popup border-2 border-dashed border-[var(--color-accent)] bg-[var(--color-surface)]/95 px-8 py-7 shadow-[var(--shadow-lg)]">
@@ -2406,7 +2596,16 @@ export function Composer({
                 maxHeight: commandPosition.maxHeight,
               }}
             >
-              {commandQuery?.trigger === '@' && (kbLoading || !kbLoaded) ? (
+              {commandQuery?.trigger === '@' && !canUseKnowledgeBases ? (
+                <div role="alert" className="flex items-start gap-2 px-2.5 py-2 text-[13px] leading-snug text-[var(--color-fg-muted)]">
+                  <AlertTriangle size={14} aria-hidden className="mt-0.5 shrink-0 text-[var(--color-warning)]" />
+                  <span>
+                    {t('composer.permissions.knowledgeBases', {
+                      defaultValue: 'Your user group does not have knowledge-base access.',
+                    })}
+                  </span>
+                </div>
+              ) : commandQuery?.trigger === '@' && (kbLoading || !kbLoaded) ? (
                 <div
                   role="status"
                   aria-live="polite"
@@ -2755,11 +2954,17 @@ export function Composer({
         onCommandQueryChange={setCommandQuery}
         onCommandKeyDown={handleCommandKeyDown}
         onPasteFiles={(files) => {
+          if (!canUploadFiles) return
           const dt = new DataTransfer()
           files.forEach((file) => dt.items.add(file))
           void handleAttach(dt.files)
         }}
         onLongPaste={(pasted) => {
+          if (!canUploadFiles) {
+            const current = valueRef.current
+            updateValue(current ? `${current}\n${pasted}` : pasted)
+            return
+          }
           void attachTextAsFile(pasted).then((ok) => {
             // Upload failed (quota / allowlist) — put the text back into the
             // draft so nothing is lost; the error toast explains what happened.
@@ -2781,28 +2986,32 @@ export function Composer({
       {/* Toolbar row. The file input is shared by both layouts. On phones every
           secondary action collapses into a single "+" menu (Gemini/ChatGPT-mobile
           pattern); on ≥sm screens they sit inline in a scrollable left zone. */}
-      <input
-        type="file"
-        ref={fileRef}
-        hidden
-        multiple
-        accept={canAttachImages ? undefined : NON_IMAGE_ATTACHMENT_ACCEPT}
-        onChange={(e) => {
-          void handleAttach(e.currentTarget.files)
-          e.currentTarget.value = ''
-        }}
-      />
-      <input
-        type="file"
-        ref={imageFileRef}
-        hidden
-        multiple
-        accept="image/*,.heic,.heif,.avif"
-        onChange={(e) => {
-          void handleAttach(e.currentTarget.files)
-          e.currentTarget.value = ''
-        }}
-      />
+      {canUploadFiles ? (
+        <>
+          <input
+            type="file"
+            ref={fileRef}
+            hidden
+            multiple
+            accept={canAttachImages ? undefined : NON_IMAGE_ATTACHMENT_ACCEPT}
+            onChange={(e) => {
+              void handleAttach(e.currentTarget.files)
+              e.currentTarget.value = ''
+            }}
+          />
+          <input
+            type="file"
+            ref={imageFileRef}
+            hidden
+            multiple
+            accept="image/*,.heic,.heif,.avif"
+            onChange={(e) => {
+              void handleAttach(e.currentTarget.files)
+              e.currentTarget.value = ''
+            }}
+          />
+        </>
+      ) : null}
 
       {isMobile ? (
         /* ── Mobile: fixed [+] + scroll-safe context + fixed primary action ── */
@@ -2812,7 +3021,7 @@ export function Composer({
             onOpenChange={(o) => {
               setMoreOpen(o)
               if (!o) setToolUsePanel('root')
-              if (o && onKBChange) void loadKBList()
+              if (o && canUseKnowledgeBases && onKBChange) void loadKBList()
             }}
           >
             <PopoverTrigger asChild>
@@ -2850,17 +3059,19 @@ export function Composer({
             >
               {toolUsePanel === 'root' ? (
                 <>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMoreOpen(false)
-                      fileRef.current?.click()
-                    }}
-                    className="flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-left text-[15px] text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)] active:bg-[var(--color-bg-muted)]"
-                  >
-                    <Paperclip size={18} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden />
-                    {t('composer.attach')}
-                  </button>
+                  {canUploadFiles ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMoreOpen(false)
+                        fileRef.current?.click()
+                      }}
+                      className="flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-left text-[15px] text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)] active:bg-[var(--color-bg-muted)]"
+                    >
+                      <Paperclip size={18} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden />
+                      {t('composer.attach')}
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => {
@@ -2872,7 +3083,7 @@ export function Composer({
                     <Sigma size={18} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden />
                     {t('composer.formula.action')}
                   </button>
-                  {canAttachImages ? (
+                  {canUploadFiles && canAttachImages ? (
                     <button
                       type="button"
                       onClick={() => {
@@ -2894,7 +3105,7 @@ export function Composer({
                 </>
               ) : null}
 
-              {toolUsePanel === 'root' && onKBChange && !isImageMode ? (
+              {toolUsePanel === 'root' && canUseKnowledgeBases && onKBChange && !isImageMode ? (
                 <>
                   <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden />
                   <p className="px-2.5 pb-1 pt-0.5 text-[11px] font-medium uppercase tracking-wider text-[var(--color-fg-subtle)]">
@@ -2969,16 +3180,18 @@ export function Composer({
               </Popover>
             ) : null}
 
-            <Tooltip content={t('composer.attach')}>
-              <button
-                type="button"
-                onClick={() => fileRef.current?.click()}
-                aria-label={t('composer.attach')}
-                className="inline-flex items-center justify-center size-8 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-              >
-                <Paperclip size={15} aria-hidden />
-              </button>
-            </Tooltip>
+            {canUploadFiles ? (
+              <Tooltip content={t('composer.attach')}>
+                <button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  aria-label={t('composer.attach')}
+                  className="inline-flex items-center justify-center size-8 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                >
+                  <Paperclip size={15} aria-hidden />
+                </button>
+              </Tooltip>
+            ) : null}
 
             <Tooltip content={t('composer.formula.action')}>
               <button
@@ -2991,7 +3204,7 @@ export function Composer({
               </button>
             </Tooltip>
 
-            {canAttachImages ? (
+            {canUploadFiles && canAttachImages ? (
               <Tooltip content={t('composer.addImage')}>
                 <button
                   type="button"
@@ -3021,7 +3234,7 @@ export function Composer({
             ) : null}
 
             {/* §7.2-7 📚 知识库选择器 — 绑定 kb_ids 到当前会话 */}
-            {onKBChange && !isImageMode ? (
+            {canUseKnowledgeBases && onKBChange && !isImageMode ? (
               <Popover
                 open={kbPopoverOpen}
                 onOpenChange={(open) => {
@@ -3116,6 +3329,7 @@ export function Composer({
         modelId={modelId}
         selectedIds={selectedToolIds}
         onChange={handleSelectedToolIdsChange}
+        onApply={handleSelectedToolIdsApply}
       />
     </div>
   )

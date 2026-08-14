@@ -94,6 +94,13 @@ func TestUserGroupPurchaseAvailabilityIsPersistedAndPublic(t *testing.T) {
 	if len(publicGroups) != 1 || publicGroups[0].ID != created.ID || publicGroups[0].IsPurchasable {
 		t.Fatalf("public groups = %+v, want displayed non-purchasable group", publicGroups)
 	}
+	var publicRaw []map[string]json.RawMessage
+	if err := json.Unmarshal(publicRec.Body.Bytes(), &publicRaw); err != nil {
+		t.Fatalf("decode public group fields: %v", err)
+	}
+	if _, exposed := publicRaw[0]["permissions"]; exposed {
+		t.Fatalf("public group exposed internal permission policy: %s", publicRec.Body.String())
+	}
 
 	mx := newMux()
 	mx.handle(http.MethodPatch, "/api/admin/user-groups/:id", wrap(d, updateUserGroupAdmin))

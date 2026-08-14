@@ -26,6 +26,7 @@ import type { Attachment } from '@/types/chat'
 import type { ApiConversation } from '@/api/types'
 import type { ToolMode } from '@/lib/tool-mode'
 import { resolveNewConversationFastMode } from '@/lib/chat-defaults'
+import { userCan } from '@/lib/user-permissions'
 
 gsap.registerPlugin(useGSAP)
 
@@ -197,6 +198,7 @@ export default function ChatHome() {
   const defaultModelId = useModels((s) => s.defaultId)
   const imageModels = useModels((s) => s.imageModels)
   const user = useAuth((s) => s.user)
+  const canDraw = userCan(user, 'allow_drawing')
   const workspaceId = useWorkspaces((s) => s.activeId ?? undefined)
   const clearComposerDraft = useComposerPrefs((s) => s.clearDraft)
 
@@ -211,7 +213,8 @@ export default function ChatHome() {
   // §4.20: the sidebar "Draw" entry links here with ?mode=draw to open the
   // composer pre-set to an image model (drawing mode).
   const [searchParams] = useSearchParams()
-  const drawMode = searchParams.get('mode') === 'draw'
+  const drawRequested = searchParams.get('mode') === 'draw'
+  const drawMode = drawRequested && canDraw && imageModels.length > 0
   const draftScope = drawMode ? 'new-draw' : 'new-chat'
   const savedImageModelId =
     typeof user?.settings?.image_model_id === 'string' ? user.settings.image_model_id : ''
@@ -236,6 +239,11 @@ export default function ChatHome() {
   const fast =
     !drawMode &&
     (pickedFast ?? resolveNewConversationFastMode(user?.settings, fastAvailable, drawMode))
+
+  useEffect(() => {
+    if (!drawRequested || drawMode) return
+    navigate('/', { replace: true })
+  }, [drawMode, drawRequested, navigate])
 
   useEffect(() => {
     setSelectedKnowledgeBaseIds([])

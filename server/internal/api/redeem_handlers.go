@@ -80,6 +80,10 @@ func redeemCodeHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	invalidateAuthUser(d, u.ID)
+	if red.Credits <= 0 {
+		revokeUserPermissionSnapshots(d, u.ID)
+		publishUserEvent(d, nil, u.ID, "account.permissions_updated", "")
+	}
 
 	// Credits codes are additive — no group changed hands. Return the amount so
 	// the UI can celebrate and refresh the balance.

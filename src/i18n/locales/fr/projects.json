@@ -113,6 +113,8 @@
     "submit": "Créer le projet",
     "cancel": "Annuler",
     "created": "Projet créé",
+    "limitReached": "Vous avez atteint la limite de projets de votre forfait.",
+    "workspacePermissionRequired": "Vous n'avez pas l'autorisation de créer des projets dans cet espace de travail.",
     "nameExists": "Un projet portant ce nom existe déjà."
   },
   "accent": {

@@ -11,6 +11,9 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { ProjectRow } from '@/components/projects/project-row'
 import { NewProjectDialog } from '@/components/projects/new-project-dialog'
 import { cn } from '@/lib/utils'
+import { useWorkspaces } from '@/store/workspaces'
+import { useAuth } from '@/store/auth'
+import { userCan } from '@/lib/user-permissions'
 
 type Filter = 'all' | 'pinned'
 
@@ -25,6 +28,12 @@ export default function ProjectsList() {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<Filter>('all')
   const [createOpen, setCreateOpen] = useState(false)
+  const activeWorkspace = useWorkspaces((s) =>
+    s.activeId ? s.workspaces.find((workspace) => workspace.id === s.activeId) : undefined,
+  )
+  const user = useAuth((s) => s.user)
+  const canCreateProject = userCan(user, 'allow_knowledge_bases') &&
+    (!activeWorkspace || activeWorkspace.can_create_projects)
 
   const chatCounts = useMemo(() => {
     const map = new Map<string, number>()
@@ -63,7 +72,7 @@ export default function ProjectsList() {
     <div className="flex-1 min-h-0 flex flex-col bg-[var(--color-bg)] text-[var(--color-fg)]">
       <ContentHeader
         title={t('projects:list.title')}
-        actions={
+        actions={canCreateProject ? (
           <Button
             variant="secondary"
             size="sm"
@@ -72,7 +81,7 @@ export default function ProjectsList() {
           >
             {t('projects:list.createCta')}
           </Button>
-        }
+        ) : null}
       />
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="mx-auto w-full max-w-[var(--layout-content-max-w)] px-5 py-5 pb-16 sm:px-8 sm:py-6 sm:pb-20">
@@ -168,7 +177,7 @@ export default function ProjectsList() {
             icon={<FolderKanban size={20} aria-hidden />}
             title={t('projects:list.emptyTitle')}
             description={t('projects:list.emptyBody')}
-            action={
+            action={canCreateProject ? (
               <Button
                 variant="secondary"
                 leadingIcon={<Plus size={15} aria-hidden />}
@@ -176,7 +185,7 @@ export default function ProjectsList() {
               >
                 {t('projects:list.createCta')}
               </Button>
-            }
+            ) : undefined}
           />
         )}
             </>
@@ -184,7 +193,7 @@ export default function ProjectsList() {
         </div>
       </div>
 
-      <NewProjectDialog open={createOpen} onOpenChange={setCreateOpen} />
+      <NewProjectDialog open={createOpen && canCreateProject} onOpenChange={setCreateOpen} />
     </div>
   )
 }

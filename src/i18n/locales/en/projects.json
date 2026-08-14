@@ -113,6 +113,8 @@
     "submit": "Create project",
     "cancel": "Cancel",
     "created": "Project created",
+    "limitReached": "You've reached your plan's project limit.",
+    "workspacePermissionRequired": "You do not have permission to create projects in this workspace.",
     "nameExists": "A project with this name already exists."
   },
   "accent": {

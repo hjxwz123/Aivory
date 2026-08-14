@@ -96,6 +96,11 @@ func listModelsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 
 // listImageModelsHandler returns enabled image models.
 func listImageModelsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	permissions, permissionErr := catalogPermissions(d, r)
+	if permissionErr != nil || !permissions.AllowDrawing {
+		writeJSON(w, http.StatusOK, map[string]any{"models": []any{}, "default_id": ""})
+		return
+	}
 	models, err := store.ListModels(r.Context(), d.DB, "image", true)
 	if err != nil {
 		writeError(w, 500, err)
@@ -116,6 +121,11 @@ type publicSkill struct {
 // listSkillsPublicHandler returns enabled skill display metadata. It excludes
 // execution instructions, model-facing trigger descriptions, and asset paths.
 func listSkillsPublicHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	permissions, permissionErr := catalogPermissions(d, r)
+	if permissionErr != nil {
+		writeError(w, http.StatusForbidden, errSkillGroupPermission)
+		return
+	}
 	skills, err := store.ListSkills(r.Context(), d.DB, true)
 	if err != nil {
 		writeError(w, 500, err)
@@ -123,6 +133,9 @@ func listSkillsPublicHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]publicSkill, 0, len(skills))
 	for _, skill := range skills {
+		if !store.ResourcePolicyAllows(permissions.Skills, skill.ID) {
+			continue
+		}
 		items = append(items, publicSkill{
 			ID: skill.ID, Name: skill.Name, DisplayDescription: strings.TrimSpace(skill.DisplayDescription),
 			Icon: skill.Icon, Enabled: skill.Enabled, SortOrder: skill.SortOrder,
@@ -146,13 +159,12 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 		Stream          bool   `json:"stream"`
 		ResearchEnabled bool   `json:"research_enabled"`
 		ToolMode        string `json:"tool_mode"`
-		// BuiltinTools is the resolved, user-safe capability set. Unlike the
+		// BuiltinTools is the resolved, user-safe default selection. Unlike the
 		// nullable admin policy, this always contains only live registry tools that
-		// survive both the model allowlist and the global disabled_tools switch.
+		// survive the global and user-group ceilings.
 		BuiltinTools []string `json:"builtin_tools"`
-		// ToolsAvailable is the unified user-facing capability bit. The public API
-		// deliberately does not expose hosted definitions because users no longer
-		// select either tool category.
+		// ToolsAvailable is the unified user-facing capability bit. It remains true
+		// when a model default is empty but the user may manually select a live tool.
 		ToolsAvailable bool            `json:"tools_available"`
 		ParamControls  json.RawMessage `json:"param_controls"`
 		ChannelID      string          `json:"channel_id"`
@@ -185,6 +197,14 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 		}
 	}
 	grants, _ := store.QuotasForGroup(r.Context(), d.DB, groupID)
+	permissions, permissionErr := catalogPermissions(d, r)
+	if permissionErr != nil {
+		permissions = store.UserGroupPermissions{
+			Prompts: store.ResourceAccessPolicy{Mode: store.ResourceAccessNone},
+			Skills:  store.ResourceAccessPolicy{Mode: store.ResourceAccessNone},
+			Tools:   store.ResourceAccessPolicy{Mode: store.ResourceAccessNone},
+		}
+	}
 
 	// Global USD→credit rate, read once. 0 (default / unset) disables the credit
 	// system, so image models show no per-image credit cost.
@@ -214,7 +234,22 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 	if !memoryEnabled {
 		disabledBuiltinTools["save_memory"] = true
 	}
-	mcpToolsAvailable := d.Tools != nil && len(d.Tools.ListMCP("")) > 0
+	availableBuiltinTools := make(map[string]bool, len(registeredBuiltinTools))
+	for _, name := range registeredBuiltinTools {
+		if disabledBuiltinTools[name] || !toolPolicyAllowsID(permissions, "builtin:"+name) {
+			continue
+		}
+		availableBuiltinTools[name] = true
+	}
+	mcpToolsAvailable := false
+	if d.Tools != nil {
+		for _, definition := range d.Tools.ListMCP("") {
+			if toolPolicyAllowsID(permissions, "mcp:"+definition.ServerID) {
+				mcpToolsAvailable = true
+				break
+			}
+		}
+	}
 
 	items := []item{}
 	for _, m := range models {
@@ -228,17 +263,28 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 			creditsPerImage = imageCreditCost(m, creditsPerUSD)
 		}
 		builtinTools := effectivePublicBuiltinTools(m, registeredBuiltinTools, disabledBuiltinTools)
+		builtinDefaults := builtinTools[:0]
+		for _, name := range builtinTools {
+			if availableBuiltinTools[name] {
+				builtinDefaults = append(builtinDefaults, name)
+			}
+		}
 		hostedToolsAvailable := false
 		if m.ToolMode != "none" {
 			if definitions, err := store.ParseOfficialTools(m.OfficialTools); err == nil {
-				hostedToolsAvailable = len(definitions) > 0
+				for _, definition := range definitions {
+					if toolPolicyAllowsID(permissions, "hosted:"+strings.TrimSpace(definition.Name)) {
+						hostedToolsAvailable = true
+						break
+					}
+				}
 			}
 		}
 		items = append(items, item{
 			ID: m.ID, Label: m.Label, Description: m.Description, Icon: m.Icon,
 			Kind: m.Kind, Enabled: m.Enabled, Vision: m.Vision, Stream: m.Stream, ResearchEnabled: m.ResearchEnabled, ToolMode: m.ToolMode,
-			BuiltinTools:   builtinTools,
-			ToolsAvailable: len(builtinTools) > 0 || hostedToolsAvailable || (m.ToolMode != "none" && mcpToolsAvailable),
+			BuiltinTools:   builtinDefaults,
+			ToolsAvailable: m.ToolMode != "none" && (len(availableBuiltinTools) > 0 || hostedToolsAvailable || mcpToolsAvailable),
 			ParamControls:  m.ParamControls, ChannelID: m.ChannelID, SortOrder: m.SortOrder,
 			Currency:        m.Currency,
 			Tags:            tags,

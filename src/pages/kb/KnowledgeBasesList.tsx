@@ -2,7 +2,7 @@
  * KnowledgeBasesList — gallery of the user's knowledge bases.
  */
 import { activeWorkspaceId, useWorkspaces } from '@/store/workspaces'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Plus, Database, MoreHorizontal, Trash2 } from 'lucide-react'
@@ -32,13 +32,24 @@ import {
 } from '@/components/ui/dialog'
 import { toast } from '@/hooks/use-toast'
 import { formatRelativeDate } from '@/lib/utils'
+import { Badge } from '@/components/ui/badge'
+import { useAuth } from '@/store/auth'
+import { userCan } from '@/lib/user-permissions'
+import { subscribeAccessInvalidation } from '@/lib/access-events'
+import { knowledgeBaseErrorText, knowledgeBaseOperationErrorText } from '@/lib/knowledge-base-errors'
 
 export default function KnowledgeBasesList() {
   const { t } = useTranslation(['kb', 'common'])
+  const user = useAuth((s) => s.user)
+  const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases')
   // §workspaces: KBs aren't part of reloadSpaceData(), so this page re-fetches
   // itself when the active space changes (after the switch settles).
   const activeWsId = useWorkspaces((s) => s.activeId)
   const wsSwitching = useWorkspaces((s) => s.switching)
+  const activeWorkspace = useWorkspaces((s) =>
+    s.activeId ? s.workspaces.find((workspace) => workspace.id === s.activeId) : undefined,
+  )
+  const canCreateKnowledgeBase = !activeWsId || activeWorkspace?.can_create_kb === true
   const [rows, setRows] = useState<ApiKnowledgeBase[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
@@ -55,7 +66,7 @@ export default function KnowledgeBasesList() {
   // as the conversations/projects stores).
   const loadEpochRef = useRef(0)
 
-  async function load() {
+  const load = useCallback(async () => {
     const epoch = ++loadEpochRef.current
     setLoading(true)
     setLoadError('')
@@ -65,19 +76,49 @@ export default function KnowledgeBasesList() {
       setRows(kb)
     } catch (e) {
       if (epoch !== loadEpochRef.current) return
-      const message = e instanceof ApiError ? e.message : t('common:common.error')
+      const message = knowledgeBaseErrorText(t, e, t('common:common.error'))
       setLoadError(message)
       toast.error(message)
     } finally {
       if (epoch === loadEpochRef.current) setLoading(false)
     }
-  }
+  }, [t])
 
   useEffect(() => {
+    if (!canUseKnowledgeBases) {
+      loadEpochRef.current += 1
+      setRows([])
+      setOpen(false)
+      setToDelete(null)
+      setLoadError('knowledge_base_group_permission_required')
+      setLoading(false)
+      return
+    }
     if (wsSwitching) return
     void load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeWsId, wsSwitching])
+  }, [activeWsId, canUseKnowledgeBases, load, wsSwitching])
+
+  useEffect(
+    () =>
+      subscribeAccessInvalidation((event) => {
+        if (event.kind !== 'account' && event.kind !== 'workspace' && event.kind !== 'knowledge-base') return
+        if (!userCan(useAuth.getState().user, 'allow_knowledge_bases')) {
+          loadEpochRef.current += 1
+          setRows([])
+          setOpen(false)
+          setToDelete(null)
+          setLoadError('knowledge_base_group_permission_required')
+          setLoading(false)
+          return
+        }
+        void load()
+      }),
+    [load],
+  )
+
+  useEffect(() => {
+    if (open && (!canUseKnowledgeBases || !canCreateKnowledgeBase)) setOpen(false)
+  }, [canCreateKnowledgeBase, canUseKnowledgeBases, open])
 
   async function doDelete() {
     if (!toDelete) return
@@ -88,7 +129,11 @@ export default function KnowledgeBasesList() {
       setToDelete(null)
       await load()
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('common:common.error'))
+      toast.error(knowledgeBaseOperationErrorText(t, e, t('common:common.error')))
+      if (e instanceof ApiError && (e.status === 403 || e.status === 404)) {
+        setToDelete(null)
+        await load()
+      }
     } finally {
       setDeleting(false)
     }
@@ -96,6 +141,15 @@ export default function KnowledgeBasesList() {
 
   async function create() {
     if (creatingRef.current) return
+    if (!canUseKnowledgeBases || !canCreateKnowledgeBase) {
+      setOpen(false)
+      toast.error(
+        !canUseKnowledgeBases
+          ? t('kb:groupPermissionRequired')
+          : t('kb:workspaceCreatePermissionRequired'),
+      )
+      return
+    }
     if (!draft.name.trim()) {
       toast.error(t('kb:dialog.nameRequired'))
       return
@@ -109,16 +163,8 @@ export default function KnowledgeBasesList() {
       setDraft({ name: '', description: '' })
       await load()
     } catch (e) {
-      const msg = e instanceof ApiError ? e.message : t('common:common.error')
-      toast.error(
-        msg === 'kb_limit_reached'
-          ? t('kb:limitReached', { defaultValue: 'You’ve reached your plan’s knowledge-base limit.' })
-          : msg === 'name_exists'
-            ? t('kb:dialog.nameExists', { defaultValue: 'A knowledge base with this name already exists.' })
-            : msg === 'knowledge_base_unavailable'
-              ? t('kb:dialog.unavailable')
-              : msg,
-      )
+      toast.error(knowledgeBaseErrorText(t, e, t('common:common.error')))
+      if (e instanceof ApiError && e.status === 403) setOpen(false)
     } finally {
       creatingRef.current = false
       setCreating(false)
@@ -130,14 +176,16 @@ export default function KnowledgeBasesList() {
       <ContentHeader
         title={t('kb:title')}
         actions={
-          <Button
-            variant="secondary"
-            size="sm"
-            leadingIcon={<Plus size={15} aria-hidden />}
-            onClick={() => setOpen(true)}
-          >
-            {t('kb:new')}
-          </Button>
+          canUseKnowledgeBases && canCreateKnowledgeBase ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              leadingIcon={<Plus size={15} aria-hidden />}
+              onClick={() => setOpen(true)}
+            >
+              {t('kb:new')}
+            </Button>
+          ) : null
         }
       />
       <div className="flex-1 min-h-0 overflow-y-auto">
@@ -153,11 +201,17 @@ export default function KnowledgeBasesList() {
               <EmptyState
                 icon={<Database size={20} aria-hidden />}
                 title={t('common:common.error')}
-                description={loadError}
+                description={
+                  loadError === 'knowledge_base_group_permission_required'
+                    ? t('kb:groupPermissionRequired', { defaultValue: 'Your user group does not have knowledge-base access.' })
+                    : knowledgeBaseErrorText(t, loadError, loadError)
+                }
                 action={
-                  <Button variant="secondary" onClick={() => void load()}>
-                    {t('common:actions.tryAgain', { defaultValue: 'Try again' })}
-                  </Button>
+                  canUseKnowledgeBases ? (
+                    <Button variant="secondary" onClick={() => void load()}>
+                      {t('common:actions.tryAgain', { defaultValue: 'Try again' })}
+                    </Button>
+                  ) : undefined
                 }
               />
             ) : rows.length === 0 ? (
@@ -166,9 +220,11 @@ export default function KnowledgeBasesList() {
                 title={t('kb:emptyTitle')}
                 description={t('kb:emptyBody')}
                 action={
-                  <Button variant="secondary" onClick={() => setOpen(true)}>
-                    {t('kb:createFirst')}
-                  </Button>
+                  canCreateKnowledgeBase ? (
+                    <Button variant="secondary" onClick={() => setOpen(true)}>
+                      {t('kb:createFirst')}
+                    </Button>
+                  ) : undefined
                 }
               />
             ) : (
@@ -197,6 +253,20 @@ export default function KnowledgeBasesList() {
                             {kb.description}
                           </p>
                         ) : null}
+                        {kb.access_role === 'read' || kb.access_role === 'write' ? (
+                          <div className="mt-1 flex items-center gap-1.5">
+                            <Badge size="xs" variant="neutral">
+                              {kb.access_role === 'write'
+                                ? t('kb:access.write', { defaultValue: 'Can upload' })
+                                : t('kb:access.read', { defaultValue: 'Read only' })}
+                            </Badge>
+                            {kb.owner_name ? (
+                              <span className="truncate text-[11px] text-[var(--color-fg-subtle)]">
+                                {t('kb:access.sharedBy', { name: kb.owner_name, defaultValue: 'Shared by {{name}}' })}
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </div>
                       <time
                         className="hidden shrink-0 text-[11px] tabular-nums text-[var(--color-fg-subtle)] sm:block"
@@ -207,6 +277,7 @@ export default function KnowledgeBasesList() {
                         })}
                       </time>
                     </Link>
+                    {kb.can_delete ? (
                     <div className="shrink-0">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -225,6 +296,7 @@ export default function KnowledgeBasesList() {
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -233,7 +305,7 @@ export default function KnowledgeBasesList() {
         </div>
       </div>
 
-      <Dialog open={open} onOpenChange={(next) => !creatingRef.current && setOpen(next)}>
+      <Dialog open={open && canUseKnowledgeBases && canCreateKnowledgeBase} onOpenChange={(next) => !creatingRef.current && setOpen(next)}>
         <DialogContent size="md">
           <DialogHeader>
             <DialogTitle>{t('kb:dialog.title')}</DialogTitle>

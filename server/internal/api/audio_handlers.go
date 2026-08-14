@@ -37,6 +37,22 @@ var (
 //	audio_transcribe_api_key   — required
 //	audio_transcribe_model     — default whisper-1
 func transcribeAudioHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	watcher, err := startCapabilityAccessWatcher(
+		d, r.Context(), u.ID, errVoiceGroupPermission,
+		func(permissions store.UserGroupPermissions) bool { return permissions.AllowVoiceTranscription },
+	)
+	if err != nil {
+		if isCapabilityDenied(err, errVoiceGroupPermission) {
+			writeError(w, http.StatusForbidden, errVoiceGroupPermission)
+		} else {
+			writeError(w, http.StatusInternalServerError, err)
+		}
+		return
+	}
+	defer watcher.Close()
+	r = r.WithContext(watcher.Context())
+
 	base := settingString(d, "audio_transcribe_base_url", "https://api.openai.com")
 	key := settingString(d, "audio_transcribe_api_key", "")
 	model := settingString(d, "audio_transcribe_model", "whisper-1")
@@ -46,7 +62,7 @@ func transcribeAudioHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	// §D6: per-user rate limit — each call buffers up to 25 MiB and burns the
 	// admin's transcription spend.
-	if u := authUser(r); u != nil && !rateLimitUser(d, u.ID, "audio", audioTranscriptionUserRateLimit, time.Minute) {
+	if !rateLimitUser(d, u.ID, "audio", audioTranscriptionUserRateLimit, time.Minute) {
 		writeError(w, 429, errors.New("transcription rate limit exceeded — try again shortly"))
 		return
 	}
@@ -85,6 +101,10 @@ func transcribeAudioHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
+	if !watcher.AllowedNow() {
+		writeError(w, http.StatusForbidden, errVoiceGroupPermission)
+		return
+	}
 
 	endpoint := strings.TrimRight(base, "/") + "/v1/audio/transcriptions"
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, endpoint, body)
@@ -97,11 +117,23 @@ func transcribeAudioHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 
 	resp, err := audioHTTPClient.Do(req)
 	if err != nil {
+		if watcher.Revoked() {
+			writeError(w, http.StatusForbidden, errVoiceGroupPermission)
+			return
+		}
 		writeError(w, 502, fmt.Errorf("transcription upstream: %w", err))
 		return
 	}
 	defer resp.Body.Close()
-	respBytes, _ := io.ReadAll(io.LimitReader(resp.Body, transcriptionUpstreamResponseReadCap))
+	respBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, transcriptionUpstreamResponseReadCap))
+	if watcher.Revoked() {
+		writeError(w, http.StatusForbidden, errVoiceGroupPermission)
+		return
+	}
+	if readErr != nil {
+		writeError(w, 502, fmt.Errorf("transcription upstream response: %w", readErr))
+		return
+	}
 	if resp.StatusCode >= 400 {
 		writeError(w, 502, fmt.Errorf("transcription upstream %d: %s", resp.StatusCode, truncateAudioErr(respBytes)))
 		return
@@ -111,6 +143,10 @@ func transcribeAudioHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.Unmarshal(respBytes, &parsed); err != nil {
 		writeError(w, 502, errors.New("transcription upstream returned an unexpected response"))
+		return
+	}
+	if !watcher.AllowedNow() {
+		writeError(w, http.StatusForbidden, errVoiceGroupPermission)
 		return
 	}
 	writeJSON(w, 200, map[string]string{"text": strings.TrimSpace(parsed.Text)})

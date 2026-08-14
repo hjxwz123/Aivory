@@ -538,10 +538,16 @@ function sanitizeFilename(name: string): string {
   return (cleaned || 'message').slice(0, 80)
 }
 
-/** Browser entry: build, pack and trigger the download. */
-export async function exportMarkdownAsDocx(markdown: string, baseName: string): Promise<void> {
+/** Browser entry: build, pack and trigger the download. The optional final
+ * guard lets permission-aware callers invalidate an export while packing. */
+export async function exportMarkdownAsDocx(
+  markdown: string,
+  baseName: string,
+  shouldDownload: () => boolean = () => true,
+): Promise<void> {
   const doc = buildDocxDocument(markdown)
   const blob = await Packer.toBlob(doc)
+  if (!shouldDownload()) return
   const url = URL.createObjectURL(blob)
   try {
     const a = document.createElement('a')

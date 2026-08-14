@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { RefreshCw, Search, Wrench } from 'lucide-react'
 import { toolsApi } from '@/api'
 import type { ApiSelectableTool } from '@/api/types'
@@ -16,6 +16,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { resolveLucideIcon } from '@/lib/lucide-icons'
 import { committedToolSelection } from '@/lib/tool-selection'
+import { subscribeAccessInvalidation } from '@/lib/access-events'
 import { cn } from '@/lib/utils'
 import { useTranslation } from 'react-i18next'
 
@@ -23,9 +24,11 @@ interface ToolSelectionDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   modelId: string
-  /** undefined means all available tools; [] is an explicit empty selection. */
+  /** undefined means the model defaults; [] is an explicit empty selection. */
   selectedIds?: string[]
   onChange: (ids: string[] | undefined) => void
+  /** Runs only when the user confirms the dialog, not during policy cleanup. */
+  onApply?: (ids: string[] | undefined) => void
 }
 
 function sameIds(left: readonly string[], right: readonly string[]): boolean {
@@ -40,15 +43,17 @@ export function ToolSelectionDialog({
   modelId,
   selectedIds,
   onChange,
+  onApply,
 }: ToolSelectionDialogProps) {
   const { t } = useTranslation('chat')
   const [tools, setTools] = useState<ApiSelectableTool[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(false)
   const [query, setQuery] = useState('')
-  const [draftAll, setDraftAll] = useState(selectedIds === undefined)
+  const [usingDefaults, setUsingDefaults] = useState(selectedIds === undefined)
   const [draftIds, setDraftIds] = useState<Set<string>>(() => new Set(selectedIds ?? []))
   const [reloadKey, setReloadKey] = useState(0)
+  const backgroundReconcileRequestRef = useRef(0)
 
   useEffect(() => {
     if (!open || !modelId) return
@@ -60,13 +65,16 @@ export function ToolSelectionDialog({
       .then((items) => {
         if (cancelled) return
         setTools(items)
-        const available = new Set(items.map((item) => item.id))
-        const validSelected = selectedIds?.filter((id) => available.has(id))
+        const allowed = new Set(items.filter((item) => item.allowed !== false).map((item) => item.id))
+        const defaults = items
+          .filter((item) => item.allowed !== false && item.default_selected === true)
+          .map((item) => item.id)
+        const validSelected = selectedIds?.filter((id) => allowed.has(id))
         if (selectedIds !== undefined && validSelected && !sameIds(selectedIds, validSelected)) {
           onChange(validSelected)
         }
-        setDraftAll(selectedIds === undefined)
-        setDraftIds(new Set(validSelected ?? items.map((item) => item.id)))
+        setUsingDefaults(selectedIds === undefined)
+        setDraftIds(new Set(validSelected ?? defaults))
       })
       .catch(() => {
         if (!cancelled) setError(true)
@@ -82,6 +90,33 @@ export function ToolSelectionDialog({
   useEffect(() => {
     if (!open) setQuery('')
   }, [open])
+
+  useEffect(
+    () => {
+      const unsubscribe = subscribeAccessInvalidation((event) => {
+        if (event.kind !== 'account' || !modelId) return
+        if (open) {
+          backgroundReconcileRequestRef.current += 1
+          setReloadKey((value) => value + 1)
+          return
+        }
+        // Persisted selections can outlive a group policy or a global tool
+        // switch. Trim them in the background even when the dialog is closed.
+        const requestID = ++backgroundReconcileRequestRef.current
+        void toolsApi.list(modelId).then((items) => {
+          if (requestID !== backgroundReconcileRequestRef.current || selectedIds === undefined) return
+          const allowed = new Set(items.filter((item) => item.allowed !== false).map((item) => item.id))
+          const valid = selectedIds.filter((id) => allowed.has(id))
+          if (!sameIds(selectedIds, valid)) onChange(valid)
+        }).catch(() => undefined)
+      })
+      return () => {
+        backgroundReconcileRequestRef.current += 1
+        unsubscribe()
+      }
+    },
+    [modelId, onChange, open, selectedIds],
+  )
 
   const presentedTools = useMemo(
     () =>
@@ -109,20 +144,29 @@ export function ToolSelectionDialog({
     )
   }, [presentedTools, query])
 
-  const selectedCount = draftAll ? tools.length : draftIds.size
+  const allowedTools = useMemo(() => tools.filter((tool) => tool.allowed !== false), [tools])
+  const allowedIDs = useMemo(() => allowedTools.map((tool) => tool.id), [allowedTools])
+  const defaultIDs = useMemo(
+    () => allowedTools.filter((tool) => tool.default_selected === true).map((tool) => tool.id),
+    [allowedTools],
+  )
+  const selectedCount = [...draftIds].filter((id) => allowedIDs.includes(id)).length
 
   function toggle(id: string) {
+    if (!allowedIDs.includes(id)) return
     setDraftIds((current) => {
-      const next = draftAll ? new Set(tools.map((tool) => tool.id)) : new Set(current)
+      const next = new Set(current)
       if (next.has(id)) next.delete(id)
       else next.add(id)
       return next
     })
-    setDraftAll(false)
+    setUsingDefaults(false)
   }
 
   function applySelection() {
-    onChange(committedToolSelection(tools.map((tool) => tool.id), draftIds, draftAll))
+    const selection = committedToolSelection(allowedIDs, defaultIDs, draftIds)
+    onChange(selection)
+    onApply?.(selection)
     onOpenChange(false)
   }
 
@@ -158,10 +202,10 @@ export function ToolSelectionDialog({
               variant="ghost"
               size="sm"
               onClick={() => {
-                setDraftAll(true)
-                setDraftIds(new Set(tools.map((tool) => tool.id)))
+                setUsingDefaults(false)
+                setDraftIds(new Set(allowedIDs))
               }}
-              disabled={loading || tools.length === 0}
+              disabled={loading || allowedTools.length === 0}
             >
               {t('composer.toolSelection.selectAll', { defaultValue: 'Select all' })}
             </Button>
@@ -169,10 +213,10 @@ export function ToolSelectionDialog({
               variant="ghost"
               size="sm"
               onClick={() => {
-                setDraftAll(false)
+                setUsingDefaults(false)
                 setDraftIds(new Set())
               }}
-              disabled={loading || tools.length === 0}
+              disabled={loading || allowedTools.length === 0}
             >
               {t('composer.toolSelection.clear', { defaultValue: 'Clear' })}
             </Button>
@@ -216,13 +260,15 @@ export function ToolSelectionDialog({
               <div className="divide-y divide-[var(--color-divider)]">
                 {filtered.map((tool) => {
                   const Icon = resolveLucideIcon(tool.icon) ?? Wrench
-                  const checked = draftAll || draftIds.has(tool.id)
+                  const allowed = tool.allowed !== false
+                  const checked = allowed && draftIds.has(tool.id)
                   return (
                     <label
                       key={tool.id}
                       className={cn(
                         'flex min-h-16 cursor-pointer items-start gap-3 rounded-[7px] px-2 py-2.5 interactive focus-within:ring-2 focus-within:ring-inset focus-within:ring-[var(--color-ring)] hover:bg-[var(--color-bg-muted)]',
                         checked && 'bg-[var(--color-tool-selection-soft)]/60',
+                        !allowed && 'cursor-not-allowed opacity-55 hover:bg-transparent',
                       )}
                     >
                       <span
@@ -242,9 +288,17 @@ export function ToolSelectionDialog({
                             {tool.displayDescription}
                           </span>
                         ) : null}
+                        {!allowed ? (
+                          <span className="mt-1 block text-[11.5px] text-[var(--color-danger)]">
+                            {t('composer.toolSelection.groupRestricted', {
+                              defaultValue: 'Not available to your user group',
+                            })}
+                          </span>
+                        ) : null}
                       </span>
                       <Checkbox
                         checked={checked}
+                        disabled={!allowed}
                         onChange={() => toggle(tool.id)}
                         aria-label={tool.displayName}
                         className="mt-1"
@@ -258,8 +312,8 @@ export function ToolSelectionDialog({
 
           {!loading && !error ? (
             <p className="shrink-0 pt-3 text-[12px] text-[var(--color-fg-subtle)]" aria-live="polite">
-              {draftAll
-                ? t('composer.toolSelection.allSelected', { count: tools.length, defaultValue: 'All {{count}} tools selected' })
+              {usingDefaults
+                ? t('composer.toolSelection.defaultSelected', { count: selectedCount, defaultValue: 'Model default · {{count}} selected' })
                 : t('composer.toolSelection.selectedCount', {
                     count: selectedCount,
                     defaultValue: '{{count}} tools selected',
@@ -272,7 +326,7 @@ export function ToolSelectionDialog({
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             {t('composer.toolSelection.cancel', { defaultValue: 'Cancel' })}
           </Button>
-          <Button onClick={applySelection} disabled={loading || error}>
+          <Button onClick={applySelection} disabled={loading || error || allowedTools.length === 0}>
             {t('composer.toolSelection.done', { defaultValue: 'Done' })}
           </Button>
         </DialogFooter>

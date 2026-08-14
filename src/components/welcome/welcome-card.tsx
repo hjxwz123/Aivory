@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
+import { userCan } from '@/lib/user-permissions'
 
 // No chat-preference step on purpose: a new account keeps NO reply-style
 // preference (neutral default) unless the user actively picks one later in
@@ -58,7 +59,7 @@ export function WelcomeCard() {
   const status = useAuth((s) => s.status)
   const setUser = useAuth((s) => s.setUser)
   // Skip the memory onboarding step when the global admin master switch is off.
-  const memoryAvailable = user?.memory_available !== false
+  const memoryAvailable = user?.memory_available !== false && userCan(user, 'allow_memory')
 
   const lang = useLanguage((s) => s.lang)
   const setLang = useLanguage((s) => s.setLang)

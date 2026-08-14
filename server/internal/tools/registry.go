@@ -254,13 +254,73 @@ func (r *Registry) Run(ctx context.Context, name string, input []byte, tc *llm.T
 	t, ok := r.tools[name]
 	binding, mcpOK := r.mcpBindings[name]
 	r.mu.RUnlock()
+	if !ok && !mcpOK {
+		return "", nil, errors.New("unknown tool: " + name)
+	}
+	if err := r.checkCurrentToolAccess(ctx, name, binding, mcpOK, tc); err != nil {
+		return "", nil, err
+	}
 	if ok {
 		return t.Execute(ctx, input, tc)
 	}
-	if !mcpOK {
-		return "", nil, errors.New("unknown tool: " + name)
-	}
 	return r.runMCP(ctx, binding, input)
+}
+
+// checkCurrentToolAccess is the last authorization boundary before a local or
+// MCP tool executes. A turn's declarations are intentionally a snapshot, but a
+// global switch, group policy, drawing permission, or memory setting may be
+// revoked while the model is deciding which tool to call. Re-read those values
+// here so a stale declaration can never outlive the current server policy.
+func (r *Registry) checkCurrentToolAccess(
+	ctx context.Context,
+	name string,
+	binding mcpBinding,
+	isMCP bool,
+	tc *llm.ToolContext,
+) error {
+	if r.db == nil || tc == nil || strings.TrimSpace(tc.UserID) == "" {
+		return nil
+	}
+	permissions, err := store.UserGroupPermissionsForUser(ctx, r.db, tc.UserID)
+	if err != nil {
+		return fmt.Errorf("resolve current tool permission: %w", err)
+	}
+	toolID := "builtin:" + name
+	if isMCP {
+		toolID = "mcp:" + binding.ServerID
+	}
+	if !store.ResourcePolicyAllows(permissions.Tools, toolID) {
+		return errors.New("tool is no longer allowed for this user: " + name)
+	}
+	if isMCP {
+		// runMCP performs the authoritative enabled-state lookup immediately
+		// after this check and before making any network request.
+		return nil
+	}
+	if raw, settingErr := store.GetSetting(r.db, "disabled_tools"); settingErr == nil && len(raw) > 0 {
+		if disabled, _, parseErr := store.ParseBuiltinTools(raw); parseErr == nil {
+			for _, disabledName := range disabled {
+				if disabledName == name {
+					return errors.New("tool is disabled by the administrator: " + name)
+				}
+			}
+		}
+	}
+	switch name {
+	case "image_generate":
+		if !permissions.AllowDrawing {
+			return errors.New("drawing is no longer allowed for this user")
+		}
+	case "save_memory":
+		if !store.MemoryEnabledForUser(ctx, r.db, tc.UserID) {
+			return errors.New("memory is disabled")
+		}
+	case "use_skill":
+		if permissions.Skills.Mode == store.ResourceAccessNone {
+			return errors.New("skills are no longer allowed for this user")
+		}
+	}
+	return nil
 }
 
 func (r *Registry) runMCP(ctx context.Context, binding mcpBinding, input []byte) (string, []llm.Citation, error) {

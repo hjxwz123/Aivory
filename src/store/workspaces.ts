@@ -19,6 +19,7 @@ const ACTIVE_KEY = 'aivory.workspace'
 // still in flight — consumers (ChatThread's re-hydrate) rely on "switching
 // flips false only after the newest space's list landed".
 let switchSeq = 0
+let loadSeq = 0
 
 function readStoredActive(): string | null {
   try {
@@ -62,20 +63,17 @@ export const useWorkspaces = create<WorkspacesState>((set, get) => ({
   switching: false,
 
   async load() {
+    const loadToken = ++loadSeq
     try {
       const { workspaces } = await workspacesApi.list()
+      if (loadToken !== loadSeq) return
       const activeId = get().activeId
       // A stale persisted id (kicked / deleted space) falls back to personal.
       const valid = activeId != null && workspaces.some((w) => w.id === activeId)
-      if (activeId != null && !valid) {
-        try {
-          localStorage.removeItem(ACTIVE_KEY)
-        } catch {
-          /* ignore */
-        }
-      }
-      set({ workspaces, loaded: true, activeId: valid ? activeId : null })
+      set({ workspaces, loaded: true })
+      if (activeId != null && !valid) await get().switchTo(null)
     } catch {
+      if (loadToken !== loadSeq) return
       set({ loaded: true })
     }
   },

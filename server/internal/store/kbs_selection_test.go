@@ -36,6 +36,9 @@ func TestResolveOwnedKBIDsIsStrictAndOrdered(t *testing.T) {
 	if err != nil || len(ids) != 2 || ids[0] != "kb-b" || ids[1] != "kb-a" {
 		t.Fatalf("resolved ids=%v err=%v, want [kb-b kb-a]", ids, err)
 	}
+	if ids := OwnedKBIDs(ctx, db, "u1", "", []string{"kb-a", "kb-project"}); len(ids) != 1 || ids[0] != "kb-a" {
+		t.Fatalf("owned ids=%v, want project library excluded", ids)
+	}
 
 	for _, tc := range []struct {
 		name string

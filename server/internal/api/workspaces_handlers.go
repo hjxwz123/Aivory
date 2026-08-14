@@ -88,6 +88,60 @@ func workspaceMembersHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"members": members})
 }
 
+// publishWorkspaceAccessEvent notifies every current member because workspace
+// owners and knowledge-base creators can both have permission-management
+// dialogs open. Notifying only the changed member leaves those manager views
+// stale in other tabs. extraUserIDs covers a member who was just removed.
+func publishWorkspaceAccessEvent(d Deps, r *http.Request, workspaceID, eventType string, extraUserIDs ...string) {
+	recipients := map[string]struct{}{}
+	if members, err := store.ListWorkspaceMembers(r.Context(), d.DB, workspaceID); err == nil {
+		for _, member := range members {
+			if id := strings.TrimSpace(member.UserID); id != "" {
+				recipients[id] = struct{}{}
+			}
+		}
+	}
+	for _, userID := range extraUserIDs {
+		if id := strings.TrimSpace(userID); id != "" {
+			recipients[id] = struct{}{}
+		}
+	}
+	for userID := range recipients {
+		publishUserEvent(d, r, userID, eventType, "")
+	}
+}
+
+// updateWorkspaceMemberPermissionsHandler changes the member-wide capability
+// ceiling. Per-knowledge-base permissions are managed separately on each KB.
+func updateWorkspaceMemberPermissionsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	workspaceID := pathParam(r, "id")
+	memberID := pathParam(r, "uid")
+	var permissions store.WorkspaceMemberPermissions
+	if err := decodeJSON(r, &permissions); err != nil {
+		writeError(w, http.StatusBadRequest, errInvalidInput)
+		return
+	}
+	workspace, err := store.GetWorkspaceForMember(r.Context(), d.DB, workspaceID, u.ID)
+	if err != nil || workspace.OwnerID != u.ID || memberID == workspace.OwnerID {
+		writeError(w, http.StatusNotFound, errNotFound)
+		return
+	}
+	member, err := store.UpdateWorkspaceMemberPermissions(
+		r.Context(), d.DB, workspaceID, u.ID, memberID, permissions,
+	)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, errNotFound)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	publishWorkspaceAccessEvent(d, r, workspaceID, "workspace.permissions_updated", u.ID, memberID)
+	writeJSON(w, http.StatusOK, member)
+}
+
 // kickWorkspaceMemberHandler removes a member — owner only; the owner row
 // itself is protected in the store.
 func kickWorkspaceMemberHandler(d Deps, w http.ResponseWriter, r *http.Request) {
@@ -108,6 +162,7 @@ func kickWorkspaceMemberHandler(d Deps, w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusServiceUnavailable, err)
 		return
 	}
+	publishWorkspaceAccessEvent(d, r, id, "workspace.membership_updated", u.ID, memberID)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -125,6 +180,7 @@ func leaveWorkspaceHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, err)
 		return
 	}
+	publishWorkspaceAccessEvent(d, r, id, "workspace.membership_updated", u.ID)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -171,6 +227,7 @@ func joinWorkspaceHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
+	publishWorkspaceAccessEvent(d, r, ws.ID, "workspace.membership_updated", u.ID, ws.OwnerID)
 	writeJSON(w, 200, map[string]any{"id": ws.ID, "name": ws.Name})
 }
 
@@ -186,9 +243,17 @@ func deleteWorkspaceHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
+	members, err := store.ListWorkspaceMembers(r.Context(), d.DB, id)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
 	if err := teardownWorkspace(d, r, ws); err != nil {
 		writeError(w, 500, err)
 		return
+	}
+	for _, member := range members {
+		publishUserEvent(d, nil, member.UserID, "workspace.membership_updated", "")
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
@@ -332,9 +397,17 @@ func adminDeleteWorkspaceHandler(d Deps, w http.ResponseWriter, r *http.Request)
 		writeError(w, 404, errNotFound)
 		return
 	}
+	members, err := store.ListWorkspaceMembers(r.Context(), d.DB, id)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
 	if err := teardownWorkspace(d, r, ws); err != nil {
 		writeError(w, 500, err)
 		return
+	}
+	for _, member := range members {
+		publishUserEvent(d, nil, member.UserID, "workspace.membership_updated", "")
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }

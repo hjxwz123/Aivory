@@ -27,14 +27,27 @@ var (
 	// Knowledge-base retrieval is configured by administrators. User-facing
 	// APIs deliberately expose stable capability errors instead of model names,
 	// dimensions, or other indexing implementation details.
-	errKnowledgeBaseUnavailable           = errors.New("knowledge_base_unavailable")
-	errKnowledgeBaseSelectionIncompatible = errors.New("knowledge_base_selection_incompatible")
+	errKnowledgeBaseUnavailable            = errors.New("knowledge_base_unavailable")
+	errKnowledgeBaseSelectionIncompatible  = errors.New("knowledge_base_selection_incompatible")
+	errKnowledgeBaseGroupPermission        = errors.New("knowledge_base_group_permission_required")
+	errPromptGroupPermission               = errors.New("prompt_group_permission_required")
+	errSkillGroupPermission                = errors.New("skill_group_permission_required")
+	errToolGroupPermission                 = errors.New("tool_group_permission_required")
+	errSharingGroupPermission              = errors.New("sharing_group_permission_required")
+	errKnowledgeBaseSharingGroupPermission = errors.New("knowledge_base_sharing_group_permission_required")
+	errFileUploadGroupPermission           = errors.New("file_upload_group_permission_required")
+	errConversationExportGroupPermission   = errors.New("conversation_export_group_permission_required")
+	errVoiceGroupPermission                = errors.New("voice_transcription_group_permission_required")
+	errMemoryGroupPermission               = errors.New("memory_group_permission_required")
+	errDrawingGroupPermission              = errors.New("drawing_group_permission_required")
 
 	// Workspaces (§workspaces). Stable machine codes: creation gated off for the
 	// group / owned-workspace cap reached. Deliberately NOT "account_suspended" —
 	// the client force-logs-out on that one.
-	errWorkspaceDisabled = errors.New("workspace_disabled")
-	errWorkspaceLimit    = errors.New("workspace_limit_reached")
+	errWorkspaceDisabled                  = errors.New("workspace_disabled")
+	errWorkspaceLimit                     = errors.New("workspace_limit_reached")
+	errWorkspaceProjectCreationPermission = errors.New("workspace_project_creation_permission_required")
+	errWorkspaceKBCreationPermission      = errors.New("workspace_kb_creation_permission_required")
 
 	// RAG embedding model lock. Once set, changing the global embedding model
 	// would strand existing Qdrant collections/chunks under the old model.

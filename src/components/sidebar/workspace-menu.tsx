@@ -5,9 +5,9 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeftRight, Briefcase, Check, Copy, Home, LogOut, Plus, Trash2, UserX, Users } from 'lucide-react'
+import { AlertTriangle, ArrowLeftRight, Briefcase, Check, Copy, Home, LogOut, Plus, RefreshCw, Settings2, Trash2, UserX, Users } from 'lucide-react'
 import { workspacesApi } from '@/api'
-import type { ApiWorkspaceMember } from '@/api/types'
+import type { ApiWorkspaceMember, ApiWorkspaceMemberPermissions } from '@/api/types'
 import { useAuth } from '@/store/auth'
 import { useWorkspaces } from '@/store/workspaces'
 import { toast } from '@/hooks/use-toast'
@@ -27,6 +27,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
+import { subscribeAccessInvalidation } from '@/lib/access-events'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -40,7 +42,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 
 /** Whether the current user may create workspaces (group feature / admin). */
-export function canCreateWorkspaces(): boolean {
+function canCreateWorkspaces(): boolean {
   const u = useAuth.getState().user
   return u?.role === 'admin' || (u?.features ?? []).includes('workspaces')
 }
@@ -161,10 +163,12 @@ export function CreateWorkspaceDialog({ open, onOpenChange }: { open: boolean; o
   const switchTo = useWorkspaces((s) => s.switchTo)
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
+  const busyRef = useRef(false)
 
   async function submit() {
     const n = name.trim()
-    if (!n || busy) return
+    if (!n || busyRef.current) return
+    busyRef.current = true
     setBusy(true)
     try {
       const ws = await createWs(n)
@@ -182,13 +186,20 @@ export function CreateWorkspaceDialog({ open, onOpenChange }: { open: boolean; o
             : t('workspace.createFailed', { defaultValue: 'Could not create the workspace.' }),
       )
     } finally {
+      busyRef.current = false
       setBusy(false)
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="sm">
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next && busyRef.current) return
+        onOpenChange(next)
+      }}
+    >
+      <DialogContent size="sm" closeDisabled={busy}>
         <DialogHeader>
           <DialogTitle>{t('workspace.create', { defaultValue: 'Create workspace' })}</DialogTitle>
           <DialogDescription>
@@ -203,11 +214,12 @@ export function CreateWorkspaceDialog({ open, onOpenChange }: { open: boolean; o
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && void submit()}
             placeholder={t('workspace.namePlaceholder', { defaultValue: 'Workspace name' })}
+            aria-label={t('workspace.namePlaceholder', { defaultValue: 'Workspace name' })}
             autoFocus
           />
         </DialogBody>
         <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
+          <Button variant="ghost" disabled={busy} onClick={() => onOpenChange(false)}>
             {t('common.cancel', { ns: 'common', defaultValue: 'Cancel' })}
           </Button>
           <Button onClick={() => void submit()} disabled={!name.trim() || busy}>
@@ -230,77 +242,187 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
   // Distinguish "still fetching" from "loaded, empty": without it the dialog
   // opens claiming "0 members" and the list pops in a beat later.
   const [membersLoading, setMembersLoading] = useState(true)
+  const [membersLoadFailed, setMembersLoadFailed] = useState(false)
+  const [membersLoadAttempt, setMembersLoadAttempt] = useState(0)
+  const membersRequestRef = useRef(0)
   const [inviteToken, setInviteToken] = useState(ws?.invite_token ?? '')
   const { copied, copy } = useCopy()
   const isOwner = ws?.role === 'owner'
   // In-flight guards so slow-backend mutations can't be double-fired.
   const [busyUid, setBusyUid] = useState<string | null>(null)
+  const busyUidRef = useRef<{ uid: string; epoch: number } | null>(null)
   const [rotating, setRotating] = useState(false)
-  const rotatingRef = useRef(false)
+  const rotatingRef = useRef<{ workspaceID: string; epoch: number } | null>(null)
   const [actioning, setActioning] = useState(false)
-  const actioningRef = useRef(false)
+  const actioningRef = useRef<{ workspaceID: string; epoch: number } | null>(null)
+  const [editingMember, setEditingMember] = useState<ApiWorkspaceMember | null>(null)
+  const [permissionDraft, setPermissionDraft] = useState<ApiWorkspaceMemberPermissions | null>(null)
+  const [savingPermissions, setSavingPermissions] = useState(false)
+  const savingPermissionsRef = useRef<number | null>(null)
+  const operationEpochRef = useRef(0)
 
   useEffect(() => {
+    const request = ++membersRequestRef.current
+    operationEpochRef.current += 1
+    busyUidRef.current = null
+    rotatingRef.current = null
+    actioningRef.current = null
+    savingPermissionsRef.current = null
+    setBusyUid(null)
+    setRotating(false)
+    setActioning(false)
+    setSavingPermissions(false)
+    setEditingMember(null)
+    setPermissionDraft(null)
     if (!open || !activeId) return
     setInviteToken(ws?.invite_token ?? '')
     setMembersLoading(true)
+    setMembersLoadFailed(false)
     workspacesApi
       .members(activeId)
-      .then((r) => setMembers(r.members))
-      .catch(() => setMembers([]))
-      .finally(() => setMembersLoading(false))
-  }, [open, activeId, ws?.invite_token])
+      .then((r) => {
+        if (request === membersRequestRef.current) setMembers(r.members)
+      })
+      .catch(() => {
+        if (request !== membersRequestRef.current) return
+        setMembers([])
+        setMembersLoadFailed(true)
+      })
+      .finally(() => {
+        if (request === membersRequestRef.current) setMembersLoading(false)
+      })
+  }, [open, activeId, membersLoadAttempt, ws?.invite_token])
+
+  useEffect(
+    () =>
+      subscribeAccessInvalidation((event) => {
+        if (!open || (event.kind !== 'account' && event.kind !== 'workspace')) return
+        setMembersLoadAttempt((attempt) => attempt + 1)
+      }),
+    [open],
+  )
 
   if (!ws || !activeId) return null
   const inviteURL = inviteToken ? `${window.location.origin}/workspace/join/${inviteToken}` : ''
 
   async function kick(uid: string) {
-    if (busyUid) return
+    if (busyUidRef.current) return
+    const epoch = operationEpochRef.current
+    busyUidRef.current = { uid, epoch }
     setBusyUid(uid)
     try {
       await workspacesApi.kick(activeId!, uid)
-      setMembers((m) => m.filter((x) => x.user_id !== uid))
+      if (epoch === operationEpochRef.current) {
+        setMembers((m) => m.filter((x) => x.user_id !== uid))
+      }
     } catch {
-      toast.error(t('workspace.kickFailed', { defaultValue: 'Could not remove the member.' }))
+      if (epoch === operationEpochRef.current) {
+        toast.error(t('workspace.kickFailed', { defaultValue: 'Could not remove the member.' }))
+      }
     } finally {
-      setBusyUid(null)
+      if (busyUidRef.current?.uid === uid && busyUidRef.current.epoch === epoch) {
+        busyUidRef.current = null
+        if (epoch === operationEpochRef.current) setBusyUid(null)
+      }
+    }
+  }
+
+  function editPermissions(member: ApiWorkspaceMember) {
+    setEditingMember(member)
+    setPermissionDraft({
+      can_create_projects: member.can_create_projects,
+      can_private_conversations: member.can_private_conversations,
+      can_create_kb: member.can_create_kb,
+      can_add_kb_files: member.can_add_kb_files,
+      can_delete_kb_content: member.can_delete_kb_content,
+    })
+  }
+
+  async function savePermissions() {
+    if (!editingMember || !permissionDraft || savingPermissionsRef.current !== null) return
+    const epoch = operationEpochRef.current
+    const memberID = editingMember.user_id
+    const draft = { ...permissionDraft }
+    savingPermissionsRef.current = epoch
+    setSavingPermissions(true)
+    try {
+      const updated = await workspacesApi.updateMemberPermissions(activeId!, memberID, draft)
+      if (epoch !== operationEpochRef.current) return
+      setMembers((current) => current.map((member) => member.user_id === updated.user_id ? updated : member))
+      setEditingMember(null)
+      setPermissionDraft(null)
+      toast.success(t('workspace.permissionsSaved', { defaultValue: 'Member permissions updated.' }))
+    } catch {
+      if (epoch === operationEpochRef.current) {
+        toast.error(t('workspace.permissionsSaveFailed', { defaultValue: 'Could not update member permissions.' }))
+      }
+    } finally {
+      if (savingPermissionsRef.current === epoch) {
+        savingPermissionsRef.current = null
+        if (epoch === operationEpochRef.current) setSavingPermissions(false)
+      }
     }
   }
 
   async function rotate() {
     if (rotatingRef.current) return
-    rotatingRef.current = true
+    const workspaceID = activeId!
+    const epoch = operationEpochRef.current
+    const operation = { workspaceID, epoch }
+    rotatingRef.current = operation
     setRotating(true)
     try {
-      const { invite_token } = await workspacesApi.rotateInvite(activeId!)
+      const { invite_token } = await workspacesApi.rotateInvite(workspaceID)
+      if (rotatingRef.current !== operation || epoch !== operationEpochRef.current) return
       setInviteToken(invite_token)
       toast.success(t('workspace.inviteRotated', { defaultValue: 'New invite link generated — the old one is dead.' }))
     } catch {
-      toast.error(t('workspace.inviteRotateFailed', { defaultValue: 'Could not rotate the invite link.' }))
+      if (rotatingRef.current === operation && epoch === operationEpochRef.current) {
+        toast.error(t('workspace.inviteRotateFailed', { defaultValue: 'Could not rotate the invite link.' }))
+      }
     } finally {
-      rotatingRef.current = false
-      setRotating(false)
+      if (rotatingRef.current === operation) {
+        rotatingRef.current = null
+        if (epoch === operationEpochRef.current) setRotating(false)
+      }
     }
   }
 
   // Delete (owner) / Leave (non-owner) share one in-flight flag — only one is
   // ever rendered — so the destructive footer button can't be double-fired.
-  async function runFooterAction(fn: (id: string) => Promise<void>) {
+  async function runFooterAction(fn: (id: string) => Promise<void>, failureMessage: string) {
     if (actioningRef.current) return
-    actioningRef.current = true
+    const workspaceID = activeId!
+    const epoch = operationEpochRef.current
+    const operation = { workspaceID, epoch }
+    actioningRef.current = operation
     setActioning(true)
     try {
-      await fn(activeId!)
-      onOpenChange(false)
+      await fn(workspaceID)
+      if (actioningRef.current === operation && epoch === operationEpochRef.current) onOpenChange(false)
+    } catch {
+      if (actioningRef.current === operation && epoch === operationEpochRef.current) toast.error(failureMessage)
     } finally {
-      actioningRef.current = false
-      setActioning(false)
+      if (actioningRef.current === operation) {
+        actioningRef.current = null
+        if (epoch === operationEpochRef.current) setActioning(false)
+      }
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="md">
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next && (actioningRef.current || savingPermissionsRef.current !== null || busyUidRef.current)) return
+        onOpenChange(next)
+      }}
+    >
+      <DialogContent
+        size="md"
+        closeDisabled={actioning || savingPermissions || busyUid !== null}
+        className="max-sm:h-[calc(100dvh-1rem)] max-sm:max-h-[calc(100dvh-1rem)]"
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Briefcase size={15} aria-hidden />
@@ -309,7 +431,9 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
           <DialogDescription>
             {membersLoading
               ? t('workspace.membersLoading', { defaultValue: 'Loading members…' })
-              : t('workspace.membersBody', { count: members.length, defaultValue: '{{count}} members' })}
+              : membersLoadFailed
+                ? t('workspace.membersLoadFailed', { defaultValue: 'Could not load workspace members.' })
+                : t('workspace.membersBody', { count: members.length, defaultValue: '{{count}} members' })}
           </DialogDescription>
         </DialogHeader>
 
@@ -352,7 +476,24 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
                 </li>
               ))
             : null}
-          {!membersLoading && members.map((m) => (
+          {!membersLoading && membersLoadFailed ? (
+            <li role="alert" className="flex flex-col items-center px-4 py-8 text-center">
+              <AlertTriangle size={18} aria-hidden className="text-[var(--color-danger)]" />
+              <p className="mt-2 text-[13px] text-[var(--color-fg-muted)]">
+                {t('workspace.membersLoadFailed', { defaultValue: 'Could not load workspace members.' })}
+              </p>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="mt-3"
+                leadingIcon={<RefreshCw size={13} aria-hidden />}
+                onClick={() => setMembersLoadAttempt((attempt) => attempt + 1)}
+              >
+                {t('actions.tryAgain', { ns: 'common', defaultValue: 'Try again' })}
+              </Button>
+            </li>
+          ) : null}
+          {!membersLoading && !membersLoadFailed && members.map((m) => (
             <li key={m.user_id} className="flex items-center gap-2.5 rounded-[8px] px-1.5 py-1.5">
               <Avatar size="sm">
                 {m.avatar_url ? <AvatarImage src={m.avatar_url} alt={m.name} /> : null}
@@ -367,15 +508,30 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
                 </div>
               </div>
               {isOwner && m.role !== 'owner' ? (
-                <button
-                  type="button"
-                  onClick={() => void kick(m.user_id)}
-                  disabled={busyUid === m.user_id}
-                  aria-label={t('workspace.kick', { defaultValue: 'Remove member' })}
-                  className="inline-flex size-7 items-center justify-center rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:opacity-50 disabled:pointer-events-none"
-                >
-                  <UserX size={13} aria-hidden />
-                </button>
+                <div className="flex shrink-0 items-center gap-0.5">
+                  <Tooltip content={t('workspace.managePermissions', { defaultValue: 'Manage permissions' })}>
+                    <button
+                      type="button"
+                      onClick={() => editPermissions(m)}
+                      disabled={busyUid !== null}
+                      aria-label={t('workspace.managePermissions', { defaultValue: 'Manage permissions' })}
+                      className="inline-flex size-7 items-center justify-center rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:pointer-events-none disabled:opacity-50 max-sm:size-10"
+                    >
+                      <Settings2 size={13} aria-hidden />
+                    </button>
+                  </Tooltip>
+                  <Tooltip content={t('workspace.kick', { defaultValue: 'Remove member' })}>
+                    <button
+                      type="button"
+                      onClick={() => void kick(m.user_id)}
+                      disabled={busyUid !== null}
+                      aria-label={t('workspace.kick', { defaultValue: 'Remove member' })}
+                      className="inline-flex size-7 items-center justify-center rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:pointer-events-none disabled:opacity-50 max-sm:size-10"
+                    >
+                      <UserX size={13} aria-hidden />
+                    </button>
+                  </Tooltip>
+                </div>
               ) : null}
             </li>
           ))}
@@ -387,7 +543,10 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
             <Button
               variant="destructive"
               loading={actioning}
-              onClick={() => void runFooterAction(removeWs)}
+              onClick={() => void runFooterAction(
+                removeWs,
+                t('workspace.deleteFailed', { defaultValue: 'Could not delete the workspace.' }),
+              )}
             >
               <Trash2 size={13} aria-hidden />
               {t('workspace.delete', { defaultValue: 'Delete workspace' })}
@@ -396,17 +555,89 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
             <Button
               variant="destructive"
               loading={actioning}
-              onClick={() => void runFooterAction(leaveWs)}
+              onClick={() => void runFooterAction(
+                leaveWs,
+                t('workspace.leaveFailed', { defaultValue: 'Could not leave the workspace.' }),
+              )}
             >
               <LogOut size={13} aria-hidden />
               {t('workspace.leave', { defaultValue: 'Leave workspace' })}
             </Button>
           )}
-          <Button variant="ghost" disabled={actioning} onClick={() => onOpenChange(false)}>
+          <Button variant="ghost" disabled={actioning || busyUid !== null} onClick={() => onOpenChange(false)}>
             {t('common.close', { ns: 'common', defaultValue: 'Close' })}
           </Button>
         </DialogFooter>
       </DialogContent>
+
+      <Dialog
+        open={editingMember !== null}
+        onOpenChange={(next) => {
+          if (!next && !savingPermissions) {
+            setEditingMember(null)
+            setPermissionDraft(null)
+          }
+        }}
+      >
+        <DialogContent size="sm" closeDisabled={savingPermissions}>
+          <DialogHeader>
+            <DialogTitle>{t('workspace.memberPermissions', { defaultValue: 'Member permissions' })}</DialogTitle>
+            <DialogDescription>
+              {t('workspace.memberPermissionsBody', {
+                name: editingMember?.name || editingMember?.email || '',
+                defaultValue: 'Set what {{name}} can create and manage across this workspace.',
+              })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody className="divide-y divide-[var(--color-divider)] py-0">
+            {permissionDraft ? WORKSPACE_PERMISSION_ROWS.map((row) => (
+              <label key={row.key} className="flex min-h-14 cursor-pointer items-center gap-4 py-3">
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[13px] font-medium text-[var(--color-fg)]">
+                    {t(`workspace.permissions.${row.key}.label`, { defaultValue: row.label })}
+                  </span>
+                  <span className="mt-0.5 block text-[11.5px] leading-4 text-[var(--color-fg-subtle)]">
+                    {t(`workspace.permissions.${row.key}.description`, { defaultValue: row.description })}
+                  </span>
+                </span>
+                <Switch
+                  checked={permissionDraft[row.key]}
+                  disabled={savingPermissions}
+                  onCheckedChange={(checked) => setPermissionDraft((current) => current ? { ...current, [row.key]: checked } : current)}
+                  aria-label={t(`workspace.permissions.${row.key}.label`, { defaultValue: row.label })}
+                />
+              </label>
+            )) : null}
+          </DialogBody>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              disabled={savingPermissions}
+              onClick={() => {
+                setEditingMember(null)
+                setPermissionDraft(null)
+              }}
+            >
+              {t('common.cancel', { ns: 'common', defaultValue: 'Cancel' })}
+            </Button>
+            <Button loading={savingPermissions} onClick={() => void savePermissions()}>
+              {t('common.save', { ns: 'common', defaultValue: 'Save' })}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   )
 }
+
+const WORKSPACE_PERMISSION_ROWS: Array<{
+  key: keyof ApiWorkspaceMemberPermissions
+  label: string
+  description: string
+}> = [
+  { key: 'can_create_projects', label: 'Create projects', description: 'Create new projects and their project libraries.' },
+  { key: 'can_private_conversations', label: 'Private conversations', description: 'Create conversations visible only to themselves.' },
+  { key: 'can_create_kb', label: 'Create knowledge bases', description: 'Create new workspace knowledge bases.' },
+  { key: 'can_add_kb_files', label: 'Add knowledge-base files', description: 'Upload and paste content into workspace knowledge bases.' },
+  { key: 'can_delete_kb_content', label: 'Delete knowledge-base content', description: 'Delete or retry content when the specific library also allows it.' },
+]

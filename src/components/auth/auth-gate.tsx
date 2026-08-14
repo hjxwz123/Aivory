@@ -19,6 +19,7 @@ import { useLanguage, detectBrowserLanguage, toSupportedLanguage } from '@/store
 import { useTheme } from '@/store/theme'
 import { persistUserSettings } from '@/lib/user-settings'
 import { resolveDefaultToolMode } from '@/lib/tool-mode'
+import { invalidateAccessState } from '@/lib/access-events'
 import { ACCENT_PRESETS, type AccentPref, type ThemePref } from '@/types/settings'
 
 const PUBLIC_PATHS = ['/welcome', '/login', '/register', '/forgot-password', '/share', '/setup', '/privacy', '/terms']
@@ -36,6 +37,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const loadConversations = useConversations((s) => s.load)
   const loadProjects = useProjects((s) => s.load)
   const loadModels = useModels((s) => s.load)
+  const refreshProfile = useAuth((s) => s.refreshProfile)
   const syncUserSettings = useSettings((s) => s.syncUserSettings)
   const location = useLocation()
   const hydratedDataForUser = useRef<string | null>(null)
@@ -100,6 +102,30 @@ export function AuthGate({ children }: { children: ReactNode }) {
       })
     void loadModels()
   }, [status, user?.id, loadConversations, loadProjects, loadModels])
+
+  // A temporary plan can expire while the tab stays open and no realtime event
+  // is emitted. Refresh just after the deadline, then reconcile every cache
+  // whose visible choices depend on the user's group.
+  useEffect(() => {
+    if (status !== 'authenticated' || !user?.id || !user.group_expires_at) return
+    const expiresAtMs = user.group_expires_at * 1000
+    const schedule = () => {
+      const remaining = expiresAtMs - Date.now() + 750
+      if (remaining > 2_147_000_000) {
+        return window.setTimeout(schedule, 2_147_000_000)
+      }
+      return window.setTimeout(() => {
+        void refreshProfile().then((fresh) => {
+          if (!fresh) return
+          invalidateAccessState({ kind: 'account' })
+          void loadModels()
+          void useWorkspaces.getState().load()
+        })
+      }, Math.max(0, remaining))
+    }
+    const timer = schedule()
+    return () => window.clearTimeout(timer)
+  }, [loadModels, refreshProfile, status, user?.group_expires_at, user?.id])
 
   // Loading shimmer (auth check + initial paint) — reused while the first-run
   // probe is still pending so we never route on a not-yet-known needsSetup.

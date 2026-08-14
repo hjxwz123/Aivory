@@ -6,10 +6,10 @@
  * is scoped to the keys this page owns so concurrent edits don't clobber
  * fields managed elsewhere.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
-import { Settings2 } from 'lucide-react'
+import { AlertTriangle, RefreshCw, Settings2 } from 'lucide-react'
 import { adminApi, ApiError, type ApiMCPServer } from '@/api'
 import type { ApiBuiltinTool } from '@/api/types'
 import { LucideGlyph } from '@/components/ui/lucide-icon'
@@ -40,43 +40,124 @@ export default function AdminTools() {
   const [builtinTools, setBuiltinTools] = useState<ApiBuiltinTool[]>([])
   const [mcpServers, setMcpServers] = useState<ApiMCPServer[]>([])
   const [loading, setLoading] = useState(true)
+  const [settingsLoadFailed, setSettingsLoadFailed] = useState(false)
+  const [builtinToolsLoadFailed, setBuiltinToolsLoadFailed] = useState(false)
+  const [mcpLoadFailed, setMCPLoadFailed] = useState(false)
+  const [builtinToolsRefreshing, setBuiltinToolsRefreshing] = useState(false)
+  const [mcpRefreshing, setMCPRefreshing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [togglingMCPID, setTogglingMCPID] = useState('')
+  const savingRef = useRef(false)
+  const togglingMCPRef = useRef('')
+  const loadRequestRef = useRef(0)
+  const builtinToolsRequestRef = useRef(0)
+  const mcpRequestRef = useRef(0)
 
   async function load() {
+    const requestID = ++loadRequestRef.current
+    const builtinToolsRequestID = ++builtinToolsRequestRef.current
+    const mcpRequestID = ++mcpRequestRef.current
     setLoading(true)
-    try {
-      const [s, tools, mcp] = await Promise.all([
-        adminApi.settings(),
-        adminApi.builtinTools().catch(() => [] as ApiBuiltinTool[]),
-        adminApi.mcpServers(),
-      ])
-      setDraft(s)
-      setBuiltinTools(tools)
-      setMcpServers(mcp)
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
-    } finally {
-      setLoading(false)
+    setSettingsLoadFailed(false)
+    setBuiltinToolsLoadFailed(false)
+    setMCPLoadFailed(false)
+    setBuiltinTools([])
+    setMcpServers([])
+    const [settingsResult, toolsResult, mcpResult] = await Promise.allSettled([
+      adminApi.settings(),
+      adminApi.builtinTools(),
+      adminApi.mcpServers(),
+    ])
+    if (requestID !== loadRequestRef.current) return
+    if (settingsResult.status === 'fulfilled') {
+      setDraft(settingsResult.value)
+    } else {
+      setDraft({})
+      setSettingsLoadFailed(true)
     }
+    if (builtinToolsRequestID === builtinToolsRequestRef.current) {
+      if (toolsResult.status === 'fulfilled') {
+        setBuiltinTools(toolsResult.value)
+      } else {
+        setBuiltinToolsLoadFailed(true)
+      }
+    }
+    if (mcpRequestID === mcpRequestRef.current) {
+      if (mcpResult.status === 'fulfilled') {
+        setMcpServers(mcpResult.value)
+      } else {
+        setMCPLoadFailed(true)
+      }
+    }
+    setLoading(false)
   }
   useEffect(() => {
     void load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      loadRequestRef.current += 1
+      builtinToolsRequestRef.current += 1
+      mcpRequestRef.current += 1
+    }
   }, [])
 
+  async function retryBuiltinTools() {
+    const requestID = ++builtinToolsRequestRef.current
+    setBuiltinToolsRefreshing(true)
+    try {
+      const tools = await adminApi.builtinTools()
+      if (requestID !== builtinToolsRequestRef.current) return
+      setBuiltinTools(tools)
+      setBuiltinToolsLoadFailed(false)
+    } catch (error) {
+      if (requestID !== builtinToolsRequestRef.current) return
+      setBuiltinTools([])
+      setBuiltinToolsLoadFailed(true)
+      toast.error(error instanceof ApiError ? error.message : t('admin:common.failed'))
+    } finally {
+      if (requestID === builtinToolsRequestRef.current) setBuiltinToolsRefreshing(false)
+    }
+  }
+
+  async function retryMCPServers() {
+    const requestID = ++mcpRequestRef.current
+    setMCPRefreshing(true)
+    try {
+      const servers = await adminApi.mcpServers()
+      if (requestID !== mcpRequestRef.current) return
+      setMcpServers(servers)
+      setMCPLoadFailed(false)
+    } catch (error) {
+      if (requestID !== mcpRequestRef.current) return
+      setMcpServers([])
+      setMCPLoadFailed(true)
+      toast.error(error instanceof ApiError ? error.message : t('admin:common.failed'))
+    } finally {
+      if (requestID === mcpRequestRef.current) setMCPRefreshing(false)
+    }
+  }
+
   async function save() {
+    if (savingRef.current) return
+    savingRef.current = true
     setSaving(true)
     try {
       const patch: Settings = {}
       for (const k of OWNED_KEYS) {
         if (k in draft) patch[k] = draft[k]
       }
-      await adminApi.updateSettings(patch)
+      const saved = await adminApi.updateSettings(patch)
+      setDraft((current) => {
+        const next = { ...current }
+        for (const key of OWNED_KEYS) {
+          if (key in saved) next[key] = saved[key]
+        }
+        return next
+      })
       toast.success(t('admin:settings.saved'))
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
     } finally {
+      savingRef.current = false
       setSaving(false)
     }
   }
@@ -92,14 +173,20 @@ export default function AdminTools() {
   }
 
   function setToolEnabled(name: string, enabled: boolean) {
-    const disabled = new Set(readStringArray('disabled_tools'))
-    if (enabled) disabled.delete(name)
-    else disabled.add(name)
-    setDraft({ ...draft, disabled_tools: [...disabled] })
+    setDraft((current) => {
+      const value = current.disabled_tools
+      const disabled = new Set(
+        Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [],
+      )
+      if (enabled) disabled.delete(name)
+      else disabled.add(name)
+      return { ...current, disabled_tools: [...disabled] }
+    })
   }
 
   async function setMCPEnabled(server: ApiMCPServer, enabled: boolean) {
-    if (togglingMCPID) return
+    if (togglingMCPRef.current) return
+    togglingMCPRef.current = server.id
     setTogglingMCPID(server.id)
     setMcpServers((current) => current.map((row) => row.id === server.id ? { ...row, enabled } : row))
     try {
@@ -109,6 +196,7 @@ export default function AdminTools() {
       setMcpServers((current) => current.map((row) => row.id === server.id ? server : row))
       toast.error(error instanceof ApiError ? error.message : t('admin:common.failed'))
     } finally {
+      togglingMCPRef.current = ''
       setTogglingMCPID('')
     }
   }
@@ -124,8 +212,22 @@ export default function AdminTools() {
 
       {loading ? (
         <PanelFallback />
+      ) : settingsLoadFailed ? (
+        <div className="mt-8 flex min-h-64 flex-col items-center justify-center rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center">
+          <AlertTriangle size={22} aria-hidden className="text-[var(--color-danger)]" />
+          <p className="mt-3 text-sm font-medium text-[var(--color-fg)]">{t('admin:tools.loadFailed')}</p>
+          <Button
+            className="mt-4"
+            size="sm"
+            variant="secondary"
+            leadingIcon={<RefreshCw size={14} aria-hidden />}
+            onClick={() => void load()}
+          >
+            {t('common:actions.tryAgain')}
+          </Button>
+        </div>
       ) : (
-        <section className="mt-8 flex flex-col gap-5">
+        <section className="mt-8 flex flex-col gap-5" aria-busy={saving || Boolean(togglingMCPID)}>
           <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5">
             <h2 className="font-serif text-lg text-[var(--color-fg)]">
               {t('admin:tools.availabilityTitle', { defaultValue: 'Global tool availability' })}
@@ -135,7 +237,14 @@ export default function AdminTools() {
                 defaultValue: 'A disabled tool is removed from every model, including models that explicitly allow it.',
               })}
             </p>
-            {builtinTools.length === 0 ? (
+            {builtinToolsLoadFailed ? (
+              <div className="mt-4 flex flex-col items-start gap-2 border-y border-[var(--color-divider)] py-4">
+                <p className="text-sm text-[var(--color-danger)]">{t('admin:tools.builtinLoadFailed')}</p>
+                <Button size="sm" variant="ghost" leadingIcon={<RefreshCw size={14} aria-hidden />} loading={builtinToolsRefreshing} onClick={() => void retryBuiltinTools()}>
+                  {t('common:actions.tryAgain')}
+                </Button>
+              </div>
+            ) : builtinTools.length === 0 ? (
               <p className="mt-4 text-sm text-[var(--color-fg-muted)]">
                 {t('admin:tools.availabilityEmpty', { defaultValue: 'No platform tools are registered.' })}
               </p>
@@ -153,7 +262,11 @@ export default function AdminTools() {
                           {t(`admin:models.builtinTools.descriptions.${tool.name}`, { defaultValue: tool.description })}
                         </span>
                       </span>
-                      <Switch checked={enabled} onCheckedChange={(value) => setToolEnabled(tool.name, value)} />
+                      <Switch
+                        checked={enabled}
+                        disabled={saving}
+                        onCheckedChange={(value) => setToolEnabled(tool.name, value)}
+                      />
                     </label>
                   )
                 })}
@@ -181,7 +294,14 @@ export default function AdminTools() {
                 <Link to="/admin/mcp">{t('admin:tools.manageMCP')}</Link>
               </Button>
             </div>
-            {mcpServers.length === 0 ? (
+            {mcpLoadFailed ? (
+              <div className="mt-4 flex flex-col items-start gap-2 border-y border-[var(--color-divider)] py-4">
+                <p className="text-sm text-[var(--color-danger)]">{t('admin:tools.mcpLoadFailed')}</p>
+                <Button size="sm" variant="ghost" leadingIcon={<RefreshCw size={14} aria-hidden />} loading={mcpRefreshing} onClick={() => void retryMCPServers()}>
+                  {t('common:actions.tryAgain')}
+                </Button>
+              </div>
+            ) : mcpServers.length === 0 ? (
               <p className="mt-4 text-sm text-[var(--color-fg-muted)]">{t('admin:tools.mcpAvailabilityEmpty')}</p>
             ) : (
               <div className="mt-4 divide-y divide-[var(--color-divider)] border-y border-[var(--color-divider)]">
@@ -204,7 +324,7 @@ export default function AdminTools() {
                     <Switch
                       id={`tool-mcp-${server.id}`}
                       checked={server.enabled}
-                      disabled={Boolean(togglingMCPID)}
+                      disabled={Boolean(togglingMCPID) || saving}
                       onCheckedChange={(value) => void setMCPEnabled(server, value)}
                     />
                   </label>
@@ -225,6 +345,7 @@ export default function AdminTools() {
               >
                 <Select
                   value={searchProvider || 'none'}
+                  disabled={saving}
                   onValueChange={(v) =>
                     setDraft({ ...draft, search_provider: v === 'none' ? '' : v })
                   }
@@ -253,6 +374,7 @@ export default function AdminTools() {
                       type="url"
                       placeholder="https://searxng.your-domain.tld"
                       value={readString('search_base_url')}
+                      disabled={saving}
                       onChange={(e) => setDraft({ ...draft, search_base_url: e.target.value })}
                     />
                   </Field>
@@ -271,6 +393,7 @@ export default function AdminTools() {
                       type="password"
                       autoComplete="off"
                       value={readString('search_api_key')}
+                      disabled={saving}
                       onChange={(e) => setDraft({ ...draft, search_api_key: e.target.value })}
                     />
                   </Field>
@@ -295,6 +418,7 @@ export default function AdminTools() {
                   autoComplete="off"
                   placeholder="http://your-server:48217"
                   value={readString('sandbox_base_url')}
+                  disabled={saving}
                   onChange={(e) => setDraft({ ...draft, sandbox_base_url: e.target.value })}
                 />
               </Field>
@@ -309,6 +433,7 @@ export default function AdminTools() {
                   type="password"
                   autoComplete="new-password"
                   value={readString('sandbox_api_key')}
+                  disabled={saving}
                   onChange={(e) => setDraft({ ...draft, sandbox_api_key: e.target.value })}
                 />
               </Field>
@@ -324,6 +449,7 @@ export default function AdminTools() {
                   max={600}
                   placeholder="120"
                   value={readString('sandbox_exec_timeout_sec')}
+                  disabled={saving}
                   onChange={(e) => setDraft({ ...draft, sandbox_exec_timeout_sec: e.target.value })}
                 />
               </Field>
@@ -339,6 +465,7 @@ export default function AdminTools() {
                   max={86400}
                   placeholder="1800"
                   value={readString('sandbox_idle_ttl_sec')}
+                  disabled={saving}
                   onChange={(e) => setDraft({ ...draft, sandbox_idle_ttl_sec: e.target.value })}
                 />
               </Field>

@@ -12,6 +12,8 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
+import { useAuth } from '@/store/auth'
+import { userCan } from '@/lib/user-permissions'
 
 interface MoveToProjectSubProps {
   conversationId: string
@@ -29,6 +31,10 @@ export function MoveToProjectSub({ conversationId, currentProjectId }: MoveToPro
   const { t } = useTranslation(['chat', 'projects'])
   const projects = useProjects((s) => s.projects)
   const setProject = useConversations((s) => s.setProject)
+  const user = useAuth((s) => s.user)
+  const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases')
+
+  if (!canUseKnowledgeBases && !currentProjectId) return null
 
   async function move(projectId: string | undefined, name?: string) {
     if (projectId === currentProjectId) return
@@ -60,7 +66,7 @@ export function MoveToProjectSub({ conversationId, currentProjectId }: MoveToPro
             <DropdownMenuSeparator />
           </>
         ) : null}
-        {projects.length === 0 ? (
+        {!canUseKnowledgeBases ? null : projects.length === 0 ? (
           <DropdownMenuItem disabled>{t('projects:moveTo.none')}</DropdownMenuItem>
         ) : (
           projects.map((p) => (

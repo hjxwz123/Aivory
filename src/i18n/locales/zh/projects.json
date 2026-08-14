@@ -113,6 +113,8 @@
     "submit": "创建项目",
     "cancel": "取消",
     "created": "项目已创建",
+    "limitReached": "已达到套餐的项目数量上限。",
+    "workspacePermissionRequired": "你没有在此工作空间创建项目的权限。",
     "nameExists": "已存在同名项目。"
   },
   "accent": {

@@ -148,13 +148,13 @@ func StorageBillingUserForContainer(ctx context.Context, db *sql.DB, kbID, conve
 	var err error
 	if kbID != "" {
 		args := []any{kbID}
-		args = append(args, workspaceResourceAccessArgs(accessUserID)...)
+		args = append(args, knowledgeBaseWriteArgs(accessUserID)...)
 		err = db.QueryRowContext(ctx, `
 			SELECT CASE WHEN COALESCE(k.workspace_id,'')<>''
 			       THEN COALESCE(w.owner_id, k.user_id) ELSE k.user_id END
 			  FROM knowledge_bases k
 			  LEFT JOIN workspaces w ON w.id=k.workspace_id
-			 WHERE k.id=? AND `+workspaceResourceAccessPredicate("k"), args...).Scan(&billingUserID)
+			 WHERE k.id=? AND `+knowledgeBaseWritePredicate("k"), args...).Scan(&billingUserID)
 	} else {
 		args := []any{conversationID}
 		args = append(args, workspaceResourceAccessArgs(accessUserID)...)

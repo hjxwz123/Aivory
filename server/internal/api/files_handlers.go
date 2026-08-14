@@ -114,6 +114,32 @@ func uploadDestPath(d Deps, userID, kindPrefix, safeName string) (string, error)
 	return filepath.Join(dir, store.GenID(kindPrefix)+"_"+safeName), nil
 }
 
+// writeUploadCopy makes the filesystem write atomic from the application's
+// point of view: callers either receive a complete, closed file or no file at
+// all. In particular, a disconnected client or a late disk error must not
+// leave bytes behind that have no database row and cannot be managed later.
+func writeUploadCopy(path string, source io.Reader, limit int64) (int64, error) {
+	out, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return 0, err
+	}
+	n, copyErr := io.Copy(out, io.LimitReader(source, limit+1))
+	closeErr := out.Close()
+	if copyErr != nil {
+		_ = os.Remove(path)
+		return n, copyErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(path)
+		return n, closeErr
+	}
+	if n > limit {
+		_ = os.Remove(path)
+		return n, errFileTooLarge
+	}
+	return n, nil
+}
+
 // receiveDocument handles multipart or JSON-encoded document uploads. When
 // the request is JSON, the "filename" and "content" fields are required —
 // the server writes content to a real file on disk. Multipart support is
@@ -126,6 +152,17 @@ func uploadDestPath(d Deps, userID, kindPrefix, safeName string) (string, error)
 // Returns the persisted store.Document, ready for RAG ingestion.
 func receiveDocument(d Deps, r *http.Request, kbID, convID string) (*store.Document, error) {
 	u := authUser(r)
+	// Fail on current group capabilities before resolving billing or checking
+	// quota. A user who cannot upload should never receive a misleading quota
+	// error, and these checks happen before any request bytes are consumed.
+	if err := currentFileUploadPermission(d, r); err != nil {
+		return nil, err
+	}
+	if kbID != "" {
+		if err := currentKnowledgeBasePermission(d, r); err != nil {
+			return nil, err
+		}
+	}
 	billingUserID, err := store.StorageBillingUserForContainer(r.Context(), d.DB, kbID, convID, u.ID)
 	if err != nil {
 		return nil, err
@@ -162,11 +199,19 @@ func receiveDocument(d Deps, r *http.Request, kbID, convID string) (*store.Docum
 		if err := checkStorageQuota(r, d, billingUserID, int64(len(body.Content))); err != nil {
 			return nil, err
 		}
+		if err := currentFileUploadPermission(d, r); err != nil {
+			return nil, err
+		}
+		if kbID != "" {
+			if err := currentKnowledgeBasePermission(d, r); err != nil {
+				return nil, err
+			}
+		}
 		path, err := uploadDestPath(d, u.ID, "d", safe)
 		if err != nil {
 			return nil, err
 		}
-		if err := os.WriteFile(path, []byte(body.Content), 0o600); err != nil {
+		if _, err := writeUploadCopy(path, strings.NewReader(body.Content), d.Config.MaxUploadBytes); err != nil {
 			return nil, err
 		}
 		doc := store.Document{
@@ -203,21 +248,21 @@ func receiveDocument(d Deps, r *http.Request, kbID, convID string) (*store.Docum
 	if err != nil {
 		return nil, err
 	}
-	out, err := os.Create(path)
+	// ParseMultipartForm's argument is only the in-memory threshold. Keep the
+	// application-owned copy bounded and remove it on every incomplete write.
+	n, err := writeUploadCopy(path, file, d.Config.MaxUploadBytes)
 	if err != nil {
 		return nil, err
 	}
-	defer out.Close()
-	// §C3: bound the copy so an oversized upload can't fill the disk. ParseMultipartForm's
-	// arg is only the in-memory threshold; the stream itself must be capped here.
-	n, err := io.Copy(out, io.LimitReader(file, d.Config.MaxUploadBytes+1))
-	if err != nil {
-		return nil, err
-	}
-	if n > d.Config.MaxUploadBytes {
-		_ = out.Close()
+	if err := currentFileUploadPermission(d, r); err != nil {
 		_ = os.Remove(path)
-		return nil, errFileTooLarge
+		return nil, err
+	}
+	if kbID != "" {
+		if err := currentKnowledgeBasePermission(d, r); err != nil {
+			_ = os.Remove(path)
+			return nil, err
+		}
 	}
 	doc := store.Document{
 		KBID: kbID, ConversationID: convID, Filename: safe,
@@ -226,7 +271,6 @@ func receiveDocument(d Deps, r *http.Request, kbID, convID string) (*store.Docum
 	}
 	created, err := store.CreateDocumentForUser(r.Context(), d.DB, doc, u.ID)
 	if err != nil {
-		_ = out.Close()
 		_ = os.Remove(path)
 		return nil, err
 	}
@@ -389,30 +433,29 @@ func uploadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
-	out, err := os.Create(path)
+	n, err := writeUploadCopy(path, file, limit)
 	if err != nil {
+		if errors.Is(err, errFileTooLarge) {
+			writeError(w, 413, uploadTooLargeError(kind, limit))
+			return
+		}
 		writeError(w, 500, err)
-		return
-	}
-	defer out.Close()
-	n, err := io.Copy(out, io.LimitReader(file, limit+1))
-	if err != nil {
-		writeError(w, 500, err)
-		return
-	}
-	if n > limit {
-		_ = out.Close()
-		_ = os.Remove(path)
-		writeError(w, 413, uploadTooLargeError(kind, limit))
 		return
 	}
 	if kind != "image" {
 		if err := checkUploadQuota(n); err != nil {
-			_ = out.Close()
 			_ = os.Remove(path)
 			writeError(w, http.StatusInsufficientStorage, err)
 			return
 		}
+	}
+	// The route checked this before reading the request body. Re-check after the
+	// potentially long copy so a group revocation cannot leave a file behind just
+	// because the upload started while the capability was still enabled.
+	if err := currentFileUploadPermission(d, r); err != nil {
+		_ = os.Remove(path)
+		writeError(w, http.StatusForbidden, err)
+		return
 	}
 	f, err := store.CreateFile(r.Context(), d.DB, store.File{
 		UserID: u.ID, ConversationID: conv, Filename: safe,
@@ -444,7 +487,8 @@ func uploadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// the scope check above.
 	if scopeConv != nil && isDocKind(f.Kind) {
 		if c := scopeConv; c.ProjectID != "" {
-			if p, err := store.GetProject(r.Context(), d.DB, c.ProjectID, u.ID); err == nil && p.AutoAddUploads && p.KBID != "" {
+			permissions, permissionErr := requestPermissions(d, r)
+			if p, err := store.GetProject(r.Context(), d.DB, c.ProjectID, u.ID); permissionErr == nil && permissions.AllowKnowledgeBases && err == nil && p.AutoAddUploads && p.KBID != "" {
 				if doc, derr := store.CreateDocumentForUser(r.Context(), d.DB, store.Document{
 					KBID: p.KBID, Filename: f.Filename, MimeType: f.MimeType,
 					SizeBytes: f.SizeBytes, Status: "pending", StoragePath: f.StoragePath,
@@ -790,16 +834,26 @@ func documentContentHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, errNotFound)
 		return
 	}
-	serveStoredFile(d, w, &store.File{
+	if doc.KBID != "" && !requireKnowledgeBasePermission(d, w, r) {
+		return
+	}
+	// Knowledge-base access can be revoked independently of the document. Do
+	// not let a browser reuse an authorized response after a share, workspace
+	// membership, or user-group permission has been removed.
+	serveStoredFileWithCacheControl(d, w, &store.File{
 		Filename:    doc.Filename,
 		StoragePath: doc.StoragePath,
-	})
+	}, "private, no-store")
 }
 
 // serveStoredFile streams an uploaded file row's bytes with the standard safety
 // headers. ACCESS CONTROL IS THE CALLER'S JOB — owner/admin auth on the private
 // route, share-snapshot membership on the public share route (§ sharing).
 func serveStoredFile(d Deps, w http.ResponseWriter, f *store.File) {
+	serveStoredFileWithCacheControl(d, w, f, fmt.Sprintf("private, max-age=%d", int(uploadedFileCacheTTL.Seconds())))
+}
+
+func serveStoredFileWithCacheControl(d Deps, w http.ResponseWriter, f *store.File, cacheControl string) {
 	cleanName := filepath.Base(f.Filename)
 	full, err := fileguard.ResolveExisting(f.StoragePath, d.Config.UploadDir)
 	if err != nil {
@@ -826,7 +880,7 @@ func serveStoredFile(d Deps, w http.ResponseWriter, f *store.File) {
 	// Cache so a single conversation page's repeated image-tag fetches don't
 	// re-stream the same file on every navigation. The file_id never collides,
 	// so a long TTL is safe; we keep it private since the file is owner-scoped.
-	w.Header().Set("cache-control", fmt.Sprintf("private, max-age=%d", int(uploadedFileCacheTTL.Seconds())))
+	w.Header().Set("cache-control", cacheControl)
 	disp := "attachment"
 	if previewableInline(contentType) {
 		disp = "inline"

@@ -129,12 +129,12 @@ func TestEPayUserGroupCheckoutAndWebhookFlow(t *testing.T) {
 			}
 			minimumExpiry := time.Unix(beforeCallback, 0).UTC().AddDate(tc.addYears, tc.addMonths, 0).Unix()
 			maximumExpiry := time.Unix(afterCallback, 0).UTC().AddDate(tc.addYears, tc.addMonths, 0).Unix()
-			if groupID != group.ID || previousGroupID != "" || tokenVersion != 1 ||
+			if groupID != group.ID || previousGroupID != "" || tokenVersion != fx.user.TokenVer ||
 				groupExpiresAt < minimumExpiry || groupExpiresAt > maximumExpiry {
 				t.Fatalf(
-					"%s fulfilled membership = group %q previous %q expiry %d token %d; want group %q, empty previous, expiry %d..%d, token 1",
+					"%s fulfilled membership = group %q previous %q expiry %d token %d; want group %q, empty previous, expiry %d..%d, token %d",
 					tc.billingCycle, groupID, previousGroupID, groupExpiresAt, tokenVersion,
-					group.ID, minimumExpiry, maximumExpiry,
+					group.ID, minimumExpiry, maximumExpiry, fx.user.TokenVer,
 				)
 			}
 

@@ -19,6 +19,9 @@ import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
+import { useWorkspaces } from '@/store/workspaces'
+import { useAuth } from '@/store/auth'
+import { userCan } from '@/lib/user-permissions'
 
 interface NewProjectDialogProps {
   open: boolean
@@ -33,9 +36,15 @@ interface NewProjectDialogProps {
 const DEFAULT_ACCENT: ProjectAccent = 'violet'
 
 export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDialogProps) {
-  const { t } = useTranslation(['projects', 'common'])
+  const { t } = useTranslation(['projects', 'common', 'kb'])
   const create = useProjects((s) => s.createProject)
   const navigate = useNavigate()
+  const activeWorkspace = useWorkspaces((s) =>
+    s.activeId ? s.workspaces.find((workspace) => workspace.id === s.activeId) : undefined,
+  )
+  const user = useAuth((s) => s.user)
+  const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases')
+  const canCreateProject = canUseKnowledgeBases && (!activeWorkspace || activeWorkspace.can_create_projects)
 
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -56,7 +65,22 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
     }
   }, [open])
 
+  // Do not leave the parent's open state armed after an administrator revokes
+  // project creation. Otherwise restoring the permission later reopens an old
+  // draft without another user action.
+  useEffect(() => {
+    if (open && !canCreateProject) onOpenChange(false)
+  }, [canCreateProject, onOpenChange, open])
+
   async function submit() {
+    if (!canCreateProject) {
+      setError(
+        canUseKnowledgeBases
+          ? t('projects:create.workspacePermissionRequired')
+          : t('kb:groupPermissionRequired'),
+      )
+      return
+    }
     if (creatingRef.current) return
     const trimmed = name.trim()
     if (!trimmed) {
@@ -79,7 +103,11 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
             ? t('projects:create.limitReached', { defaultValue: 'You’ve reached your plan’s project limit.' })
             : err === 'name_exists'
               ? t('projects:create.nameExists', { defaultValue: 'A project with this name already exists.' })
-              : t('common:somethingWentWrong', { defaultValue: 'Something went wrong' }),
+              : err === 'workspace_project_creation_permission_required'
+                ? t('projects:create.workspacePermissionRequired')
+                : err === 'knowledge_base_group_permission_required'
+                  ? t('kb:groupPermissionRequired')
+                : t('common:somethingWentWrong', { defaultValue: 'Something went wrong' }),
         )
         return
       }
@@ -94,7 +122,7 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
   }
 
   return (
-    <Dialog open={open} onOpenChange={(next) => !creatingRef.current && onOpenChange(next)}>
+    <Dialog open={open && canCreateProject} onOpenChange={(next) => !creatingRef.current && onOpenChange(next)}>
       <DialogContent size="lg">
         <DialogHeader>
           <DialogTitle>{t('projects:create.title')}</DialogTitle>

@@ -107,6 +107,10 @@
     "incompatibleKnowledgeBase": "このライブラリは現在の選択と一緒に使用できません",
     "knowledgeBaseMentionLabel": "ナレッジベースを添付",
     "knowledgeBaseMentionEmpty": "一致するナレッジベースがありません",
+    "permissions": {
+      "knowledgeBases": "所属ユーザーグループにはナレッジベース権限がありません。",
+      "fileUpload": "所属ユーザーグループにはファイルのアップロード権限がありません。"
+    },
     "removeKnowledgeBase": "ナレッジベース {{name}} を削除",
     "style": "スタイル",
     "styleHeading": "画像スタイル",
@@ -136,6 +140,7 @@
       "entry": "ツールを選択",
       "entryDescription": "このターンで利用できるツールを選択します。",
       "summaryAll": "すべて",
+      "summaryDefault": "モデルの初期設定",
       "summaryCount": "{{count}} 件選択",
       "selectedChip": "{{count}} 件のツール",
       "reset": "利用可能なすべてのツールを使用",
@@ -150,6 +155,8 @@
       "retry": "再試行",
       "noResults": "一致するツールはありません。",
       "empty": "このモデルで利用できるツールはありません。",
+      "groupRestricted": "所属ユーザーグループでは利用できません",
+      "defaultSelected": "モデルの初期設定 · {{count}} 件選択",
       "allSelected": "全 {{count}} 件のツールを選択中",
       "selectedCount": "{{count}} 件のツールを選択中",
       "cancel": "キャンセル",
@@ -271,6 +278,9 @@
     "error": {
       "title": "返信に失敗しました。もう一度お試しください",
       "interrupted": "生成が中断されました。もう一度お試しください。",
+      "permissionChanged": "権限が変更されました",
+      "drawingPermission": "所属ユーザーグループでは、描画モデルと画像生成ツールを利用できなくなりました。",
+      "knowledgeBasePermission": "所属ユーザーグループでは、ナレッジベースを利用できなくなりました。",
       "retry": "再試行"
     }
   },
@@ -520,6 +530,8 @@
     "moreSoon": "さらに多くのモデルが近日登場",
     "current": "現在のモデル",
     "label": "モデル: {{name}}",
+    "unavailable": "モデルを利用できません",
+    "unavailableHint": "このモデルは利用できなくなりました。別のモデルを選択してください。",
     "upgrade": "アップグレードして解除",
     "allTags": "すべて",
     "noneForTag": "このタグのモデルはありません。",
@@ -635,12 +647,15 @@
     "members": "メンバー",
     "membersBody": "{{count}} 名のメンバー",
     "membersLoading": "メンバーを読み込んでいます…",
+    "membersLoadFailed": "ワークスペースのメンバーを読み込めませんでした。",
     "inviteLink": "招待リンク",
     "rotateInvite": "リンクを再発行（旧リンクは無効化）",
     "inviteRotated": "新しい招待リンクを発行しました。旧リンクは無効です。",
     "inviteRotateFailed": "招待リンクを再発行できませんでした。",
     "kick": "メンバーを削除",
     "kickFailed": "メンバーを削除できませんでした。",
+    "deleteFailed": "ワークスペースを削除できませんでした。",
+    "leaveFailed": "ワークスペースから退出できませんでした。",
     "delete": "ワークスペースを削除",
     "leave": "ワークスペースを退出",
     "backToPersonal": "個人スペースへ戻る",
@@ -652,7 +667,34 @@
     "backHome": "チャットへ戻る",
     "roleOwner": "オーナー",
     "roleMember": "メンバー",
-    "switchSpace": "スペースを切り替え"
+    "switchSpace": "スペースを切り替え",
+    "managePermissions": "権限を管理",
+    "memberPermissions": "メンバー権限",
+    "memberPermissionsBody": "{{name}} がこのワークスペースで作成・管理できる内容を設定します。",
+    "permissionsSaved": "メンバー権限を更新しました。",
+    "permissionsSaveFailed": "メンバー権限を更新できませんでした。",
+    "permissions": {
+      "can_create_projects": {
+        "label": "プロジェクトを作成",
+        "description": "新しいプロジェクトとそのナレッジベースを作成します。"
+      },
+      "can_private_conversations": {
+        "label": "非公開の会話",
+        "description": "本人だけに表示される会話を作成します。"
+      },
+      "can_create_kb": {
+        "label": "ナレッジベースを作成",
+        "description": "新しいワークスペースナレッジベースを作成します。"
+      },
+      "can_add_kb_files": {
+        "label": "ナレッジベースにファイルを追加",
+        "description": "ワークスペースナレッジベースへファイルや貼り付け内容を追加します。"
+      },
+      "can_delete_kb_content": {
+        "label": "ナレッジベースの内容を削除",
+        "description": "対象のナレッジベースでも許可されている場合に、内容の削除・再試行・管理ができます。"
+      }
+    }
   },
   "attachmentDeleted": "ファイルは削除されました"
 }

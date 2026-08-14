@@ -61,6 +61,7 @@ export interface ApiUser {
    *  enable memory and the per-user toggle is hidden. Transient (auth/me only).
    *  Absent ⇒ treat as available (older backend). */
   memory_available?: boolean
+  permissions?: ApiUserGroupPermissions
   created_at: number
 }
 
@@ -280,6 +281,11 @@ export interface ApiWorkspace {
   role?: 'owner' | 'member'
   member_count?: number
   owner_name?: string
+  can_create_projects: boolean
+  can_private_conversations: boolean
+  can_create_kb: boolean
+  can_add_kb_files: boolean
+  can_delete_kb_content: boolean
 }
 
 export interface ApiWorkspaceMember {
@@ -289,6 +295,19 @@ export interface ApiWorkspaceMember {
   name: string
   email: string
   avatar_url: string
+  can_create_projects: boolean
+  can_private_conversations: boolean
+  can_create_kb: boolean
+  can_add_kb_files: boolean
+  can_delete_kb_content: boolean
+}
+
+export interface ApiWorkspaceMemberPermissions {
+  can_create_projects: boolean
+  can_private_conversations: boolean
+  can_create_kb: boolean
+  can_add_kb_files: boolean
+  can_delete_kb_content: boolean
 }
 
 /** Membership tier (§ user groups). */
@@ -321,6 +340,73 @@ export interface ApiUserGroup {
   is_public?: boolean
   /** Whether users may purchase this group while it is listed. */
   is_purchasable?: boolean
+  permissions?: ApiUserGroupPermissions
+}
+
+export type ApiResourceAccessMode = 'all' | 'selected' | 'none'
+export interface ApiResourceAccessPolicy {
+  mode: ApiResourceAccessMode
+  ids: string[]
+}
+export interface ApiUserGroupPermissions {
+  prompts: ApiResourceAccessPolicy
+  skills: ApiResourceAccessPolicy
+  tools: ApiResourceAccessPolicy
+  allow_sharing: boolean
+  allow_knowledge_bases: boolean
+  allow_knowledge_base_sharing: boolean
+  allow_file_upload: boolean
+  allow_conversation_export: boolean
+  allow_voice_transcription: boolean
+  allow_memory: boolean
+  allow_drawing: boolean
+}
+
+export interface ApiKnowledgeBaseShare {
+  kb_id: string
+  user_id: string
+  role?: 'read' | 'write'
+  name: string
+  email: string
+  avatar_url?: string
+  created_at?: number
+  updated_at?: number
+}
+
+export interface ApiKnowledgeBaseUploader {
+  user_id: string
+  name: string
+  email: string
+  avatar_url?: string
+}
+
+export interface ApiWorkspaceKnowledgeBaseMemberPermission {
+  kb_id: string
+  user_id: string
+  role: 'owner' | 'member'
+  name: string
+  email: string
+  avatar_url?: string
+  can_add_files: boolean
+  can_delete_content: boolean
+  total_can_add_kb_files: boolean
+  total_can_delete_kb_content: boolean
+  locked: boolean
+}
+
+export interface ApiGroupUsersPage {
+  users: ApiGroupUserSummary[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface ApiGroupUserSummary {
+  id: string
+  email: string
+  name: string
+  role: ApiUser['role']
+  status: ApiUser['status']
 }
 
 /** Purchasable package of permanent (non-expiring) credits. */
@@ -638,9 +724,9 @@ export interface ApiModel {
   fast?: boolean
   system_prompt: string
   param_controls: unknown
-  /** Platform function-calling allowlist. Admin responses use `null`/omitted
-   * for all registered tools (including future additions) and `[]` for none;
-   * public model responses always return the resolved effective `string[]`. */
+  /** Platform tool defaults. Admin responses use `null`/omitted to select all
+   * registered tools (including future additions) by default and `[]` for none;
+   * public responses return defaults after global and group policy filtering. */
   builtin_tools?: string[] | null
   /** Unified public capability bit. True when the administrator configured at
    * least one available local Function or provider-hosted tool. */
@@ -690,6 +776,11 @@ export interface ApiSelectableTool {
   name: string
   description: string
   icon: string
+  /** False when the group may see this candidate but cannot select or invoke it. */
+  allowed?: boolean
+  /** True when the serving model selects this tool when the user has not saved
+   * an explicit override. Availability and defaults are intentionally separate. */
+  default_selected?: boolean
 }
 
 /** One file bundled with a skill (§4.17). use_skill stages these into the
@@ -803,6 +894,11 @@ export interface ApiProject {
   updated_at: number
   /** §workspaces */
   workspace_id?: string
+  /** Effective project-library capabilities. Detail responses always include
+   * these; list/create/update responses may omit them. */
+  can_upload_files?: boolean
+  can_delete_content?: boolean
+  can_delete?: boolean
 }
 
 export interface ApiKnowledgeBase {
@@ -810,7 +906,15 @@ export interface ApiKnowledgeBase {
   user_id: string
   name: string
   description: string
-  project_id: string
+  workspace_id?: string
+  access_role?: 'owner' | 'read' | 'write' | 'workspace'
+  owner_name?: string
+  can_share?: boolean
+  can_upload?: boolean
+  can_delete?: boolean
+  can_delete_content?: boolean
+  can_manage_members?: boolean
+  project_id?: string
   created_at: number
 }
 
@@ -830,6 +934,10 @@ export interface ApiDocument {
   status: 'pending' | 'parsing' | 'embedding' | 'ready' | 'failed'
   error: string
   chunk_count: number
+  uploaded_by_user_id?: string
+  uploaded_by_name?: string
+  uploaded_by_email?: string
+  can_delete?: boolean
   created_at: number
 }
 

@@ -45,6 +45,13 @@ func CanManageConversationShare(ctx context.Context, db *sql.DB, convID, userID 
 // and a direct store caller cannot bypass authorization. snapshot is opaque JSON
 // built by the API's cost-stripped public message projection.
 func CreateShare(ctx context.Context, db *sql.DB, userID, convID, title string, snapshot []byte) (*Share, error) {
+	allowed, err := conversationSharingAllowedForUser(ctx, db, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, ErrNotFound
+	}
 	id := "sh_" + genToken() // §D1: 192-bit unguessable token (public capability URL)
 	if len(snapshot) == 0 {
 		snapshot = []byte("[]")
@@ -122,6 +129,13 @@ func GetShareByConversation(ctx context.Context, db *sql.DB, convID, userID stri
 	if err != nil {
 		return nil, err
 	}
+	allowed, err := conversationSharingAllowedForUser(ctx, db, s.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, ErrNotFound
+	}
 	s.Snapshot = json.RawMessage(snapshot)
 	return &s, nil
 }
@@ -145,8 +159,31 @@ func GetShareByToken(ctx context.Context, db *sql.DB, token string) (*Share, err
 	if err != nil {
 		return nil, err
 	}
+	allowed, err := conversationSharingAllowedForUser(ctx, db, s.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, ErrNotFound
+	}
 	s.Snapshot = json.RawMessage(snapshot)
 	return &s, nil
+}
+
+// conversationSharingAllowedForUser re-resolves the publisher's current
+// membership policy whenever a share is created or consumed. Existing rows are
+// intentionally retained while permission is disabled, so restoring the
+// capability makes the same public link live again. Administrators inherit the
+// permissive policy from UserGroupPermissionStateForUser.
+func conversationSharingAllowedForUser(ctx context.Context, db *sql.DB, userID string) (bool, error) {
+	permissions, err := UserGroupPermissionsForUser(ctx, db, userID)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return permissions.AllowSharing, nil
 }
 
 // DeleteShareByConversation revokes a share only when the same management

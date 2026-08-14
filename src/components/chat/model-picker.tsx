@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { ChevronDown, Zap } from 'lucide-react'
+import { CircleAlert, ChevronDown, Zap } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useModels } from '@/store/models'
 import {
@@ -11,6 +11,9 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { ModelIcon } from '@/components/chat/model-icon'
 import { cn } from '@/lib/utils'
+import { useAuth } from '@/store/auth'
+import { userCan } from '@/lib/user-permissions'
+import { findSelectedModel, isSelectedModelUnavailable } from '@/lib/model-selection'
 
 interface ModelPickerProps {
   value: string
@@ -39,15 +42,25 @@ export function ModelPicker({
   menuAlign = 'end',
 }: ModelPickerProps) {
   const models = useModels((s) => s.models)
-  const imageModels = useModels((s) => s.imageModels)
+  const storedImageModels = useModels((s) => s.imageModels)
+  const user = useAuth((state) => state.user)
+  const imageModels = userCan(user, 'allow_drawing') ? storedImageModels : []
   const tags = useModels((s) => s.tags)
   const fastAvailable = useModels((s) => s.fastAvailable)
+  const modelsLoaded = useModels((s) => s.loaded)
   // §fast-mode: a fast selection only holds while a fast model is actually
   // configured (fastAvailable) — otherwise fall through to the advanced model.
   const isFast = Boolean(fast) && fastAvailable
   // §4.20: a selected value can be a chat OR an image model — look in both so the
   // trigger shows the right name + icon (incl. an image model when drawing).
-  const current = models.find((m) => m.id === value) ?? imageModels.find((m) => m.id === value) ?? models[0]
+  const current = findSelectedModel(value, models, imageModels)
+  const unavailable = isSelectedModelUnavailable({
+    modelId: value,
+    currentModel: current,
+    modelsLoaded,
+    fast,
+    fastAvailable,
+  })
   const { t } = useTranslation('chat')
   // Picking any concrete model exits fast mode; 快速 re-enters it.
   const pickModel = (id: string) => {
@@ -76,14 +89,29 @@ export function ModelPicker({
           'max-w-[180px]',
           className,
         )}
-        aria-label={isFast ? t('fastMode.label', { defaultValue: '快速' }) : t('modelPicker.label', { name: current?.label ?? 'Model' })}
+        aria-label={
+          isFast
+            ? t('fastMode.label', { defaultValue: '快速' })
+            : unavailable
+              ? t('modelPicker.unavailableHint', { defaultValue: 'This model is no longer available. Choose another model.' })
+              : t('modelPicker.label', { name: current?.label ?? 'Model' })
+        }
+        aria-invalid={unavailable || undefined}
       >
         {isFast ? (
           <Zap size={16} aria-hidden />
+        ) : unavailable ? (
+          <CircleAlert size={16} className="shrink-0 text-[var(--color-danger)]" aria-hidden />
         ) : (
           <ModelIcon icon={current?.icon} size={16} />
         )}
-        <span className="truncate">{isFast ? t('fastMode.label', { defaultValue: '快速' }) : current?.label ?? 'Model'}</span>
+        <span className={cn('truncate', unavailable && 'text-[var(--color-danger)]')}>
+          {isFast
+            ? t('fastMode.label', { defaultValue: '快速' })
+            : unavailable
+              ? t('modelPicker.unavailable', { defaultValue: 'Model unavailable' })
+              : current?.label ?? 'Model'}
+        </span>
         <ChevronDown size={13} aria-hidden />
       </DropdownMenuTrigger>
       <DropdownMenuContent

@@ -35,6 +35,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Ban, Check, ChevronDown, Loader2, Sparkles, Wrench } from 'lucide-react'
 import { persistUserSettings } from '@/lib/user-settings'
+import { userCan } from '@/lib/user-permissions'
 
 // Trait keys MUST match personaTraitPhrases on the backend (orchestrator.go).
 const TRAITS = [
@@ -58,7 +59,8 @@ export default function Personalization() {
   // Global admin master switch: when memory is turned off platform-wide, hide the
   // per-user toggle entirely (no one can enable it; it's gated off server-side too).
   // Absent flag (older backend) ⇒ treat as available.
-  const memoryAvailable = useAuth((s) => s.user?.memory_available !== false)
+  const user = useAuth((s) => s.user)
+  const memoryAvailable = user?.memory_available !== false && userCan(user, 'allow_memory')
   const defaultToolMode = useComposerPrefs((s) => s.defaultToolMode)
   const setDefaultToolMode = useComposerPrefs((s) => s.setDefaultToolMode)
   const setToolMode = useComposerPrefs((s) => s.setToolMode)

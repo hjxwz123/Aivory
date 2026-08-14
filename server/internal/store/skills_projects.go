@@ -238,19 +238,15 @@ func lockCommercialCapUserTx(ctx context.Context, tx *sql.Tx, userID string) err
 	return nil
 }
 
-func validateWorkspaceResourceCreationTx(ctx context.Context, tx *sql.Tx, workspaceID, userID string) error {
+func validateWorkspaceResourceCreationTx(ctx context.Context, tx *sql.Tx, workspaceID, userID, capability string) error {
 	var one int
 	err := tx.QueryRowContext(ctx, `
 		SELECT 1
 		  FROM workspaces create_workspace
 		 WHERE create_workspace.id=?
 		   AND `+workspaceAcceptsResourceCreationPredicate("create_workspace")+`
-		   AND (
-		       create_workspace.owner_id=? OR EXISTS (
-		         SELECT 1 FROM workspace_members create_member
-		          WHERE create_member.workspace_id=create_workspace.id AND create_member.user_id=?
-		       )
-		   )`, workspaceID, userID, userID, userID).Scan(&one)
+		   AND `+workspaceMemberCapabilityPredicate("create_workspace", capability),
+		workspaceID, userID, userID, userID).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -342,6 +338,24 @@ func GetProject(ctx context.Context, db *sql.DB, id, userID string) (*Project, e
 	return &p, nil
 }
 
+// CanManageProject uses the same principal boundary as project deletion: a
+// personal creator, the canonical workspace owner, or the current workspace
+// member who created the project. It is a read-only preflight; mutations still
+// repeat this predicate inside their transaction.
+func CanManageProject(ctx context.Context, db *sql.DB, id, userID string) (bool, error) {
+	args := []any{id}
+	args = append(args, workspaceResourceManagerArgs(userID)...)
+	var allowed int
+	err := db.QueryRowContext(ctx,
+		`SELECT 1 FROM projects WHERE id=? AND `+workspaceResourceManagerPredicate("projects"),
+		args...,
+	).Scan(&allowed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil && allowed == 1, err
+}
+
 // GetProjectByName returns a user's project by case-insensitive, trimmed name.
 func GetProjectByName(ctx context.Context, db *sql.DB, userID, name string) (*Project, error) {
 	row := db.QueryRowContext(ctx,
@@ -413,14 +427,9 @@ func CreateProject(ctx context.Context, db *sql.DB, p Project) (*Project, error)
 			id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, workspace_id
 		) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 		    FROM workspaces create_workspace
-		   WHERE create_workspace.id=?
-		     AND `+workspaceAcceptsResourceCreationPredicate("create_workspace")+`
-		     AND (
-		         create_workspace.owner_id=? OR EXISTS (
-		           SELECT 1 FROM workspace_members create_member
-		            WHERE create_member.workspace_id=create_workspace.id AND create_member.user_id=?
-		         )
-		   )`,
+			   WHERE create_workspace.id=?
+			     AND `+workspaceAcceptsResourceCreationPredicate("create_workspace")+`
+			     AND `+workspaceMemberCapabilityPredicate("create_workspace", "can_create_projects"),
 			p.ID, p.UserID, p.Name, p.Description, p.Instructions, p.Accent, p.Emoji,
 			boolInt(p.Pinned), kbID, boolInt(p.AutoAddUploads), now, now, p.WorkspaceID,
 			p.WorkspaceID, p.UserID, p.UserID, p.UserID)
@@ -533,7 +542,7 @@ func createProjectWithLimit(
 	defer tx.Rollback() //nolint:errcheck
 
 	if p.WorkspaceID != "" {
-		if err := validateWorkspaceResourceCreationTx(ctx, tx, p.WorkspaceID, p.UserID); err != nil {
+		if err := validateWorkspaceResourceCreationTx(ctx, tx, p.WorkspaceID, p.UserID, "can_create_projects"); err != nil {
 			return nil, err
 		}
 	}
@@ -592,12 +601,7 @@ func insertDedicatedProjectLibraryTx(ctx context.Context, tx *sql.Tx, kb Knowled
 			   FROM workspaces create_workspace
 			  WHERE create_workspace.id=?
 			    AND `+workspaceAcceptsResourceCreationPredicate("create_workspace")+`
-			    AND (
-			        create_workspace.owner_id=? OR EXISTS (
-			          SELECT 1 FROM workspace_members create_member
-			           WHERE create_member.workspace_id=create_workspace.id AND create_member.user_id=?
-			        )
-			  )`,
+				    AND `+workspaceMemberCapabilityPredicate("create_workspace", "can_create_projects"),
 			kb.ID, kb.UserID, kb.Name, kb.Description, kb.EmbeddingModelID, kb.EmbeddingDim, kb.ProjectID, now, kb.WorkspaceID,
 			kb.WorkspaceID, kb.UserID, kb.UserID, kb.UserID)
 		if err == nil {
@@ -636,12 +640,7 @@ func insertProjectWithScopeTx(ctx context.Context, tx *sql.Tx, p Project, now in
 		    FROM workspaces create_workspace
 		   WHERE create_workspace.id=?
 		     AND `+workspaceAcceptsResourceCreationPredicate("create_workspace")+`
-		     AND (
-		         create_workspace.owner_id=? OR EXISTS (
-		           SELECT 1 FROM workspace_members create_member
-		            WHERE create_member.workspace_id=create_workspace.id AND create_member.user_id=?
-		         )
-		   )`,
+			     AND `+workspaceMemberCapabilityPredicate("create_workspace", "can_create_projects"),
 			p.ID, p.UserID, p.Name, p.Description, p.Instructions, p.Accent, p.Emoji,
 			boolInt(p.Pinned), kbID, boolInt(p.AutoAddUploads), now, now, p.WorkspaceID,
 			p.WorkspaceID, p.UserID, p.UserID, p.UserID)

@@ -41,7 +41,7 @@ import { isKnownLocalMessageId, persistedMessageReference } from '@/lib/message-
 import { envNum } from '@/lib/env-config'
 import { markConversationsDeleted, unmarkConversationsDeleted } from '@/lib/sync-guards'
 import { toast } from '@/hooks/use-toast'
-import { activeWorkspaceId } from '@/store/workspaces'
+import { activeWorkspaceId, useWorkspaces } from '@/store/workspaces'
 import { useAuth } from '@/store/auth'
 import { useComposerPrefs, type ComposerMode } from '@/store/composer-prefs'
 import { useModels } from '@/store/models'
@@ -825,6 +825,10 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     } catch (e) {
       // Fall back to optimistic local conversation so the UI never blocks.
       const now = Date.now()
+      const workspaceId = activeWorkspaceId()
+      const workspace = workspaceId
+        ? useWorkspaces.getState().workspaces.find((row) => row.id === workspaceId)
+        : undefined
       const conv: Conversation = {
         id: uid('c'),
         title: 'New conversation',
@@ -833,6 +837,8 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         modelId: resolvedModelId,
         fast: resolvedFast === true,
         projectId,
+        workspaceId,
+        isPublic: workspaceId ? workspace?.can_private_conversations === false : false,
         messages: [],
       }
       set((s) => ({ conversations: [conv, ...s.conversations], error: errorMessage(e) }))
@@ -871,6 +877,11 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       // Tag the active space so the sidebar (which filters by workspace) shows
       // the new chat immediately; the create + re-key confirms it server-side.
       workspaceId: activeWorkspaceId() || undefined,
+      isPublic: (() => {
+        const workspaceId = activeWorkspaceId()
+        if (!workspaceId) return false
+        return useWorkspaces.getState().workspaces.find((row) => row.id === workspaceId)?.can_private_conversations === false
+      })(),
       messages: [],
     }
     set((s) => ({ conversations: [conv, ...s.conversations] }))

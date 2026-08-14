@@ -315,3 +315,71 @@ func TestPrivateLibraryMutationCannotCrossUserBoundary(t *testing.T) {
 		t.Fatalf("owner row changed: %+v err=%v", stored, err)
 	}
 }
+
+func TestPrivateLibraryPermissionRevocationDeniesDeleteWithoutDeletingData(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "library-permission-revocation.db"))
+	defer db.Close()
+	mustExec(t, db, `INSERT INTO users(id,email,password_hash,role,status) VALUES('u1','u1@example.test','h','user','active')`)
+
+	permissions := store.DefaultUserGroupPermissions()
+	permissions.Skills = store.ResourceAccessPolicy{Mode: store.ResourceAccessNone, IDs: []string{}}
+	permissions.Prompts = store.ResourceAccessPolicy{Mode: store.ResourceAccessNone, IDs: []string{}}
+	raw, err := json.Marshal(permissions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	permissionsRaw := json.RawMessage(raw)
+	group, err := store.CreateUserGroupWithPermissions(
+		t.Context(), db, store.UserGroup{ID: "ug-library-revoked", Name: "Library revoked"}, true, &permissionsRaw,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, db, `UPDATE users SET group_id=? WHERE id='u1'`, group.ID)
+
+	skill, err := store.CreateUserSkill(t.Context(), db, store.UserSkill{
+		UserID: "u1", Name: "private-skill", Description: "Private", Instructions: "Keep this skill.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt, err := store.CreateUserPrompt(t.Context(), db, store.UserPrompt{
+		UserID: "u1", Name: "Private prompt", Description: "Private", Content: "Keep this prompt.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	d := Deps{DB: db}
+	mx := newMux()
+	mx.handle(http.MethodDelete, "/api/me/skills/:id", func(w http.ResponseWriter, r *http.Request) {
+		deleteMySkillHandler(d, w, r)
+	})
+	mx.handle(http.MethodDelete, "/api/me/prompts/:id", func(w http.ResponseWriter, r *http.Request) {
+		deleteMyPromptHandler(d, w, r)
+	})
+
+	for _, tc := range []struct {
+		name string
+		path string
+		code string
+	}{
+		{name: "skill", path: "/api/me/skills/" + skill.ID, code: errSkillGroupPermission.Error()},
+		{name: "prompt", path: "/api/me/prompts/" + prompt.ID, code: errPromptGroupPermission.Error()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			mx.ServeHTTP(rec, libraryRequest(t, http.MethodDelete, tc.path, "", "u1"))
+			if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), tc.code) {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+
+	if _, err := store.GetUserSkill(t.Context(), db, skill.ID, "u1"); err != nil {
+		t.Fatalf("revocation deleted private skill: %v", err)
+	}
+	if _, err := store.GetUserPrompt(t.Context(), db, prompt.ID, "u1"); err != nil {
+		t.Fatalf("revocation deleted private prompt: %v", err)
+	}
+}

@@ -85,12 +85,18 @@ import { toast } from '@/hooks/use-toast'
 import { cn, safeHref } from '@/lib/utils'
 import { isEmptyStoppedMessage, messageHasActions } from '@/lib/message-state'
 import { documentCitationContentUrl } from '@/lib/citations'
+import { userCan } from '@/lib/user-permissions'
 import { attachmentKindLabel, attachmentTileClass, fileIconFor } from '@/lib/file-icon'
 import {
   feedbackCommentLength,
   MAX_FEEDBACK_COMMENT_LENGTH,
   truncateFeedbackComment,
 } from '@/lib/message-feedback'
+
+const RUNTIME_PERMISSION_ERROR_CODES = new Set([
+  'drawing_group_permission_required',
+  'knowledge_base_group_permission_required',
+])
 
 /**
  * ThinkingLogo — the "still forming a reply" indicator shown before the first
@@ -258,7 +264,9 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
   // §workspaces: in a shared conversation "own" = authored by ME — other
   // members' questions render LEFT like the assistant, with the author's
   // name + avatar. Personal conversations (no author) keep role semantics.
-  const meId = useAuth((s) => s.user?.id)
+  const user = useAuth((s) => s.user)
+  const meId = user?.id
+  const canExportConversations = userCan(user, 'allow_conversation_export')
   // readOnly (admin transcript viewer): there is no "me" perspective — keep the
   // classic role-based layout so mixed legacy/authored turns don't zigzag.
   const isOwn = isUser && (readOnly ? true : message.authorId ? message.authorId === meId : true)
@@ -298,11 +306,16 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
   const [lightbox, setLightbox] = useState<{ src: string; alt?: string } | null>(null)
   // Non-image attachment preview (pdf / docx / text / fallback) — opens a modal
   // instead of letting the click download the file.
-  const [filePreview, setFilePreview] = useState<{ name: string; url?: string; kind: Attachment['kind'] } | null>(null)
+  const [filePreview, setFilePreview] = useState<{
+    name: string
+    url?: string
+    kind: Attachment['kind']
+    authenticated?: boolean
+  } | null>(null)
   const openDocumentCitation = useCallback((citation: Citation) => {
     const url = documentCitationContentUrl(citation)
     if (!url) return
-    setFilePreview({ name: citation.title, url, kind: 'other' })
+    setFilePreview({ name: citation.title, url, kind: 'other', authenticated: true })
   }, [])
   const editRef = useRef<RichComposerEditorHandle>(null)
   const assistantEditRef = useRef<HTMLTextAreaElement>(null)
@@ -311,6 +324,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
   const editFormulaSelectionRef = useRef<{ from: number; to: number } | null>(null)
   const { copied, copy } = useCopy()
   const [exportingDocx, setExportingDocx] = useState(false)
+  const exportAttemptRef = useRef(0)
   const emptyStopped = isEmptyStoppedMessage(message)
   const turnTime = useMemo(
     () => ({
@@ -324,18 +338,39 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
   // equations (lib/docx-export.ts). Lazy import keeps docx/katex-omml out of
   // the main bundle; failures surface as a toast, never an exception.
   const exportDocx = async () => {
-    if (exportingDocx || !message.content) return
+    if (!canExportConversations || exportingDocx || !message.content) return
+    const userID = user?.id
+    if (!userID) return
+    const attempt = exportAttemptRef.current + 1
+    exportAttemptRef.current = attempt
     setExportingDocx(true)
     try {
       const { exportMarkdownAsDocx } = await import('@/lib/docx-export')
       const stamp = new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-')
-      await exportMarkdownAsDocx(message.content, `aivory-reply-${stamp}`)
+      await exportMarkdownAsDocx(message.content, `aivory-reply-${stamp}`, () => {
+        const latestUser = useAuth.getState().user
+        return exportAttemptRef.current === attempt && latestUser?.id === userID &&
+          userCan(latestUser, 'allow_conversation_export')
+      })
     } catch {
-      toast.error(t('actions.exportDocxFailed', { defaultValue: 'Export failed' }))
+      if (exportAttemptRef.current === attempt) {
+        toast.error(t('actions.exportDocxFailed', { defaultValue: 'Export failed' }))
+      }
     } finally {
-      setExportingDocx(false)
+      if (exportAttemptRef.current === attempt) setExportingDocx(false)
     }
   }
+
+  useEffect(() => {
+    if (!canExportConversations) {
+      exportAttemptRef.current += 1
+      setExportingDocx(false)
+    }
+  }, [canExportConversations, user?.id])
+
+  useEffect(() => () => {
+    exportAttemptRef.current += 1
+  }, [])
 
   // Seed the draft when entering edit mode — but only on the transition,
   // so streaming/external updates to message.content don't overwrite the user's typing.
@@ -912,19 +947,29 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                       <AlertTriangle size={16} aria-hidden />
                       {message.errorCode === GENERATION_INTERRUPTED_ERROR_CODE
                         ? t('message.error.interrupted')
-                        : t('message.error.title')}
+                        : message.errorCode && RUNTIME_PERMISSION_ERROR_CODES.has(message.errorCode)
+                          ? t('message.error.permissionChanged')
+                          : t('message.error.title')}
                     </div>
                     {message.errorCode !== GENERATION_INTERRUPTED_ERROR_CODE ? (
-                      <p className="mt-1 text-[12.5px] text-[var(--color-fg-subtle)] break-words">{message.error}</p>
+                      <p className="mt-1 text-[12.5px] text-[var(--color-fg-subtle)] break-words">
+                        {message.errorCode === 'drawing_group_permission_required'
+                          ? t('message.error.drawingPermission')
+                          : message.errorCode === 'knowledge_base_group_permission_required'
+                            ? t('message.error.knowledgeBasePermission')
+                            : message.error}
+                      </p>
                     ) : null}
-                    <button
-                      type="button"
-                      onClick={() => onRegenerate?.(message.id)}
-                      className="mt-2.5 inline-flex items-center gap-1.5 h-8 px-3 rounded-[9px] text-sm font-medium bg-[var(--color-danger)] text-[var(--color-fg-inverted)] interactive hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-                    >
-                      <RefreshCw size={13} aria-hidden />
-                      {t('message.error.retry')}
-                    </button>
+                    {!message.errorCode || !RUNTIME_PERMISSION_ERROR_CODES.has(message.errorCode) ? (
+                      <button
+                        type="button"
+                        onClick={() => onRegenerate?.(message.id)}
+                        className="mt-2.5 inline-flex items-center gap-1.5 h-8 px-3 rounded-[9px] text-sm font-medium bg-[var(--color-danger)] text-[var(--color-fg-inverted)] interactive hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                      >
+                        <RefreshCw size={13} aria-hidden />
+                        {t('message.error.retry')}
+                      </button>
+                    ) : null}
                   </div>
                 ) : null}
                 {message.citations && message.citations.length > 0 ? (
@@ -1079,7 +1124,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
 
                 {!isUser && (
                   <>
-                    {message.content ? (
+                    {message.content && canExportConversations ? (
                       <Tooltip content={t('actions.exportDocx', { defaultValue: 'Export as Word' })}>
                         <button
                           type="button"
@@ -1312,7 +1357,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                       onClick={() => { setActionSheetOpen(false); setEditing(true) }}
                     />
                   ) : null}
-                  {message.content ? (
+                  {message.content && canExportConversations ? (
                     <MsgActionRow
                       icon={<FileDown size={18} aria-hidden />}
                       label={t('actions.exportDocx', { defaultValue: 'Export as Word' })}

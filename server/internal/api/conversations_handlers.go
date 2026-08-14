@@ -151,6 +151,15 @@ func createConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
+	permissions, permissionErr := requestPermissions(d, r)
+	if permissionErr != nil {
+		writeError(w, http.StatusForbidden, errPermissionDenied)
+		return
+	}
+	if !permissions.AllowKnowledgeBases && strings.TrimSpace(req.ProjectID) != "" {
+		writeError(w, http.StatusForbidden, errKnowledgeBaseGroupPermission)
+		return
+	}
 	explicitModel := strings.TrimSpace(req.ModelID) != ""
 	req.ModelID = strings.TrimSpace(req.ModelID)
 	userDefaultModelID := ""
@@ -165,6 +174,12 @@ func createConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			_ = json.Unmarshal(raw, &req.ModelID)
 		}
 		req.ModelID = strings.TrimSpace(req.ModelID)
+	}
+	if !permissions.AllowDrawing && req.ModelID != "" {
+		if model, modelErr := store.GetModel(r.Context(), d.DB, req.ModelID); modelErr == nil && model.Kind == "image" {
+			writeError(w, http.StatusForbidden, errDrawingGroupPermission)
+			return
+		}
 	}
 	fast := false
 	if req.Fast != nil {
@@ -376,6 +391,11 @@ func createInlineThreadHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		InlineSourceConv: srcID,
 		InlineParentID:   req.MessageID,
 		InlineQuote:      quote,
+		WorkspaceID:      src.WorkspaceID,
+		// Inline threads are new conversations. Workspace threads therefore use
+		// the creator-private default; CreateConversation forces them public when
+		// this member does not have can_private_conversations.
+		IsPublic: false,
 	})
 	if err != nil {
 		writeError(w, 500, err)
@@ -478,6 +498,21 @@ func updateConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
+	permissions, permissionErr := requestPermissions(d, r)
+	if permissionErr != nil {
+		writeError(w, http.StatusForbidden, errPermissionDenied)
+		return
+	}
+	if !permissions.AllowKnowledgeBases && (rawStringArrayHasValue(p.KBIDs) || p.ProjectID != nil && strings.TrimSpace(*p.ProjectID) != "") {
+		writeError(w, http.StatusForbidden, errKnowledgeBaseGroupPermission)
+		return
+	}
+	if !permissions.AllowDrawing && p.ModelID != nil && strings.TrimSpace(*p.ModelID) != "" {
+		if model, modelErr := store.GetModel(r.Context(), d.DB, strings.TrimSpace(*p.ModelID)); modelErr == nil && model.Kind == "image" {
+			writeError(w, http.StatusForbidden, errDrawingGroupPermission)
+			return
+		}
+	}
 	var current *store.Conversation
 	if p.IsPublic != nil || p.KBIDs != nil || p.ProjectID != nil {
 		var err error
@@ -565,6 +600,22 @@ func updateConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		publishWorkspaceConversationVisibility(d, r, visibilityWorkspaceID, u.ID, id, conv.IsPublic)
 	}
 	writeJSON(w, 200, conv)
+}
+
+func rawStringArrayHasValue(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var values []string
+	if json.Unmarshal(raw, &values) != nil {
+		return false
+	}
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // publishWorkspaceConversationVisibility reconciles other members immediately:
