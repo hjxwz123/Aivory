@@ -3,9 +3,11 @@ package rag
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"io"
 	"log"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -33,6 +35,29 @@ func TestRetrieveWithoutVectorStoreInjectsFullContext(t *testing.T) {
 		if snippet.Source != "document" {
 			t.Fatalf("conversation citation source=%q, want document: %+v", snippet.Source, snippet)
 		}
+	}
+}
+
+func TestRetrieveDocumentsScopesCurrentTurnToAttachedDocument(t *testing.T) {
+	ctx := context.Background()
+	db := seedEmbeddedConversationDoc(t, ctx)
+	defer db.Close()
+	for _, query := range []string{
+		`INSERT INTO documents(id,conversation_id,filename,mime_type,size_bytes,status) VALUES('doc2','c1','B.txt','text/plain',100,'ready')`,
+		`INSERT INTO chunks(id,document_id,conversation_id,seq,chunk_type,content,embedding_model) VALUES('ch-b','doc2','c1',0,'text','content from document B','')`,
+	} {
+		if _, err := db.ExecContext(ctx, query); err != nil {
+			t.Fatalf("seed B: %v", err)
+		}
+	}
+
+	svc := New(db, nil, log.New(io.Discard, "", 0))
+	got, err := svc.RetrieveDocuments(ctx, "u1", "c1", nil, []string{"doc2"}, "summarize this article", 8)
+	if err != nil {
+		t.Fatalf("retrieve current document: %v", err)
+	}
+	if len(got) != 1 || got[0].Snippet != "content from document B" || got[0].URL != "doc://doc2" {
+		t.Fatalf("current-document retrieval leaked another upload: %+v", got)
 	}
 }
 
@@ -404,7 +429,7 @@ func TestRouteAndRetrieveConversationRouterQueriesRemainUnbounded(t *testing.T) 
 	}
 }
 
-func TestRouteAndRetrieveConversationFullDocStillInjectsWholeDocument(t *testing.T) {
+func TestRouteAndRetrieveConversationFullDocSummarisesWholeOverBudgetDocument(t *testing.T) {
 	ctx := context.Background()
 	db := seedEmbeddedConversationDoc(t, ctx)
 	defer db.Close()
@@ -413,28 +438,53 @@ func TestRouteAndRetrieveConversationFullDocStillInjectsWholeDocument(t *testing
 		t.Fatalf("set threshold: %v", err)
 	}
 
-	router := &recordingRouter{decision: RouteDecision{Strategy: "full_doc"}}
+	router := &recordingRouter{decision: RouteDecision{Strategy: "full_doc"}, summary: "summary covering the complete document"}
 	svc := New(db, nil, log.New(io.Discard, "", 0))
 	svc.SetTaskLLM(router)
-	svc.SetVectorStore(testVectorStore{existingIDs: map[string]bool{"ch1": true, "ch2": true}})
 
 	got, decision, err := svc.RouteAndRetrieve(ctx, "u1", "c1", nil, "summarize everything", nil, 8)
 	if err != nil {
 		t.Fatalf("route full doc: %v", err)
 	}
-	if router.calls != 1 {
-		t.Fatalf("conversation full_doc made %d task calls, want router only (no map-reduce)", router.calls)
+	if router.calls != 2 {
+		t.Fatalf("conversation full_doc made %d task calls, want router + map-reduce", router.calls)
 	}
-	if decision.Strategy != "full_doc" || len(got) != 2 {
+	if decision.Strategy != "full_doc" || len(got) != 1 {
 		t.Fatalf("conversation full_doc decision=%+v snippets=%+v", decision, got)
 	}
-	if got[0].Snippet != "first full chunk" || got[1].Snippet != "second full chunk" {
-		t.Fatalf("conversation full_doc did not preserve whole text: %+v", got)
+	if got[0].Snippet != router.summary || got[0].Title != "f.txt (摘要)" {
+		t.Fatalf("conversation full_doc did not use whole-document summary: %+v", got)
 	}
 	for _, snippet := range got {
 		if snippet.Source != "document" {
 			t.Fatalf("conversation full_doc source=%q, want document", snippet.Source)
 		}
+	}
+}
+
+func TestRetrieveDocumentsBoundsSingleLargeCurrentDocumentWithoutVectorStore(t *testing.T) {
+	ctx := context.Background()
+	db := seedEmbeddedConversationDoc(t, ctx)
+	defer db.Close()
+	t.Cleanup(store.InvalidateConfig)
+	if err := store.SetSetting(db, "rag_full_text_threshold", 4); err != nil {
+		t.Fatalf("set threshold: %v", err)
+	}
+
+	svc := New(db, nil, log.New(io.Discard, "", 0))
+	got, err := svc.RetrieveDocuments(ctx, "u1", "c1", nil, []string{"d1"}, "second", 8)
+	if err != nil {
+		t.Fatalf("retrieve current large document: %v", err)
+	}
+	total := 0
+	for _, snippet := range got {
+		total += estimateTokens(snippet.Snippet)
+		if snippet.URL != "" && snippet.URL != "doc://d1" {
+			t.Fatalf("retrieval escaped current document: %+v", got)
+		}
+	}
+	if total > 4 {
+		t.Fatalf("single large document fallback injected %d tokens, want <= 4: %+v", total, got)
 	}
 }
 
@@ -506,7 +556,7 @@ func TestRouteAndRetrieveKeepsRouterForKBOnlyScope(t *testing.T) {
 	}
 }
 
-func TestRouteAndRetrieveRecoversLexicalMatchWhenRouterSaysNone(t *testing.T) {
+func TestRouteAndRetrieveHonorsRouterNoneWithoutLexicalOverride(t *testing.T) {
 	ctx := context.Background()
 	db := seedEmbeddedConversationDoc(t, ctx)
 	defer db.Close()
@@ -529,8 +579,8 @@ func TestRouteAndRetrieveRecoversLexicalMatchWhenRouterSaysNone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("route retrieve: %v", err)
 	}
-	if decision.Strategy != "retrieve" || len(got) == 0 || got[0].ID != "ch1" {
-		t.Fatalf("lexical router fallback = decision %q snippets %+v", decision.Strategy, got)
+	if decision.Strategy != "none" || len(got) != 0 {
+		t.Fatalf("router none was overridden = decision %q snippets %+v", decision.Strategy, got)
 	}
 }
 
@@ -688,13 +738,17 @@ func seedEmbeddedKBDoc(t *testing.T, ctx context.Context) *sql.DB {
 type recordingRouter struct {
 	calls    int
 	decision RouteDecision
+	summary  string
 	err      error
 }
 
-func (r *recordingRouter) RunJSON(_ context.Context, _ string, _ string, out any, _ RouterOpts) error {
+func (r *recordingRouter) RunJSON(_ context.Context, kind string, _ string, out any, _ RouterOpts) error {
 	r.calls++
 	if r.err != nil {
 		return r.err
+	}
+	if kind == "task.rag_map_reduce" {
+		return json.Unmarshal([]byte(`{"summary":`+strconv.Quote(r.summary)+`}`), out)
 	}
 	if d, ok := out.(*RouteDecision); ok {
 		*d = r.decision

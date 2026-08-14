@@ -86,6 +86,16 @@ func TestVectorChunkStatusesNonEmptyScopeAlwaysFilters(t *testing.T) {
 	}
 }
 
+func TestDocumentScopeReplacesBroadConversationBranch(t *testing.T) {
+	conditions := scopeShould(Scope{ConversationID: "conv-1", DocumentIDs: []string{"doc-b"}})
+	if len(conditions) != 1 {
+		t.Fatalf("scope conditions=%#v, want only current document", conditions)
+	}
+	if conditions[0]["key"] != "document_id" {
+		t.Fatalf("scope condition=%#v, want document_id filter", conditions[0])
+	}
+}
+
 func TestDeleteByDocumentSweepsCollectionsWithBoundedConcurrency(t *testing.T) {
 	var active, maximum, deletes atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

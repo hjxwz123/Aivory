@@ -51,6 +51,10 @@ type ChunkVectorStatus struct {
 type Scope struct {
 	KBIDs          []string
 	ConversationID string
+	// DocumentIDs narrows conversation uploads to the documents explicitly
+	// attached to the current turn. It is ORed with KBIDs, while replacing the
+	// broad ConversationID branch when populated.
+	DocumentIDs []string
 }
 
 // Store is the backend surface. dim selects the per-dimension collection.

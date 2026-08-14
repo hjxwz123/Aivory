@@ -3,6 +3,7 @@ package llm
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -22,6 +23,7 @@ import (
 	"aivory/server/internal/cache"
 	"aivory/server/internal/envcfg"
 	"aivory/server/internal/fileguard"
+	"aivory/server/internal/generationcfg"
 	"aivory/server/internal/msgcache"
 	"aivory/server/internal/queue"
 	"aivory/server/internal/rag"
@@ -48,6 +50,7 @@ var (
 	sandboxExecTimeoutClampRangeMax = envcfg.Int("AIVORY_LLM_SANDBOX_EXEC_TIMEOUT_CLAMP_RANGE_MAX", 600)
 	sandboxExecTimeoutClampRangeMin = envcfg.Int("AIVORY_LLM_SANDBOX_EXEC_TIMEOUT_CLAMP_RANGE_MIN", 10)
 	sandboxExecCtxSafetyMargin      = envcfg.Dur("AIVORY_LLM_SANDBOX_EXEC_CTX_SAFETY_MARGIN", 150*time.Second)
+	compactionLeaseTTL              = envcfg.Dur("AIVORY_LLM_COMPACTION_LEASE_TTL", 2*time.Hour)
 )
 
 // Orchestrator coordinates the per-message flow described in §3.1: load
@@ -72,6 +75,153 @@ type Orchestrator struct {
 	// work such as title generation uses it after a durable metadata write so
 	// open clients re-fetch the committed conversation row.
 	onConversationUpdated func(userID, conversationID string)
+	// onCompactionStatus is a separate lifecycle bridge for AUTOMATIC context
+	// compaction. It intentionally does not cover explicit /compact requests:
+	// those already have a synchronous HTTP result, while background and inline
+	// automatic work otherwise gives open clients no indication that it is using
+	// the configured summarisation model.
+	onCompactionStatus func(userID, conversationID, operationID, status string)
+}
+
+// compactionConfigFingerprint identifies the provider request contract captured
+// when an asynchronous compaction job is queued. A model/channel ID alone is
+// insufficient: administrators can change request parameters, tool schemas,
+// endpoint credentials, or the compaction threshold in place while a job waits
+// in the queue. Reusing the old history projection after such a change can
+// replay an incompatible native exchange or apply an obsolete budget. The
+// fingerprint is an internal digest only; secrets are hashed and never logged.
+type compactionChannelFingerprint struct {
+	ID        string
+	Type      string
+	APIFormat string
+	BaseURL   string
+	APIKey    string
+	Enabled   bool
+	UpdatedAt int64
+}
+
+type compactionCandidateFingerprint struct {
+	ID       string
+	Model    store.Model
+	Primary  compactionChannelFingerprint
+	Fallback *compactionFallbackFingerprint
+}
+
+type compactionFallbackFingerprint struct {
+	ID      string
+	Exists  bool
+	Channel *compactionChannelFingerprint
+}
+
+type compactionFingerprintPayload struct {
+	Candidates []compactionCandidateFingerprint
+	Settings   map[string]string
+}
+
+func compactionChannelFingerprintFrom(channel *store.Channel) compactionChannelFingerprint {
+	if channel == nil {
+		return compactionChannelFingerprint{}
+	}
+	// API keys are part of the request contract, but must not be retained in the
+	// preimage even though the final value is a digest. This keeps accidental
+	// debug logging of the payload from disclosing credentials.
+	keyDigest := sha256.Sum256([]byte(channel.APIKey))
+	return compactionChannelFingerprint{
+		ID: channel.ID, Type: channel.Type, APIFormat: channel.APIFormat,
+		BaseURL: channel.BaseURL, APIKey: fmt.Sprintf("%x", keyDigest[:]),
+		Enabled: channel.Enabled, UpdatedAt: channel.UpdatedAt,
+	}
+}
+
+func compactionConfigFingerprint(candidates []compactionCandidateFingerprint, settings map[string]string) string {
+	if len(candidates) == 0 || settings == nil {
+		return ""
+	}
+	value := compactionFingerprintPayload{
+		Candidates: candidates,
+		Settings:   settings,
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return ""
+	}
+	digest := sha256.Sum256(encoded)
+	return fmt.Sprintf("%x", digest[:])
+}
+
+func compactionSettingsSnapshot(db *sql.DB) (map[string]string, error) {
+	keys := []string{
+		"compaction_enabled", "keep_recent_rounds", "compaction_token_trigger", "compaction_token_cap",
+		"compaction_retention_percentage", "summary_max_tokens", "summary_target_percent",
+		"summary_merge_max_tokens", "compaction_request_max_tokens", "context_compaction_model_id",
+		"context_compaction_prompt", "task_model_id", "default_model_id",
+	}
+	settings := make(map[string]string, len(keys))
+	for _, key := range keys {
+		raw, err := store.GetSetting(db, key)
+		if err != nil {
+			// Older databases may legitimately lack a setting that has a code
+			// default. Preserve that absence as part of the contract so adding the
+			// row later still invalidates a queued job; only an actual read failure
+			// makes the fingerprint unusable.
+			if errors.Is(err, sql.ErrNoRows) {
+				settings[key] = "<missing>"
+				continue
+			}
+			return nil, fmt.Errorf("read compaction setting %q: %w", key, err)
+		}
+		settings[key] = string(raw)
+	}
+	return settings, nil
+}
+
+func compactionRuntimeFingerprint(ctx context.Context, db *sql.DB, conversationModelID string) string {
+	candidateIDs, err := resolveCompactionModelCandidates(ctx, db, conversationModelID)
+	if err != nil {
+		return ""
+	}
+	candidates := make([]compactionCandidateFingerprint, 0, len(candidateIDs))
+	for _, candidateID := range candidateIDs {
+		model, modelErr := store.GetModel(ctx, db, candidateID)
+		if modelErr != nil || model == nil {
+			return ""
+		}
+		primary, channelErr := store.GetChannel(ctx, db, model.ChannelID)
+		if channelErr != nil || primary == nil {
+			return ""
+		}
+		candidate := compactionCandidateFingerprint{
+			ID:      candidateID,
+			Model:   *model,
+			Primary: compactionChannelFingerprintFrom(primary),
+		}
+		fallbackID := strings.TrimSpace(model.FallbackChannelID)
+		if fallbackID != "" && fallbackID != model.ChannelID {
+			fallback, fallbackErr := store.GetChannel(ctx, db, fallbackID)
+			candidate.Fallback = &compactionFallbackFingerprint{ID: fallbackID}
+			if fallbackErr != nil {
+				if !errors.Is(fallbackErr, store.ErrNotFound) {
+					return ""
+				}
+				// The live request ignores a stale fallback_channel_id and continues on
+				// the primary channel. Preserve the missing binding as an explicit,
+				// stable state. If the channel later appears or the ID is changed, the
+				// fingerprint changes and invalidates the queued job.
+				fallback = nil
+			}
+			if fallback != nil {
+				fp := compactionChannelFingerprintFrom(fallback)
+				candidate.Fallback.Exists = true
+				candidate.Fallback.Channel = &fp
+			}
+		}
+		candidates = append(candidates, candidate)
+	}
+	settings, settingsErr := compactionSettingsSnapshot(db)
+	if settingsErr != nil {
+		return ""
+	}
+	return compactionConfigFingerprint(candidates, settings)
 }
 
 // ToolRefusalError marks a tool failure that is a policy/quota REFUSAL (content
@@ -82,6 +232,15 @@ type Orchestrator struct {
 type ToolRefusalError struct{ Message string }
 
 func (e *ToolRefusalError) Error() string { return e.Message }
+
+var (
+	// ErrDrawingPermission is returned before a direct image-model turn persists
+	// either message when the current user group forbids drawing.
+	ErrDrawingPermission = errors.New("drawing_group_permission_required")
+	// ErrKnowledgeBasePermission applies the same defense-in-depth boundary to
+	// optional and project knowledge bases for non-HTTP and future callers.
+	ErrKnowledgeBasePermission = errors.New("knowledge_base_group_permission_required")
+)
 
 // ToolRegistry is the subset of the tools package the orchestrator needs.
 type ToolRegistry interface {
@@ -120,10 +279,13 @@ type ToolContext struct {
 	// Fast quarters the per-turn tool budgets and withholds python_execute
 	// entirely (§fast-mode) — fast turns trade tool depth for speed.
 	Fast bool
-	// BuiltinTools is the model's resolved local-tool allowlist. nil means the
-	// backwards-compatible default (all registered tools); a non-nil empty map
-	// means the administrator explicitly disabled every local tool.
+	// BuiltinTools is the model's resolved local-tool default selection. nil means
+	// all registered tools; a non-nil empty map means no local tool is selected by
+	// default. Global and user-group ceilings are applied separately.
 	BuiltinTools map[string]bool
+	// AdminSkillIDs is the user-group ceiling for administrator-managed skills.
+	// nil permits every model-bound skill; a non-nil map permits only listed IDs.
+	AdminSkillIDs map[string]bool
 	// ImageModelID is the user's pre-selected image model (§4.12-B).
 	ImageModelID string
 	// ImageRequestParams is the already allowlisted request fragment produced
@@ -228,6 +390,16 @@ func (tc *ToolContext) AllowsBuiltinTool(name string) bool {
 	return tc.BuiltinTools[name]
 }
 
+// AllowsAdminSkill is the final execution and asset-staging boundary for an
+// administrator-managed skill. Model bindings and this group ceiling must both
+// allow a skill before its instructions or files can be loaded.
+func (tc *ToolContext) AllowsAdminSkill(id string) bool {
+	if tc == nil || tc.AdminSkillIDs == nil {
+		return true
+	}
+	return tc.AdminSkillIDs[id]
+}
+
 // AddImageCredits accumulates the total credits the tool charged for images this
 // turn, so the chat finalize can surface them in messages.credits (§4.20).
 func (tc *ToolContext) AddImageCredits(total float64) {
@@ -317,8 +489,7 @@ var maxToolCallsPerTurnFast = func() int {
 
 // filterDisabledTools drops any tool named in the global `disabled_tools`
 // setting (§B6 partial: a platform-wide tool kill-switch — e.g. turn off
-// python_execute or image_generate). The per-model policy is applied immediately
-// afterward by filterModelBuiltinTools.
+// python_execute or image_generate).
 func (o *Orchestrator) filterDisabledTools(defs []ToolDef) []ToolDef {
 	deny := o.disabledToolSet()
 	if len(deny) == 0 {
@@ -362,6 +533,204 @@ func filterModelBuiltinTools(defs []ToolDef, allowed map[string]bool) []ToolDef 
 		}
 	}
 	return out
+}
+
+func toolAccessPolicyAllows(policy *ToolAccessPolicy, id string) bool {
+	if policy == nil {
+		return true
+	}
+	switch policy.Mode {
+	case store.ResourceAccessNone:
+		return false
+	case store.ResourceAccessSelected:
+		allowed := false
+		for _, candidate := range policy.IDs {
+			if candidate == id {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return false
+		}
+	}
+	if !policy.AllowDrawing && (id == "builtin:image_generate" || id == "hosted:image_generation") {
+		return false
+	}
+	if !policy.AllowMemory && id == "builtin:save_memory" {
+		return false
+	}
+	if !policy.AllowSkills && id == "builtin:use_skill" {
+		return false
+	}
+	return true
+}
+
+func groupToolAccessPolicy(permissions store.UserGroupPermissions) *ToolAccessPolicy {
+	allowSkills := permissions.Skills.Mode == store.ResourceAccessAll ||
+		(permissions.Skills.Mode == store.ResourceAccessSelected && len(permissions.Skills.IDs) > 0)
+	return &ToolAccessPolicy{
+		Mode:         permissions.Tools.Mode,
+		IDs:          append([]string(nil), permissions.Tools.IDs...),
+		AllowDrawing: permissions.AllowDrawing,
+		AllowMemory:  permissions.AllowMemory,
+		AllowSkills:  allowSkills,
+		SkillMode:    permissions.Skills.Mode,
+		SkillIDs:     append([]string(nil), permissions.Skills.IDs...),
+	}
+}
+
+func intersectResourceAccess(
+	leftMode string,
+	leftIDs []string,
+	rightMode string,
+	rightIDs []string,
+) (string, []string) {
+	if leftMode == "" {
+		leftMode = store.ResourceAccessAll
+	}
+	if rightMode == "" {
+		rightMode = store.ResourceAccessAll
+	}
+	if leftMode == store.ResourceAccessNone || rightMode == store.ResourceAccessNone {
+		return store.ResourceAccessNone, nil
+	}
+	if leftMode == store.ResourceAccessAll {
+		return rightMode, append([]string(nil), rightIDs...)
+	}
+	if rightMode == store.ResourceAccessAll {
+		return leftMode, append([]string(nil), leftIDs...)
+	}
+	rightSet := make(map[string]bool, len(rightIDs))
+	for _, id := range rightIDs {
+		rightSet[id] = true
+	}
+	intersection := make([]string, 0, len(leftIDs))
+	for _, id := range leftIDs {
+		if rightSet[id] {
+			intersection = append(intersection, id)
+		}
+	}
+	if len(intersection) == 0 {
+		return store.ResourceAccessNone, nil
+	}
+	return store.ResourceAccessSelected, intersection
+}
+
+// intersectToolAccessPolicies treats the API snapshot as an optional extra
+// restriction. The database-derived policy always remains the hard ceiling, so
+// a direct caller cannot broaden access with a forged or omitted request field.
+func intersectToolAccessPolicies(requested, current *ToolAccessPolicy) *ToolAccessPolicy {
+	if current == nil {
+		return requested
+	}
+	if requested == nil {
+		copy := *current
+		copy.IDs = append([]string(nil), current.IDs...)
+		copy.SkillIDs = append([]string(nil), current.SkillIDs...)
+		return &copy
+	}
+	mode, ids := intersectResourceAccess(requested.Mode, requested.IDs, current.Mode, current.IDs)
+	skillMode, skillIDs := intersectResourceAccess(requested.SkillMode, requested.SkillIDs, current.SkillMode, current.SkillIDs)
+	return &ToolAccessPolicy{
+		Mode:         mode,
+		IDs:          ids,
+		AllowDrawing: requested.AllowDrawing && current.AllowDrawing,
+		AllowMemory:  requested.AllowMemory && current.AllowMemory,
+		AllowSkills:  requested.AllowSkills && current.AllowSkills && skillMode != store.ResourceAccessNone,
+		SkillMode:    skillMode,
+		SkillIDs:     skillIDs,
+	}
+}
+
+func skillAccessPolicyAllows(policy *ToolAccessPolicy, id string) bool {
+	if policy == nil {
+		return true
+	}
+	switch policy.SkillMode {
+	case store.ResourceAccessNone:
+		return false
+	case store.ResourceAccessSelected:
+		for _, candidate := range policy.SkillIDs {
+			if candidate == id {
+				return true
+			}
+		}
+		return false
+	default:
+		return policy.AllowSkills
+	}
+}
+
+func adminSkillIDSet(policy *ToolAccessPolicy) map[string]bool {
+	if policy == nil || policy.SkillMode == "" || policy.SkillMode == store.ResourceAccessAll {
+		return nil
+	}
+	allowed := make(map[string]bool, len(policy.SkillIDs))
+	if policy.SkillMode == store.ResourceAccessSelected {
+		for _, id := range policy.SkillIDs {
+			allowed[id] = true
+		}
+	}
+	return allowed
+}
+
+func userSkillAccessPolicyAllows(policy *ToolAccessPolicy, skill store.UserSkill) bool {
+	if policy == nil || policy.SkillMode == "" || policy.SkillMode == store.ResourceAccessAll {
+		return true
+	}
+	return skill.SourceSkillID != "" && skillAccessPolicyAllows(policy, skill.SourceSkillID)
+}
+
+func validateUserSkillAccessPolicy(policy *ToolAccessPolicy, skills []store.UserSkill) error {
+	for _, skill := range skills {
+		if !userSkillAccessPolicyAllows(policy, skill) {
+			return store.ErrInvalidUserSkillSelection
+		}
+	}
+	return nil
+}
+
+func filterBuiltinToolsByAccess(defs []ToolDef, policy *ToolAccessPolicy) []ToolDef {
+	if policy == nil {
+		return defs
+	}
+	out := make([]ToolDef, 0, len(defs))
+	for _, definition := range defs {
+		if toolAccessPolicyAllows(policy, "builtin:"+definition.Name) {
+			out = append(out, definition)
+		}
+	}
+	return out
+}
+
+func filterMCPToolsByAccess(defs []MCPToolDef, policy *ToolAccessPolicy) []MCPToolDef {
+	if policy == nil {
+		return defs
+	}
+	out := make([]MCPToolDef, 0, len(defs))
+	for _, definition := range defs {
+		if toolAccessPolicyAllows(policy, "mcp:"+definition.ServerID) {
+			out = append(out, definition)
+		}
+	}
+	return out
+}
+
+func filterHostedToolsByAccess(names []string, requests []json.RawMessage, policy *ToolAccessPolicy) ([]string, []json.RawMessage) {
+	if policy == nil {
+		return names, requests
+	}
+	outNames := make([]string, 0, len(names))
+	outRequests := make([]json.RawMessage, 0, len(requests))
+	for index, name := range names {
+		if index >= len(requests) || !toolAccessPolicyAllows(policy, "hosted:"+name) {
+			continue
+		}
+		outNames = append(outNames, name)
+		outRequests = append(outRequests, requests[index])
+	}
+	return outNames, outRequests
 }
 
 func selectedToolIDSet(ids []string, configured bool) map[string]bool {
@@ -552,6 +921,19 @@ func (o *Orchestrator) SetConversationUpdatedHandler(fn func(userID, conversatio
 	o.onConversationUpdated = fn
 }
 
+// SetCompactionStatusHandler installs the API-owned notification bridge for
+// automatic context compaction. Status is one of "started", "completed", or
+// "failed". It is configured during startup before the server accepts work.
+func (o *Orchestrator) SetCompactionStatusHandler(fn func(userID, conversationID, operationID, status string)) {
+	o.onCompactionStatus = fn
+}
+
+func (o *Orchestrator) notifyAutomaticCompactionStatus(userID, conversationID, operationID, status string) {
+	if o != nil && o.onCompactionStatus != nil {
+		o.onCompactionStatus(userID, conversationID, operationID, status)
+	}
+}
+
 // ManualCompactionResult describes one explicit /compact attempt.
 type ManualCompactionResult struct {
 	Compacted       bool   `json:"compacted"`
@@ -561,6 +943,138 @@ type ManualCompactionResult struct {
 	SummaryTokens   int    `json:"summary_tokens"`
 }
 
+type compactionLease struct {
+	orchestrator   *Orchestrator
+	conversationID string
+	token          string
+}
+
+func effectiveCompactionLeaseTTL() time.Duration {
+	ttl := compactionLeaseTTL
+	if ttl <= 0 {
+		ttl = 2 * time.Hour
+	}
+	if minimum := generationcfg.ProtectedDuration(); ttl < minimum {
+		return minimum
+	}
+	return ttl
+}
+
+// tryAcquireCompactionLease uses the relational database as the authoritative
+// per-conversation lease. Redis is optional in Aivory, and a process-local
+// in-memory cache cannot protect a multi-replica deployment from duplicate
+// compaction provider calls or duplicate billing.
+func (o *Orchestrator) tryAcquireCompactionLease(ctx context.Context, conversationID string) (*compactionLease, bool, error) {
+	if o == nil || o.db == nil {
+		return nil, false, errors.New("context compaction database is unavailable")
+	}
+	token := store.GenID("cmpl")
+	acquired, err := store.TryAcquireConversationCompactionLease(
+		ctx, o.db, conversationID, token, effectiveCompactionLeaseTTL(),
+	)
+	if err != nil || !acquired {
+		return nil, acquired, err
+	}
+	return &compactionLease{orchestrator: o, conversationID: conversationID, token: token}, true, nil
+}
+
+// acquireCompactionLease is retained for tests and lifecycle probes that only
+// need a best-effort yes/no answer. Production call sites use the context-aware
+// form above so a database failure is never misreported as an active summary.
+func (o *Orchestrator) acquireCompactionLease(conversationID string) (*compactionLease, bool) {
+	lease, acquired, err := o.tryAcquireCompactionLease(context.Background(), conversationID)
+	if err != nil && o != nil && o.logger != nil {
+		o.logger.Printf("compaction: acquire lease (conv=%s): %v", conversationID, err)
+	}
+	return lease, acquired
+}
+
+func (lease *compactionLease) Release() {
+	if lease == nil || lease.orchestrator == nil || lease.orchestrator.db == nil {
+		return
+	}
+	// A client cancellation must not strand the lease until its long TTL expires.
+	// The owner token protects a replacement that acquired the row after expiry.
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := store.ReleaseConversationCompactionLease(ctx, lease.orchestrator.db, lease.conversationID, lease.token); err != nil && lease.orchestrator.logger != nil {
+		lease.orchestrator.logger.Printf("compaction: release lease (conv=%s): %v", lease.conversationID, err)
+	}
+}
+
+// compactionHistoryAtLeaf loads exactly the branch that scheduled an async
+// compaction. The normal ListMessages contract repairs a dangling leaf to the
+// newest surviving branch so conversations still render after partial deletes;
+// that behavior is unsafe for a queued summary job. Validate both before and
+// after loading, and require the returned path to terminate at the requested
+// leaf so a repair fallback can never be mistaken for the scheduled branch.
+func (o *Orchestrator) compactionHistoryAtLeaf(ctx context.Context, conversationID, leafID string) ([]store.Message, bool, error) {
+	leaf, err := store.GetMessage(ctx, o.db, leafID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if leaf == nil || leaf.ConversationID != conversationID {
+		return nil, false, nil
+	}
+	history, err := msgcache.ListMessages(ctx, o.cache, o.db, conversationID, leafID)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(history) == 0 || history[len(history)-1].ID != leafID {
+		return nil, false, nil
+	}
+	leaf, err = store.GetMessage(ctx, o.db, leafID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if leaf == nil || leaf.ConversationID != conversationID {
+		return nil, false, nil
+	}
+	return history, true, nil
+}
+
+// compactionLeafOnActivePath verifies that a queued compaction still belongs to
+// the conversation branch the user is currently viewing. Read active_leaf_id on
+// both sides of the path reconstruction so a concurrent branch switch cannot be
+// mistaken for a stable match. The caller performs this immediately before any
+// status notification, task-model call, or standalone compaction billing.
+func (o *Orchestrator) compactionLeafOnActivePath(ctx context.Context, conversationID, queuedLeafID string) (bool, error) {
+	var activeLeafBefore string
+	if err := o.db.QueryRowContext(ctx,
+		`SELECT COALESCE(active_leaf_id,'') FROM conversations WHERE id=?`, conversationID,
+	).Scan(&activeLeafBefore); err != nil {
+		return false, err
+	}
+	if activeLeafBefore == "" {
+		return false, nil
+	}
+	activePath, current, err := o.compactionHistoryAtLeaf(ctx, conversationID, activeLeafBefore)
+	if err != nil || !current {
+		return false, err
+	}
+	var activeLeafAfter string
+	if err := o.db.QueryRowContext(ctx,
+		`SELECT COALESCE(active_leaf_id,'') FROM conversations WHERE id=?`, conversationID,
+	).Scan(&activeLeafAfter); err != nil {
+		return false, err
+	}
+	if activeLeafAfter != activeLeafBefore {
+		return false, nil
+	}
+	for _, message := range activePath {
+		if message.ID == queuedLeafID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // CompactConversation explicitly advances the active branch's summary while
 // reusing the same model routing, persistence and race guards as auto-compaction.
 func (o *Orchestrator) CompactConversation(ctx context.Context, userID, conversationID string) (ManualCompactionResult, error) {
@@ -568,6 +1082,12 @@ func (o *Orchestrator) CompactConversation(ctx context.Context, userID, conversa
 	if o == nil || o.db == nil || o.task == nil {
 		return result, errors.New("context compaction is unavailable")
 	}
+	// Bound explicit compaction by the same operator-controlled ceiling as a chat
+	// generation. The distributed lease is guaranteed to outlive this deadline,
+	// so a stalled provider cannot let another replica start a duplicate summary
+	// call (and potentially charge it twice) after the lease expires.
+	ctx, cancel := context.WithTimeout(ctx, generationcfg.MaxDuration())
+	defer cancel()
 	enabled := true
 	if raw, err := store.GetSetting(o.db, "compaction_enabled"); err == nil {
 		_ = json.Unmarshal(raw, &enabled)
@@ -586,10 +1106,32 @@ func (o *Orchestrator) CompactConversation(ctx context.Context, userID, conversa
 		// Keep that conversation-wide mutation with its creator.
 		return result, store.ErrNotFound
 	}
+	lease, acquired, leaseErr := o.tryAcquireCompactionLease(ctx, conv.ID)
+	if leaseErr != nil {
+		result.Reason = "compaction_failed"
+		return result, fmt.Errorf("acquire context compaction lease: %w", leaseErr)
+	}
+	if !acquired {
+		result.Reason = "generation_in_progress"
+		return result, ErrCompactionInFlight
+	}
+	defer lease.Release()
+	// Refresh mutable branch and summary state after acquiring the lease. A prior
+	// compaction or branch switch may have completed between authorization and the
+	// lease; attributing that change to this command would misreport success.
+	conv, err = store.GetConversation(ctx, o.db, conversationID, userID)
+	if err != nil {
+		return result, err
+	}
+	if conv.UserID != userID {
+		return result, store.ErrNotFound
+	}
 	var inFlight int
+	streamingCutoff := protectedStreamingCutoffUnix()
 	if err := o.db.QueryRowContext(ctx,
-		`SELECT COUNT(1) FROM messages WHERE conversation_id=? AND role='assistant' AND status='streaming'`,
-		conv.ID,
+		`SELECT COUNT(1) FROM messages
+		  WHERE conversation_id=? AND role='assistant' AND status='streaming' AND created_at>?`,
+		conv.ID, streamingCutoff,
 	).Scan(&inFlight); err != nil {
 		return result, err
 	}
@@ -597,14 +1139,35 @@ func (o *Orchestrator) CompactConversation(ctx context.Context, userID, conversa
 		result.Reason = "generation_in_progress"
 		return result, ErrCompactionInFlight
 	}
-	history, err := msgcache.ListMessages(ctx, o.cache, o.db, conv.ID, conv.ActiveLeafID)
+	history, leafCurrent, err := o.compactionHistoryAtLeaf(ctx, conv.ID, conv.ActiveLeafID)
 	if err != nil {
 		return result, err
 	}
-	beforeBlocks := filterBlocksForPath(LoadSummaryBlocks(conv.SummaryBlocks), history)
+	if !leafCurrent {
+		result.Reason = "conversation_changed"
+		return result, ErrCompactionChanged
+	}
+	beforeBlocks := filterBlocksForPath(loadSummaryBlocksForModel(ctx, o.db, conv.SummaryBlocks, conv.ModelID), history)
 	beforeFrontier := summarizedFrontier(beforeBlocks, history)
-	keep, blocks, err := CompactConversationNow(ctx, o.db, o.task, conv, history, conv.ModelID, userID)
+	operationID := store.GenID("cmp")
+	billingCtx := withStandaloneCompactionBilling(ctx, o, operationID)
+	keep, blocks, err := CompactConversationNow(billingCtx, o.db, o.task, conv, history, conv.ModelID, userID)
 	if err != nil {
+		switch {
+		case errors.Is(err, context.DeadlineExceeded):
+			result.Reason = "timed_out"
+		case errors.Is(err, context.Canceled):
+			// If the caller itself is still alive, this came from an internal or
+			// provider context. The HTTP layer suppresses output only when its own
+			// request context has actually ended.
+			result.Reason = "compaction_failed"
+		case errors.Is(err, ErrCompactionChanged):
+			result.Reason = "conversation_changed"
+		case errors.Is(err, ErrCompactionPersist):
+			result.Reason = "persistence_failed"
+		case errors.Is(err, ErrCompactionFailed), errors.Is(err, ErrTaskBillingRecord):
+			result.Reason = "compaction_failed"
+		}
 		return result, err
 	}
 	afterFrontier := summarizedFrontier(blocks, history)
@@ -686,10 +1249,13 @@ type RunRequest struct {
 	// the unified tool policy. It is ignored: clients select from the safe unified
 	// catalog through SelectedToolIDs and cannot submit hosted request fragments.
 	OfficialToolNames []string
-	// SelectedToolIDs is a unified service/tool catalog subset. Omitted means all
-	// currently available candidates; an explicit empty array means none.
+	// SelectedToolIDs is a unified service/tool catalog subset. Omitted uses the
+	// serving model's administrator defaults; an explicit empty array means none.
 	SelectedToolIDs         []string
 	SelectedToolsConfigured bool
+	// ToolAccessPolicy is the current user's group-level hard ceiling. It remains
+	// independent from model defaults and is re-applied during model fallback.
+	ToolAccessPolicy *ToolAccessPolicy
 	// SelectedUserSkillIDs names private, user-owned Agent Skills explicitly
 	// selected for this turn. They are persisted on the user message and injected
 	// at user-message authority, never into composeSystemPrompt.
@@ -907,20 +1473,32 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 	req.ToolModePrompt = false
 	if req.ToolsEnabled {
 		selectedTools := selectedToolIDSet(base.SelectedToolIDs, base.SelectedToolsConfigured)
-		builtinDefs := filterModelBuiltinTools(o.filterDisabledTools(o.tools.List(m.ID)), fallbackBuiltinTools)
+		builtinDefs := filterBuiltinToolsByAccess(o.filterDisabledTools(o.tools.List(m.ID)), base.ToolAccessPolicy)
 		if !store.MemoryEnabledForUser(ctx, o.db, base.UserID) {
 			builtinDefs = filterToolDefsByName(builtinDefs, map[string]bool{"save_memory": true})
 		}
 		if req.Fast {
 			builtinDefs = filterToolDefsByName(builtinDefs, map[string]bool{"python_execute": true})
 		}
-		builtinDefs = filterBuiltinToolsBySelection(builtinDefs, selectedTools)
-		mcpDefs := filterMCPToolsBySelection(o.listMCPTools(m.ID), selectedTools)
+		if base.SelectedToolsConfigured {
+			builtinDefs = filterBuiltinToolsBySelection(builtinDefs, selectedTools)
+		} else {
+			builtinDefs = filterModelBuiltinTools(builtinDefs, fallbackBuiltinTools)
+		}
+		mcpDefs := filterMCPToolsByAccess(o.listMCPTools(m.ID), base.ToolAccessPolicy)
+		if base.SelectedToolsConfigured {
+			mcpDefs = filterMCPToolsBySelection(mcpDefs, selectedTools)
+		}
 		req.Tools = append(builtinDefs, flattenMCPToolDefs(mcpDefs)...)
 		req.OfficialToolNames, req.OfficialToolRequests = configuredOfficialToolRequests(m.OfficialTools, req.Fast)
-		req.OfficialToolNames, req.OfficialToolRequests = filterHostedToolsBySelection(
-			req.OfficialToolNames, req.OfficialToolRequests, selectedTools,
+		req.OfficialToolNames, req.OfficialToolRequests = filterHostedToolsByAccess(
+			req.OfficialToolNames, req.OfficialToolRequests, base.ToolAccessPolicy,
 		)
+		if base.SelectedToolsConfigured {
+			req.OfficialToolNames, req.OfficialToolRequests = filterHostedToolsBySelection(
+				req.OfficialToolNames, req.OfficialToolRequests, selectedTools,
+			)
+		}
 		req.ToolModePrompt = fallbackToolMode == "prompt" && len(req.Tools) > 0
 	}
 	// The primary history may contain calls that the fallback model does not
@@ -942,7 +1520,9 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 	if !nativeHistoryCompatible(base.Model, ch.Type, ch.APIFormat) ||
 		!nativeHistoryModelCompatible(base.Model.ID, m.ID) {
 		for index := range req.History {
-			req.History[index].Raw = nil
+			if !isPromptToolRawEnvelope(req.History[index].Raw) {
+				req.History[index].Raw = nil
+			}
 		}
 	}
 	// The base request may have been assembled for a native primary model and
@@ -951,7 +1531,9 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 	// that native exchange is legal to replay on the fallback request.
 	if req.ToolModePrompt {
 		for index := range req.History {
-			req.History[index].Raw = nil
+			if !isPromptToolRawEnvelope(req.History[index].Raw) {
+				req.History[index].Raw = nil
+			}
 		}
 	}
 	if base.SystemPromptOptions != nil {
@@ -965,6 +1547,9 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 		}
 		fallbackOpts.ToolNames = toolDefNames(req.Tools)
 		fallbackOpts.SkillToolAvailable = toolDefsContain(req.Tools, "use_skill")
+		if base.ToolAccessPolicy != nil {
+			fallbackOpts.SkillMode = base.ToolAccessPolicy.SkillMode
+		}
 		if !toolDefsContain(req.Tools, "python_execute") {
 			fallbackOpts.SandboxFiles = nil
 		}
@@ -975,10 +1560,14 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 		fallbackOpts.Skills = nil
 		fallbackOpts.SkillsFull = nil
 		selectedTools := selectedToolIDSet(base.SelectedToolIDs, base.SelectedToolsConfigured)
-		fallbackAllowsSkills := (fallbackBuiltinTools == nil || fallbackBuiltinTools["use_skill"]) &&
-			(selectedTools == nil || selectedTools["builtin:use_skill"])
+		fallbackAllowsSkills := toolAccessPolicyAllows(base.ToolAccessPolicy, "builtin:use_skill")
+		if base.SelectedToolsConfigured {
+			fallbackAllowsSkills = fallbackAllowsSkills && selectedTools["builtin:use_skill"]
+		} else {
+			fallbackAllowsSkills = fallbackAllowsSkills && (fallbackBuiltinTools == nil || fallbackBuiltinTools["use_skill"])
+		}
 		if fallbackOpts.SkillsAllowed && fallbackAllowsSkills && !globalDisabledTools["use_skill"] {
-			fallbackOpts.Skills, fallbackOpts.SkillsFull = loadEnabledModelSkills(ctx, o.db, m.ID)
+			fallbackOpts.Skills, fallbackOpts.SkillsFull = loadEnabledModelSkills(ctx, o.db, m.ID, base.ToolAccessPolicy)
 		}
 		fallbackOpts.SkillsAllowed = fallbackOpts.SkillsAllowed && fallbackAllowsSkills && !globalDisabledTools["use_skill"]
 
@@ -1042,6 +1631,12 @@ func nativeHistoryModelCompatible(primaryModelID, fallbackModelID string) bool {
 // cannot be safely attributed or replayed on a later turn. Canonical blocks
 // remain persisted and preserve the visible answer/tool trace.
 func nativeRawForPersistedModel(raw json.RawMessage, ttftFallbackModel string) json.RawMessage {
+	// Prompt-protocol Raw is provider-neutral application metadata used only by
+	// context compaction. It remains correctly attributable even when a TTFT model
+	// fallback produced the turn, and provider adapters never replay it upstream.
+	if isPromptToolRawEnvelope(raw) {
+		return raw
+	}
 	if strings.TrimSpace(ttftFallbackModel) != "" {
 		return nil
 	}
@@ -1450,6 +2045,15 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if err != nil {
 		return nil, err
 	}
+	currentPermissions, err := store.UserGroupPermissionsForUser(ctx, o.db, req.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve current user-group permissions: %w", err)
+	}
+	req.ToolAccessPolicy = intersectToolAccessPolicies(req.ToolAccessPolicy, groupToolAccessPolicy(currentPermissions))
+	if !currentPermissions.AllowKnowledgeBases &&
+		(strings.TrimSpace(conv.ProjectID) != "" || len(conversationKnowledgeBaseSelection(conv, req)) > 0) {
+		return nil, ErrKnowledgeBasePermission
+	}
 	turnKBIDs, err := resolveConversationKnowledgeBaseSelection(ctx, o.db, conv, req)
 	if err != nil {
 		return nil, fmt.Errorf("resolve knowledge-base selection: %w", err)
@@ -1484,6 +2088,9 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	}
 	if !model.Enabled {
 		return nil, errors.New("model is disabled")
+	}
+	if model.Kind == "image" && req.ToolAccessPolicy != nil && !req.ToolAccessPolicy.AllowDrawing {
+		return nil, ErrDrawingPermission
 	}
 	// §fast-mode locks the turn's shape: no Verify, no Deep Research, and tools
 	// stay ON (fast can't disable tools) but run on a quartered budget without
@@ -1542,6 +2149,9 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if !req.ReuseExistingUserMessage {
 		selectedUserSkills, normalizedSelectedUserSkillIDs, err = store.ResolveUserSkillSelection(ctx, o.db, req.UserID, req.SelectedUserSkillIDs, true)
 		if err != nil {
+			return nil, err
+		}
+		if err := validateUserSkillAccessPolicy(req.ToolAccessPolicy, selectedUserSkills); err != nil {
 			return nil, err
 		}
 	}
@@ -1618,6 +2228,9 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			_ = json.Unmarshal(existing.SelectedUserSkillIDs, &persistedIDs)
 			selectedUserSkills, normalizedSelectedUserSkillIDs, err = store.ResolveUserSkillSelection(ctx, o.db, req.UserID, persistedIDs, false)
 			if err != nil {
+				return nil, err
+			}
+			if err := validateUserSkillAccessPolicy(req.ToolAccessPolicy, selectedUserSkills); err != nil {
 				return nil, err
 			}
 		}
@@ -1898,11 +2511,15 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// request.
 	availableSkillIdx := []SkillIndex{}
 	availableSkillFull := []SkillFull{}
-	skillsAllowed := (builtinTools == nil || builtinTools["use_skill"]) &&
-		!globalDisabledTools["use_skill"] &&
-		(selectedTools == nil || selectedTools["builtin:use_skill"])
+	skillsAllowed := !globalDisabledTools["use_skill"] &&
+		toolAccessPolicyAllows(req.ToolAccessPolicy, "builtin:use_skill")
+	if req.SelectedToolsConfigured {
+		skillsAllowed = skillsAllowed && selectedTools["builtin:use_skill"]
+	} else {
+		skillsAllowed = skillsAllowed && (builtinTools == nil || builtinTools["use_skill"])
+	}
 	if skillsAllowed {
-		availableSkillIdx, availableSkillFull = loadEnabledModelSkills(ctx, o.db, model.ID)
+		availableSkillIdx, availableSkillFull = loadEnabledModelSkills(ctx, o.db, model.ID, req.ToolAccessPolicy)
 	}
 
 	// 5. Resolve tools for this model BEFORE composing the system prompt so the
@@ -1920,8 +2537,11 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	toolDefs := []ToolDef{}
 	if toolMode != "none" {
 		hostedToolNames, hostedToolRequests = configuredOfficialToolRequests(model.OfficialTools, fastMode)
-		hostedToolNames, hostedToolRequests = filterHostedToolsBySelection(hostedToolNames, hostedToolRequests, selectedTools)
-		builtinDefs := filterModelBuiltinTools(o.filterDisabledTools(o.tools.List(model.ID)), builtinTools)
+		hostedToolNames, hostedToolRequests = filterHostedToolsByAccess(hostedToolNames, hostedToolRequests, req.ToolAccessPolicy)
+		if req.SelectedToolsConfigured {
+			hostedToolNames, hostedToolRequests = filterHostedToolsBySelection(hostedToolNames, hostedToolRequests, selectedTools)
+		}
+		builtinDefs := filterBuiltinToolsByAccess(o.filterDisabledTools(o.tools.List(model.ID)), req.ToolAccessPolicy)
 		if !memoryEnabled {
 			builtinDefs = filterToolDefsByName(builtinDefs, map[string]bool{"save_memory": true})
 		}
@@ -1931,8 +2551,15 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		if fastMode {
 			builtinDefs = filterToolDefsByName(builtinDefs, map[string]bool{"python_execute": true})
 		}
-		builtinDefs = filterBuiltinToolsBySelection(builtinDefs, selectedTools)
-		mcpDefs := filterMCPToolsBySelection(o.listMCPTools(model.ID), selectedTools)
+		if req.SelectedToolsConfigured {
+			builtinDefs = filterBuiltinToolsBySelection(builtinDefs, selectedTools)
+		} else {
+			builtinDefs = filterModelBuiltinTools(builtinDefs, builtinTools)
+		}
+		mcpDefs := filterMCPToolsByAccess(o.listMCPTools(model.ID), req.ToolAccessPolicy)
+		if req.SelectedToolsConfigured {
+			mcpDefs = filterMCPToolsBySelection(mcpDefs, selectedTools)
+		}
 		toolDefs = append(builtinDefs, flattenMCPToolDefs(mcpDefs)...)
 	}
 	if req.ToolMode == ToolModeAuto {
@@ -2031,10 +2658,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// §4.11-B: run inline RAG when a KB is bound OR the conversation itself has an
 	// ingested upload (chat-attached files are conversation-scoped, not in a KB).
 	ragScoped := len(kbIDs) > 0 || (o.rag != nil && store.ConversationHasReadyDocs(ctx, o.db, conv.ID))
+	currentDocumentIDs := attachmentDocumentIDs(req.Attachments)
 	if o.rag != nil && ragScoped && req.Mode != ModeDeepResearch {
 		ragCtx := rag.WithBillingMessageID(ctx, assistantMsg.ID)
 		ragCtx = rag.WithBillingWorkspaceID(ragCtx, conv.WorkspaceID)
-		recent := recentHistoryStrings(history, ragRouterRecentHistoryCount)
 		var snippets []rag.Snippet
 		var decision rag.RouteDecision
 		// topK=8 (was 5): a large uploaded doc's relevant section can sit outside a
@@ -2049,10 +2676,11 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 				conv.ID,
 				kbIDs,
 				req.UserText,
-				recent,
+				nil,
 				8,
 				rag.IterativeRetrievalOptions{
 					ForceRetrieve: ragMode == "inject",
+					DocumentIDs:   currentDocumentIDs,
 					OnProgress: func(progress rag.IterativeRetrievalProgress) {
 						onEvent(SseEvent{Type: "rag", Status: string(progress)})
 					},
@@ -2069,7 +2697,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			snippets, ragErr = o.rag.Retrieve(ragCtx, req.UserID, conv.ID, kbIDs, req.UserText, 8)
 			decision = rag.RouteDecision{Strategy: "retrieve"}
 		} else {
-			snippets, decision, ragErr = o.rag.RouteAndRetrieve(ragCtx, req.UserID, conv.ID, kbIDs, req.UserText, recent, 8)
+			snippets, decision, ragErr = o.rag.RouteAndRetrieveDocuments(ragCtx, req.UserID, conv.ID, kbIDs, currentDocumentIDs, req.UserText, nil, 8)
 		}
 		// Never SILENTLY swallow a retrieval failure (e.g. mixed embedding
 		// models/dims, embedder down). We still answer without RAG context — the
@@ -2198,7 +2826,13 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// them. In particular, OpenAI Responses encrypted reasoning cannot be sent
 	// to a different model on the same channel; storeToUnified drops those Raw
 	// values while retaining canonical text/tool blocks for the new model.
-	summaryBlocks := filterBlocksForPath(LoadSummaryBlocks(conv.SummaryBlocks), history)
+	// Summary routing follows the model that actually serves this turn. In fast
+	// mode conversations.model_id intentionally remains the user's advanced model,
+	// so using conv.ModelID here would apply the wrong task fallback chain and
+	// request-budget calculation.
+	compactionConv := *conv
+	compactionConv.ModelID = model.ID
+	summaryBlocks := filterBlocksForPath(loadSummaryBlocksForModel(ctx, o.db, conv.SummaryBlocks, model.ID), history)
 	frontier := summarizedFrontier(summaryBlocks, history)
 	if frontier < 0 || frontier > len(history) {
 		frontier = 0
@@ -2218,6 +2852,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	//     not the system prompt — keeps the system prefix stable + cacheable.
 	uHist = injectSummaryIntoHistory(uHist, ApplySummaryBlocks(summaryBlocks))
 	uHist = injectRAGIntoHistory(uHist, ragContext)
+	o.injectCompactionMedia(ctx, req.UserID, conv.ID, uHist, summaryBlocks, model.Vision)
 
 	// 9c. Resolve file attachments into provider-ready blocks (§4.6): images
 	//     become base64 image blocks on their message (vision models see them
@@ -2294,6 +2929,12 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		InlineSource:        inlineSource,
 		SkillToolAvailable:  skillToolAvailable,
 		SkillsAllowed:       skillsAllowed && !req.NoTools,
+		SkillMode: func() string {
+			if req.ToolAccessPolicy == nil {
+				return ""
+			}
+			return req.ToolAccessPolicy.SkillMode
+		}(),
 	}
 	system := composeSystemPrompt(systemOpts)
 
@@ -2315,54 +2956,175 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		keep, channel.Type, model.ID, nativeToolReplay, allowedHistoryTools, fastMode, model.Vision,
 	)}) + summaryTokens(summaryBlocks)
 	keep, summaryBlocks, compactAction := PlanCompactionForRequest(
-		o.db, conv, history, requestTokens, model.CompactionTokenThreshold,
+		o.db, &compactionConv, history, requestTokens, model.CompactionTokenThreshold,
 	)
 	if compactAction == compactInline {
-		compactCtx := withTaskBillingMessageID(ctx, assistantMsg.ID)
-		if k, b, cerr := MaybeCompactForRequest(
-			compactCtx, o.db, o.task, conv, history, requestTokens, renderedHistoryTokens,
-			model.CompactionTokenThreshold, model.ID, req.UserID,
-		); errors.Is(cerr, ErrTaskBillingRecord) {
-			return nil, cerr
-		} else if cerr == nil {
-			keep, summaryBlocks = k, b
+		lease, acquired, leaseErr := o.tryAcquireCompactionLease(ctx, conv.ID)
+		if leaseErr != nil {
+			// Automatic compaction is maintenance work. Keep the user-visible chat
+			// turn available if the database briefly cannot admit its lease; no model
+			// call or standalone billing is started in this case.
+			if o.logger != nil {
+				o.logger.Printf("compaction: skip inline pass after lease error (conv=%s): %v", conv.ID, leaseErr)
+			}
+		} else if acquired {
+			operationID := store.GenID("cmp")
+			// Inline compaction runs before the main chat admission below. Keep its
+			// provider usage on an independent operation so a later insufficient-credit
+			// refusal for the chat turn cannot strand or misattribute the summary cost
+			// on the assistant message.
+			compactCtx := withStandaloneCompactionBilling(ctx, o, operationID)
+			beforeFrontier := summarizedFrontier(summaryBlocks, history)
+			var cerr error
+			func() {
+				defer lease.Release()
+				o.notifyAutomaticCompactionStatus(req.UserID, conv.ID, operationID, "started")
+				k, b, compactErr := MaybeCompactForRequest(
+					compactCtx, o.db, o.task, conv, history, requestTokens, renderedHistoryTokens,
+					model.CompactionTokenThreshold, model.ID, req.UserID, userMsg.ID,
+				)
+				cerr = compactErr
+				if cerr == nil {
+					keep, summaryBlocks = k, b
+				}
+				status := "failed"
+				if cerr == nil && summarizedFrontier(summaryBlocks, history) > beforeFrontier {
+					status = "completed"
+				}
+				// Publish the terminal state before releasing the lease. A newer pass
+				// cannot start and publish its own status until this operation is fully
+				// identified as complete or failed.
+				o.notifyAutomaticCompactionStatus(req.UserID, conv.ID, operationID, status)
+			}()
+			if errors.Is(cerr, ErrTaskBillingRecord) {
+				return nil, cerr
+			}
 		}
 	} else if compactAction == compactAsync && o.queue != nil && o.task != nil {
 		convID, userID, leafID := conv.ID, req.UserID, userMsg.ID
+		operationID := store.GenID("cmp")
 		modelThreshold, compactionModelID := model.CompactionTokenThreshold, model.ID
+		modelChannelID := model.ChannelID
+		modelVision := model.Vision
+		channelType := channel.Type
+		currentModelID := model.ID
+		persistedModelID := model.ID
+		if fastMode {
+			persistedModelID = strings.TrimSpace(conv.ModelID)
+		}
+		configFingerprint := compactionRuntimeFingerprint(ctx, o.db, currentModelID)
+		vision := model.Vision
+		historyToolAllowlist := cloneBoolMap(allowedHistoryTools)
 		plannedBaseHistory := compactionHistoryForRequest(
-			keep, channel.Type, model.ID, nativeToolReplay, allowedHistoryTools, fastMode, model.Vision,
+			keep, channelType, currentModelID, nativeToolReplay, historyToolAllowlist, fastMode, vision,
 		)
 		plannedRenderedHistoryTokens := estimateRequestTokens(UnifiedChatRequest{History: plannedBaseHistory}) + summaryTokens(summaryBlocks)
 		o.queue.Enqueue("compaction.advance", func(ctx context.Context) error {
+			ctx, cancel := context.WithTimeout(ctx, generationcfg.MaxDuration())
+			defer cancel()
+			lease, acquired, leaseErr := o.tryAcquireCompactionLease(ctx, convID)
+			if leaseErr != nil {
+				return fmt.Errorf("acquire context compaction lease: %w", leaseErr)
+			}
+			if !acquired {
+				return nil
+			}
+			defer lease.Release()
+			// The queued job belongs to the path that triggered it, not merely to
+			// the conversation. ListMessages deliberately repairs dangling leaves
+			// to the newest path for normal rendering; using that fallback here
+			// would summarise an unrelated sibling after the original leaf was
+			// deleted. Validate and re-plan before issuing any status notification
+			// or model call: another job may have advanced the frontier while this one
+			// waited, making this pass a legitimate no-op rather than a failure.
+			histNow, leafCurrent, leafErr := o.compactionHistoryAtLeaf(ctx, convID, leafID)
+			if leafErr != nil {
+				return leafErr
+			}
+			if !leafCurrent {
+				return nil
+			}
 			fresh, gerr := store.GetConversation(ctx, o.db, convID, userID)
 			if gerr != nil {
 				return gerr
 			}
-			// Re-read the same branch at execution time. requestTokens remains the
-			// authoritative complete-request snapshot that triggered this pass.
-			histNow, herr := msgcache.ListMessages(ctx, o.cache, o.db, convID, leafID)
-			if herr != nil {
-				return herr
+			// Keep the persisted picker state separate from the effective model that
+			// shaped this request. A fast turn deliberately does not overwrite
+			// conversations.model_id with the hidden fast model. Both the picker state
+			// and mode must still match the queued snapshot, and a fast job additionally
+			// verifies that the administrator's current fast model is unchanged.
+			if strings.TrimSpace(fresh.ModelID) != persistedModelID || fresh.Fast != fastMode {
+				return nil
 			}
-			freshBlocks := filterBlocksForPath(LoadSummaryBlocks(fresh.SummaryBlocks), histNow)
+			if fastMode {
+				freshFastModel, fastErr := store.GetFastModel(ctx, o.db)
+				if fastErr != nil || freshFastModel == nil || freshFastModel.ID != currentModelID {
+					return nil
+				}
+			} else if fresh.ModelID != currentModelID {
+				return nil
+			}
+			freshModel, modelErr := store.GetModel(ctx, o.db, currentModelID)
+			if modelErr != nil || freshModel == nil || !freshModel.Enabled || freshModel.ChannelID != modelChannelID || freshModel.Vision != modelVision {
+				return nil
+			}
+			freshChannel, channelErr := store.GetChannel(ctx, o.db, freshModel.ChannelID)
+			if channelErr != nil || freshChannel == nil || !freshChannel.Enabled || !strings.EqualFold(strings.TrimSpace(freshChannel.Type), strings.TrimSpace(channelType)) {
+				return nil
+			}
+			if current := compactionRuntimeFingerprint(ctx, o.db, currentModelID); current == "" || current != configFingerprint {
+				// Any in-place model/channel/compaction-setting change invalidates the
+				// queued request contract. A subsequent turn will plan with the new
+				// threshold, prompt, parameters, and provider projection.
+				return nil
+			}
+			onActivePath, activePathErr := o.compactionLeafOnActivePath(ctx, convID, leafID)
+			if activePathErr != nil {
+				return activePathErr
+			}
+			if !onActivePath {
+				return nil
+			}
+			// The strict branch snapshot above is rebased at execution time.
+			// requestTokens remains the authoritative complete-request snapshot that
+			// triggered this pass.
+			freshBlocks := filterBlocksForPath(loadSummaryBlocksForModel(ctx, o.db, fresh.SummaryBlocks, currentModelID), histNow)
 			freshFrontier := summarizedFrontier(freshBlocks, histNow)
 			if freshFrontier < 0 || freshFrontier > len(histNow) {
 				freshFrontier = 0
 			}
 			freshBaseHistory := compactionHistoryForRequest(
-				histNow[freshFrontier:], channel.Type, model.ID, nativeToolReplay,
-				allowedHistoryTools, fastMode, model.Vision,
+				histNow[freshFrontier:], channelType, currentModelID, nativeToolReplay,
+				historyToolAllowlist, fastMode, vision,
 			)
 			freshRequestTokens := RebasedCompactionRequestTokens(
 				requestTokens, plannedRenderedHistoryTokens,
 				estimateRequestTokens(UnifiedChatRequest{History: freshBaseHistory})+summaryTokens(freshBlocks),
 			)
-			_, _, cerr := MaybeCompactForRequest(
+			freshCompactionConv := *fresh
+			freshCompactionConv.ModelID = currentModelID
+			_, _, freshAction := PlanCompactionForRequest(
+				o.db, &freshCompactionConv, histNow, freshRequestTokens, modelThreshold,
+			)
+			if freshAction == compactNone {
+				return nil
+			}
+			o.notifyAutomaticCompactionStatus(userID, convID, operationID, "started")
+			ctx = withStandaloneCompactionBilling(ctx, o, operationID)
+			completed := false
+			defer func() {
+				if completed {
+					o.notifyAutomaticCompactionStatus(userID, convID, operationID, "completed")
+				} else {
+					o.notifyAutomaticCompactionStatus(userID, convID, operationID, "failed")
+				}
+			}()
+			_, finalBlocks, cerr := MaybeCompactForRequest(
 				ctx, o.db, o.task, fresh, histNow, freshRequestTokens,
 				estimateRequestTokens(UnifiedChatRequest{History: freshBaseHistory})+summaryTokens(freshBlocks),
-				modelThreshold, compactionModelID, userID,
+				modelThreshold, compactionModelID, userID, leafID,
 			)
+			completed = cerr == nil && summarizedFrontier(finalBlocks, histNow) > freshFrontier
 			return cerr
 		})
 	}
@@ -2374,6 +3136,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	uHist = injectSelectedUserSkillsIntoHistory(uHist, selectedUserSkills)
 	uHist = injectSummaryIntoHistory(uHist, ApplySummaryBlocks(summaryBlocks))
 	uHist = injectRAGIntoHistory(uHist, ragContext)
+	o.injectCompactionMedia(ctx, req.UserID, conv.ID, uHist, summaryBlocks, model.Vision)
 	o.resolveAttachments(ctx, req.UserID, conv.ID, uHist, model, nil)
 	if hostedImageEnabled {
 		o.resolveImageArtifactBlocks(ctx, req.UserID, uHist)
@@ -2430,6 +3193,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		OfficialToolRequests:    hostedToolRequests,
 		SelectedToolIDs:         append([]string(nil), req.SelectedToolIDs...),
 		SelectedToolsConfigured: req.SelectedToolsConfigured,
+		ToolAccessPolicy:        req.ToolAccessPolicy,
 		ToolsEnabled:            toolsEnabled,
 		Fast:                    fastMode,
 		ToolModePrompt:          toolMode == "prompt" && len(toolDefs) > 0,
@@ -2446,9 +3210,11 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// request. A preliminary gate above keeps obvious refusals cheap; this atomic
 	// reservation is authoritative under concurrent turns.
 	if model.Kind != "image" {
+		estimatedTurnCost := estimateTurnUSD(*model, provReq)
+		estimatedTurnTokens := estimateTurnTokens(provReq)
 		turnBilling, msg, err = o.reserveUsageBilling(
-			ctx, req.UserID, model, store.QuotaScopeModelChat, 1, estimateTurnUSD(*model, provReq),
-			estimateTurnTokens(provReq), "llm_turn", assistantMsg.ID+":chat",
+			ctx, req.UserID, model, store.QuotaScopeModelChat, 1, estimatedTurnCost,
+			estimatedTurnTokens, "llm_turn", assistantMsg.ID+":chat",
 		)
 		if err != nil {
 			return nil, err
@@ -2507,7 +3273,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			// includes model policy, global disabled_tools, fast mode, official/no-
 			// tools state, and prevents an unsolicited provider call from bypassing
 			// declaration filtering.
-			BuiltinTools: toolDefNameSet(toolDefs),
+			BuiltinTools:  toolDefNameSet(toolDefs),
+			AdminSkillIDs: adminSkillIDSet(req.ToolAccessPolicy),
 			citationIndexes: func() *citationIndexAllocator {
 				if !hasAttachedKnowledgeBase {
 					return nil
@@ -2682,8 +3449,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 				emitDeferredKBCitations(partialBlocks)
 			}
 			usage := Usage{}
+			var partialRaw json.RawMessage
 			if result != nil {
 				usage = result.Usage
+				partialRaw = nativeRawForPersistedModel(result.Raw, ttftFallbackModel)
 			}
 			usage, produced := stoppedTurnUsage(usage, provReq, partialBlocks, visibleOutput.Load(), reqRecorder.snapshots())
 			// §发出就算: a user-stopped turn is finalized like a completed one — the
@@ -2697,7 +3466,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			persistStoppedBillingFailure := func(cost float64, cause error) error {
 				const safeErr = "Billing settlement failed. Your partial result was saved, but this turn requires administrator review."
 				_ = finishMessage(ctx, store.MessageFinishPatch{
-					Blocks: partialJSON, Citations: citesJSON, StopReason: "stopped", Status: "error", Error: safeErr,
+					Blocks: partialJSON, Raw: partialRaw, Citations: citesJSON, StopReason: "stopped", Status: "error", Error: safeErr,
 					InputTokens: usage.InputTokens, ContextTokens: reqRecorder.maxContextTokens(), OutputTokens: usage.OutputTokens,
 					CacheReadTokens: usage.CacheReadTokens, CacheWriteTokens: usage.CacheWriteTokens,
 					Cost: cost, GenMs: time.Since(turnStart).Milliseconds(),
@@ -2744,6 +3513,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			turnCredits := stopCredits + runner.ctx.ImageCreditsTotal()
 			_ = finishMessage(ctx, store.MessageFinishPatch{
 				Blocks:           partialJSON,
+				Raw:              partialRaw,
 				Citations:        citesJSON,
 				StopReason:       "stopped",
 				InputTokens:      usage.InputTokens,
@@ -3118,7 +3888,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	}
 
 	// 13. Async memory extraction (§4.16) — runs after the user has the reply.
-	if o.memory != nil && o.queue != nil && conv.WorkspaceID == "" {
+	if o.memory != nil && o.queue != nil && conv.WorkspaceID == "" && memoryEnabled {
 		convID := conv.ID
 		o.queue.Enqueue("memory.process", func(ctx context.Context) error {
 			return o.memory.Process(ctx, convID)
@@ -3164,6 +3934,20 @@ func imageAttachmentIDs(attachments []Attachment) []string {
 	for _, attachment := range attachments {
 		id := strings.TrimSpace(attachment.ID)
 		if id == "" || seen[id] || (attachment.Kind != "image" && !strings.HasPrefix(attachment.MimeType, "image/")) {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func attachmentDocumentIDs(attachments []Attachment) []string {
+	ids := make([]string, 0, len(attachments))
+	seen := make(map[string]bool, len(attachments))
+	for _, attachment := range attachments {
+		id := strings.TrimSpace(attachment.DocumentID)
+		if id == "" || seen[id] {
 			continue
 		}
 		seen[id] = true
@@ -3477,7 +4261,7 @@ func storeToUnified(msgs []store.Message, currentProvider, currentModelID string
 			cp[i].Provider == currentProvider &&
 			currentModelID != "" &&
 			strings.TrimSpace(cp[i].ModelID) == currentModelID
-		if !nativeToolReplay || !sameNativeModel {
+		if !isPromptToolRawEnvelope(cp[i].Raw) && (!nativeToolReplay || !sameNativeModel) {
 			cp[i].Raw = nil
 		}
 	}
@@ -3594,7 +4378,13 @@ func stripDisallowedBuiltinToolBlocks(history []UnifiedMessage, allowed map[stri
 			filtered.Blocks = append(filtered.Blocks, UnifiedBlock{Kind: "text", Text: unsupportedToolHistoryPlaceholder})
 		}
 		if affected {
-			filtered.Raw = nil
+			if isPromptToolRawEnvelope(message.Raw) {
+				filtered.Raw = filterPromptToolRawEnvelope(message.Raw, func(name string) bool {
+					return allowed[strings.TrimSpace(name)]
+				})
+			} else {
+				filtered.Raw = nil
+			}
 		} else {
 			filtered.Raw = append(json.RawMessage(nil), message.Raw...)
 		}
@@ -3625,7 +4415,13 @@ func stripFastModeCodeBlocks(history []UnifiedMessage) []UnifiedMessage {
 	out := make([]UnifiedMessage, len(history))
 	for i, message := range history {
 		filtered := message
-		filtered.Raw = nil
+		if isPromptToolRawEnvelope(message.Raw) {
+			filtered.Raw = filterPromptToolRawEnvelope(message.Raw, func(name string) bool {
+				return !deniedNames[strings.ToLower(strings.TrimSpace(name))]
+			})
+		} else {
+			filtered.Raw = nil
+		}
 		if message.Blocks != nil {
 			filtered.Blocks = make([]UnifiedBlock, 0, len(message.Blocks))
 		}
@@ -3971,11 +4767,14 @@ type SkillFull struct {
 	Instructions string
 }
 
-func loadEnabledModelSkills(ctx context.Context, db *sql.DB, modelID string) ([]SkillIndex, []SkillFull) {
+func loadEnabledModelSkills(ctx context.Context, db *sql.DB, modelID string, policy *ToolAccessPolicy) ([]SkillIndex, []SkillFull) {
 	indexes := []SkillIndex{}
 	full := []SkillFull{}
 	skillIDs, _ := store.SkillsForModel(ctx, db, modelID)
 	for _, skillID := range skillIDs {
+		if !skillAccessPolicyAllows(policy, skillID) {
+			continue
+		}
 		skill, err := store.GetSkill(ctx, db, skillID)
 		if err != nil || !skill.Enabled {
 			continue
@@ -4025,6 +4824,14 @@ type systemPromptOpts struct {
 	// that inline skills, but false for a per-turn disable or model/global policy.
 	// TTFT fallback uses it to avoid broadening the original request policy.
 	SkillsAllowed bool
+	// SkillMode carries the effective administrator/per-turn skill policy into
+	// prompt composition. Selected policies may expose database skills while
+	// still excluding code-defined skills without catalog IDs.
+	SkillMode string
+}
+
+func skillModeAllowsBuiltinDocGen(mode string) bool {
+	return mode == "" || mode == store.ResourceAccessAll
 }
 
 // UserPersona is the per-user personalization read from settings.
@@ -4254,7 +5061,7 @@ func composeSystemPrompt(o systemPromptOpts) string {
 		// produces a document is dead weight. Models that can't call use_skill
 		// still get them inline.
 		if has["python_execute"] {
-			if o.SkillsAllowed && !o.SkillToolAvailable {
+			if o.SkillsAllowed && !o.SkillToolAvailable && skillModeAllowsBuiltinDocGen(o.SkillMode) {
 				b.WriteString("\n")
 				b.WriteString(DocGenRecipes)
 			}
@@ -4283,7 +5090,7 @@ func composeSystemPrompt(o systemPromptOpts) string {
 	if o.SkillsAllowed {
 		skillIdx = o.Skills
 	}
-	if o.SkillsAllowed && o.SkillToolAvailable && o.ToolMode != "none" && has["python_execute"] {
+	if o.SkillsAllowed && o.SkillToolAvailable && o.ToolMode != "none" && has["python_execute"] && skillModeAllowsBuiltinDocGen(o.SkillMode) {
 		shadowed := false
 		for _, s := range o.Skills {
 			if strings.EqualFold(s.Name, DocGenSkillName) {
@@ -5453,6 +6260,7 @@ func toolRunnerForModelRequest(runner ToolRunner, modelID string, definitions []
 			DeepResearch:       source.DeepResearch,
 			Fast:               source.Fast,
 			BuiltinTools:       toolDefNameSet(definitions),
+			AdminSkillIDs:      cloneBoolMap(source.AdminSkillIDs),
 			ImageModelID:       source.ImageModelID,
 			ImageRequestParams: params,
 			ImageInputIDs:      append([]string(nil), source.ImageInputIDs...),
@@ -5466,6 +6274,17 @@ func toolRunnerForModelRequest(runner ToolRunner, modelID string, definitions []
 		base = &orchToolRunner{orch: current.orch, ctx: fallbackContext, onEvent: current.onEvent}
 	}
 	return toolDefAllowlistRunner{next: base, allowed: toolDefNameSet(definitions)}
+}
+
+func cloneBoolMap(source map[string]bool) map[string]bool {
+	if source == nil {
+		return nil
+	}
+	cloned := make(map[string]bool, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 // toolTimeouts bounds a single tool invocation per tool type (§4.3: search

@@ -67,7 +67,13 @@ func scopeShould(scope Scope) []map[string]any {
 		}
 		should = append(should, map[string]any{"key": "kb_id", "match": map[string]any{"value": kb}})
 	}
-	if scope.ConversationID != "" {
+	for _, documentID := range scope.DocumentIDs {
+		if documentID == "" {
+			continue
+		}
+		should = append(should, map[string]any{"key": "document_id", "match": map[string]any{"value": documentID}})
+	}
+	if len(scope.DocumentIDs) == 0 && scope.ConversationID != "" {
 		should = append(should, map[string]any{"key": "conversation_id", "match": map[string]any{"value": scope.ConversationID}})
 	}
 	return should
