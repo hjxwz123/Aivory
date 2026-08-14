@@ -1,5 +1,11 @@
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useState, type MouseEvent } from 'react'
-import { tokenizeMarkdown, inlineMarkdownToHtml, blockMarkdownToHtml, type CiteRef } from '@/lib/markdown'
+import {
+  tokenizeMarkdown,
+  inlineMarkdownToHtml,
+  blockMarkdownToHtml,
+  type CiteRef,
+  type MarkdownBlock,
+} from '@/lib/markdown'
 import { CodeBlock } from './code-block'
 import { MermaidDiagram } from './mermaid-diagram'
 import { cn, safeHref } from '@/lib/utils'
@@ -47,6 +53,113 @@ function HeadingTag({ depth, html, className }: { depth: number; html: string; c
       return <h5 className={cn('font-sans font-semibold text-sm mt-3 text-[var(--color-fg)]', className)}>{inner}</h5>
   }
 }
+
+interface MarkdownBlockViewProps {
+  block: MarkdownBlock
+  index: number
+  live: boolean
+  blockKeyPrefix?: string
+  cites: CiteRef[]
+  breaks: boolean
+}
+
+/**
+ * A streamed reply only changes its trailing block most of the time. Keeping
+ * each block behind its own memo boundary prevents stable leading paragraphs
+ * from repeatedly running marked, KaTeX and the DOM sanitizer as the tail
+ * grows. The parent still tokenizes the complete source, so Markdown boundary
+ * semantics and the final rendered output remain identical.
+ */
+const MarkdownBlockView = memo(
+  function MarkdownBlockView({ block: b, index, live, blockKeyPrefix, cites, breaks }: MarkdownBlockViewProps) {
+    const blockAnim = live ? 'animate-[fade-in_500ms_var(--ease-out)_backwards]' : undefined
+
+    switch (b.type) {
+      case 'heading':
+        return <HeadingTag depth={b.depth ?? 2} html={inlineMarkdownToHtml(b.content, cites, breaks)} className={blockAnim} />
+      case 'paragraph':
+        return (
+          <p
+            className={cn('leading-relaxed text-[var(--color-fg)]', blockAnim)}
+            dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(b.content, cites, breaks) }}
+          />
+        )
+      case 'list':
+      case 'ordered-list':
+        return (
+          <div
+            className={cn(
+              'my-3 text-[var(--color-fg)] leading-relaxed',
+              '[&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5',
+              '[&_ul]:my-1 [&_ol]:my-1 [&_li]:my-1 [&_li]:pl-0.5',
+              '[&_ul_ul]:list-[circle] [&_ul_ul]:my-0.5 [&_ol_ol]:my-0.5 [&_li_p]:my-0',
+              blockAnim,
+            )}
+            dangerouslySetInnerHTML={{ __html: blockMarkdownToHtml(b.content, cites, breaks) }}
+          />
+        )
+      case 'code':
+        if ((b.lang ?? '').toLowerCase() === 'mermaid') {
+          return <MermaidDiagram code={b.content} live={live} className={blockAnim} />
+        }
+        return (
+          <CodeBlock
+            code={b.content}
+            lang={b.lang}
+            live={live}
+            className={blockAnim}
+            previewKey={blockKeyPrefix ? `${blockKeyPrefix}#${index}` : undefined}
+          />
+        )
+      case 'blockquote':
+        return (
+          <blockquote
+            className={cn(
+              'border-l-2 border-[var(--color-border-strong)] pl-4 text-[var(--color-fg-muted)] italic',
+              blockAnim,
+            )}
+            dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(b.content, cites, breaks) }}
+          />
+        )
+      case 'math':
+        return (
+          <div
+            className={cn('my-3 overflow-x-auto', blockAnim)}
+            dangerouslySetInnerHTML={{ __html: b.content }}
+          />
+        )
+      case 'hr':
+        return <hr className={cn('my-6 border-[var(--color-divider)]', blockAnim)} />
+      case 'table':
+        return (
+          <div
+            className={cn(
+              'my-4 overflow-x-auto rounded-[10px] border border-[var(--color-border)]',
+              '[&_table]:w-full [&_table]:border-collapse [&_table]:text-sm',
+              '[&_thead]:bg-[var(--color-bg-muted)]',
+              '[&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold [&_th]:text-[var(--color-fg)] [&_th]:border-b [&_th]:border-[var(--color-border)]',
+              '[&_td]:px-3 [&_td]:py-2 [&_td]:align-top [&_td]:text-[var(--color-fg-muted)] [&_td]:border-b [&_td]:border-[var(--color-divider)]',
+              '[&_tr:last-child_td]:border-b-0',
+              blockAnim,
+            )}
+            dangerouslySetInnerHTML={{ __html: blockMarkdownToHtml(b.content, cites, breaks) }}
+          />
+        )
+      default:
+        return null
+    }
+  },
+  (prev, next) =>
+    prev.index === next.index &&
+    prev.live === next.live &&
+    prev.blockKeyPrefix === next.blockKeyPrefix &&
+    prev.cites === next.cites &&
+    prev.breaks === next.breaks &&
+    prev.block.type === next.block.type &&
+    prev.block.content === next.block.content &&
+    prev.block.depth === next.block.depth &&
+    prev.block.lang === next.block.lang,
+)
 
 /**
  * useThrottledContent caps how often `content` is recomputed during a stream.
@@ -114,108 +227,19 @@ export const Markdown = memo(function Markdown({
   )
   if (!content) return null
 
-  // While streaming, each block fades in ONCE when it first appears, so a reply
-  // arrives as a calm block-by-block reveal instead of a per-token jitter.
-  // React reuses the DOM node for an already-rendered block (stable key), so
-  // growing the last block's text does NOT replay the animation — only a
-  // genuinely new block animates. `backwards` holds opacity:0 before the first
-  // frame so a block never flashes fully-opaque then fades. Honors
-  // prefers-reduced-motion via the global media query in globals.css.
-  const blockAnim = live ? 'animate-[fade-in_500ms_var(--ease-out)_backwards]' : undefined
-
   return (
     <div className={cn('prose-aivory', className)} onClick={handleCitationClick}>
-      {blocks.map((b, i) => {
-        switch (b.type) {
-          case 'heading':
-            return <HeadingTag key={i} depth={b.depth ?? 2} html={inlineMarkdownToHtml(b.content, cites, breaks)} className={blockAnim} />
-          case 'paragraph':
-            return (
-              <p
-                key={i}
-                className={cn('leading-relaxed text-[var(--color-fg)]', blockAnim)}
-                dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(b.content, cites, breaks) }}
-              />
-            )
-          case 'list':
-          case 'ordered-list':
-            // Block-parse so `- item` / `1. item` become real <ul>/<ol><li>
-            // markup with line breaks — parseInline would leave the dashes as
-            // literal inline text on one line. The sanitizer strips classes off
-            // the list elements, so bullets/spacing are applied via the wrapper.
-            return (
-              <div
-                key={i}
-                className={cn(
-                  'my-3 text-[var(--color-fg)] leading-relaxed',
-                  '[&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5',
-                  '[&_ul]:my-1 [&_ol]:my-1 [&_li]:my-1 [&_li]:pl-0.5',
-                  '[&_ul_ul]:list-[circle] [&_ul_ul]:my-0.5 [&_ol_ol]:my-0.5 [&_li_p]:my-0',
-                  blockAnim,
-                )}
-                dangerouslySetInnerHTML={{ __html: blockMarkdownToHtml(b.content, cites, breaks) }}
-              />
-            )
-          case 'code':
-            if ((b.lang ?? '').toLowerCase() === 'mermaid') {
-              return <MermaidDiagram key={i} code={b.content} live={live} className={blockAnim} />
-            }
-            return (
-              <CodeBlock
-                key={i}
-                code={b.content}
-                lang={b.lang}
-                live={live}
-                className={blockAnim}
-                previewKey={blockKeyPrefix ? `${blockKeyPrefix}#${i}` : undefined}
-              />
-            )
-          case 'blockquote':
-            return (
-              <blockquote
-                key={i}
-                className={cn(
-                  'border-l-2 border-[var(--color-border-strong)] pl-4 text-[var(--color-fg-muted)] italic',
-                  blockAnim,
-                )}
-                dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(b.content, cites, breaks) }}
-              />
-            )
-          case 'math':
-            // Display math, pre-rendered by KaTeX in tokenizeMarkdown (trusted
-            // output). Scrolls horizontally on small screens for wide formulas.
-            return (
-              <div
-                key={i}
-                className={cn('my-3 overflow-x-auto', blockAnim)}
-                dangerouslySetInnerHTML={{ __html: b.content }}
-              />
-            )
-          case 'hr':
-            return <hr key={i} className={cn('my-6 border-[var(--color-divider)]', blockAnim)} />
-          case 'table':
-            // Block-parse so GFM pipe tables become real <table> markup. The
-            // sanitizer strips classes off table elements, so styling is applied
-            // from the wrapper via arbitrary child selectors.
-            return (
-              <div
-                key={i}
-                className={cn(
-                  'my-4 overflow-x-auto rounded-[10px] border border-[var(--color-border)]',
-                  '[&_table]:w-full [&_table]:border-collapse [&_table]:text-sm',
-                  '[&_thead]:bg-[var(--color-bg-muted)]',
-                  '[&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold [&_th]:text-[var(--color-fg)] [&_th]:border-b [&_th]:border-[var(--color-border)]',
-                  '[&_td]:px-3 [&_td]:py-2 [&_td]:align-top [&_td]:text-[var(--color-fg-muted)] [&_td]:border-b [&_td]:border-[var(--color-divider)]',
-                  '[&_tr:last-child_td]:border-b-0',
-                  blockAnim,
-                )}
-                dangerouslySetInnerHTML={{ __html: blockMarkdownToHtml(b.content, cites, breaks) }}
-              />
-            )
-          default:
-            return null
-        }
-      })}
+      {blocks.map((block, index) => (
+        <MarkdownBlockView
+          key={index}
+          block={block}
+          index={index}
+          live={live}
+          blockKeyPrefix={blockKeyPrefix}
+          cites={cites}
+          breaks={breaks}
+        />
+      ))}
     </div>
   )
 })
