@@ -846,6 +846,44 @@
       transform var(--conversation-title-duration, 3000ms) linear var(--duration-base);
   }
 
+  /* The composer focus state stays attached to the working surface: a fine
+     accent outline and a shallow reflected shadow, without a detached light
+     bar beneath the input. */
+  .chat-composer-shell {
+    box-shadow:
+      inset 0 0 0 1px var(--color-border-subtle),
+      var(--shadow-sm);
+    transition:
+      transform var(--duration-base) var(--ease-out),
+      box-shadow var(--duration-base) var(--ease-out);
+  }
+
+  .chat-composer-shell:focus-within {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in oklch, var(--color-accent) 42%, var(--color-border-strong)),
+      0 0 0 1px color-mix(in oklch, var(--color-accent) 7%, transparent),
+      0 6px 14px -7px color-mix(in oklch, var(--color-accent) 24%, transparent),
+      var(--shadow-sm);
+    transform: translateY(-1px);
+  }
+
+  .chat-composer-shell[data-drag-over='true'] {
+    box-shadow:
+      inset 0 0 0 2px var(--color-tool-selection),
+      0 5px 12px -5px color-mix(in oklch, var(--color-tool-selection) 28%, transparent),
+      var(--shadow-md);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .chat-composer-shell {
+      transition: none;
+    }
+
+    .chat-composer-shell:focus-within {
+      transform: none;
+    }
+  }
+
   /* Variable-font optical sizing — display serif opens up at large sizes. */
   .font-optical {
     font-optical-sizing: auto;
