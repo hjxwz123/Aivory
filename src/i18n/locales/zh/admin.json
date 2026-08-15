@@ -575,6 +575,7 @@
     "fallbackTag": "兜底",
     "fallbackTitle": "由该模型的兜底渠道提供",
     "ttftFallbackTag": "超时兜底 → {{model}}",
+    "ttftFallbackShort": "超时兜底",
     "ttftFallbackTitle": "主模型超时未输出，本轮切换到兜底模型 {{model}} 处理",
     "errorDetail": {
       "title": "上游报错",
@@ -887,9 +888,11 @@
       "storageLocalNote": "本机模式下，头像等应用对象由 API 直接写入 AIVORY_LOCAL_STORAGE_DIR（默认 UPLOAD_DIR/object-storage）；沙盒工作区仍归档到 SANDBOX_LOCAL_STORAGE_DIR。仅适用于单节点；MinerU 文档解析仍需对象存储。",
       "sandboxIdleTtl": "闲置回收（秒）",
       "sandboxIdleTtlHint": "沙盒闲置这么多秒后回收（回收前先归档其工作区）。留空 = 1800（30 分钟）。范围 60–86400。",
-      "logFullRequests": "记录完整请求体",
-      "logFullRequestsLead": "在每条用量记录上保存完整（已脱敏）的上游请求体，便于调试。失败请求无论此项是否开启都始终记录。",
-      "logErrorsOnlyHint": "开启：维持只记录失败请求。关闭：记录全部请求的完整请求体——数据库更大，且更多敏感提示词落盘。"
+      "logFullRequests": "请求记录范围",
+      "logFullRequestsLead": "配置哪些上游请求保留诊断信息，以及是否保存已脱敏的完整请求体。",
+      "logErrorsOnlyHint": "记录全部请求会增加数据库体积；请求体仍受下方独立开关控制。",
+      "logRequestBodies": "保存完整请求体",
+      "logRequestBodiesHint": "关闭后仍记录请求方法、地址、已脱敏请求头和错误详情，但不会保存提示词、参数或附件内容。"
     }
   },
   "groups": {

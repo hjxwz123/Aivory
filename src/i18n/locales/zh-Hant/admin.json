@@ -571,6 +571,7 @@
     "fallbackTag": "備援",
     "fallbackTitle": "由該模型的備援渠道處理",
     "ttftFallbackTag": "逾時備援 → {{model}}",
+    "ttftFallbackShort": "逾時備援",
     "ttftFallbackTitle": "主模型逾時未輸出，本輪切換到備援模型 {{model}} 處理",
     "errorDetail": {
       "title": "上游報錯",
@@ -883,9 +884,11 @@
       "storageLocalNote": "本機模式下，頭像等應用物件由 API 直接寫入 AIVORY_LOCAL_STORAGE_DIR（預設 UPLOAD_DIR/object-storage）；沙箱工作區仍歸檔到 SANDBOX_LOCAL_STORAGE_DIR。僅適用於單節點；MinerU 文件解析仍需物件儲存。",
       "sandboxIdleTtl": "閒置回收（秒）",
       "sandboxIdleTtlHint": "沙箱閒置這麼多秒後回收（回收前先歸檔其工作區）。留空 = 1800（30 分鐘）。範圍 60–86400。",
-      "logFullRequests": "記錄完整請求體",
-      "logFullRequestsLead": "在每條用量記錄上保存完整（已脫敏）的上游請求體，便於除錯。失敗請求無論此項是否開啟都始終記錄。",
-      "logErrorsOnlyHint": "開啟：維持只記錄失敗請求。關閉：記錄全部請求的完整請求體——資料庫更大，且更多敏感提示詞落盤。"
+      "logFullRequests": "請求記錄範圍",
+      "logFullRequestsLead": "設定哪些上游請求保留診斷資訊，以及是否儲存已脫敏的完整請求體。",
+      "logErrorsOnlyHint": "記錄全部請求會增加資料庫用量；請求體仍由下方獨立開關控制。",
+      "logRequestBodies": "儲存完整請求體",
+      "logRequestBodiesHint": "關閉後仍記錄請求方法、網址、已脫敏請求標頭和錯誤詳情，但不會儲存提示詞、參數或附件內容。"
     }
   },
   "groups": {

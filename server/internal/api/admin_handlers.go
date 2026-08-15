@@ -1472,10 +1472,10 @@ var settingsKeys = []string{
 	"rag_rerank_enabled", "rag_rerank_api_url", "rag_rerank_api_key", "rag_rerank_model",
 	// §credits pre-flight token/affordability check.
 	"credit_preflight_enabled",
-	// §B5 request logging: log_full_requests turns on persisting the full
-	// (sanitized) provider request body on usage rows; log_errors_only (default
-	// true) restricts that to failed requests. Off = errors-only (the floor).
-	"log_full_requests", "log_errors_only",
+	// §B5 request logging: log_full_requests + log_errors_only select which
+	// requests expose diagnostics. log_request_bodies is an independent privacy
+	// boundary: false keeps method/URL/headers/error while omitting every body.
+	"log_full_requests", "log_errors_only", "log_request_bodies",
 }
 
 // sensitiveKeywords lists substrings that identify secret settings fields.
@@ -1682,6 +1682,12 @@ func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.R
 				}
 				v = normalized
 			case "compaction_enabled":
+				var enabled bool
+				if json.Unmarshal(v, &enabled) != nil {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(enabled)
+			case "log_full_requests", "log_errors_only", "log_request_bodies":
 				var enabled bool
 				if json.Unmarshal(v, &enabled) != nil {
 					return 0, errInvalidInput

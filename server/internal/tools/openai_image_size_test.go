@@ -64,10 +64,10 @@ func TestClosestGPTImage2SizePreservesLegalAspect(t *testing.T) {
 		want          string
 		wantRatio     float64
 	}{
-		{name: "landscape 16:9", width: 1920, height: 1080, want: "1280x720", wantRatio: 16.0 / 9.0},
-		{name: "portrait 9:16", width: 1080, height: 1920, want: "720x1280", wantRatio: 9.0 / 16.0},
-		{name: "standard 4:3", width: 1600, height: 1200, want: "1152x864", wantRatio: 4.0 / 3.0},
-		{name: "extreme ratio clamps to 3:1", width: 5000, height: 1000, want: "1776x592", wantRatio: 3},
+		{name: "landscape 16:9", width: 1920, height: 1080, want: "2048x1152", wantRatio: 16.0 / 9.0},
+		{name: "portrait 9:16", width: 1080, height: 1920, want: "1152x2048", wantRatio: 9.0 / 16.0},
+		{name: "standard 4:3", width: 1600, height: 1200, want: "1600x1200", wantRatio: 4.0 / 3.0},
+		{name: "extreme ratio clamps to 3:1", width: 5000, height: 1000, want: "3504x1168", wantRatio: 3},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -98,7 +98,7 @@ func TestClosestGPTImage2SizePreservesLegalAspect(t *testing.T) {
 
 func TestInferredOpenAIEditSizeUsesKnownModelsAndFallsBack(t *testing.T) {
 	landscape := imageBytes{data: sizedPNG(t, 1600, 900), mime: "image/png"}
-	if got := inferredOpenAIEditSize("gpt-image-2-2026-04-21", landscape); got != "1280x720" {
+	if got := inferredOpenAIEditSize("gpt-image-2-2026-04-21", landscape); got != "1536x864" {
 		t.Fatalf("GPT Image 2 snapshot size = %q", got)
 	}
 	if got := inferredOpenAIEditSize("gpt-image-1.5", landscape); got != "1536x1024" {
@@ -141,14 +141,57 @@ func TestOpenAIImageGenerationOmitsUnconfiguredSize(t *testing.T) {
 	}
 }
 
+func TestOpenAIImageGenerationUsesHighQualityForKnownModels(t *testing.T) {
+	tests := []struct {
+		name      string
+		model     string
+		params    map[string]any
+		want      string
+		wantField bool
+	}{
+		{name: "gpt image 2", model: "gpt-image-2", want: "high", wantField: true},
+		{name: "gpt image snapshot", model: "gpt-image-1.5-2026-04-21", want: "high", wantField: true},
+		{name: "dall-e 3", model: "dall-e-3", want: "hd", wantField: true},
+		{name: "admin override", model: "gpt-image-2", params: map[string]any{"quality": "low"}, want: "low", wantField: true},
+		{name: "unknown compatible model", model: "provider-image-alias", wantField: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var captured map[string]any
+			useImageTestHTTPClient(t, func(req *http.Request) (*http.Response, error) {
+				if err := json.NewDecoder(req.Body).Decode(&captured); err != nil {
+					t.Fatalf("decode request: %v", err)
+				}
+				return imageSuccessResponse(`{"data":[{"b64_json":"aW1hZ2U="}]}`), nil
+			})
+
+			if _, err := openaiGenerateImages(
+				context.Background(),
+				"https://images.example.test",
+				"server-secret",
+				tt.model,
+				imgInput{Prompt: "server prompt", N: 1},
+				nil,
+				tt.params,
+			); err != nil {
+				t.Fatalf("openaiGenerateImages: %v", err)
+			}
+			got, exists := captured["quality"]
+			if exists != tt.wantField || (tt.wantField && got != tt.want) {
+				t.Fatalf("quality = %#v (exists=%v), want %q (exists=%v)", got, exists, tt.want, tt.wantField)
+			}
+		})
+	}
+}
+
 func TestOpenAIImageEditInfersSourceRatio(t *testing.T) {
 	inputData := sizedPNG(t, 1920, 1080)
 	useImageTestHTTPClient(t, func(req *http.Request) (*http.Response, error) {
 		if err := req.ParseMultipartForm(4 << 20); err != nil {
 			t.Fatalf("parse multipart: %v", err)
 		}
-		if got := req.FormValue("size"); got != "1280x720" {
-			t.Fatalf("inferred multipart size = %q, want 1280x720", got)
+		if got := req.FormValue("size"); got != "2048x1152" {
+			t.Fatalf("inferred multipart size = %q, want 2048x1152", got)
 		}
 		files := req.MultipartForm.File["image"]
 		if len(files) != 1 {

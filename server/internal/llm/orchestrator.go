@@ -1305,6 +1305,9 @@ type RunRequest struct {
 	// turn (conversation model kind=image). Its hidden prompt is composed
 	// server-side into the final image prompt; ignored for chat models.
 	ImageStyleID string
+	// OptimizeImagePrompt controls the task-model rewrite for direct image-model
+	// turns. Nil preserves the historical default (enabled).
+	OptimizeImagePrompt *bool
 	// Locale is the user's UI language code (e.g. "en", "zh", "zh-Hant", "ja").
 	// It anchors the reply-language instruction so an English question gets an
 	// English answer even from a language-biased model (§ reply language).
@@ -1890,6 +1893,13 @@ func settingBool(db *sql.DB, key string, def bool) bool {
 // always carry their snapshot regardless (unchanged floor behavior).
 func (o *Orchestrator) successRequestLoggingEnabled() bool {
 	return settingBool(o.db, "log_full_requests", false) && !settingBool(o.db, "log_errors_only", true)
+}
+
+// requestBodyLoggingEnabled is independent from the request-scope selector.
+// Turning it off keeps method/URL/headers/error diagnostics while preventing
+// prompt and payload bodies from being retained on either success or error rows.
+func (o *Orchestrator) requestBodyLoggingEnabled() bool {
+	return settingBool(o.db, "log_request_bodies", true)
 }
 
 // requestUsageRow is one per-upstream-request slice of a finished turn's usage
@@ -3356,10 +3366,11 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	}
 
 	reqRecorder := newProviderRequestRecorder(channel.Type)
-	// §B5-per-request rows: keep sanitized header/body on EVERY captured request
-	// only when the admin opted into full success-request logging; `last` always
-	// keeps the full snapshot for the error row either way.
+	// §B5-per-request rows: retain diagnostics on successful requests only when
+	// the admin selected all-request logging. Request bodies have a separate
+	// privacy boundary that also applies to failures.
 	reqRecorder.captureAll = o.successRequestLoggingEnabled()
+	reqRecorder.captureBody = o.requestBodyLoggingEnabled()
 	providerCtx := contextWithProviderRequestRecorder(ctx, reqRecorder)
 	providerCtx = contextWithProviderVisibleOutput(providerCtx, visibleOutput)
 	providerCtx = contextWithProviderTextDeltaVisibility(providerCtx, model.Stream)
@@ -4018,7 +4029,10 @@ func (o *Orchestrator) runImageTurn(
 		}
 		emitEvent(event)
 	}
-	onEvent(SseEvent{Type: "image_status", MessageID: assistantMsg.ID, Status: "optimizing"})
+	optimizePrompt := req.OptimizeImagePrompt == nil || *req.OptimizeImagePrompt
+	if optimizePrompt {
+		onEvent(SseEvent{Type: "image_status", MessageID: assistantMsg.ID, Status: "optimizing"})
+	}
 
 	// Style: the composer sends image_style_id on a fresh turn. Regenerate doesn't
 	// resend it, so fall back to the last style remembered on the conversation
@@ -4035,9 +4049,13 @@ func (o *Orchestrator) runImageTurn(
 			_ = store.SetConvProviderStateKeyForUser(ctx, o.db, conv.ID, assistantMsg.ID, req.UserID, "image_style", styleID)
 		}
 	}
-	finalPrompt, optimizeErr := o.optimizeImagePrompt(ctx, req.UserID, conv.ID, assistantMsg.ID, req.UserText, styleHidden)
-	if optimizeErr != nil {
-		return nil, optimizeErr
+	finalPrompt := composeImagePrompt(req.UserText, styleHidden)
+	if optimizePrompt {
+		var optimizeErr error
+		finalPrompt, optimizeErr = o.optimizeImagePrompt(ctx, req.UserID, conv.ID, assistantMsg.ID, req.UserText, styleHidden)
+		if optimizeErr != nil {
+			return nil, optimizeErr
+		}
 	}
 
 	// Reference images: the user's image attachments become input images (edit /
@@ -4247,7 +4265,7 @@ func (o *Orchestrator) runImageTurn(
 // deterministic join so generation always proceeds. The hidden prompt is
 // composed here and NEVER returned to the client.
 func (o *Orchestrator) optimizeImagePrompt(ctx context.Context, userID, convID, msgID, userText, styleHidden string) (string, error) {
-	join := strings.TrimSpace(strings.TrimSpace(userText) + "\n" + styleHidden)
+	join := composeImagePrompt(userText, styleHidden)
 	modelID := settingStr(o.db, "image_prompt_model_id")
 	if modelID == "" || o.task == nil {
 		return join, nil
@@ -4274,6 +4292,10 @@ func (o *Orchestrator) optimizeImagePrompt(ctx context.Context, userID, convID, 
 		return join, nil
 	}
 	return strings.TrimSpace(out), nil
+}
+
+func composeImagePrompt(userText, styleHidden string) string {
+	return strings.TrimSpace(strings.TrimSpace(userText) + "\n" + strings.TrimSpace(styleHidden))
 }
 
 // storeToUnified converts stored messages to the unified history shape.

@@ -134,6 +134,10 @@ type postMessageReq struct {
 	ParamOverrides map[string]any   `json:"params"`
 	// ImageStyleID selects an admin image style for an image-mode turn (§4.20).
 	ImageStyleID string `json:"image_style_id"`
+	// OptimizeImagePrompt defaults to true when omitted for compatibility with
+	// older clients. False skips the task-model rewrite and sends the user's text
+	// directly, while still applying an explicitly selected style directive.
+	OptimizeImagePrompt *bool `json:"optimize_image_prompt"`
 	// Locale is the user's current UI language (i18next code, e.g. "en", "zh");
 	// drives the reply-language instruction (§ reply language).
 	Locale string `json:"locale"`
@@ -1209,6 +1213,7 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		Fast:                             req.Fast,
 		ParamOverrides:                   req.ParamOverrides,
 		ImageStyleID:                     req.ImageStyleID,
+		OptimizeImagePrompt:              req.OptimizeImagePrompt,
 		Locale:                           req.Locale,
 		KnowledgeBaseIDs:                 turnKBIDs,
 		KnowledgeBaseSelectionConfigured: turnKBSelectionConfigured,
@@ -1379,19 +1384,20 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	id := pathParam(r, "id")
 	var body struct {
-		AssistantID     string          `json:"assistant_id"`
-		GenerationID    string          `json:"generation_id"`
-		ModelID         string          `json:"model_id"`
-		Mode            string          `json:"mode"`
-		Verify          bool            `json:"verify"`
-		ToolMode        json.RawMessage `json:"tool_mode"`
-		NoTools         bool            `json:"no_tools"`
-		WebSearch       bool            `json:"web_search"`
-		SelectedToolIDs json.RawMessage `json:"selected_tool_ids"`
-		KBIDs           json.RawMessage `json:"kb_ids"`
-		Fast            bool            `json:"fast"` // §fast-mode: honour the CURRENT picker (regenerate follows the live toggle)
-		ParamOverrides  map[string]any  `json:"params"`
-		Locale          string          `json:"locale"`
+		AssistantID         string          `json:"assistant_id"`
+		GenerationID        string          `json:"generation_id"`
+		ModelID             string          `json:"model_id"`
+		Mode                string          `json:"mode"`
+		Verify              bool            `json:"verify"`
+		ToolMode            json.RawMessage `json:"tool_mode"`
+		NoTools             bool            `json:"no_tools"`
+		WebSearch           bool            `json:"web_search"`
+		SelectedToolIDs     json.RawMessage `json:"selected_tool_ids"`
+		KBIDs               json.RawMessage `json:"kb_ids"`
+		Fast                bool            `json:"fast"` // §fast-mode: honour the CURRENT picker (regenerate follows the live toggle)
+		ParamOverrides      map[string]any  `json:"params"`
+		OptimizeImagePrompt *bool           `json:"optimize_image_prompt"`
+		Locale              string          `json:"locale"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, 400, errInvalidInput)
@@ -1642,6 +1648,7 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		ForceWebSearch:                   body.WebSearch,
 		Fast:                             body.Fast,
 		ParamOverrides:                   body.ParamOverrides,
+		OptimizeImagePrompt:              body.OptimizeImagePrompt,
 		Locale:                           body.Locale,
 		KnowledgeBaseIDs:                 turnKBIDs,
 		KnowledgeBaseSelectionConfigured: turnKBSelectionConfigured,

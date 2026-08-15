@@ -475,6 +475,7 @@ export default function ChatHome() {
       mode?: 'default' | 'deep-research' | 'canvas'
       params?: Record<string, unknown>
       imageStyleId?: string
+      optimizeImagePrompt?: boolean
       verify?: boolean
       toolMode: ToolMode
       webSearch?: boolean
@@ -522,6 +523,7 @@ export default function ChatHome() {
         mode: opts.mode,
         params: opts.params,
         imageStyleId: opts.imageStyleId,
+        optimizeImagePrompt: opts.optimizeImagePrompt,
         verify: opts.verify,
         toolMode: opts.toolMode,
         webSearch: opts.webSearch,

@@ -571,6 +571,7 @@
     "fallbackTag": "Secours",
     "fallbackTitle": "Servi par le canal de secours du modèle",
     "ttftFallbackTag": "Secours (délai) → {{model}}",
+    "ttftFallbackShort": "Secours délai",
     "ttftFallbackTitle": "Le modèle principal n’a rien produit à temps ; ce tour a été servi par le modèle de secours {{model}}",
     "errorDetail": {
       "title": "Erreur amont",
@@ -883,9 +884,11 @@
       "storageLocalNote": "En mode local, les objets applicatifs comme les avatars sont écrits directement par l’API dans AIVORY_LOCAL_STORAGE_DIR (par défaut : UPLOAD_DIR/object-storage) ; les espaces de travail sandbox utilisent toujours SANDBOX_LOCAL_STORAGE_DIR. Nœud unique uniquement ; l’analyse MinerU nécessite toujours un stockage objet.",
       "sandboxIdleTtl": "Recyclage inactif (secondes)",
       "sandboxIdleTtlHint": "Recycle un sandbox après ce nombre de secondes d'inactivité (son espace de travail est archivé d'abord). Vide = 1800 (30 min). Plage 60–86400.",
-      "logFullRequests": "Journaliser le corps complet des requêtes",
-      "logFullRequestsLead": "Enregistre le corps complet (assaini) de la requête en amont sur chaque enregistrement d'usage pour le débogage. Les requêtes en échec sont toujours enregistrées, indépendamment de ce réglage.",
-      "logErrorsOnlyHint": "Activé : ne conserver que les requêtes en échec. Désactivé : enregistrer le corps complet de chaque requête — base de données plus volumineuse et davantage de données de prompt sensibles stockées."
+      "logFullRequests": "Portée de journalisation des requêtes",
+      "logFullRequestsLead": "Choisissez les requêtes amont qui conservent leurs diagnostics et si les corps complets assainis sont stockés.",
+      "logErrorsOnlyHint": "Journaliser toutes les requêtes augmente l'utilisation de la base ; les corps restent contrôlés par l'interrupteur séparé ci-dessous.",
+      "logRequestBodies": "Stocker les corps complets des requêtes",
+      "logRequestBodiesHint": "Lorsque cette option est désactivée, les méthodes, URL, en-têtes assainis et erreurs restent disponibles, mais les prompts, paramètres et contenus de pièces jointes ne sont pas stockés."
     }
   },
   "groups": {

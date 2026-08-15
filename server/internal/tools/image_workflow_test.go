@@ -174,6 +174,101 @@ func TestImageGenerateToolInheritsSavedModelParamsAndDefaultCount(t *testing.T) 
 	}
 }
 
+func TestImageGenerationFallsBackOnceAndLogsBothChannelAttempts(t *testing.T) {
+	tool, convID := seedImageWorkflow(t, "openai", "gpt-image-1.5")
+	for _, query := range []string{
+		`INSERT INTO channels(id,name,type,api_format,base_url,api_key,enabled) VALUES('ch_flow_fallback','Image Fallback','openai','','https://fallback.images.test','fallback-secret',1)`,
+		`UPDATE channels SET base_url='https://primary.images.test', api_format='' WHERE id='ch_flow'`,
+		`UPDATE models SET fallback_channel_id='ch_flow_fallback', price_per_image=0.25 WHERE id='m_flow'`,
+		`INSERT INTO messages(id,conversation_id,role,model_id,author_id,status) VALUES('a_fallback','c_flow','assistant','m_flow','u_flow','streaming')`,
+	} {
+		if _, err := tool.db.Exec(query); err != nil {
+			t.Fatalf("seed %q: %v", query, err)
+		}
+	}
+	if err := store.SetSetting(tool.db, "log_full_requests", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetSetting(tool.db, "log_errors_only", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetSetting(tool.db, "log_request_bodies", false); err != nil {
+		t.Fatal(err)
+	}
+
+	imageData := sizedPNG(t, 24, 24)
+	primaryCalls, fallbackCalls := 0, 0
+	useImageTestHTTPClient(t, func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Host {
+		case "primary.images.test":
+			primaryCalls++
+			if got := req.Header.Get("authorization"); got != "Bearer server-secret" {
+				t.Fatalf("primary authorization = %q", got)
+			}
+			return &http.Response{
+				StatusCode: http.StatusServiceUnavailable,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"error":"primary unavailable"}`)),
+			}, nil
+		case "fallback.images.test":
+			fallbackCalls++
+			if got := req.Header.Get("authorization"); got != "Bearer fallback-secret" {
+				t.Fatalf("fallback authorization = %q", got)
+			}
+			return imageSuccessResponse(`{"data":[{"b64_json":"` + base64.StdEncoding.EncodeToString(imageData) + `"}]}`), nil
+		default:
+			t.Fatalf("unexpected image host %q", req.URL.Host)
+			return nil, nil
+		}
+	})
+
+	if _, _, err := tool.Execute(context.Background(), []byte(`{"prompt":"draw a lighthouse"}`), &llm.ToolContext{
+		UserID: "u_flow", ConvID: convID, MessageID: "a_fallback", ImageModelID: "m_flow", DB: tool.db,
+	}); err != nil {
+		t.Fatalf("fallback image generation: %v", err)
+	}
+	if primaryCalls != 1 || fallbackCalls != 1 {
+		t.Fatalf("attempts primary/fallback = %d/%d, want 1/1", primaryCalls, fallbackCalls)
+	}
+
+	rows, err := tool.db.Query(`
+		SELECT status, channel_id, fallback, error, request_method, request_url, request_body, images_count, cost
+		FROM usage_logs WHERE message_id='a_fallback' AND purpose='image' ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	type usageRow struct {
+		status, channelID, errorText, method, requestURL, requestBody string
+		fallback, images                                              int
+		cost                                                          float64
+	}
+	var got []usageRow
+	for rows.Next() {
+		var row usageRow
+		if err := rows.Scan(&row.status, &row.channelID, &row.fallback, &row.errorText, &row.method, &row.requestURL, &row.requestBody, &row.images, &row.cost); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, row)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("usage rows = %+v, want primary error + fallback success", got)
+	}
+	if got[0].status != "error" || got[0].channelID != "ch_flow" || got[0].fallback != 0 ||
+		!strings.Contains(got[0].errorText, "503") || got[0].method != "POST" ||
+		!strings.Contains(got[0].requestURL, "primary.images.test") || got[0].requestBody != "" || got[0].images != 0 || got[0].cost != 0 {
+		t.Fatalf("primary failure row = %+v", got[0])
+	}
+	if got[1].status != "ok" || got[1].channelID != "ch_flow_fallback" || got[1].fallback != 1 ||
+		got[1].errorText != "" || got[1].method != "POST" || !strings.Contains(got[1].requestURL, "fallback.images.test") ||
+		got[1].requestBody != "" || got[1].images != 1 || got[1].cost != 0.25 {
+		t.Fatalf("fallback success row = %+v", got[1])
+	}
+}
+
 func TestGeminiReferenceLimitsAreModelSpecificAndRejectOverflow(t *testing.T) {
 	previousCap := imageImageInputImageCap
 	imageImageInputImageCap = 0

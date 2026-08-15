@@ -844,13 +844,14 @@ function ImageList({
           <li key={item.id} className="min-w-0 bg-[var(--color-surface)]">
             <button
               type="button"
+              aria-haspopup="dialog"
               onClick={() => onOpen(item)}
               className="group block h-full w-full p-3 text-left interactive hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)]"
             >
               <span className="block aspect-[4/3] overflow-hidden rounded-[8px] bg-[var(--color-surface-sunken)]">
                 <ResourceImage src={item.url} alt={item.filename} className="group-hover:scale-[1.02]" />
               </span>
-              <span className="mt-3 block line-clamp-2 min-h-10 text-sm leading-5 text-[var(--color-fg)]">
+              <span className="mt-3 line-clamp-2 h-10 overflow-hidden text-sm leading-5 text-[var(--color-fg)]">
                 {item.prompt || t('admin:resources.details.promptMissing')}
               </span>
               <span className="mt-2 flex min-w-0 items-center justify-between gap-3 text-[11px] text-[var(--color-fg-subtle)]">

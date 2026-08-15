@@ -814,6 +814,7 @@ type imageGenerateTool struct {
 	db          *sql.DB
 	uploadDir   string
 	artifactDir string
+	logger      *log.Logger
 }
 
 func (t *imageGenerateTool) Name() string { return "image_generate" }
@@ -902,6 +903,7 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	if channel.APIKey == "" {
 		return "No API key on the image channel — ask an admin to configure it.", nil, nil
 	}
+	fallbackChannel := t.resolveImageFallbackChannel(ctx, model, channel)
 
 	// §4.20 per-model image quota — shared across drawing mode and chat tool-call
 	// (both log purpose='image' against this model id), enforced here so neither
@@ -965,7 +967,6 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	if tooManyInputs {
 		return "", nil, fmt.Errorf("the selected image model accepts at most %d reference image(s)", inputLimit)
 	}
-	isGemini := channel.Type == "google" || channel.Type == "gemini"
 	if len(inputImageIDs) == 0 && len(inputImgs) == 0 {
 		if previous := t.loadNearestBranchImage(ctx, tc); previous != nil {
 			inputImgs = []imageBytes{*previous}
@@ -995,14 +996,46 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		defer cancel()
 	}
 
-	var images []imageBytes
-	switch {
-	case isGemini:
-		images, err = geminiGenerateImages(genCtx, channel.BaseURL, channel.APIKey, model.RequestID, providerInput, inputImgs, imageRequestParams)
-	case channel.Type == "openai":
-		images, err = openaiGenerateImages(genCtx, channel.BaseURL, channel.APIKey, model.RequestID, providerInput, inputImgs, imageRequestParams)
-	default:
-		return "", nil, fmt.Errorf("image generation not supported for channel type %q", channel.Type)
+	includeRequestBody := imageRequestBodyLoggingEnabled(t.db)
+	captureSuccessRequest := imageSuccessRequestLoggingEnabled(t.db)
+	runAttempt := func(attemptChannel *store.Channel) ([]imageBytes, llm.ProviderRequestDiagnostics, error) {
+		var diagnostics llm.ProviderRequestDiagnostics
+		capture := func(request *http.Request) {
+			diagnostics = llm.CaptureProviderRequestDiagnostics(request, includeRequestBody)
+		}
+		var generated []imageBytes
+		var attemptErr error
+		switch imageChannelFamily(attemptChannel.Type) {
+		case "gemini":
+			generated, attemptErr = geminiGenerateImages(genCtx, attemptChannel.BaseURL, attemptChannel.APIKey, model.RequestID, providerInput, inputImgs, imageRequestParams, capture)
+		case "openai":
+			generated, attemptErr = openaiGenerateImages(genCtx, attemptChannel.BaseURL, attemptChannel.APIKey, model.RequestID, providerInput, inputImgs, imageRequestParams, capture)
+		default:
+			attemptErr = fmt.Errorf("image generation not supported for channel type %q", attemptChannel.Type)
+		}
+		if attemptErr == nil && len(generated) == 0 {
+			if genCtx.Err() != nil {
+				attemptErr = genCtx.Err()
+			} else {
+				attemptErr = errors.New("the image model returned no images")
+			}
+		}
+		return generated, diagnostics, attemptErr
+	}
+
+	images, requestDiagnostics, err := runAttempt(channel)
+	servedChannel := channel
+	usedFallback := false
+	if err != nil {
+		t.logImageProviderFailure(ctx, tc, model, channel.ID, false, requestDiagnostics, err)
+		if fallbackChannel != nil && imageFallbackAllowed(ctx, genCtx, err) {
+			servedChannel = fallbackChannel
+			usedFallback = true
+			images, requestDiagnostics, err = runAttempt(fallbackChannel)
+			if err != nil {
+				t.logImageProviderFailure(ctx, tc, model, fallbackChannel.ID, true, requestDiagnostics, err)
+			}
+		}
 	}
 	if err != nil {
 		return "", nil, err
@@ -1012,15 +1045,6 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	// more artifacts than requested, or debit more credits than were approved.
 	if len(images) > in.N {
 		images = images[:in.N]
-	}
-	if len(images) == 0 {
-		// A per-model timeout (genCtx) can fire DURING a url-fetch of the result;
-		// fetchRemoteImage swallows that error, so surface the deadline here rather
-		// than reporting a misleading "no images" success.
-		if genCtx.Err() != nil {
-			return "", nil, genCtx.Err()
-		}
-		return "", nil, errors.New("the image model returned no images")
 	}
 
 	// The bytes are in hand → persist the artifacts + meter on a DETACHED context
@@ -1055,7 +1079,16 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	// cost in credits (same flow as drawing mode) via ImageBilling, and record the
 	// full charge so the turn is not misclassified as free quota usage.
 	var imageCredits float64
-	usage := store.UsageLog{ModelID: model.ID, Purpose: "image", ImagesCount: len(images), Cost: imageCost, Currency: model.Currency}
+	usage := store.UsageLog{
+		ModelID: model.ID, Purpose: "image", ImagesCount: len(images), Cost: imageCost, Currency: model.Currency,
+		ChannelID: servedChannel.ID, Fallback: usedFallback,
+	}
+	if captureSuccessRequest {
+		usage.RequestMethod = requestDiagnostics.Method
+		usage.RequestURL = requestDiagnostics.URL
+		usage.RequestHeaders = requestDiagnostics.Headers
+		usage.RequestBody = requestDiagnostics.Body
+	}
 	if tc != nil {
 		usage.UserID = tc.UserID
 		usage.WorkspaceID = tc.WorkspaceID
@@ -1126,6 +1159,105 @@ func (t *imageGenerateTool) resolveImageModel(ctx context.Context, tc *llm.ToolC
 type imageBytes struct {
 	data []byte
 	mime string
+}
+
+func imageChannelFamily(channelType string) string {
+	switch strings.ToLower(strings.TrimSpace(channelType)) {
+	case "openai":
+		return "openai"
+	case "google", "gemini":
+		return "gemini"
+	default:
+		return ""
+	}
+}
+
+func (t *imageGenerateTool) resolveImageFallbackChannel(ctx context.Context, model *store.Model, primary *store.Channel) *store.Channel {
+	fallbackID := strings.TrimSpace(model.FallbackChannelID)
+	if fallbackID == "" || fallbackID == primary.ID {
+		return nil
+	}
+	fallback, err := store.GetChannel(ctx, t.db, fallbackID)
+	if err != nil {
+		if t.logger != nil {
+			t.logger.Printf("image: model %q fallback channel %q not found — ignoring", model.ID, fallbackID)
+		}
+		return nil
+	}
+	sameFamily := imageChannelFamily(primary.Type) != "" && imageChannelFamily(primary.Type) == imageChannelFamily(fallback.Type)
+	sameFormat := strings.EqualFold(strings.TrimSpace(primary.APIFormat), strings.TrimSpace(fallback.APIFormat))
+	if !fallback.Enabled || !sameFamily || !sameFormat || strings.TrimSpace(fallback.APIKey) == "" {
+		if t.logger != nil {
+			t.logger.Printf("image: model %q fallback channel %q unusable (enabled=%v type=%q/%q format=%q/%q hasKey=%v) — ignoring",
+				model.ID, fallback.ID, fallback.Enabled, fallback.Type, primary.Type, fallback.APIFormat, primary.APIFormat, fallback.APIKey != "")
+		}
+		return nil
+	}
+	return fallback
+}
+
+func imageFallbackAllowed(parentCtx, attemptCtx context.Context, err error) bool {
+	if err == nil || parentCtx.Err() != nil || attemptCtx.Err() != nil {
+		return false
+	}
+	return !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
+}
+
+func imageRequestBodyLoggingEnabled(db *sql.DB) bool {
+	return imageLoggingSettingBool(db, "log_request_bodies", true)
+}
+
+func imageSuccessRequestLoggingEnabled(db *sql.DB) bool {
+	return imageLoggingSettingBool(db, "log_full_requests", false) && !imageLoggingSettingBool(db, "log_errors_only", true)
+}
+
+func imageLoggingSettingBool(db *sql.DB, key string, fallback bool) bool {
+	raw, err := store.GetSetting(db, key)
+	if err != nil || len(raw) == 0 {
+		return fallback
+	}
+	var value bool
+	if json.Unmarshal(raw, &value) != nil {
+		return fallback
+	}
+	return value
+}
+
+func (t *imageGenerateTool) logImageProviderFailure(
+	ctx context.Context,
+	tc *llm.ToolContext,
+	model *store.Model,
+	channelID string,
+	fallback bool,
+	diagnostics llm.ProviderRequestDiagnostics,
+	providerErr error,
+) {
+	if tc == nil || tc.DB == nil || strings.TrimSpace(tc.UserID) == "" || providerErr == nil || ctx.Err() != nil {
+		return
+	}
+	logCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancel()
+	row := store.UsageLog{
+		UserID: tc.UserID, WorkspaceID: tc.WorkspaceID,
+		ConversationID: tc.ConvID, MessageID: tc.MessageID,
+		ModelID: model.ID, Purpose: "image", Currency: model.Currency,
+		ChannelID: channelID, Fallback: fallback, Status: "error",
+		Error:         truncateImageProviderError(providerErr.Error()),
+		RequestMethod: diagnostics.Method, RequestURL: diagnostics.URL,
+		RequestHeaders: diagnostics.Headers, RequestBody: diagnostics.Body,
+	}
+	if err := store.LogUsageAnalytics(logCtx, t.db, row); err != nil && t.logger != nil {
+		t.logger.Printf("image: usage error log write failed (msg=%s channel=%s): %v", tc.MessageID, channelID, err)
+	}
+}
+
+func truncateImageProviderError(message string) string {
+	const maxRunes = 2000
+	runes := []rune(message)
+	if len(runes) <= maxRunes {
+		return message
+	}
+	return string(runes[:maxRunes]) + "…"
 }
 
 // moderateImagePrompt screens an image prompt against the admin-managed keyword
@@ -1391,7 +1523,7 @@ func readVerifiedImageInput(path string, storedSize int64, roots ...string) ([]b
 // extracts inlineData parts (§4.12-C). Explicit or branch-resolved input images
 // ride along as inline_data parts so the
 // model edits rather than starts fresh (§4.12-D).
-func geminiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string, in imgInput, inputImgs []imageBytes, requestParams map[string]any) ([]imageBytes, error) {
+func geminiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string, in imgInput, inputImgs []imageBytes, requestParams map[string]any, requestObservers ...func(*http.Request)) ([]imageBytes, error) {
 	base := strings.TrimRight(baseURL, "/")
 	if base == "" {
 		base = "https://generativelanguage.googleapis.com"
@@ -1416,7 +1548,9 @@ func geminiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 			"candidateCount":     llm.ClampImageGenerationCount(in.N),
 		},
 	}
-	body := store.DeepMergeJSONObjects(sanitizeImageRequestParams(requestParams), native)
+	cleanParams := sanitizeImageRequestParams(requestParams)
+	applyDefaultGeminiImageSize(cleanParams, requestID)
+	body := store.DeepMergeJSONObjects(cleanParams, native)
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
@@ -1427,6 +1561,7 @@ func geminiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 		return nil, err
 	}
 	req.Header.Set("content-type", "application/json")
+	notifyImageRequestObservers(req, requestObservers)
 	resp, err := toolHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -1475,7 +1610,7 @@ func geminiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 // openaiGenerateImages calls the Images API (§4.12-C): plain generation via
 // /v1/images/generations, or — when input images are supplied — image editing
 // via the multipart /v1/images/edits endpoint.
-func openaiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string, in imgInput, inputImgs []imageBytes, requestParams map[string]any) ([]imageBytes, error) {
+func openaiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string, in imgInput, inputImgs []imageBytes, requestParams map[string]any, requestObservers ...func(*http.Request)) ([]imageBytes, error) {
 	base := llm.OpenAIBaseURL(baseURL)
 
 	// gpt-image-1 returns b64_json natively and REJECTS the response_format
@@ -1483,6 +1618,11 @@ func openaiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 	// both b64_json and url responses so either model family works.
 	isDalle := strings.Contains(strings.ToLower(requestID), "dall")
 	cleanParams := sanitizeImageRequestParams(requestParams)
+	if _, configured := cleanParams["quality"]; !configured {
+		if quality := defaultOpenAIImageQuality(requestID); quality != "" {
+			cleanParams["quality"] = quality
+		}
+	}
 	if len(inputImgs) > 0 {
 		modelID := strings.ToLower(strings.TrimSpace(requestID))
 		switch {
@@ -1579,6 +1719,7 @@ func openaiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 		req.Header.Set("content-type", "application/json")
 	}
 	req.Header.Set("authorization", "Bearer "+apiKey)
+	notifyImageRequestObservers(req, requestObservers)
 	resp, err := toolHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -1620,6 +1761,14 @@ func openaiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 	return out, nil
 }
 
+func notifyImageRequestObservers(req *http.Request, observers []func(*http.Request)) {
+	for _, observer := range observers {
+		if observer != nil {
+			observer(req)
+		}
+	}
+}
+
 func outputFormatMIME(value any) string {
 	format, _ := value.(string)
 	switch strings.ToLower(strings.TrimSpace(format)) {
@@ -1633,11 +1782,11 @@ func outputFormatMIME(value any) string {
 }
 
 const (
-	gptImage2MinPixels    = 655360
-	gptImage2MaxPixels    = 8294400
-	gptImage2MaxEdge      = 3840
-	gptImage2MaxAspect    = 3.0
-	gptImage2TargetPixels = 1024 * 1024
+	gptImage2MinPixels        = 655360
+	gptImage2MaxPixels        = 8294400
+	gptImage2MaxEdge          = 3840
+	gptImage2MaxAspect        = 3.0
+	gptImage2DefaultMaxPixels = 2048 * 2048
 )
 
 // inferredOpenAIEditSize preserves the first edit image's canvas as closely as
@@ -1702,18 +1851,31 @@ func closestGPTImage1Size(width, height int) string {
 	return best.size
 }
 
-// closestGPTImage2Size searches a conservative ~1 MP band for the legal
-// multiple-of-16 canvas whose ratio is closest to the source. Keeping the area
-// near the former 1024-square budget avoids silently turning a large upload
-// into an expensive experimental-size output while preserving its shape.
+// closestGPTImage2Size preserves the source canvas up to a conservative 2K
+// (~4 MP) default. Explicit admin/user sizes can still request the provider's
+// full legal range, but automatic edits must not shrink every large reference
+// to the old ~1 MP budget before the original bytes are saved unchanged.
 func closestGPTImage2Size(width, height int) string {
 	if width <= 0 || height <= 0 {
 		return ""
 	}
 	targetRatio := float64(width) / float64(height)
 	targetRatio = math.Max(1/gptImage2MaxAspect, math.Min(gptImage2MaxAspect, targetRatio))
-	searchMinPixels := 3 * gptImage2TargetPixels / 4
-	searchMaxPixels := 5 * gptImage2TargetPixels / 4
+	// Start at the automatic cap and only multiply when the product is known to
+	// fit below it. Malformed image headers can carry enormous dimensions; this
+	// avoids an int overflow before the value is clamped.
+	targetPixels := gptImage2DefaultMaxPixels
+	if height > 0 && width <= gptImage2DefaultMaxPixels/height {
+		targetPixels = width * height
+	}
+	if targetPixels < gptImage2MinPixels {
+		targetPixels = gptImage2MinPixels
+	}
+	if targetPixels > gptImage2DefaultMaxPixels {
+		targetPixels = gptImage2DefaultMaxPixels
+	}
+	searchMinPixels := max(gptImage2MinPixels, 3*targetPixels/4)
+	searchMaxPixels := min(gptImage2DefaultMaxPixels, 5*targetPixels/4)
 
 	bestWidth, bestHeight := 0, 0
 	bestRatioError, bestAreaError := math.MaxFloat64, math.MaxFloat64
@@ -1728,7 +1890,7 @@ func closestGPTImage2Size(width, height int) string {
 				continue
 			}
 			ratioError := math.Abs(math.Log(candidateRatio / targetRatio))
-			areaError := math.Abs(math.Log(float64(pixels) / gptImage2TargetPixels))
+			areaError := math.Abs(math.Log(float64(pixels) / float64(targetPixels)))
 			if ratioError < bestRatioError-1e-12 || (math.Abs(ratioError-bestRatioError) <= 1e-12 && areaError < bestAreaError) {
 				bestWidth, bestHeight = candidateWidth, candidateHeight
 				bestRatioError, bestAreaError = ratioError, areaError
@@ -1739,6 +1901,52 @@ func closestGPTImage2Size(width, height int) string {
 		return ""
 	}
 	return fmt.Sprintf("%dx%d", bestWidth, bestHeight)
+}
+
+// defaultOpenAIImageQuality only applies to documented OpenAI image model IDs.
+// Unknown OpenAI-compatible aliases keep provider defaults so a third-party
+// gateway is never sent a field it may not implement. An admin-declared quality
+// always wins because callers invoke this helper only when the key is absent.
+func defaultOpenAIImageQuality(requestID string) string {
+	modelID := strings.ToLower(strings.TrimSpace(requestID))
+	switch {
+	case isOpenAIModelOrSnapshot(modelID, "gpt-image-2"),
+		isOpenAIModelOrSnapshot(modelID, "gpt-image-1.5"),
+		isOpenAIModelOrSnapshot(modelID, "gpt-image-1-mini"),
+		isOpenAIModelOrSnapshot(modelID, "gpt-image-1"):
+		return "high"
+	case modelID == "dall-e-3":
+		return "hd"
+	default:
+		return ""
+	}
+}
+
+// applyDefaultGeminiImageSize raises known high-resolution Gemini image models
+// from their 1K provider default to 2K. The nested lookup deliberately preserves
+// an explicit admin imageSize (including 1K or 4K), and unknown aliases are left
+// untouched for OpenAI-compatible/proxy safety.
+func applyDefaultGeminiImageSize(params map[string]any, requestID string) {
+	modelID := strings.ToLower(strings.TrimSpace(requestID))
+	supports2K := strings.HasPrefix(modelID, "gemini-3-pro-image") ||
+		strings.HasPrefix(modelID, "gemini-3.1-flash-image") ||
+		strings.HasPrefix(modelID, "nano-banana-pro")
+	if !supports2K {
+		return
+	}
+	generationConfig, ok := params["generationConfig"].(map[string]any)
+	if !ok {
+		generationConfig = map[string]any{}
+		params["generationConfig"] = generationConfig
+	}
+	imageConfig, ok := generationConfig["imageConfig"].(map[string]any)
+	if !ok {
+		imageConfig = map[string]any{}
+		generationConfig["imageConfig"] = imageConfig
+	}
+	if _, configured := imageConfig["imageSize"]; !configured {
+		imageConfig["imageSize"] = "2K"
+	}
 }
 
 // sanitizeImageRequestParams clones the admin-declared param-control fragment

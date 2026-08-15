@@ -66,6 +66,7 @@ export function resolveArmedTurnFlags(_modelId?: string): {
   toolMode: ToolMode
   webSearch?: boolean
   selectedToolIds?: string[]
+  optimizeImagePrompt: boolean
 } {
   const p = useComposerPrefs.getState()
   const mode = p.mode !== 'default' ? p.mode : undefined
@@ -76,6 +77,7 @@ export function resolveArmedTurnFlags(_modelId?: string): {
     toolMode,
     webSearch: toolMode === 'disabled' && p.forceWebSearch ? true : undefined,
     selectedToolIds: _modelId ? p.selectedToolIdsByModel[_modelId] : undefined,
+    optimizeImagePrompt: p.optimizeImagePrompt,
   }
 }
 
@@ -338,6 +340,8 @@ interface ConversationStore {
     mode?: 'default' | 'deep-research' | 'canvas'
     /** §4.20 image mode: selected style id, sent for an image-model turn. */
     imageStyleId?: string
+    /** Direct image-model turns only: whether to run the prompt optimizer. */
+    optimizeImagePrompt?: boolean
     /** §verify: enable Verify mode for this turn (a second model audits the answer). */
     verify?: boolean
     /** Per-turn tool policy. Missing legacy/internal callers normalize to auto;
@@ -1594,6 +1598,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           attachments: input.attachments?.map(attachmentToApi),
           params: input.params,
           image_style_id: input.imageStyleId,
+          optimize_image_prompt: input.optimizeImagePrompt,
           // UI language → backend anchors the reply language to it (§ reply language).
           locale: currentLocale(),
         },
@@ -2026,6 +2031,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           // Fast turns must not inherit parameter overrides cached from the
           // previously selected advanced model (for example, `thinking`).
           params: fast ? undefined : conv?.lastParams,
+          optimize_image_prompt: armed.optimizeImagePrompt,
           locale: currentLocale(),
         },
         abort.signal,

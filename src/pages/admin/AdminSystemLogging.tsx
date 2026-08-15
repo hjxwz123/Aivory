@@ -6,6 +6,7 @@ import { Field } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/hooks/use-toast'
 import { PanelFallback } from '@/components/ui/panel-fallback'
+import { Switch } from '@/components/ui/switch'
 
 type LogScope = 'errors' | 'all'
 
@@ -16,6 +17,7 @@ function readBool(settings: Record<string, unknown>, key: string, fallback: bool
 export default function AdminSystemLogging() {
   const { t } = useTranslation(['admin', 'common'])
   const [scope, setScope] = useState<LogScope>('errors')
+  const [requestBodies, setRequestBodies] = useState(true)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
@@ -25,6 +27,7 @@ export default function AdminSystemLogging() {
         const logsAllRequests =
           readBool(settings, 'log_full_requests', false) && !readBool(settings, 'log_errors_only', true)
         setScope(logsAllRequests ? 'all' : 'errors')
+        setRequestBodies(readBool(settings, 'log_request_bodies', true))
       })
       .catch((error) => toast.error(error instanceof ApiError ? error.message : t('admin:common.failed')))
       .finally(() => setLoading(false))
@@ -37,6 +40,7 @@ export default function AdminSystemLogging() {
       await adminApi.updateSettings({
         log_full_requests: scope === 'all',
         log_errors_only: scope === 'errors',
+        log_request_bodies: requestBodies,
       })
       toast.success(t('admin:settings.saved'))
     } catch (error) {
@@ -81,6 +85,24 @@ export default function AdminSystemLogging() {
               {t('admin:settings.fields.logErrorsOnlyHint')}
             </p>
           )}
+
+          <div className="flex items-start justify-between gap-6 border-y border-[var(--color-divider)] py-4">
+            <label htmlFor="request-body-logging" className="min-w-0 cursor-pointer">
+              <span className="block text-sm font-medium text-[var(--color-fg)]">
+                {t('admin:settings.fields.logRequestBodies')}
+              </span>
+              <span className="mt-1 block max-w-2xl text-xs leading-5 text-[var(--color-fg-subtle)]">
+                {t('admin:settings.fields.logRequestBodiesHint')}
+              </span>
+            </label>
+            <Switch
+              id="request-body-logging"
+              checked={requestBodies}
+              onCheckedChange={setRequestBodies}
+              aria-label={t('admin:settings.fields.logRequestBodies')}
+              className="mt-0.5 shrink-0"
+            />
+          </div>
 
           <div className="flex justify-end">
             <Button loading={saving} onClick={() => void save()}>
