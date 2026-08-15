@@ -296,13 +296,14 @@ export function ToolSelectionDialog({
                           </span>
                         ) : null}
                       </span>
-                      <Checkbox
-                        checked={checked}
-                        disabled={!allowed}
-                        onChange={() => toggle(tool.id)}
-                        aria-label={tool.displayName}
-                        className="mt-1"
-                      />
+                      <span className="mt-1 inline-flex shrink-0">
+                        <Checkbox
+                          checked={checked}
+                          disabled={!allowed}
+                          onChange={() => toggle(tool.id)}
+                          aria-label={tool.displayName}
+                        />
+                      </span>
                     </label>
                   )
                 })}

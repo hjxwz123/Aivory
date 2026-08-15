@@ -129,6 +129,7 @@
       "verifyDesc": "A second model fact-checks the answer after it is written.",
       "noTools": "Disable tools",
       "noToolsDesc": "Answer directly without calling any tool — faster and cheaper.",
+      "tools": "Tools",
       "toolMode": "Tool use",
       "toolModeDesc": "Configure the tools available for this turn.",
       "toolModeAuto": "Automatic",
