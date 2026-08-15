@@ -56,7 +56,7 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 			decls = append(decls, map[string]any{
 				"name":        t.Name,
 				"description": t.Description,
-				"parameters":  json.RawMessage(t.InputSchema),
+				"parameters":  normalizeGeminiFunctionSchema(t.InputSchema),
 			})
 		}
 		// Canonical camelCase, NOT proto snake_case: Google itself accepts both,
