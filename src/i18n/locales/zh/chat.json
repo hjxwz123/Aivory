@@ -129,6 +129,7 @@
       "verifyDesc": "回答生成后由第二个模型进行事实核查。",
       "noTools": "禁用工具，更节省额度",
       "noToolsDesc": "不自动调用任何工具，直接回答——更快更省。",
+      "tools": "工具",
       "toolMode": "工具调用",
       "toolModeDesc": "配置本轮对话可使用的工具。",
       "toolModeAuto": "自动",

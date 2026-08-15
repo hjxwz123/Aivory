@@ -129,6 +129,7 @@
       "verifyDesc": "Un second modèle vérifie les faits de la réponse une fois rédigée.",
       "noTools": "Désactiver les outils",
       "noToolsDesc": "Répond directement sans appeler d'outil — plus rapide et moins cher.",
+      "tools": "Outils",
       "toolMode": "Utilisation des outils",
       "toolModeDesc": "Configurez les outils disponibles pour ce tour.",
       "toolModeAuto": "Automatique",

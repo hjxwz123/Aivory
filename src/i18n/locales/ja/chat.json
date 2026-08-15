@@ -129,6 +129,7 @@
       "verifyDesc": "回答の作成後に別のモデルがファクトチェックします。",
       "noTools": "ツールを無効化",
       "noToolsDesc": "ツールを一切呼び出さず直接回答します — 高速・低コスト。",
+      "tools": "ツール",
       "toolMode": "ツール利用",
       "toolModeDesc": "このターンで利用できるツールを設定します。",
       "toolModeAuto": "自動",

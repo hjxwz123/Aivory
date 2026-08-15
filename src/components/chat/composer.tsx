@@ -37,6 +37,8 @@ import {
   ChevronRight,
   FileText,
   PackageOpen,
+  Sparkles,
+  Ban,
 } from 'lucide-react'
 import type { Attachment } from '@/types/chat'
 import {
@@ -45,6 +47,7 @@ import {
   resolveModelToolModeCapabilities,
   type ToolMode,
   type ToolModeCapabilities,
+  visibleToolModes,
 } from '@/lib/tool-mode'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -394,28 +397,90 @@ function FeatureRow({ item, onAfter }: { item: FeatureItem; onAfter?: () => void
 
 type ToolUsePanel = 'root' | 'tools'
 
-interface ToolSelectionAction {
+interface ToolModeAction {
+  mode: ToolMode
+  icon: ReactNode
   label: string
   description: string
+  selected: boolean
+  onSelect: () => void
+}
+
+interface ToolSelectionAction {
+  label: string
   summary: string
+  count?: number
   custom: boolean
   onOpen: () => void
 }
 
-/** A stable drill-down: root features -> tool use -> tool selection dialog. */
+function ToolModeRow({ item }: { item: ToolModeAction }) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={item.selected}
+      onClick={item.onSelect}
+      className={cn(
+        'flex w-full min-w-0 items-start gap-2.5 rounded-[10px] px-2.5 py-2 text-left interactive',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+        item.selected
+          ? 'bg-[var(--color-tool-selection-soft)]'
+          : 'hover:bg-[var(--color-bg-muted)]',
+      )}
+    >
+      <span
+        className={cn(
+          'mt-0.5 inline-flex size-4 shrink-0 items-center justify-center',
+          item.selected
+            ? 'text-[var(--color-tool-selection-text)]'
+            : 'text-[var(--color-fg-muted)]',
+        )}
+        aria-hidden
+      >
+        {item.icon}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[13px] font-medium text-[var(--color-fg)]">
+          {item.label}
+        </span>
+        <span className="mt-0.5 block text-[11.5px] leading-snug text-[var(--color-fg-subtle)]">
+          {item.description}
+        </span>
+      </span>
+      <span className="mt-0.5 inline-flex size-4 shrink-0 items-center justify-center" aria-hidden>
+        {item.selected ? (
+          <Check size={13} className="text-[var(--color-tool-selection-text)]" />
+        ) : null}
+      </span>
+    </button>
+  )
+}
+
+/** A stable drill-down: root features -> tool mode, with tool selection in the header. */
 function ToolUseSelector({
+  rootLabel,
   label,
   description,
+  modeSummary,
+  active,
   menuOpen,
   rootItems,
+  modeItems,
+  secondaryItems,
   toolSelection,
   onPanelChange,
   onAfter,
 }: {
+  rootLabel: string
   label: string
   description: string
+  modeSummary: string
+  active: boolean
   menuOpen: boolean
   rootItems: FeatureItem[]
+  modeItems: ToolModeAction[]
+  secondaryItems?: FeatureItem[]
   toolSelection: ToolSelectionAction
   onPanelChange?: (panel: ToolUsePanel) => void
   onAfter?: () => void
@@ -454,11 +519,11 @@ function ToolUseSelector({
           ref={rootToolRef}
           type="button"
           onClick={() => setPanel('tools')}
-          aria-label={`${label}: ${toolSelection.summary}`}
+          aria-label={`${rootLabel}: ${modeSummary}`}
           className={cn(
             'flex w-full min-w-0 max-w-full items-start gap-2.5 overflow-hidden rounded-[12px] border px-2.5 py-2 text-left interactive',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-            toolSelection.custom
+            active
               ? 'border-[var(--color-tool-selection-border)] bg-[var(--color-tool-selection-soft)]'
               : 'border-transparent hover:bg-[var(--color-bg-muted)]',
           )}
@@ -466,7 +531,7 @@ function ToolUseSelector({
           <span
             className={cn(
               'mt-0.5 inline-flex shrink-0',
-              toolSelection.custom
+              active
                 ? 'text-[var(--color-tool-selection-text)]'
                 : 'text-[var(--color-fg-muted)]',
             )}
@@ -477,17 +542,17 @@ function ToolUseSelector({
           <span className="min-w-0 max-w-full flex-1">
             <span className="flex min-w-0 items-center gap-2">
               <span className="truncate text-[13px] font-medium text-[var(--color-fg)]">
-                {label}
+                {rootLabel}
               </span>
               <span
                 className={cn(
                   'ml-auto shrink-0 text-[11.5px]',
-                  toolSelection.custom
+                  active
                     ? 'text-[var(--color-tool-selection-text)]'
                     : 'text-[var(--color-fg-subtle)]',
                 )}
               >
-                {toolSelection.summary}
+                {modeSummary}
               </span>
             </span>
             <span className="mt-0.5 block max-w-full break-words [overflow-wrap:anywhere] text-[11.5px] leading-snug text-[var(--color-fg-subtle)]">
@@ -512,66 +577,60 @@ function ToolUseSelector({
         setPanel('root')
       }}
     >
-      <button
-        ref={toolsBackRef}
-        type="button"
-        onClick={() => setPanel('root')}
-        className="flex min-h-9 w-full items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-[12.5px] font-medium text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-      >
-        <ArrowLeft size={14} aria-hidden />
-        <span className="truncate">{label}</span>
-        <span className="ml-auto text-[11px] text-[var(--color-fg-subtle)]">{toolSelection.summary}</span>
-      </button>
-      <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden />
-      <button
-        type="button"
-        aria-haspopup="dialog"
-        aria-label={`${toolSelection.label}: ${toolSelection.summary}`}
-        onClick={() => {
-          onAfter?.()
-          toolSelection.onOpen()
-        }}
-        className={cn(
-          'flex w-full min-w-0 max-w-full items-start gap-2.5 overflow-hidden rounded-[12px] border px-2.5 py-2 text-left interactive',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-          toolSelection.custom
-            ? 'border-[var(--color-tool-selection-border)] bg-[var(--color-tool-selection-soft)]'
-            : 'border-transparent hover:bg-[var(--color-bg-muted)]',
-        )}
-      >
-        <span
-          className={cn(
-            'mt-0.5 inline-flex shrink-0',
-            toolSelection.custom
-              ? 'text-[var(--color-tool-selection-text)]'
-              : 'text-[var(--color-fg-muted)]',
-          )}
-          aria-hidden
+      <div className="flex min-h-9 items-center gap-1.5 px-0.5">
+        <button
+          ref={toolsBackRef}
+          type="button"
+          onClick={() => setPanel('root')}
+          aria-label={rootLabel}
+          className="inline-flex size-8 shrink-0 items-center justify-center rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
         >
-          <Wrench size={16} />
+          <ArrowLeft size={14} aria-hidden />
+        </button>
+        <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-[var(--color-fg)]">
+          {label}
         </span>
-        <span className="min-w-0 max-w-full flex-1">
-          <span className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-[13px] font-medium text-[var(--color-fg)]">
-              {toolSelection.label}
+        <button
+          type="button"
+          aria-haspopup="dialog"
+          aria-label={`${toolSelection.label}: ${toolSelection.summary}`}
+          onClick={() => {
+            onAfter?.()
+            toolSelection.onOpen()
+          }}
+          className={cn(
+            'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-[8px] px-2 text-[11.5px] font-medium interactive',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+            toolSelection.custom
+              ? 'bg-[var(--color-tool-selection-soft)] text-[var(--color-tool-selection-text)] hover:bg-[var(--color-tool-selection)]/15'
+              : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+          )}
+        >
+          <Wrench size={13} aria-hidden />
+          <span>{toolSelection.label}</span>
+          {toolSelection.count !== undefined ? (
+            <span className="min-w-[1ch] text-[10.5px] font-semibold tabular-nums">
+              {toolSelection.count}
             </span>
-            <span
-              className={cn(
-                'ml-auto shrink-0 text-[11.5px]',
-                toolSelection.custom
-                  ? 'text-[var(--color-tool-selection-text)]'
-                  : 'text-[var(--color-fg-subtle)]',
-              )}
-            >
-              {toolSelection.summary}
-            </span>
-          </span>
-          <span className="mt-0.5 block max-w-full break-words [overflow-wrap:anywhere] text-[11.5px] leading-snug text-[var(--color-fg-subtle)]">
-            {toolSelection.description}
-          </span>
-        </span>
-        <ChevronRight size={14} className="mt-1 shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
-      </button>
+          ) : null}
+        </button>
+      </div>
+      <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden />
+      <div className="flex flex-col gap-0.5" role="radiogroup" aria-label={label}>
+        {modeItems.map((item) => (
+          <ToolModeRow key={item.mode} item={item} />
+        ))}
+      </div>
+      {secondaryItems && secondaryItems.length > 0 ? (
+        <>
+          <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden />
+          <div className="flex flex-col gap-0.5">
+            {secondaryItems.map((item) => (
+              <FeatureRow key={item.key} item={item} onAfter={onAfter} />
+            ))}
+          </div>
+        </>
+      ) : null}
     </div>
   )
 }
@@ -614,8 +673,8 @@ export function Composer({
   // §verify: when on, the answer is fact-checked by a second model this turn.
   const verify = useComposerPrefs((s) => s.verify)
   const setVerify = useComposerPrefs((s) => s.setVerify)
-  // The persisted tool policy still drives request routing, while the composer
-  // presents tool selection as the single user-facing tool-use control.
+  // The persisted tool policy still drives request routing. Mode and candidate
+  // selection share one progressive "Tools" menu but remain independent state.
   const toolMode = useComposerPrefs((s) => s.toolMode)
   const setToolMode = useComposerPrefs((s) => s.setToolMode)
   const forceWebSearch = useComposerPrefs((s) => s.forceWebSearch)
@@ -698,12 +757,6 @@ export function Composer({
     (ids: string[] | undefined) => setSelectedToolIds(modelId, ids),
     [modelId, setSelectedToolIds],
   )
-  const handleSelectedToolIdsApply = useCallback(() => {
-    // Older preferences may still carry an explicit disabled mode. Confirming a
-    // tool selection must make those tools usable instead of leaving the dialog
-    // and the wire request in contradictory states.
-    if (toolMode === 'disabled') setToolMode('auto')
-  }, [setToolMode, toolMode])
   const loadKBList = useCallback(async () => {
     if (!canUseKnowledgeBases) {
       kbLoadRequestRef.current += 1
@@ -1976,6 +2029,7 @@ export function Composer({
   }
 
   const toolModeLabel = t('composer.features.toolMode', { defaultValue: 'Tool use' })
+  const toolsLabel = t('composer.features.tools', { defaultValue: 'Tools' })
   const hasCustomToolSelection = selectedToolIds !== undefined
   const toolSelectionSummary = hasCustomToolSelection
     ? t('composer.toolSelection.summaryCount', {
@@ -1983,6 +2037,44 @@ export function Composer({
         defaultValue: '{{count}} selected',
       })
     : t('composer.toolSelection.summaryDefault', { defaultValue: 'Model default' })
+  const toolModeItems: ToolModeAction[] = visibleToolModes(toolModeCapabilities).map((itemMode) => {
+    const modeKey =
+      itemMode === 'auto'
+        ? 'Auto'
+        : itemMode === 'enabled'
+          ? 'Enabled'
+          : 'Disabled'
+    const icon =
+      itemMode === 'auto' ? (
+        <Sparkles size={15} aria-hidden />
+      ) : itemMode === 'enabled' ? (
+        <Wrench size={15} aria-hidden />
+      ) : (
+        <Ban size={15} aria-hidden />
+      )
+    return {
+      mode: itemMode,
+      icon,
+      label: t(`composer.features.toolMode${modeKey}`, {
+        defaultValue: itemMode === 'auto' ? 'Automatic' : itemMode === 'enabled' ? 'On' : 'Off',
+      }),
+      description: t(`composer.features.toolMode${modeKey}Desc`, {
+        defaultValue:
+          itemMode === 'auto'
+            ? 'Automatically decide whether tool calls are needed.'
+            : itemMode === 'enabled'
+              ? 'Turn on tool calling.'
+              : 'Answer directly without making tools available.',
+      }),
+      selected: availableToolMode === itemMode,
+      onSelect: () => setToolMode(itemMode),
+    }
+  })
+  const toolModeSummary =
+    toolModeItems.find((item) => item.mode === availableToolMode)?.label ??
+    t('composer.features.toolModeAuto', { defaultValue: 'Automatic' })
+  const toolUseConfigured =
+    hasCustomToolSelection || (!researchActive && availableToolMode !== 'auto')
 
   const webSearchItem: FeatureItem | undefined =
     showToolUseSelector && supportsWebSearch && availableToolMode === 'disabled'
@@ -2022,18 +2114,21 @@ export function Composer({
     <div className="flex flex-col gap-0.5">
       {showToolUseSelector ? (
         <ToolUseSelector
+          rootLabel={toolsLabel}
           label={toolModeLabel}
           description={t('composer.features.toolModeDesc', {
             defaultValue: 'Configure the tools available for this turn.',
           })}
+          modeSummary={toolModeSummary}
+          active={toolUseConfigured}
           menuOpen={isMobile ? moreOpen : featuresOpen}
-          rootItems={[...featureItems, ...(webSearchItem ? [webSearchItem] : [])]}
+          rootItems={featureItems}
+          modeItems={toolModeItems}
+          secondaryItems={webSearchItem ? [webSearchItem] : undefined}
           toolSelection={{
             label: t('composer.toolSelection.entry', { defaultValue: 'Choose tools' }),
-            description: t('composer.toolSelection.entryDescription', {
-              defaultValue: 'Choose which tools are available for this turn.',
-            }),
             summary: toolSelectionSummary,
+            count: hasCustomToolSelection ? selectedToolIds.length : undefined,
             custom: hasCustomToolSelection,
             onOpen: () => {
               setMoreOpen(false)
@@ -3394,7 +3489,6 @@ export function Composer({
         modelId={modelId}
         selectedIds={selectedToolIds}
         onChange={handleSelectedToolIdsChange}
-        onApply={handleSelectedToolIdsApply}
       />
     </div>
   )
