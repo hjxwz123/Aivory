@@ -106,6 +106,11 @@ import { knowledgeBaseSelectionContext } from '@/lib/knowledge-base-selection'
 import { userCan } from '@/lib/user-permissions'
 import { subscribeAccessInvalidation } from '@/lib/access-events'
 import { findSelectedModel, isSelectedModelUnavailable } from '@/lib/model-selection'
+import {
+  IMAGE_UPLOAD_PASSTHROUGH_BYTES,
+  IMAGE_UPLOAD_TARGET_BYTES,
+  prepareImageForUpload,
+} from '@/lib/image-upload'
 
 interface ComposerProps {
   modelId: string
@@ -121,6 +126,8 @@ interface ComposerProps {
       params?: Record<string, unknown>
       /** §4.20 image mode: chosen style id (sent for an image-model turn). */
       imageStyleId?: string
+      /** Direct image-model turns only: rewrite the prompt before generation. */
+      optimizeImagePrompt?: boolean
       /** §verify: run the secondary-auditor pass on this turn. */
       verify?: boolean
       /** Three-state tool policy, always sent explicitly. */
@@ -216,11 +223,10 @@ function loadSttCapability(): Promise<SttCapability> {
   return sttCapabilityPromise
 }
 
-// §4.6-A upload size caps. The /api/files handler is authoritative; we read the
-// admin-configured per-kind caps from the upload policy once (module-level
-// cache, shared across composer instances) so we can reject an oversize file up
-// front instead of wasting an upload round-trip. Falls back to the seeded
-// defaults if the fetch fails, so a transient error never blocks attaching.
+// §4.6-A upload size caps. The /api/files handler is authoritative; the image
+// limit is used as a compression target instead of a client-side rejection.
+// Non-image files still use the admin-configured hard pre-check. The policy is
+// cached across composer instances so attaching never pays repeated round trips.
 const DEFAULT_UPLOAD_LIMITS = { max_image_bytes: 5 * 1024 * 1024, max_file_bytes: 50 * 1024 * 1024 }
 let uploadLimitsCache: Promise<{ max_image_bytes: number; max_file_bytes: number }> | null = null
 
@@ -673,6 +679,8 @@ export function Composer({
   // §verify: when on, the answer is fact-checked by a second model this turn.
   const verify = useComposerPrefs((s) => s.verify)
   const setVerify = useComposerPrefs((s) => s.setVerify)
+  const optimizeImagePrompt = useComposerPrefs((s) => s.optimizeImagePrompt)
+  const setOptimizeImagePrompt = useComposerPrefs((s) => s.setOptimizeImagePrompt)
   // The persisted tool policy still drives request routing. Mode and candidate
   // selection share one progressive "Tools" menu but remain independent state.
   const toolMode = useComposerPrefs((s) => s.toolMode)
@@ -1531,6 +1539,7 @@ export function Composer({
         mode: effectiveMode === 'default' ? undefined : effectiveMode,
         params: Object.keys(params).length > 0 ? params : undefined,
         imageStyleId: isImageMode && imageStyleId ? imageStyleId : undefined,
+        optimizeImagePrompt: isImageMode ? optimizeImagePrompt : undefined,
         verify: effectiveVerify ? true : undefined,
         toolMode: effectiveToolMode,
         webSearch: effectiveWebSearch ? true : undefined,
@@ -1854,10 +1863,11 @@ export function Composer({
     }))
     setAttachments((current) => [...current, ...candidates.map(({ attachment }) => attachment)])
 
-    // §4.6 reject oversize files BEFORE uploading — images and other files have
-    // separate admin-set caps. Rejected images would otherwise upload fine but be
-    // silently dropped at chat time (base64 inline cap); documents would fail the
-    // server cap after a wasted upload.
+    // §4.6 prepare images before upload. Up to 3 MiB stays byte-for-byte intact;
+    // larger images are silently compressed under both the 3 MiB provider target
+    // and any stricter admin cap. Process sequentially so selecting several large
+    // photos cannot keep multiple decoded bitmaps/canvases resident at once.
+    // Non-image documents retain their existing hard pre-check.
     const limits = await getUploadLimits()
     if (!canUploadFilesRef.current) {
       const candidateIDs = new Set(candidates.map(({ attachment }) => attachment.id))
@@ -1868,21 +1878,40 @@ export function Composer({
       setAttachments((current) => current.filter((attachment) => !candidateIDs.has(attachment.id)))
       return 0
     }
-    const overImage = candidates.filter(
-      ({ file }) => isImageFileLike(file) && file.size > limits.max_image_bytes,
+    const imageHeadroom = Math.min(64 * 1024, Math.max(1, Math.floor(limits.max_image_bytes * 0.02)))
+    const imageTargetBytes = Math.max(
+      1,
+      Math.min(IMAGE_UPLOAD_TARGET_BYTES, limits.max_image_bytes - imageHeadroom),
     )
-    const overFile = candidates.filter(
+    const imagePassthroughBytes = Math.max(
+      1,
+      Math.min(IMAGE_UPLOAD_PASSTHROUGH_BYTES, limits.max_image_bytes),
+    )
+    const preparedCandidates: typeof candidates = []
+    for (const candidate of candidates) {
+      const preparedFile = isImageFileLike(candidate.file)
+        ? await prepareImageForUpload(candidate.file, {
+            // The product default is byte-for-byte passthrough through 3 MiB.
+            // A deliberately stricter admin cap still remains authoritative.
+            passthroughBytes: imagePassthroughBytes,
+            targetBytes: imageTargetBytes,
+          })
+        : candidate.file
+      preparedCandidates.push({ ...candidate, file: preparedFile })
+      if (preparedFile !== candidate.file) {
+        setAttachments((current) =>
+          current.map((attachment) =>
+            attachment.id === candidate.attachment.id
+              ? { ...attachment, size: preparedFile.size }
+              : attachment,
+          ),
+        )
+      }
+    }
+
+    const overFile = preparedCandidates.filter(
       ({ file }) => !isImageFileLike(file) && file.size > limits.max_file_bytes,
     )
-    if (overImage.length) {
-      toast.error(
-        t('composer.imageTooLarge', {
-          defaultValue: 'Images must be under {{mb}} MB',
-          mb: Math.floor(limits.max_image_bytes / (1024 * 1024)),
-        }),
-        overImage.map(({ file }) => file.name).join(', '),
-      )
-    }
     if (overFile.length) {
       toast.error(
         t('composer.fileTooLarge', {
@@ -1893,7 +1922,7 @@ export function Composer({
       )
     }
 
-    const rejectedIds = new Set([...overImage, ...overFile].map(({ attachment }) => attachment.id))
+    const rejectedIds = new Set(overFile.map(({ attachment }) => attachment.id))
     if (rejectedIds.size > 0) {
       candidates.forEach(({ attachment }) => {
         if (rejectedIds.has(attachment.id) && attachment.previewUrl?.startsWith('blob:')) {
@@ -1909,7 +1938,7 @@ export function Composer({
 
     // Removal can happen while upload-policy validation is in flight. Do not
     // resurrect or upload a candidate the user has already dismissed.
-    const accepted = candidates.filter(({ attachment }) => {
+    const accepted = preparedCandidates.filter(({ attachment }) => {
       if (rejectedIds.has(attachment.id)) {
         removedAttachmentIds.current.delete(attachment.id)
         return false
@@ -3295,6 +3324,24 @@ export function Composer({
               model name). They get the only shrinkable/scrollable lane so the
               two 44px edge actions never leave the viewport. */}
           <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overscroll-x-contain scrollbar-none">
+            {isImageMode ? (
+              <Tooltip content={t(optimizeImagePrompt ? 'composer.imagePromptOptimizationOn' : 'composer.imagePromptOptimizationOff')}>
+                <button
+                  type="button"
+                  aria-label={t('composer.imagePromptOptimization')}
+                  aria-pressed={optimizeImagePrompt}
+                  onClick={() => setOptimizeImagePrompt(!optimizeImagePrompt)}
+                  className={cn(
+                    'inline-flex size-8 shrink-0 items-center justify-center rounded-[8px] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                    optimizeImagePrompt
+                      ? 'bg-[var(--color-tool-selection)] text-[var(--color-tool-selection-fg)] ring-4 ring-[var(--color-tool-selection-soft)] hover:bg-[var(--color-tool-selection-hover)]'
+                      : 'bg-[var(--color-tool-idle)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
+                  )}
+                >
+                  <Sparkles size={15} aria-hidden />
+                </button>
+              </Tooltip>
+            ) : null}
             {isImageMode ? <StylePicker value={imageStyleId} onChange={setImageStyleId} className="min-w-0 max-w-[42vw] shrink" /> : null}
 
             {/* On phones the header already carries the model picker (ChatThread),
@@ -3378,6 +3425,25 @@ export function Composer({
             ) : null}
 
             <div className="mx-1 h-5 w-px bg-[var(--color-divider)]" aria-hidden />
+
+            {isImageMode ? (
+              <Tooltip content={t(optimizeImagePrompt ? 'composer.imagePromptOptimizationOn' : 'composer.imagePromptOptimizationOff')}>
+                <button
+                  type="button"
+                  aria-label={t('composer.imagePromptOptimization')}
+                  aria-pressed={optimizeImagePrompt}
+                  onClick={() => setOptimizeImagePrompt(!optimizeImagePrompt)}
+                  className={cn(
+                    'inline-flex size-8 shrink-0 items-center justify-center rounded-[8px] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                    optimizeImagePrompt
+                      ? 'bg-[var(--color-tool-selection)] text-[var(--color-tool-selection-fg)] ring-4 ring-[var(--color-tool-selection-soft)] hover:bg-[var(--color-tool-selection-hover)]'
+                      : 'bg-[var(--color-tool-idle)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
+                  )}
+                >
+                  <Sparkles size={15} aria-hidden />
+                </button>
+              </Tooltip>
+            ) : null}
 
             {isImageMode ? <StylePicker value={imageStyleId} onChange={setImageStyleId} /> : null}
 

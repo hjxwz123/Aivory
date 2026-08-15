@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strings"
@@ -66,16 +68,20 @@ type providerRequestRecorder struct {
 	// outside input_tokens, while OpenAI and Google report prompt/input totals
 	// that already include cached portions.
 	provider string
-	// captureAll keeps the sanitized header/body on EVERY list entry (admin
-	// enabled full success-request logging). Off, successful entries keep only
-	// method/URL/usage; attachFailure restores full diagnostics for error entries.
+	// captureAll keeps sanitized request diagnostics on EVERY list entry (admin
+	// enabled success-request logging). Off, successful entries keep only
+	// method/URL/usage; attachFailure restores allowed diagnostics for errors.
 	captureAll bool
+	// captureBody is the independent privacy boundary for request bodies. When
+	// disabled, method/URL/sanitized headers and errors remain available, but a
+	// request body is never retained even for failed attempts.
+	captureBody bool
 }
 
 type providerRequestRecorderKey struct{}
 
 func newProviderRequestRecorder(provider ...string) *providerRequestRecorder {
-	recorder := &providerRequestRecorder{}
+	recorder := &providerRequestRecorder{captureBody: true}
 	if len(provider) > 0 {
 		recorder.provider = providerIDForChannelType(provider[0])
 	}
@@ -333,7 +339,11 @@ func (r *providerRequestRecorder) record(req *http.Request, fallbackAttempt ...b
 	}
 	fallback := len(fallbackAttempt) > 0 && fallbackAttempt[0]
 	body := snapshotRequestBody(req)
-	sanitizedBody := sanitizeProviderRequestBody(body)
+	sanitizedBody := sanitizeProviderRequestBodyForRequest(req, body)
+	storedBody := sanitizedBody
+	if !r.captureBody {
+		storedBody = ""
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.attempt++
@@ -341,7 +351,7 @@ func (r *providerRequestRecorder) record(req *http.Request, fallbackAttempt ...b
 		Method:               req.Method,
 		URL:                  sanitizeProviderRequestURL(req.URL),
 		Header:               sanitizeProviderRequestHeaders(req.Header),
-		Body:                 sanitizedBody,
+		Body:                 storedBody,
 		Attempt:              r.attempt,
 		Fallback:             fallback,
 		EstimatedInputTokens: estimateTokens(sanitizedBody),
@@ -405,9 +415,9 @@ func (r *providerRequestRecorder) attachFailure(fallback bool, message string) {
 	defer r.mu.Unlock()
 
 	// sendProviderRequest recorded this attempt immediately before the failure.
-	// Restore the full sanitized request onto the list entry even when captureAll
-	// is off: error rows always retain diagnostics, while success rows remain
-	// governed by the administrator's request-logging setting.
+	// Restore the allowed sanitized request diagnostics onto the list entry even
+	// when captureAll is off. The independent captureBody privacy boundary is
+	// already reflected in r.last and is never bypassed here.
 	if r.attempt > 0 && r.last.Attempt == r.attempt && r.last.Fallback == fallback && r.last.Error == "" {
 		r.last.Error = message
 		if n := len(r.all); n > 0 && r.all[n-1].Attempt == r.attempt {
@@ -511,6 +521,97 @@ func sanitizeProviderRequestBody(body []byte) string {
 	return clampString(string(body), providerRequestBodyMaxBytes)
 }
 
+// ProviderRequestDiagnostics is the sanitized request metadata persisted on
+// admin-visible usage rows. It is exported so non-chat provider integrations
+// such as image generation can use the exact same redaction policy.
+type ProviderRequestDiagnostics struct {
+	Method  string
+	URL     string
+	Headers string
+	Body    string
+}
+
+// CaptureProviderRequestDiagnostics snapshots a provider request without
+// consuming its body. includeBody is the administrator-controlled privacy
+// boundary; method, URL and sanitized headers remain available when it is false.
+func CaptureProviderRequestDiagnostics(req *http.Request, includeBody bool) ProviderRequestDiagnostics {
+	if req == nil {
+		return ProviderRequestDiagnostics{}
+	}
+	diagnostics := ProviderRequestDiagnostics{
+		Method:  req.Method,
+		URL:     sanitizeProviderRequestURL(req.URL),
+		Headers: sanitizeProviderRequestHeaders(req.Header),
+	}
+	if includeBody {
+		diagnostics.Body = sanitizeProviderRequestBodyForRequest(req, snapshotRequestBody(req))
+	}
+	return diagnostics
+}
+
+func sanitizeProviderRequestBodyForRequest(req *http.Request, body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	if req != nil {
+		mediaType, params, err := mime.ParseMediaType(req.Header.Get("content-type"))
+		if err == nil && strings.EqualFold(mediaType, "multipart/form-data") && params["boundary"] != "" {
+			if sanitized := sanitizeProviderMultipartBody(body, params["boundary"]); sanitized != "" {
+				return sanitized
+			}
+		}
+	}
+	return sanitizeProviderRequestBody(body)
+}
+
+func sanitizeProviderMultipartBody(body []byte, boundary string) string {
+	reader := multipart.NewReader(bytes.NewReader(body), boundary)
+	fields := map[string]any{}
+	for {
+		part, err := reader.NextPart()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return ""
+		}
+		name := strings.TrimSpace(part.FormName())
+		if name == "" {
+			name = "field"
+		}
+		if filename := strings.TrimSpace(part.FileName()); filename != "" {
+			n, _ := io.Copy(io.Discard, part)
+			appendProviderMultipartField(fields, name, map[string]any{
+				"filename":     clampString(filename, providerRequestValueMaxBytes),
+				"content_type": clampString(part.Header.Get("content-type"), providerRequestValueMaxBytes),
+				"bytes":        n,
+				"content":      "[redacted binary]",
+			})
+			continue
+		}
+		value, _ := io.ReadAll(io.LimitReader(part, int64(providerRequestValueMaxBytes)+1))
+		appendProviderMultipartField(fields, name, sanitizeProviderJSONValue(name, clampString(string(value), providerRequestValueMaxBytes)))
+	}
+	buf, err := json.MarshalIndent(fields, "", "  ")
+	if err != nil {
+		return ""
+	}
+	return clampString(string(buf), providerRequestBodyMaxBytes)
+}
+
+func appendProviderMultipartField(fields map[string]any, name string, value any) {
+	if existing, ok := fields[name]; ok {
+		switch current := existing.(type) {
+		case []any:
+			fields[name] = append(current, value)
+		default:
+			fields[name] = []any{current, value}
+		}
+		return
+	}
+	fields[name] = value
+}
+
 func sanitizeProviderJSONValue(key string, v any) any {
 	if key != "" && !isProviderJSONTokenCountName(key) && isSensitiveName(key) {
 		return "[redacted]"
@@ -528,10 +629,33 @@ func sanitizeProviderJSONValue(key string, v any) any {
 		}
 		return x
 	case string:
-		return sanitizeProviderString(x)
+		return sanitizeProviderStringForKey(key, x)
 	default:
 		return v
 	}
+}
+
+func sanitizeProviderStringForKey(key, value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(key))
+	if (normalized == "data" || normalized == "b64_json" || normalized == "b64json") && looksLikeLargeBase64(value) {
+		return "[redacted base64 " + decimalString(len(value)) + " chars]"
+	}
+	return sanitizeProviderString(value)
+}
+
+func looksLikeLargeBase64(value string) bool {
+	if len(value) < 1024 || len(value)%4 != 0 {
+		return false
+	}
+	for _, char := range value {
+		if (char >= 'A' && char <= 'Z') || (char >= 'a' && char <= 'z') ||
+			(char >= '0' && char <= '9') || char == '+' || char == '/' || char == '=' ||
+			char == '-' || char == '_' || char == '\n' || char == '\r' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func isProviderJSONTokenCountName(name string) bool {

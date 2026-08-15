@@ -303,7 +303,12 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
   const [brokenAtts, setBrokenAtts] = useState<Set<string>>(new Set())
   // Lightbox: which image is being previewed (null = closed). Driven from the
   // attachment id so the Dialog re-mounts cleanly on each preview.
-  const [lightbox, setLightbox] = useState<{ src: string; alt?: string } | null>(null)
+  const [lightbox, setLightbox] = useState<{
+    src: string
+    alt?: string
+    downloadUrl?: string
+    filename?: string
+  } | null>(null)
   // Non-image attachment preview (pdf / docx / text / fallback) — opens a modal
   // instead of letting the click download the file.
   const [filePreview, setFilePreview] = useState<{
@@ -747,7 +752,12 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                       <button
                         key={attachment.id}
                         type="button"
-                        onClick={() => setLightbox({ src: attachment.previewUrl!, alt: attachment.name })}
+                        onClick={() => setLightbox({
+                          src: attachment.previewUrl!,
+                          alt: attachment.name,
+                          downloadUrl: attachment.previewUrl,
+                          filename: attachment.name,
+                        })}
                         aria-label={t('actions.viewImage', { defaultValue: 'View image' })}
                         className={cn(
                           'block shrink-0 overflow-hidden rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] hover:opacity-90',
@@ -1002,13 +1012,24 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                           )
                         }
                         return (
-                          <a key={a.id} href={href} target="_blank" rel="noreferrer" className="block">
+                          <button
+                            key={a.id}
+                            type="button"
+                            onClick={() => setLightbox({
+                              src: href,
+                              alt: a.filename,
+                              downloadUrl: href,
+                              filename: a.filename,
+                            })}
+                            aria-label={t('actions.viewImage', { defaultValue: 'View image' })}
+                            className="block overflow-hidden rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                          >
                             <img
                               src={href}
                               alt={a.filename}
-                              className="max-h-64 rounded-lg border border-[var(--color-border)]"
+                              className="max-h-64 rounded-lg border border-[var(--color-border)] transition-opacity hover:opacity-90"
                             />
-                          </a>
+                          </button>
                         )
                       }
                       return (
@@ -1329,6 +1350,8 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
         onOpenChange={(o) => !o && setLightbox(null)}
         src={lightbox?.src ?? ''}
         alt={lightbox?.alt}
+        downloadUrl={lightbox?.downloadUrl}
+        filename={lightbox?.filename}
       />
       {/* Non-image attachment preview modal. */}
       <FilePreview

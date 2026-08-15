@@ -19,6 +19,7 @@ function resetPrefs() {
   useComposerPrefs.setState({
     mode: 'default',
     verify: false,
+    optimizeImagePrompt: true,
     toolMode: 'auto',
     forceWebSearch: false,
     defaultToolMode: 'auto',
@@ -40,6 +41,17 @@ describe('composer tool mode', () => {
     expect(prefs.toolMode).toBe('auto')
     expect(prefs.defaultToolMode).toBe('auto')
     expect(resolveArmedTurnFlags()).toMatchObject({ toolMode: 'auto' })
+  })
+
+  it('keeps image prompt optimization on by default and persists an explicit opt-out', () => {
+    expect(parsePersistedComposerPrefs({}).optimizeImagePrompt).toBe(true)
+    expect(resolveArmedTurnFlags().optimizeImagePrompt).toBe(true)
+
+    useComposerPrefs.getState().setOptimizeImagePrompt(false)
+
+    expect(useComposerPrefs.getState().optimizeImagePrompt).toBe(false)
+    expect(resolveArmedTurnFlags().optimizeImagePrompt).toBe(false)
+    expect(parsePersistedComposerPrefs({ optimizeImagePrompt: false }).optimizeImagePrompt).toBe(false)
   })
 
   it('forces Deep Research to enabled and clears forced search', () => {

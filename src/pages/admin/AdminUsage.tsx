@@ -288,9 +288,21 @@ export default function AdminUsage() {
           </div>
         ) : (
           <>
-          <div className="hidden rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] overflow-x-auto xl:block">
-            <table className="min-w-[1120px] w-full text-sm tabular-nums">
-              <thead className="bg-[var(--color-bg-muted)] text-[12px] text-[var(--color-fg-subtle)]">
+          <div className="hidden overflow-x-auto rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] xl:block">
+            <table className="w-full min-w-[1320px] table-fixed text-sm tabular-nums">
+              <colgroup>
+                <col className="w-[150px]" />
+                <col className="w-[190px]" />
+                <col className="w-[220px]" />
+                <col className="w-[210px]" />
+                <col className="w-[175px]" />
+                <col className="w-[165px]" />
+                <col className="w-[82px]" />
+                <col className="w-[82px]" />
+                <col className="w-[105px]" />
+                <col className="w-[56px]" />
+              </colgroup>
+              <thead className="whitespace-nowrap bg-[var(--color-bg-muted)] text-[12px] text-[var(--color-fg-subtle)]">
                 <tr>
                   <th className="text-left py-2.5 px-4 font-medium">{t('usage.table.time', { defaultValue: 'Time' })}</th>
                   <th className="text-left py-2.5 px-4 font-medium">{t('usage.table.user')}</th>
@@ -306,63 +318,64 @@ export default function AdminUsage() {
               </thead>
               <tbody>
                 {records.map((r) => (
-                  <tr key={r.id} className="border-t border-[var(--color-divider)]">
+                  <tr key={r.id} className="border-t border-[var(--color-divider)] hover:bg-[var(--color-bg-muted)]/45">
                     <td className="py-2 px-4 text-[12px] text-[var(--color-fg-muted)] whitespace-nowrap">{timeFmt.format(new Date(r.created_at * 1000))}</td>
-                    <td className="py-2 px-4 truncate max-w-[12rem]">{r.user_email || r.user_id}</td>
-                    <td className="py-2 px-4 max-w-[14rem]">
-                      {r.conversation_deleted ? (
-                        <span className="text-[var(--color-fg-faint)] italic">
-                          {t('usage.conversationDeleted', { defaultValue: 'Deleted' })}
-                        </span>
-                      ) : r.conversation_id ? (
-                        <Link
-                          to={`/admin/users/${encodeURIComponent(r.user_id)}/conversations/${encodeURIComponent(r.conversation_id)}`}
-                          className="block truncate text-[var(--color-accent)] hover:underline"
-                          title={r.conversation_title || r.conversation_id}
-                        >
-                          {r.conversation_title || r.conversation_id}
-                        </Link>
-                      ) : (
-                        <span className="text-[var(--color-fg-faint)]">—</span>
-                      )}
-                      {r.workspace_name || r.workspace_id ? (
-                        <span
-                          className="mt-0.5 inline-block max-w-full truncate rounded-full border border-[var(--color-border)] px-1.5 text-[10px] text-[var(--color-fg-subtle)]"
-                          title={r.workspace_name || r.workspace_id}
-                        >
-                          {t('usage.workspaceTag', { defaultValue: 'WS' })} · {r.workspace_name || r.workspace_id}
-                        </span>
-                      ) : null}
+                    <td className="truncate px-4 py-2" title={r.user_email || r.user_id}>{r.user_email || r.user_id}</td>
+                    <td className="px-4 py-2">
+                      <div className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
+                        {r.conversation_deleted ? (
+                          <span className="min-w-0 truncate text-[var(--color-fg-faint)] italic">
+                            {t('usage.conversationDeleted', { defaultValue: 'Deleted' })}
+                          </span>
+                        ) : r.conversation_id ? (
+                          <Link
+                            to={`/admin/users/${encodeURIComponent(r.user_id)}/conversations/${encodeURIComponent(r.conversation_id)}`}
+                            className="min-w-0 flex-1 truncate text-[var(--color-accent)] hover:underline"
+                            title={r.conversation_title || r.conversation_id}
+                          >
+                            {r.conversation_title || r.conversation_id}
+                          </Link>
+                        ) : (
+                          <span className="text-[var(--color-fg-faint)]">—</span>
+                        )}
+                        {r.workspace_name || r.workspace_id ? (
+                          <span
+                            className="max-w-[5.5rem] shrink-0 truncate rounded-full border border-[var(--color-border)] px-1.5 text-[10px] text-[var(--color-fg-subtle)]"
+                            title={r.workspace_name || r.workspace_id}
+                          >
+                            {t('usage.workspaceTag', { defaultValue: 'WS' })} · {r.workspace_name || r.workspace_id}
+                          </span>
+                        ) : null}
+                      </div>
                     </td>
-                    <td className="py-2 px-4 text-[12px]">
-                      <span className="inline-flex flex-wrap items-center gap-1">
-                        {modelLabel(r.model_id)}
+                    <td className="px-4 py-2 text-[12px]">
+                      <span className="flex min-w-0 items-center gap-1 whitespace-nowrap">
+                        <span className="min-w-0 flex-1 truncate" title={modelLabel(r.model_id)}>
+                          {modelLabel(r.model_id)}
+                        </span>
                         {r.ttft_fallback_model ? (
                           <span
-                            className="rounded-full border border-[var(--color-warning)] px-1.5 text-[10px] text-[var(--color-warning)]"
+                            className="shrink-0 rounded-full border border-[var(--color-warning)] px-1.5 text-[10px] text-[var(--color-warning)]"
                             title={t('usage.ttftFallbackTitle', {
                               defaultValue:
                                 'Primary model produced no output in time; this turn was served by the fallback model {{model}}',
                               model: r.ttft_fallback_model,
                             })}
                           >
-                            {t('usage.ttftFallbackTag', {
-                              defaultValue: 'Timeout fallback → {{model}}',
-                              model: r.ttft_fallback_model,
-                            })}
+                            {t('usage.ttftFallbackShort', { defaultValue: 'Timeout fallback' })}
                           </span>
                         ) : null}
                       </span>
                     </td>
-                    <td className="py-2 px-4 text-[12px]">
+                    <td className="px-4 py-2 text-[12px]">
                       {r.channel_name || r.channel_id ? (
-                        <span className="inline-flex items-center gap-1">
-                          <span className="truncate max-w-[8rem] text-[var(--color-fg-muted)]" title={r.channel_name || r.channel_id}>
+                        <span className="flex min-w-0 items-center gap-1 whitespace-nowrap">
+                          <span className="min-w-0 flex-1 truncate text-[var(--color-fg-muted)]" title={r.channel_name || r.channel_id}>
                             {r.channel_name || r.channel_id}
                           </span>
                           {r.fallback ? (
                             <span
-                              className="rounded-full border border-[var(--color-warning)] px-1.5 text-[10px] text-[var(--color-warning)]"
+                              className="shrink-0 rounded-full border border-[var(--color-warning)] px-1.5 text-[10px] text-[var(--color-warning)]"
                               title={t('usage.fallbackTitle', { defaultValue: 'Served by the model’s fallback channel' })}
                             >
                               {t('usage.fallbackTag', { defaultValue: 'Fallback' })}
@@ -373,9 +386,9 @@ export default function AdminUsage() {
                         <span className="text-[var(--color-fg-faint)]">—</span>
                       )}
                     </td>
-                    <td className="py-2 px-4 text-[var(--color-fg-muted)] whitespace-nowrap">
-                      <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-                        {purposeLabel(r.purpose)}
+                    <td className="whitespace-nowrap px-4 py-2 text-[var(--color-fg-muted)]">
+                      <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
+                        <span className="min-w-0 flex-1 truncate" title={purposeLabel(r.purpose)}>{purposeLabel(r.purpose)}</span>
                         {r.status === 'error' ? (
                           <button
                             type="button"

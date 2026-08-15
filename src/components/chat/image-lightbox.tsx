@@ -5,10 +5,10 @@
  *
  * Render style: dark backdrop, centred image up to 96vw × 90vh, "object-contain"
  * so portrait & landscape both fit, with a close button in the top-right and an
- * external-link affordance to open the original. Source URL + alt are the only
- * required inputs.
+ * external-link and download affordances for the original bytes. Source URL +
+ * alt are the only required inputs.
  */
-import { X, ExternalLink } from 'lucide-react'
+import { Download, ExternalLink, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Dialog, DialogClose, DialogOverlay, DialogPortal } from '@/components/ui/dialog'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
@@ -21,9 +21,10 @@ interface ImageLightboxProps {
   alt?: string
   /** Optional download/original URL (when src is a thumbnail). Defaults to src. */
   downloadUrl?: string
+  filename?: string
 }
 
-export function ImageLightbox({ open, onOpenChange, src, alt, downloadUrl }: ImageLightboxProps) {
+export function ImageLightbox({ open, onOpenChange, src, alt, downloadUrl, filename }: ImageLightboxProps) {
   const { t } = useTranslation('common')
   const href = downloadUrl ?? src
   return (
@@ -49,6 +50,14 @@ export function ImageLightbox({ open, onOpenChange, src, alt, downloadUrl }: Ima
           />
           {/* Top-right control cluster */}
           <div className="absolute top-3 right-3 sm:top-5 sm:right-5 flex items-center gap-1.5">
+            <a
+              href={href}
+              download={filename ?? ''}
+              aria-label={t('actions.download')}
+              className="inline-flex items-center justify-center size-9 rounded-full bg-[var(--color-surface)]/90 text-[var(--color-fg)] hover:bg-[var(--color-surface)] interactive shadow-[var(--shadow-sm)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+            >
+              <Download size={15} aria-hidden />
+            </a>
             <a
               href={href}
               target="_blank"

@@ -9,6 +9,9 @@ export type ComposerParamValues = Record<string, ParamValue>
 export interface PersistedComposerPrefs {
   mode: ComposerMode
   verify: boolean
+  /** Direct image-model turns rewrite prompts by default; users can opt out and
+   * send their exact wording to the image provider. */
+  optimizeImagePrompt: boolean
   // Per-turn tool policy. Deep Research requires tools, so selecting it forces
   // this to enabled; the setters keep that invariant in persisted state.
   toolMode: ToolMode
@@ -29,6 +32,7 @@ export interface PersistedComposerPrefs {
 interface ComposerPrefsStore extends PersistedComposerPrefs {
   setMode: (mode: ComposerMode) => void
   setVerify: (verify: boolean) => void
+  setOptimizeImagePrompt: (enabled: boolean) => void
   setToolMode: (toolMode: ToolMode) => void
   // Update the mirror of the server-side default tool policy.
   setDefaultToolMode: (toolMode: ToolMode) => void
@@ -45,6 +49,7 @@ const MAX_DRAFT_LEN = 12_000
 const DEFAULT_PREFS: PersistedComposerPrefs = {
   mode: 'default',
   verify: false,
+  optimizeImagePrompt: true,
   toolMode: 'auto',
   forceWebSearch: false,
   defaultToolMode: 'auto',
@@ -147,6 +152,7 @@ export function parsePersistedComposerPrefs(parsed: unknown): PersistedComposerP
   return {
     mode: isMode(parsed.mode) ? parsed.mode : DEFAULT_PREFS.mode,
     verify: parsed.verify === true,
+    optimizeImagePrompt: parsed.optimizeImagePrompt !== false,
     toolMode,
     // forced search only exists inside an explicitly disabled-tools turn
     forceWebSearch: toolMode === 'disabled' && parsed.forceWebSearch === true,
@@ -175,6 +181,7 @@ function persistedFrom(state: PersistedComposerPrefs, patch: Partial<PersistedCo
   return {
     mode: state.mode,
     verify: state.verify,
+    optimizeImagePrompt: state.optimizeImagePrompt,
     toolMode: state.toolMode,
     forceWebSearch: state.forceWebSearch,
     defaultToolMode: state.defaultToolMode,
@@ -212,6 +219,9 @@ export const useComposerPrefs = create<ComposerPrefsStore>((set) => {
     },
     setVerify(verify) {
       commit({ verify })
+    },
+    setOptimizeImagePrompt(optimizeImagePrompt) {
+      commit({ optimizeImagePrompt })
     },
     setToolMode(toolMode) {
       // Every policy except enabled exits Deep Research, whose pipeline always

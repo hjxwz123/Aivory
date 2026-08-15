@@ -517,6 +517,7 @@ func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opt
 	streamCtx := contextWithoutProviderRequestRecorder(ctx)
 	streamCtx = contextWithoutProviderVisibleOutput(streamCtx)
 	requestRecorder := newProviderRequestRecorder(channel.Type)
+	requestRecorder.captureBody = settingBool(t.db, "log_request_bodies", true)
 	streamCtx = contextWithProviderRequestRecorder(streamCtx, requestRecorder)
 	// We capture deltas but only really care about the final result.
 	captured := strings.Builder{}

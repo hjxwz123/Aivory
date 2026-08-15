@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"mime/multipart"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"aivory/server/internal/store"
@@ -21,8 +23,8 @@ func mustHTTPRequest(t *testing.T, url, body string) *http.Request {
 }
 
 // §B5 request logging: successRequestLoggingEnabled gates whether SUCCESS usage
-// rows carry the full provider request (error rows always carry it — that path
-// reads the recorder's `last` snapshot directly and is not settings-gated).
+// rows carry provider diagnostics. Error rows remain available independently;
+// the request-body privacy switch is covered separately below.
 func TestSuccessRequestLoggingGating(t *testing.T) {
 	// The settings cache is process-global while each test uses its own temporary
 	// database. Isolate repeated/shuffled runs from another fixture's values.
@@ -67,6 +69,57 @@ func TestSuccessRequestLoggingGating(t *testing.T) {
 	set("log_full_requests", false)
 	if o.successRequestLoggingEnabled() {
 		t.Fatal("master off: success rows should not capture even with errors-only off")
+	}
+}
+
+func TestProviderRequestBodyLoggingCanBeDisabledIndependently(t *testing.T) {
+	rec := newProviderRequestRecorder()
+	rec.captureAll = true
+	rec.captureBody = false
+	rec.record(mustHTTPRequest(t, "https://api.example/v1/messages", `{"prompt":"private"}`))
+	rec.attachFailure(false, "upstream failed")
+
+	snapshots := rec.snapshots()
+	if len(snapshots) != 1 {
+		t.Fatalf("snapshots = %d, want 1", len(snapshots))
+	}
+	if snapshots[0].Method != "POST" || snapshots[0].URL == "" || snapshots[0].Error == "" {
+		t.Fatalf("non-body diagnostics were lost: %+v", snapshots[0])
+	}
+	if snapshots[0].Body != "" || rec.snapshot().Body != "" {
+		t.Fatalf("disabled request-body logging retained content: %+v", snapshots[0])
+	}
+}
+
+func TestProviderRequestDiagnosticsRedactsMultipartImageBytes(t *testing.T) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("prompt", "keep this prompt"); err != nil {
+		t.Fatal(err)
+	}
+	file, err := writer.CreateFormFile("image", "source.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.Write([]byte("raw-image-secret")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest("POST", "https://images.example/v1/images/edits", bytes.NewReader(body.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("content-type", writer.FormDataContentType())
+	req.Header.Set("authorization", "Bearer provider-secret")
+
+	diagnostics := CaptureProviderRequestDiagnostics(req, true)
+	if !strings.Contains(diagnostics.Body, "keep this prompt") || !strings.Contains(diagnostics.Body, "[redacted binary]") {
+		t.Fatalf("multipart diagnostics missing safe fields: %s", diagnostics.Body)
+	}
+	if strings.Contains(diagnostics.Body, "raw-image-secret") || strings.Contains(diagnostics.Headers, "provider-secret") {
+		t.Fatalf("multipart diagnostics leaked provider data: body=%s headers=%s", diagnostics.Body, diagnostics.Headers)
 	}
 }
 

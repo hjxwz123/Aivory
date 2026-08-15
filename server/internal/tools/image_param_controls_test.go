@@ -197,8 +197,8 @@ func TestImageGenerateToolFaithfullyEditsCurrentAttachmentWithModelDefaults(t *t
 		if got := req.FormValue("input_fidelity"); got != "" {
 			t.Fatalf("GPT Image 2 must omit unsupported input_fidelity, got %q", got)
 		}
-		if got := req.FormValue("size"); got != "1280x720" {
-			t.Fatalf("source-ratio size = %q, want 1280x720", got)
+		if got := req.FormValue("size"); got != "1536x864" {
+			t.Fatalf("source-ratio size = %q, want 1536x864", got)
 		}
 		prompt := req.FormValue("prompt")
 		if !strings.Contains(prompt, exactInstruction) || !strings.Contains(prompt, "Preserve every other detail") {
@@ -474,5 +474,52 @@ func TestGeminiImageGenerationMergesAspectParamsAndProtectsNativeFields(t *testi
 		if _, exists := captured[forbidden]; exists {
 			t.Fatalf("forbidden field %q reached Gemini body: %#v", forbidden, captured)
 		}
+	}
+}
+
+func TestGeminiImageGenerationDefaultsKnownModelsTo2K(t *testing.T) {
+	tests := []struct {
+		name   string
+		model  string
+		params map[string]any
+		want   string
+	}{
+		{name: "gemini 3 pro", model: "gemini-3-pro-image-preview", want: "2K"},
+		{name: "gemini 3.1 flash", model: "gemini-3.1-flash-image-preview", want: "2K"},
+		{name: "nano banana pro alias", model: "nano-banana-pro-preview", want: "2K"},
+		{name: "admin override", model: "gemini-3-pro-image-preview", params: map[string]any{
+			"generationConfig": map[string]any{"imageConfig": map[string]any{"imageSize": "4K"}},
+		}, want: "4K"},
+		{name: "older fixed resolution model", model: "gemini-2.5-flash-image"},
+		{name: "unknown compatible model", model: "provider-gemini-image-alias"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var captured map[string]any
+			useImageTestHTTPClient(t, func(req *http.Request) (*http.Response, error) {
+				if err := json.NewDecoder(req.Body).Decode(&captured); err != nil {
+					t.Fatalf("decode request: %v", err)
+				}
+				return imageSuccessResponse(`{"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"aW1hZ2U="}}]}}]}`), nil
+			})
+
+			if _, err := geminiGenerateImages(
+				context.Background(),
+				"https://gemini.example.test",
+				"server-secret",
+				tt.model,
+				imgInput{Prompt: "server prompt", N: 1},
+				nil,
+				tt.params,
+			); err != nil {
+				t.Fatalf("geminiGenerateImages: %v", err)
+			}
+			generationConfig, _ := captured["generationConfig"].(map[string]any)
+			imageConfig, _ := generationConfig["imageConfig"].(map[string]any)
+			got, _ := imageConfig["imageSize"].(string)
+			if got != tt.want {
+				t.Fatalf("imageSize = %q, want %q; body=%#v", got, tt.want, captured)
+			}
+		})
 	}
 }
