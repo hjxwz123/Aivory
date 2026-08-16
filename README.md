@@ -381,4 +381,4 @@ cd server && go vet ./... && go build ./...
 
 ## Acknowledgements
 
-[MinerU](https://mineru.net) · [Qdrant](https://qdrant.tech) · [SearXNG](https://github.com/searxng/searxng) · [Radix UI](https://www.radix-ui.com)
+[Qdrant](https://qdrant.tech/) · [Radix UI](https://www.radix-ui.com/) · [Linux Do](https://linux.do/)

@@ -358,7 +358,4 @@ go build ./...
 
 ## 致谢
 
-- [MinerU](https://mineru.net) 提供文档解析云服务。
-- [Qdrant](https://qdrant.tech) 提供向量数据库。
-- [SearXNG](https://github.com/searxng/searxng) 提供自部署元搜索引擎。
-- Radix UI / shadcn 的无头组件生态，Aivory 在其之上重新主题化。
+[Qdrant](https://qdrant.tech/) · [Radix UI](https://www.radix-ui.com/) · [Linux Do](https://linux.do/)
