@@ -28,6 +28,7 @@ const OWNED_KEYS = [
   'search_provider',
   'search_base_url',
   'search_api_key',
+  'search_engines',
   'sandbox_base_url',
   'sandbox_api_key',
   'sandbox_exec_timeout_sec',
@@ -376,6 +377,19 @@ export default function AdminTools() {
                       value={readString('search_base_url')}
                       disabled={saving}
                       onChange={(e) => setDraft({ ...draft, search_base_url: e.target.value })}
+                    />
+                  </Field>
+                  <Field
+                    label={t('admin:settings.fields.searchEngines')}
+                    htmlFor="search-engines"
+                    hint={t('admin:settings.fields.searchEnginesHint')}
+                  >
+                    <Input
+                      id="search-engines"
+                      placeholder={t('admin:settings.fields.searchEnginesPlaceholder')}
+                      value={readString('search_engines')}
+                      disabled={saving}
+                      onChange={(e) => setDraft({ ...draft, search_engines: e.target.value })}
                     />
                   </Field>
                 </div>

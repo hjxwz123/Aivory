@@ -39,6 +39,35 @@ func TestFormatUnresponsiveEngines(t *testing.T) {
 	}
 }
 
+func TestParseSearchEngines(t *testing.T) {
+	got := parseSearchEngines(" Bing, ddg bing\twikipedia ")
+	want := []string{"bing", "ddg", "wikipedia"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("parseSearchEngines = %#v, want %#v", got, want)
+	}
+	if got := parseSearchEngines("   "); len(got) != 0 {
+		t.Fatalf("blank selection = %#v, want empty", got)
+	}
+}
+
+func TestSearxngSearchUsesSelectedEngines(t *testing.T) {
+	var received string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received = r.URL.Query().Get("engines")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[{"title":"Bing result","url":"https://example.test","content":"snippet"}]}`))
+	}))
+	defer srv.Close()
+
+	s := &searxngSearcher{baseURL: srv.URL, engines: []string{"bing", "wikipedia"}}
+	if _, _, err := s.Search(context.Background(), "anything", 5); err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+	if received != "bing,wikipedia" {
+		t.Fatalf("engines query = %q, want %q", received, "bing,wikipedia")
+	}
+}
+
 // A 200 with empty results but failed engines is a real failure (self-hosted
 // SearXNG's engines are routinely IP-blocked / rate-limited) — surface WHICH
 // engines failed instead of a bland "no results" the model reads as a genuine
