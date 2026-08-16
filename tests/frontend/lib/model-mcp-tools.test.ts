@@ -10,9 +10,9 @@ import {
 const AVAILABLE = ['rail', 'papers']
 
 describe('model MCP default selection', () => {
-  it('uses every currently available service for the default policy', () => {
-    expect(resolveModelMCPServerIDs(null, AVAILABLE)).toEqual(AVAILABLE)
-    expect(materializeModelMCPServerIDs(undefined, AVAILABLE)).toEqual(AVAILABLE)
+  it('selects no service for the default policy', () => {
+    expect(resolveModelMCPServerIDs(null, AVAILABLE)).toEqual([])
+    expect(materializeModelMCPServerIDs(undefined, AVAILABLE)).toEqual([])
   })
 
   it('keeps explicit unavailable and deleted IDs visible', () => {
@@ -32,7 +32,7 @@ describe('model MCP default selection', () => {
 
   it('can remove an unavailable saved service without losing other selections', () => {
     expect(toggleModelMCPServerID(['rail', 'disabled'], AVAILABLE, 'disabled')).toEqual(['rail'])
-    expect(toggleModelMCPServerID(null, AVAILABLE, 'papers')).toEqual(['rail'])
+    expect(toggleModelMCPServerID(null, AVAILABLE, 'papers')).toEqual(['papers'])
   })
 
   it('requires global enablement and a non-empty discovery snapshot', () => {

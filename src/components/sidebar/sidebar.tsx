@@ -217,6 +217,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
   const sidebarRef = useRef<HTMLElement>(null)
   const sidebarId = useId()
   const [newProjectOpen, setNewProjectOpen] = useState(false)
+  const [conversationListScrolled, setConversationListScrolled] = useState(false)
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(() => new Set())
   const [loadingProjectIds, setLoadingProjectIds] = useState<Set<string>>(() => new Set())
   const loadedProjectIdsRef = useRef<Set<string>>(new Set())
@@ -460,14 +461,14 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
       </div>
 
       {/* Actions */}
-      <div className={cn('flex flex-col gap-0.5 px-3 max-sm:gap-px max-sm:px-2', collapsed && 'items-center')}>
+      <div className={cn('flex flex-col gap-px px-2', collapsed && 'items-center')}>
         <Tooltip content={collapsed ? t('sidebar.newChat') : ''} side="right">
           <button
             type="button"
             onClick={() => void startNewChat()}
             aria-current={newChatActive ? 'page' : undefined}
             className={cn(
-              'inline-flex h-9 items-center gap-2 rounded-[10px] text-sm font-medium max-lg:h-[var(--tap-min)] max-sm:!h-9 max-sm:gap-1.5 max-sm:rounded-[8px] max-sm:text-[13px]',
+              'inline-flex h-8 items-center gap-2 rounded-[8px] text-[13px] font-medium max-lg:h-[var(--tap-min)] max-sm:!h-9 max-sm:gap-1.5',
               // Filled "selected" look ONLY on the new-chat home; a plain nav row
               // everywhere else so it never reads as selected on /chat, /projects…
               newChatActive
@@ -475,7 +476,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
                 : 'border border-transparent text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
               'interactive',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-              collapsed ? 'w-9 justify-center px-0' : 'w-full justify-between px-3 max-sm:px-2.5',
+              collapsed ? 'w-8 justify-center px-0' : 'w-full justify-between px-2.5',
             )}
           >
             <span className="inline-flex items-center gap-2">
@@ -491,10 +492,10 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             type="button"
             onClick={() => setOpen(true)}
             className={cn(
-              'inline-flex h-9 items-center gap-2 rounded-[10px] text-sm max-lg:h-[var(--tap-min)] max-sm:!h-9 max-sm:gap-1.5 max-sm:rounded-[8px] max-sm:text-[13px]',
+              'inline-flex h-8 items-center gap-2 rounded-[8px] text-[13px] max-lg:h-[var(--tap-min)] max-sm:!h-9 max-sm:gap-1.5',
               'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-              collapsed ? 'w-9 justify-center px-0' : 'w-full justify-between px-3 max-sm:px-2.5',
+              collapsed ? 'w-8 justify-center px-0' : 'w-full justify-between px-2.5',
             )}
           >
             <span className="inline-flex items-center gap-2">
@@ -513,13 +514,13 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
               onClick={onClose}
               aria-current={drawActive ? 'page' : undefined}
               className={cn(
-                'inline-flex h-9 items-center gap-2 rounded-[10px] text-sm max-lg:h-[var(--tap-min)] max-sm:!h-9 max-sm:gap-1.5 max-sm:rounded-[8px] max-sm:text-[13px]',
+                'inline-flex h-8 items-center gap-2 rounded-[8px] text-[13px] max-lg:h-[var(--tap-min)] max-sm:!h-9 max-sm:gap-1.5',
                 drawActive
                   ? 'bg-[var(--color-bg-muted)] text-[var(--color-fg)] font-medium'
                   : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
                 'interactive',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                collapsed ? 'w-9 justify-center px-0' : 'w-full justify-start px-3 max-sm:px-2.5',
+                collapsed ? 'w-8 justify-center px-0' : 'w-full justify-start px-2.5',
               )}
             >
               <ImagePlus size={15} aria-hidden />
@@ -531,7 +532,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
         <div
           aria-hidden
           className={cn(
-            'my-1.5 h-px shrink-0 bg-[var(--color-divider)]',
+            'my-1 h-px shrink-0 bg-[var(--color-divider)]/60',
             collapsed ? 'w-5' : 'mx-2',
           )}
         />
@@ -546,12 +547,12 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
               onClick={onClose}
               aria-current={filesActive ? 'page' : undefined}
               className={cn(
-                'inline-flex h-9 items-center gap-2 rounded-[10px] text-sm interactive max-lg:h-[var(--tap-min)] max-sm:!h-9 max-sm:gap-1.5 max-sm:rounded-[8px] max-sm:text-[13px]',
+                'inline-flex h-8 items-center gap-2 rounded-[8px] text-[13px] interactive max-lg:h-[var(--tap-min)] max-sm:!h-9 max-sm:gap-1.5',
                 filesActive
                   ? 'bg-[var(--color-bg-muted)] text-[var(--color-fg)] font-medium'
                   : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                collapsed ? 'w-9 justify-center px-0' : 'w-full justify-start px-3 max-sm:px-2.5',
+                collapsed ? 'w-8 justify-center px-0' : 'w-full justify-start px-2.5',
               )}
             >
               <FolderOpen size={15} aria-hidden />
@@ -570,12 +571,12 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
               onClick={onClose}
               aria-current={knowledgeBasesActive ? 'page' : undefined}
               className={cn(
-                'inline-flex h-9 items-center gap-2 rounded-[10px] text-sm interactive max-lg:h-[var(--tap-min)] max-sm:!h-9 max-sm:gap-1.5 max-sm:rounded-[8px] max-sm:text-[13px]',
+                'inline-flex h-8 items-center gap-2 rounded-[8px] text-[13px] interactive max-lg:h-[var(--tap-min)] max-sm:!h-9 max-sm:gap-1.5',
                 knowledgeBasesActive
                   ? 'bg-[var(--color-bg-muted)] text-[var(--color-fg)] font-medium'
                   : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                collapsed ? 'w-9 justify-center px-0' : 'w-full justify-start px-3 max-sm:px-2.5',
+                collapsed ? 'w-8 justify-center px-0' : 'w-full justify-start px-2.5',
               )}
             >
               <Database size={15} aria-hidden />
@@ -595,12 +596,12 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             onClick={onClose}
             aria-current={skillsActive ? 'page' : undefined}
             className={cn(
-              'inline-flex h-9 items-center gap-2 rounded-[10px] text-sm interactive max-lg:h-[var(--tap-min)] max-sm:!h-9 max-sm:gap-1.5 max-sm:rounded-[8px] max-sm:text-[13px]',
+              'inline-flex h-8 items-center gap-2 rounded-[8px] text-[13px] interactive max-lg:h-[var(--tap-min)] max-sm:!h-9 max-sm:gap-1.5',
               skillsActive
                 ? 'bg-[var(--color-bg-muted)] text-[var(--color-fg)] font-medium'
                 : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-              collapsed ? 'w-9 justify-center px-0' : 'w-full justify-start px-3 max-sm:px-2.5',
+              collapsed ? 'w-8 justify-center px-0' : 'w-full justify-start px-2.5',
             )}
           >
             <LibraryBig size={15} aria-hidden />
@@ -613,9 +614,13 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
           fades out and a spinner takes its place instead of flashing the old
           (or momentarily empty) space's rows (§ workspace switch animation). */}
       {!collapsed && (
-        <div className="relative mt-2 flex-1 min-h-0 max-sm:mt-1">
+        <div className="relative mt-1 flex-1 min-h-0">
           <div
             ref={listScrollRef}
+            onScroll={(event) => {
+              const scrolled = event.currentTarget.scrollTop > 2
+              setConversationListScrolled((current) => (current === scrolled ? current : scrolled))
+            }}
             className={cn(
               'h-full overflow-y-auto scrollbar-thin transition-opacity duration-200',
               switching && 'opacity-0 pointer-events-none',
@@ -795,6 +800,15 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
               </p>
             )}
           </div>
+          <div
+            aria-hidden
+            className={cn(
+              'pointer-events-none absolute inset-x-0 top-0 z-10 h-5',
+              reducedMotion ? 'transition-none' : 'transition-opacity duration-150',
+              conversationListScrolled && !switching ? 'opacity-100' : 'opacity-0',
+            )}
+            style={{ background: 'linear-gradient(to bottom, var(--color-sidebar-bg), transparent)' }}
+          />
           {switching && (
             <div className="absolute inset-0 flex items-center justify-center">
               <Loader2 size={16} className="animate-spin text-[var(--color-fg-subtle)]" aria-hidden />

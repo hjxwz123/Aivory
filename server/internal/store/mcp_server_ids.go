@@ -12,9 +12,9 @@ import (
 // not a nullable JSON array of non-empty server ids.
 var ErrMCPServerIDsInvalid = errors.New("mcp_server_ids must be null or a JSON array of MCP server ids")
 
-// ParseMCPServerIDs preserves the model-default distinction used by the tool
-// picker and orchestrator: absent/null selects every currently eligible MCP
-// service, while an explicit [] selects none by default.
+// ParseMCPServerIDs preserves whether an administrator explicitly configured a
+// model's MCP defaults. Absent/null and explicit [] both select no MCP service;
+// the distinction is retained so the editor can display the default-off state.
 func ParseMCPServerIDs(raw json.RawMessage) (ids []string, configured bool, err error) {
 	raw = bytes.TrimSpace(raw)
 	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {

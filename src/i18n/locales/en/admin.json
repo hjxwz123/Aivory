@@ -110,7 +110,7 @@
       "builtinToolsLoadFailed": "Could not load the built-in tool registry. The saved policy has not been changed.",
       "mcpToolsLabel": "MCP tools",
       "mcpToolsHint": "Choose the MCP services selected by default for this model. Users may adjust them in chat; only globally enabled services with synchronized tools can run.",
-      "mcpToolsDefaultAll": "All selected by default",
+      "mcpToolsDefaultOff": "Off by default",
       "mcpToolsCustom": "Custom defaults",
       "mcpToolsSelected": "{{selected}}/{{total}} available selected by default",
       "mcpToolsSelectAll": "Select all",

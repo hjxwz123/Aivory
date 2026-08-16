@@ -87,17 +87,20 @@ func TestSelectedToolSubsetFiltersBuiltinHostedAndMCPDeclarations(t *testing.T) 
 	}
 }
 
-func TestSelectedToolIDsOmittedMeansAllAndExplicitEmptyMeansNone(t *testing.T) {
+func TestSelectedToolIDsOmittedUsesModelDefaultsAndExplicitEmptyMeansNone(t *testing.T) {
 	t.Run("omitted", func(t *testing.T) {
 		orchestrator, provider, model, conversation, _, _ := setupToolRouteTest(t)
 		orchestrator.tools = &selectedToolsRegistry{}
 		runToolRouteTurn(t, orchestrator, model.ID, conversation.ID, RunRequest{ToolMode: ToolModeEnabled})
 		request := provider.mainRequests[0]
-		for _, name := range []string{
-			"aivory_web_search", "python_execute", "mcp_train_lookup_abc123", "mcp_paper_search_def456",
-		} {
+		for _, name := range []string{"aivory_web_search", "python_execute"} {
 			if !requestHasTool(request, name) {
 				t.Fatalf("omitted selection lost %q: %+v", name, request.Tools)
+			}
+		}
+		for _, name := range []string{"mcp_train_lookup_abc123", "mcp_paper_search_def456"} {
+			if requestHasTool(request, name) {
+				t.Fatalf("default-off MCP tool %q was declared: %+v", name, request.Tools)
 			}
 		}
 	})

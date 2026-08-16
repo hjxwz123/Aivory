@@ -2855,8 +2855,8 @@ func validateConfigArchiveModelMCPServerIDs(row map[string]json.RawMessage) erro
 }
 
 // backupNullableStringField reads an exported nullable TEXT cell. It differs
-// from backupStringField because JSON null is a meaningful default-all policy
-// for nullable model tool defaults rather than malformed input.
+// from backupStringField because JSON null is a meaningful model tool policy
+// value rather than malformed input.
 func backupNullableStringField(row map[string]json.RawMessage, key string) (value string, present, isNull bool, err error) {
 	raw, ok := row[key]
 	if !ok {

@@ -182,7 +182,7 @@ export function ToolSelectionDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <DialogBody className="flex flex-col px-4 pb-3 sm:px-6">
+        <DialogBody className="flex min-h-0 flex-col overflow-hidden px-4 pb-3 sm:px-6">
           <div className="flex shrink-0 flex-wrap items-center gap-2 pb-3">
             <div className="relative min-w-[12rem] flex-1">
               <Search
@@ -222,7 +222,11 @@ export function ToolSelectionDialog({
             </Button>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain border-y border-[var(--color-divider)] scrollbar-thin">
+          <div
+            className="min-h-0 max-h-[min(56dvh,30rem)] flex-1 overflow-y-auto overscroll-contain border-y border-[var(--color-divider)] scrollbar-thin"
+            role="region"
+            aria-label={t('composer.toolSelection.title', { defaultValue: 'Choose tools' })}
+          >
             {loading ? (
               <div className="space-y-1 py-2" aria-label={t('composer.toolSelection.loading', { defaultValue: 'Loading tools' })}>
                 {[0, 1, 2].map((item) => (

@@ -110,7 +110,7 @@
       "builtinToolsLoadFailed": "Impossible de charger le registre des outils intégrés. La configuration enregistrée n’a pas été modifiée.",
       "mcpToolsLabel": "Outils MCP",
       "mcpToolsHint": "Choisissez les services MCP sélectionnés par défaut pour ce modèle. Les utilisateurs peuvent les modifier dans le chat ; seuls les services activés globalement et synchronisés peuvent s’exécuter.",
-      "mcpToolsDefaultAll": "Tous sélectionnés par défaut",
+      "mcpToolsDefaultOff": "Désactivés par défaut",
       "mcpToolsCustom": "Sélection par défaut personnalisée",
       "mcpToolsSelected": "{{selected}}/{{total}} services disponibles sélectionnés par défaut",
       "mcpToolsSelectAll": "Tout sélectionner",

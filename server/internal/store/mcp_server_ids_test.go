@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestMCPServerIDsPolicyDistinguishesDefaultAllFromExplicitNone(t *testing.T) {
+func TestMCPServerIDsPolicyDistinguishesDefaultOffFromExplicitNone(t *testing.T) {
 	for _, raw := range []json.RawMessage{nil, json.RawMessage(`null`), json.RawMessage(` `)} {
 		ids, configured, err := ParseMCPServerIDs(raw)
 		if err != nil || configured || ids != nil {
@@ -59,7 +59,7 @@ func TestModelMCPServerIDsPersistenceKeepsNullablePolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	if defaultModel.MCPServerIDs != nil {
-		t.Fatalf("omitted mcp_server_ids = %s, want nil/default-all", defaultModel.MCPServerIDs)
+		t.Fatalf("omitted mcp_server_ids = %s, want nil/default-off", defaultModel.MCPServerIDs)
 	}
 	var nullable sql.NullString
 	if err := db.QueryRow(`SELECT mcp_server_ids FROM models WHERE id=?`, defaultModel.ID).Scan(&nullable); err != nil || nullable.Valid {
@@ -88,6 +88,6 @@ func TestModelMCPServerIDsPersistenceKeepsNullablePolicy(t *testing.T) {
 	configured.MCPServerIDs = nil
 	updated, err = UpdateModel(ctx, db, configured.ID, *configured)
 	if err != nil || updated.MCPServerIDs != nil {
-		t.Fatalf("default-all update = %s, err=%v", updated.MCPServerIDs, err)
+		t.Fatalf("default-off update = %s, err=%v", updated.MCPServerIDs, err)
 	}
 }

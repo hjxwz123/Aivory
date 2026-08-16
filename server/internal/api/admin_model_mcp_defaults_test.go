@@ -63,11 +63,11 @@ func TestAdminModelMCPDefaultsOmittedEmptyNullAndInvalidSemantics(t *testing.T) 
 		t.Fatalf("omitted patch changed policy to %s, err=%v", stored.MCPServerIDs, err)
 	}
 	if recorder = patch(`{"mcp_server_ids":null}`); recorder.Code != http.StatusOK {
-		t.Fatalf("null reset status=%d body=%s", recorder.Code, recorder.Body.String())
+		t.Fatalf("null default-off reset status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 	stored, err = store.GetModel(t.Context(), db, noneModel.ID)
 	if err != nil || stored.MCPServerIDs != nil {
-		t.Fatalf("null patch did not reset default-all: %s, err=%v", stored.MCPServerIDs, err)
+		t.Fatalf("null patch did not reset default-off: %s, err=%v", stored.MCPServerIDs, err)
 	}
 	if recorder = patch(`{"mcp_server_ids":[""]}`); recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "mcp_server_ids") {
 		t.Fatalf("invalid patch status=%d body=%s", recorder.Code, recorder.Body.String())

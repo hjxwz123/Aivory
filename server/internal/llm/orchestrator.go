@@ -535,16 +535,12 @@ func filterModelBuiltinTools(defs []ToolDef, allowed map[string]bool) []ToolDef 
 	return out
 }
 
-// modelMCPServerIDSet resolves the model's default MCP selection. nil means all
-// currently eligible services; explicit [] and malformed non-null data both
-// fail closed to an empty set.
+// modelMCPServerIDSet resolves the model's default MCP selection. Missing,
+// explicit-empty, and malformed policies all fail closed to an empty set.
 func modelMCPServerIDSet(raw json.RawMessage) map[string]bool {
 	ids, configured, err := store.ParseMCPServerIDs(raw)
-	if err != nil {
+	if err != nil || !configured {
 		return map[string]bool{}
-	}
-	if !configured {
-		return nil
 	}
 	allowed := make(map[string]bool, len(ids))
 	for _, id := range ids {
