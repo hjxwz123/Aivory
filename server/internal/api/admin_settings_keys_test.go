@@ -46,6 +46,42 @@ func TestAdminSettingsKeysAreUniqueAndExcludeRetiredPurchasingSettings(t *testin
 	}
 }
 
+func TestSearchEngineSettingNormalizesAndRejectsUnsafeNames(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "search-engines-settings.db"))
+	defer db.Close()
+	d := Deps{DB: db}
+
+	patch := func(body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPatch, "/api/admin/settings", strings.NewReader(body))
+		req.Header.Set("content-type", "application/json")
+		rec := httptest.NewRecorder()
+		adminSettingsSet(d, rec, req)
+		return rec
+	}
+
+	if rec := patch(`{"search_engines":" Bing, ddg bing wikipedia "}`); rec.Code != http.StatusOK {
+		t.Fatalf("valid engine selection status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var stored string
+	if err := db.QueryRow(`SELECT value FROM settings WHERE key=?`, "search_engines").Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored != `"bing,ddg,wikipedia"` {
+		t.Fatalf("normalized search_engines = %q", stored)
+	}
+
+	if rec := patch(`{"search_engines":"bing,duck/duckgo"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("unsafe engine selection status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if err := db.QueryRow(`SELECT value FROM settings WHERE key=?`, "search_engines").Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored != `"bing,ddg,wikipedia"` {
+		t.Fatalf("invalid patch changed search_engines to %q", stored)
+	}
+}
+
 func TestRerankSettingsSeedDisabled(t *testing.T) {
 	db := openMigrated(t, filepath.Join(t.TempDir(), "rerank-seed-settings.db"))
 	defer db.Close()

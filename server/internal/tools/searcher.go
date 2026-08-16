@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"unicode"
 
 	"aivory/server/internal/llm"
 )
@@ -21,7 +22,7 @@ type Searcher interface {
 
 // newSearcher builds the configured searcher. SearXNG can run unauthenticated
 // (apiKey is empty), but Serper/Brave require a key.
-func newSearcher(provider, apiKey, baseURL string) Searcher {
+func newSearcher(provider, apiKey, baseURL string, selectedEngines ...[]string) Searcher {
 	switch strings.ToLower(provider) {
 	case "serper":
 		if apiKey == "" {
@@ -37,13 +38,13 @@ func newSearcher(provider, apiKey, baseURL string) Searcher {
 		if baseURL == "" {
 			return nil
 		}
-		return &searxngSearcher{baseURL: strings.TrimRight(baseURL, "/")}
+		return &searxngSearcher{baseURL: strings.TrimRight(baseURL, "/"), engines: firstEngineSelection(selectedEngines)}
 	case "", "auto":
 		if apiKey != "" {
 			return &serperSearcher{apiKey: apiKey}
 		}
 		if baseURL != "" {
-			return &searxngSearcher{baseURL: strings.TrimRight(baseURL, "/")}
+			return &searxngSearcher{baseURL: strings.TrimRight(baseURL, "/"), engines: firstEngineSelection(selectedEngines)}
 		}
 		return nil
 	default:
@@ -142,13 +143,56 @@ func (b *braveSearcher) Search(ctx context.Context, query string, topK int) (str
 }
 
 // searxngSearcher queries a self-hosted SearXNG instance over JSON.
-type searxngSearcher struct{ baseURL string }
+type searxngSearcher struct {
+	baseURL string
+	engines []string
+}
+
+func firstEngineSelection(selections [][]string) []string {
+	if len(selections) == 0 || len(selections[0]) == 0 {
+		return nil
+	}
+	return append([]string(nil), selections[0]...)
+}
+
+// parseSearchEngines accepts the compact value used by the administrator
+// settings page. SearXNG accepts engine names and shortcuts (for example
+// "bing" or "ddg"), so Aivory deliberately does not maintain a fixed engine
+// catalog. An empty value leaves SearXNG's own enabled-engine set untouched.
+func parseSearchEngines(value string) []string {
+	parts := strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || unicode.IsSpace(r)
+	})
+	seen := make(map[string]struct{}, len(parts))
+	engines := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		part = strings.ToLower(part)
+		if _, exists := seen[part]; exists {
+			continue
+		}
+		seen[part] = struct{}{}
+		engines = append(engines, part)
+	}
+	return engines
+}
 
 func (s *searxngSearcher) Search(ctx context.Context, query string, topK int) (string, []llm.Citation, error) {
 	// baseURL is used verbatim (an instance may legitimately be MOUNTED under a
 	// /search subpath, so stripping the suffix would break it); an admin who
 	// pasted the endpoint by mistake gets a targeted hint on the resulting 404.
-	u := fmt.Sprintf("%s/search?q=%s&format=json&safesearch=1", s.baseURL, url.QueryEscape(query))
+	params := url.Values{
+		"q":          []string{query},
+		"format":     []string{"json"},
+		"safesearch": []string{"1"},
+	}
+	if len(s.engines) > 0 {
+		params.Set("engines", strings.Join(s.engines, ","))
+	}
+	u := fmt.Sprintf("%s/search?%s", s.baseURL, params.Encode())
 	req, _ := http.NewRequestWithContext(ctx, "GET", u, nil)
 	req.Header.Set("Accept", "application/json")
 	// SearXNG's default bot limiter blocks user agents that match bot/crawler

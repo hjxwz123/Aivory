@@ -1439,7 +1439,9 @@ var settingsKeys = []string{
 	// Provider ∈ {"", "serper", "brave", "searxng", "auto"}. SearXNG is the
 	// self-hosted option and only needs base_url (no api_key). Empty provider
 	// falls back to the env values and finally to the no-op placeholder.
-	"search_provider", "search_base_url", "search_api_key",
+	// search_engines is a comma/space-separated list of SearXNG engine names or
+	// shortcuts. Empty means that SearXNG chooses its enabled defaults.
+	"search_provider", "search_base_url", "search_api_key", "search_engines",
 	// §4.6 upload safety — extension allowlist. Stored as a single
 	// comma-separated string (e.g. "pdf,docx,txt,png,jpg"). Empty string means
 	// "use the safe default allowlist" (see api.defaultUploadExtensions).
@@ -1482,6 +1484,39 @@ var settingsKeys = []string{
 // Any settings key whose name contains one of these (case-insensitive) will
 // have its non-empty string value replaced with the mask on GET responses.
 var sensitiveKeywords = []string{"password", "secret", "api_key", "token", "key_secret", "key_id", "access_key"}
+
+func normalizeSearchEnginesSetting(value string) (string, error) {
+	const maxEngines = 64
+	const maxEngineNameBytes = 80
+	parts := strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\t' || r == '\r' || r == '\n'
+	})
+	seen := make(map[string]struct{}, len(parts))
+	engines := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.ToLower(strings.TrimSpace(part))
+		if part == "" {
+			continue
+		}
+		if len(part) > maxEngineNameBytes {
+			return "", errInvalidInput
+		}
+		for _, r := range part {
+			if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.') {
+				return "", errInvalidInput
+			}
+		}
+		if _, exists := seen[part]; exists {
+			continue
+		}
+		if len(engines) >= maxEngines {
+			return "", errInvalidInput
+		}
+		seen[part] = struct{}{}
+		engines = append(engines, part)
+	}
+	return strings.Join(engines, ","), nil
+}
 
 // maskSensitiveSettings replaces non-empty string values for sensitive keys
 // with the display mask so credentials are never returned in plaintext (H-1).
@@ -1693,6 +1728,16 @@ func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.R
 					return 0, errInvalidInput
 				}
 				v, _ = json.Marshal(enabled)
+			case "search_engines":
+				var raw string
+				if json.Unmarshal(v, &raw) != nil {
+					return 0, errInvalidInput
+				}
+				normalized, err := normalizeSearchEnginesSetting(raw)
+				if err != nil {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(normalized)
 			case "rag_rerank_enabled":
 				var enabled bool
 				if json.Unmarshal(v, &enabled) != nil {

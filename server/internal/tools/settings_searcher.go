@@ -11,7 +11,7 @@ import (
 )
 
 // settingsSearcher is a thin Searcher that re-resolves provider + base URL +
-// api key from admin settings on every call (§4.4). Mirrors settingsSandbox:
+// api key + optional SearXNG engine selection from admin settings on every call (§4.4). Mirrors settingsSandbox:
 // admin edits take effect on the very next aivory_web_search invocation, no restart.
 //
 // Resolution priority:
@@ -46,7 +46,8 @@ func (s *settingsSearcher) Search(ctx context.Context, query string, topK int) (
 	provider := s.settingString("search_provider", s.fallbackPv)
 	baseURL := s.settingString("search_base_url", s.fallbackURL)
 	apiKey := s.settingString("search_api_key", s.fallbackKey)
-	b := newSearcher(provider, apiKey, baseURL)
+	engines := parseSearchEngines(s.settingString("search_engines", ""))
+	b := newSearcher(provider, apiKey, baseURL, engines)
 	if b == nil {
 		// Mirror the original webSearchTool fallback so the model sees a
 		// consistent "search not configured" reply regardless of which leg of
