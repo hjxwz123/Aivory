@@ -2460,7 +2460,10 @@ func TestCompactionRatioTunablesFailClosedOnInvalidDenominators(t *testing.T) {
 	}
 	store.InvalidateConfig()
 	t.Cleanup(store.InvalidateConfig)
-	mustSet(t, db, "keep_recent_rounds", "100")
+	// Keep one round so this case still has a real summary candidate. The test is
+	// about the invalid inline-overflow ratio falling back to async, not about a
+	// request-only overflow with no old messages to compact.
+	mustSet(t, db, "keep_recent_rounds", "1")
 	mustSet(t, db, "compaction_token_trigger", "10")
 	_, _, action := PlanCompactionForRequest(db,
 		&store.Conversation{SummaryBlocks: json.RawMessage("[]")}, buildHistory(4), 1000, 0)
@@ -2805,6 +2808,90 @@ func TestPlanCompactionHotPath(t *testing.T) {
 	// Large cold-start backlog (> 36) → summarise inline to bound the prompt.
 	if _, _, action3 := PlanCompaction(db, conv, buildHistory(40), 0); action3 != compactInline {
 		t.Fatalf("large backlog: action=%d, want inline", action3)
+	}
+}
+
+func TestPlanCompactionSkipsTokenOverflowWithoutAnOldRound(t *testing.T) {
+	store.InvalidateConfig()
+	t.Cleanup(store.InvalidateConfig)
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, updated_at INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	mustSet(t, db, "compaction_enabled", "true")
+	mustSet(t, db, "keep_recent_rounds", "6")
+	mustSet(t, db, "compaction_token_trigger", "10")
+
+	// The complete request is deliberately over the trigger, but the history is
+	// only one complete turn. There is no older round that a summary can remove.
+	history := buildHistory(2)
+	keep, blocks, action := PlanCompactionForRequest(
+		db,
+		&store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: json.RawMessage("[]")},
+		history,
+		1000,
+		0,
+	)
+	if action != compactNone || len(keep) != len(history) || len(blocks) != 0 {
+		t.Fatalf("token-only overflow without an old round: action=%d keep=%d blocks=%d, want none/%d/0", action, len(keep), len(blocks), len(history))
+	}
+}
+
+func TestPlanCompactionSkipsUnavoidablePerTurnOverflow(t *testing.T) {
+	store.InvalidateConfig()
+	t.Cleanup(store.InvalidateConfig)
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, updated_at INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	mustSet(t, db, "compaction_enabled", "true")
+	mustSet(t, db, "keep_recent_rounds", "6")
+	mustSet(t, db, "compaction_token_trigger", "100")
+
+	// There are old rounds that could technically be summarized, but fixed
+	// request context still exceeds the trigger even after the deepest safe cut.
+	// Retrying token compaction on every new turn cannot solve that condition.
+	history := buildHistory(8)
+	keep, blocks, action := PlanCompactionForRequest(
+		db,
+		&store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: json.RawMessage("[]")},
+		history,
+		1000,
+		0,
+		800,
+	)
+	if action != compactNone || len(keep) != len(history) || len(blocks) != 0 {
+		t.Fatalf("unavoidable request overflow: action=%d keep=%d blocks=%d, want none/%d/0", action, len(keep), len(blocks), len(history))
+	}
+	_, _, action = PlanCompactionForRequest(
+		db,
+		&store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: json.RawMessage("[]")},
+		history,
+		1000,
+		0,
+		50,
+	)
+	if action != compactInline {
+		t.Fatalf("reducible request overflow action=%d, want inline", action)
+	}
+	_, _, action = PlanCompactionForRequest(
+		db,
+		&store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: json.RawMessage("[]")},
+		buildHistory(20),
+		1000,
+		0,
+		800,
+	)
+	if action != compactAsync {
+		t.Fatalf("round overflow with unavoidable request action=%d, want async", action)
 	}
 }
 

@@ -2998,8 +2998,15 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	renderedHistoryTokens := estimateRequestTokens(UnifiedChatRequest{History: compactionHistoryForRequest(
 		keep, channel.Type, model.ID, nativeToolReplay, allowedHistoryTools, fastMode, model.Vision,
 	)}) + summaryTokens(summaryBlocks)
+	minimumCut := deepestAutomaticCompactionCut(history, frontier)
+	minimumRenderedHistoryTokens := estimateRequestTokens(UnifiedChatRequest{History: compactionHistoryForRequest(
+		history[minimumCut:], channel.Type, model.ID, nativeToolReplay, allowedHistoryTools, fastMode, model.Vision,
+	)}) + summaryTokens(summaryBlocks)
+	minimumRequestTokens := RebasedCompactionRequestTokens(
+		requestTokens, renderedHistoryTokens, minimumRenderedHistoryTokens,
+	)
 	keep, summaryBlocks, compactAction := PlanCompactionForRequest(
-		o.db, &compactionConv, history, requestTokens, model.CompactionTokenThreshold,
+		o.db, &compactionConv, history, requestTokens, model.CompactionTokenThreshold, minimumRequestTokens,
 	)
 	if compactAction == compactInline {
 		lease, acquired, leaseErr := o.tryAcquireCompactionLease(ctx, conv.ID)
@@ -3140,14 +3147,24 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 				histNow[freshFrontier:], channelType, currentModelID, nativeToolReplay,
 				historyToolAllowlist, fastMode, vision,
 			)
+			freshRenderedHistoryTokens := estimateRequestTokens(UnifiedChatRequest{History: freshBaseHistory}) + summaryTokens(freshBlocks)
 			freshRequestTokens := RebasedCompactionRequestTokens(
 				requestTokens, plannedRenderedHistoryTokens,
-				estimateRequestTokens(UnifiedChatRequest{History: freshBaseHistory})+summaryTokens(freshBlocks),
+				freshRenderedHistoryTokens,
+			)
+			freshMinimumCut := deepestAutomaticCompactionCut(histNow, freshFrontier)
+			freshMinimumHistory := compactionHistoryForRequest(
+				histNow[freshMinimumCut:], channelType, currentModelID, nativeToolReplay,
+				historyToolAllowlist, fastMode, vision,
+			)
+			freshMinimumRenderedHistoryTokens := estimateRequestTokens(UnifiedChatRequest{History: freshMinimumHistory}) + summaryTokens(freshBlocks)
+			freshMinimumRequestTokens := RebasedCompactionRequestTokens(
+				freshRequestTokens, freshRenderedHistoryTokens, freshMinimumRenderedHistoryTokens,
 			)
 			freshCompactionConv := *fresh
 			freshCompactionConv.ModelID = currentModelID
 			_, _, freshAction := PlanCompactionForRequest(
-				o.db, &freshCompactionConv, histNow, freshRequestTokens, modelThreshold,
+				o.db, &freshCompactionConv, histNow, freshRequestTokens, modelThreshold, freshMinimumRequestTokens,
 			)
 			if freshAction == compactNone {
 				return nil
@@ -3164,7 +3181,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			}()
 			_, finalBlocks, cerr := MaybeCompactForRequest(
 				ctx, o.db, o.task, fresh, histNow, freshRequestTokens,
-				estimateRequestTokens(UnifiedChatRequest{History: freshBaseHistory})+summaryTokens(freshBlocks),
+				freshRenderedHistoryTokens,
 				modelThreshold, compactionModelID, userID, leafID,
 			)
 			completed = cerr == nil && summarizedFrontier(finalBlocks, histNow) > freshFrontier

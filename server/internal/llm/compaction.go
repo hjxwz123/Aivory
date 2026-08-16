@@ -1883,6 +1883,70 @@ func compactionKeepCount(messageCount, keepRounds, retentionPct int) int {
 	return keep
 }
 
+// automaticCompactionCandidateCut finds the safe prefix an automatic pass could
+// replace. A complete request may exceed the token
+// trigger because of system instructions, tool declarations, RAG, or a large
+// attachment while the conversation itself still contains only the recent
+// messages that policy requires us to keep verbatim. In that situation there is
+// nothing a summary model can remove, so treating the overflow as an async/inline
+// action only creates a pointless task and a misleading progress notification.
+//
+// Token-based deepening can only move the cut forward from this baseline. The
+// streaming-row and user-boundary rules below mirror the safety clamps in
+// maybeCompact, so a cut that cannot survive those rules is not a candidate
+// either.
+func automaticCompactionCandidateCut(history []store.Message, frontier, keepMsgs int, tokenOverflow bool) int {
+	if frontier < 0 {
+		frontier = 0
+	}
+	if len(history) == 0 || keepMsgs <= 0 || frontier >= len(history) {
+		return frontier
+	}
+	cut := len(history) - keepMsgs
+	if tokenOverflow {
+		// Token pressure may intentionally override the round-retention target and
+		// keep only the final round verbatim. Use the deepest safe automatic cut
+		// when deciding whether any prefix could be summarized; maybeCompact later
+		// computes the exact cut from suffix token sizes.
+		if tokenCut := len(history) - 2; tokenCut > cut {
+			cut = tokenCut
+		}
+	}
+	if cut <= frontier {
+		return frontier
+	}
+	if cut > len(history) {
+		cut = len(history)
+	}
+	streamingCutoff := protectedStreamingCutoffUnix()
+	for i, m := range history[frontier:cut] {
+		if m.Role == "assistant" && m.Status == "streaming" && m.CreatedAt > streamingCutoff {
+			cut = frontier + i
+			break
+		}
+	}
+	// A summary may only start at a user message so tool-use/result pairs and
+	// their preceding question stay together. Move the tentative cut backwards
+	// exactly as maybeCompact does before it calls the task model.
+	for cut > frontier && cut < len(history) && history[cut].Role != "user" {
+		cut--
+	}
+	return cut
+}
+
+func automaticCompactionHasCandidate(history []store.Message, frontier, keepMsgs int, tokenOverflow bool) bool {
+	return automaticCompactionCandidateCut(history, frontier, keepMsgs, tokenOverflow) > frontier
+}
+
+// deepestAutomaticCompactionCut is the smallest verbatim tail an automatic
+// pass may leave behind. It is used only for request-size planning: if the
+// assembled request would still exceed the trigger after this deepest possible
+// cut, token-triggered compaction cannot solve the overflow and should fall back
+// to the normal round-retention cadence.
+func deepestAutomaticCompactionCut(history []store.Message, frontier int) int {
+	return automaticCompactionCandidateCut(history, frontier, 2, false)
+}
+
 // Compaction action returned by PlanCompaction telling the caller how to advance
 // the summary for this turn.
 const (
@@ -1913,11 +1977,15 @@ func PlanCompaction(db *sql.DB, conv *store.Conversation, history []store.Messag
 	keepRounds, globalTrigger, tokenCap, retentionPct, _, _, _ := compactionSettings(db)
 	modelTrigger := 0
 	requestEstimateComplete := false
+	minimumRequestEstimate := 0
 	if len(options) > 0 {
 		modelTrigger = options[0]
 	}
 	if len(options) > 1 {
 		requestEstimateComplete = options[1] != 0
+	}
+	if len(options) > 2 {
+		minimumRequestEstimate = options[2]
 	}
 	tokenTrigger := effectiveCompactionTokenTrigger(globalTrigger, tokenCap, modelTrigger)
 	frontier := summarizedFrontier(pathExisting, history)
@@ -1929,7 +1997,15 @@ func PlanCompaction(db *sql.DB, conv *store.Conversation, history []store.Messag
 	ctxTok, exact, _ := contextTokens(keep, pathExisting, requestEstimate, requestEstimateComplete)
 	keepMsgs := compactionKeepCount(tail, keepRounds, retentionPct)
 	minimumKeepMsgs := min(keepRounds*2, tail)
-	overflow := tail > keepMsgs || (tokenTrigger > 0 && ctxTok > tokenTrigger)
+	tokenOverflow := tokenTrigger > 0 && ctxTok > tokenTrigger
+	if requestEstimateComplete && minimumRequestEstimate > tokenTrigger && tokenTrigger > 0 {
+		// Even replacing every safely summarizable historical round would leave the
+		// request over budget. Re-running the summary model every turn cannot satisfy
+		// the token trigger; let the independent round-retention trigger compact the
+		// growing history periodically instead.
+		tokenOverflow = false
+	}
+	overflow := tail > keepMsgs || tokenOverflow
 	// A token-heavy but message-LIGHT overflow (a few huge code/plot turns) is not
 	// caught by the message-count backlog gate below, so it would always defer to
 	// the async pass and make THIS turn pay the full un-summarised prompt — the
@@ -1940,11 +2016,16 @@ func PlanCompaction(db *sql.DB, conv *store.Conversation, history []store.Messag
 	// turn is trimmed its ctxTok drops back under the bar and later turns go async
 	// again, so this fires only on the actual spikes.
 	bigTokenOverflow := false
-	if exact && tokenTrigger > 0 && bigTokenOverflowNum > 0 && bigTokenOverflowDen > 0 {
+	if tokenOverflow && exact && tokenTrigger > 0 && bigTokenOverflowNum > 0 && bigTokenOverflowDen > 0 {
 		bigTokenOverflow = ctxTok > tokenTrigger*bigTokenOverflowNum/bigTokenOverflowDen
 	}
 	switch {
 	case !overflow:
+		return keep, pathExisting, compactNone
+	case !automaticCompactionHasCandidate(history, frontier, keepMsgs, tokenOverflow):
+		// No safe historical prefix can advance the frontier: every round is still
+		// inside the verbatim retention window or protected by an in-flight assistant
+		// row. Do not enqueue a no-op compaction or emit started/failed.
 		return keep, pathExisting, compactNone
 	case tail > minimumKeepMsgs*effectiveInlineBacklogFactor() || bigTokenOverflow:
 		// Large un-summarised backlog (a freshly-imported long conversation) OR a
@@ -1967,8 +2048,14 @@ func effectiveInlineBacklogFactor() int {
 // unit-test callers that pass only an overhead estimate, requestTokens is the
 // complete assembled upstream request size (system + tools + injected context +
 // history), so a large first-turn estimate may safely choose the inline path.
-func PlanCompactionForRequest(db *sql.DB, conv *store.Conversation, history []store.Message, requestTokens, modelTokenThreshold int) ([]store.Message, []SummaryBlock, int) {
-	return PlanCompaction(db, conv, history, requestTokens, modelTokenThreshold, 1)
+// minimumRequestTokens is that same request after the deepest safe history cut;
+// when it still exceeds the trigger, token compaction cannot cure the overflow.
+func PlanCompactionForRequest(db *sql.DB, conv *store.Conversation, history []store.Message, requestTokens, modelTokenThreshold int, minimumRequestTokens ...int) ([]store.Message, []SummaryBlock, int) {
+	options := []int{modelTokenThreshold, 1}
+	if len(minimumRequestTokens) > 0 {
+		options = append(options, minimumRequestTokens[0])
+	}
+	return PlanCompaction(db, conv, history, requestTokens, options...)
 }
 
 // RebasedCompactionRequestTokens carries the stable non-history request portion

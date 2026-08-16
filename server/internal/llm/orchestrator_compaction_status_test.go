@@ -416,6 +416,35 @@ func TestAutomaticAsyncCompactionValidatesLeafAndLeaseBeforeNotifying(t *testing
 	}
 }
 
+func TestAutomaticCompactionSkipsUnavoidableRequestOverflow(t *testing.T) {
+	q := &compactionStatusQueue{}
+	orchestrator, provider, conv, model, db := automaticCompactionStatusFixture(t, 4, q)
+	// Force even the system prompt plus the minimum retained tail over the token
+	// trigger. Old rounds exist, but summarizing them cannot satisfy this threshold,
+	// so token pressure must not create a compaction task on every turn.
+	if err := store.SetSetting(db, "compaction_token_trigger", 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetSetting(db, "keep_recent_rounds", 6); err != nil {
+		t.Fatal(err)
+	}
+	var statuses []automaticCompactionStatus
+	orchestrator.SetCompactionStatusHandler(func(_, _, operationID, status string) {
+		statuses = append(statuses, automaticCompactionStatus{operationID: operationID, status: status})
+	})
+
+	runAutomaticCompactionStatusTurn(t, orchestrator, conv, model)
+	if len(q.jobs) != 0 {
+		t.Fatalf("queued jobs = %d, want zero when the minimum request still exceeds the token trigger", len(q.jobs))
+	}
+	if len(statuses) != 0 {
+		t.Fatalf("automatic compaction statuses = %v, want none", statuses)
+	}
+	if provider.summaryCalls != 0 {
+		t.Fatalf("summary provider calls = %d, want zero", provider.summaryCalls)
+	}
+}
+
 func TestAutomaticAsyncCompactionSkipsAfterActiveLeafSwitchesToSibling(t *testing.T) {
 	q := &compactionStatusQueue{}
 	orchestrator, provider, conv, model, db := automaticCompactionStatusFixture(t, 4, q)
