@@ -110,7 +110,7 @@
       "builtinToolsLoadFailed": "組み込みツールの一覧を読み込めませんでした。保存済みの設定は変更されていません。",
       "mcpToolsLabel": "MCP ツール",
       "mcpToolsHint": "このモデルで初期選択する MCP サービスを設定します。ユーザーはチャットで変更できますが、全体で有効かつツール同期済みのサービスのみ実行できます。",
-      "mcpToolsDefaultAll": "すべて初期選択",
+      "mcpToolsDefaultOff": "デフォルトで無効",
       "mcpToolsCustom": "初期選択を指定",
       "mcpToolsSelected": "利用可能な {{total}} 件中 {{selected}} 件を初期選択",
       "mcpToolsSelectAll": "すべて選択",

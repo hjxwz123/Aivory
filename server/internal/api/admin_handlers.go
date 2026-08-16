@@ -459,8 +459,8 @@ func updateModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 			m.OfficialTools = officialTools
 		}
 	}
-	// The row was decoded over the existing model, so omission preserves the
-	// policy while an explicit null resets it to the default-all behavior.
+	// The row was decoded over the existing model, so omission preserves each
+	// policy. For built-ins null means default-all; for MCP it means default-off.
 	if builtinTools, err := store.NormalizeBuiltinTools(m.BuiltinTools); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return

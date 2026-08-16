@@ -110,7 +110,7 @@
       "builtinToolsLoadFailed": "无法加载内置工具列表，已保存的配置未被更改。",
       "mcpToolsLabel": "MCP 工具",
       "mcpToolsHint": "选择此模型默认勾选的 MCP 服务。用户仍可在对话中调整；仅全局启用且已同步工具的服务可运行。",
-      "mcpToolsDefaultAll": "全部默认选中",
+      "mcpToolsDefaultOff": "默认关闭",
       "mcpToolsCustom": "自定义默认项",
       "mcpToolsSelected": "默认选中 {{selected}}/{{total}} 个可用服务",
       "mcpToolsSelectAll": "全选",

@@ -24,16 +24,16 @@ export function isSelectableMCPServer(server: MCPServerAvailability): boolean {
 }
 
 /** Resolve the model policy without discarding explicitly saved unavailable or
- * deleted IDs. `null` follows the live available-service catalog. */
+ * deleted IDs. An absent policy is fail-closed: no MCP service is selected. */
 export function resolveModelMCPServerIDs(
   configured: readonly string[] | null | undefined,
-  availableIDs: readonly string[],
+  _availableIDs: readonly string[],
 ): string[] {
-  return configured == null ? uniqueIDs(availableIDs) : uniqueIDs(configured)
+  return configured == null ? [] : uniqueIDs(configured)
 }
 
-/** Convert default-all into an explicit snapshot before the administrator
- * starts customizing it. */
+/** Materialize the default-off policy before the administrator starts
+ * customizing it. */
 export function materializeModelMCPServerIDs(
   configured: readonly string[] | null | undefined,
   availableIDs: readonly string[],

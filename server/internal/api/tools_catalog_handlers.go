@@ -149,7 +149,7 @@ func listSelectableToolsHandler(d Deps, w http.ResponseWriter, r *http.Request) 
 			ID: id, Name: definition.DisplayName,
 			Description: definition.DisplayDescription, Icon: definition.Icon,
 			Allowed:         toolPolicyAllowsID(permissions, id),
-			DefaultSelected: mcpDefaultsErr == nil && (!mcpDefaultsConfigured || defaultMCPServerIDs[definition.ServerID]),
+			DefaultSelected: mcpDefaultsErr == nil && mcpDefaultsConfigured && defaultMCPServerIDs[definition.ServerID],
 		})
 	}
 

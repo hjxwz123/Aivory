@@ -136,7 +136,7 @@ interface ComposerProps {
       webSearch?: boolean
       /** User-owned skills explicitly selected for this turn. */
       selectedUserSkillIds?: string[]
-      /** Per-model candidate tool subset. undefined preserves the default-all policy. */
+      /** Per-model candidate tool subset. undefined preserves the model defaults. */
       selectedToolIds?: string[]
       /** §fast-mode: run this turn in fast mode. */
       fast?: boolean

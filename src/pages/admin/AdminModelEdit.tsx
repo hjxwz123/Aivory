@@ -379,7 +379,7 @@ export default function AdminModelEdit() {
       missing: true,
     })),
   ]
-  const mcpToolsUseDefault = draft?.mcp_server_ids == null
+  const mcpToolsUseDefaultOff = draft?.mcp_server_ids == null
 
   function replaceVisibleBuiltinTools(selectedNames: string[]) {
     setDraft((current) =>
@@ -1014,20 +1014,20 @@ export default function AdminModelEdit() {
                       <div className="inline-flex w-fit items-center gap-1 rounded-[9px] border border-[var(--color-border-subtle)] bg-[var(--color-surface)] p-0.5">
                         <button
                           type="button"
-                          aria-pressed={mcpToolsUseDefault}
+                          aria-pressed={mcpToolsUseDefaultOff}
                           onClick={() => patch({ mcp_server_ids: null })}
                           className={cn(
                             'h-7 rounded-[7px] px-2.5 text-[12px] font-medium interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                            mcpToolsUseDefault
+                            mcpToolsUseDefaultOff
                               ? 'bg-[var(--color-fg)] text-[var(--color-fg-inverted)]'
                               : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
                           )}
                         >
-                          {t('admin:models.fields.mcpToolsDefaultAll', { defaultValue: 'Default all' })}
+                          {t('admin:models.fields.mcpToolsDefaultOff', { defaultValue: 'Off by default' })}
                         </button>
                         <button
                           type="button"
-                          aria-pressed={!mcpToolsUseDefault}
+                          aria-pressed={!mcpToolsUseDefaultOff}
                           disabled={mcpServersLoading || mcpServersError}
                           onClick={() => patch({
                             mcp_server_ids: materializeModelMCPServerIDs(
@@ -1039,7 +1039,7 @@ export default function AdminModelEdit() {
                             'h-7 rounded-[7px] px-2.5 text-[12px] font-medium interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                             mcpServersLoading || mcpServersError
                               ? 'cursor-not-allowed opacity-40'
-                              : !mcpToolsUseDefault
+                              : !mcpToolsUseDefaultOff
                                 ? 'bg-[var(--color-fg)] text-[var(--color-fg-inverted)]'
                                 : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
                           )}
@@ -1055,7 +1055,7 @@ export default function AdminModelEdit() {
                             defaultValue: '{{selected}}/{{total}} available selected',
                           })}
                         </span>
-                        {!mcpToolsUseDefault ? (
+                        {!mcpToolsUseDefaultOff ? (
                           <>
                             <Button
                               type="button"
@@ -1127,7 +1127,7 @@ export default function AdminModelEdit() {
                         {displayedMCPServers.map((server) => {
                           const checked = selectedMCPServerSet.has(server.id)
                           const selectable = isSelectableMCPServer(server)
-                          const canToggle = !mcpToolsUseDefault && (selectable || checked)
+                          const canToggle = !mcpToolsUseDefaultOff && (selectable || checked)
                           const hasSnapshot = (server.discovered_tools?.length ?? 0) > 0
                           return (
                             <button
@@ -1143,7 +1143,7 @@ export default function AdminModelEdit() {
                                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                                 canToggle ? 'interactive' : 'cursor-default',
                                 checked
-                                  ? mcpToolsUseDefault
+                                  ? mcpToolsUseDefaultOff
                                     ? 'bg-[var(--color-surface)]/70'
                                     : 'bg-[var(--color-secondary-soft)]'
                                   : canToggle
@@ -1193,7 +1193,7 @@ export default function AdminModelEdit() {
                                   aria-hidden
                                   className={cn(
                                     'mt-0.5 shrink-0',
-                                    mcpToolsUseDefault
+                                    mcpToolsUseDefaultOff
                                       ? 'text-[var(--color-fg-subtle)]'
                                       : 'text-[var(--color-secondary)]',
                                   )}
