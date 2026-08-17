@@ -115,7 +115,7 @@ func loadWorkspaceAuthorizationContext(ctx context.Context, db *sql.DB, req Work
 		          SELECT t.user_id=w.owner_id
 		          FROM workspace_members t
 		         WHERE t.workspace_id=w.id AND t.user_id=?
-		        ),0)
+		        ),FALSE)
 		   FROM workspaces w
 		   LEFT JOIN workspace_members m ON m.workspace_id=w.id AND m.user_id=?
 		  WHERE w.id=? AND (w.owner_id=? OR m.user_id=?)`,
