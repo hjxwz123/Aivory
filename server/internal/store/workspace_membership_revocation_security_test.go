@@ -43,13 +43,13 @@ func TestWorkspaceMembershipRevocationRemovesCreatorAccessEverywhere(t *testing.
 		t.Fatalf("create conversation: %v", err)
 	}
 	project, err := CreateProject(ctx, db, Project{
-		ID: "rev-project", UserID: "creator", WorkspaceID: workspace.ID, Name: "Shared project",
+		ID: "rev-project", UserID: "creator", WorkspaceID: workspace.ID, Name: "Shared project", IsPublic: true,
 	})
 	if err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	kb, err := CreateKB(ctx, db, KnowledgeBase{
-		ID: "rev-kb", UserID: "creator", WorkspaceID: workspace.ID, Name: "Shared KB",
+		ID: "rev-kb", UserID: "creator", WorkspaceID: workspace.ID, Name: "Shared KB", IsPublic: true,
 		EmbeddingModelID: "rev-emb", EmbeddingDim: 3,
 	})
 	if err != nil {
@@ -164,7 +164,11 @@ func TestWorkspaceMembershipRevocationRemovesCreatorAccessEverywhere(t *testing.
 	if _, err := GetShareByToken(ctx, db, leaveShare.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("leaver share after leave: %v", err)
 	}
-	if _, err := JoinWorkspaceByInviteToken(ctx, db, originalInviteToken, "leaver"); err != nil {
+	leaverReinvite, err := CreateWorkspaceInvite(ctx, db, workspace.ID, "owner", "", WorkspaceRoleMember, 0, 1)
+	if err != nil {
+		t.Fatalf("create leaver re-invite: %v", err)
+	}
+	if _, _, err := JoinWorkspaceByInviteRecord(ctx, db, leaverReinvite.Token, "leaver", "leaver@example.test"); err != nil {
 		t.Fatalf("leaver rejoin: %v", err)
 	}
 	if err := FinishMessageForUser(ctx, db, leaveStreaming.ID, leaveConversation.ID, "leaver", MessageFinishPatch{
@@ -183,7 +187,7 @@ func TestWorkspaceMembershipRevocationRemovesCreatorAccessEverywhere(t *testing.
 		t.Fatalf("leaver second leave: %v", err)
 	}
 
-	if err := RemoveWorkspaceMember(ctx, db, workspace.ID, "creator"); err != nil {
+	if err := RemoveWorkspaceMember(ctx, db, workspace.ID, "owner", "creator"); err != nil {
 		t.Fatalf("kick creator: %v", err)
 	}
 
@@ -338,13 +342,13 @@ func TestWorkspaceMembershipRevocationRemovesCreatorAccessEverywhere(t *testing.
 	if _, err := GetArtifact(ctx, db, artifact.ID, "member"); err != nil {
 		t.Fatalf("member artifact after kick: %v", err)
 	}
-	// A fresh owner-issued capability may let the creator rejoin under the product
+	// A fresh governed invite may let the creator rejoin under the product
 	// policy, but the public share capability revoked by the kick must not revive.
-	rotatedWorkspace, err := GetWorkspace(ctx, db, workspace.ID)
-	if err != nil || rotatedWorkspace.InviteToken == originalInviteToken {
-		t.Fatalf("rotated workspace=%#v err=%v", rotatedWorkspace, err)
+	creatorReinvite, err := CreateWorkspaceInvite(ctx, db, workspace.ID, "owner", "", WorkspaceRoleMember, 0, 1)
+	if err != nil {
+		t.Fatalf("create creator re-invite: %v", err)
 	}
-	if _, err := JoinWorkspaceByInviteToken(ctx, db, rotatedWorkspace.InviteToken, "creator"); err != nil {
+	if _, _, err := JoinWorkspaceByInviteRecord(ctx, db, creatorReinvite.Token, "creator", "creator@example.test"); err != nil {
 		t.Fatalf("rejoin with fresh token: %v", err)
 	}
 	if err := SetConvProviderStateKeyForUser(ctx, db, conversation.ID, providerStateMessage.ID, "creator", "sandbox_id", "after-rejoin"); !errors.Is(err, ErrConversationAccessRevoked) {
@@ -362,7 +366,7 @@ func TestWorkspaceMembershipRevocationRemovesCreatorAccessEverywhere(t *testing.
 	if _, err := GetShareByToken(ctx, db, share.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("kicked publisher share revived after rejoin: %v", err)
 	}
-	if err := RemoveWorkspaceMember(ctx, db, workspace.ID, "creator"); err != nil {
+	if err := RemoveWorkspaceMember(ctx, db, workspace.ID, "owner", "creator"); err != nil {
 		t.Fatalf("kick rejoined creator: %v", err)
 	}
 	exec(t, db, `DELETE FROM workspace_members WHERE workspace_id=? AND user_id='owner'`, workspace.ID)
@@ -420,7 +424,7 @@ func TestWorkspaceKickSerializesAgainstInviteJoin(t *testing.T) {
 	}()
 	go func() {
 		<-start
-		kickResult <- RemoveWorkspaceMember(ctx, db, workspace.ID, "member")
+		kickResult <- RemoveWorkspaceMember(ctx, db, workspace.ID, "owner", "member")
 	}()
 	go func() {
 		<-start

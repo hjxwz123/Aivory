@@ -22,6 +22,11 @@ import type {
   ApiWorkspaceMember,
   ApiWorkspaceMemberPermissions,
   ApiWorkspaceKnowledgeBaseMemberPermission,
+  ApiWorkspaceRole,
+  ApiWorkspaceInvite,
+  ApiWorkspacePolicy,
+  ApiWorkspaceUsageRow,
+  ApiWorkspaceAuditLog,
   ApiAnalytics,
   ApiAuthResponse,
   ApiBuiltinTool,
@@ -279,7 +284,9 @@ export const authApi = {
 // ----- Models / skills -----------------------------------------------------
 
 export const modelsApi = {
-  list: () =>
+  /** §workspace RBAC: a workspace scope filters the list to the models that
+   *  workspace's policy allows (presentation only — turns re-check server-side). */
+  list: (workspaceId?: string) =>
     api<{
       models: ApiModel[]
       default_id: string
@@ -287,15 +294,17 @@ export const modelsApi = {
       fast_available?: boolean
       /** Anonymous capability only; the hidden fast model identity stays server-side. */
       fast_vision?: boolean
-    }>('/models'),
+    }>(`/models${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`),
   listImage: () => api<{ models: ApiModel[]; default_id: string }>('/image-models'),
   /** Model tags for the picker's filter chips (§ model tags). */
   tags: () => api<ApiModelTag[]>('/model-tags'),
 }
 
 export const toolsApi = {
-  list: (modelId: string) =>
-    api<ApiSelectableTool[]>(`/tools?model_id=${encodeURIComponent(modelId)}`),
+  list: (modelId: string, workspaceId?: string) =>
+    api<ApiSelectableTool[]>(
+      `/tools?model_id=${encodeURIComponent(modelId)}${workspaceId ? `&workspace_id=${encodeURIComponent(workspaceId)}` : ''}`,
+    ),
 }
 
 // ----- Image generation (§4.20) --------------------------------------------
@@ -480,6 +489,31 @@ export const workspacesApi = {
     api<ApiWorkspaceMember>(
       `/workspaces/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}/permissions`,
       { method: 'PATCH', body },
+    ),
+  updateMemberRole: (id: string, userId: string, role: ApiWorkspaceRole) =>
+    api<ApiWorkspaceMember>(
+      `/workspaces/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}/role`,
+      { method: 'PATCH', body: { role } },
+    ),
+  transferOwnership: (id: string, userId: string) =>
+    api<ApiWorkspace>(`/workspaces/${encodeURIComponent(id)}/transfer`, { method: 'POST', body: { user_id: userId } }),
+  listInvites: (id: string) =>
+    api<{ invites: ApiWorkspaceInvite[] }>(`/workspaces/${encodeURIComponent(id)}/invites`),
+  createInvite: (id: string, body: { role: ApiWorkspaceRole; email?: string; expires_at?: number; max_uses?: number }) =>
+    api<ApiWorkspaceInvite>(`/workspaces/${encodeURIComponent(id)}/invites`, { method: 'POST', body }),
+  revokeInvite: (id: string, inviteId: string) =>
+    api<{ ok: true }>(`/workspaces/${encodeURIComponent(id)}/invites/${encodeURIComponent(inviteId)}`, { method: 'DELETE' }),
+  getPolicy: (id: string) =>
+    api<ApiWorkspacePolicy>(`/workspaces/${encodeURIComponent(id)}/policy`),
+  updatePolicy: (id: string, body: Partial<Omit<ApiWorkspacePolicy, 'WorkspaceID' | 'UpdatedBy' | 'UpdatedAt'>>) =>
+    api<ApiWorkspacePolicy>(`/workspaces/${encodeURIComponent(id)}/policy`, { method: 'PATCH', body }),
+  usage: (id: string, days = 30) =>
+    api<{ days: number; usage: ApiWorkspaceUsageRow[] }>(
+      `/workspaces/${encodeURIComponent(id)}/usage?days=${days}`,
+    ),
+  audit: (id: string, limit = 100, offset = 0) =>
+    api<{ logs: ApiWorkspaceAuditLog[] }>(
+      `/workspaces/${encodeURIComponent(id)}/audit?limit=${limit}&offset=${offset}`,
     ),
   kick: (id: string, userId: string) =>
     api<{ ok: true }>(`/workspaces/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`, { method: 'DELETE' }),
@@ -669,8 +703,10 @@ export const kbsApi = {
   list: (workspaceId?: string) =>
     api<ApiKnowledgeBase[]>(`/kbs${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`),
   get: (id: string) => api<ApiKnowledgeBase>(`/kbs/${encodeURIComponent(id)}`),
-  create: (body: { name: string; description?: string; workspace_id?: string }) =>
+  create: (body: { name: string; description?: string; workspace_id?: string; is_public?: boolean }) =>
     api<ApiKnowledgeBase>('/kbs', { method: 'POST', body }),
+  update: (id: string, body: { is_public: boolean }) =>
+    api<ApiKnowledgeBase>(`/kbs/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
   remove: (id: string) => api<{ ok: true }>(`/kbs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   listDocs: (id: string, params: { search?: string; uploaded_by_user_id?: string } = {}) => {
     const query = new URLSearchParams()

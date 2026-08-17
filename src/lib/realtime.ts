@@ -154,6 +154,7 @@ function handleEvent(ev: RealtimeEvent): void {
       return
     case 'workspace.permissions_updated':
     case 'workspace.membership_updated':
+    case 'workspace.policy_updated':
       void reconcileAccessState('workspace')
       return
     case 'knowledge_base.access_updated':
@@ -227,7 +228,10 @@ function reconcileAccessState(kind: 'account' | 'workspace'): Promise<void> {
       if (useAuth.getState().user?.id !== uid) return
       await Promise.all([
         refreshAccount || refreshWorkspace ? useWorkspaces.getState().load() : Promise.resolve(),
-        refreshAccount ? useModels.getState().load() : Promise.resolve(),
+        // §workspace RBAC: workspace policy changes reshape the model catalog
+        // (and account changes always do) — reload without waiting for a
+        // re-login.
+        refreshAccount || refreshWorkspace ? useModels.getState().load() : Promise.resolve(),
       ])
       if (useAuth.getState().user?.id !== uid) return
       invalidateAccessState({ kind: refreshAccount ? 'account' : 'workspace' })

@@ -48,7 +48,7 @@ func TestWorkspaceResourcesCountAgainstCreatorCommercialCapsWhileAccessible(t *t
 		t.Fatalf("accessible KB cap count = %d, %v; want 2", n, err)
 	}
 
-	if err := RemoveWorkspaceMember(ctx, db, ws.ID, "member"); err != nil {
+	if err := RemoveWorkspaceMember(ctx, db, ws.ID, "owner", "member"); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := CountProjectsByUser(ctx, db, "member"); err != nil || n != 1 {

@@ -68,7 +68,12 @@
     "renamed": "ファイル名を変更しました",
     "renameFailed": "ファイル名を変更できませんでした",
     "loadFailedTitle": "このナレッジベースを読み込めませんでした",
-    "chunkCount": "{{count}} チャンク"
+    "chunkCount": "{{count}} チャンク",
+    "makePrivate": "非公開にする",
+    "makeShared": "ワークスペースと共有",
+    "visibilityPrivate": "ナレッジベースはあなたと管理者のみに非公開になりました。",
+    "visibilityShared": "ナレッジベースはワークスペースと共有されました。",
+    "visibilityFailed": "公開範囲を更新できませんでした。"
   },
   "groupPermissionTitle": "ナレッジベースを利用できません",
   "groupPermissionRequired": "所属ユーザーグループにはナレッジベース権限がありません。",
@@ -110,7 +115,7 @@
     "member": "メンバー",
     "addFiles": "ファイルを追加",
     "deleteContent": "内容を削除",
-    "manager": "ワークスペースオーナーまたはナレッジベース作成者",
+    "manager": "ワークスペースのオーナー・管理者、またはナレッジベース作成者",
     "disabledByWorkspace": "メンバー権限で無効",
     "loadFailed": "ワークスペースメンバーを読み込めませんでした。",
     "empty": "ワークスペースメンバーはいません。"

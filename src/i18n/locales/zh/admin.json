@@ -1884,7 +1884,9 @@
     "deleteTitle": "删除该工作空间？",
     "deleteBody": "其中的所有对话、项目和知识库将被删除，全部成员失去访问权限。此操作不可撤销。",
     "roleOwner": "创建者",
-    "roleMember": "成员"
+    "roleMember": "成员",
+    "roleAdmin": "管理员",
+    "roleGuest": "游客"
   },
   "userFeedback": {
     "title": "用户反馈",

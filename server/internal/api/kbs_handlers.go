@@ -18,11 +18,13 @@ var kbDocUploadRateLimit = envcfg.Int("AIVORY_API_RATE_LIMIT_USER", 20)
 // implementation details stay server-side; callers only need the library
 // identity and their effective capabilities.
 type knowledgeBaseResponse struct {
-	ID               string `json:"id"`
-	UserID           string `json:"user_id"`
-	Name             string `json:"name"`
-	Description      string `json:"description"`
-	WorkspaceID      string `json:"workspace_id,omitempty"`
+	ID          string `json:"id"`
+	UserID      string `json:"user_id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	// §workspace RBAC: shared with the workspace (true) or creator-private.
+	IsPublic         bool   `json:"is_public"`
 	AccessRole       string `json:"access_role,omitempty"`
 	OwnerName        string `json:"owner_name,omitempty"`
 	CanShare         bool   `json:"can_share"`
@@ -37,7 +39,7 @@ type knowledgeBaseResponse struct {
 func userKnowledgeBase(kb store.KnowledgeBase) knowledgeBaseResponse {
 	return knowledgeBaseResponse{
 		ID: kb.ID, UserID: kb.UserID, Name: kb.Name, Description: kb.Description,
-		WorkspaceID: kb.WorkspaceID, AccessRole: kb.AccessRole, OwnerName: kb.OwnerName,
+		WorkspaceID: kb.WorkspaceID, IsPublic: kb.IsPublic, AccessRole: kb.AccessRole, OwnerName: kb.OwnerName,
 		CanShare: kb.CanShare, CanUpload: kb.CanUpload, CanDelete: kb.CanDelete,
 		CanDeleteContent: kb.CanDeleteContent, CanManageMembers: kb.CanManageMembers,
 		ProjectID: kb.ProjectID, CreatedAt: kb.CreatedAt,
@@ -131,6 +133,8 @@ type createKBReq struct {
 	Description string `json:"description"`
 	// '' = personal; set = shared workspace KB (§workspaces).
 	WorkspaceID string `json:"workspace_id"`
+	// §workspace RBAC: shared with the workspace (default) or creator-private.
+	IsPublic *bool `json:"is_public"`
 }
 
 // createKBHandler creates a new KB pinned to the administrator-configured
@@ -158,6 +162,17 @@ func createKBHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, errWorkspaceKBCreationPermission)
 			return
 		}
+		// §workspace RBAC phase 4: knowledge bases may be switched off for the
+		// whole workspace (fail closed on lookup errors).
+		policy, policyErr := store.GetWorkspacePolicy(r.Context(), d.DB, req.WorkspaceID)
+		if policyErr != nil {
+			writeError(w, 500, policyErr)
+			return
+		}
+		if !policy.AllowKnowledgeBases {
+			writeError(w, http.StatusForbidden, errWorkspaceKnowledgeBaseDisabled)
+			return
+		}
 	}
 	if existing, err := store.GetKBByName(r.Context(), d.DB, u.ID, req.Name); err == nil && existing != nil {
 		writeError(w, 409, store.ErrKBNameExists)
@@ -174,6 +189,13 @@ func createKBHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, errKnowledgeBaseUnavailable)
 		return
 	}
+	// §workspace RBAC: workspace KBs default to workspace-shared; the creator
+	// may opt into private at creation. Guests cannot create at all (the
+	// workspace capability check below rejects them).
+	isPublic := true
+	if req.IsPublic != nil {
+		isPublic = *req.IsPublic
+	}
 	kb, err := store.CreateKBWithLimit(r.Context(), d.DB, store.KnowledgeBase{
 		UserID:           u.ID,
 		Name:             req.Name,
@@ -181,6 +203,7 @@ func createKBHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		EmbeddingModelID: m.ID,
 		EmbeddingDim:     m.Dim,
 		WorkspaceID:      req.WorkspaceID,
+		IsPublic:         isPublic,
 	}, maxKBs)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) && req.WorkspaceID != "" {
@@ -199,6 +222,77 @@ func createKBHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 201, userKnowledgeBase(*kb))
+}
+
+// updateKBHandler flips a workspace knowledge base between private and
+// workspace-shared (§workspace RBAC phase 2). Creator or admin only; the store
+// re-authorizes inside the workspace-membership transaction.
+func updateKBHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	id := pathParam(r, "id")
+	var req struct {
+		IsPublic *bool `json:"is_public"`
+	}
+	if err := decodeJSON(r, &req); err != nil || req.IsPublic == nil {
+		writeError(w, 400, errInvalidInput)
+		return
+	}
+	current, err := store.GetStandaloneKB(r.Context(), d.DB, id, u.ID)
+	if err != nil || current.WorkspaceID == "" {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	decision, err := store.AuthorizeWorkspace(r.Context(), d.DB, store.WorkspaceAuthorizationRequest{
+		WorkspaceID: current.WorkspaceID, UserID: u.ID,
+		Action:   store.ActionKnowledgeBaseVisibilityUpdate,
+		Resource: "knowledge_base", ResourceID: id,
+	})
+	if err != nil || !decision.Allowed {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	beforeAccess, err := store.ListKnowledgeBaseAccessUserIDs(r.Context(), d.DB, id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	kb, err := store.UpdateKBVisibility(r.Context(), d.DB, id, u.ID, *req.IsPublic)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, 404, errNotFound)
+			return
+		}
+		writeError(w, 500, err)
+		return
+	}
+	afterAccess, err := store.ListKnowledgeBaseAccessUserIDs(r.Context(), d.DB, id)
+	if err != nil {
+		// The visibility write has committed but an access snapshot could not be
+		// read. Fail closed for every principal known before the mutation.
+		for _, userID := range beforeAccess {
+			revokeKnowledgeBaseUserGenerations(d, id, userID)
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	// Revoke the union, not merely the set difference. A member may join in the
+	// narrow interval between the first snapshot and the serialized visibility
+	// update; the post-commit snapshot catches that turn too. This is an
+	// ephemeral per-user epoch, so owners/admins may immediately start again.
+	affected := make(map[string]struct{}, len(beforeAccess)+len(afterAccess))
+	for _, userID := range beforeAccess {
+		affected[userID] = struct{}{}
+	}
+	for _, userID := range afterAccess {
+		affected[userID] = struct{}{}
+	}
+	for userID := range affected {
+		revokeKnowledgeBaseUserGenerations(d, id, userID)
+	}
+	// The visibility change reshapes who can list/open the library — notify
+	// every current member so pickers and detail views refresh.
+	publishKnowledgeBaseAccessEvent(d, r, id)
+	writeJSON(w, 200, userKnowledgeBase(*kb))
 }
 
 // deleteKBHandler removes the KB and cascades to docs and chunks.
@@ -248,6 +342,15 @@ func uploadKBDocHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	kb, err := store.GetStandaloneKB(r.Context(), d.DB, id, u.ID)
 	if err != nil || !kb.CanUpload {
 		writeError(w, 404, errNotFound)
+		return
+	}
+	// §workspace RBAC phase 4: workspace libraries re-check the KB switch.
+	if err := enforceWorkspaceKnowledgeBasePolicy(r.Context(), d.DB, kb.WorkspaceID); err != nil {
+		writeError(w, workspacePolicyErrorStatus(err), err)
+		return
+	}
+	if err := enforceWorkspaceFileUploadPolicy(r.Context(), d.DB, kb.WorkspaceID); err != nil {
+		writeError(w, workspacePolicyErrorStatus(err), err)
 		return
 	}
 	if !requireUserCapabilityError(d, w, r, errFileUploadGroupPermission, func(p store.UserGroupPermissions) bool { return p.AllowFileUpload }) {

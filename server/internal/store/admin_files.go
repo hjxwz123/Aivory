@@ -181,7 +181,7 @@ func adminFilesWhere(f AdminFileFilter) (string, []any) {
 				(t.kb_id<>'' AND EXISTS (
 					SELECT 1 FROM knowledge_bases inventory_kb
 					 WHERE inventory_kb.id=t.kb_id
-					   AND `+workspaceResourceAccessPredicate("inventory_kb")+`
+					   AND `+workspaceScopedVisibilityPredicate("inventory_kb")+`
 				)) OR
 				(t.conversation_id<>'' AND EXISTS (
 					SELECT 1 FROM conversations inventory_document_conversation
@@ -192,7 +192,7 @@ func adminFilesWhere(f AdminFileFilter) (string, []any) {
 		)`)
 		args = append(args, f.AccessUserID)
 		args = append(args, workspaceResourceAccessArgs(f.AccessUserID)...)
-		args = append(args, workspaceResourceAccessArgs(f.AccessUserID)...)
+		args = append(args, workspaceScopedVisibilityArgs(f.AccessUserID)...)
 		args = append(args, workspaceResourceAccessArgs(f.AccessUserID)...)
 	}
 	if q := strings.TrimSpace(f.UserQ); q != "" {

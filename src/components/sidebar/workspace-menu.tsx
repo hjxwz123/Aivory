@@ -5,9 +5,17 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { AlertTriangle, ArrowLeftRight, Briefcase, Check, Copy, Home, LogOut, Plus, RefreshCw, Settings2, Trash2, UserX, Users } from 'lucide-react'
-import { workspacesApi } from '@/api'
-import type { ApiWorkspaceMember, ApiWorkspaceMemberPermissions } from '@/api/types'
+import { AlertTriangle, ArrowLeftRight, Briefcase, Check, Copy, FileClock, Home, KeyRound, LogOut, Plus, RefreshCw, Settings2, ShieldCheck, SlidersHorizontal, Trash2, UserX, Users } from 'lucide-react'
+import { modelsApi, workspacesApi } from '@/api'
+import type {
+  ApiModel,
+  ApiWorkspaceAuditLog,
+  ApiWorkspaceInvite,
+  ApiWorkspaceMember,
+  ApiWorkspaceMemberPermissions,
+  ApiWorkspacePolicy,
+  ApiWorkspaceRole,
+} from '@/api/types'
 import { useAuth } from '@/store/auth'
 import { useWorkspaces } from '@/store/workspaces'
 import { toast } from '@/hooks/use-toast'
@@ -245,9 +253,15 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
   const [membersLoadFailed, setMembersLoadFailed] = useState(false)
   const [membersLoadAttempt, setMembersLoadAttempt] = useState(0)
   const membersRequestRef = useRef(0)
-  const [inviteToken, setInviteToken] = useState(ws?.invite_token ?? '')
+  // The former workspace-level token is intentionally no longer accepted.
+  // A quick link appears only after the manager explicitly generates one.
+  const [inviteToken, setInviteToken] = useState('')
   const { copied, copy } = useCopy()
-  const isOwner = ws?.role === 'owner'
+  // §workspace RBAC: role authority comes from is_owner + role, never from a
+  // third "owner" role value (the backend always reports the owner as admin).
+  const isOwner = ws?.is_owner ?? false
+  const isAdmin = ws?.role === 'admin'
+  const canManage = isOwner || isAdmin
   // In-flight guards so slow-backend mutations can't be double-fired.
   const [busyUid, setBusyUid] = useState<string | null>(null)
   const busyUidRef = useRef<{ uid: string; epoch: number } | null>(null)
@@ -259,7 +273,24 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
   const [permissionDraft, setPermissionDraft] = useState<ApiWorkspaceMemberPermissions | null>(null)
   const [savingPermissions, setSavingPermissions] = useState(false)
   const savingPermissionsRef = useRef<number | null>(null)
+  const [roleBusyUid, setRoleBusyUid] = useState<string | null>(null)
+  const roleBusyRef = useRef<{ uid: string; role: ApiWorkspaceRole; epoch: number } | null>(null)
   const operationEpochRef = useRef(0)
+  // §workspace RBAC phases 3/4: managers switch between members, invites and
+  // the capability policy; non-managers only ever see the member list.
+  const [tab, setTab] = useState<'members' | 'invites' | 'policy' | 'audit'>('members')
+  const [transferOpen, setTransferOpen] = useState(false)
+
+  function roleLabel(role: ApiWorkspaceRole | undefined): string {
+    switch (role) {
+      case 'admin':
+        return t('workspace.roleAdmin', { defaultValue: 'Admin' })
+      case 'guest':
+        return t('workspace.roleGuest', { defaultValue: 'Guest' })
+      default:
+        return t('workspace.roleMember', { defaultValue: 'Member' })
+    }
+  }
 
   useEffect(() => {
     const request = ++membersRequestRef.current
@@ -275,7 +306,7 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
     setEditingMember(null)
     setPermissionDraft(null)
     if (!open || !activeId) return
-    setInviteToken(ws?.invite_token ?? '')
+    setInviteToken('')
     setMembersLoading(true)
     setMembersLoadFailed(false)
     workspacesApi
@@ -291,7 +322,7 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
       .finally(() => {
         if (request === membersRequestRef.current) setMembersLoading(false)
       })
-  }, [open, activeId, membersLoadAttempt, ws?.invite_token])
+  }, [open, activeId, membersLoadAttempt])
 
   useEffect(
     () =>
@@ -323,6 +354,31 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
       if (busyUidRef.current?.uid === uid && busyUidRef.current.epoch === epoch) {
         busyUidRef.current = null
         if (epoch === operationEpochRef.current) setBusyUid(null)
+      }
+    }
+  }
+
+  // §workspace RBAC role ladder: the owner may set admin/member/guest on
+  // others; ordinary admins only flip member<->guest. The backend re-checks.
+  async function changeRole(uid: string, role: ApiWorkspaceRole) {
+    if (roleBusyRef.current) return
+    const epoch = operationEpochRef.current
+    roleBusyRef.current = { uid, role, epoch }
+    setRoleBusyUid(uid)
+    try {
+      const updated = await workspacesApi.updateMemberRole(activeId!, uid, role)
+      if (epoch === operationEpochRef.current) {
+        setMembers((current) => current.map((m) => (m.user_id === updated.user_id ? updated : m)))
+        toast.success(t('workspace.roleUpdated', { defaultValue: 'Role updated.' }))
+      }
+    } catch {
+      if (epoch === operationEpochRef.current) {
+        toast.error(t('workspace.roleUpdateFailed', { defaultValue: 'Could not update the role.' }))
+      }
+    } finally {
+      if (roleBusyRef.current?.uid === uid && roleBusyRef.current.epoch === epoch) {
+        roleBusyRef.current = null
+        if (epoch === operationEpochRef.current) setRoleBusyUid(null)
       }
     }
   }
@@ -438,19 +494,57 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
         </DialogHeader>
 
         <DialogBody className="space-y-4">
-        {/* Invite link — owner only */}
-        {isOwner && inviteURL ? (
+        {/* §workspace RBAC: manager tabs — members / invites / capability policy. */}
+        {canManage ? (
+          <div role="tablist" aria-label={t('workspace.manageTabs', { defaultValue: 'Workspace management' })} className="flex gap-1 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-1">
+            {([
+              ['members', <Users key="i" size={13} aria-hidden />, t('workspace.tabMembers', { defaultValue: 'Members' })],
+              ['invites', <KeyRound key="i" size={13} aria-hidden />, t('workspace.tabInvites', { defaultValue: 'Invites' })],
+              ['policy', <SlidersHorizontal key="i" size={13} aria-hidden />, t('workspace.tabPolicy', { defaultValue: 'Capabilities' })],
+              ['audit', <FileClock key="i" size={13} aria-hidden />, t('workspace.tabAudit', { defaultValue: 'Audit' })],
+            ] as const).map(([key, icon, label]) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={tab === key}
+                onClick={() => setTab(key)}
+                className={`flex flex-1 items-center justify-center gap-1.5 rounded-[7px] px-2 py-1.5 text-[12px] font-medium interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] ${
+                  tab === key
+                    ? 'bg-[var(--color-bg)] text-[var(--color-fg)] shadow-sm'
+                    : 'text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)]'
+                }`}
+              >
+                {icon}
+                {label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        {tab !== 'members' && canManage ? null : (
+        <>
+        {/* Invite link — admins may reset it (member-level invite); the current
+            token is only exposed to the owner, so ordinary admins see the
+            fresh link after rotating. */}
+        {canManage ? (
           <div className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-2.5">
             <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-fg-subtle)]">
               {t('workspace.inviteLink', { defaultValue: 'Invite link' })}
             </div>
-            <div className="mt-1.5 flex items-center gap-2">
-              <code className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--color-fg-muted)]">{inviteURL}</code>
-              <Button size="sm" variant="secondary" onClick={() => copy(inviteURL)}>
-                <Copy size={12} aria-hidden />
-                {copied ? t('actions.copied', { defaultValue: 'Copied' }) : t('actions.copy', { defaultValue: 'Copy' })}
-              </Button>
-            </div>
+            {inviteToken ? (
+              <div className="mt-1.5 flex items-center gap-2">
+                <code className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--color-fg-muted)]">{inviteURL}</code>
+                <Button size="sm" variant="secondary" onClick={() => copy(inviteURL)}>
+                  <Copy size={12} aria-hidden />
+                  {copied ? t('actions.copied', { defaultValue: 'Copied' }) : t('actions.copy', { defaultValue: 'Copy' })}
+                </Button>
+              </div>
+            ) : (
+              <p className="mt-1.5 text-[11.5px] text-[var(--color-fg-subtle)]">
+                {t('workspace.inviteOwnerOnly', { defaultValue: 'Only the owner can view the current link. Reset it to generate a new one.' })}
+              </p>
+            )}
             <button
               type="button"
               onClick={() => void rotate()}
@@ -493,8 +587,19 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
               </Button>
             </li>
           ) : null}
-          {!membersLoading && !membersLoadFailed && members.map((m) => (
-            <li key={m.user_id} className="flex items-center gap-2.5 rounded-[8px] px-1.5 py-1.5">
+          {!membersLoading && !membersLoadFailed && members.map((m) => {
+            const self = m.user_id === ws.owner_id
+            const targetIsAdmin = m.is_owner || m.role === 'admin'
+            // Owner manages everyone (but never self); ordinary admins manage
+            // ordinary members and guests only.
+            const canActOn = canManage && !self && (isOwner || !targetIsAdmin)
+            const roleOptions: ApiWorkspaceRole[] = isOwner && !m.is_owner
+              ? ['admin', 'member', 'guest']
+              : !targetIsAdmin
+                ? ['member', 'guest']
+                : []
+            return (
+              <li key={m.user_id} className="flex items-center gap-2.5 rounded-[8px] px-1.5 py-1.5">
               <Avatar size="sm">
                 {m.avatar_url ? <AvatarImage src={m.avatar_url} alt={m.name} /> : null}
                 <AvatarFallback>{initials(m.name || m.email)}</AvatarFallback>
@@ -502,13 +607,41 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[13px] font-medium text-[var(--color-fg)]">{m.name || m.email}</div>
                 <div className="truncate text-[11px] text-[var(--color-fg-subtle)]">
-                  {m.role === 'owner'
+                  {m.is_owner
                     ? t('workspace.roleOwner', { defaultValue: 'Owner' })
-                    : t('workspace.roleMember', { defaultValue: 'Member' })}
+                    : roleLabel(m.role)}
                 </div>
               </div>
-              {isOwner && m.role !== 'owner' ? (
+              {canActOn ? (
                 <div className="flex shrink-0 items-center gap-0.5">
+                  {roleOptions.length > 0 ? (
+                    <DropdownMenu>
+                      <Tooltip content={t('workspace.changeRole', { defaultValue: 'Change role' })}>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            disabled={busyUid !== null || roleBusyUid !== null}
+                            aria-label={t('workspace.changeRole', { defaultValue: 'Change role' })}
+                            className="inline-flex size-7 items-center justify-center rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:pointer-events-none disabled:opacity-50 max-sm:size-10"
+                          >
+                            <ShieldCheck size={13} aria-hidden />
+                          </button>
+                        </DropdownMenuTrigger>
+                      </Tooltip>
+                      <DropdownMenuContent align="end">
+                        {roleOptions.map((role) => (
+                          <DropdownMenuItem
+                            key={role}
+                            disabled={m.role === role || roleBusyUid !== null}
+                            onClick={() => void changeRole(m.user_id, role)}
+                          >
+                            {m.role === role ? <Check size={13} aria-hidden /> : <span className="w-[13px]" aria-hidden />}
+                            {roleLabel(role)}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  ) : null}
                   <Tooltip content={t('workspace.managePermissions', { defaultValue: 'Manage permissions' })}>
                     <button
                       type="button"
@@ -534,41 +667,74 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
                 </div>
               ) : null}
             </li>
-          ))}
+            )
+          })}
         </ul>
+        </>
+        )}
+        {tab === 'invites' && canManage && activeId ? (
+          <WorkspaceInvitesPanel workspaceID={activeId} isOwner={isOwner} />
+        ) : null}
+        {tab === 'policy' && canManage && activeId ? (
+          <WorkspacePolicyPanel workspaceID={activeId} />
+        ) : null}
+        {tab === 'audit' && canManage && activeId ? (
+          <WorkspaceAuditPanel workspaceID={activeId} />
+        ) : null}
         </DialogBody>
 
         <DialogFooter className="justify-between">
-          {isOwner ? (
-            <Button
-              variant="destructive"
-              loading={actioning}
-              onClick={() => void runFooterAction(
-                removeWs,
-                t('workspace.deleteFailed', { defaultValue: 'Could not delete the workspace.' }),
-              )}
-            >
-              <Trash2 size={13} aria-hidden />
-              {t('workspace.delete', { defaultValue: 'Delete workspace' })}
-            </Button>
-          ) : (
-            <Button
-              variant="destructive"
-              loading={actioning}
-              onClick={() => void runFooterAction(
-                leaveWs,
-                t('workspace.leaveFailed', { defaultValue: 'Could not leave the workspace.' }),
-              )}
-            >
-              <LogOut size={13} aria-hidden />
-              {t('workspace.leave', { defaultValue: 'Leave workspace' })}
-            </Button>
-          )}
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            {isOwner && tab === 'members' ? (
+              <Button
+                variant="secondary"
+                disabled={actioning}
+                leadingIcon={<ArrowLeftRight size={13} aria-hidden />}
+                onClick={() => setTransferOpen(true)}
+              >
+                {t('workspace.transfer', { defaultValue: 'Transfer ownership' })}
+              </Button>
+            ) : null}
+            {isOwner ? (
+              <Button
+                variant="destructive"
+                loading={actioning}
+                onClick={() => void runFooterAction(
+                  removeWs,
+                  t('workspace.deleteFailed', { defaultValue: 'Could not delete the workspace.' }),
+                )}
+              >
+                <Trash2 size={13} aria-hidden />
+                {t('workspace.delete', { defaultValue: 'Delete workspace' })}
+              </Button>
+            ) : (
+              <Button
+                variant="destructive"
+                loading={actioning}
+                onClick={() => void runFooterAction(
+                  leaveWs,
+                  t('workspace.leaveFailed', { defaultValue: 'Could not leave the workspace.' }),
+                )}
+              >
+                <LogOut size={13} aria-hidden />
+                {t('workspace.leave', { defaultValue: 'Leave workspace' })}
+              </Button>
+            )}
+          </div>
           <Button variant="ghost" disabled={actioning || busyUid !== null} onClick={() => onOpenChange(false)}>
             {t('common.close', { ns: 'common', defaultValue: 'Close' })}
           </Button>
         </DialogFooter>
       </DialogContent>
+
+      <WorkspaceTransferDialog
+        open={transferOpen}
+        onOpenChange={setTransferOpen}
+        workspaceID={activeId ?? ''}
+        workspaceName={ws.name}
+        members={members.filter((m) => !m.is_owner)}
+        onTransferred={() => setMembersLoadAttempt((attempt) => attempt + 1)}
+      />
 
       <Dialog
         open={editingMember !== null}
@@ -590,7 +756,12 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="divide-y divide-[var(--color-divider)] py-0">
-            {permissionDraft ? WORKSPACE_PERMISSION_ROWS.map((row) => (
+            {permissionDraft && editingMember?.role === 'guest' ? (
+              <p className="py-4 text-[12.5px] leading-5 text-[var(--color-fg-muted)]">
+                {t('workspace.readOnlyAccess', { defaultValue: 'Read-only access' })}
+              </p>
+            ) : null}
+            {permissionDraft && editingMember?.role !== 'guest' ? WORKSPACE_PERMISSION_ROWS.map((row) => (
               <label key={row.key} className="flex min-h-14 cursor-pointer items-center gap-4 py-3">
                 <span className="min-w-0 flex-1">
                   <span className="block text-[13px] font-medium text-[var(--color-fg)]">
@@ -641,3 +812,588 @@ const WORKSPACE_PERMISSION_ROWS: Array<{
   { key: 'can_add_kb_files', label: 'Add knowledge-base files', description: 'Upload and paste content into workspace knowledge bases.' },
   { key: 'can_delete_kb_content', label: 'Delete knowledge-base content', description: 'Delete or retry content when the specific library also allows it.' },
 ]
+
+/** §workspace RBAC phase 3 — invite records: create, copy link, revoke. */
+function WorkspaceInvitesPanel({ workspaceID, isOwner }: { workspaceID: string; isOwner: boolean }) {
+  const { t } = useTranslation('chat')
+  const [invites, setInvites] = useState<ApiWorkspaceInvite[]>([])
+  const [loading, setLoading] = useState(true)
+  const [failed, setFailed] = useState(false)
+  const [attempt, setAttempt] = useState(0)
+  const [role, setRole] = useState<ApiWorkspaceRole>('guest')
+  const [email, setEmail] = useState('')
+  const [expiryDays, setExpiryDays] = useState(7)
+  const [maxUses, setMaxUses] = useState(1)
+  const [creating, setCreating] = useState(false)
+  const [revokingId, setRevokingId] = useState<string | null>(null)
+  const { copied, copy } = useCopy()
+
+  useEffect(() => {
+    let current = true
+    setLoading(true)
+    setFailed(false)
+    workspacesApi
+      .listInvites(workspaceID)
+      .then((r) => { if (current) setInvites(r.invites) })
+      .catch(() => { if (current) { setInvites([]); setFailed(true) } })
+      .finally(() => { if (current) setLoading(false) })
+    return () => { current = false }
+  }, [workspaceID, attempt])
+
+  async function createInvite() {
+    if (creating) return
+    setCreating(true)
+    try {
+      await workspacesApi.createInvite(workspaceID, {
+        role,
+        email: email.trim() || undefined,
+        expires_at: expiryDays > 0 ? Math.floor(Date.now() / 1000) + expiryDays * 86400 : 0,
+        max_uses: Math.max(0, Math.floor(maxUses)),
+      })
+      setEmail('')
+      setAttempt((v) => v + 1)
+      toast.success(t('workspace.inviteCreated', { defaultValue: 'Invite created.' }))
+    } catch {
+      toast.error(t('workspace.inviteCreateFailed', { defaultValue: 'Could not create the invite.' }))
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  async function revoke(id: string) {
+    if (revokingId) return
+    setRevokingId(id)
+    try {
+      await workspacesApi.revokeInvite(workspaceID, id)
+      setAttempt((v) => v + 1)
+      toast.success(t('workspace.inviteRevoked', { defaultValue: 'Invite revoked.' }))
+    } catch {
+      toast.error(t('workspace.inviteRevokeFailed', { defaultValue: 'Could not revoke the invite.' }))
+    } finally {
+      setRevokingId(null)
+    }
+  }
+
+  function inviteStatus(invite: ApiWorkspaceInvite): { label: string; dead: boolean } {
+    const now = Math.floor(Date.now() / 1000)
+    if (invite.revoked_at > 0) return { label: t('workspace.inviteRevokedLabel', { defaultValue: 'Revoked' }), dead: true }
+    if (invite.expires_at > 0 && now > invite.expires_at) return { label: t('workspace.inviteExpired', { defaultValue: 'Expired' }), dead: true }
+    if (invite.max_uses > 0 && invite.used_count >= invite.max_uses) return { label: t('workspace.inviteExhausted', { defaultValue: 'Used up' }), dead: true }
+    return { label: t('workspace.inviteActive', { defaultValue: 'Active' }), dead: false }
+  }
+
+  const roleOptions: ApiWorkspaceRole[] = isOwner ? ['guest', 'member', 'admin'] : ['guest', 'member']
+  function roleLabel(r: ApiWorkspaceRole): string {
+    switch (r) {
+      case 'admin': return t('workspace.roleAdmin', { defaultValue: 'Admin' })
+      case 'guest': return t('workspace.roleGuest', { defaultValue: 'Guest' })
+      default: return t('workspace.roleMember', { defaultValue: 'Member' })
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-2.5">
+        <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-fg-subtle)]">
+          {t('workspace.newInvite', { defaultValue: 'New invite' })}
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <div role="radiogroup" aria-label={t('workspace.inviteRole', { defaultValue: 'Invite role' })} className="flex rounded-[7px] border border-[var(--color-border)] p-0.5">
+            {roleOptions.map((r) => (
+              <button
+                key={r}
+                type="button"
+                role="radio"
+                aria-checked={role === r}
+                disabled={creating}
+                onClick={() => setRole(r)}
+                className={`rounded-[6px] px-2.5 py-1 text-[12px] font-medium interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:opacity-50 ${
+                  role === r ? 'bg-[var(--color-bg)] text-[var(--color-fg)] shadow-sm' : 'text-[var(--color-fg-subtle)]'
+                }`}
+              >
+                {roleLabel(r)}
+              </button>
+            ))}
+          </div>
+          <Input
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder={t('workspace.inviteEmailOptional', { defaultValue: 'Bind to email (optional)' })}
+            aria-label={t('workspace.inviteEmailOptional', { defaultValue: 'Bind to email (optional)' })}
+            className="h-8 min-w-0 flex-1 text-[12.5px]"
+            inputMode="email"
+          />
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-[12px] text-[var(--color-fg-subtle)]">
+          <label className="flex items-center gap-1.5">
+            {t('workspace.inviteExpires', { defaultValue: 'Expires' })}
+            <select
+              value={expiryDays}
+              disabled={creating}
+              onChange={(e) => setExpiryDays(Number(e.target.value))}
+              className="h-8 rounded-[7px] border border-[var(--color-border)] bg-[var(--color-bg)] px-2 text-[12px] text-[var(--color-fg)]"
+              aria-label={t('workspace.inviteExpires', { defaultValue: 'Expires' })}
+            >
+              <option value={1}>{t('common.day', { defaultValue: '1 day' })}</option>
+              <option value={7}>{t('common.week', { defaultValue: '7 days' })}</option>
+              <option value={30}>{t('common.month', { defaultValue: '30 days' })}</option>
+              <option value={0}>{t('workspace.inviteNeverExpires', { defaultValue: 'Never' })}</option>
+            </select>
+          </label>
+          <label className="flex items-center gap-1.5">
+            {t('workspace.inviteMaxUses', { defaultValue: 'Max uses' })}
+            <Input
+              value={maxUses}
+              disabled={creating}
+              onChange={(e) => setMaxUses(Number(e.target.value) || 0)}
+              type="number"
+              min={0}
+              className="h-8 w-20 text-[12.5px]"
+              aria-label={t('workspace.inviteMaxUses', { defaultValue: 'Max uses' })}
+            />
+          </label>
+          <Button size="sm" loading={creating} leadingIcon={<Plus size={13} aria-hidden />} onClick={() => void createInvite()}>
+            {t('workspace.inviteCreate', { defaultValue: 'Create invite' })}
+          </Button>
+        </div>
+        <p className="mt-1.5 text-[11px] text-[var(--color-fg-subtle)]">
+          {t('workspace.inviteHint', { defaultValue: 'Unset max uses = unlimited. Generic invites default to the read-only guest role.' })}
+        </p>
+      </div>
+
+      {loading ? (
+        <div className="space-y-2 py-2">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
+      ) : failed ? (
+        <div role="alert" className="flex flex-col items-center px-4 py-6 text-center">
+          <AlertTriangle size={18} aria-hidden className="text-[var(--color-danger)]" />
+          <p className="mt-2 text-[13px] text-[var(--color-fg-muted)]">
+            {t('workspace.invitesLoadFailed', { defaultValue: 'Could not load invites.' })}
+          </p>
+          <Button size="sm" variant="secondary" className="mt-3" leadingIcon={<RefreshCw size={13} aria-hidden />} onClick={() => setAttempt((v) => v + 1)}>
+            {t('actions.tryAgain', { ns: 'common', defaultValue: 'Try again' })}
+          </Button>
+        </div>
+      ) : invites.length === 0 ? (
+        <p className="py-6 text-center text-[13px] text-[var(--color-fg-muted)]">
+          {t('workspace.invitesEmpty', { defaultValue: 'No invites yet.' })}
+        </p>
+      ) : (
+        <ul className="max-h-64 space-y-1 overflow-y-auto scrollbar-thin">
+          {invites.map((invite) => {
+            const status = inviteStatus(invite)
+            const url = `${window.location.origin}/workspace/join/${invite.token}`
+            return (
+              <li key={invite.id} className="flex items-center gap-2.5 rounded-[8px] px-1.5 py-1.5">
+                <KeyRound size={14} aria-hidden className="shrink-0 text-[var(--color-fg-subtle)]" />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[12.5px] font-medium text-[var(--color-fg)]">
+                    {roleLabel(invite.role)}
+                    {invite.email ? <span className="ml-1.5 font-normal text-[var(--color-fg-subtle)]">· {invite.email}</span> : null}
+                  </div>
+                  <div className="truncate text-[11px] text-[var(--color-fg-subtle)]">
+                    {status.label}
+                    {' · '}
+                    {t('workspace.inviteUses', { used: invite.used_count, max: invite.max_uses > 0 ? invite.max_uses : '∞', defaultValue: '{{used}}/{{max}} uses' })}
+                  </div>
+                </div>
+                {!status.dead ? (
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    <Button size="sm" variant="secondary" onClick={() => copy(url)}>
+                      <Copy size={12} aria-hidden />
+                      {copied ? t('actions.copied', { defaultValue: 'Copied' }) : t('actions.copy', { defaultValue: 'Copy' })}
+                    </Button>
+                    <Tooltip content={t('workspace.inviteRevoke', { defaultValue: 'Revoke invite' })}>
+                      <button
+                        type="button"
+                        onClick={() => void revoke(invite.id)}
+                        disabled={revokingId !== null}
+                        aria-label={t('workspace.inviteRevoke', { defaultValue: 'Revoke invite' })}
+                        className="inline-flex size-7 items-center justify-center rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:pointer-events-none disabled:opacity-50"
+                      >
+                        <UserX size={13} aria-hidden />
+                      </button>
+                    </Tooltip>
+                  </div>
+                ) : null}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+/** §workspace RBAC phase 4 — capability policy: switches, model allowlist and
+ *  the member monthly credit limit. */
+function WorkspacePolicyPanel({ workspaceID }: { workspaceID: string }) {
+  const { t } = useTranslation('chat')
+  const [policy, setPolicy] = useState<ApiWorkspacePolicy | null>(null)
+  const [models, setModels] = useState<ApiModel[]>([])
+  const [loading, setLoading] = useState(true)
+  const [failed, setFailed] = useState(false)
+  const [attempt, setAttempt] = useState(0)
+  const [saving, setSaving] = useState(false)
+  const [limitDraft, setLimitDraft] = useState('0')
+
+  useEffect(() => {
+    let current = true
+    setLoading(true)
+    setFailed(false)
+    Promise.all([
+      workspacesApi.getPolicy(workspaceID),
+      // Unscoped: the editor picks from ALL platform models, not the
+      // already-narrowed workspace list.
+      modelsApi.list(undefined),
+    ])
+      .then(([p, m]) => {
+        if (current) {
+          setPolicy(p)
+          setModels(m.models)
+          setLimitDraft(String(p.MemberMonthlyCreditLimit))
+        }
+      })
+      .catch(() => { if (current) setFailed(true) })
+      .finally(() => { if (current) setLoading(false) })
+    return () => { current = false }
+  }, [workspaceID, attempt])
+
+  if (loading) {
+    return <div className="space-y-2 py-2">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
+  }
+  if (failed || !policy) {
+    return (
+      <div role="alert" className="flex flex-col items-center px-4 py-6 text-center">
+        <AlertTriangle size={18} aria-hidden className="text-[var(--color-danger)]" />
+        <p className="mt-2 text-[13px] text-[var(--color-fg-muted)]">
+          {t('workspace.policyLoadFailed', { defaultValue: 'Could not load the workspace policy.' })}
+        </p>
+        <Button size="sm" variant="secondary" className="mt-3" leadingIcon={<RefreshCw size={13} aria-hidden />} onClick={() => setAttempt((v) => v + 1)}>
+          {t('actions.tryAgain', { ns: 'common', defaultValue: 'Try again' })}
+        </Button>
+      </div>
+    )
+  }
+
+  const allModelsAllowed = policy.AllowedModelIDs.length === 0
+  const switches: Array<{ key: keyof ApiWorkspacePolicy; label: string; description: string }> = [
+    { key: 'AllowSandbox', label: 'Python sandbox', description: 'Run python_execute / code_interpreter tools.' },
+    { key: 'AllowImageGeneration', label: 'Image generation', description: 'Image models and image tools.' },
+    { key: 'AllowKnowledgeBases', label: 'Knowledge bases', description: 'Create and use workspace knowledge bases and projects.' },
+    { key: 'AllowFileUpload', label: 'File upload', description: 'Attach files to workspace conversations.' },
+  ]
+
+  async function save() {
+    if (saving) return
+    setSaving(true)
+    try {
+      const updated = await workspacesApi.updatePolicy(workspaceID, {
+        AllowedModelIDs: policy!.AllowedModelIDs,
+        AllowSandbox: policy!.AllowSandbox,
+        AllowImageGeneration: policy!.AllowImageGeneration,
+        AllowKnowledgeBases: policy!.AllowKnowledgeBases,
+        AllowFileUpload: policy!.AllowFileUpload,
+        MemberMonthlyCreditLimit: Math.max(0, Number(limitDraft) || 0),
+      })
+      setPolicy(updated)
+      setLimitDraft(String(updated.MemberMonthlyCreditLimit))
+      toast.success(t('workspace.policySaved', { defaultValue: 'Workspace capabilities updated.' }))
+    } catch {
+      toast.error(t('workspace.policySaveFailed', { defaultValue: 'Could not update the workspace policy.' }))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="divide-y divide-[var(--color-divider)] rounded-[10px] border border-[var(--color-border)]">
+        {switches.map((row) => (
+          <label key={row.key} className="flex min-h-14 cursor-pointer items-center gap-4 px-3 py-3">
+            <span className="min-w-0 flex-1">
+              <span className="block text-[13px] font-medium text-[var(--color-fg)]">
+                {t(`workspace.policy.${row.key}.label`, { defaultValue: row.label })}
+              </span>
+              <span className="mt-0.5 block text-[11.5px] leading-4 text-[var(--color-fg-subtle)]">
+                {t(`workspace.policy.${row.key}.description`, { defaultValue: row.description })}
+              </span>
+            </span>
+            <Switch
+              checked={Boolean(policy[row.key])}
+              disabled={saving}
+              onCheckedChange={(checked) => setPolicy((current) => current ? { ...current, [row.key]: checked } : current)}
+              aria-label={t(`workspace.policy.${row.key}.label`, { defaultValue: row.label })}
+            />
+          </label>
+        ))}
+      </div>
+
+      <div className="rounded-[10px] border border-[var(--color-border)] p-3">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-[13px] font-medium text-[var(--color-fg)]">
+            {t('workspace.policy.modelAllowlist', { defaultValue: 'Allowed models' })}
+          </span>
+          <label className="flex items-center gap-2 text-[12px] text-[var(--color-fg-muted)]">
+            {t('workspace.policy.allModels', { defaultValue: 'All models' })}
+            <Switch
+              checked={allModelsAllowed}
+              disabled={saving}
+              onCheckedChange={(checked) => setPolicy((current) => current ? { ...current, AllowedModelIDs: checked ? [] : current.AllowedModelIDs } : current)}
+              aria-label={t('workspace.policy.allModels', { defaultValue: 'All models' })}
+            />
+          </label>
+        </div>
+        {!allModelsAllowed ? (
+          <div className="mt-2 max-h-40 space-y-1 overflow-y-auto scrollbar-thin">
+            {models.map((model) => {
+              const checked = policy.AllowedModelIDs.includes(model.id)
+              return (
+                <label key={model.id} className="flex cursor-pointer items-center gap-2.5 rounded-[7px] px-1.5 py-1.5 hover:bg-[var(--color-bg-muted)]">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={saving}
+                    onChange={(e) => setPolicy((current) => {
+                      if (!current) return current
+                      const next = e.target.checked
+                        ? [...current.AllowedModelIDs, model.id]
+                        : current.AllowedModelIDs.filter((id) => id !== model.id)
+                      return { ...current, AllowedModelIDs: next }
+                    })}
+                    className="size-3.5 accent-[var(--color-accent)]"
+                  />
+                  <span className="min-w-0 flex-1 truncate text-[12.5px] text-[var(--color-fg)]">{model.label || model.id}</span>
+                </label>
+              )
+            })}
+            {models.length === 0 ? (
+              <p className="py-2 text-center text-[12px] text-[var(--color-fg-subtle)]">
+                {t('workspace.policy.noModels', { defaultValue: 'No models available.' })}
+              </p>
+            ) : null}
+          </div>
+        ) : (
+          <p className="mt-1.5 text-[11.5px] text-[var(--color-fg-subtle)]">
+            {t('workspace.policy.allModelsHint', { defaultValue: 'Every model the platform offers is usable in this workspace.' })}
+          </p>
+        )}
+      </div>
+
+      <div className="rounded-[10px] border border-[var(--color-border)] p-3">
+        <label className="block text-[13px] font-medium text-[var(--color-fg)]">
+          {t('workspace.policy.creditLimit', { defaultValue: 'Member monthly credit limit' })}
+        </label>
+        <p className="mt-0.5 text-[11.5px] text-[var(--color-fg-subtle)]">
+          {t('workspace.policy.creditLimitHint', { defaultValue: '0 = unlimited. Members hitting the limit cannot start new turns in this workspace.' })}
+        </p>
+        <Input
+          value={limitDraft}
+          disabled={saving}
+          onChange={(e) => setLimitDraft(e.target.value)}
+          type="number"
+          min={0}
+          step="0.01"
+          className="mt-2 h-8 w-32 text-[12.5px]"
+          aria-label={t('workspace.policy.creditLimit', { defaultValue: 'Member monthly credit limit' })}
+        />
+      </div>
+
+      <div className="flex justify-end">
+        <Button loading={saving} onClick={() => void save()}>
+          {t('common.save', { ns: 'common', defaultValue: 'Save' })}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/** §workspace RBAC phase 3 — ownership transfer with typed-name confirmation. */
+function WorkspaceTransferDialog({
+  open,
+  onOpenChange,
+  workspaceID,
+  workspaceName,
+  members,
+  onTransferred,
+}: {
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  workspaceID: string
+  workspaceName: string
+  members: ApiWorkspaceMember[]
+  onTransferred: () => void
+}) {
+  const { t } = useTranslation('chat')
+  const [targetID, setTargetID] = useState('')
+  const [confirmName, setConfirmName] = useState('')
+  const [busy, setBusy] = useState(false)
+  const eligible = members.filter((m) => !m.is_owner)
+  const target = eligible.find((m) => m.user_id === targetID)
+
+  useEffect(() => {
+    if (open) {
+      setTargetID('')
+      setConfirmName('')
+    }
+  }, [open])
+
+  async function transfer() {
+    if (busy || !targetID || confirmName !== workspaceName) return
+    setBusy(true)
+    try {
+      await workspacesApi.transferOwnership(workspaceID, targetID)
+      toast.success(t('workspace.transferDone', { defaultValue: 'Ownership transferred.' }))
+      onOpenChange(false)
+      onTransferred()
+    } catch {
+      toast.error(t('workspace.transferFailed', { defaultValue: 'Could not transfer ownership.' }))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => { if (!next && !busy) onOpenChange(next) }}>
+      <DialogContent size="sm" closeDisabled={busy}>
+        <DialogHeader>
+          <DialogTitle>{t('workspace.transfer', { defaultValue: 'Transfer ownership' })}</DialogTitle>
+          <DialogDescription>
+            {t('workspace.transferBody', { defaultValue: 'The receiver becomes the workspace owner and an admin. You keep the admin role but lose owner-exclusive operations.' })}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody className="space-y-3">
+          <div className="max-h-40 space-y-1 overflow-y-auto scrollbar-thin">
+            {eligible.length === 0 ? (
+              <p className="py-2 text-center text-[12.5px] text-[var(--color-fg-subtle)]">
+                {t('workspace.transferNoCandidates', { defaultValue: 'No other members to transfer to.' })}
+              </p>
+            ) : eligible.map((m) => (
+              <button
+                key={m.user_id}
+                type="button"
+                disabled={busy}
+                onClick={() => setTargetID(m.user_id)}
+                className={`flex w-full items-center gap-2.5 rounded-[8px] border px-2 py-2 text-left interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:opacity-50 ${
+                  targetID === m.user_id
+                    ? 'border-[var(--color-accent)] bg-[var(--color-bg-muted)]'
+                    : 'border-transparent hover:bg-[var(--color-bg-muted)]'
+                }`}
+              >
+                <Check size={13} aria-hidden className={targetID === m.user_id ? 'opacity-100' : 'opacity-0'} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-medium text-[var(--color-fg)]">{m.name || m.email}</span>
+                  <span className="block truncate text-[11px] text-[var(--color-fg-subtle)]">{m.role === 'admin' ? t('workspace.roleAdmin', { defaultValue: 'Admin' }) : m.role === 'guest' ? t('workspace.roleGuest', { defaultValue: 'Guest' }) : t('workspace.roleMember', { defaultValue: 'Member' })}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+          {target ? (
+            <div>
+              <p className="text-[12px] text-[var(--color-fg-muted)]">
+                {t('workspace.transferConfirmHint', { defaultValue: 'Type the workspace name "{{name}}" to confirm.', name: workspaceName })}
+              </p>
+              <Input
+                value={confirmName}
+                disabled={busy}
+                onChange={(e) => setConfirmName(e.target.value)}
+                placeholder={workspaceName}
+                aria-label={t('workspace.transferConfirmHint', { defaultValue: 'Type the workspace name to confirm' })}
+                className="mt-1.5"
+              />
+            </div>
+          ) : null}
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="ghost" disabled={busy} onClick={() => onOpenChange(false)}>
+            {t('common.cancel', { ns: 'common', defaultValue: 'Cancel' })}
+          </Button>
+          <Button
+            variant="destructive"
+            loading={busy}
+            disabled={!targetID || confirmName !== workspaceName}
+            onClick={() => void transfer()}
+          >
+            {t('workspace.transferConfirm', { defaultValue: 'Transfer' })}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** §workspace RBAC phase 5 — admin audit trail viewer. */
+function WorkspaceAuditPanel({ workspaceID }: { workspaceID: string }) {
+  const { t } = useTranslation('chat')
+  const [logs, setLogs] = useState<ApiWorkspaceAuditLog[]>([])
+  const [loading, setLoading] = useState(true)
+  const [failed, setFailed] = useState(false)
+  const [attempt, setAttempt] = useState(0)
+
+  useEffect(() => {
+    let current = true
+    setLoading(true)
+    setFailed(false)
+    workspacesApi
+      .audit(workspaceID, 100, 0)
+      .then((r) => { if (current) setLogs(r.logs) })
+      .catch(() => { if (current) { setLogs([]); setFailed(true) } })
+      .finally(() => { if (current) setLoading(false) })
+    return () => { current = false }
+  }, [workspaceID, attempt])
+
+  function actionLabel(action: string): string {
+    const key = `workspace.audit.actions.${action}`
+    const fallback = action
+    return t(key, { defaultValue: fallback })
+  }
+
+  function describeTarget(log: ApiWorkspaceAuditLog): string {
+    if (!log.target_type) return ''
+    return t('workspace.audit.target', {
+      type: log.target_type,
+      defaultValue: '{{type}}',
+    })
+  }
+
+  return (
+    <div className="space-y-2">
+      {loading ? (
+        <div className="space-y-2 py-2">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-10 w-full" />)}</div>
+      ) : failed ? (
+        <div role="alert" className="flex flex-col items-center px-4 py-6 text-center">
+          <AlertTriangle size={18} aria-hidden className="text-[var(--color-danger)]" />
+          <p className="mt-2 text-[13px] text-[var(--color-fg-muted)]">
+            {t('workspace.audit.loadFailed', { defaultValue: 'Could not load the audit log.' })}
+          </p>
+          <Button size="sm" variant="secondary" className="mt-3" leadingIcon={<RefreshCw size={13} aria-hidden />} onClick={() => setAttempt((v) => v + 1)}>
+            {t('actions.tryAgain', { ns: 'common', defaultValue: 'Try again' })}
+          </Button>
+        </div>
+      ) : logs.length === 0 ? (
+        <p className="py-6 text-center text-[13px] text-[var(--color-fg-muted)]">
+          {t('workspace.audit.empty', { defaultValue: 'No audit entries yet.' })}
+        </p>
+      ) : (
+        <ul className="max-h-72 space-y-1 overflow-y-auto scrollbar-thin">
+          {logs.map((log) => (
+            <li key={log.id} className="rounded-[8px] px-2 py-2 hover:bg-[var(--color-bg-muted)]">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="min-w-0 truncate text-[12.5px] font-medium text-[var(--color-fg)]">
+                  {actionLabel(log.action)}
+                </span>
+                <span className="shrink-0 text-[10.5px] tabular-nums text-[var(--color-fg-subtle)]">
+                  {new Date(log.created_at * 1000).toLocaleString()}
+                </span>
+              </div>
+              <div className="mt-0.5 truncate text-[11px] text-[var(--color-fg-subtle)]">
+                {log.actor_name || log.actor_user_id}
+                {log.target_type ? <span className="mx-1">·</span> : null}
+                {describeTarget(log)}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}

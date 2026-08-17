@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { RefreshCw, Search, Wrench } from 'lucide-react'
 import { toolsApi } from '@/api'
+import { activeWorkspaceId } from '@/store/workspaces'
 import type { ApiSelectableTool } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -61,7 +62,7 @@ export function ToolSelectionDialog({
     setLoading(true)
     setError(false)
     void toolsApi
-      .list(modelId)
+      .list(modelId, activeWorkspaceId() ?? undefined)
       .then((items) => {
         if (cancelled) return
         setTools(items)
@@ -94,7 +95,9 @@ export function ToolSelectionDialog({
   useEffect(
     () => {
       const unsubscribe = subscribeAccessInvalidation((event) => {
-        if (event.kind !== 'account' || !modelId) return
+        // §workspace RBAC: workspace policy changes reshape the tool catalog
+        // alongside account-level permission changes.
+        if ((event.kind !== 'account' && event.kind !== 'workspace') || !modelId) return
         if (open) {
           backgroundReconcileRequestRef.current += 1
           setReloadKey((value) => value + 1)
@@ -103,7 +106,7 @@ export function ToolSelectionDialog({
         // Persisted selections can outlive a group policy or a global tool
         // switch. Trim them in the background even when the dialog is closed.
         const requestID = ++backgroundReconcileRequestRef.current
-        void toolsApi.list(modelId).then((items) => {
+        void toolsApi.list(modelId, activeWorkspaceId() ?? undefined).then((items) => {
           if (requestID !== backgroundReconcileRequestRef.current || selectedIds === undefined) return
           const allowed = new Set(items.filter((item) => item.allowed !== false).map((item) => item.id))
           const valid = selectedIds.filter((id) => allowed.has(id))

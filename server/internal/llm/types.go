@@ -146,6 +146,10 @@ type ToolAccessPolicy struct {
 	// A group may allow use_skill as a tool while exposing only selected skills.
 	SkillMode string
 	SkillIDs  []string
+	// DenyIDs removes specific catalog ids regardless of Mode/IDs. Used by the
+	// §workspace RBAC capability switches (sandbox, image generation) which
+	// must subtract from an otherwise-all access mode.
+	DenyIDs []string
 }
 
 // ModelInfo is the slim subset of store.Model the provider needs.

@@ -77,7 +77,7 @@ func TestWorkspaceGenerationWritesStopAtMembershipRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create streaming placeholder: %v", err)
 	}
-	if err := RemoveWorkspaceMember(ctx, db, workspace.ID, "generation-member"); err != nil {
+	if err := RemoveWorkspaceMember(ctx, db, workspace.ID, "generation-owner", "generation-member"); err != nil {
 		t.Fatalf("revoke membership: %v", err)
 	}
 	// Rejoining grants a new authorization epoch. It must not revive placeholders

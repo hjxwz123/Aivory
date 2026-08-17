@@ -261,7 +261,7 @@ func TestAtomicWorkspaceProjectLibraryCreateSerializesConcurrentKick(t *testing.
 	kickDone := make(chan error, 1)
 	go func() {
 		close(kickAttempting)
-		kickDone <- RemoveWorkspaceMember(fx.ctx, fx.db, fx.workspaceA, "creator")
+		kickDone <- RemoveWorkspaceMember(fx.ctx, fx.db, fx.workspaceA, "owner-a", "creator")
 	}()
 	<-kickAttempting
 	close(allowProjectInsert)

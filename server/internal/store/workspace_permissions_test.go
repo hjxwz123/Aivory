@@ -190,7 +190,18 @@ func TestWorkspaceKnowledgeBasePermissionOverridesAreClearedOnLeave(t *testing.T
 		t.Fatalf("rejoin workspace: %v", err)
 	}
 	kb, err := GetKB(ctx, db, "workspace-kb", "member")
-	if err != nil || !kb.CanUpload || !kb.CanDeleteContent {
-		t.Fatalf("rejoined member did not receive defaults: %+v err=%v", kb, err)
+	if err != nil || !kb.CanUpload || kb.CanDeleteContent {
+		// §workspace RBAC: CanDeleteContent now means "manage any member's
+		// content" (admins and the library creator only). Ordinary members
+		// keep deleting their OWN uploads via the document-level rule.
+		t.Fatalf("rejoined member defaults: %+v err=%v; want upload=yes manage-any=no", kb, err)
+	}
+	exec(t, db, `INSERT INTO documents(id,kb_id,filename,mime_type,size_bytes,status,storage_path,uploaded_by_user_id) VALUES
+		('rejoined-own-upload','workspace-kb','rejoined.txt','text/plain',1,'ready','','member')`)
+	if err := DeleteDocumentForUser(ctx, db, "rejoined-own-upload", "kb", "workspace-kb", "member"); err != nil {
+		t.Fatalf("rejoined member deleting own upload: %v", err)
+	}
+	if err := DeleteDocumentForUser(ctx, db, "workspace-document", "kb", "workspace-kb", "member"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("rejoined member deleting creator document error=%v, want ErrNotFound", err)
 	}
 }

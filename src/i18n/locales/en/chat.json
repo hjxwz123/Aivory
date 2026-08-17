@@ -704,6 +704,94 @@
         "label": "Delete knowledge-base content",
         "description": "Delete, retry, or manage content when the specific knowledge base also allows it."
       }
+    },
+    "roleAdmin": "Admin",
+    "roleGuest": "Guest",
+    "changeRole": "Change role",
+    "roleUpdated": "Role updated.",
+    "roleUpdateFailed": "Could not update the role.",
+    "readOnlyAccess": "Read-only access",
+    "inviteOwnerOnly": "Only the owner can view the current link. Reset it to generate a new one.",
+    "readOnlyTitle": "Read-only access",
+    "readOnlyBody": "You are a guest in this workspace. You can read shared conversations but not send messages.",
+    "manageTabs": "Workspace management",
+    "tabMembers": "Members",
+    "tabInvites": "Invites",
+    "tabPolicy": "Capabilities",
+    "transfer": "Transfer ownership",
+    "transferBody": "The receiver becomes the workspace owner and an admin. You keep the admin role but lose owner-exclusive operations.",
+    "transferConfirmHint": "Type the workspace name \"{{name}}\" to confirm.",
+    "transferConfirm": "Transfer",
+    "transferDone": "Ownership transferred.",
+    "transferFailed": "Could not transfer ownership.",
+    "transferNoCandidates": "No other members to transfer to.",
+    "newInvite": "New invite",
+    "inviteRole": "Invite role",
+    "inviteEmailOptional": "Bind to email (optional)",
+    "inviteExpires": "Expires",
+    "inviteNeverExpires": "Never",
+    "inviteMaxUses": "Max uses",
+    "inviteCreate": "Create invite",
+    "inviteCreated": "Invite created.",
+    "inviteCreateFailed": "Could not create the invite.",
+    "inviteHint": "Unset max uses = unlimited. Generic invites default to the read-only guest role.",
+    "invitesLoadFailed": "Could not load invites.",
+    "invitesEmpty": "No invites yet.",
+    "inviteRevokedLabel": "Revoked",
+    "inviteExpired": "Expired",
+    "inviteExhausted": "Used up",
+    "inviteActive": "Active",
+    "inviteUses": "{{used}}/{{max}} uses",
+    "inviteRevoke": "Revoke invite",
+    "inviteRevoked": "Invite revoked.",
+    "inviteRevokeFailed": "Could not revoke the invite.",
+    "policyLoadFailed": "Could not load the workspace policy.",
+    "policySaved": "Workspace capabilities updated.",
+    "policySaveFailed": "Could not update the workspace policy.",
+    "policy": {
+      "AllowSandbox": {
+        "label": "Python sandbox",
+        "description": "Run python_execute / code_interpreter tools."
+      },
+      "AllowImageGeneration": {
+        "label": "Image generation",
+        "description": "Image models and image tools."
+      },
+      "AllowKnowledgeBases": {
+        "label": "Knowledge bases",
+        "description": "Create and use workspace knowledge bases and projects."
+      },
+      "AllowFileUpload": {
+        "label": "File upload",
+        "description": "Attach files to workspace conversations."
+      },
+      "modelAllowlist": "Allowed models",
+      "allModels": "All models",
+      "allModelsHint": "Every model the platform offers is usable in this workspace.",
+      "noModels": "No models available.",
+      "creditLimit": "Member monthly credit limit",
+      "creditLimitHint": "0 = unlimited. Members hitting the limit cannot start new turns in this workspace."
+    },
+    "tabAudit": "Audit",
+    "audit": {
+      "loadFailed": "Could not load the audit log.",
+      "empty": "No audit entries yet.",
+      "target": "{{type}}",
+      "actions": {
+        "workspace.created": "Workspace created",
+        "workspace.deleted": "Workspace deleted",
+        "workspace.transferred": "Ownership transferred",
+        "member.joined": "Member joined",
+        "member.left": "Member left",
+        "member.removed": "Member removed",
+        "member.role_updated": "Role changed",
+        "member.permissions_updated": "Member limits changed",
+        "invite.created": "Invite created",
+        "invite.used": "Invite used",
+        "invite.revoked": "Invite revoked",
+        "resource.visibility_changed": "Resource visibility changed",
+        "policy.updated": "Capability policy changed"
+      }
     }
   },
   "attachmentDeleted": "File deleted"

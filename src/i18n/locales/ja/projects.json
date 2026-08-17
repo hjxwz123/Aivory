@@ -74,7 +74,11 @@
       "edit": "詳細を編集",
       "pin": "プロジェクトをピン留め",
       "unpin": "ピン留めを解除",
-      "delete": "プロジェクトを削除"
+      "delete": "プロジェクトを削除",
+      "makePrivate": "非公開にする",
+      "makeShared": "ワークスペースと共有",
+      "visibilityPrivate": "プロジェクトはあなたと管理者のみに非公開になりました。",
+      "visibilityShared": "プロジェクトはワークスペースと共有されました。"
     },
     "renameTitle": "プロジェクトの名前を変更",
     "renameSave": "保存",

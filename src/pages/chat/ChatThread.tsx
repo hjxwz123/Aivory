@@ -305,7 +305,7 @@ export default function ChatThread() {
     if (
       !conversation ||
       visibilityBusy ||
-      conversation.creatorId !== meId ||
+      (conversation.creatorId !== meId && conversationWorkspace?.role !== 'admin') ||
       (!nextPublic && !canMakePrivate)
     ) return
     setVisibilityBusy(true)
@@ -329,7 +329,10 @@ export default function ChatThread() {
   }
 
   const canMakePrivate = conversationWorkspace?.can_private_conversations !== false
-  const canChangeVisibility = conversation.creatorId === meId && (!conversation.isPublic || canMakePrivate)
+  // §workspace RBAC: the creator or a workspace admin may flip visibility.
+  const canChangeVisibility =
+    (conversation.creatorId === meId || conversationWorkspace?.role === 'admin') &&
+    (!conversation.isPublic || canMakePrivate)
   const visibilityLabel = conversation.isPublic
     ? t('chat:visibility.public')
     : t('chat:visibility.private')
@@ -547,7 +550,18 @@ export default function ChatThread() {
           </button>
         )}
         <div className="mx-auto w-full max-w-[var(--layout-message-max-w)] px-3 sm:px-6 lg:px-8 pb-3 sm:pb-5 pt-1.5 sm:pt-2">
-          {conversation.projectId && !canUseKnowledgeBases ? (
+          {/* §workspace RBAC: guests are read-only — replace the composer with
+              an explainer instead of letting them type into a 404. */}
+          {conversationWorkspace?.role === 'guest' ? (
+            <div className="border-t border-[var(--color-divider)] py-4 text-center">
+              <p className="text-[13px] font-medium text-[var(--color-fg)]">
+                {t('chat:workspace.readOnlyTitle', { defaultValue: 'Read-only access' })}
+              </p>
+              <p className="mt-1 text-[12px] leading-relaxed text-[var(--color-fg-muted)]">
+                {t('chat:workspace.readOnlyBody', { defaultValue: 'You are a guest in this workspace. You can read shared conversations but not send messages.' })}
+              </p>
+            </div>
+          ) : conversation.projectId && !canUseKnowledgeBases ? (
             <div className="border-t border-[var(--color-divider)] py-4 text-center">
               <p className="text-[13px] font-medium text-[var(--color-fg)]">
                 {t('kb:groupPermissionTitle', { defaultValue: 'Knowledge bases unavailable' })}

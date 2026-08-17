@@ -375,6 +375,9 @@ type Project struct {
 	UpdatedAt          int64  `json:"updated_at"`
 	// '' = personal; set = shared with the workspace's members (§workspaces).
 	WorkspaceID string `json:"workspace_id"`
+	// §workspace RBAC: shared with the workspace (true) or private to the
+	// creator and workspace admins (false). Personal rows ignore it.
+	IsPublic bool `json:"is_public"`
 }
 
 // Conversation — §5 conversations row. kb_ids/summary_blocks/provider_state
@@ -486,6 +489,9 @@ type KnowledgeBase struct {
 	CreatedAt        int64  `json:"created_at"`
 	// '' = personal; set = shared with the workspace's members (§workspaces).
 	WorkspaceID string `json:"workspace_id"`
+	// §workspace RBAC: shared with the workspace (true) or private to the
+	// creator and workspace admins (false). Personal rows ignore it.
+	IsPublic bool `json:"is_public"`
 	// AccessRole is transient and user-relative: owner, read, write, or workspace.
 	// It is populated by user-facing list/get queries and never persisted.
 	AccessRole       string `json:"access_role,omitempty"`
@@ -527,6 +533,7 @@ type WorkspaceKnowledgeBaseMemberPermission struct {
 	KBID                    string `json:"kb_id"`
 	UserID                  string `json:"user_id"`
 	Role                    string `json:"role"`
+	IsOwner                 bool   `json:"is_owner"`
 	Name                    string `json:"name"`
 	Email                   string `json:"email"`
 	AvatarURL               string `json:"avatar_url,omitempty"`

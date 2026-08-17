@@ -94,15 +94,12 @@ func TestCreateInlineThreadKeepsWorkspaceBoundary(t *testing.T) {
 			if _, err := store.GetConversation(t.Context(), db, created.ID, "thread-creator"); err != nil {
 				t.Fatalf("thread creator cannot read inline thread: %v", err)
 			}
-			_, ownerErr := store.GetConversation(t.Context(), db, created.ID, "workspace-owner")
-			if tc.wantPublic && ownerErr != nil {
-				t.Fatalf("workspace owner cannot read forced-public inline thread: %v", ownerErr)
-			}
-			if !tc.wantPublic && !errors.Is(ownerErr, store.ErrNotFound) {
-				t.Fatalf("workspace owner read private inline thread error=%v, want ErrNotFound", ownerErr)
+			// §workspace RBAC: workspace admins read private conversations too.
+			if _, ownerErr := store.GetConversation(t.Context(), db, created.ID, "workspace-owner"); ownerErr != nil {
+				t.Fatalf("workspace admin cannot read inline thread: %v", ownerErr)
 			}
 
-			if err := store.RemoveWorkspaceMember(t.Context(), db, workspace.ID, "thread-creator"); err != nil {
+			if err := store.RemoveWorkspaceMember(t.Context(), db, workspace.ID, "workspace-owner", "thread-creator"); err != nil {
 				t.Fatalf("remove thread creator: %v", err)
 			}
 			if _, err := store.GetConversation(t.Context(), db, created.ID, "thread-creator"); !errors.Is(err, store.ErrNotFound) {

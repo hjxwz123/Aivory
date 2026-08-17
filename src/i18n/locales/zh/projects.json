@@ -74,7 +74,11 @@
       "edit": "编辑详情",
       "pin": "置顶项目",
       "unpin": "取消置顶",
-      "delete": "删除项目"
+      "delete": "删除项目",
+      "makePrivate": "设为私有",
+      "makeShared": "共享到工作空间",
+      "visibilityPrivate": "项目已设为私有，仅你和管理员可见。",
+      "visibilityShared": "项目已共享给工作空间全体成员。"
     },
     "renameTitle": "重命名项目",
     "renameSave": "保存",

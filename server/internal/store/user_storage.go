@@ -157,13 +157,13 @@ func StorageBillingUserForContainer(ctx context.Context, db *sql.DB, kbID, conve
 			 WHERE k.id=? AND `+knowledgeBaseWritePredicate("k"), args...).Scan(&billingUserID)
 	} else {
 		args := []any{conversationID}
-		args = append(args, workspaceResourceAccessArgs(accessUserID)...)
+		args = append(args, conversationMemberMutationArgs(accessUserID)...)
 		err = db.QueryRowContext(ctx, `
 			SELECT CASE WHEN COALESCE(c.workspace_id,'')<>''
 			       THEN COALESCE(w.owner_id, c.user_id) ELSE c.user_id END
 			  FROM conversations c
 			  LEFT JOIN workspaces w ON w.id=c.workspace_id
-			 WHERE c.id=? AND `+conversationResourceAccessPredicate("c"), args...).Scan(&billingUserID)
+			 WHERE c.id=? AND `+conversationMemberMutationPredicate("c"), args...).Scan(&billingUserID)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotFound

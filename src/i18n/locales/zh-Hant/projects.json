@@ -74,7 +74,11 @@
       "edit": "編輯詳情",
       "pin": "置頂專案",
       "unpin": "取消置頂",
-      "delete": "刪除專案"
+      "delete": "刪除專案",
+      "makePrivate": "設為私有",
+      "makeShared": "共享到工作空間",
+      "visibilityPrivate": "專案已設為私有，僅你和管理員可見。",
+      "visibilityShared": "專案已共享給工作空間全體成員。"
     },
     "renameTitle": "重新命名專案",
     "renameSave": "儲存",

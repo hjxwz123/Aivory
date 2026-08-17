@@ -11,18 +11,57 @@ import (
 // Workspaces (§workspaces) — fully-isolated collaborative spaces. A workspace
 // owns conversations/projects/KBs via their workspace_id column ('' = personal);
 // every member sees all of them. Membership is granted ONLY through the invite
-// link (a 192-bit capability token, rotatable). The owner is also a member row
-// (role='owner') so membership predicates need no special-casing.
+// link (a 192-bit capability token, rotatable). Roles are admin/member/guest
+// (§workspace RBAC): the workspace owner is a member row with role='admin' plus
+// workspaces.owner_id, which is the ONLY source of owner-exclusive authority.
+// Legacy rows still holding 'owner' are read as 'admin' and rewritten by the
+// startup migration.
+
+// Workspace member roles (§workspace RBAC). Values written after the RBAC
+// migration: admin, member, guest. The historical 'owner' member role is
+// normalized to admin on read; workspaces.owner_id decides ownership.
+const (
+	WorkspaceRoleAdmin  = "admin"
+	WorkspaceRoleMember = "member"
+	WorkspaceRoleGuest  = "guest"
+	// WorkspaceRoleOwnerLegacy is the pre-RBAC role value kept readable for
+	// databases upgraded in place.
+	WorkspaceRoleOwnerLegacy = "owner"
+)
+
+// normalizeWorkspaceRoleSQL returns a SQL expression mapping a member role
+// column onto the canonical role set ('owner' legacy rows read as 'admin').
+func normalizeWorkspaceRoleSQL(expr string) string {
+	return `CASE WHEN COALESCE(` + expr + `,'')='owner' THEN 'admin' ELSE COALESCE(` + expr + `,'') END`
+}
+
+// isAdminRoleSQL matches member roles that carry workspace-admin authority
+// (canonical admin plus the legacy 'owner' value).
+func isAdminRoleSQL(expr string) string {
+	return `COALESCE(` + expr + `,'') IN ('admin','owner')`
+}
+
+// isCollaboratorRoleSQL is the write-capable counterpart to isAdminRoleSQL.
+// It deliberately uses a closed role set: malformed rows must never become
+// writable merely because they are not guests. "owner" is kept only for
+// databases that have not yet completed the legacy-role migration.
+func isCollaboratorRoleSQL(expr string) string {
+	return `COALESCE(` + expr + `,'') IN ('admin','member','owner')`
+}
 
 // Workspace is one workspace row.
 type Workspace struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	OwnerID     string `json:"owner_id"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	OwnerID string `json:"owner_id"`
+	// InviteToken is retained for legacy database compatibility only. It is not
+	// an accepted join capability and is cleared from user-facing responses.
 	InviteToken string `json:"invite_token,omitempty"`
 	CreatedAt   int64  `json:"created_at"`
 	// Enriched (not columns):
-	Role                    string `json:"role,omitempty"`         // requesting user's role
+	Role string `json:"role,omitempty"` // requesting user's role (admin/member/guest)
+	// IsOwner marks the requesting user as the canonical workspace owner.
+	IsOwner                 bool   `json:"is_owner"`
 	MemberCount             int    `json:"member_count,omitempty"` // filled by list queries
 	OwnerName               string `json:"owner_name,omitempty"`
 	CanCreateProjects       bool   `json:"can_create_projects"`
@@ -36,6 +75,7 @@ type Workspace struct {
 type WorkspaceMember struct {
 	UserID                  string `json:"user_id"`
 	Role                    string `json:"role"`
+	IsOwner                 bool   `json:"is_owner"`
 	CanCreateProjects       bool   `json:"can_create_projects"`
 	CanPrivateConversations bool   `json:"can_private_conversations"`
 	CanCreateKB             bool   `json:"can_create_kb"`
@@ -100,10 +140,46 @@ func workspaceResourceAccessArgs(userID string) []any {
 	return []any{userID, userID, userID}
 }
 
+// workspaceScopedVisibilityPredicate is the §workspace RBAC phase-2 read
+// boundary for resources that carry an is_public column (projects, knowledge
+// bases): shared rows (is_public=1) are visible to every current member —
+// guests included; private rows (is_public=0) only to their creator and
+// workspace admins (canonical owner plus admin-role members). A creator who
+// leaves the workspace loses access to their own private rows. Personal rows
+// (workspace_id=”) remain creator-only. Callers must append
+// workspaceScopedVisibilityArgs(userID) in predicate order.
+func workspaceScopedVisibilityPredicate(alias string) string {
+	prefix := ""
+	if alias != "" {
+		prefix = alias + "."
+	}
+	return `((COALESCE(` + prefix + `workspace_id,'')='' AND ` + prefix + `user_id=?) OR (` +
+		`COALESCE(` + prefix + `workspace_id,'')<>'' AND EXISTS (` +
+		`SELECT 1 FROM workspaces scoped_workspace ` +
+		`WHERE scoped_workspace.id=` + prefix + `workspace_id AND (` +
+		`scoped_workspace.owner_id=? OR EXISTS (` +
+		`SELECT 1 FROM workspace_members scoped_member ` +
+		`WHERE scoped_member.workspace_id=scoped_workspace.id AND scoped_member.user_id=? ` +
+		`AND (` + isAdminRoleSQL("scoped_member.role") + ` OR ` + prefix + `is_public=1)` +
+		`) OR (` + prefix + `user_id=? AND EXISTS (` +
+		`SELECT 1 FROM workspace_members scoped_creator ` +
+		`WHERE scoped_creator.workspace_id=scoped_workspace.id AND scoped_creator.user_id=?` +
+		`)` +
+		`)` +
+		`)` +
+		`)` +
+		`))`
+}
+
+func workspaceScopedVisibilityArgs(userID string) []any {
+	return []any{userID, userID, userID, userID, userID}
+}
+
 // conversationResourceAccessPredicate adds per-conversation visibility to the
-// standard personal/workspace boundary without adding SQL parameters. Public
-// workspace rows are visible to every current member; private rows only match
-// when the current owner/member is also conversations.user_id. Keeping the same
+// standard personal/workspace boundary without changing the three-argument
+// shape. In a workspace: admins (including the canonical owner) see every
+// conversation; other current members see public rows plus their own private
+// rows; guests — who are read-only — still see public rows. Keeping the same
 // three-argument shape lets document/file/message subqueries share the existing
 // authorization plumbing.
 func conversationResourceAccessPredicate(alias string) string {
@@ -115,20 +191,49 @@ func conversationResourceAccessPredicate(alias string) string {
 		`COALESCE(` + prefix + `workspace_id,'')<>'' AND EXISTS (` +
 		`SELECT 1 FROM workspaces conversation_workspace ` +
 		`WHERE conversation_workspace.id=` + prefix + `workspace_id AND (` +
-		`(conversation_workspace.owner_id=? AND (` + prefix + `is_public=1 OR ` + prefix + `user_id=conversation_workspace.owner_id)) OR EXISTS (` +
+		`conversation_workspace.owner_id=? OR EXISTS (` +
 		`SELECT 1 FROM workspace_members conversation_member ` +
 		`WHERE conversation_member.workspace_id=conversation_workspace.id AND conversation_member.user_id=? ` +
-		`AND (` + prefix + `is_public=1 OR ` + prefix + `user_id=conversation_member.user_id)` +
+		`AND (` + isAdminRoleSQL("conversation_member.role") + ` ` +
+		`OR ` + prefix + `is_public=1 ` +
+		`OR ` + prefix + `user_id=conversation_member.user_id)` +
 		`)` +
 		`)` +
 		`)` +
 		`))`
 }
 
-// workspaceResourceManagerPredicate is the stricter share-management boundary:
-// a personal resource's creator; or, in a workspace, its canonical owner or the
-// resource creator while that creator is still a current member. Other ordinary
-// members may collaborate on content but may not publish or revoke its share.
+// conversationMemberMutationPredicate is the boundary for mutations against a
+// conversation carried out by ordinary collaborators (sending messages,
+// switching branches, attaching uploads): read access PLUS the workspace actor
+// must not be a guest. Guests are strictly read-only (§workspace RBAC).
+// conversationMemberMutationArgs supplies the five positional parameters.
+func conversationMemberMutationPredicate(alias string) string {
+	prefix := ""
+	if alias != "" {
+		prefix = alias + "."
+	}
+	return `(` + conversationResourceAccessPredicate(alias) + ` ` +
+		`AND (COALESCE(` + prefix + `workspace_id,'')='' OR EXISTS (` +
+		`SELECT 1 FROM workspaces mutation_workspace ` +
+		`WHERE mutation_workspace.id=` + prefix + `workspace_id AND (` +
+		`mutation_workspace.owner_id=? OR EXISTS (` +
+		`SELECT 1 FROM workspace_members mutation_member ` +
+		`WHERE mutation_member.workspace_id=mutation_workspace.id AND mutation_member.user_id=? ` +
+		`AND ` + isCollaboratorRoleSQL("mutation_member.role") + `)` +
+		`)` +
+		`)))`
+}
+
+func conversationMemberMutationArgs(userID string) []any {
+	return append(workspaceResourceAccessArgs(userID), userID, userID)
+}
+
+// workspaceResourceManagerPredicate is the stricter resource-management
+// boundary: a personal resource's creator; or, in a workspace, an admin (the
+// canonical owner always, plus admin-role members) or the resource creator
+// while that creator is still a current member. Other ordinary members may
+// collaborate on content but may not rename, republish or destroy the share.
 func workspaceResourceManagerPredicate(alias string) string {
 	prefix := ""
 	if alias != "" {
@@ -138,9 +243,15 @@ func workspaceResourceManagerPredicate(alias string) string {
 		`COALESCE(` + prefix + `workspace_id,'')<>'' AND EXISTS (` +
 		`SELECT 1 FROM workspaces resource_workspace ` +
 		`WHERE resource_workspace.id=` + prefix + `workspace_id AND (` +
-		`resource_workspace.owner_id=? OR (` + prefix + `user_id=? AND EXISTS (` +
+		`resource_workspace.owner_id=? OR EXISTS (` +
+		`SELECT 1 FROM workspace_members resource_admin_member ` +
+		`WHERE resource_admin_member.workspace_id=resource_workspace.id ` +
+		`AND resource_admin_member.user_id=? ` +
+		`AND ` + isAdminRoleSQL("resource_admin_member.role") + ` ` +
+		`) OR (` + prefix + `user_id=? AND EXISTS (` +
 		`SELECT 1 FROM workspace_members resource_manager_member ` +
-		`WHERE resource_manager_member.workspace_id=resource_workspace.id AND resource_manager_member.user_id=?` +
+		`WHERE resource_manager_member.workspace_id=resource_workspace.id AND resource_manager_member.user_id=? ` +
+		`AND ` + isCollaboratorRoleSQL("resource_manager_member.role") +
 		`)` +
 		`)` +
 		`)` +
@@ -149,7 +260,7 @@ func workspaceResourceManagerPredicate(alias string) string {
 }
 
 func workspaceResourceManagerArgs(userID string) []any {
-	return []any{userID, userID, userID, userID}
+	return []any{userID, userID, userID, userID, userID}
 }
 
 // workspaceAcceptsResourceCreationPredicate blocks new shared resources once
@@ -157,7 +268,7 @@ func workspaceResourceManagerArgs(userID string) []any {
 // alias is a trusted workspaces-table alias; the single placeholder is the
 // creating user's id.
 func workspaceAcceptsResourceCreationPredicate(alias string) string {
-	return `EXISTS (
+	return `COALESCE(` + alias + `.deleting,0)=0 AND EXISTS (
 		SELECT 1 FROM users creation_owner
 		 WHERE creation_owner.id=` + alias + `.owner_id AND creation_owner.status='active'
 	) AND EXISTS (
@@ -167,15 +278,17 @@ func workspaceAcceptsResourceCreationPredicate(alias string) string {
 }
 
 // workspaceMemberCapabilityPredicate is used inside mutations that already
-// lock the workspace row. The canonical owner always has every capability;
-// ordinary members must still exist and have the requested total permission.
+// lock the workspace row. Workspace admins (canonical owner plus admin-role
+// members) always have every capability; ordinary members must still exist,
+// not be guests, and have the requested total permission.
 // capability is a trusted column name supplied only by store code.
 func workspaceMemberCapabilityPredicate(workspaceAlias, capability string) string {
 	return `(` + workspaceAlias + `.owner_id=? OR EXISTS (
 		SELECT 1 FROM workspace_members capability_member
 		 WHERE capability_member.workspace_id=` + workspaceAlias + `.id
 		   AND capability_member.user_id=?
-		   AND capability_member.` + capability + `=1
+		   AND (capability_member.` + capability + `=1 OR ` + isAdminRoleSQL("capability_member.role") + `)
+		   AND ` + isCollaboratorRoleSQL("capability_member.role") + `
 	))`
 }
 
@@ -223,15 +336,21 @@ func CreateWorkspace(ctx context.Context, db *sql.DB, ownerID, name string) (*Wo
 	}
 	defer func() { _ = tx.Rollback() }()
 	id := genID("ws")
-	token := "wsi_" + genToken() // §D1-grade capability: join-by-link only
+	// Keep a unique compatibility value for pre-invite-record databases. The
+	// application never resolves this token; all joins use workspace_invites.
+	token := "wsi_" + genToken()
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO workspaces(id, name, owner_id, invite_token) VALUES(?, ?, ?, ?)`,
 		id, name, ownerID, token); err != nil {
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO workspace_members(workspace_id, user_id, role) VALUES(?, ?, 'owner')`,
+		`INSERT INTO workspace_members(workspace_id, user_id, role) VALUES(?, ?, 'admin')`,
 		id, ownerID); err != nil {
+		return nil, err
+	}
+	if err := recordWorkspaceAudit(ctx, tx, id, ownerID, AuditWorkspaceCreated, "workspace", id,
+		map[string]any{"name": name}); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -241,11 +360,14 @@ func CreateWorkspace(ctx context.Context, db *sql.DB, ownerID, name string) (*Wo
 	if err != nil {
 		return nil, err
 	}
-	// The creator is, by definition, the owner and sole member. Set the enriched
-	// fields GetWorkspace can't (it reads columns only) so the create response is
-	// complete — the client's Members dialog gates the invite link on role=owner,
-	// and without this it stays hidden until a page reload re-fetches the list.
-	w.Role = "owner"
+	// The creator is, by definition, the owner (owner_id) and an admin. Set the
+	// enriched fields GetWorkspace can't (it reads columns only) so the create
+	// response is complete — the client's Members dialog gates management on
+	// is_owner/admin, and without this it stays hidden until a page reload
+	// re-fetches the list.
+	w.Role = WorkspaceRoleAdmin
+	w.IsOwner = true
+	w.InviteToken = ""
 	w.MemberCount = 1
 	applyWorkspacePermissions(w, fullWorkspaceMemberPermissions())
 	return w, nil
@@ -274,12 +396,12 @@ func GetWorkspaceForMember(ctx context.Context, db *sql.DB, id, userID string) (
 	var w Workspace
 	err := db.QueryRowContext(ctx,
 		`SELECT w.id, w.name, w.owner_id, w.invite_token, w.created_at,
-		        CASE WHEN w.owner_id=? THEN 'owner' ELSE COALESCE(m.role,'') END,
-		        CASE WHEN w.owner_id=? THEN 1 ELSE COALESCE(m.can_create_projects,0) END,
-		        CASE WHEN w.owner_id=? THEN 1 ELSE COALESCE(m.can_private_conversations,0) END,
-		        CASE WHEN w.owner_id=? THEN 1 ELSE COALESCE(m.can_create_kb,0) END,
-		        CASE WHEN w.owner_id=? THEN 1 ELSE COALESCE(m.can_add_kb_files,0) END,
-		        CASE WHEN w.owner_id=? THEN 1 ELSE COALESCE(m.can_delete_kb_content,0) END
+		        CASE WHEN w.owner_id=? THEN 'admin' ELSE `+normalizeWorkspaceRoleSQL("m.role")+` END,
+		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_create_projects,0) END,
+		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_private_conversations,0) END,
+		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_create_kb,0) END,
+		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_add_kb_files,0) END,
+		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_delete_kb_content,0) END
 		   FROM workspaces w
 		   LEFT JOIN workspace_members m ON m.workspace_id=w.id AND m.user_id=?
 		  WHERE w.id=? AND (w.owner_id=? OR m.user_id=?)`,
@@ -296,27 +418,16 @@ func GetWorkspaceForMember(ctx context.Context, db *sql.DB, id, userID string) (
 	if err != nil {
 		return nil, err
 	}
+	w.IsOwner = w.OwnerID == userID
+	w.InviteToken = ""
 	return &w, nil
 }
 
-// GetWorkspaceByInviteToken resolves an invite link. Uniform ErrNotFound on
-// miss (no enumeration oracle).
-func GetWorkspaceByInviteToken(ctx context.Context, db *sql.DB, token string) (*Workspace, error) {
-	var w Workspace
-	err := db.QueryRowContext(ctx,
-		`SELECT w.id, w.name, w.owner_id, w.created_at,
-		        (SELECT COUNT(*) FROM workspace_members m WHERE m.workspace_id=w.id),
-		        COALESCE(u.name, '')
-		   FROM workspaces w JOIN users u ON u.id = w.owner_id
-		  WHERE w.invite_token=? AND u.status='active'`, token,
-	).Scan(&w.ID, &w.Name, &w.OwnerID, &w.CreatedAt, &w.MemberCount, &w.OwnerName)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &w, nil
+// GetWorkspaceByInviteToken is retained for source compatibility only. The
+// historical workspaces.invite_token is an unbounded legacy capability and is
+// intentionally never resolved; callers must use workspace_invites records.
+func GetWorkspaceByInviteToken(_ context.Context, _ *sql.DB, _ string) (*Workspace, error) {
+	return nil, ErrNotFound
 }
 
 // ListWorkspacesForUser returns every workspace the user belongs to, with the
@@ -326,12 +437,12 @@ func GetWorkspaceByInviteToken(ctx context.Context, db *sql.DB, token string) (*
 func ListWorkspacesForUser(ctx context.Context, db *sql.DB, userID string) ([]Workspace, error) {
 	rows, err := db.QueryContext(ctx,
 		`SELECT w.id, w.name, w.owner_id, w.invite_token, w.created_at,
-		        CASE WHEN w.owner_id=? THEN 'owner' ELSE COALESCE(m.role,'') END,
-		        CASE WHEN w.owner_id=? THEN 1 ELSE COALESCE(m.can_create_projects,0) END,
-		        CASE WHEN w.owner_id=? THEN 1 ELSE COALESCE(m.can_private_conversations,0) END,
-		        CASE WHEN w.owner_id=? THEN 1 ELSE COALESCE(m.can_create_kb,0) END,
-		        CASE WHEN w.owner_id=? THEN 1 ELSE COALESCE(m.can_add_kb_files,0) END,
-		        CASE WHEN w.owner_id=? THEN 1 ELSE COALESCE(m.can_delete_kb_content,0) END,
+		        CASE WHEN w.owner_id=? THEN 'admin' ELSE `+normalizeWorkspaceRoleSQL("m.role")+` END,
+		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_create_projects,0) END,
+		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_private_conversations,0) END,
+		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_create_kb,0) END,
+		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_add_kb_files,0) END,
+		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_delete_kb_content,0) END,
 		        (SELECT COUNT(*) FROM workspace_members mm WHERE mm.workspace_id=w.id)
 		   FROM workspaces w
 		   LEFT JOIN workspace_members m ON m.workspace_id=w.id AND m.user_id=?
@@ -352,9 +463,9 @@ func ListWorkspacesForUser(ctx context.Context, db *sql.DB, userID string) ([]Wo
 		); err != nil {
 			return nil, err
 		}
-		if w.Role != "owner" {
-			w.InviteToken = ""
-		}
+		w.IsOwner = w.OwnerID == userID
+		// Legacy workspace tokens are never a user-facing capability.
+		w.InviteToken = ""
 		out = append(out, w)
 	}
 	return out, rows.Err()
@@ -367,13 +478,13 @@ func CountOwnedWorkspaces(ctx context.Context, db *sql.DB, userID string) (int, 
 	return n, err
 }
 
-// IsWorkspaceMember reports membership + role ("" when not a member). The
-// canonical owner remains authoritative even if a legacy owner membership row
-// is missing.
+// IsWorkspaceMember reports membership + normalized role ("" when not a
+// member; legacy 'owner' reads as 'admin'). The canonical owner remains
+// authoritative even if a legacy owner membership row is missing.
 func IsWorkspaceMember(ctx context.Context, db *sql.DB, workspaceID, userID string) (string, error) {
 	var role string
 	err := db.QueryRowContext(ctx,
-		`SELECT CASE WHEN w.owner_id=? THEN 'owner' ELSE COALESCE(m.role,'') END
+		`SELECT CASE WHEN w.owner_id=? THEN 'admin' ELSE `+normalizeWorkspaceRoleSQL("m.role")+` END
 		   FROM workspaces w
 		   LEFT JOIN workspace_members m ON m.workspace_id=w.id AND m.user_id=?
 		  WHERE w.id=? AND (w.owner_id=? OR m.user_id=?)`,
@@ -388,12 +499,13 @@ func IsWorkspaceMember(ctx context.Context, db *sql.DB, workspaceID, userID stri
 // ListWorkspaceMembers returns members joined with display identity.
 func ListWorkspaceMembers(ctx context.Context, db *sql.DB, workspaceID string) ([]WorkspaceMember, error) {
 	rows, err := db.QueryContext(ctx,
-		`SELECT m.user_id, CASE WHEN w.owner_id=m.user_id THEN 'owner' ELSE m.role END,
-		        CASE WHEN w.owner_id=m.user_id THEN 1 ELSE m.can_create_projects END,
-		        CASE WHEN w.owner_id=m.user_id THEN 1 ELSE m.can_private_conversations END,
-		        CASE WHEN w.owner_id=m.user_id THEN 1 ELSE m.can_create_kb END,
-		        CASE WHEN w.owner_id=m.user_id THEN 1 ELSE m.can_add_kb_files END,
-		        CASE WHEN w.owner_id=m.user_id THEN 1 ELSE m.can_delete_kb_content END,
+		`SELECT m.user_id, CASE WHEN w.owner_id=m.user_id THEN 'admin' ELSE `+normalizeWorkspaceRoleSQL("m.role")+` END,
+		        CASE WHEN w.owner_id=m.user_id THEN 1 ELSE 0 END,
+		        CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_create_projects END,
+		        CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_private_conversations END,
+		        CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_create_kb END,
+		        CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_add_kb_files END,
+		        CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_delete_kb_content END,
 		        m.joined_at, COALESCE(u.name,''), COALESCE(u.email,''), COALESCE(u.settings,'')
 		   FROM workspace_members m
 		   JOIN workspaces w ON w.id=m.workspace_id
@@ -408,7 +520,8 @@ func ListWorkspaceMembers(ctx context.Context, db *sql.DB, workspaceID string) (
 		var m WorkspaceMember
 		var settings string
 		if err := rows.Scan(
-			&m.UserID, &m.Role, &m.CanCreateProjects, &m.CanPrivateConversations,
+			&m.UserID, &m.Role, &m.IsOwner,
+			&m.CanCreateProjects, &m.CanPrivateConversations,
 			&m.CanCreateKB, &m.CanAddKBFiles, &m.CanDeleteKBContent,
 			&m.JoinedAt, &m.Name, &m.Email, &settings,
 		); err != nil {
@@ -420,10 +533,14 @@ func ListWorkspaceMembers(ctx context.Context, db *sql.DB, workspaceID string) (
 	return out, rows.Err()
 }
 
+// UpdateWorkspaceMemberPermissions changes the member-wide capability ceiling.
+// Actor must be a workspace admin (canonical owner or admin-role member); the
+// target must be an ordinary member or guest — admins are not subject to
+// member capability limits and only the owner may manage them at all.
 func UpdateWorkspaceMemberPermissions(
 	ctx context.Context,
 	db *sql.DB,
-	workspaceID, ownerID, memberID string,
+	workspaceID, actorID, memberID string,
 	permissions WorkspaceMemberPermissions,
 ) (*WorkspaceMember, error) {
 	tx, err := beginWorkspaceMutationTx(ctx, db, workspaceID)
@@ -434,11 +551,19 @@ func UpdateWorkspaceMemberPermissions(
 	res, err := tx.ExecContext(ctx, `UPDATE workspace_members
 		SET can_create_projects=?, can_private_conversations=?, can_create_kb=?,
 		    can_add_kb_files=?, can_delete_kb_content=?
-		WHERE workspace_id=? AND user_id=? AND role<>'owner'
-		  AND EXISTS (SELECT 1 FROM workspaces w WHERE w.id=workspace_members.workspace_id AND w.owner_id=?)`,
+		WHERE workspace_id=? AND user_id=?
+		  AND NOT EXISTS (SELECT 1 FROM workspaces w
+		                  WHERE w.id=workspace_members.workspace_id AND w.owner_id=workspace_members.user_id)
+		  AND COALESCE(role,'') NOT IN ('admin','owner')
+		  AND EXISTS (SELECT 1 FROM workspaces w WHERE w.id=workspace_members.workspace_id AND (
+		      w.owner_id=? OR EXISTS (
+		        SELECT 1 FROM workspace_members actor_member
+		         WHERE actor_member.workspace_id=w.id AND actor_member.user_id=?
+		           AND `+isAdminRoleSQL("actor_member.role")+`
+		      )))`,
 		boolInt(permissions.CanCreateProjects), boolInt(permissions.CanPrivateConversations),
 		boolInt(permissions.CanCreateKB), boolInt(permissions.CanAddKBFiles),
-		boolInt(permissions.CanDeleteKBContent), workspaceID, memberID, ownerID)
+		boolInt(permissions.CanDeleteKBContent), workspaceID, memberID, actorID, actorID)
 	if err != nil {
 		return nil, err
 	}
@@ -447,18 +572,137 @@ func UpdateWorkspaceMemberPermissions(
 	} else if n != 1 {
 		return nil, ErrNotFound
 	}
+	if err := recordWorkspaceAudit(ctx, tx, workspaceID, actorID, AuditMemberPermissionsUpdated,
+		"workspace_member", memberID, map[string]any{
+			"can_create_projects":       permissions.CanCreateProjects,
+			"can_private_conversations": permissions.CanPrivateConversations,
+			"can_create_kb":             permissions.CanCreateKB,
+			"can_add_kb_files":          permissions.CanAddKBFiles,
+			"can_delete_kb_content":     permissions.CanDeleteKBContent,
+		}); err != nil {
+		return nil, err
+	}
 	var member WorkspaceMember
 	var settings string
-	err = tx.QueryRowContext(ctx, `SELECT m.user_id,m.role,m.can_create_projects,m.can_private_conversations,
-		m.can_create_kb,m.can_add_kb_files,m.can_delete_kb_content,m.joined_at,
-		COALESCE(u.name,''),COALESCE(u.email,''),COALESCE(u.settings,'')
-		FROM workspace_members m LEFT JOIN users u ON u.id=m.user_id
+	err = tx.QueryRowContext(ctx, `SELECT m.user_id,
+			CASE WHEN w.owner_id=m.user_id THEN 'admin' ELSE `+normalizeWorkspaceRoleSQL("m.role")+` END,
+			CASE WHEN w.owner_id=m.user_id THEN 1 ELSE 0 END,
+			m.can_create_projects,m.can_private_conversations,
+			m.can_create_kb,m.can_add_kb_files,m.can_delete_kb_content,m.joined_at,
+			COALESCE(u.name,''),COALESCE(u.email,''),COALESCE(u.settings,'')
+		FROM workspace_members m
+		JOIN workspaces w ON w.id=m.workspace_id
+		LEFT JOIN users u ON u.id=m.user_id
 		WHERE m.workspace_id=? AND m.user_id=?`, workspaceID, memberID).Scan(
-		&member.UserID, &member.Role, &member.CanCreateProjects, &member.CanPrivateConversations,
+		&member.UserID, &member.Role, &member.IsOwner,
+		&member.CanCreateProjects, &member.CanPrivateConversations,
 		&member.CanCreateKB, &member.CanAddKBFiles, &member.CanDeleteKBContent,
 		&member.JoinedAt, &member.Name, &member.Email, &settings,
 	)
 	if err != nil {
+		return nil, err
+	}
+	member.AvatarURL = avatarFromSettings(settings)
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &member, nil
+}
+
+// ValidWorkspaceMemberRole reports whether role is a writable membership role.
+func ValidWorkspaceMemberRole(role string) bool {
+	return role == WorkspaceRoleAdmin || role == WorkspaceRoleMember || role == WorkspaceRoleGuest
+}
+
+// UpdateWorkspaceMemberRole applies the §workspace RBAC role-change ladder under
+// the workspace membership lock:
+//
+//	owner:          admin <-> member <-> guest on OTHERS (never self)
+//	ordinary admin: member <-> guest only (never touches admins or self)
+//	member / guest: no role management
+//
+// The canonical owner row can never be re-roled. Returns the updated member.
+func UpdateWorkspaceMemberRole(
+	ctx context.Context,
+	db *sql.DB,
+	workspaceID, actorID, memberID, newRole string,
+) (*WorkspaceMember, error) {
+	if !ValidWorkspaceMemberRole(newRole) {
+		return nil, errors.New("invalid role")
+	}
+	tx, err := beginWorkspaceMutationTx(ctx, db, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	var workspaceOwnerID string
+	var actorIsOwner bool
+	var actorRole string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT w.owner_id, w.owner_id=?, COALESCE(am.role,'')
+		   FROM workspaces w
+		   LEFT JOIN workspace_members am ON am.workspace_id=w.id AND am.user_id=?
+		  WHERE w.id=? AND (w.owner_id=? OR am.user_id=?)`,
+		actorID, actorID, workspaceID, actorID, actorID,
+	).Scan(&workspaceOwnerID, &actorIsOwner, &actorRole); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	actorAdmin := actorIsOwner || actorRole == "admin" || actorRole == "owner"
+	if !actorAdmin {
+		return nil, ErrForbidden
+	}
+	if memberID == workspaceOwnerID {
+		return nil, ErrForbidden // the owner row is fixed
+	}
+
+	var targetRole string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT `+normalizeWorkspaceRoleSQL("role")+` FROM workspace_members
+		  WHERE workspace_id=? AND user_id=?`, workspaceID, memberID,
+	).Scan(&targetRole); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	// Ordinary admins may only flip ordinary users between member and guest.
+	// Promoting to admin, demoting an admin, or re-roling an admin is
+	// owner-exclusive.
+	if !actorIsOwner && (targetRole == "admin" || newRole == WorkspaceRoleAdmin) {
+		return nil, ErrForbidden
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE workspace_members SET role=? WHERE workspace_id=? AND user_id=?`,
+		newRole, workspaceID, memberID); err != nil {
+		return nil, err
+	}
+	if err := recordWorkspaceAudit(ctx, tx, workspaceID, actorID, AuditMemberRoleUpdated,
+		"workspace_member", memberID, map[string]any{"from": targetRole, "to": newRole}); err != nil {
+		return nil, err
+	}
+
+	var member WorkspaceMember
+	var settings string
+	if err := tx.QueryRowContext(ctx, `SELECT m.user_id,
+			CASE WHEN w.owner_id=m.user_id THEN 'admin' ELSE `+normalizeWorkspaceRoleSQL("m.role")+` END,
+			CASE WHEN w.owner_id=m.user_id THEN 1 ELSE 0 END,
+			m.can_create_projects,m.can_private_conversations,
+			m.can_create_kb,m.can_add_kb_files,m.can_delete_kb_content,m.joined_at,
+			COALESCE(u.name,''),COALESCE(u.email,''),COALESCE(u.settings,'')
+		FROM workspace_members m
+		JOIN workspaces w ON w.id=m.workspace_id
+		LEFT JOIN users u ON u.id=m.user_id
+		WHERE m.workspace_id=? AND m.user_id=?`, workspaceID, memberID).Scan(
+		&member.UserID, &member.Role, &member.IsOwner,
+		&member.CanCreateProjects, &member.CanPrivateConversations,
+		&member.CanCreateKB, &member.CanAddKBFiles, &member.CanDeleteKBContent,
+		&member.JoinedAt, &member.Name, &member.Email, &settings,
+	); err != nil {
 		return nil, err
 	}
 	member.AvatarURL = avatarFromSettings(settings)
@@ -478,57 +722,38 @@ func JoinWorkspace(ctx context.Context, db *sql.DB, workspaceID, userID string) 
 	if err := lockWorkspaceMembershipTx(ctx, tx, workspaceID); err != nil {
 		return err
 	}
-	if err := joinWorkspaceTx(ctx, tx, workspaceID, userID); err != nil {
+	joined, err := joinWorkspaceWithRoleTx(ctx, tx, workspaceID, userID, WorkspaceRoleMember)
+	if err != nil {
 		return err
+	}
+	if joined {
+		if err := recordWorkspaceAudit(ctx, tx, workspaceID, userID, AuditMemberJoined,
+			"workspace_member", userID, map[string]any{"role": WorkspaceRoleMember, "source": "direct"}); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
 
-// JoinWorkspaceByInviteToken consumes the capability under the same workspace
-// lock used by kick/token rotation. Rechecking the token after acquiring that
-// lock prevents a request that resolved the old token just before a kick from
-// re-adding the removed member afterwards.
-func JoinWorkspaceByInviteToken(ctx context.Context, db *sql.DB, token, userID string) (*Workspace, error) {
-	var workspaceID string
-	if err := db.QueryRowContext(ctx,
-		`SELECT id FROM workspaces WHERE invite_token=?`, token,
-	).Scan(&workspaceID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
-		}
-		return nil, err
-	}
-	tx, err := beginWorkspaceMutationTx(ctx, db, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback() //nolint:errcheck
-	var workspace Workspace
-	if err := tx.QueryRowContext(ctx,
-		`SELECT w.id, w.name, w.owner_id, w.created_at
-		   FROM workspaces w JOIN users owner ON owner.id=w.owner_id
-		  WHERE w.id=? AND w.invite_token=? AND owner.status='active'`, workspaceID, token,
-	).Scan(&workspace.ID, &workspace.Name, &workspace.OwnerID, &workspace.CreatedAt); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
-		}
-		return nil, err
-	}
-	if err := joinWorkspaceTx(ctx, tx, workspaceID, userID); err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	workspace.Role = "member"
-	if workspace.OwnerID == userID {
-		workspace.Role = "owner"
-	}
-	applyWorkspacePermissions(&workspace, fullWorkspaceMemberPermissions())
-	return &workspace, nil
+// JoinWorkspaceByInviteToken is retained for source compatibility only. The
+// permanent legacy workspace token is deliberately not consumable; callers
+// must use JoinWorkspaceByInviteRecord.
+func JoinWorkspaceByInviteToken(_ context.Context, _ *sql.DB, _ string, _ string) (*Workspace, error) {
+	return nil, ErrNotFound
 }
 
 func joinWorkspaceTx(ctx context.Context, tx *sql.Tx, workspaceID, userID string) error {
+	_, err := joinWorkspaceWithRoleTx(ctx, tx, workspaceID, userID, WorkspaceRoleMember)
+	return err
+}
+
+// joinWorkspaceWithRoleTx inserts the membership row with the granted role and
+// reports whether a new membership was created (an existing member re-joining
+// is a no-op that grants nothing).
+func joinWorkspaceWithRoleTx(ctx context.Context, tx *sql.Tx, workspaceID, userID, role string) (bool, error) {
+	if !ValidWorkspaceMemberRole(role) {
+		return false, errors.New("invalid role")
+	}
 	var ownerStatus, joiningStatus string
 	if err := tx.QueryRowContext(ctx,
 		`SELECT owner.status, joining_user.status
@@ -538,17 +763,21 @@ func joinWorkspaceTx(ctx context.Context, tx *sql.Tx, workspaceID, userID string
 		  WHERE w.id=?`, userID, workspaceID,
 	).Scan(&ownerStatus, &joiningStatus); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
+			return false, ErrNotFound
 		}
-		return err
+		return false, err
 	}
 	if ownerStatus != "active" || joiningStatus != "active" {
-		return ErrNotFound
+		return false, ErrNotFound
 	}
-	_, err := tx.ExecContext(ctx,
-		`INSERT INTO workspace_members(workspace_id, user_id, role) VALUES(?, ?, 'member')
-		 ON CONFLICT(workspace_id, user_id) DO NOTHING`, workspaceID, userID)
-	return err
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO workspace_members(workspace_id, user_id, role) VALUES(?, ?, ?)
+		 ON CONFLICT(workspace_id, user_id) DO NOTHING`, workspaceID, userID, role)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, nil
 }
 
 // LeaveWorkspace removes a member. The owner cannot leave — they must delete
@@ -603,21 +832,26 @@ func LeaveWorkspaceWithRevokedGenerations(ctx context.Context, db *sql.DB, works
 	if n, _ := res.RowsAffected(); n == 0 {
 		return nil, ErrNotFound
 	}
+	if err := recordWorkspaceAudit(ctx, tx, workspaceID, userID, AuditMemberLeft,
+		"workspace_member", userID, nil); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return revokedMessageIDs, nil
 }
 
-// RemoveWorkspaceMember is the owner's kick. The owner row itself is protected.
-func RemoveWorkspaceMember(ctx context.Context, db *sql.DB, workspaceID, memberID string) error {
-	_, err := RemoveWorkspaceMemberWithRevokedGenerations(ctx, db, workspaceID, memberID)
+// RemoveWorkspaceMember is the admin kick. The owner row itself is protected.
+func RemoveWorkspaceMember(ctx context.Context, db *sql.DB, workspaceID, actorID, memberID string) error {
+	_, err := RemoveWorkspaceMemberWithRevokedGenerations(ctx, db, workspaceID, actorID, memberID)
 	return err
 }
 
-// RemoveWorkspaceMemberWithRevokedGenerations is the cache-aware owner kick.
-// See LeaveWorkspaceWithRevokedGenerations for the returned id contract.
-func RemoveWorkspaceMemberWithRevokedGenerations(ctx context.Context, db *sql.DB, workspaceID, memberID string) ([]string, error) {
+// RemoveWorkspaceMemberWithRevokedGenerations is the cache-aware kick. Actor
+// must be a workspace admin; only the canonical owner may remove another
+// admin. See LeaveWorkspaceWithRevokedGenerations for the returned id contract.
+func RemoveWorkspaceMemberWithRevokedGenerations(ctx context.Context, db *sql.DB, workspaceID, actorID, memberID string) ([]string, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -626,11 +860,41 @@ func RemoveWorkspaceMemberWithRevokedGenerations(ctx context.Context, db *sql.DB
 	if err := lockWorkspaceMembershipTx(ctx, tx, workspaceID); err != nil {
 		return nil, err
 	}
-	// A kicked member typically still knows the old capability URL. Rotate it in
-	// this transaction so revocation cannot be bypassed by immediately rejoining.
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE workspaces SET invite_token=? WHERE id=?`, "wsi_"+genToken(), workspaceID); err != nil {
+	var workspaceOwnerID string
+	var actorRole string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT w.owner_id, COALESCE(am.role,'')
+		   FROM workspaces w
+		   LEFT JOIN workspace_members am ON am.workspace_id=w.id AND am.user_id=?
+		  WHERE w.id=? AND (w.owner_id=? OR am.user_id=?)`,
+		actorID, workspaceID, actorID, actorID,
+	).Scan(&workspaceOwnerID, &actorRole); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
 		return nil, err
+	}
+	if workspaceOwnerID != actorID && actorRole != "admin" && actorRole != "owner" {
+		return nil, ErrForbidden
+	}
+	if memberID == workspaceOwnerID {
+		return nil, ErrForbidden
+	}
+	// Only the owner may remove a fellow admin.
+	if workspaceOwnerID != actorID {
+		var targetRole string
+		if err := tx.QueryRowContext(ctx,
+			`SELECT `+normalizeWorkspaceRoleSQL("role")+` FROM workspace_members
+			  WHERE workspace_id=? AND user_id=?`, workspaceID, memberID,
+		).Scan(&targetRole); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, ErrNotFound
+			}
+			return nil, err
+		}
+		if targetRole == WorkspaceRoleAdmin {
+			return nil, ErrForbidden
+		}
 	}
 	// Public capability links published by the departing creator stay revoked even
 	// if that account later receives a fresh invitation and rejoins.
@@ -667,10 +931,22 @@ func RemoveWorkspaceMemberWithRevokedGenerations(ctx context.Context, db *sql.DB
 	if n, _ := res.RowsAffected(); n == 0 {
 		return nil, ErrNotFound
 	}
+	if err := recordWorkspaceAudit(ctx, tx, workspaceID, actorID, AuditMemberRemoved,
+		"workspace_member", memberID, nil); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return revokedMessageIDs, nil
+}
+
+// RecordWorkspaceDeleted writes the workspace.deleted audit entry AFTER a
+// successful teardown. The audit table intentionally has no FK, so the row
+// outlives the workspace itself.
+func RecordWorkspaceDeleted(ctx context.Context, db *sql.DB, workspaceID, actorID, name string) error {
+	return recordWorkspaceAudit(ctx, db, workspaceID, actorID, AuditWorkspaceDeleted,
+		"workspace", workspaceID, map[string]any{"name": name})
 }
 
 // scrubWorkspaceUserStreamingMessagesTx makes membership revocation durable
@@ -769,23 +1045,62 @@ func lockWorkspaceMembershipTx(ctx context.Context, tx *sql.Tx, workspaceID stri
 	return nil
 }
 
-// RotateWorkspaceInvite mints a fresh invite token (invalidating the old link).
-func RotateWorkspaceInvite(ctx context.Context, db *sql.DB, workspaceID string) (string, error) {
-	token := "wsi_" + genToken()
-	if _, err := db.ExecContext(ctx,
-		`UPDATE workspaces SET invite_token=? WHERE id=?`, token, workspaceID); err != nil {
-		return "", err
-	}
-	return token, nil
-}
-
 // DeleteWorkspaceRow removes the workspace row itself; member rows cascade via
 // FK. Content teardown (conversations/projects/KBs — which needs vector-store
 // cleanup) is orchestrated by the HANDLER through the existing per-entity
 // deleters, then this finishes the job.
-func DeleteWorkspaceRow(ctx context.Context, db *sql.DB, workspaceID string) error {
-	_, err := db.ExecContext(ctx, `DELETE FROM workspaces WHERE id=?`, workspaceID)
-	return err
+func MarkWorkspaceDeleting(ctx context.Context, db *sql.DB, workspaceID, expectedOwnerID string) error {
+	tx, err := beginWorkspaceMutationTx(ctx, db, workspaceID)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	res, err := tx.ExecContext(ctx,
+		`UPDATE workspaces SET deleting=1 WHERE id=? AND owner_id=? AND COALESCE(deleting,0)=0`,
+		workspaceID, expectedOwnerID,
+	)
+	if err != nil {
+		return err
+	}
+	if n, rowsErr := res.RowsAffected(); rowsErr != nil {
+		return rowsErr
+	} else if n != 1 {
+		return ErrNotFound
+	}
+	return tx.Commit()
+}
+
+// ClearWorkspaceDeleting makes a failed teardown retryable. The expected owner
+// guards against a stale handler clearing a fence after ownership changed.
+func ClearWorkspaceDeleting(ctx context.Context, db *sql.DB, workspaceID, expectedOwnerID string) error {
+	res, err := db.ExecContext(ctx,
+		`UPDATE workspaces SET deleting=0 WHERE id=? AND owner_id=? AND COALESCE(deleting,0)=1`,
+		workspaceID, expectedOwnerID,
+	)
+	if err != nil {
+		return err
+	}
+	if n, rowsErr := res.RowsAffected(); rowsErr != nil {
+		return rowsErr
+	} else if n != 1 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func DeleteWorkspaceRow(ctx context.Context, db *sql.DB, workspaceID, expectedOwnerID string) error {
+	res, err := db.ExecContext(ctx,
+		`DELETE FROM workspaces WHERE id=? AND owner_id=? AND COALESCE(deleting,0)=1`, workspaceID, expectedOwnerID,
+	)
+	if err != nil {
+		return err
+	}
+	if n, rowsErr := res.RowsAffected(); rowsErr != nil {
+		return rowsErr
+	} else if n != 1 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // WorkspaceContentIDs lists the conversation/project/KB ids belonging to a

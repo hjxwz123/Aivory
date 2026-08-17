@@ -109,11 +109,13 @@ func CreateFile(ctx context.Context, db *sql.DB, f File) (*File, error) {
 			f.SizeBytes, f.StoragePath, f.Kind, boolInt(f.Draft), now,
 			f.ConversationID,
 		}
-		args = append(args, workspaceResourceAccessArgs(f.UserID)...)
+		args = append(args, conversationMemberMutationArgs(f.UserID)...)
+		// Uploads are mutations: workspace guests are read-only, so the member
+		// mutation predicate (access + non-guest) replaces the plain read one.
 		q := `INSERT INTO files(id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, draft, created_at)
 			 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 			   FROM conversations c
-			  WHERE c.id=? AND ` + conversationResourceAccessPredicate("c")
+			  WHERE c.id=? AND ` + conversationMemberMutationPredicate("c")
 		if workspaceID != "" {
 			q += ` AND EXISTS (
 				SELECT 1 FROM workspaces create_workspace
@@ -337,7 +339,7 @@ func DeleteConversationFileAndDocuments(ctx context.Context, db *sql.DB, fileID,
 
 	var storagePath string
 	pathArgs := []any{fileID, convID, userID, userID}
-	pathArgs = append(pathArgs, workspaceResourceAccessArgs(userID)...)
+	pathArgs = append(pathArgs, conversationMemberMutationArgs(userID)...)
 	if err := tx.QueryRowContext(ctx,
 		`SELECT f.storage_path FROM files f
 		  WHERE f.id=? AND f.conversation_id=?
@@ -354,7 +356,7 @@ func DeleteConversationFileAndDocuments(ctx context.Context, db *sql.DB, fileID,
 		    )
 		    AND EXISTS (
 		      SELECT 1 FROM conversations c
-		       WHERE c.id=f.conversation_id AND `+conversationResourceAccessPredicate("c")+`
+		       WHERE c.id=f.conversation_id AND `+conversationMemberMutationPredicate("c")+`
 		    )`, pathArgs...,
 	).Scan(&storagePath); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -363,7 +365,7 @@ func DeleteConversationFileAndDocuments(ctx context.Context, db *sql.DB, fileID,
 		return err
 	}
 	args := []any{fileID, convID, userID, userID}
-	args = append(args, workspaceResourceAccessArgs(userID)...)
+	args = append(args, conversationMemberMutationArgs(userID)...)
 	res, err := tx.ExecContext(ctx,
 		`DELETE FROM files
 		  WHERE id=? AND conversation_id=?
@@ -380,7 +382,7 @@ func DeleteConversationFileAndDocuments(ctx context.Context, db *sql.DB, fileID,
 		    )
 		    AND EXISTS (
 		      SELECT 1 FROM conversations c
-		       WHERE c.id=files.conversation_id AND `+conversationResourceAccessPredicate("c")+`
+		       WHERE c.id=files.conversation_id AND `+conversationMemberMutationPredicate("c")+`
 		    )`, args...)
 	if err != nil {
 		return err
@@ -2002,14 +2004,14 @@ func createArtifact(ctx context.Context, db *sql.DB, a Artifact, expectedConvID,
 		return nil, ErrNotFound
 	}
 	accessArgs := []any{a.MessageID, expectedConvID, userID}
-	accessArgs = append(accessArgs, workspaceResourceAccessArgs(userID)...)
+	accessArgs = append(accessArgs, conversationMemberMutationArgs(userID)...)
 	var allowed int
 	if err := tx.QueryRowContext(ctx,
 		`SELECT 1
 		   FROM messages m JOIN conversations c ON c.id=m.conversation_id
 		  WHERE m.id=? AND m.conversation_id=? AND m.role='assistant'
 		    AND COALESCE(m.author_id,'')=? AND m.status='streaming'
-		    AND `+conversationResourceAccessPredicate("c"), accessArgs...,
+		    AND `+conversationMemberMutationPredicate("c"), accessArgs...,
 	).Scan(&allowed); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrConversationAccessRevoked

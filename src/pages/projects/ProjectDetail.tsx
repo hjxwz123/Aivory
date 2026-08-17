@@ -2,12 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
+  Lock,
   MoreHorizontal,
   Pencil,
   Pin,
   PinOff,
   Plus,
   Sparkles,
+  Unlock,
   Trash2,
   Save,
   Upload,
@@ -88,6 +90,7 @@ export default function ProjectDetail() {
   const renameProject = useProjects((s) => s.renameProject)
   const togglePin = useProjects((s) => s.togglePin)
   const deleteProject = useProjects((s) => s.deleteProject)
+  const setProjectVisibility = useProjects((s) => s.setVisibility)
   const uploadFile = useProjects((s) => s.uploadFile)
   const removeFile = useProjects((s) => s.removeFile)
   const renameFile = useProjects((s) => s.renameFile)
@@ -202,6 +205,24 @@ export default function ProjectDetail() {
   const canUploadProjectFiles = canUseKnowledgeBases && project?.canUploadFiles === true
   const canDeleteProjectContent = canUseKnowledgeBases && project?.canDeleteContent === true
   const canDeleteProject = project?.canDelete === true
+  // §workspace RBAC: the project creator or a workspace admin may flip the
+  // private/shared scope; personal projects have no scope.
+  const workspaceRole = useWorkspaces((s) => (project?.workspaceId ? s.workspaces.find((w) => w.id === project.workspaceId)?.role : undefined))
+  const canChangeProjectVisibility = Boolean(
+    project?.workspaceId && (project.userId === userId || workspaceRole === 'admin'),
+  )
+  const [visibilityBusy, setVisibilityBusy] = useState(false)
+  async function toggleProjectVisibility() {
+    if (!project || visibilityBusy) return
+    setVisibilityBusy(true)
+    const ok = await setProjectVisibility(project.id, !project.isPublic)
+    setVisibilityBusy(false)
+    if (ok) {
+      toast.success(project.isPublic
+        ? t('projects:detail.visibilityPrivate', { defaultValue: 'Project is now private to you and workspace admins.' })
+        : t('projects:detail.visibilityShared', { defaultValue: 'Project is now shared with the workspace.' }))
+    }
+  }
   const canUploadProjectFilesRef = useRef(canUploadProjectFiles)
   canUploadProjectFilesRef.current = canUploadProjectFiles
 
@@ -554,6 +575,17 @@ export default function ProjectDetail() {
                 {project.pinned ? <PinOff size={13} aria-hidden /> : <Pin size={13} aria-hidden />}
                 {project.pinned ? t('projects:detail.menu.unpin') : t('projects:detail.menu.pin')}
               </DropdownMenuItem>
+              {canChangeProjectVisibility ? (
+                <DropdownMenuItem
+                  disabled={visibilityBusy}
+                  onSelect={() => void toggleProjectVisibility()}
+                >
+                  {project.isPublic ? <Lock size={13} aria-hidden /> : <Unlock size={13} aria-hidden />}
+                  {project.isPublic
+                    ? t('projects:detail.menu.makePrivate', { defaultValue: 'Make private' })
+                    : t('projects:detail.menu.makeShared', { defaultValue: 'Share with workspace' })}
+                </DropdownMenuItem>
+              ) : null}
               {canDeleteProject ? (
                 <>
                   <DropdownMenuSeparator />

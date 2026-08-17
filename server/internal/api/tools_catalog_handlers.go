@@ -153,6 +153,30 @@ func listSelectableToolsHandler(d Deps, w http.ResponseWriter, r *http.Request) 
 		})
 	}
 
+	// §workspace RBAC phase 4: with a workspace scope, hide tools/MCP servers
+	// the workspace policy disables (execution-time enforcement remains
+	// authoritative in the orchestrator).
+	if workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id")); workspaceID != "" {
+		u := authUser(r)
+		role, memberErr := store.IsWorkspaceMember(r.Context(), d.DB, workspaceID, u.ID)
+		if memberErr != nil || role == "" {
+			writeError(w, http.StatusNotFound, errNotFound)
+			return
+		}
+		policy, policyErr := store.GetWorkspacePolicy(r.Context(), d.DB, workspaceID)
+		if policyErr != nil {
+			writeError(w, http.StatusInternalServerError, policyErr)
+			return
+		}
+		visible := items[:0]
+		for _, item := range items {
+			if !policy.ToolDeniedByPolicy(item.ID) {
+				visible = append(visible, item)
+			}
+		}
+		items = visible
+	}
+
 	sort.SliceStable(items, func(i, j int) bool {
 		left, right := strings.ToLower(items[i].Name), strings.ToLower(items[j].Name)
 		if left == right {

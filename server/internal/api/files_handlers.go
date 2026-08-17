@@ -313,6 +313,19 @@ func uploadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		scopeConv = c
+		// §workspace RBAC phase 4: workspace uploads re-check the capability
+		// policy at execution time (fail closed).
+		if scopeConv.WorkspaceID != "" {
+			policy, policyErr := store.GetWorkspacePolicy(r.Context(), d.DB, scopeConv.WorkspaceID)
+			if policyErr != nil {
+				writeError(w, 500, policyErr)
+				return
+			}
+			if !policy.AllowFileUpload {
+				writeError(w, http.StatusForbidden, errWorkspaceFileUploadDisabled)
+				return
+			}
+		}
 	}
 	// §C3 hard cap: reject the whole request body past the limit (+overhead) so a
 	// huge upload can't exhaust memory/disk before the per-file copy check.

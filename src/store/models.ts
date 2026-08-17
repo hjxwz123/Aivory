@@ -12,6 +12,7 @@ import type { ApiModel, ApiModelTag } from '@/api/types'
 import { useSettings } from '@/store/settings'
 import { useAuth } from '@/store/auth'
 import { userCan } from '@/lib/user-permissions'
+import { activeWorkspaceId } from '@/store/workspaces'
 
 interface ModelStore {
   models: ApiModel[]
@@ -64,10 +65,13 @@ export const useModels = create<ModelStore>((set, get) => ({
     set({ loading: true, error: null })
     try {
       const canDraw = userCan(useAuth.getState().user, 'allow_drawing')
+      // §workspace RBAC: the picker follows the ACTIVE space — a workspace
+      // scope returns only its policy-allowed models; personal returns all.
+      const workspaceId = activeWorkspaceId()
       // Tags + image models are optional decoration for the picker — never let
       // their fetch failing block the chat model list.
       const [resp, tagResult, img] = await Promise.all([
-        modelsApi.list(),
+        modelsApi.list(workspaceId),
         modelsApi.tags().then(
           (tags) => ({ ok: true as const, tags }),
           () => ({ ok: false as const, tags: [] as ApiModelTag[] }),

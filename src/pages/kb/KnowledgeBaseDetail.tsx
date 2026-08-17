@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Plus, Trash2, Upload, FileText, AlertTriangle, MoreHorizontal, RefreshCw, Search, Share2, Eye, UserPlus, UserMinus, Users, Pencil } from 'lucide-react'
+import { Plus, Trash2, Upload, FileText, AlertTriangle, MoreHorizontal, RefreshCw, Search, Share2, Eye, UserPlus, UserMinus, Users, Pencil, Lock, Unlock } from 'lucide-react'
 import { ApiError, kbsApi } from '@/api'
 import type { ApiDocument, ApiKnowledgeBase, ApiKnowledgeBaseShare, ApiKnowledgeBaseUploader, ApiWorkspaceKnowledgeBaseMemberPermission } from '@/api/types'
 import { apiUpload, apiUrl } from '@/api/client'
@@ -43,6 +43,7 @@ import { FilePreview } from '@/components/chat/file-preview'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { initials } from '@/components/ui/avatar.utils'
 import { useAuth } from '@/store/auth'
+import { useWorkspaces } from '@/store/workspaces'
 import { userCan } from '@/lib/user-permissions'
 import { Switch } from '@/components/ui/switch'
 import { subscribeAccessInvalidation } from '@/lib/access-events'
@@ -56,6 +57,24 @@ export default function KnowledgeBaseDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const user = useAuth((s) => s.user)
+  // §workspace RBAC: visibility management needs the creator id or admin role.
+  const workspaceRole = useWorkspaces((s) => (kb?.workspace_id ? s.workspaces.find((w) => w.id === kb.workspace_id)?.role : undefined))
+  const [kbVisibilityBusy, setKBVisibilityBusy] = useState(false)
+  async function toggleKBVisibility() {
+    if (!kb || kbVisibilityBusy) return
+    setKBVisibilityBusy(true)
+    try {
+      const updated = await kbsApi.update(kb.id, { is_public: kb.is_public === false })
+      setKB(updated)
+      toast.success(updated.is_public
+        ? t('kb:detail.visibilityShared', { defaultValue: 'Knowledge base is now shared with the workspace.' })
+        : t('kb:detail.visibilityPrivate', { defaultValue: 'Knowledge base is now private to you and workspace admins.' }))
+    } catch {
+      toast.error(t('kb:detail.visibilityFailed', { defaultValue: 'Could not update the visibility.' }))
+    } finally {
+      setKBVisibilityBusy(false)
+    }
+  }
   const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases')
   const canShareKnowledgeBases = userCan(user, 'allow_knowledge_base_sharing')
   const canUploadFiles = userCan(user, 'allow_file_upload')
@@ -530,6 +549,19 @@ export default function KnowledgeBaseDetail() {
                 onClick={() => setShareOpen(true)}
               >
                 {t('kb:share.action', { defaultValue: 'Share' })}
+              </Button>
+            ) : null}
+            {kb?.workspace_id && (kb.user_id === user?.id || workspaceRole === 'admin') ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={kbVisibilityBusy}
+                leadingIcon={kb.is_public !== false ? <Lock size={15} aria-hidden /> : <Unlock size={15} aria-hidden />}
+                onClick={() => void toggleKBVisibility()}
+              >
+                {kb.is_public !== false
+                  ? t('kb:detail.makePrivate', { defaultValue: 'Make private' })
+                  : t('kb:detail.makeShared', { defaultValue: 'Share with workspace' })}
               </Button>
             ) : null}
             {kb?.workspace_id && kb.can_manage_members ? (

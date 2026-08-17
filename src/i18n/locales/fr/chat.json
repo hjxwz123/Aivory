@@ -699,6 +699,94 @@
         "label": "Supprimer le contenu des bases",
         "description": "Supprimer, relancer ou gérer du contenu lorsque la base concernée l'autorise aussi."
       }
+    },
+    "roleAdmin": "Administrateur",
+    "roleGuest": "Invité",
+    "changeRole": "Changer le rôle",
+    "roleUpdated": "Rôle mis à jour.",
+    "roleUpdateFailed": "Impossible de mettre à jour le rôle.",
+    "readOnlyAccess": "Accès en lecture seule",
+    "inviteOwnerOnly": "Seul le propriétaire peut voir le lien actuel. Réinitialisez-le pour en générer un nouveau.",
+    "readOnlyTitle": "Accès en lecture seule",
+    "readOnlyBody": "Vous êtes invité dans cet espace. Vous pouvez lire les conversations partagées mais pas envoyer de messages.",
+    "manageTabs": "Gestion de l'espace",
+    "tabMembers": "Membres",
+    "tabInvites": "Invitations",
+    "tabPolicy": "Capacités",
+    "transfer": "Transférer la propriété",
+    "transferBody": "Le destinataire devient propriétaire et administrateur. Vous restez administrateur mais perdez les opérations réservées au propriétaire.",
+    "transferConfirmHint": "Saisissez le nom de l'espace « {{name}} » pour confirmer.",
+    "transferConfirm": "Transférer",
+    "transferDone": "Propriété transférée.",
+    "transferFailed": "Impossible de transférer la propriété.",
+    "transferNoCandidates": "Aucun autre membre destinataire.",
+    "newInvite": "Nouvelle invitation",
+    "inviteRole": "Rôle de l'invitation",
+    "inviteEmailOptional": "Lier à un e-mail (facultatif)",
+    "inviteExpires": "Expiration",
+    "inviteNeverExpires": "Jamais",
+    "inviteMaxUses": "Utilisations max",
+    "inviteCreate": "Créer l'invitation",
+    "inviteCreated": "Invitation créée.",
+    "inviteCreateFailed": "Impossible de créer l'invitation.",
+    "inviteHint": "0 utilisation max = illimité. Les invitations génériques créent des invités en lecture seule.",
+    "invitesLoadFailed": "Impossible de charger les invitations.",
+    "invitesEmpty": "Aucune invitation.",
+    "inviteRevokedLabel": "Révoquée",
+    "inviteExpired": "Expirée",
+    "inviteExhausted": "Épuisée",
+    "inviteActive": "Active",
+    "inviteUses": "{{used}}/{{max}} utilisations",
+    "inviteRevoke": "Révoquer l'invitation",
+    "inviteRevoked": "Invitation révoquée.",
+    "inviteRevokeFailed": "Impossible de révoquer l'invitation.",
+    "policyLoadFailed": "Impossible de charger la stratégie de l'espace.",
+    "policySaved": "Capacités de l'espace mises à jour.",
+    "policySaveFailed": "Impossible de mettre à jour la stratégie de l'espace.",
+    "policy": {
+      "AllowSandbox": {
+        "label": "Bac à sable Python",
+        "description": "Exécuter les outils python_execute / code_interpreter."
+      },
+      "AllowImageGeneration": {
+        "label": "Génération d'images",
+        "description": "Modèles et outils d'image."
+      },
+      "AllowKnowledgeBases": {
+        "label": "Bases de connaissances",
+        "description": "Créer et utiliser les bases et projets de l'espace."
+      },
+      "AllowFileUpload": {
+        "label": "Téléversement de fichiers",
+        "description": "Joindre des fichiers aux conversations de l'espace."
+      },
+      "modelAllowlist": "Modèles autorisés",
+      "allModels": "Tous les modèles",
+      "allModelsHint": "Tous les modèles de la plateforme sont utilisables dans cet espace.",
+      "noModels": "Aucun modèle disponible.",
+      "creditLimit": "Plafond mensuel de crédits",
+      "creditLimitHint": "0 = illimité. Les membres ayant atteint le plafond ne peuvent plus démarrer de tours dans cet espace."
+    },
+    "tabAudit": "Audit",
+    "audit": {
+      "loadFailed": "Impossible de charger le journal d'audit.",
+      "empty": "Aucune entrée d'audit.",
+      "target": "{{type}}",
+      "actions": {
+        "workspace.created": "Espace créé",
+        "workspace.deleted": "Espace supprimé",
+        "workspace.transferred": "Propriété transférée",
+        "member.joined": "Membre arrivé",
+        "member.left": "Membre parti",
+        "member.removed": "Membre exclu",
+        "member.role_updated": "Rôle modifié",
+        "member.permissions_updated": "Limites membre modifiées",
+        "invite.created": "Invitation créée",
+        "invite.used": "Invitation utilisée",
+        "invite.revoked": "Invitation révoquée",
+        "resource.visibility_changed": "Visibilité modifiée",
+        "policy.updated": "Stratégie modifiée"
+      }
     }
   },
   "attachmentDeleted": "Fichier supprimé"

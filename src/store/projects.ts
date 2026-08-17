@@ -26,6 +26,8 @@ interface ProjectStore {
   createProject: (init?: Partial<Pick<Project, 'name' | 'description' | 'instructions' | 'accent' | 'emoji'>>) => Promise<Project | null>
   renameProject: (id: string, name: string) => Promise<boolean>
   updateProject: (id: string, patch: Partial<Pick<Project, 'name' | 'description' | 'instructions' | 'accent' | 'emoji' | 'autoAddUploads'>>) => Promise<boolean>
+  /** §workspace RBAC: flip a workspace project between shared and private. */
+  setVisibility: (id: string, isPublic: boolean) => Promise<boolean>
   togglePin: (id: string) => Promise<void>
   deleteProject: (id: string) => Promise<boolean>
 
@@ -142,6 +144,20 @@ export const useProjects = create<ProjectStore>((set, get) => ({
   async updateProject(id, patch) {
     try {
       const updated = await projectsApi.update(id, toApiPatch(patch))
+      set((s) => ({
+        projects: s.projects.map((p) => (p.id === id ? mergeApiProject(p, updated) : p)),
+      }))
+      return true
+    } catch (e) {
+      toast.error(errorMessage(e, 'Failed to update project'))
+      return false
+    }
+  },
+
+  /** §workspace RBAC: flip a workspace project between shared and private. */
+  async setVisibility(id, isPublic) {
+    try {
+      const updated = await projectsApi.update(id, { is_public: isPublic })
       set((s) => ({
         projects: s.projects.map((p) => (p.id === id ? mergeApiProject(p, updated) : p)),
       }))
@@ -275,6 +291,9 @@ async function toLocalProject(p: ApiProject, docs: ApiDocument[]): Promise<Proje
     emoji: p.emoji || undefined,
     autoAddUploads: p.auto_add_uploads,
     pinned: p.pinned,
+    workspaceId: p.workspace_id || undefined,
+    userId: p.user_id,
+    isPublic: p.is_public !== false,
     canUploadFiles: p.can_upload_files,
     canDeleteContent: p.can_delete_content,
     canDelete: p.can_delete,
@@ -293,6 +312,7 @@ function mergeApiProject(project: Project, updated: ApiProject): Project {
     emoji: updated.emoji || undefined,
     autoAddUploads: updated.auto_add_uploads,
     pinned: updated.pinned,
+    isPublic: updated.is_public !== false,
     updatedAt: updated.updated_at * 1000,
   }
 }

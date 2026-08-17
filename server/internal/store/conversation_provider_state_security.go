@@ -49,14 +49,14 @@ func SetConvProviderStateKeyForUser(ctx context.Context, db *sql.DB, convID, mes
 	}
 
 	accessArgs := []any{messageID, convID, userID}
-	accessArgs = append(accessArgs, workspaceResourceAccessArgs(userID)...)
+	accessArgs = append(accessArgs, conversationMemberMutationArgs(userID)...)
 	var raw string
 	if err := tx.QueryRowContext(ctx,
 		`SELECT c.provider_state
 		   FROM messages m JOIN conversations c ON c.id=m.conversation_id
 		  WHERE m.id=? AND m.conversation_id=? AND m.role='assistant'
 		    AND COALESCE(m.author_id,'')=? AND m.status='streaming'
-		    AND `+conversationResourceAccessPredicate("c"), accessArgs...,
+		    AND `+conversationMemberMutationPredicate("c"), accessArgs...,
 	).Scan(&raw); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrConversationAccessRevoked
@@ -71,11 +71,11 @@ func SetConvProviderStateKeyForUser(ctx context.Context, db *sql.DB, convID, mes
 		return err
 	}
 	updateArgs := []any{string(encoded), time.Now().Unix(), convID}
-	updateArgs = append(updateArgs, workspaceResourceAccessArgs(userID)...)
+	updateArgs = append(updateArgs, conversationMemberMutationArgs(userID)...)
 	updateArgs = append(updateArgs, messageID, userID)
 	res, err := tx.ExecContext(ctx,
 		`UPDATE conversations SET provider_state=?, updated_at=?
-		  WHERE id=? AND `+conversationResourceAccessPredicate("conversations")+`
+		  WHERE id=? AND `+conversationMemberMutationPredicate("conversations")+`
 		    AND EXISTS (
 		      SELECT 1 FROM messages provider_state_message
 		       WHERE provider_state_message.id=?

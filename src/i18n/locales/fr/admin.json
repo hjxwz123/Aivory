@@ -1880,7 +1880,9 @@
     "deleteTitle": "Supprimer cet espace ?",
     "deleteBody": "Toutes les conversations, projets et bases de connaissances internes seront supprimés et tous les membres perdront l'accès. Irréversible.",
     "roleOwner": "Propriétaire",
-    "roleMember": "Membre"
+    "roleMember": "Membre",
+    "roleAdmin": "Administrateur",
+    "roleGuest": "Invité"
   },
   "userFeedback": {
     "title": "Retours utilisateurs",

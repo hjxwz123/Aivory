@@ -481,7 +481,10 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
   embedding_model_id TEXT NOT NULL REFERENCES models(id),
   embedding_dim      INTEGER NOT NULL,
   project_id         TEXT,
-  created_at         BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
+  created_at         BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint),
+  -- §workspace RBAC: 1 = shared with the workspace; 0 = private to the
+  -- creator and workspace admins. Personal rows ignore it.
+  is_public          INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE INDEX IF NOT EXISTS idx_kbs_user ON knowledge_bases(user_id);
@@ -509,7 +512,10 @@ CREATE TABLE IF NOT EXISTS projects (
   kb_id            TEXT REFERENCES knowledge_bases(id) ON DELETE SET NULL,
   auto_add_uploads INTEGER NOT NULL DEFAULT 0,
   created_at       BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint),
-  updated_at       BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
+  updated_at       BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint),
+  -- §workspace RBAC: 1 = shared with the workspace; 0 = private to the
+  -- creator and workspace admins. Personal rows ignore it.
+  is_public        INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS idx_projects_user ON projects(user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_user_name_unique ON projects(user_id, lower(trim(name)));
@@ -870,6 +876,7 @@ CREATE TABLE IF NOT EXISTS workspaces (
   name         TEXT NOT NULL,
   owner_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   invite_token TEXT NOT NULL UNIQUE,
+  deleting     INTEGER NOT NULL DEFAULT 0,
   created_at   BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
 CREATE INDEX IF NOT EXISTS idx_workspaces_owner ON workspaces(owner_id);
@@ -897,3 +904,55 @@ CREATE TABLE IF NOT EXISTS workspace_kb_member_permissions (
   PRIMARY KEY (kb_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_ws_kb_permissions_user ON workspace_kb_member_permissions(user_id);
+
+-- §workspace RBAC phase 3 — scoped invitation records. The obsolete
+-- workspaces.invite_token is retained only for schema compatibility and is
+-- never accepted by the application. purpose is internal lifecycle metadata:
+-- "manual" is an administrator-created invite; "quick_link" is the bounded
+-- single-use link returned by the legacy rotate endpoint.
+CREATE TABLE IF NOT EXISTS workspace_invites (
+  id           TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  token        TEXT NOT NULL UNIQUE,
+  email        TEXT NOT NULL DEFAULT '',
+  role         TEXT NOT NULL DEFAULT 'guest',
+  expires_at   BIGINT NOT NULL DEFAULT 0,
+  max_uses     BIGINT NOT NULL DEFAULT 1,
+  used_count   BIGINT NOT NULL DEFAULT 0,
+  created_by   TEXT REFERENCES users(id) ON DELETE SET NULL,
+  purpose      TEXT NOT NULL DEFAULT 'manual',
+  revoked_at   BIGINT NOT NULL DEFAULT 0,
+  created_at   BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
+);
+CREATE INDEX IF NOT EXISTS idx_ws_invites_workspace ON workspace_invites(workspace_id, created_at DESC);
+
+-- §workspace RBAC phase 4 — per-workspace capability policy. Empty id arrays
+-- mean "everything the platform offers"; the policy can only narrow.
+CREATE TABLE IF NOT EXISTS workspace_policies (
+  workspace_id                TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
+  allowed_model_ids           TEXT NOT NULL DEFAULT '[]',
+  allowed_tool_ids            TEXT NOT NULL DEFAULT '[]',
+  allowed_mcp_server_ids      TEXT NOT NULL DEFAULT '[]',
+  allow_sandbox               INTEGER NOT NULL DEFAULT 1,
+  allow_image_generation      INTEGER NOT NULL DEFAULT 1,
+  allow_knowledge_bases       INTEGER NOT NULL DEFAULT 1,
+  allow_file_upload           INTEGER NOT NULL DEFAULT 1,
+  member_monthly_credit_limit REAL NOT NULL DEFAULT 0,
+  updated_by                  TEXT NOT NULL DEFAULT '',
+  updated_at                  BIGINT NOT NULL DEFAULT 0
+);
+
+-- §workspace RBAC phase 5 — lightweight audit trail. No FK on workspace_id:
+-- rows deliberately OUTLIVE workspace deletion. metadata NEVER contains
+-- invite tokens, API keys, request bodies or document content.
+CREATE TABLE IF NOT EXISTS workspace_audit_logs (
+  id            TEXT PRIMARY KEY,
+  workspace_id  TEXT NOT NULL,
+  actor_user_id TEXT NOT NULL,
+  action        TEXT NOT NULL,
+  target_type   TEXT NOT NULL DEFAULT '',
+  target_id     TEXT NOT NULL DEFAULT '',
+  metadata      TEXT NOT NULL DEFAULT '{}',
+  created_at    BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
+);
+CREATE INDEX IF NOT EXISTS idx_ws_audit_workspace ON workspace_audit_logs(workspace_id, created_at DESC);

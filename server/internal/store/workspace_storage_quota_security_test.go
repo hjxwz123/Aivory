@@ -79,7 +79,7 @@ func TestWorkspaceStorageUsageFollowsCanonicalBillingPrincipal(t *testing.T) {
 	// Remove the unsent draft before revocation. Retained committed bytes must
 	// remain charged to owner after the uploader is no longer a member.
 	exec(t, db, `DELETE FROM files WHERE id='workspace-draft'`)
-	if err := RemoveWorkspaceMember(ctx, db, workspace.ID, "member"); err != nil {
+	if err := RemoveWorkspaceMember(ctx, db, workspace.ID, "owner", "member"); err != nil {
 		t.Fatalf("remove member: %v", err)
 	}
 	if used, err := UserStorageUsage(ctx, db, "owner"); err != nil || used != 70 {

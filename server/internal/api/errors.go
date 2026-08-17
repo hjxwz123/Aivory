@@ -11,6 +11,8 @@ var (
 	errAdminOnly      = errors.New("admin only")
 	errInvalidInput   = errors.New("invalid input")
 	errNotFound       = errors.New("not found")
+	// Authenticated but lacking the required workspace role (§workspace RBAC).
+	errForbidden = errors.New("forbidden")
 
 	errUploadRateLimited = errors.New("upload rate limit exceeded — try again shortly")
 
@@ -38,8 +40,16 @@ var (
 	errFileUploadGroupPermission           = errors.New("file_upload_group_permission_required")
 	errConversationExportGroupPermission   = errors.New("conversation_export_group_permission_required")
 	errVoiceGroupPermission                = errors.New("voice_transcription_group_permission_required")
-	errMemoryGroupPermission               = errors.New("memory_group_permission_required")
-	errDrawingGroupPermission              = errors.New("drawing_group_permission_required")
+
+	// §workspace RBAC phase 4 — workspace capability policy. Stable machine
+	// codes the client maps to a localized "disabled by your workspace" notice.
+	errWorkspaceModelDisabled         = errors.New("workspace_model_disabled")
+	errWorkspaceImageDisabled         = errors.New("workspace_image_generation_disabled")
+	errWorkspaceFileUploadDisabled    = errors.New("workspace_file_upload_disabled")
+	errWorkspaceKnowledgeBaseDisabled = errors.New("workspace_knowledge_bases_disabled")
+	errWorkspaceCreditLimitExceeded   = errors.New("workspace_member_credit_limit_exceeded")
+	errMemoryGroupPermission          = errors.New("memory_group_permission_required")
+	errDrawingGroupPermission         = errors.New("drawing_group_permission_required")
 
 	// Workspaces (§workspaces). Stable machine codes: creation gated off for the
 	// group / owned-workspace cap reached. Deliberately NOT "account_suspended" —

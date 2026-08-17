@@ -73,6 +73,24 @@ func listModelsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
+	// §workspace RBAC phase 4: with a workspace scope, hide models the
+	// workspace policy disables so pickers only offer allowed ones. Turn-time
+	// enforcement remains authoritative — this is presentation only.
+	var wsPolicy *store.WorkspacePolicy
+	if workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id")); workspaceID != "" {
+		u := authUser(r)
+		role, memberErr := store.IsWorkspaceMember(r.Context(), d.DB, workspaceID, u.ID)
+		if memberErr != nil || role == "" {
+			writeError(w, 404, errNotFound)
+			return
+		}
+		policy, policyErr := store.GetWorkspacePolicy(r.Context(), d.DB, workspaceID)
+		if policyErr != nil {
+			writeError(w, 500, policyErr)
+			return
+		}
+		wsPolicy = &policy
+	}
 	// §fast-mode: the fast model is resolved server-side and never named to the
 	// user, so drop it from the advanced ("进阶") picker. `fast_available` tells the
 	// composer whether to offer the 快速 option at all. `fast_vision` exposes only
@@ -86,7 +104,18 @@ func listModelsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			fastVision = modelSupportsImageInput(&m)
 			continue
 		}
+		if wsPolicy != nil && !wsPolicy.ModelAllowedByPolicy(m.ID) {
+			continue
+		}
 		filtered = append(filtered, m)
+	}
+	if wsPolicy != nil && fastAvailable {
+		// The hidden fast model is subject to the same allowlist.
+		if fastModel, fastErr := store.GetFastModel(r.Context(), d.DB); fastErr == nil && fastModel != nil &&
+			!wsPolicy.ModelAllowedByPolicy(fastModel.ID) {
+			fastAvailable = false
+			fastVision = false
+		}
 	}
 	resp := modelsResponse(d, r, filtered)
 	resp["fast_available"] = fastAvailable

@@ -13,15 +13,16 @@ import (
 
 var ErrMixedKBEmbeddingModels = errors.New("selected knowledge bases use different embedding models")
 
-// knowledgeBaseAccessPredicate extends the standard personal/workspace boundary
-// with explicit personal-library shares. The first three arguments are the
-// workspace boundary; the fourth is the share recipient.
+// knowledgeBaseAccessPredicate extends the workspace visibility boundary with
+// explicit personal-library shares. The first five arguments are the scoped
+// visibility boundary (§workspace RBAC phase 2: private KBs stay with their
+// creator and workspace admins); the sixth is the share recipient.
 func knowledgeBaseAccessPredicate(alias string) string {
 	prefix := ""
 	if alias != "" {
 		prefix = alias + "."
 	}
-	return `(` + workspaceResourceAccessPredicate(alias) + ` OR (` +
+	return `(` + workspaceScopedVisibilityPredicate(alias) + ` OR (` +
 		`COALESCE(` + prefix + `workspace_id,'')='' AND EXISTS (` +
 		`SELECT 1 FROM knowledge_base_shares kb_access_share ` +
 		`WHERE kb_access_share.kb_id=` + prefix + `id AND kb_access_share.user_id=?` +
@@ -30,12 +31,13 @@ func knowledgeBaseAccessPredicate(alias string) string {
 }
 
 func knowledgeBaseAccessArgs(userID string) []any {
-	return append(workspaceResourceAccessArgs(userID), userID)
+	return append(workspaceScopedVisibilityArgs(userID), userID)
 }
 
 // knowledgeBaseWritePredicate admits personal owners/collaborators, workspace
-// owners and current workspace KB creators. Other workspace members must pass
-// both the member-level and per-library add-file permissions.
+// admins (canonical owner plus admin-role members) and current workspace KB
+// creators. Other non-guest members must pass both the member-level and
+// per-library add-file permissions. Guests can never upload.
 func knowledgeBaseWritePredicate(alias string) string {
 	prefix := ""
 	if alias != "" {
@@ -47,12 +49,17 @@ func knowledgeBaseWritePredicate(alias string) string {
 		`))) OR (COALESCE(` + prefix + `workspace_id,'')<>'' AND EXISTS (` +
 		`SELECT 1 FROM workspaces kb_write_workspace ` +
 		`WHERE kb_write_workspace.id=` + prefix + `workspace_id AND (` +
-		`kb_write_workspace.owner_id=? OR (` + prefix + `user_id=? AND EXISTS (` +
+		`kb_write_workspace.owner_id=? OR EXISTS (` +
+		`SELECT 1 FROM workspace_members kb_write_admin ` +
+		`WHERE kb_write_admin.workspace_id=kb_write_workspace.id AND kb_write_admin.user_id=? ` +
+		`AND ` + isAdminRoleSQL("kb_write_admin.role") + ` ` +
+		`) OR (` + prefix + `user_id=? AND EXISTS (` +
 		`SELECT 1 FROM workspace_members kb_write_creator ` +
 		`WHERE kb_write_creator.workspace_id=kb_write_workspace.id AND kb_write_creator.user_id=?` +
 		`)) OR EXISTS (` +
 		`SELECT 1 FROM workspace_members kb_write_member ` +
 		`WHERE kb_write_member.workspace_id=kb_write_workspace.id AND kb_write_member.user_id=? ` +
+		`AND ` + isCollaboratorRoleSQL("kb_write_member.role") + ` ` +
 		`AND kb_write_member.can_add_kb_files=1 AND COALESCE((` +
 		`SELECT permission.can_add_files FROM workspace_kb_member_permissions permission ` +
 		`WHERE permission.kb_id=` + prefix + `id AND permission.user_id=?` +
@@ -63,34 +70,37 @@ func knowledgeBaseWritePredicate(alias string) string {
 }
 
 func knowledgeBaseWriteArgs(userID string) []any {
-	return []any{userID, userID, userID, userID, userID, userID, userID}
+	return []any{userID, userID, userID, userID, userID, userID, userID, userID}
 }
 
+// workspaceKnowledgeBaseContentDeletePredicate is the manage-any-content
+// boundary of a workspace knowledge base: workspace admins (canonical owner
+// plus admin-role members) and the library's current creator may delete or
+// retry ANY document. Ordinary members delete only their own uploads (see
+// knowledgeBaseDocumentMutationPredicate).
 func workspaceKnowledgeBaseContentDeletePredicate(alias string) string {
 	prefix := alias + "."
 	return `COALESCE(` + prefix + `workspace_id,'')<>'' AND EXISTS (
 		SELECT 1 FROM workspaces kb_delete_workspace
 		 WHERE kb_delete_workspace.id=` + prefix + `workspace_id AND (
-		   kb_delete_workspace.owner_id=? OR (
+		   kb_delete_workspace.owner_id=? OR EXISTS (
+		     SELECT 1 FROM workspace_members kb_delete_admin
+		      WHERE kb_delete_admin.workspace_id=kb_delete_workspace.id
+		        AND kb_delete_admin.user_id=?
+		        AND ` + isAdminRoleSQL("kb_delete_admin.role") + `
+		   ) OR (
 		     ` + prefix + `user_id=? AND EXISTS (
 		       SELECT 1 FROM workspace_members kb_delete_creator
 		        WHERE kb_delete_creator.workspace_id=kb_delete_workspace.id
 		          AND kb_delete_creator.user_id=?
 		     )
-		   ) OR EXISTS (
-		     SELECT 1 FROM workspace_members kb_delete_member
-		      WHERE kb_delete_member.workspace_id=kb_delete_workspace.id
-		        AND kb_delete_member.user_id=? AND kb_delete_member.can_delete_kb_content=1
-		        AND COALESCE((SELECT permission.can_delete_content
-		          FROM workspace_kb_member_permissions permission
-		         WHERE permission.kb_id=` + prefix + `id AND permission.user_id=?),1)=1
 		   )
 		 )
 	)`
 }
 
 func workspaceKnowledgeBaseDeleteArgs(userID string) []any {
-	return []any{userID, userID, userID, userID, userID}
+	return []any{userID, userID, userID, userID}
 }
 
 func knowledgeBaseDeletePredicate(alias string) string {
@@ -99,7 +109,12 @@ func knowledgeBaseDeletePredicate(alias string) string {
 		COALESCE(` + prefix + `workspace_id,'')<>'' AND EXISTS (
 		  SELECT 1 FROM workspaces kb_object_delete_workspace
 		   WHERE kb_object_delete_workspace.id=` + prefix + `workspace_id AND (
-		     kb_object_delete_workspace.owner_id=? OR (
+		     kb_object_delete_workspace.owner_id=? OR EXISTS (
+		       SELECT 1 FROM workspace_members kb_object_delete_admin
+		        WHERE kb_object_delete_admin.workspace_id=kb_object_delete_workspace.id
+		          AND kb_object_delete_admin.user_id=?
+		          AND ` + isAdminRoleSQL("kb_object_delete_admin.role") + `
+		     ) OR (
 		       ` + prefix + `user_id=? AND EXISTS (
 		         SELECT 1 FROM workspace_members kb_object_delete_creator
 		          WHERE kb_object_delete_creator.workspace_id=kb_object_delete_workspace.id
@@ -112,15 +127,29 @@ func knowledgeBaseDeletePredicate(alias string) string {
 }
 
 func knowledgeBaseDeleteArgs(userID string) []any {
-	return []any{userID, userID, userID, userID}
+	return []any{userID, userID, userID, userID, userID}
 }
 
 // knowledgeBaseDocumentMutationPredicate protects document-level mutations.
-// Workspace content uses the two-layer member/library delete permission;
-// personal owners may manage every document while write collaborators may only
-// mutate documents they uploaded themselves.
+// Workspace content: admins and the library creator manage every document;
+// ordinary non-guest members may only mutate documents they uploaded
+// themselves, and only while their member-level and per-library delete
+// permissions allow it. Personal owners manage every document while write
+// collaborators may only mutate documents they uploaded themselves.
 func knowledgeBaseDocumentMutationPredicate(kbAlias, documentAlias string) string {
 	return `((` + workspaceKnowledgeBaseContentDeletePredicate(kbAlias) + `) OR (` +
+		`COALESCE(` + kbAlias + `.workspace_id,'')<>'' AND EXISTS (` +
+		`SELECT 1 FROM workspaces document_delete_workspace` +
+		` JOIN workspace_members document_delete_member ON document_delete_member.workspace_id=document_delete_workspace.id` +
+		` WHERE document_delete_workspace.id=` + kbAlias + `.workspace_id` +
+		`   AND document_delete_member.user_id=?` +
+		`   AND ` + isCollaboratorRoleSQL("document_delete_member.role") +
+		`   AND document_delete_member.can_delete_kb_content=1` +
+		`   AND COALESCE((SELECT permission.can_delete_content` +
+		`     FROM workspace_kb_member_permissions permission` +
+		`    WHERE permission.kb_id=` + kbAlias + `.id AND permission.user_id=?),1)=1` +
+		`   AND ` + documentAlias + `.uploaded_by_user_id=?` +
+		`)) OR (` +
 		`COALESCE(` + kbAlias + `.workspace_id,'')='' AND (` + kbAlias + `.user_id=? OR EXISTS (` +
 		`SELECT 1 FROM knowledge_base_shares document_mutation_share ` +
 		`WHERE document_mutation_share.kb_id=` + kbAlias + `.id AND document_mutation_share.user_id=? ` +
@@ -130,8 +159,11 @@ func knowledgeBaseDocumentMutationPredicate(kbAlias, documentAlias string) strin
 }
 
 func knowledgeBaseDocumentMutationArgs(userID string) []any {
-	args := workspaceKnowledgeBaseDeleteArgs(userID)
-	return append(args, userID, userID, userID)
+	return []any{
+		userID, userID, userID, userID, // manage-any (admin/creator)
+		userID, userID, userID, // own-upload member path
+		userID, userID, userID, // personal owner / write share
+	}
 }
 
 // ListKBs returns the user's knowledge bases.
@@ -146,7 +178,7 @@ func CountStandaloneKBsByUser(ctx context.Context, db *sql.DB, userID string) (i
 func countStandaloneKBsByUser(ctx context.Context, q commercialCapQueryer, userID string) (int, error) {
 	var n int
 	args := []any{userID}
-	args = append(args, workspaceResourceAccessArgs(userID)...)
+	args = append(args, workspaceScopedVisibilityArgs(userID)...)
 	err := q.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM knowledge_bases
 		  WHERE user_id=? AND (project_id IS NULL OR project_id='')
@@ -154,7 +186,7 @@ func countStandaloneKBsByUser(ctx context.Context, q commercialCapQueryer, userI
 		      SELECT 1 FROM projects commercial_project_library
 		       WHERE commercial_project_library.kb_id=knowledge_bases.id
 		    )
-		    AND `+workspaceResourceAccessPredicate("knowledge_bases"), args...).Scan(&n)
+		    AND `+workspaceScopedVisibilityPredicate("knowledge_bases"), args...).Scan(&n)
 	return n, err
 }
 
@@ -200,13 +232,13 @@ func ListWorkspaceKBsForUser(ctx context.Context, db *sql.DB, workspaceID, userI
 }
 
 func listWorkspaceKBs(ctx context.Context, db *sql.DB, workspaceID, userID string) ([]KnowledgeBase, error) {
-	q := `SELECT id, user_id, name, description, embedding_model_id, embedding_dim, COALESCE(project_id, ''), created_at, COALESCE(workspace_id,'')
-			 FROM knowledge_bases WHERE workspace_id=?
-			   AND ` + standaloneKnowledgeBasePredicate("knowledge_bases")
+	q := `SELECT id, user_id, name, description, embedding_model_id, embedding_dim, COALESCE(project_id, ''), created_at, COALESCE(workspace_id,''), COALESCE(is_public,1)
+		 FROM knowledge_bases WHERE workspace_id=?
+		   AND ` + standaloneKnowledgeBasePredicate("knowledge_bases")
 	args := []any{workspaceID}
 	if userID != "" {
-		q += ` AND ` + workspaceResourceAccessPredicate("knowledge_bases")
-		args = append(args, workspaceResourceAccessArgs(userID)...)
+		q += ` AND ` + workspaceScopedVisibilityPredicate("knowledge_bases")
+		args = append(args, workspaceScopedVisibilityArgs(userID)...)
 	}
 	q += ` ORDER BY created_at DESC`
 	rows, err := db.QueryContext(ctx,
@@ -270,9 +302,9 @@ func OwnedKBIDs(ctx context.Context, db *sql.DB, userID, workspaceID string, ids
 	// compatibility path used by older clients.
 	scope := standaloneKnowledgeBasePredicate("knowledge_bases") + ` AND COALESCE(knowledge_bases.workspace_id,'')='' AND ` + knowledgeBaseAccessPredicate("knowledge_bases")
 	if workspaceID != "" {
-		scope = standaloneKnowledgeBasePredicate("knowledge_bases") + ` AND knowledge_bases.workspace_id=? AND ` + workspaceResourceAccessPredicate("knowledge_bases")
+		scope = standaloneKnowledgeBasePredicate("knowledge_bases") + ` AND knowledge_bases.workspace_id=? AND ` + workspaceScopedVisibilityPredicate("knowledge_bases")
 		args = append(args, workspaceID)
-		args = append(args, workspaceResourceAccessArgs(userID)...)
+		args = append(args, workspaceScopedVisibilityArgs(userID)...)
 	} else {
 		args = append(args, knowledgeBaseAccessArgs(userID)...)
 	}
@@ -322,9 +354,9 @@ func ResolveOwnedKBIDs(ctx context.Context, db *sql.DB, userID, workspaceID stri
 	}
 	scope := `COALESCE(knowledge_bases.workspace_id,'')='' AND ` + knowledgeBaseAccessPredicate("knowledge_bases")
 	if workspaceID != "" {
-		scope = `knowledge_bases.workspace_id=? AND ` + workspaceResourceAccessPredicate("knowledge_bases")
+		scope = `knowledge_bases.workspace_id=? AND ` + workspaceScopedVisibilityPredicate("knowledge_bases")
 		args = append(args, workspaceID)
-		args = append(args, workspaceResourceAccessArgs(userID)...)
+		args = append(args, workspaceScopedVisibilityArgs(userID)...)
 	} else {
 		args = append(args, knowledgeBaseAccessArgs(userID)...)
 	}
@@ -406,7 +438,7 @@ func GetKB(ctx context.Context, db *sql.DB, id, userID string) (*KnowledgeBase, 
 	args := []any{id}
 	args = append(args, knowledgeBaseAccessArgs(userID)...)
 	row := db.QueryRowContext(ctx,
-		`SELECT id, user_id, name, description, embedding_model_id, embedding_dim, COALESCE(project_id, ''), created_at, COALESCE(workspace_id,'') FROM knowledge_bases WHERE id=? AND `+knowledgeBaseAccessPredicate("knowledge_bases"), args...)
+		`SELECT id, user_id, name, description, embedding_model_id, embedding_dim, COALESCE(project_id, ''), created_at, COALESCE(workspace_id,''), COALESCE(is_public,1) FROM knowledge_bases WHERE id=? AND `+knowledgeBaseAccessPredicate("knowledge_bases"), args...)
 	kb, err := scanKB(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -443,10 +475,10 @@ func GetStandaloneKB(ctx context.Context, db *sql.DB, id, userID string) (*Knowl
 }
 
 // ListKnowledgeBaseAccessUserIDs snapshots every user that can currently see a
-// knowledge base. Handlers call it before deletion so they can invalidate all
-// affected clients after the row and its share records have cascaded away.
-// The canonical workspace owner is included even when a legacy database is
-// missing their workspace_members row.
+// knowledge base. The visibility predicate must stay exact: workspace guests
+// and members see shared libraries, while a private library remains with its
+// creator plus workspace administrators. Handlers use this before and after a
+// visibility change to revoke only principals that actually lost access.
 func ListKnowledgeBaseAccessUserIDs(ctx context.Context, db *sql.DB, id string) ([]string, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT DISTINCT access_user_id FROM (
@@ -454,19 +486,27 @@ func ListKnowledgeBaseAccessUserIDs(ctx context.Context, db *sql.DB, id string) 
 			  FROM knowledge_bases k WHERE k.id=?
 			UNION ALL
 			SELECT s.user_id AS access_user_id
-			  FROM knowledge_base_shares s WHERE s.kb_id=?
+			  FROM knowledge_base_shares s
+			  JOIN knowledge_bases k ON k.id=s.kb_id
+			 WHERE s.kb_id=? AND COALESCE(k.workspace_id,'')=''
+			UNION ALL
+			SELECT m.user_id AS access_user_id
+			  FROM knowledge_bases k
+			  JOIN workspace_members m ON m.workspace_id=k.workspace_id
+			 WHERE k.id=? AND COALESCE(k.workspace_id,'')<>'' AND COALESCE(k.is_public,1)=1
 			UNION ALL
 			SELECT m.user_id AS access_user_id
 			  FROM knowledge_bases k
 			  JOIN workspace_members m ON m.workspace_id=k.workspace_id
 			 WHERE k.id=? AND COALESCE(k.workspace_id,'')<>''
+			   AND `+isAdminRoleSQL("m.role")+`
 			UNION ALL
 			SELECT w.owner_id AS access_user_id
 			  FROM knowledge_bases k JOIN workspaces w ON w.id=k.workspace_id
 			 WHERE k.id=? AND COALESCE(k.workspace_id,'')<>''
 		) knowledge_base_access_users
 		WHERE TRIM(access_user_id)<>''
-		ORDER BY access_user_id`, id, id, id, id)
+		ORDER BY access_user_id`, id, id, id, id, id)
 	if err != nil {
 		return nil, err
 	}
@@ -552,7 +592,7 @@ func enrichKnowledgeBasePermissions(ctx context.Context, q rowQueryer, kb *Knowl
 // GetKBByName returns a user's KB by case-insensitive, trimmed name.
 func GetKBByName(ctx context.Context, db *sql.DB, userID, name string) (*KnowledgeBase, error) {
 	row := db.QueryRowContext(ctx,
-		`SELECT id, user_id, name, description, embedding_model_id, embedding_dim, COALESCE(project_id, ''), created_at, COALESCE(workspace_id,'')
+		`SELECT id, user_id, name, description, embedding_model_id, embedding_dim, COALESCE(project_id, ''), created_at, COALESCE(workspace_id,''), COALESCE(is_public,1)
 		 FROM knowledge_bases
 		 WHERE user_id=? AND COALESCE(workspace_id,'')=''
 		   AND lower(trim(name))=lower(trim(?)) LIMIT 1`,
@@ -569,7 +609,7 @@ func GetKBByName(ctx context.Context, db *sql.DB, userID, name string) (*Knowled
 
 func scanKB(s scanner) (KnowledgeBase, error) {
 	var kb KnowledgeBase
-	if err := s.Scan(&kb.ID, &kb.UserID, &kb.Name, &kb.Description, &kb.EmbeddingModelID, &kb.EmbeddingDim, &kb.ProjectID, &kb.CreatedAt, &kb.WorkspaceID); err != nil {
+	if err := s.Scan(&kb.ID, &kb.UserID, &kb.Name, &kb.Description, &kb.EmbeddingModelID, &kb.EmbeddingDim, &kb.ProjectID, &kb.CreatedAt, &kb.WorkspaceID, &kb.IsPublic); err != nil {
 		return kb, err
 	}
 	return kb, nil
@@ -604,8 +644,8 @@ func CreateKB(ctx context.Context, db *sql.DB, kb KnowledgeBase) (*KnowledgeBase
 	var err error
 	if kb.WorkspaceID == "" {
 		_, err = db.ExecContext(ctx,
-			`INSERT INTO knowledge_bases(id, user_id, name, description, embedding_model_id, embedding_dim, project_id, created_at, workspace_id) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			kb.ID, kb.UserID, kb.Name, kb.Description, kb.EmbeddingModelID, kb.EmbeddingDim, pid, now, kb.WorkspaceID)
+			`INSERT INTO knowledge_bases(id, user_id, name, description, embedding_model_id, embedding_dim, project_id, created_at, workspace_id, is_public) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			kb.ID, kb.UserID, kb.Name, kb.Description, kb.EmbeddingModelID, kb.EmbeddingDim, pid, now, kb.WorkspaceID, boolInt(kb.IsPublic))
 	} else {
 		tx, txErr := beginWorkspaceMutationTx(ctx, db, kb.WorkspaceID)
 		if txErr != nil {
@@ -614,13 +654,13 @@ func CreateKB(ctx context.Context, db *sql.DB, kb KnowledgeBase) (*KnowledgeBase
 		defer tx.Rollback() //nolint:errcheck
 		var result sql.Result
 		result, err = tx.ExecContext(ctx,
-			`INSERT INTO knowledge_bases(id, user_id, name, description, embedding_model_id, embedding_dim, project_id, created_at, workspace_id)
-			 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
+			`INSERT INTO knowledge_bases(id, user_id, name, description, embedding_model_id, embedding_dim, project_id, created_at, workspace_id, is_public)
+			 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 			   FROM workspaces create_workspace
 			  WHERE create_workspace.id=?
 			    AND `+workspaceAcceptsResourceCreationPredicate("create_workspace")+`
 				    AND `+workspaceMemberCapabilityPredicate("create_workspace", "can_create_kb"),
-			kb.ID, kb.UserID, kb.Name, kb.Description, kb.EmbeddingModelID, kb.EmbeddingDim, pid, now, kb.WorkspaceID,
+			kb.ID, kb.UserID, kb.Name, kb.Description, kb.EmbeddingModelID, kb.EmbeddingDim, pid, now, kb.WorkspaceID, boolInt(kb.IsPublic),
 			kb.WorkspaceID, kb.UserID, kb.UserID, kb.UserID)
 		if err != nil {
 			if isUniqueIndexErr(err, "idx_kbs_user_name_unique", "knowledge_bases.user_id") {
@@ -634,7 +674,7 @@ func CreateKB(ctx context.Context, db *sql.DB, kb KnowledgeBase) (*KnowledgeBase
 			return nil, ErrNotFound
 		}
 		created, scanErr := scanKB(tx.QueryRowContext(ctx,
-			`SELECT id, user_id, name, description, embedding_model_id, embedding_dim, COALESCE(project_id,''), created_at, COALESCE(workspace_id,'')
+			`SELECT id, user_id, name, description, embedding_model_id, embedding_dim, COALESCE(project_id,''), created_at, COALESCE(workspace_id,''), COALESCE(is_public,1)
 			   FROM knowledge_bases WHERE id=?`, kb.ID))
 		if scanErr != nil {
 			return nil, scanErr
@@ -705,18 +745,18 @@ func CreateKBWithLimit(ctx context.Context, db *sql.DB, kb KnowledgeBase, maxKBs
 
 	if kb.WorkspaceID == "" {
 		_, err = tx.ExecContext(ctx,
-			`INSERT INTO knowledge_bases(id, user_id, name, description, embedding_model_id, embedding_dim, project_id, created_at, workspace_id) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			kb.ID, kb.UserID, kb.Name, kb.Description, kb.EmbeddingModelID, kb.EmbeddingDim, pid, now, kb.WorkspaceID)
+			`INSERT INTO knowledge_bases(id, user_id, name, description, embedding_model_id, embedding_dim, project_id, created_at, workspace_id, is_public) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			kb.ID, kb.UserID, kb.Name, kb.Description, kb.EmbeddingModelID, kb.EmbeddingDim, pid, now, kb.WorkspaceID, boolInt(kb.IsPublic))
 	} else {
 		var result sql.Result
 		result, err = tx.ExecContext(ctx,
-			`INSERT INTO knowledge_bases(id, user_id, name, description, embedding_model_id, embedding_dim, project_id, created_at, workspace_id)
-			 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
+			`INSERT INTO knowledge_bases(id, user_id, name, description, embedding_model_id, embedding_dim, project_id, created_at, workspace_id, is_public)
+			 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 			   FROM workspaces create_workspace
 			  WHERE create_workspace.id=?
 			    AND `+workspaceAcceptsResourceCreationPredicate("create_workspace")+`
 				    AND `+workspaceMemberCapabilityPredicate("create_workspace", "can_create_kb"),
-			kb.ID, kb.UserID, kb.Name, kb.Description, kb.EmbeddingModelID, kb.EmbeddingDim, pid, now, kb.WorkspaceID,
+			kb.ID, kb.UserID, kb.Name, kb.Description, kb.EmbeddingModelID, kb.EmbeddingDim, pid, now, kb.WorkspaceID, boolInt(kb.IsPublic),
 			kb.WorkspaceID, kb.UserID, kb.UserID, kb.UserID)
 		if err == nil {
 			if affected, rowsErr := result.RowsAffected(); rowsErr != nil {
@@ -733,7 +773,7 @@ func CreateKBWithLimit(ctx context.Context, db *sql.DB, kb KnowledgeBase, maxKBs
 		return nil, err
 	}
 	created, err := scanKB(tx.QueryRowContext(ctx,
-		`SELECT id, user_id, name, description, embedding_model_id, embedding_dim, COALESCE(project_id,''), created_at, COALESCE(workspace_id,'')
+		`SELECT id, user_id, name, description, embedding_model_id, embedding_dim, COALESCE(project_id,''), created_at, COALESCE(workspace_id,''), COALESCE(is_public,1)
 		   FROM knowledge_bases WHERE id=?`, kb.ID))
 	if err != nil {
 		return nil, err
@@ -745,6 +785,64 @@ func CreateKBWithLimit(ctx context.Context, db *sql.DB, kb KnowledgeBase, maxKBs
 		return nil, err
 	}
 	return &created, nil
+}
+
+// UpdateKBVisibility flips a workspace knowledge base between private and
+// workspace-shared (§workspace RBAC phase 2). Only the library creator or a
+// workspace admin may change it; personal libraries have no visibility scope.
+// The change re-authorizes inside the workspace-membership transaction.
+func UpdateKBVisibility(ctx context.Context, db *sql.DB, kbID, userID string, isPublic bool) (*KnowledgeBase, error) {
+	var workspaceID string
+	if err := db.QueryRowContext(ctx,
+		`SELECT COALESCE(workspace_id,'') FROM knowledge_bases WHERE id=?`, kbID,
+	).Scan(&workspaceID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	if workspaceID == "" {
+		return nil, ErrNotFound
+	}
+	tx, err := beginWorkspaceMutationTx(ctx, db, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	updateArgs := []any{boolInt(isPublic), kbID}
+	updateArgs = append(updateArgs, workspaceResourceManagerArgs(userID)...)
+	res, err := tx.ExecContext(ctx,
+		`UPDATE knowledge_bases SET is_public=?
+		  WHERE id=? AND COALESCE(workspace_id,'')<>'' AND `+workspaceResourceManagerPredicate("knowledge_bases"),
+		updateArgs...)
+	if err != nil {
+		return nil, err
+	}
+	if n, rowsErr := res.RowsAffected(); rowsErr != nil {
+		return nil, rowsErr
+	} else if n != 1 {
+		return nil, ErrNotFound
+	}
+	if err := recordWorkspaceAudit(ctx, tx, workspaceID, userID, AuditResourceVisibilityChanged,
+		"knowledge_base", kbID, map[string]any{"is_public": isPublic}); err != nil {
+		return nil, err
+	}
+	var updated KnowledgeBase
+	if err := tx.QueryRowContext(ctx,
+		`SELECT id, user_id, name, description, embedding_model_id, embedding_dim, COALESCE(project_id, ''), created_at, COALESCE(workspace_id,''), COALESCE(is_public,1)
+		   FROM knowledge_bases WHERE id=?`, kbID,
+	).Scan(&updated.ID, &updated.UserID, &updated.Name, &updated.Description,
+		&updated.EmbeddingModelID, &updated.EmbeddingDim, &updated.ProjectID,
+		&updated.CreatedAt, &updated.WorkspaceID, &updated.IsPublic); err != nil {
+		return nil, err
+	}
+	if err := enrichKnowledgeBaseForUser(ctx, tx, &updated, userID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &updated, nil
 }
 
 // SetKBEmbeddingDim corrects the stored vector width for a KB. Called during
@@ -1461,12 +1559,15 @@ func CreateDocumentForUser(ctx context.Context, db *sql.DB, d Document, userID s
 			appendWorkspaceDocumentCreationArgs(args, workspaceID, userID)...)
 	} else {
 		args := append(baseArgs, d.ConversationID)
-		args = append(args, workspaceResourceAccessArgs(userID)...)
+		// Conversation documents are attachments, not merely visible content.
+		// A guest can read a shared conversation but must never create an
+		// attachment in it, including through a direct store caller.
+		args = append(args, conversationMemberMutationArgs(userID)...)
 		res, err = mutationDB.ExecContext(ctx,
 			`INSERT INTO documents(id, kb_id, conversation_id, filename, mime_type, size_bytes, status, storage_path, uploaded_by_user_id, ingest_updated_at, created_at)
 			 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 			   FROM conversations document_create_conversation
-			  WHERE document_create_conversation.id=? AND `+conversationResourceAccessPredicate("document_create_conversation")+
+			  WHERE document_create_conversation.id=? AND `+conversationMemberMutationPredicate("document_create_conversation")+
 				workspaceDocumentCreationPredicate("document_create_conversation", workspaceID),
 			appendWorkspaceDocumentCreationArgs(args, workspaceID, userID)...)
 	}
@@ -1542,14 +1643,14 @@ func documentBillingUserTx(ctx context.Context, tx *sql.Tx, scope, parentID, acc
 		query = `SELECT CASE WHEN COALESCE(c.workspace_id,'')<>''
 			THEN COALESCE(w.owner_id, c.user_id) ELSE c.user_id END
 			FROM conversations c LEFT JOIN workspaces w ON w.id=c.workspace_id
-			WHERE c.id=? AND ` + conversationResourceAccessPredicate("c")
+			WHERE c.id=? AND ` + conversationMemberMutationPredicate("c")
 	default:
 		return "", ErrNotFound
 	}
 	if scope == "kb" {
 		args = append(args, knowledgeBaseWriteArgs(accessUserID)...)
 	} else {
-		args = append(args, workspaceResourceAccessArgs(accessUserID)...)
+		args = append(args, conversationMemberMutationArgs(accessUserID)...)
 	}
 	var billingUserID string
 	if err := tx.QueryRowContext(ctx, query, args...).Scan(&billingUserID); err != nil {
@@ -1695,6 +1796,15 @@ func retryScopedDocumentForUser(ctx context.Context, db *sql.DB, id, scope, pare
 			knowledgeBaseDocumentMutationPredicate("document_retry_kb", "documents") + `
 		)`
 		args = append(args, knowledgeBaseDocumentMutationArgs(userID)...)
+	} else {
+		// A failed attachment remains readable to guests, but retrying parsing
+		// changes shared state and therefore requires reply/write authority.
+		q += ` AND EXISTS (
+			SELECT 1 FROM conversations document_retry_conversation
+			 WHERE document_retry_conversation.id=documents.conversation_id AND ` +
+			conversationMemberMutationPredicate("document_retry_conversation") + `
+		)`
+		args = append(args, conversationMemberMutationArgs(userID)...)
 	}
 	if workspaceID == "" && scope != "kb" {
 		res, err := db.ExecContext(ctx, q, args...)
@@ -1763,6 +1873,13 @@ func RenameDocumentForUser(ctx context.Context, db *sql.DB, id, scope, parentID,
 	args = append(args, parentID)
 	if scope == "kb" {
 		args = append(args, knowledgeBaseDocumentMutationArgs(userID)...)
+	} else {
+		q += ` AND EXISTS (
+			SELECT 1 FROM conversations document_rename_conversation
+			 WHERE document_rename_conversation.id=documents.conversation_id AND ` +
+			conversationMemberMutationPredicate("document_rename_conversation") + `
+		)`
+		args = append(args, conversationMemberMutationArgs(userID)...)
 	}
 	q += ` AND ` + documentUserAccessPredicate("documents")
 	args = append(args, documentUserAccessArgs(userID)...)
@@ -1824,6 +1941,12 @@ func DeleteDocumentForUser(ctx context.Context, db *sql.DB, id, scope, parentID,
 	case "conversation":
 		q += ` AND conversation_id=?`
 		args = append(args, parentID)
+		q += ` AND EXISTS (
+			SELECT 1 FROM conversations document_delete_conversation
+			 WHERE document_delete_conversation.id=documents.conversation_id AND ` +
+			conversationMemberMutationPredicate("document_delete_conversation") + `
+		)`
+		args = append(args, conversationMemberMutationArgs(userID)...)
 		q += ` AND ` + documentUserAccessPredicate("documents")
 		args = append(args, documentUserAccessArgs(userID)...)
 	default:
@@ -1895,6 +2018,7 @@ func PromoteDocumentToKB(ctx context.Context, db *sql.DB, docID, kbID, userID st
 	defer tx.Rollback() //nolint:errcheck
 	args := []any{kbID, docID}
 	args = append(args, documentUserAccessArgs(userID)...)
+	args = append(args, conversationMemberMutationArgs(userID)...)
 	args = append(args, kbID, destinationWorkspaceID)
 	args = append(args, knowledgeBaseWriteArgs(userID)...)
 	res, err := tx.ExecContext(ctx,
@@ -1902,6 +2026,10 @@ func PromoteDocumentToKB(ctx context.Context, db *sql.DB, docID, kbID, userID st
 		    SET kb_id=?, conversation_id=NULL
 		  WHERE id=? AND conversation_id IS NOT NULL
 		    AND `+documentUserAccessPredicate("documents")+`
+		    AND EXISTS (
+		      SELECT 1 FROM conversations promotion_conversation
+		       WHERE promotion_conversation.id=documents.conversation_id AND `+conversationMemberMutationPredicate("promotion_conversation")+`
+		    )
 		    AND EXISTS (
 		      SELECT 1 FROM knowledge_bases promotion_kb
 		       WHERE promotion_kb.id=?

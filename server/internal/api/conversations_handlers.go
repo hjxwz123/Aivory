@@ -554,11 +554,23 @@ func updateConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	visibilityChanged := false
 	visibilityWorkspaceID := ""
 	if p.IsPublic != nil {
-		// Workspace visibility belongs exclusively to the conversation creator.
-		// A uniform 404 avoids exposing private conversation ids to other members.
-		if current.WorkspaceID == "" || current.UserID != u.ID {
+		// §workspace RBAC: visibility belongs to the conversation creator and
+		// workspace admins. A uniform 404 avoids exposing private conversation
+		// ids to other members.
+		if current.WorkspaceID == "" {
 			writeError(w, 404, errNotFound)
 			return
+		}
+		if current.UserID != u.ID {
+			decision, err := store.AuthorizeWorkspace(r.Context(), d.DB, store.WorkspaceAuthorizationRequest{
+				WorkspaceID: current.WorkspaceID, UserID: u.ID,
+				Action:   store.ActionConversationVisibilityUpdate,
+				Resource: "conversation", ResourceID: id,
+			})
+			if err != nil || !decision.Allowed {
+				writeError(w, 404, errNotFound)
+				return
+			}
 		}
 		visibilityChanged = current.IsPublic != *p.IsPublic
 		visibilityWorkspaceID = current.WorkspaceID
@@ -626,6 +638,7 @@ func updateConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	stripServerConvFields(conv)
 	publishUserEvent(d, r, u.ID, "conversation.updated", id)
 	if visibilityChanged {
+		revokeConversationGenerations(d, id)
 		publishWorkspaceConversationVisibility(d, r, visibilityWorkspaceID, u.ID, id, conv.IsPublic)
 	}
 	writeJSON(w, 200, conv)
