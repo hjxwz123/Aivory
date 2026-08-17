@@ -86,6 +86,7 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ steps.vars.outputs.owner }}/${{ matrix.name }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
