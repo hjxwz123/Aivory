@@ -57,6 +57,7 @@ export default function KnowledgeBaseDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const user = useAuth((s) => s.user)
+  const [kb, setKB] = useState<ApiKnowledgeBase | null>(null)
   // §workspace RBAC: visibility management needs the creator id or admin role.
   const workspaceRole = useWorkspaces((s) => (kb?.workspace_id ? s.workspaces.find((w) => w.id === kb.workspace_id)?.role : undefined))
   const [kbVisibilityBusy, setKBVisibilityBusy] = useState(false)
@@ -78,7 +79,6 @@ export default function KnowledgeBaseDetail() {
   const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases')
   const canShareKnowledgeBases = userCan(user, 'allow_knowledge_base_sharing')
   const canUploadFiles = userCan(user, 'allow_file_upload')
-  const [kb, setKB] = useState<ApiKnowledgeBase | null>(null)
   const [docs, setDocs] = useState<ApiDocument[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
