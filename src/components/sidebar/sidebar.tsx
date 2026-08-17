@@ -975,6 +975,13 @@ function ConversationItem({
   const user = useAuth((s) => s.user)
   const meId = user?.id
   const canShare = userCan(user, 'allow_sharing')
+  const workspaceRole = useWorkspaces((s) =>
+    conversation.workspaceId
+      ? s.workspaces.find((workspace) => workspace.id === conversation.workspaceId)?.role
+      : undefined,
+  )
+  const isWorkspaceGuest = workspaceRole === 'guest'
+  const canManageConversation = !conversation.workspaceId || conversation.creatorId === meId || workspaceRole === 'admin'
   const rename = useConversations((s) => s.renameConversation)
   const remove = useConversations((s) => s.deleteConversation)
   const star = useConversations((s) => s.toggleStar)
@@ -985,6 +992,12 @@ function ConversationItem({
   const [draft, setDraft] = useState(conversation.title)
   const [confirm, setConfirm] = useState(false)
   const displayTitle = `${conversation.starred ? '☆ ' : ''}${conversation.title || t('untitled')}`
+
+  useEffect(() => {
+    if (canManageConversation) return
+    setRenaming(false)
+    setConfirm(false)
+  }, [canManageConversation])
 
   // Create (or refresh) a public share and copy its link in one tap (§ sharing).
   // Managing / revoking the share lives in the conversation's Share dialog.
@@ -1055,7 +1068,7 @@ function ConversationItem({
             ) : null}
           </span>
         </Link>
-        <div className="absolute right-1.5 top-1/2 -translate-y-1/2">
+        {!isWorkspaceGuest ? <div className="absolute right-1.5 top-1/2 -translate-y-1/2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -1070,10 +1083,12 @@ function ConversationItem({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-[180px]">
-              <DropdownMenuItem onClick={() => setRenaming(true)}>
-                <Pencil size={13} aria-hidden />
-                {t('sidebar.rename')}
-              </DropdownMenuItem>
+              {canManageConversation ? (
+                <DropdownMenuItem onClick={() => setRenaming(true)}>
+                  <Pencil size={13} aria-hidden />
+                  {t('sidebar.rename')}
+                </DropdownMenuItem>
+              ) : null}
               <DropdownMenuItem onClick={() => {
                 void star(conversation.id)
                 toast.success(conversation.starred ? t('common:actions.unstar') : t('common:actions.star'))
@@ -1081,23 +1096,31 @@ function ConversationItem({
                 <Star size={13} aria-hidden />
                 {conversation.starred ? t('common:actions.unstar') : t('common:actions.star')}
               </DropdownMenuItem>
-              {canShare ? (
+              {canShare && canManageConversation ? (
                 <DropdownMenuItem onClick={() => void shareConversation()}>
                   <Share2 size={13} aria-hidden />
                   {t('sidebar.share')}
                 </DropdownMenuItem>
               ) : null}
-              <DropdownMenuSeparator />
-              <MoveToProjectSub conversationId={conversation.id} currentProjectId={conversation.projectId} />
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => {
-                archive(conversation.id)
-                toast.success(t('sidebar.archived'))
-              }}>
-                <Archive size={13} aria-hidden />
-                {t('sidebar.archive')}
-              </DropdownMenuItem>
-              {!conversation.workspaceId || conversation.creatorId === meId ? (
+              {canManageConversation ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <MoveToProjectSub conversationId={conversation.id} currentProjectId={conversation.projectId} />
+                </>
+              ) : null}
+              {!conversation.workspaceId ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => {
+                    archive(conversation.id)
+                    toast.success(t('sidebar.archived'))
+                  }}>
+                    <Archive size={13} aria-hidden />
+                    {t('sidebar.archive')}
+                  </DropdownMenuItem>
+                </>
+              ) : null}
+              {canManageConversation ? (
                 <DropdownMenuItem destructive onClick={() => setConfirm(true)}>
                   <Trash2 size={13} aria-hidden />
                   {t('sidebar.delete')}
@@ -1105,11 +1128,11 @@ function ConversationItem({
               ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
-        </div>
+        </div> : null}
       </div>
 
       {/* Rename dialog */}
-      <Dialog open={renaming} onOpenChange={setRenaming}>
+      <Dialog open={renaming && canManageConversation} onOpenChange={setRenaming}>
         <DialogContent size="sm">
           <DialogHeader>
             <DialogTitle>{t('sidebar.renameTitle')}</DialogTitle>
@@ -1136,7 +1159,7 @@ function ConversationItem({
       </Dialog>
 
       {/* Delete confirm */}
-      <Dialog open={confirm} onOpenChange={setConfirm}>
+      <Dialog open={confirm && canManageConversation} onOpenChange={setConfirm}>
         <DialogContent size="sm">
           <DialogHeader>
             <DialogTitle>{t('sidebar.deleteTitle')}</DialogTitle>

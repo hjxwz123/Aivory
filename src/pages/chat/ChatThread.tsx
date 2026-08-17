@@ -82,6 +82,7 @@ export default function ChatThread() {
       ? s.workspaces.find((workspace) => workspace.id === conversation.workspaceId)
       : undefined,
   )
+  const isWorkspaceGuest = conversationWorkspace?.role === 'guest'
   const openFilesDrawer = useConversationFiles((s) => s.openDrawer)
   const closeFilesDrawer = useConversationFiles((s) => s.close)
   const filesDrawerOpen = useConversationFiles((s) => s.open)
@@ -120,6 +121,18 @@ export default function ChatThread() {
   useEffect(() => {
     if (conversationWorkspace?.can_private_conversations === false) setConfirmPrivate(false)
   }, [conversationWorkspace?.can_private_conversations])
+
+  // A role can change while this route stays mounted. Close any already-open
+  // mutation surface immediately; otherwise promoting the user later could
+  // resurrect a stale delete/rename/share dialog from before the downgrade.
+  useEffect(() => {
+    if (!isWorkspaceGuest) return
+    setRenaming(false)
+    setConfirmDelete(false)
+    setConfirmPrivate(false)
+    setShareOpen(false)
+    setOutlineOpen(false)
+  }, [isWorkspaceGuest])
 
   // Hydrate the active conversation + its messages from the backend whenever
   // the id changes — and again after a workspace switch settles (the switch
@@ -284,7 +297,7 @@ export default function ChatThread() {
   // Same-provider swaps (Sonnet → Opus) keep raw replay + full fidelity.
   // Shared by the desktop toolbar and the mobile header's model label.
   function handleModelChange(nextId: string) {
-    if (!conversation) return
+    if (!conversation || isWorkspaceGuest) return
     const all = useModels.getState().models
     const cur = all.find((m) => m.id === conversation.modelId)
     const next = all.find((m) => m.id === nextId)
@@ -297,7 +310,7 @@ export default function ChatThread() {
 
   // §fast-mode: switch the conversation between 快速 and 进阶.
   function handleFastChange(next: boolean) {
-    if (!conversation) return
+    if (!conversation || isWorkspaceGuest) return
     void setFast(conversation.id, next)
   }
 
@@ -331,6 +344,7 @@ export default function ChatThread() {
   const canMakePrivate = conversationWorkspace?.can_private_conversations !== false
   // §workspace RBAC: the creator or a workspace admin may flip visibility.
   const canChangeVisibility =
+    !isWorkspaceGuest &&
     (conversation.creatorId === meId || conversationWorkspace?.role === 'admin') &&
     (!conversation.isPublic || canMakePrivate)
   const visibilityLabel = conversation.isPublic
@@ -386,23 +400,25 @@ export default function ChatThread() {
               onToggle={requestVisibilityToggle}
             />
           ) : null}
-          <ModelPicker value={conversation.modelId} onChange={handleModelChange} fast={conversation.fast} onFastChange={handleFastChange} />
-          <Tooltip content={t('chat:topbar.outlineTooltip', { defaultValue: 'Conversation outline' })}>
-            <button
-              type="button"
-              onClick={() => setOutlineOpen((o) => !o)}
-              aria-label={t('chat:topbar.outlineTooltip', { defaultValue: 'Conversation outline' })}
-              aria-pressed={outlineOpen}
-              className={cn(
-                'inline-flex items-center justify-center size-8 rounded-[8px] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                outlineOpen
-                  ? 'bg-[var(--color-bg-muted)] text-[var(--color-fg)]'
-                  : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-              )}
-            >
-              <GitBranch size={14} aria-hidden />
-            </button>
-          </Tooltip>
+          <ModelPicker value={conversation.modelId} onChange={handleModelChange} fast={conversation.fast} onFastChange={handleFastChange} disabled={isWorkspaceGuest} />
+          {!isWorkspaceGuest ? (
+            <Tooltip content={t('chat:topbar.outlineTooltip', { defaultValue: 'Conversation outline' })}>
+              <button
+                type="button"
+                onClick={() => setOutlineOpen((o) => !o)}
+                aria-label={t('chat:topbar.outlineTooltip', { defaultValue: 'Conversation outline' })}
+                aria-pressed={outlineOpen}
+                className={cn(
+                  'inline-flex items-center justify-center size-8 rounded-[8px] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                  outlineOpen
+                    ? 'bg-[var(--color-bg-muted)] text-[var(--color-fg)]'
+                    : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+                )}
+              >
+                <GitBranch size={14} aria-hidden />
+              </button>
+            </Tooltip>
+          ) : null}
           <Tooltip content={t('chat:files.tooltip')}>
             <button
               type="button"
@@ -419,7 +435,7 @@ export default function ChatThread() {
               <Files size={14} aria-hidden />
             </button>
           </Tooltip>
-          <DropdownMenu>
+          {!isWorkspaceGuest ? <DropdownMenu>
             <Tooltip content={t('chat:actions.more')}>
               <DropdownMenuTrigger asChild>
                 <button
@@ -443,15 +459,19 @@ export default function ChatThread() {
                   <Share2 size={13} aria-hidden /> {t('chat:sidebar.share')}
                 </DropdownMenuItem>
               ) : null}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={async () => { toast.info(t('chat:sidebar.archiving', { defaultValue: 'Archiving…' })); await archive(conversation.id); toast.success(t('chat:sidebar.archived')); navigate('/chat') }}>
-                <Archive size={13} aria-hidden /> {t('chat:sidebar.archive')}
-              </DropdownMenuItem>
+              {!conversation.workspaceId ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={async () => { toast.info(t('chat:sidebar.archiving', { defaultValue: 'Archiving…' })); await archive(conversation.id); toast.success(t('chat:sidebar.archived')); navigate('/chat') }}>
+                    <Archive size={13} aria-hidden /> {t('chat:sidebar.archive')}
+                  </DropdownMenuItem>
+                </>
+              ) : null}
               <DropdownMenuItem destructive onSelect={() => setConfirmDelete(true)}>
                 <Trash2 size={13} aria-hidden /> {t('chat:sidebar.delete')}
               </DropdownMenuItem>
             </DropdownMenuContent>
-          </DropdownMenu>
+          </DropdownMenu> : null}
         </header>
       ) : (
         <header className="grid grid-cols-[var(--tap-min)_1fr_var(--tap-min)] items-center gap-1 h-[var(--layout-topbar-h-mobile)] px-2 bg-[var(--color-bg)]/85 backdrop-blur-sm">
@@ -477,6 +497,7 @@ export default function ChatThread() {
                 onFastChange={handleFastChange}
                 menuAlign="center"
                 className="h-auto min-w-0 max-w-[52vw] gap-1 px-1.5 py-0.5 text-[11.5px] rounded-[7px]"
+                disabled={isWorkspaceGuest}
               />
               {conversation.workspaceId ? (
                 <WorkspaceVisibilityButton
@@ -529,7 +550,7 @@ export default function ChatThread() {
         </div>
         <ConversationMinimap conversation={conversation} scrollContainerRef={scrollRef} />
       </div>
-      <InlineThreadLayer conversationId={conversation.id} scrollRef={scrollRef} />
+      <InlineThreadLayer conversationId={conversation.id} scrollRef={scrollRef} readOnly={isWorkspaceGuest} />
 
       {/* Composer — a hairline separates it from the thread on phones, where it's
           a bottom-anchored bar rather than a floating card. */}
@@ -552,7 +573,7 @@ export default function ChatThread() {
         <div className="mx-auto w-full max-w-[var(--layout-message-max-w)] px-3 sm:px-6 lg:px-8 pb-3 sm:pb-5 pt-1.5 sm:pt-2">
           {/* §workspace RBAC: guests are read-only — replace the composer with
               an explainer instead of letting them type into a 404. */}
-          {conversationWorkspace?.role === 'guest' ? (
+          {isWorkspaceGuest ? (
             <div className="border-t border-[var(--color-divider)] py-4 text-center">
               <p className="text-[13px] font-medium text-[var(--color-fg)]">
                 {t('chat:workspace.readOnlyTitle', { defaultValue: 'Read-only access' })}
@@ -591,7 +612,7 @@ export default function ChatThread() {
         </div>
       </div>
 
-      <Dialog open={renaming} onOpenChange={(open) => { setRenaming(open); if (!open) setRenameError('') }}>
+      <Dialog open={renaming && !isWorkspaceGuest} onOpenChange={(open) => { setRenaming(open); if (!open) setRenameError('') }}>
         <DialogContent size="sm">
           <DialogHeader>
             <DialogTitle>{t('chat:sidebar.renameTitle')}</DialogTitle>
@@ -636,7 +657,7 @@ export default function ChatThread() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+      <Dialog open={confirmDelete && !isWorkspaceGuest} onOpenChange={setConfirmDelete}>
         <DialogContent size="sm">
           <DialogHeader>
             <DialogTitle>{t('chat:sidebar.deleteTitle')}</DialogTitle>
@@ -673,7 +694,7 @@ export default function ChatThread() {
         </DialogContent>
       </Dialog>
 
-      {outlineOpen ? (
+      {outlineOpen && !isWorkspaceGuest ? (
         <ConversationOutline
           conversation={conversation}
           scrollContainerRef={scrollRef}
@@ -686,26 +707,32 @@ export default function ChatThread() {
       <Sheet open={actionsOpen} onOpenChange={setActionsOpen}>
         <SheetContent side="bottom" size="sm" label={t('chat:actions.more')} className="h-auto max-h-[85dvh]">
           <div className="flex flex-col px-2 py-2">
-            <ThreadActionRow
-              icon={<GitBranch size={18} aria-hidden />}
-              label={t('chat:topbar.outlineTooltip', { defaultValue: 'Conversation outline' })}
-              onClick={() => { setActionsOpen(false); setOutlineOpen(true) }}
-            />
+            {!isWorkspaceGuest ? (
+              <ThreadActionRow
+                icon={<GitBranch size={18} aria-hidden />}
+                label={t('chat:topbar.outlineTooltip', { defaultValue: 'Conversation outline' })}
+                onClick={() => { setActionsOpen(false); setOutlineOpen(true) }}
+              />
+            ) : null}
             <ThreadActionRow
               icon={<Files size={18} aria-hidden />}
               label={t('chat:files.title')}
               onClick={() => { setActionsOpen(false); openFilesDrawer(conversation.id) }}
             />
-            <ThreadActionRow
-              icon={<Pencil size={18} aria-hidden />}
-              label={t('chat:sidebar.rename')}
-              onClick={() => { setActionsOpen(false); setRenameDraft(conversation.title); setRenaming(true) }}
-            />
-            <ThreadActionRow
-              icon={<Star size={18} aria-hidden />}
-              label={conversation.starred ? t('common:actions.unstar') : t('common:actions.star')}
-              onClick={() => { setActionsOpen(false); void star(conversation.id) }}
-            />
+            {!isWorkspaceGuest ? (
+              <>
+                <ThreadActionRow
+                  icon={<Pencil size={18} aria-hidden />}
+                  label={t('chat:sidebar.rename')}
+                  onClick={() => { setActionsOpen(false); setRenameDraft(conversation.title); setRenaming(true) }}
+                />
+                <ThreadActionRow
+                  icon={<Star size={18} aria-hidden />}
+                  label={conversation.starred ? t('common:actions.unstar') : t('common:actions.star')}
+                  onClick={() => { setActionsOpen(false); void star(conversation.id) }}
+                />
+              </>
+            ) : null}
             {conversation.workspaceId && canChangeVisibility ? (
               <ThreadActionRow
                 icon={conversation.isPublic ? <LockKeyhole size={18} aria-hidden /> : <Globe2 size={18} aria-hidden />}
@@ -713,7 +740,7 @@ export default function ChatThread() {
                 onClick={() => { setActionsOpen(false); requestVisibilityToggle() }}
               />
             ) : null}
-            {canShare ? (
+            {canShare && !isWorkspaceGuest ? (
               <ThreadActionRow
                 icon={<Share2 size={18} aria-hidden />}
                 label={t('chat:sidebar.share')}
@@ -727,23 +754,31 @@ export default function ChatThread() {
                 onClick={() => { setActionsOpen(false); navigate(`/projects/${project.id}`) }}
               />
             ) : null}
-            <div className="my-1.5 h-px bg-[var(--color-divider)]" aria-hidden />
-            <ThreadActionRow
-              icon={<Archive size={18} aria-hidden />}
-              label={t('chat:sidebar.archive')}
-              onClick={async () => { setActionsOpen(false); await archive(conversation.id); toast.success(t('chat:sidebar.archived')); navigate('/chat') }}
-            />
-            <ThreadActionRow
-              icon={<Trash2 size={18} aria-hidden />}
-              label={t('chat:sidebar.delete')}
-              destructive
-              onClick={() => { setActionsOpen(false); setConfirmDelete(true) }}
-            />
+            {!isWorkspaceGuest ? (
+              <>
+                {!conversation.workspaceId ? (
+                  <>
+                    <div className="my-1.5 h-px bg-[var(--color-divider)]" aria-hidden />
+                    <ThreadActionRow
+                      icon={<Archive size={18} aria-hidden />}
+                      label={t('chat:sidebar.archive')}
+                      onClick={async () => { setActionsOpen(false); await archive(conversation.id); toast.success(t('chat:sidebar.archived')); navigate('/chat') }}
+                    />
+                  </>
+                ) : null}
+                <ThreadActionRow
+                  icon={<Trash2 size={18} aria-hidden />}
+                  label={t('chat:sidebar.delete')}
+                  destructive
+                  onClick={() => { setActionsOpen(false); setConfirmDelete(true) }}
+                />
+              </>
+            ) : null}
           </div>
         </SheetContent>
       </Sheet>
 
-      {canShare ? (
+      {canShare && !isWorkspaceGuest ? (
         <ShareConversationDialog
           conversationId={conversation.id}
           open={shareOpen}

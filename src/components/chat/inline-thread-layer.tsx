@@ -28,9 +28,11 @@ interface PendingSel {
 interface InlineThreadLayerProps {
   conversationId: string
   scrollRef: React.RefObject<HTMLDivElement | null>
+  /** Guests may open existing annotations but cannot create or reply to one. */
+  readOnly?: boolean
 }
 
-export function InlineThreadLayer({ conversationId, scrollRef }: InlineThreadLayerProps) {
+export function InlineThreadLayer({ conversationId, scrollRef, readOnly = false }: InlineThreadLayerProps) {
   const { t } = useTranslation('chat')
   const createInlineThread = useConversations((s) => s.createInlineThread)
   const sendMessage = useConversations((s) => s.sendMessage)
@@ -141,6 +143,10 @@ export function InlineThreadLayer({ conversationId, scrollRef }: InlineThreadLay
         dismiss()
         return
       }
+      if (readOnly) {
+        dismiss()
+        return
+      }
       const range = sel.getRangeAt(0)
       const msgEl = findMsgEl(range.commonAncestorContainer)
       if (!msgEl || msgEl.getAttribute('data-inline-role') !== 'assistant') {
@@ -174,7 +180,7 @@ export function InlineThreadLayer({ conversationId, scrollRef }: InlineThreadLay
 
     document.addEventListener('mouseup', onMouseUp)
     return () => document.removeEventListener('mouseup', onMouseUp)
-  }, [dismiss, openThread])
+  }, [dismiss, openThread, readOnly])
 
   // Hide the floating affordance on scroll (its anchor rect goes stale).
   useEffect(() => {
@@ -188,7 +194,7 @@ export function InlineThreadLayer({ conversationId, scrollRef }: InlineThreadLay
   }, [asking, scrollRef])
 
   async function submit() {
-    if (!pending) return
+    if (readOnly || !pending) return
     const question = draft.trim()
     if (!question) return
     const armed = resolveArmedTurnFlags(modelId)

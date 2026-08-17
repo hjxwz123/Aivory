@@ -419,6 +419,19 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
     return () => window.clearTimeout(timer)
   }, [feedbackSubmitted])
 
+  // Workspace roles may change without remounting the transcript. A callback
+  // disappearing means this row is now read-only, so discard any transient
+  // editor or feedback UI that was opened before the permission change.
+  useEffect(() => {
+    if (onFeedback) return
+    setFeedbackPanelOpen(false)
+  }, [onFeedback])
+
+  useEffect(() => {
+    if (isUser ? onEdit : onSaveEdit) return
+    setEditing(false)
+  }, [isUser, onEdit, onSaveEdit])
+
   // An in-place edit (or any authoritative external refresh) invalidates an
   // old dislike. Clear the row-local draft only after the feedback mutation
   // itself has settled, so the first optimistic dislike is not closed early.
@@ -970,7 +983,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                             : message.error}
                       </p>
                     ) : null}
-                    {!message.errorCode || !RUNTIME_PERMISSION_ERROR_CODES.has(message.errorCode) ? (
+                    {onRegenerate && (!message.errorCode || !RUNTIME_PERMISSION_ERROR_CODES.has(message.errorCode)) ? (
                       <button
                         type="button"
                         onClick={() => onRegenerate?.(message.id)}
@@ -1054,7 +1067,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
         {/* Branch picker during streaming — the action bar below is hidden while
             tokens arrive, but a freshly-retried answer should show its
             `< n/m >` immediately (§4.15 R2). */}
-        {!isUser && message.streaming && message.branchCount && message.branchCount > 1 && typeof message.branchIndex === 'number' ? (
+        {!readOnly && onBranchSwitch && !isUser && message.streaming && message.branchCount && message.branchCount > 1 && typeof message.branchIndex === 'number' ? (
           <div className="mt-2 inline-flex items-center">
             <BranchSwitcher message={message} onSwitch={onBranchSwitch} t={t} />
           </div>
@@ -1065,7 +1078,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
             after a retry (R2) — shown the instant the branch exists rather than
             waiting for a hover, and kept visible in read-only (admin) triage. The
             hover action bar below no longer carries its own copy. */}
-        {!editing && !message.streaming && message.branchCount && message.branchCount > 1 && typeof message.branchIndex === 'number' ? (
+        {!readOnly && onBranchSwitch && !editing && !message.streaming && message.branchCount && message.branchCount > 1 && typeof message.branchIndex === 'number' ? (
           <div className="mt-2 inline-flex items-center">
             <BranchSwitcher message={message} onSwitch={onBranchSwitch} t={t} />
           </div>
@@ -1159,59 +1172,65 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                         </button>
                       </Tooltip>
                     ) : null}
-                    <Tooltip content={t('actions.regenerate')}>
-                      <button
-                        type="button"
-                        onClick={() => onRegenerate?.(message.id)}
-                        aria-label={t('actions.regenerate')}
-                        className="inline-flex items-center justify-center size-7 max-sm:size-9 rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-                      >
-                        <RefreshCw size={13} aria-hidden />
-                      </button>
-                    </Tooltip>
-                    <Tooltip content={t('actions.helpful')}>
-                      <button
-                        type="button"
-                        onClick={() => void toggleLike()}
-                        disabled={feedbackPending || !onFeedback}
-                        aria-label={t('actions.helpful')}
-                        aria-pressed={message.liked}
-                        className={cn(
-                          'inline-flex items-center justify-center size-7 max-sm:size-9 rounded-[7px] interactive disabled:pointer-events-none disabled:opacity-50',
-                          message.liked
-                            ? 'text-[var(--color-success)] bg-[var(--color-success-soft)]'
-                            : 'text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                        )}
-                      >
-                        <ThumbsUp size={13} aria-hidden />
-                      </button>
-                    </Tooltip>
-                    <Tooltip content={t('actions.notHelpful')}>
-                      <button
-                        ref={dislikeButtonRef}
-                        type="button"
-                        onClick={() => void toggleDislike()}
-                        disabled={feedbackPending || !onFeedback}
-                        aria-label={t('actions.notHelpful')}
-                        aria-pressed={message.disliked}
-                        aria-expanded={feedbackPanelOpen}
-                        aria-controls={feedbackPanelId}
-                        className={cn(
-                          'inline-flex items-center justify-center size-7 max-sm:size-9 rounded-[7px] interactive disabled:pointer-events-none disabled:opacity-50',
-                          message.disliked
-                            ? 'text-[var(--color-danger)] bg-[var(--color-danger-soft)]'
-                            : 'text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                        )}
-                      >
-                        <ThumbsDown size={13} aria-hidden />
-                      </button>
-                    </Tooltip>
+                    {onRegenerate ? (
+                      <Tooltip content={t('actions.regenerate')}>
+                        <button
+                          type="button"
+                          onClick={() => onRegenerate(message.id)}
+                          aria-label={t('actions.regenerate')}
+                          className="inline-flex items-center justify-center size-7 max-sm:size-9 rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                        >
+                          <RefreshCw size={13} aria-hidden />
+                        </button>
+                      </Tooltip>
+                    ) : null}
+                    {onFeedback ? (
+                      <>
+                        <Tooltip content={t('actions.helpful')}>
+                          <button
+                            type="button"
+                            onClick={() => void toggleLike()}
+                            disabled={feedbackPending}
+                            aria-label={t('actions.helpful')}
+                            aria-pressed={message.liked}
+                            className={cn(
+                              'inline-flex items-center justify-center size-7 max-sm:size-9 rounded-[7px] interactive disabled:pointer-events-none disabled:opacity-50',
+                              message.liked
+                                ? 'text-[var(--color-success)] bg-[var(--color-success-soft)]'
+                                : 'text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+                              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                            )}
+                          >
+                            <ThumbsUp size={13} aria-hidden />
+                          </button>
+                        </Tooltip>
+                        <Tooltip content={t('actions.notHelpful')}>
+                          <button
+                            ref={dislikeButtonRef}
+                            type="button"
+                            onClick={() => void toggleDislike()}
+                            disabled={feedbackPending}
+                            aria-label={t('actions.notHelpful')}
+                            aria-pressed={message.disliked}
+                            aria-expanded={feedbackPanelOpen}
+                            aria-controls={feedbackPanelId}
+                            className={cn(
+                              'inline-flex items-center justify-center size-7 max-sm:size-9 rounded-[7px] interactive disabled:pointer-events-none disabled:opacity-50',
+                              message.disliked
+                                ? 'text-[var(--color-danger)] bg-[var(--color-danger-soft)]'
+                                : 'text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+                              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                            )}
+                          >
+                            <ThumbsDown size={13} aria-hidden />
+                          </button>
+                        </Tooltip>
+                      </>
+                    ) : null}
                   </>
                 )}
 
-                {isOwn && (
+                {isOwn && onEdit && (
                   <Tooltip content={t('actions.edit')}>
                     <button
                       type="button"
@@ -1276,7 +1295,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                         {t('actions.fork', { defaultValue: 'Fork to new conversation' })}
                       </DropdownMenuItem>
                     ) : null}
-                    {!isUser && (
+                    {!isUser && onRegenerate && (
                       <>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem onClick={() => onRegenerate?.(message.id)}>
@@ -1387,35 +1406,41 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                       onClick={() => { setActionSheetOpen(false); void exportDocx() }}
                     />
                   ) : null}
-                  <MsgActionRow
-                    icon={<RefreshCw size={18} aria-hidden />}
-                    label={t('actions.regenerate')}
-                    onClick={() => { setActionSheetOpen(false); onRegenerate?.(message.id) }}
-                  />
-                  <MsgActionRow
-                    icon={<ThumbsUp size={18} aria-hidden />}
-                    label={t('actions.helpful')}
-                    active={message.liked}
-                    disabled={feedbackPending || !onFeedback}
-                    onClick={() => {
-                      setActionSheetOpen(false)
-                      void toggleLike()
-                    }}
-                  />
-                  <MsgActionRow
-                    icon={<ThumbsDown size={18} aria-hidden />}
-                    label={t('actions.notHelpful')}
-                    active={message.disliked}
-                    disabled={feedbackPending || !onFeedback}
-                    controls={feedbackPanelId}
-                    expanded={feedbackPanelOpen}
-                    onClick={() => {
-                      setActionSheetOpen(false)
-                      void toggleDislike()
-                    }}
-                  />
+                  {onRegenerate ? (
+                    <MsgActionRow
+                      icon={<RefreshCw size={18} aria-hidden />}
+                      label={t('actions.regenerate')}
+                      onClick={() => { setActionSheetOpen(false); onRegenerate(message.id) }}
+                    />
+                  ) : null}
+                  {onFeedback ? (
+                    <>
+                      <MsgActionRow
+                        icon={<ThumbsUp size={18} aria-hidden />}
+                        label={t('actions.helpful')}
+                        active={message.liked}
+                        disabled={feedbackPending}
+                        onClick={() => {
+                          setActionSheetOpen(false)
+                          void toggleLike()
+                        }}
+                      />
+                      <MsgActionRow
+                        icon={<ThumbsDown size={18} aria-hidden />}
+                        label={t('actions.notHelpful')}
+                        active={message.disliked}
+                        disabled={feedbackPending}
+                        controls={feedbackPanelId}
+                        expanded={feedbackPanelOpen}
+                        onClick={() => {
+                          setActionSheetOpen(false)
+                          void toggleDislike()
+                        }}
+                      />
+                    </>
+                  ) : null}
                 </>
-              ) : isOwn ? (
+              ) : isOwn && onEdit ? (
                 <MsgActionRow
                   icon={<Pencil size={18} aria-hidden />}
                   label={t('actions.edit')}

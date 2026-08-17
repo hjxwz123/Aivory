@@ -25,6 +25,8 @@ interface ModelPickerProps {
   className?: string
   /** Align the menu to the trigger. Mobile title bars use `center`. */
   menuAlign?: 'start' | 'center' | 'end'
+  /** Keep the current model visible while preventing changes in read-only views. */
+  disabled?: boolean
 }
 
 /**
@@ -40,6 +42,7 @@ export function ModelPicker({
   onFastChange,
   className,
   menuAlign = 'end',
+  disabled = false,
 }: ModelPickerProps) {
   const models = useModels((s) => s.models)
   const storedImageModels = useModels((s) => s.imageModels)
@@ -87,8 +90,10 @@ export function ModelPicker({
           'hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive',
           'focus-visible:outline-none focus-visible:bg-[var(--color-bg-muted)] focus-visible:text-[var(--color-fg)]',
           'max-w-[180px]',
+          'disabled:pointer-events-none disabled:opacity-70',
           className,
         )}
+        disabled={disabled}
         aria-label={
           isFast
             ? t('fastMode.label', { defaultValue: '快速' })

@@ -9,6 +9,7 @@ import { MathText } from '@/components/chat/math-text'
 import { useInlineThreadDrawer } from '@/store/inline-thread'
 import { resolveArmedTurnFlags, useConversations } from '@/store/conversations'
 import { useSettings } from '@/store/settings'
+import { useWorkspaces } from '@/store/workspaces'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { cn } from '@/lib/utils'
 import { hasMathContent } from '@/lib/math-content'
@@ -79,6 +80,11 @@ export function InlineThreadPanel() {
 function ThreadBody({ quote, childId, onClose }: { quote: string; childId: string | null; onClose: () => void }) {
   const { t } = useTranslation('chat')
   const conv = useConversations((s) => s.conversations.find((c) => c.id === childId))
+  const isWorkspaceGuest = useWorkspaces((s) =>
+    conv?.workspaceId
+      ? s.workspaces.find((workspace) => workspace.id === conv.workspaceId)?.role === 'guest'
+      : false,
+  )
   const sendMessage = useConversations((s) => s.sendMessage)
   const userMessageMarkdown = useSettings((s) => s.appearance.userMessageMarkdown)
   const [draft, setDraft] = useState('')
@@ -95,7 +101,7 @@ function ThreadBody({ quote, childId, onClose }: { quote: string; childId: strin
 
   function submit() {
     const text = draft.trim()
-    if (!text || !childId) return
+    if (isWorkspaceGuest || !text || !childId) return
     setDraft('')
     const armed = resolveArmedTurnFlags(conv?.modelId)
     void sendMessage({
@@ -175,7 +181,11 @@ function ThreadBody({ quote, childId, onClose }: { quote: string; childId: strin
       </div>
 
       {/* Composer */}
-      <div className="shrink-0 border-t border-[var(--color-divider)] p-3">
+      {isWorkspaceGuest ? (
+        <div className="shrink-0 border-t border-[var(--color-divider)] px-3 py-3 text-center text-[12px] text-[var(--color-fg-muted)]">
+          {t('workspace.readOnlyBody', { defaultValue: 'You are a guest in this workspace. You can read shared conversations but not send messages.' })}
+        </div>
+      ) : <div className="shrink-0 border-t border-[var(--color-divider)] p-3">
         <div className="flex items-end gap-1.5">
           <textarea
             rows={1}
@@ -200,7 +210,7 @@ function ThreadBody({ quote, childId, onClose }: { quote: string; childId: strin
             <CornerDownLeft size={15} aria-hidden />
           </button>
         </div>
-      </div>
+      </div>}
     </>
   )
 }

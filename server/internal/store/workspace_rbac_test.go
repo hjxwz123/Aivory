@@ -251,6 +251,41 @@ func TestWorkspaceGuestIsReadOnly(t *testing.T) {
 	}
 }
 
+func TestWorkspaceConversationCannotBeArchived(t *testing.T) {
+	ctx := context.Background()
+	fx := newRBACFixture(t)
+	archived := true
+
+	// Workspaces deliberately have no archived-conversation view. This must be
+	// enforced below the HTTP layer so a direct API client cannot hide a shared
+	// conversation from every workspace list.
+	for _, actor := range []string{"member", "admin", "owner"} {
+		if _, err := UpdateConversation(ctx, fx.db, fx.sharedConvID, actor, ConversationPatch{Archived: &archived}); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("%s archive workspace conversation error=%v, want ErrNotFound", actor, err)
+		}
+	}
+
+	var stored int
+	if err := fx.db.QueryRow(`SELECT archived FROM conversations WHERE id=?`, fx.sharedConvID).Scan(&stored); err != nil {
+		t.Fatalf("read archived flag: %v", err)
+	}
+	if stored != 0 {
+		t.Fatalf("workspace conversation archived=%d, want 0", stored)
+	}
+
+	// Older clients could write this state; startup migration restores it.
+	exec(t, fx.db, `UPDATE conversations SET archived=1 WHERE id=?`, fx.sharedConvID)
+	if err := Migrate(fx.db); err != nil {
+		t.Fatalf("migrate archived workspace conversation: %v", err)
+	}
+	if err := fx.db.QueryRow(`SELECT archived FROM conversations WHERE id=?`, fx.sharedConvID).Scan(&stored); err != nil {
+		t.Fatalf("read restored archived flag: %v", err)
+	}
+	if stored != 0 {
+		t.Fatalf("migrated workspace conversation archived=%d, want 0", stored)
+	}
+}
+
 func TestWorkspaceRoleDowngradeStopsConversationAttachmentAndMessageWrites(t *testing.T) {
 	ctx := context.Background()
 	fx := newRBACFixture(t)

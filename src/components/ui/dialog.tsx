@@ -1,6 +1,6 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { X } from 'lucide-react'
-import { forwardRef, type ComponentPropsWithoutRef, type ElementRef, type HTMLAttributes } from 'react'
+import { forwardRef, useLayoutEffect, useRef, type ComponentPropsWithoutRef, type ElementRef, type HTMLAttributes } from 'react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 
@@ -51,11 +51,50 @@ export const DialogContent = forwardRef<
   DialogContentProps
 >(function DialogContent({ className, size = 'md', showClose = true, closeDisabled = false, captureIgnore = false, children, ...rest }, ref) {
   const { t } = useTranslation('common')
+  const contentRef = useRef<ElementRef<typeof DialogPrimitive.Content>>(null)
+
+  // Dialog bodies often grow after an async result, validation error, or a
+  // conditional field appears. Scale the new box from its previous dimensions
+  // so the size change reads as one continuous surface instead of a hard jump.
+  useLayoutEffect(() => {
+    const node = contentRef.current
+    if (!node || typeof ResizeObserver === 'undefined') return
+    let previous = node.getBoundingClientRect()
+    let observed = false
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const observer = new ResizeObserver(() => {
+      const next = node.getBoundingClientRect()
+      const changed = Math.abs(previous.width - next.width) > 0.5 || Math.abs(previous.height - next.height) > 0.5
+      const before = previous
+      previous = next
+      if (!observed) {
+        observed = true
+        return
+      }
+      if (!changed || reducedMotion.matches || before.width <= 0 || before.height <= 0 || next.width <= 0 || next.height <= 0) return
+      node.animate(
+        [
+          { transform: `translate(-50%, -50%) scale(${before.width / next.width}, ${before.height / next.height})` },
+          { transform: 'translate(-50%, -50%) scale(1)' },
+        ],
+        { duration: 200, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
+      )
+    })
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
+
+  function setContentRef(node: ElementRef<typeof DialogPrimitive.Content> | null) {
+    contentRef.current = node
+    if (typeof ref === 'function') ref(node)
+    else if (ref) ref.current = node
+  }
+
   return (
     <DialogPortal>
       <DialogOverlay data-feedback-capture-ignore={captureIgnore ? '' : undefined} />
       <DialogPrimitive.Content
-        ref={ref}
+        ref={setContentRef}
         data-feedback-capture-ignore={captureIgnore ? '' : undefined}
         className={cn(
           'fixed left-1/2 top-1/2 z-[60] -translate-x-1/2 -translate-y-1/2 w-[min(96vw,calc(100vw-2rem))]',
