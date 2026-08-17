@@ -894,12 +894,9 @@ function WorkspaceInvitesPanel({ workspaceID, isOwner }: { workspaceID: string; 
   }
 
   return (
-    <div className="space-y-4">
-      <div className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-2.5">
-        <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-fg-subtle)]">
-          {t('workspace.newInvite', { defaultValue: 'New invite' })}
-        </div>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
+    <div className="space-y-3">
+      <div className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-2">
+        <div className="flex flex-wrap items-center gap-1.5">
           <div role="radiogroup" aria-label={t('workspace.inviteRole', { defaultValue: 'Invite role' })} className="flex rounded-[7px] border border-[var(--color-border)] p-0.5">
             {roleOptions.map((r) => (
               <button
@@ -922,18 +919,16 @@ function WorkspaceInvitesPanel({ workspaceID, isOwner }: { workspaceID: string; 
             onChange={(e) => setEmail(e.target.value)}
             placeholder={t('workspace.inviteEmailOptional', { defaultValue: 'Bind to email (optional)' })}
             aria-label={t('workspace.inviteEmailOptional', { defaultValue: 'Bind to email (optional)' })}
-            className="h-8 min-w-0 flex-1 text-[12.5px]"
+            className="h-8 min-w-40 flex-1 text-[12.5px]"
             inputMode="email"
           />
-        </div>
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-[12px] text-[var(--color-fg-subtle)]">
-          <label className="flex items-center gap-1.5">
-            {t('workspace.inviteExpires', { defaultValue: 'Expires' })}
+          <label className="flex items-center gap-1 text-[11px] text-[var(--color-fg-subtle)]">
+            <span className="whitespace-nowrap">{t('workspace.inviteExpires', { defaultValue: 'Expires' })}</span>
             <select
               value={expiryDays}
               disabled={creating}
               onChange={(e) => setExpiryDays(Number(e.target.value))}
-              className="h-8 rounded-[7px] border border-[var(--color-border)] bg-[var(--color-bg)] px-2 text-[12px] text-[var(--color-fg)]"
+              className="h-8 rounded-[7px] border border-[var(--color-border)] bg-[var(--color-bg)] px-1.5 text-[12px] text-[var(--color-fg)]"
               aria-label={t('workspace.inviteExpires', { defaultValue: 'Expires' })}
             >
               <option value={1}>{t('common.day', { defaultValue: '1 day' })}</option>
@@ -942,15 +937,15 @@ function WorkspaceInvitesPanel({ workspaceID, isOwner }: { workspaceID: string; 
               <option value={0}>{t('workspace.inviteNeverExpires', { defaultValue: 'Never' })}</option>
             </select>
           </label>
-          <label className="flex items-center gap-1.5">
-            {t('workspace.inviteMaxUses', { defaultValue: 'Max uses' })}
+          <label className="flex items-center gap-1 text-[11px] text-[var(--color-fg-subtle)]">
+            <span className="whitespace-nowrap">{t('workspace.inviteMaxUses', { defaultValue: 'Max uses' })}</span>
             <Input
               value={maxUses}
               disabled={creating}
               onChange={(e) => setMaxUses(Number(e.target.value) || 0)}
               type="number"
               min={0}
-              className="h-8 w-20 text-[12.5px]"
+              className="h-8 w-14 px-1.5 text-[12.5px]"
               aria-label={t('workspace.inviteMaxUses', { defaultValue: 'Max uses' })}
             />
           </label>
@@ -958,9 +953,6 @@ function WorkspaceInvitesPanel({ workspaceID, isOwner }: { workspaceID: string; 
             {t('workspace.inviteCreate', { defaultValue: 'Create invite' })}
           </Button>
         </div>
-        <p className="mt-1.5 text-[11px] text-[var(--color-fg-subtle)]">
-          {t('workspace.inviteHint', { defaultValue: 'Unset max uses = unlimited. Generic invites default to the read-only guest role.' })}
-        </p>
       </div>
 
       {loading ? (
@@ -1140,7 +1132,10 @@ function WorkspacePolicyPanel({ workspaceID }: { workspaceID: string }) {
             <Switch
               checked={allModelsAllowed}
               disabled={saving}
-              onCheckedChange={(checked) => setPolicy((current) => current ? { ...current, AllowedModelIDs: checked ? [] : current.AllowedModelIDs } : current)}
+              onCheckedChange={(checked) => setPolicy((current) => current ? {
+                ...current,
+                AllowedModelIDs: checked ? [] : models.map((model) => model.id),
+              } : current)}
               aria-label={t('workspace.policy.allModels', { defaultValue: 'All models' })}
             />
           </label>
