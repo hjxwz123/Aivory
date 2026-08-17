@@ -6,6 +6,8 @@ import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { Tooltip } from '@/components/ui/tooltip'
 import { ProgressRing } from '@/components/ui/progress-ring'
 import { useConversationFiles } from '@/store/conversation-files'
+import { useConversations } from '@/store/conversations'
+import { useWorkspaces } from '@/store/workspaces'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { fileIconFor } from '@/lib/file-icon'
 import { toast } from '@/hooks/use-toast'
@@ -62,11 +64,18 @@ export function ConversationFilesPanel() {
 function FilesBody({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation('chat')
   const files = useConversationFiles((s) => s.files)
+  const conversationId = useConversationFiles((s) => s.conversationId)
   const loading = useConversationFiles((s) => s.loading)
   const uploading = useConversationFiles((s) => s.uploading)
   const uploadJob = useConversationFiles((s) => s.uploadJob)
   const upload = useConversationFiles((s) => s.upload)
   const remove = useConversationFiles((s) => s.remove)
+  const conversation = useConversations((s) => s.conversations.find((item) => item.id === conversationId))
+  const isWorkspaceGuest = useWorkspaces((s) =>
+    conversation?.workspaceId
+      ? s.workspaces.find((workspace) => workspace.id === conversation.workspaceId)?.role === 'guest'
+      : false,
+  )
   const inputRef = useRef<HTMLInputElement>(null)
   // Belt-and-suspenders against a microtask-window double-click: the store
   // removes the row optimistically (synchronously) so it unmounts almost
@@ -80,6 +89,7 @@ function FilesBody({ onClose }: { onClose: () => void }) {
     : t('files.uploading')
 
   async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+    if (isWorkspaceGuest) return
     const list = e.target.files
     if (!list || !list.length) return
     // Files added here are conversation context, not attachments on the next
@@ -107,6 +117,7 @@ function FilesBody({ onClose }: { onClose: () => void }) {
   }
 
   async function onRemove(id: string) {
+    if (isWorkspaceGuest) return
     if (removingId) return
     setRemovingId(id)
     try {
@@ -137,7 +148,7 @@ function FilesBody({ onClose }: { onClose: () => void }) {
         </Tooltip>
       </header>
 
-      <div className="px-3 pt-3 shrink-0">
+      {!isWorkspaceGuest ? <div className="px-3 pt-3 shrink-0">
         <input
           ref={inputRef}
           type="file"
@@ -167,7 +178,7 @@ function FilesBody({ onClose }: { onClose: () => void }) {
         {uploading && uploadJob ? (
           <p className="mt-1 truncate px-1 text-[11px] text-[var(--color-fg-subtle)]">{uploadJob.name}</p>
         ) : null}
-      </div>
+      </div> : null}
 
       <p className="px-4 pt-2.5 pb-1 text-[11px] leading-snug text-[var(--color-fg-subtle)] shrink-0">
         {t('files.hint')}
@@ -201,7 +212,7 @@ function FilesBody({ onClose }: { onClose: () => void }) {
                     <span className="truncate text-[13px] text-[var(--color-fg)]">{f.filename}</span>
                     <span className="text-[11px] text-[var(--color-fg-subtle)]">{formatBytes(f.size_bytes)}</span>
                   </a>
-                  <button
+                  {!isWorkspaceGuest ? <button
                     type="button"
                     onClick={() => void onRemove(f.id)}
                     disabled={removingId === f.id}
@@ -209,7 +220,7 @@ function FilesBody({ onClose }: { onClose: () => void }) {
                     className="inline-flex size-7 shrink-0 items-center justify-center rounded-[8px] text-[var(--color-fg-subtle)] opacity-0 interactive hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] group-hover/file:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                   >
                     <Trash2 size={14} aria-hidden />
-                  </button>
+                  </button> : null}
                 </li>
               )
             })}

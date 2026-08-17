@@ -7,6 +7,7 @@ import { IssueFeedbackDialog } from './issue-feedback-dialog'
 import { useAuth } from '@/store/auth'
 import { useConversations, MSG_PAGE, resolveArmedTurnFlags } from '@/store/conversations'
 import { useSettings } from '@/store/settings'
+import { useWorkspaces } from '@/store/workspaces'
 import { toast } from '@/hooks/use-toast'
 import { protectedFirstRoundMessageIds } from '@/lib/message-state'
 
@@ -30,6 +31,11 @@ const BATCH = 24
 
 export function MessageList({ conversation, scrollToMessageId, jumpKey }: MessageListProps) {
   const meId = useAuth((s) => s.user?.id)
+  const isWorkspaceGuest = useWorkspaces((s) =>
+    conversation.workspaceId
+      ? s.workspaces.find((workspace) => workspace.id === conversation.workspaceId)?.role === 'guest'
+      : false,
+  )
   const navigate = useNavigate()
   const { t } = useTranslation('chat')
   // Pull stable selectors only — keeps this component out of the per-token
@@ -302,17 +308,17 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
         <MessageRow
           key={m.id}
           message={m}
-          onRegenerate={handleRegenerate}
-          onEdit={handleEdit}
-          onSaveEdit={handleSaveEdit}
-          onFeedback={handleFeedback}
-          onReport={handleReport}
-          onBranchSwitch={handleBranchSwitch}
-          onFork={handleFork}
+          onRegenerate={isWorkspaceGuest ? undefined : handleRegenerate}
+          onEdit={isWorkspaceGuest ? undefined : handleEdit}
+          onSaveEdit={isWorkspaceGuest ? undefined : handleSaveEdit}
+          onFeedback={isWorkspaceGuest ? undefined : handleFeedback}
+          onReport={isWorkspaceGuest ? undefined : handleReport}
+          onBranchSwitch={isWorkspaceGuest ? undefined : handleBranchSwitch}
+          onFork={isWorkspaceGuest ? undefined : handleFork}
           onDelete={
             // §first-exchange: the opening question + its answer can never be
             // deleted, whoever owns the conversation.
-            protectedFirstRoundIds.has(m.id)
+            isWorkspaceGuest || protectedFirstRoundIds.has(m.id)
               ? undefined
               : // §workspaces: hide the delete-round affordance on turns the member
                 // cannot delete (server enforces author-or-creator regardless). In a

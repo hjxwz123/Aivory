@@ -477,6 +477,12 @@ func UpdateConversation(ctx context.Context, db *sql.DB, id, userID string, p Co
 		}
 		return nil, err
 	}
+	// Workspace conversations are shared resources and deliberately do not have
+	// an archive view. Reject archive toggles here as well as in the UI so an API
+	// client cannot make a conversation disappear from every workspace listing.
+	if p.Archived != nil && workspaceID != "" {
+		return nil, ErrNotFound
+	}
 	// Visibility is a workspace concept — personal rows keep rejecting it.
 	if p.IsPublic != nil && workspaceID == "" {
 		return nil, ErrNotFound

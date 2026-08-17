@@ -35,6 +35,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { subscribeAccessInvalidation } from '@/lib/access-events'
 import {
@@ -896,60 +897,57 @@ function WorkspaceInvitesPanel({ workspaceID, isOwner }: { workspaceID: string; 
   return (
     <div className="space-y-3">
       <div className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-2">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <div role="radiogroup" aria-label={t('workspace.inviteRole', { defaultValue: 'Invite role' })} className="flex rounded-[7px] border border-[var(--color-border)] p-0.5">
-            {roleOptions.map((r) => (
-              <button
-                key={r}
-                type="button"
-                role="radio"
-                aria-checked={role === r}
-                disabled={creating}
-                onClick={() => setRole(r)}
-                className={`rounded-[6px] px-2.5 py-1 text-[12px] font-medium interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:opacity-50 ${
-                  role === r ? 'bg-[var(--color-bg)] text-[var(--color-fg)] shadow-sm' : 'text-[var(--color-fg-subtle)]'
-                }`}
-              >
-                {roleLabel(r)}
-              </button>
-            ))}
-          </div>
+        <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
+          <Select value={role} disabled={creating} onValueChange={(value) => setRole(value as ApiWorkspaceRole)}>
+            <SelectTrigger
+              aria-label={t('workspace.inviteRole', { defaultValue: 'Invite role' })}
+              className="h-8 w-[88px] shrink-0 px-2 text-[12px]"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {roleOptions.map((option) => (
+                <SelectItem key={option} value={option}>{roleLabel(option)}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Input
             value={email}
+            disabled={creating}
             onChange={(e) => setEmail(e.target.value)}
             placeholder={t('workspace.inviteEmailOptional', { defaultValue: 'Bind to email (optional)' })}
             aria-label={t('workspace.inviteEmailOptional', { defaultValue: 'Bind to email (optional)' })}
-            className="h-8 min-w-40 flex-1 text-[12.5px]"
+            className="h-8 min-w-[11rem] flex-1 text-[12.5px] sm:min-w-0"
             inputMode="email"
           />
-          <label className="flex items-center gap-1 text-[11px] text-[var(--color-fg-subtle)]">
-            <span className="whitespace-nowrap">{t('workspace.inviteExpires', { defaultValue: 'Expires' })}</span>
-            <select
-              value={expiryDays}
-              disabled={creating}
-              onChange={(e) => setExpiryDays(Number(e.target.value))}
-              className="h-8 rounded-[7px] border border-[var(--color-border)] bg-[var(--color-bg)] px-1.5 text-[12px] text-[var(--color-fg)]"
+          <Select value={String(expiryDays)} disabled={creating} onValueChange={(value) => setExpiryDays(Number(value))}>
+            <SelectTrigger
               aria-label={t('workspace.inviteExpires', { defaultValue: 'Expires' })}
+              className="h-8 w-[86px] shrink-0 px-2 text-[12px]"
             >
-              <option value={1}>{t('common.day', { defaultValue: '1 day' })}</option>
-              <option value={7}>{t('common.week', { defaultValue: '7 days' })}</option>
-              <option value={30}>{t('common.month', { defaultValue: '30 days' })}</option>
-              <option value={0}>{t('workspace.inviteNeverExpires', { defaultValue: 'Never' })}</option>
-            </select>
-          </label>
-          <label className="flex items-center gap-1 text-[11px] text-[var(--color-fg-subtle)]">
-            <span className="whitespace-nowrap">{t('workspace.inviteMaxUses', { defaultValue: 'Max uses' })}</span>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="1">{t('common.day', { defaultValue: '1 day' })}</SelectItem>
+              <SelectItem value="7">{t('common.week', { defaultValue: '7 days' })}</SelectItem>
+              <SelectItem value="30">{t('common.month', { defaultValue: '30 days' })}</SelectItem>
+              <SelectItem value="0">{t('workspace.inviteNeverExpires', { defaultValue: 'Never' })}</SelectItem>
+            </SelectContent>
+          </Select>
+          <label className="flex shrink-0 items-center gap-1 text-[11px] text-[var(--color-fg-subtle)]">
+            <span className="sr-only">{t('workspace.inviteMaxUses', { defaultValue: 'Max uses' })}</span>
             <Input
               value={maxUses}
               disabled={creating}
               onChange={(e) => setMaxUses(Number(e.target.value) || 0)}
               type="number"
               min={0}
-              className="h-8 w-14 px-1.5 text-[12.5px]"
-              aria-label={t('workspace.inviteMaxUses', { defaultValue: 'Max uses' })}
+              className="h-8 w-[54px] px-1.5 text-[12.5px]"
+              aria-label={t('workspace.inviteMaxUses', { defaultValue: 'Max uses (0 for unlimited)' })}
+              title={t('workspace.inviteMaxUses', { defaultValue: 'Max uses' })}
             />
           </label>
-          <Button size="sm" loading={creating} leadingIcon={<Plus size={13} aria-hidden />} onClick={() => void createInvite()}>
+          <Button className="shrink-0" size="sm" loading={creating} leadingIcon={<Plus size={13} aria-hidden />} onClick={() => void createInvite()}>
             {t('workspace.inviteCreate', { defaultValue: 'Create invite' })}
           </Button>
         </div>

@@ -448,6 +448,13 @@ func Migrate(db *sql.DB) error {
 		WHERE COALESCE(role,'') NOT IN ('admin','member','guest')`); err != nil {
 		return fmt.Errorf("normalize invalid workspace member roles: %w", err)
 	}
+	// Workspace conversations have never had an archived view. Restore rows
+	// produced by older clients before archive mutations were rejected, so they
+	// reappear in their workspace instead of remaining permanently unreachable.
+	if _, err := db.Exec(`UPDATE conversations SET archived=0
+		WHERE COALESCE(workspace_id,'')<>'' AND archived<>0`); err != nil {
+		return fmt.Errorf("restore archived workspace conversations: %w", err)
+	}
 	// Before generic OIDC gained issuer/JWKS verification, custom UserInfo
 	// providers were persisted as kind=oidc. Only rows from that legacy shape
 	// have an empty generation marker; new OIDC drafts receive a marker when
