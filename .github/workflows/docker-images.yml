@@ -32,6 +32,13 @@ on:
       - 'docs/**'
   workflow_dispatch: {}
 
+# A multi-arch build can take long enough for a newer main build to finish
+# first. Serialize each ref and cancel its stale run so an older commit can
+# never publish :latest after a newer one.
+concurrency:
+  group: app-image-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   REGISTRY: ghcr.io
   PLATFORMS: linux/amd64,linux/arm64
