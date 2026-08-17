@@ -296,10 +296,12 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
     const request = ++membersRequestRef.current
     operationEpochRef.current += 1
     busyUidRef.current = null
+    roleBusyRef.current = null
     rotatingRef.current = null
     actioningRef.current = null
     savingPermissionsRef.current = null
     setBusyUid(null)
+    setRoleBusyUid(null)
     setRotating(false)
     setActioning(false)
     setSavingPermissions(false)
