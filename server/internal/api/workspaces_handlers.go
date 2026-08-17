@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -72,11 +73,16 @@ func listWorkspacesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"workspaces": list})
 }
 
-// workspaceMembersHandler lists members — visible to every member.
+// workspaceMembersHandler lists members — visible to every current member.
+// Emails are admin-only surface: members and guests see names/avatars/roles
+// (§workspace RBAC).
 func workspaceMembersHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	id := pathParam(r, "id")
-	if _, err := store.GetWorkspaceForMember(r.Context(), d.DB, id, u.ID); err != nil {
+	decision, err := store.AuthorizeWorkspace(r.Context(), d.DB, store.WorkspaceAuthorizationRequest{
+		WorkspaceID: id, UserID: u.ID, Action: store.ActionWorkspaceMemberView,
+	})
+	if err != nil || !decision.Allowed {
 		writeError(w, 404, errNotFound)
 		return
 	}
@@ -84,6 +90,11 @@ func workspaceMembersHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, 500, err)
 		return
+	}
+	if !decision.IsAdmin {
+		for i := range members {
+			members[i].Email = ""
+		}
 	}
 	writeJSON(w, 200, map[string]any{"members": members})
 }
@@ -112,7 +123,9 @@ func publishWorkspaceAccessEvent(d Deps, r *http.Request, workspaceID, eventType
 }
 
 // updateWorkspaceMemberPermissionsHandler changes the member-wide capability
-// ceiling. Per-knowledge-base permissions are managed separately on each KB.
+// ceiling. Admins may tighten ordinary members and guests; the owner and
+// per-knowledge-base permissions are managed separately. Per-knowledge-base
+// permissions are managed separately on each KB.
 func updateWorkspaceMemberPermissionsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	workspaceID := pathParam(r, "id")
@@ -122,9 +135,13 @@ func updateWorkspaceMemberPermissionsHandler(d Deps, w http.ResponseWriter, r *h
 		writeError(w, http.StatusBadRequest, errInvalidInput)
 		return
 	}
-	workspace, err := store.GetWorkspaceForMember(r.Context(), d.DB, workspaceID, u.ID)
-	if err != nil || workspace.OwnerID != u.ID || memberID == workspace.OwnerID {
-		writeError(w, http.StatusNotFound, errNotFound)
+	decision, err := store.AuthorizeWorkspace(r.Context(), d.DB, store.WorkspaceAuthorizationRequest{
+		WorkspaceID: workspaceID, UserID: u.ID,
+		Action:   store.ActionWorkspaceMemberPermissions,
+		Resource: "workspace_member", ResourceID: memberID,
+	})
+	if err != nil || !decision.Allowed {
+		writeError(w, 404, errNotFound)
 		return
 	}
 	member, err := store.UpdateWorkspaceMemberPermissions(
@@ -138,30 +155,98 @@ func updateWorkspaceMemberPermissionsHandler(d Deps, w http.ResponseWriter, r *h
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	// Capability reductions can remove tool/file authority from an active turn.
+	// Cancel the member's existing work; a fresh turn captures the new ceiling.
+	revokeWorkspaceMemberGenerations(d, workspaceID, memberID)
 	publishWorkspaceAccessEvent(d, r, workspaceID, "workspace.permissions_updated", u.ID, memberID)
 	writeJSON(w, http.StatusOK, member)
 }
 
-// kickWorkspaceMemberHandler removes a member — owner only; the owner row
+// updateWorkspaceMemberRoleHandler applies the §workspace RBAC role ladder:
+// the owner may grant/revoke admin and move anyone between member and guest;
+// ordinary admins may only switch ordinary users between member and guest.
+func updateWorkspaceMemberRoleHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	workspaceID := pathParam(r, "id")
+	memberID := pathParam(r, "uid")
+	var req struct {
+		Role string `json:"role"`
+	}
+	if err := decodeJSON(r, &req); err != nil || !store.ValidWorkspaceMemberRole(req.Role) {
+		writeError(w, http.StatusBadRequest, errInvalidInput)
+		return
+	}
+	decision, err := store.AuthorizeWorkspace(r.Context(), d.DB, store.WorkspaceAuthorizationRequest{
+		WorkspaceID: workspaceID, UserID: u.ID,
+		Action:   store.ActionWorkspaceMemberRoleUpdate,
+		Resource: "workspace_member", ResourceID: memberID,
+		NewRole: req.Role,
+	})
+	if err != nil || !decision.Allowed {
+		// Uniform 404 for non-members; 403 would leak which actors hold
+		// which power only when they are already members, which is fine.
+		if err == nil && !decision.Allowed {
+			writeError(w, http.StatusForbidden, errForbidden)
+			return
+		}
+		writeError(w, 404, errNotFound)
+		return
+	}
+	member, err := store.UpdateWorkspaceMemberRole(r.Context(), d.DB, workspaceID, u.ID, memberID, req.Role)
+	if err != nil {
+		switch {
+		case errors.Is(err, store.ErrForbidden):
+			writeError(w, http.StatusForbidden, errForbidden)
+		case errors.Is(err, store.ErrNotFound):
+			writeError(w, http.StatusNotFound, errNotFound)
+		default:
+			writeError(w, http.StatusInternalServerError, err)
+		}
+		return
+	}
+	// The role update is committed before this broadcast. Any turn that began
+	// with the old role is stopped, while a later promotion is free to start a
+	// new turn without inheriting a permanent tombstone.
+	revokeWorkspaceMemberGenerations(d, workspaceID, memberID)
+	publishWorkspaceAccessEvent(d, r, workspaceID, "workspace.permissions_updated", u.ID, memberID)
+	writeJSON(w, http.StatusOK, member)
+}
+
+// kickWorkspaceMemberHandler removes a member — admins may remove ordinary
+// members and guests; only the owner may remove another admin. The owner row
 // itself is protected in the store.
 func kickWorkspaceMemberHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	id := pathParam(r, "id")
 	memberID := pathParam(r, "uid")
-	ws, err := store.GetWorkspaceForMember(r.Context(), d.DB, id, u.ID)
-	if err != nil || ws.OwnerID != u.ID {
+	decision, err := store.AuthorizeWorkspace(r.Context(), d.DB, store.WorkspaceAuthorizationRequest{
+		WorkspaceID: id, UserID: u.ID,
+		Action:   store.ActionWorkspaceMemberRemove,
+		Resource: "workspace_member", ResourceID: memberID,
+	})
+	if err != nil || !decision.Allowed {
+		if err == nil && !decision.Allowed {
+			writeError(w, http.StatusForbidden, errForbidden)
+			return
+		}
 		writeError(w, 404, errNotFound)
 		return
 	}
-	revokedMessageIDs, err := store.RemoveWorkspaceMemberWithRevokedGenerations(r.Context(), d.DB, id, memberID)
+	revokedMessageIDs, err := store.RemoveWorkspaceMemberWithRevokedGenerations(r.Context(), d.DB, id, u.ID, memberID)
 	if err != nil {
-		writeError(w, 404, errNotFound)
+		switch {
+		case errors.Is(err, store.ErrForbidden):
+			writeError(w, http.StatusForbidden, errForbidden)
+		default:
+			writeError(w, 404, errNotFound)
+		}
 		return
 	}
 	if err := revokeMessageGenerationStreams(d, revokedMessageIDs); err != nil {
 		writeError(w, http.StatusServiceUnavailable, err)
 		return
 	}
+	revokeWorkspaceMemberGenerations(d, id, memberID)
 	publishWorkspaceAccessEvent(d, r, id, "workspace.membership_updated", u.ID, memberID)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
@@ -180,55 +265,298 @@ func leaveWorkspaceHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, err)
 		return
 	}
+	revokeWorkspaceMemberGenerations(d, id, u.ID)
 	publishWorkspaceAccessEvent(d, r, id, "workspace.membership_updated", u.ID)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
-// rotateWorkspaceInviteHandler mints a fresh invite link (owner only), killing
-// the old one.
+// rotateWorkspaceInviteHandler mints a fresh bounded quick-link. The store
+// repeats the authorization after acquiring the workspace lock, preventing a
+// stale handler check from succeeding after the caller is demoted or removed.
 func rotateWorkspaceInviteHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	id := pathParam(r, "id")
-	ws, err := store.GetWorkspaceForMember(r.Context(), d.DB, id, u.ID)
-	if err != nil || ws.OwnerID != u.ID {
+	decision, err := store.AuthorizeWorkspace(r.Context(), d.DB, store.WorkspaceAuthorizationRequest{
+		WorkspaceID: id, UserID: u.ID, Action: store.ActionWorkspaceMemberInvite,
+	})
+	if err != nil || !decision.Allowed {
 		writeError(w, 404, errNotFound)
 		return
 	}
-	token, err := store.RotateWorkspaceInvite(r.Context(), d.DB, id)
+	token, err := store.RotateWorkspaceInvite(r.Context(), d.DB, id, u.ID)
 	if err != nil {
-		writeError(w, 500, err)
+		switch {
+		case errors.Is(err, store.ErrForbidden):
+			writeError(w, http.StatusForbidden, errForbidden)
+		case errors.Is(err, store.ErrNotFound):
+			writeError(w, http.StatusNotFound, errNotFound)
+		default:
+			writeError(w, http.StatusInternalServerError, err)
+		}
 		return
 	}
 	writeJSON(w, 200, map[string]string{"invite_token": token})
 }
 
-// workspaceInviteInfoHandler resolves an invite token to a join preview
-// (name / owner / member count). Auth'd + rate-limited; uniform 404 on
-// unknown tokens so the space can't be enumerated.
+// workspaceInviteInfoHandler resolves a governed invite record to a join
+// preview. Auth'd + rate-limited; uniform 404 on unknown/dead tokens so the
+// space cannot be enumerated. The former permanent workspace token is never
+// accepted as a fallback.
 func workspaceInviteInfoHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	token := pathParam(r, "token")
-	ws, err := store.GetWorkspaceByInviteToken(r.Context(), d.DB, token)
+	preview, err := store.GetWorkspaceInvitePreview(r.Context(), d.DB, token)
 	if err != nil {
 		writeError(w, 404, errNotFound)
 		return
 	}
 	writeJSON(w, 200, map[string]any{
-		"id": ws.ID, "name": ws.Name, "owner_name": ws.OwnerName, "member_count": ws.MemberCount,
+		"id": preview.WorkspaceID, "name": preview.Name, "owner_name": preview.OwnerName,
+		"member_count": preview.MemberCount, "role": preview.Role, "email_bound": preview.EmailBound,
+		"kind": "invite",
 	})
 }
 
-// joinWorkspaceHandler consumes an invite link: the caller becomes a member
-// (idempotent for existing members).
+// joinWorkspaceHandler consumes a governed invite record. Expiry, revocation,
+// use limits and email binding apply to every accepted token; the permanent
+// legacy workspace token has no fallback path.
 func joinWorkspaceHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	token := pathParam(r, "token")
-	ws, err := store.JoinWorkspaceByInviteToken(r.Context(), d.DB, token, u.ID)
+	ws, role, err := store.JoinWorkspaceByInviteRecord(r.Context(), d.DB, token, u.ID, u.Email)
 	if err != nil {
 		writeError(w, 404, errNotFound)
 		return
 	}
 	publishWorkspaceAccessEvent(d, r, ws.ID, "workspace.membership_updated", u.ID, ws.OwnerID)
-	writeJSON(w, 200, map[string]any{"id": ws.ID, "name": ws.Name})
+	writeJSON(w, 200, map[string]any{"id": ws.ID, "name": ws.Name, "role": role})
+}
+
+// createWorkspaceInviteHandler mints an invite record. Admins may invite
+// members/guests; only the owner may mint admin invites (§workspace RBAC §11).
+func createWorkspaceInviteHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	workspaceID := pathParam(r, "id")
+	var req struct {
+		Role      string `json:"role"`
+		Email     string `json:"email"`
+		ExpiresAt int64  `json:"expires_at"`
+		MaxUses   int64  `json:"max_uses"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, errInvalidInput)
+		return
+	}
+	// §workspace RBAC: new invites default to the read-only guest role.
+	if strings.TrimSpace(req.Role) == "" {
+		req.Role = store.WorkspaceRoleGuest
+	}
+	decision, err := store.AuthorizeWorkspace(r.Context(), d.DB, store.WorkspaceAuthorizationRequest{
+		WorkspaceID: workspaceID, UserID: u.ID, Action: store.ActionWorkspaceMemberInvite,
+	})
+	if err != nil || !decision.Allowed {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	if req.Role == store.WorkspaceRoleAdmin && !decision.IsOwner {
+		writeError(w, http.StatusForbidden, errForbidden)
+		return
+	}
+	invite, err := store.CreateWorkspaceInvite(r.Context(), d.DB, workspaceID, u.ID,
+		req.Email, req.Role, req.ExpiresAt, req.MaxUses)
+	if err != nil {
+		switch {
+		case errors.Is(err, store.ErrForbidden):
+			writeError(w, http.StatusForbidden, errForbidden)
+		case errors.Is(err, store.ErrNotFound):
+			writeError(w, http.StatusNotFound, errNotFound)
+		default:
+			writeError(w, http.StatusBadRequest, err)
+		}
+		return
+	}
+	publishWorkspaceAccessEvent(d, r, workspaceID, "workspace.permissions_updated", u.ID)
+	writeJSON(w, 201, invite)
+}
+
+// listWorkspaceInvitesHandler returns the invite records (tokens included —
+// admins share the links; member/guest callers are rejected in the store).
+func listWorkspaceInvitesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	workspaceID := pathParam(r, "id")
+	invites, err := store.ListWorkspaceInvites(r.Context(), d.DB, workspaceID, u.ID)
+	if err != nil {
+		switch {
+		case errors.Is(err, store.ErrForbidden):
+			writeError(w, http.StatusForbidden, errForbidden)
+		case errors.Is(err, store.ErrNotFound):
+			writeError(w, http.StatusNotFound, errNotFound)
+		default:
+			writeError(w, http.StatusInternalServerError, err)
+		}
+		return
+	}
+	writeJSON(w, 200, map[string]any{"invites": invites})
+}
+
+// revokeWorkspaceInviteHandler kills an invite record.
+func revokeWorkspaceInviteHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	workspaceID := pathParam(r, "id")
+	inviteID := pathParam(r, "inviteId")
+	if err := store.RevokeWorkspaceInvite(r.Context(), d.DB, workspaceID, u.ID, inviteID); err != nil {
+		switch {
+		case errors.Is(err, store.ErrForbidden):
+			writeError(w, http.StatusForbidden, errForbidden)
+		case errors.Is(err, store.ErrNotFound):
+			writeError(w, http.StatusNotFound, errNotFound)
+		default:
+			writeError(w, http.StatusInternalServerError, err)
+		}
+		return
+	}
+	publishWorkspaceAccessEvent(d, r, workspaceID, "workspace.permissions_updated", u.ID)
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+// transferWorkspaceOwnershipHandler moves the canonical owner. Owner-only;
+// the receiver must be a current member and becomes admin; the old owner
+// keeps the admin role and immediately loses owner-exclusive authority.
+func transferWorkspaceOwnershipHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	workspaceID := pathParam(r, "id")
+	var req struct {
+		UserID string `json:"user_id"`
+	}
+	if err := decodeJSON(r, &req); err != nil || strings.TrimSpace(req.UserID) == "" {
+		writeError(w, http.StatusBadRequest, errInvalidInput)
+		return
+	}
+	decision, err := store.AuthorizeWorkspace(r.Context(), d.DB, store.WorkspaceAuthorizationRequest{
+		WorkspaceID: workspaceID, UserID: u.ID, Action: store.ActionWorkspaceTransfer,
+	})
+	if err != nil || !decision.Allowed {
+		if err == nil && !decision.Allowed {
+			writeError(w, http.StatusForbidden, errForbidden)
+			return
+		}
+		writeError(w, 404, errNotFound)
+		return
+	}
+	ws, err := store.TransferWorkspaceOwnership(r.Context(), d.DB, workspaceID, u.ID, req.UserID)
+	if err != nil {
+		switch {
+		case errors.Is(err, store.ErrForbidden):
+			writeError(w, http.StatusForbidden, errForbidden)
+		case errors.Is(err, store.ErrNotFound):
+			writeError(w, http.StatusNotFound, errNotFound)
+		default:
+			writeError(w, http.StatusInternalServerError, err)
+		}
+		return
+	}
+	publishWorkspaceAccessEvent(d, r, workspaceID, "workspace.membership_updated", u.ID, req.UserID)
+	writeJSON(w, 200, ws)
+}
+
+// getWorkspacePolicyHandler returns the effective capability policy. Every
+// current member may read it (the UI hides disabled capabilities with it);
+// the backend re-checks it at every execution point regardless.
+func getWorkspacePolicyHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	workspaceID := pathParam(r, "id")
+	if _, err := store.GetWorkspaceForMember(r.Context(), d.DB, workspaceID, u.ID); err != nil {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	policy, err := store.GetWorkspacePolicy(r.Context(), d.DB, workspaceID)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, policy)
+}
+
+// updateWorkspacePolicyHandler narrows the workspace capability policy.
+// Workspace admins only; the store re-authorizes inside the membership-lock
+// transaction. Guests never gain from a permissive policy — their read-only
+// boundary is role-based, not policy-based.
+func updateWorkspacePolicyHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	workspaceID := pathParam(r, "id")
+	var req struct {
+		AllowedModelIDs          *[]string `json:"allowed_model_ids"`
+		AllowedToolIDs           *[]string `json:"allowed_tool_ids"`
+		AllowedMCPServerIDs      *[]string `json:"allowed_mcp_server_ids"`
+		AllowSandbox             *bool     `json:"allow_sandbox"`
+		AllowImageGeneration     *bool     `json:"allow_image_generation"`
+		AllowKnowledgeBases      *bool     `json:"allow_knowledge_bases"`
+		AllowFileUpload          *bool     `json:"allow_file_upload"`
+		MemberMonthlyCreditLimit *float64  `json:"member_monthly_credit_limit"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, errInvalidInput)
+		return
+	}
+	decision, err := store.AuthorizeWorkspace(r.Context(), d.DB, store.WorkspaceAuthorizationRequest{
+		WorkspaceID: workspaceID, UserID: u.ID, Action: store.ActionWorkspaceSettingsUpdate,
+	})
+	if err != nil || !decision.Allowed {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	policy, err := store.UpdateWorkspacePolicy(r.Context(), d.DB, workspaceID, u.ID, store.WorkspacePolicyPatch{
+		AllowedModelIDs:          req.AllowedModelIDs,
+		AllowedToolIDs:           req.AllowedToolIDs,
+		AllowedMCPServerIDs:      req.AllowedMCPServerIDs,
+		AllowSandbox:             req.AllowSandbox,
+		AllowImageGeneration:     req.AllowImageGeneration,
+		AllowKnowledgeBases:      req.AllowKnowledgeBases,
+		AllowFileUpload:          req.AllowFileUpload,
+		MemberMonthlyCreditLimit: req.MemberMonthlyCreditLimit,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, store.ErrForbidden):
+			writeError(w, http.StatusForbidden, errForbidden)
+		case errors.Is(err, store.ErrNotFound):
+			writeError(w, http.StatusNotFound, errNotFound)
+		default:
+			writeError(w, http.StatusBadRequest, err)
+		}
+		return
+	}
+	// A tool loop may be between provider rounds when policy changes. Broadcast
+	// after the transactional write so current turns are cancelled and later
+	// turns read the newly committed policy.
+	revokeWorkspacePolicyGenerations(d, workspaceID)
+	// Capability changes must reach clients without a re-login: notify every
+	// member so model/tool catalogs and composer affordances refresh.
+	publishWorkspaceAccessEvent(d, r, workspaceID, "workspace.policy_updated", u.ID)
+	writeJSON(w, 200, policy)
+}
+
+// workspaceUsageHandler is the admins' per-member usage rollup for the
+// workspace (§workspace RBAC phase 4).
+func workspaceUsageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	workspaceID := pathParam(r, "id")
+	decision, err := store.AuthorizeWorkspace(r.Context(), d.DB, store.WorkspaceAuthorizationRequest{
+		WorkspaceID: workspaceID, UserID: u.ID, Action: store.ActionUsageView,
+	})
+	if err != nil || !decision.Allowed {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+	if days <= 0 {
+		days = 30
+	}
+	rows, err := store.SumWorkspaceUsageByMember(r.Context(), d.DB, workspaceID, days)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"days": days, "usage": rows})
 }
 
 // deleteWorkspaceHandler tears down the whole space — OWNER ONLY (§workspaces:
@@ -252,6 +580,8 @@ func deleteWorkspaceHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
+	// The audit row outlives the workspace itself (no FK by design).
+	_ = store.RecordWorkspaceDeleted(r.Context(), d.DB, ws.ID, u.ID, ws.Name)
 	for _, member := range members {
 		publishUserEvent(d, nil, member.UserID, "workspace.membership_updated", "")
 	}
@@ -264,6 +594,23 @@ func deleteWorkspaceHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 // deleters admit the operation regardless of which authorized caller (owner or
 // admin) triggered it.
 func teardownWorkspace(d Deps, r *http.Request, ws *store.Workspace) (returnErr error) {
+	// Persist the fence before taking the worklist. Every scoped resource create
+	// shares the workspace mutation lock and checks this flag, so no new child
+	// can appear after WorkspaceContentIDs has taken its snapshot.
+	if err := store.MarkWorkspaceDeleting(r.Context(), d.DB, ws.ID, ws.OwnerID); err != nil {
+		return err
+	}
+	// From this point every error must make the fence retryable, including a
+	// failure before streaming messages have been scrubbed.
+	teardownComplete := false
+	defer func() {
+		if !teardownComplete {
+			d.Cache.Delete(workspaceGenerationRevocationKey(ws.ID))
+			if clearErr := store.ClearWorkspaceDeleting(context.Background(), d.DB, ws.ID, ws.OwnerID); clearErr != nil && d.Logger != nil {
+				d.Logger.Printf("workspace %s teardown fence reset: %v", ws.ID, clearErr)
+			}
+		}
+	}()
 	revokedMessageIDs, err := store.ScrubWorkspaceStreamingMessages(r.Context(), d.DB, ws.ID)
 	if err != nil {
 		return err
@@ -271,14 +618,8 @@ func teardownWorkspace(d Deps, r *http.Request, ws *store.Workspace) (returnErr 
 	if !publishWorkspaceGenerationRevocation(d, ws.ID) {
 		return errors.New("workspace generation revocation unavailable")
 	}
-	// If a later teardown step fails, restore the workspace for new turns. The
-	// per-message tombstones remain, so generations scrubbed above never revive.
-	teardownComplete := false
-	defer func() {
-		if !teardownComplete {
-			d.Cache.Delete(workspaceGenerationRevocationKey(ws.ID))
-		}
-	}()
+	// If a later teardown step fails, the deferred fence reset restores the
+	// workspace for new turns. Per-message tombstones never revive.
 	if err := revokeMessageGenerationStreams(d, revokedMessageIDs); err != nil {
 		return err
 	}
@@ -341,7 +682,7 @@ func teardownWorkspace(d Deps, r *http.Request, ws *store.Workspace) (returnErr 
 	if teardownErr != nil {
 		return fmt.Errorf("workspace %s teardown incomplete: %w", ws.ID, teardownErr)
 	}
-	if err := store.DeleteWorkspaceRow(r.Context(), d.DB, ws.ID); err != nil {
+	if err := store.DeleteWorkspaceRow(r.Context(), d.DB, ws.ID, ws.OwnerID); err != nil {
 		return err
 	}
 	teardownComplete = true
@@ -391,6 +732,7 @@ func adminWorkspaceDetailHandler(d Deps, w http.ResponseWriter, r *http.Request)
 
 // adminDeleteWorkspaceHandler removes a workspace and all content (admin triage).
 func adminDeleteWorkspaceHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
 	id := pathParam(r, "id")
 	ws, err := store.GetWorkspace(r.Context(), d.DB, id)
 	if err != nil {
@@ -406,8 +748,39 @@ func adminDeleteWorkspaceHandler(d Deps, w http.ResponseWriter, r *http.Request)
 		writeError(w, 500, err)
 		return
 	}
+	_ = store.RecordWorkspaceDeleted(r.Context(), d.DB, ws.ID, u.ID, ws.Name)
 	for _, member := range members {
 		publishUserEvent(d, nil, member.UserID, "workspace.membership_updated", "")
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+// workspaceAuditLogHandler serves the admin audit page (§workspace RBAC
+// phase 5). Members and guests are rejected — the trail never leaks to
+// ordinary users.
+func workspaceAuditLogHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	workspaceID := pathParam(r, "id")
+	decision, err := store.AuthorizeWorkspace(r.Context(), d.DB, store.WorkspaceAuthorizationRequest{
+		WorkspaceID: workspaceID, UserID: u.ID, Action: store.ActionWorkspaceAuditView,
+	})
+	if err != nil || !decision.Allowed {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	logs, err := store.ListWorkspaceAuditLogs(r.Context(), d.DB, workspaceID, u.ID, limit, offset)
+	if err != nil {
+		switch {
+		case errors.Is(err, store.ErrForbidden):
+			writeError(w, http.StatusForbidden, errForbidden)
+		case errors.Is(err, store.ErrNotFound):
+			writeError(w, http.StatusNotFound, errNotFound)
+		default:
+			writeError(w, http.StatusInternalServerError, err)
+		}
+		return
+	}
+	writeJSON(w, 200, map[string]any{"logs": logs})
 }

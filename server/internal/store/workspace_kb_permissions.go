@@ -63,22 +63,20 @@ func UpdateWorkspaceKnowledgeBaseMemberPermission(
 	defer tx.Rollback() //nolint:errcheck
 
 	var allowed int
-	managerArgs := []any{kbID, managerID, managerID, managerID}
 	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM knowledge_bases k
 		JOIN workspaces w ON w.id=k.workspace_id
 		WHERE k.id=? AND `+standaloneKnowledgeBasePredicate("k")+`
-		  AND (w.owner_id=? OR (k.user_id=? AND EXISTS (
-		    SELECT 1 FROM workspace_members manager_member
-		     WHERE manager_member.workspace_id=w.id AND manager_member.user_id=?
-		  )))`, managerArgs...).Scan(&allowed); err != nil {
+		  AND `+workspaceResourceManagerPredicate("k"),
+		append([]any{kbID}, workspaceResourceManagerArgs(managerID)...)...).Scan(&allowed); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, err
 	}
 
-	// The workspace owner and KB creator are fixed principals and always retain
-	// effective access while the creator remains a workspace member.
+	// The workspace owner, admins and the KB creator are fixed principals and
+	// always retain effective access while the creator remains a workspace
+	// member; per-library overlays only constrain ordinary members and guests.
 	res, err := tx.ExecContext(ctx, `INSERT INTO workspace_kb_member_permissions(
 		kb_id,user_id,can_add_files,can_delete_content,updated_at
 	)
@@ -87,6 +85,7 @@ func UpdateWorkspaceKnowledgeBaseMemberPermission(
 	  JOIN workspaces w ON w.id=k.workspace_id
 	  JOIN workspace_members m ON m.workspace_id=w.id AND m.user_id=?
 	 WHERE k.id=? AND m.user_id<>w.owner_id AND m.user_id<>k.user_id
+	   AND COALESCE(m.role,'') NOT IN ('admin','owner')
 	ON CONFLICT(kb_id,user_id) DO UPDATE SET
 	  can_add_files=excluded.can_add_files,
 	  can_delete_content=excluded.can_delete_content,
@@ -115,15 +114,15 @@ func UpdateWorkspaceKnowledgeBaseMemberPermission(
 	return &item, nil
 }
 
+// requireWorkspaceKnowledgeBaseManager admits workspace admins and the KB's
+// current creator for the per-library permission overlay (§workspace RBAC).
 func requireWorkspaceKnowledgeBaseManager(ctx context.Context, db *sql.DB, kbID, managerID string) error {
 	var allowed int
 	err := db.QueryRowContext(ctx, `SELECT 1 FROM knowledge_bases k
 		JOIN workspaces w ON w.id=k.workspace_id
 		WHERE k.id=? AND `+standaloneKnowledgeBasePredicate("k")+`
-		  AND (w.owner_id=? OR (k.user_id=? AND EXISTS (
-		    SELECT 1 FROM workspace_members manager_member
-		     WHERE manager_member.workspace_id=w.id AND manager_member.user_id=?
-		  )))`, kbID, managerID, managerID, managerID).Scan(&allowed)
+		  AND `+workspaceResourceManagerPredicate("k"),
+		append([]any{kbID}, workspaceResourceManagerArgs(managerID)...)...).Scan(&allowed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -132,13 +131,14 @@ func requireWorkspaceKnowledgeBaseManager(ctx context.Context, db *sql.DB, kbID,
 
 func workspaceKnowledgeBaseMemberPermissionsQuery() string {
 	return `SELECT k.id,m.user_id,
-		CASE WHEN w.owner_id=m.user_id THEN 'owner' ELSE m.role END,
+		CASE WHEN w.owner_id=m.user_id THEN 'admin' ELSE ` + normalizeWorkspaceRoleSQL("m.role") + ` END,
+		CASE WHEN w.owner_id=m.user_id THEN 1 ELSE 0 END,
 		COALESCE(u.name,''),COALESCE(u.email,''),COALESCE(u.settings,''),
-		CASE WHEN w.owner_id=m.user_id OR k.user_id=m.user_id THEN 1 ELSE COALESCE(p.can_add_files,1) END,
-		CASE WHEN w.owner_id=m.user_id OR k.user_id=m.user_id THEN 1 ELSE COALESCE(p.can_delete_content,1) END,
-		CASE WHEN w.owner_id=m.user_id OR k.user_id=m.user_id THEN 1 ELSE m.can_add_kb_files END,
-		CASE WHEN w.owner_id=m.user_id OR k.user_id=m.user_id THEN 1 ELSE m.can_delete_kb_content END,
-		CASE WHEN w.owner_id=m.user_id OR k.user_id=m.user_id THEN 1 ELSE 0 END
+		CASE WHEN w.owner_id=m.user_id OR ` + isAdminRoleSQL("m.role") + ` OR k.user_id=m.user_id THEN 1 ELSE COALESCE(p.can_add_files,1) END,
+		CASE WHEN w.owner_id=m.user_id OR ` + isAdminRoleSQL("m.role") + ` OR k.user_id=m.user_id THEN 1 ELSE COALESCE(p.can_delete_content,1) END,
+		CASE WHEN w.owner_id=m.user_id OR ` + isAdminRoleSQL("m.role") + ` OR k.user_id=m.user_id THEN 1 ELSE m.can_add_kb_files END,
+		CASE WHEN w.owner_id=m.user_id OR ` + isAdminRoleSQL("m.role") + ` OR k.user_id=m.user_id THEN 1 ELSE m.can_delete_kb_content END,
+		CASE WHEN w.owner_id=m.user_id OR ` + isAdminRoleSQL("m.role") + ` OR k.user_id=m.user_id THEN 1 ELSE 0 END
 	FROM knowledge_bases k
 	JOIN workspaces w ON w.id=k.workspace_id
 	JOIN workspace_members m ON m.workspace_id=w.id
@@ -151,7 +151,7 @@ func scanWorkspaceKnowledgeBaseMemberPermission(s scanner) (WorkspaceKnowledgeBa
 	var item WorkspaceKnowledgeBaseMemberPermission
 	var settings string
 	err := s.Scan(
-		&item.KBID, &item.UserID, &item.Role, &item.Name, &item.Email, &settings,
+		&item.KBID, &item.UserID, &item.Role, &item.IsOwner, &item.Name, &item.Email, &settings,
 		&item.CanAddFiles, &item.CanDeleteContent,
 		&item.TotalCanAddKBFiles, &item.TotalCanDeleteKBContent, &item.Locked,
 	)

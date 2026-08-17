@@ -68,7 +68,12 @@
     "renamed": "檔案已重新命名",
     "renameFailed": "無法重新命名檔案",
     "loadFailedTitle": "無法載入此知識庫",
-    "chunkCount": "{{count}} 個切片"
+    "chunkCount": "{{count}} 個切片",
+    "makePrivate": "設為私有",
+    "makeShared": "共享到工作空間",
+    "visibilityPrivate": "知識庫已設為私有，僅你和管理員可見。",
+    "visibilityShared": "知識庫已共享給工作空間全體成員。",
+    "visibilityFailed": "更新可見範圍失敗。"
   },
   "groupPermissionTitle": "知識庫不可用",
   "groupPermissionRequired": "所在使用者組無知識庫權限。",
@@ -110,7 +115,7 @@
     "member": "成員",
     "addFiles": "新增檔案",
     "deleteContent": "刪除內容",
-    "manager": "工作空間建立者或知識庫建立者",
+    "manager": "工作空間擁有者、管理員或知識庫建立者",
     "disabledByWorkspace": "成員總權限已關閉",
     "loadFailed": "無法載入工作空間成員。",
     "empty": "工作空間目前沒有成員。"

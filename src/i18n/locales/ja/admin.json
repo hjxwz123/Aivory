@@ -1880,7 +1880,9 @@
     "deleteTitle": "このワークスペースを削除しますか？",
     "deleteBody": "内部のすべての会話・プロジェクト・ナレッジベースが削除され、全メンバーがアクセスを失います。元に戻せません。",
     "roleOwner": "オーナー",
-    "roleMember": "メンバー"
+    "roleMember": "メンバー",
+    "roleAdmin": "管理者",
+    "roleGuest": "ゲスト"
   },
   "userFeedback": {
     "title": "ユーザーフィードバック",

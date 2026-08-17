@@ -214,10 +214,10 @@ type commercialCapQueryer interface {
 func countProjectsByUser(ctx context.Context, q commercialCapQueryer, userID string) (int, error) {
 	var n int
 	args := []any{userID}
-	args = append(args, workspaceResourceAccessArgs(userID)...)
+	args = append(args, workspaceScopedVisibilityArgs(userID)...)
 	err := q.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM projects
-		  WHERE user_id=? AND `+workspaceResourceAccessPredicate("projects"), args...).Scan(&n)
+		  WHERE user_id=? AND `+workspaceScopedVisibilityPredicate("projects"), args...).Scan(&n)
 	return n, err
 }
 
@@ -259,7 +259,8 @@ func ListProjects(ctx context.Context, db *sql.DB, userID string) ([]Project, er
 	rows, err := db.QueryContext(ctx,
 		`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,''),
 		        COALESCE((SELECT embedding_model_id FROM knowledge_bases WHERE id=projects.kb_id),''),
-		        COALESCE((SELECT embedding_dim FROM knowledge_bases WHERE id=projects.kb_id),0)
+		        COALESCE((SELECT embedding_dim FROM knowledge_bases WHERE id=projects.kb_id),0),
+		        COALESCE(is_public,1)
 		 FROM projects WHERE user_id=? AND COALESCE(workspace_id,'')='' ORDER BY pinned DESC, updated_at DESC`, userID)
 	if err != nil {
 		return nil, err
@@ -292,12 +293,13 @@ func ListWorkspaceProjectsForUser(ctx context.Context, db *sql.DB, workspaceID, 
 func listWorkspaceProjects(ctx context.Context, db *sql.DB, workspaceID, userID string) ([]Project, error) {
 	q := `SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,''),
 	             COALESCE((SELECT embedding_model_id FROM knowledge_bases WHERE id=projects.kb_id),''),
-	             COALESCE((SELECT embedding_dim FROM knowledge_bases WHERE id=projects.kb_id),0)
+	             COALESCE((SELECT embedding_dim FROM knowledge_bases WHERE id=projects.kb_id),0),
+	             COALESCE(is_public,1)
 		 FROM projects WHERE workspace_id=?`
 	args := []any{workspaceID}
 	if userID != "" {
-		q += ` AND ` + workspaceResourceAccessPredicate("projects")
-		args = append(args, workspaceResourceAccessArgs(userID)...)
+		q += ` AND ` + workspaceScopedVisibilityPredicate("projects")
+		args = append(args, workspaceScopedVisibilityArgs(userID)...)
 	}
 	q += ` ORDER BY pinned DESC, updated_at DESC`
 	rows, err := db.QueryContext(ctx,
@@ -322,12 +324,13 @@ func listWorkspaceProjects(ctx context.Context, db *sql.DB, workspaceID, userID 
 // revoked; the canonical workspace owner remains authoritative.
 func GetProject(ctx context.Context, db *sql.DB, id, userID string) (*Project, error) {
 	args := []any{id}
-	args = append(args, workspaceResourceAccessArgs(userID)...)
+	args = append(args, workspaceScopedVisibilityArgs(userID)...)
 	row := db.QueryRowContext(ctx,
 		`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,''),
 		        COALESCE((SELECT embedding_model_id FROM knowledge_bases WHERE id=projects.kb_id),''),
-		        COALESCE((SELECT embedding_dim FROM knowledge_bases WHERE id=projects.kb_id),0)
-		 FROM projects WHERE id=? AND `+workspaceResourceAccessPredicate("projects"), args...)
+		        COALESCE((SELECT embedding_dim FROM knowledge_bases WHERE id=projects.kb_id),0),
+		        COALESCE(is_public,1)
+		 FROM projects WHERE id=? AND `+workspaceScopedVisibilityPredicate("projects"), args...)
 	p, err := scanProject(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -361,7 +364,8 @@ func GetProjectByName(ctx context.Context, db *sql.DB, userID, name string) (*Pr
 	row := db.QueryRowContext(ctx,
 		`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,''),
 		        COALESCE((SELECT embedding_model_id FROM knowledge_bases WHERE id=projects.kb_id),''),
-		        COALESCE((SELECT embedding_dim FROM knowledge_bases WHERE id=projects.kb_id),0)
+		        COALESCE((SELECT embedding_dim FROM knowledge_bases WHERE id=projects.kb_id),0),
+		        COALESCE(is_public,1)
 		 FROM projects
 		 WHERE user_id=? AND COALESCE(workspace_id,'')=''
 		   AND lower(trim(name))=lower(trim(?)) LIMIT 1`,
@@ -378,13 +382,14 @@ func GetProjectByName(ctx context.Context, db *sql.DB, userID, name string) (*Pr
 
 func scanProject(s scanner) (Project, error) {
 	var p Project
-	var pinned, autoAdd int
+	var pinned, autoAdd, isPublic int
 	var kbID sql.NullString
-	if err := s.Scan(&p.ID, &p.UserID, &p.Name, &p.Description, &p.Instructions, &p.Accent, &p.Emoji, &pinned, &kbID, &autoAdd, &p.CreatedAt, &p.UpdatedAt, &p.WorkspaceID, &p.KBEmbeddingModelID, &p.KBEmbeddingDim); err != nil {
+	if err := s.Scan(&p.ID, &p.UserID, &p.Name, &p.Description, &p.Instructions, &p.Accent, &p.Emoji, &pinned, &kbID, &autoAdd, &p.CreatedAt, &p.UpdatedAt, &p.WorkspaceID, &p.KBEmbeddingModelID, &p.KBEmbeddingDim, &isPublic); err != nil {
 		return p, err
 	}
 	p.Pinned = pinned == 1
 	p.AutoAddUploads = autoAdd == 1
+	p.IsPublic = isPublic == 1
 	p.KBID = kbID.String
 	return p, nil
 }
@@ -412,10 +417,10 @@ func CreateProject(ctx context.Context, db *sql.DB, p Project) (*Project, error)
 	var err error
 	if p.WorkspaceID == "" {
 		_, err = db.ExecContext(ctx, `INSERT INTO projects(
-			id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, workspace_id
-		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, workspace_id, is_public
+		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			p.ID, p.UserID, p.Name, p.Description, p.Instructions, p.Accent, p.Emoji,
-			boolInt(p.Pinned), kbID, boolInt(p.AutoAddUploads), now, now, p.WorkspaceID)
+			boolInt(p.Pinned), kbID, boolInt(p.AutoAddUploads), now, now, p.WorkspaceID, boolInt(p.IsPublic))
 	} else {
 		tx, txErr := beginWorkspaceMutationTx(ctx, db, p.WorkspaceID)
 		if txErr != nil {
@@ -424,14 +429,14 @@ func CreateProject(ctx context.Context, db *sql.DB, p Project) (*Project, error)
 		defer tx.Rollback() //nolint:errcheck
 		var result sql.Result
 		result, err = tx.ExecContext(ctx, `INSERT INTO projects(
-			id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, workspace_id
-		) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+			id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, workspace_id, is_public
+		) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 		    FROM workspaces create_workspace
 			   WHERE create_workspace.id=?
 			     AND `+workspaceAcceptsResourceCreationPredicate("create_workspace")+`
 			     AND `+workspaceMemberCapabilityPredicate("create_workspace", "can_create_projects"),
 			p.ID, p.UserID, p.Name, p.Description, p.Instructions, p.Accent, p.Emoji,
-			boolInt(p.Pinned), kbID, boolInt(p.AutoAddUploads), now, now, p.WorkspaceID,
+			boolInt(p.Pinned), kbID, boolInt(p.AutoAddUploads), now, now, p.WorkspaceID, boolInt(p.IsPublic),
 			p.WorkspaceID, p.UserID, p.UserID, p.UserID)
 		if err != nil {
 			if isUniqueIndexErr(err, "idx_projects_user_name_unique", "projects.user_id") {
@@ -447,7 +452,8 @@ func CreateProject(ctx context.Context, db *sql.DB, p Project) (*Project, error)
 		created, scanErr := scanProject(tx.QueryRowContext(ctx,
 			`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,''),
 			        COALESCE((SELECT embedding_model_id FROM knowledge_bases WHERE id=projects.kb_id),''),
-			        COALESCE((SELECT embedding_dim FROM knowledge_bases WHERE id=projects.kb_id),0)
+			        COALESCE((SELECT embedding_dim FROM knowledge_bases WHERE id=projects.kb_id),0),
+			        COALESCE(is_public,1)
 			   FROM projects WHERE id=?`, p.ID))
 		if scanErr != nil {
 			return nil, scanErr
@@ -575,7 +581,8 @@ func createProjectWithLimit(
 	created, err := scanProject(tx.QueryRowContext(ctx,
 		`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,''),
 		        COALESCE((SELECT embedding_model_id FROM knowledge_bases WHERE id=projects.kb_id),''),
-		        COALESCE((SELECT embedding_dim FROM knowledge_bases WHERE id=projects.kb_id),0)
+		        COALESCE((SELECT embedding_dim FROM knowledge_bases WHERE id=projects.kb_id),0),
+		        COALESCE(is_public,1)
 		   FROM projects WHERE id=?`, p.ID))
 	if err != nil {
 		return nil, err
@@ -590,19 +597,19 @@ func insertDedicatedProjectLibraryTx(ctx context.Context, tx *sql.Tx, kb Knowled
 	var err error
 	if kb.WorkspaceID == "" {
 		_, err = tx.ExecContext(ctx,
-			`INSERT INTO knowledge_bases(id, user_id, name, description, embedding_model_id, embedding_dim, project_id, created_at, workspace_id)
-			 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			kb.ID, kb.UserID, kb.Name, kb.Description, kb.EmbeddingModelID, kb.EmbeddingDim, kb.ProjectID, now, kb.WorkspaceID)
+			`INSERT INTO knowledge_bases(id, user_id, name, description, embedding_model_id, embedding_dim, project_id, created_at, workspace_id, is_public)
+			 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			kb.ID, kb.UserID, kb.Name, kb.Description, kb.EmbeddingModelID, kb.EmbeddingDim, kb.ProjectID, now, kb.WorkspaceID, boolInt(kb.IsPublic))
 	} else {
 		var result sql.Result
 		result, err = tx.ExecContext(ctx,
-			`INSERT INTO knowledge_bases(id, user_id, name, description, embedding_model_id, embedding_dim, project_id, created_at, workspace_id)
-			 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
+			`INSERT INTO knowledge_bases(id, user_id, name, description, embedding_model_id, embedding_dim, project_id, created_at, workspace_id, is_public)
+			 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 			   FROM workspaces create_workspace
 			  WHERE create_workspace.id=?
 			    AND `+workspaceAcceptsResourceCreationPredicate("create_workspace")+`
 				    AND `+workspaceMemberCapabilityPredicate("create_workspace", "can_create_projects"),
-			kb.ID, kb.UserID, kb.Name, kb.Description, kb.EmbeddingModelID, kb.EmbeddingDim, kb.ProjectID, now, kb.WorkspaceID,
+			kb.ID, kb.UserID, kb.Name, kb.Description, kb.EmbeddingModelID, kb.EmbeddingDim, kb.ProjectID, now, kb.WorkspaceID, boolInt(kb.IsPublic),
 			kb.WorkspaceID, kb.UserID, kb.UserID, kb.UserID)
 		if err == nil {
 			if affected, rowsErr := result.RowsAffected(); rowsErr != nil {
@@ -628,21 +635,21 @@ func insertProjectWithScopeTx(ctx context.Context, tx *sql.Tx, p Project, now in
 	var err error
 	if p.WorkspaceID == "" {
 		_, err = tx.ExecContext(ctx, `INSERT INTO projects(
-			id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, workspace_id
-		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, workspace_id, is_public
+		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			p.ID, p.UserID, p.Name, p.Description, p.Instructions, p.Accent, p.Emoji,
-			boolInt(p.Pinned), kbID, boolInt(p.AutoAddUploads), now, now, p.WorkspaceID)
+			boolInt(p.Pinned), kbID, boolInt(p.AutoAddUploads), now, now, p.WorkspaceID, boolInt(p.IsPublic))
 	} else {
 		var result sql.Result
 		result, err = tx.ExecContext(ctx, `INSERT INTO projects(
-			id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, workspace_id
-		) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+			id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, workspace_id, is_public
+		) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 		    FROM workspaces create_workspace
 		   WHERE create_workspace.id=?
 		     AND `+workspaceAcceptsResourceCreationPredicate("create_workspace")+`
 			     AND `+workspaceMemberCapabilityPredicate("create_workspace", "can_create_projects"),
 			p.ID, p.UserID, p.Name, p.Description, p.Instructions, p.Accent, p.Emoji,
-			boolInt(p.Pinned), kbID, boolInt(p.AutoAddUploads), now, now, p.WorkspaceID,
+			boolInt(p.Pinned), kbID, boolInt(p.AutoAddUploads), now, now, p.WorkspaceID, boolInt(p.IsPublic),
 			p.WorkspaceID, p.UserID, p.UserID, p.UserID)
 		if err == nil {
 			if affected, rowsErr := result.RowsAffected(); rowsErr != nil {
@@ -667,6 +674,9 @@ type ProjectPatch struct {
 	Emoji          *string `json:"emoji"`
 	Pinned         *bool   `json:"pinned"`
 	AutoAddUploads *bool   `json:"auto_add_uploads"`
+	// §workspace RBAC: flip between workspace-shared and creator-private.
+	// Ignored on personal rows (visibility is a workspace concept).
+	IsPublic *bool `json:"is_public"`
 }
 
 func UpdateProject(ctx context.Context, db *sql.DB, id, userID string, patch ProjectPatch) (*Project, error) {
@@ -700,15 +710,25 @@ func UpdateProject(ctx context.Context, db *sql.DB, id, userID string, patch Pro
 		parts = append(parts, "auto_add_uploads=?")
 		args = append(args, boolInt(*patch.AutoAddUploads))
 	}
+	// Visibility applies to workspace rows only; the handler rejects personal
+	// patches before reaching here, so the column write is unconditional-safe
+	// (personal rows ignore is_public in every read predicate).
+	if patch.IsPublic != nil {
+		parts = append(parts, "is_public=?")
+		args = append(args, boolInt(*patch.IsPublic))
+	}
 	if len(parts) == 0 {
 		return GetProject(ctx, db, id, userID)
 	}
 	parts = append(parts, "updated_at=?")
 	args = append(args, time.Now().Unix())
 	args = append(args, id)
-	args = append(args, workspaceResourceAccessArgs(userID)...)
+	// §workspace RBAC: project metadata (name, description, instructions,
+	// accent, emoji, pin, auto-add-uploads) belongs to the project creator and
+	// workspace admins. Ordinary members keep read/use access only.
+	args = append(args, workspaceResourceManagerArgs(userID)...)
 	q := "UPDATE projects SET " + strings.Join(parts, ", ") +
-		" WHERE id=? AND " + workspaceResourceAccessPredicate("projects")
+		" WHERE id=? AND " + workspaceResourceManagerPredicate("projects")
 	workspaceID, err := projectWorkspaceID(ctx, db, id)
 	if err != nil {
 		return nil, err
@@ -746,10 +766,28 @@ func UpdateProject(ctx context.Context, db *sql.DB, id, userID string, patch Pro
 	} else if n != 1 {
 		return nil, ErrNotFound
 	}
+	if patch.IsPublic != nil && workspaceID != "" {
+		// A project library is not independently shareable. Keep its direct
+		// document authorization boundary identical to the project in the same
+		// transaction, otherwise a known document id bypasses project privacy.
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE knowledge_bases SET is_public=?
+			  WHERE id=(SELECT COALESCE(kb_id,'') FROM projects WHERE id=?)
+			    AND workspace_id=?`,
+			boolInt(*patch.IsPublic), id, workspaceID,
+		); err != nil {
+			return nil, err
+		}
+		if err := recordWorkspaceAudit(ctx, tx, workspaceID, userID, AuditResourceVisibilityChanged,
+			"project", id, map[string]any{"is_public": *patch.IsPublic}); err != nil {
+			return nil, err
+		}
+	}
 	updated, err := scanProject(tx.QueryRowContext(ctx,
 		`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,''),
 		        COALESCE((SELECT embedding_model_id FROM knowledge_bases WHERE id=projects.kb_id),''),
-		        COALESCE((SELECT embedding_dim FROM knowledge_bases WHERE id=projects.kb_id),0)
+		        COALESCE((SELECT embedding_dim FROM knowledge_bases WHERE id=projects.kb_id),0),
+		        COALESCE(is_public,1)
 		   FROM projects WHERE id=?`, id))
 	if err != nil {
 		return nil, err

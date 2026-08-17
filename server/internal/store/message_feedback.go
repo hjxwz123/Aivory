@@ -167,13 +167,14 @@ func SetMessageFeedbackForUser(ctx context.Context, db *sql.DB, feedback Message
 	defer tx.Rollback() //nolint:errcheck
 
 	accessArgs := []any{feedback.MessageID, feedback.ConversationID}
-	accessArgs = append(accessArgs, workspaceResourceAccessArgs(feedback.UserID)...)
+	// Feedback is a mutation — workspace guests are read-only.
+	accessArgs = append(accessArgs, conversationMemberMutationArgs(feedback.UserID)...)
 	var authoritativeWorkspaceID, authoritativeModelID string
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COALESCE(c.workspace_id,''), COALESCE(m.model_id,'')
 		   FROM messages m JOIN conversations c ON c.id=m.conversation_id
 		  WHERE m.id=? AND m.conversation_id=? AND m.role='assistant'
-		    AND `+conversationResourceAccessPredicate("c"), accessArgs...,
+		    AND `+conversationMemberMutationPredicate("c"), accessArgs...,
 	).Scan(&authoritativeWorkspaceID, &authoritativeModelID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound

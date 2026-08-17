@@ -699,6 +699,94 @@
         "label": "ナレッジベースの内容を削除",
         "description": "対象のナレッジベースでも許可されている場合に、内容の削除・再試行・管理ができます。"
       }
+    },
+    "roleAdmin": "管理者",
+    "roleGuest": "ゲスト",
+    "changeRole": "役割を変更",
+    "roleUpdated": "役割を更新しました。",
+    "roleUpdateFailed": "役割を更新できませんでした。",
+    "readOnlyAccess": "読み取り専用",
+    "inviteOwnerOnly": "現在のリンクを表示できるのはオーナーのみです。リセットして新しいリンクを生成してください。",
+    "readOnlyTitle": "読み取り専用アクセス",
+    "readOnlyBody": "あなたはこのワークスペースのゲストです。共有された会話は読めますが、メッセージは送信できません。",
+    "manageTabs": "ワークスペース管理",
+    "tabMembers": "メンバー",
+    "tabInvites": "招待",
+    "tabPolicy": "機能",
+    "transfer": "所有権を移転",
+    "transferBody": "受け取り側がワークスペースのオーナー兼管理者になります。あなたは管理者のまま、オーナー専用操作は失われます。",
+    "transferConfirmHint": "確認のためワークスペース名「{{name}}」を入力してください。",
+    "transferConfirm": "移転",
+    "transferDone": "所有権を移転しました。",
+    "transferFailed": "所有権を移転できませんでした。",
+    "transferNoCandidates": "移転先のメンバーがいません。",
+    "newInvite": "新しい招待",
+    "inviteRole": "招待ロール",
+    "inviteEmailOptional": "メールを限定（任意）",
+    "inviteExpires": "有効期限",
+    "inviteNeverExpires": "無期限",
+    "inviteMaxUses": "使用回数上限",
+    "inviteCreate": "招待を作成",
+    "inviteCreated": "招待を作成しました。",
+    "inviteCreateFailed": "招待を作成できませんでした。",
+    "inviteHint": "使用回数 0 は無制限です。汎用招待は既定で読み取り専用ゲストになります。",
+    "invitesLoadFailed": "招待を読み込めませんでした。",
+    "invitesEmpty": "招待はまだありません。",
+    "inviteRevokedLabel": "失効",
+    "inviteExpired": "期限切れ",
+    "inviteExhausted": "使用済み",
+    "inviteActive": "有効",
+    "inviteUses": "{{used}}/{{max}} 回使用",
+    "inviteRevoke": "招待を失効",
+    "inviteRevoked": "招待を失効しました。",
+    "inviteRevokeFailed": "招待を失効できませんでした。",
+    "policyLoadFailed": "ワークスペースポリシーを読み込めませんでした。",
+    "policySaved": "ワークスペース機能を更新しました。",
+    "policySaveFailed": "ワークスペースポリシーを更新できませんでした。",
+    "policy": {
+      "AllowSandbox": {
+        "label": "Python サンドボックス",
+        "description": "python_execute / code_interpreter ツールを実行。"
+      },
+      "AllowImageGeneration": {
+        "label": "画像生成",
+        "description": "画像モデルと画像ツール。"
+      },
+      "AllowKnowledgeBases": {
+        "label": "ナレッジベース",
+        "description": "ワークスペースのナレッジベースとプロジェクトを作成・利用。"
+      },
+      "AllowFileUpload": {
+        "label": "ファイルアップロード",
+        "description": "ワークスペース会話にファイルを添付。"
+      },
+      "modelAllowlist": "許可するモデル",
+      "allModels": "すべてのモデル",
+      "allModelsHint": "プラットフォームが提供するすべてのモデルを利用できます。",
+      "noModels": "利用できるモデルがありません。",
+      "creditLimit": "メンバーの月間クレジット上限",
+      "creditLimitHint": "0 は無制限。上限に達したメンバーはこのワークスペースで新しいターンを開始できません。"
+    },
+    "tabAudit": "監査",
+    "audit": {
+      "loadFailed": "監査ログを読み込めませんでした。",
+      "empty": "監査記録はまだありません。",
+      "target": "{{type}}",
+      "actions": {
+        "workspace.created": "ワークスペース作成",
+        "workspace.deleted": "ワークスペース削除",
+        "workspace.transferred": "所有権移転",
+        "member.joined": "メンバー参加",
+        "member.left": "メンバー退室",
+        "member.removed": "メンバー除外",
+        "member.role_updated": "ロール変更",
+        "member.permissions_updated": "メンバー制限変更",
+        "invite.created": "招待作成",
+        "invite.used": "招待使用",
+        "invite.revoked": "招待失効",
+        "resource.visibility_changed": "リソース公開範囲変更",
+        "policy.updated": "機能ポリシー変更"
+      }
     }
   },
   "attachmentDeleted": "ファイルは削除されました"

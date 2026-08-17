@@ -74,7 +74,11 @@
       "edit": "Edit details",
       "pin": "Pin project",
       "unpin": "Unpin project",
-      "delete": "Delete project"
+      "delete": "Delete project",
+      "makePrivate": "Make private",
+      "makeShared": "Share with workspace",
+      "visibilityPrivate": "Project is now private to you and workspace admins.",
+      "visibilityShared": "Project is now shared with the workspace."
     },
     "renameTitle": "Rename project",
     "renameSave": "Save",

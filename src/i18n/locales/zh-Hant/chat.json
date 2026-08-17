@@ -699,6 +699,94 @@
         "label": "刪除知識庫內容",
         "description": "具體知識庫同時允許時，可刪除、重試或管理其中內容。"
       }
+    },
+    "roleAdmin": "管理員",
+    "roleGuest": "訪客",
+    "changeRole": "變更角色",
+    "roleUpdated": "角色已更新。",
+    "roleUpdateFailed": "角色更新失敗。",
+    "readOnlyAccess": "唯讀存取",
+    "inviteOwnerOnly": "只有擁有者可以檢視目前連結。重設後可產生新連結。",
+    "readOnlyTitle": "唯讀存取",
+    "readOnlyBody": "你是該工作空間的訪客，可以閱讀共享對話，但無法傳送訊息。",
+    "manageTabs": "工作空間管理",
+    "tabMembers": "成員",
+    "tabInvites": "邀請",
+    "tabPolicy": "能力",
+    "transfer": "轉移擁有權",
+    "transferBody": "接收者將成為工作空間擁有者和管理員。你保留管理員角色，但失去擁有者專屬操作。",
+    "transferConfirmHint": "輸入工作空間名稱「{{name}}」以確認。",
+    "transferConfirm": "轉移",
+    "transferDone": "擁有權已轉移。",
+    "transferFailed": "擁有權轉移失敗。",
+    "transferNoCandidates": "沒有其他可接收的成員。",
+    "newInvite": "新邀請",
+    "inviteRole": "邀請角色",
+    "inviteEmailOptional": "綁定信箱（可選）",
+    "inviteExpires": "有效期",
+    "inviteNeverExpires": "永久",
+    "inviteMaxUses": "次數上限",
+    "inviteCreate": "建立邀請",
+    "inviteCreated": "邀請已建立。",
+    "inviteCreateFailed": "建立邀請失敗。",
+    "inviteHint": "次數上限留 0 表示不限次。通用邀請預設加入為唯讀訪客。",
+    "invitesLoadFailed": "邀請列表載入失敗。",
+    "invitesEmpty": "還沒有邀請。",
+    "inviteRevokedLabel": "已撤銷",
+    "inviteExpired": "已過期",
+    "inviteExhausted": "已用盡",
+    "inviteActive": "有效",
+    "inviteUses": "已用 {{used}}/{{max}} 次",
+    "inviteRevoke": "撤銷邀請",
+    "inviteRevoked": "邀請已撤銷。",
+    "inviteRevokeFailed": "撤銷邀請失敗。",
+    "policyLoadFailed": "工作空間策略載入失敗。",
+    "policySaved": "工作空間能力已更新。",
+    "policySaveFailed": "工作空間策略更新失敗。",
+    "policy": {
+      "AllowSandbox": {
+        "label": "Python 沙盒",
+        "description": "執行 python_execute / code_interpreter 工具。"
+      },
+      "AllowImageGeneration": {
+        "label": "圖片生成",
+        "description": "圖片模型與圖片工具。"
+      },
+      "AllowKnowledgeBases": {
+        "label": "知識庫",
+        "description": "建立並使用工作空間知識庫和專案。"
+      },
+      "AllowFileUpload": {
+        "label": "檔案上傳",
+        "description": "在工作空間對話中附加檔案。"
+      },
+      "modelAllowlist": "允許的模型",
+      "allModels": "全部模型",
+      "allModelsHint": "本工作空間可使用平台提供的全部模型。",
+      "noModels": "暫無可用模型。",
+      "creditLimit": "成員月度額度",
+      "creditLimitHint": "0 表示不限。達到額度的成員不能再在該工作空間發起新對話輪次。"
+    },
+    "tabAudit": "稽核",
+    "audit": {
+      "loadFailed": "稽核日誌載入失敗。",
+      "empty": "還沒有稽核記錄。",
+      "target": "{{type}}",
+      "actions": {
+        "workspace.created": "建立工作空間",
+        "workspace.deleted": "刪除工作空間",
+        "workspace.transferred": "擁有權轉移",
+        "member.joined": "成員加入",
+        "member.left": "成員退出",
+        "member.removed": "成員被移除",
+        "member.role_updated": "角色變更",
+        "member.permissions_updated": "成員限制變更",
+        "invite.created": "建立邀請",
+        "invite.used": "使用邀請",
+        "invite.revoked": "撤銷邀請",
+        "resource.visibility_changed": "資源可見範圍變更",
+        "policy.updated": "能力策略變更"
+      }
     }
   },
   "attachmentDeleted": "檔案已刪除"

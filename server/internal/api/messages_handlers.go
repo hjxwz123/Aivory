@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -175,6 +176,18 @@ func workspaceGenerationRevocationKey(workspaceID string) string {
 	return "workspace-generation-revoked:" + workspaceID
 }
 
+func workspaceMemberGenerationRevocationTopic(workspaceID, userID string) string {
+	return "workspace:" + strings.TrimSpace(workspaceID) + ":user:" + strings.TrimSpace(userID) + ":generation-revoked"
+}
+
+func workspacePolicyGenerationRevocationTopic(workspaceID string) string {
+	return "workspace:" + strings.TrimSpace(workspaceID) + ":policy:generation-revoked"
+}
+
+func conversationGenerationRevocationTopic(conversationID string) string {
+	return "conversation:" + strings.TrimSpace(conversationID) + ":generation-revoked"
+}
+
 func knowledgeBaseGenerationRevocationTopic(kbID string) string {
 	return "knowledge-base:" + strings.TrimSpace(kbID) + ":generation-revoked"
 }
@@ -313,6 +326,107 @@ func publishWorkspaceGenerationRevocation(d Deps, workspaceID string) bool {
 	return true
 }
 
+// revokeWorkspaceMemberGenerations stops only the target member's active
+// turns. It is intentionally an ephemeral broadcast rather than a permanent
+// deny key: a later promotion must be able to start a new turn immediately.
+func revokeWorkspaceMemberGenerations(d Deps, workspaceID, userID string) {
+	if d.Cache == nil || strings.TrimSpace(workspaceID) == "" || strings.TrimSpace(userID) == "" {
+		return
+	}
+	d.Cache.Publish(workspaceMemberGenerationRevocationTopic(workspaceID, userID), "1")
+}
+
+// revokeWorkspacePolicyGenerations invalidates currently running work after
+// any policy mutation. New turns load the committed policy afresh.
+func revokeWorkspacePolicyGenerations(d Deps, workspaceID string) {
+	if d.Cache == nil || strings.TrimSpace(workspaceID) == "" {
+		return
+	}
+	d.Cache.Publish(workspacePolicyGenerationRevocationTopic(workspaceID), "1")
+}
+
+// revokeConversationGenerations closes a visibility-change race. It cancels
+// all active turns on that conversation; current authorization determines who
+// may start a replacement turn.
+func revokeConversationGenerations(d Deps, conversationID string) {
+	if d.Cache == nil || strings.TrimSpace(conversationID) == "" {
+		return
+	}
+	d.Cache.Publish(conversationGenerationRevocationTopic(conversationID), "1")
+}
+
+type generationWorkspaceAccessSnapshot struct {
+	WorkspaceID    string
+	ConversationID string
+	UserID         string
+	Policy         store.WorkspacePolicy
+}
+
+// captureGenerationWorkspaceAccess makes the request-start authorization
+// explicit. GetConversation deliberately admits read-only guests, while a
+// generation requires reply authority; checking here prevents a guest from
+// getting as far as model setup or a provider call.
+func captureGenerationWorkspaceAccess(
+	ctx context.Context, db *sql.DB, conv *store.Conversation, userID string,
+) (*generationWorkspaceAccessSnapshot, error) {
+	if conv == nil || strings.TrimSpace(conv.WorkspaceID) == "" {
+		return nil, nil
+	}
+	decision, err := store.AuthorizeWorkspace(ctx, db, store.WorkspaceAuthorizationRequest{
+		WorkspaceID: conv.WorkspaceID,
+		UserID:      userID,
+		Action:      store.ActionConversationReply,
+		Resource:    "conversation",
+		ResourceID:  conv.ID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !decision.Allowed {
+		return nil, errForbidden
+	}
+	policy, err := store.GetWorkspacePolicy(ctx, db, conv.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	return &generationWorkspaceAccessSnapshot{
+		WorkspaceID: conv.WorkspaceID, ConversationID: conv.ID, UserID: userID, Policy: policy,
+	}, nil
+}
+
+func (snapshot *generationWorkspaceAccessSnapshot) stillCurrent(ctx context.Context, db *sql.DB) bool {
+	if snapshot == nil {
+		return true
+	}
+	decision, err := store.AuthorizeWorkspace(ctx, db, store.WorkspaceAuthorizationRequest{
+		WorkspaceID: snapshot.WorkspaceID,
+		UserID:      snapshot.UserID,
+		Action:      store.ActionConversationReply,
+		Resource:    "conversation",
+		ResourceID:  snapshot.ConversationID,
+	})
+	if err != nil || !decision.Allowed {
+		return false
+	}
+	policy, err := store.GetWorkspacePolicy(ctx, db, snapshot.WorkspaceID)
+	if err != nil {
+		return false
+	}
+	return workspacePoliciesEqual(snapshot.Policy, policy)
+}
+
+func workspacePoliciesEqual(a, b store.WorkspacePolicy) bool {
+	if a.WorkspaceID != b.WorkspaceID || a.AllowSandbox != b.AllowSandbox ||
+		a.AllowImageGeneration != b.AllowImageGeneration ||
+		a.AllowKnowledgeBases != b.AllowKnowledgeBases || a.AllowFileUpload != b.AllowFileUpload ||
+		a.MemberMonthlyCreditLimit != b.MemberMonthlyCreditLimit {
+		return false
+	}
+	return slices.Equal(a.AllowedModelIDs, b.AllowedModelIDs) &&
+		slices.Equal(a.AllowedToolIDs, b.AllowedToolIDs) &&
+		slices.Equal(a.AllowedMCPServerIDs, b.AllowedMCPServerIDs)
+}
+
 func subscribePermanentRevocation(
 	d Deps, ctx context.Context, cancel context.CancelFunc, topic string, revoked func() bool,
 ) func() {
@@ -353,23 +467,26 @@ func subscribePermanentRevocation(
 }
 
 type generationAccessRevocationWatcher struct {
-	d                 Deps
-	ctx               context.Context
-	cancel            context.CancelFunc
-	workspaceUnsub    func()
-	permissionUnsubs  []func()
-	knowledgeUnsubs   []func()
-	knowledgeBases    *generationKnowledgeBaseAccessSnapshot
-	knowledgeRevoked  atomic.Bool
-	permissionRevoked atomic.Bool
-	permissions       *requestPermissionSnapshot
-	conversationID    string
-	userID            string
-	messageMu         sync.Mutex
-	messageID         string
-	groupExpiryTimer  *time.Timer
-	messageOnce       sync.Once
-	messageUnsub      func()
+	d                     Deps
+	ctx                   context.Context
+	cancel                context.CancelFunc
+	workspaceUnsub        func()
+	workspaceAccessUnsubs []func()
+	workspaceAccess       *generationWorkspaceAccessSnapshot
+	workspaceRevoked      atomic.Bool
+	permissionUnsubs      []func()
+	knowledgeUnsubs       []func()
+	knowledgeBases        *generationKnowledgeBaseAccessSnapshot
+	knowledgeRevoked      atomic.Bool
+	permissionRevoked     atomic.Bool
+	permissions           *requestPermissionSnapshot
+	conversationID        string
+	userID                string
+	messageMu             sync.Mutex
+	messageID             string
+	groupExpiryTimer      *time.Timer
+	messageOnce           sync.Once
+	messageUnsub          func()
 }
 
 func subscribeAccessRevocationTopic(
@@ -406,10 +523,11 @@ func newGenerationAccessRevocationWatcher(
 	d Deps, ctx context.Context, cancel context.CancelFunc, conversationID, workspaceID string,
 	permissions *requestPermissionSnapshot,
 	knowledgeBases *generationKnowledgeBaseAccessSnapshot,
+	workspaceAccess *generationWorkspaceAccessSnapshot,
 ) *generationAccessRevocationWatcher {
 	watcher := &generationAccessRevocationWatcher{
 		d: d, ctx: ctx, cancel: cancel, workspaceUnsub: func() {}, knowledgeBases: knowledgeBases,
-		permissions: permissions, conversationID: strings.TrimSpace(conversationID),
+		permissions: permissions, conversationID: strings.TrimSpace(conversationID), workspaceAccess: workspaceAccess,
 	}
 	if strings.TrimSpace(workspaceID) != "" {
 		key := workspaceGenerationRevocationKey(workspaceID)
@@ -417,6 +535,23 @@ func newGenerationAccessRevocationWatcher(
 			d, ctx, cancel, workspaceGenerationRevocationTopic(workspaceID),
 			func() bool { _, revoked := d.Cache.Get(key); return revoked },
 		)
+	}
+	if workspaceAccess != nil {
+		watcher.workspaceAccessUnsubs = append(watcher.workspaceAccessUnsubs,
+			subscribeAccessRevocationTopic(d, ctx, watcher.revokeWorkspaceAccess,
+				workspaceMemberGenerationRevocationTopic(workspaceAccess.WorkspaceID, workspaceAccess.UserID)),
+			subscribeAccessRevocationTopic(d, ctx, watcher.revokeWorkspaceAccess,
+				workspacePolicyGenerationRevocationTopic(workspaceAccess.WorkspaceID)),
+			subscribeAccessRevocationTopic(d, ctx, watcher.revokeWorkspaceAccess,
+				conversationGenerationRevocationTopic(workspaceAccess.ConversationID)),
+		)
+		if !watcher.workspaceAccessStillCurrent() {
+			watcher.revokeWorkspaceAccess()
+		}
+		// Pub/sub delivers prompt revocation across replicas. The periodic DB
+		// recheck is the fail-closed backstop for a missed event or a direct SQL
+		// administration change.
+		go watcher.watchWorkspaceAccess()
 	}
 	if permissions != nil {
 		watcher.userID = permissions.UserID
@@ -459,6 +594,47 @@ func newGenerationAccessRevocationWatcher(
 		}
 	}
 	return watcher
+}
+
+func (watcher *generationAccessRevocationWatcher) workspaceAccessStillCurrent() bool {
+	return watcher == nil || watcher.workspaceAccess == nil || watcher.workspaceAccess.stillCurrent(watcher.ctx, watcher.d.DB)
+}
+
+func (watcher *generationAccessRevocationWatcher) watchWorkspaceAccess() {
+	if watcher == nil || watcher.workspaceAccess == nil {
+		return
+	}
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-watcher.ctx.Done():
+			return
+		case <-ticker.C:
+			if !watcher.workspaceAccessStillCurrent() {
+				watcher.revokeWorkspaceAccess()
+				return
+			}
+		}
+	}
+}
+
+func (watcher *generationAccessRevocationWatcher) revokeWorkspaceAccess() {
+	if watcher == nil {
+		return
+	}
+	watcher.workspaceRevoked.Store(true)
+	watcher.cancel()
+	watcher.messageMu.Lock()
+	messageID := watcher.messageID
+	watcher.messageMu.Unlock()
+	if messageID != "" {
+		_ = genstream.Revoke(watcher.d.Cache, messageID)
+		if watcher.d.Cache != nil {
+			watcher.d.Cache.Publish(genstream.RevocationTopic(messageID), "1")
+		}
+		watcher.scrubRevokedMessage(messageID, "workspace")
+	}
 }
 
 func (watcher *generationAccessRevocationWatcher) permissionAccessStillCurrent() bool {
@@ -609,6 +785,13 @@ func (watcher *generationAccessRevocationWatcher) watchMessage(messageID string)
 			}
 			watcher.scrubRevokedMessage(messageID, "knowledge-base")
 		}
+		if watcher.workspaceRevoked.Load() {
+			_ = genstream.Revoke(watcher.d.Cache, messageID)
+			if watcher.d.Cache != nil {
+				watcher.d.Cache.Publish(genstream.RevocationTopic(messageID), "1")
+			}
+			watcher.scrubRevokedMessage(messageID, "workspace")
+		}
 	})
 }
 
@@ -623,6 +806,9 @@ func (watcher *generationAccessRevocationWatcher) close() {
 		watcher.groupExpiryTimer.Stop()
 	}
 	for _, unsubscribe := range watcher.permissionUnsubs {
+		unsubscribe()
+	}
+	for _, unsubscribe := range watcher.workspaceAccessUnsubs {
 		unsubscribe()
 	}
 	for _, unsubscribe := range watcher.knowledgeUnsubs {
@@ -967,6 +1153,15 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	workspaceAccess, workspaceAccessErr := captureGenerationWorkspaceAccess(r.Context(), d.DB, conv, u.ID)
+	if workspaceAccessErr != nil {
+		if errors.Is(workspaceAccessErr, errForbidden) {
+			writeError(w, http.StatusForbidden, errForbidden)
+		} else {
+			writeError(w, http.StatusInternalServerError, workspaceAccessErr)
+		}
+		return
+	}
 	knowledgeBaseAccess := captureGenerationKnowledgeBaseAccess(
 		d, u.ID, id, conv.WorkspaceID,
 		generationKnowledgeBaseIDs(r.Context(), d.DB, u.ID, conv, turnKBIDs, turnKBSelectionConfigured),
@@ -1025,6 +1220,22 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		}
 		if model.Kind == "image" {
 			writeError(w, http.StatusForbidden, errDrawingGroupPermission)
+			return
+		}
+	}
+	// §workspace RBAC phase 4: re-check the workspace capability policy for
+	// this turn — model allowlist, image switch, attachments, knowledge bases
+	// and the member monthly credit limit (fail closed on lookup errors). A
+	// model-less request keeps the orchestrator's own error path.
+	{
+		effectiveModel, modelErr := resolveEffectiveConversationModel(r.Context(), d.DB, conv, req.ModelID, req.Fast)
+		if modelErr != nil && !errors.Is(modelErr, errNoModelConfigured) {
+			writeError(w, imageCapabilityErrorStatus(modelErr), modelErr)
+			return
+		}
+		if err := enforceWorkspaceTurnPolicy(r.Context(), d.DB, conv, u.ID, effectiveModel,
+			len(req.Attachments), permissions.AllowKnowledgeBases && turnUsesKnowledgeBase(conv, req.KBIDs)); err != nil {
+			writeError(w, workspacePolicyErrorStatus(err), err)
 			return
 		}
 	}
@@ -1110,7 +1321,7 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), generationcfg.MaxDuration())
 	defer cancel()
 	accessRevocation := newGenerationAccessRevocationWatcher(
-		d, ctx, cancel, id, conv.WorkspaceID, &permissionSnapshot, knowledgeBaseAccess,
+		d, ctx, cancel, id, conv.WorkspaceID, &permissionSnapshot, knowledgeBaseAccess, workspaceAccess,
 	)
 	defer accessRevocation.close()
 	scopedStop := newGenerationStopWatcher(d, ctx, cancel, u.ID, id, req.GenerationID)
@@ -1195,20 +1406,26 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 
 	runResult, runErr := d.Orchestrator.Run(ctx, llm.RunRequest{
-		UserID:                           u.ID,
-		ConversationID:                   id,
-		ModelID:                          req.ModelID,
-		UserText:                         req.Text,
-		Attachments:                      req.Attachments,
-		ParentID:                         req.ParentID,
-		Branch:                           req.Branch,
-		Mode:                             req.Mode,
-		Verify:                           req.Verify,
-		ToolMode:                         toolMode,
-		SelectedUserSkillIDs:             req.SelectedUserSkillIDs,
-		SelectedToolIDs:                  selectedToolIDs,
-		SelectedToolsConfigured:          selectedToolsConfigured,
-		ToolAccessPolicy:                 runToolAccessPolicy(permissions),
+		UserID:                  u.ID,
+		ConversationID:          id,
+		ModelID:                 req.ModelID,
+		UserText:                req.Text,
+		Attachments:             req.Attachments,
+		ParentID:                req.ParentID,
+		Branch:                  req.Branch,
+		Mode:                    req.Mode,
+		Verify:                  req.Verify,
+		ToolMode:                toolMode,
+		SelectedUserSkillIDs:    req.SelectedUserSkillIDs,
+		SelectedToolIDs:         selectedToolIDs,
+		SelectedToolsConfigured: selectedToolsConfigured,
+		ToolAccessPolicy:        workspaceTurnToolPolicy(r.Context(), d.DB, conv, runToolAccessPolicy(permissions)),
+		WorkspaceAccessCheck: func(checkCtx context.Context) error {
+			if workspaceAccess.stillCurrent(checkCtx, d.DB) {
+				return nil
+			}
+			return errors.New("workspace access revoked")
+		},
 		ForceWebSearch:                   req.WebSearch,
 		Fast:                             req.Fast,
 		ParamOverrides:                   req.ParamOverrides,
@@ -1438,6 +1655,31 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	// §workspace RBAC phase 4: regenerated turns pass the same workspace
+	// capability gate as fresh ones (model allowlist, image switch, credit
+	// limit; attachments were already persisted upstream). A model-less
+	// request keeps the orchestrator's own error path.
+	{
+		effectiveModel, modelErr := resolveEffectiveConversationModel(r.Context(), d.DB, conv, body.ModelID, body.Fast)
+		if modelErr != nil && !errors.Is(modelErr, errNoModelConfigured) {
+			writeError(w, imageCapabilityErrorStatus(modelErr), modelErr)
+			return
+		}
+		if err := enforceWorkspaceTurnPolicy(r.Context(), d.DB, conv, u.ID, effectiveModel, 0,
+			turnUsesKnowledgeBase(conv, body.KBIDs)); err != nil {
+			writeError(w, workspacePolicyErrorStatus(err), err)
+			return
+		}
+	}
+	workspaceAccess, workspaceAccessErr := captureGenerationWorkspaceAccess(r.Context(), d.DB, conv, u.ID)
+	if workspaceAccessErr != nil {
+		if errors.Is(workspaceAccessErr, errForbidden) {
+			writeError(w, http.StatusForbidden, errForbidden)
+		} else {
+			writeError(w, http.StatusInternalServerError, workspaceAccessErr)
+		}
+		return
+	}
 	knowledgeBaseAccess := captureGenerationKnowledgeBaseAccess(
 		d, u.ID, id, conv.WorkspaceID,
 		generationKnowledgeBaseIDs(r.Context(), d.DB, u.ID, conv, turnKBIDs, turnKBSelectionConfigured),
@@ -1558,7 +1800,7 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), generationcfg.MaxDuration())
 	defer cancel()
 	accessRevocation := newGenerationAccessRevocationWatcher(
-		d, ctx, cancel, id, conv.WorkspaceID, &permissionSnapshot, knowledgeBaseAccess,
+		d, ctx, cancel, id, conv.WorkspaceID, &permissionSnapshot, knowledgeBaseAccess, workspaceAccess,
 	)
 	defer accessRevocation.close()
 	scopedStop := newGenerationStopWatcher(d, ctx, cancel, u.ID, id, body.GenerationID)
@@ -1633,18 +1875,24 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 
 	runResult, runErr := d.Orchestrator.Run(ctx, llm.RunRequest{
-		UserID:                           u.ID,
-		ConversationID:                   id,
-		ModelID:                          body.ModelID,
-		UserText:                         text,
-		ParentID:                         user.ID, // assistant sibling under SAME user — §4.15
-		ReuseExistingUserMessage:         true,
-		Mode:                             body.Mode,
-		Verify:                           body.Verify,
-		ToolMode:                         toolMode,
-		SelectedToolIDs:                  selectedToolIDs,
-		SelectedToolsConfigured:          selectedToolsConfigured,
-		ToolAccessPolicy:                 runToolAccessPolicy(permissions),
+		UserID:                   u.ID,
+		ConversationID:           id,
+		ModelID:                  body.ModelID,
+		UserText:                 text,
+		ParentID:                 user.ID, // assistant sibling under SAME user — §4.15
+		ReuseExistingUserMessage: true,
+		Mode:                     body.Mode,
+		Verify:                   body.Verify,
+		ToolMode:                 toolMode,
+		SelectedToolIDs:          selectedToolIDs,
+		SelectedToolsConfigured:  selectedToolsConfigured,
+		ToolAccessPolicy:         workspaceTurnToolPolicy(r.Context(), d.DB, conv, runToolAccessPolicy(permissions)),
+		WorkspaceAccessCheck: func(checkCtx context.Context) error {
+			if workspaceAccess.stillCurrent(checkCtx, d.DB) {
+				return nil
+			}
+			return errors.New("workspace access revoked")
+		},
 		ForceWebSearch:                   body.WebSearch,
 		Fast:                             body.Fast,
 		ParamOverrides:                   body.ParamOverrides,
@@ -1714,7 +1962,7 @@ func streamMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
-	accessRevocation := newGenerationAccessRevocationWatcher(d, ctx, cancel, convID, conv.WorkspaceID, nil, nil)
+	accessRevocation := newGenerationAccessRevocationWatcher(d, ctx, cancel, convID, conv.WorkspaceID, nil, nil, nil)
 	defer accessRevocation.close()
 	accessRevocation.watchMessage(msgID)
 

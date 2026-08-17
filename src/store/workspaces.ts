@@ -47,13 +47,19 @@ interface WorkspacesState {
 }
 
 // Reload every space-scoped cache. Imported lazily to dodge an import cycle
-// (conversations store ← workspaces store ← conversations store).
+// (conversations store ← workspaces store ← conversations store). The model
+// catalog is workspace-scoped too (§workspace RBAC policy filter).
 async function reloadSpaceData() {
-  const [{ useConversations }, { useProjects }] = await Promise.all([
+  const [{ useConversations }, { useProjects }, { useModels }] = await Promise.all([
     import('./conversations'),
     import('./projects'),
+    import('./models'),
   ])
-  await Promise.all([useConversations.getState().load(), useProjects.getState().load()])
+  await Promise.all([
+    useConversations.getState().load(),
+    useProjects.getState().load(),
+    useModels.getState().load(),
+  ])
 }
 
 export const useWorkspaces = create<WorkspacesState>((set, get) => ({

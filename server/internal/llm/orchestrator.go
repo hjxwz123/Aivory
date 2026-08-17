@@ -274,6 +274,9 @@ type ToolContext struct {
 	ProjectID   string
 	ProjectName string
 	DB          *sql.DB
+	// WorkspaceAccessCheck revalidates the turn authority immediately before a
+	// local tool leaves the process. Nil for personal conversations.
+	WorkspaceAccessCheck func(context.Context) error
 	// DeepResearch raises the per-turn tool budgets (deep_research.go).
 	DeepResearch bool
 	// Fast quarters the per-turn tool budgets and withholds python_execute
@@ -562,9 +565,21 @@ func filterModelMCPTools(defs []MCPToolDef, allowed map[string]bool) []MCPToolDe
 	return out
 }
 
+// Allows reports whether the policy admits one prefixed catalog tool id
+// ("builtin:…", "hosted:…", "mcp:…"). Public so the API layer can unit-test
+// the workspace policy fold end to end.
+func (p *ToolAccessPolicy) Allows(id string) bool {
+	return toolAccessPolicyAllows(p, id)
+}
+
 func toolAccessPolicyAllows(policy *ToolAccessPolicy, id string) bool {
 	if policy == nil {
 		return true
+	}
+	for _, denied := range policy.DenyIDs {
+		if denied == id {
+			return false
+		}
 	}
 	switch policy.Mode {
 	case store.ResourceAccessNone:
@@ -655,10 +670,13 @@ func intersectToolAccessPolicies(requested, current *ToolAccessPolicy) *ToolAcce
 		copy := *current
 		copy.IDs = append([]string(nil), current.IDs...)
 		copy.SkillIDs = append([]string(nil), current.SkillIDs...)
+		copy.DenyIDs = append([]string(nil), current.DenyIDs...)
 		return &copy
 	}
 	mode, ids := intersectResourceAccess(requested.Mode, requested.IDs, current.Mode, current.IDs)
 	skillMode, skillIDs := intersectResourceAccess(requested.SkillMode, requested.SkillIDs, current.SkillMode, current.SkillIDs)
+	denyIDs := append([]string(nil), requested.DenyIDs...)
+	denyIDs = append(denyIDs, current.DenyIDs...)
 	return &ToolAccessPolicy{
 		Mode:         mode,
 		IDs:          ids,
@@ -667,6 +685,7 @@ func intersectToolAccessPolicies(requested, current *ToolAccessPolicy) *ToolAcce
 		AllowSkills:  requested.AllowSkills && current.AllowSkills && skillMode != store.ResourceAccessNone,
 		SkillMode:    skillMode,
 		SkillIDs:     skillIDs,
+		DenyIDs:      denyIDs,
 	}
 }
 
@@ -1283,6 +1302,10 @@ type RunRequest struct {
 	// ToolAccessPolicy is the current user's group-level hard ceiling. It remains
 	// independent from model defaults and is re-applied during model fallback.
 	ToolAccessPolicy *ToolAccessPolicy
+	// WorkspaceAccessCheck is supplied by the API for workspace turns. It is
+	// called immediately before every local tool execution so a role, visibility,
+	// or policy change cannot wait for the next request to take effect.
+	WorkspaceAccessCheck func(context.Context) error
 	// SelectedUserSkillIDs names private, user-owned Agent Skills explicitly
 	// selected for this turn. They are persisted on the user message and injected
 	// at user-message authority, never into composeSystemPrompt.
@@ -3323,8 +3346,9 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			WorkspaceID: conv.WorkspaceID, ConvID: conv.ID, MessageID: assistantMsg.ID, ModelID: model.ID,
 			ProjectID: conv.ProjectID, ProjectName: projectName,
 			DB: o.db, ImageModelID: imageModelID,
-			ImageInputIDs:   imageAttachmentIDs(req.Attachments),
-			ImageUserPrompt: req.UserText,
+			WorkspaceAccessCheck: req.WorkspaceAccessCheck,
+			ImageInputIDs:        imageAttachmentIDs(req.Attachments),
+			ImageUserPrompt:      req.UserText,
 			// §4.20: meter chat-driven image_generate against the same credit flow.
 			ImageBilling: o,
 			DeepResearch: req.Mode == ModeDeepResearch,
@@ -6321,27 +6345,28 @@ func toolRunnerForModelRequest(runner ToolRunner, modelID string, definitions []
 			}
 		}
 		fallbackContext := &ToolContext{
-			UserID:             source.UserID,
-			ConvID:             source.ConvID,
-			MessageID:          source.MessageID,
-			WorkspaceID:        source.WorkspaceID,
-			ModelID:            modelID,
-			ProjectID:          source.ProjectID,
-			ProjectName:        source.ProjectName,
-			DB:                 source.DB,
-			DeepResearch:       source.DeepResearch,
-			Fast:               source.Fast,
-			BuiltinTools:       toolDefNameSet(definitions),
-			AdminSkillIDs:      cloneBoolMap(source.AdminSkillIDs),
-			ImageModelID:       source.ImageModelID,
-			ImageRequestParams: params,
-			ImageInputIDs:      append([]string(nil), source.ImageInputIDs...),
-			ImageUserPrompt:    source.ImageUserPrompt,
-			SkipImageQuota:     source.SkipImageQuota,
-			ImageBilling:       source.ImageBilling,
-			OnArtifact:         source.OnArtifact,
-			counts:             map[string]int{},
-			citationIndexes:    source.citationIndexes,
+			UserID:               source.UserID,
+			ConvID:               source.ConvID,
+			MessageID:            source.MessageID,
+			WorkspaceID:          source.WorkspaceID,
+			ModelID:              modelID,
+			ProjectID:            source.ProjectID,
+			ProjectName:          source.ProjectName,
+			DB:                   source.DB,
+			WorkspaceAccessCheck: source.WorkspaceAccessCheck,
+			DeepResearch:         source.DeepResearch,
+			Fast:                 source.Fast,
+			BuiltinTools:         toolDefNameSet(definitions),
+			AdminSkillIDs:        cloneBoolMap(source.AdminSkillIDs),
+			ImageModelID:         source.ImageModelID,
+			ImageRequestParams:   params,
+			ImageInputIDs:        append([]string(nil), source.ImageInputIDs...),
+			ImageUserPrompt:      source.ImageUserPrompt,
+			SkipImageQuota:       source.SkipImageQuota,
+			ImageBilling:         source.ImageBilling,
+			OnArtifact:           source.OnArtifact,
+			counts:               map[string]int{},
+			citationIndexes:      source.citationIndexes,
 		}
 		base = &orchToolRunner{orch: current.orch, ctx: fallbackContext, onEvent: current.onEvent}
 	}
@@ -6400,6 +6425,14 @@ func sandboxExecCtxTimeout(db *sql.DB) time.Duration {
 }
 
 func (r *orchToolRunner) Run(ctx context.Context, name string, input []byte) (string, []Citation, error) {
+	if r.ctx == nil {
+		return "", nil, errors.New("tool context unavailable")
+	}
+	if r.ctx.WorkspaceAccessCheck != nil {
+		if err := r.ctx.WorkspaceAccessCheck(ctx); err != nil {
+			return "", nil, fmt.Errorf("workspace access revoked before tool execution: %w", err)
+		}
+	}
 	if err := r.ctx.charge(name); err != nil {
 		return "", nil, err
 	}

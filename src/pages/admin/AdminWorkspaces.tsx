@@ -233,7 +233,19 @@ function WorkspaceDetail({
       <div className="mt-5 grid gap-3 sm:mt-6 sm:gap-6 lg:grid-cols-2">
         <Panel title={t('workspaces.members', { defaultValue: 'Members' })}>
           {members.map((m) => (
-            <Row key={m.user_id} main={m.name || m.email} sub={m.role === 'owner' ? t('workspaces.roleOwner', { defaultValue: 'Owner' }) : t('workspaces.roleMember', { defaultValue: 'Member' })} />
+            <Row
+              key={m.user_id}
+              main={m.name || m.email}
+              sub={
+                m.is_owner
+                  ? t('workspaces.roleOwner', { defaultValue: 'Owner' })
+                  : m.role === 'admin'
+                    ? t('workspaces.roleAdmin', { defaultValue: 'Admin' })
+                    : m.role === 'guest'
+                      ? t('workspaces.roleGuest', { defaultValue: 'Guest' })
+                      : t('workspaces.roleMember', { defaultValue: 'Member' })
+              }
+            />
           ))}
         </Panel>
         <Panel title={`${t('workspaces.conversations', { defaultValue: 'Conversations' })} · ${conversations.length}`}>

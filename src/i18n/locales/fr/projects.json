@@ -74,7 +74,11 @@
       "edit": "Modifier les détails",
       "pin": "Épingler le projet",
       "unpin": "Désépingler le projet",
-      "delete": "Supprimer le projet"
+      "delete": "Supprimer le projet",
+      "makePrivate": "Rendre privé",
+      "makeShared": "Partager avec l'espace",
+      "visibilityPrivate": "Le projet est désormais privé pour vous et les administrateurs.",
+      "visibilityShared": "Le projet est désormais partagé avec l'espace."
     },
     "renameTitle": "Renommer le projet",
     "renameSave": "Enregistrer",

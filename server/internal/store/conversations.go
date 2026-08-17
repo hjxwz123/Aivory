@@ -325,8 +325,11 @@ func CreateConversation(ctx context.Context, db *sql.DB, c Conversation) (*Conve
 		}
 		defer tx.Rollback() //nolint:errcheck
 		if !c.IsPublic {
+			// Admins are not subject to member capability limits; ordinary
+			// members need the private-conversation capability. Guests cannot
+			// create conversations at all (guarded below).
 			var canPrivate int
-			if err := tx.QueryRowContext(ctx, `SELECT CASE WHEN w.owner_id=? THEN 1 ELSE COALESCE(m.can_private_conversations,0) END
+			if err := tx.QueryRowContext(ctx, `SELECT CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_private_conversations,0) END
 				FROM workspaces w LEFT JOIN workspace_members m ON m.workspace_id=w.id AND m.user_id=?
 				WHERE w.id=? AND (w.owner_id=? OR m.user_id=?)`,
 				c.UserID, c.UserID, c.WorkspaceID, c.UserID, c.UserID).Scan(&canPrivate); err != nil {
@@ -349,8 +352,9 @@ func CreateConversation(ctx context.Context, db *sql.DB, c Conversation) (*Conve
 			        create_workspace.owner_id=? OR EXISTS (
 			          SELECT 1 FROM workspace_members create_member
 			           WHERE create_member.workspace_id=create_workspace.id AND create_member.user_id=?
+			             AND `+isCollaboratorRoleSQL("create_member.role")+`
 			        )
-			  )`, append(insertArgs, c.WorkspaceID, c.UserID, c.UserID, c.UserID)...)
+			    )`, append(insertArgs, c.WorkspaceID, c.UserID, c.UserID, c.UserID)...)
 		if err != nil {
 			return nil, err
 		}
@@ -473,26 +477,38 @@ func UpdateConversation(ctx context.Context, db *sql.DB, id, userID string, p Co
 		}
 		return nil, err
 	}
+	// Visibility is a workspace concept — personal rows keep rejecting it.
+	if p.IsPublic != nil && workspaceID == "" {
+		return nil, ErrNotFound
+	}
 	args = append(args, id)
-	args = append(args, workspaceResourceAccessArgs(userID)...)
-	// Same access predicate as GetConversation: the owner, or any member of the
-	// conversation's workspace (§workspaces — members switch branches, rename,
-	// attach KBs collaboratively). Deletion is NOT here; it stays creator-only.
-	q := "UPDATE conversations SET " + strings.Join(parts, ", ") +
-		" WHERE id=? AND " + conversationResourceAccessPredicate("conversations")
-	if p.IsPublic != nil {
-		// Visibility is the creator's decision, even though public workspace
-		// conversations otherwise retain their collaborative mutation behavior.
-		q += " AND user_id=? AND COALESCE(workspace_id,'')<>''"
-		args = append(args, userID)
-		if !*p.IsPublic {
-			q += ` AND EXISTS (
-				SELECT 1 FROM workspaces private_workspace
-				 WHERE private_workspace.id=conversations.workspace_id
-				   AND ` + workspaceMemberCapabilityPredicate("private_workspace", "can_private_conversations") + `
-			)`
-			args = append(args, workspaceMemberCapabilityArgs(userID)...)
-		}
+	// §workspace RBAC: metadata fields (title, model, KB binding, visibility,
+	// project link) are the creator's or a workspace admin's to change. Purely
+	// collaborative state (active branch, pin/archive/star toggles) stays open
+	// to every non-guest member of a shared conversation. Personal rows are
+	// always creator-only under both predicates.
+	metadataTouched := p.Title != nil || p.ProjectID != nil || p.ModelID != nil ||
+		p.Provider != nil || p.Fast != nil || p.KBIDs != nil || p.RAGMode != nil || p.IsPublic != nil
+	var q string
+	if metadataTouched {
+		args = append(args, workspaceResourceManagerArgs(userID)...)
+		q = "UPDATE conversations SET " + strings.Join(parts, ", ") +
+			" WHERE id=? AND " + workspaceResourceManagerPredicate("conversations")
+	} else {
+		args = append(args, conversationMemberMutationArgs(userID)...)
+		q = "UPDATE conversations SET " + strings.Join(parts, ", ") +
+			" WHERE id=? AND " + conversationMemberMutationPredicate("conversations")
+	}
+	if p.IsPublic != nil && !*p.IsPublic && workspaceID != "" {
+		// Making a workspace conversation private additionally requires the
+		// private-conversation capability for ordinary members (admins bypass
+		// it via the capability predicate itself).
+		q += ` AND EXISTS (
+			SELECT 1 FROM workspaces private_workspace
+			 WHERE private_workspace.id=conversations.workspace_id
+			   AND ` + workspaceMemberCapabilityPredicate("private_workspace", "can_private_conversations") + `
+		)`
+		args = append(args, workspaceMemberCapabilityArgs(userID)...)
 	}
 	if workspaceID == "" {
 		res, err := db.ExecContext(ctx, q, args...)
@@ -520,6 +536,12 @@ func UpdateConversation(ctx context.Context, db *sql.DB, id, userID string, p Co
 		return nil, rowsErr
 	} else if n != 1 {
 		return nil, ErrNotFound
+	}
+	if p.IsPublic != nil && workspaceID != "" {
+		if err := recordWorkspaceAudit(ctx, tx, workspaceID, userID, AuditResourceVisibilityChanged,
+			"conversation", id, map[string]any{"is_public": *p.IsPublic}); err != nil {
+			return nil, err
+		}
 	}
 	updated, err := scanConversationWithCreator(tx.QueryRowContext(ctx,
 		`SELECT c.id, c.user_id, COALESCE(c.project_id, ''), c.title, c.provider, c.model_id, c.fast, c.kb_ids, c.rag_mode, c.summary_blocks, COALESCE(c.active_leaf_id, ''), c.provider_state, c.pinned, c.archived, c.starred, c.created_at, c.updated_at, COALESCE(c.inline_source_conv, ''), COALESCE(c.inline_parent_id, ''), COALESCE(c.inline_quote, ''), COALESCE(c.workspace_id, ''), c.is_public, COALESCE(u.name,''), COALESCE(u.settings,'')
@@ -652,7 +674,23 @@ func DeleteConversationWithState(ctx context.Context, db *sql.DB, id, userID str
 		}
 		return nil, err
 	}
-	if ownerID != userID {
+	creator := ownerID == userID
+	// §workspace RBAC: the creator or a workspace admin may delete a workspace
+	// conversation. Admins act on the whole inline subtree, mirroring their
+	// authority over every workspace resource.
+	adminManager := false
+	if !creator && workspaceID != "" {
+		if err := tx.QueryRowContext(ctx,
+			`SELECT EXISTS (SELECT 1 FROM workspaces w
+			  WHERE w.id=? AND (w.owner_id=? OR EXISTS (
+			    SELECT 1 FROM workspace_members dm
+			     WHERE dm.workspace_id=w.id AND dm.user_id=? AND `+isAdminRoleSQL("dm.role")+`
+			  )))`, workspaceID, userID, userID,
+		).Scan(&adminManager); err != nil {
+			return nil, err
+		}
+	}
+	if !creator && !adminManager {
 		return nil, ErrNotFound
 	}
 	// Membership revocation takes this same workspace lock. The authorization
@@ -671,12 +709,12 @@ func DeleteConversationWithState(ctx context.Context, db *sql.DB, id, userID str
 	} else if n != 1 {
 		return nil, ErrNotFound
 	}
-	authArgs := []any{id, userID}
-	authArgs = append(authArgs, workspaceResourceAccessArgs(userID)...)
+	managerArgs := []any{id}
+	managerArgs = append(managerArgs, workspaceResourceManagerArgs(userID)...)
 	var exists int
 	if err := tx.QueryRowContext(ctx,
 		`SELECT 1 FROM conversations
-		  WHERE id=? AND user_id=? AND `+conversationResourceAccessPredicate("conversations"), authArgs...,
+		  WHERE id=? AND `+workspaceResourceManagerPredicate("conversations"), managerArgs...,
 	).Scan(&exists); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -687,9 +725,12 @@ func DeleteConversationWithState(ctx context.Context, db *sql.DB, id, userID str
 	if err != nil {
 		return nil, err
 	}
-	children, err = conversationIDsOwnedBy(ctx, tx, children, userID)
-	if err != nil {
-		return nil, err
+	if !adminManager || creator {
+		// Deleting your own conversation only takes the descendants you own.
+		children, err = conversationIDsOwnedBy(ctx, tx, children, userID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	ids := append([]string{id}, children...)
 	storagePaths, err := storagePathsForConversationIDs(ctx, tx, ids)
@@ -700,12 +741,10 @@ func DeleteConversationWithState(ctx context.Context, db *sql.DB, id, userID str
 		return nil, err
 	}
 	deleteArgs := anySlice(ids)
-	deleteArgs = append(deleteArgs, userID)
-	deleteArgs = append(deleteArgs, workspaceResourceAccessArgs(userID)...)
+	deleteArgs = append(deleteArgs, workspaceResourceManagerArgs(userID)...)
 	res, err := tx.ExecContext(ctx,
 		`DELETE FROM conversations
-		  WHERE id IN (`+idPlaceholders(len(ids))+`) AND user_id=?
-		    AND `+conversationResourceAccessPredicate("conversations"), deleteArgs...)
+		  WHERE id IN (`+idPlaceholders(len(ids))+`) AND `+workspaceResourceManagerPredicate("conversations"), deleteArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -1012,11 +1051,11 @@ func createMessage(ctx context.Context, db *sql.DB, m Message, userID string) (*
 			return nil, ErrNotFound
 		}
 		accessArgs := []any{m.ConversationID}
-		accessArgs = append(accessArgs, workspaceResourceAccessArgs(userID)...)
+		accessArgs = append(accessArgs, conversationMemberMutationArgs(userID)...)
 		var allowed int
 		if err := tx.QueryRowContext(ctx,
 			`SELECT 1 FROM conversations c
-			  WHERE c.id=? AND `+conversationResourceAccessPredicate("c"), accessArgs...,
+			  WHERE c.id=? AND `+conversationMemberMutationPredicate("c"), accessArgs...,
 		).Scan(&allowed); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil, ErrNotFound
@@ -1347,13 +1386,13 @@ func FinishMessageForUser(ctx context.Context, db *sql.DB, id, expectedConvID, u
 	}
 
 	accessArgs := []any{id, expectedConvID, userID}
-	accessArgs = append(accessArgs, workspaceResourceAccessArgs(userID)...)
+	accessArgs = append(accessArgs, conversationMemberMutationArgs(userID)...)
 	var allowed int
 	err = tx.QueryRowContext(ctx,
 		`SELECT 1
 		   FROM messages m JOIN conversations c ON c.id=m.conversation_id
 		  WHERE m.id=? AND m.conversation_id=? AND COALESCE(m.author_id,'')=?
-		    AND `+conversationResourceAccessPredicate("c"), accessArgs...,
+		    AND `+conversationMemberMutationPredicate("c"), accessArgs...,
 	).Scan(&allowed)
 	if errors.Is(err, sql.ErrNoRows) {
 		// This row was created while access was valid. Revocation is allowed to
@@ -1456,12 +1495,15 @@ func updateMessageContent(ctx context.Context, db *sql.DB, id, expectedConvID, u
 			return ErrNotFound
 		}
 		accessArgs := []any{id, expectedConvID}
-		accessArgs = append(accessArgs, workspaceResourceAccessArgs(userID)...)
+		// Message edits are mutations. Guests retain read access to shared
+		// conversations but cannot change either their historical prompts or
+		// collaboratively editable assistant replies after a role downgrade.
+		accessArgs = append(accessArgs, conversationMemberMutationArgs(userID)...)
 		if err := tx.QueryRowContext(ctx,
 			`SELECT m.conversation_id, m.role, m.created_at, COALESCE(m.author_id,'')
 			   FROM messages m JOIN conversations c ON c.id=m.conversation_id
 			  WHERE m.id=? AND m.conversation_id=?
-			    AND `+conversationResourceAccessPredicate("c"), accessArgs...,
+			    AND `+conversationMemberMutationPredicate("c"), accessArgs...,
 		).Scan(&convID, &role, &createdAt, &authorID); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return ErrNotFound
@@ -1495,10 +1537,10 @@ func updateMessageContent(ctx context.Context, db *sql.DB, id, expectedConvID, u
 	if expectedConvID != "" {
 		updateSQL += ` AND conversation_id=? AND EXISTS (
 			SELECT 1 FROM conversations c
-			 WHERE c.id=messages.conversation_id AND ` + conversationResourceAccessPredicate("c") + `
+			 WHERE c.id=messages.conversation_id AND ` + conversationMemberMutationPredicate("c") + `
 		)`
 		updateArgs = append(updateArgs, expectedConvID)
-		updateArgs = append(updateArgs, workspaceResourceAccessArgs(userID)...)
+		updateArgs = append(updateArgs, conversationMemberMutationArgs(userID)...)
 	}
 	res, err := tx.ExecContext(ctx, updateSQL, updateArgs...)
 	if err != nil {
@@ -1577,13 +1619,13 @@ func SetMessageVerifyForUser(ctx context.Context, db *sql.DB, id, expectedConvID
 		}
 	}
 	args := []any{string(verify), id, expectedConvID, userID}
-	args = append(args, workspaceResourceAccessArgs(userID)...)
+	args = append(args, conversationMemberMutationArgs(userID)...)
 	res, err := tx.ExecContext(ctx,
 		`UPDATE messages SET verify=?
 		  WHERE id=? AND conversation_id=? AND role='assistant' AND COALESCE(author_id,'')=? AND status='streaming'
 		    AND EXISTS (
 		      SELECT 1 FROM conversations c
-		       WHERE c.id=messages.conversation_id AND `+conversationResourceAccessPredicate("c")+`
+		       WHERE c.id=messages.conversation_id AND `+conversationMemberMutationPredicate("c")+`
 		    )`, args...)
 	if err != nil {
 		return err
@@ -1781,10 +1823,10 @@ func DeleteRound(ctx context.Context, db *sql.DB, convID, userID, msgID string) 
 		return "", ErrNotFound
 	}
 	accessArgs := []any{convID}
-	accessArgs = append(accessArgs, workspaceResourceAccessArgs(userID)...)
+	accessArgs = append(accessArgs, conversationMemberMutationArgs(userID)...)
 	if err := tx.QueryRowContext(ctx,
 		`SELECT user_id, COALESCE(workspace_id,'') FROM conversations
-		  WHERE id=? AND `+conversationResourceAccessPredicate("conversations"), accessArgs...,
+		  WHERE id=? AND `+conversationMemberMutationPredicate("conversations"), accessArgs...,
 	).Scan(&owner, &workspaceID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", ErrNotFound
@@ -1792,6 +1834,20 @@ func DeleteRound(ctx context.Context, db *sql.DB, convID, userID, msgID string) 
 		return "", err
 	}
 	creator := owner == userID
+	// Workspace admins may delete other members' rounds (§workspace RBAC 9.1);
+	// ordinary members remain limited to their own turns.
+	roundAdmin := false
+	if !creator && workspaceID != "" {
+		if err := tx.QueryRowContext(ctx,
+			`SELECT EXISTS (SELECT 1 FROM workspaces w
+			  WHERE w.id=? AND (w.owner_id=? OR EXISTS (
+			    SELECT 1 FROM workspace_members dm
+			     WHERE dm.workspace_id=w.id AND dm.user_id=? AND `+isAdminRoleSQL("dm.role")+`
+			  )))`, workspaceID, userID, userID,
+		).Scan(&roundAdmin); err != nil {
+			return "", err
+		}
+	}
 
 	var m Message
 	if err := tx.QueryRowContext(ctx,
@@ -1833,8 +1889,9 @@ func DeleteRound(ctx context.Context, db *sql.DB, convID, userID, msgID string) 
 	// The HTTP handler performs the same check for a fast 404, but the store is
 	// the authority: derive the round's user turn under this transaction's lock.
 	// Legacy empty authors belong to the conversation creator and therefore fail
-	// closed for ordinary workspace members.
-	if !creator {
+	// closed for ordinary workspace members. Workspace admins may remove any
+	// round, matching the conversation permission matrix.
+	if !creator && !roundAdmin {
 		roundAuthor := ""
 		switch {
 		case m.Role == "user":

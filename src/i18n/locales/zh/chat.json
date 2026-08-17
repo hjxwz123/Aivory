@@ -699,6 +699,94 @@
         "label": "删除知识库内容",
         "description": "具体知识库同时允许时，可删除、重试或管理其中内容。"
       }
+    },
+    "roleAdmin": "管理员",
+    "roleGuest": "游客",
+    "changeRole": "更改角色",
+    "roleUpdated": "角色已更新。",
+    "roleUpdateFailed": "角色更新失败。",
+    "readOnlyAccess": "只读访问",
+    "inviteOwnerOnly": "只有所有者可以查看当前链接。重置后可生成新链接。",
+    "readOnlyTitle": "只读访问",
+    "readOnlyBody": "你是该工作空间的游客，可以阅读共享对话，但不能发送消息。",
+    "manageTabs": "工作空间管理",
+    "tabMembers": "成员",
+    "tabInvites": "邀请",
+    "tabPolicy": "能力",
+    "transfer": "转移所有权",
+    "transferBody": "接收者将成为工作空间所有者和管理员。你保留管理员角色，但失去所有者专属操作。",
+    "transferConfirmHint": "输入工作空间名称“{{name}}”以确认。",
+    "transferConfirm": "转移",
+    "transferDone": "所有权已转移。",
+    "transferFailed": "所有权转移失败。",
+    "transferNoCandidates": "没有其他可接收的成员。",
+    "newInvite": "新邀请",
+    "inviteRole": "邀请角色",
+    "inviteEmailOptional": "绑定邮箱（可选）",
+    "inviteExpires": "有效期",
+    "inviteNeverExpires": "永久",
+    "inviteMaxUses": "次数上限",
+    "inviteCreate": "创建邀请",
+    "inviteCreated": "邀请已创建。",
+    "inviteCreateFailed": "创建邀请失败。",
+    "inviteHint": "次数上限留 0 表示不限次。通用邀请默认加入为只读游客。",
+    "invitesLoadFailed": "邀请列表加载失败。",
+    "invitesEmpty": "还没有邀请。",
+    "inviteRevokedLabel": "已撤销",
+    "inviteExpired": "已过期",
+    "inviteExhausted": "已用尽",
+    "inviteActive": "有效",
+    "inviteUses": "已用 {{used}}/{{max}} 次",
+    "inviteRevoke": "撤销邀请",
+    "inviteRevoked": "邀请已撤销。",
+    "inviteRevokeFailed": "撤销邀请失败。",
+    "policyLoadFailed": "工作空间策略加载失败。",
+    "policySaved": "工作空间能力已更新。",
+    "policySaveFailed": "工作空间策略更新失败。",
+    "policy": {
+      "AllowSandbox": {
+        "label": "Python 沙盒",
+        "description": "运行 python_execute / code_interpreter 工具。"
+      },
+      "AllowImageGeneration": {
+        "label": "图片生成",
+        "description": "图片模型与图片工具。"
+      },
+      "AllowKnowledgeBases": {
+        "label": "知识库",
+        "description": "创建并使用工作空间知识库和项目。"
+      },
+      "AllowFileUpload": {
+        "label": "文件上传",
+        "description": "在工作空间对话中附加文件。"
+      },
+      "modelAllowlist": "允许的模型",
+      "allModels": "全部模型",
+      "allModelsHint": "本工作空间可使用平台提供的全部模型。",
+      "noModels": "暂无可用模型。",
+      "creditLimit": "成员月度额度",
+      "creditLimitHint": "0 表示不限。达到额度的成员不能再在该工作空间发起新对话轮次。"
+    },
+    "tabAudit": "审计",
+    "audit": {
+      "loadFailed": "审计日志加载失败。",
+      "empty": "还没有审计记录。",
+      "target": "{{type}}",
+      "actions": {
+        "workspace.created": "创建工作空间",
+        "workspace.deleted": "删除工作空间",
+        "workspace.transferred": "所有权转移",
+        "member.joined": "成员加入",
+        "member.left": "成员退出",
+        "member.removed": "成员被移除",
+        "member.role_updated": "角色变更",
+        "member.permissions_updated": "成员限制变更",
+        "invite.created": "创建邀请",
+        "invite.used": "使用邀请",
+        "invite.revoked": "撤销邀请",
+        "resource.visibility_changed": "资源可见范围变更",
+        "policy.updated": "能力策略变更"
+      }
     }
   },
   "attachmentDeleted": "文件已删除"

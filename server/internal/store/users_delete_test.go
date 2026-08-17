@@ -78,6 +78,33 @@ func TestDeleteUserRemovesOwnedFilesDocumentsAndStorage(t *testing.T) {
 	}
 }
 
+func TestDeleteUserRevokesInvitesCreatedInAnotherWorkspace(t *testing.T) {
+	ctx := context.Background()
+	fx := newRBACFixture(t)
+	exec(t, fx.db, `INSERT INTO users(id,email,password_hash,role,status) VALUES('departing','departing@example.test','h','user','active')`)
+	if err := JoinWorkspace(ctx, fx.db, fx.workspaceID, "departing"); err != nil {
+		t.Fatalf("join departing user: %v", err)
+	}
+	if _, err := UpdateWorkspaceMemberRole(ctx, fx.db, fx.workspaceID, "owner", "departing", WorkspaceRoleAdmin); err != nil {
+		t.Fatalf("promote departing user: %v", err)
+	}
+	invite, err := CreateWorkspaceInvite(ctx, fx.db, fx.workspaceID, "departing", "", WorkspaceRoleMember, 0, 1)
+	if err != nil {
+		t.Fatalf("create departing invite: %v", err)
+	}
+
+	if err := DeleteUser(ctx, fx.db, "departing"); err != nil {
+		t.Fatalf("delete invite creator: %v", err)
+	}
+	if _, err := GetWorkspaceInvitePreview(ctx, fx.db, invite.Token); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleted creator invite preview=%v, want ErrNotFound", err)
+	}
+	var inviteCount int
+	if err := fx.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM workspace_invites WHERE id=?`, invite.ID).Scan(&inviteCount); err != nil || inviteCount != 0 {
+		t.Fatalf("deleted creator invite count=%d err=%v, want 0", inviteCount, err)
+	}
+}
+
 func TestDeleteUserPreservesWorkspaceResourcesAndTransfersOwnership(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

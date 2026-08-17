@@ -236,6 +236,14 @@ func Migrate(db *sql.DB) error {
 	addWorkspaceCanCreateKB := `ALTER TABLE workspace_members ADD COLUMN can_create_kb INTEGER NOT NULL DEFAULT 1`
 	addWorkspaceCanAddKBFiles := `ALTER TABLE workspace_members ADD COLUMN can_add_kb_files INTEGER NOT NULL DEFAULT 1`
 	addWorkspaceCanDeleteKBContent := `ALTER TABLE workspace_members ADD COLUMN can_delete_kb_content INTEGER NOT NULL DEFAULT 1`
+	addWorkspaceInvitePurpose := `ALTER TABLE workspace_invites ADD COLUMN purpose TEXT NOT NULL DEFAULT 'manual'`
+	// A durable deletion fence prevents creations from racing a multi-step
+	// workspace teardown. It is reset when a recoverable teardown fails.
+	addWorkspaceDeleting := `ALTER TABLE workspaces ADD COLUMN deleting INTEGER NOT NULL DEFAULT 0`
+	// §workspace RBAC phase 2 — private/workspace visibility on projects and
+	// knowledge bases. Existing shared rows stay shared (DEFAULT 1).
+	addKBIsPublic := `ALTER TABLE knowledge_bases ADD COLUMN is_public INTEGER NOT NULL DEFAULT 1`
+	addProjectIsPublic := `ALTER TABLE projects ADD COLUMN is_public INTEGER NOT NULL DEFAULT 1`
 	// §fast-mode: the admin's single fast model, plus the per-conversation and
 	// per-message markers that let the user boundary mask the real model name.
 	addModelFast := `ALTER TABLE models ADD COLUMN fast INTEGER NOT NULL DEFAULT 0`
@@ -350,6 +358,10 @@ func Migrate(db *sql.DB) error {
 		addWorkspaceCanCreateKB = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_create_kb INTEGER NOT NULL DEFAULT 1`
 		addWorkspaceCanAddKBFiles = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_add_kb_files INTEGER NOT NULL DEFAULT 1`
 		addWorkspaceCanDeleteKBContent = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_delete_kb_content INTEGER NOT NULL DEFAULT 1`
+		addWorkspaceInvitePurpose = `ALTER TABLE workspace_invites ADD COLUMN IF NOT EXISTS purpose TEXT NOT NULL DEFAULT 'manual'`
+		addWorkspaceDeleting = `ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS deleting INTEGER NOT NULL DEFAULT 0`
+		addKBIsPublic = `ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS is_public INTEGER NOT NULL DEFAULT 1`
+		addProjectIsPublic = `ALTER TABLE projects ADD COLUMN IF NOT EXISTS is_public INTEGER NOT NULL DEFAULT 1`
 		addModelFast = `ALTER TABLE models ADD COLUMN IF NOT EXISTS fast INTEGER NOT NULL DEFAULT 0`
 		addConvFast = `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS fast INTEGER NOT NULL DEFAULT 0`
 		addMsgFast = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS fast INTEGER NOT NULL DEFAULT 0`
@@ -408,7 +420,8 @@ func Migrate(db *sql.DB) error {
 		addModelFallbackChannel, addUsageChannel, addUsageFallback, addUsageStatus, addUsageError,
 		addUsageRequestMethod, addUsageRequestURL, addUsageRequestHeaders, addUsageRequestBody, addUsageTTFTFallback,
 		addFileDraft, addDocumentIngestUpdatedAt, addDocumentUploader,
-		addWorkspaceCanCreateProjects, addWorkspaceCanPrivateConversations, addWorkspaceCanCreateKB, addWorkspaceCanAddKBFiles, addWorkspaceCanDeleteKBContent,
+		addWorkspaceCanCreateProjects, addWorkspaceCanPrivateConversations, addWorkspaceCanCreateKB, addWorkspaceCanAddKBFiles, addWorkspaceCanDeleteKBContent, addWorkspaceInvitePurpose, addWorkspaceDeleting,
+		addKBIsPublic, addProjectIsPublic,
 		addModelFast, addConvFast, addMsgFast,
 		addSkillDisplayDescription, addUserSkillIcon, addMsgSelectedUserSkills,
 		addRedeemKind, addRedeemCredits, addRedemptionCredits,
@@ -418,6 +431,22 @@ func Migrate(db *sql.DB) error {
 		addOAuthIssuerURL, addOAuthJWKSURL, addOAuthSubjectNamespace,
 	} {
 		_, _ = db.Exec(ddl)
+	}
+	if err := migrateWorkspaceInviteCreatorReference(db); err != nil {
+		return fmt.Errorf("migrate workspace invite creator reference: %w", err)
+	}
+	// §workspace RBAC: the pre-RBAC member role 'owner' collapses into 'admin'.
+	// workspaces.owner_id remains the single source of owner-exclusive authority.
+	if _, err := db.Exec(`UPDATE workspace_members SET role='admin' WHERE COALESCE(role,'')='owner'`); err != nil {
+		return fmt.Errorf("migrate workspace member roles: %w", err)
+	}
+	// A malformed role must fail closed even before a request reaches the SQL
+	// predicates. Existing legacy owners were normalized above; every other
+	// unknown value becomes the read-only guest role.
+	if _, err := db.Exec(`UPDATE workspace_members
+		SET role='guest'
+		WHERE COALESCE(role,'') NOT IN ('admin','member','guest')`); err != nil {
+		return fmt.Errorf("normalize invalid workspace member roles: %w", err)
 	}
 	// Before generic OIDC gained issuer/JWKS verification, custom UserInfo
 	// providers were persisted as kind=oidc. Only rows from that legacy shape
@@ -515,13 +544,15 @@ func Migrate(db *sql.DB) error {
 		"mcp_servers":                     {"id", "name", "icon", "description", "url", "headers", "enabled", "discovered_tools", "protocol_version", "last_error", "last_synced_at", "created_at", "updated_at"},
 		"refresh_tokens":                  {"session_id", "user_agent", "ip", "location", "last_seen"},
 		"conversations":                   {"inline_source_conv", "inline_parent_id", "inline_quote", "workspace_id", "is_public", "fast"},
-		"projects":                        {"workspace_id"},
-		"knowledge_bases":                 {"workspace_id"},
+		"projects":                        {"workspace_id", "is_public"},
+		"knowledge_bases":                 {"workspace_id", "is_public"},
 		"chunks":                          {"image_ref"},
 		"files":                           {"draft"},
 		"documents":                       {"ingest_updated_at", "uploaded_by_user_id"},
 		"knowledge_base_shares":           {"kb_id", "user_id", "role", "created_at", "updated_at"},
 		"workspace_members":               {"workspace_id", "user_id", "role", "can_create_projects", "can_private_conversations", "can_create_kb", "can_add_kb_files", "can_delete_kb_content", "joined_at"},
+		"workspace_invites":               {"id", "workspace_id", "token", "email", "role", "expires_at", "max_uses", "used_count", "created_by", "purpose", "revoked_at", "created_at"},
+		"workspaces":                      {"id", "name", "owner_id", "invite_token", "deleting", "created_at"},
 		"workspace_kb_member_permissions": {"kb_id", "user_id", "can_add_files", "can_delete_content", "updated_at"},
 		"redeem_codes":                    {"kind", "credits"},
 		"redeem_redemptions":              {"credits"},

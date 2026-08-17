@@ -271,14 +271,18 @@ export interface ApiSharedConversation {
 }
 
 /** Workspace (§workspaces) — fully-isolated collaborative space. */
+export type ApiWorkspaceRole = 'admin' | 'member' | 'guest'
 export interface ApiWorkspace {
   id: string
   name: string
   owner_id: string
-  /** Present only for the owner. */
-  invite_token?: string
+  /** Deprecated compatibility field. Workspace joins use governed invite records. */
+	invite_token?: string
   created_at: number
-  role?: 'owner' | 'member'
+  /** Requesting user's role (owner rows read as 'admin'). */
+  role?: ApiWorkspaceRole
+  /** Whether the requesting user is the canonical workspace owner. */
+  is_owner?: boolean
   member_count?: number
   owner_name?: string
   can_create_projects: boolean
@@ -290,7 +294,9 @@ export interface ApiWorkspace {
 
 export interface ApiWorkspaceMember {
   user_id: string
-  role: 'owner' | 'member'
+  role: ApiWorkspaceRole
+  /** Canonical workspace owner marker (their role is always 'admin'). */
+  is_owner: boolean
   joined_at: number
   name: string
   email: string
@@ -308,6 +314,60 @@ export interface ApiWorkspaceMemberPermissions {
   can_create_kb: boolean
   can_add_kb_files: boolean
   can_delete_kb_content: boolean
+}
+
+/** §workspace RBAC phase 3 — invite record (admin-only surface). */
+export interface ApiWorkspaceInvite {
+  id: string
+  workspace_id: string
+  token: string
+  email: string
+  role: ApiWorkspaceRole
+  expires_at: number
+  max_uses: number
+  used_count: number
+  created_by: string
+  creator_name?: string
+  revoked_at: number
+  created_at: number
+}
+
+/** §workspace RBAC phase 4 — workspace capability policy. */
+export interface ApiWorkspacePolicy {
+  WorkspaceID: string
+  AllowedModelIDs: string[]
+  AllowedToolIDs: string[]
+  AllowedMCPServerIDs: string[]
+  AllowSandbox: boolean
+  AllowImageGeneration: boolean
+  AllowKnowledgeBases: boolean
+  AllowFileUpload: boolean
+  MemberMonthlyCreditLimit: number
+  UpdatedBy: string
+  UpdatedAt: number
+}
+
+export interface ApiWorkspaceUsageRow {
+  user_id: string
+  name: string
+  email: string
+  messages: number
+  input_tokens: number
+  output_tokens: number
+  credits: number
+}
+
+/** §workspace RBAC phase 5 — audit trail row (admin-only surface). */
+export interface ApiWorkspaceAuditLog {
+  id: string
+  workspace_id: string
+  actor_user_id: string
+  actor_name: string
+  action: string
+  target_type: string
+  target_id: string
+  metadata: Record<string, unknown>
+  created_at: number
 }
 
 /** Membership tier (§ user groups). */
@@ -383,7 +443,8 @@ export interface ApiKnowledgeBaseUploader {
 export interface ApiWorkspaceKnowledgeBaseMemberPermission {
   kb_id: string
   user_id: string
-  role: 'owner' | 'member'
+  role: ApiWorkspaceRole
+  is_owner: boolean
   name: string
   email: string
   avatar_url?: string
@@ -899,6 +960,8 @@ export interface ApiProject {
   updated_at: number
   /** §workspaces */
   workspace_id?: string
+  /** §workspace RBAC: shared with the workspace (true) or creator-private. */
+  is_public?: boolean
   /** Effective project-library capabilities. Detail responses always include
    * these; list/create/update responses may omit them. */
   can_upload_files?: boolean
@@ -912,6 +975,8 @@ export interface ApiKnowledgeBase {
   name: string
   description: string
   workspace_id?: string
+  /** §workspace RBAC: shared with the workspace (true) or creator-private. */
+  is_public?: boolean
   access_role?: 'owner' | 'read' | 'write' | 'workspace'
   owner_name?: string
   can_share?: boolean

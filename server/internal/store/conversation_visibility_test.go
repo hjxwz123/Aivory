@@ -44,14 +44,20 @@ func TestWorkspaceConversationVisibilityIsPrivateByDefaultAndCreatorControlled(t
 	if _, err := GetConversation(ctx, db, conversation.ID, "creator"); err != nil {
 		t.Fatalf("creator cannot read private conversation: %v", err)
 	}
-	for _, userID := range []string{"workspace-owner", "member"} {
-		if _, err := GetConversation(ctx, db, conversation.ID, userID); !errors.Is(err, ErrNotFound) {
-			t.Fatalf("%s private read error=%v, want ErrNotFound", userID, err)
-		}
-		rows, listErr := ListWorkspaceConversationsForUser(ctx, db, workspace.ID, "", "active", userID, 20, 0)
-		if listErr != nil || len(rows) != 0 {
-			t.Fatalf("%s private list=%v err=%v, want empty", userID, rows, listErr)
-		}
+	// §workspace RBAC: workspace admins (the canonical owner here) see every
+	// conversation, private ones included; ordinary members see only their own
+	// private rows.
+	if _, err := GetConversation(ctx, db, conversation.ID, "workspace-owner"); err != nil {
+		t.Fatalf("workspace admin cannot read private conversation: %v", err)
+	}
+	if rows, listErr := ListWorkspaceConversationsForUser(ctx, db, workspace.ID, "", "active", "workspace-owner", 20, 0); listErr != nil || len(rows) != 1 {
+		t.Fatalf("workspace admin private list=%v err=%v, want the private row", rows, listErr)
+	}
+	if _, err := GetConversation(ctx, db, conversation.ID, "member"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("member private read error=%v, want ErrNotFound", err)
+	}
+	if rows, listErr := ListWorkspaceConversationsForUser(ctx, db, workspace.ID, "", "active", "member", 20, 0); listErr != nil || len(rows) != 0 {
+		t.Fatalf("member private list=%v err=%v, want empty", rows, listErr)
 	}
 
 	makePublic := true

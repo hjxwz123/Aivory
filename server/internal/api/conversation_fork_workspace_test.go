@@ -83,10 +83,13 @@ func TestForkWorkspaceConversationStaysInWorkspaceAndDefaultsPrivate(t *testing.
 	if _, err := store.GetConversation(t.Context(), db, forked.ID, "forker"); err != nil {
 		t.Fatalf("fork creator cannot read fork: %v", err)
 	}
-	for _, userID := range []string{"source-creator", "workspace-owner"} {
-		if _, err := store.GetConversation(t.Context(), db, forked.ID, userID); !errors.Is(err, store.ErrNotFound) {
-			t.Fatalf("%s private fork read error=%v, want ErrNotFound", userID, err)
-		}
+	// §workspace RBAC: ordinary members cannot read another member's private
+	// fork, but workspace admins (the canonical owner) see every conversation.
+	if _, err := store.GetConversation(t.Context(), db, forked.ID, "source-creator"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("source-creator private fork read error=%v, want ErrNotFound", err)
+	}
+	if _, err := store.GetConversation(t.Context(), db, forked.ID, "workspace-owner"); err != nil {
+		t.Fatalf("workspace admin cannot read private fork: %v", err)
 	}
 
 	messages, err := store.ListAllMessages(t.Context(), db, forked.ID)

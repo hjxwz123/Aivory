@@ -46,6 +46,8 @@ func openKBPermissionTestDB(t *testing.T) *sql.DB {
 	exec(t, db, `INSERT INTO documents(id,kb_id,filename,mime_type,size_bytes,status,storage_path) VALUES
 		('personal-document','personal-kb','personal.txt','text/plain',1,'ready',''),
 		('workspace-document','workspace-kb','workspace.txt','text/plain',1,'ready','')`)
+	exec(t, db, `INSERT INTO documents(id,kb_id,filename,mime_type,size_bytes,status,storage_path,uploaded_by_user_id) VALUES
+		('member-document','workspace-kb','member-upload.txt','text/plain',1,'ready','','member')`)
 	exec(t, db, `INSERT INTO documents(id,conversation_id,filename,mime_type,size_bytes,status,storage_path) VALUES
 		('personal-conversation-document','personal-conversation','personal-chat.txt','text/plain',1,'ready',''),
 		('workspace-conversation-document','workspace-conversation','workspace-chat.txt','text/plain',1,'ready','')`)
@@ -137,7 +139,10 @@ func TestDeleteKBDocumentRequiresResourceManager(t *testing.T) {
 		{name: "personal non-creator", documentID: "personal-document", kbID: "personal-kb", actor: "member"},
 		{name: "workspace owner", documentID: "workspace-document", kbID: "workspace-kb", actor: "owner", wantAllowed: true},
 		{name: "workspace current creator", documentID: "workspace-document", kbID: "workspace-kb", actor: "creator", wantAllowed: true},
-		{name: "workspace ordinary member with default permissions", documentID: "workspace-document", kbID: "workspace-kb", actor: "member", wantAllowed: true},
+		// §workspace RBAC: ordinary members may delete only documents they
+		// uploaded themselves — never other members' content.
+		{name: "workspace ordinary member deleting another member's document", documentID: "workspace-document", kbID: "workspace-kb", actor: "member"},
+		{name: "workspace ordinary member deleting own upload", documentID: "member-document", kbID: "workspace-kb", actor: "member", wantAllowed: true},
 		{name: "workspace former creator", documentID: "workspace-document", kbID: "workspace-kb", actor: "creator", revokeCreator: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

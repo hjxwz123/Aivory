@@ -68,7 +68,12 @@
     "renamed": "文件已重命名",
     "renameFailed": "无法重命名文件",
     "loadFailedTitle": "无法加载此知识库",
-    "chunkCount": "{{count}} 个切片"
+    "chunkCount": "{{count}} 个切片",
+    "makePrivate": "设为私有",
+    "makeShared": "共享到工作空间",
+    "visibilityPrivate": "知识库已设为私有，仅你和管理员可见。",
+    "visibilityShared": "知识库已共享给工作空间全体成员。",
+    "visibilityFailed": "更新可见范围失败。"
   },
   "groupPermissionTitle": "知识库不可用",
   "groupPermissionRequired": "所在用户组无知识库权限。",
@@ -110,7 +115,7 @@
     "member": "成员",
     "addFiles": "添加文件",
     "deleteContent": "删除内容",
-    "manager": "工作空间创建者或知识库创建者",
+    "manager": "工作空间所有者、管理员或知识库创建者",
     "disabledByWorkspace": "成员总权限已关闭",
     "loadFailed": "无法加载工作空间成员。",
     "empty": "工作空间暂无成员。"

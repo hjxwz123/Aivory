@@ -69,7 +69,12 @@
     "renameFailed": "Could not rename file",
     "loadFailedTitle": "Could not load this knowledge base",
     "chunkCount_one": "{{count}} chunk",
-    "chunkCount_other": "{{count}} chunks"
+    "chunkCount_other": "{{count}} chunks",
+    "makePrivate": "Make private",
+    "makeShared": "Share with workspace",
+    "visibilityPrivate": "Knowledge base is now private to you and workspace admins.",
+    "visibilityShared": "Knowledge base is now shared with the workspace.",
+    "visibilityFailed": "Could not update the visibility."
   },
   "groupPermissionTitle": "Knowledge bases unavailable",
   "groupPermissionRequired": "Your user group does not have knowledge-base access.",
@@ -111,7 +116,7 @@
     "member": "Member",
     "addFiles": "Add files",
     "deleteContent": "Delete content",
-    "manager": "Workspace owner or knowledge-base creator",
+    "manager": "Workspace owner, admin or library creator",
     "disabledByWorkspace": "Disabled for member",
     "loadFailed": "Could not load workspace members.",
     "empty": "No workspace members."

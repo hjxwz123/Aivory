@@ -91,7 +91,7 @@ func TestListUserImageArtifactsSeparatesSelfServiceAndAdminScopes(t *testing.T) 
 	assertGallery(ListUserImageArtifactsForUser, "self", "gallery-owner", "gallery-owner-artifact")
 	assertGallery(ListUserImageArtifacts, "admin", "gallery-member", "gallery-member-artifact")
 	assertGallery(ListUserImageArtifacts, "admin", "gallery-owner", "gallery-owner-artifact")
-	if err := RemoveWorkspaceMember(ctx, db, workspace.ID, "gallery-member"); err != nil {
+	if err := RemoveWorkspaceMember(ctx, db, workspace.ID, "gallery-owner", "gallery-member"); err != nil {
 		t.Fatalf("kick member: %v", err)
 	}
 	// c.user_id is still gallery-member, which was the old vulnerable predicate.

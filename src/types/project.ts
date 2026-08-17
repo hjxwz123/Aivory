@@ -47,6 +47,12 @@ export interface Project {
   createdAt: number
   updatedAt: number
   pinned?: boolean
+  /** §workspaces: '' in the personal space, set inside a workspace. */
+  workspaceId?: string
+  /** §workspace RBAC: creator id — used to gate scope management. */
+  userId?: string
+  /** §workspace RBAC: shared with the workspace (true) or creator-private. */
+  isPublic?: boolean
   /** Present after the detail endpoint has resolved effective authorization. */
   canUploadFiles?: boolean
   canDeleteContent?: boolean

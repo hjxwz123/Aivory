@@ -1880,7 +1880,9 @@
     "deleteTitle": "Delete this workspace?",
     "deleteBody": "Every conversation, project and knowledge base inside is removed and all members lose access. This cannot be undone.",
     "roleOwner": "Owner",
-    "roleMember": "Member"
+    "roleMember": "Member",
+    "roleAdmin": "Admin",
+    "roleGuest": "Guest"
   },
   "userFeedback": {
     "title": "User feedback",

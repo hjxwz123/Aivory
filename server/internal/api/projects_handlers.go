@@ -35,6 +35,8 @@ type projectResponse struct {
 	CreatedAt      int64  `json:"created_at"`
 	UpdatedAt      int64  `json:"updated_at"`
 	WorkspaceID    string `json:"workspace_id,omitempty"`
+	// §workspace RBAC: shared with the workspace (true) or creator-private.
+	IsPublic bool `json:"is_public"`
 	// Effective capabilities are populated on detail responses. List responses
 	// omit them to avoid authorization queries per project.
 	CanUploadFiles   *bool `json:"can_upload_files,omitempty"`
@@ -47,7 +49,7 @@ func userProject(p store.Project) projectResponse {
 		ID: p.ID, UserID: p.UserID, Name: p.Name, Description: p.Description,
 		Instructions: p.Instructions, Accent: p.Accent, Emoji: p.Emoji, Pinned: p.Pinned,
 		KBID: p.KBID, AutoAddUploads: p.AutoAddUploads, CreatedAt: p.CreatedAt,
-		UpdatedAt: p.UpdatedAt, WorkspaceID: p.WorkspaceID,
+		UpdatedAt: p.UpdatedAt, WorkspaceID: p.WorkspaceID, IsPublic: p.IsPublic,
 	}
 }
 
@@ -128,6 +130,8 @@ type createProjectReq struct {
 	// '' = personal; set = create INSIDE that workspace (§workspaces, membership
 	// validated server-side). Both members and the owner may create.
 	WorkspaceID string `json:"workspace_id"`
+	// §workspace RBAC: shared with the workspace (default) or creator-private.
+	IsPublic *bool `json:"is_public"`
 }
 
 // groupCapFor returns the user's effective per-group resource caps (§ user
@@ -172,6 +176,12 @@ func createProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, errWorkspaceProjectCreationPermission)
 			return
 		}
+		// §workspace RBAC phase 4: projects implicitly create a knowledge
+		// library, so the workspace KB switch gates them too.
+		if err := enforceWorkspaceKnowledgeBasePolicy(r.Context(), d.DB, req.WorkspaceID); err != nil {
+			writeError(w, workspacePolicyErrorStatus(err), err)
+			return
+		}
 	}
 	if existing, err := store.GetProjectByName(r.Context(), d.DB, u.ID, req.Name); err == nil && existing != nil {
 		writeError(w, 409, store.ErrProjectNameExists)
@@ -186,12 +196,18 @@ func createProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// Project libraries use the same administrator-selected embedding model as
 	// standalone knowledge bases. The model identity remains server-side; a
 	// user cannot choose or override it through the project request.
+	// §workspace RBAC: workspace projects default to shared; the creator may
+	// opt into private at creation.
+	isPublic := true
+	if req.IsPublic != nil {
+		isPublic = *req.IsPublic
+	}
 	embed, err := configuredEmbeddingModel(r.Context(), d)
 	if err != nil {
 		// Allow project without KB if no embedding model.
 		p, err := store.CreateProjectWithLimit(r.Context(), d.DB, store.Project{
 			UserID: u.ID, Name: req.Name, Description: req.Description, Instructions: req.Instructions,
-			Accent: req.Accent, Emoji: req.Emoji, WorkspaceID: req.WorkspaceID,
+			Accent: req.Accent, Emoji: req.Emoji, WorkspaceID: req.WorkspaceID, IsPublic: isPublic,
 		}, maxProjects)
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) && req.WorkspaceID != "" {
@@ -214,11 +230,11 @@ func createProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	p, err := store.CreateProjectWithLibraryAndLimit(r.Context(), d.DB, store.Project{
 		UserID: u.ID, Name: req.Name, Description: req.Description, Instructions: req.Instructions,
-		Accent: req.Accent, Emoji: req.Emoji, WorkspaceID: req.WorkspaceID,
+		Accent: req.Accent, Emoji: req.Emoji, WorkspaceID: req.WorkspaceID, IsPublic: isPublic,
 	}, store.KnowledgeBase{
 		UserID: u.ID, Name: req.Name + " — project library",
 		EmbeddingModelID: embed.ID, EmbeddingDim: embed.Dim,
-		WorkspaceID: req.WorkspaceID,
+		WorkspaceID: req.WorkspaceID, IsPublic: isPublic,
 	}, maxProjects)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) && req.WorkspaceID != "" {
@@ -303,6 +319,25 @@ func updateProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	var projectLibraryBeforeAccess []string
+	var projectLibraryID string
+	// §workspace RBAC: visibility is a workspace concept — personal projects
+	// keep rejecting is_public patches (mirrors conversations).
+	if p.IsPublic != nil {
+		current, err := store.GetProject(r.Context(), d.DB, id, u.ID)
+		if err != nil || current.WorkspaceID == "" {
+			writeError(w, http.StatusNotFound, errNotFound)
+			return
+		}
+		projectLibraryID = current.KBID
+		if projectLibraryID != "" {
+			projectLibraryBeforeAccess, err = store.ListKnowledgeBaseAccessUserIDs(r.Context(), d.DB, projectLibraryID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+		}
+	}
 	if p.Name != nil {
 		name := strings.TrimSpace(*p.Name)
 		p.Name = &name
@@ -326,6 +361,26 @@ func updateProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, 404, errNotFound)
 		return
+	}
+	if p.IsPublic != nil && projectLibraryID != "" {
+		afterAccess, accessErr := store.ListKnowledgeBaseAccessUserIDs(r.Context(), d.DB, projectLibraryID)
+		if accessErr != nil {
+			for _, userID := range projectLibraryBeforeAccess {
+				revokeKnowledgeBaseUserGenerations(d, projectLibraryID, userID)
+			}
+			writeError(w, http.StatusInternalServerError, accessErr)
+			return
+		}
+		affected := make(map[string]struct{}, len(projectLibraryBeforeAccess)+len(afterAccess))
+		for _, userID := range projectLibraryBeforeAccess {
+			affected[userID] = struct{}{}
+		}
+		for _, userID := range afterAccess {
+			affected[userID] = struct{}{}
+		}
+		for userID := range affected {
+			revokeKnowledgeBaseUserGenerations(d, projectLibraryID, userID)
+		}
 	}
 	writeJSON(w, 200, userProject(*upd))
 }
@@ -405,6 +460,15 @@ func uploadProjectDocHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	p, err := store.GetProject(r.Context(), d.DB, id, u.ID)
 	if err != nil || p.KBID == "" {
 		writeError(w, 404, errNotFound)
+		return
+	}
+	// §workspace RBAC phase 4: project uploads re-check the KB switch.
+	if err := enforceWorkspaceKnowledgeBasePolicy(r.Context(), d.DB, p.WorkspaceID); err != nil {
+		writeError(w, workspacePolicyErrorStatus(err), err)
+		return
+	}
+	if err := enforceWorkspaceFileUploadPolicy(r.Context(), d.DB, p.WorkspaceID); err != nil {
+		writeError(w, workspacePolicyErrorStatus(err), err)
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, d.Config.MaxUploadBytes+1<<20) // §C3

@@ -18,6 +18,10 @@ import (
 // ErrNotFound is returned when a queried row is missing.
 var ErrNotFound = errors.New("not found")
 
+// ErrForbidden is returned when the actor is authenticated but lacks the
+// workspace role required for the operation (§workspace RBAC).
+var ErrForbidden = errors.New("forbidden")
+
 // ErrUserEmailInvalid and ErrUserEmailExists distinguish invalid input from a
 // collision when an administrator changes an account's sign-in email.
 var (
@@ -1485,6 +1489,12 @@ func DeleteUser(ctx context.Context, db *sql.DB, userID string, storageRoots ...
 		`DELETE FROM projects WHERE `+userDeletionResourceScope("projects"),
 		resourceArgs...); err != nil {
 		return fmt.Errorf("delete user: delete projects: %w", err)
+	}
+	// Invitations are live capabilities, not historical content. Removing those
+	// created by the departing user prevents a usable token from outliving its
+	// creator and also supports databases upgraded from the old restrictive FK.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM workspace_invites WHERE created_by=?`, userID); err != nil {
+		return fmt.Errorf("delete user: delete workspace invites: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM workspaces WHERE owner_id=?`, userID); err != nil {
 		return fmt.Errorf("delete user: delete workspaces: %w", err)

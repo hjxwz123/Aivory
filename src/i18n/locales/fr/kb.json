@@ -68,7 +68,12 @@
     "renamed": "Fichier renommé",
     "renameFailed": "Impossible de renommer le fichier",
     "loadFailedTitle": "Impossible de charger cette base de connaissances",
-    "chunkCount": "{{count}} segment(s)"
+    "chunkCount": "{{count}} segment(s)",
+    "makePrivate": "Rendre privé",
+    "makeShared": "Partager avec l'espace",
+    "visibilityPrivate": "La base est désormais privée pour vous et les administrateurs.",
+    "visibilityShared": "La base est désormais partagée avec l'espace.",
+    "visibilityFailed": "Impossible de mettre à jour la visibilité."
   },
   "groupPermissionTitle": "Bases de connaissances indisponibles",
   "groupPermissionRequired": "Votre groupe d'utilisateurs n'a pas accès aux bases de connaissances.",
@@ -110,7 +115,7 @@
     "member": "Membre",
     "addFiles": "Ajouter des fichiers",
     "deleteContent": "Supprimer du contenu",
-    "manager": "Propriétaire de l'espace ou créateur de la base",
+    "manager": "Propriétaire, administrateur de l'espace ou créateur de la base",
     "disabledByWorkspace": "Désactivé pour ce membre",
     "loadFailed": "Impossible de charger les membres de l'espace.",
     "empty": "Aucun membre dans l'espace."

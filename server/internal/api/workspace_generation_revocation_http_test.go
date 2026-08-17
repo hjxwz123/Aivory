@@ -230,14 +230,14 @@ func TestHTTPWorkspaceKickCancelsAndScrubsActiveMemberGeneration(t *testing.T) {
 		t.Fatal("kick did not tombstone the revoked assistant message stream")
 	}
 
-	// Kick rotates the invite. A fresh explicit re-invitation creates new message
-	// epochs; it must neither clear nor inherit the old message tombstone.
-	rotated, err := store.GetWorkspace(ctx, db, workspace.ID)
+	// A fresh governed re-invitation creates new message epochs; it must neither
+	// clear nor inherit the old message tombstone.
+	reinvite, err := store.CreateWorkspaceInvite(ctx, db, workspace.ID, owner.ID, "", store.WorkspaceRoleMember, 0, 1)
 	if err != nil {
-		t.Fatalf("load rotated invite: %v", err)
+		t.Fatalf("create re-invite: %v", err)
 	}
 	join := branchHTTPDoJSON(t, client, http.MethodPost,
-		server.URL+"/api/workspaces/join/"+rotated.InviteToken, memberToken, ``)
+		server.URL+"/api/workspaces/join/"+reinvite.Token, memberToken, ``)
 	joinBody, readErr := io.ReadAll(join.Body)
 	join.Body.Close()
 	if readErr != nil {
