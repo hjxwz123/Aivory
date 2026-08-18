@@ -1,6 +1,6 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { X } from 'lucide-react'
-import { forwardRef, useLayoutEffect, useRef, type ComponentPropsWithoutRef, type ElementRef, type HTMLAttributes } from 'react'
+import { forwardRef, useEffect, useLayoutEffect, useRef, type ComponentPropsWithoutRef, type ElementRef, type HTMLAttributes } from 'react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 
@@ -205,7 +205,63 @@ export function DialogHeader({ className, ...rest }: HTMLAttributes<HTMLDivEleme
 export function DialogBody({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
   // The scroll region: takes the slack between header/footer and the capped
   // content height, scrolling its own overflow so tall forms stay reachable.
-  return <div className={cn('min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-6 pb-4', className)} {...rest} />
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const contentAnimationRef = useRef<Animation | null>(null)
+
+  // A loading state can be replaced by real content without changing the
+  // dialog's outer dimensions (for example, when both fit the same scroll
+  // region). ResizeObserver cannot see that replacement, so fade the body in
+  // once after a structural update. RAF coalescing prevents a burst of async
+  // updates from repeatedly restarting the animation.
+  useEffect(() => {
+    const node = bodyRef.current
+    if (!node || typeof MutationObserver === 'undefined' || typeof requestAnimationFrame === 'undefined') return
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
+    let frame = 0
+
+    const animateContentUpdate = () => {
+      frame = 0
+      if (reducedMotion.matches) {
+        node.style.removeProperty('opacity')
+        return
+      }
+      const current = contentAnimationRef.current
+      if (current?.playState === 'running') return
+      const animation = node.animate(
+        [{ opacity: 0.86 }, { opacity: 1 }],
+        { duration: 160, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
+      )
+      contentAnimationRef.current = animation
+      const clear = () => {
+        if (contentAnimationRef.current === animation) contentAnimationRef.current = null
+        node.style.removeProperty('opacity')
+      }
+      animation.addEventListener('finish', clear, { once: true })
+      animation.addEventListener('cancel', clear, { once: true })
+    }
+
+    const observer = new MutationObserver((records) => {
+      if (!records.some((record) => record.type === 'childList')) return
+      if (reducedMotion.matches || contentAnimationRef.current?.playState === 'running') return
+      if (frame === 0) {
+        // MutationObserver runs before the next paint. Set the first frame
+        // immediately so the replacement cannot flash at full opacity before
+        // the RAF-driven animation starts.
+        node.style.opacity = '0.86'
+        frame = requestAnimationFrame(animateContentUpdate)
+      }
+    })
+    observer.observe(node, { childList: true, subtree: true })
+    return () => {
+      observer.disconnect()
+      if (frame !== 0) cancelAnimationFrame(frame)
+      contentAnimationRef.current?.cancel()
+      contentAnimationRef.current = null
+      node.style.removeProperty('opacity')
+    }
+  }, [])
+
+  return <div ref={bodyRef} className={cn('min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-6 pb-4', className)} {...rest} />
 }
 
 export function DialogFooter({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
