@@ -46,42 +46,97 @@ const sizeMap: Record<DialogSize, string> = {
   full: 'max-w-[min(96vw,72rem)]',
 }
 
+interface DialogDimensions {
+  width: number
+  height: number
+}
+
+function readDialogDimensions(node: HTMLElement): DialogDimensions {
+  // offsetWidth/offsetHeight describe the layout box and are not distorted by
+  // the transform used for the resize transition itself.
+  return { width: node.offsetWidth, height: node.offsetHeight }
+}
+
+function dialogDimensionsChanged(before: DialogDimensions, next: DialogDimensions): boolean {
+  return Math.abs(before.width - next.width) > 0.5 || Math.abs(before.height - next.height) > 0.5
+}
+
+function animateDialogResize(
+  node: HTMLElement,
+  before: DialogDimensions,
+  next: DialogDimensions,
+  reducedMotion: MediaQueryList,
+): Animation | null {
+  if (!dialogDimensionsChanged(before, next) || reducedMotion.matches || before.width <= 0 || before.height <= 0 || next.width <= 0 || next.height <= 0) return null
+  return node.animate(
+    [
+      { transform: `translate(-50%, -50%) scale(${before.width / next.width}, ${before.height / next.height})` },
+      { transform: 'translate(-50%, -50%) scale(1)' },
+    ],
+    { duration: 220, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
+  )
+}
+
 export const DialogContent = forwardRef<
   ElementRef<typeof DialogPrimitive.Content>,
   DialogContentProps
 >(function DialogContent({ className, size = 'md', showClose = true, closeDisabled = false, captureIgnore = false, children, ...rest }, ref) {
   const { t } = useTranslation('common')
   const contentRef = useRef<ElementRef<typeof DialogPrimitive.Content>>(null)
+  const previousDimensionsRef = useRef<DialogDimensions | null>(null)
+  const reducedMotionRef = useRef<MediaQueryList | null>(null)
+  const resizeAnimationRef = useRef<Animation | null>(null)
 
-  // Dialog bodies often grow after an async result, validation error, or a
-  // conditional field appears. Scale the new box from its previous dimensions
-  // so the size change reads as one continuous surface instead of a hard jump.
+  function transitionFromPreviousSize(node: HTMLElement, next: DialogDimensions) {
+    const before = previousDimensionsRef.current
+    previousDimensionsRef.current = next
+    // ResizeObserver also runs after React's layout effects. Ignore its
+    // duplicate same-size notification so it cannot cancel the tab animation
+    // that was just started above.
+    if (!before || !dialogDimensionsChanged(before, next)) return
+    resizeAnimationRef.current?.cancel()
+    const animation = animateDialogResize(
+      node,
+      before,
+      next,
+      reducedMotionRef.current ?? window.matchMedia('(prefers-reduced-motion: reduce)'),
+    )
+    resizeAnimationRef.current = animation
+    if (animation) {
+      const clear = () => {
+        if (resizeAnimationRef.current === animation) resizeAnimationRef.current = null
+      }
+      animation.addEventListener('finish', clear, { once: true })
+      animation.addEventListener('cancel', clear, { once: true })
+    }
+  }
+
+  // Capture React-driven layout changes before the browser paints. This is
+  // important for tabs: the old geometry exists in the previous commit, while
+  // ResizeObserver alone only reports after the new geometry is already live.
+  useLayoutEffect(() => {
+    const node = contentRef.current
+    if (!node) return
+    reducedMotionRef.current ??= window.matchMedia('(prefers-reduced-motion: reduce)')
+    transitionFromPreviousSize(node, readDialogDimensions(node))
+  })
+
+  // Async content (validation text, loading results, images) can resize a
+  // dialog without a React render in this component. Keep the observer as a
+  // second path for those changes, while the layout effect handles tab swaps.
   useLayoutEffect(() => {
     const node = contentRef.current
     if (!node || typeof ResizeObserver === 'undefined') return
-    let previous = node.getBoundingClientRect()
-    let observed = false
-    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
+    reducedMotionRef.current ??= window.matchMedia('(prefers-reduced-motion: reduce)')
     const observer = new ResizeObserver(() => {
-      const next = node.getBoundingClientRect()
-      const changed = Math.abs(previous.width - next.width) > 0.5 || Math.abs(previous.height - next.height) > 0.5
-      const before = previous
-      previous = next
-      if (!observed) {
-        observed = true
-        return
-      }
-      if (!changed || reducedMotion.matches || before.width <= 0 || before.height <= 0 || next.width <= 0 || next.height <= 0) return
-      node.animate(
-        [
-          { transform: `translate(-50%, -50%) scale(${before.width / next.width}, ${before.height / next.height})` },
-          { transform: 'translate(-50%, -50%) scale(1)' },
-        ],
-        { duration: 200, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
-      )
+      transitionFromPreviousSize(node, readDialogDimensions(node))
     })
     observer.observe(node)
-    return () => observer.disconnect()
+    return () => {
+      observer.disconnect()
+      resizeAnimationRef.current?.cancel()
+      resizeAnimationRef.current = null
+    }
   }, [])
 
   function setContentRef(node: ElementRef<typeof DialogPrimitive.Content> | null) {
@@ -101,7 +156,7 @@ export const DialogContent = forwardRef<
           sizeMap[size],
           // Never exceed the viewport: cap height and let the body scroll while
           // the header/footer stay pinned (see DialogBody/DialogHeader/Footer).
-          'flex flex-col max-h-[calc(100dvh-2rem)]',
+          'flex min-w-0 flex-col max-h-[calc(100dvh-2rem)] overflow-x-hidden',
           'rounded-popup bg-[var(--color-surface)] border border-[var(--color-border)]',
           'shadow-[var(--shadow-xl)]',
           'data-[state=open]:animate-[pop-in_220ms_var(--ease-out)]',
@@ -139,7 +194,7 @@ export function DialogHeader({ className, ...rest }: HTMLAttributes<HTMLDivEleme
 export function DialogBody({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
   // The scroll region: takes the slack between header/footer and the capped
   // content height, scrolling its own overflow so tall forms stay reachable.
-  return <div className={cn('min-h-0 flex-1 overflow-y-auto px-6 pb-4', className)} {...rest} />
+  return <div className={cn('min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-6 pb-4', className)} {...rest} />
 }
 
 export function DialogFooter({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {

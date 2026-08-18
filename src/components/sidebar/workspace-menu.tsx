@@ -499,7 +499,7 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
         <DialogBody className="space-y-4">
         {/* §workspace RBAC: manager tabs — members / invites / capability policy. */}
         {canManage ? (
-          <div role="tablist" aria-label={t('workspace.manageTabs', { defaultValue: 'Workspace management' })} className="flex gap-1 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-1">
+          <div role="tablist" aria-label={t('workspace.manageTabs', { defaultValue: 'Workspace management' })} className="flex min-w-0 gap-1 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-1">
             {([
               ['members', <Users key="i" size={13} aria-hidden />, t('workspace.tabMembers', { defaultValue: 'Members' })],
               ['invites', <KeyRound key="i" size={13} aria-hidden />, t('workspace.tabInvites', { defaultValue: 'Invites' })],
@@ -512,14 +512,14 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
                 role="tab"
                 aria-selected={tab === key}
                 onClick={() => setTab(key)}
-                className={`flex flex-1 items-center justify-center gap-1.5 rounded-[7px] px-2 py-1.5 text-[12px] font-medium interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] ${
+                className={`flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-[7px] px-1.5 py-1.5 text-[12px] font-medium interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] ${
                   tab === key
                     ? 'bg-[var(--color-bg)] text-[var(--color-fg)] shadow-sm'
                     : 'text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)]'
                 }`}
               >
-                {icon}
-                {label}
+                <span className="shrink-0">{icon}</span>
+                <span className="min-w-0 truncate">{label}</span>
               </button>
             ))}
           </div>
@@ -897,11 +897,11 @@ function WorkspaceInvitesPanel({ workspaceID, isOwner }: { workspaceID: string; 
   return (
     <div className="space-y-3">
       <div className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-2">
-        <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
+        <div className="grid min-w-0 grid-cols-[4.5rem_minmax(0,1fr)_4.5rem_2.75rem_2rem] items-center gap-1.5 max-[390px]:flex max-[390px]:flex-wrap">
           <Select value={role} disabled={creating} onValueChange={(value) => setRole(value as ApiWorkspaceRole)}>
             <SelectTrigger
               aria-label={t('workspace.inviteRole', { defaultValue: 'Invite role' })}
-              className="h-8 w-[88px] shrink-0 px-2 text-[12px]"
+              className="h-8 w-[72px] min-w-0 px-2 text-[12px]"
             >
               <SelectValue />
             </SelectTrigger>
@@ -917,13 +917,13 @@ function WorkspaceInvitesPanel({ workspaceID, isOwner }: { workspaceID: string; 
             onChange={(e) => setEmail(e.target.value)}
             placeholder={t('workspace.inviteEmailOptional', { defaultValue: 'Bind to email (optional)' })}
             aria-label={t('workspace.inviteEmailOptional', { defaultValue: 'Bind to email (optional)' })}
-            className="h-8 min-w-[11rem] flex-1 text-[12.5px] sm:min-w-0"
+            className="h-8 min-w-0 w-full text-[12.5px] max-[390px]:order-5 max-[390px]:basis-full"
             inputMode="email"
           />
           <Select value={String(expiryDays)} disabled={creating} onValueChange={(value) => setExpiryDays(Number(value))}>
             <SelectTrigger
               aria-label={t('workspace.inviteExpires', { defaultValue: 'Expires' })}
-              className="h-8 w-[86px] shrink-0 px-2 text-[12px]"
+              className="h-8 w-[72px] min-w-0 px-2 text-[12px]"
             >
               <SelectValue />
             </SelectTrigger>
@@ -934,7 +934,7 @@ function WorkspaceInvitesPanel({ workspaceID, isOwner }: { workspaceID: string; 
               <SelectItem value="0">{t('workspace.inviteNeverExpires', { defaultValue: 'Never' })}</SelectItem>
             </SelectContent>
           </Select>
-          <label className="flex shrink-0 items-center gap-1 text-[11px] text-[var(--color-fg-subtle)]">
+          <label className="flex min-w-0 items-center text-[11px] text-[var(--color-fg-subtle)]">
             <span className="sr-only">{t('workspace.inviteMaxUses', { defaultValue: 'Max uses' })}</span>
             <Input
               value={maxUses}
@@ -942,14 +942,22 @@ function WorkspaceInvitesPanel({ workspaceID, isOwner }: { workspaceID: string; 
               onChange={(e) => setMaxUses(Number(e.target.value) || 0)}
               type="number"
               min={0}
-              className="h-8 w-[54px] px-1.5 text-[12.5px]"
+              className="h-8 w-11 min-w-0 px-1.5 text-[12.5px]"
               aria-label={t('workspace.inviteMaxUses', { defaultValue: 'Max uses (0 for unlimited)' })}
               title={t('workspace.inviteMaxUses', { defaultValue: 'Max uses' })}
             />
           </label>
-          <Button className="shrink-0" size="sm" loading={creating} leadingIcon={<Plus size={13} aria-hidden />} onClick={() => void createInvite()}>
-            {t('workspace.inviteCreate', { defaultValue: 'Create invite' })}
-          </Button>
+          <Tooltip content={t('workspace.inviteCreate', { defaultValue: 'Create invite' })}>
+            <Button
+              className="size-8 shrink-0 rounded-[8px]"
+              size="icon-sm"
+              loading={creating}
+              aria-label={t('workspace.inviteCreate', { defaultValue: 'Create invite' })}
+              onClick={() => void createInvite()}
+            >
+              {creating ? null : <Plus size={14} aria-hidden />}
+            </Button>
+          </Tooltip>
         </div>
       </div>
 
