@@ -476,6 +476,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_prompts_name_unique ON prompts(lower(trim(
 CREATE TABLE IF NOT EXISTS user_skills (
   id              TEXT PRIMARY KEY,
   user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  workspace_id    TEXT NOT NULL DEFAULT '',
   name            TEXT NOT NULL,
   description     TEXT NOT NULL,
   icon            TEXT NOT NULL DEFAULT '',
@@ -485,12 +486,16 @@ CREATE TABLE IF NOT EXISTS user_skills (
   updated_at      INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
 CREATE INDEX IF NOT EXISTS idx_user_skills_user ON user_skills(user_id, updated_at DESC);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_user_skills_user_name_unique ON user_skills(user_id, lower(trim(name)));
-CREATE UNIQUE INDEX IF NOT EXISTS idx_user_skills_source_unique ON user_skills(user_id, source_skill_id);
+CREATE INDEX IF NOT EXISTS idx_user_skills_workspace ON user_skills(workspace_id, updated_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_skills_user_name_unique ON user_skills(user_id, lower(trim(name))) WHERE workspace_id='';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_skills_workspace_name_unique ON user_skills(workspace_id, lower(trim(name))) WHERE workspace_id<>'';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_skills_source_unique ON user_skills(user_id, source_skill_id) WHERE workspace_id='' AND source_skill_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_skills_workspace_source_unique ON user_skills(workspace_id, source_skill_id) WHERE workspace_id<>'' AND source_skill_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS user_prompts (
   id               TEXT PRIMARY KEY,
   user_id          TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  workspace_id     TEXT NOT NULL DEFAULT '',
   name             TEXT NOT NULL,
   description      TEXT NOT NULL DEFAULT '',
   content          TEXT NOT NULL,
@@ -499,8 +504,11 @@ CREATE TABLE IF NOT EXISTS user_prompts (
   updated_at       INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
 CREATE INDEX IF NOT EXISTS idx_user_prompts_user ON user_prompts(user_id, updated_at DESC);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_user_prompts_user_name_unique ON user_prompts(user_id, lower(trim(name)));
-CREATE UNIQUE INDEX IF NOT EXISTS idx_user_prompts_source_unique ON user_prompts(user_id, source_prompt_id);
+CREATE INDEX IF NOT EXISTS idx_user_prompts_workspace ON user_prompts(workspace_id, updated_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_prompts_user_name_unique ON user_prompts(user_id, lower(trim(name))) WHERE workspace_id='';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_prompts_workspace_name_unique ON user_prompts(workspace_id, lower(trim(name))) WHERE workspace_id<>'';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_prompts_source_unique ON user_prompts(user_id, source_prompt_id) WHERE workspace_id='' AND source_prompt_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_prompts_workspace_source_unique ON user_prompts(workspace_id, source_prompt_id) WHERE workspace_id<>'' AND source_prompt_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS model_skills (
   model_id TEXT NOT NULL REFERENCES models(id) ON DELETE CASCADE,
@@ -951,6 +959,7 @@ CREATE TABLE IF NOT EXISTS workspace_members (
   role                     TEXT NOT NULL DEFAULT 'member',
   can_create_projects      INTEGER NOT NULL DEFAULT 1,
   can_private_conversations INTEGER NOT NULL DEFAULT 1,
+  can_create_skills_prompts INTEGER NOT NULL DEFAULT 1,
   can_create_kb            INTEGER NOT NULL DEFAULT 1,
   can_add_kb_files         INTEGER NOT NULL DEFAULT 1,
   can_delete_kb_content    INTEGER NOT NULL DEFAULT 1,

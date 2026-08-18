@@ -391,6 +391,7 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
     setPermissionDraft({
       can_create_projects: member.can_create_projects,
       can_private_conversations: member.can_private_conversations,
+      can_create_skills_prompts: member.can_create_skills_prompts,
       can_create_kb: member.can_create_kb,
       can_add_kb_files: member.can_add_kb_files,
       can_delete_kb_content: member.can_delete_kb_content,
@@ -810,6 +811,7 @@ const WORKSPACE_PERMISSION_ROWS: Array<{
   description: string
 }> = [
   { key: 'can_create_projects', label: 'Create projects', description: 'Create new projects and their project libraries.' },
+  { key: 'can_create_skills_prompts', label: 'Create skills and prompts', description: 'Create and manage their own workspace skills and prompts.' },
   { key: 'can_private_conversations', label: 'Private conversations', description: 'Create conversations visible only to themselves.' },
   { key: 'can_create_kb', label: 'Create knowledge bases', description: 'Create new workspace knowledge bases.' },
   { key: 'can_add_kb_files', label: 'Add knowledge-base files', description: 'Upload and paste content into workspace knowledge bases.' },

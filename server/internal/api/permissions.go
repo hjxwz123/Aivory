@@ -317,11 +317,12 @@ func resolvePermittedUserSkillSelection(
 	ctx context.Context,
 	db *sql.DB,
 	userID string,
+	workspaceID string,
 	ids []string,
 	strict bool,
 	policy store.ResourceAccessPolicy,
 ) ([]store.UserSkill, []string, error) {
-	skills, normalized, err := store.ResolveUserSkillSelection(ctx, db, userID, ids, strict)
+	skills, normalized, err := store.ResolveUserSkillSelectionScoped(ctx, db, userID, workspaceID, ids, strict)
 	if err != nil {
 		return nil, nil, err
 	}

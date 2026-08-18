@@ -48,6 +48,7 @@ import { toast } from '@/hooks/use-toast'
 import { skillDisplayDescription } from '@/lib/skill-description'
 import { isValidSkillName, parseSkillDocument } from '@/lib/skill-document'
 import { cn } from '@/lib/utils'
+import { useWorkspaces } from '@/store/workspaces'
 
 type ItemKind = 'skill' | 'prompt'
 type KindFilter = 'all' | ItemKind
@@ -89,31 +90,53 @@ export default function SkillsPrompts() {
   const [addingCatalogId, setAddingCatalogId] = useState('')
   const savingRef = useRef(false)
   const deletingRef = useRef(false)
+  const libraryLoadRequestRef = useRef(0)
+  const workspaceId = useWorkspaces((state) => state.activeId ?? undefined)
+  const workspaceIdRef = useRef(workspaceId)
+  workspaceIdRef.current = workspaceId
+  const activeWorkspace = useWorkspaces((state) =>
+    state.activeId ? state.workspaces.find((workspace) => workspace.id === state.activeId) : undefined,
+  )
+  // Treat an active workspace whose membership is still loading as read-only
+  // until the server-backed role is known. This prevents a guest from seeing a
+  // write control for one render during workspace hydration.
+  const canWrite =
+    !workspaceId ||
+    activeWorkspace?.role === 'admin' ||
+    (activeWorkspace?.role === 'member' && activeWorkspace.can_create_skills_prompts)
 
   async function load() {
+    const requestID = ++libraryLoadRequestRef.current
+    const requestedWorkspaceID = workspaceIdRef.current
     setLoading(true)
     setLoadError('')
+    setSkills([])
+    setPrompts([])
+    setCatalog(emptyCatalog)
     try {
       const [userSkills, userPrompts, publicCatalog] = await Promise.all([
-        libraryApi.skills(),
-        libraryApi.prompts(),
-        libraryApi.catalog(),
+        libraryApi.skills(requestedWorkspaceID),
+        libraryApi.prompts(requestedWorkspaceID),
+        libraryApi.catalog(requestedWorkspaceID),
       ])
+      if (requestID !== libraryLoadRequestRef.current || workspaceIdRef.current !== requestedWorkspaceID) return
       setSkills(userSkills)
       setPrompts(userPrompts)
       setCatalog(publicCatalog)
     } catch (error) {
+      if (requestID !== libraryLoadRequestRef.current || workspaceIdRef.current !== requestedWorkspaceID) return
       const message = error instanceof ApiError ? error.message : t('common:common.error')
       setLoadError(message)
     } finally {
-      setLoading(false)
+      if (requestID === libraryLoadRequestRef.current && workspaceIdRef.current === requestedWorkspaceID) setLoading(false)
     }
   }
 
   useEffect(() => {
+    libraryLoadRequestRef.current += 1
     void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [workspaceId])
 
   const normalizedQuery = query.trim().toLocaleLowerCase()
   const filteredSkills = useMemo(
@@ -218,12 +241,12 @@ export default function SkillsPrompts() {
     try {
       if (editor.kind === 'skill') {
         const body = { name, description, instructions: content }
-        if (editor.id) await libraryApi.updateSkill(editor.id, body)
-        else await libraryApi.createSkill(body)
+        if (editor.id) await libraryApi.updateSkill(editor.id, body, workspaceId)
+        else await libraryApi.createSkill(body, workspaceId)
       } else {
         const body = { name, description, content }
-        if (editor.id) await libraryApi.updatePrompt(editor.id, body)
-        else await libraryApi.createPrompt(body)
+        if (editor.id) await libraryApi.updatePrompt(editor.id, body, workspaceId)
+        else await libraryApi.createPrompt(body, workspaceId)
       }
       toast.success(editor.id ? t('library:editor.updated') : t('library:editor.created'))
       setEditor((current) => ({ ...current, open: false }))
@@ -245,8 +268,8 @@ export default function SkillsPrompts() {
     deletingRef.current = true
     setDeleting(true)
     try {
-      if (deleteTarget.kind === 'skill') await libraryApi.removeSkill(deleteTarget.item.id)
-      else await libraryApi.removePrompt(deleteTarget.item.id)
+      if (deleteTarget.kind === 'skill') await libraryApi.removeSkill(deleteTarget.item.id, workspaceId)
+      else await libraryApi.removePrompt(deleteTarget.item.id, workspaceId)
       toast.success(t('library:remove.done'))
       setDeleteTarget(null)
       await load()
@@ -259,11 +282,12 @@ export default function SkillsPrompts() {
   }
 
   async function addCatalogItem(kind: ItemKind, id: string) {
+    if (!canWrite) return
     if (addingCatalogId) return
     setAddingCatalogId(`${kind}:${id}`)
     try {
-      if (kind === 'skill') await libraryApi.addCatalogSkill(id)
-      else await libraryApi.addCatalogPrompt(id)
+      if (kind === 'skill') await libraryApi.addCatalogSkill(id, workspaceId)
+      else await libraryApi.addCatalogPrompt(id, workspaceId)
       toast.success(t('library:catalog.added'))
       await load()
     } catch (error) {
@@ -285,26 +309,28 @@ export default function SkillsPrompts() {
       <ContentHeader
         title={t('library:title')}
         actions={
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                size="sm"
-                variant="secondary"
-                leadingIcon={<Plus size={15} aria-hidden />}
-                className="max-sm:min-h-[var(--tap-min)]"
-              >
-                {t('library:new')}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={() => setEditor(newEditor('skill'))}>
-                <Sparkles size={14} aria-hidden /> {t('library:kinds.skill')}
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => setEditor(newEditor('prompt'))}>
-                <FileText size={14} aria-hidden /> {t('library:kinds.prompt')}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          canWrite ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  leadingIcon={<Plus size={15} aria-hidden />}
+                  className="max-sm:min-h-[var(--tap-min)]"
+                >
+                  {t('library:new')}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => setEditor(newEditor('skill'))}>
+                  <Sparkles size={14} aria-hidden /> {t('library:kinds.skill')}
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setEditor(newEditor('prompt'))}>
+                  <FileText size={14} aria-hidden /> {t('library:kinds.prompt')}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null
         }
       />
 
@@ -350,7 +376,7 @@ export default function SkillsPrompts() {
                       icon={<LibraryBig size={20} aria-hidden />}
                       title={query ? t('library:empty.search') : t('library:empty.mine')}
                       action={
-                        !query ? (
+                        !query && canWrite ? (
                           <Button variant="secondary" leadingIcon={<Plus size={14} aria-hidden />} onClick={() => setEditor(newEditor('skill'))}>
                             {t('library:newSkill')}
                           </Button>
@@ -367,6 +393,7 @@ export default function SkillsPrompts() {
                           description={skillDisplayDescription(item)}
                           icon={item.icon}
                           imported={Boolean(item.source_skill_id)}
+                          canManage={item.can_manage}
                           onEdit={() => editSkill(item)}
                           onDelete={() => setDeleteTarget({ kind: 'skill', item })}
                           t={t}
@@ -379,6 +406,7 @@ export default function SkillsPrompts() {
                           name={item.name}
                           description={item.description}
                           imported={Boolean(item.source_prompt_id)}
+                          canManage={item.can_manage}
                           onEdit={() => editPrompt(item)}
                           onDelete={() => setDeleteTarget({ kind: 'prompt', item })}
                           t={t}
@@ -403,6 +431,7 @@ export default function SkillsPrompts() {
                           kind="skill"
                           item={item}
                           adding={addingCatalogId === `skill:${item.id}`}
+                          canAdd={canWrite}
                           onAdd={() => void addCatalogItem('skill', item.id)}
                           t={t}
                         />
@@ -413,6 +442,7 @@ export default function SkillsPrompts() {
                           kind="prompt"
                           item={item}
                           adding={addingCatalogId === `prompt:${item.id}`}
+                          canAdd={canWrite}
                           onAdd={() => void addCatalogItem('prompt', item.id)}
                           t={t}
                         />
@@ -500,6 +530,7 @@ function UserLibraryRow({
   description,
   icon,
   imported,
+  canManage,
   onEdit,
   onDelete,
   t,
@@ -509,6 +540,7 @@ function UserLibraryRow({
   description: string
   icon?: string
   imported: boolean
+  canManage: boolean
   onEdit: () => void
   onDelete: () => void
   t: ReturnType<typeof useTranslation>['t']
@@ -530,21 +562,23 @@ function UserLibraryRow({
         </div>
         <p className="mt-0.5 truncate text-[12.5px] text-[var(--color-fg-muted)]">{description}</p>
       </div>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            aria-label={`${t('common:actions.more')}: ${name}`}
-            className="inline-flex size-[var(--tap-min)] shrink-0 items-center justify-center rounded-[8px] text-[var(--color-fg-subtle)] opacity-100 hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] sm:size-8 sm:opacity-0 sm:group-hover:opacity-100 sm:data-[state=open]:opacity-100 sm:focus-visible:opacity-100"
-          >
-            <MoreHorizontal size={15} aria-hidden />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem onSelect={onEdit}><Pencil size={14} aria-hidden /> {t('common:actions.edit')}</DropdownMenuItem>
-          <DropdownMenuItem destructive onSelect={onDelete}><Trash2 size={14} aria-hidden /> {t('common:actions.delete')}</DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {canManage ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label={`${t('common:actions.more')}: ${name}`}
+              className="inline-flex size-[var(--tap-min)] shrink-0 items-center justify-center rounded-[8px] text-[var(--color-fg-subtle)] opacity-100 hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] sm:size-8 sm:opacity-0 sm:group-hover:opacity-100 sm:data-[state=open]:opacity-100 sm:focus-visible:opacity-100"
+            >
+              <MoreHorizontal size={15} aria-hidden />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={onEdit}><Pencil size={14} aria-hidden /> {t('common:actions.edit')}</DropdownMenuItem>
+            <DropdownMenuItem destructive onSelect={onDelete}><Trash2 size={14} aria-hidden /> {t('common:actions.delete')}</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : <span className="size-[var(--tap-min)] shrink-0 sm:size-8" aria-hidden />}
     </li>
   )
 }
@@ -553,12 +587,14 @@ function CatalogRow({
   kind,
   item,
   adding,
+  canAdd,
   onAdd,
   t,
 }: {
   kind: ItemKind
   item: ApiLibraryCatalogSkill | ApiLibraryCatalogPrompt
   adding: boolean
+  canAdd: boolean
   onAdd: () => void
   t: ReturnType<typeof useTranslation>['t']
 }) {
@@ -596,7 +632,7 @@ function CatalogRow({
           <Check size={14} aria-hidden />
           <span className="hidden sm:inline">{t('library:catalog.addedLabel')}</span>
         </span>
-      ) : (
+      ) : canAdd ? (
         <Button
           variant="ghost"
           size="sm"
@@ -607,7 +643,7 @@ function CatalogRow({
         >
           {t('library:catalog.add')}
         </Button>
-      )}
+      ) : <span className="size-9 shrink-0" aria-hidden />}
     </li>
   )
 }

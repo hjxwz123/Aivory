@@ -61,7 +61,8 @@ export default function ChatLayout() {
   useHotkeys([
     {
       combo: 'mod+b',
-      whenInputFocused: false,
+      // Keep the sidebar toggle available while the composer is focused.
+      whenInputFocused: true,
       handler: () => {
         if (isDesktop) useSettings.getState().toggleSidebar()
         else useUI.getState().toggleNav()

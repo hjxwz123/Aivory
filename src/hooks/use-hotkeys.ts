@@ -22,8 +22,16 @@ function matches(combo: Combo, e: KeyboardEvent): boolean {
   const modOk = wantsMod ? modPressed : !modPressed
   const shiftOk = wantsShift ? e.shiftKey : !e.shiftKey
   const altOk = wantsAlt ? e.altKey : !e.altKey
-  const k = (e.key || '').toLowerCase()
-  return modOk && shiftOk && altOk && k === key
+  const eventKey = (e.key || '').toLowerCase()
+  const eventCode = (e.code || '').toLowerCase()
+  // On macOS, key values can vary with keyboard layout and modifier state
+  // (for example Shift+O may be reported differently by an IME). `code`
+  // identifies the physical key and keeps app shortcuts layout-stable.
+  const codeForKey = key.length === 1 && /[a-z]/.test(key)
+    ? `key${key}`
+    : key === '/' ? 'slash' : key === ',' ? 'comma' : ''
+  const keyOk = eventKey === key || Boolean(codeForKey && eventCode === codeForKey)
+  return modOk && shiftOk && altOk && keyOk
 }
 
 function isEditableTarget(t: EventTarget | null): boolean {

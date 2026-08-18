@@ -2210,7 +2210,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	selectedUserSkills := []store.UserSkill{}
 	normalizedSelectedUserSkillIDs := []string{}
 	if !req.ReuseExistingUserMessage {
-		selectedUserSkills, normalizedSelectedUserSkillIDs, err = store.ResolveUserSkillSelection(ctx, o.db, req.UserID, req.SelectedUserSkillIDs, true)
+		selectedUserSkills, normalizedSelectedUserSkillIDs, err = store.ResolveUserSkillSelectionScoped(ctx, o.db, req.UserID, conv.WorkspaceID, req.SelectedUserSkillIDs, true)
 		if err != nil {
 			return nil, err
 		}
@@ -2289,7 +2289,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			// a shared conversation must never read another user's private skills.
 			var persistedIDs []string
 			_ = json.Unmarshal(existing.SelectedUserSkillIDs, &persistedIDs)
-			selectedUserSkills, normalizedSelectedUserSkillIDs, err = store.ResolveUserSkillSelection(ctx, o.db, req.UserID, persistedIDs, false)
+			selectedUserSkills, normalizedSelectedUserSkillIDs, err = store.ResolveUserSkillSelectionScoped(ctx, o.db, req.UserID, conv.WorkspaceID, persistedIDs, false)
 			if err != nil {
 				return nil, err
 			}

@@ -683,6 +683,10 @@
         "label": "建立專案",
         "description": "建立新專案及其專案知識庫。"
       },
+      "can_create_skills_prompts": {
+        "label": "建立技能和提示詞",
+        "description": "在工作空間資源庫中建立和管理自己新增的技能與提示詞。"
+      },
       "can_private_conversations": {
         "label": "私人對話",
         "description": "建立僅自己可見的對話。"

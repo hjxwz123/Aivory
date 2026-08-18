@@ -123,6 +123,74 @@ func TestPrivateSkillRejectsFileAndPathFieldsRegardlessOfCaseOrNesting(t *testin
 	}
 }
 
+func TestWorkspaceLibraryAllowsMemberWritesAndGuestReadsOnly(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "workspace-library-rbac.db"))
+	defer db.Close()
+	mustExec(t, db, `
+		INSERT INTO users(id,email,password_hash) VALUES
+			('u1','u1@example.test','h'),('u2','u2@example.test','h'),
+			('u3','u3@example.test','h'),('u4','u4@example.test','h');
+		INSERT INTO workspaces(id,name,owner_id,invite_token) VALUES ('ws1','Workspace one','u1','token-ws1');
+		INSERT INTO workspace_members(workspace_id,user_id,role) VALUES
+			('ws1','u1','admin'),('ws1','u2','member'),('ws1','u3','guest')
+	`)
+	d := Deps{DB: db}
+
+	rec := httptest.NewRecorder()
+	createMySkillHandler(d, rec, libraryRequest(t, http.MethodPost, "/api/me/skills",
+		`{"name":"shared-skill","description":"Shared","instructions":"Use this skill.","workspace_id":"ws1"}`, "u2"))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("member create status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	mustExec(t, db, `UPDATE workspace_members SET can_create_skills_prompts=0 WHERE workspace_id='ws1' AND user_id='u2'`)
+
+	rec = httptest.NewRecorder()
+	createMySkillHandler(d, rec, libraryRequest(t, http.MethodPost, "/api/me/skills",
+		`{"name":"revoked-skill","description":"Revoked","instructions":"Should fail.","workspace_id":"ws1"}`, "u2"))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("revoked member create status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	listMySkillsHandler(d, rec, libraryRequest(t, http.MethodGet, "/api/me/skills?workspace_id=ws1", "", "u2"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("revoked member list status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var revokedList []store.UserSkill
+	if err := json.Unmarshal(rec.Body.Bytes(), &revokedList); err != nil {
+		t.Fatal(err)
+	}
+	if len(revokedList) != 1 || revokedList[0].CanManage {
+		t.Fatalf("revoked member listed=%+v", revokedList)
+	}
+
+	rec = httptest.NewRecorder()
+	listMySkillsHandler(d, rec, libraryRequest(t, http.MethodGet, "/api/me/skills?workspace_id=ws1", "", "u3"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("guest list status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var listed []store.UserSkill
+	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || listed[0].CanManage {
+		t.Fatalf("guest listed=%+v", listed)
+	}
+
+	rec = httptest.NewRecorder()
+	createMySkillHandler(d, rec, libraryRequest(t, http.MethodPost, "/api/me/skills",
+		`{"name":"guest-skill","description":"Guest","instructions":"Should fail.","workspace_id":"ws1"}`, "u3"))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("guest create status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	listMySkillsHandler(d, rec, libraryRequest(t, http.MethodGet, "/api/me/skills?workspace_id=ws1", "", "u4"))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("outsider list status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestLibraryCatalogExposesOnlyExplicitDisplayDescriptionWithoutPrivateContent(t *testing.T) {
 	db := openMigrated(t, filepath.Join(t.TempDir(), "catalog-redaction.db"))
 	defer db.Close()

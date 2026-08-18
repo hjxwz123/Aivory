@@ -287,6 +287,7 @@ export interface ApiWorkspace {
   owner_name?: string
   can_create_projects: boolean
   can_private_conversations: boolean
+  can_create_skills_prompts: boolean
   can_create_kb: boolean
   can_add_kb_files: boolean
   can_delete_kb_content: boolean
@@ -303,6 +304,7 @@ export interface ApiWorkspaceMember {
   avatar_url: string
   can_create_projects: boolean
   can_private_conversations: boolean
+  can_create_skills_prompts: boolean
   can_create_kb: boolean
   can_add_kb_files: boolean
   can_delete_kb_content: boolean
@@ -311,6 +313,7 @@ export interface ApiWorkspaceMember {
 export interface ApiWorkspaceMemberPermissions {
   can_create_projects: boolean
   can_private_conversations: boolean
+  can_create_skills_prompts: boolean
   can_create_kb: boolean
   can_add_kb_files: boolean
   can_delete_kb_content: boolean
@@ -897,6 +900,8 @@ export interface ApiPrompt {
 
 export interface ApiUserSkill {
   id: string
+  workspace_id?: string
+  can_manage: boolean
   name: string
   description: string
   /** Current administrator catalog copy for imported skills. When the
@@ -912,6 +917,8 @@ export interface ApiUserSkill {
 
 export interface ApiUserPrompt {
   id: string
+  workspace_id?: string
+  can_manage: boolean
   name: string
   description: string
   content: string

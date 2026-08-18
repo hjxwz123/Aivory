@@ -4,12 +4,13 @@ import { cn } from '@/lib/utils'
 interface EmptyStateProps {
   icon?: ReactNode
   title: ReactNode
+  titleClassName?: string
   description?: ReactNode
   action?: ReactNode
   className?: string
 }
 
-export function EmptyState({ icon, title, description, action, className }: EmptyStateProps) {
+export function EmptyState({ icon, title, titleClassName, description, action, className }: EmptyStateProps) {
   return (
     <div
       className={cn(
@@ -25,7 +26,7 @@ export function EmptyState({ icon, title, description, action, className }: Empt
       ) : null}
       {/* No font-serif: in-app headings follow the Appearance → Font setting
           (globals.css base rule); serif stays opt-in for brand pages only. */}
-      <h3 className="text-2xl tracking-tight text-[var(--color-fg)]">{title}</h3>
+      <h3 className={cn('text-lg font-semibold tracking-tight text-[var(--color-fg)]', titleClassName)}>{title}</h3>
       {description ? (
         <p className="mt-2.5 text-sm text-[var(--color-fg-muted)] leading-relaxed text-pretty">
           {description}

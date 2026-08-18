@@ -1166,6 +1166,8 @@ func validateUserDeletionReadState(ctx context.Context, q RowExecer, userID stri
 			 OR EXISTS (SELECT 1 FROM conversations c WHERE c.workspace_id=deletion_workspace.id AND c.user_id=?)
 			 OR EXISTS (SELECT 1 FROM projects p WHERE p.workspace_id=deletion_workspace.id AND p.user_id=?)
 			 OR EXISTS (SELECT 1 FROM knowledge_bases k WHERE k.workspace_id=deletion_workspace.id AND k.user_id=?)
+			 OR EXISTS (SELECT 1 FROM user_skills us WHERE us.workspace_id=deletion_workspace.id AND us.user_id=?)
+			 OR EXISTS (SELECT 1 FROM user_prompts up WHERE up.workspace_id=deletion_workspace.id AND up.user_id=?)
 			 OR EXISTS (
 				SELECT 1 FROM files f JOIN conversations c ON c.id=f.conversation_id
 				 WHERE c.workspace_id=deletion_workspace.id AND f.user_id=?
@@ -1174,7 +1176,7 @@ func validateUserDeletionReadState(ctx context.Context, q RowExecer, userID stri
 				SELECT 1 FROM conversation_shares s JOIN conversations c ON c.id=s.conversation_id
 				 WHERE c.workspace_id=deletion_workspace.id AND s.user_id=?
 			 )
-		   )`, userID, userID, userID, userID, userID, userID, userID).Scan(&count); err != nil {
+		   )`, userID, userID, userID, userID, userID, userID, userID, userID, userID).Scan(&count); err != nil {
 		return err
 	}
 	if count > 0 {
@@ -1195,6 +1197,8 @@ func lockUserDeletionWorkspacesTx(ctx context.Context, tx *sql.Tx, userID string
 		    OR EXISTS (SELECT 1 FROM conversations c WHERE c.workspace_id=deletion_workspace.id AND c.user_id=?)
 		    OR EXISTS (SELECT 1 FROM projects p WHERE p.workspace_id=deletion_workspace.id AND p.user_id=?)
 		    OR EXISTS (SELECT 1 FROM knowledge_bases k WHERE k.workspace_id=deletion_workspace.id AND k.user_id=?)
+		    OR EXISTS (SELECT 1 FROM user_skills us WHERE us.workspace_id=deletion_workspace.id AND us.user_id=?)
+		    OR EXISTS (SELECT 1 FROM user_prompts up WHERE up.workspace_id=deletion_workspace.id AND up.user_id=?)
 		    OR EXISTS (
 			 SELECT 1 FROM files f JOIN conversations c ON c.id=f.conversation_id
 			  WHERE c.workspace_id=deletion_workspace.id AND f.user_id=?
@@ -1203,7 +1207,7 @@ func lockUserDeletionWorkspacesTx(ctx context.Context, tx *sql.Tx, userID string
 			 SELECT 1 FROM conversation_shares s JOIN conversations c ON c.id=s.conversation_id
 			  WHERE c.workspace_id=deletion_workspace.id AND s.user_id=?
 		    )
-		 ORDER BY deletion_workspace.id`, userID, userID, userID, userID, userID, userID, userID)
+		 ORDER BY deletion_workspace.id`, userID, userID, userID, userID, userID, userID, userID, userID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -1295,9 +1299,10 @@ type namedWorkspaceResourceTransfer struct {
 }
 
 func transferNamedWorkspaceResourcesTx(ctx context.Context, tx *sql.Tx, table, userID string) error {
-	if table != "projects" && table != "knowledge_bases" {
+	if table != "projects" && table != "knowledge_bases" && table != "user_skills" && table != "user_prompts" {
 		return errors.New("unsupported named workspace resource")
 	}
+	sharedWorkspaceNamespace := table == "user_skills" || table == "user_prompts"
 	query := fmt.Sprintf(`
 		SELECT deletion_resource.id, deletion_resource.name,
 		       deletion_resource.workspace_id, deletion_workspace.owner_id
@@ -1328,12 +1333,22 @@ func transferNamedWorkspaceResourcesTx(ctx context.Context, tx *sql.Tx, table, u
 		candidate := resource.Name
 		for attempt := 0; ; attempt++ {
 			var conflicts int
-			conflictQuery := fmt.Sprintf(`
-				SELECT COUNT(*) FROM %s
-				 WHERE user_id=? AND COALESCE(workspace_id,'')=? AND id<>?
-				   AND lower(trim(name))=lower(trim(?))`, table)
-			if err := tx.QueryRowContext(ctx, conflictQuery,
-				resource.OwnerID, resource.WorkspaceID, resource.ID, candidate).Scan(&conflicts); err != nil {
+			var conflictQuery string
+			var conflictArgs []any
+			if sharedWorkspaceNamespace {
+				conflictQuery = fmt.Sprintf(`
+					SELECT COUNT(*) FROM %s
+					 WHERE COALESCE(workspace_id,'')=? AND id<>?
+					   AND lower(trim(name))=lower(trim(?))`, table)
+				conflictArgs = []any{resource.WorkspaceID, resource.ID, candidate}
+			} else {
+				conflictQuery = fmt.Sprintf(`
+					SELECT COUNT(*) FROM %s
+					 WHERE user_id=? AND COALESCE(workspace_id,'')=? AND id<>?
+					   AND lower(trim(name))=lower(trim(?))`, table)
+				conflictArgs = []any{resource.OwnerID, resource.WorkspaceID, resource.ID, candidate}
+			}
+			if err := tx.QueryRowContext(ctx, conflictQuery, conflictArgs...).Scan(&conflicts); err != nil {
 				return err
 			}
 			if conflicts == 0 {
@@ -1372,6 +1387,12 @@ func transferUserWorkspaceResourcesTx(ctx context.Context, tx *sql.Tx, userID st
 		return err
 	}
 	if err := transferNamedWorkspaceResourcesTx(ctx, tx, "knowledge_bases", userID); err != nil {
+		return err
+	}
+	if err := transferNamedWorkspaceResourcesTx(ctx, tx, "user_skills", userID); err != nil {
+		return err
+	}
+	if err := transferNamedWorkspaceResourcesTx(ctx, tx, "user_prompts", userID); err != nil {
 		return err
 	}
 	for _, query := range []string{

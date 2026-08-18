@@ -17,7 +17,7 @@ func TestWorkspaceMemberPermissionsDefaultAndOwnerManagement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get workspace: %v", err)
 	}
-	if !workspace.CanCreateProjects || !workspace.CanPrivateConversations || !workspace.CanCreateKB ||
+	if !workspace.CanCreateProjects || !workspace.CanPrivateConversations || !workspace.CanCreateSkillsPrompts || !workspace.CanCreateKB ||
 		!workspace.CanAddKBFiles || !workspace.CanDeleteKBContent {
 		t.Fatalf("new member permissions=%+v, want all enabled", workspace)
 	}
@@ -34,12 +34,12 @@ func TestWorkspaceMemberPermissionsDefaultAndOwnerManagement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("owner update permissions: %v", err)
 	}
-	if updated.CanCreateProjects || updated.CanPrivateConversations || updated.CanCreateKB ||
+	if updated.CanCreateProjects || updated.CanPrivateConversations || updated.CanCreateSkillsPrompts || updated.CanCreateKB ||
 		updated.CanAddKBFiles || updated.CanDeleteKBContent {
 		t.Fatalf("updated permissions=%+v, want all disabled", updated)
 	}
 	workspace, err = GetWorkspaceForMember(ctx, db, "ws1", "outsider")
-	if err != nil || workspace.CanCreateProjects || workspace.CanPrivateConversations || workspace.CanCreateKB ||
+	if err != nil || workspace.CanCreateProjects || workspace.CanPrivateConversations || workspace.CanCreateSkillsPrompts || workspace.CanCreateKB ||
 		workspace.CanAddKBFiles || workspace.CanDeleteKBContent {
 		t.Fatalf("effective workspace permissions=%+v err=%v", workspace, err)
 	}

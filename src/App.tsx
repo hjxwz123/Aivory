@@ -13,7 +13,6 @@ import { AuthGate } from '@/components/auth/auth-gate'
 import SettingsDialog from '@/pages/settings/SettingsLayout'
 import { useCommandMenu } from '@/hooks/use-command-menu'
 import { useHotkeys } from '@/hooks/use-hotkeys'
-import { useSettings } from '@/store/settings'
 import { useConversations } from '@/store/conversations'
 import { useUI } from '@/store/ui'
 import { useSettingsModal } from '@/store/settings-modal'
@@ -86,18 +85,18 @@ const NotFound = lazy(() => import('@/pages/NotFound'))
 function GlobalShortcuts() {
   const toggle = useCommandMenu((s) => s.toggle)
   const setOpen = useCommandMenu((s) => s.setOpen)
-  const toggleSidebar = useSettings((s) => s.toggleSidebar)
   const createConversation = useConversations((s) => s.createConversation)
   const navigate = useNavigate()
   const openSettings = useOpenSettings()
 
   useHotkeys([
     { combo: 'mod+k', whenInputFocused: true, handler: () => toggle() },
-    { combo: 'mod+b', whenInputFocused: false, handler: () => toggleSidebar() },
     { combo: 'mod+,', whenInputFocused: false, handler: () => openSettings('account') },
     {
       combo: 'mod+shift+o',
-      whenInputFocused: false,
+      // This is a navigation shortcut, not text editing; it should work even
+      // when the composer currently owns focus.
+      whenInputFocused: true,
       handler: () => {
         void (async () => {
           const c = await createConversation()
