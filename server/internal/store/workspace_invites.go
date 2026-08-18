@@ -304,6 +304,9 @@ func JoinWorkspaceByInviteRecord(ctx context.Context, db *sql.DB, token, userID,
 		return nil, "", err
 	}
 	if joined {
+		if err := ApplyWorkspaceOnboardingTx(ctx, tx, workspaceID, userID); err != nil {
+			return nil, "", err
+		}
 		// Consume exactly one use; the conditional UPDATE keeps concurrent
 		// one-time joins from both succeeding.
 		res, cerr := tx.ExecContext(ctx,

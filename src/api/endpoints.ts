@@ -27,6 +27,8 @@ import type {
   ApiWorkspacePolicy,
   ApiWorkspaceUsageRow,
   ApiWorkspaceAuditLog,
+  ApiWorkspaceSettings,
+  ApiWorkspaceDomainMapping,
   ApiAnalytics,
   ApiAuthPolicy,
   ApiAuthResponse,
@@ -512,6 +514,9 @@ export const workspacesApi = {
     api<ApiWorkspacePolicy>(`/workspaces/${encodeURIComponent(id)}/policy`),
   updatePolicy: (id: string, body: Partial<Omit<ApiWorkspacePolicy, 'WorkspaceID' | 'UpdatedBy' | 'UpdatedAt'>>) =>
     api<ApiWorkspacePolicy>(`/workspaces/${encodeURIComponent(id)}/policy`, { method: 'PATCH', body }),
+  settings: (id: string) => api<ApiWorkspaceSettings>(`/workspaces/${encodeURIComponent(id)}/settings`),
+  updateSettings: (id: string, body: Partial<ApiWorkspaceSettings>) =>
+    api<ApiWorkspaceSettings>(`/workspaces/${encodeURIComponent(id)}/settings`, { method: 'PATCH', body }),
   usage: (id: string, days = 30) =>
     api<{ days: number; usage: ApiWorkspaceUsageRow[] }>(
       `/workspaces/${encodeURIComponent(id)}/usage?days=${days}`,
@@ -538,11 +543,21 @@ export const workspacesApi = {
   adminDetail: (id: string) =>
     api<{
       workspace: ApiWorkspace
+      settings?: ApiWorkspaceSettings
+      domains?: ApiWorkspaceDomainMapping[]
       members: ApiWorkspaceMember[]
       conversations: ApiConversation[]
       projects: ApiProject[]
       kbs: ApiKnowledgeBase[]
     }>(`/admin/workspaces/${encodeURIComponent(id)}`),
+  adminUpdateSettings: (id: string, body: Partial<ApiWorkspaceSettings>) =>
+    api<ApiWorkspaceSettings>(`/admin/workspaces/${encodeURIComponent(id)}/settings`, { method: 'PATCH', body }),
+  adminDomains: (id: string) =>
+    api<{ mappings: ApiWorkspaceDomainMapping[] }>(`/admin/workspaces/${encodeURIComponent(id)}/domains`),
+  adminAddDomain: (id: string, domain: string) =>
+    api<ApiWorkspaceDomainMapping>(`/admin/workspaces/${encodeURIComponent(id)}/domains`, { method: 'POST', body: { domain } }),
+  adminRemoveDomain: (id: string, mappingId: string) =>
+    api<{ ok: true }>(`/admin/workspaces/${encodeURIComponent(id)}/domains/${encodeURIComponent(mappingId)}`, { method: 'DELETE' }),
   adminRemove: (id: string) =>
     api<{ ok: true }>(`/admin/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 }

@@ -939,9 +939,39 @@ CREATE TABLE IF NOT EXISTS workspaces (
   owner_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   invite_token TEXT NOT NULL UNIQUE,
   deleting     INTEGER NOT NULL DEFAULT 0,
+  default_new_user_role TEXT NOT NULL DEFAULT 'member',
+  default_member_permissions TEXT NOT NULL DEFAULT '{"can_create_projects":true,"can_private_conversations":true,"can_create_skills_prompts":true,"can_create_kb":true,"can_add_kb_files":true,"can_delete_kb_content":true}',
+  allow_personal_space INTEGER NOT NULL DEFAULT 1,
+  initial_site_group_id TEXT NOT NULL DEFAULT '',
+  initial_permanent_credits REAL NOT NULL DEFAULT 0,
   created_at   INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
 CREATE INDEX IF NOT EXISTS idx_workspaces_owner ON workspaces(owner_id);
+
+-- Enterprise onboarding routes verified email domains into an existing
+-- workspace. A domain can belong to only one initial workspace in the
+-- lightweight model; provider_id is optional and is only an extra match.
+CREATE TABLE IF NOT EXISTS workspace_domain_mappings (
+  id            TEXT PRIMARY KEY,
+  domain        TEXT NOT NULL,
+  provider_id   TEXT NOT NULL DEFAULT '',
+  workspace_id  TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  created_by    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at    INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_domain_mapping_domain ON workspace_domain_mappings(lower(trim(domain)));
+CREATE INDEX IF NOT EXISTS idx_workspace_domain_mapping_workspace ON workspace_domain_mappings(workspace_id);
+
+-- One-time onboarding effects. This prevents group assignment and permanent
+-- credit grants from repeating after a member leaves and rejoins.
+CREATE TABLE IF NOT EXISTS workspace_onboarding_grants (
+  workspace_id       TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  user_id            TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  site_group_granted INTEGER NOT NULL DEFAULT 0,
+  credits_granted_micros INTEGER NOT NULL DEFAULT 0,
+  created_at         INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  PRIMARY KEY (workspace_id, user_id)
+);
 
 CREATE TABLE IF NOT EXISTS workspace_members (
   workspace_id             TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,

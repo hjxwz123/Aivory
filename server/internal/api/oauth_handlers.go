@@ -568,6 +568,19 @@ func oauthCallbackHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, verifyURL, http.StatusFound)
 		return
 	}
+	// Enterprise domain routing is intentionally evaluated only after the
+	// provider identity and verified email have been accepted. A mapped domain
+	// must complete its workspace onboarding transaction before a session is
+	// issued; an unmapped domain is a no-op.
+	if info.EmailVerified && strings.TrimSpace(info.Email) != "" {
+		if _, onboardingErr := store.OnboardUserByEmail(ctx, d.DB, user.ID, info.Email, "oauth:"+p.ID); onboardingErr != nil {
+			if d.Logger != nil {
+				d.Logger.Printf("[oauth] workspace onboarding failed for user=%s provider=%s: %v", user.ID, p.ID, onboardingErr)
+			}
+			fail("workspace_onboarding_failed")
+			return
+		}
+	}
 
 	// §cross-domain hand-off: the flow always completes here on the canonical host,
 	// but session cookies must be set on the domain the user is actually browsing.

@@ -294,6 +294,24 @@ export interface ApiWorkspace {
   can_create_kb: boolean
   can_add_kb_files: boolean
   can_delete_kb_content: boolean
+  allow_personal_space?: boolean
+}
+
+export interface ApiWorkspaceSettings {
+  workspace_id: string
+  default_new_user_role: ApiWorkspaceRole
+  default_member_permissions: ApiWorkspaceMemberPermissions
+  allow_personal_space: boolean
+  initial_site_group_id?: string
+  initial_permanent_credits: number
+}
+
+export interface ApiWorkspaceDomainMapping {
+  id: string
+  domain: string
+  workspace_id: string
+  workspace_name?: string
+  created_at: number
 }
 
 export interface ApiWorkspaceMember {

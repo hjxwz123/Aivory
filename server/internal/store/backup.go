@@ -32,7 +32,7 @@ const BackupVersion = 2
 // (messages.parent_id) is satisfied by exporting messages in creation order —
 // a reply is always created after the message it answers.
 var backupTableOrder = []string{
-	"settings", "users", "credit_adjustment_notifications", "login_histories", "workspaces", "workspace_members", "user_groups", "credit_ledger", "credit_reservations", "quota_ledger", "billing_usage", "credit_packages",
+	"settings", "users", "credit_adjustment_notifications", "login_histories", "workspaces", "workspace_domain_mappings", "workspace_members", "workspace_onboarding_grants", "user_groups", "credit_ledger", "credit_reservations", "quota_ledger", "billing_usage", "credit_packages",
 	"payment_channels", "payment_methods", "payment_orders", "payment_order_attempts", "payment_events",
 	"channels", "mcp_servers", "skills", "prompts", "user_skills", "user_prompts", "oauth_providers",
 	"models", "model_group_quotas", "model_tags", "image_styles",
