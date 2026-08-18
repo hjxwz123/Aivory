@@ -104,7 +104,7 @@ export default function SettingsDialog() {
             'focus-visible:outline-none',
             // Mobile: full-screen sheet. Desktop: centered panel.
             'inset-0 flex flex-col',
-            'sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2',
+            'sm:inset-auto sm:left-1/2 sm:top-1/2 sm:[translate:-50%_-50%]',
             'sm:w-[min(94vw,60rem)] sm:h-[min(44rem,calc(100dvh-2rem))] sm:max-h-[calc(100dvh-2rem)] sm:flex-row',
             'sm:rounded-popup sm:border sm:border-[var(--color-border)] sm:shadow-[var(--shadow-xl)]',
             'data-[state=open]:animate-[pop-in_220ms_var(--ease-out)]',

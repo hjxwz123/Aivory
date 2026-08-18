@@ -5,7 +5,7 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { AlertTriangle, ArrowLeftRight, Briefcase, Check, Copy, FileClock, Home, KeyRound, LogOut, Plus, RefreshCw, Settings2, ShieldCheck, SlidersHorizontal, Trash2, UserX, Users } from 'lucide-react'
+import { AlertTriangle, ArrowLeftRight, Briefcase, Check, Copy, FileClock, Home, KeyRound, LogOut, Plus, RefreshCw, Settings2, ShieldCheck, SlidersHorizontal, Trash2, UserPlus, UserX, Users } from 'lucide-react'
 import { modelsApi, workspacesApi } from '@/api'
 import type {
   ApiModel,
@@ -899,11 +899,11 @@ function WorkspaceInvitesPanel({ workspaceID, isOwner }: { workspaceID: string; 
   return (
     <div className="space-y-3">
       <div className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-2">
-        <div className="grid min-w-0 grid-cols-[4.5rem_minmax(0,1fr)_4.5rem_2.75rem_2rem] items-center gap-1.5 max-[390px]:flex max-[390px]:flex-wrap">
+        <div className="grid min-w-0 grid-cols-[4.75rem_minmax(0,1fr)_5.25rem_2.75rem_2rem] items-center gap-1.5">
           <Select value={role} disabled={creating} onValueChange={(value) => setRole(value as ApiWorkspaceRole)}>
             <SelectTrigger
               aria-label={t('workspace.inviteRole', { defaultValue: 'Invite role' })}
-              className="h-8 w-[72px] min-w-0 px-2 text-[12px]"
+              className="h-8 min-w-0 gap-1 px-2 text-[12px] [&>span:first-child]:min-w-0 [&>span:first-child]:truncate [&>span:first-child]:whitespace-nowrap"
             >
               <SelectValue />
             </SelectTrigger>
@@ -919,20 +919,21 @@ function WorkspaceInvitesPanel({ workspaceID, isOwner }: { workspaceID: string; 
             onChange={(e) => setEmail(e.target.value)}
             placeholder={t('workspace.inviteEmailOptional', { defaultValue: 'Bind to email (optional)' })}
             aria-label={t('workspace.inviteEmailOptional', { defaultValue: 'Bind to email (optional)' })}
-            className="h-8 min-w-0 w-full text-[12.5px] max-[390px]:order-5 max-[390px]:basis-full"
+            wrapperClassName="h-8 min-w-0 w-full px-2.5"
+            className="min-w-0 text-[12.5px]"
             inputMode="email"
           />
           <Select value={String(expiryDays)} disabled={creating} onValueChange={(value) => setExpiryDays(Number(value))}>
             <SelectTrigger
               aria-label={t('workspace.inviteExpires', { defaultValue: 'Expires' })}
-              className="h-8 w-[72px] min-w-0 px-2 text-[12px]"
+              className="h-8 min-w-0 gap-1 px-2 text-[12px] [&>span:first-child]:min-w-0 [&>span:first-child]:truncate [&>span:first-child]:whitespace-nowrap"
             >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="1">{t('common.day', { defaultValue: '1 day' })}</SelectItem>
-              <SelectItem value="7">{t('common.week', { defaultValue: '7 days' })}</SelectItem>
-              <SelectItem value="30">{t('common.month', { defaultValue: '30 days' })}</SelectItem>
+              <SelectItem value="1">{t('workspace.inviteExpiryDay', { defaultValue: '1 day' })}</SelectItem>
+              <SelectItem value="7">{t('workspace.inviteExpiryWeek', { defaultValue: '7 days' })}</SelectItem>
+              <SelectItem value="30">{t('workspace.inviteExpiryMonth', { defaultValue: '30 days' })}</SelectItem>
               <SelectItem value="0">{t('workspace.inviteNeverExpires', { defaultValue: 'Never' })}</SelectItem>
             </SelectContent>
           </Select>
@@ -941,10 +942,11 @@ function WorkspaceInvitesPanel({ workspaceID, isOwner }: { workspaceID: string; 
             <Input
               value={maxUses}
               disabled={creating}
-              onChange={(e) => setMaxUses(Number(e.target.value) || 0)}
+              onChange={(e) => setMaxUses(Math.max(0, Number(e.target.value) || 0))}
               type="number"
               min={0}
-              className="h-8 w-11 min-w-0 px-1.5 text-[12.5px]"
+              wrapperClassName="h-8 w-full min-w-0 px-1.5"
+              className="min-w-0 appearance-none p-0 text-center text-[12.5px] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
               aria-label={t('workspace.inviteMaxUses', { defaultValue: 'Max uses (0 for unlimited)' })}
               title={t('workspace.inviteMaxUses', { defaultValue: 'Max uses' })}
             />
@@ -957,7 +959,7 @@ function WorkspaceInvitesPanel({ workspaceID, isOwner }: { workspaceID: string; 
               aria-label={t('workspace.inviteCreate', { defaultValue: 'Create invite' })}
               onClick={() => void createInvite()}
             >
-              {creating ? null : <Plus size={14} aria-hidden />}
+              {creating ? null : <UserPlus size={14} aria-hidden />}
             </Button>
           </Tooltip>
         </div>
