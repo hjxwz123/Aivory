@@ -58,6 +58,38 @@ func TestMigrateAddsIconToLegacyUserSkillsTable(t *testing.T) {
 	}
 }
 
+func TestMigrateAddsWorkspaceColumnsBeforeLibraryIndexes(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "legacy-user-library-scope.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	// Simulate a database created before workspace-scoped skills/prompts. The
+	// embedded schema must be safe to apply before the additive columns exist;
+	// Migrate creates the dependent indexes only after those ALTERs complete.
+	if _, err := db.Exec(schemaSQL); err != nil {
+		t.Fatalf("seed current schema: %v", err)
+	}
+	for _, table := range []string{"user_skills", "user_prompts"} {
+		if _, err := db.Exec("ALTER TABLE " + table + " DROP COLUMN workspace_id"); err != nil {
+			t.Fatalf("drop legacy %s workspace column: %v", table, err)
+		}
+	}
+
+	if err := Migrate(db); err != nil {
+		t.Fatalf("migrate legacy workspace library schema: %v", err)
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatalf("repeat workspace library migration: %v", err)
+	}
+	for _, table := range []string{"user_skills", "user_prompts"} {
+		if _, err := db.Exec("SELECT workspace_id FROM " + table + " WHERE 1=0"); err != nil {
+			t.Fatalf("%s workspace column missing after migration: %v", table, err)
+		}
+	}
+}
+
 func TestPrivateLibraryOwnershipAndCatalogCopiesRemainIndependent(t *testing.T) {
 	db, ctx := openLibraryTestDB(t)
 	adminSkill, err := CreateSkill(ctx, db, Skill{
