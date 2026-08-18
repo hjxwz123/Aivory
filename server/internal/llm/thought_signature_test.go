@@ -3,6 +3,7 @@ package llm
 import (
 	"encoding/base64"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -94,5 +95,57 @@ func TestGeminiFunctionCallPartSignature(t *testing.T) {
 	dec, err := base64.StdEncoding.DecodeString(geminiSkipSigSentinel)
 	if err != nil || string(dec) != "skip_thought_signature_validator" {
 		t.Errorf("sentinel decode = %q (err %v), want skip_thought_signature_validator", string(dec), err)
+	}
+}
+
+func TestGeminiRawReplayDropsStandaloneThoughtSignaturePart(t *testing.T) {
+	history := []UnifiedMessage{{
+		Role: "assistant",
+		Blocks: []UnifiedBlock{{
+			Kind: "tool_call", ToolName: "python_execute", ToolID: "python_execute",
+		}},
+		Raw: json.RawMessage(`[
+			{"role":"model","parts":[
+				{"thoughtSignature":"orphan-metadata"},
+				{"functionCall":{"name":"python_execute","args":{}},"thoughtSignature":"real-sig"}
+			]},
+			{"role":"user","parts":[{"functionResponse":{"name":"python_execute","response":{"content":"ok"}}}]}
+		]`),
+	}}
+
+	wire, err := json.Marshal(historyToGemini(history, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(wire)
+	if strings.Contains(body, "orphan-metadata") {
+		t.Fatalf("metadata-only Gemini part survived raw replay: %s", body)
+	}
+	if !strings.Contains(body, `"functionCall"`) || !strings.Contains(body, `"functionResponse"`) {
+		t.Fatalf("valid native tool history was lost while sanitizing: %s", body)
+	}
+}
+
+func TestReadGeminiStreamDoesNotPersistStandaloneThoughtSignaturePart(t *testing.T) {
+	stream := `data: {"candidates":[{"content":{"parts":[` +
+		`{"thoughtSignature":"stream-sig"},` +
+		`{"functionCall":{"name":"python_execute","args":{}}}` +
+		`]},"finishReason":"STOP"}]}` + "\n\n"
+
+	_, _, calls, modelParts, _, _, err := readGeminiStream(strings.NewReader(stream), func(SseEvent) {})
+	if err != nil {
+		t.Fatalf("readGeminiStream: %v", err)
+	}
+	if len(calls) != 1 || len(modelParts) != 1 {
+		t.Fatalf("calls=%#v modelParts=%#v, want one signed function call part", calls, modelParts)
+	}
+	if _, exists := modelParts[0]["functionCall"]; !exists {
+		t.Fatalf("functionCall missing after signature filtering: %#v", modelParts[0])
+	}
+	if modelParts[0]["thoughtSignature"] != "stream-sig" {
+		t.Fatalf("standalone signature was not transferred to functionCall: %#v", modelParts[0])
+	}
+	if !geminiPartHasData(modelParts[0]) {
+		t.Fatalf("persisted Gemini part has no data oneof: %#v", modelParts[0])
 	}
 }

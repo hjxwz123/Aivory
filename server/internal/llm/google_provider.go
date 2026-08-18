@@ -298,13 +298,21 @@ func historyToGemini(h []UnifiedMessage, vision bool) []map[string]any {
 		if m.Role == "assistant" && len(m.Raw) > 2 && !isPromptToolRawEnvelope(m.Raw) {
 			var turns []map[string]any
 			if err := json.Unmarshal(m.Raw, &turns); err == nil && len(turns) > 0 && turns[0]["parts"] != nil {
+				// Some Gemini thinking variants emit thoughtSignature as a
+				// metadata-only part. It is useful when attached to a functionCall,
+				// but a standalone signature does not initialize Part's data oneof
+				// and Google rejects the next request with a parts[N].data 400.
+				sanitizedTurns, validTurns := sanitizeGeminiRawTurns(turns)
+				if validTurns {
+					turns = sanitizedTurns
+				}
 				// Gemini 3 hard-rejects (400 "missing thought_signature in
 				// functionCall parts") any replayed functionCall part that lacks its
 				// thoughtSignature. Raw persisted before signature capture landed —
 				// or stripped by a relay — carries bare calls; rather than poison
 				// the whole request, fall through to the lossy-but-valid block→text
 				// path below (the same downgrade used for cross-vendor history).
-				if geminiRawCallsAllSigned(turns) {
+				if validTurns && geminiRawCallsAllSigned(turns) {
 					contents = append(contents, turns...)
 					continue
 				}
@@ -330,6 +338,55 @@ func historyToGemini(h []UnifiedMessage, vision bool) []map[string]any {
 		contents = append(contents, map[string]any{"role": role, "parts": parts})
 	}
 	return contents
+}
+
+// geminiPartHasData reports whether a decoded Gemini Part initializes one of
+// Google's data oneof fields. thought/thoughtSignature are metadata and do not
+// count. A standalone signature part is invalid on replay and causes the
+// opaque `parts[N].data required oneof` error from the Google API.
+func geminiPartHasData(part map[string]any) bool {
+	for _, key := range []string{
+		"text", "inlineData", "inline_data", "fileData", "file_data",
+		"functionCall", "function_call", "functionResponse", "function_response",
+		"executableCode", "executable_code", "codeExecutionResult", "code_execution_result",
+	} {
+		if value, ok := part[key]; ok && value != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// sanitizeGeminiRawTurns removes metadata-only parts from a decoded native
+// history replay. The JSON shape remains []any so it is compatible with the
+// raw wire format and geminiRawCallsAllSigned. Malformed turns are rejected and
+// the caller falls back to canonical blocks instead of sending partial history.
+func sanitizeGeminiRawTurns(turns []map[string]any) ([]map[string]any, bool) {
+	sanitized := make([]map[string]any, 0, len(turns))
+	for _, turn := range turns {
+		rawParts, ok := turn["parts"].([]any)
+		if !ok {
+			return nil, false
+		}
+		parts := make([]any, 0, len(rawParts))
+		for _, rawPart := range rawParts {
+			part, ok := rawPart.(map[string]any)
+			if !ok || !geminiPartHasData(part) {
+				continue
+			}
+			parts = append(parts, part)
+		}
+		if len(parts) == 0 {
+			continue
+		}
+		copyTurn := make(map[string]any, len(turn)+1)
+		for key, value := range turn {
+			copyTurn[key] = value
+		}
+		copyTurn["parts"] = parts
+		sanitized = append(sanitized, copyTurn)
+	}
+	return sanitized, len(sanitized) > 0
 }
 
 // geminiCall is one Gemini functionCall request parsed from the stream.
@@ -551,7 +608,7 @@ func readGeminiStream(body io.Reader, onEvent func(SseEvent)) (string, string, [
 				// executableCode/codeExecutionResult), never functionCall. Preserve
 				// those parts for same-provider replay without adding them to calls,
 				// which is the client Function list executed by Aivory below.
-				if !handled && len(prm) > 0 {
+				if !handled && len(prm) > 0 && geminiPartHasData(prm) {
 					modelParts = append(modelParts, prm)
 				}
 			}
@@ -618,7 +675,7 @@ func parseGeminiCandidate(parsed map[string]any) (string, []geminiCall, []map[st
 				calls = append(calls, geminiCall{Name: name, Args: args})
 				modelParts = append(modelParts, geminiFunctionCallPart(prm, fc, candSig))
 			}
-			if !handled && len(prm) > 0 {
+			if !handled && len(prm) > 0 && geminiPartHasData(prm) {
 				modelParts = append(modelParts, prm)
 			}
 		}
