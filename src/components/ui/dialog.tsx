@@ -70,8 +70,8 @@ function animateDialogResize(
   if (!dialogDimensionsChanged(before, next) || reducedMotion.matches || before.width <= 0 || before.height <= 0 || next.width <= 0 || next.height <= 0) return null
   return node.animate(
     [
-      { transform: `translate(-50%, -50%) scale(${before.width / next.width}, ${before.height / next.height})` },
-      { transform: 'translate(-50%, -50%) scale(1)' },
+      { transform: `scale(${before.width / next.width}, ${before.height / next.height})` },
+      { transform: 'scale(1)' },
     ],
     { duration: 220, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
   )
@@ -88,13 +88,21 @@ export const DialogContent = forwardRef<
   const resizeAnimationRef = useRef<Animation | null>(null)
 
   function transitionFromPreviousSize(node: HTMLElement, next: DialogDimensions) {
-    const before = previousDimensionsRef.current
+    let before = previousDimensionsRef.current
     previousDimensionsRef.current = next
     // ResizeObserver also runs after React's layout effects. Ignore its
     // duplicate same-size notification so it cannot cancel the tab animation
     // that was just started above.
     if (!before || !dialogDimensionsChanged(before, next)) return
-    resizeAnimationRef.current?.cancel()
+    const runningAnimation = resizeAnimationRef.current
+    if (runningAnimation) {
+      // Continue from the currently painted dimensions when tabs or async
+      // content resize repeatedly before the previous transition has ended.
+      // This avoids snapping back to the previous transition's start size.
+      const currentRect = node.getBoundingClientRect()
+      before = { width: currentRect.width, height: currentRect.height }
+      runningAnimation.cancel()
+    }
     const animation = animateDialogResize(
       node,
       before,
@@ -152,7 +160,10 @@ export const DialogContent = forwardRef<
         ref={setContentRef}
         data-feedback-capture-ignore={captureIgnore ? '' : undefined}
         className={cn(
-          'fixed left-1/2 top-1/2 z-[60] -translate-x-1/2 -translate-y-1/2 w-[min(96vw,calc(100vw-2rem))]',
+          // Positioning uses the independent `translate` property. Entrance
+          // and resize animations can then scale the surface without ever
+          // replacing the transform responsible for keeping it centered.
+          'fixed left-1/2 top-1/2 z-[60] [translate:-50%_-50%] w-[min(96vw,calc(100vw-2rem))]',
           sizeMap[size],
           // Never exceed the viewport: cap height and let the body scroll while
           // the header/footer stay pinned (see DialogBody/DialogHeader/Footer).
