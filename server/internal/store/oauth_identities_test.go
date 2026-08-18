@@ -195,6 +195,31 @@ func TestConcurrentUnbindPreservesLastOAuthLoginMethod(t *testing.T) {
 	}
 }
 
+func TestUnbindOAuthIdentityKeepsAutoRedirectProvider(t *testing.T) {
+	ctx := context.Background()
+	db := setupOAuthDB(t)
+	exec(t, db, `INSERT INTO oauth_providers(id,kind,name,client_id,enabled) VALUES('oa_github','github','GitHub','cid',1)`)
+	if err := BindOAuthIdentity(ctx, db, "oa_google", "google-sub", "u1", "a@b.c"); err != nil {
+		t.Fatal(err)
+	}
+	if err := BindOAuthIdentity(ctx, db, "oa_github", "github-sub", "u1", "a@b.c"); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetSetting(db, "auth_entry_mode", "auto_redirect"); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetSetting(db, "auth_default_provider_id", "oa_google"); err != nil {
+		t.Fatal(err)
+	}
+
+	if ok, err := UnbindOAuthIdentity(ctx, db, "oa_google", "google-sub", "u1"); ok || !errors.Is(err, ErrOAuthLastLoginMethod) {
+		t.Fatalf("default-provider unbind = ok %v err %v, want lockout rejection", ok, err)
+	}
+	if ok, err := UnbindOAuthIdentity(ctx, db, "oa_github", "github-sub", "u1"); err != nil || !ok {
+		t.Fatalf("non-default provider unbind = ok %v err %v, want success", ok, err)
+	}
+}
+
 func TestCreateOAuthUserRollsBackWhenIdentityAlreadyExists(t *testing.T) {
 	ctx := context.Background()
 	db := setupOAuthDB(t)

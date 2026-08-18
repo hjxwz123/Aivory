@@ -1363,6 +1363,8 @@ var settingsKeys = []string{
 	"keep_recent_rounds", "summary_max_tokens", "summary_target_percent", "summary_merge_max_tokens", "compaction_request_max_tokens", "context_compaction_prompt", "compaction_enabled",
 	"compaction_token_trigger", "compaction_token_cap", "compaction_retention_percentage",
 	"memory_enabled", "daily_message_limit", "daily_image_limit", "signup_open",
+	"password_login_enabled", "auth_entry_mode", "auth_default_provider_id",
+	"oauth_initial_password_policy", "oauth_auto_provision_enabled",
 	"email_verification_required", "daily_token_limit", "max_concurrent_generations",
 	// Anti-abuse registration controls. register_ip_daily_limit: max accounts one
 	// IP may create per day (0 = off). register_captcha_required: gate signup
@@ -1563,9 +1565,21 @@ func adminSettingsSet(d Deps, w http.ResponseWriter, r *http.Request) {
 	if capabilitiesPresent {
 		capabilitiesBefore = currentGlobalCapabilitySnapshot(d)
 	}
-	if _, err := applyAdminSettingsPatch(r.Context(), d, body, true); err != nil {
+	adminID := ""
+	if admin := authUser(r); admin != nil {
+		adminID = admin.ID
+	}
+	if _, err := applyAdminSettingsPatch(r.Context(), d, body, true, adminID); err != nil {
 		if errors.Is(err, errInvalidInput) {
 			writeError(w, 400, errInvalidInput)
+			return
+		}
+		if errors.Is(err, errAuthPolicyConflict) || errors.Is(err, errAuthPolicyProviderRequired) || errors.Is(err, errAuthPolicyAdminLinkRequired) {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
+		if errors.Is(err, errAuthPolicyAdminRequired) {
+			writeError(w, http.StatusForbidden, err)
 			return
 		}
 		if errors.Is(err, errEmbeddingModelLocked) {
@@ -1575,15 +1589,21 @@ func adminSettingsSet(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
-	if capabilitiesPresent && !globalCapabilitySnapshotsEqual(capabilitiesBefore, currentGlobalCapabilitySnapshot(d)) {
+	capabilitiesChanged := capabilitiesPresent && !globalCapabilitySnapshotsEqual(capabilitiesBefore, currentGlobalCapabilitySnapshot(d))
+	if capabilitiesChanged {
 		revokeGlobalCapabilitySnapshots(d)
+	}
+	if capabilitiesChanged || authPolicyKeysPresent(body) {
 		publishGlobalEvent(d, "account.permissions_updated")
 	}
 	broadcastConfigInvalidate(d) // §2.4: clear the settings cache on every instance
+	if authPolicyKeysPresent(body) && d.Logger != nil {
+		d.Logger.Printf("[audit] admin=%s action=auth.policy.updated", adminID)
+	}
 	adminSettingsGet(d, w, r)
 }
 
-func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.RawMessage, skipNull bool) (int64, error) {
+func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.RawMessage, skipNull bool, authAdminID string) (int64, error) {
 	type settingWrite struct {
 		key   string
 		value json.RawMessage
@@ -1722,6 +1742,30 @@ func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.R
 					return 0, errInvalidInput
 				}
 				v, _ = json.Marshal(enabled)
+			case "password_login_enabled", "oauth_auto_provision_enabled":
+				var enabled bool
+				if json.Unmarshal(v, &enabled) != nil {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(enabled)
+			case "auth_entry_mode":
+				var value string
+				if json.Unmarshal(v, &value) != nil || !validAuthEntryMode(strings.TrimSpace(value)) {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(strings.TrimSpace(value))
+			case "auth_default_provider_id":
+				var value string
+				if json.Unmarshal(v, &value) != nil {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(strings.TrimSpace(value))
+			case "oauth_initial_password_policy":
+				var value string
+				if json.Unmarshal(v, &value) != nil || !validOAuthPasswordPolicy(strings.TrimSpace(value)) {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(strings.TrimSpace(value))
 			case "log_full_requests", "log_errors_only", "log_request_bodies":
 				var enabled bool
 				if json.Unmarshal(v, &enabled) != nil {
@@ -1793,6 +1837,17 @@ func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.R
 		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if authPolicyKeysPresent(body) {
+		if err := store.LockAuthConfigurationTx(ctx, tx); err != nil {
+			return 0, err
+		}
+		if err := lockActiveAuthAdminTx(ctx, tx, authAdminID); err != nil {
+			return 0, err
+		}
+		if err := validateAuthPolicyPatchTx(ctx, tx, body, authAdminID); err != nil {
+			return 0, err
+		}
+	}
 	now := time.Now().Unix()
 	for _, write := range writes {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO settings(key, value, updated_at) VALUES(?, ?, ?)

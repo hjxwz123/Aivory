@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,31 @@ import (
 )
 
 const oauthCols = `id, kind, name, icon, client_id, client_secret, issuer_url, jwks_url, auth_url, token_url, userinfo_url, scopes, team_id, key_id, subject_namespace, enabled, sort_order, updated_at`
+
+// LockAuthConfigurationTx serializes every transaction that can change the
+// effective enterprise sign-in policy. The no-op row update is portable across
+// SQLite and PostgreSQL; unlike a process mutex it also protects multi-instance
+// deployments. Seed normally creates this row, while the INSERT keeps older or
+// partially restored databases safe.
+func LockAuthConfigurationTx(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO settings(key, value, updated_at)
+		VALUES('password_login_enabled', 'true', ?)
+		ON CONFLICT(key) DO NOTHING`, time.Now().Unix()); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE settings SET value=value WHERE key='password_login_enabled'`)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return errors.New("lock authentication configuration")
+	}
+	return nil
+}
 
 // OAuthProviderCallbackGuard is an opaque, non-secret snapshot of the exact
 // provider trust and credential generation used for an OAuth callback. It is
@@ -110,7 +136,18 @@ func ListOAuthProviders(ctx context.Context, db *sql.DB) ([]OAuthProvider, error
 // ListEnabledOAuthProviders returns the enabled providers (secret stripped) for
 // the public login page.
 func ListEnabledOAuthProviders(ctx context.Context, db *sql.DB) ([]OAuthProvider, error) {
-	rows, err := db.QueryContext(ctx, `SELECT `+oauthCols+` FROM oauth_providers WHERE enabled=1 ORDER BY sort_order, name`)
+	return listEnabledOAuthProviders(ctx, db)
+}
+
+// ListEnabledOAuthProvidersTx is the caller-owned transaction form used when
+// authentication policy and provider availability must be validated from one
+// database snapshot.
+func ListEnabledOAuthProvidersTx(ctx context.Context, tx *sql.Tx) ([]OAuthProvider, error) {
+	return listEnabledOAuthProviders(ctx, tx)
+}
+
+func listEnabledOAuthProviders(ctx context.Context, ex RowExecer) ([]OAuthProvider, error) {
+	rows, err := ex.QueryContext(ctx, `SELECT `+oauthCols+` FROM oauth_providers WHERE enabled=1 ORDER BY sort_order, name`)
 	if err != nil {
 		return nil, err
 	}
@@ -407,6 +444,36 @@ func UpdateOAuthProviderCAS(
 	}
 	defer tx.Rollback()
 
+	updated, err := UpdateOAuthProviderCASTx(ctx, tx, id, patch, expected, currentNamespace, nextNamespace)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	updated.ClientSecret = ""
+	return updated, nil
+}
+
+// UpdateOAuthProviderCASTx is the caller-owned transaction form. Callers that
+// can affect enterprise login availability first lock the shared
+// authentication-configuration row, validate the final policy in this same
+// transaction, and then apply this CAS update before committing.
+func UpdateOAuthProviderCASTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	id string,
+	patch OAuthProviderPatch,
+	expected OAuthProvider,
+	currentNamespace string,
+	nextNamespace string,
+) (*OAuthProvider, error) {
+	if patch.Kind != nil && !ValidOAuthProviderKind(*patch.Kind) {
+		return nil, ErrInvalidOAuthProviderKind
+	}
+	if strings.TrimSpace(id) == "" || expected.ID != id || currentNamespace == "" || nextNamespace == "" {
+		return nil, ErrOAuthProviderChanged
+	}
 	current, err := lockOAuthProvider(ctx, tx, id)
 	if err != nil {
 		return nil, err
@@ -443,9 +510,6 @@ func UpdateOAuthProviderCAS(
 	updated, err := scanOAuthProvider(tx.QueryRowContext(ctx,
 		`SELECT `+oauthCols+` FROM oauth_providers WHERE id=?`, id))
 	if err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	updated.ClientSecret = ""
@@ -582,6 +646,22 @@ func DeleteOAuthProvider(ctx context.Context, db *sql.DB, id string) error {
 	return err
 }
 
+// DeleteOAuthProviderTx removes a provider inside a caller-owned transaction.
+func DeleteOAuthProviderTx(ctx context.Context, tx *sql.Tx, id string) error {
+	result, err := tx.ExecContext(ctx, "DELETE FROM oauth_providers WHERE id=?", id)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // ===== Identity linking =====
 
 // FindOAuthIdentityUser returns the local user id linked to (providerID,
@@ -640,7 +720,17 @@ func LinkOAuthIdentityForCallback(
 // JOIN drops orphaned rows whose provider was deleted — those can no longer log
 // in or be meaningfully shown, so they're invisible (and harmless).
 func ListOAuthIdentitiesForUser(ctx context.Context, db *sql.DB, userID string) ([]OAuthIdentity, error) {
-	rows, err := db.QueryContext(ctx, `
+	return listOAuthIdentitiesForUser(ctx, db, userID)
+}
+
+// ListOAuthIdentitiesForUserTx is the transaction form used by enterprise
+// authentication lockout validation.
+func ListOAuthIdentitiesForUserTx(ctx context.Context, tx *sql.Tx, userID string) ([]OAuthIdentity, error) {
+	return listOAuthIdentitiesForUser(ctx, tx, userID)
+}
+
+func listOAuthIdentitiesForUser(ctx context.Context, ex RowExecer, userID string) ([]OAuthIdentity, error) {
+	rows, err := ex.QueryContext(ctx, `
 		SELECT i.provider_id, i.subject, i.email, i.created_at, p.name, p.kind, p.icon, p.enabled
 		FROM oauth_identities i
 		JOIN oauth_providers p ON p.id = i.provider_id
@@ -834,6 +924,12 @@ func UnbindOAuthIdentity(ctx context.Context, db *sql.DB, providerID, subject, u
 		return false, err
 	}
 	defer tx.Rollback()
+	// Serialize against enterprise sign-in policy and provider mutations. If a
+	// stricter policy commits first, this request validates against it; if this
+	// unlink commits first, the policy writer sees the remaining identities.
+	if err := LockAuthConfigurationTx(ctx, tx); err != nil {
+		return false, err
+	}
 
 	// A harmless UPDATE acquires the per-user write lock on both PostgreSQL and
 	// SQLite. Concurrent removals for two different identity rows must serialize
@@ -854,15 +950,51 @@ func UnbindOAuthIdentity(ctx context.Context, db *sql.DB, providerID, subject, u
 	if exists == 0 {
 		return false, nil
 	}
-	var passwordSet, identityCount int
+	var passwordSet int
 	if err := tx.QueryRowContext(ctx, `SELECT password_set FROM users WHERE id=?`, userID).Scan(&passwordSet); err != nil {
 		return false, err
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM oauth_identities WHERE user_id=?`, userID).Scan(&identityCount); err != nil {
+	passwordLoginEnabled := true
+	authEntryMode := "login_page"
+	defaultProviderID := ""
+	readSetting := func(key string, dst any) error {
+		var raw string
+		err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`, key).Scan(&raw)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal([]byte(raw), dst)
+	}
+	if err := readSetting("password_login_enabled", &passwordLoginEnabled); err != nil {
 		return false, err
 	}
-	if passwordSet == 0 && identityCount <= 1 {
-		return false, ErrOAuthLastLoginMethod
+	if err := readSetting("auth_entry_mode", &authEntryMode); err != nil {
+		return false, err
+	}
+	if err := readSetting("auth_default_provider_id", &defaultProviderID); err != nil {
+		return false, err
+	}
+	localLoginAvailable := passwordSet != 0 && passwordLoginEnabled && authEntryMode == "login_page"
+	if !localLoginAvailable {
+		query := `SELECT COUNT(*)
+			FROM oauth_identities i JOIN oauth_providers p ON p.id=i.provider_id
+			WHERE i.user_id=? AND p.enabled=1
+			  AND NOT (i.provider_id=? AND i.subject=?)`
+		args := []any{userID, providerID, subject}
+		if authEntryMode == "auto_redirect" {
+			query += ` AND i.provider_id=?`
+			args = append(args, strings.TrimSpace(defaultProviderID))
+		}
+		var remaining int
+		if err := tx.QueryRowContext(ctx, query, args...).Scan(&remaining); err != nil {
+			return false, err
+		}
+		if remaining == 0 {
+			return false, ErrOAuthLastLoginMethod
+		}
 	}
 	res, err := tx.ExecContext(ctx,
 		`DELETE FROM oauth_identities WHERE provider_id=? AND subject=? AND user_id=?`,

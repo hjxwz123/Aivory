@@ -44,6 +44,64 @@ func newAuthSecurityDeps(t *testing.T, name string) Deps {
 	}
 }
 
+func TestPasswordLoginPolicyBlocksEveryPublicPasswordEntryPoint(t *testing.T) {
+	d := newAuthSecurityDeps(t, "password-login-policy.db")
+	if err := store.SetSetting(d.DB, "password_login_enabled", false); err != nil {
+		t.Fatalf("disable password login: %v", err)
+	}
+	store.InvalidateConfig()
+
+	tests := []struct {
+		name string
+		h    handler
+		path string
+		body string
+	}{
+		{name: "login", h: loginHandler, path: "/api/auth/login", body: `{"email":"user@example.test","password":"password123"}`},
+		{name: "register", h: registerHandler, path: "/api/auth/register", body: `{"email":"new@example.test","name":"New","password":"password123"}`},
+		{name: "forgot password", h: forgotPasswordHandler, path: "/api/auth/forgot-password", body: `{"email":"user@example.test"}`},
+		{name: "reset password", h: resetPasswordHandler, path: "/api/auth/reset-password", body: `{"email":"user@example.test","code":"123456","new_password":"password456"}`},
+		{name: "send reset code", h: sendCodeHandler, path: "/api/auth/send-code", body: `{"email":"user@example.test","purpose":"reset"}`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := runAuthJSONHandler(t, d, tc.h, tc.path, tc.body)
+			if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "password_login_disabled") {
+				t.Fatalf("status=%d body=%s, want 403 password_login_disabled", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestPasswordLoginPolicyAllowsOAuthEmailVerification(t *testing.T) {
+	d := newAuthSecurityDeps(t, "oauth-email-verification.db")
+	user, err := store.CreateUserWithState(
+		t.Context(), d.DB, "oauth-pending@example.test", "OAuth Pending", "throwaway", "user", "pending", false,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetSetting(d.DB, "password_login_enabled", false); err != nil {
+		t.Fatal(err)
+	}
+	d.Cache.Set("verify:"+user.Email, "123456", time.Minute)
+
+	rec := runAuthJSONHandler(
+		t, d, verifyEmailHandler, "/api/auth/verify-email",
+		`{"email":"oauth-pending@example.test","code":"123456"}`,
+	)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("OAuth email verification status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	verified, err := store.FindUserByID(t.Context(), d.DB, user.ID)
+	if err != nil {
+		t.Fatalf("load verified OAuth user: %v", err)
+	}
+	if verified.Status != "active" {
+		t.Fatalf("verified OAuth user status=%q, want active", verified.Status)
+	}
+}
+
 func TestRegistrationCreatesPendingUserInInitialInsert(t *testing.T) {
 	d := newAuthSecurityDeps(t, "pending-registration.db")
 	if _, err := store.CreateUserWithRole(t.Context(), d.DB, "admin@example.test", "Admin", "hash", "admin"); err != nil {

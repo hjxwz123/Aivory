@@ -46,6 +46,11 @@ export default function Account() {
   const [pwOpen, setPwOpen] = useState(false)
   const [pw, setPw] = useState({ current: '', next: '' })
   const [isChangingPassword, setIsChangingPassword] = useState(false)
+  const authPolicy = useAuth((s) => s.authPolicy)
+  const hasPassword = user?.has_password ?? true
+  const passwordPolicy = user?.oauth_initial_password_policy ?? authPolicy.oauth_initial_password_policy
+  const passwordManagementEnabled = hasPassword || passwordPolicy !== 'disabled'
+  const canDeleteWithPassword = hasPassword
 
   // Two-factor (TOTP) state.
   const twoFactorOn = Boolean(user?.totp_enabled)
@@ -172,6 +177,15 @@ export default function Account() {
     }
     setIsChangingPassword(true)
     try {
+      if (!hasPassword) {
+        await authApi.setPassword(pw.next)
+        if (user) setUser({ ...user, has_password: true })
+        await refreshUser()
+        toast.success(t('settings:account.passwordSet', { defaultValue: 'Password set' }))
+        setPwOpen(false)
+        setPw({ current: '', next: '' })
+        return
+      }
       await authApi.changePassword(pw.current, pw.next)
       toast.success(t('settings:account.passwordUpdated'))
       setPwOpen(false)
@@ -255,20 +269,27 @@ export default function Account() {
       </SettingsSection>
 
       <SettingsSection title={t('settings:account.security')}>
-        <SettingsRow
-          label={t('settings:account.securityRows.password')}
-          description={
-            user?.password_changed_at
-              ? t('settings:account.securityRows.passwordChangedOn', {
-                  date: formatAbsoluteDate(user.password_changed_at * 1000),
-                })
-              : t('settings:account.securityRows.passwordNeverChanged')
-          }
-        >
-          <Button variant="secondary" onClick={() => setPwOpen(true)}>
-            <Lock size={13} aria-hidden /> {t('common:actions.changePassword')}
-          </Button>
-        </SettingsRow>
+        {passwordManagementEnabled ? (
+          <SettingsRow
+            label={t('settings:account.securityRows.password')}
+            description={
+              !hasPassword
+                ? t('settings:account.securityRows.passwordNotSet', { defaultValue: 'No local password is set.' })
+                : user?.password_changed_at
+                  ? t('settings:account.securityRows.passwordChangedOn', {
+                      date: formatAbsoluteDate(user.password_changed_at * 1000),
+                    })
+                  : t('settings:account.securityRows.passwordNeverChanged')
+            }
+          >
+            <Button variant="secondary" onClick={() => setPwOpen(true)}>
+              <Lock size={13} aria-hidden />
+              {hasPassword
+                ? t('common:actions.changePassword')
+                : t('settings:account.setPassword', { defaultValue: 'Set password' })}
+            </Button>
+          </SettingsRow>
+        ) : null}
         <SettingsRow
           label={t('settings:account.twofa.label')}
           description={twoFactorOn ? t('settings:account.twofa.onBody') : t('settings:account.twofa.offBody')}
@@ -289,7 +310,8 @@ export default function Account() {
 
       <ActiveSessions />
 
-      <SettingsSection title={t('settings:account.danger')} description={t('settings:account.dangerBody')}>
+      {canDeleteWithPassword ? (
+        <SettingsSection title={t('settings:account.danger')} description={t('settings:account.dangerBody')}>
         <SettingsRow
           label={t('settings:account.dangerRows.delete')}
           description={t('settings:account.dangerRows.deleteBody')}
@@ -298,24 +320,35 @@ export default function Account() {
             {t('settings:account.dangerRows.delete')}
           </Button>
         </SettingsRow>
-      </SettingsSection>
+        </SettingsSection>
+      ) : null}
 
       <Dialog open={pwOpen} onOpenChange={setPwOpen}>
         <DialogContent size="sm">
           <DialogHeader>
-            <DialogTitle>{t('common:actions.changePassword')}</DialogTitle>
-            <DialogDescription>{t('settings:account.signOutOnSuccess')}</DialogDescription>
+            <DialogTitle>
+              {hasPassword
+                ? t('common:actions.changePassword')
+                : t('settings:account.setPassword', { defaultValue: 'Set password' })}
+            </DialogTitle>
+            <DialogDescription>
+              {hasPassword
+                ? t('settings:account.signOutOnSuccess')
+                : t('settings:account.setPasswordDescription', { defaultValue: 'Add a local password to your account.' })}
+            </DialogDescription>
           </DialogHeader>
           <DialogBody>
             <div className="grid gap-3">
-              <Field label={t('settings:account.currentPassword')} htmlFor="pw-cur">
-                <Input
-                  id="pw-cur"
-                  type="password"
-                  value={pw.current}
-                  onChange={(e) => setPw({ ...pw, current: e.target.value })}
-                />
-              </Field>
+              {hasPassword ? (
+                <Field label={t('settings:account.currentPassword')} htmlFor="pw-cur">
+                  <Input
+                    id="pw-cur"
+                    type="password"
+                    value={pw.current}
+                    onChange={(e) => setPw({ ...pw, current: e.target.value })}
+                  />
+                </Field>
+              ) : null}
               <Field label={t('settings:account.newPassword')} htmlFor="pw-new" hint={t('settings:account.newPasswordHint')}>
                 <Input
                   id="pw-new"

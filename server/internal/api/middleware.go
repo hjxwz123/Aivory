@@ -97,6 +97,17 @@ func requireAuth(d Deps, h handler) http.HandlerFunc {
 		user.Role = state.Role
 		user.Status = state.Status
 		user.TokenVer = state.TokenVer
+		if !user.HasPassword && !initialPasswordSetupRequest(r) {
+			policy, policyErr := loadAuthPolicy(d)
+			if policyErr != nil {
+				writeError(w, http.StatusInternalServerError, policyErr)
+				return
+			}
+			if policy.OAuthInitialPasswordPolicy == oauthPasswordRequired {
+				writeError(w, http.StatusPreconditionRequired, errInitialPasswordRequired)
+				return
+			}
+		}
 		// Online status (§ admin → users): record activity at most once per minute
 		// per user (cache-throttled) so it's a single cheap UPDATE, off the
 		// request path. user.LastSeenAt reflects the value before this touch.

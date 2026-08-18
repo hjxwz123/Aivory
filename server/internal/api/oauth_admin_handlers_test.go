@@ -168,22 +168,22 @@ func TestOAuthProviderAdminRejectsStaleCredentialSnapshot(t *testing.T) {
 			"enabled": true,
 		}), http.StatusCreated)
 
-	previous := updateOAuthProviderCAS
-	updateOAuthProviderCAS = func(
+	previous := updateOAuthProviderCASTx
+	updateOAuthProviderCASTx = func(
 		ctx context.Context,
-		db *sql.DB,
+		tx *sql.Tx,
 		id string,
 		patch store.OAuthProviderPatch,
 		expected store.OAuthProvider,
 		currentNamespace string,
 		nextNamespace string,
 	) (*store.OAuthProvider, error) {
-		if _, err := db.ExecContext(ctx, `UPDATE oauth_providers SET client_secret='concurrent-secret' WHERE id=?`, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE oauth_providers SET client_secret='concurrent-secret' WHERE id=?`, id); err != nil {
 			return nil, err
 		}
-		return store.UpdateOAuthProviderCAS(ctx, db, id, patch, expected, currentNamespace, nextNamespace)
+		return store.UpdateOAuthProviderCASTx(ctx, tx, id, patch, expected, currentNamespace, nextNamespace)
 	}
-	t.Cleanup(func() { updateOAuthProviderCAS = previous })
+	t.Cleanup(func() { updateOAuthProviderCASTx = previous })
 
 	rec := fx.request(t, http.MethodPatch, "/api/admin/oauth-providers/"+created.ID, map[string]any{"name": "Stale Rename"})
 	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), store.ErrOAuthProviderChanged.Error()) {
@@ -193,8 +193,8 @@ func TestOAuthProviderAdminRejectsStaleCredentialSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.Name != created.Name || stored.ClientSecret != "concurrent-secret" {
-		t.Fatalf("stale patch merged into provider name=%q secret=%q", stored.Name, stored.ClientSecret)
+	if stored.Name != created.Name || stored.ClientSecret != "original-secret" {
+		t.Fatalf("stale patch transaction was not rolled back: name=%q secret=%q", stored.Name, stored.ClientSecret)
 	}
 }
 

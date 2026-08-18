@@ -46,6 +46,7 @@ export function IdentitySources() {
   const { t } = useTranslation(['settings', 'common'])
   const lang = useLanguage((s) => s.lang)
   const user = useAuth((s) => s.user)
+  const authPolicy = useAuth((s) => s.authPolicy)
   const userId = user?.id ?? ''
   const { providers } = useOAuthProviders()
   const cached = userId ? identitiesCache.peek(userId) : undefined
@@ -164,9 +165,26 @@ export function IdentitySources() {
   const boundIDs = new Set(visibleIdentities.map((i) => i.provider_id))
   const available = providers.filter((p) => !boundIDs.has(p.id))
 
-  // Removing the only sign-in method would lock out a password-less account.
+  // Provider-only entry modes must retain an identity the login UI can
+  // actually use. Automatic redirect specifically requires the selected
+  // default provider, even when another provider remains linked.
   const hasPassword = user?.has_password ?? true
-  const lockoutOnLast = !hasPassword && visibleIdentities.length <= 1
+  const localLoginAvailable =
+    hasPassword && authPolicy.password_login_enabled && authPolicy.entry_mode === 'login_page'
+  const readyProviderIDs = new Set(providers.map((provider) => provider.id))
+  const unlinkWouldLockOut = (identity: ApiOAuthIdentity) => {
+    if (localLoginAvailable) return false
+    const remaining = visibleIdentities.filter(
+      (candidate) =>
+        (candidate.provider_id !== identity.provider_id || candidate.subject !== identity.subject) &&
+        candidate.provider_enabled &&
+        readyProviderIDs.has(candidate.provider_id),
+    )
+    if (authPolicy.entry_mode === 'auto_redirect') {
+      return !remaining.some((candidate) => candidate.provider_id === authPolicy.default_provider?.id)
+    }
+    return remaining.length === 0
+  }
 
   // Nothing configured and nothing bound → render nothing at all.
   if (!visibleLoading && visibleIdentities.length === 0 && providers.length === 0) return null
@@ -187,7 +205,7 @@ export function IdentitySources() {
           <>
             {visibleIdentities.map((it) => {
               const key = it.provider_id + ':' + it.subject
-              const disableUnbind = lockoutOnLast
+              const disableUnbind = unlinkWouldLockOut(it)
               return (
                 <div key={key} className="px-5 sm:px-6 py-4 flex items-center gap-4">
                   <div className="shrink-0 size-9 inline-flex items-center justify-center rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">

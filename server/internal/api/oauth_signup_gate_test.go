@@ -61,13 +61,11 @@ func (m *oauthGateMail) SendCode(to, _ string, purpose string) error {
 
 // TestResolveOAuthUserBlocksNewSignupWhenClosed covers the §login/register
 // hardening gap: a first-time visitor with no existing account or linked
-// identity must not be able to route around a closed register form just by
-// clicking "Continue with Google" — resolveOAuthUser must refuse to
-// provision a brand-new account once the admin sets signup_open=false.
+// identity must be rejected when provider-driven account creation is disabled.
 func TestResolveOAuthUserBlocksNewSignupWhenClosed(t *testing.T) {
 	d := newOAuthGateTestDeps(t)
-	if err := store.SetSetting(d.DB, "signup_open", false); err != nil {
-		t.Fatalf("set signup_open: %v", err)
+	if err := store.SetSetting(d.DB, "oauth_auto_provision_enabled", false); err != nil {
+		t.Fatalf("set oauth_auto_provision_enabled: %v", err)
 	}
 	p := namespacedOAuthProviderForTest(&store.OAuthProvider{ID: "google", Kind: "google", Name: "Google"})
 	info := oauth.UserInfo{Subject: "sub-new-1", Email: "brandnew@example.test", EmailVerified: true, Name: "Brand New"}
@@ -76,8 +74,8 @@ func TestResolveOAuthUserBlocksNewSignupWhenClosed(t *testing.T) {
 	if u != nil {
 		t.Fatalf("expected no user to be provisioned, got %+v", u)
 	}
-	if !errors.Is(err, errSignupClosed) {
-		t.Fatalf("err = %v, want errSignupClosed", err)
+	if !errors.Is(err, errOAuthAutoProvisionDisabled) {
+		t.Fatalf("err = %v, want errOAuthAutoProvisionDisabled", err)
 	}
 
 	// And no account/identity was actually created despite the attempt.
@@ -140,7 +138,7 @@ func TestResolveOAuthUserRegistrationQuotaFailsClosedWhenUnavailable(t *testing.
 	}
 }
 
-// TestResolveOAuthUserAllowsExistingUserLoginWhenClosed: closed registration
+// TestResolveOAuthUserAllowsExistingUserLoginWhenClosed: disabled provisioning
 // must only block NEW accounts — an OAuth identity already linked to an
 // existing user must still be able to sign IN (that's a login, not a signup).
 func TestResolveOAuthUserAllowsExistingUserLoginWhenClosed(t *testing.T) {
@@ -155,8 +153,8 @@ func TestResolveOAuthUserAllowsExistingUserLoginWhenClosed(t *testing.T) {
 	}
 
 	// Admin closes registration afterward.
-	if err := store.SetSetting(d.DB, "signup_open", false); err != nil {
-		t.Fatalf("set signup_open: %v", err)
+	if err := store.SetSetting(d.DB, "oauth_auto_provision_enabled", false); err != nil {
+		t.Fatalf("set oauth_auto_provision_enabled: %v", err)
 	}
 
 	// Same identity signing back in must still succeed (linked-identity path).
@@ -342,7 +340,7 @@ func TestResolveOAuthUserRejectsUnreachableVerificationAddress(t *testing.T) {
 
 func TestResolveOAuthUserFailsClosedOnMalformedRegistrationSettings(t *testing.T) {
 	for _, key := range []string{
-		"signup_open",
+		"oauth_auto_provision_enabled",
 		"email_domain_whitelist",
 		"register_captcha_required",
 		"register_ip_daily_limit",

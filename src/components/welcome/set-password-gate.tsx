@@ -21,12 +21,14 @@ export function SetPasswordGate() {
   const user = useAuth((s) => s.user)
   const status = useAuth((s) => s.status)
   const setUser = useAuth((s) => s.setUser)
+  const authPolicy = useAuth((s) => s.authPolicy)
 
   const [next, setNext] = useState('')
   const [confirm, setConfirm] = useState('')
   const [saving, setSaving] = useState(false)
 
-  const open = status === 'authenticated' && user?.has_password === false
+  const passwordPolicy = user?.oauth_initial_password_policy ?? authPolicy.oauth_initial_password_policy
+  const open = status === 'authenticated' && user?.has_password === false && passwordPolicy === 'required'
 
   async function submit() {
     if (next.length < 8) {

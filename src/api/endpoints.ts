@@ -28,6 +28,7 @@ import type {
   ApiWorkspaceUsageRow,
   ApiWorkspaceAuditLog,
   ApiAnalytics,
+  ApiAuthPolicy,
   ApiAuthResponse,
   ApiBuiltinTool,
   ApiChannel,
@@ -145,6 +146,7 @@ export const authApi = {
     }>('/public/captcha'),
   /** Whether the deployment still needs its first-run setup (zero users). */
   needsSetup: () => api<{ needs_setup: boolean }>('/public/needs-setup'),
+  authPolicy: () => api<ApiAuthPolicy>('/public/auth-policy'),
   /** Create the first account (admin) on a fresh deployment, then sign in. */
   setup: (name: string, email: string, password: string) =>
     api<ApiAuthResponse>('/setup', { method: 'POST', body: { name, email, password } }),

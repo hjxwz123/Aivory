@@ -40,6 +40,9 @@ export interface ApiUser {
   /** False for OAuth accounts that have never chosen their own password — the
    *  client forces a set-password step before letting them into the app. */
   has_password?: boolean
+  /** Effective deployment authentication policy, attached to /me responses. */
+  password_login_enabled?: boolean
+  oauth_initial_password_policy?: OAuthInitialPasswordPolicy
   /** Unix seconds of the last password change (change/reset/first set).
    *  0 or absent = never changed since the account was created. */
   password_changed_at?: number
@@ -563,6 +566,19 @@ export interface ApiAuthResponse {
   user: ApiUser
   access_token: string
   expires_at: number
+}
+
+export type AuthEntryMode = 'login_page' | 'provider_picker' | 'auto_redirect'
+export type OAuthInitialPasswordPolicy = 'required' | 'optional' | 'disabled'
+
+/** Public authentication policy used before a session exists. */
+export interface ApiAuthPolicy {
+  password_login_enabled: boolean
+  entry_mode: AuthEntryMode
+  default_provider: ApiPublicOAuthProvider | null
+  oauth_initial_password_policy: OAuthInitialPasswordPolicy
+  oauth_auto_provision_enabled: boolean
+  providers: ApiPublicOAuthProvider[]
 }
 
 export type OAuthKind = 'google' | 'github' | 'apple' | 'oauth2' | 'oidc'

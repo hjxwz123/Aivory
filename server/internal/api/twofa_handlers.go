@@ -173,6 +173,19 @@ func login2faHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ticketData := parseTwofaLoginTicket(rawTicket)
+	if ticketData.Source != store.LoginMethodOAuth {
+		enabled, settingErr := passwordLoginEnabled(d)
+		if settingErr != nil {
+			writeError(w, http.StatusInternalServerError, settingErr)
+			return
+		}
+		if !enabled {
+			clear2faCookie(w)
+			_ = d.Cache.CompareAndDelete("2fa:"+ticket, rawTicket)
+			writeError(w, http.StatusForbidden, errPasswordLoginDisabled)
+			return
+		}
+	}
 	uid := ticketData.UserID
 	user, err := store.FindUserByID(r.Context(), d.DB, uid)
 	if err != nil || user.Status != "active" || !user.TotpEnabled || ticketData.TokenVer == nil || *ticketData.TokenVer != user.TokenVer {
