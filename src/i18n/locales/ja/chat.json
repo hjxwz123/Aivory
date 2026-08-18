@@ -683,6 +683,10 @@
         "label": "プロジェクトを作成",
         "description": "新しいプロジェクトとそのナレッジベースを作成します。"
       },
+      "can_create_skills_prompts": {
+        "label": "スキルとプロンプトを作成",
+        "description": "ワークスペースのリソースライブラリで、自分のスキルとプロンプトを作成・管理します。"
+      },
       "can_private_conversations": {
         "label": "非公開の会話",
         "description": "本人だけに表示される会話を作成します。"

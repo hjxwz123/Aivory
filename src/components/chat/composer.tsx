@@ -674,6 +674,8 @@ export function Composer({
   const canUseVoice = userCan(user, 'allow_voice_transcription')
   const canDraw = userCan(user, 'allow_drawing')
   const workspaceId = useWorkspaces((state) => state.activeId ?? undefined)
+  const workspaceIdRef = useRef(workspaceId)
+  workspaceIdRef.current = workspaceId
   const mode = useComposerPrefs((s) => s.mode)
   const setMode = useComposerPrefs((s) => s.setMode)
   // §verify: when on, the answer is fact-checked by a second model this turn.
@@ -795,23 +797,29 @@ export function Composer({
     }
   }, [canUseKnowledgeBases, kbIds, onKBChange, projectKBId, workspaceId])
 
-  const loadLibrary = useCallback(async () => {
+  const loadLibrary = useCallback(async (requestedWorkspaceID = workspaceIdRef.current) => {
     const requestID = ++libraryLoadRequestRef.current
     setLibraryLoading(true)
+    setLibrarySkills([])
+    setLibraryPrompts([])
+    setSelectedSkills([])
     try {
-      const [skills, prompts] = await Promise.all([libraryApi.skills(), libraryApi.prompts()])
-      if (requestID !== libraryLoadRequestRef.current) return
+      const [skills, prompts] = await Promise.all([
+        libraryApi.skills(requestedWorkspaceID),
+        libraryApi.prompts(requestedWorkspaceID),
+      ])
+      if (requestID !== libraryLoadRequestRef.current || workspaceIdRef.current !== requestedWorkspaceID) return
       setLibrarySkills(skills)
       setLibraryPrompts(prompts)
       const allowedSkills = new Set(skills.map((skill) => skill.id))
       setSelectedSkills((current) => current.filter((skill) => allowedSkills.has(skill.id)))
     } catch {
-      if (requestID !== libraryLoadRequestRef.current) return
+      if (requestID !== libraryLoadRequestRef.current || workspaceIdRef.current !== requestedWorkspaceID) return
       setLibrarySkills([])
       setLibraryPrompts([])
       setSelectedSkills([])
     } finally {
-      if (requestID === libraryLoadRequestRef.current) setLibraryLoading(false)
+      if (requestID === libraryLoadRequestRef.current && workspaceIdRef.current === requestedWorkspaceID) setLibraryLoading(false)
     }
   }, [])
 
@@ -900,11 +908,11 @@ export function Composer({
   const hasAttachments = attachments.length > 0
 
   useEffect(() => {
-    void loadLibrary()
+    void loadLibrary(workspaceId)
     return () => {
       libraryLoadRequestRef.current += 1
     }
-  }, [loadLibrary])
+  }, [loadLibrary, workspaceId])
 
   useEffect(
     () =>

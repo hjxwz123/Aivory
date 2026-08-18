@@ -1167,7 +1167,7 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		generationKnowledgeBaseIDs(r.Context(), d.DB, u.ID, conv, turnKBIDs, turnKBSelectionConfigured),
 	)
 	_, normalizedSkillIDs, err := resolvePermittedUserSkillSelection(
-		r.Context(), d.DB, u.ID, req.SelectedUserSkillIDs, true, permissions.Skills,
+		r.Context(), d.DB, u.ID, conv.WorkspaceID, req.SelectedUserSkillIDs, true, permissions.Skills,
 	)
 	if err != nil {
 		if errors.Is(err, errSkillGroupPermission) {
@@ -1762,7 +1762,7 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	var persistedSkillIDs []string
 	_ = json.Unmarshal(user.SelectedUserSkillIDs, &persistedSkillIDs)
 	if _, _, skillErr := resolvePermittedUserSkillSelection(
-		r.Context(), d.DB, u.ID, persistedSkillIDs, false, permissions.Skills,
+		r.Context(), d.DB, u.ID, conv.WorkspaceID, persistedSkillIDs, false, permissions.Skills,
 	); skillErr != nil {
 		if errors.Is(skillErr, errSkillGroupPermission) {
 			writeError(w, http.StatusForbidden, errSkillGroupPermission)

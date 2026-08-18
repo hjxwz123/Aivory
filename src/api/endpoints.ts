@@ -324,25 +324,28 @@ export const skillsApi = {
 }
 
 export const libraryApi = {
-  catalog: () => api<ApiLibraryCatalog>('/library/catalog'),
-  skills: () => api<ApiUserSkill[]>('/me/skills'),
-  createSkill: (body: Pick<ApiUserSkill, 'name' | 'description' | 'instructions'>) =>
-    api<ApiUserSkill>('/me/skills', { method: 'POST', body }),
-  updateSkill: (id: string, body: Partial<Pick<ApiUserSkill, 'name' | 'description' | 'instructions'>>) =>
-    api<ApiUserSkill>(`/me/skills/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
-  removeSkill: (id: string) =>
-    api<{ ok: true }>(`/me/skills/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  addCatalogSkill: (sourceId: string) =>
-    api<ApiUserSkill>('/me/skills/from-catalog', { method: 'POST', body: { source_id: sourceId } }),
-  prompts: () => api<ApiUserPrompt[]>('/me/prompts'),
-  createPrompt: (body: Pick<ApiUserPrompt, 'name' | 'description' | 'content'>) =>
-    api<ApiUserPrompt>('/me/prompts', { method: 'POST', body }),
-  updatePrompt: (id: string, body: Partial<Pick<ApiUserPrompt, 'name' | 'description' | 'content'>>) =>
-    api<ApiUserPrompt>(`/me/prompts/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
-  removePrompt: (id: string) =>
-    api<{ ok: true }>(`/me/prompts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  addCatalogPrompt: (sourceId: string) =>
-    api<ApiUserPrompt>('/me/prompts/from-catalog', { method: 'POST', body: { source_id: sourceId } }),
+  catalog: (workspaceId?: string) =>
+    api<ApiLibraryCatalog>(`/library/catalog${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`),
+  skills: (workspaceId?: string) =>
+    api<ApiUserSkill[]>(`/me/skills${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`),
+  createSkill: (body: Pick<ApiUserSkill, 'name' | 'description' | 'instructions'>, workspaceId?: string) =>
+    api<ApiUserSkill>('/me/skills', { method: 'POST', body: { ...body, workspace_id: workspaceId } }),
+  updateSkill: (id: string, body: Partial<Pick<ApiUserSkill, 'name' | 'description' | 'instructions'>>, workspaceId?: string) =>
+    api<ApiUserSkill>(`/me/skills/${encodeURIComponent(id)}${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`, { method: 'PATCH', body }),
+  removeSkill: (id: string, workspaceId?: string) =>
+    api<{ ok: true }>(`/me/skills/${encodeURIComponent(id)}${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`, { method: 'DELETE' }),
+  addCatalogSkill: (sourceId: string, workspaceId?: string) =>
+    api<ApiUserSkill>('/me/skills/from-catalog', { method: 'POST', body: { source_id: sourceId, workspace_id: workspaceId } }),
+  prompts: (workspaceId?: string) =>
+    api<ApiUserPrompt[]>(`/me/prompts${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`),
+  createPrompt: (body: Pick<ApiUserPrompt, 'name' | 'description' | 'content'>, workspaceId?: string) =>
+    api<ApiUserPrompt>('/me/prompts', { method: 'POST', body: { ...body, workspace_id: workspaceId } }),
+  updatePrompt: (id: string, body: Partial<Pick<ApiUserPrompt, 'name' | 'description' | 'content'>>, workspaceId?: string) =>
+    api<ApiUserPrompt>(`/me/prompts/${encodeURIComponent(id)}${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`, { method: 'PATCH', body }),
+  removePrompt: (id: string, workspaceId?: string) =>
+    api<{ ok: true }>(`/me/prompts/${encodeURIComponent(id)}${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`, { method: 'DELETE' }),
+  addCatalogPrompt: (sourceId: string, workspaceId?: string) =>
+    api<ApiUserPrompt>('/me/prompts/from-catalog', { method: 'POST', body: { source_id: sourceId, workspace_id: workspaceId } }),
 }
 
 // ----- User groups (membership tiers) --------------------------------------

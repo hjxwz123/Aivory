@@ -334,6 +334,8 @@ type Prompt struct {
 type UserSkill struct {
 	ID                 string `json:"id"`
 	UserID             string `json:"-"`
+	WorkspaceID        string `json:"workspace_id,omitempty"`
+	CanManage          bool   `json:"can_manage"`
 	Name               string `json:"name"`
 	Description        string `json:"description"`
 	DisplayDescription string `json:"display_description,omitempty"`
@@ -349,6 +351,8 @@ type UserSkill struct {
 type UserPrompt struct {
 	ID             string `json:"id"`
 	UserID         string `json:"-"`
+	WorkspaceID    string `json:"workspace_id,omitempty"`
+	CanManage      bool   `json:"can_manage"`
 	Name           string `json:"name"`
 	Description    string `json:"description"`
 	Content        string `json:"content"`

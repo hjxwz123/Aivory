@@ -402,9 +402,14 @@ export default function UserFiles() {
                   </Button>
                 </div>
               ) : rows.length === 0 ? (
+                // The list pane has three fixed toolbars above its empty area;
+                // compensate for half their height so the two-pane empty
+                // states share the same visual center on desktop. Mobile keeps
+                // the natural list-body centering.
                 <EmptyState
-                  className="my-auto py-10"
+                  className="my-auto py-10 lg:-translate-y-[4.5rem]"
                   icon={<FolderOpen size={21} aria-hidden />}
+                  titleClassName="text-lg font-semibold"
                   title={
                     searchDebounced || origin !== ALL || fileType !== 'all'
                       ? t('files:list.emptyFilteredTitle')
@@ -564,13 +569,13 @@ export default function UserFiles() {
               </>
             ) : (
               <div className="flex h-full items-center justify-center p-6">
-                <div className="max-w-sm text-center">
-                  <span className="mx-auto inline-flex size-12 items-center justify-center rounded-full bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
-                    <FileQuestion size={21} aria-hidden />
-                  </span>
-                  <h2 className="mt-4 text-lg font-semibold text-[var(--color-fg)]">{t('files:preview.selectTitle')}</h2>
-                  <p className="mt-2 text-sm leading-relaxed text-[var(--color-fg-muted)]">{t('files:preview.selectBody')}</p>
-                </div>
+                <EmptyState
+                  className="max-w-sm py-10"
+                  icon={<FileQuestion size={21} aria-hidden />}
+                  titleClassName="text-lg font-semibold"
+                  title={t('files:preview.selectTitle')}
+                  description={t('files:preview.selectBody')}
+                />
               </div>
             )}
           </section>

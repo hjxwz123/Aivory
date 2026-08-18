@@ -683,6 +683,10 @@
         "label": "Créer des projets",
         "description": "Créer de nouveaux projets et leurs bases de connaissances."
       },
+      "can_create_skills_prompts": {
+        "label": "Créer des compétences et invites",
+        "description": "Créer et gérer leurs propres compétences et invites dans la bibliothèque de l’espace de travail."
+      },
       "can_private_conversations": {
         "label": "Conversations privées",
         "description": "Créer des conversations visibles uniquement par soi-même."

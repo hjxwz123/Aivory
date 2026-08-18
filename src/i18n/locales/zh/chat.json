@@ -683,6 +683,10 @@
         "label": "创建项目",
         "description": "创建新项目及其项目知识库。"
       },
+      "can_create_skills_prompts": {
+        "label": "创建技能和提示词",
+        "description": "在工作空间资源库中创建和管理自己添加的技能与提示词。"
+      },
       "can_private_conversations": {
         "label": "私密对话",
         "description": "创建仅自己可见的对话。"

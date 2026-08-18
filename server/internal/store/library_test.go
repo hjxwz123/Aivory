@@ -114,6 +114,101 @@ func TestPrivateLibraryOwnershipAndCatalogCopiesRemainIndependent(t *testing.T) 
 	}
 }
 
+func TestWorkspaceLibraryIsScopedAndRoleAware(t *testing.T) {
+	db, ctx := openLibraryTestDB(t)
+	if _, err := db.Exec(`
+		INSERT INTO users(id,email,password_hash) VALUES ('u3','u3@example.test','h'),('u4','u4@example.test','h');
+		INSERT INTO workspaces(id,name,owner_id,invite_token) VALUES ('ws1','Workspace one','u1','token-ws1');
+		INSERT INTO workspace_members(workspace_id,user_id,role) VALUES
+			('ws1','u1','admin'),('ws1','u2','member'),('ws1','u3','guest')
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	ownerSkill, err := CreateUserSkill(ctx, db, UserSkill{
+		UserID: "u1", WorkspaceID: "ws1", Name: "owner-skill", Description: "owner", Instructions: "owner instructions",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	memberSkill, err := CreateUserSkill(ctx, db, UserSkill{
+		UserID: "u2", WorkspaceID: "ws1", Name: "member-skill", Description: "member", Instructions: "member instructions",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	personal, err := ListUserSkillsScoped(ctx, db, "u1", "")
+	if err != nil || len(personal) != 0 {
+		t.Fatalf("workspace skill leaked into personal library: rows=%+v err=%v", personal, err)
+	}
+	memberRows, err := ListUserSkillsScoped(ctx, db, "u2", "ws1")
+	if err != nil || len(memberRows) != 2 {
+		t.Fatalf("member workspace rows=%+v err=%v", memberRows, err)
+	}
+	for _, row := range memberRows {
+		wantManage := row.ID == memberSkill.ID
+		if row.CanManage != wantManage {
+			t.Fatalf("member can_manage for %s=%v want=%v", row.ID, row.CanManage, wantManage)
+		}
+	}
+	guestRows, err := ListUserSkillsScoped(ctx, db, "u3", "ws1")
+	if err != nil || len(guestRows) != 2 {
+		t.Fatalf("guest workspace rows=%+v err=%v", guestRows, err)
+	}
+	for _, row := range guestRows {
+		if row.CanManage {
+			t.Fatalf("guest unexpectedly can manage %s", row.ID)
+		}
+	}
+	outsiderRows, err := ListUserSkillsScoped(ctx, db, "u4", "ws1")
+	if err != nil || len(outsiderRows) != 0 {
+		t.Fatalf("outsider workspace rows=%+v err=%v", outsiderRows, err)
+	}
+
+	ownerSkill.Description = "attempted edit"
+	if _, err := UpdateUserSkillScoped(ctx, db, ownerSkill.ID, "u2", "ws1", *ownerSkill); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("member edited another member's skill: err=%v", err)
+	}
+	memberSkill.Description = "edited by creator"
+	if _, err := UpdateUserSkillScoped(ctx, db, memberSkill.ID, "u2", "ws1", *memberSkill); err != nil {
+		t.Fatalf("member could not edit own skill: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE workspace_members SET can_create_skills_prompts=0 WHERE workspace_id='ws1' AND user_id='u2'`); err != nil {
+		t.Fatal(err)
+	}
+	memberRows, err = ListUserSkillsScoped(ctx, db, "u2", "ws1")
+	if err != nil || len(memberRows) != 2 {
+		t.Fatalf("revoked member workspace rows=%+v err=%v", memberRows, err)
+	}
+	for _, row := range memberRows {
+		if row.CanManage {
+			t.Fatalf("revoked member unexpectedly can manage %s", row.ID)
+		}
+	}
+	if _, err := CreateUserPrompt(ctx, db, UserPrompt{
+		UserID: "u2", WorkspaceID: "ws1", Name: "revoked-prompt", Description: "revoked", Content: "should fail",
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("revoked member prompt create err=%v, want ErrNotFound", err)
+	}
+	if _, err := UpdateUserSkillScoped(ctx, db, memberSkill.ID, "u2", "ws1", *memberSkill); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("revoked member skill update err=%v, want ErrNotFound", err)
+	}
+	if _, err := CreateUserPrompt(ctx, db, UserPrompt{
+		UserID: "u3", WorkspaceID: "ws1", Name: "guest-prompt", Description: "guest", Content: "should fail",
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("guest workspace prompt create err=%v, want ErrNotFound", err)
+	}
+	if _, err := CreateUserSkill(ctx, db, UserSkill{
+		UserID: "u3", WorkspaceID: "ws1", Name: "guest-skill", Description: "guest", Instructions: "should fail",
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("guest workspace skill create err=%v, want ErrNotFound", err)
+	}
+	if _, _, err := ResolveUserSkillSelectionScoped(ctx, db, "u4", "ws1", []string{ownerSkill.ID}, true); !errors.Is(err, ErrInvalidUserSkillSelection) {
+		t.Fatalf("outsider selected workspace skill err=%v", err)
+	}
+}
+
 func TestUserSkillIconRoundTripsAcrossReadAndUpdatePaths(t *testing.T) {
 	db, ctx := openLibraryTestDB(t)
 	created, err := CreateUserSkill(ctx, db, UserSkill{

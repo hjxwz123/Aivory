@@ -42,12 +42,39 @@ type userSkillPayload struct {
 	Name         *string `json:"name"`
 	Description  *string `json:"description"`
 	Instructions *string `json:"instructions"`
+	WorkspaceID  string  `json:"workspace_id"`
 }
 
 type userPromptPayload struct {
 	Name        *string `json:"name"`
 	Description *string `json:"description"`
 	Content     *string `json:"content"`
+	WorkspaceID string  `json:"workspace_id"`
+}
+
+func libraryWorkspaceID(r *http.Request) string {
+	return strings.TrimSpace(r.URL.Query().Get("workspace_id"))
+}
+
+func authorizeLibraryWorkspace(d Deps, w http.ResponseWriter, r *http.Request, workspaceID string, write bool) bool {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return true
+	}
+	workspace, err := store.GetWorkspaceForMember(r.Context(), d.DB, workspaceID, authUser(r).ID)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, errNotFound)
+		return false
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return false
+	}
+	if write && (workspace.Role == store.WorkspaceRoleGuest || !workspace.CanCreateSkillsPrompts) {
+		writeError(w, http.StatusForbidden, errForbidden)
+		return false
+	}
+	return true
 }
 
 type adminPromptCreatePayload struct {
@@ -117,6 +144,10 @@ func containsForbiddenPrivateSkillKey(value any) bool {
 }
 
 func listLibraryCatalogHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	workspaceID := libraryWorkspaceID(r)
+	if !authorizeLibraryWorkspace(d, w, r, workspaceID, false) {
+		return
+	}
 	permissions, permissionErr := requestPermissions(d, r)
 	if permissionErr != nil {
 		writeError(w, http.StatusForbidden, errPermissionDenied)
@@ -132,7 +163,7 @@ func listLibraryCatalogHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	addedSkills, addedPrompts, err := store.UserLibrarySourceSets(r.Context(), d.DB, authUser(r).ID)
+	addedSkills, addedPrompts, err := store.UserLibrarySourceSetsScoped(r.Context(), d.DB, authUser(r).ID, workspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -264,12 +295,16 @@ func deletePromptAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 // ===== User skills =====
 
 func listMySkillsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	workspaceID := libraryWorkspaceID(r)
+	if !authorizeLibraryWorkspace(d, w, r, workspaceID, false) {
+		return
+	}
 	permissions, permissionErr := requestPermissions(d, r)
 	if permissionErr != nil {
 		writeError(w, http.StatusForbidden, errSkillGroupPermission)
 		return
 	}
-	rows, err := store.ListUserSkills(r.Context(), d.DB, authUser(r).ID)
+	rows, err := store.ListUserSkillsScoped(r.Context(), d.DB, authUser(r).ID, workspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -290,7 +325,7 @@ func createMySkillHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body userSkillPayload
-	if err := decodePrivateLibraryPayload(r, &body, map[string]bool{"name": true, "description": true, "instructions": true}); err != nil {
+	if err := decodePrivateLibraryPayload(r, &body, map[string]bool{"name": true, "description": true, "instructions": true, "workspaceid": true}); err != nil {
 		writeError(w, http.StatusBadRequest, errInvalidInput)
 		return
 	}
@@ -298,8 +333,13 @@ func createMySkillHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("name, description, and instructions required"))
 		return
 	}
+	body.WorkspaceID = strings.TrimSpace(body.WorkspaceID)
+	if !authorizeLibraryWorkspace(d, w, r, body.WorkspaceID, true) {
+		return
+	}
 	skill := store.UserSkill{
-		UserID: authUser(r).ID, Name: *body.Name, Description: *body.Description, Instructions: *body.Instructions,
+		UserID: authUser(r).ID, WorkspaceID: body.WorkspaceID,
+		Name: *body.Name, Description: *body.Description, Instructions: *body.Instructions,
 	}
 	normalizeUserSkill(&skill)
 	if err := validateUserSkill(skill); err != nil {
@@ -317,7 +357,11 @@ func createMySkillHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 func updateMySkillHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	ownerID := authUser(r).ID
 	id := pathParam(r, "id")
-	current, err := store.GetUserSkill(r.Context(), d.DB, id, ownerID)
+	workspaceID := libraryWorkspaceID(r)
+	if !authorizeLibraryWorkspace(d, w, r, workspaceID, true) {
+		return
+	}
+	current, err := store.GetUserSkillScoped(r.Context(), d.DB, id, ownerID, workspaceID)
 	if err != nil {
 		writeLibraryStoreError(w, err)
 		return
@@ -325,6 +369,10 @@ func updateMySkillHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	permissions, permissionErr := requestPermissions(d, r)
 	if permissionErr != nil || !store.UserSkillPolicyAllows(permissions.Skills, *current) {
 		writeError(w, http.StatusForbidden, errSkillGroupPermission)
+		return
+	}
+	if !current.CanManage {
+		writeError(w, http.StatusForbidden, errForbidden)
 		return
 	}
 	var body userSkillPayload
@@ -347,7 +395,7 @@ func updateMySkillHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	updated, err := store.UpdateUserSkill(r.Context(), d.DB, id, ownerID, skill)
+	updated, err := store.UpdateUserSkillScoped(r.Context(), d.DB, id, ownerID, workspaceID, skill)
 	if err != nil {
 		writeUserLibraryMutationError(w, err)
 		return
@@ -358,7 +406,11 @@ func updateMySkillHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 func deleteMySkillHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	ownerID := authUser(r).ID
 	id := pathParam(r, "id")
-	current, err := store.GetUserSkill(r.Context(), d.DB, id, ownerID)
+	workspaceID := libraryWorkspaceID(r)
+	if !authorizeLibraryWorkspace(d, w, r, workspaceID, true) {
+		return
+	}
+	current, err := store.GetUserSkillScoped(r.Context(), d.DB, id, ownerID, workspaceID)
 	if err != nil {
 		writeLibraryStoreError(w, err)
 		return
@@ -368,7 +420,11 @@ func deleteMySkillHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, errSkillGroupPermission)
 		return
 	}
-	if err := store.DeleteUserSkill(r.Context(), d.DB, id, ownerID); err != nil {
+	if !current.CanManage {
+		writeError(w, http.StatusForbidden, errForbidden)
+		return
+	}
+	if err := store.DeleteUserSkillScoped(r.Context(), d.DB, id, ownerID, workspaceID); err != nil {
 		writeLibraryStoreError(w, err)
 		return
 	}
@@ -377,10 +433,15 @@ func deleteMySkillHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 
 func copySkillFromCatalogHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		SourceID string `json:"source_id"`
+		SourceID    string `json:"source_id"`
+		WorkspaceID string `json:"workspace_id"`
 	}
 	if err := decodeJSON(r, &body); err != nil || strings.TrimSpace(body.SourceID) == "" {
 		writeError(w, http.StatusBadRequest, errInvalidInput)
+		return
+	}
+	body.WorkspaceID = strings.TrimSpace(body.WorkspaceID)
+	if !authorizeLibraryWorkspace(d, w, r, body.WorkspaceID, true) {
 		return
 	}
 	source, err := store.GetSkill(r.Context(), d.DB, strings.TrimSpace(body.SourceID))
@@ -398,7 +459,8 @@ func copySkillFromCatalogHandler(d Deps, w http.ResponseWriter, r *http.Request)
 		return
 	}
 	skill := store.UserSkill{
-		UserID: authUser(r).ID, Name: privateSkillNameFromCatalog(source.Name, source.ID), Description: source.Description,
+		UserID: authUser(r).ID, WorkspaceID: body.WorkspaceID,
+		Name: privateSkillNameFromCatalog(source.Name, source.ID), Description: source.Description,
 		Icon: source.Icon, Instructions: source.Instructions, SourceSkillID: source.ID,
 	}
 	normalizeUserSkill(&skill)
@@ -444,12 +506,16 @@ func privateSkillNameFromCatalog(name, sourceID string) string {
 // ===== User prompts =====
 
 func listMyPromptsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	workspaceID := libraryWorkspaceID(r)
+	if !authorizeLibraryWorkspace(d, w, r, workspaceID, false) {
+		return
+	}
 	permissions, permissionErr := requestPermissions(d, r)
 	if permissionErr != nil {
 		writeError(w, http.StatusForbidden, errPromptGroupPermission)
 		return
 	}
-	rows, err := store.ListUserPrompts(r.Context(), d.DB, authUser(r).ID)
+	rows, err := store.ListUserPromptsScoped(r.Context(), d.DB, authUser(r).ID, workspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -470,7 +536,7 @@ func createMyPromptHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body userPromptPayload
-	if err := decodePrivateLibraryPayload(r, &body, map[string]bool{"name": true, "description": true, "content": true}); err != nil {
+	if err := decodePrivateLibraryPayload(r, &body, map[string]bool{"name": true, "description": true, "content": true, "workspaceid": true}); err != nil {
 		writeError(w, http.StatusBadRequest, errInvalidInput)
 		return
 	}
@@ -478,8 +544,13 @@ func createMyPromptHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("name, description, and content required"))
 		return
 	}
+	body.WorkspaceID = strings.TrimSpace(body.WorkspaceID)
+	if !authorizeLibraryWorkspace(d, w, r, body.WorkspaceID, true) {
+		return
+	}
 	prompt := store.UserPrompt{
-		UserID: authUser(r).ID, Name: *body.Name, Description: *body.Description, Content: *body.Content,
+		UserID: authUser(r).ID, WorkspaceID: body.WorkspaceID,
+		Name: *body.Name, Description: *body.Description, Content: *body.Content,
 	}
 	normalizeUserPrompt(&prompt)
 	if err := validateUserPrompt(prompt); err != nil {
@@ -497,7 +568,11 @@ func createMyPromptHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 func updateMyPromptHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	ownerID := authUser(r).ID
 	id := pathParam(r, "id")
-	current, err := store.GetUserPrompt(r.Context(), d.DB, id, ownerID)
+	workspaceID := libraryWorkspaceID(r)
+	if !authorizeLibraryWorkspace(d, w, r, workspaceID, true) {
+		return
+	}
+	current, err := store.GetUserPromptScoped(r.Context(), d.DB, id, ownerID, workspaceID)
 	if err != nil {
 		writeLibraryStoreError(w, err)
 		return
@@ -505,6 +580,10 @@ func updateMyPromptHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	permissions, permissionErr := requestPermissions(d, r)
 	if permissionErr != nil || !store.UserPromptPolicyAllows(permissions.Prompts, *current) {
 		writeError(w, http.StatusForbidden, errPromptGroupPermission)
+		return
+	}
+	if !current.CanManage {
+		writeError(w, http.StatusForbidden, errForbidden)
 		return
 	}
 	var body userPromptPayload
@@ -527,7 +606,7 @@ func updateMyPromptHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	updated, err := store.UpdateUserPrompt(r.Context(), d.DB, id, ownerID, prompt)
+	updated, err := store.UpdateUserPromptScoped(r.Context(), d.DB, id, ownerID, workspaceID, prompt)
 	if err != nil {
 		writeUserLibraryMutationError(w, err)
 		return
@@ -538,7 +617,11 @@ func updateMyPromptHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 func deleteMyPromptHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	ownerID := authUser(r).ID
 	id := pathParam(r, "id")
-	current, err := store.GetUserPrompt(r.Context(), d.DB, id, ownerID)
+	workspaceID := libraryWorkspaceID(r)
+	if !authorizeLibraryWorkspace(d, w, r, workspaceID, true) {
+		return
+	}
+	current, err := store.GetUserPromptScoped(r.Context(), d.DB, id, ownerID, workspaceID)
 	if err != nil {
 		writeLibraryStoreError(w, err)
 		return
@@ -548,7 +631,11 @@ func deleteMyPromptHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, errPromptGroupPermission)
 		return
 	}
-	if err := store.DeleteUserPrompt(r.Context(), d.DB, id, ownerID); err != nil {
+	if !current.CanManage {
+		writeError(w, http.StatusForbidden, errForbidden)
+		return
+	}
+	if err := store.DeleteUserPromptScoped(r.Context(), d.DB, id, ownerID, workspaceID); err != nil {
 		writeLibraryStoreError(w, err)
 		return
 	}
@@ -557,10 +644,15 @@ func deleteMyPromptHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 
 func copyPromptFromCatalogHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		SourceID string `json:"source_id"`
+		SourceID    string `json:"source_id"`
+		WorkspaceID string `json:"workspace_id"`
 	}
 	if err := decodeJSON(r, &body); err != nil || strings.TrimSpace(body.SourceID) == "" {
 		writeError(w, http.StatusBadRequest, errInvalidInput)
+		return
+	}
+	body.WorkspaceID = strings.TrimSpace(body.WorkspaceID)
+	if !authorizeLibraryWorkspace(d, w, r, body.WorkspaceID, true) {
 		return
 	}
 	source, err := store.GetPrompt(r.Context(), d.DB, strings.TrimSpace(body.SourceID))
@@ -578,7 +670,8 @@ func copyPromptFromCatalogHandler(d Deps, w http.ResponseWriter, r *http.Request
 		return
 	}
 	prompt := store.UserPrompt{
-		UserID: authUser(r).ID, Name: source.Name, Description: source.Description,
+		UserID: authUser(r).ID, WorkspaceID: body.WorkspaceID,
+		Name: source.Name, Description: source.Description,
 		Content: source.Content, SourcePromptID: source.ID,
 	}
 	normalizeUserPrompt(&prompt)

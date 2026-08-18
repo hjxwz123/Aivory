@@ -688,6 +688,10 @@
         "label": "Create projects",
         "description": "Create new projects and their project knowledge bases."
       },
+      "can_create_skills_prompts": {
+        "label": "Create skills and prompts",
+        "description": "Create and manage their own skills and prompts in the workspace library."
+      },
       "can_private_conversations": {
         "label": "Private conversations",
         "description": "Create conversations visible only to themselves."

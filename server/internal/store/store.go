@@ -233,6 +233,7 @@ func Migrate(db *sql.DB) error {
 	addDocumentUploader := `ALTER TABLE documents ADD COLUMN uploaded_by_user_id TEXT NOT NULL DEFAULT ''`
 	addWorkspaceCanCreateProjects := `ALTER TABLE workspace_members ADD COLUMN can_create_projects INTEGER NOT NULL DEFAULT 1`
 	addWorkspaceCanPrivateConversations := `ALTER TABLE workspace_members ADD COLUMN can_private_conversations INTEGER NOT NULL DEFAULT 1`
+	addWorkspaceCanCreateSkillsPrompts := `ALTER TABLE workspace_members ADD COLUMN can_create_skills_prompts INTEGER NOT NULL DEFAULT 1`
 	addWorkspaceCanCreateKB := `ALTER TABLE workspace_members ADD COLUMN can_create_kb INTEGER NOT NULL DEFAULT 1`
 	addWorkspaceCanAddKBFiles := `ALTER TABLE workspace_members ADD COLUMN can_add_kb_files INTEGER NOT NULL DEFAULT 1`
 	addWorkspaceCanDeleteKBContent := `ALTER TABLE workspace_members ADD COLUMN can_delete_kb_content INTEGER NOT NULL DEFAULT 1`
@@ -254,6 +255,8 @@ func Migrate(db *sql.DB) error {
 	// skill ids are persisted on each user turn for branch/regenerate fidelity.
 	addSkillDisplayDescription := `ALTER TABLE skills ADD COLUMN display_description TEXT NOT NULL DEFAULT ''`
 	addUserSkillIcon := `ALTER TABLE user_skills ADD COLUMN icon TEXT NOT NULL DEFAULT ''`
+	addUserSkillWorkspace := `ALTER TABLE user_skills ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''`
+	addUserPromptWorkspace := `ALTER TABLE user_prompts ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''`
 	addMsgSelectedUserSkills := `ALTER TABLE messages ADD COLUMN selected_user_skill_ids TEXT NOT NULL DEFAULT '[]'`
 	// §credits redeem codes: 'credits'-kind codes grant permanent credits instead
 	// of a group; redemptions record the granted amount for the audit trail.
@@ -355,6 +358,7 @@ func Migrate(db *sql.DB) error {
 		addDocumentUploader = `ALTER TABLE documents ADD COLUMN IF NOT EXISTS uploaded_by_user_id TEXT NOT NULL DEFAULT ''`
 		addWorkspaceCanCreateProjects = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_create_projects INTEGER NOT NULL DEFAULT 1`
 		addWorkspaceCanPrivateConversations = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_private_conversations INTEGER NOT NULL DEFAULT 1`
+		addWorkspaceCanCreateSkillsPrompts = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_create_skills_prompts INTEGER NOT NULL DEFAULT 1`
 		addWorkspaceCanCreateKB = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_create_kb INTEGER NOT NULL DEFAULT 1`
 		addWorkspaceCanAddKBFiles = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_add_kb_files INTEGER NOT NULL DEFAULT 1`
 		addWorkspaceCanDeleteKBContent = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_delete_kb_content INTEGER NOT NULL DEFAULT 1`
@@ -367,6 +371,8 @@ func Migrate(db *sql.DB) error {
 		addMsgFast = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS fast INTEGER NOT NULL DEFAULT 0`
 		addSkillDisplayDescription = `ALTER TABLE skills ADD COLUMN IF NOT EXISTS display_description TEXT NOT NULL DEFAULT ''`
 		addUserSkillIcon = `ALTER TABLE user_skills ADD COLUMN IF NOT EXISTS icon TEXT NOT NULL DEFAULT ''`
+		addUserSkillWorkspace = `ALTER TABLE user_skills ADD COLUMN IF NOT EXISTS workspace_id TEXT NOT NULL DEFAULT ''`
+		addUserPromptWorkspace = `ALTER TABLE user_prompts ADD COLUMN IF NOT EXISTS workspace_id TEXT NOT NULL DEFAULT ''`
 		addMsgSelectedUserSkills = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS selected_user_skill_ids TEXT NOT NULL DEFAULT '[]'`
 		addRedeemKind = `ALTER TABLE redeem_codes ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'group'`
 		addRedeemCredits = `ALTER TABLE redeem_codes ADD COLUMN IF NOT EXISTS credits REAL NOT NULL DEFAULT 0`
@@ -420,10 +426,10 @@ func Migrate(db *sql.DB) error {
 		addModelFallbackChannel, addUsageChannel, addUsageFallback, addUsageStatus, addUsageError,
 		addUsageRequestMethod, addUsageRequestURL, addUsageRequestHeaders, addUsageRequestBody, addUsageTTFTFallback,
 		addFileDraft, addDocumentIngestUpdatedAt, addDocumentUploader,
-		addWorkspaceCanCreateProjects, addWorkspaceCanPrivateConversations, addWorkspaceCanCreateKB, addWorkspaceCanAddKBFiles, addWorkspaceCanDeleteKBContent, addWorkspaceInvitePurpose, addWorkspaceDeleting,
+		addWorkspaceCanCreateProjects, addWorkspaceCanPrivateConversations, addWorkspaceCanCreateSkillsPrompts, addWorkspaceCanCreateKB, addWorkspaceCanAddKBFiles, addWorkspaceCanDeleteKBContent, addWorkspaceInvitePurpose, addWorkspaceDeleting,
 		addKBIsPublic, addProjectIsPublic,
 		addModelFast, addConvFast, addMsgFast,
-		addSkillDisplayDescription, addUserSkillIcon, addMsgSelectedUserSkills,
+		addSkillDisplayDescription, addUserSkillIcon, addUserSkillWorkspace, addUserPromptWorkspace, addMsgSelectedUserSkills,
 		addRedeemKind, addRedeemCredits, addRedemptionCredits,
 		addPaymentPaidAmount, addPaymentTaxAmount, addPaymentProviderAmount, addPaymentProviderCurrency, addPaymentConversionRate,
 		addPaymentChannelEnvironment, addPaymentOrderEnvironment,
@@ -518,6 +524,23 @@ func Migrate(db *sql.DB) error {
 		`DROP INDEX IF EXISTS idx_kbs_user_name_unique`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_user_name_unique ON projects(user_id, COALESCE(workspace_id,''), lower(trim(name)))`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_kbs_user_name_unique ON knowledge_bases(user_id, COALESCE(workspace_id,''), lower(trim(name)))`,
+		// User skills/prompts share a namespace inside a workspace, while personal
+		// rows remain namespaced by the creator. Partial indexes keep both scopes
+		// independent and prevent duplicate catalog copies in a shared workspace.
+		`DROP INDEX IF EXISTS idx_user_skills_user_name_unique`,
+		`DROP INDEX IF EXISTS idx_user_skills_source_unique`,
+		`DROP INDEX IF EXISTS idx_user_prompts_user_name_unique`,
+		`DROP INDEX IF EXISTS idx_user_prompts_source_unique`,
+		`CREATE INDEX IF NOT EXISTS idx_user_skills_workspace ON user_skills(workspace_id, updated_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_user_prompts_workspace ON user_prompts(workspace_id, updated_at DESC)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_skills_user_name_unique ON user_skills(user_id, lower(trim(name))) WHERE workspace_id=''`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_skills_workspace_name_unique ON user_skills(workspace_id, lower(trim(name))) WHERE workspace_id<>''`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_skills_source_unique ON user_skills(user_id, source_skill_id) WHERE workspace_id='' AND source_skill_id IS NOT NULL`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_skills_workspace_source_unique ON user_skills(workspace_id, source_skill_id) WHERE workspace_id<>'' AND source_skill_id IS NOT NULL`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_prompts_user_name_unique ON user_prompts(user_id, lower(trim(name))) WHERE workspace_id=''`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_prompts_workspace_name_unique ON user_prompts(workspace_id, lower(trim(name))) WHERE workspace_id<>''`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_prompts_source_unique ON user_prompts(user_id, source_prompt_id) WHERE workspace_id='' AND source_prompt_id IS NOT NULL`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_prompts_workspace_source_unique ON user_prompts(workspace_id, source_prompt_id) WHERE workspace_id<>'' AND source_prompt_id IS NOT NULL`,
 	} {
 		_, _ = db.Exec(ddl)
 	}
@@ -536,8 +559,8 @@ func Migrate(db *sql.DB) error {
 		"user_feedback":                   {"id", "user_id", "message_id", "conversation_id", "conversation_title", "description", "page_path", "user_agent", "viewport_width", "viewport_height", "screenshot", "screenshot_mime", "screenshot_width", "screenshot_height", "created_at"},
 		"skills":                          {"display_description"},
 		"prompts":                         {"name", "description", "content", "enabled", "sort_order"},
-		"user_skills":                     {"user_id", "name", "description", "icon", "instructions", "source_skill_id"},
-		"user_prompts":                    {"user_id", "name", "description", "content", "source_prompt_id"},
+		"user_skills":                     {"user_id", "workspace_id", "name", "description", "icon", "instructions", "source_skill_id"},
+		"user_prompts":                    {"user_id", "workspace_id", "name", "description", "content", "source_prompt_id"},
 		"users":                           {"group_id", "totp_secret", "totp_enabled", "group_expires_at", "previous_group_id", "password_set", "password_changed_at", "last_seen_at", "credits_permanent", "credits_permanent_micros", "credit_cycle_anchor", "quota_cycle_anchor", "sort_order"},
 		"usage_logs":                      {"credits", "workspace_id", "channel_id", "fallback", "status", "error", "request_method", "request_url", "request_headers", "request_body", "ttft_fallback_model"},
 		"usage_stats":                     {"source_log_id", "user_id", "conversation_id", "message_id", "model_id", "purpose", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "images_count", "cost", "currency", "credits", "workspace_id", "channel_id", "fallback", "ttft_fallback_model", "created_at"},
@@ -557,7 +580,7 @@ func Migrate(db *sql.DB) error {
 		"files":                           {"draft"},
 		"documents":                       {"ingest_updated_at", "uploaded_by_user_id"},
 		"knowledge_base_shares":           {"kb_id", "user_id", "role", "created_at", "updated_at"},
-		"workspace_members":               {"workspace_id", "user_id", "role", "can_create_projects", "can_private_conversations", "can_create_kb", "can_add_kb_files", "can_delete_kb_content", "joined_at"},
+		"workspace_members":               {"workspace_id", "user_id", "role", "can_create_projects", "can_private_conversations", "can_create_skills_prompts", "can_create_kb", "can_add_kb_files", "can_delete_kb_content", "joined_at"},
 		"workspace_invites":               {"id", "workspace_id", "token", "email", "role", "expires_at", "max_uses", "used_count", "created_by", "purpose", "revoked_at", "created_at"},
 		"workspaces":                      {"id", "name", "owner_id", "invite_token", "deleting", "created_at"},
 		"workspace_kb_member_permissions": {"kb_id", "user_id", "can_add_files", "can_delete_content", "updated_at"},
