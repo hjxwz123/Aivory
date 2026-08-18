@@ -622,7 +622,7 @@ func importBackupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, errBackupImportAdminUnauthorized) {
 			writeError(w, http.StatusForbidden, err)
-		} else if errors.Is(err, errInvalidBillingConfigArchive) || errors.Is(err, errInvalidCompactionConfigArchive) || errors.Is(err, errInvalidBackupStoragePath) {
+		} else if errors.Is(err, errInvalidBillingConfigArchive) || errors.Is(err, errInvalidCompactionConfigArchive) || errors.Is(err, errInvalidOAuthConfigArchive) || errors.Is(err, errInvalidBackupStoragePath) {
 			writeError(w, http.StatusBadRequest, err)
 		} else {
 			writeError(w, http.StatusInternalServerError, fmt.Errorf("restore failed (no changes committed): %w", err))
@@ -837,6 +837,20 @@ func restoreInto(ctx context.Context, ex store.RowExecer, zr *zip.Reader, man ba
 		if err := ex.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&n); err == nil {
 			counts["users"] = n
 		}
+	}
+	tx, ok := ex.(*sql.Tx)
+	if !ok {
+		return nil, errors.New("backup restore requires a transaction")
+	}
+	if err := store.LockAuthConfigurationTx(ctx, tx); err != nil {
+		return nil, err
+	}
+	adminID := ""
+	if importingAdmin != nil {
+		adminID = importingAdmin.ID
+	}
+	if err := validateCurrentAuthPolicyTx(ctx, tx, adminID); err != nil {
+		return nil, fmt.Errorf("%w: enterprise authentication policy: %v", errInvalidOAuthConfigArchive, err)
 	}
 	return counts, nil
 }
@@ -1066,6 +1080,10 @@ func reconcileBackupImportAdmin(ctx context.Context, ex store.RowExecer, snap *b
 			}
 		}
 	}
+	// The verified administrator may have been remapped to a fresh id when the
+	// archive's original id belongs to another local user. Keep subsequent
+	// policy validation anchored to the account that was actually restored.
+	snap.ID = chosenID
 
 	newTokenVer := snap.TokenVer + 1
 	if importedTokenVer >= newTokenVer {
@@ -1356,6 +1374,12 @@ func mergeConfigArchive(ctx context.Context, d Deps, zr *zip.Reader, man configM
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// Authentication settings and OAuth providers form one lockout-sensitive
+	// configuration. Keep the same database lock order as the admin settings
+	// and provider endpoints before authorizing and merging the archive.
+	if err := store.LockAuthConfigurationTx(ctx, tx); err != nil {
+		return nil, err
+	}
 	active, err := lockActiveImportAdmin(ctx, tx, importingAdminID)
 	if err != nil {
 		return nil, err
@@ -1407,6 +1431,9 @@ func mergeConfigArchive(ctx context.Context, d Deps, zr *zip.Reader, man configM
 	}
 	if err := validateBillingConfiguration(ctx, tx); err != nil {
 		return nil, fmt.Errorf("%w: %v", errInvalidBillingConfigArchive, err)
+	}
+	if err := validateCurrentAuthPolicyTx(ctx, tx, importingAdminID); err != nil {
+		return nil, fmt.Errorf("%w: enterprise authentication policy: %v", errInvalidOAuthConfigArchive, err)
 	}
 	if err := rewriteConfigSkillAssetPaths(ctx, tx, man, d); err != nil {
 		return nil, err

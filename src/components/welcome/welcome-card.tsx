@@ -58,6 +58,7 @@ export function WelcomeCard() {
   const user = useAuth((s) => s.user)
   const status = useAuth((s) => s.status)
   const setUser = useAuth((s) => s.setUser)
+  const authPolicy = useAuth((s) => s.authPolicy)
   // Skip the memory onboarding step when the global admin master switch is off.
   const memoryAvailable = user?.memory_available !== false && userCan(user, 'allow_memory')
 
@@ -75,7 +76,8 @@ export function WelcomeCard() {
   const onboarded = Boolean((user?.settings as Record<string, unknown> | undefined)?.onboarded)
   // OAuth accounts must set a password first (SetPasswordGate); hold the wizard
   // back until they have, so the two mandatory dialogs don't stack.
-  const needsPassword = user?.has_password === false
+  const passwordPolicy = user?.oauth_initial_password_policy ?? authPolicy.oauth_initial_password_policy
+  const needsPassword = user?.has_password === false && passwordPolicy === 'required'
   const eligible = status === 'authenticated' && Boolean(user) && !onboarded && !needsPassword
 
   const [mounted, setMounted] = useState(false)

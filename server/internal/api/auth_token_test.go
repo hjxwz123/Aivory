@@ -120,6 +120,47 @@ func TestRequireAdminUsesDatabaseRoleAcrossIndependentCaches(t *testing.T) {
 	}
 }
 
+func TestRequireAuthEnforcesMandatoryInitialPassword(t *testing.T) {
+	d := newAuthSecurityDeps(t, "mandatory-initial-password.db")
+	user, err := store.CreateUser(t.Context(), d.DB, "oauth-user@example.test", "OAuth User", "throwaway-hash")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if _, err := d.DB.Exec(`UPDATE users SET password_set=0 WHERE id=?`, user.ID); err != nil {
+		t.Fatalf("mark user passwordless: %v", err)
+	}
+	user, err = store.FindUserByID(t.Context(), d.DB, user.ID)
+	if err != nil {
+		t.Fatalf("reload user: %v", err)
+	}
+	token := issueBoundTestAccessToken(t, d.DB, d.Auth, user)
+
+	request := func(method, path string) (int, bool, string) {
+		called := false
+		h := requireAuth(d, func(_ Deps, w http.ResponseWriter, _ *http.Request) {
+			called = true
+			w.WriteHeader(http.StatusNoContent)
+		})
+		req := httptest.NewRequest(method, path, nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code, called, rec.Body.String()
+	}
+
+	if status, called, body := request(http.MethodGet, "/api/conversations"); status != http.StatusPreconditionRequired || called {
+		t.Fatalf("protected request status=%d called=%v body=%s", status, called, body)
+	}
+	for _, allowed := range []struct{ method, path string }{
+		{http.MethodGet, "/api/me"},
+		{http.MethodPost, "/api/me/password/set"},
+	} {
+		if status, called, body := request(allowed.method, allowed.path); status != http.StatusNoContent || !called {
+			t.Fatalf("allowed request %s %s status=%d called=%v body=%s", allowed.method, allowed.path, status, called, body)
+		}
+	}
+}
+
 func TestRevokedSessionFamilyImmediatelyInvalidatesBoundAccessToken(t *testing.T) {
 	d := newAuthSecurityDeps(t, "access-session-family.db")
 	user, err := store.CreateUser(t.Context(), d.DB, "session-bound@example.test", "Session Bound", "hash")

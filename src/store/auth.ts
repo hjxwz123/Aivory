@@ -8,8 +8,23 @@
  */
 import { create } from 'zustand'
 import { authApi, ApiError, resetAuthFailureState, setAccessToken } from '@/api'
-import { isAuthRefreshSuppressed, setAuthLostHandler, setBannedHandler, setRefreshHandler } from '@/api/client'
-import type { ApiUser } from '@/api/types'
+import {
+  isAuthRefreshSuppressed,
+  setAuthLostHandler,
+  setBannedHandler,
+  setInitialPasswordRequiredHandler,
+  setRefreshHandler,
+} from '@/api/client'
+import type { ApiAuthPolicy, ApiUser } from '@/api/types'
+
+export const DEFAULT_AUTH_POLICY: ApiAuthPolicy = {
+  password_login_enabled: true,
+  entry_mode: 'login_page',
+  default_provider: null,
+  oauth_initial_password_policy: 'required',
+  oauth_auto_provision_enabled: true,
+  providers: [],
+}
 
 // Auth requests can overlap: AuthGate hydrates even on /login, while the user can
 // submit the login form before that stale hydrate finishes. Only the latest auth
@@ -42,6 +57,10 @@ interface AuthState {
    *  Drives the suspended notice on the login screen. */
   banned: boolean
   signupOpen: boolean
+  /** Public deployment authentication policy. Always resolves to a compatible
+   * fallback so a transient policy request failure cannot strand the login UI. */
+  authPolicy: ApiAuthPolicy
+  authPolicyLoaded: boolean
   /** True when the admin requires the slider-puzzle captcha on the register form. */
   captchaRequired: boolean
   /** True when the admin requires the slider-puzzle captcha on password sign-in
@@ -62,6 +81,7 @@ interface AuthState {
   pendingTwoFactor: { ticket: string } | null
 
   hydrate: () => Promise<void>
+  refreshAuthPolicy: () => Promise<ApiAuthPolicy>
   /** Refresh the server-authoritative profile without changing auth status or
    *  invalidating an in-flight login/logout transition. Permission events and
    *  expiring plans use this to converge an already-open tab. */
@@ -93,6 +113,8 @@ export const useAuth = create<AuthState>((set, get) => ({
   error: null,
   banned: false,
   signupOpen: true,
+  authPolicy: DEFAULT_AUTH_POLICY,
+  authPolicyLoaded: false,
   captchaRequired: false,
   loginCaptchaRequired: false,
   needsSetup: false,
@@ -132,6 +154,17 @@ export const useAuth = create<AuthState>((set, get) => ({
     set({ pendingTwoFactor: { ticket }, status: 'unauthenticated' })
   },
 
+  async refreshAuthPolicy() {
+    try {
+      const authPolicy = await authApi.authPolicy()
+      set({ authPolicy, authPolicyLoaded: true })
+      return authPolicy
+    } catch {
+      set({ authPolicy: DEFAULT_AUTH_POLICY, authPolicyLoaded: true })
+      return DEFAULT_AUTH_POLICY
+    }
+  },
+
   async hydrate() {
     const seq = beginAuthOp()
     set({ status: 'authenticating' })
@@ -160,10 +193,14 @@ export const useAuth = create<AuthState>((set, get) => ({
       set({ user: null, status: 'unauthenticated' })
     } finally {
       // First-run probe: a fresh deployment (zero users) routes to /setup. Probe
-      // it in PARALLEL with signup-open so a slow/failed sibling call can't delay
+      // it in PARALLEL with public login policy so a slow/failed sibling call can't delay
       // the routing decision, and mark it resolved either way so the AuthGate
       // stops waiting (otherwise the gate is stuck on the default needsSetup).
-      const [signup, setup] = await Promise.allSettled([authApi.signupOpen(), authApi.needsSetup()])
+      const [signup, setup, authPolicy] = await Promise.allSettled([
+        authApi.signupOpen(),
+        authApi.needsSetup(),
+        authApi.authPolicy(),
+      ])
       if (isLatestAuthOp(seq)) {
         if (signup.status === 'fulfilled') {
           set({
@@ -175,7 +212,11 @@ export const useAuth = create<AuthState>((set, get) => ({
         if (setup.status === 'fulfilled') {
           set({ needsSetup: setup.value.needs_setup })
         }
-        set({ setupProbed: true })
+        set({
+          authPolicy: authPolicy.status === 'fulfilled' ? authPolicy.value : DEFAULT_AUTH_POLICY,
+          authPolicyLoaded: true,
+          setupProbed: true,
+        })
       }
     }
   },
@@ -315,7 +356,8 @@ export const useAuth = create<AuthState>((set, get) => ({
       /* ignore */
     }
     setAccessToken(null)
-    set({ user: null, status: 'unauthenticated', pendingTwoFactor: null })
+    set({ user: null, status: 'unauthenticated', pendingTwoFactor: null, authPolicyLoaded: false })
+    await get().refreshAuthPolicy()
   },
 
   async updateProfile(patch) {
@@ -330,13 +372,23 @@ export const useAuth = create<AuthState>((set, get) => ({
 setBannedHandler(() => {
   beginAuthOp()
   setAccessToken(null)
-  useAuth.setState({ user: null, status: 'unauthenticated', banned: true, pendingTwoFactor: null })
+  useAuth.setState({ user: null, status: 'unauthenticated', banned: true, pendingTwoFactor: null, authPolicyLoaded: false })
+  void useAuth.getState().refreshAuthPolicy()
 })
 
 setAuthLostHandler(() => {
   beginAuthOp()
   setAccessToken(null)
-  useAuth.setState({ user: null, status: 'unauthenticated', pendingTwoFactor: null })
+  useAuth.setState({ user: null, status: 'unauthenticated', pendingTwoFactor: null, authPolicyLoaded: false })
+  void useAuth.getState().refreshAuthPolicy()
+})
+
+setInitialPasswordRequiredHandler(() => {
+  const current = useAuth.getState().user
+  if (!current || current.has_password !== false) return
+  useAuth.setState({
+    user: { ...current, oauth_initial_password_policy: 'required' },
+  })
 })
 
 // Refresh-on-401: the access token is short-lived (2h); rather than letting an

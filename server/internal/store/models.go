@@ -34,6 +34,10 @@ type User struct {
 	// chosen a password of their own. The client uses this to force a
 	// set-password step (§ third-party login has no password).
 	HasPassword bool `json:"has_password"`
+	// Authentication policy is attached transiently by the API so an already
+	// authenticated OAuth user sees the same password rules as the login page.
+	PasswordLoginEnabled       bool   `json:"password_login_enabled"`
+	OAuthInitialPasswordPolicy string `json:"oauth_initial_password_policy"`
 	// PasswordChangedAt is the unix seconds of the user's last password change
 	// (change / reset / first OAuth set-password). 0 = never changed since the
 	// account was created — the account page shows a neutral message instead of

@@ -542,11 +542,8 @@ func oauthCallbackHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, errSetupRequired):
 			fail("setup_required")
 			return
-		case errors.Is(err, errSignupClosed):
-			// Not a real failure — surface the SAME code the plain register form
-			// uses, so the login page shows one consistent "signups are closed"
-			// message no matter which path a first-time visitor tried.
-			fail("signup_closed")
+		case errors.Is(err, errOAuthAutoProvisionDisabled):
+			fail("oauth_auto_provision_disabled")
 			return
 		case errors.Is(err, errEmailDomainNotAllowed):
 			fail("email_domain_not_allowed")
@@ -838,14 +835,12 @@ func resolveOAuthUser(ctx context.Context, d Deps, p *store.OAuthProvider, info 
 		}
 	}
 
-	// §signup-closed gate: everything above this point either logs in an
+	// §OAuth auto-provision gate: everything above this point either logs in an
 	// existing identity/account or falls through here because NO account
 	// matched — i.e. every remaining path is a genuine new-account signup.
-	// When the admin has closed registration, a brand-new visitor must not be
-	// able to route around the closed register form just by clicking "Continue
-	// with Google" — mirror the same signup_open check registerHandler applies.
-	// An OAuth identity that already has a linked/matching account (handled in
-	// the branches above) is unaffected — that's a login, not a signup.
+	// Password registration and enterprise SSO provisioning are separate policy
+	// decisions. Existing linked/matching accounts remain logins and are
+	// unaffected by either new-account switch.
 	userCount, err := store.CountUsers(ctx, d.DB)
 	if err != nil {
 		return nil, err
@@ -853,12 +848,12 @@ func resolveOAuthUser(ctx context.Context, d Deps, p *store.OAuthProvider, info 
 	if userCount == 0 {
 		return nil, errSetupRequired
 	}
-	open, err := oauthBoolSetting(d, "signup_open")
+	open, err := oauthBoolSetting(d, "oauth_auto_provision_enabled")
 	if err != nil {
 		return nil, err
 	}
 	if !open {
-		return nil, errSignupClosed
+		return nil, errOAuthAutoProvisionDisabled
 	}
 
 	// OAuth is another registration transport, not an exemption from the global
@@ -1269,6 +1264,10 @@ func updateOAuthProviderAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		effective.Enabled = *patch.Enabled
 	}
 	effective = effectiveOAuthProvider(effective)
+	adminID := ""
+	if admin := authUser(r); admin != nil {
+		adminID = admin.ID
+	}
 	if oauthClientSecretReentryRequired(currentEffective, effective, patch.ClientSecret) {
 		writeError(w, http.StatusBadRequest, errOAuthClientSecretReentryRequired)
 		return
@@ -1306,8 +1305,36 @@ func updateOAuthProviderAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	currentNamespace := oauth.Resolve(toOAuthConfig(&currentEffective)).SubjectNamespace()
 	nextNamespace := oauth.Resolve(toOAuthConfig(&effective)).SubjectNamespace()
-	upd, err := updateOAuthProviderCAS(
-		r.Context(), d.DB, id, patch, *current, currentNamespace, nextNamespace,
+	tx, err := d.DB.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := store.LockAuthConfigurationTx(r.Context(), tx); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if adminID != "" {
+		if err := lockActiveAuthAdminTx(r.Context(), tx, adminID); err != nil {
+			if errors.Is(err, errAuthPolicyAdminRequired) {
+				writeError(w, http.StatusForbidden, err)
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+	}
+	if err := ensureOAuthProviderMutationAllowedTx(r.Context(), tx, adminID, &effective, ""); err != nil {
+		if errors.Is(err, errAuthPolicyProviderRequired) || errors.Is(err, errAuthPolicyAdminLinkRequired) {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	upd, err := updateOAuthProviderCASTx(
+		r.Context(), tx, id, patch, *current, currentNamespace, nextNamespace,
 	)
 	if err != nil {
 		if errors.Is(err, store.ErrOAuthProviderNameExists) || errors.Is(err, store.ErrOAuthProviderChanged) {
@@ -1321,15 +1348,59 @@ func updateOAuthProviderAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	if err := tx.Commit(); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 	writeJSON(w, 200, adminOAuthProviderJSON(*upd, d, r))
 }
 
-var updateOAuthProviderCAS = store.UpdateOAuthProviderCAS
+var updateOAuthProviderCASTx = store.UpdateOAuthProviderCASTx
 
 func deleteOAuthProviderAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")
-	if err := store.DeleteOAuthProvider(r.Context(), d.DB, id); err != nil {
+	adminID := ""
+	if admin := authUser(r); admin != nil {
+		adminID = admin.ID
+	}
+	tx, err := d.DB.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := store.LockAuthConfigurationTx(r.Context(), tx); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if adminID != "" {
+		if err := lockActiveAuthAdminTx(r.Context(), tx, adminID); err != nil {
+			if errors.Is(err, errAuthPolicyAdminRequired) {
+				writeError(w, http.StatusForbidden, err)
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+	}
+	if err := ensureOAuthProviderMutationAllowedTx(r.Context(), tx, adminID, nil, id); err != nil {
+		if errors.Is(err, errAuthPolicyProviderRequired) || errors.Is(err, errAuthPolicyAdminLinkRequired) {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if err := store.DeleteOAuthProviderTx(r.Context(), tx, id); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, errNotFound)
+			return
+		}
 		writeError(w, 500, err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})

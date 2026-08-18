@@ -219,6 +219,9 @@ type authResp struct {
 // access-token cookie. When email_verification_required is on, the account
 // starts as "pending" and a 6-digit code is sent via the configured mailer.
 func registerHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	if !requirePasswordLoginEnabled(d, w) {
+		return
+	}
 	var req registerReq
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, 400, errInvalidInput)
@@ -395,6 +398,9 @@ func sendCodeHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errInvalidInput)
 		return
 	}
+	if req.Purpose == "reset" && !requirePasswordLoginEnabled(d, w) {
+		return
+	}
 	retryAfter, allowed := reserveEmailSend(d, req.Email, req.Purpose)
 	if !allowed {
 		writeEmailCooldown(w, retryAfter)
@@ -471,6 +477,9 @@ func verifyEmailHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 // nonexistent recipients receive the same success or cooldown response so the
 // endpoint cannot be used to enumerate accounts.
 func forgotPasswordHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	if !requirePasswordLoginEnabled(d, w) {
+		return
+	}
 	var req struct {
 		Email string `json:"email"`
 	}
@@ -498,6 +507,9 @@ func forgotPasswordHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 // resetPasswordHandler accepts email + code + new password and updates the
 // user's password hash.
 func resetPasswordHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	if !requirePasswordLoginEnabled(d, w) {
+		return
+	}
 	var req struct {
 		Email       string `json:"email"`
 		Code        string `json:"code"`
@@ -557,6 +569,9 @@ type loginReq struct {
 
 // loginHandler verifies credentials and sets the auth cookie.
 func loginHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	if !requirePasswordLoginEnabled(d, w) {
+		return
+	}
 	var req loginReq
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, 400, errInvalidInput)

@@ -21,6 +21,8 @@ import { persistUserSettings } from '@/lib/user-settings'
 import { resolveDefaultToolMode } from '@/lib/tool-mode'
 import { invalidateAccessState } from '@/lib/access-events'
 import { ACCENT_PRESETS, type AccentPref, type ThemePref } from '@/types/settings'
+import { apiUrl } from '@/api'
+import { oauthStartPath } from '@/lib/oauth'
 
 const PUBLIC_PATHS = ['/welcome', '/login', '/register', '/forgot-password', '/share', '/setup', '/privacy', '/terms']
 
@@ -34,6 +36,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const user = useAuth((s) => s.user)
   const needsSetup = useAuth((s) => s.needsSetup)
   const setupProbed = useAuth((s) => s.setupProbed)
+  const authPolicy = useAuth((s) => s.authPolicy)
+  const authPolicyLoaded = useAuth((s) => s.authPolicyLoaded)
+  const pendingTwoFactor = useAuth((s) => s.pendingTwoFactor)
+  const pendingVerification = useAuth((s) => s.pendingVerification)
   const loadConversations = useConversations((s) => s.load)
   const loadProjects = useProjects((s) => s.load)
   const loadModels = useModels((s) => s.load)
@@ -42,9 +48,37 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const location = useLocation()
   const hydratedDataForUser = useRef<string | null>(null)
 
+  const authQuery = new URLSearchParams(location.search)
+  const emailVerificationInProgress =
+    location.pathname === '/register' && (authQuery.has('verify_email') || Boolean(pendingVerification))
+  const callbackNeedsAttention =
+    (location.pathname === '/login' && ['oauth_error', 'twofa'].some((key) => authQuery.has(key))) ||
+    emailVerificationInProgress
+  const shouldAutoRedirect =
+    status === 'unauthenticated' &&
+    setupProbed &&
+    !needsSetup &&
+    authPolicyLoaded &&
+    !user &&
+    authPolicy.entry_mode === 'auto_redirect' &&
+    Boolean(authPolicy.default_provider) &&
+    !pendingTwoFactor &&
+    !callbackNeedsAttention &&
+    !['/setup', '/privacy', '/terms'].some(
+      (path) => location.pathname === path || location.pathname.startsWith(path + '/'),
+    ) &&
+    !location.pathname.startsWith('/share/')
+
   useEffect(() => {
     void hydrate()
   }, [hydrate])
+
+  useEffect(() => {
+    if (!shouldAutoRedirect || !authPolicy.default_provider) return
+    // Full-page navigation is required for OAuth. replace() also prevents the
+    // Back button from returning to a route that immediately redirects again.
+    window.location.replace(apiUrl(oauthStartPath(authPolicy.default_provider.id)))
+  }, [authPolicy.default_provider, shouldAutoRedirect])
 
   // Keep local UI preferences in sync with the authenticated profile.
   useEffect(() => {
@@ -81,7 +115,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
   // repeated conversations/projects/models requests.
   useEffect(() => {
     const userId = user?.id ?? null
-    if (status !== 'authenticated' || !userId) {
+    if (status !== 'authenticated' || !user || !userId) {
+      hydratedDataForUser.current = null
+      return
+    }
+    const passwordPolicy = user.oauth_initial_password_policy ?? authPolicy.oauth_initial_password_policy
+    if (user.has_password === false && passwordPolicy === 'required') {
       hydratedDataForUser.current = null
       return
     }
@@ -101,7 +140,17 @@ export function AuthGate({ children }: { children: ReactNode }) {
         void loadProjects()
       })
     void loadModels()
-  }, [status, user?.id, loadConversations, loadProjects, loadModels])
+  }, [
+    authPolicy.oauth_initial_password_policy,
+    status,
+    user,
+    user?.has_password,
+    user?.id,
+    user?.oauth_initial_password_policy,
+    loadConversations,
+    loadProjects,
+    loadModels,
+  ])
 
   // A temporary plan can expire while the tab stays open and no realtime event
   // is emitted. Refresh just after the deadline, then reconcile every cache
@@ -135,7 +184,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
     </div>
   )
   if (status === 'idle' || status === 'authenticating') {
-    if (isPublic(location.pathname)) return <>{children}</>
+    const policyRoute = ['/welcome', '/login', '/register', '/forgot-password'].includes(location.pathname)
+    if (isPublic(location.pathname) && (!policyRoute || authPolicyLoaded)) return <>{children}</>
     return shimmer
   }
   // First-run probe not resolved yet — deciding setup-vs-login on the default
@@ -155,7 +205,22 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return <Navigate to={user ? '/' : '/login'} replace />
   }
 
+  if (!user && !authPolicyLoaded) {
+    return shimmer
+  }
+
+  if (shouldAutoRedirect) {
+    return shimmer
+  }
+
   if (!user) {
+    if (
+      (!authPolicy.password_login_enabled || authPolicy.entry_mode !== 'login_page') &&
+      ((location.pathname === '/register' && !emailVerificationInProgress) ||
+        location.pathname === '/forgot-password')
+    ) {
+      return <Navigate to="/login" replace />
+    }
     if (isPublic(location.pathname)) return <>{children}</>
     return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />
   }

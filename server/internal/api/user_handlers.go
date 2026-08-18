@@ -43,6 +43,10 @@ func attachGroupInfo(d Deps, r *http.Request, u *store.User) {
 	}
 	// Global memory master switch → lets the client show/hide the per-user toggle.
 	u.MemoryAvailable = store.MemoryEnabledGlobal(d.DB) && u.Permissions.AllowMemory
+	if policy, err := loadAuthPolicy(d); err == nil {
+		u.PasswordLoginEnabled = policy.PasswordLoginEnabled
+		u.OAuthInitialPasswordPolicy = policy.OAuthInitialPasswordPolicy
+	}
 }
 
 type updateMeReq struct {
@@ -131,6 +135,15 @@ type setPasswordReq struct {
 // the app (§ third-party login has no password).
 func setPasswordHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
+	policy, err := loadAuthPolicy(d)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if policy.OAuthInitialPasswordPolicy == oauthPasswordDisabled {
+		writeError(w, http.StatusForbidden, errPasswordManagementDisabled)
+		return
+	}
 	if u.HasPassword {
 		writeError(w, 409, errors.New("password already set"))
 		return

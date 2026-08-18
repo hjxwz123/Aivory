@@ -1032,9 +1032,16 @@ func Seed(db *sql.DB, cfg config.Config) error {
 		"daily_image_limit":               fmt.Sprintf("%d", cfg.DailyImages),
 		"daily_token_limit":               `0`,
 		"max_concurrent_generations":      `3`,
-		"signup_open":                     `true`,
-		"email_verification_required":     `false`,
-		"email_domain_whitelist":          `""`,
+		// Authentication policy. Defaults preserve the existing mixed login page
+		// and mandatory first-password flow for accounts created through OAuth.
+		"password_login_enabled":        `true`,
+		"auth_entry_mode":               `"login_page"`,
+		"auth_default_provider_id":      `""`,
+		"oauth_initial_password_policy": `"required"`,
+		"oauth_auto_provision_enabled":  `true`,
+		"signup_open":                   `true`,
+		"email_verification_required":   `false`,
+		"email_domain_whitelist":        `""`,
 		// Anti-abuse registration controls. register_ip_daily_limit caps how many
 		// accounts one client IP may create per calendar day (0 = unlimited).
 		// register_captcha_required gates signup behind the arithmetic captcha

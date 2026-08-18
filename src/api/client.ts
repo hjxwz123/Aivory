@@ -202,6 +202,7 @@ async function apiRequest<T>(path: string, opts: ApiOptions, retried: boolean): 
     // app once so it can sign the user out with a clear "suspended" message,
     // instead of a silent logout or a generic error.
     if (message === 'account_suspended') notifyBanned()
+    if (message === 'initial_password_required') notifyInitialPasswordRequired()
     throw new ApiError(res.status, message, parsed)
   }
   return parsed as T
@@ -224,6 +225,7 @@ async function apiUploadRequest<T>(
       notifyAuthLost()
     }
     if (message === 'account_suspended') notifyBanned()
+    if (message === 'initial_password_required') notifyInitialPasswordRequired()
     throw new ApiError(res.status, message, res.parsed)
   }
   return res.parsed as T
@@ -325,6 +327,14 @@ function notifyBanned(): void {
   bannedHandler?.()
 }
 
+let initialPasswordRequiredHandler: (() => void) | null = null
+export function setInitialPasswordRequiredHandler(cb: () => void): void {
+  initialPasswordRequiredHandler = cb
+}
+function notifyInitialPasswordRequired(): void {
+  initialPasswordRequiredHandler?.()
+}
+
 let authLostHandler: (() => void) | null = null
 let authLostFired = false
 export function setAuthLostHandler(cb: () => void): void {
@@ -413,7 +423,9 @@ export async function* streamSSE(
       parsed = text
     }
     const e = parsed as ApiErrorShape | undefined
-    throw new ApiError(res.status, e?.error ?? `stream failed (${res.status})`, parsed)
+    const message = e?.error ?? `stream failed (${res.status})`
+    if (message === 'initial_password_required') notifyInitialPasswordRequired()
+    throw new ApiError(res.status, message, parsed)
   }
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
@@ -480,7 +492,9 @@ export async function* streamSSEGet(
         parsed = text
       }
       const e = parsed as ApiErrorShape | undefined
-      throw new ApiError(res.status, e?.error ?? `stream failed (${res.status})`, parsed)
+      const message = e?.error ?? `stream failed (${res.status})`
+      if (message === 'initial_password_required') notifyInitialPasswordRequired()
+      throw new ApiError(res.status, message, parsed)
     }
     try {
       for await (const frame of readSSEBody(res.body)) {

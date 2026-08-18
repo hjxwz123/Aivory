@@ -170,6 +170,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/public/needs-setup", wrap(d, needsSetupHandler))
 	mux.handle("POST", "/api/setup", rateLimitedIP(d, "auth", rlFirstRunSetupMax, rlFirstRunSetupWindow, wrap(d, setupHandler)))
 	mux.handle("GET", "/api/public/oauth-providers", wrap(d, oauthProvidersPublicHandler))
+	mux.handle("GET", "/api/public/auth-policy", wrap(d, publicAuthPolicyHandler))
 	// Public operator contact + optional policy overrides. The handler exposes a
 	// strict three-field DTO rather than the administrator settings map.
 	mux.handle("GET", "/api/public/legal-config", wrap(d, legalConfigPublicHandler))
