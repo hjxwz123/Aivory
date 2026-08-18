@@ -451,11 +451,6 @@ CREATE TABLE IF NOT EXISTS user_skills (
   updated_at      BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
 CREATE INDEX IF NOT EXISTS idx_user_skills_user ON user_skills(user_id, updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_user_skills_workspace ON user_skills(workspace_id, updated_at DESC);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_user_skills_user_name_unique ON user_skills(user_id, lower(trim(name))) WHERE workspace_id='';
-CREATE UNIQUE INDEX IF NOT EXISTS idx_user_skills_workspace_name_unique ON user_skills(workspace_id, lower(trim(name))) WHERE workspace_id<>'';
-CREATE UNIQUE INDEX IF NOT EXISTS idx_user_skills_source_unique ON user_skills(user_id, source_skill_id) WHERE workspace_id='' AND source_skill_id IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_user_skills_workspace_source_unique ON user_skills(workspace_id, source_skill_id) WHERE workspace_id<>'' AND source_skill_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS user_prompts (
   id               TEXT PRIMARY KEY,
@@ -469,11 +464,6 @@ CREATE TABLE IF NOT EXISTS user_prompts (
   updated_at       BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
 CREATE INDEX IF NOT EXISTS idx_user_prompts_user ON user_prompts(user_id, updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_user_prompts_workspace ON user_prompts(workspace_id, updated_at DESC);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_user_prompts_user_name_unique ON user_prompts(user_id, lower(trim(name))) WHERE workspace_id='';
-CREATE UNIQUE INDEX IF NOT EXISTS idx_user_prompts_workspace_name_unique ON user_prompts(workspace_id, lower(trim(name))) WHERE workspace_id<>'';
-CREATE UNIQUE INDEX IF NOT EXISTS idx_user_prompts_source_unique ON user_prompts(user_id, source_prompt_id) WHERE workspace_id='' AND source_prompt_id IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_user_prompts_workspace_source_unique ON user_prompts(workspace_id, source_prompt_id) WHERE workspace_id<>'' AND source_prompt_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS model_skills (
   model_id TEXT NOT NULL REFERENCES models(id) ON DELETE CASCADE,
