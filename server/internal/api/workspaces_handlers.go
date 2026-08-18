@@ -722,11 +722,14 @@ func adminWorkspaceDetailHandler(d Deps, w http.ResponseWriter, r *http.Request)
 	convs, _ := store.ListWorkspaceConversations(r.Context(), d.DB, id, "", "any", adminWorkspaceDetailConversationsPageSize, 0)
 	projects, _ := store.ListWorkspaceProjects(r.Context(), d.DB, id)
 	kbs, _ := store.ListWorkspaceKBs(r.Context(), d.DB, id)
+	settings, _ := store.GetWorkspaceSettings(r.Context(), d.DB, id)
+	domains, _ := store.ListWorkspaceDomainMappings(r.Context(), d.DB, id)
 	for i := range convs {
 		stripServerConvFields(&convs[i])
 	}
 	writeJSON(w, 200, map[string]any{
 		"workspace": ws, "members": members, "conversations": convs, "projects": projects, "kbs": kbs,
+		"settings": settings, "domains": domains,
 	})
 }
 

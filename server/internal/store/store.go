@@ -241,6 +241,11 @@ func Migrate(db *sql.DB) error {
 	// A durable deletion fence prevents creations from racing a multi-step
 	// workspace teardown. It is reset when a recoverable teardown fails.
 	addWorkspaceDeleting := `ALTER TABLE workspaces ADD COLUMN deleting INTEGER NOT NULL DEFAULT 0`
+	addWorkspaceDefaultRole := `ALTER TABLE workspaces ADD COLUMN default_new_user_role TEXT NOT NULL DEFAULT 'member'`
+	addWorkspaceMemberPermissions := `ALTER TABLE workspaces ADD COLUMN default_member_permissions TEXT NOT NULL DEFAULT '{"can_create_projects":true,"can_private_conversations":true,"can_create_skills_prompts":true,"can_create_kb":true,"can_add_kb_files":true,"can_delete_kb_content":true}'`
+	addWorkspacePersonalSpace := `ALTER TABLE workspaces ADD COLUMN allow_personal_space INTEGER NOT NULL DEFAULT 1`
+	addWorkspaceInitialGroup := `ALTER TABLE workspaces ADD COLUMN initial_site_group_id TEXT NOT NULL DEFAULT ''`
+	addWorkspaceInitialCredits := `ALTER TABLE workspaces ADD COLUMN initial_permanent_credits REAL NOT NULL DEFAULT 0`
 	// §workspace RBAC phase 2 — private/workspace visibility on projects and
 	// knowledge bases. Existing shared rows stay shared (DEFAULT 1).
 	addKBIsPublic := `ALTER TABLE knowledge_bases ADD COLUMN is_public INTEGER NOT NULL DEFAULT 1`
@@ -364,6 +369,11 @@ func Migrate(db *sql.DB) error {
 		addWorkspaceCanDeleteKBContent = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_delete_kb_content INTEGER NOT NULL DEFAULT 1`
 		addWorkspaceInvitePurpose = `ALTER TABLE workspace_invites ADD COLUMN IF NOT EXISTS purpose TEXT NOT NULL DEFAULT 'manual'`
 		addWorkspaceDeleting = `ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS deleting INTEGER NOT NULL DEFAULT 0`
+		addWorkspaceDefaultRole = `ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS default_new_user_role TEXT NOT NULL DEFAULT 'member'`
+		addWorkspaceMemberPermissions = `ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS default_member_permissions TEXT NOT NULL DEFAULT '{"can_create_projects":true,"can_private_conversations":true,"can_create_skills_prompts":true,"can_create_kb":true,"can_add_kb_files":true,"can_delete_kb_content":true}'`
+		addWorkspacePersonalSpace = `ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS allow_personal_space INTEGER NOT NULL DEFAULT 1`
+		addWorkspaceInitialGroup = `ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS initial_site_group_id TEXT NOT NULL DEFAULT ''`
+		addWorkspaceInitialCredits = `ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS initial_permanent_credits DOUBLE PRECISION NOT NULL DEFAULT 0`
 		addKBIsPublic = `ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS is_public INTEGER NOT NULL DEFAULT 1`
 		addProjectIsPublic = `ALTER TABLE projects ADD COLUMN IF NOT EXISTS is_public INTEGER NOT NULL DEFAULT 1`
 		addModelFast = `ALTER TABLE models ADD COLUMN IF NOT EXISTS fast INTEGER NOT NULL DEFAULT 0`
@@ -426,7 +436,7 @@ func Migrate(db *sql.DB) error {
 		addModelFallbackChannel, addUsageChannel, addUsageFallback, addUsageStatus, addUsageError,
 		addUsageRequestMethod, addUsageRequestURL, addUsageRequestHeaders, addUsageRequestBody, addUsageTTFTFallback,
 		addFileDraft, addDocumentIngestUpdatedAt, addDocumentUploader,
-		addWorkspaceCanCreateProjects, addWorkspaceCanPrivateConversations, addWorkspaceCanCreateSkillsPrompts, addWorkspaceCanCreateKB, addWorkspaceCanAddKBFiles, addWorkspaceCanDeleteKBContent, addWorkspaceInvitePurpose, addWorkspaceDeleting,
+			addWorkspaceCanCreateProjects, addWorkspaceCanPrivateConversations, addWorkspaceCanCreateSkillsPrompts, addWorkspaceCanCreateKB, addWorkspaceCanAddKBFiles, addWorkspaceCanDeleteKBContent, addWorkspaceInvitePurpose, addWorkspaceDeleting, addWorkspaceDefaultRole, addWorkspaceMemberPermissions, addWorkspacePersonalSpace, addWorkspaceInitialGroup, addWorkspaceInitialCredits,
 		addKBIsPublic, addProjectIsPublic,
 		addModelFast, addConvFast, addMsgFast,
 		addSkillDisplayDescription, addUserSkillIcon, addUserSkillWorkspace, addUserPromptWorkspace, addMsgSelectedUserSkills,
@@ -582,7 +592,7 @@ func Migrate(db *sql.DB) error {
 		"knowledge_base_shares":           {"kb_id", "user_id", "role", "created_at", "updated_at"},
 		"workspace_members":               {"workspace_id", "user_id", "role", "can_create_projects", "can_private_conversations", "can_create_skills_prompts", "can_create_kb", "can_add_kb_files", "can_delete_kb_content", "joined_at"},
 		"workspace_invites":               {"id", "workspace_id", "token", "email", "role", "expires_at", "max_uses", "used_count", "created_by", "purpose", "revoked_at", "created_at"},
-		"workspaces":                      {"id", "name", "owner_id", "invite_token", "deleting", "created_at"},
+			"workspaces":                      {"id", "name", "owner_id", "invite_token", "deleting", "default_new_user_role", "default_member_permissions", "allow_personal_space", "initial_site_group_id", "initial_permanent_credits", "created_at"},
 		"workspace_kb_member_permissions": {"kb_id", "user_id", "can_add_files", "can_delete_content", "updated_at"},
 		"redeem_codes":                    {"kind", "credits"},
 		"redeem_redemptions":              {"credits"},

@@ -70,6 +70,20 @@ type Workspace struct {
 	CanCreateKB             bool   `json:"can_create_kb"`
 	CanAddKBFiles           bool   `json:"can_add_kb_files"`
 	CanDeleteKBContent      bool   `json:"can_delete_kb_content"`
+	AllowPersonalSpace      bool   `json:"allow_personal_space"`
+}
+
+// WorkspaceSettings contains the small set of onboarding controls that are
+// intentionally workspace-scoped. Website administrators own the domain,
+// site-group and credit defaults; workspace administrators own the member
+// defaults and personal-space switch.
+type WorkspaceSettings struct {
+	WorkspaceID              string                     `json:"workspace_id"`
+	DefaultNewUserRole       string                     `json:"default_new_user_role"`
+	DefaultMemberPermissions WorkspaceMemberPermissions `json:"default_member_permissions"`
+	AllowPersonalSpace       bool                       `json:"allow_personal_space"`
+	InitialSiteGroupID       string                     `json:"initial_site_group_id,omitempty"`
+	InitialPermanentCredits  float64                    `json:"initial_permanent_credits"`
 }
 
 // WorkspaceMember is one member row enriched with user identity for display.
@@ -381,8 +395,8 @@ func CreateWorkspace(ctx context.Context, db *sql.DB, ownerID, name string) (*Wo
 func GetWorkspace(ctx context.Context, db *sql.DB, id string) (*Workspace, error) {
 	var w Workspace
 	err := db.QueryRowContext(ctx,
-		`SELECT id, name, owner_id, invite_token, created_at FROM workspaces WHERE id=?`, id,
-	).Scan(&w.ID, &w.Name, &w.OwnerID, &w.InviteToken, &w.CreatedAt)
+		`SELECT id, name, owner_id, invite_token, created_at, COALESCE(allow_personal_space,1) FROM workspaces WHERE id=?`, id,
+	).Scan(&w.ID, &w.Name, &w.OwnerID, &w.InviteToken, &w.CreatedAt, &w.AllowPersonalSpace)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -399,7 +413,7 @@ func GetWorkspace(ctx context.Context, db *sql.DB, id string) (*Workspace, error
 func GetWorkspaceForMember(ctx context.Context, db *sql.DB, id, userID string) (*Workspace, error) {
 	var w Workspace
 	err := db.QueryRowContext(ctx,
-		`SELECT w.id, w.name, w.owner_id, w.invite_token, w.created_at,
+		`SELECT w.id, w.name, w.owner_id, w.invite_token, w.created_at, COALESCE(w.allow_personal_space,1),
 		        CASE WHEN w.owner_id=? THEN 'admin' ELSE `+normalizeWorkspaceRoleSQL("m.role")+` END,
 		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_create_projects,0) END,
 		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_private_conversations,0) END,
@@ -413,7 +427,7 @@ func GetWorkspaceForMember(ctx context.Context, db *sql.DB, id, userID string) (
 		userID, userID, userID, userID, userID, userID, userID,
 		userID, id, userID, userID,
 	).Scan(
-		&w.ID, &w.Name, &w.OwnerID, &w.InviteToken, &w.CreatedAt, &w.Role,
+		&w.ID, &w.Name, &w.OwnerID, &w.InviteToken, &w.CreatedAt, &w.AllowPersonalSpace, &w.Role,
 		&w.CanCreateProjects, &w.CanPrivateConversations, &w.CanCreateSkillsPrompts, &w.CanCreateKB,
 		&w.CanAddKBFiles, &w.CanDeleteKBContent,
 	)
@@ -441,7 +455,7 @@ func GetWorkspaceByInviteToken(_ context.Context, _ *sql.DB, _ string) (*Workspa
 // anyway by joining flow, but least-privilege costs nothing).
 func ListWorkspacesForUser(ctx context.Context, db *sql.DB, userID string) ([]Workspace, error) {
 	rows, err := db.QueryContext(ctx,
-		`SELECT w.id, w.name, w.owner_id, w.invite_token, w.created_at,
+		`SELECT w.id, w.name, w.owner_id, w.invite_token, w.created_at, COALESCE(w.allow_personal_space,1),
 		        CASE WHEN w.owner_id=? THEN 'admin' ELSE `+normalizeWorkspaceRoleSQL("m.role")+` END,
 		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_create_projects,0) END,
 		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_private_conversations,0) END,
@@ -463,7 +477,7 @@ func ListWorkspacesForUser(ctx context.Context, db *sql.DB, userID string) ([]Wo
 	for rows.Next() {
 		var w Workspace
 		if err := rows.Scan(
-			&w.ID, &w.Name, &w.OwnerID, &w.InviteToken, &w.CreatedAt, &w.Role,
+			&w.ID, &w.Name, &w.OwnerID, &w.InviteToken, &w.CreatedAt, &w.AllowPersonalSpace, &w.Role,
 			&w.CanCreateProjects, &w.CanPrivateConversations, &w.CanCreateSkillsPrompts, &w.CanCreateKB,
 			&w.CanAddKBFiles, &w.CanDeleteKBContent, &w.MemberCount,
 		); err != nil {
@@ -730,13 +744,21 @@ func JoinWorkspace(ctx context.Context, db *sql.DB, workspaceID, userID string) 
 	if err := lockWorkspaceMembershipTx(ctx, tx, workspaceID); err != nil {
 		return err
 	}
-	joined, err := joinWorkspaceWithRoleTx(ctx, tx, workspaceID, userID, WorkspaceRoleMember)
+	role := WorkspaceRoleMember
+	var configuredRole string
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(default_new_user_role,'member') FROM workspaces WHERE id=?`, workspaceID).Scan(&configuredRole); err == nil && configuredRole == WorkspaceRoleGuest {
+		role = WorkspaceRoleGuest
+	}
+	joined, err := joinWorkspaceWithRoleTx(ctx, tx, workspaceID, userID, role)
 	if err != nil {
 		return err
 	}
 	if joined {
+		if err := ApplyWorkspaceOnboardingTx(ctx, tx, workspaceID, userID); err != nil {
+			return err
+		}
 		if err := recordWorkspaceAudit(ctx, tx, workspaceID, userID, AuditMemberJoined,
-			"workspace_member", userID, map[string]any{"role": WorkspaceRoleMember, "source": "direct"}); err != nil {
+			"workspace_member", userID, map[string]any{"role": role, "source": "direct"}); err != nil {
 			return err
 		}
 	}
@@ -762,14 +784,14 @@ func joinWorkspaceWithRoleTx(ctx context.Context, tx *sql.Tx, workspaceID, userI
 	if !ValidWorkspaceMemberRole(role) {
 		return false, errors.New("invalid role")
 	}
-	var ownerStatus, joiningStatus string
+	var ownerStatus, joiningStatus, defaultPermissions string
 	if err := tx.QueryRowContext(ctx,
-		`SELECT owner.status, joining_user.status
+		`SELECT owner.status, joining_user.status, COALESCE(w.default_member_permissions,'{}')
 		   FROM workspaces w
 		   JOIN users owner ON owner.id=w.owner_id
 		   JOIN users joining_user ON joining_user.id=?
 		  WHERE w.id=?`, userID, workspaceID,
-	).Scan(&ownerStatus, &joiningStatus); err != nil {
+	).Scan(&ownerStatus, &joiningStatus, &defaultPermissions); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, ErrNotFound
 		}
@@ -778,9 +800,19 @@ func joinWorkspaceWithRoleTx(ctx context.Context, tx *sql.Tx, workspaceID, userI
 	if ownerStatus != "active" || joiningStatus != "active" {
 		return false, ErrNotFound
 	}
+	permissions := fullWorkspaceMemberPermissions()
+	if role == WorkspaceRoleMember && strings.TrimSpace(defaultPermissions) != "" {
+		_ = json.Unmarshal([]byte(defaultPermissions), &permissions)
+	}
+	// Explicit invitations keep their declared role. Direct enterprise joins
+	// resolve the workspace default role before calling this helper.
+	if role == WorkspaceRoleGuest {
+		permissions = WorkspaceMemberPermissions{}
+	}
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO workspace_members(workspace_id, user_id, role) VALUES(?, ?, ?)
-		 ON CONFLICT(workspace_id, user_id) DO NOTHING`, workspaceID, userID, role)
+		`INSERT INTO workspace_members(workspace_id, user_id, role, can_create_projects, can_private_conversations, can_create_skills_prompts, can_create_kb, can_add_kb_files, can_delete_kb_content) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(workspace_id, user_id) DO NOTHING`, workspaceID, userID, role,
+		boolInt(permissions.CanCreateProjects), boolInt(permissions.CanPrivateConversations), boolInt(permissions.CanCreateSkillsPrompts), boolInt(permissions.CanCreateKB), boolInt(permissions.CanAddKBFiles), boolInt(permissions.CanDeleteKBContent))
 	if err != nil {
 		return false, err
 	}

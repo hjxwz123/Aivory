@@ -13,6 +13,7 @@ import type {
   ApiWorkspaceInvite,
   ApiWorkspaceMember,
   ApiWorkspaceMemberPermissions,
+  ApiWorkspaceSettings,
   ApiWorkspacePolicy,
   ApiWorkspaceRole,
 } from '@/api/types'
@@ -279,8 +280,10 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
   const operationEpochRef = useRef(0)
   // §workspace RBAC phases 3/4: managers switch between members, invites and
   // the capability policy; non-managers only ever see the member list.
-  const [tab, setTab] = useState<'members' | 'invites' | 'policy' | 'audit'>('members')
+  const [tab, setTab] = useState<'members' | 'invites' | 'policy' | 'audit' | 'settings'>('members')
   const [transferOpen, setTransferOpen] = useState(false)
+  const [workspaceSettings, setWorkspaceSettings] = useState<ApiWorkspaceSettings | null>(null)
+  const [settingsLoading, setSettingsLoading] = useState(false)
 
   function roleLabel(role: ApiWorkspaceRole | undefined): string {
     switch (role) {
@@ -326,6 +329,20 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
         if (request === membersRequestRef.current) setMembersLoading(false)
       })
   }, [open, activeId, membersLoadAttempt])
+
+  useEffect(() => {
+    let current = true
+    if (!open || !activeId || !canManage) {
+      setWorkspaceSettings(null)
+      return
+    }
+    setSettingsLoading(true)
+    workspacesApi.settings(activeId)
+      .then((settings) => { if (current) setWorkspaceSettings(settings) })
+      .catch(() => { if (current) setWorkspaceSettings(null) })
+      .finally(() => { if (current) setSettingsLoading(false) })
+    return () => { current = false }
+  }, [open, activeId, canManage])
 
   useEffect(
     () =>
@@ -505,6 +522,7 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
               ['members', <Users key="i" size={13} aria-hidden />, t('workspace.tabMembers', { defaultValue: 'Members' })],
               ['invites', <KeyRound key="i" size={13} aria-hidden />, t('workspace.tabInvites', { defaultValue: 'Invites' })],
               ['policy', <SlidersHorizontal key="i" size={13} aria-hidden />, t('workspace.tabPolicy', { defaultValue: 'Capabilities' })],
+              ['settings', <Settings2 key="i" size={13} aria-hidden />, t('workspace.tabSettings', { defaultValue: 'New users' })],
               ['audit', <FileClock key="i" size={13} aria-hidden />, t('workspace.tabAudit', { defaultValue: 'Audit' })],
             ] as const).map(([key, icon, label]) => (
               <button
@@ -681,6 +699,17 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
         ) : null}
         {tab === 'policy' && canManage && activeId ? (
           <WorkspacePolicyPanel workspaceID={activeId} />
+        ) : null}
+        {tab === 'settings' && canManage && activeId ? (
+          <WorkspaceDefaultsPanel
+            workspaceID={activeId}
+            settings={workspaceSettings}
+            loading={settingsLoading}
+            onSaved={(next) => {
+              setWorkspaceSettings(next)
+              void useWorkspaces.getState().load()
+            }}
+          />
         ) : null}
         {tab === 'audit' && canManage && activeId ? (
           <WorkspaceAuditPanel workspaceID={activeId} />
