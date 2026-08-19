@@ -758,7 +758,8 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                     className={cn(
                       imageAttachments.length === 1
                         ? 'flex'
-                        : 'flex w-[min(30rem,72vw)] max-w-full snap-x snap-mandatory gap-2 overflow-x-auto overscroll-x-contain pb-1 scrollbar-none',
+                        : 'flex w-[min(30rem,72vw)] max-w-full flex-wrap gap-2',
+                      imageAttachments.length > 1 && (isOwn ? 'justify-end' : 'justify-start'),
                     )}
                   >
                     {imageAttachments.map((attachment) => (
@@ -774,7 +775,6 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                         aria-label={t('actions.viewImage', { defaultValue: 'View image' })}
                         className={cn(
                           'block shrink-0 overflow-hidden rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] hover:opacity-90',
-                          imageAttachments.length > 1 && 'snap-start',
                         )}
                       >
                         <img
