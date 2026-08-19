@@ -95,6 +95,89 @@ func officialImageGenerationEnabled(req UnifiedChatRequest) bool {
 	return responsesRequestHasToolType(body, "image_generation")
 }
 
+// addMissingOpenAIChatReasoning repairs Chat Completions Raw written before
+// reasoning fields were preserved. The canonical blocks retain each reasoning
+// round for UI rendering, while Raw retains the assistant/tool message sequence.
+// Aligning both lets old conversations continue without inventing reasoning for
+// cross-provider history, whose Raw is deliberately absent.
+func addMissingOpenAIChatReasoning(turns []map[string]any, blocks []UnifiedBlock) {
+	assistantCount := 0
+	for _, turn := range turns {
+		if turn["role"] == "assistant" {
+			assistantCount++
+		}
+	}
+	if assistantCount == 0 {
+		return
+	}
+
+	rounds := openAIChatReasoningRounds(blocks)
+	for len(rounds) < assistantCount {
+		rounds = append(rounds, "")
+	}
+	assistantIndex := 0
+	for _, turn := range turns {
+		if turn["role"] != "assistant" {
+			continue
+		}
+		reasoning := ""
+		if assistantIndex < len(rounds) {
+			reasoning = rounds[assistantIndex]
+		}
+		assistantIndex++
+		if reasoning == "" || openAIChatTurnHasReasoning(turn) {
+			continue
+		}
+		turn["reasoning_content"] = reasoning
+	}
+}
+
+func openAIChatTurnHasReasoning(turn map[string]any) bool {
+	for _, field := range []string{"reasoning_content", "reasoning"} {
+		if value, _ := turn[field].(string); value != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// openAIChatReasoningRounds mirrors streamChat's canonical block order. A
+// tool_call closes one assistant round; the next thinking/text block starts the
+// post-tool round. Empty rounds are retained so multiple Raw assistant messages
+// stay aligned even if only some of them emitted reasoning.
+func openAIChatReasoningRounds(blocks []UnifiedBlock) []string {
+	rounds := []string{}
+	var current strings.Builder
+	afterToolCall := false
+	started := false
+	for _, block := range blocks {
+		switch block.Kind {
+		case "thinking":
+			if afterToolCall {
+				afterToolCall = false
+			}
+			current.WriteString(block.Text)
+			started = true
+		case "text":
+			if afterToolCall {
+				afterToolCall = false
+			}
+			started = true
+		case "tool_call":
+			if !afterToolCall {
+				rounds = append(rounds, current.String())
+				current.Reset()
+				afterToolCall = true
+			}
+			started = true
+		}
+	}
+	if started && !afterToolCall {
+		rounds = append(rounds, current.String())
+	}
+	return rounds
+}
+
 func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest, tools ToolRunner, onEvent func(SseEvent)) (*UnifiedResult, error) {
 	// §4.13 prompt-mode: no native function calling — drive the text protocol.
 	if req.ToolModePrompt {
@@ -120,6 +203,12 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 		if m.Role == "assistant" && len(m.Raw) > 2 && !isPromptToolRawEnvelope(m.Raw) && (req.Model.Vision || !nativeRawContainsImage(m.Raw)) {
 			var turns []map[string]any
 			if err := json.Unmarshal(m.Raw, &turns); err == nil && len(turns) > 0 && turns[0]["role"] != nil {
+				// Several OpenAI-compatible reasoning models require the assistant's
+				// reasoning payload to be replayed verbatim on every subsequent Chat
+				// Completions request. Rows written before reasoning replay support may
+				// have the canonical thinking blocks but no wire field in Raw; repair
+				// those turns without overwriting native fields that are already intact.
+				addMissingOpenAIChatReasoning(turns, m.Blocks)
 				messages = append(messages, turns...)
 				continue
 			}
@@ -195,7 +284,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 		raw, _ := json.Marshal(body)
 		var (
 			text      string
-			reasoning string
+			reasoning openAIChatReasoning
 			calls     []openAIToolCall
 			finish    string
 			u         Usage
@@ -210,7 +299,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 			hr.Header.Set("accept", "text/event-stream")
 			return hr, nil
 		}, func(resp *http.Response, emit func(SseEvent)) error {
-			text, reasoning, finish, u = "", "", "", Usage{}
+			text, reasoning, finish, u = "", openAIChatReasoning{}, "", Usage{}
 			calls = nil
 			if statusErr := requireProviderSuccess(resp, "openai"); statusErr != nil {
 				return statusErr
@@ -224,8 +313,8 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 		}, onEvent)
 		if err != nil {
 			partialBlocks := append([]UnifiedBlock{}, allBlocks...)
-			if reasoning != "" {
-				partialBlocks = append(partialBlocks, UnifiedBlock{Kind: "thinking", Text: reasoning})
+			if reasoning.Text != "" {
+				partialBlocks = append(partialBlocks, UnifiedBlock{Kind: "thinking", Text: reasoning.Text})
 			}
 			if text != "" {
 				partialBlocks = append(partialBlocks, UnifiedBlock{Kind: "text", Text: text})
@@ -255,8 +344,8 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 		allText.WriteString(text)
 		// Thinking precedes the round's text so the reasoning trace reads
 		// think → answer/tool in order.
-		if reasoning != "" {
-			allBlocks = append(allBlocks, UnifiedBlock{Kind: "thinking", Text: reasoning})
+		if reasoning.Text != "" {
+			allBlocks = append(allBlocks, UnifiedBlock{Kind: "thinking", Text: reasoning.Text})
 		}
 		if text != "" {
 			allBlocks = append(allBlocks, UnifiedBlock{Kind: "text", Text: text})
@@ -265,6 +354,9 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 		usage.OutputTokens += u.OutputTokens
 
 		assistant := map[string]any{"role": "assistant", "content": text}
+		if reasoning.Text != "" {
+			assistant[reasoning.WireField()] = reasoning.Text
+		}
 		if len(calls) > 0 {
 			toolCalls := []map[string]any{}
 			for _, c := range calls {
@@ -575,11 +667,37 @@ type openAIResponseCallBuf struct {
 	Started  bool
 }
 
-func readOpenAIChatStream(body io.Reader, onEvent func(SseEvent)) (string, string, []openAIToolCall, string, Usage, error) {
+type openAIChatReasoning struct {
+	Text  string
+	Field string
+}
+
+func (r openAIChatReasoning) WireField() string {
+	if r.Field == "reasoning" {
+		return "reasoning"
+	}
+	return "reasoning_content"
+}
+
+func readOpenAIChatStream(body io.Reader, onEvent func(SseEvent)) (string, openAIChatReasoning, []openAIToolCall, string, Usage, error) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, readOpenAIChatStreamBufInit), readOpenAIChatStreamBufMax)
 	text := strings.Builder{}
 	reasoning := strings.Builder{}
+	reasoningField := ""
+	snapshotReasoning := func() openAIChatReasoning {
+		return openAIChatReasoning{Text: reasoning.String(), Field: reasoningField}
+	}
+	appendReasoning := func(field, value string) {
+		if value == "" {
+			return
+		}
+		if reasoningField == "" {
+			reasoningField = field
+		}
+		reasoning.WriteString(value)
+		onEvent(SseEvent{Type: "thinking_delta", Text: value})
+	}
 	usage := Usage{}
 	finish := "end_turn"
 	sawEvent := false
@@ -631,11 +749,11 @@ func readOpenAIChatStream(body io.Reader, onEvent func(SseEvent)) (string, strin
 		}
 		var ev map[string]any
 		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
-			return text.String(), reasoning.String(), snapshotCalls(), finish, usage,
+			return text.String(), snapshotReasoning(), snapshotCalls(), finish, usage,
 				fmt.Errorf("openai chat stream invalid JSON: %w", err)
 		}
 		if streamErr := providerEventError("openai chat", ev); streamErr != nil {
-			return text.String(), reasoning.String(), snapshotCalls(), finish, usage, streamErr
+			return text.String(), snapshotReasoning(), snapshotCalls(), finish, usage, streamErr
 		}
 		choices, _ := ev["choices"].([]any)
 		if len(choices) > 0 {
@@ -648,12 +766,10 @@ func readOpenAIChatStream(body io.Reader, onEvent func(SseEvent)) (string, strin
 			// compatible gateways, DeepSeek-R1, etc.) stream chain-of-thought as
 			// `reasoning_content` or `reasoning` deltas — surface them as thinking.
 			if s, _ := delta["reasoning_content"].(string); s != "" {
-				reasoning.WriteString(s)
-				onEvent(SseEvent{Type: "thinking_delta", Text: s})
+				appendReasoning("reasoning_content", s)
 			}
 			if s, _ := delta["reasoning"].(string); s != "" {
-				reasoning.WriteString(s)
-				onEvent(SseEvent{Type: "thinking_delta", Text: s})
+				appendReasoning("reasoning", s)
 			}
 			if s, _ := delta["content"].(string); s != "" {
 				text.WriteString(s)
@@ -702,15 +818,15 @@ func readOpenAIChatStream(body io.Reader, onEvent func(SseEvent)) (string, strin
 	}
 	calls := snapshotCalls()
 	if err := scanner.Err(); err != nil && !terminal {
-		return text.String(), reasoning.String(), calls, finish, usage, err
+		return text.String(), snapshotReasoning(), calls, finish, usage, err
 	}
 	if !sawEvent {
-		return text.String(), reasoning.String(), calls, finish, usage, invalidProviderStream("openai chat", "empty response")
+		return text.String(), snapshotReasoning(), calls, finish, usage, invalidProviderStream("openai chat", "empty response")
 	}
 	if !terminal {
-		return text.String(), reasoning.String(), calls, finish, usage, invalidProviderStream("openai chat", "response ended before a terminal event")
+		return text.String(), snapshotReasoning(), calls, finish, usage, invalidProviderStream("openai chat", "response ended before a terminal event")
 	}
-	return text.String(), reasoning.String(), calls, finish, usage, nil
+	return text.String(), snapshotReasoning(), calls, finish, usage, nil
 }
 
 // streamResponses drives the OpenAI Responses API (`POST /v1/responses`),
