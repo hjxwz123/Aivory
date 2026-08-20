@@ -444,7 +444,7 @@ export default function AdminUsers() {
             moveDownLabel={t('admin:common.moveDown')}
             mobileDragOnly
             listClassName="max-md:gap-2 max-md:divide-y-0 max-md:border-0 max-md:bg-transparent"
-            rowClassName="grid grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-start gap-x-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-3 md:grid-cols-[auto_auto_1fr_auto] md:items-center md:gap-3 md:rounded-none md:border-0 md:bg-transparent md:px-5 md:py-4"
+            rowClassName="grid grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-center gap-x-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-2.5 md:grid-cols-[auto_auto_1fr_auto] md:items-center md:gap-3 md:rounded-none md:border-0 md:bg-transparent md:px-5 md:py-2"
             renderItem={(u) => {
               const isMe = me?.id === u.id
               const group = groups.find((g) => g.id === u.group_id)
@@ -458,8 +458,8 @@ export default function AdminUsers() {
                   : t('admin:users.neverSeen')
               return (
                 <>
-                  <div className="flex min-w-0 items-start gap-2.5 md:items-center md:gap-3">
-                    <Avatar size="md" className="mt-0.5 shrink-0 max-md:size-9 md:mt-0">
+                  <div className="flex min-w-0 items-center gap-2.5 md:gap-3">
+                    <Avatar size="md" className="shrink-0">
                       {avatarUrl ? <AvatarImage src={avatarUrl} alt={u.name || u.email} /> : null}
                       <AvatarFallback>{initials(u.name || u.email)}</AvatarFallback>
                     </Avatar>
@@ -473,7 +473,7 @@ export default function AdminUsers() {
                             online ? 'bg-[var(--color-success)]' : 'bg-[var(--color-fg-faint)]',
                           )}
                         />
-                        <span className="min-w-0 font-medium leading-5 text-[var(--color-fg)] max-md:line-clamp-2 md:truncate">
+                        <span className="min-w-0 truncate font-medium text-[var(--color-fg)]">
                           {u.name || u.email}
                         </span>
                         <div className="hidden items-center gap-2 md:flex">
@@ -491,9 +491,9 @@ export default function AdminUsers() {
                           {isMe ? <Badge size="xs" variant="neutral">{t('admin:users.you')}</Badge> : null}
                         </div>
                       </div>
-                      <p className="mt-0.5 truncate font-mono text-[12px] text-[var(--color-fg-subtle)] md:hidden">{u.email}</p>
-                      <p className="mt-1 text-[12px] leading-4 text-[var(--color-fg-subtle)] md:hidden">{presence}</p>
-                      <div className="mt-2 flex flex-wrap gap-1 md:hidden">
+                      <p className="truncate font-mono text-[12px] text-[var(--color-fg-subtle)] md:hidden">{u.email}</p>
+                      <p className="truncate text-[12px] leading-4 text-[var(--color-fg-subtle)] md:hidden">{presence}</p>
+                      <div className="mt-1.5 flex flex-wrap gap-1 md:hidden">
                         <Badge size="xs">{t(`admin:users.role${u.role === 'admin' ? 'Admin' : 'User'}`)}</Badge>
                         {group && !group.is_default ? <Badge size="xs" variant="neutral">{group.name}</Badge> : null}
                         {u.status !== 'active' ? (
@@ -507,7 +507,7 @@ export default function AdminUsers() {
                         ) : null}
                         {isMe ? <Badge size="xs" variant="neutral">{t('admin:users.you')}</Badge> : null}
                       </div>
-                      <div className="mt-0.5 hidden items-center gap-2 text-[12px] text-[var(--color-fg-subtle)] md:flex">
+                      <div className="hidden items-center gap-2 text-[12px] text-[var(--color-fg-subtle)] md:flex">
                         <span className="min-w-0 truncate font-mono">{u.email}</span>
                         <span aria-hidden>·</span>
                         <span className="shrink-0">{presence}</span>
