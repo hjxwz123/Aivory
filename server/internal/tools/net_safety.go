@@ -10,7 +10,7 @@ import (
 // Low-level HTTP-client network tunables for tool fetches — dial / TLS / idle /
 // overall timeouts. Hardcoded (not operator-facing knobs).
 var (
-	ssrfSafeClientTimeout               = 25 * time.Second
+	ssrfSafeClientTimeout               = 40 * time.Second
 	toolHTTPClientDialTimeout           = 10 * time.Second
 	toolHTTPClientTLSHandshakeTimeout   = 10 * time.Second
 	toolHTTPClientResponseHeaderTimeout = 600 * time.Second

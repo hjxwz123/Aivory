@@ -6463,7 +6463,7 @@ func cloneBoolMap(source map[string]bool) map[string]bool {
 // 10s / sandbox 120s / image 60s) so one slow tool can't stall the turn.
 var toolTimeouts = map[string]time.Duration{
 	toolnames.AivoryWebSearch: envcfg.Dur("AIVORY_LLM_TOOL_TIMEOUTS", 10*time.Second),
-	"web_fetch":               envcfg.Dur("AIVORY_LLM_TOOL_TIMEOUTS_2", 15*time.Second),
+	"web_fetch":               envcfg.Dur("AIVORY_LLM_TOOL_TIMEOUTS_2", 30*time.Second),
 	"fetch_image":             envcfg.Dur("AIVORY_LLM_TOOL_TIMEOUTS_FETCH_IMAGE", 45*time.Second),
 	"python_execute":          120 * time.Second,
 	"image_generate":          envcfg.Dur("AIVORY_LLM_TOOL_TIMEOUTS_3", 600*time.Second), // slow third-party image gateways need a wide window
