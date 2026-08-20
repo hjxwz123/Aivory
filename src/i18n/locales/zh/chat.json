@@ -62,6 +62,8 @@
       }
     },
     "imageUnsupported": "当前模型不支持图片输入，请选择支持视觉的模型。",
+    "imagesWillBeIgnored": "当前模型不支持识图，本次对话中的图片将被忽略。",
+    "imageIgnoredNeedsText": "当前模型不支持识图，图片将被忽略。请添加文字后再发送。",
     "imagePromptRequired": "请描述你希望如何修改这张参考图。",
     "imagePromptOptimization": "提示词优化",
     "imagePromptOptimizationOn": "提示词优化已开启",

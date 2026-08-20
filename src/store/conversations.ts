@@ -416,6 +416,13 @@ const generatedLocalMessageIds = new Set<string>()
 // that window must stay local and be replayed after the temp id is re-keyed.
 const optimisticConversationIds = new Set<string>()
 
+// Exported for the composer: an optimistic new-chat temp id has NO server row
+// yet, so draft-file endpoints 404 for it. The draft restore must be skipped
+// while such a conversation is mounted (the real id is installed at send).
+export function isOptimisticConversationId(id: string): boolean {
+  return optimisticConversationIds.has(id)
+}
+
 // A POST generation is intentionally detached on the server so it can finish
 // after a phone changes network, locks the screen, or the browser drops the
 // response body. Once message_start has given us the persisted assistant id,

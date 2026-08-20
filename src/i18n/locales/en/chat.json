@@ -62,6 +62,8 @@
       }
     },
     "imageUnsupported": "The current model does not support image input. Choose a vision-capable model.",
+    "imagesWillBeIgnored": "This model doesn't support image input. Images in this conversation will be ignored.",
+    "imageIgnoredNeedsText": "This model doesn't support image input, so the image will be ignored. Add some text before sending.",
     "imagePromptRequired": "Describe how you want to change the reference image.",
     "imagePromptOptimization": "Prompt optimization",
     "imagePromptOptimizationOn": "Prompt optimization is on",

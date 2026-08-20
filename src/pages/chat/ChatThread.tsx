@@ -34,6 +34,7 @@ import { ConversationMinimap } from '@/components/chat/conversation-minimap'
 import { accentClasses } from '@/lib/project-helpers'
 import { cn, truncate } from '@/lib/utils'
 import { userCan } from '@/lib/user-permissions'
+import { findSelectedModel } from '@/lib/model-selection'
 import type { Attachment } from '@/types/chat'
 import type { ToolMode } from '@/lib/tool-mode'
 
@@ -293,6 +294,30 @@ export default function ChatThread() {
     setAutoFollow(true)
   }
 
+  // §model switch: switching to a model that can't read images while the
+  // conversation already holds image messages silently drops those images from
+  // every later request. Warn once (bottom-right toast); the server strips them.
+  function warnIfImagesWillBeIgnored() {
+    if (!conversation) return
+    const hasHistoryImages = conversation.messages.some(
+      (m) => m.role === 'user' && (m.attachments ?? []).some((a) => a.kind === 'image'),
+    )
+    if (!hasHistoryImages) return
+    toast.warning(
+      t('chat:composer.imagesWillBeIgnored', {
+        defaultValue: 'This model doesn\'t support image input. Images in this conversation will be ignored.',
+      }),
+    )
+  }
+
+  function modelReadsImages(id: string): boolean {
+    if (!id) return false
+    const { models, imageModels } = useModels.getState()
+    const model = findSelectedModel(id, models, imageModels)
+    // kind=image models always accept reference images (composer: resolveImageAttachmentCapability).
+    return Boolean(model && (model.kind === 'image' || model.vision))
+  }
+
   // §2.3-D cross-vendor downgrade: only warn when switching provider type.
   // Same-provider swaps (Sonnet → Opus) keep raw replay + full fidelity.
   // Shared by the desktop toolbar and the mobile header's model label.
@@ -306,12 +331,22 @@ export default function ChatThread() {
     if (!sameProvider) {
       toast.success(t('chat:thread.modelSwitched'), t('chat:thread.modelSwitchedBody'))
     }
+    if (nextId !== conversation.modelId && !modelReadsImages(nextId)) {
+      warnIfImagesWillBeIgnored()
+    }
   }
 
   // §fast-mode: switch the conversation between 快速 and 进阶.
   function handleFastChange(next: boolean) {
     if (!conversation || isWorkspaceGuest) return
     void setFast(conversation.id, next)
+    if (next) {
+      // Into fast mode: the hidden fast model is otherwise text-only.
+      if (!useModels.getState().fastVision) warnIfImagesWillBeIgnored()
+    } else if (!modelReadsImages(conversation.modelId)) {
+      // Back to 进阶: restore the advanced modelId picked before.
+      warnIfImagesWillBeIgnored()
+    }
   }
 
   async function changeVisibility(nextPublic: boolean) {
@@ -594,7 +629,12 @@ export default function ChatThread() {
           ) : (
             <Composer
               modelId={conversation.modelId}
-              onModelChange={(id) => void setModel(conversation.id, id)}
+              onModelChange={(id) => {
+                void setModel(conversation.id, id)
+                if (id !== conversation.modelId && !modelReadsImages(id)) {
+                  warnIfImagesWillBeIgnored()
+                }
+              }}
               fast={conversation.fast}
               onFastChange={handleFastChange}
               onSubmit={submit}

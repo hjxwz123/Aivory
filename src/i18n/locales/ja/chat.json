@@ -62,6 +62,8 @@
       }
     },
     "imageUnsupported": "現在のモデルは画像入力に対応していません。画像認識対応モデルを選択してください。",
+    "imagesWillBeIgnored": "このモデルは画像入力に対応していません。会話内の画像は無視されます。",
+    "imageIgnoredNeedsText": "このモデルは画像入力に対応していないため、画像は無視されます。送信前にテキストを追加してください。",
     "imagePromptRequired": "参照画像をどのように変更するか説明してください。",
     "imagePromptOptimization": "プロンプト最適化",
     "imagePromptOptimizationOn": "プロンプト最適化はオンです",

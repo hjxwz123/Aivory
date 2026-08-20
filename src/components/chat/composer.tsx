@@ -12,6 +12,7 @@
  *   4. IME-aware Enter handling for CJK input.
  */
 import { useWorkspaces } from '@/store/workspaces'
+import { isOptimisticConversationId } from '@/store/conversations'
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
@@ -991,6 +992,31 @@ export function Composer({
       window.removeEventListener('drop', onDrop)
     }
   }, [canUploadFiles])
+
+  // § paste-to-attach: a file copied on the machine (Finder/Explorer copy,
+  // screenshot) pasted ANYWHERE inside the composer attaches it — including when
+  // focus sits on the file area instead of the textarea. The editor's own
+  // ProseMirror handlePaste already consumes file pastes inside the textarea
+  // (preventDefault + onPasteFiles), so those are skipped here via
+  // `defaultPrevented` — otherwise one paste would upload twice. Target
+  // containment keeps pastes in other surfaces (settings, dialogs) untouched;
+  // only ONE composer is ever mounted, so the listener never double-handles.
+  useEffect(() => {
+    if (!canUploadFiles) return
+    const onWindowPaste = (e: ClipboardEvent) => {
+      if (e.defaultPrevented) return
+      const root = composerRootRef.current
+      if (!root || !(e.target instanceof Node) || !root.contains(e.target)) return
+      const files = Array.from(e.clipboardData?.files ?? [])
+      if (files.length === 0) return
+      e.preventDefault()
+      const dt = new DataTransfer()
+      files.forEach((file) => dt.items.add(file))
+      void handleAttachRef.current(dt.files)
+    }
+    window.addEventListener('paste', onWindowPaste)
+    return () => window.removeEventListener('paste', onWindowPaste)
+  }, [canUploadFiles])
   useEffect(() => {
     const timers = pollTimers.current
     return () => {
@@ -1447,11 +1473,28 @@ export function Composer({
     if (unsupportedImageNotifiedRef.current) return
     unsupportedImageNotifiedRef.current = true
     toast.warning(
-      t('composer.imageUnsupported', {
-        defaultValue: 'The current model does not support image input. Choose a vision-capable model.',
+      t('composer.imagesWillBeIgnored', {
+        defaultValue: 'This model doesn\'t support image input. Images in this conversation will be ignored.',
       }),
     )
   }, [hasUnsupportedImageAttachment, t])
+  // §4.6 ignore, not block: when the model can't read images, image attachments
+  // on the draft are dropped from the request instead of erroring. Documents
+  // (pdf/doc/sheet/code) are never images and still travel as usual.
+  const sendableAttachments = useMemo(() => {
+    if (!hasUnsupportedImageAttachment) return attachments
+    return attachments.filter(
+      (attachment) =>
+        attachment.kind !== 'image' &&
+        !isImageFileLike({
+          name: attachment.name,
+          type: '',
+        }),
+    )
+  }, [attachments, hasUnsupportedImageAttachment])
+  // An image-only draft leaves nothing to send once the images are ignored —
+  // block it with a caption request instead of submitting an empty turn.
+  const ignoredImagesLeaveNothing = hasUnsupportedImageAttachment && value.trim().length === 0
   const voiceActive = recording || streamConnecting || transcribing || voiceStarting
   const canSubmit =
     hasSendableMessageContent(value, attachments, isImageMode) &&
@@ -1461,7 +1504,7 @@ export function Composer({
     !uploading &&
     !restoringAttachments &&
     !documentNotReady &&
-    !hasUnsupportedImageAttachment &&
+    !ignoredImagesLeaveNothing &&
     !imagePermissionDenied &&
     !selectedModelUnavailable &&
     !executingCurrentCommand
@@ -1505,10 +1548,12 @@ export function Composer({
       return
     }
     if (!hasSendableMessageContent(text, attachments, isImageMode)) return
-    if (hasUnsupportedImageAttachment) {
-      toast.error(
-        t('composer.imageUnsupported', {
-          defaultValue: 'The current model does not support image input. Choose a vision-capable model.',
+    if (ignoredImagesLeaveNothing) {
+      // The draft is only images, which the current model can't read. Ignoring
+      // them would leave an empty request, so ask for a caption instead.
+      toast.warning(
+        t('composer.imageIgnoredNeedsText', {
+          defaultValue: 'This model doesn\'t support image input, so the image will be ignored. Add some text before sending.',
         }),
       )
       return
@@ -1543,7 +1588,7 @@ export function Composer({
       // Uploads happen on attach now (so parsing starts immediately and the send is
       // gated until 'ready'); by here every attachment is already a real backend id.
       const params = effectiveFast ? {} : filterVisibleParams(visibleParamControls, paramValues)
-      onSubmit(text, attachments, {
+      onSubmit(text, sendableAttachments, {
         mode: effectiveMode === 'default' ? undefined : effectiveMode,
         params: Object.keys(params).length > 0 ? params : undefined,
         imageStyleId: isImageMode && imageStyleId ? imageStyleId : undefined,
@@ -1754,7 +1799,10 @@ export function Composer({
       setRestoringAttachments(false)
       return
     }
-    if (!conversationId) {
+    if (!conversationId || isOptimisticConversationId(conversationId)) {
+      // An optimistic new-chat temp id has no server row yet — the draft-file
+      // endpoint would 404 and toast a spurious "restore failed" on every brand
+      // new conversation. Skip the restore; it reruns once the real id lands.
       setRestoringAttachments(false)
       return
     }
