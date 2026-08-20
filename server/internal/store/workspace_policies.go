@@ -295,7 +295,7 @@ func (p WorkspacePolicy) ModelAllowedByPolicy(modelID string) bool {
 // ("builtin:…", "hosted:…", "mcp:…") is outside the workspace's tool/MCP
 // allowlists or blocked by the sandbox / image switches.
 func (p WorkspacePolicy) ToolDeniedByPolicy(id string) bool {
-	if !p.AllowSandbox && (id == "builtin:python_execute" || id == "builtin:code_interpreter") {
+	if !p.AllowSandbox && (id == "builtin:python_execute" || id == "builtin:fetch_image" || id == "builtin:code_interpreter") {
 		return true
 	}
 	if !p.AllowImageGeneration && (id == "builtin:image_generate" || id == "hosted:image_generation") {

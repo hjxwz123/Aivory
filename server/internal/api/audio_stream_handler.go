@@ -227,11 +227,10 @@ func audioStreamHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if resp.Code != 0 {
-				msg := resp.ErrMessage
-				if msg == "" {
-					msg = "the transcription service reported an error"
+				if d.Logger != nil {
+					d.Logger.Printf("volcano ASR error (code=%d logid=%s): %s", resp.Code, vsess.logID, resp.ErrMessage)
 				}
-				writeStreamEvent(bconn, streamEvent{Type: "error", Message: msg})
+				writeStreamEvent(bconn, streamEvent{Type: "error", Message: "the transcription service reported an error"})
 				return
 			}
 			if resp.Text != "" || resp.IsLastPackage {

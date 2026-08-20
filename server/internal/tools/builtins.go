@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
@@ -82,7 +83,7 @@ func (t *webSearchTool) Execute(ctx context.Context, input []byte, _ *llm.ToolCo
 	var in webSearchInput
 	_ = json.Unmarshal(input, &in)
 	if in.Query == "" {
-		return "", nil, errors.New("query required")
+		return "", nil, &llm.ToolUserError{Message: "query required"}
 	}
 	if in.TopK <= 0 {
 		in.TopK = inTopK
@@ -117,12 +118,12 @@ func (t *webFetchTool) Execute(ctx context.Context, input []byte, _ *llm.ToolCon
 	_ = json.Unmarshal(input, &in)
 	u, err := url.Parse(in.URL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-		return "", nil, errors.New("invalid URL")
+		return "", nil, &llm.ToolUserError{Message: "invalid URL"}
 	}
 	// Reject non-web ports up-front (defence in depth — the dialer re-checks
 	// the resolved IP + port on every hop, defeating redirects/rebinding).
 	if p := u.Port(); p != "" && p != "80" && p != "443" {
-		return "", nil, errors.New("blocked non-web port")
+		return "", nil, &llm.ToolUserError{Message: "blocked non-web port"}
 	}
 	req, _ := http.NewRequestWithContext(ctx, "GET", in.URL, nil)
 	req.Header.Set("user-agent", "AivoryBot/1.0")
@@ -195,15 +196,18 @@ func stripHTML(s string) string {
 	return strings.TrimSpace(text)
 }
 
-// fetchImageTool is retained only as a fail-closed compatibility target for an
-// in-flight/legacy tool call. It is no longer registered or advertised: external
-// images must be sent directly to a vision-capable provider, never downloaded
-// into the Python sandbox.
-type fetchImageTool struct{}
+// fetchImageTool downloads a public image into the current conversation's
+// persistent sandbox. The Python runner itself remains network-isolated; all
+// outbound access goes through the backend's SSRF-safe client.
+type fetchImageTool struct {
+	sandbox sandbox.Service
+	logger  *log.Logger
+	client  *http.Client
+}
 
 func (t *fetchImageTool) Name() string { return "fetch_image" }
 func (t *fetchImageTool) Description() string {
-	return "Image downloads into the Python sandbox are disabled."
+	return "Download an image from a public HTTP(S) URL into this conversation's Python sandbox. Returns a stable path under /workspace/downloads/ that python_execute can open with Pillow or use in documents."
 }
 func (t *fetchImageTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"url":{"type":"string"},"filename":{"type":"string"}},"required":["url"]}`)
@@ -214,8 +218,169 @@ type fetchImageInput struct {
 	Filename string `json:"filename"`
 }
 
-func (t *fetchImageTool) Execute(_ context.Context, _ []byte, _ *llm.ToolContext) (string, []llm.Citation, error) {
-	return "", nil, errors.New("fetch_image is disabled: images must use a vision-capable model API and cannot be staged in the sandbox")
+func (t *fetchImageTool) Execute(ctx context.Context, input []byte, tc *llm.ToolContext) (string, []llm.Citation, error) {
+	var in fetchImageInput
+	_ = json.Unmarshal(input, &in)
+	u, err := url.Parse(strings.TrimSpace(in.URL))
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return "", nil, &llm.ToolUserError{Message: "invalid image URL"}
+	}
+	if p := u.Port(); p != "" && p != "80" && p != "443" {
+		return "", nil, &llm.ToolUserError{Message: "blocked non-web port"}
+	}
+	if fetchRemoteImageDownloadCap <= 0 {
+		return "", nil, errors.New("image downloads are unavailable")
+	}
+	if t.sandbox == nil || !t.sandbox.Enabled() {
+		return "", nil, &llm.ToolUserError{Message: "fetch_image requires the Python sandbox to be configured"}
+	}
+	if tc == nil || tc.DB == nil || strings.TrimSpace(tc.ConvID) == "" || strings.TrimSpace(tc.MessageID) == "" || strings.TrimSpace(tc.UserID) == "" {
+		return "", nil, errors.New("fetch_image requires an active conversation")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return "", nil, &llm.ToolUserError{Message: "invalid image URL"}
+	}
+	req.Header.Set("user-agent", "AivoryBot/1.0")
+	client := t.client
+	if client == nil {
+		client = ssrfSafeClient()
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", nil, fmt.Errorf("download public image: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return "", nil, &llm.ToolUserError{Message: fmt.Sprintf("image download returned HTTP %d", resp.StatusCode)}
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, fetchRemoteImageDownloadCap+1))
+	if err != nil {
+		return "", nil, fmt.Errorf("read public image: %w", err)
+	}
+	if len(data) == 0 {
+		return "", nil, &llm.ToolUserError{Message: "image URL returned an empty response"}
+	}
+	if int64(len(data)) > fetchRemoteImageDownloadCap {
+		return "", nil, &llm.ToolUserError{Message: "downloaded image exceeds the configured size limit"}
+	}
+	mimeType := verifiedImageMIMEFromBytes(data)
+	if mimeType == "" {
+		return "", nil, &llm.ToolUserError{Message: "URL did not return a supported image"}
+	}
+
+	sessionID, err := t.ensureSession(ctx, tc)
+	if err != nil {
+		return "", nil, err
+	}
+	path := "/workspace/downloads/" + downloadedImageName(in.Filename, u, mimeType)
+	if err := t.sandbox.PutFile(ctx, sessionID, path, data); err != nil {
+		if !isSandboxSessionGone(err) {
+			return "", nil, fmt.Errorf("stage downloaded image: %w", err)
+		}
+		sessionID, err = t.rebuildSession(ctx, tc, sessionID)
+		if err != nil {
+			return "", nil, err
+		}
+		if err := t.sandbox.PutFile(ctx, sessionID, path, data); err != nil {
+			return "", nil, fmt.Errorf("stage downloaded image: %w", err)
+		}
+	}
+	return fmt.Sprintf("Saved image (%d bytes, %s) to %s. Use this exact path with python_execute.", len(data), mimeType, path), nil, nil
+}
+
+func (t *fetchImageTool) ensureSession(ctx context.Context, tc *llm.ToolContext) (string, error) {
+	unlock := lockConvSandbox(tc.ConvID)
+	defer unlock()
+	sessionID, _ := store.GetConvProviderStateKey(ctx, tc.DB, tc.ConvID, "sandbox_id")
+	if sessionID != "" {
+		return sessionID, nil
+	}
+	sessionID, err := t.sandbox.NewSession(ctx, tc.ConvID)
+	if err != nil {
+		if t.logger != nil {
+			t.logger.Printf("fetch_image: sandbox NewSession failed: %v", err)
+		}
+		return "", fmt.Errorf("sandbox session: %w", err)
+	}
+	if err := store.SetConvProviderStateKeyForUser(ctx, tc.DB, tc.ConvID, tc.MessageID, tc.UserID, "sandbox_id", sessionID); err != nil {
+		_ = t.sandbox.Release(ctx, sessionID)
+		return "", fmt.Errorf("persist sandbox session: %w", err)
+	}
+	return sessionID, nil
+}
+
+func (t *fetchImageTool) rebuildSession(ctx context.Context, tc *llm.ToolContext, previous string) (string, error) {
+	unlock := lockConvSandbox(tc.ConvID)
+	defer unlock()
+	current, _ := store.GetConvProviderStateKey(ctx, tc.DB, tc.ConvID, "sandbox_id")
+	if current != "" && current != previous {
+		return current, nil
+	}
+	sessionID, err := t.sandbox.NewSession(ctx, tc.ConvID)
+	if err != nil {
+		return "", fmt.Errorf("sandbox session (rebuild): %w", err)
+	}
+	if err := store.SetConvProviderStateKeyForUser(ctx, tc.DB, tc.ConvID, tc.MessageID, tc.UserID, "sandbox_id", sessionID); err != nil {
+		_ = t.sandbox.Release(ctx, sessionID)
+		return "", fmt.Errorf("persist sandbox session (rebuild): %w", err)
+	}
+	return sessionID, nil
+}
+
+func downloadedImageName(want string, u *url.URL, mimeType string) string {
+	base := strings.TrimSpace(want)
+	if base == "" {
+		base = filepath.Base(u.Path)
+	}
+	base = strings.TrimSuffix(filepath.Base(base), filepath.Ext(base))
+	base = strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			return r
+		default:
+			return '-'
+		}
+	}, base)
+	base = strings.Trim(base, "-_")
+	if base == "" {
+		base = "image"
+	}
+	if len(base) > 80 {
+		base = base[:80]
+	}
+	digest := sha256.Sum256([]byte(u.String()))
+	return fmt.Sprintf("%s-%x%s", base, digest[:4], imageExtensionForMIME(mimeType))
+}
+
+func imageExtensionForMIME(mimeType string) string {
+	switch strings.ToLower(strings.TrimSpace(mimeType)) {
+	case "image/jpeg":
+		return ".jpg"
+	case "image/gif":
+		return ".gif"
+	case "image/webp":
+		return ".webp"
+	case "image/bmp":
+		return ".bmp"
+	case "image/tiff":
+		return ".tiff"
+	case "image/avif":
+		return ".avif"
+	case "image/heif":
+		return ".heif"
+	case "image/x-icon", "image/vnd.microsoft.icon":
+		return ".ico"
+	case "image/jxl":
+		return ".jxl"
+	case "image/vnd.adobe.photoshop":
+		return ".psd"
+	case "image/svg+xml":
+		return ".svg"
+	default:
+		return ".png"
+	}
 }
 
 var sandboxImageExtensions = map[string]struct{}{
@@ -289,6 +454,29 @@ func verifiedImageMIMEFromBytes(data []byte) string {
 	return ""
 }
 
+func readSandboxUpload(path string, storedSize, limit int64, roots ...string) ([]byte, error) {
+	if limit <= 0 || storedSize < 0 || storedSize > limit {
+		return nil, errors.New("sandbox upload exceeds the staging limit")
+	}
+	safePath, err := fileguard.ResolveExisting(path, roots...)
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.Open(safePath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, errors.New("sandbox upload exceeds the staging limit")
+	}
+	return data, nil
+}
+
 // convSandboxMu serialises sandbox-session provisioning per conversation so two
 // concurrent python_execute calls in one turn don't each create a session and
 // clobber the conversation's sandbox_id (leaking the orphaned container until
@@ -315,7 +503,7 @@ type pythonExecuteTool struct {
 
 func (t *pythonExecuteTool) Name() string { return "python_execute" }
 func (t *pythonExecuteTool) Description() string {
-	return "Run Python in a persistent sandbox for math, data analysis, plotting, spreadsheet/CSV processing, and generating downloadable files (PDF/PPTX/DOCX/XLSX/PNG). The session and its /workspace persist across calls AND across turns in this conversation, so call it several times in a row — inspect the data first (shape/columns/head), then compute, and read again differently if the first attempt doesn't fit. Supported non-image data uploads are staged in /workspace/uploads/; external image files are never staged and must use a vision-capable model API. Run `import os; os.listdir('/workspace/uploads')` first to see exact filenames, then use their real paths (for example pandas.read_csv / pandas.read_excel). Write outputs, including plots and other generated images, to /workspace/outputs to return them as downloadable artifacts. Stdout/stderr is returned."
+	return "Run Python in a persistent sandbox for math, data analysis, image editing, plotting, spreadsheet/CSV processing, and generating downloadable files (PDF/PPTX/DOCX/XLSX/PNG). The session and its /workspace persist across calls AND across turns in this conversation, so call it several times in a row — inspect the inputs first, then edit or compute, and read again differently if the first attempt doesn't fit. Supported data uploads, verified user-uploaded images, and prior image-generation outputs from this conversation are staged in /workspace/uploads/; public images fetched with fetch_image are stored in /workspace/downloads/. Run `import os; os.listdir('/workspace/uploads')` and inspect /workspace/downloads when needed, then use the real paths (for example Pillow for images, pandas.read_csv / pandas.read_excel for tables). Write outputs, including edited images, plots, and documents, to /workspace/outputs to return them as downloadable artifacts. Stdout/stderr is returned."
 }
 func (t *pythonExecuteTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"code":{"type":"string"}},"required":["code"]}`)
@@ -329,7 +517,7 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	var in pyInput
 	_ = json.Unmarshal(input, &in)
 	if strings.TrimSpace(in.Code) == "" {
-		return "", nil, errors.New("code required")
+		return "", nil, &llm.ToolUserError{Message: "code required"}
 	}
 
 	// Safe-mode fallback when no sandbox backend is wired in.
@@ -397,10 +585,9 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	}
 
 	// Reset the persistent input namespaces, then stage the conversation's
-	// current non-image data files into /workspace/uploads. Reset is mandatory:
-	// older sessions/archives may still contain image copies written by previous
-	// releases, and executing user code before removing them would reopen the
-	// sandbox image-input path.
+	// current data files and verified user-uploaded images into
+	// /workspace/uploads. Reset prevents stale inputs from surviving deletion or
+	// permission changes between calls.
 	stageFiles := func(sid string) error {
 		if err := t.sandbox.ResetInputs(ctx, sid); err != nil {
 			return fmt.Errorf("reset sandbox inputs: %w", err)
@@ -433,35 +620,51 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		}
 		if files, err := store.ListFilesByConversation(ctx, tc.DB, tc.ConvID, tc.UserID); err == nil {
 			for _, f := range files {
-				// Only data-oriented inputs are eligible. Image metadata is checked
-				// again below and file bytes are sniffed before PutFile, so a forged
-				// kind/MIME/extension cannot turn the sandbox into a vision fallback.
+				// Only data-oriented inputs and explicit image rows are eligible.
+				// Image rows must also pass byte-signature verification below; legacy
+				// text/data rows containing disguised image bytes remain excluded.
 				spreadsheetName := false
 				switch strings.ToLower(filepath.Ext(strings.TrimSpace(f.Filename))) {
 				case ".csv", ".tsv", ".xlsx", ".xls", ".xlsm":
 					spreadsheetName = true
 				}
-				if f.Kind != "sheet" && f.Kind != "text" && f.Kind != "code" && !spreadsheetName {
+				imageMetadata := conversationImageMetadata(f.Kind, f.MimeType)
+				dataInput := f.Kind == "sheet" || f.Kind == "text" || f.Kind == "code" || spreadsheetName
+				if !dataInput && !imageMetadata {
 					continue
 				}
-				if isSandboxImageInput(f.Filename, f.MimeType, f.Kind, nil) {
-					continue
-				}
-				if f.SizeBytes > pythonExecuteUploadStagingFileSize {
-					continue
-				}
-				safePath, err := fileguard.ResolveExisting(f.StoragePath, t.uploadDir)
+				data, err := readSandboxUpload(f.StoragePath, f.SizeBytes, pythonExecuteUploadStagingFileSize, t.uploadDir)
 				if err != nil {
 					continue
 				}
-				data, err := os.ReadFile(safePath)
-				if err != nil {
+				verifiedImage := verifiedImageMIMEFromBytes(data) != ""
+				if imageMetadata && !verifiedImage {
 					continue
 				}
-				if isSandboxImageInput(f.Filename, f.MimeType, f.Kind, data) {
+				if !imageMetadata && verifiedImage {
 					continue
 				}
 				_ = t.sandbox.PutFile(ctx, sid, "/workspace/uploads/"+uniqueName(f.Filename), data)
+			}
+		}
+		// Generated images are artifacts rather than rows in files. Mount only
+		// image_generate / hosted image-generation outputs so Python can edit the
+		// image produced by a previous turn without exposing unrelated tool output.
+		if artifacts, err := store.ListImageArtifactsByConversation(ctx, tc.DB, tc.ConvID, tc.UserID); err == nil {
+			for _, artifact := range artifacts {
+				if !reusableGeneratedImageSource(artifact.Source) {
+					continue
+				}
+				data, err := readSandboxUpload(artifact.StoragePath, artifact.SizeBytes, pythonExecuteUploadStagingFileSize, t.artifactDir)
+				if err != nil {
+					continue
+				}
+				mimeType := verifiedImageMIMEFromBytes(data)
+				if mimeType == "" {
+					continue
+				}
+				name := uniqueName("generated-" + artifact.Filename)
+				_ = t.sandbox.PutFile(ctx, sid, "/workspace/uploads/"+name, data)
 			}
 		}
 		// Stage non-image skill assets too (§4.17) so use_skill can reference scripts/data
@@ -633,6 +836,25 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		out.WriteString("(no output)")
 	}
 	return out.String(), nil, nil
+}
+
+func reusableGeneratedImageSource(source string) bool {
+	switch strings.TrimSpace(source) {
+	case "", store.ArtifactSourceImageGenerate, store.ArtifactSourceHostedImageGeneration:
+		// Empty source is retained for artifacts created before source metadata was
+		// introduced; explicit Python artifacts remain excluded.
+		return true
+	default:
+		return false
+	}
+}
+
+// conversationImageMetadata deliberately ignores the filename extension. A
+// legacy text/data row named "photo.png" is not enough authority to cross the
+// image boundary; uploads are classified server-side and carry kind/MIME.
+func conversationImageMetadata(kind, mimeType string) bool {
+	return strings.EqualFold(strings.TrimSpace(kind), "image") ||
+		strings.HasPrefix(strings.ToLower(strings.TrimSpace(strings.SplitN(mimeType, ";", 2)[0])), "image/")
 }
 
 // saveArtifact writes a tool-produced file to ArtifactDir, records it, and
@@ -819,10 +1041,15 @@ type imageGenerateTool struct {
 
 func (t *imageGenerateTool) Name() string { return "image_generate" }
 func (t *imageGenerateTool) Description() string {
-	return "Generate a new image or faithfully edit a user-provided image. Current-turn image attachments are supplied automatically; do not invent file ids. For edits, describe only the requested change and preserve all other source details. Returns the image as a downloadable artifact."
+	return "Generate a new image or faithfully edit a user-provided image. Current-turn attachments and the nearest generated image on this conversation branch are supplied automatically; do not invent file ids. For edits, describe only the requested change and preserve all other source details. Returns the image as a downloadable artifact."
 }
 func (t *imageGenerateTool) InputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"prompt":{"type":"string","description":"The requested image or exact edit instruction. For edits, do not translate, paraphrase, or restyle text that should remain unchanged."},"n":{"type":"integer","default":1},"size":{"type":"string","description":"Optional output size. Omit for edits to preserve the source aspect ratio automatically. GPT Image 1.x supports 1024x1024, 1536x1024, and 1024x1536; GPT Image 2 also supports valid WIDTHxHEIGHT values."},"input_images":{"type":"array","items":{"type":"string"},"description":"Optional artifact ids from earlier turns. Current-turn image attachments are included automatically."}},"required":["prompt"]}`)
+	// Reference images are resolved server-side from current-turn attachments and
+	// the active conversation branch. Keep the legacy input_images decoder in
+	// Execute for trusted callers, but do not expose internal artifact ids to chat
+	// models: a model cannot reliably know which ids are valid and an invalid id
+	// must never turn an edit into an unrelated fresh generation.
+	return json.RawMessage(`{"type":"object","properties":{"prompt":{"type":"string","description":"The requested image or exact edit instruction. Current-turn attachments and the nearest generated image on this conversation branch are supplied automatically. For edits, do not translate, paraphrase, or restyle text that should remain unchanged."},"n":{"type":"integer","default":1},"size":{"type":"string","description":"Optional output size. Omit for edits to preserve the source aspect ratio automatically. GPT Image 1.x supports 1024x1024, 1536x1024, and 1024x1536; GPT Image 2 also supports valid WIDTHxHEIGHT values."}},"required":["prompt"]}`)
 }
 
 type imgInput struct {
@@ -839,7 +1066,7 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	_ = json.Unmarshal(input, &inputFields)
 	_, nProvided := inputFields["n"]
 	if strings.TrimSpace(in.Prompt) == "" {
-		return "", nil, errors.New("prompt required")
+		return "", nil, &llm.ToolUserError{Message: "prompt required"}
 	}
 	in.Size = strings.TrimSpace(in.Size)
 	if in.Size == "" {
@@ -886,7 +1113,10 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	if tc != nil && tc.DB != nil {
 		dailyReservation, err = t.checkDailyImageLimit(ctx, tc.UserID, in.N)
 		if err != nil {
-			return "", nil, &llm.ToolRefusalError{Message: err.Error()}
+			if errors.Is(err, llm.ErrDailyImageLimitReached) {
+				return "", nil, &llm.ToolRefusalError{Message: llm.ErrDailyImageLimitReached.Error()}
+			}
+			return "", nil, err
 		}
 		defer func() {
 			if dailyReservation != nil && !providerDelivered {
@@ -965,9 +1195,13 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	inputLimit := imageInputImageLimit(channel.Type, model.RequestID)
 	inputImgs, tooManyInputs := t.loadInputImages(ctx, tc, inputImageIDs, inputLimit)
 	if tooManyInputs {
-		return "", nil, fmt.Errorf("the selected image model accepts at most %d reference image(s)", inputLimit)
+		return "", nil, &llm.ToolUserError{Message: fmt.Sprintf("the selected image model accepts at most %d reference image(s)", inputLimit)}
 	}
-	if len(inputImageIDs) == 0 && len(inputImgs) == 0 {
+	// Explicit ids are a trusted compatibility path, but they can be stale (for
+	// example when a model copied an old artifact URL). If none resolved to a
+	// verified image, continue with the active branch's nearest generated image
+	// instead of silently switching an edit into a fresh generation.
+	if len(inputImgs) == 0 {
 		if previous := t.loadNearestBranchImage(ctx, tc); previous != nil {
 			inputImgs = []imageBytes{*previous}
 		}
@@ -1150,7 +1384,7 @@ func (t *imageGenerateTool) resolveImageModel(ctx context.Context, tc *llm.ToolC
 		return nil, err
 	}
 	if len(models) == 0 {
-		return nil, errors.New("no image model configured — an admin must add one (kind=image)")
+		return nil, &llm.ToolUserError{Message: "no image model configured — an admin must add one (kind=image)"}
 	}
 	m := models[0]
 	return &m, nil
@@ -1326,7 +1560,7 @@ func (t *imageGenerateTool) checkDailyImageLimit(ctx context.Context, userID str
 		return nil, err
 	}
 	if !allowed {
-		return nil, fmt.Errorf("daily image limit reached")
+		return nil, llm.ErrDailyImageLimitReached
 	}
 	return reservation, nil
 }
@@ -2107,7 +2341,7 @@ func (t *useSkillTool) Execute(ctx context.Context, input []byte, tc *llm.ToolCo
 	var in skillInput
 	_ = json.Unmarshal(input, &in)
 	if in.Name == "" {
-		return "", nil, errors.New("name required")
+		return "", nil, &llm.ToolUserError{Message: "name required"}
 	}
 	var currentSkillPolicy *store.ResourceAccessPolicy
 	if tc != nil && strings.TrimSpace(tc.UserID) != "" {
@@ -2182,12 +2416,12 @@ type memInput struct {
 
 func (t *saveMemoryTool) Execute(ctx context.Context, input []byte, tc *llm.ToolContext) (string, []llm.Citation, error) {
 	if t.db == nil || tc == nil || !store.MemoryEnabledForUser(ctx, t.db, tc.UserID) {
-		return "", nil, errors.New("memory is disabled")
+		return "", nil, &llm.ToolUserError{Message: "memory is disabled"}
 	}
 	var in memInput
 	_ = json.Unmarshal(input, &in)
 	if in.MemoryText == "" {
-		return "", nil, errors.New("memory_text required")
+		return "", nil, &llm.ToolUserError{Message: "memory_text required"}
 	}
 	_, err := store.CreateMemory(ctx, t.db, store.Memory{
 		UserID:     tc.UserID,

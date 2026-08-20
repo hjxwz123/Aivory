@@ -733,6 +733,42 @@ describe('stopped turn optimistic-id reconciliation', () => {
     expect(apiMocks.get).not.toHaveBeenCalled()
   })
 
+  it('replays a detached generation when the POST stream ends without a terminal frame', async () => {
+    apiMocks.streamSSE.mockReturnValue(
+      events(
+        { type: 'message_start', message_id: 'msg_server_assistant' },
+        { type: 'text_delta', text: 'partial answer' },
+      ),
+    )
+    apiMocks.streamSSEGet.mockReturnValue(
+      events(
+        { type: 'message_start', message_id: 'msg_server_assistant' },
+        { type: 'text_delta', text: 'recovered answer' },
+        { type: 'done' },
+      ),
+    )
+    // The replay itself is sufficient to settle the UI. A temporarily failed
+    // canonical-path refresh must not turn the recovered answer into an error.
+    apiMocks.get.mockRejectedValue(new Error('temporary refresh failure'))
+
+    await useConversations.getState().sendMessage({
+      conversationId: 'conv_stop',
+      text: 'question with a phone image',
+      modelId: 'model_1',
+      toolMode: 'auto',
+    })
+
+    await vi.waitFor(() => {
+      expect(useConversations.getState().conversations[0].messages.at(-1)).toMatchObject({
+        id: 'msg_server_assistant',
+        content: 'recovered answer',
+        streaming: false,
+      })
+    })
+    expect(useConversations.getState().conversations[0].messages.at(-1)?.errorCode).toBeUndefined()
+    expect(apiMocks.streamSSEGet).toHaveBeenCalledOnce()
+  })
+
   it('uses structured interruption state for regeneration without appending English markdown', async () => {
     const sourceUser: Message = {
       id: 'msg_interrupted_regen_user',
@@ -883,6 +919,44 @@ describe('stopped turn optimistic-id reconciliation', () => {
         }),
       ],
     })
+  })
+
+  it('redacts transport details from a persisted failed tool result', () => {
+    const assistant = apiMessage(
+      'msg_reloaded_tool_error',
+      'assistant',
+      'msg_reloaded_user',
+      'complete',
+      '',
+    )
+    const raw = 'Error: Post "https://images.internal.example.test/v1/images/edits": context canceled'
+    assistant.blocks = [
+      {
+        kind: 'tool_call',
+        tool_id: 'tool_reloaded_error',
+        tool_name: 'image_generate',
+        summary: raw,
+      },
+      {
+        kind: 'tool_output',
+        tool_id: 'tool_reloaded_error',
+        tool_name: 'image_generate',
+        text: raw,
+        summary: 'error',
+      },
+    ]
+
+    const local = toLocalMessage(assistant)
+    expect(local.reasoning?.[0]).toMatchObject({
+      kind: 'tool',
+      tool: {
+        id: 'tool_reloaded_error',
+        status: 'error',
+        output: 'The operation was canceled.',
+      },
+    })
+    expect(JSON.stringify(local)).not.toContain('images.internal.example.test')
+    expect(JSON.stringify(local)).not.toContain('/v1/images/edits')
   })
 
   it('blocks edit-resend when its explicit parent is still client-only', async () => {

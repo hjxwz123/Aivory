@@ -59,4 +59,37 @@ describe('prepareImageForUpload', () => {
     expect(output.name).toBe('phone-photo.webp')
     expect(close).toHaveBeenCalledOnce()
   })
+
+  it('converts a small HEIC image instead of passing an unsupported provider format through', async () => {
+    const close = vi.fn()
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => ({
+      width: 1600,
+      height: 1200,
+      close,
+    })))
+
+    const canvas = {
+      width: 0,
+      height: 0,
+      getContext: vi.fn(() => ({
+        imageSmoothingEnabled: false,
+        imageSmoothingQuality: 'low',
+        fillStyle: '',
+        fillRect: vi.fn(),
+        drawImage: vi.fn(),
+      })),
+      toBlob: vi.fn((callback: BlobCallback, mimeType: string) => {
+        callback(new Blob([new Uint8Array(768)], { type: mimeType }))
+      }),
+    }
+    vi.stubGlobal('document', { createElement: vi.fn(() => canvas) })
+
+    const input = new File([new Uint8Array(1024)], 'IMG_0001.HEIC', { type: 'image/heic' })
+    const output = await prepareImageForUpload(input)
+
+    expect(output).not.toBe(input)
+    expect(output.type).toBe('image/webp')
+    expect(output.name).toBe('IMG_0001.webp')
+    expect(close).toHaveBeenCalledOnce()
+  })
 })

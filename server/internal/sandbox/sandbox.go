@@ -109,9 +109,9 @@ type Service interface {
 	PutFile(ctx context.Context, sessionID, path string, data []byte) error
 	// ResetInputs removes every previously staged input under
 	// /workspace/uploads and /workspace/skills, then recreates those directories.
-	// It intentionally leaves /workspace/outputs and all other generated workspace
-	// state alone. Callers use this before staging the current non-image inputs so
-	// an older persistent session/archive cannot retain legacy image copies.
+	// It intentionally leaves /workspace/downloads, /workspace/outputs, and all
+	// other generated workspace state alone. Callers use this before re-staging
+	// the current conversation uploads and skill assets.
 	ResetInputs(ctx context.Context, sessionID string) error
 	// GetFile reads a file out of the session workspace. Used when the
 	// orchestrator wants to surface a sandbox-produced file that isn't a

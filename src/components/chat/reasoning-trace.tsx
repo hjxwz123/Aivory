@@ -10,6 +10,7 @@ import {
   Sparkles,
   ChevronRight,
   Check,
+  Download,
   AlertTriangle,
 } from 'lucide-react'
 import type { ReasoningItem, ToolCall } from '@/types/chat'
@@ -36,6 +37,7 @@ const TOOL_ICON: Record<string, ComponentType<{ size?: number; className?: strin
   web_search: Search,
   aivory_web_search: Search,
   web_fetch: Globe,
+  fetch_image: Download,
   python_execute: Terminal,
   use_skill: BookOpen,
   image_generate: ImageIcon,

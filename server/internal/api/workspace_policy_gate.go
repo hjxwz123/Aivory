@@ -140,7 +140,7 @@ func applyWorkspaceToolPolicy(
 		}
 	}
 	if !policy.AllowSandbox {
-		merged.DenyIDs = append(merged.DenyIDs, "builtin:python_execute", "builtin:code_interpreter")
+		merged.DenyIDs = append(merged.DenyIDs, "builtin:python_execute", "builtin:fetch_image", "builtin:code_interpreter")
 	}
 	if !policy.AllowImageGeneration {
 		merged.DenyIDs = append(merged.DenyIDs, "builtin:image_generate", "hosted:image_generation")

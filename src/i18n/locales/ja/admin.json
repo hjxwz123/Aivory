@@ -206,6 +206,7 @@
       "names": {
         "aivory_web_search": "Aivory ウェブ検索",
         "web_fetch": "ウェブページを読む",
+        "fetch_image": "画像をダウンロード",
         "python_execute": "Python インタープリター",
         "image_generate": "画像生成",
         "use_skill": "スキルを使用",
@@ -214,6 +215,7 @@
       "descriptions": {
         "aivory_web_search": "Aivory で設定された検索バックエンドを使用して公開ウェブの最新情報を検索します。",
         "web_fetch": "指定したウェブページの本文を読み取ります。",
+        "fetch_image": "公開画像を Python サンドボックスへダウンロードします。",
         "python_execute": "Python で分析、計算、ファイル生成を行います。",
         "image_generate": "設定済みの画像モデルで画像を生成・編集します。",
         "use_skill": "割り当て済みスキルの完全な手順を必要時に読み込みます。",

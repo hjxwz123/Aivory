@@ -372,7 +372,7 @@ func RunPromptToolLoopWithRaw(
 		isError := runErr != nil
 		summaryStatus := "complete"
 		if isError {
-			output = "Error: " + runErr.Error()
+			output = publicToolErrorOutput(runErr)
 			summaryStatus = "error"
 		}
 		citations = append(citations, cites...)

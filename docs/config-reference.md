@@ -109,16 +109,19 @@
 | `AIVORY_LLM_SANDBOX_EXEC_CTX_SAFETY_MARGIN` | `duration` | `150*time.Second` | `llm/orchestrator.go:41` | Margin added to the clamped sandbox exec timeout when sizing the python_execute context so it outlasts the sandbox HTTP client. |
 | `AIVORY_LLM_PER_TURN_TOOL_LIMITS_WEB_SEARCH` | `int` | `16` | `llm/orchestrator.go:147` | Max `aivory_web_search` calls allowed per message in normal mode; exceeding it fails the call. |
 | `AIVORY_LLM_PER_TURN_TOOL_LIMITS_WEB_FETCH` | `int` | `12` | `llm/orchestrator.go:148` | Max web_fetch calls allowed per message in normal mode; exceeding it fails the call. |
+| `AIVORY_LLM_PER_TURN_TOOL_LIMITS_FETCH_IMAGE` | `int` | `16` | `llm/orchestrator.go` | Max public-image downloads allowed per message in normal mode; exceeding it fails the call. |
 | `AIVORY_LLM_PER_TURN_TOOL_LIMITS_IMAGE_GENERATE` | `int` | `8` | `llm/orchestrator.go:150` | Max image_generate calls allowed per message in normal mode; exceeding it fails the call. |
 | `AIVORY_LLM_PER_TURN_TOOL_LIMITS_PYTHON_EXECUTE` | `int` | `16` | `llm/orchestrator.go:151` | Max python_execute sandbox runs allowed per message in normal mode; exceeding it fails the call. |
 | `AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_SEARCH` | `int` | `40` | `llm/orchestrator.go:157` | Max `aivory_web_search` calls allowed per message while Deep Research runs; exceeding it fails the call. |
 | `AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_FETCH` | `int` | `25` | `llm/orchestrator.go:158` | Max web_fetch calls allowed per message while Deep Research runs; exceeding it fails the call. |
+| `AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_FETCH_IMAGE` | `int` | `12` | `llm/orchestrator.go` | Max public-image downloads allowed per message while Deep Research runs; exceeding it fails the call. |
 | `AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_IMAGE_GENERATE` | `int` | `4` | `llm/orchestrator.go:160` | Max image_generate calls allowed per message while Deep Research runs; exceeding it fails the call. |
 | `AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_PYTHON_EXECUTE` | `int` | `8` | `llm/orchestrator.go:161` | Max python_execute sandbox runs allowed per message while Deep Research runs; exceeding it fails the call. |
 | `AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN` | `int` | `48` | `llm/orchestrator.go:169` | Global ceiling on total tool calls across all tools per message in normal mode, on top of the per-tool caps. |
 | `AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN_DEEP` | `int` | `150` | `llm/orchestrator.go:170` | Global ceiling on total tool calls across all tools per message while Deep Research runs. |
 | `AIVORY_LLM_TOOL_TIMEOUTS` | `duration` | `10*time.Second` | `llm/orchestrator.go:2326` | Per-invocation timeout bounding a single `aivory_web_search` tool call. |
 | `AIVORY_LLM_TOOL_TIMEOUTS_2` | `duration` | `15*time.Second` | `llm/orchestrator.go:2327` | Per-invocation timeout bounding a single web_fetch tool call. |
+| `AIVORY_LLM_TOOL_TIMEOUTS_FETCH_IMAGE` | `duration` | `45*time.Second` | `llm/orchestrator.go` | Per-invocation timeout bounding a single fetch_image download. |
 | `AIVORY_LLM_TOOL_TIMEOUTS_3` | `duration` | `600*time.Second` | `llm/orchestrator.go:2329` | Per-invocation timeout bounding a single image_generate tool call (wide for slow third-party image gateways). |
 | `AIVORY_LLM_TOOL_TIMEOUT_DEFAULT` | `duration` | `100*time.Second` | `llm/orchestrator.go:2332` | Fallback per-invocation timeout for any tool not listed in the per-type toolTimeouts map. |
 | `AIVORY_LLM_PROMPT_MAX_ITER` | `int` | `10` | `llm/prompt_tools.go:36` | Max iterations of the prompt-mode tool loop (each = one model generation plus optional tool call) before the turn ends. |
@@ -241,7 +244,7 @@
 | `AIVORY_TOOLS_IN_SIZE` | `string` | `""` | `tools/builtins.go:51` | Optional image size override used when an image_generate call omits size. Empty lets the provider choose automatically; GPT image edits infer the closest supported ratio when possible. |
 | `AIVORY_TOOLS_DAILY_IMAGE_LIMIT_RESET_WINDOW` | `duration` | `24*time.Hour` | `tools/builtins.go:45` | Window Now() is truncated to for the day-start boundary of the per-user image-generation quota ledger. |
 | `AIVORY_TOOLS_IMAGE_IMAGE_INPUT_IMAGE_CAP` | `int` | `0` | `tools/builtins.go:56` | Global override for reference images loaded by image-to-image calls. `0` selects the model-specific limit (DALL-E 1, OpenAI 16, Gemini 3 models 14, other Gemini models 3). |
-| `AIVORY_TOOLS_FETCHREMOTEIMAGE_DOWNLOAD_CAP` | `int64` | `32<<20` | `tools/builtins.go:48` | Byte cap on downloading an image URL returned in an image-API response via the SSRF-safe client. |
+| `AIVORY_TOOLS_FETCHREMOTEIMAGE_DOWNLOAD_CAP` | `int64` | `32<<20` | `tools/builtins.go:48` | Byte cap for fetch_image public downloads and image URLs returned in image-API responses. Both paths use the SSRF-safe client and require verified image bytes. |
 | `AIVORY_TOOLS_CONFIDENCE` | `float` | `0.95` | `tools/builtins.go:50` | Confidence score stored on each memory record the save_memory tool creates. |
 
 

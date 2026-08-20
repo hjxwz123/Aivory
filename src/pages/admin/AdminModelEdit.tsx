@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next'
 import {
   BookOpen,
   Check,
+  Download,
   Globe,
   Image as ImageIcon,
   LoaderCircle,
@@ -73,6 +74,7 @@ const TOOL_MODES = ['native', 'prompt', 'none'] as const
 const BUILTIN_TOOL_ICONS: Record<string, typeof Wrench> = {
   aivory_web_search: Search,
   web_fetch: Globe,
+  fetch_image: Download,
   python_execute: SquareTerminal,
   image_generate: ImageIcon,
   use_skill: BookOpen,

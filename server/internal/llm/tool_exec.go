@@ -3,7 +3,9 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"aivory/server/internal/envcfg"
@@ -21,6 +23,45 @@ type toolCallResult struct {
 	Output    string
 	Citations []Citation
 	Err       error
+}
+
+const (
+	publicToolCanceledMessage = "The operation was canceled."
+	publicToolTimeoutMessage  = "The tool timed out. Please try again."
+	publicToolFailureMessage  = "Tool execution failed. Please try again."
+)
+
+// ToolUserError marks a validation error whose message is intentionally safe
+// to return to the model and user. Unknown tool errors are never surfaced: HTTP
+// clients commonly include the full request URL (and therefore private hosts,
+// ports, paths, or query credentials) in err.Error().
+type ToolUserError struct{ Message string }
+
+func (e *ToolUserError) Error() string { return e.Message }
+
+// publicToolErrorOutput is the single user/model-facing boundary for local,
+// managed, and MCP tool failures. The original error remains available to
+// server-side logging and usage diagnostics; only explicit public error types
+// cross this boundary.
+func publicToolErrorOutput(err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, context.Canceled) {
+		return publicToolCanceledMessage
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return publicToolTimeoutMessage
+	}
+	var refusal *ToolRefusalError
+	if errors.As(err, &refusal) && strings.TrimSpace(refusal.Message) != "" {
+		return strings.TrimSpace(refusal.Message)
+	}
+	var userErr *ToolUserError
+	if errors.As(err, &userErr) && strings.TrimSpace(userErr.Message) != "" {
+		return strings.TrimSpace(userErr.Message)
+	}
+	return publicToolFailureMessage
 }
 
 // maxConcurrentTools caps how many tools run at once within a single turn so a

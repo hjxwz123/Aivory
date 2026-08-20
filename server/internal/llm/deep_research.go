@@ -806,7 +806,10 @@ func (rs *researcher) execToolsConcurrent(ctx context.Context, specs []toolCallS
 		summary := truncate(r.Output, deepResearchToolResultSummaryCap)
 		if r.Err != nil {
 			status = "error"
-			summary = "Error: " + r.Err.Error()
+			if rs.logger != nil {
+				rs.logger("tool %s failed: %v", c.Name, r.Err)
+			}
+			summary = publicToolErrorOutput(r.Err)
 		}
 		rs.emit(SseEvent{Type: "tool_result", Name: c.Name, ID: c.ID, Summary: summary, Status: status})
 		rs.blocks = append(rs.blocks, UnifiedBlock{

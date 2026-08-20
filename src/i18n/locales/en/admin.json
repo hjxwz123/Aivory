@@ -206,6 +206,7 @@
       "names": {
         "aivory_web_search": "Aivory web search",
         "web_fetch": "Read web page",
+        "fetch_image": "Download image",
         "python_execute": "Python interpreter",
         "image_generate": "Image generation",
         "use_skill": "Use skill",
@@ -214,6 +215,7 @@
       "descriptions": {
         "aivory_web_search": "Search the public web through Aivory's configured search backend.",
         "web_fetch": "Read the main content of a specific web page.",
+        "fetch_image": "Download a public image into the Python sandbox.",
         "python_execute": "Run Python for analysis, calculations, and file generation.",
         "image_generate": "Generate or edit images with the configured image model.",
         "use_skill": "Load an assigned skill's full instructions on demand.",

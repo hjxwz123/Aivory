@@ -1,8 +1,10 @@
 /**
  * Prepare chat image attachments without making users manage provider byte
- * limits themselves. Images at or below 3 MiB stay byte-for-byte unchanged.
- * Larger browser-decodable images are re-encoded at the original dimensions
- * first; the canvas is only reduced when quality alone cannot meet the budget.
+ * limits themselves. Provider-compatible images at or below 3 MiB stay
+ * byte-for-byte unchanged. Formats commonly produced by phones but rejected by
+ * vision APIs (HEIC/HEIF, TIFF, BMP, AVIF, ICO) are always converted first.
+ * Larger browser-decodable images are re-encoded at the original dimensions;
+ * the canvas is only reduced when quality alone cannot meet the byte budget.
  */
 
 export const IMAGE_UPLOAD_PASSTHROUGH_BYTES = 3 * 1024 * 1024
@@ -18,6 +20,15 @@ const RASTER_IMAGE_EXTENSIONS = new Set([
   'png', 'jpg', 'jpeg', 'jpe', 'jfif', 'gif', 'webp', 'bmp', 'tif', 'tiff',
   'heic', 'heif', 'avif', 'ico',
 ])
+const PROVIDER_COMPATIBLE_IMAGE_MIMES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+])
+const PROVIDER_COMPATIBLE_IMAGE_EXTENSIONS = new Set([
+  'jpg', 'jpeg', 'jpe', 'jfif', 'png', 'webp', 'gif',
+])
 
 interface DecodedImage {
   source: CanvasImageSource
@@ -27,7 +38,7 @@ interface DecodedImage {
 }
 
 export interface PrepareImageOptions {
-  /** Original files no larger than this stay byte-for-byte unchanged. */
+  /** Compatible original files no larger than this stay byte-for-byte unchanged. */
   passthroughBytes?: number
   /** Compressed output must fit under this provider/server-safe budget. */
   targetBytes?: number
@@ -38,6 +49,17 @@ function isRasterImageFile(file: File): boolean {
   if (mimeType === 'image/svg+xml') return false
   const extension = file.name.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? ''
   return RASTER_IMAGE_EXTENSIONS.has(extension) || mimeType.startsWith('image/')
+}
+
+function isProviderCompatibleImage(file: File): boolean {
+  const mimeType = file.type.toLowerCase().trim()
+  const extension = file.name.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? ''
+  // If either piece of metadata explicitly identifies a format vision APIs do
+  // not reliably accept, convert it. This also covers iOS files whose MIME is
+  // empty but whose filename still ends in HEIC/HEIF.
+  if (mimeType.startsWith('image/') && !PROVIDER_COMPATIBLE_IMAGE_MIMES.has(mimeType)) return false
+  if (RASTER_IMAGE_EXTENSIONS.has(extension) && !PROVIDER_COMPATIBLE_IMAGE_EXTENSIONS.has(extension)) return false
+  return PROVIDER_COMPATIBLE_IMAGE_MIMES.has(mimeType) || PROVIDER_COMPATIBLE_IMAGE_EXTENSIONS.has(extension)
 }
 
 async function decodeImage(file: File): Promise<DecodedImage | null> {
@@ -261,7 +283,8 @@ export async function prepareImageForUpload(
   const passthroughBytes = Math.max(1, options.passthroughBytes ?? IMAGE_UPLOAD_PASSTHROUGH_BYTES)
   const requestedTarget = Math.max(1, options.targetBytes ?? IMAGE_UPLOAD_TARGET_BYTES)
   const targetBytes = Math.max(1, Math.min(requestedTarget, passthroughBytes - 1))
-  if (!isRasterImageFile(file) || file.size <= passthroughBytes) return file
+  if (!isRasterImageFile(file)) return file
+  if (file.size <= passthroughBytes && isProviderCompatibleImage(file)) return file
   if (typeof document === 'undefined') return file
 
   try {
