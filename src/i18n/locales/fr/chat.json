@@ -62,6 +62,8 @@
       }
     },
     "imageUnsupported": "Le modèle actuel ne prend pas en charge les images. Choisissez un modèle compatible avec la vision.",
+    "imagesWillBeIgnored": "Ce modèle ne prend pas en charge les images. Les images de cette conversation seront ignorées.",
+    "imageIgnoredNeedsText": "Ce modèle ne prend pas en charge les images : elles seront donc ignorées. Ajoutez du texte avant d'envoyer.",
     "imagePromptRequired": "Décrivez comment modifier l’image de référence.",
     "imagePromptOptimization": "Optimisation du prompt",
     "imagePromptOptimizationOn": "L’optimisation du prompt est activée",

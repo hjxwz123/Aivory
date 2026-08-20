@@ -234,17 +234,29 @@ export const RichComposerEditor = forwardRef<RichComposerEditorHandle, RichCompo
           },
           handlePaste: (view, event) => {
             const clipboardEvent = event as ClipboardEvent
-            const images = Array.from(clipboardEvent.clipboardData?.items ?? [])
+            const clipboard = clipboardEvent.clipboardData
+            if (!clipboard) return false
+            // § paste-to-attach (copy a file on the machine → paste): files
+            // copied from the OS (Finder/Explorer copies, screenshots) land in
+            // clipboardData.files — the most reliable cross-browser source.
+            const pastedFiles = Array.from(clipboard.files)
+            if (pastedFiles.length > 0) {
+              event.preventDefault()
+              propsRef.current.onPasteFiles(pastedFiles)
+              return true
+            }
+            // Fallback for browsers that expose file items but not `files`.
+            const itemFiles = Array.from(clipboard.items)
               .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
               .map((item) => item.getAsFile())
               .filter((file): file is File => file !== null)
-            if (images.length > 0) {
+            if (itemFiles.length > 0) {
               event.preventDefault()
-              propsRef.current.onPasteFiles(images)
+              propsRef.current.onPasteFiles(itemFiles)
               return true
             }
 
-            const pasted = clipboardEvent.clipboardData?.getData('text/plain') ?? ''
+            const pasted = clipboard.getData('text/plain') ?? ''
             if (!pasted) return false
             const pastedHtml = clipboardEvent.clipboardData?.getData('text/html') ?? ''
             if (/data-type=["'](?:inline|block)-math["']/.test(pastedHtml)) return false
