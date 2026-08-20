@@ -73,6 +73,7 @@ func NewRegistry(db *sql.DB, cfg config.Config, logger *log.Logger) *Registry {
 	r.sandbox = sb
 	r.Register(&webSearchTool{cfg: cfg, searcher: newSettingsSearcher(db, cfg.SearchProvider, cfg.SearchAPIKey, cfg.SearchBaseURL)})
 	r.Register(&webFetchTool{})
+	r.Register(&fetchImageTool{sandbox: sb, logger: logger})
 	r.Register(&pythonExecuteTool{sandbox: sb, uploadDir: cfg.UploadDir, artifactDir: cfg.ArtifactDir, logger: logger})
 	r.Register(&imageGenerateTool{db: db, uploadDir: cfg.UploadDir, artifactDir: cfg.ArtifactDir, logger: logger})
 	r.Register(&useSkillTool{db: db})

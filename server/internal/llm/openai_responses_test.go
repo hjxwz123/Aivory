@@ -127,6 +127,64 @@ func TestOpenAIResponsesHostedImageLargeEventReturnsBinaryWithoutRawBase64(t *te
 	}
 }
 
+func TestOpenAIResponsesHostedImageContinuesFromPreviousArtifact(t *testing.T) {
+	imageData := testPNGBytes(48)
+	encoded := base64.StdEncoding.EncodeToString(imageData)
+	var requestBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = io.WriteString(w, strings.Join([]string{
+			`data: {"type":"response.output_text.delta","delta":"edited"}`,
+			`data: {"type":"response.completed","response":{"usage":{"input_tokens":5,"output_tokens":1},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"edited"}]}]}}`,
+			`data: [DONE]`,
+			``,
+		}, "\n\n"))
+	}))
+	defer server.Close()
+
+	_, err := (&OpenAIProvider{}).Stream(context.Background(), UnifiedChatRequest{
+		Model: ModelInfo{
+			RequestID: "gpt-test", BaseURL: server.URL, APIKey: "k", APIFormat: "responses",
+		},
+		History: []UnifiedMessage{
+			{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "draw a room"}}},
+			{Role: "assistant", Blocks: []UnifiedBlock{{
+				Kind: "artifact", FileRef: "art_previous", Data: encoded, MimeType: "image/png",
+			}}},
+			{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "only change the wall color"}}},
+		},
+		OfficialToolNames:    []string{"image_generation"},
+		OfficialToolRequests: []json.RawMessage{json.RawMessage(`{"tools":[{"type":"image_generation"}]}`)},
+	}, nil, func(SseEvent) {})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+
+	tools, _ := requestBody["tools"].([]any)
+	if len(tools) != 1 {
+		t.Fatalf("hosted image tool missing from request: %#v", requestBody["tools"])
+	}
+	input, _ := requestBody["input"].([]any)
+	if len(input) != 2 {
+		t.Fatalf("input turns = %d, want original user + edit user without an empty assistant turn: %#v", len(input), input)
+	}
+	editTurn, _ := input[1].(map[string]any)
+	if editTurn["role"] != "user" {
+		t.Fatalf("edit turn role = %#v", editTurn["role"])
+	}
+	content, _ := editTurn["content"].([]any)
+	if len(content) != 2 {
+		t.Fatalf("edit content = %#v, want text + previous image", editTurn["content"])
+	}
+	imagePart, _ := content[1].(map[string]any)
+	if imagePart["type"] != "input_image" || imagePart["image_url"] != "data:image/png;base64,"+encoded {
+		t.Fatalf("previous generated image was not sent as edit input: %#v", imagePart)
+	}
+}
+
 func TestResponsesHostedImageUsesLatestPartialWhenFinalResultIsOmitted(t *testing.T) {
 	imageData := testPNGBytes(32)
 	encoded := base64.StdEncoding.EncodeToString(imageData)

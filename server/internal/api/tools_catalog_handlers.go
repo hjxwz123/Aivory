@@ -20,6 +20,7 @@ type selectableToolResponse struct {
 var builtinToolDisplay = map[string]struct{ name, icon string }{
 	"aivory_web_search": {"Aivory web search", "Search"},
 	"web_fetch":         {"Read web page", "Globe"},
+	"fetch_image":       {"Download image", "Download"},
 	"python_execute":    {"Python interpreter", "Terminal"},
 	"image_generate":    {"Image generation", "Image"},
 	"use_skill":         {"Use skill", "BookOpen"},

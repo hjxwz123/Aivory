@@ -206,6 +206,7 @@
       "names": {
         "aivory_web_search": "Aivory 網頁搜尋",
         "web_fetch": "網頁讀取",
+        "fetch_image": "下載圖片",
         "python_execute": "Python 直譯器",
         "image_generate": "圖片生成",
         "use_skill": "技能呼叫",
@@ -214,6 +215,7 @@
       "descriptions": {
         "aivory_web_search": "透過 Aivory 設定的搜尋後端檢索公開網頁中的最新資訊。",
         "web_fetch": "讀取指定網頁的主要內容。",
+        "fetch_image": "將公開圖片下載到 Python 沙箱。",
         "python_execute": "執行 Python，完成分析、計算及檔案生成。",
         "image_generate": "使用已設定的圖片模型生成或編輯圖片。",
         "use_skill": "按需載入已綁定技能的完整說明。",

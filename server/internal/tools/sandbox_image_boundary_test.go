@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -102,7 +104,7 @@ func TestSandboxImageInputClassificationUsesMetadataExtensionAndBytes(t *testing
 	}
 }
 
-func TestPythonExecuteResetsInputsAndStagesOnlyNonImages(t *testing.T) {
+func TestPythonExecuteResetsInputsAndStagesVerifiedConversationImages(t *testing.T) {
 	ctx := context.Background()
 	db := openToolsTestDB(t)
 	root := t.TempDir()
@@ -122,7 +124,7 @@ func TestPythonExecuteResetsInputsAndStagesOnlyNonImages(t *testing.T) {
 		"csv":           write("rows.csv", []byte("a,b\n1,2\n")),
 		"image":         write("photo.png", png),
 		"forged":        write("payload.dat", png),
-		"imageArtifact": write("generated.png", png),
+		"imageArtifact": write(filepath.Join("artifacts", "generated.png"), png),
 		"skillText":     write(filepath.Join("skill-assets", "helper.py"), []byte("print('ok')\n")),
 		"skillImage":    write(filepath.Join("skill-assets", "reference.bin"), png),
 		"deniedSkill":   write(filepath.Join("skill-assets", "denied.py"), []byte("print('denied')\n")),
@@ -154,6 +156,7 @@ func TestPythonExecuteResetsInputsAndStagesOnlyNonImages(t *testing.T) {
 		{`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,storage_path,kind) VALUES('f_img','u1','c1','photo.png','image/png',?,?, 'image')`, []any{len(png), paths["image"]}},
 		{`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,storage_path,kind) VALUES('f_forged','u1','c1','payload.dat','text/plain',?,?, 'text')`, []any{len(png), paths["forged"]}},
 		{`INSERT INTO artifacts(id,message_id,filename,storage_path,mime_type,size_bytes) VALUES('art1','msg1','generated.png',?,'image/png',?)`, []any{paths["imageArtifact"], len(png)}},
+		{`INSERT INTO artifacts(id,message_id,filename,storage_path,mime_type,size_bytes,source) VALUES('art_python','msg1','python.png',?,'image/png',?,'python_execute')`, []any{paths["imageArtifact"], len(png)}},
 		{`INSERT INTO skills(id,name,description,instructions,assets,enabled) VALUES('sk1','Data helper','desc','instructions',?,1)`, []any{string(assets)}},
 		{`INSERT INTO skills(id,name,description,instructions,assets,enabled) VALUES('sk2','Denied helper','desc','denied instructions',?,1)`, []any{string(deniedAssets)}},
 		{`INSERT INTO model_skills(model_id,skill_id) VALUES('m1','sk1')`, nil},
@@ -186,19 +189,21 @@ func TestPythonExecuteResetsInputsAndStagesOnlyNonImages(t *testing.T) {
 		t.Fatalf("Exec calls = %d, want 1", fake.execCalls)
 	}
 	wantPaths := map[string]bool{
-		"/workspace/uploads/rows.csv":               true,
-		"/workspace/skills/Data helper/helper.py":   true,
-		"/workspace/skills/Denied helper/denied.py": true,
+		"/workspace/uploads/rows.csv":                true,
+		"/workspace/uploads/photo.png":               true,
+		"/workspace/uploads/generated-generated.png": true,
+		"/workspace/skills/Data helper/helper.py":    true,
+		"/workspace/skills/Denied helper/denied.py":  true,
 	}
 	if len(fake.putFiles) != len(wantPaths) {
-		t.Fatalf("staged paths = %+v, want only non-image data and skill files", fake.putFiles)
+		t.Fatalf("staged paths = %+v, want data, verified conversation image and skill files", fake.putFiles)
 	}
 	for _, staged := range fake.putFiles {
 		if !wantPaths[staged.path] {
 			t.Errorf("unexpected staged input %q", staged.path)
 		}
-		if isSandboxImageInput(staged.path, "", "", staged.data) {
-			t.Errorf("image bytes reached PutFile at %q", staged.path)
+		if strings.Contains(staged.path, "/uploads/") && staged.path != "/workspace/uploads/photo.png" && staged.path != "/workspace/uploads/generated-generated.png" && isSandboxImageInput(staged.path, "", "", staged.data) {
+			t.Errorf("disguised image bytes reached PutFile at %q", staged.path)
 		}
 	}
 	if outputArtifact.MimeType != "image/png" {
@@ -236,7 +241,7 @@ func TestPythonExecuteResetsInputsAndStagesOnlyNonImages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute with use_skill denied: %v", err)
 	}
-	if len(deniedFake.putFiles) != 1 || deniedFake.putFiles[0].path != "/workspace/uploads/rows.csv" {
+	if len(deniedFake.putFiles) != 3 || deniedFake.putFiles[0].path != "/workspace/uploads/rows.csv" || deniedFake.putFiles[1].path != "/workspace/uploads/photo.png" || deniedFake.putFiles[2].path != "/workspace/uploads/generated-generated.png" {
 		t.Fatalf("use_skill denial staged model skill assets: %+v", deniedFake.putFiles)
 	}
 }
@@ -271,16 +276,59 @@ func TestPythonExecuteRebuildsSessionWhenInitialResetFindsReapedSandbox(t *testi
 	}
 }
 
-func TestFetchImageIsNotAdvertisedAndAlwaysFailsClosed(t *testing.T) {
+func TestFetchImageIsAdvertisedAndRequiresConversationContext(t *testing.T) {
 	registry := NewRegistry(nil, config.Config{}, log.New(io.Discard, "", 0))
+	found := false
 	for _, def := range registry.List("") {
 		if def.Name == "fetch_image" {
-			t.Fatal("fetch_image must not be advertised to models")
+			found = true
 		}
 	}
+	if !found {
+		t.Fatal("fetch_image was not advertised to models")
+	}
 	_, _, err := (&fetchImageTool{}).Execute(context.Background(), []byte(`{"url":"https://example.com/photo.png"}`), nil)
-	if err == nil || !strings.Contains(err.Error(), "cannot be staged in the sandbox") {
-		t.Fatalf("fetch_image error = %v, want hard sandbox boundary", err)
+	if err == nil || !strings.Contains(err.Error(), "sandbox") {
+		t.Fatalf("fetch_image error = %v, want sandbox/configuration error", err)
+	}
+}
+
+type staticImageRoundTripper struct{}
+
+func (staticImageRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	png := append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 32)...)
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(bytes.NewReader(png)),
+		Header:     make(http.Header),
+	}, nil
+}
+
+func TestFetchImageStagesVerifiedDownloadInPersistentDownloadDirectory(t *testing.T) {
+	ctx := context.Background()
+	db := openToolsTestDB(t)
+	if _, err := db.ExecContext(ctx, `INSERT INTO users(id,email,password_hash) VALUES('u_fetch','fetch@example.test','h')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO conversations(id,user_id,title) VALUES('c_fetch','u_fetch','Fetch')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO messages(id,conversation_id,role,author_id,status) VALUES('m_fetch','c_fetch','assistant','u_fetch','streaming')`); err != nil {
+		t.Fatal(err)
+	}
+	fake := &recordingSandbox{}
+	tool := &fetchImageTool{sandbox: fake, client: &http.Client{Transport: staticImageRoundTripper{}}, logger: log.New(io.Discard, "", 0)}
+	output, _, err := tool.Execute(ctx, []byte(`{"url":"https://cdn.example.test/photo"}`), &llm.ToolContext{
+		DB: db, UserID: "u_fetch", ConvID: "c_fetch", MessageID: "m_fetch",
+	})
+	if err != nil {
+		t.Fatalf("fetch image: %v", err)
+	}
+	if len(fake.putFiles) != 1 || !strings.HasPrefix(fake.putFiles[0].path, "/workspace/downloads/photo-") || !strings.HasSuffix(fake.putFiles[0].path, ".png") {
+		t.Fatalf("staged download = %+v", fake.putFiles)
+	}
+	if !strings.Contains(output, "/workspace/downloads/") {
+		t.Fatalf("tool output did not expose staged path: %q", output)
 	}
 }
 

@@ -35,6 +35,9 @@ func TestImageGenerateSchemaDoesNotDefaultToSquare(t *testing.T) {
 	if _, exists := size["enum"]; exists {
 		t.Fatalf("size schema must allow GPT Image 2 WIDTHxHEIGHT values: %#v", size)
 	}
+	if _, exists := properties["input_images"]; exists {
+		t.Fatal("internal artifact ids must not be exposed to the chat model")
+	}
 }
 
 func TestClosestGPTImage1Size(t *testing.T) {

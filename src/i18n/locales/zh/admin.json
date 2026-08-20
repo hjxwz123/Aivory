@@ -210,6 +210,7 @@
       "names": {
         "aivory_web_search": "Aivory 网页搜索",
         "web_fetch": "网页读取",
+        "fetch_image": "下载图片",
         "python_execute": "Python 解释器",
         "image_generate": "图片生成",
         "use_skill": "技能调用",
@@ -218,6 +219,7 @@
       "descriptions": {
         "aivory_web_search": "通过 Aivory 配置的搜索后端检索公开网页中的最新信息。",
         "web_fetch": "读取指定网页的主要内容。",
+        "fetch_image": "将公网图片下载到 Python 沙箱。",
         "python_execute": "运行 Python，完成分析、计算和文件生成。",
         "image_generate": "使用已配置的图片模型生成或编辑图片。",
         "use_skill": "按需加载已绑定技能的完整说明。",

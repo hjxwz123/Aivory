@@ -51,7 +51,7 @@ func TestResolveImageArtifactBlocksHydratesOnlyOwnedVerifiedImages(t *testing.T)
 	}
 	artifact, err := store.CreateArtifact(context.Background(), db, store.Artifact{
 		MessageID: "a1", Filename: "generated.bin", StoragePath: imagePath,
-		MimeType: "text/plain", SizeBytes: int64(len(imageData)),
+		MimeType: "text/plain", SizeBytes: int64(len(imageData)), Source: store.ArtifactSourceImageGenerate,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -69,6 +69,21 @@ func TestResolveImageArtifactBlocksHydratesOnlyOwnedVerifiedImages(t *testing.T)
 	(&Orchestrator{db: db}).resolveImageArtifactBlocks(context.Background(), "u2", notOwned)
 	if notOwned[0].Blocks[0].Data != "" {
 		t.Fatal("another user's generated image was hydrated into provider history")
+	}
+
+	pythonArtifact, err := store.CreateArtifact(context.Background(), db, store.Artifact{
+		MessageID: "a1", Filename: "python.png", StoragePath: imagePath,
+		MimeType: "image/png", SizeBytes: int64(len(imageData)), Source: store.ArtifactSourcePythonExecute,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pythonOutput := []UnifiedMessage{{Role: "assistant", Blocks: []UnifiedBlock{{
+		Kind: "artifact", FileRef: pythonArtifact.ID, MimeType: "image/png",
+	}}}}
+	(&Orchestrator{db: db}).resolveImageArtifactBlocks(context.Background(), "u1", pythonOutput)
+	if pythonOutput[0].Blocks[0].Data != "" {
+		t.Fatal("python artifact was implicitly reused as a hosted image edit source")
 	}
 }
 

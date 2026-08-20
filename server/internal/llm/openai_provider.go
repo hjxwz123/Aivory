@@ -395,7 +395,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 			status := "complete"
 			if r.Err != nil {
 				status = "error"
-				out = "Error: " + r.Err.Error()
+				out = publicToolErrorOutput(r.Err)
 			}
 			allCitations = append(allCitations, r.Citations...)
 			onEvent(SseEvent{Type: "tool_result", Name: tc.Name, ID: tc.ID, Summary: truncate(out, toolResultSummaryTruncationOpenAI), Status: status})
@@ -907,13 +907,17 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 				})
 			}
 		}
-		if len(parts) == 0 {
-			parts = append(parts, map[string]any{"type": ctype, "text": ""})
+		// A direct image-model turn is persisted as an assistant artifact with no
+		// text. Its binary image belongs on the following user turn as input_image;
+		// emitting an empty output_text item here is both semantically wrong and is
+		// rejected by some Responses-compatible gateways. Other genuinely empty
+		// messages have already been removed by storeToUnified.
+		if len(parts) > 0 {
+			input = append(input, map[string]any{
+				"role":    m.Role,
+				"content": parts,
+			})
 		}
-		input = append(input, map[string]any{
-			"role":    m.Role,
-			"content": parts,
-		})
 		if hostedImageContext && m.Role == "assistant" {
 			for _, b := range m.Blocks {
 				if b.Kind == "artifact" && b.Data != "" && strings.HasPrefix(strings.ToLower(b.MimeType), "image/") {
@@ -1165,7 +1169,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 			status := "complete"
 			if r.Err != nil {
 				status = "error"
-				out = "Error: " + r.Err.Error()
+				out = publicToolErrorOutput(r.Err)
 			}
 			allCitations = append(allCitations, r.Citations...)
 			onEvent(SseEvent{Type: "tool_result", Name: c.Name, ID: c.ID, Summary: truncate(out, toolResultSummaryTruncationOpenAI), Status: status})

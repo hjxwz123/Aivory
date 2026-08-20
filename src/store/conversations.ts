@@ -52,6 +52,7 @@ import { normalizeSelectedUserSkillIds } from '@/lib/composer-commands'
 import { resolveNewConversationFastMode } from '@/lib/chat-defaults'
 import { initialConversationTitle } from '@/lib/chat-message-input'
 import { ragInjectionFromEvent } from '@/lib/rag-injection'
+import { sanitizeToolErrorOutput, sanitizeUserVisibleError } from '@/lib/user-visible-error'
 
 // resolveArmedTurnFlags snapshots the CURRENT composer feature toggles for turns
 // started OUTSIDE the composer's own submit — regenerate, edit-and-resend, and
@@ -414,6 +415,38 @@ const generatedLocalMessageIds = new Set<string>()
 // createFirst path receives the server row. Conversation mutations made in
 // that window must stay local and be replayed after the temp id is re-keyed.
 const optimisticConversationIds = new Set<string>()
+
+// A POST generation is intentionally detached on the server so it can finish
+// after a phone changes network, locks the screen, or the browser drops the
+// response body. Once message_start has given us the persisted assistant id,
+// transfer a broken/ended POST reader to the replayable GET stream instead of
+// presenting a false generation failure while the backend is still working.
+function beginMessageStreamReplay(
+  set: (fn: (state: ConversationStore) => Partial<ConversationStore>) => void,
+  get: () => ConversationStore,
+  conversationId: string,
+  assistantId: string,
+  previousController: AbortController,
+): void {
+  const current = streamControllers.get(assistantId)
+  // A route hydration or another recovery path may already own the replay.
+  if (current && current !== previousController) return
+
+  const replayAbort = new AbortController()
+  streamControllers.set(assistantId, replayAbort)
+  streamConversationIds.set(assistantId, conversationId)
+  void consumeReplayStream(set, get, conversationId, assistantId, replayAbort).finally(() => {
+    if (streamControllers.get(assistantId) === replayAbort) {
+      streamControllers.delete(assistantId)
+    }
+    if (
+      !streamControllers.has(assistantId) &&
+      streamConversationIds.get(assistantId) === conversationId
+    ) {
+      streamConversationIds.delete(assistantId)
+    }
+  })
+}
 
 // An explicit stop can abort the POST reader before its `message_start` frame
 // reaches the browser even though the backend is still committing the stopped
@@ -1761,7 +1794,8 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
             updateAssistant(set, input.conversationId, serverAssistantId, (m) => ({
               ...m,
               reasoning: patchReasoningTool(m.reasoning ?? [], tid, {
-                output: ev.summary,
+                output:
+                  ev.status === 'error' ? sanitizeToolErrorOutput(ev.summary) : ev.summary,
                 status: ev.status === 'error' ? 'error' : 'complete',
                 endedAt: Date.now(),
               }),
@@ -1793,7 +1827,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
               streaming: false,
               imageStatus: undefined,
               reasoning: interruptRunningTools(m.reasoning),
-              error: ev.message || 'error',
+              error: sanitizeUserVisibleError(ev.message),
               errorCode: ev.code || GENERATION_INTERRUPTED_ERROR_CODE,
             }))
             break
@@ -1814,10 +1848,11 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
             break
         }
       }
-      // The stream ended. If we never received a terminal `done`/`error` (a
-      // clean EOF mid-flight, or the upstream closed without a final event), the
-      // assistant could be stuck `streaming:true` — never leave an empty,
-      // spinning bubble. Preserve partial content and mark the turn interrupted.
+      // A mobile connection may return a clean EOF without a terminal frame
+      // while the detached server generation continues normally. Once the
+      // persisted id is known, hand the message to the replay GET stream; only
+      // explicit backend error events should surface as generation failures.
+      let replayingDetachedGeneration = false
       {
         const am = get()
           .conversations.find((c) => c.id === input.conversationId)
@@ -1826,20 +1861,24 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           // A user-initiated stop is a deliberate halt, not a failure — keep the
           // partial reply and never show the retry banner.
           const stopped = abort.signal.aborted
-          updateAssistant(set, input.conversationId, serverAssistantId, (m) => ({
-            ...m,
-            streaming: false,
-            // §4.20: clear the drawing placeholder on any non-terminal stream end
-            // (the `done`/`error`/`artifact` cases already do) so it can't spin forever.
-            imageStatus: undefined,
-            stopped: stopped ? true : m.stopped,
-            reasoning: stopped ? m.reasoning : interruptRunningTools(m.reasoning),
-            error: stopped ? m.error : m.error || 'The reply ended unexpectedly. Please try again.',
-            errorCode: stopped ? m.errorCode : m.errorCode || GENERATION_INTERRUPTED_ERROR_CODE,
-          }))
-          if (!stopped) errored = true
+          if (!stopped && assistantStarted) {
+            beginMessageStreamReplay(set, get, input.conversationId, serverAssistantId, abort)
+            replayingDetachedGeneration = true
+          } else {
+            updateAssistant(set, input.conversationId, serverAssistantId, (m) => ({
+              ...m,
+              streaming: false,
+              imageStatus: undefined,
+              stopped: stopped ? true : m.stopped,
+              reasoning: stopped ? m.reasoning : interruptRunningTools(m.reasoning),
+              error: stopped ? m.error : m.error || 'The reply ended unexpectedly. Please try again.',
+              errorCode: stopped ? m.errorCode : m.errorCode || GENERATION_INTERRUPTED_ERROR_CODE,
+            }))
+            if (!stopped) errored = true
+          }
         }
       }
+      if (replayingDetachedGeneration) return
       // Stream finished cleanly — reconcile to the canonical tree path so the
       // user/assistant siblings collapse and the `< n/m >` picker appears. Skip
       // it on an error turn so the error message + retry button survive (a
@@ -1858,7 +1897,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     } catch (e) {
       if (abort.signal.aborted && streamHandoffs.delete(abort)) return
       if (!abort.signal.aborted && serverAssistantId !== assistantId) {
-        window.setTimeout(() => get().resumeStreamingMessages(input.conversationId, { replaceExisting: true }), 0)
+        beginMessageStreamReplay(set, get, input.conversationId, serverAssistantId, abort)
         return
       }
       // Target the CURRENT server id so the patch lands even after the
@@ -2088,7 +2127,8 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
             updateAssistant(set, conversationId, serverAssistantId, (m) => ({
               ...m,
               reasoning: patchReasoningTool(m.reasoning ?? [], tid, {
-                output: ev.summary,
+                output:
+                  ev.status === 'error' ? sanitizeToolErrorOutput(ev.summary) : ev.summary,
                 status: ev.status === 'error' ? 'error' : 'complete',
                 endedAt: Date.now(),
               }),
@@ -2206,11 +2246,18 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
               imageStatus: undefined,
               verify: m.verify?.status === 'running' ? undefined : m.verify,
               reasoning: interruptRunningTools(m.reasoning),
-              error: ev.message || 'error',
+              error: sanitizeUserVisibleError(ev.message),
               errorCode: ev.code || GENERATION_INTERRUPTED_ERROR_CODE,
             }))
             break
         }
+      }
+      const unfinished = get()
+        .conversations.find((c) => c.id === conversationId)
+        ?.messages.find((m) => m.id === serverAssistantId)
+      if (!abort.signal.aborted && assistantStarted && unfinished?.streaming) {
+        beginMessageStreamReplay(set, get, conversationId, serverAssistantId, abort)
+        return
       }
       // Reconcile so the freshly generated reply and the previous one show up as
       // siblings with a `< n/m >` picker instead of two stacked bubbles (§4.15).
@@ -2226,7 +2273,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     } catch (e) {
       if (abort.signal.aborted && streamHandoffs.delete(abort)) return
       if (!abort.signal.aborted && serverAssistantId !== placeholderId) {
-        window.setTimeout(() => get().resumeStreamingMessages(conversationId, { replaceExisting: true }), 0)
+        beginMessageStreamReplay(set, get, conversationId, serverAssistantId, abort)
         return
       }
       // A user-initiated stop aborts the reader before the terminal frame — keep
@@ -2602,7 +2649,7 @@ function applyReplayEvent(
       updateAssistant(set, conversationId, assistantId, (m) => ({
         ...m,
         reasoning: patchReasoningTool(m.reasoning ?? [], ev.id!, {
-          output: ev.summary,
+          output: ev.status === 'error' ? sanitizeToolErrorOutput(ev.summary) : ev.summary,
           status: ev.status === 'error' ? 'error' : 'complete',
           endedAt: Date.now(),
         }),
@@ -2636,7 +2683,7 @@ function applyReplayEvent(
         imageStatus: undefined,
         verify: m.verify?.status === 'running' ? undefined : m.verify,
         reasoning: interruptRunningTools(m.reasoning),
-        error: ev.message || 'error',
+        error: sanitizeUserVisibleError(ev.message),
         errorCode: ev.code || GENERATION_INTERRUPTED_ERROR_CODE,
       }))
       break
@@ -2821,6 +2868,13 @@ export function toLocalMessage(m: ApiMessage): Message {
   const artifacts: Message['artifacts'] = []
   let research: ResearchState | undefined
   const blocks = m.blocks ?? []
+  const failedToolIDs = new Set(
+    blocks
+      .filter(
+        (block) => block.kind === 'tool_output' && block.summary === 'error' && block.tool_id,
+      )
+      .map((block) => block.tool_id as string),
+  )
   const lastToolBlockIndex = blocks.reduce(
     (lastIndex, block, blockIndex) => (block.kind === 'tool_call' ? blockIndex + 1 : lastIndex),
     0,
@@ -2871,6 +2925,9 @@ export function toLocalMessage(m: ApiMessage): Message {
         pendingText = ''
       }
       const id = b.tool_id ?? `${m.id}-r${idx}`
+      // Older rows predate the canonical tool_output status block and only
+      // marked a failed result by prefixing the tool_call summary with Error:.
+      const toolFailed = failedToolIDs.has(id) || /^error\s*:/i.test(b.summary?.trim() ?? '')
       reasoning.push({
         kind: 'tool',
         id,
@@ -2879,12 +2936,12 @@ export function toLocalMessage(m: ApiMessage): Message {
           name: b.tool_name ?? 'tool',
           label: prettyToolLabel(b.tool_name ?? 'tool'),
           status:
-            m.status === 'error' && idx === lastToolBlockIndex && !b.summary
+            toolFailed || (m.status === 'error' && idx === lastToolBlockIndex && !b.summary)
               ? 'error'
               : 'complete',
           startedAt: m.created_at * 1000,
           endedAt: m.created_at * 1000,
-          output: b.summary,
+          output: toolFailed ? sanitizeToolErrorOutput(b.summary) : b.summary,
           // Reloaded tool rounds keep their input so the subtitle (query/code)
           // still renders (§7.1-4).
           input:
@@ -2994,9 +3051,9 @@ function errorFromApiMessage(
   hasResearch: boolean,
 ): string | undefined {
   if (m.stop_reason === GENERATION_INTERRUPTED_ERROR_CODE) {
-    return m.error?.trim() || 'Generation interrupted. Please try again.'
+    return sanitizeUserVisibleError(m.error, 'Generation interrupted. Please try again.')
   }
-  if (m.error && m.error.trim()) return m.error.trim()
+  if (m.error && m.error.trim()) return sanitizeUserVisibleError(m.error)
   const refusalLike =
     m.stop_reason === 'content_moderation' ||
     m.stop_reason === 'content_filter' ||

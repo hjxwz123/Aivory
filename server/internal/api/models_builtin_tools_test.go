@@ -9,7 +9,7 @@ import (
 )
 
 func TestEffectivePublicBuiltinTools(t *testing.T) {
-	registered := []string{"aivory_web_search", "image_generate", "python_execute"}
+	registered := []string{"aivory_web_search", "fetch_image", "image_generate", "python_execute"}
 	tests := []struct {
 		name     string
 		model    store.Model
@@ -25,7 +25,7 @@ func TestEffectivePublicBuiltinTools(t *testing.T) {
 			name:     "global disable is removed",
 			model:    store.Model{Kind: "chat", ToolMode: "prompt"},
 			disabled: map[string]bool{"python_execute": true},
-			want:     []string{"aivory_web_search", "image_generate"},
+			want:     []string{"aivory_web_search", "fetch_image", "image_generate"},
 		},
 		{
 			name:  "custom policy keeps registry order and drops stale names",

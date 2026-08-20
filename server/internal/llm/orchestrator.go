@@ -45,6 +45,7 @@ var (
 	// requested <=8-word label.
 	titleGenerationOutputTokens     = 256
 	attachmentImageInlineBytes      = envcfg.Int64("AIVORY_LLM_ATTACHMENT_IMAGE_INLINE_BYTES", 20*1024*1024)
+	sandboxUploadStagingFileSize    = envcfg.Int64("AIVORY_TOOLS_PYTHON_EXECUTE_UPLOAD_STAGING_FILE_SIZE", 40*1024*1024)
 	toolRouteTimeout                = envcfg.Dur("AIVORY_LLM_TOOL_ROUTE_TIMEOUT", 5*time.Second)
 	toolRouteSchemaTokenThreshold   = envcfg.Int("AIVORY_LLM_TOOL_ROUTE_SCHEMA_TOKEN_THRESHOLD", 512)
 	sandboxExecTimeoutClampRangeMax = envcfg.Int("AIVORY_LLM_SANDBOX_EXEC_TIMEOUT_CLAMP_RANGE_MAX", 600)
@@ -442,6 +443,7 @@ type ImageBiller interface {
 var perTurnToolLimits = map[string]int{
 	toolnames.AivoryWebSearch: envcfg.Int("AIVORY_LLM_PER_TURN_TOOL_LIMITS_WEB_SEARCH", 16),
 	"web_fetch":               envcfg.Int("AIVORY_LLM_PER_TURN_TOOL_LIMITS_WEB_FETCH", 12),
+	"fetch_image":             envcfg.Int("AIVORY_LLM_PER_TURN_TOOL_LIMITS_FETCH_IMAGE", 16),
 	"image_generate":          envcfg.Int("AIVORY_LLM_PER_TURN_TOOL_LIMITS_IMAGE_GENERATE", 8),
 	"python_execute":          envcfg.Int("AIVORY_LLM_PER_TURN_TOOL_LIMITS_PYTHON_EXECUTE", 16), // §F10: cap sandbox executions/turn (each up to 120s) to bound abuse/DoS
 }
@@ -451,6 +453,7 @@ var perTurnToolLimits = map[string]int{
 var deepResearchToolLimits = map[string]int{
 	toolnames.AivoryWebSearch: envcfg.Int("AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_SEARCH", 40),
 	"web_fetch":               envcfg.Int("AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_FETCH", 25),
+	"fetch_image":             envcfg.Int("AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_FETCH_IMAGE", 12),
 	"image_generate":          envcfg.Int("AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_IMAGE_GENERATE", 4),
 	"python_execute":          envcfg.Int("AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_PYTHON_EXECUTE", 8),
 }
@@ -905,10 +908,10 @@ func (tc *ToolContext) charge(name string) error {
 	case tc.Fast:
 		limits = fastToolLimits
 		totalCap = maxToolCallsPerTurnFast
-		// python_execute is withheld from fast turns; block it defensively even if
-		// it somehow reaches the runner (it's also dropped from the offered tools).
-		if name == "python_execute" {
-			return errors.New("python_execute is unavailable in fast mode")
+		// Sandbox-backed tools are withheld from fast turns; block them
+		// defensively even if one somehow reaches the runner.
+		if name == "python_execute" || name == "fetch_image" {
+			return errors.New("sandbox tools are unavailable in fast mode")
 		}
 	}
 	tc.budgetMu.Lock()
@@ -1532,7 +1535,7 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 			builtinDefs = filterToolDefsByName(builtinDefs, map[string]bool{"save_memory": true})
 		}
 		if req.Fast {
-			builtinDefs = filterToolDefsByName(builtinDefs, map[string]bool{"python_execute": true})
+			builtinDefs = filterToolDefsByName(builtinDefs, map[string]bool{"python_execute": true, "fetch_image": true})
 		}
 		if base.SelectedToolsConfigured {
 			builtinDefs = filterBuiltinToolsBySelection(builtinDefs, selectedTools)
@@ -2564,7 +2567,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// Resolve staged files before automatic tool routing. The route model receives
 	// only a presence bit; exact file names are used solely by deterministic local
 	// fast paths and never leave this process.
-	sandboxFiles := listSandboxFiles(ctx, o.db, conv.ID, req.UserID, o.uploadDir)
+	sandboxFiles := listSandboxFiles(ctx, o.db, conv.ID, req.UserID, o.uploadDir, o.artifactDir)
 	builtinTools := modelBuiltinToolSet(model.BuiltinTools)
 	mcpServers := modelMCPServerIDSet(model.MCPServerIDs)
 	globalDisabledTools := o.disabledToolSet()
@@ -2662,7 +2665,19 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if hostedImageEnabled {
 		hostedDailyImageQuota, err = o.checkDailyImageLimit(ctx, req.UserID, 1)
 		if err != nil {
-			message := err.Error()
+			if !errors.Is(err, ErrDailyImageLimitReached) {
+				if o.logger != nil {
+					o.logger.Printf("hosted image daily quota check failed (conv=%s msg=%s): %v", conv.ID, assistantMsg.ID, err)
+				}
+				const safeErr = "Image generation is temporarily unavailable. Please try again."
+				errBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: safeErr}})
+				_ = finishMessage(ctx, store.MessageFinishPatch{
+					Blocks: errBlocks, Citations: []byte("[]"), Status: "error", Error: safeErr,
+				})
+				onEvent(SseEvent{Type: "error", MessageID: assistantMsg.ID, Message: safeErr})
+				return nil, err
+			}
+			message := ErrDailyImageLimitReached.Error()
 			refusalBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: message}})
 			_ = finishMessage(ctx, store.MessageFinishPatch{
 				Blocks: refusalBlocks, Citations: []byte("[]"), StopReason: "quota_exceeded", Status: "complete",
@@ -2934,10 +2949,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		o.resolveImageArtifactBlocks(ctx, req.UserID, uHist)
 	}
 
-	// 9d. Conversation-scoped data files staged into the sandbox
-	//     (/workspace/uploads) were resolved above (`sandboxFiles`, before the
-	//     forced-read fallback). Listing them in the system prompt lets the model
-	//     operate on a CSV/XLSX uploaded in an earlier turn via python_execute.
+	// 9d. Conversation-scoped files staged into the sandbox (/workspace/uploads)
+	//     were resolved above (`sandboxFiles`, before the forced-read fallback).
+	//     Listing them in the system prompt lets the model operate on uploaded
+	//     data and verified images from an earlier turn via python_execute.
 	//     When python_execute is unavailable that guidance is a dead end and sheet
 	//     content is injected as <uploaded-data-preview> instead, so suppress the
 	//     listing to avoid pointing the model at a tool it can't call.
@@ -4665,7 +4680,8 @@ func (o *Orchestrator) resolveImageArtifactBlocks(ctx context.Context, userID st
 				continue
 			}
 			artifact, err := store.GetArtifact(ctx, o.db, artifactID, userID)
-			if err != nil || artifact == nil || artifact.SizeBytes <= 0 || artifact.SizeBytes > attachmentImageInlineBytes {
+			if err != nil || artifact == nil || !reusableProviderImageArtifact(artifact.Source) ||
+				artifact.SizeBytes <= 0 || artifact.SizeBytes > attachmentImageInlineBytes {
 				continue
 			}
 			safePath, err := resolveLLMStoragePath(artifact.StoragePath, o.artifactDir)
@@ -4688,6 +4704,18 @@ func (o *Orchestrator) resolveImageArtifactBlocks(ctx context.Context, userID st
 			block.Data = base64.StdEncoding.EncodeToString(data)
 			block.MimeType = mimeType
 		}
+	}
+}
+
+func reusableProviderImageArtifact(source string) bool {
+	switch strings.TrimSpace(source) {
+	case "", store.ArtifactSourceImageGenerate, store.ArtifactSourceHostedImageGeneration:
+		// Empty source keeps image artifacts produced before source attribution was
+		// introduced. Python and unrelated downloadable artifacts are never selected
+		// implicitly as an image-generation edit source.
+		return true
+	default:
+		return false
 	}
 }
 
@@ -4897,9 +4925,9 @@ type systemPromptOpts struct {
 	SkillsFull          []SkillFull
 	Memories            []store.Memory
 	ProjectFiles        []ProjectFileSummary
-	// SandboxFiles are conversation-uploaded non-image data files staged at
-	// /workspace/uploads (CSV/XLSX/text/code). Listed only when
-	// python_execute is enabled.
+	// SandboxFiles are supported conversation data files and verified uploaded
+	// images staged at /workspace/uploads. Listed only when python_execute is
+	// enabled.
 	SandboxFiles []ProjectFileSummary
 	// Persona is the user's personalization (tone traits + custom instructions
 	// + nickname). Empty fields render nothing.
@@ -5127,6 +5155,7 @@ func composeSystemPrompt(o systemPromptOpts) string {
 			// excluded (prompt/none mode inlines skills in segment ③).
 			guidance := []struct{ name, line string }{
 				{toolnames.AivoryWebSearch, l.toolWebSearch},
+				{"fetch_image", l.toolFetchImage},
 				{"python_execute", l.toolPython},
 				{"image_generate", l.toolImage},
 				{"save_memory", l.toolSaveMemory},
@@ -5601,6 +5630,7 @@ func toolRouteKnownCapabilities(name string) []string {
 	switch {
 	case name == toolnames.AivoryWebSearch,
 		name == "web_fetch",
+		name == "fetch_image",
 		name == "web_search",
 		strings.HasPrefix(name, "web_search_"),
 		name == "google_search",
@@ -5893,41 +5923,82 @@ func (o *Orchestrator) forcedWebSearch(ctx context.Context, req RunRequest, conv
 	return "<web-search-result>\n" + strings.TrimSpace(b.String()) + "\n</web-search-result>", cites
 }
 
-// listSandboxFiles returns the conversation's sandbox-staged data files (the same
-// kinds tools.pythonExecuteTool stages: sheet/text/code). Shared by the
+// listSandboxFiles returns the conversation's sandbox-staged files (the same
+// kinds tools.pythonExecuteTool stages: sheet/text/code/image). Shared by the
 // system-prompt listing and the no-tools forced read. Filename detection keeps
 // older rows usable when their stored kind predates the sheet classifier.
 func listSandboxFiles(ctx context.Context, db *sql.DB, convID, userID string, roots ...string) []ProjectFileSummary {
 	out := []ProjectFileSummary{}
 	convFiles, err := store.ListFilesByConversation(ctx, db, convID, userID)
-	if err != nil {
-		return out
+	if err == nil {
+		for _, f := range convFiles {
+			metadataImage := strings.EqualFold(strings.TrimSpace(f.Kind), "image") ||
+				strings.HasPrefix(strings.ToLower(strings.TrimSpace(strings.SplitN(f.MimeType, ";", 2)[0])), "image/")
+			verifiedImage := storedSandboxFileLooksLikeImage(f, roots...)
+			if metadataImage {
+				if verifiedImage && f.SizeBytes >= 0 && f.SizeBytes <= sandboxUploadStagingFileSize {
+					out = append(out, ProjectFileSummary{Name: f.Filename, Kind: "image"})
+				}
+				continue
+			}
+			// A legacy text/data row containing image bytes is deliberately not
+			// advertised or staged. Image access requires explicit server-owned image
+			// metadata plus a matching byte signature.
+			if verifiedImage {
+				continue
+			}
+			if isSandboxSpreadsheetFilename(f.Filename) {
+				out = append(out, ProjectFileSummary{Name: f.Filename, Kind: "sheet"})
+				continue
+			}
+			switch f.Kind {
+			case "sheet", "text", "code":
+				out = append(out, ProjectFileSummary{Name: f.Filename, Kind: f.Kind})
+			}
+		}
 	}
-	for _, f := range convFiles {
-		// New uploads have authoritative kind/MIME metadata; the bounded prefix
-		// check also covers legacy rows whose image was renamed to data.csv before
-		// server-side byte classification existed.
-		if storedSandboxFileLooksLikeImage(f, roots...) {
-			continue
-		}
-		if isSandboxSpreadsheetFilename(f.Filename) {
-			out = append(out, ProjectFileSummary{Name: f.Filename, Kind: "sheet"})
-			continue
-		}
-		switch f.Kind {
-		case "sheet", "text", "code":
-			out = append(out, ProjectFileSummary{Name: f.Filename, Kind: f.Kind})
+	if artifacts, err := store.ListImageArtifactsByConversation(ctx, db, convID, userID); err == nil {
+		for _, artifact := range artifacts {
+			if !reusableGeneratedImageSource(artifact.Source) || !storedSandboxArtifactLooksLikeImage(artifact, roots...) {
+				continue
+			}
+			name := filepath.Base(strings.TrimSpace(artifact.Filename))
+			if name == "" || name == "." || name == "/" {
+				name = "image"
+			}
+			out = append(out, ProjectFileSummary{Name: "generated-" + name, Kind: "image"})
 		}
 	}
 	return out
 }
 
-func storedSandboxFileLooksLikeImage(file store.File, roots ...string) bool {
-	if strings.EqualFold(strings.TrimSpace(file.Kind), "image") ||
-		strings.HasPrefix(strings.ToLower(strings.TrimSpace(file.MimeType)), "image/") ||
-		providerImageFilename(file.Filename) {
+func reusableGeneratedImageSource(source string) bool {
+	switch strings.TrimSpace(source) {
+	case "", store.ArtifactSourceImageGenerate, store.ArtifactSourceHostedImageGeneration:
 		return true
+	default:
+		return false
 	}
+}
+
+func storedSandboxArtifactLooksLikeImage(artifact store.Artifact, roots ...string) bool {
+	if artifact.SizeBytes < 0 || artifact.SizeBytes > sandboxUploadStagingFileSize {
+		return false
+	}
+	safePath, err := resolveLLMStoragePath(artifact.StoragePath, roots...)
+	if err != nil {
+		return false
+	}
+	f, err := os.Open(safePath)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, sandboxUploadStagingFileSize+1))
+	return err == nil && int64(len(data)) <= sandboxUploadStagingFileSize && providerImageMIMEFromBytes(data) != ""
+}
+
+func storedSandboxFileLooksLikeImage(file store.File, roots ...string) bool {
 	safePath, err := resolveLLMStoragePath(file.StoragePath, roots...)
 	if err != nil {
 		return false
@@ -5937,6 +6008,10 @@ func storedSandboxFileLooksLikeImage(file store.File, roots ...string) bool {
 		return false
 	}
 	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || info.Size() < 0 || info.Size() > sandboxUploadStagingFileSize {
+		return false
+	}
 	head, err := io.ReadAll(io.LimitReader(f, 4096))
 	return err == nil && providerImageMIMEFromBytes(head) != ""
 }
@@ -6389,6 +6464,7 @@ func cloneBoolMap(source map[string]bool) map[string]bool {
 var toolTimeouts = map[string]time.Duration{
 	toolnames.AivoryWebSearch: envcfg.Dur("AIVORY_LLM_TOOL_TIMEOUTS", 10*time.Second),
 	"web_fetch":               envcfg.Dur("AIVORY_LLM_TOOL_TIMEOUTS_2", 15*time.Second),
+	"fetch_image":             envcfg.Dur("AIVORY_LLM_TOOL_TIMEOUTS_FETCH_IMAGE", 45*time.Second),
 	"python_execute":          120 * time.Second,
 	"image_generate":          envcfg.Dur("AIVORY_LLM_TOOL_TIMEOUTS_3", 600*time.Second), // slow third-party image gateways need a wide window
 }
@@ -6450,6 +6526,9 @@ func (r *orchToolRunner) Run(ctx context.Context, name string, input []byte) (st
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	out, cites, err := r.orch.tools.Run(ctx, name, input, r.ctx)
+	if err != nil && r.orch.logger != nil {
+		r.orch.logger.Printf("tool execution failed (conv=%s msg=%s tool=%s): %v", r.ctx.ConvID, r.ctx.MessageID, name, err)
+	}
 	if err == nil && len(cites) > 0 && r.ctx != nil && r.ctx.citationIndexes != nil {
 		offset := r.ctx.citationIndexes.allocate(len(cites))
 		out = remapCitationMarkers(out, len(cites), offset)

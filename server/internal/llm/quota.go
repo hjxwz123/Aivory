@@ -15,6 +15,10 @@ import (
 
 const defaultImageDocumentFlatTokenAllowance = 1024
 
+// ErrDailyImageLimitReached distinguishes an expected, user-visible quota
+// refusal from storage/configuration failures in the same admission check.
+var ErrDailyImageLimitReached = errors.New("daily image limit reached")
+
 var (
 	dailyImageLimitResetWindow      = envcfg.Dur("AIVORY_TOOLS_DAILY_IMAGE_LIMIT_RESET_WINDOW", 24*time.Hour)
 	imageDocumentFlatTokenAllowance = envcfg.Int("AIVORY_LLM_IMAGE_DOCUMENT_FLAT_TOKEN_ALLOWANCE", defaultImageDocumentFlatTokenAllowance)
@@ -442,7 +446,7 @@ func (o *Orchestrator) checkDailyImageLimit(ctx context.Context, userID string, 
 		return nil, err
 	}
 	if !allowed {
-		return nil, fmt.Errorf("daily image limit reached")
+		return nil, ErrDailyImageLimitReached
 	}
 	return reservation, nil
 }

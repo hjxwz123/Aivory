@@ -1890,7 +1890,13 @@ func FirstImageArtifactForMessage(ctx context.Context, db *sql.DB, messageID, co
 		 FROM artifacts a
 		 JOIN messages m ON m.id=a.message_id
 		 WHERE a.message_id=? AND m.conversation_id=? AND a.mime_type LIKE 'image/%'
-		 ORDER BY a.filename ASC, a.created_at ASC, a.id ASC
+		   AND COALESCE(a.source,'') IN ('', 'image_generate', 'image_generation')
+		 ORDER BY CASE COALESCE(a.source,'')
+		            WHEN 'image_generate' THEN 0
+		            WHEN 'image_generation' THEN 1
+		            ELSE 2
+		          END,
+		          a.created_at DESC, a.filename ASC, a.id ASC
 		 LIMIT 1`, messageID, conversationID).Scan(
 		&a.ID, &a.MessageID, &a.Filename, &a.StoragePath, &a.MimeType, &a.SizeBytes, &a.Source, &a.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {

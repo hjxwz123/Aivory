@@ -487,7 +487,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 			status := "complete"
 			if r.Err != nil {
 				status = "error"
-				out = "Error: " + r.Err.Error()
+				out = publicToolErrorOutput(r.Err)
 			}
 			allCitations = append(allCitations, r.Citations...)
 			onEvent(SseEvent{Type: "tool_result", Name: tc.Name, ID: tc.ID, Summary: truncate(out, toolResultSummaryTruncationAnthropic), Status: status})

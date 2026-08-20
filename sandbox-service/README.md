@@ -315,7 +315,7 @@ request.
 
 Artifacts in `files[]` are whatever Python wrote under `/workspace/outputs/`
 during that exec (`{name, mime_type, data_base64}`), including generated PNGs.
-`/files` is only for eligible non-image data and skill inputs; it rejects image
-extensions and image signatures. `/files/reset-inputs` clears `/workspace/uploads`
-and `/workspace/skills` without touching generated outputs or other workspace
-state.
+`/files` accepts backend-authorized data and image inputs while retaining its
+workspace path, size, and symlink confinement. `/files/reset-inputs` clears
+`/workspace/uploads` and `/workspace/skills` without touching downloaded images,
+generated outputs, or other workspace state.

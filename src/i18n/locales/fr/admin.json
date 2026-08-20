@@ -206,6 +206,7 @@
       "names": {
         "aivory_web_search": "Recherche web Aivory",
         "web_fetch": "Lire une page web",
+        "fetch_image": "Télécharger une image",
         "python_execute": "Interpréteur Python",
         "image_generate": "Génération d’images",
         "use_skill": "Utiliser une compétence",
@@ -214,6 +215,7 @@
       "descriptions": {
         "aivory_web_search": "Rechercher des informations récentes via le moteur configuré dans Aivory.",
         "web_fetch": "Lire le contenu principal d’une page web précise.",
+        "fetch_image": "Télécharger une image publique dans le bac à sable Python.",
         "python_execute": "Exécuter Python pour analyser, calculer et générer des fichiers.",
         "image_generate": "Générer ou modifier des images avec le modèle configuré.",
         "use_skill": "Charger à la demande les instructions complètes d’une compétence.",

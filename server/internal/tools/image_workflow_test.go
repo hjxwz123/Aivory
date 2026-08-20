@@ -69,6 +69,17 @@ func TestOpenAIImageContinuationUsesNearestBranchAndRegenerateIgnoresSibling(t *
 	}); err != nil {
 		t.Fatal(err)
 	}
+	pythonImage := sizedPNG(t, 48, 48)
+	pythonPath := filepath.Join(tool.artifactDir, "python-output.png")
+	if err := os.WriteFile(pythonPath, pythonImage, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateArtifact(context.Background(), tool.db, store.Artifact{
+		ID: "art_python", MessageID: "a_old", Filename: "python-output.png", StoragePath: pythonPath,
+		MimeType: "image/png", SizeBytes: int64(len(pythonImage)), Source: store.ArtifactSourcePythonExecute,
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	if got := tool.loadNearestBranchImage(context.Background(), &llm.ToolContext{DB: tool.db, ConvID: convID, MessageID: "a_regen"}); got != nil {
 		t.Fatal("regenerate assistant selected an image from its sibling response")
@@ -116,7 +127,7 @@ func TestOpenAIImageContinuationUsesNearestBranchAndRegenerateIgnoresSibling(t *
 		return imageSuccessResponse(string(body)), nil
 	})
 
-	if _, _, err := tool.Execute(context.Background(), []byte(`{"prompt":"replace everything"}`), &llm.ToolContext{
+	if _, _, err := tool.Execute(context.Background(), []byte(`{"prompt":"replace everything","input_images":["stale-artifact-id"]}`), &llm.ToolContext{
 		UserID: "u_flow", ConvID: convID, MessageID: "a_follow", ImageModelID: "m_flow", DB: tool.db,
 		ImageUserPrompt: "只把天空改成蓝色",
 	}); err != nil {

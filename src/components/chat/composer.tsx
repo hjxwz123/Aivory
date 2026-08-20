@@ -1871,10 +1871,12 @@ export function Composer({
     }))
     setAttachments((current) => [...current, ...candidates.map(({ attachment }) => attachment)])
 
-    // §4.6 prepare images before upload. Up to 3 MiB stays byte-for-byte intact;
-    // larger images are silently compressed under both the 3 MiB provider target
-    // and any stricter admin cap. Process sequentially so selecting several large
-    // photos cannot keep multiple decoded bitmaps/canvases resident at once.
+    // §4.6 prepare images before upload. Compatible formats through 3 MiB stay
+    // byte-for-byte intact; phone formats such as HEIC/HEIF are converted even
+    // when smaller because vision providers cannot reliably decode them. Larger
+    // images are compressed under both the provider target and any stricter
+    // admin cap. Process sequentially so several photos cannot keep multiple
+    // decoded bitmaps/canvases resident at once.
     // Non-image documents retain their existing hard pre-check.
     const limits = await getUploadLimits()
     if (!canUploadFilesRef.current) {
@@ -1899,22 +1901,33 @@ export function Composer({
     for (const candidate of candidates) {
       const preparedFile = isImageFileLike(candidate.file)
         ? await prepareImageForUpload(candidate.file, {
-            // The product default is byte-for-byte passthrough through 3 MiB.
-            // A deliberately stricter admin cap still remains authoritative.
+            // Compatible formats pass through byte-for-byte through 3 MiB. A
+            // deliberately stricter admin cap still remains authoritative.
             passthroughBytes: imagePassthroughBytes,
             targetBytes: imageTargetBytes,
           })
         : candidate.file
-      preparedCandidates.push({ ...candidate, file: preparedFile })
+      let preparedAttachment = candidate.attachment
       if (preparedFile !== candidate.file) {
+        if (candidate.attachment.previewUrl?.startsWith('blob:')) {
+          URL.revokeObjectURL(candidate.attachment.previewUrl)
+        }
+        preparedAttachment = {
+          ...candidate.attachment,
+          name: preparedFile.name,
+          size: preparedFile.size,
+          kind: classifyAttachmentKind(preparedFile.name, preparedFile.type),
+          previewUrl: URL.createObjectURL(preparedFile),
+        }
         setAttachments((current) =>
           current.map((attachment) =>
             attachment.id === candidate.attachment.id
-              ? { ...attachment, size: preparedFile.size }
+              ? preparedAttachment
               : attachment,
           ),
         )
       }
+      preparedCandidates.push({ file: preparedFile, attachment: preparedAttachment })
     }
 
     const overFile = preparedCandidates.filter(

@@ -213,7 +213,7 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 			status := "complete"
 			if r.Err != nil {
 				status = "error"
-				out = "Error: " + r.Err.Error()
+				out = publicToolErrorOutput(r.Err)
 			}
 			// §6.2 tool_result MUST include the upstream tool_use id so the UI
 			// can pair the result with the in-flight tool_call card. For Gemini

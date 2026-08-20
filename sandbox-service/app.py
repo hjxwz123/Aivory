@@ -765,8 +765,8 @@ def create_session(body: Optional[CreateBody] = Body(default=None)):
             "--label", f"aivory.created_at={int(time.time())}",
             # Runner isolation is an invariant, not an operator setting. The
             # sidecar remains reachable from the Go backend on its own service
-            # network, while user Python gets no Docker network namespace route
-            # and cannot bypass image-input policy with requests/curl.
+            # network, while user Python gets no Docker network namespace route.
+            # Public image downloads are mediated by the Go backend.
             "--network", "none",
             "--memory", MEMORY,
             "--memory-swap", MEMORY,
@@ -848,11 +848,11 @@ def create_session(body: Optional[CreateBody] = Body(default=None)):
         if _storage_effective(storage):
             _restore_workspace(session_id, storage)
             _remember_storage(session_id, storage)
-        # Legacy archives may contain user-uploaded or tool-fetched images under
-        # the server-managed input directories. Inputs are authoritative in the
-        # main application's database and are re-staged for every python call,
-        # so clear both directories after restore. /workspace/outputs is left
-        # untouched, preserving Python-generated PNGs and other artifacts.
+        # Inputs under /workspace/uploads and /workspace/skills are authoritative
+        # in the main application's database and are re-staged for every Python
+        # call, so clear both directories after restore. /workspace/downloads and
+        # /workspace/outputs are left untouched, preserving backend-fetched images
+        # and Python-generated artifacts.
         reset_error = _reset_input_dirs(name)
         if reset_error is not None:
             _docker(["rm", "-f", name], timeout=30)
@@ -961,13 +961,6 @@ def put_file(body: FilesBody):
         path = f"{WORKSPACE}/{path}"
     if not _safe_under_workspace(path):
         raise HTTPException(status_code=400, detail="path must be under /workspace")
-    # The sandbox upload API is only for non-image data and skill inputs. Images
-    # must travel through a vision-capable provider API; rejecting by both name
-    # and file signature prevents a caller from bypassing the Go-side filter by
-    # forging metadata or changing an extension.
-    if _looks_like_image_input(path, data):
-        raise HTTPException(status_code=415, detail="image files are not accepted as sandbox inputs")
-
     with _session_lock(sid):
         if not _is_running(sid):
             raise HTTPException(status_code=404, detail="session not found or not running")
@@ -1316,42 +1309,6 @@ def _collect_new_files(name: str, before: dict[str, str]) -> tuple[list[dict], s
 
 
 # --- Path safety ------------------------------------------------------------
-_IMAGE_INPUT_EXTENSIONS = {
-    ".apng", ".avif", ".bmp", ".cr2", ".cur", ".dng", ".eps", ".gif",
-    ".heic", ".heif", ".ico", ".jfif", ".jpe", ".jpeg", ".jpg", ".jxl",
-    ".nef", ".png", ".psd", ".raw", ".svg", ".tif", ".tiff", ".webp",
-}
-
-
-def _looks_like_image_input(path: str, data: bytes) -> bool:
-    """Recognise common image inputs without trusting caller-provided metadata."""
-    if os.path.splitext(path.lower())[1] in _IMAGE_INPUT_EXTENSIONS:
-        return True
-    head = data[:4096]
-    if head.startswith((b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"BM")):
-        return True
-    if head.startswith((b"II*\x00", b"MM\x00*", b"\x00\x00\x01\x00", b"\x00\x00\x02\x00")):
-        return True
-    if len(head) >= 12 and head[:4] == b"RIFF" and head[8:12] == b"WEBP":
-        return True
-    if head.startswith((b"\xff\x0a", b"\x00\x00\x00\x0cJXL \r\n\x87\n", b"8BPS")):
-        return True
-    # AVIF/HEIF use ISO-BMFF. Check the major/compatible brand area near ftyp.
-    if len(head) >= 12 and head[4:8] == b"ftyp":
-        brands = head[8:64]
-        if any(brand in brands for brand in (
-            b"avif", b"avis", b"heic", b"heix", b"hevc", b"hevx", b"heim",
-            b"heis", b"mif1", b"msf1",
-        )):
-            return True
-    # SVG is XML/text and therefore has no binary magic. Only inspect the head;
-    # this catches BOM/XML declarations and leading comments without scanning an
-    # arbitrary large text asset.
-    if re.search(br"<svg(?:\s|>)", head, flags=re.IGNORECASE):
-        return True
-    return False
-
-
 def _reset_input_dirs(name: str) -> Optional[str]:
     """Drop staged inputs while preserving /workspace/outputs and other state."""
     script = (

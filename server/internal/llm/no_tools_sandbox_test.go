@@ -81,7 +81,7 @@ func TestSandboxFilesHaveSheet(t *testing.T) {
 	}
 }
 
-func TestListSandboxFilesNeverAdvertisesImages(t *testing.T) {
+func TestListSandboxFilesAdvertisesOnlyVerifiedConversationImages(t *testing.T) {
 	ctx := context.Background()
 	db, err := store.Open(filepath.Join(t.TempDir(), "sandbox-files.db"))
 	if err != nil {
@@ -114,9 +114,19 @@ func TestListSandboxFilesNeverAdvertisesImages(t *testing.T) {
 	); err != nil {
 		t.Fatalf("seed legacy image bytes: %v", err)
 	}
+	verifiedPath := filepath.Join(t.TempDir(), "photo.png")
+	if err := os.WriteFile(verifiedPath, png, 0o600); err != nil {
+		t.Fatalf("write verified image: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,storage_path,kind) VALUES('verified-image','u1','c1','photo.png','image/png',? ,?,'image')`,
+		len(png), verifiedPath,
+	); err != nil {
+		t.Fatalf("seed verified image: %v", err)
+	}
 
 	files := listSandboxFiles(ctx, db, "c1", "u1")
-	want := map[string]string{"data.csv": "sheet", "notes.txt": "text"}
+	want := map[string]string{"data.csv": "sheet", "notes.txt": "text", "photo.png": "image"}
 	if len(files) != len(want) {
 		t.Fatalf("sandbox prompt files = %+v, want only non-images", files)
 	}
