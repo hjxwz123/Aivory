@@ -19,6 +19,7 @@ import (
 	"log"
 	"math"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -48,6 +49,14 @@ var (
 	inTopK                                 = envcfg.Int("AIVORY_TOOLS_IN_TOP_K", 5)
 	webFetchResponseBodyReadCap            = envcfg.Int64("AIVORY_TOOLS_WEB_FETCH_RESPONSE_BODY_READ_CAP", 256*1024)
 	webFetchExtractedTextCharCap           = envcfg.Int("AIVORY_TOOLS_WEB_FETCH_EXTRACTED_TEXT_CHAR_CAP", 32000)
+	// § web_fetch Jina fallback: when the origin is directly unreachable from
+	// THIS server (filtered/black-holed network, no route to the target), retry
+	// the read through a Jina Reader–compatible text-extraction endpoint, which
+	// fetches the page from its own hosts. The direct attempt gets its own short
+	// sub-timeout so a black-hole can't consume the whole tool budget. The base
+	// and switch read env at call time (webFetchJinaFallbackOn / webFetchJinaBase)
+	// so tests can override them.
+	webFetchDirectAttemptTimeout = envcfg.Dur("AIVORY_TOOLS_WEB_FETCH_DIRECT_TIMEOUT", 12*time.Second)
 	pythonExecuteUploadStagingFileSize     = envcfg.Int64("AIVORY_TOOLS_PYTHON_EXECUTE_UPLOAD_STAGING_FILE_SIZE", 40*1024*1024)
 	pythonExecuteStdoutStderrTruncationCap = envcfg.Int("AIVORY_TOOLS_PYTHON_EXECUTE_STDOUT_STDERR_TRUNCATION_CAP", 32*1024)
 	inSize                                 = envcfg.Str("AIVORY_TOOLS_IN_SIZE", "")
@@ -58,6 +67,17 @@ var (
 	fetchRemoteImageDownloadCap = envcfg.Int64("AIVORY_TOOLS_FETCHREMOTEIMAGE_DOWNLOAD_CAP", 32<<20)
 	saveMemoryConfidence        = envcfg.F64("AIVORY_TOOLS_CONFIDENCE", 0.95)
 )
+
+// webFetchJinaFallbackOn reports whether the Jina reader fallback is enabled.
+// Read at call time (not package init) so tests can flip it with t.Setenv.
+func webFetchJinaFallbackOn() bool {
+	return envcfg.Bool("AIVORY_TOOLS_WEB_FETCH_JINA_FALLBACK", true)
+}
+
+// webFetchJinaBase returns the Jina Reader–compatible base URL (call-time read).
+func webFetchJinaBase() string {
+	return envcfg.Str("AIVORY_TOOLS_WEB_FETCH_JINA_BASE", "https://r.jina.ai")
+}
 
 // webSearchTool implements §4.4 via a pluggable Searcher. When no backend is
 // configured it returns a polite placeholder so callers never crash.
@@ -98,8 +118,27 @@ func (t *webSearchTool) Execute(ctx context.Context, input []byte, _ *llm.ToolCo
 	return t.searcher.Search(ctx, in.Query, in.TopK)
 }
 
-// webFetchTool implements §4.4 with the SSRF guards.
-type webFetchTool struct{}
+// webFetchTool implements §4.4 with the SSRF guards. `direct`/`reader` round
+// trippers are nil in production (each falls back to the SSRF-safe client) and
+// only injected by tests to avoid real network I/O / port constraints.
+type webFetchTool struct {
+	direct http.RoundTripper
+	reader http.RoundTripper
+}
+
+func (t *webFetchTool) directClient() *http.Client {
+	if t.direct != nil {
+		return &http.Client{Transport: t.direct}
+	}
+	return ssrfSafeClient()
+}
+
+func (t *webFetchTool) readerClient() *http.Client {
+	if t.reader != nil {
+		return &http.Client{Transport: t.reader}
+	}
+	return ssrfSafeClient()
+}
 
 func (t *webFetchTool) Name() string { return "web_fetch" }
 func (t *webFetchTool) Description() string {
@@ -125,22 +164,117 @@ func (t *webFetchTool) Execute(ctx context.Context, input []byte, _ *llm.ToolCon
 	if p := u.Port(); p != "" && p != "80" && p != "443" {
 		return "", nil, &llm.ToolUserError{Message: "blocked non-web port"}
 	}
-	req, _ := http.NewRequestWithContext(ctx, "GET", in.URL, nil)
-	req.Header.Set("user-agent", "AivoryBot/1.0")
-	resp, err := ssrfSafeClient().Do(req)
+
+	// Direct attempt first, on its own short deadline: an unreachable origin
+	// (black-holed/filtered network) otherwise hangs until the whole tool budget
+	// is spent and leaves nothing for the Jina fallback below.
+	directCtx, cancel := context.WithTimeout(ctx, webFetchDirectAttemptTimeout)
+	text, err := t.attemptDirect(directCtx, u.String())
+	cancel()
+	if err == nil && strings.TrimSpace(text) != "" {
+		return text, nil, nil
+	}
+
+	// § web_fetch Jina fallback: retry through a reader service when the origin
+	// can't be read from this server (network failure, bot-blocked 4xx, or a
+	// JS-only page that yields no text). The target is re-validated for the
+	// reader hop — see jinaTargetAllowed.
+	if webFetchJinaFallbackOn() && jinaTargetAllowed(u) {
+		text, err = t.attemptJina(ctx, u.String())
+		if err == nil && strings.TrimSpace(text) != "" {
+			return text, nil, nil
+		}
+	}
+	return "", nil, err
+}
+
+// attemptDirect fetches the origin HTML, extracts readable text, and fails on
+// transport errors, non-2xx status, or an empty extraction.
+func (t *webFetchTool) attemptDirect(ctx context.Context, rawURL string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
 	if err != nil {
-		return "", nil, err
+		return "", err
+	}
+	req.Header.Set("user-agent", "AivoryBot/1.0")
+	resp, err := t.directClient().Do(req)
+	if err != nil {
+		return "", err
 	}
 	defer resp.Body.Close()
-	// Truncate after 256 KB — keeps tokens bounded.
-	limited := io.LimitReader(resp.Body, webFetchResponseBodyReadCap)
-	body, _ := io.ReadAll(limited)
-	text := stripHTML(string(body))
-	// Roughly cap at ~8K tokens (≈32K chars) per §4.4.
-	if len(text) > webFetchExtractedTextCharCap {
-		text = text[:webFetchExtractedTextCharCap] + "\n…[truncated]"
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("origin returned status %d", resp.StatusCode)
 	}
-	return text, nil, nil
+	// Truncate after 256 KB — keeps tokens bounded.
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, webFetchResponseBodyReadCap))
+	return capExtractedText(stripHTML(string(body))), nil
+}
+
+// attemptJina reads the page through the configured reader service (default
+// https://r.jina.ai/<url>), which renders content server-side (JS included)
+// and returns extracted text/markdown instead of raw HTML.
+func (t *webFetchTool) attemptJina(ctx context.Context, target string) (string, error) {
+	base := strings.TrimSpace(webFetchJinaBase())
+	if base == "" {
+		return "", errors.New("jina fallback disabled")
+	}
+	readerURL, err := jinaReaderURL(base, target)
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", readerURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("user-agent", "AivoryBot/1.0")
+	resp, err := t.readerClient().Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("reader returned status %d", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, webFetchResponseBodyReadCap))
+	return capExtractedText(strings.TrimSpace(string(body))), nil
+}
+
+// capExtractedText clips text to the per-§4.4 character budget on a rune
+// boundary (byte-slicing a Go string can split a UTF-8 sequence mid-rune).
+func capExtractedText(text string) string {
+	if r := []rune(text); len(r) > webFetchExtractedTextCharCap {
+		return string(r[:webFetchExtractedTextCharCap]) + "\n…[truncated]"
+	}
+	return text
+}
+
+// jinaReaderURL builds the reader URL for a target, e.g.
+// https://r.jina.ai/<url-encoded target>. The base is operator-configurable so
+// a self-hosted Jina-compatible reader can be pointed at.
+func jinaReaderURL(base, target string) (string, error) {
+	b, err := url.Parse(base)
+	if err != nil || b.Host == "" || (b.Scheme != "https" && b.Scheme != "http") {
+		return "", fmt.Errorf("invalid reader base %q", base)
+	}
+	return strings.TrimRight(base, "/") + "/" + url.PathEscape(target), nil
+}
+
+// jinaTargetAllowed re-asserts SSRF safety for the reader hop. The reader
+// resolves the target from ITS network, so the local dial-time public-IP guard
+// never sees the final address — check it here instead to keep cloud-metadata,
+// loopback and RFC1918 targets out of the fallback. The URL already passed the
+// scheme/port checks; a LOCAL resolution failure is not a block (the reader may
+// still resolve it), so unknown-but-plausible names still get a chance.
+func jinaTargetAllowed(target *url.URL) bool {
+	addrs, err := net.LookupHost(target.Hostname())
+	if err != nil {
+		return true
+	}
+	for _, a := range addrs {
+		if ip := net.ParseIP(a); ip != nil && isPublicIP(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 // scriptStyleRe removes <script>/<style>/<noscript>/<svg> blocks before tag
