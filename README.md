@@ -90,7 +90,7 @@ The sandbox keeps the same filesystem session across calls and conversation turn
 
 ### Persistent Python sandbox
 
-Every conversation has an isolated sandbox session. If an idle sandbox is recycled, Aivory provisions a new session, re-stages eligible files, and retries transparently. CSV, spreadsheets, text, and code may enter `/workspace/uploads`; user and generated images never enter the sandbox and are sent only through a vision model's native multimodal API.
+Every conversation has an isolated sandbox session. When Python is invoked, every conversation upload is staged with its original bytes in `/workspace/uploads`, including PDF, DOCX, PPTX, spreadsheets, text, code, and images. This lets the sandbox make targeted changes to an original document without first flattening its layout through text extraction. If an idle sandbox is recycled, Aivory provisions a new session, re-stages the files, and retries transparently.
 
 - Full Python standard library + preinstalled packages (pandas, matplotlib, python-pptx, …); runner networking is always disabled
 - `stdout` / `stderr` stream line-by-line while the code runs — you see progress, not just results

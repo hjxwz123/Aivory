@@ -194,4 +194,4 @@ sidecar 启动时还会发现已有的 `aivory.sandbox=1` 容器，因此 sideca
 
 当 `/sessions` 和 `DELETE /sessions/{id}` 请求携带 `storage` 块时，sidecar 会在 TTL 回收或显式销毁前归档持久工作区状态，并在下次创建 session 时恢复（设计 §4.5）。服务端管理的 `uploads` 和 `skills` 输入目录不会进入归档，旧归档恢复后也会立即清空这两个目录。归档对象键用 `/sessions` 下发的 **`archive_key`（会话 id）**作为文件名 `<prefix>/workspaces/<archive_key>.tgz`——因为每次创建都是新的 session id，用稳定的 `archive_key` 才能**跨回收恢复**工作区（§4.5-C G2）；未下发 `archive_key` 时回退用 session id。`provider` 为 `local`（默认）/ `s3` / `aliyun_oss`。这些操作都是 best-effort：无有效 `storage` 块即 no-op（回收即丢失），归档/恢复失败也不会让请求失败。
 
-`files[]` 产物是本次执行期间 Python 写入 `/workspace/outputs/` 的文件，格式为 `{name, mime_type, data_base64}`，其中可以包含 Python 生成的 PNG。`/files` 接受后端已授权的数据和图片输入，同时继续执行工作区路径、大小和符号链接限制。`/files/reset-inputs` 会清空 `/workspace/uploads` 与 `/workspace/skills`，但不会触碰已下载图片、生成产物或其他工作区状态。
+`files[]` 产物是本次执行期间 Python 写入 `/workspace/outputs/` 的文件，格式为 `{name, mime_type, data_base64}`，其中可以包含 Python 生成的 PNG。`/files` 接受后端已授权的任意允许格式的会话上传文件，同时继续执行工作区路径、大小和符号链接限制。`/files/reset-inputs` 会清空 `/workspace/uploads` 与 `/workspace/skills`，但不会触碰已下载图片、生成产物或其他工作区状态。

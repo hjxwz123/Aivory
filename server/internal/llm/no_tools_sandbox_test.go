@@ -81,7 +81,7 @@ func TestSandboxFilesHaveSheet(t *testing.T) {
 	}
 }
 
-func TestListSandboxFilesAdvertisesOnlyVerifiedConversationImages(t *testing.T) {
+func TestListSandboxFilesAdvertisesEveryConversationUpload(t *testing.T) {
 	ctx := context.Background()
 	db, err := store.Open(filepath.Join(t.TempDir(), "sandbox-files.db"))
 	if err != nil {
@@ -94,41 +94,24 @@ func TestListSandboxFilesAdvertisesOnlyVerifiedConversationImages(t *testing.T) 
 	for _, q := range []string{
 		`INSERT INTO users(id,email,password_hash,name) VALUES('u1','u1@example.com','hash','User')`,
 		`INSERT INTO conversations(id,user_id,title) VALUES('c1','u1','Test')`,
-		`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,storage_path,kind) VALUES('data','u1','c1','data.csv','text/csv','/tmp/data.csv','sheet')`,
-		`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,storage_path,kind) VALUES('renamed-image','u1','c1','renamed.csv','image/png','/tmp/renamed.csv','image')`,
-		`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,storage_path,kind) VALUES('photo','u1','c1','photo.png','image/png','/tmp/photo.png','image')`,
-		`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,storage_path,kind) VALUES('notes','u1','c1','notes.txt','text/plain','/tmp/notes.txt','text')`,
+		`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,storage_path,kind) VALUES('data','u1','c1','data.csv','text/csv',10,'/tmp/data.csv','sheet')`,
+		`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,storage_path,kind) VALUES('docx','u1','c1','original.docx','application/vnd.openxmlformats-officedocument.wordprocessingml.document',10,'/tmp/original.docx','document')`,
+		`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,storage_path,kind) VALUES('pptx','u1','c1','slides.pptx','application/vnd.openxmlformats-officedocument.presentationml.presentation',10,'/tmp/slides.pptx','document')`,
+		`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,storage_path,kind) VALUES('pdf','u1','c1','contract.pdf','application/pdf',10,'/tmp/contract.pdf','document')`,
+		`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,storage_path,kind) VALUES('photo','u1','c1','photo.png','image/png',10,'/tmp/photo.png','image')`,
+		`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,storage_path,kind) VALUES('large','u1','c1','large.bin','application/octet-stream',41943041,'/tmp/large.bin','file')`,
 	} {
 		if _, err := db.ExecContext(ctx, q); err != nil {
 			t.Fatalf("seed %q: %v", q, err)
 		}
 	}
-	legacyPath := filepath.Join(t.TempDir(), "legacy.csv")
-	png := append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 24)...)
-	if err := os.WriteFile(legacyPath, png, 0o600); err != nil {
-		t.Fatalf("write legacy image: %v", err)
-	}
-	if _, err := db.ExecContext(ctx,
-		`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,storage_path,kind) VALUES('legacy-image','u1','c1','legacy.csv','text/csv',? ,?,'sheet')`,
-		len(png), legacyPath,
-	); err != nil {
-		t.Fatalf("seed legacy image bytes: %v", err)
-	}
-	verifiedPath := filepath.Join(t.TempDir(), "photo.png")
-	if err := os.WriteFile(verifiedPath, png, 0o600); err != nil {
-		t.Fatalf("write verified image: %v", err)
-	}
-	if _, err := db.ExecContext(ctx,
-		`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,storage_path,kind) VALUES('verified-image','u1','c1','photo.png','image/png',? ,?,'image')`,
-		len(png), verifiedPath,
-	); err != nil {
-		t.Fatalf("seed verified image: %v", err)
-	}
-
 	files := listSandboxFiles(ctx, db, "c1", "u1")
-	want := map[string]string{"data.csv": "sheet", "notes.txt": "text", "photo.png": "image"}
+	want := map[string]string{
+		"data.csv": "sheet", "original.docx": "document", "slides.pptx": "document",
+		"contract.pdf": "document", "photo.png": "image",
+	}
 	if len(files) != len(want) {
-		t.Fatalf("sandbox prompt files = %+v, want only non-images", files)
+		t.Fatalf("sandbox prompt files = %+v, want every size-eligible upload", files)
 	}
 	for _, file := range files {
 		if want[file.Name] != file.Kind {
