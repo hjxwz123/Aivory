@@ -58,7 +58,7 @@ for html in slides_html:  # one string per slide, e.g. "<h1>Title</h1><p>Subtitl
         r.font.color.rgb = RGBColor.from_string("0f172a" if r.font.bold else "1f2937")
 prs.save("/workspace/outputs/deck.pptx")
 ` + docGenFence + `
-Map <table> via slide.shapes.add_table likewise. Charts/diagrams: render them inside Python (for example, a matplotlib PNG under /workspace/outputs) and then add_picture. Verified user-uploaded images from this conversation are available under /workspace/uploads and can be opened with Pillow or embedded with add_picture. Public images downloaded with fetch_image are available under /workspace/downloads. Prior generated-image artifacts are not copied into the sandbox automatically. Other supported conversation data uploads are also available under /workspace/uploads.
+Map <table> via slide.shapes.add_table likewise. Charts/diagrams: render them inside Python (for example, a matplotlib PNG under /workspace/outputs) and then add_picture. Every original conversation upload, including PDF/DOCX/PPTX/XLSX and images, is available without format conversion under /workspace/uploads. For a targeted edit, open that original file with the matching library, change only the requested content, and save the result under /workspace/outputs so its existing layout and formatting are retained. Prior image-generation outputs are also staged under /workspace/uploads; public images downloaded with fetch_image are available under /workspace/downloads.
 
 **Word (.docx):** python-docx — set doc.styles['Normal'].font.name = 'Noto Sans CJK SC' (size Pt(11)), then add_heading / add_paragraph / add_table / add_picture.
 

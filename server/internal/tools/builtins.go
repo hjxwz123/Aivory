@@ -46,9 +46,9 @@ import (
 // Env-overridable defaults (see docs/config-reference.md). Each falls back to
 // its documented default when the corresponding AIVORY_* variable is unset.
 var (
-	inTopK                                 = envcfg.Int("AIVORY_TOOLS_IN_TOP_K", 5)
-	webFetchResponseBodyReadCap            = envcfg.Int64("AIVORY_TOOLS_WEB_FETCH_RESPONSE_BODY_READ_CAP", 256*1024)
-	webFetchExtractedTextCharCap           = envcfg.Int("AIVORY_TOOLS_WEB_FETCH_EXTRACTED_TEXT_CHAR_CAP", 32000)
+	inTopK                       = envcfg.Int("AIVORY_TOOLS_IN_TOP_K", 5)
+	webFetchResponseBodyReadCap  = envcfg.Int64("AIVORY_TOOLS_WEB_FETCH_RESPONSE_BODY_READ_CAP", 256*1024)
+	webFetchExtractedTextCharCap = envcfg.Int("AIVORY_TOOLS_WEB_FETCH_EXTRACTED_TEXT_CHAR_CAP", 32000)
 	// § web_fetch Jina fallback: when the origin is directly unreachable from
 	// THIS server (filtered/black-holed network, no route to the target), retry
 	// the read through a Jina Reader–compatible text-extraction endpoint, which
@@ -56,7 +56,7 @@ var (
 	// sub-timeout so a black-hole can't consume the whole tool budget. The base
 	// and switch read env at call time (webFetchJinaFallbackOn / webFetchJinaBase)
 	// so tests can override them.
-	webFetchDirectAttemptTimeout = envcfg.Dur("AIVORY_TOOLS_WEB_FETCH_DIRECT_TIMEOUT", 12*time.Second)
+	webFetchDirectAttemptTimeout           = envcfg.Dur("AIVORY_TOOLS_WEB_FETCH_DIRECT_TIMEOUT", 12*time.Second)
 	pythonExecuteUploadStagingFileSize     = envcfg.Int64("AIVORY_TOOLS_PYTHON_EXECUTE_UPLOAD_STAGING_FILE_SIZE", 40*1024*1024)
 	pythonExecuteStdoutStderrTruncationCap = envcfg.Int("AIVORY_TOOLS_PYTHON_EXECUTE_STDOUT_STDERR_TRUNCATION_CAP", 32*1024)
 	inSize                                 = envcfg.Str("AIVORY_TOOLS_IN_SIZE", "")
@@ -637,7 +637,7 @@ type pythonExecuteTool struct {
 
 func (t *pythonExecuteTool) Name() string { return "python_execute" }
 func (t *pythonExecuteTool) Description() string {
-	return "Run Python in a persistent sandbox for math, data analysis, image editing, plotting, spreadsheet/CSV processing, and generating downloadable files (PDF/PPTX/DOCX/XLSX/PNG). The session and its /workspace persist across calls AND across turns in this conversation, so call it several times in a row — inspect the inputs first, then edit or compute, and read again differently if the first attempt doesn't fit. Supported data uploads, verified user-uploaded images, and prior image-generation outputs from this conversation are staged in /workspace/uploads/; public images fetched with fetch_image are stored in /workspace/downloads/. Run `import os; os.listdir('/workspace/uploads')` and inspect /workspace/downloads when needed, then use the real paths (for example Pillow for images, pandas.read_csv / pandas.read_excel for tables). Write outputs, including edited images, plots, and documents, to /workspace/outputs to return them as downloadable artifacts. Stdout/stderr is returned."
+	return "Run Python in a persistent sandbox for math, data analysis, image editing, plotting, spreadsheet/CSV processing, editing existing PDF/Office documents, and generating downloadable files (PDF/PPTX/DOCX/XLSX/PNG). The session and its /workspace persist across calls AND across turns in this conversation, so call it several times in a row — inspect the inputs first, then edit or compute, and read again differently if the first attempt doesn't fit. Every conversation upload, including the original PDF/DOCX/PPTX/XLSX file, is staged without format conversion in /workspace/uploads/; prior image-generation outputs are staged there too, and public images fetched with fetch_image are stored in /workspace/downloads/. Run `import os; os.listdir('/workspace/uploads')` and inspect /workspace/downloads when needed, then use the real paths (for example python-docx/python-pptx/pypdf for documents, Pillow for images, and pandas for tables). Preserve the original file's layout and formatting when the user asks for a targeted edit. Write outputs, including edited images, plots, and documents, to /workspace/outputs to return them as downloadable artifacts. Stdout/stderr is returned."
 }
 func (t *pythonExecuteTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"code":{"type":"string"}},"required":["code"]}`)
@@ -718,10 +718,11 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		unlockConv()
 	}
 
-	// Reset the persistent input namespaces, then stage the conversation's
-	// current data files and verified user-uploaded images into
-	// /workspace/uploads. Reset prevents stale inputs from surviving deletion or
-	// permission changes between calls.
+	// Reset the persistent input namespaces, then stage every current
+	// conversation upload into /workspace/uploads. Keeping the original bytes is
+	// important for targeted edits to Office/PDF files where parsing and
+	// regenerating content would discard layout and formatting. Reset prevents
+	// stale inputs from surviving deletion or permission changes between calls.
 	stageFiles := func(sid string) error {
 		if err := t.sandbox.ResetInputs(ctx, sid); err != nil {
 			return fmt.Errorf("reset sandbox inputs: %w", err)
@@ -754,31 +755,14 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		}
 		if files, err := store.ListFilesByConversation(ctx, tc.DB, tc.ConvID, tc.UserID); err == nil {
 			for _, f := range files {
-				// Only data-oriented inputs and explicit image rows are eligible.
-				// Image rows must also pass byte-signature verification below; legacy
-				// text/data rows containing disguised image bytes remain excluded.
-				spreadsheetName := false
-				switch strings.ToLower(filepath.Ext(strings.TrimSpace(f.Filename))) {
-				case ".csv", ".tsv", ".xlsx", ".xls", ".xlsm":
-					spreadsheetName = true
-				}
-				imageMetadata := conversationImageMetadata(f.Kind, f.MimeType)
-				dataInput := f.Kind == "sheet" || f.Kind == "text" || f.Kind == "code" || spreadsheetName
-				if !dataInput && !imageMetadata {
-					continue
-				}
 				data, err := readSandboxUpload(f.StoragePath, f.SizeBytes, pythonExecuteUploadStagingFileSize, t.uploadDir)
 				if err != nil {
 					continue
 				}
-				verifiedImage := verifiedImageMIMEFromBytes(data) != ""
-				if imageMetadata && !verifiedImage {
-					continue
+				dest := "/workspace/uploads/" + uniqueName(f.Filename)
+				if err := t.sandbox.PutFile(ctx, sid, dest, data); err != nil {
+					return fmt.Errorf("stage conversation upload %q: %w", f.Filename, err)
 				}
-				if !imageMetadata && verifiedImage {
-					continue
-				}
-				_ = t.sandbox.PutFile(ctx, sid, "/workspace/uploads/"+uniqueName(f.Filename), data)
 			}
 		}
 		// Generated images are artifacts rather than rows in files. Mount only
@@ -981,14 +965,6 @@ func reusableGeneratedImageSource(source string) bool {
 	default:
 		return false
 	}
-}
-
-// conversationImageMetadata deliberately ignores the filename extension. A
-// legacy text/data row named "photo.png" is not enough authority to cross the
-// image boundary; uploads are classified server-side and carry kind/MIME.
-func conversationImageMetadata(kind, mimeType string) bool {
-	return strings.EqualFold(strings.TrimSpace(kind), "image") ||
-		strings.HasPrefix(strings.ToLower(strings.TrimSpace(strings.SplitN(mimeType, ";", 2)[0])), "image/")
 }
 
 // saveArtifact writes a tool-produced file to ArtifactDir, records it, and

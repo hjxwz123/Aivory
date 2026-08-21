@@ -4925,9 +4925,8 @@ type systemPromptOpts struct {
 	SkillsFull          []SkillFull
 	Memories            []store.Memory
 	ProjectFiles        []ProjectFileSummary
-	// SandboxFiles are supported conversation data files and verified uploaded
-	// images staged at /workspace/uploads. Listed only when python_execute is
-	// enabled.
+	// SandboxFiles are the original conversation uploads staged at
+	// /workspace/uploads. Listed only when python_execute is enabled.
 	SandboxFiles []ProjectFileSummary
 	// Persona is the user's personalization (tone traits + custom instructions
 	// + nickname). Empty fields render nothing.
@@ -5923,38 +5922,26 @@ func (o *Orchestrator) forcedWebSearch(ctx context.Context, req RunRequest, conv
 	return "<web-search-result>\n" + strings.TrimSpace(b.String()) + "\n</web-search-result>", cites
 }
 
-// listSandboxFiles returns the conversation's sandbox-staged files (the same
-// kinds tools.pythonExecuteTool stages: sheet/text/code/image). Shared by the
-// system-prompt listing and the no-tools forced read. Filename detection keeps
-// older rows usable when their stored kind predates the sheet classifier.
+// listSandboxFiles returns every conversation upload eligible for sandbox
+// staging. The original bytes are made available regardless of format so
+// Python can perform targeted edits without reconstructing Office/PDF files.
+// Shared by the system-prompt listing and the no-tools forced read.
 func listSandboxFiles(ctx context.Context, db *sql.DB, convID, userID string, roots ...string) []ProjectFileSummary {
 	out := []ProjectFileSummary{}
 	convFiles, err := store.ListFilesByConversation(ctx, db, convID, userID)
 	if err == nil {
 		for _, f := range convFiles {
-			metadataImage := strings.EqualFold(strings.TrimSpace(f.Kind), "image") ||
-				strings.HasPrefix(strings.ToLower(strings.TrimSpace(strings.SplitN(f.MimeType, ";", 2)[0])), "image/")
-			verifiedImage := storedSandboxFileLooksLikeImage(f, roots...)
-			if metadataImage {
-				if verifiedImage && f.SizeBytes >= 0 && f.SizeBytes <= sandboxUploadStagingFileSize {
-					out = append(out, ProjectFileSummary{Name: f.Filename, Kind: "image"})
-				}
+			if f.SizeBytes < 0 || f.SizeBytes > sandboxUploadStagingFileSize {
 				continue
 			}
-			// A legacy text/data row containing image bytes is deliberately not
-			// advertised or staged. Image access requires explicit server-owned image
-			// metadata plus a matching byte signature.
-			if verifiedImage {
-				continue
+			kind := strings.TrimSpace(f.Kind)
+			if kind == "" {
+				kind = strings.TrimSpace(f.MimeType)
 			}
-			if isSandboxSpreadsheetFilename(f.Filename) {
-				out = append(out, ProjectFileSummary{Name: f.Filename, Kind: "sheet"})
-				continue
+			if kind == "" {
+				kind = "file"
 			}
-			switch f.Kind {
-			case "sheet", "text", "code":
-				out = append(out, ProjectFileSummary{Name: f.Filename, Kind: f.Kind})
-			}
+			out = append(out, ProjectFileSummary{Name: f.Filename, Kind: kind})
 		}
 	}
 	if artifacts, err := store.ListImageArtifactsByConversation(ctx, db, convID, userID); err == nil {
@@ -5996,24 +5983,6 @@ func storedSandboxArtifactLooksLikeImage(artifact store.Artifact, roots ...strin
 	defer f.Close()
 	data, err := io.ReadAll(io.LimitReader(f, sandboxUploadStagingFileSize+1))
 	return err == nil && int64(len(data)) <= sandboxUploadStagingFileSize && providerImageMIMEFromBytes(data) != ""
-}
-
-func storedSandboxFileLooksLikeImage(file store.File, roots ...string) bool {
-	safePath, err := resolveLLMStoragePath(file.StoragePath, roots...)
-	if err != nil {
-		return false
-	}
-	f, err := os.Open(safePath)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil || info.Size() < 0 || info.Size() > sandboxUploadStagingFileSize {
-		return false
-	}
-	head, err := io.ReadAll(io.LimitReader(f, 4096))
-	return err == nil && providerImageMIMEFromBytes(head) != ""
 }
 
 func isSandboxSpreadsheetFilename(name string) bool {

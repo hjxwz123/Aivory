@@ -33,6 +33,7 @@ type recordingSandbox struct {
 	resetErrors []error
 	newSessions int
 	putFiles    []stagedSandboxFile
+	putErr      error
 	execCalls   int
 	execResult  *sandbox.Result
 }
@@ -51,7 +52,7 @@ func (s *recordingSandbox) Exec(context.Context, string, string) (*sandbox.Resul
 }
 func (s *recordingSandbox) PutFile(_ context.Context, _ string, path string, data []byte) error {
 	s.putFiles = append(s.putFiles, stagedSandboxFile{path: path, data: append([]byte(nil), data...)})
-	return nil
+	return s.putErr
 }
 func (s *recordingSandbox) ResetInputs(context.Context, string) error {
 	s.resetCalls++
@@ -104,7 +105,7 @@ func TestSandboxImageInputClassificationUsesMetadataExtensionAndBytes(t *testing
 	}
 }
 
-func TestPythonExecuteResetsInputsAndStagesVerifiedConversationImages(t *testing.T) {
+func TestPythonExecuteResetsInputsAndStagesEveryConversationUpload(t *testing.T) {
 	ctx := context.Background()
 	db := openToolsTestDB(t)
 	root := t.TempDir()
@@ -124,6 +125,9 @@ func TestPythonExecuteResetsInputsAndStagesVerifiedConversationImages(t *testing
 		"csv":           write("rows.csv", []byte("a,b\n1,2\n")),
 		"image":         write("photo.png", png),
 		"forged":        write("payload.dat", png),
+		"docx":          write("original.docx", []byte("PK\x03\x04docx-original")),
+		"pptx":          write("slides.pptx", []byte("PK\x03\x04pptx-original")),
+		"pdf":           write("contract.pdf", []byte("%PDF-1.7\npdf-original")),
 		"imageArtifact": write(filepath.Join("artifacts", "generated.png"), png),
 		"skillText":     write(filepath.Join("skill-assets", "helper.py"), []byte("print('ok')\n")),
 		"skillImage":    write(filepath.Join("skill-assets", "reference.bin"), png),
@@ -155,6 +159,9 @@ func TestPythonExecuteResetsInputsAndStagesVerifiedConversationImages(t *testing
 		{`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,storage_path,kind) VALUES('f_csv','u1','c1','rows.csv','text/csv',?,?, 'sheet')`, []any{len("a,b\n1,2\n"), paths["csv"]}},
 		{`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,storage_path,kind) VALUES('f_img','u1','c1','photo.png','image/png',?,?, 'image')`, []any{len(png), paths["image"]}},
 		{`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,storage_path,kind) VALUES('f_forged','u1','c1','payload.dat','text/plain',?,?, 'text')`, []any{len(png), paths["forged"]}},
+		{`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,storage_path,kind) VALUES('f_docx','u1','c1','original.docx','application/vnd.openxmlformats-officedocument.wordprocessingml.document',?,?, 'document')`, []any{len("PK\x03\x04docx-original"), paths["docx"]}},
+		{`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,storage_path,kind) VALUES('f_pptx','u1','c1','slides.pptx','application/vnd.openxmlformats-officedocument.presentationml.presentation',?,?, 'document')`, []any{len("PK\x03\x04pptx-original"), paths["pptx"]}},
+		{`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,storage_path,kind) VALUES('f_pdf','u1','c1','contract.pdf','application/pdf',?,?, 'document')`, []any{len("%PDF-1.7\npdf-original"), paths["pdf"]}},
 		{`INSERT INTO artifacts(id,message_id,filename,storage_path,mime_type,size_bytes) VALUES('art1','msg1','generated.png',?,'image/png',?)`, []any{paths["imageArtifact"], len(png)}},
 		{`INSERT INTO artifacts(id,message_id,filename,storage_path,mime_type,size_bytes,source) VALUES('art_python','msg1','python.png',?,'image/png',?,'python_execute')`, []any{paths["imageArtifact"], len(png)}},
 		{`INSERT INTO skills(id,name,description,instructions,assets,enabled) VALUES('sk1','Data helper','desc','instructions',?,1)`, []any{string(assets)}},
@@ -191,19 +198,31 @@ func TestPythonExecuteResetsInputsAndStagesVerifiedConversationImages(t *testing
 	wantPaths := map[string]bool{
 		"/workspace/uploads/rows.csv":                true,
 		"/workspace/uploads/photo.png":               true,
+		"/workspace/uploads/payload.dat":             true,
+		"/workspace/uploads/original.docx":           true,
+		"/workspace/uploads/slides.pptx":             true,
+		"/workspace/uploads/contract.pdf":            true,
 		"/workspace/uploads/generated-generated.png": true,
 		"/workspace/skills/Data helper/helper.py":    true,
 		"/workspace/skills/Denied helper/denied.py":  true,
 	}
 	if len(fake.putFiles) != len(wantPaths) {
-		t.Fatalf("staged paths = %+v, want data, verified conversation image and skill files", fake.putFiles)
+		t.Fatalf("staged paths = %+v, want every conversation upload plus eligible generated/skill files", fake.putFiles)
 	}
 	for _, staged := range fake.putFiles {
 		if !wantPaths[staged.path] {
 			t.Errorf("unexpected staged input %q", staged.path)
 		}
-		if strings.Contains(staged.path, "/uploads/") && staged.path != "/workspace/uploads/photo.png" && staged.path != "/workspace/uploads/generated-generated.png" && isSandboxImageInput(staged.path, "", "", staged.data) {
-			t.Errorf("disguised image bytes reached PutFile at %q", staged.path)
+	}
+	for path, original := range map[string][]byte{
+		"/workspace/uploads/original.docx": []byte("PK\x03\x04docx-original"),
+		"/workspace/uploads/slides.pptx":   []byte("PK\x03\x04pptx-original"),
+		"/workspace/uploads/contract.pdf":  []byte("%PDF-1.7\npdf-original"),
+	} {
+		for _, staged := range fake.putFiles {
+			if staged.path == path && !bytes.Equal(staged.data, original) {
+				t.Errorf("%s was not staged with its original bytes", path)
+			}
 		}
 	}
 	if outputArtifact.MimeType != "image/png" {
@@ -241,8 +260,12 @@ func TestPythonExecuteResetsInputsAndStagesVerifiedConversationImages(t *testing
 	if err != nil {
 		t.Fatalf("Execute with use_skill denied: %v", err)
 	}
-	if len(deniedFake.putFiles) != 3 || deniedFake.putFiles[0].path != "/workspace/uploads/rows.csv" || deniedFake.putFiles[1].path != "/workspace/uploads/photo.png" || deniedFake.putFiles[2].path != "/workspace/uploads/generated-generated.png" {
-		t.Fatalf("use_skill denial staged model skill assets: %+v", deniedFake.putFiles)
+	deniedPaths := map[string]bool{}
+	for _, staged := range deniedFake.putFiles {
+		deniedPaths[staged.path] = true
+	}
+	if len(deniedPaths) != 7 || !deniedPaths["/workspace/uploads/original.docx"] || !deniedPaths["/workspace/uploads/slides.pptx"] || !deniedPaths["/workspace/uploads/contract.pdf"] || !deniedPaths["/workspace/uploads/generated-generated.png"] {
+		t.Fatalf("use_skill denial did not preserve all ordinary uploads: %+v", deniedFake.putFiles)
 	}
 }
 
@@ -255,6 +278,42 @@ func TestPythonExecuteFailsClosedWhenPersistentInputsCannotBeReset(t *testing.T)
 	}
 	if fake.execCalls != 0 {
 		t.Fatalf("Exec ran %d time(s) despite reset failure", fake.execCalls)
+	}
+}
+
+func TestPythonExecuteDoesNotRunWhenConversationUploadCannotBeStaged(t *testing.T) {
+	ctx := context.Background()
+	db := openToolsTestDB(t)
+	root := t.TempDir()
+	docx := []byte("PK\x03\x04docx-original")
+	path := filepath.Join(root, "original.docx")
+	if err := os.WriteFile(path, docx, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range []string{
+		`INSERT INTO users(id,email,password_hash,name) VALUES('u1','u1@example.com','hash','User')`,
+		`INSERT INTO conversations(id,user_id,title) VALUES('c1','u1','Test')`,
+		`INSERT INTO messages(id,conversation_id,role,author_id,status) VALUES('m1','c1','assistant','u1','streaming')`,
+	} {
+		if _, err := db.ExecContext(ctx, query); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,storage_path,kind) VALUES('docx','u1','c1','original.docx','application/vnd.openxmlformats-officedocument.wordprocessingml.document',?,?, 'document')`,
+		len(docx), path,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	fake := &recordingSandbox{putErr: errors.New("sidecar rejected upload")}
+	tool := &pythonExecuteTool{sandbox: fake, uploadDir: root, logger: log.New(io.Discard, "", 0)}
+	_, _, err := tool.Execute(ctx, []byte(`{"code":"print(1)"}`), &llm.ToolContext{DB: db, UserID: "u1", ConvID: "c1", MessageID: "m1"})
+	if err == nil || !strings.Contains(err.Error(), `stage conversation upload "original.docx"`) {
+		t.Fatalf("Execute error = %v, want conversation upload staging failure", err)
+	}
+	if fake.execCalls != 0 {
+		t.Fatalf("Exec ran %d time(s) despite upload staging failure", fake.execCalls)
 	}
 }
 
