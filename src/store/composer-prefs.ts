@@ -38,6 +38,8 @@ interface ComposerPrefsStore extends PersistedComposerPrefs {
   setDefaultToolMode: (toolMode: ToolMode) => void
   setForceWebSearch: (on: boolean) => void
   setSelectedToolIds: (modelId: string, ids: string[] | undefined) => void
+  /** Restore the account/model defaults before starting an unrelated chat. */
+  resetForNewConversation: () => void
   setParamValues: (modelId: string, values: Record<string, unknown>) => void
   setDraft: (scope: string, value: string) => void
   clearDraft: (scope: string) => void
@@ -258,6 +260,22 @@ export const useComposerPrefs = create<ComposerPrefsStore>((set) => {
         return { selectedToolIdsByModel }
       })
     },
+    resetForNewConversation() {
+      set((state) => {
+        const toolMode = state.defaultToolMode
+        const patch: Partial<PersistedComposerPrefs> = {
+          toolMode,
+          forceWebSearch: false,
+          // A chosen subset is a turn override, not the next conversation's
+          // model default. Clear every model so changing models in the new
+          // conversation cannot revive a stale selection either.
+          selectedToolIdsByModel: {},
+        }
+        if (toolMode !== 'enabled') patch.mode = 'default'
+        persistPrefs(persistedFrom(state, patch))
+        return patch
+      })
+    },
     setParamValues(modelId, values) {
       const id = modelId.trim()
       if (!id) return
@@ -301,8 +319,7 @@ export const useComposerPrefs = create<ComposerPrefsStore>((set) => {
   }
 })
 
-/** Reset the live per-turn policy when the user explicitly starts a new chat. */
-export function resetComposerToolModeToDefault(): void {
-  const prefs = useComposerPrefs.getState()
-  prefs.setToolMode(prefs.defaultToolMode)
+/** Restore all composer tool preferences when the user explicitly starts a new chat. */
+export function resetComposerForNewConversation(): void {
+  useComposerPrefs.getState().resetForNewConversation()
 }

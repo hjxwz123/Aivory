@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { parsePersistedComposerPrefs, resetComposerToolModeToDefault, useComposerPrefs } from '@/store/composer-prefs'
+import { parsePersistedComposerPrefs, resetComposerForNewConversation, useComposerPrefs } from '@/store/composer-prefs'
 import {
   modelAllowsToolModeSelection,
   normalizeToolModeForCapabilities,
@@ -75,12 +75,26 @@ describe('composer tool mode', () => {
     expect(useComposerPrefs.getState().forceWebSearch).toBe(false)
   })
 
-  it('resets every new-chat entry to the complete account default', () => {
-    useComposerPrefs.setState({ defaultToolMode: 'enabled', toolMode: 'disabled', forceWebSearch: true })
+  it('resets every new-chat entry to the complete account default and drops per-model tool overrides', () => {
+    const setItem = vi.fn()
+    vi.stubGlobal('window', {})
+    vi.stubGlobal('localStorage', { setItem })
+    useComposerPrefs.setState({
+      defaultToolMode: 'enabled',
+      toolMode: 'disabled',
+      forceWebSearch: true,
+      selectedToolIdsByModel: {
+        model_1: ['builtin:aivory_web_search'],
+        model_2: [],
+      },
+    })
 
-    resetComposerToolModeToDefault()
+    resetComposerForNewConversation()
 
     expect(useComposerPrefs.getState()).toMatchObject({ toolMode: 'enabled', forceWebSearch: false })
+    expect(useComposerPrefs.getState().selectedToolIdsByModel).toEqual({})
+    const [, persisted] = setItem.mock.lastCall ?? []
+    expect(JSON.parse(String(persisted)).selectedToolIdsByModel).toEqual({})
   })
 
   it('allows forced search only while tools are disabled', () => {
