@@ -33,7 +33,7 @@ import { useCommandMenu } from '@/hooks/use-command-menu'
 import { useOpenSettings } from '@/hooks/use-open-settings'
 import { searchApi, type SearchHit } from '@/api'
 import { useConversations, sameConvListShape } from '@/store/conversations'
-import { resetComposerToolModeToDefault } from '@/store/composer-prefs'
+import { resetComposerForNewConversation } from '@/store/composer-prefs'
 import { useProjects } from '@/store/projects'
 import { useTheme } from '@/store/theme'
 import { useSettings } from '@/store/settings'
@@ -193,7 +193,7 @@ export function CommandMenu() {
                 <CommandItem
                   onSelect={() =>
                     run(() => {
-                      resetComposerToolModeToDefault()
+                      resetComposerForNewConversation()
                       navigate('/')
                     })
                   }

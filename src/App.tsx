@@ -14,6 +14,7 @@ import SettingsDialog from '@/pages/settings/SettingsLayout'
 import { useCommandMenu } from '@/hooks/use-command-menu'
 import { useHotkeys } from '@/hooks/use-hotkeys'
 import { useConversations } from '@/store/conversations'
+import { resetComposerForNewConversation } from '@/store/composer-prefs'
 import { useUI } from '@/store/ui'
 import { useSettingsModal } from '@/store/settings-modal'
 import { initAppUpdate, maybeApplyUpdate } from '@/lib/app-update'
@@ -99,6 +100,7 @@ function GlobalShortcuts() {
       whenInputFocused: true,
       handler: () => {
         void (async () => {
+          resetComposerForNewConversation()
           const c = await createConversation()
           if (c) navigate(`/chat/${c.id}`)
         })()

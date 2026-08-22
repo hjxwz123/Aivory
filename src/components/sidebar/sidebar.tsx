@@ -66,7 +66,7 @@ import { Input } from '@/components/ui/input'
 import { NewProjectDialog } from '@/components/projects/new-project-dialog'
 import { MoveToProjectSub } from '@/components/projects/move-to-project-menu'
 import { useConversations, sameConvListShape } from '@/store/conversations'
-import { resetComposerToolModeToDefault } from '@/store/composer-prefs'
+import { resetComposerForNewConversation } from '@/store/composer-prefs'
 import { useProjects } from '@/store/projects'
 import { useModels } from '@/store/models'
 import { useSettings } from '@/store/settings'
@@ -341,9 +341,9 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
   }, [activeConversations, collapsed, currentId, expandedProjectIds, reducedMotion])
 
   function startNewChat() {
-    // A new chat starts from the account's exact three-state default, even when
-    // the previous conversation used a per-turn override.
-    resetComposerToolModeToDefault()
+    // A new chat starts from model defaults, never a prior conversation's
+    // per-model hand-picked tool subset.
+    resetComposerForNewConversation()
     // Go to the empty home screen — the conversation is created only when the
     // user sends the first message, so clicking "New chat" never piles up blank
     // conversations.
@@ -391,7 +391,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
               <Link
                 to="/"
                 onClick={() => {
-                  resetComposerToolModeToDefault()
+                  resetComposerForNewConversation()
                   onClose?.()
                 }}
                 className="inline-flex min-w-0 items-center gap-2"
@@ -420,7 +420,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             key="personal"
             to="/"
             onClick={() => {
-              resetComposerToolModeToDefault()
+              resetComposerForNewConversation()
               onClose?.()
             }}
             className="page-enter inline-flex items-center"
@@ -430,7 +430,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
           </Link>
           )
         ) : (
-          <Link to="/" onClick={resetComposerToolModeToDefault} className="mx-auto" aria-label={tCommon('aria.homeLink')}>
+          <Link to="/" onClick={resetComposerForNewConversation} className="mx-auto" aria-label={tCommon('aria.homeLink')}>
             <LogoMark size={22} />
           </Link>
         )}
