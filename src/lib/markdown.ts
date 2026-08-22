@@ -389,6 +389,27 @@ export function tokenizeMarkdown(md: string, breaks = false): MarkdownBlock[] {
   return blocks
 }
 
+export function normalizeThinkingMarkdown(md: string): string {
+  if (!md) return md
+  let s = md.replace(/\r\n/g, '\n')
+  const fences: string[] = []
+  s = s.replace(/```[\s\S]*?```/g, (m) => {
+    const i = fences.length
+    fences.push(m)
+    return `@@FENCE${i}@@`
+  })
+
+  s = s.replace(/([^\n])\s*(?=#{1,6}\s)/g, '$1\n\n')
+
+  const bolds = s.match(/\*\*[^*\n]+?\*\*/g)
+  if (bolds && bolds.length >= 2) s = s.replace(/([^\n])\s*(?=\*\*[^*\n]+?\*\*)/g, '$1\n\n')
+  s = s.replace(/([^\n])\s*(?=(?:-|\*)\s+\S)/g, '$1\n\n')
+  s = s.replace(/([^\n])\s*(?=\d+\.\s+\S)/g, '$1\n\n')
+  s = s.replace(/\n{3,}/g, '\n\n')
+  s = s.replace(/@@FENCE(\d+)@@/g, (_, i) => fences[Number(i)] ?? '')
+  return s
+}
+
 // lexInto runs marked's block lexer over a text segment and appends the mapped
 // blocks. Split out so tokenizeMarkdown can interleave extracted math blocks.
 function lexInto(blocks: MarkdownBlock[], md: string, breaks = false): void {

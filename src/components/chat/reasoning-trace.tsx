@@ -14,6 +14,7 @@ import {
   AlertTriangle,
 } from 'lucide-react'
 import type { ReasoningItem, ToolCall } from '@/types/chat'
+import { normalizeThinkingMarkdown } from '@/lib/markdown'
 import { Markdown } from './markdown'
 import { cn } from '@/lib/utils'
 import {
@@ -124,7 +125,7 @@ export function ReasoningTrace({ reasoning, streaming = false, settled = false }
                 return (
                   <Markdown
                     key={it.id}
-                    content={it.text}
+                    content={normalizeThinkingMarkdown(it.text)}
                     live={streaming}
                     breaks
                     className={cn(
