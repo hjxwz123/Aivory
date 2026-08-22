@@ -127,19 +127,179 @@ func TestOpenAIImageContinuationUsesNearestBranchAndRegenerateIgnoresSibling(t *
 		return imageSuccessResponse(string(body)), nil
 	})
 
-	if _, _, err := tool.Execute(context.Background(), []byte(`{"prompt":"replace everything","input_images":["stale-artifact-id"]}`), &llm.ToolContext{
+	if _, _, err := tool.Execute(context.Background(), []byte(`{"prompt":"replace everything","action":"edit","base_image":"previous_generation","input_images":["stale-artifact-id"]}`), &llm.ToolContext{
 		UserID: "u_flow", ConvID: convID, MessageID: "a_follow", ImageModelID: "m_flow", DB: tool.db,
 		ImageUserPrompt: "只把天空改成蓝色",
 	}); err != nil {
 		t.Fatalf("branch continuation: %v", err)
 	}
-	if _, _, err := tool.Execute(context.Background(), []byte(`{"prompt":"draw a fresh variation"}`), &llm.ToolContext{
+	if _, _, err := tool.Execute(context.Background(), []byte(`{"prompt":"draw a fresh variation","action":"generate","base_image":"none"}`), &llm.ToolContext{
 		UserID: "u_flow", ConvID: convID, MessageID: "a_regen", ImageModelID: "m_flow", DB: tool.db,
 	}); err != nil {
 		t.Fatalf("regenerate: %v", err)
 	}
 	if requestCount != 2 {
 		t.Fatalf("image request count = %d", requestCount)
+	}
+}
+
+func seedImageBaseSelectionWorkflow(t *testing.T) (*imageGenerateTool, string, []byte, []string, [][]byte) {
+	t.Helper()
+	tool, convID := seedImageWorkflow(t, "openai", "gpt-image-2")
+	for _, query := range []string{
+		`INSERT INTO messages(id,conversation_id,parent_id,role,model_id) VALUES('u_root','c_flow',NULL,'user','m_flow')`,
+		`INSERT INTO messages(id,conversation_id,parent_id,role,model_id,status) VALUES('a_prior','c_flow','u_root','assistant','m_flow','complete')`,
+		`INSERT INTO messages(id,conversation_id,parent_id,role,model_id) VALUES('u_edit','c_flow','a_prior','user','m_flow')`,
+		`INSERT INTO messages(id,conversation_id,parent_id,role,model_id,author_id,status) VALUES('a_edit','c_flow','u_edit','assistant','m_flow','u_flow','streaming')`,
+	} {
+		if _, err := tool.db.Exec(query); err != nil {
+			t.Fatalf("seed message %q: %v", query, err)
+		}
+	}
+
+	priorCanvas := sizedPNG(t, 1600, 900)
+	priorPath := filepath.Join(tool.artifactDir, "prior-canvas.png")
+	if err := os.WriteFile(priorPath, priorCanvas, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateArtifact(context.Background(), tool.db, store.Artifact{
+		ID: "art_canvas", MessageID: "a_prior", Filename: "prior-canvas.png", StoragePath: priorPath,
+		MimeType: "image/png", SizeBytes: int64(len(priorCanvas)), Source: store.ArtifactSourceImageGenerate,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	references := [][]byte{sizedPNG(t, 700, 500), sizedPNG(t, 500, 700)}
+	referenceIDs := []string{"f_web_page", "f_hardware"}
+	for i, id := range referenceIDs {
+		path := filepath.Join(tool.uploadDir, id+".png")
+		if err := os.WriteFile(path, references[i], 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.CreateFile(context.Background(), tool.db, store.File{
+			ID: id, UserID: "u_flow", ConversationID: convID, Filename: id + ".png", StoragePath: path,
+			MimeType: "image/png", Kind: "image", SizeBytes: int64(len(references[i])),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return tool, convID, priorCanvas, referenceIDs, references
+}
+
+func TestOpenAIImageEditCanSelectPriorCanvasBeforeCurrentReferences(t *testing.T) {
+	tool, convID, priorCanvas, referenceIDs, references := seedImageBaseSelectionWorkflow(t)
+
+	responseImage := sizedPNG(t, 32, 32)
+	useImageTestHTTPClient(t, func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path != "/v1/images/edits" {
+			t.Fatalf("continuation path = %q, want /v1/images/edits", req.URL.Path)
+		}
+		if err := req.ParseMultipartForm(12 << 20); err != nil {
+			t.Fatalf("parse continuation edit: %v", err)
+		}
+		files := req.MultipartForm.File["image[]"]
+		if len(files) != 3 {
+			t.Fatalf("continuation image count = %d, want canvas + 2 references", len(files))
+		}
+		wantImages := [][]byte{priorCanvas, references[0], references[1]}
+		for i, want := range wantImages {
+			file, err := files[i].Open()
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, readErr := io.ReadAll(file)
+			_ = file.Close()
+			if readErr != nil || !bytes.Equal(got, want) {
+				t.Fatalf("continuation image[%d] is not the expected canvas/reference, err=%v", i, readErr)
+			}
+		}
+		prompt := req.FormValue("prompt")
+		if !strings.Contains(prompt, "右侧换成参考图中的网站页面") ||
+			!strings.Contains(prompt, "first supplied image as the authoritative base canvas") {
+			t.Fatalf("continuation prompt = %q", prompt)
+		}
+		body, _ := json.Marshal(map[string]any{"data": []map[string]string{{"b64_json": base64.StdEncoding.EncodeToString(responseImage)}}})
+		return imageSuccessResponse(string(body)), nil
+	})
+
+	if _, _, err := tool.Execute(context.Background(), []byte(`{"prompt":"redesign everything","action":"edit","base_image":"previous_generation"}`), &llm.ToolContext{
+		UserID: "u_flow", ConvID: convID, MessageID: "a_edit", ImageModelID: "m_flow", DB: tool.db,
+		ImageInputIDs: referenceIDs, ImageUserPrompt: "右侧换成参考图中的网站页面，右下角硬件参考另一张图，其他不变",
+	}); err != nil {
+		t.Fatalf("continuation with references: %v", err)
+	}
+}
+
+func TestOpenAIImageGenerateIgnoresPriorAndCurrentImages(t *testing.T) {
+	tool, convID, _, referenceIDs, _ := seedImageBaseSelectionWorkflow(t)
+	responseImage := sizedPNG(t, 32, 32)
+	useImageTestHTTPClient(t, func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path != "/v1/images/generations" {
+			t.Fatalf("generation path = %q, want /v1/images/generations", req.URL.Path)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			t.Fatalf("decode generation request: %v", err)
+		}
+		if body["prompt"] != "create a completely new poster" {
+			t.Fatalf("generation prompt = %#v", body["prompt"])
+		}
+		if body["size"] != "3840x2160" {
+			t.Fatalf("generation size = %#v, want user-requested 16:9 4K", body["size"])
+		}
+		encoded := base64.StdEncoding.EncodeToString(responseImage)
+		return imageSuccessResponse(`{"data":[{"b64_json":"` + encoded + `"}]}`), nil
+	})
+
+	if _, _, err := tool.Execute(context.Background(), []byte(`{"prompt":"create a completely new poster","action":"generate","base_image":"none"}`), &llm.ToolContext{
+		UserID: "u_flow", ConvID: convID, MessageID: "a_edit", ImageModelID: "m_flow", DB: tool.db,
+		ImageInputIDs: referenceIDs, ImageUserPrompt: "ignore the old poster and create a new one in 16:9 at 4K",
+	}); err != nil {
+		t.Fatalf("generation with image context: %v", err)
+	}
+}
+
+func TestOpenAIImageEditCanSelectCurrentAttachmentWithoutPriorImage(t *testing.T) {
+	tool, convID, priorCanvas, referenceIDs, references := seedImageBaseSelectionWorkflow(t)
+	responseImage := sizedPNG(t, 32, 32)
+	useImageTestHTTPClient(t, func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path != "/v1/images/edits" {
+			t.Fatalf("edit path = %q, want /v1/images/edits", req.URL.Path)
+		}
+		if err := req.ParseMultipartForm(12 << 20); err != nil {
+			t.Fatalf("parse current-attachment edit: %v", err)
+		}
+		files := req.MultipartForm.File["image[]"]
+		if len(files) != 2 {
+			t.Fatalf("edit image count = %d, want selected base + other current reference", len(files))
+		}
+		wantImages := [][]byte{references[1], references[0]}
+		for i, want := range wantImages {
+			file, err := files[i].Open()
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, readErr := io.ReadAll(file)
+			_ = file.Close()
+			if readErr != nil || !bytes.Equal(got, want) {
+				t.Fatalf("current-attachment edit image[%d] is incorrect, err=%v", i, readErr)
+			}
+			if bytes.Equal(got, priorCanvas) {
+				t.Fatalf("current-attachment edit unexpectedly included the prior generated image at position %d", i)
+			}
+		}
+		if prompt := req.FormValue("prompt"); !strings.Contains(prompt, "只修改第二张上传图") {
+			t.Fatalf("current-attachment edit prompt = %q", prompt)
+		}
+		encoded := base64.StdEncoding.EncodeToString(responseImage)
+		return imageSuccessResponse(`{"data":[{"b64_json":"` + encoded + `"}]}`), nil
+	})
+
+	if _, _, err := tool.Execute(context.Background(), []byte(`{"prompt":"rewrite everything","action":"edit","base_image":"current_attachment","base_image_index":2}`), &llm.ToolContext{
+		UserID: "u_flow", ConvID: convID, MessageID: "a_edit", ImageModelID: "m_flow", DB: tool.db,
+		ImageInputIDs: referenceIDs, ImageUserPrompt: "只修改第二张上传图，第一张作为参考",
+	}); err != nil {
+		t.Fatalf("edit selected current attachment: %v", err)
 	}
 }
 
@@ -175,7 +335,7 @@ func TestImageGenerateToolInheritsSavedModelParamsAndDefaultCount(t *testing.T) 
 		return imageSuccessResponse(string(body)), nil
 	})
 
-	if _, _, err := tool.Execute(context.Background(), []byte(`{"prompt":"same settings"}`), &llm.ToolContext{
+	if _, _, err := tool.Execute(context.Background(), []byte(`{"prompt":"same settings","action":"generate","base_image":"none"}`), &llm.ToolContext{
 		UserID: "u_flow", ConvID: convID, MessageID: "a_saved", ImageModelID: "m_flow", DB: tool.db,
 	}); err != nil {
 		t.Fatalf("image_generate: %v", err)
@@ -233,7 +393,7 @@ func TestImageGenerationFallsBackOnceAndLogsBothChannelAttempts(t *testing.T) {
 		}
 	})
 
-	if _, _, err := tool.Execute(context.Background(), []byte(`{"prompt":"draw a lighthouse"}`), &llm.ToolContext{
+	if _, _, err := tool.Execute(context.Background(), []byte(`{"prompt":"draw a lighthouse","action":"generate","base_image":"none"}`), &llm.ToolContext{
 		UserID: "u_flow", ConvID: convID, MessageID: "a_fallback", ImageModelID: "m_flow", DB: tool.db,
 	}); err != nil {
 		t.Fatalf("fallback image generation: %v", err)
@@ -331,7 +491,7 @@ func TestGeminiReferenceLimitsAreModelSpecificAndRejectOverflow(t *testing.T) {
 		return imageSuccessResponse(`{"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"` + encoded + `"}}]}}]}`), nil
 	})
 
-	_, _, err := tool.Execute(context.Background(), []byte(`{"prompt":"combine"}`), &llm.ToolContext{
+	_, _, err := tool.Execute(context.Background(), []byte(`{"prompt":"combine","action":"edit","base_image":"current_attachment","base_image_index":1}`), &llm.ToolContext{
 		UserID: "u_flow", ConvID: convID, MessageID: "a_gemini25", ImageModelID: "m_flow", ImageInputIDs: inputIDs, DB: tool.db,
 	})
 	if err == nil || !strings.Contains(err.Error(), "at most 3") {
@@ -340,7 +500,7 @@ func TestGeminiReferenceLimitsAreModelSpecificAndRejectOverflow(t *testing.T) {
 	if httpCalls != 0 {
 		t.Fatal("Gemini 2.5 overflow reached the provider")
 	}
-	if _, _, err := tool.Execute(context.Background(), []byte(`{"prompt":"combine"}`), &llm.ToolContext{
+	if _, _, err := tool.Execute(context.Background(), []byte(`{"prompt":"combine","action":"edit","base_image":"current_attachment","base_image_index":1}`), &llm.ToolContext{
 		UserID: "u_flow", ConvID: convID, MessageID: "a_gemini3", ImageModelID: "m_gemini3", ImageInputIDs: inputIDs, DB: tool.db,
 	}); err != nil {
 		t.Fatalf("Gemini 3 four-reference request: %v", err)
@@ -394,7 +554,7 @@ func TestArtifactPersistenceFailureReturnsErrorWithoutImageUsage(t *testing.T) {
 		return imageSuccessResponse(`{"data":[{"b64_json":"` + base64.StdEncoding.EncodeToString(imageData) + `"}]}`), nil
 	})
 
-	_, _, err := tool.Execute(context.Background(), []byte(`{"prompt":"draw"}`), &llm.ToolContext{
+	_, _, err := tool.Execute(context.Background(), []byte(`{"prompt":"draw","action":"generate","base_image":"none"}`), &llm.ToolContext{
 		UserID: "u_flow", ConvID: convID, MessageID: "a_fail", ImageModelID: "m_flow", DB: tool.db,
 	})
 	if err == nil || !strings.Contains(err.Error(), "persist generated image") {

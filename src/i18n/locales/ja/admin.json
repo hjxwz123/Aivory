@@ -540,6 +540,7 @@
       "task_memory_adjudicate": "メモリー判定",
       "task_downgrade": "ベンダー間ダウングレード",
       "task_image_prompt": "画像プロンプト",
+      "task_image_intent": "画像生成・編集ルーティング",
       "task_tool_route": "ツール判定",
       "task_search_queries": "検索クエリ生成",
       "task_research_plan": "リサーチ計画",

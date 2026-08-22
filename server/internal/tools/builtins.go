@@ -1151,22 +1151,23 @@ type imageGenerateTool struct {
 
 func (t *imageGenerateTool) Name() string { return "image_generate" }
 func (t *imageGenerateTool) Description() string {
-	return "Generate a new image or faithfully edit a user-provided image. Current-turn attachments and the nearest generated image on this conversation branch are supplied automatically; do not invent file ids. For edits, describe only the requested change and preserve all other source details. Returns the image as a downloadable artifact."
+	return "Generate a new image or faithfully edit one existing image. You must explicitly choose action=generate or action=edit from the user's intent. Generate never sends conversation images to the image API. For edit, select exactly one authoritative base_image: previous_generation for the nearest generated image on the active branch, or current_attachment plus its 1-based base_image_index for an image uploaded this turn. Other current-turn images become edit references. Do not invent file ids."
 }
 func (t *imageGenerateTool) InputSchema() json.RawMessage {
-	// Reference images are resolved server-side from current-turn attachments and
-	// the active conversation branch. Keep the legacy input_images decoder in
-	// Execute for trusted callers, but do not expose internal artifact ids to chat
-	// models: a model cannot reliably know which ids are valid and an invalid id
-	// must never turn an edit into an unrelated fresh generation.
-	return json.RawMessage(`{"type":"object","properties":{"prompt":{"type":"string","description":"The requested image or exact edit instruction. Current-turn attachments and the nearest generated image on this conversation branch are supplied automatically. For edits, do not translate, paraphrase, or restyle text that should remain unchanged."},"n":{"type":"integer","default":1},"size":{"type":"string","description":"Optional output size. Omit for edits to preserve the source aspect ratio automatically. GPT Image 1.x supports 1024x1024, 1536x1024, and 1024x1536; GPT Image 2 also supports valid WIDTHxHEIGHT values."}},"required":["prompt"]}`)
+	// Image ids stay server-side. The chat model selects a semantic source and a
+	// 1-based current-attachment position instead of copying opaque file ids.
+	return json.RawMessage(`{"type":"object","properties":{"prompt":{"type":"string","description":"The requested new image or the exact edit instruction. For edits, describe only the requested change and preserve everything else."},"action":{"type":"string","enum":["generate","edit"],"description":"Use generate only when the user wants a new image. Use edit only when the user wants to modify an existing image."},"base_image":{"type":"string","enum":["none","previous_generation","current_attachment"],"description":"For generate use none. For edit, choose previous_generation only when continuing the prior generated result, or current_attachment when an image uploaded this turn is the authoritative base."},"base_image_index":{"type":"integer","minimum":1,"description":"Required for edit with base_image=current_attachment when more than one image was uploaded this turn. This is the 1-based attachment position."},"n":{"type":"integer","default":1},"size":{"type":"string","description":"Optional explicit output size. OpenAI-format requests recognize the aspect ratio and the 1K, 2K, or 4K resolution tier from the exact user instruction; omitted resolution defaults to 2K. The final GPT Image 2 WIDTHxHEIGHT is normalized to legal multiples of 16. Edits preserve the selected base image's ratio unless the user requests another ratio. GPT Image 1.x is mapped to its supported fixed sizes."}},"required":["prompt","action","base_image"]}`)
 }
 
 type imgInput struct {
-	Prompt      string   `json:"prompt"`
-	N           int      `json:"n"`
-	Size        string   `json:"size"`
-	InputImages []string `json:"input_images"`
+	Prompt         string   `json:"prompt"`
+	UserPrompt     string   `json:"-"`
+	Action         string   `json:"action"`
+	BaseImage      string   `json:"base_image"`
+	BaseImageIndex int      `json:"base_image_index"`
+	N              int      `json:"n"`
+	Size           string   `json:"size"`
+	InputImages    []string `json:"input_images"`
 }
 
 func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.ToolContext) (string, []llm.Citation, error) {
@@ -1177,6 +1178,15 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	_, nProvided := inputFields["n"]
 	if strings.TrimSpace(in.Prompt) == "" {
 		return "", nil, &llm.ToolUserError{Message: "prompt required"}
+	}
+	in.UserPrompt = strings.TrimSpace(in.Prompt)
+	if tc != nil && strings.TrimSpace(tc.ImageUserPrompt) != "" {
+		in.UserPrompt = strings.TrimSpace(tc.ImageUserPrompt)
+	}
+	in.Action = strings.ToLower(strings.TrimSpace(in.Action))
+	in.BaseImage = strings.ToLower(strings.TrimSpace(in.BaseImage))
+	if err := validateImageOperation(in); err != nil {
+		return "", nil, err
 	}
 	in.Size = strings.TrimSpace(in.Size)
 	if in.Size == "" {
@@ -1291,33 +1301,16 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		}
 	}
 
-	// §4.12-C/D 图生图: load explicit input images first. With no explicit
-	// reference, walk the current message's parent chain and reuse the closest
-	// generated image. This is provider-neutral and branch-aware: OpenAI and Gemini
-	// both continue the active branch, while regenerate (an assistant sibling under
-	// the original user message) starts from that user's original inputs.
-	inputImageIDs := mergeImageInputIDs(nil, in.InputImages)
-	if tc != nil {
-		// Current-turn uploads are the primary source image and must stay first. For
-		// GPT Image 1.x the first image receives the richest texture preservation.
-		inputImageIDs = mergeImageInputIDs(tc.ImageInputIDs, inputImageIDs)
-	}
+	// Image bytes are resolved only after the caller explicitly chooses edit and
+	// its authoritative base. Merely having current attachments or an older image
+	// on the branch must never turn a generation request into an edit request.
 	inputLimit := imageInputImageLimit(channel.Type, model.RequestID)
-	inputImgs, tooManyInputs := t.loadInputImages(ctx, tc, inputImageIDs, inputLimit)
-	if tooManyInputs {
-		return "", nil, &llm.ToolUserError{Message: fmt.Sprintf("the selected image model accepts at most %d reference image(s)", inputLimit)}
-	}
-	// Explicit ids are a trusted compatibility path, but they can be stale (for
-	// example when a model copied an old artifact URL). If none resolved to a
-	// verified image, continue with the active branch's nearest generated image
-	// instead of silently switching an edit into a fresh generation.
-	if len(inputImgs) == 0 {
-		if previous := t.loadNearestBranchImage(ctx, tc); previous != nil {
-			inputImgs = []imageBytes{*previous}
-		}
+	inputImgs, err := t.resolveImageOperationInputs(ctx, tc, in, inputLimit)
+	if err != nil {
+		return "", nil, err
 	}
 	// The exact user instruction is authoritative whenever this request becomes an
-	// edit, including automatic branch continuation with no new attachment. A chat
+	// edit, including explicit previous-generation selection with no new attachment. A chat
 	// or prompt-optimization model must not broaden a literal edit into a restyle.
 	if len(inputImgs) > 0 && tc != nil && strings.TrimSpace(tc.ImageUserPrompt) != "" {
 		in.Prompt = strings.TrimSpace(tc.ImageUserPrompt)
@@ -1753,9 +1746,88 @@ func mergeImageInputIDs(primary, additional []string) []string {
 	return out
 }
 
+func validateImageOperation(in imgInput) error {
+	switch in.Action {
+	case "generate":
+		if in.BaseImage != "none" {
+			return &llm.ToolUserError{Message: "action=generate requires base_image=none"}
+		}
+		if in.BaseImageIndex != 0 {
+			return &llm.ToolUserError{Message: "action=generate must not set base_image_index"}
+		}
+		return nil
+	case "edit":
+		switch in.BaseImage {
+		case "previous_generation":
+			if in.BaseImageIndex != 0 {
+				return &llm.ToolUserError{Message: "base_image_index is only valid with base_image=current_attachment"}
+			}
+			return nil
+		case "current_attachment":
+			if in.BaseImageIndex < 0 {
+				return &llm.ToolUserError{Message: "base_image_index must be a 1-based current attachment position"}
+			}
+			return nil
+		default:
+			return &llm.ToolUserError{Message: "Please specify whether to edit the previous generated image or which current attachment should be used as the base image."}
+		}
+	default:
+		return &llm.ToolUserError{Message: "action must be generate or edit"}
+	}
+}
+
+func (t *imageGenerateTool) resolveImageOperationInputs(ctx context.Context, tc *llm.ToolContext, in imgInput, limit int) ([]imageBytes, error) {
+	if in.Action == "generate" {
+		return nil, nil
+	}
+	if tc == nil || tc.DB == nil {
+		return nil, &llm.ToolUserError{Message: "image editing requires an active conversation"}
+	}
+
+	currentIDs := mergeImageInputIDs(tc.ImageInputIDs, in.InputImages)
+	var base imageBytes
+	referenceIDs := currentIDs
+	switch in.BaseImage {
+	case "previous_generation":
+		previous := t.loadNearestBranchImage(ctx, tc)
+		if previous == nil {
+			return nil, &llm.ToolUserError{Message: "no previous generated image is available on the active conversation branch"}
+		}
+		base = *previous
+	case "current_attachment":
+		if len(currentIDs) == 0 {
+			return nil, &llm.ToolUserError{Message: "no current-turn image attachment is available as the edit base"}
+		}
+		index := in.BaseImageIndex
+		if index == 0 && len(currentIDs) == 1 {
+			index = 1
+		}
+		if index < 1 || index > len(currentIDs) {
+			return nil, &llm.ToolUserError{Message: fmt.Sprintf("base_image_index must select one of the %d current-turn image attachment(s)", len(currentIDs))}
+		}
+		baseID := currentIDs[index-1]
+		baseImages, _ := t.loadInputImages(ctx, tc, []string{baseID}, 1)
+		if len(baseImages) != 1 {
+			return nil, &llm.ToolUserError{Message: "the selected current-turn base image is unavailable or invalid"}
+		}
+		base = baseImages[0]
+		referenceIDs = append([]string(nil), currentIDs[:index-1]...)
+		referenceIDs = append(referenceIDs, currentIDs[index:]...)
+	}
+
+	references, tooManyInputs := t.loadInputImages(ctx, tc, referenceIDs, limit)
+	inputs := make([]imageBytes, 0, len(references)+1)
+	inputs = append(inputs, base)
+	inputs = append(inputs, references...)
+	if tooManyInputs || (limit > 0 && len(inputs) > limit) {
+		return nil, &llm.ToolUserError{Message: fmt.Sprintf("the selected image model accepts at most %d input image(s)", limit)}
+	}
+	return inputs, nil
+}
+
 func faithfulImageEditPrompt(instruction string) string {
 	return `Faithfully edit the supplied source image according to the instruction below.
-Treat the source image as authoritative. Change only what the instruction explicitly requests. Preserve every other detail as closely as possible, especially the canvas and crop, composition, layout, colors, background, lighting, texture, text content, language, typography, spacing, and alignment. Do not translate, paraphrase, retype, add, remove, or restyle anything unless the instruction explicitly requires it.
+Treat the first supplied image as the authoritative base canvas. Any later supplied images are references for the requested changes, not replacement canvases, unless the instruction explicitly selects a different base. Change only what the instruction explicitly requests. Preserve every other detail as closely as possible, especially the canvas and crop, composition, layout, colors, background, lighting, texture, text content, language, typography, spacing, and alignment. Do not translate, paraphrase, retype, add, remove, or restyle anything unless the instruction explicitly requires it.
 
 Exact user edit instruction:
 ` + strings.TrimSpace(instruction)
@@ -1988,12 +2060,10 @@ func openaiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 	if configuredSize, ok := cleanParams["size"].(string); ok && strings.TrimSpace(configuredSize) != "" {
 		requestedSize = strings.TrimSpace(configuredSize)
 	} else {
-		// A malformed or empty admin fragment must not suppress provider auto-sizing.
+		// A malformed or empty admin fragment must not suppress server sizing.
 		delete(cleanParams, "size")
 	}
-	if requestedSize == "" && len(inputImgs) > 0 {
-		requestedSize = inferredOpenAIEditSize(requestID, inputImgs[0])
-	}
+	requestedSize = resolveOpenAIImageSize(requestID, in.UserPrompt, requestedSize, inputImgs)
 
 	native := map[string]any{
 		"model":  requestID,
@@ -2126,12 +2196,225 @@ func outputFormatMIME(value any) string {
 }
 
 const (
-	gptImage2MinPixels        = 655360
-	gptImage2MaxPixels        = 8294400
-	gptImage2MaxEdge          = 3840
-	gptImage2MaxAspect        = 3.0
-	gptImage2DefaultMaxPixels = 2048 * 2048
+	gptImage2MinPixels       = 655360
+	gptImage2MaxPixels       = 8294400
+	gptImage2MaxEdge         = 3840
+	gptImage2MaxAspect       = 3.0
+	gptImage2DefaultLongEdge = 2048
 )
+
+var (
+	openAIImageDimensionsPattern = regexp.MustCompile(`(?i)([0-9]{2,5})\s*[x×]\s*([0-9]{2,5})(?:\s*(?:px|像素))?`)
+	openAIImageAspectPattern     = regexp.MustCompile(`([0-9]+(?:\.[0-9]+)?)\s*[:：/比]\s*([0-9]+(?:\.[0-9]+)?)`)
+	openAIImageKPattern          = regexp.MustCompile(`(?i)(?:^|[^0-9a-z])([0-9]{1,2})\s*k(?:[^0-9a-z]|$)`)
+	openAIConfiguredSizePattern  = regexp.MustCompile(`(?i)^\s*([0-9]{2,5})\s*x\s*([0-9]{2,5})\s*$`)
+)
+
+type openAIImageSizingDirective struct {
+	ratio               float64
+	longEdge            int
+	ratioSpecified      bool
+	resolutionSpecified bool
+	preserveSource      bool
+}
+
+// resolveOpenAIImageSize turns natural-language aspect-ratio and resolution
+// requests into the OpenAI-compatible size field. User text wins over a mapped
+// size control. With no resolution request or mapped size, 2K is the server
+// default; edits inherit the authoritative first input's ratio, while fresh
+// generations default to square.
+func resolveOpenAIImageSize(requestID, userPrompt, configuredSize string, inputImgs []imageBytes) string {
+	directive := parseOpenAIImageSizingDirective(userPrompt)
+	configuredWidth, configuredHeight, hasConfiguredSize := parseOpenAIConfiguredSize(configuredSize)
+	sourceWidth, sourceHeight := 0, 0
+	if len(inputImgs) > 0 {
+		if config, _, err := image.DecodeConfig(bytes.NewReader(inputImgs[0].data)); err == nil {
+			sourceWidth, sourceHeight = config.Width, config.Height
+		}
+	}
+	if directive.preserveSource && sourceWidth > 0 && sourceHeight > 0 {
+		return closestOpenAIImageSize(requestID, float64(sourceWidth)/float64(sourceHeight), closestOpenAIImageTierLongEdge(max(sourceWidth, sourceHeight)))
+	}
+	if !directive.ratioSpecified && !directive.resolutionSpecified && hasConfiguredSize {
+		return closestOpenAIImageSizeForDimensions(requestID, configuredWidth, configuredHeight)
+	}
+
+	ratio := directive.ratio
+	if !directive.ratioSpecified {
+		switch {
+		case hasConfiguredSize:
+			ratio = float64(configuredWidth) / float64(configuredHeight)
+		case sourceWidth > 0 && sourceHeight > 0:
+			ratio = float64(sourceWidth) / float64(sourceHeight)
+		default:
+			ratio = 1
+		}
+	}
+
+	longEdge := directive.longEdge
+	switch {
+	case directive.resolutionSpecified:
+		// The user-provided resolution is authoritative.
+	case directive.ratioSpecified:
+		// A ratio without a resolution uses the requested 2K default, even when a
+		// model control happens to contain a lower default size.
+		longEdge = gptImage2DefaultLongEdge
+	case hasConfiguredSize:
+		longEdge = max(configuredWidth, configuredHeight)
+	default:
+		longEdge = gptImage2DefaultLongEdge
+	}
+	if longEdge <= 0 {
+		longEdge = gptImage2DefaultLongEdge
+	}
+	return closestOpenAIImageSize(requestID, ratio, longEdge)
+}
+
+func parseOpenAIImageSizingDirective(prompt string) openAIImageSizingDirective {
+	text := strings.ToLower(strings.TrimSpace(prompt))
+	directive := openAIImageSizingDirective{}
+	if text == "" {
+		return directive
+	}
+	if match := openAIImageDimensionsPattern.FindStringSubmatch(text); len(match) == 3 {
+		width, widthErr := strconv.Atoi(match[1])
+		height, heightErr := strconv.Atoi(match[2])
+		if widthErr == nil && heightErr == nil && width > 0 && height > 0 {
+			if width < 256 && height < 256 {
+				directive.ratio = float64(width) / float64(height)
+				directive.ratioSpecified = true
+			} else {
+				directive.ratio = float64(width) / float64(height)
+				directive.longEdge = closestOpenAIImageTierLongEdge(max(width, height))
+				directive.ratioSpecified = true
+				directive.resolutionSpecified = true
+			}
+		}
+	}
+	if !directive.ratioSpecified {
+		if match := openAIImageAspectPattern.FindStringSubmatch(text); len(match) == 3 {
+			width, widthErr := strconv.ParseFloat(match[1], 64)
+			height, heightErr := strconv.ParseFloat(match[2], 64)
+			hasAspectLabel := containsOpenAIImageTerm(text, "比例", "宽高比", "纵横比", "縱橫比", "aspect", "ratio")
+			if widthErr == nil && heightErr == nil && width > 0 && height > 0 &&
+				(hasAspectLabel || isCommonOpenAIImageAspect(width, height)) {
+				directive.ratio = width / height
+				directive.ratioSpecified = true
+			}
+		}
+	}
+	if !directive.ratioSpecified {
+		switch {
+		case containsOpenAIImageTerm(text, "正方形", "方形", "square"):
+			directive.ratio = 1
+			directive.ratioSpecified = true
+		case containsOpenAIImageTerm(text, "手机壁纸", "竖版", "竖屏", "竖图", "竖向", "portrait", "phone wallpaper", "mobile wallpaper"):
+			directive.ratio = 9.0 / 16.0
+			directive.ratioSpecified = true
+		case containsOpenAIImageTerm(text, "电脑壁纸", "桌面壁纸", "横版", "横屏", "横图", "横向", "landscape", "widescreen", "desktop wallpaper"):
+			directive.ratio = 16.0 / 9.0
+			directive.ratioSpecified = true
+		}
+	}
+	if !directive.resolutionSpecified {
+		if match := openAIImageKPattern.FindStringSubmatch(text); len(match) == 2 {
+			if requestedK, err := strconv.Atoi(match[1]); err == nil && requestedK > 0 {
+				directive.longEdge = closestOpenAIImageTierLongEdge(requestedK * 1024)
+			}
+			directive.resolutionSpecified = directive.longEdge > 0
+		}
+	}
+	directive.preserveSource = containsOpenAIImageTerm(
+		text, "保持原尺寸", "保留原尺寸", "原始尺寸", "保持分辨率", "原分辨率",
+		"keep original size", "preserve original size", "same size", "keep the resolution",
+	)
+	return directive
+}
+
+func parseOpenAIConfiguredSize(size string) (int, int, bool) {
+	match := openAIConfiguredSizePattern.FindStringSubmatch(strings.TrimSpace(size))
+	if len(match) != 3 {
+		return 0, 0, false
+	}
+	width, widthErr := strconv.Atoi(match[1])
+	height, heightErr := strconv.Atoi(match[2])
+	if widthErr != nil || heightErr != nil || width <= 0 || height <= 0 {
+		return 0, 0, false
+	}
+	return width, height, true
+}
+
+func closestOpenAIImageTierLongEdge(edge int) int {
+	switch {
+	case edge <= 1536:
+		return 1024
+	case edge <= 3072:
+		return 2048
+	default:
+		return 3840
+	}
+}
+
+func containsOpenAIImageTerm(text string, terms ...string) bool {
+	for _, term := range terms {
+		if strings.Contains(text, term) {
+			return true
+		}
+	}
+	return false
+}
+
+func isCommonOpenAIImageAspect(width, height float64) bool {
+	if width != math.Trunc(width) || height != math.Trunc(height) {
+		return false
+	}
+	pair := fmt.Sprintf("%d:%d", int(width), int(height))
+	switch pair {
+	case "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "9:21", "21:9":
+		return true
+	default:
+		return false
+	}
+}
+
+func closestOpenAIImageSize(requestID string, ratio float64, longEdge int) string {
+	modelID := strings.ToLower(strings.TrimSpace(requestID))
+	switch {
+	case isOpenAIModelOrSnapshot(modelID, "gpt-image-1.5"),
+		isOpenAIModelOrSnapshot(modelID, "gpt-image-1-mini"),
+		isOpenAIModelOrSnapshot(modelID, "gpt-image-1"):
+		return closestGPTImage1SizeFromRatio(ratio)
+	case modelID == "dall-e-3":
+		return closestDALL3Size(ratio)
+	case modelID == "dall-e-2":
+		return "1024x1024"
+	default:
+		// gpt-image-2 and OpenAI-compatible image models receive a legal custom
+		// pixel size. Compatible gateways can therefore honor the same textual
+		// aspect-ratio and resolution contract without exposing provider fields.
+		return closestGPTImage2SizeForTarget(ratio, longEdge)
+	}
+}
+
+func closestOpenAIImageSizeForDimensions(requestID string, width, height int) string {
+	if width <= 0 || height <= 0 {
+		return ""
+	}
+	ratio := float64(width) / float64(height)
+	modelID := strings.ToLower(strings.TrimSpace(requestID))
+	switch {
+	case isOpenAIModelOrSnapshot(modelID, "gpt-image-1.5"),
+		isOpenAIModelOrSnapshot(modelID, "gpt-image-1-mini"),
+		isOpenAIModelOrSnapshot(modelID, "gpt-image-1"):
+		return closestGPTImage1SizeFromRatio(ratio)
+	case modelID == "dall-e-3":
+		return closestDALL3Size(ratio)
+	case modelID == "dall-e-2":
+		return "1024x1024"
+	default:
+		return closestGPTImage2SizeForDimensions(width, height)
+	}
+}
 
 // inferredOpenAIEditSize preserves the first edit image's canvas as closely as
 // the selected GPT Image generation supports. Unknown models and undecodable
@@ -2174,7 +2457,13 @@ func closestGPTImage1Size(width, height int) string {
 	if width <= 0 || height <= 0 {
 		return ""
 	}
-	targetRatio := float64(width) / float64(height)
+	return closestGPTImage1SizeFromRatio(float64(width) / float64(height))
+}
+
+func closestGPTImage1SizeFromRatio(targetRatio float64) string {
+	if targetRatio <= 0 || math.IsNaN(targetRatio) || math.IsInf(targetRatio, 0) {
+		return ""
+	}
 	candidates := []struct {
 		size  string
 		ratio float64
@@ -2195,38 +2484,58 @@ func closestGPTImage1Size(width, height int) string {
 	return best.size
 }
 
-// closestGPTImage2Size preserves the source canvas up to a conservative 2K
-// (~4 MP) default. Explicit admin/user sizes can still request the provider's
-// full legal range, but automatic edits must not shrink every large reference
-// to the old ~1 MP budget before the original bytes are saved unchanged.
+func closestDALL3Size(targetRatio float64) string {
+	if targetRatio <= 0 || math.IsNaN(targetRatio) || math.IsInf(targetRatio, 0) {
+		return ""
+	}
+	candidates := []struct {
+		size  string
+		ratio float64
+	}{
+		{size: "1024x1024", ratio: 1},
+		{size: "1792x1024", ratio: 1.75},
+		{size: "1024x1792", ratio: 1.0 / 1.75},
+	}
+	best := candidates[0]
+	bestError := math.Abs(math.Log(best.ratio / targetRatio))
+	for _, candidate := range candidates[1:] {
+		err := math.Abs(math.Log(candidate.ratio / targetRatio))
+		if err < bestError {
+			best = candidate
+			bestError = err
+		}
+	}
+	return best.size
+}
+
+// closestGPTImage2Size preserves the source ratio at the default 2K long edge.
 func closestGPTImage2Size(width, height int) string {
 	if width <= 0 || height <= 0 {
 		return ""
 	}
-	targetRatio := float64(width) / float64(height)
+	return closestGPTImage2SizeForTarget(float64(width)/float64(height), gptImage2DefaultLongEdge)
+}
+
+// closestGPTImage2SizeForTarget chooses a legal OpenAI size closest to the
+// requested ratio and long-edge resolution. Ratio accuracy is weighted more
+// heavily than an exact edge match, while the official pixel, edge, alignment,
+// and 3:1 constraints remain hard boundaries.
+func closestGPTImage2SizeForTarget(targetRatio float64, targetLongEdge int) string {
+	if targetRatio <= 0 || math.IsNaN(targetRatio) || math.IsInf(targetRatio, 0) || targetLongEdge <= 0 {
+		return ""
+	}
 	targetRatio = math.Max(1/gptImage2MaxAspect, math.Min(gptImage2MaxAspect, targetRatio))
-	// Start at the automatic cap and only multiply when the product is known to
-	// fit below it. Malformed image headers can carry enormous dimensions; this
-	// avoids an int overflow before the value is clamped.
-	targetPixels := gptImage2DefaultMaxPixels
-	if height > 0 && width <= gptImage2DefaultMaxPixels/height {
-		targetPixels = width * height
-	}
-	if targetPixels < gptImage2MinPixels {
-		targetPixels = gptImage2MinPixels
-	}
-	if targetPixels > gptImage2DefaultMaxPixels {
-		targetPixels = gptImage2DefaultMaxPixels
-	}
-	searchMinPixels := max(gptImage2MinPixels, 3*targetPixels/4)
-	searchMaxPixels := min(gptImage2DefaultMaxPixels, 5*targetPixels/4)
+	targetLongEdge = max(16, min(gptImage2MaxEdge, targetLongEdge))
+	minimumLongEdge := int(math.Ceil(math.Sqrt(float64(gptImage2MinPixels) * math.Max(targetRatio, 1/targetRatio))))
+	minimumLongEdge = ((minimumLongEdge + 15) / 16) * 16
+	searchMaxEdge := min(gptImage2MaxEdge, max(targetLongEdge, minimumLongEdge))
 
 	bestWidth, bestHeight := 0, 0
-	bestRatioError, bestAreaError := math.MaxFloat64, math.MaxFloat64
-	for candidateWidth := 16; candidateWidth <= gptImage2MaxEdge; candidateWidth += 16 {
-		for candidateHeight := 16; candidateHeight <= gptImage2MaxEdge; candidateHeight += 16 {
+	bestScore, bestRatioError, bestEdgeError := math.MaxFloat64, math.MaxFloat64, math.MaxFloat64
+	for candidateWidth := 16; candidateWidth <= searchMaxEdge; candidateWidth += 16 {
+		for candidateHeight := 16; candidateHeight <= searchMaxEdge; candidateHeight += 16 {
 			pixels := candidateWidth * candidateHeight
-			if pixels < searchMinPixels || pixels > searchMaxPixels || pixels < gptImage2MinPixels || pixels > gptImage2MaxPixels {
+			if pixels < gptImage2MinPixels || pixels > gptImage2MaxPixels {
 				continue
 			}
 			candidateRatio := float64(candidateWidth) / float64(candidateHeight)
@@ -2234,10 +2543,52 @@ func closestGPTImage2Size(width, height int) string {
 				continue
 			}
 			ratioError := math.Abs(math.Log(candidateRatio / targetRatio))
-			areaError := math.Abs(math.Log(float64(pixels) / float64(targetPixels)))
-			if ratioError < bestRatioError-1e-12 || (math.Abs(ratioError-bestRatioError) <= 1e-12 && areaError < bestAreaError) {
+			candidateLongEdge := max(candidateWidth, candidateHeight)
+			edgeError := math.Abs(math.Log(float64(candidateLongEdge) / float64(targetLongEdge)))
+			score := 4*ratioError + edgeError
+			if score < bestScore-1e-12 ||
+				(math.Abs(score-bestScore) <= 1e-12 && ratioError < bestRatioError-1e-12) ||
+				(math.Abs(score-bestScore) <= 1e-12 && math.Abs(ratioError-bestRatioError) <= 1e-12 && edgeError < bestEdgeError) {
 				bestWidth, bestHeight = candidateWidth, candidateHeight
-				bestRatioError, bestAreaError = ratioError, areaError
+				bestScore, bestRatioError, bestEdgeError = score, ratioError, edgeError
+			}
+		}
+	}
+	if bestWidth == 0 || bestHeight == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%dx%d", bestWidth, bestHeight)
+}
+
+func closestGPTImage2SizeForDimensions(targetWidth, targetHeight int) string {
+	if targetWidth <= 0 || targetHeight <= 0 {
+		return ""
+	}
+	targetWidth = max(16, min(gptImage2MaxEdge, targetWidth))
+	targetHeight = max(16, min(gptImage2MaxEdge, targetHeight))
+	targetRatio := float64(targetWidth) / float64(targetHeight)
+	targetRatio = math.Max(1/gptImage2MaxAspect, math.Min(gptImage2MaxAspect, targetRatio))
+
+	bestWidth, bestHeight := 0, 0
+	bestScore, bestRatioError := math.MaxFloat64, math.MaxFloat64
+	for candidateWidth := 16; candidateWidth <= gptImage2MaxEdge; candidateWidth += 16 {
+		for candidateHeight := 16; candidateHeight <= gptImage2MaxEdge; candidateHeight += 16 {
+			pixels := candidateWidth * candidateHeight
+			if pixels < gptImage2MinPixels || pixels > gptImage2MaxPixels {
+				continue
+			}
+			candidateRatio := float64(candidateWidth) / float64(candidateHeight)
+			if candidateRatio > gptImage2MaxAspect || candidateRatio < 1/gptImage2MaxAspect {
+				continue
+			}
+			widthError := math.Abs(math.Log(float64(candidateWidth) / float64(targetWidth)))
+			heightError := math.Abs(math.Log(float64(candidateHeight) / float64(targetHeight)))
+			ratioError := math.Abs(math.Log(candidateRatio / targetRatio))
+			score := widthError + heightError
+			if score < bestScore-1e-12 ||
+				(math.Abs(score-bestScore) <= 1e-12 && ratioError < bestRatioError) {
+				bestWidth, bestHeight = candidateWidth, candidateHeight
+				bestScore, bestRatioError = score, ratioError
 			}
 		}
 	}

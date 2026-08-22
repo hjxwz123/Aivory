@@ -540,6 +540,7 @@
       "task_memory_adjudicate": "Memory adjudication",
       "task_downgrade": "Cross-vendor downgrade",
       "task_image_prompt": "Image prompt",
+      "task_image_intent": "Image operation routing",
       "task_tool_route": "Tool routing",
       "task_search_queries": "Search query generation",
       "task_research_plan": "Research plan",
