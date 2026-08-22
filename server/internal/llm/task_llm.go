@@ -90,6 +90,9 @@ const (
 	// TaskToolRoute decides whether an automatic-policy chat turn needs any of
 	// the tools that are actually available to its resolved model.
 	TaskToolRoute TaskKind = "task.tool_route"
+	// TaskImageIntent separates new image generation from editing and selects the
+	// authoritative edit base for direct image-model turns.
+	TaskImageIntent TaskKind = "task.image_intent"
 )
 
 // TaskLLM dispatches small internal model calls to the configured task model.

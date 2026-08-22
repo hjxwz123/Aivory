@@ -105,7 +105,7 @@ func TestImageGenerateToolUsesOneClampedCountForQuotaRequestAndUsage(t *testing.
 
 	biller := &recordingImageBiller{payCredits: true, timed: 1, total: 2}
 	tool := &imageGenerateTool{db: db, artifactDir: t.TempDir()}
-	output, _, err := tool.Execute(context.Background(), []byte(`{"prompt":"draw","n":999,"size":"1024x1024"}`), &llm.ToolContext{
+	output, _, err := tool.Execute(context.Background(), []byte(`{"prompt":"draw","action":"generate","base_image":"none","n":999,"size":"1024x1024"}`), &llm.ToolContext{
 		UserID:             "u_image",
 		ConvID:             "c_image",
 		MessageID:          "msg_image",
@@ -197,8 +197,8 @@ func TestImageGenerateToolFaithfullyEditsCurrentAttachmentWithModelDefaults(t *t
 		if got := req.FormValue("input_fidelity"); got != "" {
 			t.Fatalf("GPT Image 2 must omit unsupported input_fidelity, got %q", got)
 		}
-		if got := req.FormValue("size"); got != "1536x864" {
-			t.Fatalf("source-ratio size = %q, want 1536x864", got)
+		if got := req.FormValue("size"); got != "2048x1152" {
+			t.Fatalf("source-ratio size = %q, want default 2K 2048x1152", got)
 		}
 		prompt := req.FormValue("prompt")
 		if !strings.Contains(prompt, exactInstruction) || !strings.Contains(prompt, "Preserve every other detail") {
@@ -226,7 +226,7 @@ func TestImageGenerateToolFaithfullyEditsCurrentAttachmentWithModelDefaults(t *t
 	tool := &imageGenerateTool{db: db, uploadDir: inputRoot, artifactDir: t.TempDir()}
 	_, _, err := tool.Execute(
 		context.Background(),
-		[]byte(`{"prompt":"rewrite the whole terminal","n":1}`),
+		[]byte(`{"prompt":"rewrite the whole terminal","action":"edit","base_image":"current_attachment","base_image_index":1,"n":1}`),
 		&llm.ToolContext{
 			UserID: "u_edit", ConvID: "c_edit", MessageID: "msg_edit", ImageModelID: "m_edit", DB: db,
 			ImageInputIDs: []string{"f_terminal"}, ImageUserPrompt: exactInstruction,

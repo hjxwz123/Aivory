@@ -540,6 +540,7 @@
       "task_memory_adjudicate": "Arbitrage de mémoire",
       "task_downgrade": "Rétrogradation inter-fournisseurs",
       "task_image_prompt": "Prompt d'image",
+      "task_image_intent": "Routage génération/modification d'image",
       "task_tool_route": "Routage des outils",
       "task_search_queries": "Génération de requêtes de recherche",
       "task_research_plan": "Plan de recherche",

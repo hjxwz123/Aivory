@@ -44,6 +44,7 @@ const TASK_PURPOSES = [
   'task.memory_adjudicate',
   'task.downgrade',
   'task.image_prompt',
+  'task.image_intent',
   'task.tool_route',
   'task.search_queries',
   'task.research_plan',
