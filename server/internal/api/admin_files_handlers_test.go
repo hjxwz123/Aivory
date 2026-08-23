@@ -102,6 +102,8 @@ func TestAdminFilesBatchDeleteRemovesRowsAndBytes(t *testing.T) {
 	mustExec(t, db, `INSERT INTO knowledge_bases(id,user_id,name,embedding_model_id,embedding_dim) VALUES('kb1','u2','KB','m1',0)`)
 	mustExec(t, db, `INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,storage_path,kind,created_at)
 	  VALUES('f1','u2','c1','notes.pdf','application/pdf',100,?,'file',100)`, filePath)
+	mustExec(t, db, `INSERT INTO messages(id,conversation_id,role,attachments)
+	  VALUES('m1','c1','user','[{"id":"f1","filename":"notes.pdf","kind":"pdf"}]')`)
 	mustExec(t, db, `INSERT INTO documents(id,conversation_id,filename,mime_type,size_bytes,status,storage_path,created_at)
 	  VALUES('d1','c1','notes.pdf','application/pdf',100,'ready',?,100)`, filePath)
 	mustExec(t, db, `INSERT INTO documents(id,kb_id,filename,mime_type,size_bytes,status,storage_path,created_at)
@@ -144,5 +146,13 @@ func TestAdminFilesBatchDeleteRemovesRowsAndBytes(t *testing.T) {
 		if _, err := os.Stat(p); !os.IsNotExist(err) {
 			t.Fatalf("%s still exists on disk", p)
 		}
+	}
+	var messageRaw string
+	if err := db.QueryRowContext(ctx, `SELECT attachments FROM messages WHERE id='m1'`).Scan(&messageRaw); err != nil {
+		t.Fatalf("load message attachments: %v", err)
+	}
+	var messageAttachments []map[string]any
+	if err := json.Unmarshal([]byte(messageRaw), &messageAttachments); err != nil || len(messageAttachments) != 1 || messageAttachments[0]["deleted"] != true {
+		t.Fatalf("admin file deletion did not mark historical attachment deleted: attachments=%v err=%v", messageAttachments, err)
 	}
 }

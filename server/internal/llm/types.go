@@ -40,6 +40,10 @@ type Attachment struct {
 	MimeType   string `json:"mime_type"`
 	Kind       string `json:"kind"`
 	URL        string `json:"url"`
+	// Deleted is persisted when its conversation file is removed after the
+	// message was sent. It keeps the transcript honest without allowing an
+	// already-deleted object back into a later model request.
+	Deleted bool `json:"deleted,omitempty"`
 }
 
 // Citation is the cross-source citation type used by web search tools and RAG.

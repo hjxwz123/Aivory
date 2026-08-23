@@ -1293,6 +1293,14 @@ func deleteConversationFileHandler(d Deps, w http.ResponseWriter, r *http.Reques
 		writeError(w, 500, err)
 		return
 	}
+	// The delete transaction marks matching historical attachments unavailable.
+	// Ensure open transcript caches reload that authoritative state before an
+	// edit, retry, or regenerate can reuse the removed file id.
+	msgcache.Bump(d.Cache, convID)
+	publishUserEvent(d, r, u.ID, "conversation.updated", convID)
+	if f.UserID != u.ID {
+		publishUserEvent(d, r, f.UserID, "conversation.updated", convID)
+	}
 	for _, docID := range docIDs {
 		cleanupRAGDocument(r.Context(), d, docID, "delete conversation file "+fileID)
 	}

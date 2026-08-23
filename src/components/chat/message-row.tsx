@@ -569,10 +569,10 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
   const visible = hovered || menuOpen || message.liked || message.disliked || feedbackPanelOpen || feedbackSubmitted
   const attachments = message.attachments ?? []
   const imageAttachments = attachments.filter(
-    (attachment) => attachment.kind === 'image' && attachment.previewUrl && !brokenAtts.has(attachment.id),
+    (attachment) => attachment.kind === 'image' && attachment.previewUrl && !attachment.deleted && !brokenAtts.has(attachment.id),
   )
   const otherAttachments = attachments.filter(
-    (attachment) => attachment.kind !== 'image' || !attachment.previewUrl || brokenAtts.has(attachment.id),
+    (attachment) => attachment.kind !== 'image' || !attachment.previewUrl || attachment.deleted || brokenAtts.has(attachment.id),
   )
 
   return (
@@ -654,7 +654,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
             {draftAtts.length > 0 ? (
               <div className="mb-3 flex flex-wrap gap-2">
                 {draftAtts.map((a) =>
-                  a.kind === 'image' && a.previewUrl ? (
+                  a.kind === 'image' && a.previewUrl && !a.deleted ? (
                     <EditableImageChip key={a.id} att={a} onRemove={() => removeDraftAtt(a.id)} />
                   ) : (
                     <EditableFileChip key={a.id} att={a} onRemove={() => removeDraftAtt(a.id)} />
@@ -797,7 +797,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                 {otherAttachments.length > 0 ? (
                   <div className="grid min-w-0 gap-1.5">
                     {otherAttachments.map((attachment) => {
-                      if (attachment.kind === 'image' && brokenAtts.has(attachment.id)) {
+                      if (attachment.kind === 'image' && (attachment.deleted || brokenAtts.has(attachment.id))) {
                         return (
                           <span
                             key={attachment.id}

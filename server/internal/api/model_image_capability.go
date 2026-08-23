@@ -117,11 +117,28 @@ func normalizeConversationAttachments(
 	if err != nil {
 		return nil, fmt.Errorf("load conversation attachments: %w", err)
 	}
+	missingIDs := make([]string, 0, len(attachments))
+	for _, attachment := range attachments {
+		id := strings.TrimSpace(attachment.ID)
+		if _, ok := files[id]; !ok {
+			missingIDs = append(missingIDs, id)
+		}
+	}
+	historical, err := store.HistoricalConversationAttachmentIDs(ctx, db, conversationID, missingIDs)
+	if err != nil {
+		return nil, fmt.Errorf("load historical conversation attachments: %w", err)
+	}
 	normalized := make([]llm.Attachment, 0, len(attachments))
 	for _, attachment := range attachments {
 		id := strings.TrimSpace(attachment.ID)
 		file, ok := files[id]
 		if !ok {
+			if historical[id] {
+				// The file was legitimately attached to this conversation before a
+				// later deletion. A stale browser may still submit it while editing
+				// or retrying; omit only that unavailable historical reference.
+				continue
+			}
 			return nil, errAttachmentUnavailable
 		}
 		kind, mimeType := normalizedStoredFileType(file)

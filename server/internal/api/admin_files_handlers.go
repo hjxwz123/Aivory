@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"aivory/server/internal/msgcache"
 	"aivory/server/internal/store"
 )
 
@@ -98,6 +99,13 @@ func deleteFilesAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 				}
 				writeError(w, 500, err)
 				return
+			}
+			if f.ConversationID != "" {
+				// Admin deletion marks persisted message attachments unavailable in
+				// the same DB transaction. Invalidate and notify the conversation
+				// owner so a cached edit cannot resend the removed object.
+				msgcache.Bump(d.Cache, f.ConversationID)
+				publishUserEvent(d, r, f.UserID, "conversation.updated", f.ConversationID)
 			}
 			for _, docID := range docIDs {
 				_ = store.DeleteDocument(r.Context(), d.DB, docID)

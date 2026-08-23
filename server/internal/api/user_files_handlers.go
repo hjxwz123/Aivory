@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"aivory/server/internal/msgcache"
 	"aivory/server/internal/store"
 )
 
@@ -134,6 +135,15 @@ func deleteMyFilesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 				}
 				writeError(w, 500, err)
 				return
+			}
+			if f.ConversationID != "" {
+				// The transaction marked any historical references unavailable. Drop
+				// cached transcripts before notifying a tab that may edit/retry one.
+				msgcache.Bump(d.Cache, f.ConversationID)
+				publishUserEvent(d, r, u.ID, "conversation.updated", f.ConversationID)
+				if f.UserID != u.ID {
+					publishUserEvent(d, r, f.UserID, "conversation.updated", f.ConversationID)
+				}
 			}
 			for _, docID := range docIDs {
 				cleanupRAGDocument(r.Context(), d, docID, "user delete file "+id)
