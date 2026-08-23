@@ -401,8 +401,16 @@ export function normalizeThinkingMarkdown(md: string): string {
 
   s = s.replace(/([^\n])\s*(?=#{1,6}\s)/g, '$1\n\n')
 
-  const bolds = s.match(/\*\*[^*\n]+?\*\*/g)
-  if (bolds && bolds.length >= 2) s = s.replace(/([^\n])\s*(?=\*\*[^*\n]+?\*\*)/g, '$1\n\n')
+  // GPT thinking often emits "title + summary" glued by a single \n:
+  //   `**Point A** summary\n**Point B** summary`
+  // With `breaks` a single \n only becomes <br>, keeping both blocks in ONE <p>.
+  // Upgrade only the single \n before a line-leading **bold** title (2+ present)
+  // to a blank line so marked splits the paragraphs. Inline **bold** inside a
+  // line stays untouched; no effect on lists / ATX headings / inline bold runs.
+  const bolds = s.match(/(?<=\n)\*\*[^*\n]+?\*\*(?!\*)/g)
+  if (bolds && bolds.length >= 2) {
+    s = s.replace(/(\n)(?=\*\*[^*\n]+?\*\*(?!\*))/g, '$1\n')
+  }
   s = s.replace(/([^\n])\s*(?=(?:-|\*)\s+\S)/g, '$1\n\n')
   s = s.replace(/([^\n])\s*(?=\d+\.\s+\S)/g, '$1\n\n')
   s = s.replace(/\n{3,}/g, '\n\n')
