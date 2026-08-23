@@ -951,6 +951,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                     live={Boolean(message.streaming)}
                     blockKeyPrefix={message.id}
                     citations={message.citations}
+                    artifacts={message.artifacts}
                     onOpenDocumentCitation={readOnly ? undefined : openDocumentCitation}
                     className="prose-full"
                   />

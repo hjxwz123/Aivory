@@ -68,6 +68,60 @@ func publicToolErrorOutput(err error) string {
 // model can't fan out unbounded work (§4.3).
 var maxConcurrentTools = envcfg.Int("AIVORY_LLM_MAX_CONCURRENT_TOOLS", 4)
 
+type conversationToolGate struct {
+	slot chan struct{}
+	refs int
+}
+
+var pythonConversationGates = struct {
+	sync.Mutex
+	byConversation map[string]*conversationToolGate
+}{byConversation: make(map[string]*conversationToolGate)}
+
+// acquirePythonConversationGate serializes Python calls for one conversation.
+// The provider can emit several tool calls in a single response, and separate
+// requests can briefly overlap after a client cancellation. Both cases target
+// the same persistent sandbox session. Waiting happens before orchToolRunner
+// creates the per-call deadline, so a queued call still receives its full
+// execution budget once it actually starts.
+func acquirePythonConversationGate(ctx context.Context, conversationID string) (func(), error) {
+	if strings.TrimSpace(conversationID) == "" {
+		return func() {}, nil
+	}
+
+	pythonConversationGates.Lock()
+	gate := pythonConversationGates.byConversation[conversationID]
+	if gate == nil {
+		gate = &conversationToolGate{slot: make(chan struct{}, 1)}
+		pythonConversationGates.byConversation[conversationID] = gate
+	}
+	gate.refs++
+	pythonConversationGates.Unlock()
+
+	dropRef := func() {
+		pythonConversationGates.Lock()
+		gate.refs--
+		if gate.refs == 0 {
+			delete(pythonConversationGates.byConversation, conversationID)
+		}
+		pythonConversationGates.Unlock()
+	}
+
+	select {
+	case gate.slot <- struct{}{}:
+		var once sync.Once
+		return func() {
+			once.Do(func() {
+				<-gate.slot
+				dropRef()
+			})
+		}, nil
+	case <-ctx.Done():
+		dropRef()
+		return nil, ctx.Err()
+	}
+}
+
 // runToolsConcurrent executes all tool calls in a turn concurrently (§4.2/§4.3)
 // while preserving result order. tool_start events are emitted up-front from
 // the caller's single goroutine; per-tool timeouts are enforced by the runner

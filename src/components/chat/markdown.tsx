@@ -9,8 +9,9 @@ import {
 import { CodeBlock } from './code-block'
 import { MermaidDiagram } from './mermaid-diagram'
 import { cn, safeHref } from '@/lib/utils'
+import { rewriteSandboxArtifactLinks } from '@/lib/artifact-links'
 
-import type { Citation } from '@/types/chat'
+import type { ArtifactRef, Citation } from '@/types/chat'
 import {
   documentIdFromCitationUrl,
   isDocumentCitation,
@@ -26,6 +27,8 @@ interface MarkdownProps {
   blockKeyPrefix?: string
   /** Citations for this turn — inline `[n]` markers become source links. */
   citations?: Citation[]
+  /** Artifacts owned by this message, used to resolve sandbox output links. */
+  artifacts?: ArtifactRef[]
   /** Opens an authenticated preview for an inline knowledge-base citation. */
   onOpenDocumentCitation?: (citation: Citation) => void
   /**
@@ -187,10 +190,15 @@ export const Markdown = memo(function Markdown({
   live = false,
   blockKeyPrefix,
   citations,
+  artifacts,
   onOpenDocumentCitation,
   breaks = false,
 }: MarkdownProps) {
-  const throttled = useThrottledContent(content)
+  const contentWithArtifactLinks = useMemo(
+    () => rewriteSandboxArtifactLinks(content, artifacts),
+    [content, artifacts],
+  )
+  const throttled = useThrottledContent(contentWithArtifactLinks)
   const blocks = useMemo(() => tokenizeMarkdown(throttled, breaks), [throttled, breaks])
   // Map citations to the lib's CiteRef shape once; `inline`/`block` helpers thread
   // them into the HTML so `[n]` markers become source links.

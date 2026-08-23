@@ -83,9 +83,11 @@ const allowedAttrs: Record<string, Set<string>> = {
 }
 const urlAttrs = new Set(['href', 'src'])
 
-function isSafeUrl(url: string): boolean {
-  const t = url.trim().toLowerCase()
-  if (t.startsWith('javascript:') || t.startsWith('vbscript:') || t.startsWith('data:text/html')) return false
+export function isSafeMarkdownUrl(url: string): boolean {
+  const trimmed = url.trim().toLowerCase()
+  if (!trimmed) return false
+  if (trimmed.startsWith('sandbox:') || trimmed.startsWith('/workspace/outputs/')) return false
+  if (trimmed.startsWith('javascript:') || trimmed.startsWith('vbscript:') || trimmed.startsWith('data:text/html')) return false
   return true
 }
 
@@ -179,7 +181,7 @@ export function sanitizeHtml(html: string): string {
           el.removeAttribute(a.name)
           continue
         }
-        if (urlAttrs.has(name) && !isSafeUrl(a.value)) {
+        if (urlAttrs.has(name) && !isSafeMarkdownUrl(a.value)) {
           el.removeAttribute(a.name)
           continue
         }
