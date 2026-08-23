@@ -64,6 +64,10 @@
     "mostPopular": "最受歡迎",
     "perMonth": "/ 月"
   },
+  "network": {
+    "offlineTitle": "目前沒有網路連線",
+    "offlineDescription": "需要網路的操作暫時無法使用。請檢查連線後再試一次。"
+  },
   "pagination": {
     "prev": "上一頁",
     "next": "下一頁",

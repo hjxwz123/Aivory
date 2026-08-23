@@ -1808,6 +1808,10 @@
     "loadFailed": "Impossible de charger la vue d’ensemble.",
     "healthTitle": "État de la configuration",
     "healthLead": "Corrigez les avertissements avant d’activer la fonctionnalité concernée pour les utilisateurs.",
+    "todayTitle": "Statistiques du jour",
+    "todayLead": "Utilisation enregistrée au cours des dernières 24 heures.",
+    "todayLoadFailed": "Les statistiques du jour n’ont pas pu être chargées. Actualisez pour réessayer.",
+    "openAnalytics": "Ouvrir les analyses",
     "metrics": {
       "users": "Utilisateurs",
       "models": "Modèles",
