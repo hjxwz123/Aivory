@@ -365,7 +365,7 @@ func RunPromptToolLoopWithRaw(
 		)
 		for retries = 0; retries <= promptMaxRetry; retries++ {
 			output, cites, runErr = toolRunner.Run(ctx, call.Name, call.Arguments)
-			if runErr == nil {
+			if runErr == nil || !promptToolErrorRetryable(runErr) {
 				break
 			}
 		}
@@ -407,6 +407,26 @@ func RunPromptToolLoopWithRaw(
 	}
 	blocks = append(blocks, UnifiedBlock{Kind: "text", Text: final})
 	return final, blocks, usage, citations, generatedImages, marshalPromptToolRawEnvelope(rawOutputs), nil
+}
+
+// Validation/refusal errors and exhausted contexts are deterministic. Running
+// the same prompt-protocol tool two more times cannot fix them and, for a
+// canceled Python request, can immediately collide with the still-finishing
+// sidecar process. Unknown operational failures retain the existing bounded
+// retry behavior.
+func promptToolErrorRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var refusal *ToolRefusalError
+	if errors.As(err, &refusal) {
+		return false
+	}
+	var userErr *ToolUserError
+	return !errors.As(err, &userErr)
 }
 
 // appendPromptToolRawOutputs converts a nested provider exchange into the same

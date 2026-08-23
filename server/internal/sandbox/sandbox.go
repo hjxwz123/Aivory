@@ -10,7 +10,9 @@
 //	POST {BaseURL}/exec  {session_id, code, timeout_ms}
 //	     -> {"stdout":"...","stderr":"...","exit_code":0,
 //	         "files":[{"name":"plot.png","mime_type":"image/png","data_base64":"..."}]}
-//	POST {BaseURL}/files/reset-inputs {session_id} -> {"ok":true}
+//	POST {BaseURL}/files/reset-inputs {session_id}
+//	     -> {"ok":true,"session_gone":false}
+//	        or {"ok":false,"session_gone":true}
 //
 // `files` are the artifacts written under /workspace/outputs during the run.
 // The Authorization: Bearer <SANDBOX_API_KEY> header is attached when set.
@@ -21,6 +23,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -29,6 +32,12 @@ import (
 
 	"aivory/server/internal/envcfg"
 )
+
+// ErrSessionGone is returned when a sidecar reports that the idle reaper has
+// already removed a conversation's stored session. It is an expected recovery
+// signal: python_execute creates a replacement and re-stages authoritative
+// inputs before retrying.
+var ErrSessionGone = errors.New("sandbox session gone")
 
 // File is an artifact produced by a run (a file under /workspace/outputs).
 type File struct {
@@ -43,6 +52,22 @@ type Result struct {
 	Stderr   string
 	ExitCode int
 	Files    []File
+}
+
+// HTTPError preserves the sidecar status code for callers that need to make a
+// bounded recovery decision (for example, replacing a session that is still
+// busy after its client disconnected). The response body stays server-side;
+// the LLM boundary continues to replace unknown errors with a generic message.
+type HTTPError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *HTTPError) Error() string {
+	if e == nil {
+		return "sandbox request failed"
+	}
+	return fmt.Sprintf("sandbox %d: %s", e.StatusCode, e.Body)
 }
 
 // StorageConfig is the per-call override the Go side forwards on /sessions
@@ -248,7 +273,7 @@ func (s *HTTPSandbox) doMethod(ctx context.Context, method, path string, payload
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, sandboxErrorBodyReadCap)) // error bodies are small; cap anyway
-		return fmt.Errorf("sandbox %d: %s", resp.StatusCode, string(b))
+		return &HTTPError{StatusCode: resp.StatusCode, Body: string(b)}
 	}
 	if out == nil {
 		return nil
@@ -297,9 +322,18 @@ func (s *HTTPSandbox) PutFile(ctx context.Context, sessionID, path string, data 
 // the exact paths so callers cannot turn this into a general-purpose deletion
 // primitive.
 func (s *HTTPSandbox) ResetInputs(ctx context.Context, sessionID string) error {
-	return s.do(ctx, "/files/reset-inputs", map[string]any{
+	var res struct {
+		SessionGone bool `json:"session_gone"`
+	}
+	if err := s.do(ctx, "/files/reset-inputs", map[string]any{
 		"session_id": sessionID,
-	}, nil)
+	}, &res); err != nil {
+		return err
+	}
+	if res.SessionGone {
+		return ErrSessionGone
+	}
+	return nil
 }
 
 // Exec runs code in the session.

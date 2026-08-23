@@ -637,7 +637,7 @@ type pythonExecuteTool struct {
 
 func (t *pythonExecuteTool) Name() string { return "python_execute" }
 func (t *pythonExecuteTool) Description() string {
-	return "Run Python in a persistent sandbox for math, data analysis, image editing, plotting, spreadsheet/CSV processing, editing existing PDF/Office documents, and generating downloadable files (PDF/PPTX/DOCX/XLSX/PNG). The session and its /workspace persist across calls AND across turns in this conversation, so call it several times in a row — inspect the inputs first, then edit or compute, and read again differently if the first attempt doesn't fit. Every conversation upload, including the original PDF/DOCX/PPTX/XLSX file, is staged without format conversion in /workspace/uploads/; prior image-generation outputs are staged there too, and public images fetched with fetch_image are stored in /workspace/downloads/. Run `import os; os.listdir('/workspace/uploads')` and inspect /workspace/downloads when needed, then use the real paths (for example python-docx/python-pptx/pypdf for documents, Pillow for images, and pandas for tables). Preserve the original file's layout and formatting when the user asks for a targeted edit. Write outputs, including edited images, plots, and documents, to /workspace/outputs to return them as downloadable artifacts. Stdout/stderr is returned."
+	return "Run Python in a persistent sandbox for math, data analysis, image editing, plotting, spreadsheet/CSV processing, editing existing PDF/Office documents, and generating downloadable files (PDF/PPTX/DOCX/XLSX/PNG). The session and its /workspace persist across calls AND across turns in this conversation, so call it several times in a row — inspect the inputs first, then edit or compute, and read again differently if the first attempt doesn't fit. Every conversation upload, including the original PDF/DOCX/PPTX/XLSX file, is staged without format conversion in /workspace/uploads/; prior image-generation outputs are staged there too, and public images fetched with fetch_image are stored in /workspace/downloads/. Run `import os; os.listdir('/workspace/uploads')` and inspect /workspace/downloads when needed, then use the real paths (for example python-docx/python-pptx/pypdf for documents, Pillow for images, and pandas for tables). Preserve the original file's layout and formatting when the user asks for a targeted edit. Write outputs, including edited images, plots, and documents, to /workspace/outputs to return them as downloadable artifacts. Produced files are attached to the assistant message automatically: refer to them by filename and never emit sandbox: or /workspace/outputs paths as download links. Stdout/stderr is returned."
 }
 func (t *pythonExecuteTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"code":{"type":"string"}},"required":["code"]}`)
@@ -684,7 +684,11 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		sessionID, _ = store.GetConvProviderStateKey(ctx, tc.DB, tc.ConvID, "sandbox_id")
 	}
 	if sessionID == "" {
-		sid, err := t.sandbox.NewSession(ctx, tc.ConvID)
+		archiveKey := ""
+		if hasConv {
+			archiveKey = tc.ConvID
+		}
+		sid, err := t.sandbox.NewSession(ctx, archiveKey)
 		if err != nil {
 			if unlockConv != nil {
 				unlockConv()
@@ -695,7 +699,7 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 			if t.logger != nil {
 				t.logger.Printf("python_execute: sandbox NewSession failed: %v", err)
 			}
-			return "", nil, fmt.Errorf("sandbox session: %w", err)
+			return "", nil, pythonSandboxPublicError(fmt.Errorf("sandbox session: %w", err))
 		}
 		sessionID = sid
 		if hasConv {
@@ -838,41 +842,26 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	}
 	if err := stageFiles(sessionID); err != nil {
 		// The reaper may remove an idle container while its durable sandbox_id is
-		// still stored on the conversation. ResetInputs is the first sidecar call,
-		// so recover here as well as in the Exec path below.
-		if !isSandboxSessionGone(err) {
+		// still stored on the conversation. A canceled HTTP request can also leave
+		// its synchronous sidecar handler holding the old session lock. Replace
+		// either stale session once, then re-stage authoritative inputs.
+		if contextEnded(ctx, err) {
+			t.abandonPythonSession(ctx, tc, sessionID)
 			return "", nil, err
 		}
-		rebuilt := ""
-		if hasConv {
-			relock := lockConvSandbox(tc.ConvID)
-			cur, _ := store.GetConvProviderStateKey(ctx, tc.DB, tc.ConvID, "sandbox_id")
-			if cur != "" && cur != sessionID {
-				rebuilt = cur
-			} else {
-				sid2, sErr := t.sandbox.NewSession(ctx, tc.ConvID)
-				if sErr != nil {
-					relock()
-					return "", nil, fmt.Errorf("sandbox session (rebuild): %w", sErr)
-				}
-				if perr := store.SetConvProviderStateKeyForUser(ctx, tc.DB, tc.ConvID, tc.MessageID, tc.UserID, "sandbox_id", sid2); perr != nil {
-					_ = t.sandbox.Release(ctx, sid2)
-					relock()
-					return "", nil, fmt.Errorf("persist sandbox session (rebuild): %w", perr)
-				}
-				rebuilt = sid2
-			}
-			relock()
-		} else {
-			sid2, sErr := t.sandbox.NewSession(ctx, "")
-			if sErr != nil {
-				return "", nil, fmt.Errorf("sandbox session (rebuild): %w", sErr)
-			}
-			rebuilt = sid2
+		if !isSandboxSessionRecoverable(err) {
+			return "", nil, pythonSandboxPublicError(err)
+		}
+		rebuilt, rebuildErr := t.rebuildPythonSession(ctx, tc, sessionID)
+		if rebuildErr != nil {
+			return "", nil, pythonSandboxPublicError(rebuildErr)
 		}
 		sessionID = rebuilt
 		if err := stageFiles(sessionID); err != nil {
-			return "", nil, err
+			if contextEnded(ctx, err) {
+				t.abandonPythonSession(ctx, tc, sessionID)
+			}
+			return "", nil, pythonSandboxPublicError(err)
 		}
 	}
 
@@ -881,51 +870,26 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		// §4.5 reaper recovery: if the upstream reaped the session container
 		// while we were idle, Exec returns 404. Provision a fresh session,
 		// re-stage uploads + skills, and retry once before bubbling the error.
-		if isSandboxSessionGone(err) {
-			rebuilt := ""
-			if hasConv {
-				// Re-provision under the per-conversation lock so two python_execute
-				// calls that both hit a reaped session don't each NewSession() and
-				// leak one container. Re-read sandbox_id under the lock first: a peer
-				// may have already rebuilt it — adopt that id instead of creating a
-				// second one.
-				relock := lockConvSandbox(tc.ConvID)
-				cur, _ := store.GetConvProviderStateKey(ctx, tc.DB, tc.ConvID, "sandbox_id")
-				if cur != "" && cur != sessionID {
-					rebuilt = cur
-				} else {
-					sid2, sErr := t.sandbox.NewSession(ctx, tc.ConvID)
-					if sErr != nil {
-						relock()
-						return "", nil, fmt.Errorf("sandbox session (rebuild): %w", sErr)
-					}
-					if perr := store.SetConvProviderStateKeyForUser(ctx, tc.DB, tc.ConvID, tc.MessageID, tc.UserID, "sandbox_id", sid2); perr != nil {
-						_ = t.sandbox.Release(ctx, sid2)
-						relock()
-						return "", nil, fmt.Errorf("persist sandbox session (rebuild): %w", perr)
-					}
-					rebuilt = sid2
-				}
-				relock()
-			} else {
-				sid2, sErr := t.sandbox.NewSession(ctx, tc.ConvID)
-				if sErr != nil {
-					return "", nil, fmt.Errorf("sandbox session (rebuild): %w", sErr)
-				}
-				rebuilt = sid2
+		if isSandboxSessionRecoverable(err) {
+			rebuilt, rebuildErr := t.rebuildPythonSession(ctx, tc, sessionID)
+			if rebuildErr != nil {
+				return "", nil, pythonSandboxPublicError(rebuildErr)
 			}
 			sessionID = rebuilt
 			// §4.5 workspace restore: if a prior run archived /workspace, the
 			// sandbox-service auto-restores on session creation. We re-stage
 			// uploads (always cheap) so the new container has user data.
 			if stageErr := stageFiles(sessionID); stageErr != nil {
-				return "", nil, stageErr
+				return "", nil, pythonSandboxPublicError(stageErr)
 			}
 			res, err = t.sandbox.Exec(ctx, sessionID, in.Code)
 		}
 	}
 	if err != nil {
-		return "", nil, err
+		if contextEnded(ctx, err) {
+			t.abandonPythonSession(ctx, tc, sessionID)
+		}
+		return "", nil, pythonSandboxPublicError(err)
 	}
 
 	// Persist produced files as artifacts + surface them to the orchestrator.
@@ -949,11 +913,77 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		for _, f := range res.Files {
 			fmt.Fprintf(&out, "- %s (%s)\n", f.Name, f.MimeType)
 		}
+		out.WriteString("Files are attached to this message automatically. Refer to them by filename; do not emit sandbox: or /workspace/outputs links.\n")
 	}
 	if out.Len() == 0 {
 		out.WriteString("(no output)")
 	}
 	return out.String(), nil, nil
+}
+
+func (t *pythonExecuteTool) rebuildPythonSession(ctx context.Context, tc *llm.ToolContext, previousID string) (string, error) {
+	hasConv := tc != nil && tc.DB != nil && tc.ConvID != ""
+	if !hasConv {
+		sid, err := t.sandbox.NewSession(ctx, "")
+		if err != nil {
+			return "", fmt.Errorf("sandbox session (rebuild): %w", err)
+		}
+		return sid, nil
+	}
+
+	unlock := lockConvSandbox(tc.ConvID)
+	defer unlock()
+	current, _ := store.GetConvProviderStateKey(ctx, tc.DB, tc.ConvID, "sandbox_id")
+	if current != "" && current != previousID {
+		return current, nil
+	}
+
+	sid, err := t.sandbox.NewSession(ctx, tc.ConvID)
+	if err != nil {
+		return "", fmt.Errorf("sandbox session (rebuild): %w", err)
+	}
+	if err := store.SetConvProviderStateKeyForUser(ctx, tc.DB, tc.ConvID, tc.MessageID, tc.UserID, "sandbox_id", sid); err != nil {
+		_ = t.sandbox.Release(ctx, sid)
+		return "", fmt.Errorf("persist sandbox session (rebuild): %w", err)
+	}
+	return sid, nil
+}
+
+// abandonPythonSession disconnects future calls from a session whose HTTP
+// request was canceled. The FastAPI handler executes blocking Docker work in a
+// worker thread and can continue holding the session lock after its client has
+// gone away; keeping that id would make every later health check queue behind
+// work that no longer has a consumer.
+func (t *pythonExecuteTool) abandonPythonSession(ctx context.Context, tc *llm.ToolContext, sessionID string) {
+	if tc == nil || tc.DB == nil || tc.ConvID == "" || sessionID == "" {
+		return
+	}
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	unlock := lockConvSandbox(tc.ConvID)
+	defer unlock()
+	current, err := store.GetConvProviderStateKey(persistCtx, tc.DB, tc.ConvID, "sandbox_id")
+	if err != nil || current != sessionID {
+		return
+	}
+	if err := store.SetConvProviderStateKeyForUser(persistCtx, tc.DB, tc.ConvID, tc.MessageID, tc.UserID, "sandbox_id", ""); err != nil && t.logger != nil {
+		t.logger.Printf("python_execute: failed to abandon canceled sandbox session: %v", err)
+	}
+}
+
+func contextEnded(ctx context.Context, err error) bool {
+	return ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+func pythonSandboxPublicError(err error) error {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	var httpErr *sandbox.HTTPError
+	if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusTooManyRequests {
+		return &llm.ToolUserError{Message: "Python sandbox is busy. Please wait a moment and try again."}
+	}
+	return err
 }
 
 func reusableGeneratedImageSource(source string) bool {
@@ -2745,20 +2775,48 @@ func truncateOutput(s string, max int) string {
 
 // isSandboxSessionGone is true for the upstream "session not found" responses
 // the sandbox-service returns after the reaper recycled a container (§4.5).
-// We detect by string match because the HTTPSandbox wraps every non-2xx in a
-// generic "sandbox <code>: <body>" — fragile but the surface is tiny + ours.
 func isSandboxSessionGone(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := strings.ToLower(err.Error())
-	if strings.Contains(msg, "sandbox 404") {
+	if errors.Is(err, sandbox.ErrSessionGone) {
 		return true
 	}
+	var httpErr *sandbox.HTTPError
+	if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
+		// FastAPI also returns a generic {"detail":"Not Found"} when an old
+		// sidecar image does not implement /files/reset-inputs at all. Treating
+		// that as a reaped session would create and persist a replacement, call
+		// the same missing route, and leak another container on every attempt.
+		msg := strings.ToLower(httpErr.Body)
+		return strings.Contains(msg, "session not found") ||
+			strings.Contains(msg, "no such session") ||
+			strings.Contains(msg, "session_gone") ||
+			(strings.Contains(msg, "session") && strings.Contains(msg, "not running"))
+	}
+	msg := strings.ToLower(err.Error())
 	if strings.Contains(msg, "session not found") || strings.Contains(msg, "no such session") || strings.Contains(msg, "session_gone") {
 		return true
 	}
 	return false
+}
+
+func isSandboxSessionBusy(err error) bool {
+	if err == nil {
+		return false
+	}
+	var httpErr *sandbox.HTTPError
+	if errors.As(err, &httpErr) {
+		return httpErr.StatusCode == http.StatusTooManyRequests && strings.Contains(strings.ToLower(httpErr.Body), "session is busy")
+	}
+	// Keep compatibility with alternate Service implementations and older
+	// sidecars that only expose a formatted error string.
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "sandbox 429") && strings.Contains(msg, "session is busy")
+}
+
+func isSandboxSessionRecoverable(err error) bool {
+	return isSandboxSessionGone(err) || isSandboxSessionBusy(err)
 }
 
 func extForMime(mime string) string {

@@ -28,14 +28,16 @@ type stagedSandboxFile struct {
 }
 
 type recordingSandbox struct {
-	resetCalls  int
-	resetErr    error
-	resetErrors []error
-	newSessions int
-	putFiles    []stagedSandboxFile
-	putErr      error
-	execCalls   int
-	execResult  *sandbox.Result
+	resetCalls   int
+	resetErr     error
+	resetErrors  []error
+	newSessions  int
+	putFiles     []stagedSandboxFile
+	putErr       error
+	execCalls    int
+	execErrors   []error
+	execSessions []string
+	execResult   *sandbox.Result
 }
 
 func (s *recordingSandbox) Enabled() bool { return true }
@@ -43,8 +45,16 @@ func (s *recordingSandbox) NewSession(context.Context, string) (string, error) {
 	s.newSessions++
 	return fmt.Sprintf("sandbox-%d", s.newSessions), nil
 }
-func (s *recordingSandbox) Exec(context.Context, string, string) (*sandbox.Result, error) {
+func (s *recordingSandbox) Exec(_ context.Context, sessionID string, _ string) (*sandbox.Result, error) {
 	s.execCalls++
+	s.execSessions = append(s.execSessions, sessionID)
+	if len(s.execErrors) > 0 {
+		err := s.execErrors[0]
+		s.execErrors = s.execErrors[1:]
+		if err != nil {
+			return nil, err
+		}
+	}
 	if s.execResult != nil {
 		return s.execResult, nil
 	}
@@ -332,6 +342,83 @@ func TestPythonExecuteRebuildsSessionWhenInitialResetFindsReapedSandbox(t *testi
 	}
 	if fake.newSessions != 2 || fake.resetCalls != 2 || fake.execCalls != 1 {
 		t.Fatalf("calls new=%d reset=%d exec=%d, want 2/2/1", fake.newSessions, fake.resetCalls, fake.execCalls)
+	}
+}
+
+func TestSandboxSessionGoneDoesNotTreatMissingSidecarRouteAsReapedSession(t *testing.T) {
+	if isSandboxSessionGone(&sandbox.HTTPError{StatusCode: http.StatusNotFound, Body: `{"detail":"Not Found"}`}) {
+		t.Fatal("a missing reset-inputs route must require a sidecar upgrade, not leak replacement sessions")
+	}
+	if !isSandboxSessionGone(&sandbox.HTTPError{StatusCode: http.StatusNotFound, Body: `{"detail":"session not found or not running"}`}) {
+		t.Fatal("an older sidecar's reaped-session 404 must remain recoverable")
+	}
+}
+
+func TestPythonExecuteRebuildsSessionWhenCanceledRunStillHoldsLock(t *testing.T) {
+	fake := &recordingSandbox{
+		resetErrors: []error{&sandbox.HTTPError{StatusCode: http.StatusTooManyRequests, Body: `{"detail":"session is busy"}`}, nil},
+		execResult:  &sandbox.Result{Stdout: "healthy\n"},
+	}
+	tool := &pythonExecuteTool{sandbox: fake, logger: log.New(io.Discard, "", 0)}
+	output, _, err := tool.Execute(context.Background(), []byte(`{"code":"print('healthcheck')"}`), &llm.ToolContext{})
+	if err != nil {
+		t.Fatalf("Execute after busy session: %v", err)
+	}
+	if output != "stdout:\nhealthy\n\n" {
+		t.Fatalf("output=%q, want rebuilt session result", output)
+	}
+	if fake.newSessions != 2 || fake.resetCalls != 2 || fake.execCalls != 1 {
+		t.Fatalf("calls new=%d reset=%d exec=%d, want 2/2/1", fake.newSessions, fake.resetCalls, fake.execCalls)
+	}
+}
+
+func TestPythonExecuteRebuildsOnceWhenExecReportsBusySession(t *testing.T) {
+	fake := &recordingSandbox{
+		execErrors: []error{&sandbox.HTTPError{StatusCode: http.StatusTooManyRequests, Body: `{"detail":"session is busy"}`}, nil},
+		execResult: &sandbox.Result{Stdout: "healthy\n"},
+	}
+	tool := &pythonExecuteTool{sandbox: fake, logger: log.New(io.Discard, "", 0)}
+	output, _, err := tool.Execute(context.Background(), []byte(`{"code":"print('healthcheck')"}`), &llm.ToolContext{})
+	if err != nil {
+		t.Fatalf("Execute after busy exec: %v", err)
+	}
+	if !strings.Contains(output, "healthy") {
+		t.Fatalf("output=%q, want successful retry", output)
+	}
+	if fake.newSessions != 2 || fake.resetCalls != 2 || fake.execCalls != 2 {
+		t.Fatalf("calls new=%d reset=%d exec=%d, want 2/2/2", fake.newSessions, fake.resetCalls, fake.execCalls)
+	}
+	if len(fake.execSessions) != 2 || fake.execSessions[0] == fake.execSessions[1] {
+		t.Fatalf("exec sessions=%v, retry must use a fresh session", fake.execSessions)
+	}
+}
+
+func TestPythonExecuteAbandonsSessionAfterCanceledHTTPExecution(t *testing.T) {
+	ctx := context.Background()
+	db := openToolsTestDB(t)
+	for _, query := range []string{
+		`INSERT INTO users(id,email,password_hash,name) VALUES('u1','u1@example.com','hash','User')`,
+		`INSERT INTO conversations(id,user_id,title) VALUES('c1','u1','Test')`,
+		`INSERT INTO messages(id,conversation_id,role,author_id,status) VALUES('m1','c1','assistant','u1','streaming')`,
+	} {
+		if _, err := db.ExecContext(ctx, query); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fake := &recordingSandbox{execErrors: []error{context.DeadlineExceeded}}
+	tool := &pythonExecuteTool{sandbox: fake, logger: log.New(io.Discard, "", 0)}
+	_, _, err := tool.Execute(ctx, []byte(`{"code":"print('slow')"}`), &llm.ToolContext{
+		DB: db, UserID: "u1", ConvID: "c1", MessageID: "m1",
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Execute error=%v, want deadline exceeded", err)
+	}
+	got, err := store.GetConvProviderStateKey(ctx, db, "c1", "sandbox_id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "" {
+		t.Fatalf("sandbox_id=%q, canceled execution must be abandoned", got)
 	}
 }
 

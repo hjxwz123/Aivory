@@ -8,7 +8,9 @@ the Go backend only needs SANDBOX_BASE_URL pointed at this service:
     POST /exec      {session_id, code, timeout_ms}
                     -> {"stdout", "stderr", "exit_code", "files":[{name,mime_type,data_base64}]}
     POST /files     {session_id, path, data_base64}  -> {"ok": true}
-    POST /files/reset-inputs {session_id}            -> {"ok": true}
+    POST /files/reset-inputs {session_id}
+                    -> {"ok": true, "session_gone": false}
+                       or {"ok": false, "session_gone": true}
 
 Each session is one long-lived, locked-down Docker container running the
 `aivory-sandbox` image (see Dockerfile.runner). /workspace persists across
@@ -249,6 +251,17 @@ _image_ready = threading.Event()
 _image_pull_lock = threading.Lock()
 
 
+def _image_pull_failure_detail(stderr: bytes) -> str:
+    detail = stderr.decode(errors="replace")[:200].strip() or "unknown docker pull failure"
+    lowered = detail.lower()
+    if "digest" in lowered or "failed commit on ref" in lowered:
+        detail += (
+            "; the configured registry/proxy returned inconsistent image content. "
+            "Retry the pull or switch IMAGE_REGISTRY/SANDBOX_IMAGE to a healthy registry"
+        )
+    return detail
+
+
 def _ensure_image_present() -> None:
     """`docker run` at session-create is budgeted 60s on the assumption it never
     pulls (see L5 above — that lock's comment literally says "docker run -d
@@ -273,7 +286,7 @@ def _ensure_image_present() -> None:
         if cp.returncode != 0:
             raise HTTPException(
                 status_code=503,
-                detail=f"sandbox image not available yet: {cp.stderr.decode(errors='replace')[:200]}",
+                detail=f"sandbox image not available yet: {_image_pull_failure_detail(cp.stderr)}",
             )
         _image_ready.set()
 
@@ -1000,14 +1013,22 @@ def reset_inputs(body: ListFilesBody):
     if not _valid_session(sid):
         raise HTTPException(status_code=400, detail="invalid session_id")
     name = _container(sid)
+    # A stored conversation session id naturally becomes stale after the idle
+    # reaper archives and removes its container. This is a normal recovery
+    # signal, not a bad client route: return a structured 200 so access logs do
+    # not fill with expected 404s. The Go client converts this back to the local
+    # ErrSessionGone sentinel and provisions a fresh session; it also recognizes
+    # the HTTP 404 returned by older sidecars.
+    if _is_terminating(sid):
+        return {"ok": False, "session_gone": True}
     with _session_lock(sid):
         if not _is_running(sid):
-            raise HTTPException(status_code=404, detail="session not found or not running")
+            return {"ok": False, "session_gone": True}
         reset_error = _reset_input_dirs(name)
         if reset_error is not None:
             raise HTTPException(status_code=500, detail=f"reset inputs failed: {reset_error}")
         _touch(sid)
-        return {"ok": True}
+        return {"ok": True, "session_gone": False}
 
 
 @app.delete("/sessions/{session_id}")
@@ -1816,12 +1837,21 @@ def _restore_workspace(session_id: str, storage: Optional[dict]) -> None:
         full_key = _workspace_archive_key(storage, _archive_stem(session_id))
         # Bound the download (an oversized/poisoned archive can't OOM the sidecar)
         # and extract with --no-same-owner so the archive can't impose ownership.
+        # /workspace is an existing root-owned tmpfs in hardened sessions. The
+        # archive contains a leading "." directory entry, so plain tar tries to
+        # chmod/utime the tmpfs root after extracting its children and exits 2
+        # for the non-root sandbox user. Preserve metadata on directories that
+        # already exist; files and newly-created directories are still restored.
         # Path/symlink escape is contained by the read-only rootfs + the bounded
         # /workspace tmpfs (a decompressed bomb hits ENOSPC, not the host).
         data = _storage_get_object(storage, full_key, max_bytes=MAX_ARCHIVE_BYTES)
         if data is None:
             return  # nothing archived for this session yet
-        cp = _docker(["exec", "-i", name, "tar", "--no-same-owner", "-xzf", "-", "-C", WORKSPACE],
+        cp = _docker([
+            "exec", "-i", name, "tar",
+            "--no-same-owner", "--no-overwrite-dir",
+            "-xzf", "-", "-C", WORKSPACE,
+        ],
                      input_bytes=data, timeout=120)
         if cp.returncode != 0:
             print(f"[sandbox] warning: restore untar for {session_id} failed: "
@@ -1895,9 +1925,18 @@ def _start_reaper() -> None:
             try:
                 cp = _docker(["pull", IMAGE], timeout=3600)
                 if cp.returncode != 0:
-                    print(f"[sandbox] warning: startup pull of {IMAGE} failed: "
-                          f"{cp.stderr.decode(errors='replace')[:200]}")
+                    cached = _docker(["image", "inspect", IMAGE], timeout=10)
+                    if cached.returncode == 0:
+                        _image_ready.set()
+                        print(f"[sandbox] warning: startup pull of {IMAGE} failed; "
+                              "continuing with the cached image: "
+                              f"{_image_pull_failure_detail(cp.stderr)}")
+                    else:
+                        print(f"[sandbox] warning: startup pull of {IMAGE} failed "
+                              "and no cached image is available: "
+                              f"{_image_pull_failure_detail(cp.stderr)}")
                 else:
+                    _image_ready.set()
                     print(f"[sandbox] runtime image {IMAGE} ready")
             except Exception as exc:  # noqa: BLE001 - warm-up must never kill startup
                 print(f"[sandbox] warning: startup pull of {IMAGE} failed: {exc}")

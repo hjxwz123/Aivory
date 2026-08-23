@@ -6735,6 +6735,13 @@ func (r *orchToolRunner) Run(ctx context.Context, name string, input []byte) (st
 	if r.ctx == nil {
 		return "", nil, errors.New("tool context unavailable")
 	}
+	if name == "python_execute" {
+		release, err := acquirePythonConversationGate(ctx, r.ctx.ConvID)
+		if err != nil {
+			return "", nil, err
+		}
+		defer release()
+	}
 	if r.ctx.WorkspaceAccessCheck != nil {
 		if err := r.ctx.WorkspaceAccessCheck(ctx); err != nil {
 			return "", nil, fmt.Errorf("workspace access revoked before tool execution: %w", err)

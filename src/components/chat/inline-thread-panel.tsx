@@ -170,7 +170,12 @@ function ThreadBody({ quote, childId, onClose }: { quote: string; childId: strin
               </div>
             ) : (
               <div key={m.id} className="self-start w-full text-[13.5px] text-[var(--color-fg)]">
-                <Markdown content={m.content} live={Boolean(m.streaming)} blockKeyPrefix={m.id} />
+                <Markdown
+                  content={m.content}
+                  artifacts={m.artifacts}
+                  live={Boolean(m.streaming)}
+                  blockKeyPrefix={m.id}
+                />
                 {m.streaming && !m.content ? (
                   <span className="text-[12px] text-[var(--color-fg-subtle)]">{t('common:common.thinking', { defaultValue: 'Thinking' })}…</span>
                 ) : null}
