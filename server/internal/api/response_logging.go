@@ -278,7 +278,9 @@ func errorResponseLoggingMiddleware(logger *log.Logger, next http.Handler) http.
 		next.ServeHTTP(wrapResponseLogWriter(observed), r)
 
 		status := observed.finalStatus()
-		if status >= 200 && status < 300 || status == http.StatusSwitchingProtocols {
+		if (status >= 200 && status < 300) ||
+			status == http.StatusSwitchingProtocols ||
+			status == http.StatusUnauthorized {
 			return
 		}
 		route := observed.routePattern

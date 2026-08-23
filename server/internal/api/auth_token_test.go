@@ -25,6 +25,56 @@ func TestReadAccessTokenPrefersBearerOverCookie(t *testing.T) {
 	}
 }
 
+func TestSessionHandlerTreatsMissingRefreshCookieAsUnauthenticated(t *testing.T) {
+	d := newAuthSecurityDeps(t, "session-probe.db")
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/session", nil)
+	rec := httptest.NewRecorder()
+
+	sessionHandler(d, rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var got authSessionResp
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Authenticated || got.User != nil || got.AccessToken != "" {
+		t.Fatalf("session response = %+v, want unauthenticated", got)
+	}
+}
+
+func TestSessionHandlerRestoresValidRefreshSession(t *testing.T) {
+	d := newAuthSecurityDeps(t, "session-probe-valid.db")
+	user, err := store.CreateUser(t.Context(), d.DB, "session-probe@example.test", "Session Probe", "hash")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	refresh, refreshExp, jti, err := d.Auth.IssueRefresh(user.ID, user.TokenVer)
+	if err != nil {
+		t.Fatalf("issue refresh: %v", err)
+	}
+	if err := store.SaveRefreshToken(t.Context(), d.DB, jti, user.ID, refreshExp, store.SessionMeta{}); err != nil {
+		t.Fatalf("save refresh: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/session", nil)
+	req.AddCookie(&http.Cookie{Name: "refresh_token", Value: refresh})
+	rec := httptest.NewRecorder()
+
+	sessionHandler(d, rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var got authSessionResp
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !got.Authenticated || got.User == nil || got.User.ID != user.ID || got.AccessToken == "" || got.ExpiresAt == 0 {
+		t.Fatalf("session response = %+v, want authenticated user %q with access token", got, user.ID)
+	}
+}
+
 func TestRequireAuthUsesDatabaseAuthStateAcrossIndependentCaches(t *testing.T) {
 	db, err := store.Open(filepath.Join(t.TempDir(), "auth.db"))
 	if err != nil {

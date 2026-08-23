@@ -401,7 +401,7 @@ export default function ChatThread() {
       : t('chat:visibility.creatorOnly')
 
   return (
-    <div className="flex-1 flex flex-col min-h-0">
+    <div className="flex-1 min-w-0 flex flex-col min-h-0">
       {/* Topbar — desktop keeps the full inline toolbar; mobile is a calm
           three-zone bar (menu • title+model • one overflow) like ChatGPT/Gemini. */}
       {isDesktop ? (

@@ -568,6 +568,14 @@ export interface ApiAuthResponse {
   expires_at: number
 }
 
+/** Browser session probe. Logged-out is a normal result, not an HTTP error. */
+export interface ApiAuthSessionResponse {
+  authenticated: boolean
+  user?: ApiUser
+  access_token?: string
+  expires_at?: number
+}
+
 export type AuthEntryMode = 'login_page' | 'provider_picker' | 'auto_redirect'
 export type OAuthInitialPasswordPolicy = 'required' | 'optional' | 'disabled'
 

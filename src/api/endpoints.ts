@@ -3,7 +3,7 @@
  * backend returns, with a small typed helper signature. Group by feature so
  * the call sites stay readable.
  */
-import { api, apiUrl, getAccessToken, ApiError, apiUpload, type UploadProgress } from './client'
+import { api, apiUrl, getAccessToken, ApiError, apiUpload, assertNetworkOnline, type UploadProgress } from './client'
 import { withRequestActivity, type RequestActivityMode } from '@/lib/request-activity'
 import type {
   ApiAdminMessageFeedbackPage,
@@ -30,6 +30,7 @@ import type {
   ApiAnalytics,
   ApiAuthPolicy,
   ApiAuthResponse,
+  ApiAuthSessionResponse,
   ApiBuiltinTool,
   ApiChannel,
   ApiConversation,
@@ -147,6 +148,8 @@ export const authApi = {
   /** Whether the deployment still needs its first-run setup (zero users). */
   needsSetup: () => api<{ needs_setup: boolean }>('/public/needs-setup'),
   authPolicy: () => api<ApiAuthPolicy>('/public/auth-policy'),
+  /** Restore an existing cookie session; signed-out is a successful normal state. */
+  session: () => api<ApiAuthSessionResponse>('/auth/session', { method: 'POST' }),
   /** Create the first account (admin) on a fresh deployment, then sign in. */
   setup: (name: string, email: string, password: string) =>
     api<ApiAuthResponse>('/setup', { method: 'POST', body: { name, email, password } }),
@@ -169,6 +172,7 @@ export const authApi = {
   deleteMyFiles: (items: Array<{ source: 'file' | 'document'; id: string }>) =>
     api<{ deleted: number }>('/me/files/delete', { method: 'POST', body: { items } }),
   myFileContentBlob: async (source: 'file' | 'document', id: string, signal?: AbortSignal): Promise<Blob> => {
+    assertNetworkOnline()
     const token = getAccessToken()
     const res = await fetch(apiUrl(`/me/files/content?source=${source}&id=${encodeURIComponent(id)}`), {
       credentials: 'include',
@@ -1249,6 +1253,7 @@ export const adminApi = {
   // cannot carry an auth header, so the authenticated fetch happens first.
   fileContentBlob: (source: 'file' | 'document', id: string, signal?: AbortSignal): Promise<Blob> =>
     withRequestActivity(async () => {
+      assertNetworkOnline()
       const token = getAccessToken()
       const res = await fetch(apiUrl(`/admin/files/content?source=${source}&id=${encodeURIComponent(id)}`), {
         credentials: 'include',
@@ -1300,6 +1305,7 @@ export const adminApi = {
   },
   userFeedbackScreenshotBlob: (id: string, signal?: AbortSignal): Promise<Blob> =>
     withRequestActivity(async () => {
+      assertNetworkOnline()
       const token = getAccessToken()
       const res = await fetch(apiUrl(`/admin/user-feedback/${encodeURIComponent(id)}/screenshot`), {
         credentials: 'include',
@@ -1331,6 +1337,7 @@ export const adminApi = {
   // sending the cookie + Bearer the rest of the client uses).
   backupExport: (includeFiles: boolean): Promise<Blob> =>
     withRequestActivity(async () => {
+      assertNetworkOnline()
       const token = getAccessToken()
       const res = await fetch(apiUrl(`/admin/backup/export${includeFiles ? '?files=1' : ''}`), {
         credentials: 'include',
@@ -1357,6 +1364,7 @@ export const adminApi = {
     api<BackupExportState>('/admin/backup/export-jobs', { activity }),
   backupArchiveDownload: (name: string): Promise<Blob> =>
     withRequestActivity(async () => {
+      assertNetworkOnline()
       const token = getAccessToken()
       const res = await fetch(apiUrl(`/admin/backup/archives/${encodeURIComponent(name)}`), {
         credentials: 'include',
@@ -1390,6 +1398,7 @@ export const adminApi = {
   // workspaces, and logs untouched.
   configExport: (): Promise<Blob> =>
     withRequestActivity(async () => {
+      assertNetworkOnline()
       const token = getAccessToken()
       const res = await fetch(apiUrl('/admin/config/export'), {
         credentials: 'include',

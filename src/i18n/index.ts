@@ -204,6 +204,7 @@ void i18n
       caches: [],
     },
     returnNull: false,
+    showSupportNotice: false,
   })
 
 export default i18n

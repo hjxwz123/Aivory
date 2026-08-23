@@ -22,6 +22,7 @@
  */
 
 import { useConversations } from '@/store/conversations'
+import { isNetworkOnline } from '@/api/client'
 import { isReloadBlocked } from '@/lib/sync-guards'
 
 const LS_KEY = 'aivory.update-ready'
@@ -51,6 +52,7 @@ function anyStreaming(): boolean {
 }
 
 async function fetchRemoteVersion(): Promise<string | null> {
+  if (!isNetworkOnline()) return null
   try {
     const res = await fetch('/version.json', { cache: 'no-store' })
     if (!res.ok) return null

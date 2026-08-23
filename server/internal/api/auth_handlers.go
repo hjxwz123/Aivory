@@ -215,6 +215,16 @@ type authResp struct {
 	ExpiresAt   int64       `json:"expires_at"`
 }
 
+// authSessionResp is used only for the browser's startup session probe. A
+// missing or expired refresh cookie is an expected state on the login screen,
+// so that probe reports it as a normal 200 response instead of an HTTP error.
+type authSessionResp struct {
+	Authenticated bool        `json:"authenticated"`
+	User          *store.User `json:"user,omitempty"`
+	AccessToken   string      `json:"access_token,omitempty"`
+	ExpiresAt     int64       `json:"expires_at,omitempty"`
+}
+
 // registerHandler creates a new account (default role=user) and sets the
 // access-token cookie. When email_verification_required is on, the account
 // starts as "pending" and a 6-digit code is sent via the configured mailer.
@@ -649,31 +659,50 @@ func logoutHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
-// refreshHandler swaps a refresh token for a new access token.
-func refreshHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+type refreshAuthFailure struct {
+	reason error
+}
+
+func (e *refreshAuthFailure) Error() string { return e.reason.Error() }
+func (e *refreshAuthFailure) Unwrap() error { return e.reason }
+
+type refreshedSession struct {
+	user       *store.User
+	access     string
+	accessExp  time.Time
+	refresh    string
+	refreshExp time.Time
+}
+
+// refreshSession rotates the presented refresh token and returns the new token
+// pair. Authentication failures are marked separately from operational errors
+// so the startup session probe can report "not signed in" without weakening the
+// existing /auth/refresh API contract.
+func refreshSession(d Deps, r *http.Request) (*refreshedSession, error) {
 	c, err := r.Cookie("refresh_token")
 	if err != nil {
-		writeError(w, 401, errAuthRequired)
-		return
+		return nil, &refreshAuthFailure{reason: errAuthRequired}
 	}
 	claims, err := d.Auth.ParseRefresh(c.Value)
 	if err != nil {
-		writeError(w, 401, errAuthRequired)
-		return
+		return nil, &refreshAuthFailure{reason: errAuthRequired}
 	}
 	user, err := store.FindUserByID(r.Context(), d.DB, claims.UID)
-	if err != nil || user.Status != "active" {
-		writeError(w, 401, errAccountBlocked)
-		return
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, &refreshAuthFailure{reason: errAccountBlocked}
+		}
+		return nil, err
+	}
+	if user.Status != "active" {
+		return nil, &refreshAuthFailure{reason: errAccountBlocked}
 	}
 	if user.TokenVer != claims.TV {
-		writeError(w, 401, errSessionExpired)
-		return
+		return nil, &refreshAuthFailure{reason: errSessionExpired}
 	}
 	refresh, refreshExp, jti, err := d.Auth.IssueRefresh(user.ID, user.TokenVer)
 	if err != nil {
-		writeError(w, 500, err)
-		return
+		return nil, err
 	}
 	sessionID, err := store.RotateRefreshToken(
 		r.Context(), d.DB, claims.ID, claims.UID, claims.TV,
@@ -681,22 +710,69 @@ func refreshHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		if errors.Is(err, store.ErrInvalidRefreshToken) {
-			writeError(w, 401, errSessionExpired)
-			return
+			return nil, &refreshAuthFailure{reason: errSessionExpired}
 		}
-		writeError(w, 500, err)
-		return
+		return nil, err
 	}
 	access, exp, err := d.Auth.IssueAccessForSession(user.ID, user.Role, user.TokenVer, sessionID)
 	if err != nil {
 		_, _ = store.RevokeUserSession(r.Context(), d.DB, user.ID, jti)
-		writeError(w, 500, err)
+		return nil, err
+	}
+	return &refreshedSession{
+		user:       user,
+		access:     access,
+		accessExp:  exp,
+		refresh:    refresh,
+		refreshExp: refreshExp,
+	}, nil
+}
+
+func writeRefreshedSession(d Deps, w http.ResponseWriter, r *http.Request, session *refreshedSession, response any) {
+	invalidateAuthUser(d, session.user.ID)
+	setSessionCookies(w, r, session.access, session.accessExp, session.refresh, session.refreshExp)
+	attachGroupInfo(d, r, session.user)
+	writeJSON(w, http.StatusOK, response)
+}
+
+// refreshHandler swaps a refresh token for a new access token. This endpoint
+// retains HTTP 401 for callers that explicitly request a token refresh.
+func refreshHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	session, err := refreshSession(d, r)
+	if err != nil {
+		var authFailure *refreshAuthFailure
+		if errors.As(err, &authFailure) {
+			writeError(w, http.StatusUnauthorized, authFailure.reason)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	invalidateAuthUser(d, user.ID)
-	setSessionCookies(w, r, access, exp, refresh, refreshExp)
-	attachGroupInfo(d, r, user)
-	writeJSON(w, 200, authResp{User: user, AccessToken: access, ExpiresAt: exp.Unix()})
+	writeRefreshedSession(d, w, r, session, authResp{User: session.user, AccessToken: session.access, ExpiresAt: session.accessExp.Unix()})
+}
+
+// sessionHandler is the browser-only startup/renewal probe. It keeps a normal
+// logged-out page from generating an expected 401 in DevTools, while protected
+// endpoints and the explicit /auth/refresh contract continue to use 401.
+func sessionHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	session, err := refreshSession(d, r)
+	if err != nil {
+		var authFailure *refreshAuthFailure
+		if errors.As(err, &authFailure) {
+			clearCookie(w, "auth_token")
+			clearCookie(w, "refresh_token")
+			writeJSON(w, http.StatusOK, authSessionResp{Authenticated: false})
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeRefreshedSession(d, w, r, session, authSessionResp{
+		Authenticated: true,
+		User:          session.user,
+		AccessToken:   session.access,
+		ExpiresAt:     session.accessExp.Unix(),
+	})
 }
 
 func finaliseSession(d Deps, w http.ResponseWriter, r *http.Request, user *store.User, inheritCreatedAt int64) {

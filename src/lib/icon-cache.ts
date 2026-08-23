@@ -26,6 +26,10 @@ type Persisted = Record<string, { d: string; t: number }>
 const mem = new Map<string, string>()
 const inflight = new Map<string, Promise<string | undefined>>()
 
+function isNetworkOnline(): boolean {
+  return typeof navigator === 'undefined' || navigator.onLine !== false
+}
+
 let persisted: Persisted | null = null
 function loadPersisted(): Persisted {
   if (persisted) return persisted
@@ -77,6 +81,10 @@ export function ensureIconCached(url: string): Promise<string | undefined> {
   const hit = cachedIconSrc(url)
   if (hit) return Promise.resolve(hit)
   if (mem.get(url) === '') return Promise.resolve(undefined)
+  if (!isNetworkOnline()) {
+    mem.set(url, '')
+    return Promise.resolve(undefined)
+  }
   const pending = inflight.get(url)
   if (pending) return pending
   const p = (async (): Promise<string | undefined> => {
