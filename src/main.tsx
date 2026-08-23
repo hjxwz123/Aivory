@@ -12,6 +12,23 @@ import App from './App'
 import './styles/globals.css'
 import 'katex/dist/katex.min.css'
 
+const aivoryConsoleMark = [
+  '     _    ___ __     _____  _______   __',
+  '    / \\  |_ _|\\ \\   / / _ \\|  _ \\ \\ / /',
+  '   / _ \\  | ||\\ \\ / / | | | |_) | \\ V /',
+  '  / ___ \\ | || \\ V /| |_| |  _ <   | |',
+  ' /_/   \\_\\___|  \\_/  \\___/|_| \\_\\  |_|',
+].join('\n')
+
+console.info(
+  `%c${aivoryConsoleMark}%c\n\n%cWELCOME TO AIVORY%c\n%cClear thinking starts here.`,
+  'color: #5eead4; background: #042f2e; font: 700 15px/1.12 Geist Mono, monospace; padding: 12px 16px; border: 1px solid #0f766e; border-radius: 6px;',
+  '',
+  'color: #0f766e; font: 700 15px Geist, sans-serif;',
+  '',
+  'color: #64748b; font: 13px Geist, sans-serif;',
+)
+
 // §23: after a deploy the old tab's next lazy-chunk request 404s (hashed files
 // were replaced) and React.lazy would white-screen. Vite surfaces that failure
 // as a `vite:preloadError` event — reload once to pick up the new build. The

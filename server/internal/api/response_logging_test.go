@@ -151,6 +151,35 @@ func TestErrorResponseLoggingSkipsAllSuccessfulResponses(t *testing.T) {
 	}
 }
 
+func TestErrorResponseLoggingSkipsUnauthorizedOnly(t *testing.T) {
+	tests := []struct {
+		name     string
+		status   int
+		wantLogs bool
+	}{
+		{name: "unauthorized", status: http.StatusUnauthorized, wantLogs: false},
+		{name: "forbidden", status: http.StatusForbidden, wantLogs: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+			rec, got := serveWithErrorResponseLogger(req, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				writeError(w, tc.status, errors.New("expected status"))
+			}))
+			if rec.Code != tc.status {
+				t.Fatalf("status = %d, want %d", rec.Code, tc.status)
+			}
+			if tc.wantLogs && !strings.Contains(got, "http non-2xx:") {
+				t.Fatalf("non-401 response was not logged: %q", got)
+			}
+			if !tc.wantLogs && got != "" {
+				t.Fatalf("401 response was logged: %q", got)
+			}
+		})
+	}
+}
+
 func TestErrorResponseLoggingLogsRedirectWithoutLocationOrQuery(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Location", "https://example.test/callback?token=location-secret")

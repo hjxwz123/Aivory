@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/dialog'
 import type { Attachment } from '@/types/chat'
 import { cn } from '@/lib/utils'
-import { getAccessToken } from '@/api/client'
+import { assertNetworkOnline, getAccessToken } from '@/api/client'
 
 interface PreviewFile {
   name: string
@@ -66,6 +66,7 @@ export function FilePreview({ open, onOpenChange, file, onLoadError }: FilePrevi
 
     void (async () => {
       try {
+        assertNetworkOnline()
         const token = file.authenticated ? getAccessToken() : null
         const response = await fetch(sourceUrl, {
           credentials: 'include',

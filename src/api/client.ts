@@ -107,6 +107,22 @@ export class ApiError extends Error {
   }
 }
 
+const NETWORK_OFFLINE_MESSAGE = 'No network connection. Check your connection and try again.'
+
+/** Whether the browser explicitly reports that its network connection is down. */
+export function isNetworkOnline(): boolean {
+  return typeof navigator === 'undefined' || navigator.onLine !== false
+}
+
+/**
+ * Avoid starting browser requests that are guaranteed to fail while offline.
+ * Callers still receive an ApiError so their existing loading and feedback
+ * paths settle normally, while DevTools is spared a needless network request.
+ */
+export function assertNetworkOnline(): void {
+  if (!isNetworkOnline()) throw new ApiError(0, NETWORK_OFFLINE_MESSAGE, null)
+}
+
 interface ApiOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
   /** Plain object (will be JSON.stringified) or FormData. */
@@ -153,6 +169,7 @@ function isAuthPath(path: string): boolean {
 }
 
 async function apiRequest<T>(path: string, opts: ApiOptions, retried: boolean): Promise<T> {
+  assertNetworkOnline()
   const isForm = opts.body instanceof FormData
   const headers: Record<string, string> = {
     accept: 'application/json',
@@ -214,6 +231,7 @@ async function apiUploadRequest<T>(
   opts: UploadOptions,
   retried: boolean,
 ): Promise<T> {
+  assertNetworkOnline()
   const res = await xhrUpload(path, body, opts)
   if (res.status === 401 && !retried && !isAuthPath(path)) {
     if (await tryRefresh()) return apiUploadRequest<T>(path, body, opts, true)
@@ -387,11 +405,13 @@ export async function* streamSSE(
   body: unknown,
   signal?: AbortSignal,
 ): AsyncGenerator<{ event: string; data: unknown; id?: string }> {
+  assertNetworkOnline()
   const sseTs = Math.floor(Date.now() / 1000)
   const sseNonce = _nonce()
   const sseSig = memoryToken ? await _sign(memoryToken, sseTs, sseNonce, path) : ''
-  const open = () =>
-    fetch(API_BASE + path, {
+  const open = () => {
+    assertNetworkOnline()
+    return fetch(API_BASE + path, {
       method: 'POST',
       credentials: 'include',
       headers: {
@@ -404,6 +424,7 @@ export async function* streamSSE(
       body: JSON.stringify(body),
       signal,
     })
+  }
   let res = await open()
   // Same refresh-on-401 as api(): an expired access token shouldn't fail a send.
   if (res.status === 401 && !isAuthPath(path) && (await tryRefresh())) {
@@ -460,8 +481,9 @@ export async function* streamSSEGet(
   let currentLastId = lastEventId ?? ''
   let retryCount = 0
   let reconnectToastShown = false
-  const open = () =>
-    fetch(API_BASE + path, {
+  const open = () => {
+    assertNetworkOnline()
+    return fetch(API_BASE + path, {
       method: 'GET',
       credentials: 'include',
       headers: {
@@ -472,6 +494,7 @@ export async function* streamSSEGet(
       },
       signal,
     })
+  }
 
   while (true) {
     let res = await open()

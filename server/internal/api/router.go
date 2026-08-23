@@ -154,6 +154,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("POST", "/api/auth/login/2fa", rateLimitedIP(d, "auth", rlLogin2faMax, rlLogin2faWindow, wrap(d, login2faHandler)))
 	mux.handle("POST", "/api/auth/logout", rateLimitedIP(d, "auth", rlLogoutMax, rlLogoutWindow, wrap(d, logoutHandler)))
 	mux.handle("POST", "/api/auth/refresh", rateLimitedIP(d, "auth", rlRefreshMax, rlRefreshWindow, wrap(d, refreshHandler)))
+	mux.handle("POST", "/api/auth/session", rateLimitedIP(d, "auth", rlRefreshMax, rlRefreshWindow, wrap(d, sessionHandler)))
 	mux.handle("POST", "/api/auth/verify-email", rateLimitedIP(d, "verify-email", rlVerifyEmailMax, rlVerifyEmailWindow, wrap(d, verifyEmailHandler)))
 	mux.handle("POST", "/api/auth/send-code", rateLimitedIP(d, "auth", rlSendCodeMax, rlSendCodeWindow, wrap(d, sendCodeHandler)))
 	mux.handle("POST", "/api/auth/forgot-password", rateLimitedIP(d, "forgot-password", rlForgotPasswordMax, rlForgotPasswordWindow, wrap(d, forgotPasswordHandler)))

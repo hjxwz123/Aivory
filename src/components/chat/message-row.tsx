@@ -748,7 +748,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
               'bg-[var(--color-user-bubble)] border border-[var(--color-user-bubble-border)]',
               'text-[var(--color-fg)] text-[length:var(--text-chat-body)] leading-relaxed',
               userMessageMarkdown || userHasMath ? 'min-w-0' : 'whitespace-pre-wrap break-words',
-              'max-w-full',
+              'min-w-0 max-w-full',
             )}
           >
             {attachments.length > 0 ? (
@@ -757,8 +757,8 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                   <div
                     className={cn(
                       imageAttachments.length === 1
-                        ? 'flex'
-                        : 'flex w-[min(30rem,72vw)] max-w-full flex-wrap gap-2',
+                        ? 'flex min-w-0 max-w-full'
+                        : 'flex min-w-0 w-[min(30rem,72vw)] max-w-full flex-wrap gap-2',
                       imageAttachments.length > 1 && (isOwn ? 'justify-end' : 'justify-start'),
                     )}
                   >
@@ -774,7 +774,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                         })}
                         aria-label={t('actions.viewImage', { defaultValue: 'View image' })}
                         className={cn(
-                          'block shrink-0 overflow-hidden rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] hover:opacity-90',
+                          'block max-w-full shrink-0 overflow-hidden rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] hover:opacity-90',
                         )}
                       >
                         <img
@@ -783,7 +783,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                           className={cn(
                             'object-cover',
                             imageAttachments.length === 1
-                              ? 'h-auto max-h-56 w-auto max-w-[18rem] sm:max-w-[22rem]'
+                              ? 'h-auto max-h-56 w-auto max-w-[min(100%,18rem)] sm:max-w-[min(100%,22rem)]'
                               : 'size-24 sm:size-28',
                           )}
                           draggable={false}

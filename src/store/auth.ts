@@ -169,25 +169,21 @@ export const useAuth = create<AuthState>((set, get) => ({
     const seq = beginAuthOp()
     set({ status: 'authenticating' })
     try {
-      // Try refresh first — it lets the user back in even after the access
-      // token expired.
-      try {
-        const resp = await authApi.refresh()
-        if (!isLatestAuthOp(seq)) return
+      // A signed-out first visit is a normal state. The session probe returns
+      // 200 { authenticated: false } in that case, avoiding an expected 401
+      // network error before the login screen is shown.
+      const resp = await authApi.session()
+      if (!isLatestAuthOp(seq)) return
+      if (resp.authenticated && resp.user && resp.access_token) {
         resetAuthFailureState()
         setAccessToken(resp.access_token)
         // Authenticated ⇒ the deployment has users; resolve the setup probe
         // immediately so the gate can route without waiting on the sibling
         // /public/needs-setup call.
         set({ user: resp.user, status: 'authenticated', needsSetup: false, setupProbed: true, error: null })
-        return
-      } catch {
-        /* fall through to /me */
+      } else {
+        set({ user: null, status: 'unauthenticated' })
       }
-      const user = await authApi.me()
-      if (!isLatestAuthOp(seq)) return
-      resetAuthFailureState()
-      set({ user, status: 'authenticated', needsSetup: false, setupProbed: true, error: null })
     } catch {
       if (!isLatestAuthOp(seq)) return
       set({ user: null, status: 'unauthenticated' })
@@ -398,7 +394,14 @@ setInitialPasswordRequiredHandler(() => {
 setRefreshHandler(async () => {
   const seq = currentAuthOp()
   try {
-    const resp = await authApi.refresh()
+    const resp = await authApi.session()
+    if (!resp.authenticated || !resp.user || !resp.access_token) {
+      if (isLatestAuthOp(seq)) {
+        setAccessToken(null)
+        useAuth.setState({ user: null, status: 'unauthenticated' })
+      }
+      return false
+    }
     if (isAuthRefreshSuppressed()) return false
     if (!isLatestAuthOp(seq)) return true
     setAccessToken(resp.access_token)
