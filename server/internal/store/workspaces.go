@@ -381,8 +381,11 @@ func CreateWorkspace(ctx context.Context, db *sql.DB, ownerID, name string) (*Wo
 func GetWorkspace(ctx context.Context, db *sql.DB, id string) (*Workspace, error) {
 	var w Workspace
 	err := db.QueryRowContext(ctx,
-		`SELECT id, name, owner_id, invite_token, created_at FROM workspaces WHERE id=?`, id,
-	).Scan(&w.ID, &w.Name, &w.OwnerID, &w.InviteToken, &w.CreatedAt)
+		`SELECT w.id, w.name, w.owner_id, w.invite_token, w.created_at, COALESCE(u.name,'')
+		   FROM workspaces w
+		   LEFT JOIN users u ON u.id=w.owner_id
+		  WHERE w.id=?`, id,
+	).Scan(&w.ID, &w.Name, &w.OwnerID, &w.InviteToken, &w.CreatedAt, &w.OwnerName)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
