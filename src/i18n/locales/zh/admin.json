@@ -1812,6 +1812,10 @@
     "loadFailed": "无法加载管理概览。",
     "healthTitle": "配置健康状态",
     "healthLead": "向用户开放相关功能前，请先处理以下警告。",
+    "todayTitle": "今日统计信息",
+    "todayLead": "过去 24 小时记录的使用情况。",
+    "todayLoadFailed": "今日统计信息暂时无法加载，请刷新后重试。",
+    "openAnalytics": "查看完整分析",
     "metrics": {
       "users": "用户",
       "models": "模型",

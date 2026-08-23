@@ -64,6 +64,10 @@
     "mostPopular": "一番人気",
     "perMonth": "/ 月"
   },
+  "network": {
+    "offlineTitle": "ネットワークに接続されていません",
+    "offlineDescription": "ネットワークが必要な操作は一時的に利用できません。接続を確認してからもう一度お試しください。"
+  },
   "pagination": {
     "prev": "前へ",
     "next": "次へ",

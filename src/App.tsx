@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { useOpenSettings } from '@/hooks/use-open-settings'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/toaster'
+import { NetworkStatusBanner } from '@/components/network-status-banner'
 import { CommandMenu } from '@/components/command-menu/command-menu'
 import { WelcomeCard } from '@/components/welcome/welcome-card'
 import { SetPasswordGate } from '@/components/welcome/set-password-gate'
@@ -220,6 +221,7 @@ export default function App() {
 
   return (
     <TooltipProvider delayDuration={280} skipDelayDuration={120}>
+      <NetworkStatusBanner />
       <ScrollToTop />
       <CloseNavOnNavigate />
       <CloseSettingsOnNavigate />

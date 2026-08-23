@@ -1808,6 +1808,10 @@
     "loadFailed": "Could not load the admin overview.",
     "healthTitle": "Configuration health",
     "healthLead": "Resolve warnings before enabling the related feature for users.",
+    "todayTitle": "Today's statistics",
+    "todayLead": "Usage recorded over the past 24 hours.",
+    "todayLoadFailed": "Today's statistics could not be loaded. Refresh to try again.",
+    "openAnalytics": "Open analytics",
     "metrics": {
       "users": "Users",
       "models": "Models",

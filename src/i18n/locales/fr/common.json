@@ -64,6 +64,10 @@
     "mostPopular": "Le plus populaire",
     "perMonth": "/ mois"
   },
+  "network": {
+    "offlineTitle": "Aucune connexion réseau",
+    "offlineDescription": "Les actions qui nécessitent une connexion réseau sont temporairement indisponibles. Vérifiez votre connexion, puis réessayez."
+  },
   "pagination": {
     "prev": "Précédent",
     "next": "Suivant",

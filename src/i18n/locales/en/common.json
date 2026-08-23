@@ -64,6 +64,10 @@
     "mostPopular": "Most popular",
     "perMonth": "/ month"
   },
+  "network": {
+    "offlineTitle": "No network connection",
+    "offlineDescription": "Actions that need a network connection are temporarily unavailable. Check your connection and try again."
+  },
   "pagination": {
     "prev": "Previous",
     "next": "Next",

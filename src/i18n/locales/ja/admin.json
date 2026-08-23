@@ -1808,6 +1808,10 @@
     "loadFailed": "管理概要を読み込めませんでした。",
     "healthTitle": "設定の健全性",
     "healthLead": "関連機能をユーザーに公開する前に警告を解消してください。",
+    "todayTitle": "本日の統計",
+    "todayLead": "過去 24 時間に記録された利用状況です。",
+    "todayLoadFailed": "本日の統計を読み込めませんでした。更新して再試行してください。",
+    "openAnalytics": "分析を開く",
     "metrics": {
       "users": "ユーザー",
       "models": "モデル",

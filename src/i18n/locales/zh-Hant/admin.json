@@ -1808,6 +1808,10 @@
     "loadFailed": "無法載入管理總覽。",
     "healthTitle": "設定健康狀態",
     "healthLead": "向使用者開放相關功能前，請先處理以下警告。",
+    "todayTitle": "今日統計資訊",
+    "todayLead": "過去 24 小時記錄的使用情況。",
+    "todayLoadFailed": "今日統計資訊暫時無法載入，請重新整理後再試。",
+    "openAnalytics": "查看完整分析",
     "metrics": {
       "users": "使用者",
       "models": "模型",

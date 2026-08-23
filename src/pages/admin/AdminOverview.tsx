@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
@@ -7,13 +7,20 @@ import {
   CheckCircle2,
   CircleDollarSign,
   Cpu,
+  FileText,
+  Image,
+  MessageSquareText,
   Network,
   Users,
 } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
+import type { ApiUsageTotals } from '@/api/types'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/hooks/use-toast'
+import { inputOutputTokens } from '@/lib/admin-analytics'
+import { getOverviewHealth } from '@/lib/admin-overview'
+import { useLanguage } from '@/store/language'
 
 interface OverviewData {
   settings: Record<string, unknown>
@@ -24,6 +31,7 @@ interface OverviewData {
   paymentChannelCount: number
   paymentMethodCount: number
   userCount: number
+  today: ApiUsageTotals | null
 }
 
 interface HealthCheck {
@@ -34,15 +42,16 @@ interface HealthCheck {
   to: string
 }
 
-function readString(settings: Record<string, unknown>, key: string): string {
-  const value = settings[key]
-  return typeof value === 'string' ? value.trim() : ''
-}
-
 export default function AdminOverview() {
   const { t } = useTranslation(['admin', 'common'])
+  const lang = useLanguage((state) => state.lang)
   const [data, setData] = useState<OverviewData | null>(null)
   const [loading, setLoading] = useState(true)
+  const numberFormat = useMemo(() => new Intl.NumberFormat(lang, { maximumFractionDigits: 0 }), [lang])
+  const compactNumberFormat = useMemo(
+    () => new Intl.NumberFormat(lang, { notation: 'compact', maximumFractionDigits: 1 }),
+    [lang],
+  )
 
   async function load() {
     setLoading(true)
@@ -56,7 +65,7 @@ export default function AdminOverview() {
         adminApi.paymentMethods(),
         adminApi.users('', 1, 0),
       ])
-      setData({
+      const overview: OverviewData = {
         settings,
         channelCount: channels.length,
         modelIds: new Set(models.map((model) => model.id)),
@@ -65,7 +74,12 @@ export default function AdminOverview() {
         paymentChannelCount: paymentChannels.length,
         paymentMethodCount: paymentMethods.length,
         userCount: usersPage.total,
-      })
+        today: null,
+      }
+      const today = getOverviewHealth(overview).allReady
+        ? await adminApi.analytics({ days: 1 }).then((analytics) => analytics.totals).catch(() => null)
+        : null
+      setData({ ...overview, today })
     } catch (error) {
       toast.error(error instanceof ApiError ? error.message : t('admin:common.failed'))
     } finally {
@@ -91,87 +105,73 @@ export default function AdminOverview() {
     )
   }
 
-  const defaultModel = readString(data.settings, 'default_model_id')
-  const taskModel = readString(data.settings, 'task_model_id')
-  const emailVerification = data.settings.email_verification_required === true
-  const smtpReady = Boolean(readString(data.settings, 'smtp_host') && readString(data.settings, 'smtp_from'))
-  const storageProvider = readString(data.settings, 'storage_provider')
-  const storageReady =
-    storageProvider === 'local' ||
-    (storageProvider === 's3' && Boolean(readString(data.settings, 'storage_s3_bucket'))) ||
-    (storageProvider === 'aliyun_oss' &&
-      Boolean(
-        readString(data.settings, 'storage_aliyun_bucket') &&
-        readString(data.settings, 'storage_aliyun_endpoint') &&
-        readString(data.settings, 'storage_aliyun_access_key_id') &&
-        readString(data.settings, 'storage_aliyun_access_key_secret'),
-      ))
+  const health = getOverviewHealth(data)
 
   const checks: HealthCheck[] = [
     {
       key: 'channel',
-      ok: data.channelCount > 0,
+      ok: health.channelReady,
       label: t('admin:overview.checks.channels', { defaultValue: 'Upstream channel' }),
-      detail: data.channelCount > 0
+      detail: health.channelReady
         ? t('admin:overview.checks.channelsReady', { defaultValue: '{{count}} channel(s) configured', count: data.channelCount })
         : t('admin:overview.checks.channelsMissing', { defaultValue: 'Create a channel before adding usable models.' }),
       to: '/admin/channels',
     },
     {
       key: 'default-model',
-      ok: Boolean(defaultModel && data.modelIds.has(defaultModel)),
+      ok: health.defaultModelReady,
       label: t('admin:overview.checks.defaultModel', { defaultValue: 'Default chat model' }),
-      detail: defaultModel && data.modelIds.has(defaultModel)
+      detail: health.defaultModelReady
         ? t('admin:overview.checks.configured', { defaultValue: 'Configured' })
         : t('admin:overview.checks.defaultModelMissing', { defaultValue: 'Chat cannot start until a valid default model is selected.' }),
       to: '/admin/settings/model-policy',
     },
     {
       key: 'task-model',
-      ok: Boolean(taskModel && data.modelIds.has(taskModel)),
+      ok: health.taskModelReady,
       label: t('admin:overview.checks.taskModel', { defaultValue: 'Internal task model' }),
-      detail: taskModel && data.modelIds.has(taskModel)
+      detail: health.taskModelReady
         ? t('admin:overview.checks.configured', { defaultValue: 'Configured' })
         : t('admin:overview.checks.taskModelMissing', { defaultValue: 'Titles, routing, summaries and memory extraction need a task model.' }),
       to: '/admin/settings/model-policy',
     },
     {
       key: 'mail',
-      ok: !emailVerification || smtpReady,
+      ok: health.emailReady,
       label: t('admin:overview.checks.email', { defaultValue: 'Email verification' }),
-      detail: !emailVerification
+      detail: !health.emailVerification
         ? t('admin:overview.checks.notRequired', { defaultValue: 'Not required' })
-        : smtpReady
+        : health.smtpReady
           ? t('admin:overview.checks.smtpReady', { defaultValue: 'SMTP is configured' })
           : t('admin:overview.checks.smtpMissing', { defaultValue: 'Verification is enabled but SMTP is incomplete.' }),
-      to: smtpReady ? '/admin/settings/registration' : '/admin/settings/email',
+      to: health.smtpReady ? '/admin/settings/registration' : '/admin/settings/email',
     },
     {
       key: 'storage',
-      ok: storageReady,
+      ok: health.storageReady,
       label: t('admin:overview.checks.storage', { defaultValue: 'Persistent storage' }),
-      detail: !storageProvider
+      detail: !health.storageProvider
         ? t('admin:overview.checks.storageMissing', {
             defaultValue: 'Archived workspaces and application objects are not persisted.',
           })
-        : storageProvider === 'local'
+        : health.storageProvider === 'local'
           ? t('admin:overview.checks.storageLocal', {
               defaultValue: 'Local storage selected; workspace persistence still requires the sandbox volume to be mounted.',
             })
-          : storageReady
+          : health.storageReady
             ? t('admin:overview.checks.storageReady', {
                 defaultValue: 'Provider: {{provider}}',
-                provider: storageProvider,
+                provider: health.storageProvider,
               })
             : t('admin:overview.checks.storageIncomplete', {
                 defaultValue: '{{provider}} is selected but required storage fields are incomplete.',
-                provider: storageProvider,
+                provider: health.storageProvider,
               }),
       to: '/admin/storage',
     },
     {
       key: 'payments',
-      ok: data.paymentChannelCount === 0 || data.paymentMethodCount > 0,
+      ok: health.paymentsReady,
       label: t('admin:overview.checks.payments', { defaultValue: 'Payment checkout' }),
       detail: data.paymentChannelCount === 0
         ? t('admin:overview.checks.paymentsUnused', { defaultValue: 'No payment channel configured' })
@@ -213,6 +213,35 @@ export default function AdminOverview() {
     },
   ]
 
+  const todaySummary = data.today
+    ? [
+        {
+          key: 'turns',
+          icon: MessageSquareText,
+          label: t('admin:analytics.stats.turns', { defaultValue: 'Delivered turns' }),
+          value: numberFormat.format(data.today.turns),
+        },
+        {
+          key: 'users',
+          icon: Users,
+          label: t('admin:analytics.stats.users', { defaultValue: 'Active users' }),
+          value: numberFormat.format(data.today.users),
+        },
+        {
+          key: 'tokens',
+          icon: FileText,
+          label: t('admin:analytics.stats.tokens', { defaultValue: 'Input + output tokens' }),
+          value: compactNumberFormat.format(inputOutputTokens(data.today)),
+        },
+        {
+          key: 'images',
+          icon: Image,
+          label: t('admin:analytics.details.images', { defaultValue: 'Images' }),
+          value: numberFormat.format(data.today.images_count),
+        },
+      ]
+    : null
+
   return (
     <div className="mx-auto max-w-[76rem]">
       <header>
@@ -238,7 +267,7 @@ export default function AdminOverview() {
             />
             <div className="min-w-0">
               <span className="block text-lg font-semibold tabular-nums text-[var(--color-fg)]">
-                {item.value.toLocaleString()}
+                {numberFormat.format(item.value)}
               </span>
               <span className="block truncate text-[12px] text-[var(--color-fg-subtle)]">{item.label}</span>
             </div>
@@ -246,6 +275,52 @@ export default function AdminOverview() {
         ))}
       </div>
 
+      {health.allReady ? (
+        <section className="mt-9">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <h2 className="text-base font-semibold text-[var(--color-fg)]">
+                {t('admin:overview.todayTitle', { defaultValue: "Today's statistics" })}
+              </h2>
+              <p className="mt-1 text-[13px] text-[var(--color-fg-muted)]">
+                {t('admin:overview.todayLead', { defaultValue: 'Usage recorded over the past 24 hours.' })}
+              </p>
+            </div>
+            <Button asChild variant="ghost" size="sm">
+              <Link to="/admin/analytics">
+                {t('admin:overview.openAnalytics', { defaultValue: 'Open analytics' })}
+                <ArrowRight size={14} aria-hidden />
+              </Link>
+            </Button>
+          </div>
+
+          {todaySummary ? (
+            <div className="mt-4 grid grid-cols-2 border-y border-[var(--color-divider)] lg:grid-cols-4">
+              {todaySummary.map((item) => (
+                <Link
+                  key={item.key}
+                  to="/admin/analytics"
+                  className="group flex min-w-0 items-center gap-3 border-[var(--color-divider)] px-4 py-4 interactive even:border-l hover:bg-[var(--color-bg-muted)]/55 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)] lg:border-l lg:first:border-l-0"
+                >
+                  <item.icon
+                    size={17}
+                    className="shrink-0 text-[var(--color-fg-subtle)] group-hover:text-[var(--color-fg-muted)]"
+                    aria-hidden
+                  />
+                  <div className="min-w-0">
+                    <span className="block text-lg font-semibold tabular-nums text-[var(--color-fg)]">{item.value}</span>
+                    <span className="block truncate text-[12px] text-[var(--color-fg-subtle)]">{item.label}</span>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-4 border-y border-[var(--color-divider)] px-2 py-5 text-[13px] text-[var(--color-fg-muted)]" role="status">
+              {t('admin:overview.todayLoadFailed', { defaultValue: "Today's statistics could not be loaded. Refresh to try again." })}
+            </div>
+          )}
+        </section>
+      ) : (
       <section className="mt-9">
         <div className="flex items-end justify-between gap-4">
           <div>
@@ -280,6 +355,7 @@ export default function AdminOverview() {
           ))}
         </ul>
       </section>
+      )}
     </div>
   )
 }

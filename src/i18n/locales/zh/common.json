@@ -64,6 +64,10 @@
     "mostPopular": "最受欢迎",
     "perMonth": "/ 月"
   },
+  "network": {
+    "offlineTitle": "当前无网络连接",
+    "offlineDescription": "需要网络的操作暂时不可用。请检查连接后重试。"
+  },
   "pagination": {
     "prev": "上一页",
     "next": "下一页",
