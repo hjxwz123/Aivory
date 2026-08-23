@@ -1271,6 +1271,8 @@ export interface ApiAttachment {
   kind: string
   url: string
   document_id?: string
+  /** The referenced conversation file was deleted after this message was sent. */
+  deleted?: boolean
 }
 
 export interface ApiCitation {

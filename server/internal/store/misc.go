@@ -249,6 +249,112 @@ func ConversationFilesByIDs(ctx context.Context, db *sql.DB, convID, userID stri
 	return out, rows.Err()
 }
 
+// HistoricalConversationAttachmentIDs returns requested file IDs which have
+// already appeared in this conversation's persisted message attachments. It is
+// deliberately only a stale-reference detector: callers must still resolve all
+// live attachments through ConversationFilesByIDs. This lets a browser with an
+// old transcript survive deletion of one of its historical files without
+// treating unknown or cross-conversation IDs as valid input.
+func HistoricalConversationAttachmentIDs(ctx context.Context, db *sql.DB, convID string, fileIDs []string) (map[string]bool, error) {
+	fileIDs = cleanIDs(fileIDs)
+	out := make(map[string]bool, len(fileIDs))
+	if convID == "" || len(fileIDs) == 0 {
+		return out, nil
+	}
+	wanted := make(map[string]bool, len(fileIDs))
+	for _, id := range fileIDs {
+		wanted[id] = true
+	}
+	rows, err := db.QueryContext(ctx,
+		`SELECT attachments FROM messages WHERE conversation_id=? AND attachments <> '[]'`, convID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		var atts []struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal([]byte(raw), &atts) != nil {
+			// A malformed legacy row cannot grant a stale-reference exception.
+			continue
+		}
+		for _, att := range atts {
+			if id := strings.TrimSpace(att.ID); wanted[id] {
+				out[id] = true
+			}
+		}
+	}
+	return out, rows.Err()
+}
+
+// markConversationAttachmentDeleted records that a message's former file
+// attachment no longer exists. The marker is intentionally retained in the
+// transcript: the UI can show a clear unavailable state, and stale clients can
+// distinguish this from a forged attachment ID. It must run inside the same
+// transaction that removes the files row.
+func markConversationAttachmentDeleted(ctx context.Context, tx *sql.Tx, convID, fileID string) error {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT id, attachments FROM messages WHERE conversation_id=? AND attachments <> '[]'`, convID)
+	if err != nil {
+		return err
+	}
+	type messageAttachments struct {
+		id          string
+		attachments []map[string]json.RawMessage
+	}
+	updates := []messageAttachments{}
+	for rows.Next() {
+		var messageID, raw string
+		if err := rows.Scan(&messageID, &raw); err != nil {
+			rows.Close()
+			return err
+		}
+		var atts []map[string]json.RawMessage
+		if json.Unmarshal([]byte(raw), &atts) != nil {
+			// Preserve malformed historical metadata rather than making a file
+			// deletion unrecoverably fail. It cannot be used as a stale exception.
+			continue
+		}
+		changed := false
+		for _, att := range atts {
+			var id string
+			if json.Unmarshal(att["id"], &id) != nil || strings.TrimSpace(id) != fileID {
+				continue
+			}
+			if string(att["deleted"]) == "true" {
+				continue
+			}
+			att["deleted"] = json.RawMessage("true")
+			changed = true
+		}
+		if changed {
+			updates = append(updates, messageAttachments{id: messageID, attachments: atts})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, update := range updates {
+		raw, err := json.Marshal(update.attachments)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE messages SET attachments=? WHERE id=?`, string(raw), update.id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // ListDraftFilesForConversation returns composer uploads that have not yet been
 // committed to a user message. The conversation ownership check belongs to the
 // caller; this is also used by the message preflight after that check has run.
@@ -391,6 +497,9 @@ func DeleteConversationFileAndDocuments(ctx context.Context, db *sql.DB, fileID,
 		return rowsErr
 	} else if n == 0 {
 		return ErrNotFound
+	}
+	if err := markConversationAttachmentDeleted(ctx, tx, convID, fileID); err != nil {
+		return err
 	}
 	docIDs = cleanIDs(docIDs)
 	if len(docIDs) > 0 {

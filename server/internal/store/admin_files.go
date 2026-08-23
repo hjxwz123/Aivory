@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 )
 
@@ -263,12 +264,29 @@ func CountAdminFiles(ctx context.Context, db *sql.DB, filter AdminFileFilter) (i
 // Returns ErrNotFound when the row doesn't exist. RAG/storage cleanup is the
 // API layer's job, mirroring deleteConversationFileHandler.
 func AdminDeleteFile(ctx context.Context, db *sql.DB, id string) error {
-	res, err := db.ExecContext(ctx, `DELETE FROM files WHERE id=?`, id)
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	var conversationID string
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(conversation_id,'') FROM files WHERE id=?`, id).Scan(&conversationID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM files WHERE id=?`, id)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrNotFound
 	}
-	return nil
+	if conversationID != "" {
+		if err := markConversationAttachmentDeleted(ctx, tx, conversationID, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }

@@ -2284,7 +2284,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			if len(req.Attachments) == 0 && len(existing.Attachments) > 2 {
 				var atts []Attachment
 				if json.Unmarshal(existing.Attachments, &atts) == nil {
-					req.Attachments = atts
+					req.Attachments = activeAttachments(atts)
 				}
 			}
 			// Regeneration reuses the skill selection persisted on the original
@@ -4653,7 +4653,7 @@ func storeToUnified(msgs []store.Message, currentProvider, currentModelID string
 		var atts []Attachment
 		if len(m.Attachments) > 2 {
 			_ = json.Unmarshal(m.Attachments, &atts)
-			um.Attachments = atts
+			um.Attachments = activeAttachments(atts)
 		}
 		if m.Role == "assistant" && len(m.Raw) > 2 {
 			um.Raw = m.Raw
@@ -4661,6 +4661,22 @@ func storeToUnified(msgs []store.Message, currentProvider, currentModelID string
 		out = append(out, um)
 	}
 	return out
+}
+
+// activeAttachments excludes objects that were removed after their message was
+// stored. The transcript keeps their metadata for the UI, but a new provider
+// request must never attempt to resolve or replay deleted bytes.
+func activeAttachments(attachments []Attachment) []Attachment {
+	if len(attachments) == 0 {
+		return nil
+	}
+	active := make([]Attachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		if !attachment.Deleted {
+			active = append(active, attachment)
+		}
+	}
+	return active
 }
 
 func shouldReplayNativeToolHistory(fast bool, toolMode string, localToolCount int, hostedTools bool) bool {

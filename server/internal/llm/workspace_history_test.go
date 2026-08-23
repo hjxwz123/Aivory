@@ -75,6 +75,22 @@ func TestStoreToUnifiedKeepsCompleteHistory(t *testing.T) {
 	}
 }
 
+func TestStoreToUnifiedOmitsDeletedAttachmentsFromProviderHistory(t *testing.T) {
+	attachments, err := json.Marshal([]Attachment{
+		{ID: "gone", Filename: "deleted.png", Kind: "image", Deleted: true},
+		{ID: "live", Filename: "kept.png", Kind: "image"},
+	})
+	if err != nil {
+		t.Fatalf("marshal attachments: %v", err)
+	}
+	history := storeToUnified([]store.Message{{
+		Role: "user", Blocks: textBlocks("compare these"), Attachments: attachments, Status: "complete",
+	}}, "anthropic", "", true)
+	if len(history) != 1 || len(history[0].Attachments) != 1 || history[0].Attachments[0].ID != "live" {
+		t.Fatalf("provider history attachments=%+v, want only live attachment", history)
+	}
+}
+
 func TestStoreToUnifiedDropsNativeRawFromDifferentModel(t *testing.T) {
 	raw := json.RawMessage(`[{"type":"reasoning","encrypted_content":"model-a-secret"},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}]`)
 	msgs := []store.Message{

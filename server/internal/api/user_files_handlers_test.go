@@ -165,6 +165,8 @@ func TestWorkspaceOwnerCanListAndDeleteBilledCommittedMemberFile(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create conversation: %v", err)
 	}
+	mustExec(t, db, `INSERT INTO messages(id,conversation_id,role,attachments)
+		VALUES('member-message','workspace-conversation','user','[{"id":"member-committed","filename":"committed.txt","kind":"text"}]')`)
 	mustExec(t, db, `INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,storage_path,kind,draft,created_at) VALUES
 		('member-committed','member','workspace-conversation','committed.txt','text/plain',9,?,'text',0,1),
 		('member-draft','member','workspace-conversation','draft.txt','text/plain',5,?,'text',1,2)`, committedPath, draftPath)
@@ -222,6 +224,14 @@ func TestWorkspaceOwnerCanListAndDeleteBilledCommittedMemberFile(t *testing.T) {
 	}
 	if _, err := os.Stat(draftPath); err != nil {
 		t.Fatalf("member draft bytes were removed: %v", err)
+	}
+	var messageAttachments []map[string]any
+	var messageRaw string
+	if err := db.QueryRowContext(ctx, `SELECT attachments FROM messages WHERE id='member-message'`).Scan(&messageRaw); err != nil {
+		t.Fatalf("load historical message attachments: %v", err)
+	}
+	if err := json.Unmarshal([]byte(messageRaw), &messageAttachments); err != nil || len(messageAttachments) != 1 || messageAttachments[0]["deleted"] != true {
+		t.Fatalf("user file deletion did not mark historical attachment deleted: attachments=%v err=%v", messageAttachments, err)
 	}
 }
 

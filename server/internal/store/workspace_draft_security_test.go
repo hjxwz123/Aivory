@@ -318,6 +318,46 @@ func TestDeleteConversationFileAndDocumentsPreservesKnowledgeBaseTwin(t *testing
 	}
 }
 
+func TestDeleteConversationFileMarksHistoricalAttachmentsDeleted(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "conversation-file-history.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+	if err := Migrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	exec(t, db, `INSERT INTO users(id,email,password_hash,role) VALUES('u1','u1@example.test','h','user')`)
+	exec(t, db, `INSERT INTO conversations(id,user_id,title) VALUES('c1','u1','History')`)
+	exec(t, db, `INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,storage_path,kind,draft)
+		VALUES('f1','u1','c1','photo.png','image/png',12,'/tmp/photo.png','image',0)`)
+	exec(t, db, `INSERT INTO messages(id,conversation_id,role,attachments)
+		VALUES('m1','c1','user','[{"id":"f1","filename":"photo.png","kind":"image","url":"/api/files/f1"}]')`)
+
+	if err := DeleteConversationFileAndDocuments(ctx, db, "f1", "c1", "u1", nil); err != nil {
+		t.Fatalf("delete conversation file: %v", err)
+	}
+	var raw string
+	if err := db.QueryRowContext(ctx, `SELECT attachments FROM messages WHERE id='m1'`).Scan(&raw); err != nil {
+		t.Fatalf("load message attachments: %v", err)
+	}
+	var attachments []map[string]any
+	if err := json.Unmarshal([]byte(raw), &attachments); err != nil {
+		t.Fatalf("decode message attachments: %v", err)
+	}
+	if len(attachments) != 1 || attachments[0]["id"] != "f1" || attachments[0]["deleted"] != true {
+		t.Fatalf("attachments=%v, want historical reference marked deleted", attachments)
+	}
+	referenced, err := HistoricalConversationAttachmentIDs(ctx, db, "c1", []string{"f1", "unknown"})
+	if err != nil {
+		t.Fatalf("historical attachment lookup: %v", err)
+	}
+	if !referenced["f1"] || referenced["unknown"] {
+		t.Fatalf("historical attachment ids=%v, want only f1", referenced)
+	}
+}
+
 // TestWorkspaceMembersCannotCommitDraftsConcurrently makes the ownership
 // predicate observable under contention: no number of member-side message
 // transactions may transition another user's draft.

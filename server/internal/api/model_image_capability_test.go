@@ -179,6 +179,11 @@ func TestNormalizeConversationAttachmentsRejectsSpoofingAndCrossConversationIDs(
 		pdfPath, pdfPath, bigPath, legacyImagePath, legacyImagePath)
 	mustExec(t, db, `INSERT INTO documents(id,conversation_id,filename,mime_type,size_bytes,status,storage_path)
 		VALUES('d_pdf','c1','report.pdf','application/pdf',22,'ready',?)`, pdfPath)
+	// The file itself has been deleted, but a historical user turn still holds
+	// its prior attachment metadata. An edit/retry from a stale client must omit
+	// that reference instead of turning the whole new turn into a 400.
+	mustExec(t, db, `INSERT INTO messages(id,conversation_id,role,attachments)
+		VALUES('m_deleted','c1','user','[{"id":"f_deleted","filename":"old.png","kind":"image","deleted":true}]')`)
 
 	forged := []llm.Attachment{
 		{ID: "f_pdf", DocumentID: "forged-document", Filename: "fake.png", MimeType: "image/png", Kind: "image", URL: "https://attacker.invalid/pdf"},
@@ -224,6 +229,10 @@ func TestNormalizeConversationAttachmentsRejectsSpoofingAndCrossConversationIDs(
 				t.Fatalf("error=%v, want %v", err, tc.err)
 			}
 		})
+	}
+	stale, err := normalizeConversationAttachments(ctx, db, "c1", "u1", []llm.Attachment{{ID: "f_deleted"}})
+	if err != nil || len(stale) != 0 {
+		t.Fatalf("stale deleted attachment normalized=%+v err=%v, want omission without error", stale, err)
 	}
 }
 

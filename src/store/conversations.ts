@@ -3019,6 +3019,7 @@ export function toLocalMessage(m: ApiMessage): Message {
             kind: (a.kind as Attachment['kind']) || 'other',
             previewUrl: a.url,
             documentId: a.document_id,
+            deleted: a.deleted,
           }))
         : undefined,
     branchIndex: m.branch_index,

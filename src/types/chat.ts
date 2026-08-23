@@ -159,6 +159,8 @@ export interface Attachment {
   previewUrl?: string
   /** Server-side RAG document id for doc-like uploads. */
   documentId?: string
+  /** The referenced conversation file was deleted after this message was sent. */
+  deleted?: boolean
 }
 
 /** A file a tool produced (sandbox output, generated image), §4.5/§4.12. */
