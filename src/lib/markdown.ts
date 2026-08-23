@@ -399,20 +399,17 @@ export function normalizeThinkingMarkdown(md: string): string {
     return `@@FENCE${i}@@`
   })
 
-  s = s.replace(/([^\n])\s*(?=#{1,6}\s)/g, '$1\n\n')
-
   // GPT thinking often emits "title + summary" glued by a single \n:
   //   `**Point A** summary\n**Point B** summary`
-  // With `breaks` a single \n only becomes <br>, keeping both blocks in ONE <p>.
-  // Upgrade only the single \n before a line-leading **bold** title (2+ present)
-  // to a blank line so marked splits the paragraphs. Inline **bold** inside a
-  // line stays untouched; no effect on lists / ATX headings / inline bold runs.
+  // With `breaks` a single \n only becomes <br>, keeping both blocks in ONE <p> so
+  // bold never renders in the collapsed thinking panel. Upgrade only the single
+  // \n that directly precedes a line-leading **bold** title (2+ present) to a
+  // blank line so marked splits the paragraphs. Inline **bold** inside a line,
+  // ATX headings and fenced code blocks are never touched.
   const bolds = s.match(/(?<=\n)\*\*[^*\n]+?\*\*(?!\*)/g)
   if (bolds && bolds.length >= 2) {
     s = s.replace(/(\n)(?=\*\*[^*\n]+?\*\*(?!\*))/g, '$1\n')
   }
-  s = s.replace(/([^\n])\s*(?=(?:-|\*)\s+\S)/g, '$1\n\n')
-  s = s.replace(/([^\n])\s*(?=\d+\.\s+\S)/g, '$1\n\n')
   s = s.replace(/\n{3,}/g, '\n\n')
   s = s.replace(/@@FENCE(\d+)@@/g, (_, i) => fences[Number(i)] ?? '')
   return s
