@@ -249,18 +249,37 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 	allBlocks := []UnifiedBlock{}
 	allCitations := []Citation{}
 	usage := Usage{}
+	var finalizationPending error
+	if signal := toolFinalizationFromContext(ctx); signal != nil {
+		finalizationPending = signal
+	}
 
-	for i := 0; i < maxIter; i++ {
+	for i := 0; i < maxIter || finalizationPending != nil; i++ {
+		finalizing := finalizationPending != nil
+		finalizationSignal := finalizationPending
+		finalizationPending = nil
+		roundModel := req.Model
+		if finalizing {
+			roundModel.Fallback = nil
+		}
+		requestMessages := messages
+		if finalizing {
+			requestMessages = append([]map[string]any{}, messages...)
+			requestMessages = append(requestMessages, map[string]any{
+				"role": "system", "content": toolFinalizationInstruction(finalizationSignal),
+			})
+		}
 		body := map[string]any{
 			"model":          req.Model.RequestID,
-			"messages":       messages,
+			"messages":       requestMessages,
 			"stream":         true,
 			"stream_options": map[string]any{"include_usage": true},
 		}
 		if req.MaxOutputTokens > 0 {
 			body["max_tokens"] = req.MaxOutputTokens
 		}
-		if len(req.Tools) > 0 && !req.ToolModePrompt {
+		nativeToolsEnabled := len(req.Tools) > 0 && !req.ToolModePrompt && !finalizing
+		if nativeToolsEnabled {
 			openAITools := []map[string]any{}
 			for _, t := range req.Tools {
 				openAITools = append(openAITools, map[string]any{
@@ -278,8 +297,10 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 			body["stop"] = []string{PromptToolStopSequence()}
 		}
 		body = MergeRequestParams(body, req.ExtraParams, req.ParamControls, req.ParamOverrides)
-		body = StripToolFields(body, len(req.Tools) > 0 && !req.ToolModePrompt)
-		body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
+		body = StripToolFields(body, nativeToolsEnabled)
+		if !finalizing {
+			body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
+		}
 		enforceOpenAIOutputTokenCap(body, req, false)
 		raw, _ := json.Marshal(body)
 		var (
@@ -289,7 +310,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 			finish    string
 			u         Usage
 		)
-		err := doProviderParsedRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
+		err := doProviderParsedRequest(ctx, roundModel, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
 			hr, e := http.NewRequestWithContext(ctx, "POST", OpenAIBaseURL(baseURL)+"/chat/completions", bytes.NewReader(raw))
 			if e != nil {
 				return nil, e
@@ -328,6 +349,9 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 			partialUsage := usage
 			partialUsage.InputTokens += u.InputTokens
 			partialUsage.OutputTokens += u.OutputTokens
+			if finalizing && !errors.Is(err, context.Canceled) {
+				err = toolFinalizationError(finalizationSignal, err)
+			}
 			// Stop button / kill: preserve what streamed so far (§6.2) instead of
 			// blanking the message.
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -352,6 +376,30 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 		}
 		usage.InputTokens += u.InputTokens
 		usage.OutputTokens += u.OutputTokens
+		if finalizing {
+			assistant := map[string]any{"role": "assistant", "content": text}
+			if reasoning.Text != "" {
+				assistant[reasoning.WireField()] = reasoning.Text
+			}
+			if text != "" || reasoning.Text != "" {
+				messages = append(messages, assistant)
+			}
+			if len(calls) > 0 || strings.TrimSpace(text) == "" {
+				raw, _ := json.Marshal(messages[historyLen:])
+				return &UnifiedResult{
+					Blocks: allBlocks, Raw: raw, StopReason: toolFinalizationStopReason(finalizationSignal),
+					Usage: usage, Citations: allCitations,
+				}, toolFinalizationError(finalizationSignal, errors.New("model did not return a tool-free final answer"))
+			}
+			raw, _ := json.Marshal(messages[historyLen:])
+			if finish == "" {
+				finish = "stop"
+			}
+			return &UnifiedResult{
+				Blocks: allBlocks, Raw: raw, StopReason: finish,
+				Usage: usage, Citations: allCitations,
+			}, nil
+		}
 
 		assistant := map[string]any{"role": "assistant", "content": text}
 		if reasoning.Text != "" {
@@ -389,6 +437,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 			specs[i] = toolCallSpec{ID: tc.ID, Name: tc.Name, Input: tc.Input}
 		}
 		results := runToolsConcurrent(ctx, tools, specs, onEvent)
+		batchFinalizationErr := toolFinalizationErrorFromResults(results)
 		for i, tc := range calls {
 			r := results[i]
 			out := r.Output
@@ -410,6 +459,11 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 				"content":      out,
 			})
 		}
+		if batchFinalizationErr != nil {
+			finalizationPending = batchFinalizationErr
+		} else if i+1 >= maxIter {
+			finalizationPending = &ErrToolBudgetExceeded{Kind: "iterations", Limit: maxIter}
+		}
 	}
 	raw, _ := json.Marshal(messages[historyLen:])
 	return &UnifiedResult{
@@ -425,6 +479,10 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 // call (no native tools, stop on </tool_call>) for §4.13 prompt-mode.
 func (p *OpenAIProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner {
 	return func(ctx context.Context, history []UnifiedMessage, system string) (PromptToolRound, error) {
+		roundModel := req.Model
+		if isToolBudgetFinalization(ctx) {
+			roundModel.Fallback = nil
+		}
 		messages := []map[string]any{}
 		if system != "" {
 			messages = append(messages, map[string]any{"role": "system", "content": system})
@@ -470,14 +528,16 @@ func (p *OpenAIProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner 
 		}
 		body = MergeRequestParams(body, req.ExtraParams, req.ParamControls, req.ParamOverrides)
 		body = StripToolFields(body, false)
-		body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
+		if !isToolBudgetFinalization(ctx) {
+			body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
+		}
 		enforceOpenAIOutputTokenCap(body, req, false)
 		raw, _ := json.Marshal(body)
 		var (
 			text string
 			u    Usage
 		)
-		err := doProviderParsedRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
+		err := doProviderParsedRequest(ctx, roundModel, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
 			hr, e := http.NewRequestWithContext(ctx, "POST", OpenAIBaseURL(baseURL)+"/chat/completions", bytes.NewReader(raw))
 			if e != nil {
 				return nil, e
@@ -510,6 +570,10 @@ func (p *OpenAIProvider) promptResponsesRunOnce(req UnifiedChatRequest) PromptTo
 		round.History = history
 		round.Tools = nil
 		round.ToolModePrompt = false
+		if isToolBudgetFinalization(ctx) {
+			round.OfficialToolNames = nil
+			round.OfficialToolRequests = nil
+		}
 		result, err := p.streamResponses(
 			ctx,
 			round,
@@ -947,8 +1011,19 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 	allCitations := []Citation{}
 	allGeneratedImages := []GeneratedImage{}
 	usage := Usage{}
+	var finalizationPending error
+	if signal := toolFinalizationFromContext(ctx); signal != nil {
+		finalizationPending = signal
+	}
 
-	for i := 0; i < maxIter; i++ {
+	for i := 0; i < maxIter || finalizationPending != nil; i++ {
+		finalizing := finalizationPending != nil
+		finalizationSignal := finalizationPending
+		finalizationPending = nil
+		roundModel := req.Model
+		if finalizing {
+			roundModel.Fallback = nil
+		}
 		body := map[string]any{
 			"model": req.Model.RequestID,
 			"input": input,
@@ -956,18 +1031,25 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 			"store":  false,
 			"stream": true,
 		}
-		if req.SystemPrompt != "" {
-			body["instructions"] = req.SystemPrompt
+		instructions := req.SystemPrompt
+		if finalizing {
+			instructions = strings.TrimSpace(instructions + "\n\n" + toolFinalizationInstruction(finalizationSignal))
+		}
+		if instructions != "" {
+			body["instructions"] = instructions
 		}
 		if req.MaxOutputTokens > 0 {
 			body["max_output_tokens"] = req.MaxOutputTokens
 		}
-		if len(respTools) > 0 {
+		nativeToolsEnabled := len(respTools) > 0 && !finalizing
+		if nativeToolsEnabled {
 			body["tools"] = respTools
 		}
 		body = MergeRequestParams(body, req.ExtraParams, req.ParamControls, req.ParamOverrides)
-		body = StripToolFields(body, len(respTools) > 0)
-		body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
+		body = StripToolFields(body, nativeToolsEnabled)
+		if !finalizing {
+			body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
+		}
 		enforceOpenAIOutputTokenCap(body, req, true)
 		// Ask the API to return the sources the hosted web_search consulted, so
 		// we can surface them as citations. For stateless Responses tool loops
@@ -1006,7 +1088,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 			onEvent(ev)
 		}
 		runRequest := func() error {
-			return doProviderParsedRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
+			return doProviderParsedRequest(ctx, roundModel, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
 				hr, e := http.NewRequestWithContext(ctx, "POST", OpenAIBaseURL(baseURL)+"/responses", bytes.NewReader(raw))
 				if e != nil {
 					return nil, e
@@ -1035,7 +1117,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 			}, emitRound)
 		}
 		err := runRequest()
-		if errors.Is(err, io.ErrUnexpectedEOF) && !roundEmitted && ctx.Err() == nil {
+		if !finalizing && errors.Is(err, io.ErrUnexpectedEOF) && !roundEmitted && ctx.Err() == nil {
 			if p.logger != nil {
 				p.logger.Printf("openai responses: upstream stream ended with unexpected EOF before any event; retrying once (model=%s)", req.Model.RequestID)
 			}
@@ -1063,6 +1145,9 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 			partialUsage := usage
 			partialUsage.InputTokens += u.InputTokens
 			partialUsage.OutputTokens += u.OutputTokens
+			if finalizing && !errors.Is(err, context.Canceled) {
+				err = toolFinalizationError(finalizationSignal, err)
+			}
 			partialInput := append([]map[string]any{}, input...)
 			completedToolResult := false
 			// A hosted Responses tool can finish before a later relay/provider error
@@ -1104,6 +1189,38 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		// (it was only streamed live before).
 		if reasoning != "" {
 			allBlocks = append(allBlocks, UnifiedBlock{Kind: "thinking", Text: reasoning})
+		}
+		if finalizing {
+			if text != "" {
+				allText.WriteString(text)
+				allBlocks = append(allBlocks, UnifiedBlock{Kind: "text", Text: text})
+			}
+			if len(calls) > 0 || len(hosted) > 0 || strings.TrimSpace(text) == "" {
+				if text != "" {
+					input = append(input, map[string]any{
+						"role":    "assistant",
+						"content": []map[string]any{{"type": "output_text", "text": text}},
+					})
+				}
+				raw, _ := json.Marshal(input[historyLen:])
+				return &UnifiedResult{
+					Blocks: allBlocks, Raw: raw, StopReason: toolFinalizationStopReason(finalizationSignal),
+					Usage: usage, Citations: allCitations, GeneratedImages: allGeneratedImages,
+				}, toolFinalizationError(finalizationSignal, errors.New("model did not return a tool-free final answer"))
+			}
+			if len(outputItems) > 0 {
+				input = append(input, outputItems...)
+			} else {
+				input = append(input, map[string]any{
+					"role":    "assistant",
+					"content": []map[string]any{{"type": "output_text", "text": text}},
+				})
+			}
+			raw, _ := json.Marshal(input[historyLen:])
+			return &UnifiedResult{
+				Blocks: allBlocks, Raw: raw, StopReason: "end_turn",
+				Usage: usage, Citations: allCitations, GeneratedImages: allGeneratedImages,
+			}, nil
 		}
 		// Persist OpenAI-hosted tool rounds as tool_call blocks so reloads show
 		// the same steps the user saw live (§2.3-B).
@@ -1163,6 +1280,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 			specs[j] = toolCallSpec{ID: c.ID, Name: c.Name, Input: c.Input}
 		}
 		results := runToolsConcurrent(ctx, tools, specs, onEvent)
+		batchFinalizationErr := toolFinalizationErrorFromResults(results)
 		for j, c := range calls {
 			r := results[j]
 			out := r.Output
@@ -1183,6 +1301,11 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 				"call_id": c.ID,
 				"output":  out,
 			})
+		}
+		if batchFinalizationErr != nil {
+			finalizationPending = batchFinalizationErr
+		} else if i+1 >= maxIter {
+			finalizationPending = &ErrToolBudgetExceeded{Kind: "iterations", Limit: maxIter}
 		}
 	}
 	raw, _ := json.Marshal(input[historyLen:])

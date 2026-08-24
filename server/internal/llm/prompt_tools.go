@@ -53,6 +53,8 @@ func PromptToolPreamble(tools []ToolDef) string {
 	b.WriteString("Important rules:\n")
 	b.WriteString("- After emitting `</tool_call>` STOP. Do not write anything else and do not invent the result.\n")
 	b.WriteString("- The orchestrator will execute the tool and reply with a `<tool_result>` block. Continue from there.\n")
+	b.WriteString("- Never repeat a tool call with the same arguments. If the available evidence is sufficient, answer immediately.\n")
+	b.WriteString("- When a tool schema offers a queries or urls array, batch independent requests that are already known.\n")
 	b.WriteString("- If you don't need a tool, just answer the user directly.\n\n")
 	b.WriteString("Tools:\n\n")
 	for _, t := range tools {
@@ -254,9 +256,19 @@ func RunPromptToolLoopWithRaw(
 	rawOutputs := []promptToolRawOutput{}
 	full := strings.Builder{}
 	parseRetries := 0
+	var finalizationPending error
 
-	for i := 0; i < promptMaxIter; i++ {
-		round, err := runner(ctx, history, sys)
+	for i := 0; i < promptMaxIter || finalizationPending != nil; i++ {
+		finalizing := finalizationPending != nil
+		finalizationSignal := finalizationPending
+		finalizationPending = nil
+		runnerCtx := ctx
+		roundSystem := sys
+		if finalizing {
+			runnerCtx = contextWithToolFinalization(ctx, finalizationSignal)
+			roundSystem = strings.TrimSpace(system + "\n\n" + toolFinalizationInstruction(finalizationSignal))
+		}
+		round, err := runner(runnerCtx, history, roundSystem)
 		// Hosted-tool prompt rounds are delegated to the provider's native path.
 		// That path can return complete result payloads even though its canonical
 		// blocks intentionally contain only a bounded display summary. Recover the
@@ -275,6 +287,7 @@ func RunPromptToolLoopWithRaw(
 		usage.OutputTokens += u.OutputTokens
 		usage.CacheReadTokens += u.CacheReadTokens
 		usage.CacheWriteTokens += u.CacheWriteTokens
+		finalRoundHasToolCall := false
 		for _, block := range round.Blocks {
 			if block.Kind == "text" {
 				continue
@@ -286,6 +299,7 @@ func RunPromptToolLoopWithRaw(
 					onEvent(SseEvent{Type: "thinking_delta", Text: block.Text})
 				}
 			case "tool_call":
+				finalRoundHasToolCall = true
 				onEvent(SseEvent{Type: "tool_start", ID: block.ToolID, Name: block.ToolName, Input: block.Input})
 				if block.Summary != "" {
 					onEvent(SseEvent{Type: "tool_result", ID: block.ToolID, Name: block.ToolName, Summary: block.Summary, Status: "complete"})
@@ -300,6 +314,9 @@ func RunPromptToolLoopWithRaw(
 		}
 		generatedImages = append(generatedImages, round.GeneratedImages...)
 		if err != nil {
+			if finalizing && !errors.Is(err, context.Canceled) {
+				err = toolFinalizationError(finalizationSignal, err)
+			}
 			// Raw provider deltas are hidden in prompt mode until their protocol
 			// envelope can be stripped. Surface and persist only the safe prefix
 			// before a possible <tool_call> marker.
@@ -320,6 +337,17 @@ func RunPromptToolLoopWithRaw(
 			// Stream the user-visible portion (the tool-call markup is stripped
 			// by SplitTextAndCall so the UI never sees the protocol envelope).
 			onEvent(SseEvent{Type: "text_delta", Text: visible})
+		}
+		if finalizing {
+			if parseErr != nil || call != nil || finalRoundHasToolCall || strings.TrimSpace(visible) == "" {
+				if full.Len() > 0 {
+					blocks = append(blocks, UnifiedBlock{Kind: "text", Text: full.String()})
+				}
+				return full.String(), blocks, usage, citations, generatedImages, marshalPromptToolRawEnvelope(rawOutputs),
+					toolFinalizationError(finalizationSignal, errors.New("model did not return a tool-free final answer"))
+			}
+			blocks = append(blocks, UnifiedBlock{Kind: "text", Text: full.String()})
+			return full.String(), blocks, usage, citations, generatedImages, marshalPromptToolRawEnvelope(rawOutputs), nil
 		}
 
 		// §4.13-5 容错: the model emitted a <tool_call> marker with broken JSON.
@@ -399,6 +427,11 @@ func RunPromptToolLoopWithRaw(
 			Role:   "user",
 			Blocks: []UnifiedBlock{{Kind: "text", Text: PromptToolResultText(call.Name, output, isError)}},
 		})
+		if signal := toolFinalizationSignal(runErr); signal != nil {
+			finalizationPending = signal
+		} else if i+1 >= promptMaxIter {
+			finalizationPending = &ErrToolBudgetExceeded{Kind: "iterations", Limit: promptMaxIter}
+		}
 	}
 	// Loop exhausted.
 	final := full.String()
@@ -419,6 +452,12 @@ func promptToolErrorRetryable(err error) bool {
 		return false
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	if IsToolBudgetExceeded(err) {
+		return false
+	}
+	if IsToolNoProgress(err) {
 		return false
 	}
 	var refusal *ToolRefusalError

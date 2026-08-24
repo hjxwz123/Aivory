@@ -58,6 +58,20 @@ func chatRunErrorEvent(err error, messageID string) llm.SseEvent {
 			MessageID: messageID,
 			Code:      errKnowledgeBaseGroupPermission.Error(),
 		}
+	case llm.IsToolBudgetExceeded(err):
+		return llm.SseEvent{
+			Type:      "error",
+			Message:   llm.ToolBudgetExceededMessage(),
+			MessageID: messageID,
+			Code:      "tool_budget_exceeded",
+		}
+	case llm.IsToolNoProgress(err):
+		return llm.SseEvent{
+			Type:      "error",
+			Message:   llm.ToolNoProgressMessage(),
+			MessageID: messageID,
+			Code:      "tool_no_progress",
+		}
 	}
 	return llm.SseEvent{Type: "error", Message: chatRunErrorMessage, MessageID: messageID}
 }

@@ -2,12 +2,22 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
 )
+
+type blockingTimeBudgetRegistry struct{}
+
+func (blockingTimeBudgetRegistry) List(string) []ToolDef { return nil }
+
+func (blockingTimeBudgetRegistry) Run(ctx context.Context, _ string, _ []byte, _ *ToolContext) (string, []Citation, error) {
+	<-ctx.Done()
+	return "", nil, ctx.Err()
+}
 
 func TestPublicToolErrorOutputDoesNotExposeUpstreamEndpoint(t *testing.T) {
 	err := &url.Error{
@@ -114,5 +124,74 @@ func TestPublicToolErrorOutputClassifiesOnlyExplicitPublicErrors(t *testing.T) {
 				t.Fatalf("public error = %q, want %q", got, test.want)
 			}
 		})
+	}
+}
+
+func TestToolContextChargeReturnsTypedBudgetErrors(t *testing.T) {
+	total := &ToolContext{counts: map[string]int{"__total__": maxToolCallsPerTurn}}
+	err := total.charge("unlimited-test-tool")
+	var totalBudget *ErrToolBudgetExceeded
+	if !errors.As(err, &totalBudget) || totalBudget.Kind != "total_calls" || totalBudget.Limit != maxToolCallsPerTurn {
+		t.Fatalf("total budget error = %#v (%v)", totalBudget, err)
+	}
+
+	toolName := "aivory_web_search"
+	limit := perTurnToolLimits[toolName]
+	perTool := &ToolContext{counts: map[string]int{toolName: limit}}
+	err = perTool.charge(toolName)
+	var toolBudget *ErrToolBudgetExceeded
+	if !errors.As(err, &toolBudget) || toolBudget.Kind != "tool_calls" || toolBudget.Tool != toolName || toolBudget.Limit != limit {
+		t.Fatalf("per-tool budget error = %#v (%v)", toolBudget, err)
+	}
+
+	if maxToolTimePerTurn > 0 {
+		timed := &ToolContext{
+			counts:              map[string]int{},
+			toolBudgetStartedAt: time.Now().Add(-maxToolTimePerTurn),
+		}
+		err = timed.charge("unlimited-test-tool")
+		var timeBudget *ErrToolBudgetExceeded
+		if !errors.As(err, &timeBudget) || timeBudget.Kind != "time" || timeBudget.Duration != maxToolTimePerTurn {
+			t.Fatalf("time budget error = %#v (%v)", timeBudget, err)
+		}
+		if remaining, limited := timed.toolTimeRemaining(); !limited || remaining != 0 {
+			t.Fatalf("exhausted time remaining = %v/%v, want 0/true", remaining, limited)
+		}
+	}
+}
+
+func TestToolBudgetFinalizationFailureDoesNotBecomeCancellation(t *testing.T) {
+	err := toolBudgetFinalizationError(
+		&ErrToolBudgetExceeded{Kind: "total_calls", Limit: 1},
+		context.DeadlineExceeded,
+	)
+	if !IsToolBudgetExceeded(err) {
+		t.Fatalf("finalization error = %v, want budget error", err)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal("finalization deadline leaked through as a normal stopped-turn deadline")
+	}
+}
+
+func TestOrchestratorToolRunnerCapsCallAtRemainingTurnTime(t *testing.T) {
+	if maxToolTimePerTurn <= 0 {
+		t.Skip("turn tool-time budget disabled")
+	}
+	tc := &ToolContext{
+		counts:              map[string]int{},
+		toolBudgetStartedAt: time.Now().Add(-maxToolTimePerTurn + 20*time.Millisecond),
+	}
+	runner := &orchToolRunner{
+		orch: &Orchestrator{tools: blockingTimeBudgetRegistry{}},
+		ctx:  tc,
+	}
+	started := time.Now()
+	_, _, err := runner.Run(context.Background(), "blocking-test-tool", json.RawMessage(`{}`))
+	var budgetErr *ErrToolBudgetExceeded
+	if !errors.As(err, &budgetErr) || budgetErr.Kind != "time" || budgetErr.Duration != maxToolTimePerTurn {
+		t.Fatalf("runner error = %#v (%v)", budgetErr, err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("runner ignored remaining turn time: %v", elapsed)
 	}
 }

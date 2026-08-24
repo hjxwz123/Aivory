@@ -74,8 +74,19 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 	allBlocks := []UnifiedBlock{}
 	allCitations := []Citation{}
 	totalUsage := Usage{}
+	var finalizationPending error
+	if signal := toolFinalizationFromContext(ctx); signal != nil {
+		finalizationPending = signal
+	}
 
-	for i := 0; i < maxIter; i++ {
+	for i := 0; i < maxIter || finalizationPending != nil; i++ {
+		finalizing := finalizationPending != nil
+		finalizationSignal := finalizationPending
+		finalizationPending = nil
+		roundModel := req.Model
+		if finalizing {
+			roundModel.Fallback = nil
+		}
 		// Gemini defaults maxOutputTokens to 8192 when the field is omitted,
 		// silently truncating well below what current models actually support
 		// (up to 64K+) — always send it explicitly (mirrors the Anthropic fix).
@@ -83,17 +94,24 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 		if req.MaxOutputTokens > 0 {
 			maxTok = req.MaxOutputTokens
 		}
+		systemPrompt := req.SystemPrompt
+		if finalizing {
+			systemPrompt = strings.TrimSpace(systemPrompt + "\n\n" + toolFinalizationInstruction(finalizationSignal))
+		}
 		body := map[string]any{
-			"systemInstruction": map[string]any{"parts": []map[string]any{{"text": req.SystemPrompt}}},
+			"systemInstruction": map[string]any{"parts": []map[string]any{{"text": systemPrompt}}},
 			"contents":          contents,
 			"generationConfig":  map[string]any{"maxOutputTokens": maxTok},
 		}
-		if toolsDecl != nil {
+		nativeToolsEnabled := toolsDecl != nil && !finalizing
+		if nativeToolsEnabled {
 			body["tools"] = toolsDecl
 		}
 		body = MergeRequestParams(body, req.ExtraParams, req.ParamControls, req.ParamOverrides)
-		body = StripToolFields(body, toolsDecl != nil)
-		body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
+		body = StripToolFields(body, nativeToolsEnabled)
+		if !finalizing {
+			body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
+		}
 		stripGoogleEndpointParams(body)
 		raw, _ := json.Marshal(body)
 		// §4.10-G stream: streamGenerateContent returns SSE-style JSON-array
@@ -108,7 +126,7 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 			citations    []Citation
 			u            Usage
 		)
-		err := doProviderParsedRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
+		err := doProviderParsedRequest(ctx, roundModel, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
 			streamURL := fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent?alt=sse", providerBaseURL(baseURL, "https://generativelanguage.googleapis.com"), req.Model.RequestID)
 			hr, e := http.NewRequestWithContext(ctx, "POST", streamURL, bytes.NewReader(raw))
 			if e != nil {
@@ -150,6 +168,9 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 			partialUsage.CacheReadTokens += u.CacheReadTokens
 			partialUsage.CacheWriteTokens += u.CacheWriteTokens
 			partialCitations := mergeCitationsByURL(append([]Citation{}, allCitations...), citations)
+			if finalizing && !errors.Is(err, context.Canceled) {
+				err = toolFinalizationError(finalizationSignal, err)
+			}
 
 			partialContents := append([]map[string]any{}, contents...)
 			partialModelParts := make([]map[string]any, 0, len(modelParts))
@@ -185,6 +206,29 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 		totalUsage.InputTokens += u.InputTokens
 		totalUsage.OutputTokens += u.OutputTokens
 		allCitations = mergeCitationsByURL(allCitations, citations)
+		if finalizing {
+			finalParts := make([]map[string]any, 0, len(modelParts))
+			for _, part := range modelParts {
+				if _, isToolCall := part["functionCall"]; !isToolCall {
+					finalParts = append(finalParts, part)
+				}
+			}
+			if len(finalParts) > 0 {
+				contents = append(contents, map[string]any{"role": "model", "parts": finalParts})
+			}
+			if len(calls) > 0 || strings.TrimSpace(text) == "" {
+				raw, _ := json.Marshal(contents[historyLen:])
+				return &UnifiedResult{
+					Blocks: allBlocks, Raw: raw, StopReason: toolFinalizationStopReason(finalizationSignal),
+					Usage: totalUsage, Citations: allCitations,
+				}, toolFinalizationError(finalizationSignal, errors.New("model did not return a tool-free final answer"))
+			}
+			raw, _ := json.Marshal(contents[historyLen:])
+			return &UnifiedResult{
+				Blocks: allBlocks, Raw: raw, StopReason: "end_turn",
+				Usage: totalUsage, Citations: allCitations,
+			}, nil
+		}
 
 		// Append the model turn (text + any functionCall parts) to history.
 		contents = append(contents, map[string]any{"role": "model", "parts": modelParts})
@@ -206,6 +250,7 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 			specs[j] = toolCallSpec{ID: c.Name, Name: c.Name, Input: c.Args}
 		}
 		results := runToolsConcurrent(ctx, tools, specs, onEvent)
+		batchFinalizationErr := toolFinalizationErrorFromResults(results)
 		respParts := []map[string]any{}
 		for j, c := range calls {
 			r := results[j]
@@ -232,6 +277,11 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 			})
 		}
 		contents = append(contents, map[string]any{"role": "user", "parts": respParts})
+		if batchFinalizationErr != nil {
+			finalizationPending = batchFinalizationErr
+		} else if i+1 >= maxIter {
+			finalizationPending = &ErrToolBudgetExceeded{Kind: "iterations", Limit: maxIter}
+		}
 	}
 	raw, _ := json.Marshal(contents[historyLen:])
 	return &UnifiedResult{
@@ -690,7 +740,12 @@ func parseGeminiCandidate(parsed map[string]any) (string, []geminiCall, []map[st
 // (stop sequence on </tool_call>) for §4.13 prompt-mode.
 func (p *GoogleProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner {
 	return func(ctx context.Context, history []UnifiedMessage, system string) (PromptToolRound, error) {
-		if len(req.OfficialToolRequests) > 0 {
+		finalizing := isToolBudgetFinalization(ctx)
+		roundModel := req.Model
+		if finalizing {
+			roundModel.Fallback = nil
+		}
+		if len(req.OfficialToolRequests) > 0 && !finalizing {
 			round := req
 			round.SystemPrompt = system
 			round.History = history
@@ -755,14 +810,16 @@ func (p *GoogleProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner 
 		}
 		body = MergeRequestParams(body, req.ExtraParams, req.ParamControls, req.ParamOverrides)
 		body = StripToolFields(body, false)
-		body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
+		if !finalizing {
+			body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
+		}
 		stripGoogleEndpointParams(body)
 		raw, _ := json.Marshal(body)
 		var (
 			text  string
 			usage Usage
 		)
-		err := doProviderParsedRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
+		err := doProviderParsedRequest(ctx, roundModel, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
 			url := fmt.Sprintf("%s/v1beta/models/%s:generateContent", providerBaseURL(baseURL, "https://generativelanguage.googleapis.com"), req.Model.RequestID)
 			hr, e := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(raw))
 			if e != nil {

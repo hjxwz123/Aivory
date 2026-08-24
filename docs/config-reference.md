@@ -119,6 +119,9 @@
 | `AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_PYTHON_EXECUTE` | `int` | `8` | `llm/orchestrator.go:161` | Max python_execute sandbox runs allowed per message while Deep Research runs; exceeding it fails the call. |
 | `AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN` | `int` | `48` | `llm/orchestrator.go:169` | Global ceiling on total tool calls across all tools per message in normal mode, on top of the per-tool caps. |
 | `AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN_DEEP` | `int` | `150` | `llm/orchestrator.go:170` | Global ceiling on total tool calls across all tools per message while Deep Research runs. |
+| `AIVORY_LLM_MAX_TOOL_TIME_PER_TURN` | `duration` | `15*time.Minute` | `llm/orchestrator.go` | Cumulative wall-clock budget for tool execution in a normal message. Once exhausted, all tools are removed and the model gets one tool-free finalization request. Set a non-positive value to disable this time budget. |
+| `AIVORY_LLM_MAX_TOOL_TIME_PER_TURN_DEEP` | `duration` | `4*time.Minute` | `llm/orchestrator.go` | Cumulative Deep Research tool-execution budget, leaving time inside the five-minute research window for one tool-free report-writing request. Set a non-positive value to disable this time budget. |
+| `AIVORY_LLM_MAX_TOOL_TIME_PER_TURN_FAST` | `duration` | `3*time.Minute` | `llm/orchestrator.go` | Cumulative tool-execution budget for fast mode before its one tool-free finalization request. Set a non-positive value to disable this time budget. |
 | `AIVORY_LLM_TOOL_TIMEOUTS` | `duration` | `10*time.Second` | `llm/orchestrator.go:2326` | Per-invocation timeout bounding a single `aivory_web_search` tool call. |
 | `AIVORY_LLM_TOOL_TIMEOUTS_2` | `duration` | `15*time.Second` | `llm/orchestrator.go:2327` | Per-invocation timeout bounding a single web_fetch tool call. |
 | `AIVORY_LLM_TOOL_TIMEOUTS_FETCH_IMAGE` | `duration` | `45*time.Second` | `llm/orchestrator.go` | Per-invocation timeout bounding a single fetch_image download. |

@@ -147,17 +147,18 @@ type researcher struct {
 	msgID    string
 	userID   string
 
-	question   string
-	blocks     []UnifiedBlock    // tool_call blocks (reload trace fidelity)
-	cites      []Citation        // deduped, 1-indexed in discovery order
-	seen       map[string]int    // normalized URL -> citation index
-	evidence   []evidenceItem    // gathered source bodies for the writer
-	findings   drFindings        // Phase 4 cross-validation output
-	weakClaims []string          // claims the coverage audits flagged as weak
-	state      drState           // panel state
-	sourceID   map[string]string // normalized URL -> stable source id
-	roundsRun  int               // research rounds executed
-	logger     func(string, ...any)
+	question            string
+	blocks              []UnifiedBlock    // tool_call blocks (reload trace fidelity)
+	cites               []Citation        // deduped, 1-indexed in discovery order
+	seen                map[string]int    // normalized URL -> citation index
+	evidence            []evidenceItem    // gathered source bodies for the writer
+	findings            drFindings        // Phase 4 cross-validation output
+	weakClaims          []string          // claims the coverage audits flagged as weak
+	state               drState           // panel state
+	sourceID            map[string]string // normalized URL -> stable source id
+	roundsRun           int               // research rounds executed
+	toolFinalizationErr error
+	logger              func(string, ...any)
 }
 
 // runDeepResearch is the entry point invoked from Orchestrator.Run at the
@@ -226,6 +227,9 @@ func (o *Orchestrator) runDeepResearch(
 			// partials we assembled (it reads result.Blocks + result.Citations).
 			return result, werr
 		}
+		if rs.toolFinalizationErr != nil {
+			return result, toolFinalizationError(rs.toolFinalizationErr, werr)
+		}
 		// A non-cancel writer failure must NOT blank the message — the user
 		// already watched the plan / searches / sources stream. Stream + append a
 		// short note and take the SUCCESS path so the full panel + reasoning trace
@@ -234,6 +238,20 @@ func (o *Orchestrator) runDeepResearch(
 		rs.emit(SseEvent{Type: "text_delta", Text: fallback})
 		result.Blocks = append(result.Blocks, UnifiedBlock{Kind: "text", Text: fallback})
 		rs.logger("writer failed (non-cancel); persisting partial research: %v", werr)
+	}
+	if rs.toolFinalizationErr != nil {
+		hasFinalText := false
+		if writerResult != nil {
+			for _, block := range writerResult.Blocks {
+				if block.Kind == "text" && strings.TrimSpace(block.Text) != "" {
+					hasFinalText = true
+					break
+				}
+			}
+		}
+		if !hasFinalText {
+			return result, toolFinalizationError(rs.toolFinalizationErr, errors.New("research writer returned no final answer"))
+		}
 	}
 	return result, nil
 }
@@ -414,6 +432,21 @@ func (rs *researcher) researchLoop(ctx context.Context, plan researchPlan) {
 			rs.logger("web search is not configured; skipping to synthesis")
 			break
 		}
+		if rs.toolFinalizationErr != nil {
+			// Concurrent calls that acquired budget before the failing call may
+			// still have returned useful search snippets. Preserve them for the
+			// single no-tool writer request, then stop all research tool phases.
+			for _, candidate := range candidates {
+				idx := rs.addSource(candidate.url, candidate.title, candidate.snippet)
+				grade := credibilityOf(candidate.url)
+				rs.updateSource(candidate.url, "kept", grade)
+				rs.evidence = append(rs.evidence, evidenceItem{
+					SubQ: questionByID[candidate.subID], URL: candidate.url, Title: candidate.title,
+					Snippet: candidate.snippet, Grade: grade, Index: idx,
+				})
+			}
+			break
+		}
 
 		// Rank + pick which new sources to read this round (domain-diverse).
 		picked := rs.rankAndPick(candidates, round)
@@ -457,6 +490,9 @@ func (rs *researcher) researchLoop(ctx context.Context, plan researchPlan) {
 						SubQ: questionByID[p.subID], URL: p.url, Title: p.title, Snippet: p.snippet, Grade: grade, Index: idx,
 					})
 				}
+			}
+			if rs.toolFinalizationErr != nil {
+				break
 			}
 		}
 
@@ -581,7 +617,7 @@ func (rs *researcher) verify(ctx context.Context, plan researchPlan) gapVerdict 
 // accordingly. Best-effort — on failure the writer simply gets no notes and
 // falls back to citing sources directly.
 func (rs *researcher) validate(ctx context.Context) {
-	if rs.o.task == nil || len(rs.evidence) < 2 || ctx.Err() != nil {
+	if rs.o.task == nil || len(rs.evidence) < 2 || ctx.Err() != nil || rs.toolFinalizationErr != nil {
 		return
 	}
 	// Bounded like the tool calls — a slow task model must not eat the whole
@@ -786,20 +822,36 @@ func (rs *researcher) execToolsConcurrent(ctx context.Context, specs []toolCallS
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			// Enforce the per-turn tool budget as a backstop (we call o.tools.Run
-			// directly, bypassing orchToolRunner, so charge it here). charge() is
-			// mutex-guarded, so concurrent calls are safe.
-			if err := rs.tc.charge(c.Name); err != nil {
-				results[i] = toolCallResult{Err: err}
-				return
-			}
-			cctx, cancel := context.WithTimeout(ctx, drCallTimeout)
-			defer cancel()
-			out, cites, err := rs.o.tools.Run(cctx, c.Name, c.Input, rs.tc)
+			out, cites, err := rs.tc.executeTrackedTool(ctx, c.Name, c.Input, func() (string, []Citation, error) {
+				// Deep Research calls the registry directly so it can own source
+				// bookkeeping; keep the same central charging and wall-clock limits.
+				if chargeErr := rs.tc.charge(c.Name); chargeErr != nil {
+					return "", nil, chargeErr
+				}
+				timeout := drCallTimeout
+				if remaining, limited := rs.tc.toolTimeRemaining(); limited {
+					if remaining <= 0 {
+						return "", nil, rs.tc.toolTimeBudgetError()
+					}
+					if remaining < timeout {
+						timeout = remaining
+					}
+				}
+				cctx, cancel := context.WithTimeout(ctx, timeout)
+				defer cancel()
+				result, resultCitations, runErr := rs.o.tools.Run(cctx, c.Name, c.Input, rs.tc)
+				if runErr != nil && ctx.Err() == nil && rs.tc.toolTimeBudgetExceeded() {
+					runErr = rs.tc.toolTimeBudgetError()
+				}
+				return result, resultCitations, runErr
+			})
 			results[i] = toolCallResult{Output: out, Citations: cites, Err: err}
 		}(i, c)
 	}
 	wg.Wait()
+	if rs.toolFinalizationErr == nil {
+		rs.toolFinalizationErr = toolFinalizationErrorFromResults(results)
+	}
 	for i, c := range specs {
 		r := results[i]
 		status := "complete"

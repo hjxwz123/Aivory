@@ -274,8 +274,19 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 	// §4.3-B: set once a 400 forces a thinking-stripped retry; keeps every later
 	// iteration this turn thinking-free so the loop can't re-poison itself.
 	thinkingStripped := false
+	var finalizationPending error
+	if signal := toolFinalizationFromContext(ctx); signal != nil {
+		finalizationPending = signal
+	}
 
-	for i := 0; i < maxIter; i++ {
+	for i := 0; i < maxIter || finalizationPending != nil; i++ {
+		finalizing := finalizationPending != nil
+		finalizationSignal := finalizationPending
+		finalizationPending = nil
+		roundModel := req.Model
+		if finalizing {
+			roundModel.Fallback = nil
+		}
 		maxTok := envcfg.Int("AIVORY_LLM_MAX_TOK", 64000)
 		if req.MaxOutputTokens > 0 {
 			maxTok = req.MaxOutputTokens
@@ -290,14 +301,19 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 			// and on the last message block (incremental history cache). Exactly two
 			// breakpoints, well under the 4-breakpoint limit.
 			setMessagesCacheBreakpoint(messages)
+			systemPrompt := req.SystemPrompt
+			if finalizing {
+				systemPrompt = strings.TrimSpace(systemPrompt + "\n\n" + toolFinalizationInstruction(finalizationSignal))
+			}
 			body := map[string]any{
 				"model":      req.Model.RequestID,
 				"max_tokens": maxTok,
 				"stream":     true,
-				"system":     anthropicSystemBlocks(req.SystemPrompt),
+				"system":     anthropicSystemBlocks(systemPrompt),
 				"messages":   messages,
 			}
-			if len(req.Tools) > 0 && !req.ToolModePrompt {
+			nativeToolsEnabled := len(req.Tools) > 0 && !req.ToolModePrompt && !finalizing
+			if nativeToolsEnabled {
 				body["tools"] = toAnthropicTools(req.Tools)
 			}
 			if req.ToolModePrompt {
@@ -307,8 +323,10 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 			// extended thinking is opt-in: if admins do not explicitly merge a
 			// `thinking` object, the provider sends no thinking field.
 			body = MergeRequestParams(body, req.ExtraParams, req.ParamControls, req.ParamOverrides)
-			body = StripToolFields(body, len(req.Tools) > 0 && !req.ToolModePrompt)
-			body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
+			body = StripToolFields(body, nativeToolsEnabled)
+			if !finalizing {
+				body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
+			}
 			// §4.3-B: once a strip-thinking retry has fired this turn, every
 			// subsequent request drops the thinking param too (the response then
 			// carries no thinking blocks, so later replays stay clean).
@@ -339,7 +357,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 			citations = nil
 			nativeContent = nil
 			usage = Usage{}
-			return doProviderParsedRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
+			return doProviderParsedRequest(ctx, roundModel, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
 				hr, e := http.NewRequestWithContext(ctx, "POST", providerBaseURL(baseURL, "https://api.anthropic.com")+"/v1/messages", bytes.NewReader(buf))
 				if e != nil {
 					return nil, e
@@ -401,6 +419,9 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 			partialUsage.OutputTokens += usage.OutputTokens
 			partialUsage.CacheReadTokens += usage.CacheReadTokens
 			partialUsage.CacheWriteTokens += usage.CacheWriteTokens
+			if finalizing && !errors.Is(err, context.Canceled) {
+				err = toolFinalizationError(finalizationSignal, err)
+			}
 
 			partialMessages := append([]map[string]any{}, messages...)
 			currentTurn := buildAssistantTurn(text, thinkingBlocks, completedAnthropicHostedCalls(hostedCalls), nil)
@@ -432,7 +453,9 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 		if thinkingText != "" {
 			allBlocks = append(allBlocks, UnifiedBlock{Kind: "thinking", Text: thinkingText})
 		}
-		allBlocks = mergeAnthropicHostedUnifiedBlocks(allBlocks, hostedCalls)
+		if !finalizing {
+			allBlocks = mergeAnthropicHostedUnifiedBlocks(allBlocks, hostedCalls)
+		}
 		if text != "" {
 			allBlocks = append(allBlocks, UnifiedBlock{Kind: "text", Text: text})
 		}
@@ -441,6 +464,27 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 		totalUsage.OutputTokens += usage.OutputTokens
 		totalUsage.CacheReadTokens += usage.CacheReadTokens
 		totalUsage.CacheWriteTokens += usage.CacheWriteTokens
+		if finalizing {
+			assistantTurn := buildAssistantTurn(text, thinkingBlocks, nil, nil)
+			if content, ok := assistantTurn["content"].([]map[string]any); ok && len(content) > 0 {
+				messages = append(messages, assistantTurn)
+			}
+			if len(toolCalls) > 0 || len(hostedCalls) > 0 || stopReason == "pause_turn" || strings.TrimSpace(text) == "" {
+				raw, _ := json.Marshal(messages[historyLen:])
+				return &UnifiedResult{
+					Blocks: allBlocks, Raw: raw, StopReason: toolFinalizationStopReason(finalizationSignal),
+					Usage: totalUsage, Citations: allCitations,
+				}, toolFinalizationError(finalizationSignal, errors.New("model did not return a tool-free final answer"))
+			}
+			raw, _ := json.Marshal(messages[historyLen:])
+			if stopReason == "" {
+				stopReason = "end_turn"
+			}
+			return &UnifiedResult{
+				Blocks: allBlocks, Raw: raw, StopReason: stopReason,
+				Usage: totalUsage, Citations: allCitations,
+			}, nil
+		}
 
 		// Append assistant turn (with thinking + tool_use blocks if any) to
 		// messages. Thinking blocks must carry their signature or the next
@@ -480,6 +524,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 			specs[i] = toolCallSpec{ID: tc.ID, Name: tc.Name, Input: tc.Input}
 		}
 		results := runToolsConcurrent(ctx, tools, specs, onEvent)
+		batchFinalizationErr := toolFinalizationErrorFromResults(results)
 		resultBlocks := []map[string]any{}
 		for i, tc := range toolCalls {
 			r := results[i]
@@ -509,6 +554,11 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 			"role":    "user",
 			"content": resultBlocks,
 		})
+		if batchFinalizationErr != nil {
+			finalizationPending = batchFinalizationErr
+		} else if i+1 >= maxIter {
+			finalizationPending = &ErrToolBudgetExceeded{Kind: "iterations", Limit: maxIter}
+		}
 	}
 	return nil, errors.New("anthropic: tool loop exhausted")
 }
@@ -519,7 +569,12 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 // (markup-stripped) portion itself.
 func (p *AnthropicProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner {
 	return func(ctx context.Context, history []UnifiedMessage, system string) (PromptToolRound, error) {
-		if len(req.OfficialToolRequests) > 0 {
+		finalizing := isToolBudgetFinalization(ctx)
+		roundModel := req.Model
+		if finalizing {
+			roundModel.Fallback = nil
+		}
+		if len(req.OfficialToolRequests) > 0 && !finalizing {
 			round := req
 			round.SystemPrompt = system
 			round.History = history
@@ -561,14 +616,16 @@ func (p *AnthropicProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunn
 		}
 		body = MergeRequestParams(body, req.ExtraParams, req.ParamControls, req.ParamOverrides)
 		body = StripToolFields(body, false)
-		body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
+		if !finalizing {
+			body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
+		}
 		applyAnthropicThinkingSettings(body, req.Model.RequestID, &maxTok, req.StrictMaxOutputTokens)
 		buf, _ := json.Marshal(body)
 		var (
 			text  string
 			usage Usage
 		)
-		err := doProviderParsedRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
+		err := doProviderParsedRequest(ctx, roundModel, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
 			hr, e := http.NewRequestWithContext(ctx, "POST", providerBaseURL(baseURL, "https://api.anthropic.com")+"/v1/messages", bytes.NewReader(buf))
 			if e != nil {
 				return nil, e
