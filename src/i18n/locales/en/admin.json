@@ -557,7 +557,7 @@
     "filters": {
       "range": "Time range",
       "user": "User",
-      "userPlaceholder": "Email or ID",
+      "userPlaceholder": "Nickname, email, or ID",
       "model": "Model",
       "allModels": "All models",
       "status": "Status",
