@@ -42,7 +42,12 @@ class WorkspaceRestoreTest(unittest.TestCase):
         self.assertIn(
             "--no-overwrite-dir",
             docker_args,
-            "restoring as uid 1000 must not chmod/utime the root-owned /workspace tmpfs",
+            "restoring as uid 1000 must preserve existing child-directory metadata",
+        )
+        self.assertIn(
+            "--strip-components=1",
+            docker_args,
+            "the archive's leading ./ entry must not chmod/utime the /workspace mount",
         )
 
 
