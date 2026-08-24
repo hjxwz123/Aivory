@@ -706,6 +706,10 @@
       "can_delete_kb_content": {
         "label": "刪除知識庫內容",
         "description": "具體知識庫同時允許時，可刪除、重試或管理其中內容。"
+      },
+      "can_delete_conversations": {
+        "label": "刪除對話",
+        "description": "刪除此工作空間內的訊息和整個對話，包括自己建立的對話。"
       }
     },
     "roleAdmin": "管理員",

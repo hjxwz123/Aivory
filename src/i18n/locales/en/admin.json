@@ -982,6 +982,8 @@
       "fileUploadHint": "Upload files to chats, projects, and writable knowledge bases.",
       "export": "Export conversations",
       "exportHint": "Export individual replies or all account conversations.",
+      "deleteConversations": "Delete conversations",
+      "deleteConversationsHint": "Delete messages and conversations, including conversations they created.",
       "voice": "Voice recognition",
       "voiceHint": "Use streaming or recorded speech transcription.",
       "memory": "Use memory",

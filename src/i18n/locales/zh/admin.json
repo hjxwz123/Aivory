@@ -986,6 +986,8 @@
       "fileUploadHint": "向对话、项目和可写知识库上传文件。",
       "export": "导出对话",
       "exportHint": "导出单条回复或账号内全部对话。",
+      "deleteConversations": "删除对话",
+      "deleteConversationsHint": "删除对话内消息和整个对话，包括自己创建的对话。",
       "voice": "语音识别",
       "voiceHint": "使用流式或录音语音转写。",
       "memory": "使用记忆",

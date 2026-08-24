@@ -982,6 +982,8 @@
       "fileUploadHint": "Ajouter des fichiers aux chats, projets et bases accessibles en écriture.",
       "export": "Exporter les conversations",
       "exportHint": "Exporter une réponse ou toutes les conversations du compte.",
+      "deleteConversations": "Supprimer les conversations",
+      "deleteConversationsHint": "Supprimer les messages et les conversations, y compris celles créées par l'utilisateur.",
       "voice": "Reconnaissance vocale",
       "voiceHint": "Transcrire un flux audio ou un enregistrement.",
       "memory": "Utiliser la mémoire",

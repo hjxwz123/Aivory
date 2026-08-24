@@ -706,6 +706,10 @@
       "can_delete_kb_content": {
         "label": "ナレッジベースの内容を削除",
         "description": "対象のナレッジベースでも許可されている場合に、内容の削除・再試行・管理ができます。"
+      },
+      "can_delete_conversations": {
+        "label": "会話を削除",
+        "description": "自分で作成した会話を含め、このワークスペースのメッセージと会話を削除します。"
       }
     },
     "roleAdmin": "管理者",
