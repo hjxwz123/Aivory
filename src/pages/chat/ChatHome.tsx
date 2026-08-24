@@ -6,6 +6,7 @@ import { gsap } from 'gsap'
 import { useGSAP } from '@gsap/react'
 import { ChevronDown, Menu } from 'lucide-react'
 import { Composer } from '@/components/chat/composer'
+import { UserMenu } from '@/components/sidebar/sidebar'
 import { SuggestionCard } from '@/components/chat/suggestion-card'
 import { MyGallery } from '@/components/chat/my-gallery'
 import { SUGGESTIONS } from '@/data/suggestions'
@@ -562,6 +563,12 @@ export default function ChatHome() {
       >
         <Menu size={17} aria-hidden />
       </button>
+      {/* Mobile home top-right: the account avatar opens the same menu the
+          sidebar footer's avatar does (placement="header" adapts the trigger +
+          popup direction for a top-right corner). */}
+      <div className="lg:hidden absolute right-3 top-3 z-20 max-sm:right-2 max-sm:top-2">
+        <UserMenu placement="header" />
+      </div>
       {/* Desktop-only ambient depth; the phone layout stays deliberately direct. */}
       <div
         className="home-glow pointer-events-none absolute left-1/2 top-[14%] -z-0 hidden size-[34rem] max-w-[88vw] -translate-x-1/2 rounded-full bg-[var(--color-accent)] opacity-[0.07] blur-[90px] sm:block"

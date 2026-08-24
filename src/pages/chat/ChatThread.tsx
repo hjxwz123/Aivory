@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { MoreHorizontal, Pencil, Share2, Star, Trash2, Archive, ArrowDown, FolderKanban, Loader2, Menu, Files, GitBranch, Globe2, LockKeyhole } from 'lucide-react'
 import { Composer } from '@/components/chat/composer'
 import { MessageList } from '@/components/chat/message-list'
+import { UserMenu } from '@/components/sidebar/sidebar'
 import { InlineThreadLayer } from '@/components/chat/inline-thread-layer'
 import { ModelPicker } from '@/components/chat/model-picker'
 import { ShareConversationDialog } from '@/components/chat/share-conversation-dialog'
@@ -509,7 +510,7 @@ export default function ChatThread() {
           </DropdownMenu> : null}
         </header>
       ) : (
-        <header className="grid grid-cols-[var(--tap-min)_1fr_var(--tap-min)] items-center gap-1 h-[var(--layout-topbar-h-mobile)] px-2 bg-[var(--color-bg)]/85 backdrop-blur-sm">
+        <header className="grid grid-cols-[var(--tap-min)_1fr_auto] items-center gap-1 h-[var(--layout-topbar-h-mobile)] px-2 bg-[var(--color-bg)]/85 backdrop-blur-sm">
           <button
             type="button"
             aria-label={t('chat:commandMenu.actions.toggleSidebar')}
@@ -548,14 +549,17 @@ export default function ChatThread() {
               ) : null}
             </div>
           </div>
-          <button
-            type="button"
-            aria-label={t('chat:actions.more')}
-            onClick={() => setActionsOpen(true)}
-            className="inline-flex items-center justify-center size-[var(--tap-min)] justify-self-end rounded-[10px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-          >
-            <MoreHorizontal size={18} aria-hidden />
-          </button>
+          <div className="flex items-center justify-self-end">
+            <button
+              type="button"
+              aria-label={t('chat:actions.more')}
+              onClick={() => setActionsOpen(true)}
+              className="inline-flex items-center justify-center size-[var(--tap-min)] rounded-[10px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+            >
+              <MoreHorizontal size={18} aria-hidden />
+            </button>
+            <UserMenu placement="header" />
+          </div>
         </header>
       )}
 
