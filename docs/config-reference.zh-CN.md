@@ -119,6 +119,9 @@
 | `AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_PYTHON_EXECUTE` | `int` | `8` | `llm/orchestrator.go:161` | 深度研究运行时每条消息允许的 python_execute 沙箱执行次数上限；超出即令该调用失败。 |
 | `AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN` | `int` | `48` | `llm/orchestrator.go:169` | 普通模式下每条消息跨所有工具的工具调用总数全局上限，叠加在各工具单独上限之上。 |
 | `AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN_DEEP` | `int` | `150` | `llm/orchestrator.go:170` | 深度研究运行时每条消息跨所有工具的工具调用总数全局上限。 |
+| `AIVORY_LLM_MAX_TOOL_TIME_PER_TURN` | `duration` | `15*time.Minute` | `llm/orchestrator.go` | 普通消息中所有工具执行的累计墙钟时间预算。耗尽后移除全部工具，并仅允许模型执行一次无工具收尾请求。设为非正值可禁用该时间预算。 |
+| `AIVORY_LLM_MAX_TOOL_TIME_PER_TURN_DEEP` | `duration` | `4*time.Minute` | `llm/orchestrator.go` | 深度研究的累计工具执行时间预算，在五分钟研究窗口内为一次无工具报告写作请求预留时间。设为非正值可禁用该时间预算。 |
+| `AIVORY_LLM_MAX_TOOL_TIME_PER_TURN_FAST` | `duration` | `3*time.Minute` | `llm/orchestrator.go` | 快速模式的累计工具执行时间预算，耗尽后仅执行一次无工具收尾请求。设为非正值可禁用该时间预算。 |
 | `AIVORY_LLM_TOOL_TIMEOUTS` | `duration` | `10*time.Second` | `llm/orchestrator.go:2326` | 单次 `aivory_web_search` 工具调用的每次调用超时上限。 |
 | `AIVORY_LLM_TOOL_TIMEOUTS_2` | `duration` | `15*time.Second` | `llm/orchestrator.go:2327` | 单次 web_fetch 工具调用的每次调用超时上限。 |
 | `AIVORY_LLM_TOOL_TIMEOUTS_3` | `duration` | `600*time.Second` | `llm/orchestrator.go:2329` | 单次 image_generate 工具调用的每次调用超时上限（为迟缓的第三方图像网关留出较宽窗口）。 |

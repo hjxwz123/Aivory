@@ -14,6 +14,26 @@ import (
 	"aivory/server/internal/store"
 )
 
+func TestChatRunErrorEventExposesToolBudgetFailure(t *testing.T) {
+	event := chatRunErrorEvent(&llm.ErrToolBudgetExceeded{Kind: "total_calls", Limit: 48}, "message-1")
+	if event.Type != "error" || event.MessageID != "message-1" || event.Code != "tool_budget_exceeded" {
+		t.Fatalf("event = %+v", event)
+	}
+	if event.Message != "已达到工具执行时间上限" || event.Message == chatRunErrorMessage {
+		t.Fatalf("event message = %q", event.Message)
+	}
+}
+
+func TestChatRunErrorEventExposesToolNoProgressFailure(t *testing.T) {
+	event := chatRunErrorEvent(&llm.ErrToolNoProgress{Kind: "duplicate_request", Tool: "web_fetch"}, "message-2")
+	if event.Type != "error" || event.MessageID != "message-2" || event.Code != "tool_no_progress" {
+		t.Fatalf("event = %+v", event)
+	}
+	if event.Message != "工具调用未获得新的有效信息" || event.Message == chatRunErrorMessage {
+		t.Fatalf("event message = %q", event.Message)
+	}
+}
+
 func TestLogChatRunErrorIncludesMetadataWithoutRequestContent(t *testing.T) {
 	var out bytes.Buffer
 	logger := log.New(&out, "", 0)

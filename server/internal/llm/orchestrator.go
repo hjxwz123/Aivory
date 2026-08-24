@@ -324,11 +324,23 @@ type ToolContext struct {
 	OnArtifact func(ArtifactRef)
 
 	// budgetMu guards counts; charged centrally by the runner before each call.
-	budgetMu sync.Mutex
-	counts   map[string]int
+	budgetMu            sync.Mutex
+	counts              map[string]int
+	toolBudgetStartedAt time.Time
+	toolStateMu         sync.Mutex
+	toolState           *toolExecutionState
 	// citationIndexes is non-nil only when a KB is attached. This preserves the
 	// exact legacy tool output for every no-KB conversation.
 	citationIndexes *citationIndexAllocator
+}
+
+func (tc *ToolContext) requestToolExecutionState() *toolExecutionState {
+	tc.toolStateMu.Lock()
+	defer tc.toolStateMu.Unlock()
+	if tc.toolState == nil {
+		tc.toolState = newToolExecutionState()
+	}
+	return tc.toolState
 }
 
 type citationIndexAllocator struct {
@@ -465,6 +477,9 @@ var deepResearchToolLimits = map[string]int{
 var (
 	maxToolCallsPerTurn     = envcfg.Int("AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN", 48)
 	maxToolCallsPerTurnDeep = envcfg.Int("AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN_DEEP", 150)
+	maxToolTimePerTurn      = envcfg.Dur("AIVORY_LLM_MAX_TOOL_TIME_PER_TURN", 15*time.Minute)
+	maxToolTimePerTurnDeep  = envcfg.Dur("AIVORY_LLM_MAX_TOOL_TIME_PER_TURN_DEEP", 4*time.Minute)
+	maxToolTimePerTurnFast  = envcfg.Dur("AIVORY_LLM_MAX_TOOL_TIME_PER_TURN_FAST", 3*time.Minute)
 )
 
 // §fast-mode budgets: each tool's per-turn cap is a QUARTER of normal (min 1 for
@@ -901,13 +916,16 @@ func (tc *ToolContext) charge(name string) error {
 	}
 	limits := perTurnToolLimits
 	totalCap := maxToolCallsPerTurn
+	timeCap := maxToolTimePerTurn
 	switch {
 	case tc.DeepResearch:
 		limits = deepResearchToolLimits
 		totalCap = maxToolCallsPerTurnDeep
+		timeCap = maxToolTimePerTurnDeep
 	case tc.Fast:
 		limits = fastToolLimits
 		totalCap = maxToolCallsPerTurnFast
+		timeCap = maxToolTimePerTurnFast
 		// Sandbox-backed tools are withheld from fast turns; block them
 		// defensively even if one somehow reaches the runner.
 		if name == "python_execute" || name == "fetch_image" {
@@ -919,17 +937,68 @@ func (tc *ToolContext) charge(name string) error {
 	if tc.counts == nil {
 		tc.counts = map[string]int{}
 	}
+	now := time.Now()
+	if tc.toolBudgetStartedAt.IsZero() {
+		tc.toolBudgetStartedAt = now
+	} else if timeCap > 0 && !now.Before(tc.toolBudgetStartedAt.Add(timeCap)) {
+		return &ErrToolBudgetExceeded{Kind: "time", Duration: timeCap}
+	}
 	tc.counts["__total__"]++
 	if tc.counts["__total__"] > totalCap {
-		return fmt.Errorf("tool-call limit (%d) reached for this message", totalCap)
+		return &ErrToolBudgetExceeded{Kind: "total_calls", Limit: totalCap}
 	}
 	if limit, ok := limits[name]; ok && limit > 0 {
 		tc.counts[name]++
 		if tc.counts[name] > limit {
-			return fmt.Errorf("%s call limit (%d) reached for this message", name, limit)
+			return &ErrToolBudgetExceeded{Kind: "tool_calls", Tool: name, Limit: limit}
 		}
 	}
 	return nil
+}
+
+func (tc *ToolContext) toolTimeLimit() time.Duration {
+	switch {
+	case tc == nil:
+		return 0
+	case tc.DeepResearch:
+		return maxToolTimePerTurnDeep
+	case tc.Fast:
+		return maxToolTimePerTurnFast
+	default:
+		return maxToolTimePerTurn
+	}
+}
+
+// toolTimeRemaining returns the remaining wall-clock budget for the whole
+// turn's tool execution. It does not start the clock; charge does that when the
+// first tool is actually requested.
+func (tc *ToolContext) toolTimeRemaining() (time.Duration, bool) {
+	if tc == nil {
+		return 0, false
+	}
+	limit := tc.toolTimeLimit()
+	if limit <= 0 {
+		return 0, false
+	}
+	tc.budgetMu.Lock()
+	defer tc.budgetMu.Unlock()
+	if tc.toolBudgetStartedAt.IsZero() {
+		return limit, true
+	}
+	remaining := time.Until(tc.toolBudgetStartedAt.Add(limit))
+	if remaining < 0 {
+		remaining = 0
+	}
+	return remaining, true
+}
+
+func (tc *ToolContext) toolTimeBudgetExceeded() bool {
+	remaining, limited := tc.toolTimeRemaining()
+	return limited && remaining <= 0
+}
+
+func (tc *ToolContext) toolTimeBudgetError() *ErrToolBudgetExceeded {
+	return &ErrToolBudgetExceeded{Kind: "time", Duration: tc.toolTimeLimit()}
 }
 
 // NewOrchestrator constructs the orchestrator.
@@ -3735,12 +3804,23 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			o.logger.Printf("orchestrator: generation error (conv=%s msg=%s model=%s provider=%s format=%s media=%s): %v",
 				conv.ID, assistantMsg.ID, model.ID, channel.Type, channel.APIFormat, providerRequestMediaStats(provReq), err)
 		}
-		const safeErr = "The model provider returned an error. Please try again in a moment."
+		safeErr := "The model provider returned an error. Please try again in a moment."
+		stopReason := "generation_interrupted"
+		errorCode := "generation_interrupted"
+		if IsToolBudgetExceeded(err) {
+			safeErr = ToolBudgetExceededMessage()
+			stopReason = "tool_budget_exceeded"
+			errorCode = "tool_budget_exceeded"
+		} else if IsToolNoProgress(err) {
+			safeErr = ToolNoProgressMessage()
+			stopReason = "tool_no_progress"
+			errorCode = "tool_no_progress"
+		}
 		_ = finishMessage(ctx, store.MessageFinishPatch{
 			Blocks:           errBlocksJSON,
 			Raw:              errRaw,
 			Citations:        errCitesJSON,
-			StopReason:       "generation_interrupted",
+			StopReason:       stopReason,
 			InputTokens:      errUsage.InputTokens,
 			ContextTokens:    reqRecorder.maxContextTokens(),
 			OutputTokens:     errUsage.OutputTokens,
@@ -3780,7 +3860,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 				RequestBody:    reqSnapshot.Body,
 			})
 		}
-		onEvent(SseEvent{Type: "error", MessageID: assistantMsg.ID, Message: safeErr, Code: "generation_interrupted"})
+		onEvent(SseEvent{Type: "error", MessageID: assistantMsg.ID, Message: safeErr, Code: errorCode})
 		return nil, err
 	}
 
@@ -6672,6 +6752,7 @@ func toolRunnerForModelRequest(runner ToolRunner, modelID string, definitions []
 			ImageBilling:         source.ImageBilling,
 			OnArtifact:           source.OnArtifact,
 			counts:               map[string]int{},
+			toolState:            source.requestToolExecutionState(),
 			citationIndexes:      source.citationIndexes,
 		}
 		base = &orchToolRunner{orch: current.orch, ctx: fallbackContext, onEvent: current.onEvent}
@@ -6735,17 +6816,30 @@ func (r *orchToolRunner) Run(ctx context.Context, name string, input []byte) (st
 	if r.ctx == nil {
 		return "", nil, errors.New("tool context unavailable")
 	}
+	if r.ctx.WorkspaceAccessCheck != nil {
+		if err := r.ctx.WorkspaceAccessCheck(ctx); err != nil {
+			return "", nil, fmt.Errorf("workspace access revoked before tool execution: %w", err)
+		}
+	}
+	out, cites, err := r.ctx.executeTrackedTool(ctx, name, input, func() (string, []Citation, error) {
+		return r.runUntracked(ctx, name, input)
+	})
+	if err == nil && r.onEvent != nil {
+		for _, citation := range cites {
+			citationCopy := citation
+			r.onEvent(SseEvent{Type: "citation", Citation: &citationCopy})
+		}
+	}
+	return out, cites, err
+}
+
+func (r *orchToolRunner) runUntracked(ctx context.Context, name string, input []byte) (string, []Citation, error) {
 	if name == "python_execute" {
 		release, err := acquirePythonConversationGate(ctx, r.ctx.ConvID)
 		if err != nil {
 			return "", nil, err
 		}
 		defer release()
-	}
-	if r.ctx.WorkspaceAccessCheck != nil {
-		if err := r.ctx.WorkspaceAccessCheck(ctx); err != nil {
-			return "", nil, fmt.Errorf("workspace access revoked before tool execution: %w", err)
-		}
 	}
 	if err := r.ctx.charge(name); err != nil {
 		return "", nil, err
@@ -6761,9 +6855,21 @@ func (r *orchToolRunner) Run(ctx context.Context, name string, input []byte) (st
 		// configured cap + margin so raising the setting actually takes effect.
 		timeout = sandboxExecCtxTimeout(r.orch.db)
 	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	if remaining, limited := r.ctx.toolTimeRemaining(); limited {
+		if remaining <= 0 {
+			return "", nil, r.ctx.toolTimeBudgetError()
+		}
+		if remaining < timeout {
+			timeout = remaining
+		}
+	}
+	parentCtx := ctx
+	ctx, cancel := context.WithTimeout(parentCtx, timeout)
 	defer cancel()
 	out, cites, err := r.orch.tools.Run(ctx, name, input, r.ctx)
+	if err != nil && parentCtx.Err() == nil && r.ctx.toolTimeBudgetExceeded() {
+		err = r.ctx.toolTimeBudgetError()
+	}
 	if err != nil && r.orch.logger != nil {
 		r.orch.logger.Printf("tool execution failed (conv=%s msg=%s tool=%s): %v", r.ctx.ConvID, r.ctx.MessageID, name, err)
 	}
@@ -6773,14 +6879,6 @@ func (r *orchToolRunner) Run(ctx context.Context, name string, input []byte) (st
 		for i := range cites {
 			cites[i].Index = offset + i + 1
 			cites[i].GlobalIndex = true
-		}
-	}
-	// Stream tool-sourced citations live (§6.2) from this single choke point so
-	// every provider (native + prompt mode) gets them without per-provider code.
-	if r.onEvent != nil {
-		for _, c := range cites {
-			cc := c
-			r.onEvent(SseEvent{Type: "citation", Citation: &cc})
 		}
 	}
 	return out, cites, err
