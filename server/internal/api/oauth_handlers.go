@@ -172,11 +172,12 @@ type oauthHandoff struct {
 }
 
 type oauthFlowState struct {
-	ProviderID string `json:"provider_id"`
-	Verifier   string `json:"verifier"`
-	Nonce      string `json:"nonce"`
-	SignupIP   string `json:"signup_ip"`
-	Captcha    string `json:"captcha_token"`
+	ProviderID    string `json:"provider_id"`
+	Verifier      string `json:"verifier"`
+	Nonce         string `json:"nonce"`
+	SignupIP      string `json:"signup_ip"`
+	Captcha       string `json:"captcha_token,omitempty"` // rolling-deploy fallback for already-started flows
+	CaptchaPassed bool   `json:"captcha_passed"`
 	// LinkUserID marks an authenticated identity-linking flow. The token version
 	// and session family bind that delayed callback to the exact authorization
 	// context that started it, so password reset or session revocation also
@@ -376,10 +377,11 @@ func oauthStartHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if len(captchaToken) > 2048 {
 		captchaToken = ""
 	}
+	captchaPassed := captchaToken != "" && consumeCaptchaPass(d, r, captchaToken, captchaPurposeRegister)
 
-	stash, _ := json.Marshal(map[string]string{
-		"provider_id": id, "verifier": verifier, "nonce": nonce, "origin": origin,
-		"signup_ip": clientIP(r), "captcha_token": captchaToken, "browser_binding": browserBinding,
+	stash, _ := json.Marshal(oauthFlowState{
+		ProviderID: id, Verifier: verifier, Nonce: nonce, Origin: origin,
+		SignupIP: clientIP(r), BrowserBinding: browserBinding, CaptchaPassed: captchaPassed,
 	})
 	d.Cache.Set("oauth:state:"+state, string(stash), oauthStateCacheTTL)
 	setOAuthBrowserBindingCookie(w, r, state, browserBinding, oauth.UsesFormPost(cfg))
@@ -454,9 +456,9 @@ func oauthCallbackHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	captchaPassed := false
-	if st.Captcha != "" {
-		captchaPassed = consumeCaptchaPass(d, st.Captcha)
+	captchaPassed := st.CaptchaPassed
+	if !captchaPassed && st.Captcha != "" {
+		captchaPassed = consumeCaptchaPass(d, r, st.Captcha, captchaPurposeRegister)
 	}
 	p, err := store.GetOAuthProvider(r.Context(), d.DB, id)
 	if err != nil || !p.Enabled {

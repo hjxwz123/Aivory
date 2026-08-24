@@ -7,12 +7,14 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"image"
 	"image/color"
 	"image/png"
 	"math"
 	"math/big"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -34,18 +36,61 @@ const (
 	capW     = 280 // background width  (natural px)
 	capH     = 160 // background height (natural px)
 	capPiece = 52  // puzzle piece bounding box (square)
+
+	captchaTraceMinDuration = 180 * time.Millisecond
+	captchaTraceMaxDuration = 20 * time.Second
+	captchaTraceMaxPoints   = 80
 )
 
 // capTol is the accepted error between the submitted fraction and the true
-// gap fraction (~9px on a 228px track). Forgiving on purpose — the per-IP
-// daily cap is the real abuse backstop; this just deters trivial scripts.
-var capTol = envcfg.F64("AIVORY_API_CAP_TOL", 0.04)
+// gap fraction (~6px on a 228px track). The server also validates the drag
+// trace, challenge binding and one-time pass; position alone is not trusted.
+var capTol = envcfg.F64("AIVORY_API_CAP_TOL", 0.025)
 
 // captchaChallengeCacheTTL bounds how long an unsolved challenge stays valid.
-var captchaChallengeCacheTTL = securityDuration("AIVORY_API_CAPTCHA_CHALLENGE_CACHE_TTL", 5*time.Minute)
+var captchaChallengeCacheTTL = securityDuration("AIVORY_API_CAPTCHA_CHALLENGE_CACHE_TTL", 2*time.Minute)
+
+type captchaPurpose string
+
+const (
+	captchaPurposeLogin    captchaPurpose = "login"
+	captchaPurposeRegister captchaPurpose = "register"
+)
+
+type captchaChallengeState struct {
+	Answer   float64        `json:"answer"`
+	Purpose  captchaPurpose `json:"purpose"`
+	Binding  string         `json:"binding"`
+	IssuedAt int64          `json:"issued_at"`
+}
+
+type captchaPassState struct {
+	Purpose captchaPurpose `json:"purpose"`
+	Binding string         `json:"binding"`
+}
+
+type captchaTracePoint struct {
+	X float64 `json:"x"`
+	T int64   `json:"t"`
+}
+
+type captchaInteraction struct {
+	Mode   string              `json:"mode"`
+	Points []captchaTracePoint `json:"points"`
+}
 
 // captchaHandler issues a fresh slider-puzzle challenge.
-func captchaHandler(d Deps, w http.ResponseWriter, _ *http.Request) {
+func captchaHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	purpose, ok := parseCaptchaPurpose(r.URL.Query().Get("purpose"))
+	if !ok {
+		writeError(w, http.StatusBadRequest, errInvalidInput)
+		return
+	}
+	if d.Cache == nil {
+		writeError(w, http.StatusServiceUnavailable, errors.New("captcha cache unavailable"))
+		return
+	}
+
 	// Gap sits in the right ~⅔ so the piece (starting at x=0) always slides right.
 	gapX := capPiece + 24 + cRandInt(capW-2*capPiece-32)
 	gapY := 10 + cRandInt(capH-capPiece-20)
@@ -70,14 +115,24 @@ func captchaHandler(d Deps, w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 
-	id := randToken(12)
+	id := randToken(16)
 	if id == "" {
 		writeError(w, http.StatusInternalServerError, errors.New("secure random source unavailable"))
 		return
 	}
 	track := float64(capW - capPiece)
 	gapFraction := float64(gapX) / track
-	d.Cache.Set("captcha:"+id, strconv.FormatFloat(gapFraction, 'f', 6, 64), captchaChallengeCacheTTL)
+	state, err := json.Marshal(captchaChallengeState{
+		Answer:   gapFraction,
+		Purpose:  purpose,
+		Binding:  captchaClientBinding(d, r),
+		IssuedAt: time.Now().UnixMilli(),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, errors.New("captcha state unavailable"))
+		return
+	}
+	d.Cache.Set("captcha:"+id, string(state), captchaChallengeCacheTTL)
 
 	writeJSON(w, 200, map[string]any{
 		"id":         id,
@@ -92,23 +147,25 @@ func captchaHandler(d Deps, w http.ResponseWriter, _ *http.Request) {
 
 // captchaVerifyHandler checks a slider solution NOW (so the client shows
 // immediate green/red feedback — the modern UX) and, on success, issues a
-// single-use PASS token that the register call presents instead of re-solving.
+// single-use PASS token that the pending auth request presents instead of re-solving.
 // The underlying challenge is consumed on every attempt (verifyPuzzleCaptcha is
 // single-use), so a wrong drag forces a fresh puzzle.
 func captchaVerifyHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ID       string  `json:"id"`
-		Fraction float64 `json:"fraction"`
+		ID          string             `json:"id"`
+		Fraction    float64            `json:"fraction"`
+		Interaction captchaInteraction `json:"interaction"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeJSON(w, 200, map[string]any{"ok": false})
 		return
 	}
-	if !verifyPuzzleCaptcha(d, req.ID, strconv.FormatFloat(req.Fraction, 'f', 6, 64)) {
+	challenge, ok := verifyPuzzleCaptcha(d, r, req.ID, req.Fraction, req.Interaction)
+	if !ok {
 		writeJSON(w, 200, map[string]any{"ok": false})
 		return
 	}
-	token := mintCaptchaPass(d)
+	token := mintCaptchaPass(d, challenge.Purpose, challenge.Binding)
 	if token == "" {
 		writeError(w, http.StatusInternalServerError, errors.New("captcha pass unavailable"))
 		return
@@ -122,7 +179,7 @@ var captchaPassTTL = securityDuration("AIVORY_API_CAPTCHA_PASS_TTL", 10*time.Min
 // mintCaptchaPass returns a signed, cache-backed one-time credential. A shared
 // Redis cache is required for multi-replica deployments, just like the puzzle
 // challenge itself; retaining server-side state is what makes replay impossible.
-func mintCaptchaPass(d Deps) string {
+func mintCaptchaPass(d Deps, purpose captchaPurpose, binding string) string {
 	if d.Cache == nil {
 		return ""
 	}
@@ -132,12 +189,16 @@ func mintCaptchaPass(d Deps) string {
 	}
 	payload := strconv.FormatInt(time.Now().Add(captchaPassTTL).Unix(), 10) + "." + base64.RawURLEncoding.EncodeToString(nonce)
 	token := payload + "." + captchaSig(payload, d.Config.JWTSecret)
-	d.Cache.Set(captchaPassKey(token), "1", captchaPassTTL)
+	state, err := json.Marshal(captchaPassState{Purpose: purpose, Binding: binding})
+	if err != nil {
+		return ""
+	}
+	d.Cache.Set(captchaPassKey(token), string(state), captchaPassTTL)
 	return token
 }
 
 // consumeCaptchaPass verifies and atomically consumes a captcha pass.
-func consumeCaptchaPass(d Deps, token string) bool {
+func consumeCaptchaPass(d Deps, r *http.Request, token string, purpose captchaPurpose) bool {
 	token = strings.TrimSpace(token)
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
@@ -152,8 +213,15 @@ func consumeCaptchaPass(d Deps, token string) bool {
 	if err != nil || time.Now().Unix() > exp || d.Cache == nil {
 		return false
 	}
-	_, ok := d.Cache.Take(captchaPassKey(token))
-	return ok
+	raw, ok := d.Cache.Take(captchaPassKey(token))
+	if !ok {
+		return false
+	}
+	var state captchaPassState
+	if json.Unmarshal([]byte(raw), &state) != nil || state.Purpose != purpose {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(state.Binding), []byte(captchaClientBinding(d, r))) == 1
 }
 
 func captchaPassKey(token string) string {
@@ -168,24 +236,104 @@ func captchaSig(payload, secret string) string {
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-// verifyPuzzleCaptcha consumes the cached challenge and checks the submitted drop
-// fraction against the true gap fraction within capTol. Single-use: the entry is
-// deleted on any attempt so a guessed id can't be hammered.
-func verifyPuzzleCaptcha(d Deps, id, answer string) bool {
-	if id == "" {
-		return false
+// verifyPuzzleCaptcha consumes the cached challenge before checking any answer.
+// This prevents retries against one image and keeps every failure indistinguishable.
+func verifyPuzzleCaptcha(d Deps, r *http.Request, id string, answer float64, interaction captchaInteraction) (captchaChallengeState, bool) {
+	var challenge captchaChallengeState
+	decodedID, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(id))
+	if err != nil || len(decodedID) != 16 || d.Cache == nil {
+		return challenge, false
 	}
 	key := "captcha:" + id
 	saved, ok := d.Cache.Take(key)
 	if !ok {
+		return challenge, false
+	}
+	if json.Unmarshal([]byte(saved), &challenge) != nil || !validCaptchaPurpose(challenge.Purpose) {
+		return captchaChallengeState{}, false
+	}
+	if subtle.ConstantTimeCompare([]byte(challenge.Binding), []byte(captchaClientBinding(d, r))) != 1 {
+		return captchaChallengeState{}, false
+	}
+	challengeAge := time.Since(time.UnixMilli(challenge.IssuedAt))
+	if challengeAge < captchaTraceMinDuration || challengeAge > captchaChallengeCacheTTL+time.Second {
+		return captchaChallengeState{}, false
+	}
+	if math.IsNaN(answer) || math.IsInf(answer, 0) || math.Abs(answer-challenge.Answer) > capTol {
+		return captchaChallengeState{}, false
+	}
+	if !validCaptchaInteraction(interaction, answer) {
+		return captchaChallengeState{}, false
+	}
+	return challenge, true
+}
+
+func parseCaptchaPurpose(raw string) (captchaPurpose, bool) {
+	purpose := captchaPurpose(strings.TrimSpace(raw))
+	// Register remains the default for one rolling-deploy window because older
+	// registration clients issued challenges without an explicit purpose.
+	if purpose == "" {
+		purpose = captchaPurposeRegister
+	}
+	return purpose, validCaptchaPurpose(purpose)
+}
+
+func validCaptchaPurpose(purpose captchaPurpose) bool {
+	return purpose == captchaPurposeLogin || purpose == captchaPurposeRegister
+}
+
+func validCaptchaInteraction(interaction captchaInteraction, answer float64) bool {
+	if interaction.Mode != "pointer" && interaction.Mode != "keyboard" {
 		return false
 	}
-	want, err1 := strconv.ParseFloat(saved, 64)
-	got, err2 := strconv.ParseFloat(strings.TrimSpace(answer), 64)
-	if err1 != nil || err2 != nil {
+	points := interaction.Points
+	if len(points) < 3 || len(points) > captchaTraceMaxPoints {
 		return false
 	}
-	return math.Abs(got-want) <= capTol
+	first := points[0]
+	last := points[len(points)-1]
+	if first.T < 0 || first.T > 50 || first.X < 0 || first.X > 0.12 {
+		return false
+	}
+	duration := time.Duration(last.T) * time.Millisecond
+	if duration < captchaTraceMinDuration || duration > captchaTraceMaxDuration || math.Abs(last.X-answer) > 0.015 {
+		return false
+	}
+	minX, maxX := first.X, first.X
+	previousT := int64(-1)
+	distinctX := map[int]struct{}{}
+	distinctT := map[int64]struct{}{}
+	for _, point := range points {
+		if math.IsNaN(point.X) || math.IsInf(point.X, 0) || point.X < 0 || point.X > 1 ||
+			point.T < 0 || point.T < previousT || point.T > captchaTraceMaxDuration.Milliseconds() {
+			return false
+		}
+		minX = math.Min(minX, point.X)
+		maxX = math.Max(maxX, point.X)
+		previousT = point.T
+		distinctX[int(math.Round(point.X*1000))] = struct{}{}
+		distinctT[point.T] = struct{}{}
+	}
+	return maxX-minX >= 0.20 && len(distinctX) >= 3 && len(distinctT) >= 3
+}
+
+func captchaClientBinding(d Deps, r *http.Request) string {
+	ip := net.ParseIP(strings.TrimSpace(clientIP(r)))
+	network := ""
+	// Prefix binding blocks cross-client token transfer without tying a short
+	// interaction to one exact mobile address that may rotate within the prefix.
+	if ip4 := ip.To4(); ip4 != nil {
+		network = ip4.Mask(net.CIDRMask(24, 32)).String() + "/24"
+	} else if ip != nil {
+		network = ip.Mask(net.CIDRMask(56, 128)).String() + "/56"
+	}
+	userAgent := strings.TrimSpace(r.UserAgent())
+	if len(userAgent) > 256 {
+		userAgent = userAgent[:256]
+	}
+	mac := hmac.New(sha256.New, []byte(d.Config.JWTSecret))
+	mac.Write([]byte("captcha-client\x00" + network + "\x00" + userAgent))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
 // genCaptchaBackground paints a soft base tinted toward the brand and scatters a

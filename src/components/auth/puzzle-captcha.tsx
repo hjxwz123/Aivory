@@ -17,12 +17,29 @@ export interface PuzzleData {
 /** idle → user is sliding; verifying → server is checking; success/error → result. */
 export type PuzzleStatus = 'idle' | 'verifying' | 'success' | 'error'
 
+export type PuzzleCaptchaPurpose = 'login' | 'register'
+
+export interface PuzzleTracePoint {
+  /** Normalized slider position in the 0..1 range. */
+  x: number
+  /** Milliseconds elapsed since the interaction began. */
+  t: number
+}
+
+export interface PuzzleSolution {
+  fraction: number
+  interaction: {
+    mode: 'pointer' | 'keyboard'
+    points: PuzzleTracePoint[]
+  }
+}
+
 interface PuzzleCaptchaProps {
   data: PuzzleData | null
   loading: boolean
   status: PuzzleStatus
-  /** Fired with the final drop position as a fraction of the track (0–1) on release. */
-  onChange: (fraction: number | null) => void
+  /** Fired with the final position and bounded interaction trace. */
+  onChange: (solution: PuzzleSolution | null) => void
   onRefresh: () => void
 }
 
@@ -40,13 +57,22 @@ export function PuzzleCaptcha({ data, loading, status, onChange, onRefresh }: Pu
   const trackRef = useRef<HTMLDivElement>(null)
   const [fraction, setFraction] = useState(0)
   const [dragging, setDragging] = useState(false)
+  const draggingRef = useRef(false)
+  const interactionStartedRef = useRef<number | null>(null)
+  const interactionModeRef = useRef<'pointer' | 'keyboard' | null>(null)
+  const traceRef = useRef<PuzzleTracePoint[]>([])
 
   // Reset whenever a fresh puzzle arrives.
   useEffect(() => {
     setFraction(0)
+    setDragging(false)
+    draggingRef.current = false
+    interactionStartedRef.current = null
+    interactionModeRef.current = null
+    traceRef.current = []
   }, [data?.id])
 
-  const locked = status === 'verifying' || status === 'success'
+  const locked = loading || status !== 'idle'
   const pieceWidthPct = data ? (data.piece_size / data.w) * 100 : 0
   const pieceTopPct = data ? (data.piece_y / data.h) * 100 : 0
   const pieceLeftPct = fraction * (100 - pieceWidthPct)
@@ -60,31 +86,80 @@ export function PuzzleCaptcha({ data, loading, status, onChange, onRefresh }: Pu
     return Math.min(1, Math.max(0, (clientX - rect.left - HANDLE_W / 2) / usable))
   }
 
+  function beginInteraction(mode: 'pointer' | 'keyboard', x: number) {
+    interactionModeRef.current = mode
+    interactionStartedRef.current = performance.now()
+    traceRef.current = [{ x, t: 0 }]
+  }
+
+  function recordTracePoint(x: number, force = false) {
+    const started = interactionStartedRef.current
+    if (started == null) return
+    const t = Math.max(0, Math.round(performance.now() - started))
+    const points = traceRef.current
+    const previous = points[points.length - 1]
+    if (!force && previous && t - previous.t < 12 && Math.abs(x - previous.x) < 0.004) return
+    const point = { x, t }
+    // Keep the request small even if a device emits very dense pointer events.
+    // The final sample always replaces the tail when the buffer is full.
+    if (points.length >= 64) points[points.length - 1] = point
+    else points.push(point)
+  }
+
+  function finishInteraction(x: number) {
+    const mode = interactionModeRef.current
+    if (!mode) return
+    recordTracePoint(x, true)
+    onChange({ fraction: x, interaction: { mode, points: traceRef.current.slice() } })
+  }
+
   function onPointerDown(e: React.PointerEvent) {
     if (!data || locked) return
     e.preventDefault()
-    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+    e.currentTarget.setPointerCapture(e.pointerId)
+    const next = fractionFromClientX(e.clientX)
+    beginInteraction('pointer', next)
+    draggingRef.current = true
     setDragging(true)
     onChange(null)
-    setFraction(fractionFromClientX(e.clientX))
+    setFraction(next)
   }
   function onPointerMove(e: React.PointerEvent) {
-    if (!dragging) return
-    setFraction(fractionFromClientX(e.clientX))
+    if (!draggingRef.current) return
+    const next = fractionFromClientX(e.clientX)
+    recordTracePoint(next)
+    setFraction(next)
   }
   function onPointerUp(e: React.PointerEvent) {
-    if (!dragging) return
+    if (!draggingRef.current) return
+    draggingRef.current = false
     setDragging(false)
     // Commit the release position (state can lag the final pointermove a frame).
     const f = fractionFromClientX(e.clientX)
     setFraction(f)
-    onChange(f)
+    finishInteraction(f)
+  }
+  function onPointerCancel() {
+    if (!draggingRef.current) return
+    draggingRef.current = false
+    setDragging(false)
+    setFraction(0)
+    interactionStartedRef.current = null
+    interactionModeRef.current = null
+    traceRef.current = []
+    onChange(null)
   }
   function nudge(delta: number) {
     if (locked) return
+    if (interactionModeRef.current !== 'keyboard') beginInteraction('keyboard', fraction)
     const next = Math.min(1, Math.max(0, fraction + delta))
     setFraction(next)
-    onChange(next)
+    recordTracePoint(next, true)
+    onChange(null)
+  }
+  function submitKeyboard() {
+    if (locked || interactionModeRef.current !== 'keyboard') return
+    finishInteraction(fraction)
   }
 
   const fillColor =
@@ -185,9 +260,11 @@ export function PuzzleCaptcha({ data, loading, status, onChange, onRefresh }: Pu
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
+          onPointerCancel={onPointerCancel}
           onKeyDown={(e) => {
             if (e.key === 'ArrowRight') { e.preventDefault(); nudge(0.02) }
             if (e.key === 'ArrowLeft') { e.preventDefault(); nudge(-0.02) }
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); submitKeyboard() }
           }}
           className={cn(
             'absolute top-1/2 flex size-11 -translate-y-1/2 touch-none items-center justify-center rounded-[9px]',

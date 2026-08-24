@@ -301,10 +301,10 @@ SSE 心跳、流恢复窗口、生成时长上限、分页与搜索上限、消�
 | `AIVORY_API_RATE_LIMIT_FORGOT_PASSWORD_WINDOW` | `duration` | `15*60*time.Second` | `api/router.go:73` | Fixed window over which per-IP requests to /api/auth/forgot-password are counted. |
 | `AIVORY_API_RATE_LIMIT_RESET_PASSWORD_MAX` | `int` | `5` | `api/router.go:75` | Per-IP request ceiling within the window for POST /api/auth/reset-password, which redeems a reset code. |
 | `AIVORY_API_RATE_LIMIT_RESET_PASSWORD_WINDOW` | `duration` | `60*time.Second` | `api/router.go:76` | Fixed window over which per-IP requests to /api/auth/reset-password are counted. |
-| `AIVORY_API_RATE_LIMIT_CAPTCHA_ISSUE_MAX` | `int` | `30` | `api/router.go:78` | Per-IP request ceiling within the window for GET /api/public/captcha, which issues a slider-puzzle challenge. |
-| `AIVORY_API_RATE_LIMIT_CAPTCHA_ISSUE_WINDOW` | `duration` | `60*time.Second` | `api/router.go:79` | Fixed window over which per-IP requests to the GET /api/public/captcha challenge issuer are counted. |
-| `AIVORY_API_RATE_LIMIT_CAPTCHA_VERIFY_MAX` | `int` | `60` | `api/router.go:81` | Per-IP request ceiling within the window for POST /api/public/captcha/verify, which checks a captcha solution. |
-| `AIVORY_API_RATE_LIMIT_CAPTCHA_VERIFY_WINDOW` | `duration` | `60*time.Second` | `api/router.go:82` | Fixed window over which per-IP requests to the /api/public/captcha/verify solution checker are counted. |
+| `AIVORY_API_RATE_LIMIT_CAPTCHA_ISSUE_MAX` | `int` | `20` | `api/router.go:79` | Per-IP request ceiling within the window for GET /api/public/captcha, which issues a slider-puzzle challenge. |
+| `AIVORY_API_RATE_LIMIT_CAPTCHA_ISSUE_WINDOW` | `duration` | `60*time.Second` | `api/router.go:80` | Fixed window over which per-IP requests to the GET /api/public/captcha challenge issuer are counted. |
+| `AIVORY_API_RATE_LIMIT_CAPTCHA_VERIFY_MAX` | `int` | `20` | `api/router.go:82` | Per-IP request ceiling within the window for POST /api/public/captcha/verify, which checks a captcha solution. |
+| `AIVORY_API_RATE_LIMIT_CAPTCHA_VERIFY_WINDOW` | `duration` | `60*time.Second` | `api/router.go:83` | Fixed window over which per-IP requests to the /api/public/captcha/verify solution checker are counted. |
 | `AIVORY_API_RATE_LIMIT_FIRST_RUN_SETUP_MAX` | `int` | `10` | `api/router.go:84` | Per-IP request ceiling within the window for POST /api/setup, the first-run create-first-admin endpoint. |
 | `AIVORY_API_RATE_LIMIT_FIRST_RUN_SETUP_WINDOW` | `duration` | `60*time.Second` | `api/router.go:85` | Fixed window over which per-IP requests to the POST /api/setup first-run bootstrap are counted. |
 | `AIVORY_API_RATE_LIMIT_PUBLIC_SHARED_CONVERSATION_MAX` | `int` | `60` | `api/router.go:87` | Per-IP request ceiling within the window for GET /api/public/shared/:token, the no-auth shared-conversation view. |
@@ -346,9 +346,9 @@ SSE 心跳、流恢复窗口、生成时长上限、分页与搜索上限、消�
 | `AIVORY_API_MINIMUM_PASSWORD_LENGTH` | `int` | `8` | `api/auth_handlers.go:29` | Minimum character length required for a user-chosen account password at registration and password change. |
 | `AIVORY_API_EMAIL_VERIFICATION_CODE_TTL` | `duration` | `10*time.Minute` | `api/auth_handlers.go:30` | Lifetime of the emailed account email-verification code. |
 | `AIVORY_API_PASSWORD_RESET_CODE_TTL` | `duration` | `10*time.Minute` | `api/auth_handlers.go:31` | Lifetime of the emailed password-reset code. |
-| `AIVORY_API_CAP_TOL` | `float` | `0.04` | `api/captcha.go:41` | Accepted error between the submitted slider fraction and the true gap fraction for a captcha to pass. |
-| `AIVORY_API_CAPTCHA_CHALLENGE_CACHE_TTL` | `duration` | `5*time.Minute` | `api/captcha.go:44` | How long an unsolved slider-puzzle captcha challenge remains valid in cache. |
-| `AIVORY_API_CAPTCHA_PASS_TTL` | `duration` | `10*time.Minute` | `api/captcha.go:110` | Lifetime of the signed pass token proving a captcha was recently solved. |
+| `AIVORY_API_CAP_TOL` | `float` | `0.025` | `api/captcha.go:48` | Accepted error between the submitted slider fraction and the true gap fraction for a captcha to pass. |
+| `AIVORY_API_CAPTCHA_CHALLENGE_CACHE_TTL` | `duration` | `2*time.Minute` | `api/captcha.go:51` | How long an unsolved slider-puzzle captcha challenge remains valid in cache. |
+| `AIVORY_API_CAPTCHA_PASS_TTL` | `duration` | `10*time.Minute` | `api/captcha.go:177` | Lifetime of the signed pass token proving a captcha was recently solved. |
 | `AIVORY_API_OAUTH_2FA_HANDOFF_COOKIE_TTL` | `duration` | `300*time.Second` | `api/oauth_handlers.go:24` | Max-Age of the short-lived HttpOnly cookie handing a 2FA login ticket to the SPA after OAuth sign-in. |
 | `AIVORY_API_OAUTH_STATE_CACHE_TTL` | `duration` | `10*time.Minute` | `api/oauth_handlers.go:25` | Lifetime of the cached OAuth authorization-flow state entry used as the CSRF guard. |
 | `AIVORY_API_OAUTH_TOKEN_EXCHANGE_CONTEXT_TIMEOUT` | `duration` | `20*time.Second` | `api/oauth_handlers.go:26` | Timeout bounding the OAuth callback's code-to-token exchange plus the userinfo fetch. |

@@ -298,7 +298,7 @@ func registerHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if captchaRequired {
-		if !consumeCaptchaPass(d, req.CaptchaToken) {
+		if !consumeCaptchaPass(d, r, req.CaptchaToken, captchaPurposeRegister) {
 			writeError(w, 400, errCaptcha)
 			return
 		}
@@ -597,7 +597,7 @@ func loginHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if loginCaptchaRequired {
-		if !consumeCaptchaPass(d, req.CaptchaToken) {
+		if !consumeCaptchaPass(d, r, req.CaptchaToken, captchaPurposeLogin) {
 			writeError(w, 400, errCaptcha)
 			return
 		}

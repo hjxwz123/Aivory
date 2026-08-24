@@ -366,7 +366,12 @@ export default function Login() {
       {/* Modal security check — opens on submit when the admin requires a
           captcha on sign-in. */}
       {showPasswordLogin && loginCaptchaRequired ? (
-        <PuzzleCaptchaDialog open={captchaOpen} onOpenChange={setCaptchaOpen} onSolved={onCaptchaSolved} />
+        <PuzzleCaptchaDialog
+          open={captchaOpen}
+          onOpenChange={setCaptchaOpen}
+          purpose="login"
+          onSolved={onCaptchaSolved}
+        />
       ) : null}
     </motion.div>
   )

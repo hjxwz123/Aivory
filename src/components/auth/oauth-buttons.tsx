@@ -50,6 +50,7 @@ export function OAuthButtons({ providers, captchaRequired = false }: OAuthButton
       ))}
       <PuzzleCaptchaDialog
         open={pendingProvider !== null}
+        purpose="register"
         onOpenChange={(open) => {
           if (!open) setPendingProvider(null)
         }}
