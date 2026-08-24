@@ -68,6 +68,12 @@ var (
 	saveMemoryConfidence        = envcfg.F64("AIVORY_TOOLS_CONFIDENCE", 0.95)
 )
 
+const (
+	webSearchBatchMaxItems = 5
+	webFetchBatchMaxItems  = 4
+	webBatchConcurrency    = 4
+)
+
 // webFetchJinaFallbackOn reports whether the Jina reader fallback is enabled.
 // Read at call time (not package init) so tests can flip it with t.Setenv.
 func webFetchJinaFallbackOn() bool {
@@ -88,26 +94,42 @@ type webSearchTool struct {
 
 func (t *webSearchTool) Name() string { return toolnames.AivoryWebSearch }
 func (t *webSearchTool) Description() string {
-	return "Search the public web for current information. Use when the answer depends on news, prices, recent events, or anything time-sensitive. Returns a list of titled snippets with URLs."
+	return "Search the public web for current information. Use query for one search or queries to batch several known searches into one tool call. Returns titled snippets with URLs."
 }
 func (t *webSearchTool) InputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"Search query"}},"required":["query"]}`)
+	return json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"One search query. Use either query or queries."},"queries":{"type":"array","items":{"type":"string"},"maxItems":5,"description":"Up to 5 independent search queries. Prefer this when several searches are known in advance."},"top_k":{"type":"integer","minimum":1,"maximum":10,"description":"Maximum results per query."}}}`)
 }
 
 type webSearchInput struct {
-	Query string `json:"query"`
-	TopK  int    `json:"top_k"`
+	Query   string   `json:"query"`
+	Queries []string `json:"queries"`
+	TopK    int      `json:"top_k"`
 }
 
 func (t *webSearchTool) Execute(ctx context.Context, input []byte, _ *llm.ToolContext) (string, []llm.Citation, error) {
 	var in webSearchInput
-	_ = json.Unmarshal(input, &in)
-	if in.Query == "" {
-		return "", nil, &llm.ToolUserError{Message: "query required"}
+	if err := json.Unmarshal(input, &in); err != nil {
+		return "", nil, &llm.ToolUserError{Message: "invalid search input"}
+	}
+	queries, err := mergeBatchStrings(in.Query, in.Queries, webSearchBatchMaxItems, "query or queries required", func(value string) string {
+		return strings.ToLower(strings.Join(strings.Fields(value), " "))
+	})
+	if err != nil {
+		return "", nil, err
 	}
 	if in.TopK <= 0 {
 		in.TopK = inTopK
 	}
+	if in.TopK > 10 {
+		return "", nil, &llm.ToolUserError{Message: "top_k must not exceed 10"}
+	}
+	if len(queries) == 1 {
+		return t.searchOne(ctx, queries[0], in.TopK)
+	}
+	return t.searchBatch(ctx, queries, in.TopK)
+}
+
+func (t *webSearchTool) searchOne(ctx context.Context, query string, topK int) (string, []llm.Citation, error) {
 	if t.searcher == nil {
 		// Fallback "result" so the model can still respond gracefully.
 		fake := []llm.Citation{
@@ -115,7 +137,105 @@ func (t *webSearchTool) Execute(ctx context.Context, input []byte, _ *llm.ToolCo
 		}
 		return "Search not yet configured. Reply based on training knowledge or ask the user to configure SEARCH_API_KEY.", fake, nil
 	}
-	return t.searcher.Search(ctx, in.Query, in.TopK)
+	return t.searcher.Search(ctx, query, topK)
+}
+
+type webSearchBatchItem struct {
+	Query           string `json:"query"`
+	Status          string `json:"status"`
+	Content         string `json:"content,omitempty"`
+	CitationIndexes []int  `json:"citation_indexes,omitempty"`
+	Error           string `json:"error,omitempty"`
+}
+
+type webSearchBatchResult struct {
+	Status string               `json:"status"`
+	Items  []webSearchBatchItem `json:"items"`
+}
+
+func (t *webSearchTool) searchBatch(ctx context.Context, queries []string, topK int) (string, []llm.Citation, error) {
+	type searchResult struct {
+		text      string
+		citations []llm.Citation
+		err       error
+	}
+	results := make([]searchResult, len(queries))
+	runBoundedBatch(ctx, len(queries), func(index int) {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				results[index].err = fmt.Errorf("batch search panicked: %v", recovered)
+			}
+		}()
+		text, citations, err := t.searchOne(ctx, queries[index], topK)
+		results[index] = searchResult{text: text, citations: citations, err: err}
+	})
+
+	items := make([]webSearchBatchItem, len(queries))
+	allCitations := make([]llm.Citation, 0, len(queries)*topK)
+	citationIndexes := make(map[string]int)
+	successes := 0
+	var firstErr error
+	for index, result := range results {
+		item := webSearchBatchItem{Query: queries[index]}
+		if result.err != nil {
+			item.Status = "error"
+			item.Error = "search failed"
+			if firstErr == nil {
+				firstErr = result.err
+			}
+			items[index] = item
+			continue
+		}
+		successes++
+		item.Status = "success"
+		var content strings.Builder
+		for _, citation := range result.citations {
+			key := canonicalBatchURL(citation.URL)
+			citationIndex, exists := citationIndexes[key]
+			if !exists {
+				citationIndex = len(allCitations) + 1
+				citation.Index = citationIndex
+				citation.ID = fmt.Sprintf("w_%d", citationIndex)
+				allCitations = append(allCitations, citation)
+				citationIndexes[key] = citationIndex
+			}
+			item.CitationIndexes = append(item.CitationIndexes, citationIndex)
+			fmt.Fprintf(&content, "[%d] %s\n%s\n%s\n\n", citationIndex, citation.Title, citation.URL, citation.Snippet)
+		}
+		if content.Len() > 0 {
+			item.Content = strings.TrimSpace(content.String())
+		} else {
+			item.Content = strings.TrimSpace(result.text)
+		}
+		items[index] = item
+	}
+	if successes == 0 {
+		if firstErr == nil {
+			firstErr = errors.New("search returned no results")
+		}
+		return "", nil, firstErr
+	}
+	hasEvidence := len(allCitations) > 0
+	if !hasEvidence {
+		for _, item := range items {
+			if strings.TrimSpace(item.Content) != "" {
+				hasEvidence = true
+				break
+			}
+		}
+	}
+	if !hasEvidence {
+		return "", nil, nil
+	}
+	status := "complete"
+	if successes != len(queries) {
+		status = "partial"
+	}
+	encoded, err := json.Marshal(webSearchBatchResult{Status: status, Items: items})
+	if err != nil {
+		return "", nil, err
+	}
+	return string(encoded), allCitations, nil
 }
 
 // webFetchTool implements §4.4 with the SSRF guards. `direct`/`reader` round
@@ -142,27 +262,42 @@ func (t *webFetchTool) readerClient() *http.Client {
 
 func (t *webFetchTool) Name() string { return "web_fetch" }
 func (t *webFetchTool) Description() string {
-	return "Fetch the main text content of a URL. Use after aivory_web_search to read a specific page. SSRF-guarded: internal IPs blocked."
+	return "Fetch the main text content of web pages. Use url for one page or urls to batch several known pages into one tool call. SSRF-guarded: internal IPs are blocked."
 }
 func (t *webFetchTool) InputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}`)
+	return json.RawMessage(`{"type":"object","properties":{"url":{"type":"string","description":"One web URL. Use either url or urls."},"urls":{"type":"array","items":{"type":"string"},"maxItems":4,"description":"Up to 4 web URLs to fetch in one tool call."}}}`)
 }
 
 type webFetchInput struct {
-	URL string `json:"url"`
+	URL  string   `json:"url"`
+	URLs []string `json:"urls"`
 }
 
 func (t *webFetchTool) Execute(ctx context.Context, input []byte, _ *llm.ToolContext) (string, []llm.Citation, error) {
 	var in webFetchInput
-	_ = json.Unmarshal(input, &in)
-	u, err := url.Parse(in.URL)
+	if err := json.Unmarshal(input, &in); err != nil {
+		return "", nil, &llm.ToolUserError{Message: "invalid web fetch input"}
+	}
+	urls, err := mergeBatchStrings(in.URL, in.URLs, webFetchBatchMaxItems, "url or urls required", canonicalBatchURL)
+	if err != nil {
+		return "", nil, err
+	}
+	if len(urls) == 1 {
+		text, err := t.fetchOne(ctx, urls[0])
+		return text, nil, err
+	}
+	return t.fetchBatch(ctx, urls)
+}
+
+func (t *webFetchTool) fetchOne(ctx context.Context, rawURL string) (string, error) {
+	u, err := url.Parse(rawURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-		return "", nil, &llm.ToolUserError{Message: "invalid URL"}
+		return "", &llm.ToolUserError{Message: "invalid URL"}
 	}
 	// Reject non-web ports up-front (defence in depth — the dialer re-checks
 	// the resolved IP + port on every hop, defeating redirects/rebinding).
 	if p := u.Port(); p != "" && p != "80" && p != "443" {
-		return "", nil, &llm.ToolUserError{Message: "blocked non-web port"}
+		return "", &llm.ToolUserError{Message: "blocked non-web port"}
 	}
 
 	// Direct attempt first, on its own short deadline: an unreachable origin
@@ -172,7 +307,7 @@ func (t *webFetchTool) Execute(ctx context.Context, input []byte, _ *llm.ToolCon
 	text, err := t.attemptDirect(directCtx, u.String())
 	cancel()
 	if err == nil && strings.TrimSpace(text) != "" {
-		return text, nil, nil
+		return text, nil
 	}
 
 	// § web_fetch Jina fallback: retry through a reader service when the origin
@@ -182,10 +317,154 @@ func (t *webFetchTool) Execute(ctx context.Context, input []byte, _ *llm.ToolCon
 	if webFetchJinaFallbackOn() && jinaTargetAllowed(u) {
 		text, err = t.attemptJina(ctx, u.String())
 		if err == nil && strings.TrimSpace(text) != "" {
-			return text, nil, nil
+			return text, nil
 		}
 	}
-	return "", nil, err
+	return "", err
+}
+
+type webFetchBatchItem struct {
+	URL     string `json:"url"`
+	Status  string `json:"status"`
+	Content string `json:"content,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+type webFetchBatchResult struct {
+	Status string              `json:"status"`
+	Items  []webFetchBatchItem `json:"items"`
+}
+
+func (t *webFetchTool) fetchBatch(ctx context.Context, urls []string) (string, []llm.Citation, error) {
+	type fetchResult struct {
+		text string
+		err  error
+	}
+	results := make([]fetchResult, len(urls))
+	runBoundedBatch(ctx, len(urls), func(index int) {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				results[index].err = fmt.Errorf("batch fetch panicked: %v", recovered)
+			}
+		}()
+		text, err := t.fetchOne(ctx, urls[index])
+		results[index] = fetchResult{text: text, err: err}
+	})
+	items := make([]webFetchBatchItem, len(urls))
+	successes := 0
+	var firstErr error
+	for index, result := range results {
+		item := webFetchBatchItem{URL: urls[index]}
+		if result.err != nil || strings.TrimSpace(result.text) == "" {
+			item.Status = "error"
+			item.Error = "page fetch failed"
+			if firstErr == nil {
+				firstErr = result.err
+				if firstErr == nil {
+					firstErr = errors.New("page fetch returned no content")
+				}
+			}
+		} else {
+			successes++
+			item.Status = "success"
+			item.Content = result.text
+		}
+		items[index] = item
+	}
+	if successes == 0 {
+		return "", nil, firstErr
+	}
+	status := "complete"
+	if successes != len(urls) {
+		status = "partial"
+	}
+	encoded, err := json.Marshal(webFetchBatchResult{Status: status, Items: items})
+	if err != nil {
+		return "", nil, err
+	}
+	return string(encoded), nil, nil
+}
+
+func mergeBatchStrings(single string, multiple []string, maxItems int, requiredMessage string, key func(string) string) ([]string, error) {
+	values := make([]string, 0, len(multiple)+1)
+	if strings.TrimSpace(single) != "" {
+		values = append(values, single)
+	}
+	values = append(values, multiple...)
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		dedupeKey := key(value)
+		if dedupeKey == "" {
+			continue
+		}
+		if _, exists := seen[dedupeKey]; exists {
+			continue
+		}
+		seen[dedupeKey] = struct{}{}
+		result = append(result, value)
+	}
+	if len(result) == 0 {
+		return nil, &llm.ToolUserError{Message: requiredMessage}
+	}
+	if len(result) > maxItems {
+		return nil, &llm.ToolUserError{Message: fmt.Sprintf("batch accepts at most %d items", maxItems)}
+	}
+	return result, nil
+}
+
+func canonicalBatchURL(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return strings.TrimSpace(raw)
+	}
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
+	host := strings.ToLower(parsed.Hostname())
+	port := parsed.Port()
+	if port == "" || parsed.Scheme == "http" && port == "80" || parsed.Scheme == "https" && port == "443" {
+		parsed.Host = host
+		if strings.Contains(host, ":") {
+			parsed.Host = "[" + host + "]"
+		}
+	} else {
+		parsed.Host = net.JoinHostPort(host, port)
+	}
+	if parsed.Path == "" {
+		parsed.Path = "/"
+	}
+	parsed.Fragment = ""
+	query := parsed.Query()
+	for key := range query {
+		lower := strings.ToLower(key)
+		if strings.HasPrefix(lower, "utm_") || lower == "fbclid" || lower == "gclid" || lower == "mc_cid" || lower == "mc_eid" {
+			query.Del(key)
+		}
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
+}
+
+func runBoundedBatch(ctx context.Context, count int, run func(index int)) {
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, webBatchConcurrency)
+	for index := 0; index < count; index++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+				run(index)
+			case <-ctx.Done():
+				run(index) // the canceled context makes the underlying operation return immediately
+			}
+		}(index)
+	}
+	wg.Wait()
 }
 
 // attemptDirect fetches the origin HTML, extracts readable text, and fails on
