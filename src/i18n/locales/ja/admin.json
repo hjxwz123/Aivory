@@ -557,7 +557,7 @@
     "filters": {
       "range": "期間",
       "user": "ユーザー",
-      "userPlaceholder": "メールまたは ID",
+      "userPlaceholder": "ニックネーム、メール、または ID",
       "model": "モデル",
       "allModels": "すべてのモデル",
       "status": "ステータス",

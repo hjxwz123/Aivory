@@ -557,7 +557,7 @@
     "filters": {
       "range": "Période",
       "user": "Utilisateur",
-      "userPlaceholder": "E-mail ou ID",
+      "userPlaceholder": "Pseudo, e-mail ou ID",
       "model": "Modèle",
       "allModels": "Tous les modèles",
       "status": "Statut",

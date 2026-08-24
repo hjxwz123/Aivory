@@ -561,7 +561,7 @@
     "filters": {
       "range": "时间范围",
       "user": "用户",
-      "userPlaceholder": "邮箱或 ID",
+      "userPlaceholder": "昵称、邮箱或 ID",
       "model": "模型",
       "allModels": "全部模型",
       "status": "状态",

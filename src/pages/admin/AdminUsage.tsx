@@ -1,7 +1,7 @@
 /**
  * AdminUsage — per-record usage log from usage_logs (one row per API call).
  *
- * Each call is one row, newest first. Filter by time range, user (email/id), and
+ * Each call is one row, newest first. Filter by time range, user (nickname/email/id), and
  * model; delete a single record or every record matching the current filter.
  * Purpose values (chat/image/embedding/task.*) are translated via i18n keys; a
  * row whose conversation was deleted shows "deleted" instead of a dangling id.
@@ -27,6 +27,7 @@ import {
 import { Pagination } from '@/components/ui/pagination'
 import { toast } from '@/hooks/use-toast'
 import { envNum } from '@/lib/env-config'
+import { usageUserLabel } from '@/lib/admin-usage'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 
 const RANGE_IDS = ['1', '7', '30', '90'] as const
@@ -221,7 +222,7 @@ export default function AdminUsage() {
           <Input
             value={userQ}
             onChange={(e) => setUserQ(e.target.value)}
-            placeholder={t('usage.filters.userPlaceholder', { defaultValue: 'Email or ID' })}
+            placeholder={t('usage.filters.userPlaceholder', { defaultValue: 'Nickname, email, or ID' })}
           />
         </div>
         <div className="col-span-2 min-w-0 sm:col-span-1">
@@ -321,7 +322,7 @@ export default function AdminUsage() {
                 {records.map((r) => (
                   <tr key={r.id} className="border-t border-[var(--color-divider)] hover:bg-[var(--color-bg-muted)]/45">
                     <td className="py-2 px-4 text-[12px] text-[var(--color-fg-muted)] whitespace-nowrap">{timeFmt.format(new Date(r.created_at * 1000))}</td>
-                    <td className="truncate px-4 py-2" title={r.user_email || r.user_id}>{r.user_email || r.user_id}</td>
+                    <td className="truncate px-4 py-2" title={usageUserLabel(r)}>{usageUserLabel(r)}</td>
                     <td className="px-4 py-2">
                       <div className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
                         {r.conversation_deleted ? (
@@ -463,7 +464,9 @@ export default function AdminUsage() {
                         </button>
                       ) : null}
                     </div>
-                    <p className="mt-1 truncate text-[12px] text-[var(--color-fg-muted)]">{r.user_email || r.user_id}</p>
+                    <p className="mt-1 truncate text-[12px] text-[var(--color-fg-muted)]" title={usageUserLabel(r)}>
+                      {usageUserLabel(r)}
+                    </p>
                     <p className="mt-0.5 text-[11px] tabular-nums text-[var(--color-fg-subtle)]">
                       {timeFmt.format(new Date(r.created_at * 1000))}
                     </p>

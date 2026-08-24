@@ -973,12 +973,13 @@ func SumUsageByUser(ctx context.Context, db *sql.DB, userID string, days int) (f
 }
 
 // AdminUsageRecord is a single usage_logs row (one API call), enriched with the
-// user email + conversation title. ConversationDeleted is true when the row
+// user's current nickname/email + conversation title. ConversationDeleted is true when the row
 // references a conversation that no longer exists — so the UI shows "deleted"
 // instead of a dangling id.
 type AdminUsageRecord struct {
 	ID                  int64   `json:"id"`
 	UserID              string  `json:"user_id"`
+	UserName            string  `json:"user_name"`
 	UserEmail           string  `json:"user_email"`
 	ConversationID      string  `json:"conversation_id"`
 	ConversationTitle   string  `json:"conversation_title"`
@@ -1017,7 +1018,7 @@ type AdminUsageRecord struct {
 type UsageFilter struct {
 	Since   int64  // created_at >= Since (0 = no lower bound)
 	Until   int64  // created_at <= Until (0 = no upper bound)
-	UserQ   string // matches user_id exactly OR email substring (case-insensitive)
+	UserQ   string // matches user_id exactly OR nickname/email substring (case-insensitive)
 	ModelID string // exact model_id
 	Status  string // "error" = only failed requests; "" = all (§usage errors)
 	// Purpose filters by usage purpose: exact ("chat" / "image" / "embedding" /
@@ -1040,8 +1041,9 @@ func (f UsageFilter) where() (string, []any) {
 		args = append(args, f.Until)
 	}
 	if q := strings.TrimSpace(f.UserQ); q != "" {
-		conds = append(conds, "(u.user_id = ? OR LOWER(COALESCE(usr.email,'')) LIKE ?)")
-		args = append(args, q, "%"+strings.ToLower(q)+"%")
+		like := "%" + strings.ToLower(q) + "%"
+		conds = append(conds, "(u.user_id = ? OR LOWER(COALESCE(usr.name,'')) LIKE ? OR LOWER(COALESCE(usr.email,'')) LIKE ?)")
+		args = append(args, q, like, like)
 	}
 	if f.ModelID != "" {
 		conds = append(conds, "u.model_id = ?")
@@ -1076,7 +1078,7 @@ func AdminUsageRecords(ctx context.Context, db *sql.DB, f UsageFilter, limit, of
 	where, args := f.where()
 	// CASE → 1/0 keeps the deleted-conversation flag portable across SQLite and
 	// Postgres (a bare boolean expression scans differently between them).
-	q := `SELECT u.id, u.user_id, COALESCE(usr.email,''), COALESCE(u.conversation_id,''), COALESCE(c.title,''),
+	q := `SELECT u.id, u.user_id, COALESCE(usr.name,''), COALESCE(usr.email,''), COALESCE(u.conversation_id,''), COALESCE(c.title,''),
 	             CASE WHEN u.conversation_id IS NOT NULL AND u.conversation_id <> '' AND c.id IS NULL THEN 1 ELSE 0 END,
 	             u.model_id, u.purpose, u.input_tokens, u.output_tokens, u.cost, u.currency, u.created_at,
 	             COALESCE(u.workspace_id,''), COALESCE(w.name,''),
@@ -1098,7 +1100,7 @@ func AdminUsageRecords(ctx context.Context, db *sql.DB, f UsageFilter, limit, of
 	for rows.Next() {
 		var r AdminUsageRecord
 		var gone, fb int
-		if err := rows.Scan(&r.ID, &r.UserID, &r.UserEmail, &r.ConversationID, &r.ConversationTitle, &gone,
+		if err := rows.Scan(&r.ID, &r.UserID, &r.UserName, &r.UserEmail, &r.ConversationID, &r.ConversationTitle, &gone,
 			&r.ModelID, &r.Purpose, &r.InputTokens, &r.OutputTokens, &r.Cost, &r.Currency, &r.CreatedAt,
 			&r.WorkspaceID, &r.WorkspaceName, &r.ChannelID, &r.ChannelName, &fb, &r.Status, &r.Error,
 			&r.RequestMethod, &r.RequestURL, &r.RequestHeaders, &r.RequestBody, &r.TTFTFallbackModel); err != nil {

@@ -1407,6 +1407,7 @@ export interface ApiAdminUserFeedbackPage {
 export interface ApiUsageRecord {
   id: number
   user_id: string
+  user_name: string
   user_email: string
   conversation_id: string
   conversation_title: string

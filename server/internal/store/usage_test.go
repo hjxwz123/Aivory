@@ -19,8 +19,8 @@ func TestAdminUsageRecords(t *testing.T) {
 	if err := Migrate(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	exec(t, db, `INSERT INTO users(id,email,password_hash,role) VALUES('u1','alice@x.com','h','user')`)
-	exec(t, db, `INSERT INTO users(id,email,password_hash,role) VALUES('u2','bob@y.com','h','user')`)
+	exec(t, db, `INSERT INTO users(id,email,password_hash,name,role) VALUES('u1','alice@x.com','h','Alice Admin','user')`)
+	exec(t, db, `INSERT INTO users(id,email,password_hash,name,role) VALUES('u2','bob@y.com','h','Bob','user')`)
 	if _, err := CreateConversation(ctx, db, Conversation{ID: "c1", UserID: "u1", Title: "Hello"}); err != nil {
 		t.Fatalf("conv: %v", err)
 	}
@@ -56,10 +56,16 @@ func TestAdminUsageRecords(t *testing.T) {
 	if byPurpose["chat"].UserEmail != "alice@x.com" {
 		t.Errorf("email join wrong: %q", byPurpose["chat"].UserEmail)
 	}
+	if byPurpose["chat"].UserName != "Alice Admin" {
+		t.Errorf("nickname join wrong: %q", byPurpose["chat"].UserName)
+	}
 
 	// Filter by user (email substring).
 	if rows, _ := AdminUsageRecords(ctx, db, UsageFilter{UserQ: "alice"}, 50, 0); len(rows) != 2 {
 		t.Errorf("user filter: got %d, want 2", len(rows))
+	}
+	if rows, _ := AdminUsageRecords(ctx, db, UsageFilter{UserQ: "Admin"}, 50, 0); len(rows) != 2 {
+		t.Errorf("nickname filter: got %d, want 2", len(rows))
 	}
 	// Filter by model.
 	if rows, _ := AdminUsageRecords(ctx, db, UsageFilter{ModelID: "m2"}, 50, 0); len(rows) != 1 || rows[0].Purpose != "image" {
