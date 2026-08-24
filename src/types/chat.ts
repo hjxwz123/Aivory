@@ -43,6 +43,8 @@ export interface ToolCall {
   status: 'running' | 'complete' | 'error'
   startedAt: number
   endedAt?: number
+  /** False after reload when the persisted message has no tool-level timestamps. */
+  timingKnown?: boolean
 }
 
 /**

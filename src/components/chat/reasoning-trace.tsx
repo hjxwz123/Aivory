@@ -151,6 +151,7 @@ function ToolStep({ toolCall }: { toolCall: ToolCall }) {
   const { status, label, name, input, output } = toolCall
   const [expanded, setExpanded] = useState(false)
   const elapsed = useElapsed(toolCall)
+  const timingKnown = elapsed !== null
   const Icon = TOOL_ICON[name] ?? Sparkles
   const displayName = label || t(`tools.${name}`, { defaultValue: name })
   const subtitle = pickSubtitle(name, input)
@@ -171,22 +172,28 @@ function ToolStep({ toolCall }: { toolCall: ToolCall }) {
         onClick={() => hasBody && setExpanded((v) => !v)}
         title={subtitle ?? undefined}
         className={cn(
-          'grid w-full min-w-0 max-w-full grid-cols-[auto_auto_minmax(0,1fr)_auto_auto] items-center gap-x-2 gap-y-0.5 overflow-hidden rounded-[7px] px-1.5 py-1 text-left',
+          'grid w-full min-w-0 max-w-full items-center gap-x-2 gap-y-0.5 overflow-hidden rounded-[7px] px-1.5 py-1 text-left',
+          timingKnown
+            ? 'grid-cols-[auto_auto_minmax(0,1fr)_auto_auto]'
+            : 'grid-cols-[auto_auto_minmax(0,1fr)_auto]',
           hasBody ? 'interactive cursor-pointer hover:bg-[var(--color-bg-muted)]/60' : 'cursor-default',
         )}
       >
         <StatusDot status={status} />
         <Icon size={12} className="shrink-0 text-[var(--color-fg-subtle)]" />
         <span className="min-w-0 truncate text-[12.5px] font-medium text-[var(--color-fg)]">{displayName}</span>
-        <span className="col-start-4 row-start-1 shrink-0 tabular-nums text-[10.5px] text-[var(--color-fg-subtle)]">
-          {elapsed}
-        </span>
+        {timingKnown ? (
+          <span className="col-start-4 row-start-1 shrink-0 tabular-nums text-[10.5px] text-[var(--color-fg-subtle)]">
+            {elapsed}
+          </span>
+        ) : null}
         {hasBody ? (
           <ChevronRight
             size={12}
             aria-hidden
             className={cn(
-              'col-start-5 row-start-1 shrink-0 text-[var(--color-fg-subtle)] transition-transform duration-150',
+              'row-start-1 shrink-0 text-[var(--color-fg-subtle)] transition-transform duration-150',
+              timingKnown ? 'col-start-5' : 'col-start-4',
               expanded && 'rotate-90',
             )}
           />
@@ -238,7 +245,7 @@ function StatusDot({ status }: { status: ToolCall['status'] }) {
  * ticks once per second (the key "we're still working" signal); once finished
  * it freezes at the total duration.
  */
-function useElapsed(tc: ToolCall): string {
+function useElapsed(tc: ToolCall): string | null {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     if (tc.status !== 'running') return
@@ -246,6 +253,7 @@ function useElapsed(tc: ToolCall): string {
     const id = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(id)
   }, [tc.status])
+  if (tc.timingKnown === false) return null
   const end = tc.status === 'running' ? now : tc.endedAt ?? tc.startedAt
   return formatElapsed(Math.max(0, end - tc.startedAt))
 }
