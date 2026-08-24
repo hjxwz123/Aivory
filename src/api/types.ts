@@ -294,6 +294,7 @@ export interface ApiWorkspace {
   can_create_kb: boolean
   can_add_kb_files: boolean
   can_delete_kb_content: boolean
+  can_delete_conversations: boolean
 }
 
 export interface ApiWorkspaceMember {
@@ -311,6 +312,7 @@ export interface ApiWorkspaceMember {
   can_create_kb: boolean
   can_add_kb_files: boolean
   can_delete_kb_content: boolean
+  can_delete_conversations: boolean
 }
 
 export interface ApiWorkspaceMemberPermissions {
@@ -320,6 +322,7 @@ export interface ApiWorkspaceMemberPermissions {
   can_create_kb: boolean
   can_add_kb_files: boolean
   can_delete_kb_content: boolean
+  can_delete_conversations: boolean
 }
 
 /** §workspace RBAC phase 3 — invite record (admin-only surface). */
@@ -423,6 +426,7 @@ export interface ApiUserGroupPermissions {
   allow_knowledge_base_sharing: boolean
   allow_file_upload: boolean
   allow_conversation_export: boolean
+  allow_conversation_deletion: boolean
   allow_voice_transcription: boolean
   allow_memory: boolean
   allow_drawing: boolean

@@ -706,6 +706,10 @@
       "can_delete_kb_content": {
         "label": "Supprimer le contenu des bases",
         "description": "Supprimer, relancer ou gérer du contenu lorsque la base concernée l'autorise aussi."
+      },
+      "can_delete_conversations": {
+        "label": "Supprimer les conversations",
+        "description": "Supprimer les messages et les conversations de cet espace, y compris celles créées par l'utilisateur."
       }
     },
     "roleAdmin": "Administrateur",

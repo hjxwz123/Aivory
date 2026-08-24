@@ -711,6 +711,10 @@
       "can_delete_kb_content": {
         "label": "Delete knowledge-base content",
         "description": "Delete, retry, or manage content when the specific knowledge base also allows it."
+      },
+      "can_delete_conversations": {
+        "label": "Delete conversations",
+        "description": "Delete messages and conversations in this workspace, including conversations they created."
       }
     },
     "roleAdmin": "Admin",

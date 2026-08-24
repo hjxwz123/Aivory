@@ -975,13 +975,17 @@ function ConversationItem({
   const user = useAuth((s) => s.user)
   const meId = user?.id
   const canShare = userCan(user, 'allow_sharing')
-  const workspaceRole = useWorkspaces((s) =>
+  const conversationWorkspace = useWorkspaces((s) =>
     conversation.workspaceId
-      ? s.workspaces.find((workspace) => workspace.id === conversation.workspaceId)?.role
+      ? s.workspaces.find((workspace) => workspace.id === conversation.workspaceId)
       : undefined,
   )
+  const workspaceRole = conversationWorkspace?.role
   const isWorkspaceGuest = workspaceRole === 'guest'
   const canManageConversation = !conversation.workspaceId || conversation.creatorId === meId || workspaceRole === 'admin'
+  const canDeleteConversations =
+    userCan(user, 'allow_conversation_deletion') &&
+    (!conversation.workspaceId || conversationWorkspace?.can_delete_conversations !== false)
   const rename = useConversations((s) => s.renameConversation)
   const remove = useConversations((s) => s.deleteConversation)
   const star = useConversations((s) => s.toggleStar)
@@ -994,10 +998,13 @@ function ConversationItem({
   const displayTitle = `${conversation.starred ? '☆ ' : ''}${conversation.title || t('untitled')}`
 
   useEffect(() => {
-    if (canManageConversation) return
-    setRenaming(false)
-    setConfirm(false)
-  }, [canManageConversation])
+    if (!canManageConversation) {
+      setRenaming(false)
+      setConfirm(false)
+      return
+    }
+    if (!canDeleteConversations) setConfirm(false)
+  }, [canManageConversation, canDeleteConversations])
 
   // Create (or refresh) a public share and copy its link in one tap (§ sharing).
   // Managing / revoking the share lives in the conversation's Share dialog.
@@ -1120,7 +1127,7 @@ function ConversationItem({
                   </DropdownMenuItem>
                 </>
               ) : null}
-              {canManageConversation ? (
+              {canManageConversation && canDeleteConversations ? (
                 <DropdownMenuItem destructive onClick={() => setConfirm(true)}>
                   <Trash2 size={13} aria-hidden />
                   {t('sidebar.delete')}
@@ -1159,7 +1166,7 @@ function ConversationItem({
       </Dialog>
 
       {/* Delete confirm */}
-      <Dialog open={confirm && canManageConversation} onOpenChange={setConfirm}>
+      <Dialog open={confirm && canManageConversation && canDeleteConversations} onOpenChange={setConfirm}>
         <DialogContent size="sm">
           <DialogHeader>
             <DialogTitle>{t('sidebar.deleteTitle')}</DialogTitle>
@@ -1399,6 +1406,8 @@ export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuP
 function ArchivedDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const { t } = useTranslation(['chat', 'common'])
   const navigate = useNavigate()
+  const user = useAuth((s) => s.user)
+  const canDeleteConversations = userCan(user, 'allow_conversation_deletion')
   const loadArchived = useConversations((s) => s.loadArchived)
   const unarchive = useConversations((s) => s.unarchiveConversation)
   const remove = useConversations((s) => s.deleteConversation)
@@ -1450,17 +1459,19 @@ function ArchivedDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
                   >
                     {t('chat:sidebar.unarchive')}
                   </Button>
-                  <button
-                    type="button"
-                    aria-label={t('chat:sidebar.delete')}
-                    onClick={() => {
-                      void remove(c.id)
-                      setRows((r) => r.filter((x) => x.id !== c.id))
-                    }}
-                    className="inline-flex size-7 items-center justify-center rounded-[7px] text-[var(--color-fg-subtle)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-                  >
-                    <Trash2 size={13} aria-hidden />
-                  </button>
+                  {canDeleteConversations ? (
+                    <button
+                      type="button"
+                      aria-label={t('chat:sidebar.delete')}
+                      onClick={() => {
+                        void remove(c.id)
+                        setRows((r) => r.filter((x) => x.id !== c.id))
+                      }}
+                      className="inline-flex size-7 items-center justify-center rounded-[7px] text-[var(--color-fg-subtle)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                    >
+                      <Trash2 size={13} aria-hidden />
+                    </button>
+                  ) : null}
                 </li>
               ))}
             </ul>

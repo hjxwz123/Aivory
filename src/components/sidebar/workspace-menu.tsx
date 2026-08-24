@@ -395,6 +395,7 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
       can_create_kb: member.can_create_kb,
       can_add_kb_files: member.can_add_kb_files,
       can_delete_kb_content: member.can_delete_kb_content,
+      can_delete_conversations: member.can_delete_conversations,
     })
   }
 
@@ -816,6 +817,7 @@ const WORKSPACE_PERMISSION_ROWS: Array<{
   { key: 'can_create_kb', label: 'Create knowledge bases', description: 'Create new workspace knowledge bases.' },
   { key: 'can_add_kb_files', label: 'Add knowledge-base files', description: 'Upload and paste content into workspace knowledge bases.' },
   { key: 'can_delete_kb_content', label: 'Delete knowledge-base content', description: 'Delete or retry content when the specific library also allows it.' },
+  { key: 'can_delete_conversations', label: 'Delete conversations', description: 'Delete messages and conversations in this workspace, including conversations they created.' },
 ]
 
 /** §workspace RBAC phase 3 — invite records: create, copy link, revoke. */

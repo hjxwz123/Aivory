@@ -982,6 +982,8 @@
       "fileUploadHint": "向對話、專案和可寫入知識庫上傳檔案。",
       "export": "匯出對話",
       "exportHint": "匯出單一回覆或帳號內全部對話。",
+      "deleteConversations": "刪除對話",
+      "deleteConversationsHint": "刪除對話內訊息和整個對話，包括自己建立的對話。",
       "voice": "語音辨識",
       "voiceHint": "使用串流或錄音語音轉寫。",
       "memory": "使用記憶",

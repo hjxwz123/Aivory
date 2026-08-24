@@ -706,6 +706,10 @@
       "can_delete_kb_content": {
         "label": "删除知识库内容",
         "description": "具体知识库同时允许时，可删除、重试或管理其中内容。"
+      },
+      "can_delete_conversations": {
+        "label": "删除对话",
+        "description": "删除此工作空间内的消息和整个对话，包括自己创建的对话。"
       }
     },
     "roleAdmin": "管理员",

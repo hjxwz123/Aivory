@@ -85,6 +85,9 @@ export default function ChatThread() {
       : undefined,
   )
   const isWorkspaceGuest = conversationWorkspace?.role === 'guest'
+  const canDeleteConversations =
+    userCan(user, 'allow_conversation_deletion') &&
+    (!conversation?.workspaceId || conversationWorkspace?.can_delete_conversations !== false)
   const openFilesDrawer = useConversationFiles((s) => s.openDrawer)
   const closeFilesDrawer = useConversationFiles((s) => s.close)
   const filesDrawerOpen = useConversationFiles((s) => s.open)
@@ -123,6 +126,10 @@ export default function ChatThread() {
   useEffect(() => {
     if (conversationWorkspace?.can_private_conversations === false) setConfirmPrivate(false)
   }, [conversationWorkspace?.can_private_conversations])
+
+  useEffect(() => {
+    if (!canDeleteConversations) setConfirmDelete(false)
+  }, [canDeleteConversations])
 
   // A role can change while this route stays mounted. Close any already-open
   // mutation surface immediately; otherwise promoting the user later could
@@ -503,9 +510,11 @@ export default function ChatThread() {
                   </DropdownMenuItem>
                 </>
               ) : null}
-              <DropdownMenuItem destructive onSelect={() => setConfirmDelete(true)}>
-                <Trash2 size={13} aria-hidden /> {t('chat:sidebar.delete')}
-              </DropdownMenuItem>
+              {canDeleteConversations ? (
+                <DropdownMenuItem destructive onSelect={() => setConfirmDelete(true)}>
+                  <Trash2 size={13} aria-hidden /> {t('chat:sidebar.delete')}
+                </DropdownMenuItem>
+              ) : null}
             </DropdownMenuContent>
           </DropdownMenu> : null}
         </header>
@@ -701,7 +710,7 @@ export default function ChatThread() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={confirmDelete && !isWorkspaceGuest} onOpenChange={setConfirmDelete}>
+      <Dialog open={confirmDelete && !isWorkspaceGuest && canDeleteConversations} onOpenChange={setConfirmDelete}>
         <DialogContent size="sm">
           <DialogHeader>
             <DialogTitle>{t('chat:sidebar.deleteTitle')}</DialogTitle>
@@ -763,7 +772,7 @@ export default function ChatThread() {
               label={t('chat:files.title')}
               onClick={() => { setActionsOpen(false); openFilesDrawer(conversation.id) }}
             />
-            {!isWorkspaceGuest ? (
+            {!isWorkspaceGuest && canDeleteConversations ? (
               <>
                 <ThreadActionRow
                   icon={<Pencil size={18} aria-hidden />}
@@ -810,12 +819,14 @@ export default function ChatThread() {
                     />
                   </>
                 ) : null}
-                <ThreadActionRow
-                  icon={<Trash2 size={18} aria-hidden />}
-                  label={t('chat:sidebar.delete')}
-                  destructive
-                  onClick={() => { setActionsOpen(false); setConfirmDelete(true) }}
-                />
+				{canDeleteConversations ? (
+				  <ThreadActionRow
+				    icon={<Trash2 size={18} aria-hidden />}
+				    label={t('chat:sidebar.delete')}
+				    destructive
+				    onClick={() => { setActionsOpen(false); setConfirmDelete(true) }}
+				  />
+				) : null}
               </>
             ) : null}
           </div>

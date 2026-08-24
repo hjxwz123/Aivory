@@ -982,6 +982,8 @@
       "fileUploadHint": "チャット、プロジェクト、書き込み可能なナレッジベースにファイルを追加します。",
       "export": "会話をエクスポート",
       "exportHint": "個別の回答またはアカウント内の全会話をエクスポートします。",
+      "deleteConversations": "会話を削除",
+      "deleteConversationsHint": "自分で作成した会話を含め、メッセージと会話を削除します。",
       "voice": "音声認識",
       "voiceHint": "ストリーミングまたは録音した音声を文字起こしします。",
       "memory": "メモリを使用",

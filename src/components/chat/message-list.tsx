@@ -10,6 +10,7 @@ import { useSettings } from '@/store/settings'
 import { useWorkspaces } from '@/store/workspaces'
 import { toast } from '@/hooks/use-toast'
 import { protectedFirstRoundMessageIds } from '@/lib/message-state'
+import { userCan } from '@/lib/user-permissions'
 
 import type { Attachment, Conversation, MessageFeedbackInput } from '@/types/chat'
 
@@ -30,12 +31,17 @@ const INITIAL_WINDOW = 24
 const BATCH = 24
 
 export function MessageList({ conversation, scrollToMessageId, jumpKey }: MessageListProps) {
-  const meId = useAuth((s) => s.user?.id)
-  const isWorkspaceGuest = useWorkspaces((s) =>
+  const user = useAuth((s) => s.user)
+  const meId = user?.id
+  const conversationWorkspace = useWorkspaces((s) =>
     conversation.workspaceId
-      ? s.workspaces.find((workspace) => workspace.id === conversation.workspaceId)?.role === 'guest'
-      : false,
+      ? s.workspaces.find((workspace) => workspace.id === conversation.workspaceId)
+      : undefined,
   )
+  const isWorkspaceGuest = conversationWorkspace?.role === 'guest'
+  const canDeleteConversations =
+    userCan(user, 'allow_conversation_deletion') &&
+    (!conversation.workspaceId || conversationWorkspace?.can_delete_conversations !== false)
   const navigate = useNavigate()
   const { t } = useTranslation('chat')
   // Pull stable selectors only — keeps this component out of the per-token
@@ -318,7 +324,7 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
           onDelete={
             // §first-exchange: the opening question + its answer can never be
             // deleted, whoever owns the conversation.
-            isWorkspaceGuest || protectedFirstRoundIds.has(m.id)
+            isWorkspaceGuest || !canDeleteConversations || protectedFirstRoundIds.has(m.id)
               ? undefined
               : // §workspaces: hide the delete-round affordance on turns the member
                 // cannot delete (server enforces author-or-creator regardless). In a
