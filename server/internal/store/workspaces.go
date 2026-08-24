@@ -70,6 +70,7 @@ type Workspace struct {
 	CanCreateKB             bool   `json:"can_create_kb"`
 	CanAddKBFiles           bool   `json:"can_add_kb_files"`
 	CanDeleteKBContent      bool   `json:"can_delete_kb_content"`
+	CanDeleteConversations  bool   `json:"can_delete_conversations"`
 }
 
 // WorkspaceMember is one member row enriched with user identity for display.
@@ -83,6 +84,7 @@ type WorkspaceMember struct {
 	CanCreateKB             bool   `json:"can_create_kb"`
 	CanAddKBFiles           bool   `json:"can_add_kb_files"`
 	CanDeleteKBContent      bool   `json:"can_delete_kb_content"`
+	CanDeleteConversations  bool   `json:"can_delete_conversations"`
 	JoinedAt                int64  `json:"joined_at"`
 	Name                    string `json:"name"`
 	Email                   string `json:"email"`
@@ -96,12 +98,33 @@ type WorkspaceMemberPermissions struct {
 	CanCreateKB             bool `json:"can_create_kb"`
 	CanAddKBFiles           bool `json:"can_add_kb_files"`
 	CanDeleteKBContent      bool `json:"can_delete_kb_content"`
+	CanDeleteConversations  bool `json:"can_delete_conversations"`
+}
+
+// UnmarshalJSON keeps API clients from before can_delete_conversations was
+// introduced on the historical permissive behavior. New clients always send
+// the field explicitly, so false remains an intentional capability reduction.
+func (p *WorkspaceMemberPermissions) UnmarshalJSON(data []byte) error {
+	type plain WorkspaceMemberPermissions
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*p = WorkspaceMemberPermissions(decoded)
+	if _, present := fields["can_delete_conversations"]; !present {
+		p.CanDeleteConversations = true
+	}
+	return nil
 }
 
 func fullWorkspaceMemberPermissions() WorkspaceMemberPermissions {
 	return WorkspaceMemberPermissions{
 		CanCreateProjects: true, CanPrivateConversations: true, CanCreateSkillsPrompts: true, CanCreateKB: true,
-		CanAddKBFiles: true, CanDeleteKBContent: true,
+		CanAddKBFiles: true, CanDeleteKBContent: true, CanDeleteConversations: true,
 	}
 }
 
@@ -112,6 +135,7 @@ func applyWorkspacePermissions(workspace *Workspace, permissions WorkspaceMember
 	workspace.CanCreateKB = permissions.CanCreateKB
 	workspace.CanAddKBFiles = permissions.CanAddKBFiles
 	workspace.CanDeleteKBContent = permissions.CanDeleteKBContent
+	workspace.CanDeleteConversations = permissions.CanDeleteConversations
 }
 
 // workspaceResourceAccessPredicate is the authoritative access boundary for a
@@ -300,6 +324,23 @@ func workspaceMemberCapabilityArgs(userID string) []any {
 	return []any{userID, userID}
 }
 
+// workspaceConversationDeletionCapabilityPredicate adds the workspace member
+// capability used only for destructive conversation actions. Personal
+// conversations are unaffected here; their user-group capability is checked by
+// the API. In a workspace, owners and admins keep their full authority while
+// ordinary members must have can_delete_conversations at mutation time.
+func workspaceConversationDeletionCapabilityPredicate(alias string) string {
+	prefix := ""
+	if alias != "" {
+		prefix = alias + "."
+	}
+	return `(COALESCE(` + prefix + `workspace_id,'')='' OR EXISTS (
+		SELECT 1 FROM workspaces deletion_workspace
+		 WHERE deletion_workspace.id=` + prefix + `workspace_id
+		   AND ` + workspaceMemberCapabilityPredicate("deletion_workspace", "can_delete_conversations") + `
+	))`
+}
+
 func beginWorkspaceMutationTx(ctx context.Context, db *sql.DB, workspaceID string) (*sql.Tx, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -409,16 +450,17 @@ func GetWorkspaceForMember(ctx context.Context, db *sql.DB, id, userID string) (
 		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_create_skills_prompts,0) END,
 		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_create_kb,0) END,
 		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_add_kb_files,0) END,
-		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_delete_kb_content,0) END
+		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_delete_kb_content,0) END,
+		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_delete_conversations,0) END
 		   FROM workspaces w
 		   LEFT JOIN workspace_members m ON m.workspace_id=w.id AND m.user_id=?
 		  WHERE w.id=? AND (w.owner_id=? OR m.user_id=?)`,
-		userID, userID, userID, userID, userID, userID, userID,
+		userID, userID, userID, userID, userID, userID, userID, userID,
 		userID, id, userID, userID,
 	).Scan(
 		&w.ID, &w.Name, &w.OwnerID, &w.InviteToken, &w.CreatedAt, &w.Role,
 		&w.CanCreateProjects, &w.CanPrivateConversations, &w.CanCreateSkillsPrompts, &w.CanCreateKB,
-		&w.CanAddKBFiles, &w.CanDeleteKBContent,
+		&w.CanAddKBFiles, &w.CanDeleteKBContent, &w.CanDeleteConversations,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -452,11 +494,12 @@ func ListWorkspacesForUser(ctx context.Context, db *sql.DB, userID string) ([]Wo
 		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_create_kb,0) END,
 		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_add_kb_files,0) END,
 		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_delete_kb_content,0) END,
+		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_delete_conversations,0) END,
 		        (SELECT COUNT(*) FROM workspace_members mm WHERE mm.workspace_id=w.id)
 		   FROM workspaces w
 		   LEFT JOIN workspace_members m ON m.workspace_id=w.id AND m.user_id=?
 		  WHERE w.owner_id=? OR m.user_id=? ORDER BY w.created_at ASC`,
-		userID, userID, userID, userID, userID, userID, userID,
+		userID, userID, userID, userID, userID, userID, userID, userID,
 		userID, userID, userID)
 	if err != nil {
 		return nil, err
@@ -468,7 +511,7 @@ func ListWorkspacesForUser(ctx context.Context, db *sql.DB, userID string) ([]Wo
 		if err := rows.Scan(
 			&w.ID, &w.Name, &w.OwnerID, &w.InviteToken, &w.CreatedAt, &w.Role,
 			&w.CanCreateProjects, &w.CanPrivateConversations, &w.CanCreateSkillsPrompts, &w.CanCreateKB,
-			&w.CanAddKBFiles, &w.CanDeleteKBContent, &w.MemberCount,
+			&w.CanAddKBFiles, &w.CanDeleteKBContent, &w.CanDeleteConversations, &w.MemberCount,
 		); err != nil {
 			return nil, err
 		}
@@ -516,6 +559,7 @@ func ListWorkspaceMembers(ctx context.Context, db *sql.DB, workspaceID string) (
 		        CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_create_kb END,
 		        CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_add_kb_files END,
 		        CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_delete_kb_content END,
+		        CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_delete_conversations END,
 		        m.joined_at, COALESCE(u.name,''), COALESCE(u.email,''), COALESCE(u.settings,'')
 		   FROM workspace_members m
 		   JOIN workspaces w ON w.id=m.workspace_id
@@ -532,7 +576,7 @@ func ListWorkspaceMembers(ctx context.Context, db *sql.DB, workspaceID string) (
 		if err := rows.Scan(
 			&m.UserID, &m.Role, &m.IsOwner,
 			&m.CanCreateProjects, &m.CanPrivateConversations, &m.CanCreateSkillsPrompts,
-			&m.CanCreateKB, &m.CanAddKBFiles, &m.CanDeleteKBContent,
+			&m.CanCreateKB, &m.CanAddKBFiles, &m.CanDeleteKBContent, &m.CanDeleteConversations,
 			&m.JoinedAt, &m.Name, &m.Email, &settings,
 		); err != nil {
 			return nil, err
@@ -560,7 +604,7 @@ func UpdateWorkspaceMemberPermissions(
 	defer tx.Rollback() //nolint:errcheck
 	res, err := tx.ExecContext(ctx, `UPDATE workspace_members
 		SET can_create_projects=?, can_private_conversations=?, can_create_skills_prompts=?, can_create_kb=?,
-		    can_add_kb_files=?, can_delete_kb_content=?
+		    can_add_kb_files=?, can_delete_kb_content=?, can_delete_conversations=?
 		WHERE workspace_id=? AND user_id=?
 		  AND NOT EXISTS (SELECT 1 FROM workspaces w
 		                  WHERE w.id=workspace_members.workspace_id AND w.owner_id=workspace_members.user_id)
@@ -573,7 +617,7 @@ func UpdateWorkspaceMemberPermissions(
 		      )))`,
 		boolInt(permissions.CanCreateProjects), boolInt(permissions.CanPrivateConversations),
 		boolInt(permissions.CanCreateSkillsPrompts), boolInt(permissions.CanCreateKB), boolInt(permissions.CanAddKBFiles),
-		boolInt(permissions.CanDeleteKBContent), workspaceID, memberID, actorID, actorID)
+		boolInt(permissions.CanDeleteKBContent), boolInt(permissions.CanDeleteConversations), workspaceID, memberID, actorID, actorID)
 	if err != nil {
 		return nil, err
 	}
@@ -590,6 +634,7 @@ func UpdateWorkspaceMemberPermissions(
 			"can_create_kb":             permissions.CanCreateKB,
 			"can_add_kb_files":          permissions.CanAddKBFiles,
 			"can_delete_kb_content":     permissions.CanDeleteKBContent,
+			"can_delete_conversations":  permissions.CanDeleteConversations,
 		}); err != nil {
 		return nil, err
 	}
@@ -599,7 +644,7 @@ func UpdateWorkspaceMemberPermissions(
 			CASE WHEN w.owner_id=m.user_id THEN 'admin' ELSE `+normalizeWorkspaceRoleSQL("m.role")+` END,
 			CASE WHEN w.owner_id=m.user_id THEN 1 ELSE 0 END,
 			m.can_create_projects,m.can_private_conversations,m.can_create_skills_prompts,
-			m.can_create_kb,m.can_add_kb_files,m.can_delete_kb_content,m.joined_at,
+			m.can_create_kb,m.can_add_kb_files,m.can_delete_kb_content,m.can_delete_conversations,m.joined_at,
 			COALESCE(u.name,''),COALESCE(u.email,''),COALESCE(u.settings,'')
 		FROM workspace_members m
 		JOIN workspaces w ON w.id=m.workspace_id
@@ -607,7 +652,7 @@ func UpdateWorkspaceMemberPermissions(
 		WHERE m.workspace_id=? AND m.user_id=?`, workspaceID, memberID).Scan(
 		&member.UserID, &member.Role, &member.IsOwner,
 		&member.CanCreateProjects, &member.CanPrivateConversations, &member.CanCreateSkillsPrompts,
-		&member.CanCreateKB, &member.CanAddKBFiles, &member.CanDeleteKBContent,
+		&member.CanCreateKB, &member.CanAddKBFiles, &member.CanDeleteKBContent, &member.CanDeleteConversations,
 		&member.JoinedAt, &member.Name, &member.Email, &settings,
 	)
 	if err != nil {
@@ -703,7 +748,7 @@ func UpdateWorkspaceMemberRole(
 			CASE WHEN w.owner_id=m.user_id THEN 'admin' ELSE `+normalizeWorkspaceRoleSQL("m.role")+` END,
 			CASE WHEN w.owner_id=m.user_id THEN 1 ELSE 0 END,
 			m.can_create_projects,m.can_private_conversations,m.can_create_skills_prompts,
-			m.can_create_kb,m.can_add_kb_files,m.can_delete_kb_content,m.joined_at,
+			m.can_create_kb,m.can_add_kb_files,m.can_delete_kb_content,m.can_delete_conversations,m.joined_at,
 			COALESCE(u.name,''),COALESCE(u.email,''),COALESCE(u.settings,'')
 		FROM workspace_members m
 		JOIN workspaces w ON w.id=m.workspace_id
@@ -711,7 +756,7 @@ func UpdateWorkspaceMemberRole(
 		WHERE m.workspace_id=? AND m.user_id=?`, workspaceID, memberID).Scan(
 		&member.UserID, &member.Role, &member.IsOwner,
 		&member.CanCreateProjects, &member.CanPrivateConversations, &member.CanCreateSkillsPrompts,
-		&member.CanCreateKB, &member.CanAddKBFiles, &member.CanDeleteKBContent,
+		&member.CanCreateKB, &member.CanAddKBFiles, &member.CanDeleteKBContent, &member.CanDeleteConversations,
 		&member.JoinedAt, &member.Name, &member.Email, &settings,
 	); err != nil {
 		return nil, err

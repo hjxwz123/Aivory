@@ -237,6 +237,7 @@ func Migrate(db *sql.DB) error {
 	addWorkspaceCanCreateKB := `ALTER TABLE workspace_members ADD COLUMN can_create_kb INTEGER NOT NULL DEFAULT 1`
 	addWorkspaceCanAddKBFiles := `ALTER TABLE workspace_members ADD COLUMN can_add_kb_files INTEGER NOT NULL DEFAULT 1`
 	addWorkspaceCanDeleteKBContent := `ALTER TABLE workspace_members ADD COLUMN can_delete_kb_content INTEGER NOT NULL DEFAULT 1`
+	addWorkspaceCanDeleteConversations := `ALTER TABLE workspace_members ADD COLUMN can_delete_conversations INTEGER NOT NULL DEFAULT 1`
 	addWorkspaceInvitePurpose := `ALTER TABLE workspace_invites ADD COLUMN purpose TEXT NOT NULL DEFAULT 'manual'`
 	// A durable deletion fence prevents creations from racing a multi-step
 	// workspace teardown. It is reset when a recoverable teardown fails.
@@ -362,6 +363,7 @@ func Migrate(db *sql.DB) error {
 		addWorkspaceCanCreateKB = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_create_kb INTEGER NOT NULL DEFAULT 1`
 		addWorkspaceCanAddKBFiles = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_add_kb_files INTEGER NOT NULL DEFAULT 1`
 		addWorkspaceCanDeleteKBContent = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_delete_kb_content INTEGER NOT NULL DEFAULT 1`
+		addWorkspaceCanDeleteConversations = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_delete_conversations INTEGER NOT NULL DEFAULT 1`
 		addWorkspaceInvitePurpose = `ALTER TABLE workspace_invites ADD COLUMN IF NOT EXISTS purpose TEXT NOT NULL DEFAULT 'manual'`
 		addWorkspaceDeleting = `ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS deleting INTEGER NOT NULL DEFAULT 0`
 		addKBIsPublic = `ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS is_public INTEGER NOT NULL DEFAULT 1`
@@ -426,7 +428,7 @@ func Migrate(db *sql.DB) error {
 		addModelFallbackChannel, addUsageChannel, addUsageFallback, addUsageStatus, addUsageError,
 		addUsageRequestMethod, addUsageRequestURL, addUsageRequestHeaders, addUsageRequestBody, addUsageTTFTFallback,
 		addFileDraft, addDocumentIngestUpdatedAt, addDocumentUploader,
-		addWorkspaceCanCreateProjects, addWorkspaceCanPrivateConversations, addWorkspaceCanCreateSkillsPrompts, addWorkspaceCanCreateKB, addWorkspaceCanAddKBFiles, addWorkspaceCanDeleteKBContent, addWorkspaceInvitePurpose, addWorkspaceDeleting,
+		addWorkspaceCanCreateProjects, addWorkspaceCanPrivateConversations, addWorkspaceCanCreateSkillsPrompts, addWorkspaceCanCreateKB, addWorkspaceCanAddKBFiles, addWorkspaceCanDeleteKBContent, addWorkspaceCanDeleteConversations, addWorkspaceInvitePurpose, addWorkspaceDeleting,
 		addKBIsPublic, addProjectIsPublic,
 		addModelFast, addConvFast, addMsgFast,
 		addSkillDisplayDescription, addUserSkillIcon, addUserSkillWorkspace, addUserPromptWorkspace, addMsgSelectedUserSkills,
@@ -580,7 +582,7 @@ func Migrate(db *sql.DB) error {
 		"files":                           {"draft"},
 		"documents":                       {"ingest_updated_at", "uploaded_by_user_id"},
 		"knowledge_base_shares":           {"kb_id", "user_id", "role", "created_at", "updated_at"},
-		"workspace_members":               {"workspace_id", "user_id", "role", "can_create_projects", "can_private_conversations", "can_create_skills_prompts", "can_create_kb", "can_add_kb_files", "can_delete_kb_content", "joined_at"},
+		"workspace_members":               {"workspace_id", "user_id", "role", "can_create_projects", "can_private_conversations", "can_create_skills_prompts", "can_create_kb", "can_add_kb_files", "can_delete_kb_content", "can_delete_conversations", "joined_at"},
 		"workspace_invites":               {"id", "workspace_id", "token", "email", "role", "expires_at", "max_uses", "used_count", "created_by", "purpose", "revoked_at", "created_at"},
 		"workspaces":                      {"id", "name", "owner_id", "invite_token", "deleting", "created_at"},
 		"workspace_kb_member_permissions": {"kb_id", "user_id", "can_add_files", "can_delete_content", "updated_at"},

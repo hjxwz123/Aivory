@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"path/filepath"
 	"testing"
 )
 
@@ -18,7 +20,7 @@ func TestWorkspaceMemberPermissionsDefaultAndOwnerManagement(t *testing.T) {
 		t.Fatalf("get workspace: %v", err)
 	}
 	if !workspace.CanCreateProjects || !workspace.CanPrivateConversations || !workspace.CanCreateSkillsPrompts || !workspace.CanCreateKB ||
-		!workspace.CanAddKBFiles || !workspace.CanDeleteKBContent {
+		!workspace.CanAddKBFiles || !workspace.CanDeleteKBContent || !workspace.CanDeleteConversations {
 		t.Fatalf("new member permissions=%+v, want all enabled", workspace)
 	}
 
@@ -35,12 +37,12 @@ func TestWorkspaceMemberPermissionsDefaultAndOwnerManagement(t *testing.T) {
 		t.Fatalf("owner update permissions: %v", err)
 	}
 	if updated.CanCreateProjects || updated.CanPrivateConversations || updated.CanCreateSkillsPrompts || updated.CanCreateKB ||
-		updated.CanAddKBFiles || updated.CanDeleteKBContent {
+		updated.CanAddKBFiles || updated.CanDeleteKBContent || updated.CanDeleteConversations {
 		t.Fatalf("updated permissions=%+v, want all disabled", updated)
 	}
 	workspace, err = GetWorkspaceForMember(ctx, db, "ws1", "outsider")
 	if err != nil || workspace.CanCreateProjects || workspace.CanPrivateConversations || workspace.CanCreateSkillsPrompts || workspace.CanCreateKB ||
-		workspace.CanAddKBFiles || workspace.CanDeleteKBContent {
+		workspace.CanAddKBFiles || workspace.CanDeleteKBContent || workspace.CanDeleteConversations {
 		t.Fatalf("effective workspace permissions=%+v err=%v", workspace, err)
 	}
 	if _, err := CreateProject(ctx, db, Project{UserID: "outsider", WorkspaceID: "ws1", Name: "Denied project"}); !errors.Is(err, ErrNotFound) {
@@ -51,6 +53,53 @@ func TestWorkspaceMemberPermissionsDefaultAndOwnerManagement(t *testing.T) {
 		EmbeddingModelID: "emb-a", EmbeddingDim: 3,
 	}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("CreateKB error=%v, want ErrNotFound", err)
+	}
+}
+
+func TestWorkspaceMemberPermissionsLegacyJSONKeepsConversationDeletionEnabled(t *testing.T) {
+	var legacy WorkspaceMemberPermissions
+	if err := json.Unmarshal([]byte(`{"can_create_projects":false}`), &legacy); err != nil {
+		t.Fatal(err)
+	}
+	if !legacy.CanDeleteConversations {
+		t.Fatalf("legacy payload disabled conversation deletion: %+v", legacy)
+	}
+
+	var explicit WorkspaceMemberPermissions
+	if err := json.Unmarshal([]byte(`{"can_delete_conversations":false}`), &explicit); err != nil {
+		t.Fatal(err)
+	}
+	if explicit.CanDeleteConversations {
+		t.Fatalf("explicit false was not preserved: %+v", explicit)
+	}
+}
+
+func TestWorkspaceConversationDeletionPermissionMigrationDefaultsExistingMembers(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "workspace-delete-capability-migration.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	exec(t, db, `INSERT INTO users(id,email,password_hash,role) VALUES('migration-owner','migration-owner@example.test','h','user')`)
+	exec(t, db, `INSERT INTO workspaces(id,name,owner_id,invite_token) VALUES('migration-ws','Migration','migration-owner','migration-token')`)
+	exec(t, db, `INSERT INTO workspace_members(workspace_id,user_id,role) VALUES('migration-ws','migration-owner','admin')`)
+
+	// Simulate a database upgraded from the version immediately before this
+	// capability existed. Migrate must add it with the historical permissive
+	// default rather than unexpectedly revoking an existing member.
+	exec(t, db, `ALTER TABLE workspace_members DROP COLUMN can_delete_conversations`)
+	if err := Migrate(db); err != nil {
+		t.Fatalf("migrate legacy workspace members: %v", err)
+	}
+	var canDelete bool
+	if err := db.QueryRow(`SELECT can_delete_conversations FROM workspace_members WHERE workspace_id='migration-ws' AND user_id='migration-owner'`).Scan(&canDelete); err != nil {
+		t.Fatal(err)
+	}
+	if !canDelete {
+		t.Fatal("existing workspace member lost conversation deletion during migration")
 	}
 }
 

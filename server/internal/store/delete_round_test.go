@@ -192,13 +192,48 @@ func TestDeleteRoundWorkspaceMember(t *testing.T) {
 	assertGone(t, db, "U1")
 	assertGone(t, db, "A1")
 
-	// A user with no workspace membership at all is still rejected.
+	// A member-level conversation deletion revocation applies to both their own
+	// rounds and whole conversations. Ownership of the conversation or message
+	// does not bypass this capability.
+	exec(t, db, `INSERT INTO conversations(id,user_id,title,workspace_id,is_public) VALUES('member-c2','member','Owned by member','ws1',1)`)
+	exec(t, db, `UPDATE workspace_members SET can_delete_conversations=0 WHERE workspace_id='ws1' AND user_id='member'`)
+	if _, err := DeleteConversationWithState(ctx, db, "member-c2", "member"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("revoked member deleted own conversation: want ErrNotFound, got %v", err)
+	}
+	var keptConversation string
+	if err := db.QueryRow(`SELECT id FROM conversations WHERE id='member-c2'`).Scan(&keptConversation); err != nil {
+		t.Fatalf("revoked member conversation was deleted: %v", err)
+	}
+
+	// member sends U2, gets an assistant reply A2. The denied delete must leave
+	// the entire round intact.
 	insMsg(t, db, "U2", "", "user", 2000)
-	exec(t, db, `UPDATE conversations SET active_leaf_id='U2' WHERE id='c1'`)
-	if _, err := DeleteRound(ctx, db, "c1", "outsider", "U2"); !errors.Is(err, ErrNotFound) {
+	exec(t, db, `UPDATE messages SET author_id='member' WHERE id='U2'`)
+	insMsg(t, db, "A2", "U2", "assistant", 2001)
+	exec(t, db, `UPDATE conversations SET active_leaf_id='A2' WHERE id='c1'`)
+	if _, err := DeleteRound(ctx, db, "c1", "member", "U2"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("revoked member deleted own round: want ErrNotFound, got %v", err)
+	}
+	assertParent(t, db, "U2", "")
+	assertParent(t, db, "A2", "U2")
+
+	exec(t, db, `UPDATE workspace_members SET can_delete_conversations=1 WHERE workspace_id='ws1' AND user_id='member'`)
+	if _, err := DeleteRound(ctx, db, "c1", "member", "U2"); err != nil {
+		t.Fatalf("re-enabled member deleting own round: %v", err)
+	}
+	assertGone(t, db, "U2")
+	assertGone(t, db, "A2")
+	if _, err := DeleteConversationWithState(ctx, db, "member-c2", "member"); err != nil {
+		t.Fatalf("re-enabled member deleting own conversation: %v", err)
+	}
+
+	// A user with no workspace membership at all is still rejected.
+	insMsg(t, db, "U3", "", "user", 3000)
+	exec(t, db, `UPDATE conversations SET active_leaf_id='U3' WHERE id='c1'`)
+	if _, err := DeleteRound(ctx, db, "c1", "outsider", "U3"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("non-member: want ErrNotFound, got %v", err)
 	}
-	assertParent(t, db, "U2", "") // untouched
+	assertParent(t, db, "U3", "") // untouched
 }
 
 func TestDeleteRoundWorkspaceMemberCannotDeleteForeignBranchDescendants(t *testing.T) {

@@ -680,26 +680,8 @@ func DeleteConversationWithState(ctx context.Context, db *sql.DB, id, userID str
 		}
 		return nil, err
 	}
-	creator := ownerID == userID
-	// §workspace RBAC: the creator or a workspace admin may delete a workspace
-	// conversation. Admins act on the whole inline subtree, mirroring their
-	// authority over every workspace resource.
-	adminManager := false
-	if !creator && workspaceID != "" {
-		if err := tx.QueryRowContext(ctx,
-			`SELECT EXISTS (SELECT 1 FROM workspaces w
-			  WHERE w.id=? AND (w.owner_id=? OR EXISTS (
-			    SELECT 1 FROM workspace_members dm
-			     WHERE dm.workspace_id=w.id AND dm.user_id=? AND `+isAdminRoleSQL("dm.role")+`
-			  )))`, workspaceID, userID, userID,
-		).Scan(&adminManager); err != nil {
-			return nil, err
-		}
-	}
-	if !creator && !adminManager {
-		return nil, ErrNotFound
-	}
 	// Membership revocation takes this same workspace lock. The authorization
+	// and permission-change transactions take this same lock. The authorization
 	// decision below therefore remains true until this transaction commits.
 	if workspaceID != "" {
 		if err := lockWorkspaceMembershipTx(ctx, tx, workspaceID); err != nil {
@@ -717,15 +699,33 @@ func DeleteConversationWithState(ctx context.Context, db *sql.DB, id, userID str
 	}
 	managerArgs := []any{id}
 	managerArgs = append(managerArgs, workspaceResourceManagerArgs(userID)...)
+	managerArgs = append(managerArgs, workspaceMemberCapabilityArgs(userID)...)
 	var exists int
 	if err := tx.QueryRowContext(ctx,
 		`SELECT 1 FROM conversations
-		  WHERE id=? AND `+workspaceResourceManagerPredicate("conversations"), managerArgs...,
+		  WHERE id=? AND `+workspaceResourceManagerPredicate("conversations")+`
+		    AND `+workspaceConversationDeletionCapabilityPredicate("conversations"), managerArgs...,
 	).Scan(&exists); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, err
+	}
+	creator := ownerID == userID
+	// A workspace admin may remove another member's conversation and its full
+	// inline subtree. Resolve this only after the membership lock so a concurrent
+	// role downgrade cannot leave a stale elevated subtree decision behind.
+	adminManager := false
+	if workspaceID != "" {
+		if err := tx.QueryRowContext(ctx,
+			`SELECT EXISTS (SELECT 1 FROM workspaces w
+			  WHERE w.id=? AND (w.owner_id=? OR EXISTS (
+			    SELECT 1 FROM workspace_members dm
+			     WHERE dm.workspace_id=w.id AND dm.user_id=? AND `+isAdminRoleSQL("dm.role")+`
+			  )))`, workspaceID, userID, userID,
+		).Scan(&adminManager); err != nil {
+			return nil, err
+		}
 	}
 	children, err := inlineDescendants(ctx, tx, id)
 	if err != nil {
@@ -1830,9 +1830,11 @@ func DeleteRound(ctx context.Context, db *sql.DB, convID, userID, msgID string) 
 	}
 	accessArgs := []any{convID}
 	accessArgs = append(accessArgs, conversationMemberMutationArgs(userID)...)
+	accessArgs = append(accessArgs, workspaceMemberCapabilityArgs(userID)...)
 	if err := tx.QueryRowContext(ctx,
 		`SELECT user_id, COALESCE(workspace_id,'') FROM conversations
-		  WHERE id=? AND `+conversationMemberMutationPredicate("conversations"), accessArgs...,
+		  WHERE id=? AND `+conversationMemberMutationPredicate("conversations")+`
+		    AND `+workspaceConversationDeletionCapabilityPredicate("conversations"), accessArgs...,
 	).Scan(&owner, &workspaceID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", ErrNotFound

@@ -2198,6 +2198,11 @@ func deleteMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	convID := pathParam(r, "id")
 	msgID := pathParam(r, "msgId")
+	permissions, permissionErr := requestPermissions(d, r)
+	if permissionErr != nil || !permissions.AllowConversationDeletion {
+		writeError(w, http.StatusForbidden, errForbidden)
+		return
+	}
 	conv, err := store.GetConversation(r.Context(), d.DB, convID, u.ID)
 	if err != nil {
 		writeError(w, 404, errNotFound)
