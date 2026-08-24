@@ -2948,6 +2948,10 @@ export function toLocalMessage(m: ApiMessage): Message {
               : 'complete',
           startedAt: m.created_at * 1000,
           endedAt: m.created_at * 1000,
+          // Persisted blocks currently carry no per-tool timestamps. Keep the
+          // ordering and status, but do not misrepresent every historical run
+          // as having completed in zero seconds.
+          timingKnown: false,
           output: toolFailed ? sanitizeToolErrorOutput(b.summary) : b.summary,
           // Reloaded tool rounds keep their input so the subtitle (query/code)
           // still renders (§7.1-4).

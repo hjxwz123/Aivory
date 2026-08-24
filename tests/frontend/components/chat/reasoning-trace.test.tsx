@@ -39,4 +39,31 @@ describe('ReasoningTrace tool layout', () => {
     expect(html).toContain('line-clamp-2')
     expect(html).toContain('overflow-wrap:anywhere')
   })
+
+  it('does not show a fabricated zero-second duration for a reloaded tool', () => {
+    const reasoning: ReasoningItem[] = [
+      {
+        kind: 'tool',
+        id: 'step-reloaded',
+        tool: {
+          id: 'tool-reloaded',
+          name: 'python_execute',
+          label: 'Running Python',
+          status: 'error',
+          startedAt: 1_700_000_000_000,
+          endedAt: 1_700_000_000_000,
+          timingKnown: false,
+          output: 'Tool execution failed. Please try again.',
+        },
+      },
+    ]
+
+    const html = renderToStaticMarkup(
+      createElement(ReasoningTrace, { reasoning, streaming: false, settled: true }),
+    )
+
+    expect(html).toContain('Running Python')
+    expect(html).not.toContain('>0s<')
+    expect(html).toContain('grid-cols-[auto_auto_minmax(0,1fr)_auto]')
+  })
 })

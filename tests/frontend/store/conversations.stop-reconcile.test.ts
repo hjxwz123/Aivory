@@ -952,6 +952,7 @@ describe('stopped turn optimistic-id reconciliation', () => {
       tool: {
         id: 'tool_reloaded_error',
         status: 'error',
+        timingKnown: false,
         output: 'The operation was canceled.',
       },
     })
