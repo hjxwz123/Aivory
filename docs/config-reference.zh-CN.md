@@ -300,10 +300,10 @@ SSE 心跳、流恢复窗口、生成时长上限、分页与搜索上限、消�
 | `AIVORY_API_RATE_LIMIT_FORGOT_PASSWORD_WINDOW` | `duration` | `15*60*time.Second` | `api/router.go:73` | 统计每 IP 对 /api/auth/forgot-password 接口请求数的固定时间窗。 |
 | `AIVORY_API_RATE_LIMIT_RESET_PASSWORD_MAX` | `int` | `5` | `api/router.go:75` | 每 IP 在窗口内对 POST /api/auth/reset-password（凭码重置密码）接口的最大请求数。 |
 | `AIVORY_API_RATE_LIMIT_RESET_PASSWORD_WINDOW` | `duration` | `60*time.Second` | `api/router.go:76` | 统计每 IP 对 /api/auth/reset-password 接口请求数的固定时间窗。 |
-| `AIVORY_API_RATE_LIMIT_CAPTCHA_ISSUE_MAX` | `int` | `30` | `api/router.go:78` | 每 IP 在窗口内对 GET /api/public/captcha（签发滑块验证码挑战）接口的最大请求数。 |
-| `AIVORY_API_RATE_LIMIT_CAPTCHA_ISSUE_WINDOW` | `duration` | `60*time.Second` | `api/router.go:79` | 统计每 IP 对 GET /api/public/captcha 挑战签发接口请求数的固定时间窗。 |
-| `AIVORY_API_RATE_LIMIT_CAPTCHA_VERIFY_MAX` | `int` | `60` | `api/router.go:81` | 每 IP 在窗口内对 POST /api/public/captcha/verify（校验验证码答案）接口的最大请求数。 |
-| `AIVORY_API_RATE_LIMIT_CAPTCHA_VERIFY_WINDOW` | `duration` | `60*time.Second` | `api/router.go:82` | 统计每 IP 对 /api/public/captcha/verify 答案校验接口请求数的固定时间窗。 |
+| `AIVORY_API_RATE_LIMIT_CAPTCHA_ISSUE_MAX` | `int` | `20` | `api/router.go:79` | 每 IP 在窗口内对 GET /api/public/captcha（签发滑块验证码挑战）接口的最大请求数。 |
+| `AIVORY_API_RATE_LIMIT_CAPTCHA_ISSUE_WINDOW` | `duration` | `60*time.Second` | `api/router.go:80` | 统计每 IP 对 GET /api/public/captcha 挑战签发接口请求数的固定时间窗。 |
+| `AIVORY_API_RATE_LIMIT_CAPTCHA_VERIFY_MAX` | `int` | `20` | `api/router.go:82` | 每 IP 在窗口内对 POST /api/public/captcha/verify（校验验证码答案）接口的最大请求数。 |
+| `AIVORY_API_RATE_LIMIT_CAPTCHA_VERIFY_WINDOW` | `duration` | `60*time.Second` | `api/router.go:83` | 统计每 IP 对 /api/public/captcha/verify 答案校验接口请求数的固定时间窗。 |
 | `AIVORY_API_RATE_LIMIT_FIRST_RUN_SETUP_MAX` | `int` | `10` | `api/router.go:84` | 每 IP 在窗口内对 POST /api/setup（首次运行创建首个管理员）接口的最大请求数。 |
 | `AIVORY_API_RATE_LIMIT_FIRST_RUN_SETUP_WINDOW` | `duration` | `60*time.Second` | `api/router.go:85` | 统计每 IP 对 POST /api/setup 首次运行引导接口请求数的固定时间窗。 |
 | `AIVORY_API_RATE_LIMIT_PUBLIC_SHARED_CONVERSATION_MAX` | `int` | `60` | `api/router.go:87` | 每 IP 在窗口内对 GET /api/public/shared/:token（免登录查看分享会话）接口的最大请求数。 |
@@ -345,9 +345,9 @@ SSE 心跳、流恢复窗口、生成时长上限、分页与搜索上限、消�
 | `AIVORY_API_MINIMUM_PASSWORD_LENGTH` | `int` | `8` | `api/auth_handlers.go:29` | 注册及修改密码时用户自选账户密码所需的最小字符长度。 |
 | `AIVORY_API_EMAIL_VERIFICATION_CODE_TTL` | `duration` | `10*time.Minute` | `api/auth_handlers.go:30` | 邮件发送的账户邮箱验证码的有效期。 |
 | `AIVORY_API_PASSWORD_RESET_CODE_TTL` | `duration` | `10*time.Minute` | `api/auth_handlers.go:31` | 邮件发送的密码重置验证码的有效期。 |
-| `AIVORY_API_CAP_TOL` | `float` | `0.04` | `api/captcha.go:41` | 滑块验证码通过时，提交的滑动比例与真实缺口比例之间允许的误差。 |
-| `AIVORY_API_CAPTCHA_CHALLENGE_CACHE_TTL` | `duration` | `5*time.Minute` | `api/captcha.go:44` | 未解答的滑块拼图验证码挑战在缓存中保持有效的时长。 |
-| `AIVORY_API_CAPTCHA_PASS_TTL` | `duration` | `10*time.Minute` | `api/captcha.go:110` | 证明近期已通过验证码的签名通行令牌的有效期。 |
+| `AIVORY_API_CAP_TOL` | `float` | `0.025` | `api/captcha.go:48` | 滑块验证码通过时，提交的滑动比例与真实缺口比例之间允许的误差。 |
+| `AIVORY_API_CAPTCHA_CHALLENGE_CACHE_TTL` | `duration` | `2*time.Minute` | `api/captcha.go:51` | 未解答的滑块拼图验证码挑战在缓存中保持有效的时长。 |
+| `AIVORY_API_CAPTCHA_PASS_TTL` | `duration` | `10*time.Minute` | `api/captcha.go:177` | 证明近期已通过验证码的签名通行令牌的有效期。 |
 | `AIVORY_API_OAUTH_2FA_HANDOFF_COOKIE_TTL` | `duration` | `300*time.Second` | `api/oauth_handlers.go:24` | OAuth 登录后将两步验证登录票据传给前端的短时 HttpOnly Cookie 的 Max-Age。 |
 | `AIVORY_API_OAUTH_STATE_CACHE_TTL` | `duration` | `10*time.Minute` | `api/oauth_handlers.go:25` | 作为 CSRF 防护的 OAuth 授权流程 state 缓存条目的有效期。 |
 | `AIVORY_API_OAUTH_TOKEN_EXCHANGE_CONTEXT_TIMEOUT` | `duration` | `20*time.Second` | `api/oauth_handlers.go:26` | OAuth 回调中授权码换取令牌及拉取用户信息的超时上限。 |

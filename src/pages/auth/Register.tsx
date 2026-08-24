@@ -424,7 +424,12 @@ export default function Register() {
 
       {/* Modal security check — opens on submit when a captcha is required. */}
       {captchaRequired ? (
-        <PuzzleCaptchaDialog open={captchaOpen} onOpenChange={setCaptchaOpen} onSolved={onCaptchaSolved} />
+        <PuzzleCaptchaDialog
+          open={captchaOpen}
+          onOpenChange={setCaptchaOpen}
+          purpose="register"
+          onSolved={onCaptchaSolved}
+        />
       ) : null}
     </motion.div>
   )

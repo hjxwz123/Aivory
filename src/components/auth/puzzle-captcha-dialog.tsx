@@ -1,12 +1,19 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { authApi } from '@/api'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { PuzzleCaptcha, type PuzzleData, type PuzzleStatus } from './puzzle-captcha'
+import {
+  PuzzleCaptcha,
+  type PuzzleCaptchaPurpose,
+  type PuzzleData,
+  type PuzzleSolution,
+  type PuzzleStatus,
+} from './puzzle-captcha'
 
 interface PuzzleCaptchaDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  purpose: PuzzleCaptchaPurpose
   /** Fired with the single-use pass token once the puzzle is solved + verified. */
   onSolved: (token: string) => void
 }
@@ -17,24 +24,24 @@ interface PuzzleCaptchaDialogProps {
  * for immediate green/red feedback. A correct drag yields a single-use pass token
  * (handed back via onSolved); a wrong one shakes red and re-rolls the puzzle.
  */
-export function PuzzleCaptchaDialog({ open, onOpenChange, onSolved }: PuzzleCaptchaDialogProps) {
+export function PuzzleCaptchaDialog({ open, onOpenChange, purpose, onSolved }: PuzzleCaptchaDialogProps) {
   const { t } = useTranslation('auth')
   const [data, setData] = useState<PuzzleData | null>(null)
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState<PuzzleStatus>('idle')
   const verifyingRef = useRef(false)
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true)
     setStatus('idle')
     try {
-      setData(await authApi.captcha())
+      setData(await authApi.captcha(purpose))
     } catch {
       setData(null)
     } finally {
       setLoading(false)
     }
-  }
+  }, [purpose])
 
   // Fresh puzzle each time the dialog opens; clear on close.
   useEffect(() => {
@@ -43,14 +50,14 @@ export function PuzzleCaptchaDialog({ open, onOpenChange, onSolved }: PuzzleCapt
       setData(null)
       setStatus('idle')
     }
-  }, [open])
+  }, [load, open])
 
-  async function onRelease(fraction: number | null) {
-    if (fraction == null || !data || verifyingRef.current) return
+  async function onRelease(solution: PuzzleSolution | null) {
+    if (solution == null || !data || verifyingRef.current) return
     verifyingRef.current = true
     setStatus('verifying')
     try {
-      const res = await authApi.captchaVerify(data.id, fraction)
+      const res = await authApi.captchaVerify(data.id, solution)
       if (res.ok && res.token) {
         setStatus('success')
         const token = res.token

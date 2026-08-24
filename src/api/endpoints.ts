@@ -135,7 +135,7 @@ export const authApi = {
   legalConfig: () =>
     api<{ contact_email: string; terms_text: string; privacy_text: string }>('/public/legal-config'),
   /** Fetch a fresh slider-puzzle captcha (drag the piece into the gap). */
-  captcha: () =>
+  captcha: (purpose: 'login' | 'register') =>
     api<{
       id: string
       background: string
@@ -144,7 +144,7 @@ export const authApi = {
       h: number
       piece_size: number
       piece_y: number
-    }>('/public/captcha'),
+    }>(`/public/captcha?purpose=${encodeURIComponent(purpose)}`),
   /** Whether the deployment still needs its first-run setup (zero users). */
   needsSetup: () => api<{ needs_setup: boolean }>('/public/needs-setup'),
   authPolicy: () => api<ApiAuthPolicy>('/public/auth-policy'),
@@ -204,10 +204,18 @@ export const authApi = {
       method: 'POST',
       body: { email, password, name, captcha_token: captchaToken },
     }),
-  // Verify a slider-puzzle solution; on success returns a single-use pass token
-  // the register call presents (lets the dialog show immediate green/red).
-  captchaVerify: (id: string, fraction: number) =>
-    api<{ ok: boolean; token?: string }>('/public/captcha/verify', { method: 'POST', body: { id, fraction } }),
+  // Verify a slider-puzzle solution; on success returns a single-use,
+  // purpose-bound pass token for the pending login or registration request.
+  captchaVerify: (
+    id: string,
+    solution: {
+      fraction: number
+      interaction: { mode: 'pointer' | 'keyboard'; points: Array<{ x: number; t: number }> }
+    },
+  ) => api<{ ok: boolean; token?: string }>('/public/captcha/verify', {
+    method: 'POST',
+    body: { id, ...solution },
+  }),
   refresh: () => api<ApiAuthResponse>('/auth/refresh', { method: 'POST' }),
   logout: () => api<{ ok: true }>('/auth/logout', { method: 'POST' }),
   updateProfile: (patch: { name?: string; email?: string }) =>

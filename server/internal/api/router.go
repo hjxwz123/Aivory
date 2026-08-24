@@ -76,10 +76,10 @@ var (
 	rlResetPasswordMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_RESET_PASSWORD_MAX", 5)
 	rlResetPasswordWindow = envcfg.Dur("AIVORY_API_RATE_LIMIT_RESET_PASSWORD_WINDOW", 60*time.Second)
 
-	rlCaptchaIssueMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_CAPTCHA_ISSUE_MAX", 30)
+	rlCaptchaIssueMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_CAPTCHA_ISSUE_MAX", 20)
 	rlCaptchaIssueWindow = envcfg.Dur("AIVORY_API_RATE_LIMIT_CAPTCHA_ISSUE_WINDOW", 60*time.Second)
 
-	rlCaptchaVerifyMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_CAPTCHA_VERIFY_MAX", 60)
+	rlCaptchaVerifyMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_CAPTCHA_VERIFY_MAX", 20)
 	rlCaptchaVerifyWindow = envcfg.Dur("AIVORY_API_RATE_LIMIT_CAPTCHA_VERIFY_WINDOW", 60*time.Second)
 
 	rlFirstRunSetupMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_FIRST_RUN_SETUP_MAX", 10)
