@@ -31,6 +31,10 @@ const knowledgeBaseMessage: Message = {
 }
 
 function renderMessage(readOnly: boolean): string {
+  return renderRow(knowledgeBaseMessage, readOnly)
+}
+
+function renderRow(message: Message, readOnly = false): string {
   return renderToStaticMarkup(
     createElement(
       MemoryRouter,
@@ -38,7 +42,7 @@ function renderMessage(readOnly: boolean): string {
       createElement(
         TooltipProvider,
         null,
-        createElement(MessageRow, { message: knowledgeBaseMessage, readOnly }),
+        createElement(MessageRow, { message, readOnly }),
       ),
     ),
   )
@@ -56,5 +60,28 @@ describe('MessageRow knowledge-base citation preview', () => {
 
     expect(html).not.toContain('data-doc-citation-index')
     expect(html).toContain('<sup class="cite-marker cite-doc" title="Knowledge.pdf">1</sup>')
+  })
+})
+
+describe('MessageRow image attachment containment', () => {
+  it('uses the message column as a definite width and reflows a three-image grid', () => {
+    const html = renderRow({
+      id: 'message-images',
+      role: 'user',
+      content: 'Use the third image as a hardware reference.',
+      createdAt: 1,
+      attachments: [
+        { id: 'image-1', name: 'poster.png', kind: 'image', size: 1, previewUrl: '/api/files/image-1' },
+        { id: 'image-2', name: 'website.png', kind: 'image', size: 1, previewUrl: '/api/files/image-2' },
+        { id: 'image-3', name: 'hardware.png', kind: 'image', size: 1, previewUrl: '/api/files/image-3' },
+      ],
+    })
+
+    expect(html).toContain('flex w-full min-w-0 flex-col [container-type:inline-size]')
+    expect(html).toContain('w-fit min-w-0 max-w-full overflow-hidden')
+    expect(html).toContain('data-image-attachment-grid="multiple"')
+    expect(html).toContain('grid-cols-[repeat(auto-fit,minmax(min(6rem,100%),1fr))]')
+    expect(html).toContain('w-[min(22rem,calc(100cqw-2.125rem))]')
+    expect(html).toContain('aspect-square w-full')
   })
 })

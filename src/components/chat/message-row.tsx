@@ -587,7 +587,10 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
     >
       <div
         className={cn(
-          'flex flex-col min-w-0',
+          // Give shrink-to-fit bubbles a definite containing width. Without
+          // w-full, a fixed-width attachment strip can win intrinsic sizing
+          // after a drawer narrows the thread and escape the bubble's max-width.
+          'flex w-full min-w-0 flex-col [container-type:inline-size]',
           // A user bubble hugs its content (right-aligned, capped width); but
           // while editing it expands to the full message column — same width as
           // an assistant reply — so there's room to rework the question.
@@ -744,22 +747,24 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
         ) : isUser ? (
           <div
             className={cn(
-              'rounded-[18px] px-4 py-2.5',
+              'w-fit min-w-0 max-w-full overflow-hidden rounded-[18px] px-4 py-2.5',
               'bg-[var(--color-user-bubble)] border border-[var(--color-user-bubble-border)]',
               'text-[var(--color-fg)] text-[length:var(--text-chat-body)] leading-relaxed',
               userMessageMarkdown || userHasMath ? 'min-w-0' : 'whitespace-pre-wrap break-words',
-              'min-w-0 max-w-full',
             )}
           >
             {attachments.length > 0 ? (
               <div className="mb-2 grid min-w-0 gap-2">
                 {imageAttachments.length > 0 ? (
                   <div
+                    data-image-attachment-grid={imageAttachments.length > 1 ? 'multiple' : 'single'}
                     className={cn(
                       imageAttachments.length === 1
                         ? 'flex min-w-0 max-w-full'
-                        : 'flex min-w-0 w-[min(30rem,72vw)] max-w-full flex-wrap gap-2',
-                      imageAttachments.length > 1 && (isOwn ? 'justify-end' : 'justify-start'),
+                        : 'grid min-w-0 max-w-full grid-cols-[repeat(auto-fit,minmax(min(6rem,100%),1fr))] gap-2',
+                      imageAttachments.length === 2 && 'w-[min(14.5rem,calc(100cqw-2.125rem))]',
+                      imageAttachments.length >= 3 && 'w-[min(22rem,calc(100cqw-2.125rem))]',
+                      imageAttachments.length > 1 && (isOwn ? 'ml-auto' : 'mr-auto'),
                     )}
                   >
                     {imageAttachments.map((attachment) => (
@@ -774,7 +779,8 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                         })}
                         aria-label={t('actions.viewImage', { defaultValue: 'View image' })}
                         className={cn(
-                          'block max-w-full shrink-0 overflow-hidden rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] hover:opacity-90',
+                          'block min-w-0 max-w-full overflow-hidden rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] hover:opacity-90',
+                          imageAttachments.length === 1 ? 'shrink-0' : 'aspect-square w-full',
                         )}
                       >
                         <img
@@ -784,7 +790,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                             'object-cover',
                             imageAttachments.length === 1
                               ? 'h-auto max-h-56 w-auto max-w-[min(100%,18rem)] sm:max-w-[min(100%,22rem)]'
-                              : 'size-24 sm:size-28',
+                              : 'size-full',
                           )}
                           draggable={false}
                           onError={() => setBrokenAtts((previous) => new Set(previous).add(attachment.id))}
