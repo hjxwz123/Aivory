@@ -1840,8 +1840,9 @@ def _restore_workspace(session_id: str, storage: Optional[dict]) -> None:
         # /workspace is an existing root-owned tmpfs in hardened sessions. The
         # archive contains a leading "." directory entry, so plain tar tries to
         # chmod/utime the tmpfs root after extracting its children and exits 2
-        # for the non-root sandbox user. Preserve metadata on directories that
-        # already exist; files and newly-created directories are still restored.
+        # for the non-root sandbox user. Strip that archive-only path component:
+        # the root entry is skipped, while ./outputs/file becomes outputs/file.
+        # --no-overwrite-dir remains defense in depth for existing child dirs.
         # Path/symlink escape is contained by the read-only rootfs + the bounded
         # /workspace tmpfs (a decompressed bomb hits ENOSPC, not the host).
         data = _storage_get_object(storage, full_key, max_bytes=MAX_ARCHIVE_BYTES)
@@ -1850,6 +1851,7 @@ def _restore_workspace(session_id: str, storage: Optional[dict]) -> None:
         cp = _docker([
             "exec", "-i", name, "tar",
             "--no-same-owner", "--no-overwrite-dir",
+            "--strip-components=1",
             "-xzf", "-", "-C", WORKSPACE,
         ],
                      input_bytes=data, timeout=120)
