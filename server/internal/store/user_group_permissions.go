@@ -35,6 +35,7 @@ type UserGroupPermissions struct {
 	AllowKnowledgeBaseSharing bool                 `json:"allow_knowledge_base_sharing"`
 	AllowFileUpload           bool                 `json:"allow_file_upload"`
 	AllowConversationExport   bool                 `json:"allow_conversation_export"`
+	AllowConversationDeletion bool                 `json:"allow_conversation_deletion"`
 	AllowVoiceTranscription   bool                 `json:"allow_voice_transcription"`
 	AllowMemory               bool                 `json:"allow_memory"`
 	AllowDrawing              bool                 `json:"allow_drawing"`
@@ -59,6 +60,7 @@ func DefaultUserGroupPermissions() UserGroupPermissions {
 		AllowKnowledgeBaseSharing: true,
 		AllowFileUpload:           true,
 		AllowConversationExport:   true,
+		AllowConversationDeletion: true,
 		AllowVoiceTranscription:   true,
 		AllowMemory:               true,
 		AllowDrawing:              true,
@@ -123,6 +125,7 @@ func NormalizeUserGroupPermissions(raw json.RawMessage) (UserGroupPermissions, e
 		"allow_knowledge_base_sharing": &permissions.AllowKnowledgeBaseSharing,
 		"allow_file_upload":            &permissions.AllowFileUpload,
 		"allow_conversation_export":    &permissions.AllowConversationExport,
+		"allow_conversation_deletion":  &permissions.AllowConversationDeletion,
 		"allow_voice_transcription":    &permissions.AllowVoiceTranscription,
 		"allow_memory":                 &permissions.AllowMemory,
 		"allow_drawing":                &permissions.AllowDrawing,
@@ -228,6 +231,7 @@ func UserGroupPermissionsEqual(a, b UserGroupPermissions) bool {
 		a.AllowKnowledgeBaseSharing == b.AllowKnowledgeBaseSharing &&
 		a.AllowFileUpload == b.AllowFileUpload &&
 		a.AllowConversationExport == b.AllowConversationExport &&
+		a.AllowConversationDeletion == b.AllowConversationDeletion &&
 		a.AllowVoiceTranscription == b.AllowVoiceTranscription &&
 		a.AllowMemory == b.AllowMemory &&
 		a.AllowDrawing == b.AllowDrawing

@@ -889,6 +889,7 @@ CREATE TABLE IF NOT EXISTS workspace_members (
   can_create_kb             INTEGER NOT NULL DEFAULT 1,
   can_add_kb_files          INTEGER NOT NULL DEFAULT 1,
   can_delete_kb_content     INTEGER NOT NULL DEFAULT 1,
+  can_delete_conversations  INTEGER NOT NULL DEFAULT 1,
   joined_at                 BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint),
   PRIMARY KEY (workspace_id, user_id)
 );

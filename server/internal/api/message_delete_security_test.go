@@ -125,3 +125,47 @@ func TestDeleteMessageHandlerRejectsWorkspaceBranchWithForeignDescendants(t *tes
 		assertExists(id)
 	}
 }
+
+func TestConversationDeletionGroupPermissionBlocksConversationAndRound(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "conversation-delete-group-permission.db"))
+	t.Cleanup(func() { _ = db.Close() })
+	mustExec(t, db, `INSERT INTO user_groups(id,name,permissions) VALUES
+		('ug_no_conversation_delete','No conversation delete','{"allow_conversation_deletion":false}')`)
+	mustExec(t, db, `INSERT INTO users(id,email,password_hash,role,status,group_id) VALUES
+		('blocked-user','blocked@example.test','h','user','active','ug_no_conversation_delete')`)
+	mustExec(t, db, `INSERT INTO conversations(id,user_id,title) VALUES
+		('blocked-conversation','blocked-user','Blocked conversation')`)
+	mustExec(t, db, `INSERT INTO messages(id,conversation_id,role,author_id,created_at) VALUES
+		('blocked-question','blocked-conversation','user','blocked-user',1)`)
+
+	d := Deps{DB: db, Cache: cache.NewMemory()}
+	user := &store.User{ID: "blocked-user", Role: "user", Status: "active"}
+
+	conversationReq := httptest.NewRequest(http.MethodDelete, "/api/conversations/blocked-conversation", nil)
+	conversationReq = conversationReq.WithContext(context.WithValue(conversationReq.Context(), userCtxKey{}, user))
+	conversationReq = conversationReq.WithContext(context.WithValue(conversationReq.Context(), pathCtxKey{}, map[string]string{"id": "blocked-conversation"}))
+	conversationRec := httptest.NewRecorder()
+	deleteConversationHandler(d, conversationRec, conversationReq)
+	if conversationRec.Code != http.StatusForbidden {
+		t.Fatalf("conversation delete status=%d body=%s, want 403", conversationRec.Code, conversationRec.Body.String())
+	}
+
+	messageReq := httptest.NewRequest(http.MethodDelete, "/api/conversations/blocked-conversation/messages/blocked-question", nil)
+	messageReq = messageReq.WithContext(context.WithValue(messageReq.Context(), userCtxKey{}, user))
+	messageReq = messageReq.WithContext(context.WithValue(messageReq.Context(), pathCtxKey{}, map[string]string{
+		"id": "blocked-conversation", "msgId": "blocked-question",
+	}))
+	messageRec := httptest.NewRecorder()
+	deleteMessageHandler(d, messageRec, messageReq)
+	if messageRec.Code != http.StatusForbidden {
+		t.Fatalf("message delete status=%d body=%s, want 403", messageRec.Code, messageRec.Body.String())
+	}
+
+	var conversationID, messageID string
+	if err := db.QueryRow(`SELECT id FROM conversations WHERE id='blocked-conversation'`).Scan(&conversationID); err != nil {
+		t.Fatalf("blocked conversation was deleted: %v", err)
+	}
+	if err := db.QueryRow(`SELECT id FROM messages WHERE id='blocked-question'`).Scan(&messageID); err != nil {
+		t.Fatalf("blocked message was deleted: %v", err)
+	}
+}

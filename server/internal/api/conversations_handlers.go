@@ -693,6 +693,11 @@ func publishWorkspaceConversationVisibility(d Deps, r *http.Request, workspaceID
 func deleteConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	id := pathParam(r, "id")
+	permissions, permissionErr := requestPermissions(d, r)
+	if permissionErr != nil || !permissions.AllowConversationDeletion {
+		writeError(w, http.StatusForbidden, errForbidden)
+		return
+	}
 	deletion, err := store.DeleteConversationWithState(r.Context(), d.DB, id, u.ID)
 	if err != nil {
 		writeError(w, 404, errNotFound)
