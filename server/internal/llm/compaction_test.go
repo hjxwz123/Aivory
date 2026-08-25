@@ -212,21 +212,21 @@ func TestMaybeCompactCutShrinkNoDuplicate(t *testing.T) {
 		t.Fatal(err)
 	}
 	conv := &store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: json.RawMessage("[]")}
-	history := buildHistory(18)
+	history := buildHistory(22)
 	persistCompactionFixture(t, db, conv, history)
 
-	_, blocks1, err := MaybeCompact(context.Background(), db, nil, conv, history[:16], 0, "u1")
+	_, blocks1, err := MaybeCompact(context.Background(), db, nil, conv, history[:20], 0, "u1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(blocks1) != 1 || blocks1[0].AnchorMessageID != "m3" {
+	if len(blocks1) != 1 || blocks1[0].AnchorMessageID != "m7" {
 		t.Fatalf("pass1 unexpected blocks: %+v", blocks1)
 	}
 	bjson, _ := json.Marshal(blocks1)
 	conv.SummaryBlocks = bjson
 
-	// Raise keep_recent_rounds → keepMsgs=16; with 18 messages the cut is 2,
-	// which is BELOW the prior anchor (m3). Must not duplicate.
+	// Raise keep_recent_rounds → keepMsgs=16. The existing frontier remains ahead
+	// of the new low watermark and must not be duplicated.
 	if err := store.SetSetting(db, "keep_recent_rounds", 8); err != nil {
 		t.Fatal(err)
 	}
@@ -237,12 +237,12 @@ func TestMaybeCompactCutShrinkNoDuplicate(t *testing.T) {
 	if len(blocks2) != 1 {
 		t.Fatalf("cut shrink created a duplicate summary block: got %d, want 1", len(blocks2))
 	}
-	if len(keep2) == 0 || keep2[0].ID != "m4" {
+	if len(keep2) == 0 || keep2[0].ID != "m8" {
 		start := "<empty>"
 		if len(keep2) > 0 {
 			start = keep2[0].ID
 		}
-		t.Fatalf("inline tail starts at %s, want m4 (after existing summary anchor)", start)
+		t.Fatalf("inline tail starts at %s, want m8 (after existing summary anchor)", start)
 	}
 }
 
@@ -542,8 +542,8 @@ func TestMergeIfOverPreservesSiblingFrontierAndMakesProgress(t *testing.T) {
 	}
 	afterA := filterBlocksForPath(merged, historyA)
 	afterB := filterBlocksForPath(merged, historyB)
-	if len(merged) >= len(blocks) {
-		t.Fatalf("stored blocks did not shrink: before=%d after=%d", len(blocks), len(merged))
+	if len(merged) > len(blocks) {
+		t.Fatalf("stored blocks grew: before=%d after=%d", len(blocks), len(merged))
 	}
 	if len(afterA) >= len(beforeA) {
 		t.Fatalf("A path blocks did not shrink: before=%d after=%d; blocks=%+v", len(beforeA), len(afterA), merged)
@@ -750,6 +750,65 @@ func TestMergeOldestBlocksUnacceptableReducePreservesSourceBlocks(t *testing.T) 
 	}
 	if !reflect.DeepEqual(merged, blocks) {
 		t.Fatalf("unacceptable reduce replaced source blocks: got=%+v want=%+v", merged, blocks)
+	}
+}
+
+func TestMergeIfOverMakesOneMaterialFoldPerOperation(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "single-material-fold.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := store.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	provider := &compactionTestProvider{text: strings.Repeat("retained concrete decision and outcome ", 4000)}
+	task := newCompactionTask(t, db, provider)
+	history := buildHistory(8)
+	tree, err := newCompactionMessageTree(map[string]string{
+		"m0": "", "m1": "m0", "m2": "m1", "m3": "m2",
+		"m4": "m3", "m5": "m4", "m6": "m5", "m7": "m6",
+	}, history)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks := []SummaryBlock{
+		{Level: 1, FromMessageID: "m0", AnchorMessageID: "m1", Text: strings.Repeat("alpha decision ", 600)},
+		{Level: 1, FromMessageID: "m2", AnchorMessageID: "m3", Text: strings.Repeat("beta outcome ", 600)},
+		{Level: 1, FromMessageID: "m4", AnchorMessageID: "m5", Text: strings.Repeat("gamma constraint ", 600)},
+		{Level: 1, FromMessageID: "m6", AnchorMessageID: "m7", Text: strings.Repeat("delta follow-up ", 600)},
+	}
+	foldCount := compactionFoldCount(len(blocks))
+	oldTokens := summaryTokens(blocks[:foldCount])
+	merged, err := mergeIfOver(
+		context.Background(), task, &store.Conversation{ID: "c1"}, "", "", blocks, history, tree, 1000,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.reqs) != 1 {
+		t.Fatalf("provider requests = %d, want one material fold", len(provider.reqs))
+	}
+	if len(merged) >= len(blocks) {
+		t.Fatalf("fold did not reduce active path blocks: before=%d after=%d", len(blocks), len(merged))
+	}
+	var replacement *SummaryBlock
+	for i := range merged {
+		if merged[i].FromMessageID == "m0" && merged[i].AnchorMessageID == "m3" {
+			replacement = &merged[i]
+			break
+		}
+	}
+	if replacement == nil {
+		t.Fatalf("folded replacement m0..m3 missing: %+v", merged)
+	}
+	gotTokens := estimateTokens(replacement.Text)
+	maxAccepted := oldTokens * defaultSummaryMergeMaxPercent / 100
+	if gotTokens > maxAccepted {
+		t.Fatalf("folded summary = %d tokens, want <= %d (60%% of %d)", gotTokens, maxAccepted, oldTokens)
+	}
+	if provider.reqs[0].MaxOutputTokens > maxAccepted {
+		t.Fatalf("provider output cap = %d, want <= %d", provider.reqs[0].MaxOutputTokens, maxAccepted)
 	}
 }
 
@@ -1354,9 +1413,10 @@ func TestMaybeCompactMapReduceBoundsEveryRequestAndCoversFullRange(t *testing.T)
 		t.Fatal(err)
 	}
 	for key, value := range map[string]any{
-		"keep_recent_rounds":            1,
-		"summary_max_tokens":            512,
-		"compaction_request_max_tokens": minimumCompactionRequestMaxTokens,
+		"keep_recent_rounds":              1,
+		"compaction_retention_percentage": 10,
+		"summary_max_tokens":              512,
+		"compaction_request_max_tokens":   minimumCompactionRequestMaxTokens,
 	} {
 		if err := store.SetSetting(db, key, value); err != nil {
 			t.Fatal(err)
@@ -2497,7 +2557,6 @@ func TestCompactionLimitsFailClosedOnInvalidTunables(t *testing.T) {
 	previousCacheBound := messageTokenMemoCacheBound
 	previousPerRound := summaryTargetPerRoundTokens
 	previousMinimum := summaryTargetMinTokens
-	previousMergeIter := summaryMergeFoldIterCap
 	t.Cleanup(func() {
 		compactionToolOutputTokens = previousToolTokens
 		compactionToolInputTokens = previousToolInputTokens
@@ -2509,7 +2568,6 @@ func TestCompactionLimitsFailClosedOnInvalidTunables(t *testing.T) {
 		messageTokenMemoCacheBound = previousCacheBound
 		summaryTargetPerRoundTokens = previousPerRound
 		summaryTargetMinTokens = previousMinimum
-		summaryMergeFoldIterCap = previousMergeIter
 	})
 
 	compactionToolOutputTokens = -1
@@ -2581,7 +2639,6 @@ func TestCompactionLimitsFailClosedOnInvalidTunables(t *testing.T) {
 		t.Fatalf("invalid target tunables produced a %d-token target", got)
 	}
 
-	summaryMergeFoldIterCap = 0
 	tree, err := newCompactionMessageTree(map[string]string{"m0": "", "m1": "m0", "m2": "m1", "m3": "m2"}, buildHistory(4))
 	if err != nil {
 		t.Fatal(err)
@@ -2595,7 +2652,7 @@ func TestCompactionLimitsFailClosedOnInvalidTunables(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(merged) >= len(blocks) {
-		t.Fatalf("invalid merge iteration cap disabled folding: %+v", merged)
+		t.Fatalf("single-pass merge did not fold: %+v", merged)
 	}
 }
 
@@ -2800,7 +2857,8 @@ func TestPlanCompactionHotPath(t *testing.T) {
 	if action != compactNone || len(keep) != 8 || len(blocks) != 0 {
 		t.Fatalf("short conv: action=%d keep=%d blocks=%d, want none/8/0", action, len(keep), len(blocks))
 	}
-	// Overflow (> 12, ≤ 36) → advance asynchronously, keep all verbatim this turn.
+	// The 20-message high watermark advances asynchronously and keeps all history
+	// verbatim for the current turn.
 	keep2, _, action2 := PlanCompaction(db, conv, buildHistory(20), 0)
 	if action2 != compactAsync || len(keep2) != 20 {
 		t.Fatalf("overflow conv: action=%d keep=%d, want async/20", action2, len(keep2))
@@ -2808,6 +2866,43 @@ func TestPlanCompactionHotPath(t *testing.T) {
 	// Large cold-start backlog (> 36) → summarise inline to bound the prompt.
 	if _, _, action3 := PlanCompaction(db, conv, buildHistory(40), 0); action3 != compactInline {
 		t.Fatalf("large backlog: action=%d, want inline", action3)
+	}
+}
+
+func TestPlanCompactionBatchesNewRoundsAfterPersistedFrontier(t *testing.T) {
+	store.InvalidateConfig()
+	t.Cleanup(store.InvalidateConfig)
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, updated_at INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	mustSet(t, db, "keep_recent_rounds", "6")
+	mustSet(t, db, "compaction_retention_percentage", "40")
+	mustSet(t, db, "compaction_token_trigger", "0")
+
+	history := buildHistory(28)
+	existing := []SummaryBlock{{
+		Level: 1, FromMessageID: "m0", AnchorMessageID: "m7", Text: "durable earlier summary",
+	}}
+	raw, _ := json.Marshal(existing)
+	conv := &store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: raw}
+
+	// The persisted frontier leaves 12 verbatim messages. One additional round
+	// grows that tail to 14, which must not schedule another compaction.
+	keep, blocks, action := PlanCompaction(db, conv, history[:22], 0)
+	if action != compactNone || len(keep) != 14 || len(blocks) != 1 {
+		t.Fatalf("one new round: action=%d keep=%d blocks=%d, want none/14/1", action, len(keep), len(blocks))
+	}
+
+	// Four new rounds grow the tail to the 20-message high watermark. The planner
+	// schedules one batch pass, which will trim it back to the 12-message low mark.
+	keep, blocks, action = PlanCompaction(db, conv, history, 0)
+	if action != compactAsync || len(keep) != 20 || len(blocks) != 1 {
+		t.Fatalf("four new rounds: action=%d keep=%d blocks=%d, want async/20/1", action, len(keep), len(blocks))
 	}
 }
 
@@ -2932,8 +3027,8 @@ func TestPlanCompactionInlineOnBigTokenOverflow(t *testing.T) {
 	}
 	conv := &store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: json.RawMessage("[]")}
 
-	// 14 msgs: tail=14 > keepRounds*2 (12) so it overflows, but ≤ keepRounds*2*3 (36)
-	// so the message-count backlog gate does NOT fire — inline must come from tokens.
+	// Fourteen messages are below the 20-message round high watermark and below the
+	// inline backlog gate, so inline compaction must come only from token pressure.
 	big := buildHistory(14)
 	setLastAssistantInput(big, 50000) // real prompt 50000 > 1.25×32000 = 40000
 	if _, _, action := PlanCompaction(db, conv, big, 0); action != compactInline {
@@ -2949,9 +3044,9 @@ func TestPlanCompactionInlineOnBigTokenOverflow(t *testing.T) {
 	}
 
 	// Estimate-only overflow (no recorded usage → exact=false) must NOT inline: we
-	// never stall first token on a shaky estimate. Small blocks keep the estimate
-	// tiny, so this stays async via the round-budget overflow.
-	est := buildHistory(14) // no InputTokens anywhere → exact=false
+	// never stall first token on a shaky estimate. Twenty messages reach the round
+	// high watermark, so this stays asynchronous.
+	est := buildHistory(20) // no InputTokens anywhere → exact=false
 	if _, _, action := PlanCompaction(db, conv, est, 0); action != compactAsync {
 		t.Fatalf("estimate-only, no real count: action=%d, want async", action)
 	}

@@ -71,9 +71,8 @@
 | `AIVORY_LLM_SUMMARY_SHORT_RETRY_SOURCE_FACTOR` | `int` | `2` | `llm/compaction.go` | 短摘要重试前要求的最小“源内容/目标”倍数，避免对本就稀疏的内容强行填充。 |
 | `AIVORY_LLM_BIG_TOKEN_OVERFLOW_NUM` | `int` | `5` | `llm/compaction.go:65` | 本轮触发内联摘要的 token 触发阈值倍数（num/den，默认 5/4 = 1.25 倍）的分子。 |
 | `AIVORY_LLM_BIG_TOKEN_OVERFLOW_DEN` | `int` | `4` | `llm/compaction.go:66` | 本轮触发内联摘要的 token 触发阈值倍数（num/den，默认 5/4 = 1.25 倍）的分母。 |
-| `AIVORY_LLM_INLINE_COMPACTION_BACKLOG_FACTOR` | `int` | `3` | `llm/compaction.go:67` | 未摘要尾部长度相对 keepRounds*2 的倍数，超过则本轮强制内联（而非异步）压缩。 |
+| `AIVORY_LLM_INLINE_COMPACTION_BACKLOG_FACTOR` | `int` | `3` | `llm/compaction.go:67` | 未摘要尾部长度相对 keepRounds*2 的倍数，超过则本轮强制内联（而非异步）压缩；规划器还会在异步高水位之上额外保留一个批次的缓冲。 |
 | `AIVORY_LLM_ATTEMPT` | `int` | `4` | `llm/compaction.go:69` | 向会话 summary_blocks 追加新摘要块时的最大比较并交换（CAS）重试次数。 |
-| `AIVORY_LLM_ITER` | `int` | `3` | `llm/compaction.go:70` | 为把某会话路径的摘要 token 压回预算内所执行的最大重复折叠迭代次数。 |
 | `AIVORY_LLM_TOOL_OUTPUT_TOKENS` | `int` | `2048` | `llm/compaction.go` | 当无法从提供商 Raw 恢复完整且可识别的原生工具结果时，规范化内部工具结果块使用的单项 token 上限。已识别并恢复的完整结果不再在此截断，而由无损压缩 map-reduce 分片限制每次模型请求大小；界面展示的短预览保持不变。 |
 | `AIVORY_LLM_TOOL_INPUT_TOKENS` | `int` | `2048` | `llm/compaction.go` | 将工具调用参数渲染到压缩请求时，每个工具调用的输入 token 上限。 |
 | `AIVORY_LLM_COMPACTION_METADATA_TOKENS` | `int` | `512` | `llm/compaction.go` | 将附件、引用、文档和产物元数据渲染到压缩请求时，每项参考内容的 token 上限。 |
