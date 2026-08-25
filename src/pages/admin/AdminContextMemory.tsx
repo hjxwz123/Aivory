@@ -18,6 +18,7 @@ const OWNED_KEYS = [
   'keep_recent_rounds',
   'compaction_token_trigger',
   'compaction_token_cap',
+  'compaction_token_target_percentage',
   'compaction_retention_percentage',
   'summary_max_tokens',
   'summary_target_percent',
@@ -88,6 +89,7 @@ export default function AdminContextMemory() {
 
   async function save() {
     const retention = readNumber('compaction_retention_percentage', 40)
+    const tokenTarget = readNumber('compaction_token_target_percentage', 60)
     const target = readNumber('summary_target_percent', 30)
     const keepRounds = readNumber('keep_recent_rounds', 6)
     const summaryTokens = readNumber('summary_max_tokens', 8192)
@@ -96,6 +98,8 @@ export default function AdminContextMemory() {
     if (
       retention < 10 ||
       retention > 50 ||
+      tokenTarget < 25 ||
+      tokenTarget > 80 ||
       target < 5 ||
       target > 80 ||
       keepRounds < 1 ||
@@ -241,6 +245,26 @@ export default function AdminContextMemory() {
                     setDraft((current) => ({
                       ...current,
                       compaction_token_trigger: Math.max(0, Math.floor(Number(event.target.value) || 0)),
+                    }))
+                  }
+                />
+              </Field>
+              <Field
+                label={t('admin:settings.fields.tokenTargetPercentage')}
+                htmlFor="compaction-token-target-percentage"
+                hint={t('admin:settings.fields.tokenTargetPercentageHint')}
+              >
+                <Input
+                  id="compaction-token-target-percentage"
+                  type="number"
+                  min={25}
+                  max={80}
+                  step={1}
+                  value={String(readNumber('compaction_token_target_percentage', 60))}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      compaction_token_target_percentage: Math.floor(Number(event.target.value) || 0),
                     }))
                   }
                 />

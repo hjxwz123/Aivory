@@ -1361,7 +1361,7 @@ func analyticsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 var settingsKeys = []string{
 	"default_model_id", "task_model_id", "context_compaction_model_id", "tool_route_model_id", "embedding_model_id",
 	"keep_recent_rounds", "summary_max_tokens", "summary_target_percent", "summary_merge_max_tokens", "compaction_request_max_tokens", "context_compaction_prompt", "compaction_enabled",
-	"compaction_token_trigger", "compaction_token_cap", "compaction_retention_percentage",
+	"compaction_token_trigger", "compaction_token_cap", "compaction_token_target_percentage", "compaction_retention_percentage",
 	"memory_enabled", "daily_message_limit", "daily_image_limit", "signup_open",
 	"password_login_enabled", "auth_entry_mode", "auth_default_provider_id",
 	"oauth_initial_password_policy", "oauth_auto_provision_enabled",
@@ -1624,7 +1624,7 @@ func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.R
 			// token_trigger inverts the early-exit guard and a zero/negative
 			// summary length makes the tiered merge churn the cache every turn.
 			switch k {
-			case "keep_recent_rounds", "summary_max_tokens", "summary_target_percent", "summary_merge_max_tokens", "compaction_request_max_tokens", "compaction_token_trigger", "compaction_token_cap", "compaction_retention_percentage",
+			case "keep_recent_rounds", "summary_max_tokens", "summary_target_percent", "summary_merge_max_tokens", "compaction_request_max_tokens", "compaction_token_trigger", "compaction_token_cap", "compaction_token_target_percentage", "compaction_retention_percentage",
 				"daily_message_limit", "daily_image_limit", "daily_token_limit",
 				"max_concurrent_generations", "register_ip_daily_limit", "fallback_ttft_sec":
 				var n int
@@ -1635,6 +1635,9 @@ func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.R
 					return 0, errInvalidInput
 				}
 				if k == "compaction_retention_percentage" && (n < 10 || n > 50) {
+					return 0, errInvalidInput
+				}
+				if k == "compaction_token_target_percentage" && (n < 25 || n > 80) {
 					return 0, errInvalidInput
 				}
 				if k == "keep_recent_rounds" && n < 1 {

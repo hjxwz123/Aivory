@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -83,10 +84,9 @@ func persistCompactionFixture(t *testing.T, db *sql.DB, conv *store.Conversation
 	}
 }
 
-// TestMaybeCompactNoDoubleCompaction locks in §4.7's core guarantee: once a
-// range is summarised it is NEVER summarised again. A later compaction only
-// rolls up the messages after the previous summary's anchor (high-water mark),
-// and earlier summary blocks stay byte-identical (stable prefix for the cache).
+// TestMaybeCompactNoDoubleCompaction locks in the replacement-state guarantee:
+// a later pass feeds only the prior continuation state plus messages after its
+// frontier into one new state. The active path renders one containing block.
 func TestMaybeCompactNoDoubleCompaction(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -127,16 +127,14 @@ func TestMaybeCompactNoDoubleCompaction(t *testing.T) {
 	if len(keep2) != 12 {
 		t.Fatalf("pass2 kept %d, want 12", len(keep2))
 	}
-	if len(blocks2) != 2 {
-		t.Fatalf("pass2 got %d summary blocks, want 2", len(blocks2))
+	if len(blocks2) != 1 {
+		t.Fatalf("pass2 got %d summary blocks, want one replacement state", len(blocks2))
 	}
-	// The first block must be UNCHANGED — not re-summarised.
-	if blocks2[0].FromMessageID != "m0" || blocks2[0].AnchorMessageID != "m3" || blocks2[0].Text != blocks1[0].Text {
-		t.Fatalf("pass2 re-summarised the old range: %+v", blocks2[0])
+	if blocks2[0].FromMessageID != "m0" || blocks2[0].AnchorMessageID != "m5" {
+		t.Fatalf("pass2 replacement range = %s..%s, want m0..m5", blocks2[0].FromMessageID, blocks2[0].AnchorMessageID)
 	}
-	// The second block must cover ONLY the new range m4..m5.
-	if blocks2[1].FromMessageID != "m4" || blocks2[1].AnchorMessageID != "m5" {
-		t.Fatalf("pass2 new block range = %s..%s, want m4..m5", blocks2[1].FromMessageID, blocks2[1].AnchorMessageID)
+	if blocks2[0].Format != continuationSummaryFormatV1 || !strings.Contains(blocks2[0].Text, blocks1[0].Text) {
+		t.Fatalf("pass2 replacement lost prior continuation state: %+v", blocks2[0])
 	}
 
 	// Pass 3: no growth → nothing new past the anchor → no extra block.
@@ -146,7 +144,7 @@ func TestMaybeCompactNoDoubleCompaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(blocks3) != 2 {
+	if len(blocks3) != 1 {
 		t.Fatalf("pass3 re-compacted with no new messages: %d blocks", len(blocks3))
 	}
 }
@@ -186,6 +184,54 @@ func TestMaybeCompactTokenTriggerDeepens(t *testing.T) {
 	}
 	if len(blocks) == 0 {
 		t.Fatal("token trigger produced no summary block")
+	}
+}
+
+func TestMaybeCompactTokenPressureTargetsIndependentLowWatermark(t *testing.T) {
+	store.InvalidateConfig()
+	t.Cleanup(store.InvalidateConfig)
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	mustSet(t, db, "keep_recent_rounds", "100")
+	mustSet(t, db, "compaction_token_target_percentage", "60")
+	mustSet(t, db, "summary_target_percent", "30")
+
+	history := buildHistory(60)
+	for i := range history {
+		blocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: strings.Repeat(fmt.Sprintf("evidence-%d ", i), 45)}})
+		history[i].Blocks = blocks
+	}
+	renderedHistoryTokens := estimateHistoryTokens(history)
+	const fixedRequestTokens = 200
+	requestTokens := renderedHistoryTokens + fixedRequestTokens
+	trigger := requestTokens * 4 / 5
+	mustSet(t, db, "compaction_token_trigger", strconv.Itoa(trigger))
+	conv := &store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: json.RawMessage("[]")}
+	persistCompactionFixture(t, db, conv, history)
+
+	keep, blocks, err := MaybeCompactForRequest(
+		context.Background(), db, nil, conv, history, requestTokens, renderedHistoryTokens,
+		0, "", "u1", history[len(history)-1].ID,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocks) != 1 || blocks[0].Format != continuationSummaryFormatV1 {
+		t.Fatalf("replacement blocks = %+v, want one continuation state", blocks)
+	}
+	target := effectiveCompactionTokenTarget(trigger, 60)
+	postCompactionTokens := fixedRequestTokens + summaryTokens(blocks) + estimateHistoryTokens(keep)
+	if postCompactionTokens > target {
+		t.Fatalf("post-compaction request = %d, target low watermark = %d (trigger=%d, kept=%d)", postCompactionTokens, target, trigger, len(keep))
+	}
+	if postCompactionTokens >= trigger {
+		t.Fatalf("post-compaction request %d did not leave hysteresis below trigger %d", postCompactionTokens, trigger)
 	}
 }
 
@@ -460,11 +506,11 @@ func TestMaybeCompactBridgesPrunedSummaryGap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(blocks) != 2 {
-		t.Fatalf("blocks after bridging gap = %+v, want prefix + new bridge block", blocks)
+	if len(blocks) != 1 {
+		t.Fatalf("blocks after bridging gap = %+v, want one replacement state", blocks)
 	}
-	if blocks[1].FromMessageID != "m6" || blocks[1].AnchorMessageID != "m9" {
-		t.Fatalf("bridge range = %s..%s, want m6..m9", blocks[1].FromMessageID, blocks[1].AnchorMessageID)
+	if blocks[0].FromMessageID != "m0" || blocks[0].AnchorMessageID != "m9" {
+		t.Fatalf("bridge replacement range = %s..%s, want m0..m9", blocks[0].FromMessageID, blocks[0].AnchorMessageID)
 	}
 	if len(keep) == 0 || keep[0].ID != "m10" {
 		t.Fatalf("keep starts at %+v, want m10 after bridging m6..m9", keep)
@@ -2628,7 +2674,7 @@ func TestCompactionLimitsFailClosedOnInvalidTunables(t *testing.T) {
 	t.Cleanup(store.InvalidateConfig)
 	mustSet(t, db, "summary_max_tokens", "0")
 	mustSet(t, db, "summary_merge_max_tokens", "0")
-	_, _, _, _, summaryMax, _, mergeMax := compactionSettings(db)
+	_, _, _, _, _, summaryMax, _, mergeMax := compactionSettings(db)
 	if summaryMax != defaultSummaryMaxTokens || mergeMax != defaultSummaryMergeBudget {
 		t.Fatalf("invalid summary budgets bypassed defaults: max=%d merge=%d", summaryMax, mergeMax)
 	}
@@ -3559,6 +3605,79 @@ func TestCompactionHistoryForRequestMatchesToolAndFastFiltering(t *testing.T) {
 	}
 	if len(got[0].Blocks) != 1 || got[0].Blocks[0].Kind != "text" || got[0].Blocks[0].Text != "visible" {
 		t.Fatalf("transformed blocks = %+v, want visible text only", got[0].Blocks)
+	}
+}
+
+func TestCompactHistoricalToolResultsKeepsPairsAndProtectsRecentRounds(t *testing.T) {
+	largeOld := strings.Repeat("old evidence ", 900)
+	largeRecent := strings.Repeat("recent evidence ", 900)
+	oldRaw := json.RawMessage(`{"type":"tool_result","tool_use_id":"call-old","content":"complete old native result"}`)
+	recentRaw := json.RawMessage(`{"type":"tool_result","tool_use_id":"call-recent","content":"complete recent native result"}`)
+	history := []UnifiedMessage{
+		{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "first"}}},
+		{Role: "assistant", Raw: oldRaw, Blocks: []UnifiedBlock{
+			{Kind: "tool_call", ToolName: "search", ToolID: "call-old", Input: json.RawMessage(`{"q":"old"}`)},
+			{Kind: "tool_output", ToolName: "search", ToolID: "call-old", Text: largeOld},
+		}},
+		{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "second"}}},
+		{Role: "assistant", Blocks: []UnifiedBlock{{Kind: "text", Text: "second answer"}}},
+		{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "third"}}},
+		{Role: "assistant", Raw: recentRaw, Blocks: []UnifiedBlock{
+			{Kind: "tool_call", ToolName: "search", ToolID: "call-recent", Input: json.RawMessage(`{"q":"recent"}`)},
+			{Kind: "tool_output", ToolName: "search", ToolID: "call-recent", Text: largeRecent},
+		}},
+	}
+
+	projected, changed := compactHistoricalToolResults(history)
+	if !changed {
+		t.Fatal("old oversized tool result was not compacted")
+	}
+	if len(projected[1].Raw) != 0 {
+		t.Fatalf("old native Raw remained in request projection: %s", projected[1].Raw)
+	}
+	if len(projected[1].Blocks) != 2 || projected[1].Blocks[0].Kind != "tool_call" || projected[1].Blocks[1].Kind != "tool_output" {
+		t.Fatalf("old tool pair was broken: %+v", projected[1].Blocks)
+	}
+	if tokens := estimateTokens(projected[1].Blocks[1].Text); tokens > defaultHistoricalToolOutputTokens {
+		t.Fatalf("old tool output tokens = %d, cap = %d", tokens, defaultHistoricalToolOutputTokens)
+	}
+	if !strings.Contains(projected[1].Blocks[1].Text, "middle omitted") {
+		t.Fatalf("old tool projection did not preserve bounded head/tail marker: %q", projected[1].Blocks[1].Text)
+	}
+	if string(projected[5].Raw) != string(recentRaw) || projected[5].Blocks[1].Text != largeRecent {
+		t.Fatal("one of the two protected recent rounds was compacted")
+	}
+	if string(history[1].Raw) != string(oldRaw) || history[1].Blocks[1].Text != largeOld {
+		t.Fatal("request projection mutated the durable source history")
+	}
+}
+
+func TestInstallContinuationReplacementRetainsOnlySiblingRequiredState(t *testing.T) {
+	history := buildHistory(8)
+	parents := map[string]string{"m0": ""}
+	for i := 1; i < len(history); i++ {
+		parents[history[i].ID] = history[i-1].ID
+	}
+	parents["sibling"] = "m3"
+	tree, err := newCompactionMessageTree(parents, history)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior := SummaryBlock{Level: 1, FromMessageID: "m0", AnchorMessageID: "m3", Text: "prior"}
+	replacement := SummaryBlock{Level: 2, Format: continuationSummaryFormatV1, FromMessageID: "m0", AnchorMessageID: "m7", Text: "replacement"}
+	withSibling := installContinuationReplacement([]SummaryBlock{prior}, []SummaryBlock{prior}, replacement, tree)
+	if len(withSibling) != 2 {
+		t.Fatalf("sibling-required state was pruned: %+v", withSibling)
+	}
+
+	delete(parents, "sibling")
+	tree, err = newCompactionMessageTree(parents, history)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withoutSibling := installContinuationReplacement([]SummaryBlock{prior}, []SummaryBlock{prior}, replacement, tree)
+	if len(withoutSibling) != 1 || withoutSibling[0].Text != replacement.Text {
+		t.Fatalf("superseded active-path state was retained: %+v", withoutSibling)
 	}
 }
 
