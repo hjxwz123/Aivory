@@ -59,18 +59,26 @@ const (
 	// block clipped to this token budget for normal rendering. Compaction may
 	// recover a complete result only from a recognized Raw tool-result envelope;
 	// its request-size bound is then enforced by the lossless map/reduce splitter.
-	defaultCompactionToolOutputTokens  = 2048
-	defaultCompactionToolInputTokens   = 2048
-	defaultCompactionMetadataTokens    = 512
-	defaultCompactionPromptTokens      = 4096
-	defaultMessageTokenMemoCacheBound  = 100000
-	defaultMessageStructuralOverhead   = 4
-	defaultSummaryTokensClampFloor     = 256
-	defaultSummaryTargetMinTokens      = 384
-	defaultSummaryTargetPerRound       = 96
-	defaultInlineBacklogFactor         = 3
-	defaultSummaryMergeFoldIterCap     = 3
-	defaultCompactionReduceIterCap     = 64
+	defaultCompactionToolOutputTokens = 2048
+	defaultCompactionToolInputTokens  = 2048
+	defaultCompactionMetadataTokens   = 512
+	defaultCompactionPromptTokens     = 4096
+	defaultMessageTokenMemoCacheBound = 100000
+	defaultMessageStructuralOverhead  = 4
+	defaultSummaryTokensClampFloor    = 256
+	defaultSummaryTargetMinTokens     = 384
+	defaultSummaryTargetPerRound      = 96
+	defaultInlineBacklogFactor        = 3
+	defaultCompactionReduceIterCap    = 64
+	// Round-triggered compaction is maintenance, not an every-turn operation.
+	// Several complete rounds must accumulate between the low and high watermarks;
+	// token pressure can still bypass this cadence immediately.
+	defaultCompactionBatchRounds = 4
+	// A summary fold must be materially smaller than the blocks it replaces.
+	// The old oldTokens-1 target allowed a 7k-token summary to become another
+	// 7k-token summary and then be folded repeatedly in one operation.
+	defaultSummaryMergeTargetPercent   = 50
+	defaultSummaryMergeMaxPercent      = 60
 	compactionPersistenceVerifyTimeout = 5 * time.Second
 	// The API permits one detached generation to run for 90 minutes by default.
 	// Keep compaction's streaming-row protection comfortably above that ceiling;
@@ -128,7 +136,6 @@ var (
 	bigTokenOverflowDen           = envcfg.Int("AIVORY_LLM_BIG_TOKEN_OVERFLOW_DEN", 4)
 	inlineCompactionBacklogFactor = envcfg.Int("AIVORY_LLM_INLINE_COMPACTION_BACKLOG_FACTOR", 3)
 	summaryBlockCASAttempts       = envcfg.Int("AIVORY_LLM_ATTEMPT", 4)
-	summaryMergeFoldIterCap       = envcfg.Int("AIVORY_LLM_ITER", 3)
 	compactionToolOutputTokens    = envcfg.Int("AIVORY_LLM_TOOL_OUTPUT_TOKENS", defaultCompactionToolOutputTokens)
 	compactionToolInputTokens     = envcfg.Int("AIVORY_LLM_TOOL_INPUT_TOKENS", defaultCompactionToolInputTokens)
 	compactionMetadataTokens      = envcfg.Int("AIVORY_LLM_COMPACTION_METADATA_TOKENS", defaultCompactionMetadataTokens)
@@ -1883,6 +1890,17 @@ func compactionKeepCount(messageCount, keepRounds, retentionPct int) int {
 	return keep
 }
 
+// compactionRoundOverflow separates the round-count trigger from its retention
+// target. Once a pass trims the tail to keepMsgs, another four complete rounds
+// must accumulate before round pressure alone can enqueue more maintenance.
+// Token pressure is evaluated separately and remains immediate.
+func compactionRoundOverflow(tail, keepMsgs int) bool {
+	if tail <= keepMsgs {
+		return false
+	}
+	return tail >= keepMsgs+defaultCompactionBatchRounds*2
+}
+
 // automaticCompactionCandidateCut finds the safe prefix an automatic pass could
 // replace. A complete request may exceed the token
 // trigger because of system instructions, tool declarations, RAG, or a large
@@ -2005,7 +2023,8 @@ func PlanCompaction(db *sql.DB, conv *store.Conversation, history []store.Messag
 		// growing history periodically instead.
 		tokenOverflow = false
 	}
-	overflow := tail > keepMsgs || tokenOverflow
+	roundOverflow := compactionRoundOverflow(tail, keepMsgs)
+	overflow := roundOverflow || tokenOverflow
 	// A token-heavy but message-LIGHT overflow (a few huge code/plot turns) is not
 	// caught by the message-count backlog gate below, so it would always defer to
 	// the async pass and make THIS turn pay the full un-summarised prompt — the
@@ -2019,6 +2038,10 @@ func PlanCompaction(db *sql.DB, conv *store.Conversation, history []store.Messag
 	if tokenOverflow && exact && tokenTrigger > 0 && bigTokenOverflowNum > 0 && bigTokenOverflowDen > 0 {
 		bigTokenOverflow = ctxTok > tokenTrigger*bigTokenOverflowNum/bigTokenOverflowDen
 	}
+	inlineBacklogThreshold := max(
+		minimumKeepMsgs*effectiveInlineBacklogFactor(),
+		keepMsgs+defaultCompactionBatchRounds*4,
+	)
 	switch {
 	case !overflow:
 		return keep, pathExisting, compactNone
@@ -2027,7 +2050,7 @@ func PlanCompaction(db *sql.DB, conv *store.Conversation, history []store.Messag
 		// inside the verbatim retention window or protected by an in-flight assistant
 		// row. Do not enqueue a no-op compaction or emit started/failed.
 		return keep, pathExisting, compactNone
-	case tail > minimumKeepMsgs*effectiveInlineBacklogFactor() || bigTokenOverflow:
+	case tail > inlineBacklogThreshold || bigTokenOverflow:
 		// Large un-summarised backlog (a freshly-imported long conversation) OR a
 		// real context well past the trigger: summarise inline this turn so the
 		// prompt stays bounded instead of paying one full-price spike first.
@@ -3074,10 +3097,10 @@ func (t *compactionMessageTree) frontiersUnchanged(before, after []SummaryBlock)
 }
 
 // mergeAndPersist folds over-budget path summaries into a coarser block when the
-// path's summary tokens exceed budget, with at most ONE task-model call: it reads
-// the current blocks, merges if needed, and CAS-writes. On contention (the column
-// moved) it returns ok=false WITHOUT retrying the merge — a later compaction turn
-// folds instead, so a hot conversation never pays multiple merge calls per turn.
+// path's summary tokens exceed budget, with at most one fold pipeline: it reads
+// the current blocks, merges if needed, and CAS-writes. A pipeline may still use
+// bounded map-reduce or one short-output retry for oversized sources. On
+// contention it returns ok=false without starting a second fold.
 func mergeAndPersist(ctx context.Context, db *sql.DB, task *TaskLLM, conv *store.Conversation, payerID, conversationModelID string, history []store.Message, budget int) ([]SummaryBlock, bool, error) {
 	// Generate the optional coarse summary outside the write transaction, then
 	// lock and CAS-persist below. Edit/delete take the same conversation lock.
@@ -3129,74 +3152,67 @@ func mergeAndPersist(ctx context.Context, db *sql.DB, task *TaskLLM, conv *store
 	return nil, false, nil // contended — let a later turn fold
 }
 
-// mergeIfOver folds the oldest current-path blocks into a coarser block when the
-// path's summary tokens exceed budget; off-path blocks are preserved untouched.
-// It folds REPEATEDLY (capped) until the path fits, so a long thread's summary
-// prefix can't grow without bound — a single fold of the oldest half may not
-// bring the total under budget if recent coarse blocks dominate.
+// mergeIfOver folds the oldest current-path blocks into one coarser block when
+// the path exceeds budget; off-path blocks are preserved untouched. One append
+// performs at most one fold. The fold has a strict compression target below, so
+// repeated near-lossless rewrites cannot create several expensive calls in one
+// logical compaction operation.
 func mergeIfOver(ctx context.Context, task *TaskLLM, conv *store.Conversation, payerID, conversationModelID string, blocks []SummaryBlock, history []store.Message, tree *compactionMessageTree, budget int) ([]SummaryBlock, error) {
-	iterCap := summaryMergeFoldIterCap
-	if iterCap <= 0 {
-		iterCap = defaultSummaryMergeFoldIterCap
+	pathBlocks := filterBlocksForPath(blocks, history)
+	pathTokens := summaryTokens(pathBlocks)
+	if pathTokens <= budget || len(pathBlocks) < 2 {
+		return blocks, nil
 	}
-	for iter := 0; iter < iterCap; iter++ {
-		pathBlocks := filterBlocksForPath(blocks, history)
-		pathTokens := summaryTokens(pathBlocks)
-		if pathTokens <= budget || len(pathBlocks) < 2 {
-			return blocks, nil
-		}
-		merged, err := mergeOldestBlocksWithModel(ctx, task, conv, payerID, conversationModelID, pathBlocks, budget)
-		if err != nil {
-			return blocks, err
-		}
-		foldCount := compactionFoldCount(len(pathBlocks))
-		// A task-model failure returns pathBlocks unchanged. Treat that as no fold;
-		// otherwise cleanup would delete source blocks despite having no replacement.
-		if len(merged) != len(pathBlocks)-foldCount+1 || len(merged) == 0 {
-			return blocks, nil
-		}
-		replacement := merged[0]
-		if replacement.FromMessageID != pathBlocks[0].FromMessageID ||
-			replacement.AnchorMessageID != pathBlocks[foldCount-1].AnchorMessageID {
-			return blocks, nil
-		}
+	merged, err := mergeOldestBlocksWithModel(ctx, task, conv, payerID, conversationModelID, pathBlocks, budget)
+	if err != nil {
+		return blocks, err
+	}
+	foldCount := compactionFoldCount(len(pathBlocks))
+	// A task-model failure returns pathBlocks unchanged. Treat that as no fold;
+	// otherwise cleanup would delete source blocks despite having no replacement.
+	if len(merged) != len(pathBlocks)-foldCount+1 || len(merged) == 0 {
+		return blocks, nil
+	}
+	replacement := merged[0]
+	if replacement.FromMessageID != pathBlocks[0].FromMessageID ||
+		replacement.AnchorMessageID != pathBlocks[foldCount-1].AnchorMessageID {
+		return blocks, nil
+	}
 
-		// Remove a folded input only when the real message tree proves the coarse
-		// replacement is visible on every branch that could render that input. A
-		// branch that split before replacement's anchor keeps its shared-prefix block.
-		foldedSet := make(map[string]bool, foldCount)
-		for _, b := range pathBlocks[:foldCount] {
-			neededOutside, ok := tree.neededOutsideReplacement(b, replacement)
-			if !ok {
-				return blocks, nil
-			}
-			if neededOutside {
-				continue
-			}
-			foldedSet[summaryBlockRangeKey(b)] = true
-		}
-		if len(foldedSet) == 0 {
+	// Remove a folded input only when the real message tree proves the coarse
+	// replacement is visible on every branch that could render that input. A
+	// branch that split before replacement's anchor keeps its shared-prefix block.
+	foldedSet := make(map[string]bool, foldCount)
+	for _, b := range pathBlocks[:foldCount] {
+		neededOutside, ok := tree.neededOutsideReplacement(b, replacement)
+		if !ok {
 			return blocks, nil
 		}
-		rebuilt := make([]SummaryBlock, 0, len(blocks))
-		for _, b := range blocks {
-			if !foldedSet[summaryBlockRangeKey(b)] {
-				rebuilt = append(rebuilt, b)
-			}
+		if neededOutside {
+			continue
 		}
-		next := append(rebuilt, replacement)
-		nextPath := filterBlocksForPath(next, history)
-		// A valid fold must make measurable progress without growing durable state,
-		// changing any branch's summarized frontier, or replacing old blocks with an
-		// equal/larger summary. Rejecting dubious output is safe: the original blocks
-		// remain immutable and a later turn may retry.
-		if len(next) > len(blocks) || len(nextPath) >= len(pathBlocks) ||
-			summaryTokens(nextPath) >= pathTokens || !tree.frontiersUnchanged(blocks, next) {
-			return blocks, nil
-		}
-		blocks = next
+		foldedSet[summaryBlockRangeKey(b)] = true
 	}
-	return blocks, nil
+	if len(foldedSet) == 0 {
+		return blocks, nil
+	}
+	rebuilt := make([]SummaryBlock, 0, len(blocks))
+	for _, b := range blocks {
+		if !foldedSet[summaryBlockRangeKey(b)] {
+			rebuilt = append(rebuilt, b)
+		}
+	}
+	next := append(rebuilt, replacement)
+	nextPath := filterBlocksForPath(next, history)
+	// A valid fold must make measurable progress without growing durable state,
+	// changing any branch's summarized frontier, or replacing old blocks with an
+	// equal/larger summary. Rejecting dubious output is safe: the original blocks
+	// remain immutable and a later turn may retry.
+	if len(next) > len(blocks) || len(nextPath) >= len(pathBlocks) ||
+		summaryTokens(nextPath) >= pathTokens || !tree.frontiersUnchanged(blocks, next) {
+		return blocks, nil
+	}
+	return next, nil
 }
 
 func summaryBlockRangeKey(block SummaryBlock) string {
@@ -3226,7 +3242,7 @@ func summaryTokens(blocks []SummaryBlock) int {
 }
 
 // mergeOldestBlocks folds the oldest half of the path's summary blocks into one
-// coarser (level+1) block so the total stays under budget. Level records the
+// coarser (level+1) block to move the total toward budget. Level records the
 // fold depth (provenance); it grows by one per genuine fold — bounded, because
 // every fold strictly reduces the block count (see the half floor below).
 func mergeOldestBlocks(ctx context.Context, task *TaskLLM, conv *store.Conversation, payerID string, blocks []SummaryBlock, budget int) ([]SummaryBlock, error) {
@@ -3246,21 +3262,24 @@ func mergeOldestBlocksWithModel(ctx context.Context, task *TaskLLM, conv *store.
 	oldest := blocks[:half]
 	rest := blocks[half:]
 	oldTokens := summaryTokens(oldest)
-	// Fold only as hard as necessary: leave room for the untouched blocks, while
-	// retaining substantially more state than the old unconditional budget/2 cap
-	// when recent summaries are small. A floor prevents a long-lived conversation
-	// from being reduced to a handful of sentences in one housekeeping pass.
-	target := budget - summaryTokens(rest)
-	if floor := min(summaryTargetMinTokens, budget); target < floor {
-		target = floor
+	if oldTokens <= 1 {
+		return blocks, nil
 	}
-	if target >= oldTokens {
-		target = oldTokens - 1
+	// Require a real fold, not a near-lossless rewrite. Aim for half the source
+	// and never accept more than 60%. When the untouched tail leaves less room,
+	// honor that tighter budget so one successful fold normally brings the path
+	// below summary_merge_max_tokens.
+	target := max(1, oldTokens*defaultSummaryMergeTargetPercent/100)
+	maxAccepted := max(1, oldTokens*defaultSummaryMergeMaxPercent/100)
+	if available := budget - summaryTokens(rest); available > 0 {
+		target = min(target, available)
+		maxAccepted = min(maxAccepted, available)
 	}
-	if target <= 0 {
-		target = 1
+	configuredOutputCap := min(compactionSummaryOutputCap(target, budget), maxAccepted)
+	if configuredOutputCap <= 0 {
+		return blocks, nil
 	}
-	configuredOutputCap := compactionSummaryOutputCap(target, budget)
+	target = min(target, configuredOutputCap)
 	maxLevel := 1
 	for _, b := range oldest {
 		if b.Level > maxLevel {
@@ -3304,6 +3323,9 @@ func mergeOldestBlocksWithModel(ctx context.Context, task *TaskLLM, conv *store.
 		outputCap = effectiveCompactionOutputCap(compactionRequestMaxTokens(task.db), outputCap)
 	}
 	text = clipToTokens(strings.TrimSpace(text), outputCap)
+	if tokens := estimateTokens(text); tokens >= oldTokens || tokens > maxAccepted {
+		return blocks, nil
+	}
 	coarse := SummaryBlock{
 		Level:           maxLevel + 1,
 		AnchorMessageID: oldest[len(oldest)-1].AnchorMessageID,

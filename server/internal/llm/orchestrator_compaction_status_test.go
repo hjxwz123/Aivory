@@ -229,9 +229,9 @@ func runAutomaticCompactionStatusTurn(t *testing.T, orchestrator *Orchestrator, 
 }
 
 func TestAutomaticInlineCompactionEmitsLifecycleStatuses(t *testing.T) {
-	// Six earlier messages plus this turn's new user message exceed the inline
-	// backlog threshold (3 * one retained round), so no queue is involved.
-	orchestrator, provider, conv, model, _ := automaticCompactionStatusFixture(t, 6, nil)
+	// Eighteen earlier messages plus this turn exceed both the batched round watermark
+	// and the inline backlog threshold, so no queue is involved.
+	orchestrator, provider, conv, model, _ := automaticCompactionStatusFixture(t, 18, nil)
 	var statuses []automaticCompactionStatus
 	terminalObservedWithLeaseHeld := false
 	orchestrator.SetCompactionStatusHandler(func(userID, conversationID, operationID, status string) {
@@ -272,7 +272,7 @@ func TestInlineCompactionSettlesBeforeChatAdmissionRefusal(t *testing.T) {
 	// before the main chat reservation. There must be no path where the summary
 	// provider has consumed tokens but a later low-credit chat refusal leaves that
 	// cost attached to an un-settled assistant-message turn.
-	orchestrator, provider, conv, model, db := automaticCompactionStatusFixture(t, 6, nil)
+	orchestrator, provider, conv, model, db := automaticCompactionStatusFixture(t, 18, nil)
 	ctx := context.Background()
 
 	// Remove both free quota rows so each call is credit-admitted independently.
@@ -378,7 +378,7 @@ func TestInlineCompactionSettlesBeforeChatAdmissionRefusal(t *testing.T) {
 
 func TestAutomaticAsyncCompactionValidatesLeafAndLeaseBeforeNotifying(t *testing.T) {
 	q := &compactionStatusQueue{}
-	orchestrator, provider, conv, model, db := automaticCompactionStatusFixture(t, 4, q)
+	orchestrator, provider, conv, model, db := automaticCompactionStatusFixture(t, 10, q)
 	var statuses []automaticCompactionStatus
 	orchestrator.SetCompactionStatusHandler(func(_, _, operationID, status string) {
 		statuses = append(statuses, automaticCompactionStatus{operationID: operationID, status: status})
@@ -418,7 +418,7 @@ func TestAutomaticAsyncCompactionValidatesLeafAndLeaseBeforeNotifying(t *testing
 
 func TestAutomaticCompactionSkipsUnavoidableRequestOverflow(t *testing.T) {
 	q := &compactionStatusQueue{}
-	orchestrator, provider, conv, model, db := automaticCompactionStatusFixture(t, 4, q)
+	orchestrator, provider, conv, model, db := automaticCompactionStatusFixture(t, 10, q)
 	// Force even the system prompt plus the minimum retained tail over the token
 	// trigger. Old rounds exist, but summarizing them cannot satisfy this threshold,
 	// so token pressure must not create a compaction task on every turn.
@@ -447,7 +447,7 @@ func TestAutomaticCompactionSkipsUnavoidableRequestOverflow(t *testing.T) {
 
 func TestAutomaticAsyncCompactionSkipsAfterActiveLeafSwitchesToSibling(t *testing.T) {
 	q := &compactionStatusQueue{}
-	orchestrator, provider, conv, model, db := automaticCompactionStatusFixture(t, 4, q)
+	orchestrator, provider, conv, model, db := automaticCompactionStatusFixture(t, 10, q)
 	var statuses []automaticCompactionStatus
 	orchestrator.SetCompactionStatusHandler(func(_, _, operationID, status string) {
 		statuses = append(statuses, automaticCompactionStatus{operationID: operationID, status: status})
@@ -502,7 +502,7 @@ func TestAutomaticAsyncCompactionSkipsAfterActiveLeafSwitchesToSibling(t *testin
 
 func TestAutomaticAsyncCompactionFailsIfActiveBranchChangesDuringSummary(t *testing.T) {
 	q := &compactionStatusQueue{}
-	orchestrator, provider, conv, model, db := automaticCompactionStatusFixture(t, 4, q)
+	orchestrator, provider, conv, model, db := automaticCompactionStatusFixture(t, 10, q)
 	ctx := context.Background()
 
 	// Make the queued summary exercise the standalone paid-compaction lifecycle.
@@ -642,7 +642,7 @@ func TestAutomaticAsyncCompactionFailsIfActiveBranchChangesDuringSummary(t *test
 
 func TestAutomaticAsyncCompactionSkipsAfterModelConfigChanges(t *testing.T) {
 	q := &compactionStatusQueue{}
-	orchestrator, provider, conv, model, db := automaticCompactionStatusFixture(t, 4, q)
+	orchestrator, provider, conv, model, db := automaticCompactionStatusFixture(t, 10, q)
 	var statuses []automaticCompactionStatus
 	orchestrator.SetCompactionStatusHandler(func(_, _, operationID, status string) {
 		statuses = append(statuses, automaticCompactionStatus{operationID: operationID, status: status})
@@ -717,7 +717,7 @@ func TestAutomaticAsyncCompactionSkipsAfterSummaryCandidateConfigChanges(t *test
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			q := &compactionStatusQueue{}
-			orchestrator, provider, conv, model, db := automaticCompactionStatusFixture(t, 4, q)
+			orchestrator, provider, conv, model, db := automaticCompactionStatusFixture(t, 10, q)
 			var statuses []automaticCompactionStatus
 			orchestrator.SetCompactionStatusHandler(func(_, _, operationID, status string) {
 				statuses = append(statuses, automaticCompactionStatus{operationID: operationID, status: status})
@@ -751,7 +751,7 @@ func TestAutomaticAsyncCompactionSkipsAfterSummaryCandidateConfigChanges(t *test
 
 func TestAutomaticAsyncCompactionRunsForFastModelWithoutOverwritingConversationModel(t *testing.T) {
 	q := &compactionStatusQueue{}
-	orchestrator, provider, conv, advancedModel, db := automaticCompactionStatusFixture(t, 4, q)
+	orchestrator, provider, conv, advancedModel, db := automaticCompactionStatusFixture(t, 10, q)
 	ctx := context.Background()
 	fastModel, err := store.CreateModel(ctx, db, store.Model{
 		ChannelID: advancedModel.ChannelID,
@@ -810,7 +810,7 @@ func TestAutomaticAsyncCompactionRunsForFastModelWithoutOverwritingConversationM
 
 func TestAutomaticAsyncCompactionUsesPrimaryWhenSummaryFallbackIsMissing(t *testing.T) {
 	q := &compactionStatusQueue{}
-	orchestrator, provider, conv, model, db := automaticCompactionStatusFixture(t, 4, q)
+	orchestrator, provider, conv, model, db := automaticCompactionStatusFixture(t, 10, q)
 	ctx := context.Background()
 	var taskModelID string
 	if err := db.QueryRow(`SELECT id FROM models WHERE request_id=?`, "compaction-status-task").Scan(&taskModelID); err != nil {
@@ -843,7 +843,7 @@ func TestAutomaticAsyncCompactionUsesPrimaryWhenSummaryFallbackIsMissing(t *test
 
 func TestAutomaticAsyncCompactionSkipsAfterMissingSummaryFallbackBindingChanges(t *testing.T) {
 	q := &compactionStatusQueue{}
-	orchestrator, provider, conv, model, db := automaticCompactionStatusFixture(t, 4, q)
+	orchestrator, provider, conv, model, db := automaticCompactionStatusFixture(t, 10, q)
 	ctx := context.Background()
 	var taskModelID string
 	if err := db.QueryRow(`SELECT id FROM models WHERE request_id=?`, "compaction-status-task").Scan(&taskModelID); err != nil {
@@ -893,7 +893,7 @@ func TestAutomaticAsyncCompactionSkipsAfterMissingSummaryFallbackBindingChanges(
 
 func TestAutomaticAsyncCompactionEmitsTerminalFailure(t *testing.T) {
 	q := &compactionStatusQueue{}
-	orchestrator, provider, conv, model, _ := automaticCompactionStatusFixture(t, 4, q)
+	orchestrator, provider, conv, model, _ := automaticCompactionStatusFixture(t, 10, q)
 	provider.failSummary = errors.New("summary provider unavailable")
 	var statuses []automaticCompactionStatus
 	terminalObservedWithLeaseHeld := false
@@ -928,7 +928,7 @@ func TestAutomaticAsyncCompactionEmitsTerminalFailure(t *testing.T) {
 func TestAutomaticAsyncCompactionAppliesGenerationDeadline(t *testing.T) {
 	t.Setenv("AIVORY_API_MAX_GEN_DURATION", "250ms")
 	q := &compactionStatusQueue{}
-	orchestrator, provider, conv, model, db := automaticCompactionStatusFixture(t, 4, q)
+	orchestrator, provider, conv, model, db := automaticCompactionStatusFixture(t, 10, q)
 	provider.blockSummary = true
 	var statuses []automaticCompactionStatus
 	terminalObservedWithLeaseHeld := false
@@ -993,7 +993,7 @@ func TestAutomaticAsyncCompactionAppliesGenerationDeadline(t *testing.T) {
 
 func TestAutomaticAsyncCompactionEmitsStableOperationIDOnSuccess(t *testing.T) {
 	q := &compactionStatusQueue{}
-	orchestrator, _, conv, model, _ := automaticCompactionStatusFixture(t, 4, q)
+	orchestrator, _, conv, model, _ := automaticCompactionStatusFixture(t, 10, q)
 	var statuses []automaticCompactionStatus
 	terminalObservedWithLeaseHeld := false
 	orchestrator.SetCompactionStatusHandler(func(_, _, operationID, status string) {
@@ -1022,7 +1022,7 @@ func TestAutomaticAsyncCompactionEmitsStableOperationIDOnSuccess(t *testing.T) {
 
 func TestAutomaticAsyncCompactionSkipsQuietlyAfterAnotherPassAdvancesFrontier(t *testing.T) {
 	q := &compactionStatusQueue{}
-	orchestrator, provider, conv, model, db := automaticCompactionStatusFixture(t, 4, q)
+	orchestrator, provider, conv, model, db := automaticCompactionStatusFixture(t, 10, q)
 	var statuses []automaticCompactionStatus
 	orchestrator.SetCompactionStatusHandler(func(_, _, operationID, status string) {
 		statuses = append(statuses, automaticCompactionStatus{operationID: operationID, status: status})
