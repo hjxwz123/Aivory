@@ -304,16 +304,16 @@ export default function UserFiles() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <ContentHeader title={t('files:title')} fluid />
-      <main className="min-h-0 flex-1 overflow-hidden border-t border-[var(--color-divider)]">
+      <main className="min-h-0 flex-1 overflow-hidden">
         <div className="flex h-full min-h-0 w-full overflow-hidden bg-[var(--color-surface)]">
           <aside
             className={cn(
-              'min-h-0 w-full flex-col bg-[var(--color-bg)] lg:flex lg:w-[20rem] lg:shrink-0 lg:border-r lg:border-[var(--color-border)] xl:w-[21rem]',
+              'min-h-0 w-full flex-col bg-[var(--color-bg)] lg:flex lg:w-[20rem] lg:shrink-0 xl:w-[21rem]',
               mobilePreviewOpen ? 'hidden' : 'flex',
             )}
             aria-label={t('files:accessibility.fileList')}
           >
-            <div className="border-b border-[var(--color-divider)] px-3 py-3">
+            <div className="px-3 pb-2 pt-3">
               <div className="flex items-center justify-between gap-3 text-[0.8125rem]">
                 <span className="inline-flex min-w-0 items-center gap-2 font-medium text-[var(--color-fg)]">
                   <HardDrive size={14} className="shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
@@ -345,7 +345,7 @@ export default function UserFiles() {
               ) : null}
             </div>
 
-            <div className="flex items-center gap-2 border-b border-[var(--color-divider)] px-3 py-2">
+            <div className="flex items-center gap-2 px-3 py-2">
               <Input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
@@ -376,7 +376,7 @@ export default function UserFiles() {
             </div>
 
             <div className="flex min-h-0 flex-1 flex-col">
-              <div className="flex h-9 shrink-0 items-center justify-between border-b border-[var(--color-divider)] px-3 text-[0.75rem] text-[var(--color-fg-subtle)]">
+              <div className="flex h-9 shrink-0 items-center justify-between px-3 text-[0.75rem] text-[var(--color-fg-subtle)]">
                 <span>{t('files:list.title')}</span>
                 <span className="tabular-nums">{t('files:total', { count: total })}</span>
               </div>
@@ -490,7 +490,7 @@ export default function UserFiles() {
               )}
 
               {pageCount > 1 ? (
-                <div className="shrink-0 border-t border-[var(--color-divider)] px-3 pb-3">
+                <div className="shrink-0 px-3 pb-3">
                   <Pagination
                     page={page}
                     pageCount={pageCount}
@@ -511,7 +511,7 @@ export default function UserFiles() {
           >
             {preview ? (
               <>
-                <header className="flex min-h-12 shrink-0 items-center gap-1 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-2 sm:px-3">
+                <header className="flex min-h-12 shrink-0 items-center gap-1 bg-[var(--color-surface)] px-2 sm:px-3">
                   <Button
                     variant="ghost"
                     size="icon-sm"

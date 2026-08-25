@@ -435,6 +435,7 @@
     "rename": "Renommer",
     "renameTitle": "Renommer la conversation",
     "renameHint": "Donnez-lui un nom que vous retrouverez plus tard.",
+    "renameEmpty": "Le titre ne peut pas être vide.",
     "renamed": "Conversation renommée",
     "share": "Partager",
     "archive": "Archiver",

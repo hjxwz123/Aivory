@@ -45,10 +45,10 @@ const ACCENT_PREVIEW: Record<AccentPref, string> = {
 // CSS family per typeface preset so each card previews in its own font,
 // regardless of which font is currently applied to the document.
 const FONT_PREVIEW: Record<FontPref, string> = {
-  default: "'Geist Variable', 'Geist', ui-sans-serif, sans-serif",
-  inter: "'Inter Variable', 'Inter', ui-sans-serif, sans-serif",
-  system: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
-  serif: "'Fraunces Variable', 'Fraunces', ui-serif, Georgia, serif",
+  default: "'Geist Variable', 'Geist', 'PingFang SC', 'Microsoft YaHei', ui-sans-serif, sans-serif",
+  humanist: "'Avenir Next', Avenir, 'Segoe UI', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif",
+  rounded: "'SF Pro Rounded', 'Yuanti SC', 'STYuanti-SC-Regular', ui-rounded, 'Arial Rounded MT Bold', sans-serif",
+  serif: "'Fraunces Variable', 'Fraunces', 'Songti SC', STSong, ui-serif, Georgia, serif",
 }
 
 export default function Appearance() {
@@ -64,12 +64,6 @@ export default function Appearance() {
   const { t } = useTranslation(['settings', 'common'])
 
   useEffect(() => syncSystem(), [syncSystem])
-  // Eager-load Inter so its preview renders in the real face before selection
-  // (it's otherwise lazy-loaded only when chosen).
-  useEffect(() => {
-    void import('@fontsource-variable/inter')
-  }, [])
-
   function onChangeAccent(preset: AccentPref) {
     setAccent(preset)
   }
@@ -224,15 +218,15 @@ export default function Appearance() {
                   onClick={() => onChangeFont(opt)}
                   style={{ fontFamily: FONT_PREVIEW[opt] }}
                   className={cn(
-                    'flex flex-col items-start gap-0.5 rounded-[10px] border px-3 py-2 text-left interactive min-w-[6.5rem]',
+                    'flex min-w-[7.25rem] flex-col items-start gap-1 rounded-[10px] border px-3 py-2.5 text-left interactive',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                     active
                       ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)]'
                       : 'border-[var(--color-border)] hover:border-[var(--color-border-strong)]',
                   )}
                 >
-                  <span className="text-[16px] leading-tight text-[var(--color-fg)]">Ag 字</span>
-                  <span className="text-[11px] text-[var(--color-fg-muted)]">
+                  <span className="text-[20px] font-medium leading-none tracking-normal text-[var(--color-fg)]">Aa 字体</span>
+                  <span className="text-[11px] leading-tight tracking-normal text-[var(--color-fg-muted)]">
                     {t(`appearance.font.options.${opt}`)}
                   </span>
                 </button>

@@ -435,6 +435,7 @@
     "rename": "名前を変更",
     "renameTitle": "会話の名前を変更",
     "renameHint": "後で見つけやすい名前を付けてください。",
+    "renameEmpty": "タイトルを空にすることはできません。",
     "renamed": "会話の名前を変更しました",
     "share": "共有",
     "archive": "アーカイブ",

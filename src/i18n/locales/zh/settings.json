@@ -223,11 +223,11 @@
     "languageBody": "切换界面语言，全局生效。",
     "font": {
       "title": "字体",
-      "subtitle": "选择全站使用的字体。",
+      "subtitle": "选择一种区别清晰的全站阅读风格。",
       "options": {
-        "default": "Geist（默认）",
-        "inter": "Inter",
-        "system": "系统字体",
+        "default": "Geist（现代）",
+        "humanist": "人文无衬线",
+        "rounded": "圆体",
         "serif": "Fraunces（衬线）"
       }
     }

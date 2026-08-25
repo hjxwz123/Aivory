@@ -435,6 +435,7 @@
     "rename": "重命名",
     "renameTitle": "重命名会话",
     "renameHint": "起一个之后能找回的名字。",
+    "renameEmpty": "标题不能为空。",
     "renamed": "会话已重命名",
     "share": "分享",
     "archive": "归档",

@@ -19,7 +19,7 @@ import { toast } from '@/hooks/use-toast'
 import { useAuth } from '@/store/auth'
 import { useConversations } from '@/store/conversations'
 import { SharedMessageIdentity } from './shared-message-identity'
-import { Copy, FileText, Ghost, Loader2 } from 'lucide-react'
+import { Copy, FileText, Ghost, Link2, Loader2 } from 'lucide-react'
 
 function messageText(blocks: ApiBlock[]): string {
   return blocks
@@ -99,11 +99,15 @@ export default function SharedConversation() {
   }
 
   return (
-    <div className="min-h-svh w-full bg-[var(--color-bg)] text-[var(--color-fg)] [--code-toolbar-sticky-top:3.5rem]">
-      <header className="sticky top-0 z-10 bg-[var(--color-bg)]/85 backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-[72rem] items-center justify-between gap-3 px-5 sm:px-8">
-          <Link to={isAuthenticated ? '/' : '/welcome'} aria-label="Aivory" className="inline-flex items-center">
-            <Logo />
+    <div className="min-h-svh w-full bg-[var(--color-bg)] text-[var(--color-fg)] [--code-toolbar-sticky-top:0rem]">
+      <header className="w-full">
+        <div className="mx-auto flex min-h-14 w-full max-w-[var(--layout-message-max-w)] items-center justify-between gap-3 px-[var(--layout-gutter-mobile)] py-3 sm:px-6 lg:px-8">
+          <Link
+            to={isAuthenticated ? '/' : '/welcome'}
+            aria-label="Aivory"
+            className="inline-flex items-center rounded-[8px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+          >
+            <Logo size="sm" />
           </Link>
           <div className="flex min-w-0 items-center gap-2">
             {isAuthenticated ? (
@@ -132,9 +136,9 @@ export default function SharedConversation() {
         </div>
       </header>
 
-      <main className="w-full pb-24">
+      <main className="w-full pb-20 sm:pb-24">
         {status === 'loading' ? (
-          <div className="mx-auto w-full max-w-[var(--layout-message-max-w)] px-[var(--layout-gutter-mobile)] py-10 text-sm text-[var(--color-fg-subtle)] sm:px-6 lg:px-8">
+          <div className="mx-auto w-full max-w-[var(--layout-message-max-w)] px-[var(--layout-gutter-mobile)] py-8 text-sm text-[var(--color-fg-subtle)] sm:px-6 lg:px-8">
             {t('common:common.loading')}
           </div>
         ) : status === 'missing' || !data ? (
@@ -151,16 +155,20 @@ export default function SharedConversation() {
             />
           </div>
         ) : (
-          <>
-            <div className="mx-auto w-full max-w-[var(--layout-message-max-w)] px-[var(--layout-gutter-mobile)] pt-10 sm:px-6 lg:px-8">
-              <div className="mb-2 text-[12px] uppercase tracking-[0.08em] text-[var(--color-fg-subtle)]">
+          <div className="mx-auto w-full max-w-[var(--layout-message-max-w)] px-[var(--layout-gutter-mobile)] sm:px-6 lg:px-8">
+            <section className="pb-7 pt-6 sm:pb-9 sm:pt-10" aria-labelledby="shared-conversation-title">
+              <div className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--color-fg-muted)]">
+                <Link2 size={13} aria-hidden className="shrink-0 text-[var(--color-accent)]" />
                 {t('chat:share.eyebrow')}
               </div>
-              <h1 className="text-balance font-serif text-3xl tracking-tight text-[var(--color-fg)] sm:text-4xl">
+              <h1
+                id="shared-conversation-title"
+                className="mt-3 text-pretty text-[1.625rem] font-semibold leading-tight tracking-normal text-[var(--color-fg)] [overflow-wrap:anywhere] sm:text-[2rem]"
+              >
                 {data.title || t('chat:share.untitled')}
               </h1>
-            </div>
-            <div className="chat-thread mx-auto mt-10 flex w-full max-w-[var(--layout-message-max-w)] flex-col px-[var(--layout-gutter-mobile)] sm:px-6 lg:px-8">
+            </section>
+            <div className="chat-thread flex w-full flex-col">
               {data.messages.map((m, i) => {
                 const text = messageText(m.blocks)
                 const atts = m.attachments ?? []
@@ -250,12 +258,12 @@ export default function SharedConversation() {
                 )
               })}
             </div>
-            <footer className="mx-auto mt-16 w-full max-w-[var(--layout-message-max-w)] px-[var(--layout-gutter-mobile)] text-center text-[12px] text-[var(--color-fg-subtle)] sm:px-6 lg:px-8">
+            <footer className="mt-14 w-full text-center text-[12px] text-[var(--color-fg-subtle)] sm:mt-16">
               <div className="border-t border-[var(--color-divider)] pt-6">
                 {t('chat:share.footer')}
               </div>
             </footer>
-          </>
+          </div>
         )}
       </main>
     </div>

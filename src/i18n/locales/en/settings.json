@@ -223,11 +223,11 @@
     "languageBody": "Switch the interface language. Affects all surfaces.",
     "font": {
       "title": "Typeface",
-      "subtitle": "Choose the font used across the app.",
+      "subtitle": "Choose a clearly distinct reading style for the app.",
       "options": {
-        "default": "Geist (default)",
-        "inter": "Inter",
-        "system": "System",
+        "default": "Geist (modern)",
+        "humanist": "Humanist sans",
+        "rounded": "Rounded",
         "serif": "Fraunces (serif)"
       }
     }
