@@ -403,7 +403,7 @@ func TestManualCompactionReportsPersistenceFailure(t *testing.T) {
 	}
 }
 
-func TestManualCompactionSucceedsWhenOptionalMergeFailsAfterAppend(t *testing.T) {
+func TestManualCompactionUsesOneReplacementPipeline(t *testing.T) {
 	provider := &appendThenCancelMergeProvider{}
 	orchestrator, _, conv, db := compactionBillingFixture(t, provider)
 	history, err := store.ListMessages(context.Background(), db, conv.ID, conv.ActiveLeafID)
@@ -437,16 +437,16 @@ func TestManualCompactionSucceedsWhenOptionalMergeFailsAfterAppend(t *testing.T)
 	if !result.Compacted || result.Reason != "compacted" || result.DroppedMessages != 2 {
 		t.Fatalf("manual compaction result=%+v, want successful two-message advance", result)
 	}
-	if got := provider.hits.Load(); got != 2 {
-		t.Fatalf("provider calls = %d, want append plus failed optional merge", got)
+	if got := provider.hits.Load(); got != 1 {
+		t.Fatalf("provider calls = %d, want one replacement summary pipeline", got)
 	}
 	var raw string
 	if err := db.QueryRow(`SELECT COALESCE(summary_blocks,'[]') FROM conversations WHERE id=?`, conv.ID).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
 	blocks := LoadSummaryBlocks(json.RawMessage(raw))
-	if len(blocks) != 2 {
-		t.Fatalf("optional merge failure lost durable fine-grained blocks: %+v", blocks)
+	if len(blocks) != 1 || blocks[0].Format != continuationSummaryFormatV1 {
+		t.Fatalf("manual compaction did not persist one continuation state: %+v", blocks)
 	}
 	if frontier := summarizedFrontier(filterBlocksForPath(blocks, history), history); frontier != 4 {
 		t.Fatalf("durable frontier = %d, want 4", frontier)

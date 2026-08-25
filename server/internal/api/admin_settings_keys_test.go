@@ -258,6 +258,7 @@ func TestAdminSettingsRejectNegativeNumericValues(t *testing.T) {
 		"compaction_request_max_tokens",
 		"compaction_token_trigger",
 		"compaction_token_cap",
+		"compaction_token_target_percentage",
 		"daily_message_limit",
 		"daily_image_limit",
 		"daily_token_limit",
@@ -285,8 +286,9 @@ func TestAdminSettingsRejectOutOfRangeCompactionPercentages(t *testing.T) {
 	d := Deps{DB: db}
 
 	for key, values := range map[string][]int{
-		"summary_target_percent":          {4, 81},
-		"compaction_retention_percentage": {9, 51},
+		"summary_target_percent":             {4, 81},
+		"compaction_retention_percentage":    {9, 51},
+		"compaction_token_target_percentage": {24, 81},
 	} {
 		for _, value := range values {
 			req := httptest.NewRequest(http.MethodPatch, "/api/admin/settings", strings.NewReader(fmt.Sprintf(`{"%s":%d}`, key, value)))
@@ -342,6 +344,7 @@ func TestAdminSettingsAcceptCompactionConfiguration(t *testing.T) {
 		"context_compaction_model_id":"summary-model",
 		"compaction_token_trigger":32000,
 		"compaction_token_cap":80000,
+		"compaction_token_target_percentage":60,
 		"compaction_retention_percentage":40,
 		"summary_max_tokens":8192,
 		"summary_target_percent":35,
@@ -356,12 +359,13 @@ func TestAdminSettingsAcceptCompactionConfiguration(t *testing.T) {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 	for key, want := range map[string]string{
-		"context_compaction_model_id":     `"` + model.ID + `"`,
-		"compaction_token_cap":            "80000",
-		"compaction_retention_percentage": "40",
-		"summary_target_percent":          "35",
-		"summary_merge_max_tokens":        "8192",
-		"compaction_request_max_tokens":   "32768",
+		"context_compaction_model_id":        `"` + model.ID + `"`,
+		"compaction_token_cap":               "80000",
+		"compaction_token_target_percentage": "60",
+		"compaction_retention_percentage":    "40",
+		"summary_target_percent":             "35",
+		"summary_merge_max_tokens":           "8192",
+		"compaction_request_max_tokens":      "32768",
 	} {
 		var got string
 		if err := db.QueryRow(`SELECT value FROM settings WHERE key=?`, key).Scan(&got); err != nil {

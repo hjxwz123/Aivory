@@ -2090,7 +2090,7 @@ func normalizeCompactionArchiveSetting(row map[string]json.RawMessage, key strin
 	switch key {
 	case "context_compaction_prompt", "context_compaction_model_id", "compaction_enabled",
 		"keep_recent_rounds", "summary_max_tokens", "summary_merge_max_tokens",
-		"summary_target_percent", "compaction_retention_percentage",
+		"summary_target_percent", "compaction_retention_percentage", "compaction_token_target_percentage",
 		"compaction_token_trigger", "compaction_token_cap", "compaction_request_max_tokens":
 		// Handled below.
 	default:
@@ -2144,6 +2144,8 @@ func normalizeCompactionArchiveSetting(row map[string]json.RawMessage, key strin
 		min, max, hasMax = 5, 80, true
 	case "compaction_retention_percentage":
 		min, max, hasMax = 10, 50, true
+	case "compaction_token_target_percentage":
+		min, max, hasMax = 25, 80, true
 	case "compaction_request_max_tokens":
 		min = 8192
 	case "compaction_token_trigger", "compaction_token_cap":

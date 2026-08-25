@@ -444,7 +444,7 @@ export default function AdminUsers() {
             moveDownLabel={t('admin:common.moveDown')}
             mobileDragOnly
             listClassName="max-md:gap-2 max-md:divide-y-0 max-md:border-0 max-md:bg-transparent"
-            rowClassName="grid grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-center gap-x-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-2.5 md:grid-cols-[auto_auto_1fr_auto] md:items-center md:gap-3 md:rounded-none md:border-0 md:bg-transparent md:px-5 md:py-2"
+            rowClassName="grid grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-center gap-x-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-3.5 md:grid-cols-[auto_auto_1fr_auto] md:items-center md:gap-3 md:rounded-none md:border-0 md:bg-transparent md:px-5 md:py-4"
             renderItem={(u) => {
               const isMe = me?.id === u.id
               const group = groups.find((g) => g.id === u.group_id)
