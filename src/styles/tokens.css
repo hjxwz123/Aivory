@@ -393,18 +393,21 @@
 
 /* ============================================================================
  * BODY TYPEFACE — personalization (§ Personalization → font).
- * Default (no data-font / "default") keeps Geist from the base --font-sans.
+ * Default keeps Geist. The remaining presets deliberately change category and
+ * silhouette instead of offering three near-identical neo-grotesk sans faces.
  * ============================================================================ */
+:root[data-font="humanist"],
 :root[data-font="inter"] {
-  --font-sans: 'Inter Variable', 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-sans: 'Avenir Next', Avenir, 'Segoe UI', 'Hiragino Sans GB', 'Microsoft YaHei', ui-sans-serif, sans-serif;
 }
 
+:root[data-font="rounded"],
 :root[data-font="system"] {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-sans: 'SF Pro Rounded', 'Yuanti SC', 'STYuanti-SC-Regular', ui-rounded, 'Arial Rounded MT Bold', 'Microsoft YaHei', sans-serif;
 }
 
 :root[data-font="serif"] {
-  --font-sans: 'Fraunces Variable', 'Fraunces', 'Iowan Old Style', Charter, ui-serif, Georgia, serif;
+  --font-sans: 'Fraunces Variable', 'Fraunces', 'Songti SC', STSong, 'Iowan Old Style', Charter, ui-serif, Georgia, serif;
 }
 
 /* ============================================================================

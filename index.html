@@ -47,8 +47,9 @@
           var fs = ap.fontSize === 'sm' ? 'sm' : ap.fontSize === 'lg' ? 'lg' : 'md'
           document.documentElement.dataset.density = density
           document.documentElement.dataset.fontsize = fs
-          var fonts = ['default', 'inter', 'system', 'serif']
-          document.documentElement.dataset.font = fonts.indexOf(ap.font) >= 0 ? ap.font : 'default'
+          var font = ap.font === 'inter' ? 'humanist' : ap.font === 'system' ? 'rounded' : ap.font
+          var fonts = ['default', 'humanist', 'rounded', 'serif']
+          document.documentElement.dataset.font = fonts.indexOf(font) >= 0 ? font : 'default'
         } catch (_) {}
       })()
     </script>

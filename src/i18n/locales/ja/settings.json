@@ -223,11 +223,11 @@
     "languageBody": "インターフェースの言語を切り替えます。すべての画面に影響します。",
     "font": {
       "title": "フォント",
-      "subtitle": "アプリ全体で使用するフォントを選択します。",
+      "subtitle": "アプリ全体で使用する、違いの明確な読み心地を選択します。",
       "options": {
-        "default": "Geist（デフォルト）",
-        "inter": "Inter",
-        "system": "システム",
+        "default": "Geist（モダン）",
+        "humanist": "ヒューマニストサンセリフ",
+        "rounded": "丸ゴシック",
         "serif": "Fraunces（セリフ）"
       }
     }

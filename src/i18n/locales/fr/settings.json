@@ -223,11 +223,11 @@
     "languageBody": "Changez la langue de l'interface. Affecte toutes les surfaces.",
     "font": {
       "title": "Police",
-      "subtitle": "Choisissez la police utilisée dans toute l'application.",
+      "subtitle": "Choisissez un style de lecture clairement distinct pour toute l'application.",
       "options": {
-        "default": "Geist (par défaut)",
-        "inter": "Inter",
-        "system": "Système",
+        "default": "Geist (moderne)",
+        "humanist": "Sans humaniste",
+        "rounded": "Arrondie",
         "serif": "Fraunces (serif)"
       }
     }

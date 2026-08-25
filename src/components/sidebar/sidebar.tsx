@@ -62,9 +62,10 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { NewProjectDialog } from '@/components/projects/new-project-dialog'
 import { MoveToProjectSub } from '@/components/projects/move-to-project-menu'
+import { RenameConversationDialog } from '@/components/chat/rename-conversation-dialog'
+import { ShareConversationDialog } from '@/components/chat/share-conversation-dialog'
 import { useConversations, sameConvListShape } from '@/store/conversations'
 import { resetComposerForNewConversation } from '@/store/composer-prefs'
 import { useProjects } from '@/store/projects'
@@ -76,8 +77,6 @@ import { SUPPORTED_LANGUAGES } from '@/i18n'
 import { useCommandMenu } from '@/hooks/use-command-menu'
 import { useOpenSettings } from '@/hooks/use-open-settings'
 import { useMediaQuery } from '@/hooks/use-media-query'
-import { useCopy } from '@/hooks/use-clipboard'
-import { conversationsApi, ApiError } from '@/api'
 import { duration } from '@/lib/design-tokens'
 import { accentClasses } from '@/lib/project-helpers'
 import { partitionConversationNavigation } from '@/lib/conversation-navigation'
@@ -986,40 +985,24 @@ function ConversationItem({
   const canDeleteConversations =
     userCan(user, 'allow_conversation_deletion') &&
     (!conversation.workspaceId || conversationWorkspace?.can_delete_conversations !== false)
-  const rename = useConversations((s) => s.renameConversation)
   const remove = useConversations((s) => s.deleteConversation)
   const star = useConversations((s) => s.toggleStar)
   const archive = useConversations((s) => s.archiveConversation)
   const navigate = useNavigate()
-  const { copy } = useCopy()
   const [renaming, setRenaming] = useState(false)
-  const [draft, setDraft] = useState(conversation.title)
+  const [shareOpen, setShareOpen] = useState(false)
   const [confirm, setConfirm] = useState(false)
   const displayTitle = `${conversation.starred ? '☆ ' : ''}${conversation.title || t('untitled')}`
 
   useEffect(() => {
     if (!canManageConversation) {
       setRenaming(false)
+      setShareOpen(false)
       setConfirm(false)
       return
     }
     if (!canDeleteConversations) setConfirm(false)
   }, [canManageConversation, canDeleteConversations])
-
-  // Create (or refresh) a public share and copy its link in one tap (§ sharing).
-  // Managing / revoking the share lives in the conversation's Share dialog.
-  async function shareConversation() {
-    // Immediate feedback so a slow backend doesn't leave the click feeling dead;
-    // the success toast below replaces this once the link is copied.
-    toast.info(t('share.creatingLink', { defaultValue: 'Creating share link…' }))
-    try {
-      const s = await conversationsApi.createShare(conversation.id)
-      await copy(`${window.location.origin}/share/${s.id}`)
-      toast.success(t('share.linkCopied'))
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('share.failed'))
-    }
-  }
 
   return (
     // data-conversation-id lets the sidebar scroll the active row into view when
@@ -1104,7 +1087,7 @@ function ConversationItem({
                 {conversation.starred ? t('common:actions.unstar') : t('common:actions.star')}
               </DropdownMenuItem>
               {canShare && canManageConversation ? (
-                <DropdownMenuItem onClick={() => void shareConversation()}>
+                <DropdownMenuItem onClick={() => setShareOpen(true)}>
                   <Share2 size={13} aria-hidden />
                   {t('sidebar.share')}
                 </DropdownMenuItem>
@@ -1138,32 +1121,22 @@ function ConversationItem({
         </div> : null}
       </div>
 
-      {/* Rename dialog */}
-      <Dialog open={renaming && canManageConversation} onOpenChange={setRenaming}>
-        <DialogContent size="sm">
-          <DialogHeader>
-            <DialogTitle>{t('sidebar.renameTitle')}</DialogTitle>
-            <DialogDescription>{t('sidebar.renameHint')}</DialogDescription>
-          </DialogHeader>
-          <DialogBody>
-            <Input value={draft} onChange={(e) => setDraft(e.target.value)} autoFocus />
-          </DialogBody>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setRenaming(false)}>
-              {t('actions.cancel', { ns: 'common' })}
-            </Button>
-            <Button
-              onClick={() => {
-                rename(conversation.id, draft)
-                setRenaming(false)
-                toast.success(t('sidebar.renamed'))
-              }}
-            >
-              {t('actions.save', { ns: 'common' })}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {canManageConversation ? (
+        <RenameConversationDialog
+          conversationId={conversation.id}
+          currentTitle={conversation.title}
+          open={renaming}
+          onOpenChange={setRenaming}
+        />
+      ) : null}
+
+      {canShare && canManageConversation ? (
+        <ShareConversationDialog
+          conversationId={conversation.id}
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+        />
+      ) : null}
 
       {/* Delete confirm */}
       <Dialog open={confirm && canManageConversation && canDeleteConversations} onOpenChange={setConfirm}>

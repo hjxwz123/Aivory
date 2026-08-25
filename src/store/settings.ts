@@ -1,9 +1,17 @@
 import { create } from 'zustand'
-import type { AppearanceSettings, ChatWidthPref, DensityPref, FontPref, FontSizePref, ModelSettings, PrivacySettings } from '@/types/settings'
+import {
+  normalizeFontPref,
+  type AppearanceSettings,
+  type ChatWidthPref,
+  type DensityPref,
+  type FontPref,
+  type FontSizePref,
+  type ModelSettings,
+  type PrivacySettings,
+} from '@/types/settings'
 import { clampSidebarWidth } from '@/lib/sidebar-width'
 
 const RESPONSE_LENGTHS = ['concise', 'balanced', 'detailed'] as const
-const FONTS: readonly FontPref[] = ['default', 'inter', 'system', 'serif']
 const CHAT_WIDTHS: readonly ChatWidthPref[] = ['narrow', 'comfortable', 'wide', 'full', 'max']
 type ResponseLengthPref = ModelSettings['responseLength']
 
@@ -62,10 +70,10 @@ export const useSettings = create<SettingsState>((set) => ({
     theme: 'system',
     density: 'comfortable',
     fontSize: 'md',
-    font: 'default',
     chatWidth: 'full',
     userMessageMarkdown: false,
     ...(initial.appearance ?? {}),
+    font: normalizeFontPref(initial.appearance?.font) ?? 'default',
   },
   models: {
     defaultModelId: '',
@@ -95,9 +103,8 @@ export const useSettings = create<SettingsState>((set) => ({
       const privacyPatch: Partial<PrivacySettings> = {}
 
       appearancePatch.userMessageMarkdown = settings.user_message_markdown === true
-      if (typeof settings.font_family === 'string' && (FONTS as readonly string[]).includes(settings.font_family)) {
-        appearancePatch.font = settings.font_family as FontPref
-      }
+      const font = normalizeFontPref(settings.font_family)
+      if (font) appearancePatch.font = font
       if (typeof settings.chat_width === 'string' && (CHAT_WIDTHS as readonly string[]).includes(settings.chat_width)) {
         appearancePatch.chatWidth = settings.chat_width as ChatWidthPref
       }
@@ -177,13 +184,10 @@ function applyFontSize(f: FontSizePref) {
   document.documentElement.dataset.fontsize = f
 }
 
-// Sets the body typeface via data-font (tokens.css swaps --font-sans). Non-brand
-// faces that need their own file are lazy-loaded only when selected, so the
-// default payload stays lean.
+// Sets the body typeface via data-font (tokens.css swaps --font-sans).
 function applyFont(f: FontPref) {
   if (typeof document === 'undefined') return
   document.documentElement.dataset.font = f
-  if (f === 'inter') void import('@fontsource-variable/inter')
 }
 
 // Chat content width — data-chat-width="full" overrides --layout-message-max-w

@@ -440,6 +440,7 @@
     "rename": "Rename",
     "renameTitle": "Rename conversation",
     "renameHint": "Give it a name you'll find later.",
+    "renameEmpty": "Title cannot be empty.",
     "renamed": "Conversation renamed",
     "share": "Share",
     "archive": "Archive",

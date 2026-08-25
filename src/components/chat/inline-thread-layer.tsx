@@ -239,7 +239,7 @@ export function InlineThreadLayer({ conversationId, scrollRef, readOnly = false 
         </button>
       ) : (
         <div className="w-[300px] rounded-popup border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-lg)] p-2">
-          <p className="px-1 pt-0.5 pb-1.5 text-[11px] text-[var(--color-fg-subtle)] line-clamp-2">
+          <p className="line-clamp-2 px-1 pb-1.5 pt-0.5 font-sans text-[11px] tracking-normal text-[var(--color-fg-subtle)]">
             “{pending.quote}”
           </p>
           <div className="flex items-end gap-1.5">

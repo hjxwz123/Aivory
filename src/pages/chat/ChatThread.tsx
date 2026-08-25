@@ -7,6 +7,7 @@ import { MessageList } from '@/components/chat/message-list'
 import { UserMenu } from '@/components/sidebar/sidebar'
 import { InlineThreadLayer } from '@/components/chat/inline-thread-layer'
 import { ModelPicker } from '@/components/chat/model-picker'
+import { RenameConversationDialog } from '@/components/chat/rename-conversation-dialog'
 import { ShareConversationDialog } from '@/components/chat/share-conversation-dialog'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Button } from '@/components/ui/button'
@@ -18,8 +19,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Tooltip } from '@/components/ui/tooltip'
-import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useConversations } from '@/store/conversations'
 import { useModels } from '@/store/models'
@@ -57,7 +57,6 @@ export default function ChatThread() {
   const setModel = useConversations((s) => s.setModel)
   const setFast = useConversations((s) => s.setFast)
   const setKBs = useConversations((s) => s.setKBs)
-  const rename = useConversations((s) => s.renameConversation)
   const setConversationPublic = useConversations((s) => s.setConversationPublic)
   const star = useConversations((s) => s.toggleStar)
   const remove = useConversations((s) => s.deleteConversation)
@@ -107,8 +106,6 @@ export default function ChatThread() {
   const [showJump, setShowJump] = useState(false)
 
   const [renaming, setRenaming] = useState(false)
-  const [renameDraft, setRenameDraft] = useState('')
-  const [renameError, setRenameError] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [confirmPrivate, setConfirmPrivate] = useState(false)
   const [visibilityBusy, setVisibilityBusy] = useState(false)
@@ -491,7 +488,7 @@ export default function ChatThread() {
               </DropdownMenuTrigger>
             </Tooltip>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={() => { setRenameDraft(conversation.title); setRenaming(true) }}>
+              <DropdownMenuItem onSelect={() => setRenaming(true)}>
                 <Pencil size={13} aria-hidden /> {t('chat:sidebar.rename')}
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => void star(conversation.id)}>
@@ -665,50 +662,14 @@ export default function ChatThread() {
         </div>
       </div>
 
-      <Dialog open={renaming && !isWorkspaceGuest} onOpenChange={(open) => { setRenaming(open); if (!open) setRenameError('') }}>
-        <DialogContent size="sm">
-          <DialogHeader>
-            <DialogTitle>{t('chat:sidebar.renameTitle')}</DialogTitle>
-          </DialogHeader>
-          <DialogBody>
-            <Input
-              value={renameDraft}
-              onChange={(e) => { setRenameDraft(e.target.value); if (e.target.value.trim()) setRenameError('') }}
-              autoFocus
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  const trimmed = renameDraft.trim()
-                  if (!trimmed) { setRenameError(t('chat:thread.renameEmpty', { defaultValue: 'Title cannot be empty' })); return }
-                  void rename(conversation.id, trimmed)
-                  setRenaming(false)
-                  setRenameError('')
-                  toast.success(t('chat:thread.renamed'))
-                }
-              }}
-            />
-            {renameError ? (
-              <p className="mt-1.5 text-[12px] text-[var(--color-danger)]">{renameError}</p>
-            ) : null}
-          </DialogBody>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => { setRenaming(false); setRenameError('') }}>
-              {t('common:actions.cancel')}
-            </Button>
-            <Button onClick={() => {
-              const trimmed = renameDraft.trim()
-              if (!trimmed) { setRenameError(t('chat:thread.renameEmpty', { defaultValue: 'Title cannot be empty' })); return }
-              void rename(conversation.id, trimmed)
-              setRenaming(false)
-              setRenameError('')
-              toast.success(t('chat:thread.renamed'))
-            }}>
-              {t('common:actions.save')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {!isWorkspaceGuest ? (
+        <RenameConversationDialog
+          conversationId={conversation.id}
+          currentTitle={conversation.title}
+          open={renaming}
+          onOpenChange={setRenaming}
+        />
+      ) : null}
 
       <Dialog open={confirmDelete && !isWorkspaceGuest && canDeleteConversations} onOpenChange={setConfirmDelete}>
         <DialogContent size="sm">
@@ -777,7 +738,7 @@ export default function ChatThread() {
                 <ThreadActionRow
                   icon={<Pencil size={18} aria-hidden />}
                   label={t('chat:sidebar.rename')}
-                  onClick={() => { setActionsOpen(false); setRenameDraft(conversation.title); setRenaming(true) }}
+                  onClick={() => { setActionsOpen(false); setRenaming(true) }}
                 />
                 <ThreadActionRow
                   icon={<Star size={18} aria-hidden />}

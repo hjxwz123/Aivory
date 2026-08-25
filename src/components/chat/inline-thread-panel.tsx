@@ -59,7 +59,7 @@ export function InlineThreadPanel() {
         aria-label={t('inline.title', { defaultValue: 'Sub-conversation' })}
         className={cn(
           'hidden lg:flex flex-col shrink-0 h-full w-[clamp(22rem,34vw,34rem)]',
-          'border-l border-[var(--color-divider)] bg-[var(--color-bg)]',
+          'bg-[var(--color-surface)]',
           'animate-[panel-in_240ms_var(--ease-out)]',
         )}
       >
@@ -70,7 +70,7 @@ export function InlineThreadPanel() {
 
   return (
     <Sheet open={open} onOpenChange={(o) => { if (!o) close() }}>
-      <SheetContent side="right" size="lg" label={t('inline.title', { defaultValue: 'Sub-conversation' })} className="w-[min(28rem,94vw)]">
+      <SheetContent side="right" size="lg" label={t('inline.title', { defaultValue: 'Sub-conversation' })} className="w-[min(28rem,94vw)] !border-l-0">
         <ThreadBody quote={quote} childId={childId} onClose={close} />
       </SheetContent>
     </Sheet>
@@ -117,9 +117,9 @@ function ThreadBody({ quote, childId, onClose }: { quote: string; childId: strin
 
   return (
     <>
-      <header className="flex items-center gap-2 h-12 px-3 border-b border-[var(--color-divider)] shrink-0">
+      <header className="flex h-12 shrink-0 items-center gap-2 px-3">
         <MessagesSquare size={14} aria-hidden className="text-[var(--color-secondary)]" />
-        <span className="flex-1 min-w-0 truncate tracking-tight text-[15px] text-[var(--color-fg)]">
+        <span className="min-w-0 flex-1 truncate font-sans text-[15px] font-medium tracking-normal text-[var(--color-fg)]">
           {t('inline.title', { defaultValue: 'Sub-conversation' })}
         </span>
         <Tooltip content={t('code.previewClose', { defaultValue: 'Close' })}>
@@ -136,10 +136,10 @@ function ThreadBody({ quote, childId, onClose }: { quote: string; childId: strin
 
       {/* Anchored excerpt */}
       {quote ? (
-        <div className="shrink-0 px-4 py-3 border-b border-[var(--color-divider)] bg-[var(--color-secondary-soft)]/40">
+        <div className="mx-3 mb-1 shrink-0 rounded-[8px] bg-[var(--color-secondary-soft)]/40 px-3 py-2.5">
           <div className="flex gap-2">
             <Quote size={13} aria-hidden className="mt-0.5 shrink-0 text-[var(--color-secondary)]" />
-            <p className="text-[12.5px] leading-relaxed text-[var(--color-fg-muted)] line-clamp-4">{quote}</p>
+            <p className="line-clamp-4 font-sans text-[12.5px] leading-relaxed tracking-normal text-[var(--color-fg-muted)]">{quote}</p>
           </div>
         </div>
       ) : null}
@@ -187,10 +187,10 @@ function ThreadBody({ quote, childId, onClose }: { quote: string; childId: strin
 
       {/* Composer */}
       {isWorkspaceGuest ? (
-        <div className="shrink-0 border-t border-[var(--color-divider)] px-3 py-3 text-center text-[12px] text-[var(--color-fg-muted)]">
+        <div className="shrink-0 bg-[var(--color-bg-muted)]/55 px-3 py-3 text-center text-[12px] text-[var(--color-fg-muted)]">
           {t('workspace.readOnlyBody', { defaultValue: 'You are a guest in this workspace. You can read shared conversations but not send messages.' })}
         </div>
-      ) : <div className="shrink-0 border-t border-[var(--color-divider)] p-3">
+      ) : <div className="shrink-0 bg-[var(--color-bg)] p-3">
         <div className="flex items-end gap-1.5">
           <textarea
             rows={1}
