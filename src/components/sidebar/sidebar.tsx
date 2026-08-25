@@ -1320,7 +1320,9 @@ export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuP
         side={inHeader ? 'bottom' : 'top'}
         className={cn(
           'min-w-[220px]',
-          inHeader && 'w-[min(17rem,calc(100vw-1rem))] [&_[role=menuitem]]:min-h-11',
+          // The mobile header uses the same compact item density as the desktop
+          // account menu. The avatar trigger itself remains tap-sized.
+          inHeader && 'w-[min(17rem,calc(100vw-1rem))]',
         )}
       >
         <DropdownMenuItem onClick={() => openSettings('account')}>

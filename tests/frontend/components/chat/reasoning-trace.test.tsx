@@ -6,7 +6,11 @@ import { ReasoningTrace } from '@/components/chat/reasoning-trace'
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? key,
+    t: (key: string, options?: { defaultValue?: string; count?: number; duration?: string }) => {
+      if (key === 'reasoning.durationSeconds') return `${options?.count} seconds`
+      if (key === 'reasoning.thoughtFor') return `Thought for ${options?.duration}`
+      return options?.defaultValue ?? key
+    },
   }),
 }))
 
@@ -65,5 +69,35 @@ describe('ReasoningTrace tool layout', () => {
     expect(html).toContain('Running Python')
     expect(html).not.toContain('>0s<')
     expect(html).toContain('grid-cols-[auto_auto_minmax(0,1fr)_auto]')
+  })
+
+  it('shows the persisted thought duration with a neutral lightbulb icon', () => {
+    const reasoning: ReasoningItem[] = [{ kind: 'thinking', id: 'thought-1', text: 'I considered the options.' }]
+
+    const html = renderToStaticMarkup(
+      createElement(ReasoningTrace, { reasoning, thinkingMs: 3200, streaming: false, settled: true }),
+    )
+
+    expect(html).toContain('Thought for 3 seconds')
+    expect(html).toContain('lucide-lightbulb')
+    expect(html).toContain('text-[var(--color-fg-muted)]')
+    expect(html).not.toContain('text-[var(--color-secondary)]')
+    expect(html).not.toContain('thinking-shimmer')
+  })
+
+  it('renders a section title glued after a sentence as its own thought paragraph', () => {
+    const reasoning: ReasoningItem[] = [
+      {
+        kind: 'thinking',
+        id: 'thought-title-boundary',
+        text: 'The prior thought ends at the lower right.**Updating hardware visuals**\n\nThe next thought begins.',
+      },
+    ]
+
+    const html = renderToStaticMarkup(
+      createElement(ReasoningTrace, { reasoning, streaming: false, settled: true }),
+    )
+
+    expect(html).toMatch(/lower right\.<\/p><p[^>]*><strong>Updating hardware visuals<\/strong><\/p>/)
   })
 })

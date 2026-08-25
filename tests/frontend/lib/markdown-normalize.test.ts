@@ -30,6 +30,21 @@ describe('normalizeThinkingMarkdown', () => {
     for (const h of htmls) expect(h).toContain('<strong>')
   })
 
+  it('separates a bold thought title glued directly after the prior sentence', () => {
+    const n = normalizeThinkingMarkdown(
+      '**Clarifying image edits**\n\nThe previous reasoning ends at the lower right.**Updating hardware visuals**\n\nThe next reasoning section starts here.',
+    )
+
+    expect(n).toContain('lower right.\n\n**Updating hardware visuals**')
+    const paragraphs = tokenizeMarkdown(n, true)
+      .filter((b) => b.type === 'paragraph')
+      .map((b) => inlineMarkdownToHtml(b.content, undefined, true))
+
+    expect(paragraphs).toHaveLength(4)
+    expect(paragraphs[1]).not.toContain('Updating hardware visuals')
+    expect(paragraphs[2]).toBe('<strong>Updating hardware visuals</strong>')
+  })
+
   it('leaves ATX headings and blank-line text unchanged', () => {
     const n = normalizeThinkingMarkdown('### 标题一\n这是摘要\n\n### 标题二\n这是摘要2')
     expect(n).toBe('### 标题一\n这是摘要\n\n### 标题二\n这是摘要2')

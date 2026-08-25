@@ -175,6 +175,10 @@
   "thinking": "思考中",
   "reasoning": {
     "title": "思考过程",
+    "thoughtFor": "已思考 {{duration}}",
+    "durationSeconds_one": "{{count}} 秒",
+    "durationSeconds_other": "{{count}} 秒",
+    "durationMinutesSeconds": "{{minutes}} 分 {{seconds}} 秒",
     "steps_one": "{{count}} 步",
     "steps_other": "{{count}} 步"
   },

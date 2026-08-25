@@ -180,6 +180,10 @@
   "thinking": "Thinking",
   "reasoning": {
     "title": "Reasoning",
+    "thoughtFor": "Thought for {{duration}}",
+    "durationSeconds_one": "{{count}} second",
+    "durationSeconds_other": "{{count}} seconds",
+    "durationMinutesSeconds": "{{minutes}}m {{seconds}}s",
     "steps_one": "{{count}} step",
     "steps_other": "{{count}} steps"
   },

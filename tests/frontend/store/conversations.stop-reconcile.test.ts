@@ -697,6 +697,25 @@ describe('stopped turn optimistic-id reconciliation', () => {
     expect(local.error).toBeUndefined()
   })
 
+  it('restores persisted reasoning duration from the first thinking block', () => {
+    const assistant = apiMessage(
+      'msg_thinking_duration',
+      'assistant',
+      'msg_thinking_duration_user',
+      'complete',
+      'final answer',
+    )
+    assistant.blocks = [
+      { kind: 'thinking', text: 'I will reason through this.', thinking_ms: 3200 },
+      { kind: 'text', text: 'final answer' },
+    ]
+
+    expect(toLocalMessage(assistant)).toMatchObject({
+      thinkingMs: 3200,
+      reasoning: [expect.objectContaining({ kind: 'thinking', text: 'I will reason through this.' })],
+    })
+  })
+
   it('keeps the interruption marker and partial answer from a normal send', async () => {
     apiMocks.streamSSE.mockReturnValue(
       events(
@@ -706,6 +725,7 @@ describe('stopped turn optimistic-id reconciliation', () => {
         {
           type: 'error',
           message: 'The model provider returned an error.',
+          thinking_ms: 3200,
         },
       ),
     )
@@ -723,6 +743,7 @@ describe('stopped turn optimistic-id reconciliation', () => {
       streaming: false,
       error: 'The model provider returned an error.',
       errorCode: 'generation_interrupted',
+      thinkingMs: 3200,
       reasoning: [
         expect.objectContaining({
           kind: 'tool',

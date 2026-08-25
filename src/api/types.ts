@@ -1259,6 +1259,8 @@ export type ApiBlockKind =
 export interface ApiBlock {
   kind: ApiBlockKind
   text?: string
+  /** Total observable reasoning time, stored only on the first thinking block. */
+  thinking_ms?: number
   tool_name?: string
   tool_id?: string
   input?: unknown
@@ -1500,8 +1502,14 @@ export type ApiSseEvent =
   | { type: 'image_status'; message_id?: string; status?: string }
   | { type: 'rag'; status?: string; summary?: string; source_count?: number }
   | { type: 'refusal'; message_id?: string; message?: string }
-  | { type: 'error'; message: string; code?: string }
-  | { type: 'done'; stop_reason?: string; usage?: { input_tokens: number; output_tokens: number }; credits?: number }
+  | { type: 'error'; message: string; code?: string; thinking_ms?: number }
+  | {
+      type: 'done'
+      stop_reason?: string
+      usage?: { input_tokens: number; output_tokens: number }
+      credits?: number
+      thinking_ms?: number
+    }
   // Deep Research progress (§ deep-research mode).
   | { type: 'research_plan'; message_id?: string; text?: string; summary?: string }
   | { type: 'research_task'; id: string; text?: string; status?: string; name?: string }

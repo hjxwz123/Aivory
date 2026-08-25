@@ -175,6 +175,10 @@
   "thinking": "思考中",
   "reasoning": {
     "title": "推論",
+    "thoughtFor": "{{duration}} 考えました",
+    "durationSeconds_one": "{{count}} 秒",
+    "durationSeconds_other": "{{count}} 秒",
+    "durationMinutesSeconds": "{{minutes}} 分 {{seconds}} 秒",
     "steps_one": "{{count}} ステップ",
     "steps_other": "{{count}} ステップ"
   },

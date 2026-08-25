@@ -200,6 +200,8 @@ export interface Message {
    *  exact order they happened (§7.1-4), so the UI can render them woven
    *  together instead of "all thinking, then all tools". */
   reasoning?: ReasoningItem[]
+  /** Total observable model reasoning time, restored from the persisted thinking block. */
+  thinkingMs?: number
   /** Deep Research progress/state (plan, sources) for the research panel. */
   research?: ResearchState
   /** Turn mode — 'deep-research' renders the research panel + badge. */
