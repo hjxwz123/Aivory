@@ -2264,6 +2264,17 @@ func maxInt(a, b int) int {
 // onEvent is invoked on every SSE event so the HTTP handler can flush.
 func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(SseEvent)) (*RunResult, error) {
 	visibleOutput := new(atomic.Bool)
+	thinkingDuration := newThinkingDurationTracker()
+	emitWithThinkingDuration := onEvent
+	if emitWithThinkingDuration == nil {
+		emitWithThinkingDuration = func(SseEvent) {}
+	}
+	onEvent = func(event SseEvent) {
+		if thinkingMs := thinkingDuration.Observe(event); thinkingMs > 0 && (event.Type == "done" || event.Type == "error") {
+			event.ThinkingMs = thinkingMs
+		}
+		emitWithThinkingDuration(event)
+	}
 	onEvent = observeProviderVisibleOutput(onEvent, visibleOutput)
 	// 1. Load conversation + resolve model.
 	conv, err := store.GetConversation(ctx, o.db, req.ConversationID, req.UserID)
@@ -3634,6 +3645,9 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		for i := range result.Citations {
 			result.Citations[i] = runner.ctx.citationIndexes.normalize(result.Citations[i])
 		}
+	}
+	if result != nil {
+		result.Blocks = attachThinkingDuration(result.Blocks, thinkingDuration.FinishMs())
 	}
 	providerCompleted = err == nil && result != nil
 	// OpenAI Responses executes image_generation upstream, outside the local tool

@@ -895,6 +895,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                 look frozen; collapses once the answer text begins. */}
             <ReasoningTrace
               reasoning={message.reasoning}
+              thinkingMs={message.thinkingMs}
               streaming={message.streaming}
               settled={Boolean(message.content)}
             />

@@ -14,15 +14,19 @@ import (
 
 // UnifiedBlock is the canonical message-block shape stored in DB (§2.3-C).
 type UnifiedBlock struct {
-	Kind     string          `json:"kind"` // text | thinking | tool_call | tool_output | citation | image | document | artifact | research
-	Text     string          `json:"text,omitempty"`
-	ToolName string          `json:"tool_name,omitempty"`
-	ToolID   string          `json:"tool_id,omitempty"`
-	Input    json.RawMessage `json:"input,omitempty"`
-	Summary  string          `json:"summary,omitempty"`
-	URL      string          `json:"url,omitempty"`
-	Title    string          `json:"title,omitempty"`
-	FileRef  string          `json:"file_ref,omitempty"`
+	Kind string `json:"kind"` // text | thinking | tool_call | tool_output | citation | image | document | artifact | research
+	Text string `json:"text,omitempty"`
+	// ThinkingMs is the total observable reasoning time for the turn. It is
+	// stored only on the first thinking block so a message with multiple
+	// thought/tool rounds cannot be double-counted after reload.
+	ThinkingMs int64           `json:"thinking_ms,omitempty"`
+	ToolName   string          `json:"tool_name,omitempty"`
+	ToolID     string          `json:"tool_id,omitempty"`
+	Input      json.RawMessage `json:"input,omitempty"`
+	Summary    string          `json:"summary,omitempty"`
+	URL        string          `json:"url,omitempty"`
+	Title      string          `json:"title,omitempty"`
+	FileRef    string          `json:"file_ref,omitempty"`
 	// Data carries base64 payloads for image blocks built from user
 	// attachments (§4.6); MimeType qualifies it. Document attachments are
 	// parsed/OCRed by RAG and injected as text, not sent as provider file blocks.
@@ -244,6 +248,9 @@ type SseEvent struct {
 	// Credits charged for this turn (emitted on the `done` event so the UI can
 	// show "credits used"). 0 = free / credits disabled.
 	Credits float64 `json:"credits,omitempty"`
+	// ThinkingMs is emitted with terminal events after a turn that exposed
+	// reasoning output. The client uses it to settle the live trace immediately.
+	ThinkingMs int64 `json:"thinking_ms,omitempty"`
 	// Verdict + Finding carry Verify-mode (§verify) audit results: `verify_done`
 	// sends the overall verdict ("clean"|"issues"); `verify_finding` sends one
 	// finding at a time so the UI builds the report live; `verify_started` carries

@@ -1,7 +1,7 @@
 import { type ComponentType, useEffect, useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
-  Brain,
+  Lightbulb,
   Search,
   Globe,
   Terminal,
@@ -27,6 +27,8 @@ interface ReasoningTraceProps {
   /** Ordered, interleaved trace — thinking runs + tool rounds in the exact
    *  order they happened (§7.1-4). */
   reasoning?: ReasoningItem[]
+  /** Total observable model reasoning time in milliseconds, once the turn settles. */
+  thinkingMs?: number
   /** True while the assistant message is still streaming. */
   streaming?: boolean
   /** True once the visible answer text has started — the reasoning phase has
@@ -51,14 +53,14 @@ const TOOL_ICON: Record<string, ComponentType<{ size?: number; className?: strin
  * image_generate, …) into ONE collapsible trace instead
  * of a separate thinking block + a stack of tool cards.
  *
- * Live feedback (the user's ask): while streaming, the panel is open, the brain
- * glyph pulses, and every running tool shows a pulsing status dot plus a
+ * Live feedback (the user's ask): while streaming, the panel is open, and every
+ * running tool shows a pulsing status dot plus a
  * per-second elapsed counter — so a long search / sandbox run never looks like
  * a frozen blank. No spinning loaders (CLAUDE.md §7 — shimmer/pulse only). Once
  * the answer text starts, the panel collapses to a one-line summary the user
  * can reopen.
  */
-export function ReasoningTrace({ reasoning, streaming = false, settled = false }: ReasoningTraceProps) {
+export function ReasoningTrace({ reasoning, thinkingMs, streaming = false, settled = false }: ReasoningTraceProps) {
   const { t } = useTranslation(['chat', 'common'])
   const items = reasoning ?? []
 
@@ -77,11 +79,23 @@ export function ReasoningTrace({ reasoning, streaming = false, settled = false }
 
   if (items.length === 0) return null
 
-  const headline = active ? t('thinking') : t('reasoning.title')
+  const roundedThinkingSeconds = thinkingMs && thinkingMs > 0 ? Math.max(1, Math.round(thinkingMs / 1000)) : 0
+  const thinkingDuration =
+    roundedThinkingSeconds < 60
+      ? t('reasoning.durationSeconds', { count: roundedThinkingSeconds })
+      : t('reasoning.durationMinutesSeconds', {
+          minutes: Math.floor(roundedThinkingSeconds / 60),
+          seconds: roundedThinkingSeconds % 60,
+        })
+  const headline = active
+    ? t('thinking')
+    : roundedThinkingSeconds > 0
+      ? t('reasoning.thoughtFor', { duration: thinkingDuration })
+      : t('reasoning.title')
 
   return (
     <div className="mb-3 w-full min-w-0 max-w-full">
-      {/* Minimal, box-free disclosure — just an icon + "thinking" label + caret. */}
+      {/* Minimal, box-free disclosure — just an icon + reasoning label + caret. */}
       <button
         type="button"
         aria-expanded={expanded}
@@ -89,15 +103,12 @@ export function ReasoningTrace({ reasoning, streaming = false, settled = false }
         onClick={() => setDisclosure(toggleReasoningDisclosure)}
         className="-ml-1 flex max-w-full min-w-0 items-center gap-1.5 rounded-[6px] px-1 py-0.5 text-left text-[var(--color-fg-subtle)] interactive hover:text-[var(--color-fg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
       >
-        <Brain
+        <Lightbulb
           size={13}
           aria-hidden
-          className={cn(
-            'shrink-0 text-[var(--color-secondary)]',
-            active && 'animate-[streaming-pulse_1600ms_ease-in-out_infinite]',
-          )}
+          className="shrink-0 text-[var(--color-fg-muted)]"
         />
-        <span className={cn('min-w-0 truncate text-[12.5px]', active && 'thinking-shimmer font-medium')}>{headline}</span>
+        <span className="min-w-0 truncate text-[12.5px]">{headline}</span>
         <ChevronRight
           size={12}
           aria-hidden

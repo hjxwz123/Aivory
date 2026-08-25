@@ -1834,6 +1834,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
               streaming: false,
               imageStatus: undefined,
               reasoning: interruptRunningTools(m.reasoning),
+              thinkingMs: ev.thinking_ms && ev.thinking_ms > 0 ? ev.thinking_ms : m.thinkingMs,
               error: sanitizeUserVisibleError(ev.message),
               errorCode: ev.code || GENERATION_INTERRUPTED_ERROR_CODE,
             }))
@@ -1847,6 +1848,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
               // model unset between fetch and send, empty answer), drop the stuck
               // "running" badge rather than spin forever.
               verify: m.verify?.status === 'running' ? undefined : m.verify,
+              thinkingMs: ev.thinking_ms && ev.thinking_ms > 0 ? ev.thinking_ms : m.thinkingMs,
               credits: ev.credits && ev.credits > 0 ? ev.credits : m.credits,
               moderation: ev.stop_reason === 'content_moderation' ? true : m.moderation,
               quotaExceeded: ev.stop_reason === 'quota_exceeded' ? true : m.quotaExceeded,
@@ -2241,6 +2243,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
               imageStatus: undefined,
               // §verify: clear a never-settled audit badge (see sendMessage).
               verify: m.verify?.status === 'running' ? undefined : m.verify,
+              thinkingMs: ev.thinking_ms && ev.thinking_ms > 0 ? ev.thinking_ms : m.thinkingMs,
               moderation: ev.stop_reason === 'content_moderation' ? true : m.moderation,
               stopped: ev.stop_reason === 'stopped' ? true : m.stopped,
             }))
@@ -2253,6 +2256,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
               imageStatus: undefined,
               verify: m.verify?.status === 'running' ? undefined : m.verify,
               reasoning: interruptRunningTools(m.reasoning),
+              thinkingMs: ev.thinking_ms && ev.thinking_ms > 0 ? ev.thinking_ms : m.thinkingMs,
               error: sanitizeUserVisibleError(ev.message),
               errorCode: ev.code || GENERATION_INTERRUPTED_ERROR_CODE,
             }))
@@ -2677,6 +2681,7 @@ function applyReplayEvent(
         streaming: false,
         imageStatus: undefined,
         verify: m.verify?.status === 'running' ? undefined : m.verify,
+        thinkingMs: ev.thinking_ms && ev.thinking_ms > 0 ? ev.thinking_ms : m.thinkingMs,
         credits: ev.credits && ev.credits > 0 ? ev.credits : m.credits,
         moderation: ev.stop_reason === 'content_moderation' ? true : m.moderation,
         quotaExceeded: ev.stop_reason === 'quota_exceeded' ? true : m.quotaExceeded,
@@ -2690,6 +2695,7 @@ function applyReplayEvent(
         imageStatus: undefined,
         verify: m.verify?.status === 'running' ? undefined : m.verify,
         reasoning: interruptRunningTools(m.reasoning),
+        thinkingMs: ev.thinking_ms && ev.thinking_ms > 0 ? ev.thinking_ms : m.thinkingMs,
         error: sanitizeUserVisibleError(ev.message),
         errorCode: ev.code || GENERATION_INTERRUPTED_ERROR_CODE,
       }))
@@ -2874,6 +2880,7 @@ export function toLocalMessage(m: ApiMessage): Message {
   const reasoning: ReasoningItem[] = []
   const artifacts: Message['artifacts'] = []
   let research: ResearchState | undefined
+  let thinkingMs: number | undefined
   const blocks = m.blocks ?? []
   const failedToolIDs = new Set(
     blocks
@@ -2904,6 +2911,9 @@ export function toLocalMessage(m: ApiMessage): Message {
         /* ignore malformed state */
       }
     } else if (b.kind === 'thinking') {
+      if (typeof b.thinking_ms === 'number' && b.thinking_ms > 0) {
+        thinkingMs = Math.max(thinkingMs ?? 0, b.thinking_ms)
+      }
       const text = b.text ?? ''
       if (!text) continue
       const last = reasoning[reasoning.length - 1]
@@ -2975,6 +2985,7 @@ export function toLocalMessage(m: ApiMessage): Message {
     role: m.role,
     content,
     reasoning: reasoning.length > 0 ? reasoning : undefined,
+    thinkingMs,
     research,
     mode: research ? 'deep-research' : undefined,
     artifacts: artifacts.length > 0 ? artifacts : undefined,

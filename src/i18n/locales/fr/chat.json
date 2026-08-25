@@ -175,6 +175,10 @@
   "thinking": "Réflexion",
   "reasoning": {
     "title": "Raisonnement",
+    "thoughtFor": "Réflexion pendant {{duration}}",
+    "durationSeconds_one": "{{count}} seconde",
+    "durationSeconds_other": "{{count}} secondes",
+    "durationMinutesSeconds": "{{minutes}} min {{seconds}} s",
     "steps_one": "{{count}} étape",
     "steps_other": "{{count}} étapes"
   },
