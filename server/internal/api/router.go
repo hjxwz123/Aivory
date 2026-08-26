@@ -390,6 +390,7 @@ func NewRouter(d Deps) http.Handler {
 	// Admin endpoints.
 	mux.handle("GET", "/api/admin/channels", requireAdmin(d, listChannelsAdmin))
 	mux.handle("POST", "/api/admin/channels", requireAdmin(d, createChannelAdmin))
+	mux.handle("POST", "/api/admin/channels/:id/models/import", requireAdmin(d, importChannelModelsAdmin))
 	mux.handle("PATCH", "/api/admin/channels/reorder", requireAdmin(d, reorderChannelsAdmin))
 	mux.handle("PATCH", "/api/admin/channels/:id", requireAdmin(d, updateChannelAdmin))
 	mux.handle("DELETE", "/api/admin/channels/:id", requireAdmin(d, deleteChannelAdmin))

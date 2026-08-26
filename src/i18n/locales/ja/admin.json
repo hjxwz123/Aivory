@@ -48,7 +48,9 @@
       "apiKey": "APIキー",
       "apiKeyHintNew": "",
       "apiKeyHintEdit": "空欄にすると保存済みのキーを保持します。",
-      "enabled": "有効"
+      "enabled": "有効",
+      "autoImportModels": "対応モデルを自動追加",
+      "autoImportModelsHint": "チャネル作成後にモデル一覧を取得し、Aivory と互換性のあるモデルをすべて追加します。"
     },
     "editorTitle": "チャネルを編集",
     "newTitle": "新規チャネル",
@@ -59,6 +61,12 @@
     "created": "チャネルを作成しました",
     "updated": "チャネルを更新しました",
     "removed": "チャネルを削除しました",
+    "modelImport": {
+      "success": "対応モデルを {{count}} 件自動追加しました。",
+      "partial": "{{created}} 件を追加し、既存または未対応の {{skipped}} 件をスキップしました。",
+      "empty": "Aivory が自動追加できるモデルはプロバイダーから返されませんでした。",
+      "failed": "チャネルは保存されましたが、モデルを自動追加できませんでした。「モデル」ページから手動で追加できます。"
+    },
     "errors": {
       "nameRequired": "名前は必須です",
       "openAIBaseUrlV1Required": "OpenAI のベースURLには、/v1 で終わる完全な HTTP(S) URL を指定してください。"

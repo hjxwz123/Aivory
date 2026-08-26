@@ -33,6 +33,7 @@ import type {
   ApiAuthSessionResponse,
   ApiBuiltinTool,
   ApiChannel,
+  ApiChannelModelImportResult,
   ApiConversation,
   ApiConversationFile,
   ApiCreditPackage,
@@ -820,6 +821,8 @@ export const adminApi = {
   channels: () => api<ApiChannel[]>('/admin/channels'),
   createChannel: (body: Partial<ApiChannel> & { api_key?: string }) =>
     api<ApiChannel>('/admin/channels', { method: 'POST', body }),
+  importChannelModels: (id: string) =>
+    api<ApiChannelModelImportResult>(`/admin/channels/${encodeURIComponent(id)}/models/import`, { method: 'POST' }),
   reorderChannels: (ids: string[]) =>
     api<{ ok: true }>('/admin/channels/reorder', { method: 'PATCH', body: { ids } }),
   updateChannel: (id: string, body: Partial<ApiChannel> & { api_key?: string }) =>
