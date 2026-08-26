@@ -651,6 +651,13 @@ export interface ApiChannel {
   updated_at: number
 }
 
+export interface ApiChannelModelImportResult {
+  discovered: number
+  created: number
+  skipped_existing: number
+  skipped_unsupported: number
+}
+
 export type ApiPaymentProvider = 'stripe' | 'epay' | 'waffo'
 export type ApiPaymentEnvironment = 'live' | 'test'
 

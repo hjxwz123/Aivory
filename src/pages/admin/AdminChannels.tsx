@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Plus, Pencil, Trash2 } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
-import type { ApiChannel } from '@/api/types'
+import type { ApiChannel, ApiChannelModelImportResult } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Field } from '@/components/ui/label'
@@ -30,6 +30,12 @@ import { PanelFallback } from '@/components/ui/panel-fallback'
 import { normalizeOpenAIBaseUrl } from '@/lib/channel-base-url'
 
 type Editable = Partial<ApiChannel> & { api_key?: string }
+type ChannelEditor = {
+  open: boolean
+  row?: ApiChannel
+  draft: Editable
+  autoImportModels: boolean
+}
 
 const TYPES = ['openai', 'claude', 'gemini'] as const
 
@@ -37,8 +43,8 @@ export default function AdminChannels() {
   const { t } = useTranslation(['admin', 'common'])
   const [rows, setRows] = useState<ApiChannel[]>([])
   const [loading, setLoading] = useState(true)
-  const [editor, setEditor] = useState<{ open: boolean; row?: ApiChannel; draft: Editable }>(
-    { open: false, draft: { type: 'openai', api_format: 'chat', enabled: true } },
+  const [editor, setEditor] = useState<ChannelEditor>(
+    { open: false, draft: { type: 'openai', api_format: 'chat', enabled: true }, autoImportModels: true },
   )
   const [confirmDelete, setConfirmDelete] = useState<ApiChannel | null>(null)
   const [saving, setSaving] = useState(false)
@@ -65,12 +71,16 @@ export default function AdminChannels() {
 
   function openNew() {
     setShowBaseUrlError(false)
-    setEditor({ open: true, draft: { type: 'openai', api_format: 'chat', enabled: true, name: '', base_url: '' } })
+    setEditor({
+      open: true,
+      draft: { type: 'openai', api_format: 'chat', enabled: true, name: '', base_url: '' },
+      autoImportModels: true,
+    })
   }
 
   function openEdit(row: ApiChannel) {
     setShowBaseUrlError(false)
-    setEditor({ open: true, row, draft: { ...row, api_key: '' } })
+    setEditor({ open: true, row, draft: { ...row, api_key: '' }, autoImportModels: false })
   }
 
   async function submit() {
@@ -95,8 +105,36 @@ export default function AdminChannels() {
         await adminApi.updateChannel(editor.row.id, payload)
         toast.success(t('admin:channels.updated'))
       } else {
-        await adminApi.createChannel(payload)
-        toast.success(t('admin:channels.created'))
+        const created = await adminApi.createChannel(payload)
+        let modelImport: ApiChannelModelImportResult | null = null
+        let modelImportFailed = false
+        if (editor.autoImportModels) {
+          try {
+            modelImport = await adminApi.importChannelModels(created.id)
+          } catch {
+            modelImportFailed = true
+          }
+        }
+        setEditor({ ...editor, open: false })
+        await load()
+        if (modelImportFailed) {
+          toast.warning(t('admin:channels.created'), t('admin:channels.modelImport.failed'))
+        } else if (modelImport) {
+          const skipped = modelImport.skipped_existing + modelImport.skipped_unsupported
+          if (modelImport.created > 0) {
+            toast.success(
+              t('admin:channels.created'),
+              skipped > 0
+                ? t('admin:channels.modelImport.partial', { created: modelImport.created, skipped })
+                : t('admin:channels.modelImport.success', { count: modelImport.created }),
+            )
+          } else {
+            toast.warning(t('admin:channels.created'), t('admin:channels.modelImport.empty'))
+          }
+        } else {
+          toast.success(t('admin:channels.created'))
+        }
+        return
       }
       setEditor({ ...editor, open: false })
       await load()
@@ -222,6 +260,7 @@ export default function AdminChannels() {
               <Field label={t('admin:channels.fields.name')} htmlFor="ch-name">
                 <Input
                   id="ch-name"
+                  disabled={saving}
                   value={editor.draft.name ?? ''}
                   onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, name: e.target.value } })}
                   placeholder="Anthropic production"
@@ -230,6 +269,7 @@ export default function AdminChannels() {
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <Field label={t('admin:channels.fields.type')} htmlFor="ch-type">
                   <Select
+                    disabled={saving}
                     value={editor.draft.type ?? 'openai'}
                     onValueChange={(v) => {
                       const type = v as ApiChannel['type']
@@ -260,6 +300,7 @@ export default function AdminChannels() {
                 {editor.draft.type === 'openai' ? (
                   <Field label={t('admin:channels.fields.apiFormat')} htmlFor="ch-fmt" hint={t('admin:channels.fields.apiFormatHint')}>
                     <Select
+                      disabled={saving}
                       value={editor.draft.api_format ?? 'chat'}
                       onValueChange={(v) => setEditor({ ...editor, draft: { ...editor.draft, api_format: v as ApiChannel['api_format'] } })}
                     >
@@ -288,6 +329,7 @@ export default function AdminChannels() {
               >
                 <Input
                   id="ch-url"
+                  disabled={saving}
                   value={editor.draft.base_url ?? ''}
                   onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, base_url: e.target.value } })}
                   onBlur={() => editor.draft.type === 'openai' && setShowBaseUrlError(true)}
@@ -305,18 +347,37 @@ export default function AdminChannels() {
                 <Input
                   id="ch-key"
                   type="password"
+                  disabled={saving}
                   value={editor.draft.api_key ?? ''}
                   onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, api_key: e.target.value } })}
                   placeholder="sk-…"
                 />
               </Field>
-              <label className="flex items-center justify-between rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
-                <span className="text-sm text-[var(--color-fg)]">{t('admin:channels.fields.enabled')}</span>
-                <Switch
-                  checked={editor.draft.enabled ?? true}
-                  onCheckedChange={(v) => setEditor({ ...editor, draft: { ...editor.draft, enabled: v } })}
-                />
-              </label>
+              <div className="grid gap-1 rounded-[10px] bg-[var(--color-bg-muted)] p-1">
+                <label className="flex min-h-11 items-center justify-between gap-4 rounded-[8px] px-2.5 py-2">
+                  <span className="text-sm text-[var(--color-fg)]">{t('admin:channels.fields.enabled')}</span>
+                  <Switch
+                    disabled={saving}
+                    checked={editor.draft.enabled ?? true}
+                    onCheckedChange={(v) => setEditor({ ...editor, draft: { ...editor.draft, enabled: v } })}
+                  />
+                </label>
+                {!editor.row ? (
+                  <label className="flex min-h-14 items-center justify-between gap-4 rounded-[8px] px-2.5 py-2">
+                    <span className="min-w-0">
+                      <span className="block text-sm text-[var(--color-fg)]">{t('admin:channels.fields.autoImportModels')}</span>
+                      <span className="mt-0.5 block text-xs leading-5 text-[var(--color-fg-muted)]">
+                        {t('admin:channels.fields.autoImportModelsHint')}
+                      </span>
+                    </span>
+                    <Switch
+                      disabled={saving}
+                      checked={editor.autoImportModels}
+                      onCheckedChange={(autoImportModels) => setEditor({ ...editor, autoImportModels })}
+                    />
+                  </label>
+                ) : null}
+              </div>
             </div>
           </DialogBody>
           <DialogFooter>

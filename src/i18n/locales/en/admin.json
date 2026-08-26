@@ -48,7 +48,9 @@
       "apiKey": "API key",
       "apiKeyHintNew": "",
       "apiKeyHintEdit": "Leave blank to keep the saved key.",
-      "enabled": "Enabled"
+      "enabled": "Enabled",
+      "autoImportModels": "Add supported models automatically",
+      "autoImportModelsHint": "After creating the channel, fetch its model list and add every compatible model."
     },
     "editorTitle": "Edit channel",
     "newTitle": "New channel",
@@ -59,6 +61,12 @@
     "created": "Channel created",
     "updated": "Channel updated",
     "removed": "Channel removed",
+    "modelImport": {
+      "success": "{{count}} supported models were added automatically.",
+      "partial": "{{created}} models were added; {{skipped}} existing or unsupported models were skipped.",
+      "empty": "The provider returned no models that Aivory can add automatically.",
+      "failed": "The channel was saved, but its models could not be added automatically. You can add them manually from Models."
+    },
     "errors": {
       "nameRequired": "Name required",
       "openAIBaseUrlV1Required": "The OpenAI Base URL must be a complete HTTP(S) URL ending in /v1."

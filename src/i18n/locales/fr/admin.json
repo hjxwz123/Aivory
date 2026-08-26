@@ -48,7 +48,9 @@
       "apiKey": "Clé d'API",
       "apiKeyHintNew": "",
       "apiKeyHintEdit": "Laissez vide pour conserver la clé enregistrée.",
-      "enabled": "Activé"
+      "enabled": "Activé",
+      "autoImportModels": "Ajouter automatiquement les modèles compatibles",
+      "autoImportModelsHint": "Après la création du canal, récupère sa liste de modèles et ajoute tous ceux compatibles avec Aivory."
     },
     "editorTitle": "Modifier le canal",
     "newTitle": "Nouveau canal",
@@ -59,6 +61,12 @@
     "created": "Canal créé",
     "updated": "Canal mis à jour",
     "removed": "Canal retiré",
+    "modelImport": {
+      "success": "{{count}} modèles compatibles ont été ajoutés automatiquement.",
+      "partial": "{{created}} modèles ont été ajoutés ; {{skipped}} modèles existants ou non compatibles ont été ignorés.",
+      "empty": "Le fournisseur n’a renvoyé aucun modèle qu’Aivory puisse ajouter automatiquement.",
+      "failed": "Le canal a été enregistré, mais ses modèles n’ont pas pu être ajoutés automatiquement. Vous pouvez les ajouter manuellement depuis Modèles."
+    },
     "errors": {
       "nameRequired": "Nom requis",
       "openAIBaseUrlV1Required": "L’URL de base OpenAI doit être une URL HTTP(S) complète se terminant par /v1."

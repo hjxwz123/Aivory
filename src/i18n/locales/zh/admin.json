@@ -48,7 +48,9 @@
       "apiKey": "API Key",
       "apiKeyHintNew": "",
       "apiKeyHintEdit": "留空保留原密钥。",
-      "enabled": "启用"
+      "enabled": "启用",
+      "autoImportModels": "自动添加渠道支持的模型",
+      "autoImportModelsHint": "创建渠道后获取模型列表，并添加所有与 Aivory 兼容的模型。"
     },
     "editorTitle": "编辑渠道",
     "newTitle": "新建渠道",
@@ -59,6 +61,12 @@
     "created": "渠道已创建",
     "updated": "渠道已更新",
     "removed": "渠道已删除",
+    "modelImport": {
+      "success": "已自动添加 {{count}} 个支持的模型。",
+      "partial": "已添加 {{created}} 个模型；另有 {{skipped}} 个模型因已存在或暂不支持而跳过。",
+      "empty": "渠道接口没有返回可由 Aivory 自动添加的模型。",
+      "failed": "渠道已保存，但未能自动添加模型。你仍可前往“模型”页面手动添加。"
+    },
     "errors": {
       "nameRequired": "请填写名称",
       "openAIBaseUrlV1Required": "OpenAI Base URL 必须是以 /v1 结尾的完整 HTTP(S) 地址。"
