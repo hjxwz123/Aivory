@@ -57,6 +57,24 @@ type Tokens struct {
 	IDToken     string
 }
 
+// tokenEndpointError preserves only the protocol fields needed to classify a
+// failed exchange. Authorization codes, credentials and returned tokens must
+// never be attached to this error.
+type tokenEndpointError struct {
+	Status int
+	Code   string
+}
+
+func (e *tokenEndpointError) Error() string {
+	if e.Code != "" {
+		return "token endpoint error: " + e.Code
+	}
+	if e.Status != 0 {
+		return fmt.Sprintf("token endpoint returned HTTP %d", e.Status)
+	}
+	return "token endpoint error"
+}
+
 // UserInfo is the normalised identity pulled from a provider.
 type UserInfo struct {
 	Subject       string // stable, provider-issued user id
@@ -68,6 +86,14 @@ type UserInfo struct {
 
 var httpClientTimeout = 15 * time.Second
 var httpClient = &http.Client{Timeout: httpClientTimeout}
+
+// A token request can fail before the provider processes the authorization
+// code (for example, a stalled route while awaiting response headers). One
+// fresh-connection retry is the only recovery available in that case. If the
+// first request did reach the provider, the retry safely fails as a used code
+// and the user starts a new flow, which was already required after losing the
+// first response.
+const tokenExchangeMaxAttempts = 2
 
 // Generic OAuth endpoints are administrator supplied, so their server-side
 // requests use a DNS-rebinding-safe client and may not redirect away from the
@@ -250,40 +276,92 @@ func (c Config) postToken(ctx context.Context, form url.Values, authHeader strin
 		}
 		client = genericOAuth2HTTPClient
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.TokenURL, strings.NewReader(form.Encode()))
-	if err != nil {
-		return Tokens{}, 0, err
+	encodedForm := form.Encode()
+	var lastErr error
+	for attempt := 1; attempt <= tokenExchangeMaxAttempts; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.TokenURL, strings.NewReader(encodedForm))
+		if err != nil {
+			return Tokens{}, 0, err
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Accept", "application/json") // GitHub returns form-encoded otherwise
+		if authHeader != "" {
+			req.Header.Set("Authorization", authHeader)
+		}
+		resp, err := client.Do(req)
+		if err == nil {
+			return parseTokenEndpointResponse(resp)
+		}
+		lastErr = err
+		if attempt == tokenExchangeMaxAttempts || ctx.Err() != nil || !retryableTokenTransportError(err) {
+			break
+		}
+		// Avoid immediately selecting the same stale idle connection or route.
+		client.CloseIdleConnections()
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json") // GitHub returns form-encoded otherwise
-	if authHeader != "" {
-		req.Header.Set("Authorization", authHeader)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return Tokens{}, 0, err
-	}
+	return Tokens{}, 0, lastErr
+}
+
+func parseTokenEndpointResponse(resp *http.Response) (Tokens, int, error) {
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, oauthProviderResponseBodyCap))
-	if resp.StatusCode >= 400 {
-		return Tokens{}, resp.StatusCode, fmt.Errorf("token endpoint %d: %s", resp.StatusCode, snippet(body))
-	}
-	var tr struct {
-		AccessToken      string `json:"access_token"`
-		IDToken          string `json:"id_token"`
-		Error            string `json:"error"`
-		ErrorDescription string `json:"error_description"`
-	}
-	if err := json.Unmarshal(body, &tr); err != nil {
-		return Tokens{}, resp.StatusCode, fmt.Errorf("decode token response: %w", err)
-	}
+	tr, decodeErr := decodeTokenEndpointResponse(body)
 	if tr.Error != "" {
-		return Tokens{}, resp.StatusCode, fmt.Errorf("token endpoint error: %s %s", tr.Error, tr.ErrorDescription)
+		return Tokens{}, resp.StatusCode, &tokenEndpointError{
+			Status: resp.StatusCode,
+			Code:   strings.TrimSpace(tr.Error),
+		}
+	}
+	if resp.StatusCode >= 400 {
+		// Never attach an unstructured body: a broken endpoint could return a
+		// token-shaped payload with an error status, and callback logs must not
+		// copy that value.
+		return Tokens{}, resp.StatusCode, &tokenEndpointError{Status: resp.StatusCode}
+	}
+	if decodeErr != nil {
+		return Tokens{}, resp.StatusCode, fmt.Errorf("decode token response: %w", decodeErr)
 	}
 	if tr.AccessToken == "" && tr.IDToken == "" {
 		return Tokens{}, resp.StatusCode, errors.New("token endpoint returned no tokens")
 	}
 	return Tokens{AccessToken: tr.AccessToken, IDToken: tr.IDToken}, resp.StatusCode, nil
+}
+
+type tokenEndpointResponse struct {
+	AccessToken      string `json:"access_token"`
+	IDToken          string `json:"id_token"`
+	Error            string `json:"error"`
+	ErrorDescription string `json:"error_description"`
+}
+
+// decodeTokenEndpointResponse accepts JSON and the legacy form-encoded OAuth
+// response shape. GitHub honors the JSON Accept header, but parsing both forms
+// keeps failures deterministic if an intermediary rewrites that header.
+func decodeTokenEndpointResponse(body []byte) (tokenEndpointResponse, error) {
+	var tr tokenEndpointResponse
+	jsonErr := json.Unmarshal(body, &tr)
+	if jsonErr == nil {
+		return tr, nil
+	}
+	form, formErr := url.ParseQuery(strings.TrimSpace(string(body)))
+	if formErr != nil {
+		return tokenEndpointResponse{}, jsonErr
+	}
+	tr = tokenEndpointResponse{
+		AccessToken:      form.Get("access_token"),
+		IDToken:          form.Get("id_token"),
+		Error:            form.Get("error"),
+		ErrorDescription: form.Get("error_description"),
+	}
+	if tr.AccessToken == "" && tr.IDToken == "" && tr.Error == "" {
+		return tokenEndpointResponse{}, jsonErr
+	}
+	return tr, nil
+}
+
+func retryableTokenTransportError(err error) bool {
+	var networkErr net.Error
+	return errors.As(err, &networkErr) && (networkErr.Timeout() || networkErr.Temporary())
 }
 
 func cloneValues(v url.Values) url.Values {
@@ -297,7 +375,52 @@ func cloneValues(v url.Values) url.Values {
 }
 
 func isInvalidClient(err error) bool {
+	var endpointErr *tokenEndpointError
+	if errors.As(err, &endpointErr) {
+		switch strings.ToLower(strings.TrimSpace(endpointErr.Code)) {
+		case "invalid_client", "incorrect_client_credentials":
+			return true
+		}
+	}
 	return err != nil && strings.Contains(strings.ToLower(err.Error()), "invalid_client")
+}
+
+// TokenExchangeFailureReason maps provider and network failures to a stable
+// public allowlist instead of forwarding provider text into a redirect URL.
+func TokenExchangeFailureReason(err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "oauth_provider_timeout"
+	}
+	var endpointErr *tokenEndpointError
+	if errors.As(err, &endpointErr) {
+		switch strings.ToLower(strings.TrimSpace(endpointErr.Code)) {
+		case "invalid_client", "incorrect_client_credentials", "unauthorized_client":
+			return "oauth_credentials_invalid"
+		case "bad_verification_code", "invalid_grant", "expired_token":
+			return "oauth_code_invalid"
+		case "redirect_uri_mismatch":
+			return "oauth_redirect_uri_mismatch"
+		case "slow_down", "rate_limited", "rate_limit_exceeded":
+			return "oauth_provider_rate_limited"
+		}
+		if endpointErr.Status == http.StatusTooManyRequests {
+			return "oauth_provider_rate_limited"
+		}
+		if endpointErr.Status >= http.StatusInternalServerError {
+			return "oauth_provider_unreachable"
+		}
+	}
+	var networkErr net.Error
+	if errors.As(err, &networkErr) {
+		if networkErr.Timeout() {
+			return "oauth_provider_timeout"
+		}
+		return "oauth_provider_unreachable"
+	}
+	return "token_exchange_failed"
 }
 
 // FetchUserInfo normalises the provider's identity. GitHub uses its pinned REST

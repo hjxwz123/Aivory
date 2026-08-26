@@ -352,7 +352,7 @@ SSE 心跳、流恢复窗口、生成时长上限、分页与搜索上限、消�
 | `AIVORY_API_CAPTCHA_PASS_TTL` | `duration` | `10*time.Minute` | `api/captcha.go:177` | 证明近期已通过验证码的签名通行令牌的有效期。 |
 | `AIVORY_API_OAUTH_2FA_HANDOFF_COOKIE_TTL` | `duration` | `300*time.Second` | `api/oauth_handlers.go:24` | OAuth 登录后将两步验证登录票据传给前端的短时 HttpOnly Cookie 的 Max-Age。 |
 | `AIVORY_API_OAUTH_STATE_CACHE_TTL` | `duration` | `10*time.Minute` | `api/oauth_handlers.go:25` | 作为 CSRF 防护的 OAuth 授权流程 state 缓存条目的有效期。 |
-| `AIVORY_API_OAUTH_TOKEN_EXCHANGE_CONTEXT_TIMEOUT` | `duration` | `20*time.Second` | `api/oauth_handlers.go:26` | OAuth 回调中授权码换取令牌及拉取用户信息的超时上限。 |
+| `AIVORY_API_OAUTH_TOKEN_EXCHANGE_CONTEXT_TIMEOUT` | `duration` | `40*time.Second` | `api/oauth_handlers.go:26` | OAuth 回调中授权码换取令牌（包括一次瞬时网络故障重试）及拉取用户信息的超时上限。 |
 | `AIVORY_API_OAUTH_CROSS_DOMAIN_HANDOFF_TOKEN_TTL` | `duration` | `60*time.Second` | `api/oauth_handlers.go:27` | 前端用以换取会话的一次性跨域 OAuth 交接令牌的有效期。 |
 | `AIVORY_API_2FA_LOGIN_TICKET_BURN_THRESHOLD` | `int64` | `5` | `api/twofa_handlers.go:24` | 针对某个两步验证登录票据允许的错误 TOTP 验证码次数，达到即作废该票据。 |
 | `AIVORY_API_ISSUE_TWOFA_TICKET` | `duration` | `5*time.Minute` | `api/twofa_handlers.go:25` | 密码正确后、待输入 TOTP 验证码期间所签发的两步验证登录票据的有效期。 |

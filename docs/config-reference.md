@@ -353,7 +353,7 @@ SSE 心跳、流恢复窗口、生成时长上限、分页与搜索上限、消�
 | `AIVORY_API_CAPTCHA_PASS_TTL` | `duration` | `10*time.Minute` | `api/captcha.go:177` | Lifetime of the signed pass token proving a captcha was recently solved. |
 | `AIVORY_API_OAUTH_2FA_HANDOFF_COOKIE_TTL` | `duration` | `300*time.Second` | `api/oauth_handlers.go:24` | Max-Age of the short-lived HttpOnly cookie handing a 2FA login ticket to the SPA after OAuth sign-in. |
 | `AIVORY_API_OAUTH_STATE_CACHE_TTL` | `duration` | `10*time.Minute` | `api/oauth_handlers.go:25` | Lifetime of the cached OAuth authorization-flow state entry used as the CSRF guard. |
-| `AIVORY_API_OAUTH_TOKEN_EXCHANGE_CONTEXT_TIMEOUT` | `duration` | `20*time.Second` | `api/oauth_handlers.go:26` | Timeout bounding the OAuth callback's code-to-token exchange plus the userinfo fetch. |
+| `AIVORY_API_OAUTH_TOKEN_EXCHANGE_CONTEXT_TIMEOUT` | `duration` | `40*time.Second` | `api/oauth_handlers.go:26` | Timeout bounding the OAuth callback's code-to-token exchange (including one transient-network retry) plus the userinfo fetch. |
 | `AIVORY_API_OAUTH_CROSS_DOMAIN_HANDOFF_TOKEN_TTL` | `duration` | `60*time.Second` | `api/oauth_handlers.go:27` | Lifetime of the one-time cross-domain OAuth handoff token the SPA exchanges for a session. |
 | `AIVORY_API_2FA_LOGIN_TICKET_BURN_THRESHOLD` | `int64` | `5` | `api/twofa_handlers.go:24` | Number of wrong TOTP-code attempts against a 2FA login ticket before that ticket is burned. |
 | `AIVORY_API_ISSUE_TWOFA_TICKET` | `duration` | `5*time.Minute` | `api/twofa_handlers.go:25` | Lifetime of the 2FA login ticket issued after a correct password while the TOTP code is pending. |
