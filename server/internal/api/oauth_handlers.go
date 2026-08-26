@@ -28,7 +28,7 @@ import (
 var (
 	oauth2FAHandoffCookieTTL        = securityDuration("AIVORY_API_OAUTH_2FA_HANDOFF_COOKIE_TTL", 300*time.Second)
 	oauthStateCacheTTL              = securityDuration("AIVORY_API_OAUTH_STATE_CACHE_TTL", 10*time.Minute)
-	oauthTokenExchangeCtxTimeout    = securityDuration("AIVORY_API_OAUTH_TOKEN_EXCHANGE_CONTEXT_TIMEOUT", 20*time.Second)
+	oauthTokenExchangeCtxTimeout    = securityDuration("AIVORY_API_OAUTH_TOKEN_EXCHANGE_CONTEXT_TIMEOUT", 40*time.Second)
 	oauthCrossDomainHandoffTokenTTL = securityDuration("AIVORY_API_OAUTH_CROSS_DOMAIN_HANDOFF_TOKEN_TTL", 60*time.Second)
 )
 
@@ -491,8 +491,9 @@ func oauthCallbackHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 
 	tokens, err := exchangeOAuthAuthorizationCode(ctx, cfg, redirectURI, code, st.Verifier)
 	if err != nil {
-		d.Logger.Printf("[oauth] %s exchange failed: %v", p.Kind, err)
-		fail("token_exchange_failed")
+		reason := oauth.TokenExchangeFailureReason(err)
+		d.Logger.Printf("[oauth] %s exchange failed (%s): %v", p.Kind, reason, err)
+		fail(reason)
 		return
 	}
 	info, err := fetchOAuthCallbackUserInfo(ctx, cfg, tokens, st.Nonce)
