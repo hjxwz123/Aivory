@@ -345,8 +345,99 @@ func TestRefreshHandlerConsumesOneTokenOnlyOnce(t *testing.T) {
 	if err := d.DB.QueryRow(`SELECT COUNT(*) FROM refresh_tokens WHERE user_id=? AND revoked=0`, user.ID).Scan(&active); err != nil {
 		t.Fatalf("count active sessions: %v", err)
 	}
-	if active != 1 {
-		t.Fatalf("active sessions=%d, want 1", active)
+	if active != 0 {
+		t.Fatalf("active sessions=%d, want 0 after replay detection", active)
+	}
+}
+
+func TestFreshLoginReplacesPreviousBrowserSession(t *testing.T) {
+	d := newAuthSecurityDeps(t, "exclusive-login.db")
+	user, err := store.CreateUser(t.Context(), d.DB, "exclusive@example.test", "Exclusive", "hash")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	firstReq := httptest.NewRequest(http.MethodPost, "https://app.example.test/api/auth/login", nil)
+	firstReq.Header.Set("User-Agent", "first-browser")
+	first := httptest.NewRecorder()
+	finaliseLoginSession(d, first, firstReq, user, store.LoginMethodPassword)
+	firstAccess := responseCookie(first, "auth_token")
+	if first.Code != http.StatusOK || firstAccess == nil {
+		t.Fatalf("first login status=%d access=%v body=%s", first.Code, firstAccess, first.Body.String())
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "https://app.example.test/api/auth/login", nil)
+	secondReq.Header.Set("User-Agent", "second-browser")
+	second := httptest.NewRecorder()
+	finaliseLoginSession(d, second, secondReq, user, store.LoginMethodPassword)
+	secondAccess := responseCookie(second, "auth_token")
+	if second.Code != http.StatusOK || secondAccess == nil {
+		t.Fatalf("second login status=%d access=%v body=%s", second.Code, secondAccess, second.Body.String())
+	}
+
+	sessions, err := store.ListUserSessions(t.Context(), d.DB, user.ID)
+	if err != nil || len(sessions) != 1 || sessions[0].UserAgent != "second-browser" {
+		t.Fatalf("active sessions=%+v err=%v, want only second browser", sessions, err)
+	}
+
+	called := false
+	h := requireAuth(d, func(_ Deps, w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusNoContent)
+	})
+	oldReq := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	oldReq.Header.Set("Authorization", "Bearer "+firstAccess.Value)
+	old := httptest.NewRecorder()
+	h.ServeHTTP(old, oldReq)
+	if old.Code != http.StatusUnauthorized || called {
+		t.Fatalf("replaced access status=%d called=%v, want 401/false", old.Code, called)
+	}
+
+	called = false
+	currentReq := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	currentReq.Header.Set("Authorization", "Bearer "+secondAccess.Value)
+	current := httptest.NewRecorder()
+	h.ServeHTTP(current, currentReq)
+	if current.Code != http.StatusNoContent || !called {
+		t.Fatalf("replacement access status=%d called=%v, want 204/true", current.Code, called)
+	}
+}
+
+func TestRefreshCookieEndpointsRejectCrossSiteRequests(t *testing.T) {
+	d := newAuthSecurityDeps(t, "refresh-cookie-csrf.db")
+	user, err := store.CreateUser(t.Context(), d.DB, "csrf@example.test", "CSRF", "hash")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	refresh, refreshExp, jti, err := d.Auth.IssueRefresh(user.ID, user.TokenVer)
+	if err != nil {
+		t.Fatalf("issue refresh: %v", err)
+	}
+	if err := store.SaveRefreshToken(t.Context(), d.DB, jti, user.ID, refreshExp, store.SessionMeta{}); err != nil {
+		t.Fatalf("save refresh: %v", err)
+	}
+
+	for name, h := range map[string]handler{
+		"logout":  logoutHandler,
+		"refresh": refreshHandler,
+		"session": sessionHandler,
+	} {
+		t.Run(name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "https://app.example.test/api/auth/"+name, nil)
+			req.Header.Set("Origin", "https://attacker.example.test")
+			req.Header.Set("Sec-Fetch-Site", "cross-site")
+			req.AddCookie(&http.Cookie{Name: "refresh_token", Value: refresh})
+			rec := httptest.NewRecorder()
+			h(d, rec, req)
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("cross-site %s status=%d body=%s, want 403", name, rec.Code, rec.Body.String())
+			}
+		})
+	}
+
+	valid, err := store.IsRefreshSessionValid(t.Context(), d.DB, user.ID, jti)
+	if err != nil || !valid {
+		t.Fatalf("cross-site requests changed refresh session valid=(%v,%v)", valid, err)
 	}
 }
 

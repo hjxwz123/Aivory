@@ -1663,6 +1663,30 @@ func SaveRefreshToken(ctx context.Context, db *sql.DB, jti, userID string, expir
 	return saveRefreshToken(ctx, db, jti, userID, expiresAt, meta)
 }
 
+// ReplaceUserRefreshSession starts a fresh, exclusive browser session. The
+// user-row lock serializes concurrent logins and refresh rotation; after commit
+// exactly one active session family remains for the user. This intentionally
+// lives beside SaveRefreshToken because internal/admin callers may still need
+// to construct multiple session fixtures without applying the product policy.
+func ReplaceUserRefreshSession(ctx context.Context, db *sql.DB, jti, userID string, expiresAt time.Time, meta SessionMeta) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := lockRefreshSessionUser(ctx, tx, userID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE refresh_tokens SET revoked=1 WHERE user_id=? AND revoked=0`, userID); err != nil {
+		return err
+	}
+	if err := saveRefreshToken(ctx, tx, jti, userID, expiresAt, meta); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // SaveRefreshTokenForOAuthCallback makes the provider-generation check and the
 // refresh-session insert one database transaction. This is the OAuth callback's
 // session-issuance linearization point.
@@ -1719,6 +1743,13 @@ func SaveRefreshTokenForOAuthCallback(
 		return ErrOAuthLoginStateChanged
 	}
 	if err := validateOAuthProviderCallbackGuardTx(ctx, tx, guard); err != nil {
+		return err
+	}
+	// OAuth is a fresh login too. Revoke any prior browser session in the same
+	// transaction as the callback guard and replacement-session insert so an old
+	// device cannot race the callback and remain signed in.
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE refresh_tokens SET revoked=1 WHERE user_id=? AND revoked=0`, userID); err != nil {
 		return err
 	}
 	if err := saveRefreshToken(ctx, tx, jti, userID, expiresAt, meta); err != nil {

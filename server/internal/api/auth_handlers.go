@@ -649,6 +649,10 @@ func loginHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 
 // logoutHandler clears the cookies. Also revokes the refresh token if present.
 func logoutHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	if !csrfRefreshOK(d.Config.AllowedOrigins, r) {
+		writeError(w, http.StatusForbidden, errors.New("cross-site request blocked"))
+		return
+	}
 	if c, err := r.Cookie("refresh_token"); err == nil {
 		if claims, err := d.Auth.ParseRefresh(c.Value); err == nil {
 			_, _ = store.RevokeUserSession(r.Context(), d.DB, claims.UID, claims.ID)
@@ -709,7 +713,13 @@ func refreshSession(d Deps, r *http.Request) (*refreshedSession, error) {
 		jti, refreshExp, sessionMeta(r, 0),
 	)
 	if err != nil {
+		if errors.Is(err, store.ErrRefreshTokenReplay) && d.Logger != nil {
+			d.Logger.Printf("[auth] refresh-token replay: user=%s ip=%s", claims.UID, clientIP(r))
+		}
 		if errors.Is(err, store.ErrInvalidRefreshToken) {
+			return nil, &refreshAuthFailure{reason: errSessionExpired}
+		}
+		if errors.Is(err, store.ErrRefreshTokenReplay) {
 			return nil, &refreshAuthFailure{reason: errSessionExpired}
 		}
 		return nil, err
@@ -738,6 +748,10 @@ func writeRefreshedSession(d Deps, w http.ResponseWriter, r *http.Request, sessi
 // refreshHandler swaps a refresh token for a new access token. This endpoint
 // retains HTTP 401 for callers that explicitly request a token refresh.
 func refreshHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	if !csrfRefreshOK(d.Config.AllowedOrigins, r) {
+		writeError(w, http.StatusForbidden, errors.New("cross-site request blocked"))
+		return
+	}
 	session, err := refreshSession(d, r)
 	if err != nil {
 		var authFailure *refreshAuthFailure
@@ -755,6 +769,10 @@ func refreshHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 // logged-out page from generating an expected 401 in DevTools, while protected
 // endpoints and the explicit /auth/refresh contract continue to use 401.
 func sessionHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	if !csrfRefreshOK(d.Config.AllowedOrigins, r) {
+		writeError(w, http.StatusForbidden, errors.New("cross-site request blocked"))
+		return
+	}
 	session, err := refreshSession(d, r)
 	if err != nil {
 		var authFailure *refreshAuthFailure
@@ -892,7 +910,7 @@ func issueSessionCookiesWithOAuthGuard(
 		setSessionCookies(w, r, access, exp, refresh, refreshExp)
 		return access, exp, nil
 	}
-	if err := store.SaveRefreshToken(r.Context(), d.DB, jti, user.ID, refreshExp, meta); err != nil {
+	if err := store.ReplaceUserRefreshSession(r.Context(), d.DB, jti, user.ID, refreshExp, meta); err != nil {
 		return "", time.Time{}, err
 	}
 	access, exp, err := d.Auth.IssueAccessForSession(user.ID, user.Role, user.TokenVer, jti)

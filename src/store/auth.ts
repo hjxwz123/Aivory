@@ -49,6 +49,21 @@ function isLatestAuthOp(seq: number): boolean {
   return seq === authOpSeq
 }
 
+type BrowserLockManager = {
+  request<T>(name: string, options: { mode: 'exclusive' }, callback: () => Promise<T>): Promise<T>
+}
+
+// A consumed refresh token is deliberately treated as theft by the backend.
+// Coordinate startup/401 refreshes between same-origin tabs so normal browser
+// concurrency does not look like a copied credential being replayed.
+function refreshBrowserSession() {
+  const locks = typeof navigator === 'undefined'
+    ? undefined
+    : (navigator as Navigator & { locks?: BrowserLockManager }).locks
+  if (!locks) return authApi.session()
+  return locks.request('aivory-auth-refresh', { mode: 'exclusive' }, () => authApi.session())
+}
+
 interface AuthState {
   user: ApiUser | null
   status: 'idle' | 'authenticating' | 'authenticated' | 'unauthenticated'
@@ -172,7 +187,7 @@ export const useAuth = create<AuthState>((set, get) => ({
       // A signed-out first visit is a normal state. The session probe returns
       // 200 { authenticated: false } in that case, avoiding an expected 401
       // network error before the login screen is shown.
-      const resp = await authApi.session()
+      const resp = await refreshBrowserSession()
       if (!isLatestAuthOp(seq)) return
       if (resp.authenticated && resp.user && resp.access_token) {
         resetAuthFailureState()
@@ -394,7 +409,7 @@ setInitialPasswordRequiredHandler(() => {
 setRefreshHandler(async () => {
   const seq = currentAuthOp()
   try {
-    const resp = await authApi.session()
+    const resp = await refreshBrowserSession()
     if (!resp.authenticated || !resp.user || !resp.access_token) {
       if (isLatestAuthOp(seq)) {
         setAccessToken(null)
