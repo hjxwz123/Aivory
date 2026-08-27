@@ -46,6 +46,17 @@ ghcr.io/hjxwz123/aivory-sandbox:latest          # Python runtime
 ghcr.io/hjxwz123/aivory-sandbox-sidecar:latest  # control service
 ```
 
+Both image tags support `linux/amd64` and `linux/arm64`; Docker automatically
+pulls the matching variant for the host. Local custom builds can target either
+architecture with Buildx, for example:
+
+```bash
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -f Dockerfile.runner -t example/aivory-sandbox:latest --push .
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -f Dockerfile.sidecar -t example/aivory-sandbox-sidecar:latest --push .
+```
+
 **1. Clone the public repo on your server**
 
 ```bash

@@ -50,6 +50,17 @@ docker compose -f docker-compose.prod.yml up -d
 
 应用随后可通过 `http://<host>` 访问（默认绑定主机 80 端口；如果 80 被占用，修改 `docker-compose.prod.yml` 里的 `"80:8787"` 映射）。首次启动时系统没有任何用户，第一个通过初始化页面创建的账号会成为管理员。之后在 **/admin** 中添加真实 provider channel（API key 存在数据库里）。
 
+### CPU 架构兼容性
+
+三张 Aivory 镜像（应用、沙箱运行时和沙箱 sidecar）的同一标签都会同时发布
+`linux/amd64`（`uname -m` 输出 `x86_64`）与 `linux/arm64`（输出 `aarch64`
+或 `arm64`）。Compose 会自动选择宿主机架构，不需要设置 `platform:`。ARM64
+服务器必须运行 64 位 Linux；不支持 32 位 ARM/`armv7l`。
+
+已有 x86_64 部署不需要迁移，也不需要修改 `.env`、Compose、镜像标签、数据卷或
+现有数据，继续使用下文原有的 `pull` 和 `up -d --no-build` 命令即可。全新 ARM64
+服务器直接使用上面的快速部署命令，不需要 ARM 专用配置。
+
 `store.Migrate()` 会在启动时自动运行，并在表不存在时创建 Postgres schema（`schema_pg.sql`）。不需要手动执行 SQL。
 
 ## 按版本号部署或回滚

@@ -11,6 +11,9 @@ name: Build & push sandbox images
 # tag, or manually via the Actions tab. Images land at:
 #   ghcr.io/<account>/aivory-sandbox:latest
 #   ghcr.io/<account>/aivory-sandbox-sidecar:latest
+#
+# Both tags are multi-platform manifests. Docker automatically pulls the native
+# linux/amd64 or linux/arm64 image for the deployment host.
 
 on:
   push:
@@ -23,9 +26,13 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  # Server arch. Change to linux/arm64 (and DOCKER_CLI_ARCH=aarch64 in
-  # Dockerfile.sidecar) for ARM servers, or list both for multi-arch.
-  PLATFORMS: linux/amd64
+  PLATFORMS: linux/amd64,linux/arm64
+
+# QEMU multi-platform builds are relatively expensive. Cancel a stale build on
+# the same ref so it cannot publish after a newer commit.
+concurrency:
+  group: sandbox-images-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -34,6 +41,7 @@ jobs:
       contents: read
       packages: write
     strategy:
+      fail-fast: false
       matrix:
         include:
           - name: aivory-sandbox
@@ -79,5 +87,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Each matrix image owns its cache. Sharing the default BuildKit scope
+          # lets concurrent runner/sidecar builds overwrite each other's cache.
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=min,scope=${{ matrix.name }}

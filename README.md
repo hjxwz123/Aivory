@@ -224,6 +224,42 @@ Five containers come up:
 | `sandbox` | `ghcr.io/hjxwz123/aivory-sandbox-sidecar:latest` | Bundled code-execution sandbox (internal-only) |
 | `app` | `ghcr.io/hjxwz123/aivory-app:latest` | One container: Go HTTP + SSE server **and** the built SPA, same origin |
 
+### x86_64 and ARM64 installation
+
+Check the server architecture before deploying:
+
+| `uname -m` output | Image platform | Support |
+|---|---|---|
+| `x86_64` / `amd64` | `linux/amd64` | Supported |
+| `aarch64` / `arm64` | `linux/arm64` | Supported; requires a 64-bit Linux OS |
+| `armv7l` / other 32-bit ARM | `linux/arm/v7` | Not supported |
+
+All three Aivory images (`app`, sandbox runtime, and sandbox sidecar) publish
+both supported platforms under the same tag. Compose selects the matching
+variant automatically, so do not add a `platform:` override.
+
+Existing x86_64 installations keep their current `.env`, Compose file, image
+tags, volumes, and data. Upgrade with the same commands as before:
+
+```bash
+cd Aivory/deploy
+docker compose --env-file .env -f docker-compose.prod.yml pull
+docker compose --env-file .env -f docker-compose.prod.yml up -d --no-build
+```
+
+For a new ARM64 installation, use the normal installation commands; no ARM-only
+configuration is needed:
+
+```bash
+uname -m  # must print aarch64 or arm64
+git clone https://github.com/hjxwz123/Aivory.git
+cd Aivory/deploy
+cp .env.example .env
+$EDITOR .env
+docker compose --env-file .env -f docker-compose.prod.yml pull
+docker compose --env-file .env -f docker-compose.prod.yml up -d
+```
+
 Postgres / Redis / Qdrant use named volumes (`pgdata`, `redisdata`, `qdrantdata`). Uploads, generated artifacts, and API-owned local objects such as avatars are bind-mounted from `DATA_DIR` (default `./data`) — files land directly on the host, no container access needed. Local objects default to `UPLOAD_DIR/object-storage`; override that path with `AIVORY_LOCAL_STORAGE_DIR` when needed. The admin backup page can also generate an async full migration ZIP that includes DB rows, files, and Qdrant vectors; completed archives live under `BACKUP_DIR` (default `DATA_DIR/backups`).
 
 ---
