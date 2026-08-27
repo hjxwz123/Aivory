@@ -186,6 +186,40 @@ docker compose -f docker-compose.prod.yml up -d
 
 按版本部署时，修改实际的 `deploy/.env`，例如 `IMAGE_TAG=3.0.0`（镜像标签不带 Git tag 的 `v` 前缀）；应用和两张沙箱镜像会自动使用同一版本。`2.2.6` 等缺少沙箱版本镜像的历史版本需要额外设置 `SANDBOX_IMAGE_TAG=latest`。先运行 `docker compose --env-file .env -f docker-compose.prod.yml config --images` 核对最终镜像，再执行 `pull` 和 `up -d --no-build`。完整说明见 [`deploy/README.zh-CN.md`](deploy/README.zh-CN.md#按版本号部署或回滚)。
 
+### x86_64 与 ARM64 安装
+
+部署前先检查服务器架构：
+
+| `uname -m` 输出 | 镜像平台 | 支持情况 |
+|---|---|---|
+| `x86_64` / `amd64` | `linux/amd64` | 支持 |
+| `aarch64` / `arm64` | `linux/arm64` | 支持，必须使用 64 位 Linux 系统 |
+| `armv7l` / 其他 32 位 ARM | `linux/arm/v7` | 不支持 |
+
+应用、沙箱运行时和沙箱 sidecar 的同一标签会同时包含两种受支持的平台。
+Docker Compose 会自动拉取匹配宿主机的版本，不要额外设置 `platform:`。
+
+已有 x86_64 部署无需修改 `.env`、Compose、镜像标签、数据卷或现有数据，仍按
+原方式更新：
+
+```bash
+cd Aivory/deploy
+docker compose --env-file .env -f docker-compose.prod.yml pull
+docker compose --env-file .env -f docker-compose.prod.yml up -d --no-build
+```
+
+全新 ARM64 部署也使用标准安装命令，不需要 ARM 专用配置：
+
+```bash
+uname -m  # 必须输出 aarch64 或 arm64
+git clone https://github.com/hjxwz123/Aivory.git
+cd Aivory/deploy
+cp .env.example .env
+$EDITOR .env  # 设置 POSTGRES_PASSWORD、REDIS_PASSWORD、JWT_SECRET
+docker compose --env-file .env -f docker-compose.prod.yml pull
+docker compose --env-file .env -f docker-compose.prod.yml up -d
+```
+
 完成后访问 `http://localhost`（默认映射主机 80 端口；如被占用，改 `docker-compose.prod.yml` 里的 `"80:8787"` 映射即可，无需任何环境变量）。前端与 `/api` 同源,**解析到哪个域名哪个域名就能用**,不需要配 `PUBLIC_ORIGIN` / `ALLOWED_ORIGINS`。
 
 **首次启动**：进入初始化页面，填写昵称、邮箱和密码，该账号成为管理员。随后去 `/admin/channels` 添加第一个 Provider key，并创建模型。

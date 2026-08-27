@@ -7,22 +7,34 @@
 #
 #   docker build -f Dockerfile.sidecar -t aivory-sandbox-sidecar:latest .
 #
-# Built for linux/amd64 (typical server). For arm64 servers, change
-# DOCKER_CLI_ARCH to aarch64 and build with --platform linux/arm64.
+# Supports linux/amd64 and linux/arm64. BuildKit supplies TARGETARCH and the
+# install step maps it to Docker's static CLI archive naming automatically.
 
 FROM python:3.12-slim-bookworm
 
 ARG DOCKER_CLI_VERSION=27.3.1
-ARG DOCKER_CLI_ARCH=x86_64
+ARG TARGETARCH
 
 # Install just the docker CLI (static binary) — not the daemon. The sidecar
 # talks to the host daemon over the mounted socket.
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
-    && curl -fsSL "https://download.docker.com/linux/static/stable/${DOCKER_CLI_ARCH}/docker-${DOCKER_CLI_VERSION}.tgz" \
-       | tar xz --strip-components=1 -C /usr/local/bin docker/docker \
-    && apt-get purge -y curl && apt-get autoremove -y \
-    && rm -rf /var/lib/apt/lists/* \
-    && docker --version
+RUN set -eux; \
+    target_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "$target_arch" in \
+        amd64) docker_cli_arch="x86_64" ;; \
+        arm64) docker_cli_arch="aarch64" ;; \
+        *) echo "Unsupported target architecture: $target_arch" >&2; exit 1 ;; \
+    esac; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends curl ca-certificates; \
+    docker_cli_archive="/tmp/docker-cli.tgz"; \
+    curl -fsSL "https://download.docker.com/linux/static/stable/${docker_cli_arch}/docker-${DOCKER_CLI_VERSION}.tgz" \
+        -o "$docker_cli_archive"; \
+    tar xzf "$docker_cli_archive" --strip-components=1 -C /usr/local/bin docker/docker; \
+    rm -f "$docker_cli_archive"; \
+    apt-get purge -y curl; \
+    apt-get autoremove -y; \
+    rm -rf /var/lib/apt/lists/*; \
+    docker --version
 
 WORKDIR /app
 COPY requirements.txt .

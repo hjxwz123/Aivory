@@ -65,6 +65,19 @@ the deployment has zero users — the FIRST account you create via the setup scr
 becomes the administrator. Then add real provider channels in **/admin** (their
 API keys are stored in the database).
 
+### CPU architecture compatibility
+
+The three Aivory images (`app`, sandbox runtime, and sandbox sidecar) publish a
+single multi-platform tag for both `linux/amd64` (`uname -m` reports `x86_64`)
+and `linux/arm64` (`uname -m` reports `aarch64` or `arm64`). Compose selects the
+host architecture automatically; no `platform:` override is required. ARM64
+servers must run a 64-bit Linux OS; 32-bit ARM/`armv7l` is not supported.
+
+Existing x86_64 deployments require no migration or configuration change. Keep
+the existing `.env`, Compose file, image tags, volumes, and data, then use the
+same `pull` and `up -d --no-build` commands documented below. New ARM64 servers
+use the same quick-deploy commands shown above.
+
 `store.Migrate()` runs automatically on boot and creates the Postgres schema
 (`schema_pg.sql`) if the tables don't exist — no manual SQL step.
 
