@@ -1,7 +1,8 @@
-import katex from 'katex'
 import { memo, useMemo } from 'react'
 import { splitMathContent } from '@/lib/math-content'
+import { renderMathToHtml } from '@/lib/markdown'
 import { cn } from '@/lib/utils'
+import { useMathCopy } from '@/hooks/use-math-copy'
 
 interface MathTextProps {
   content: string
@@ -9,6 +10,7 @@ interface MathTextProps {
 }
 
 export const MathText = memo(function MathText({ content, className }: MathTextProps) {
+  const { announcement, handleMathCopy, labels } = useMathCopy()
   const segments = useMemo(
     () => {
       const parsed = splitMathContent(content)
@@ -27,27 +29,20 @@ export const MathText = memo(function MathText({ content, className }: MathTextP
           }
           return { ...segment, value }
         }
-        try {
-          return {
-            ...segment,
-            html: katex.renderToString(segment.value, {
-              displayMode: segment.type === 'block-math',
-              throwOnError: false,
-              strict: false,
-            }),
-          }
-        } catch {
-          // KaTeX can throw non-parse errors (for example a RangeError from an
-          // adversarially deep expression). Keep the message renderable.
-          return { ...segment, html: null }
+        return {
+          ...segment,
+          html: renderMathToHtml(segment.value, segment.type === 'block-math', labels),
         }
       })
     },
-    [content],
+    [content, labels],
   )
 
   return (
-    <div className={cn('min-w-0 whitespace-pre-wrap break-words', className)}>
+    <div
+      className={cn('min-w-0 whitespace-pre-wrap break-words', className)}
+      onClick={handleMathCopy}
+    >
       {segments.map((segment, index) => {
         if (segment.type === 'text') {
           return segment.value ? <span key={index}>{segment.value}</span> : null
@@ -70,6 +65,9 @@ export const MathText = memo(function MathText({ content, className }: MathTextP
           />
         )
       })}
+      <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {announcement}
+      </span>
     </div>
   )
 })

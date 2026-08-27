@@ -185,6 +185,9 @@
   "actions": {
     "copy": "複製",
     "copied": "已複製",
+    "copyLatex": "複製 LaTeX",
+    "latexCopied": "已複製 LaTeX",
+    "copyLatexFailed": "無法複製 LaTeX",
     "exportDocx": "匯出為 Word",
     "exportDocxFailed": "匯出失敗",
     "creditsUsed": "消耗 {{credits}} 點數",

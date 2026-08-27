@@ -217,22 +217,43 @@ export interface MarkdownBlock {
   lang?: string
 }
 
+export interface MathCopyLabels {
+  copy: string
+  copied: string
+}
+
+const DEFAULT_MATH_COPY_LABELS: MathCopyLabels = {
+  copy: 'Copy LaTeX',
+  copied: 'LaTeX copied',
+}
+
 /**
- * Render an inline markdown string to HTML (used by paragraph blocks).
- * marked v15 types this as `string | Promise<string>` — `async: false`
- * guarantees a string in practice; we runtime-assert to avoid silent
- * `[object Promise]` injection if marked extensions change behavior.
+ * Render a read-only formula as a button that retains the normalized LaTeX.
+ * The wrapper is generated here because inline markdown is inserted as HTML;
+ * keeping the source in a safely escaped data attribute lets the React surface
+ * provide one delegated copy interaction for paragraphs, lists and tables.
  */
-/**
- * Render a LaTeX fragment via KaTeX (§1.1 P0 — math output). Errors degrade to
- * the original delimited source rather than throwing.
- */
-function renderTex(tex: string, display: boolean): string {
+export function renderMathToHtml(
+  tex: string,
+  display: boolean,
+  labels: MathCopyLabels = DEFAULT_MATH_COPY_LABELS,
+): string | null {
+  const latex = tex.trim()
+  if (!latex) return null
   try {
-    return katex.renderToString(tex.trim(), { displayMode: display, throwOnError: false })
+    const rendered = katex.renderToString(latex, {
+      displayMode: display,
+      throwOnError: false,
+      strict: false,
+    })
+    return `<button type="button" class="math-copy-trigger" data-math-copy="true" data-latex="${escapeAttr(latex)}" data-copy-label="${escapeAttr(labels.copy)}" data-copied-label="${escapeAttr(labels.copied)}" data-display="${display ? 'true' : 'false'}" aria-label="${escapeAttr(labels.copy)}" title="${escapeAttr(labels.copy)}"><span class="math-copy-content">${rendered}</span></button>`
   } catch {
-    return escapeHtml(display ? `$$${tex}$$` : `$${tex}$`)
+    return null
   }
+}
+
+function renderTexOrSource(tex: string, display: boolean, labels?: MathCopyLabels): string {
+  return renderMathToHtml(tex, display, labels) ?? escapeHtml(display ? `$$${tex}$$` : `$${tex}$`)
 }
 
 function escapeHtml(s: string): string {
@@ -307,25 +328,41 @@ export function linkifyCitations(html: string, cites: CiteRef[]): string {
  * Currency like `$5 and $10` is left alone (lookbehind requires a non-space
  * before the closing `$`, and a single `$…$` span can't straddle two amounts).
  */
-function protectMath(md: string): { text: string; map: string[] } {
+function protectMath(md: string, labels?: MathCopyLabels): { text: string; map: string[] } {
   const map: string[] = []
+  const code: string[] = []
   const stash = (html: string) => {
     const i = map.length
     map.push(html)
     return `@@MATH${i}@@`
   }
-  let text = md
-  text = text.replace(/\$\$([\s\S]+?)\$\$/g, (_, tex) => stash(renderTex(tex, true)))
-  text = text.replace(/\\\[([\s\S]+?)\\\]/g, (_, tex) => stash(renderTex(tex, true)))
-  text = text.replace(/\\\(([\s\S]+?)\\\)/g, (_, tex) => stash(renderTex(tex, false)))
-  text = text.replace(/\$(?!\s)([^$\n]+?)(?<!\s)\$/g, (_, tex) => stash(renderTex(tex, false)))
+  const stashCode = (source: string) => {
+    const i = code.length
+    code.push(source)
+    return `@@CODE${i}@@`
+  }
+  // Math delimiters inside inline code are literal. Temporarily remove code
+  // spans before finding formulae, then restore them before marked parses.
+  let text = md.replace(/(`+)([\s\S]*?)\1/g, (source) => stashCode(source))
+  text = text.replace(/\$\$([\s\S]+?)\$\$/g, (_, tex) => stash(renderTexOrSource(tex, true, labels)))
+  text = text.replace(/\\\[([\s\S]+?)\\\]/g, (_, tex) => stash(renderTexOrSource(tex, true, labels)))
+  text = text.replace(/\\\(([\s\S]+?)\\\)/g, (_, tex) => stash(renderTexOrSource(tex, false, labels)))
+  text = text.replace(/\$(?!\s)([^$\n]+?)(?<!\s)\$/g, (_, tex) => stash(renderTexOrSource(tex, false, labels)))
+  text = text.replace(/@@CODE(\d+)@@/g, (_, i) => code[Number(i)] ?? '')
   return { text, map }
 }
 
-export function inlineMarkdownToHtml(md: string, cites?: CiteRef[], breaks = false): string {
+export function inlineMarkdownToHtml(
+  md: string,
+  cites?: CiteRef[],
+  breaks = false,
+  mathCopyLabels?: MathCopyLabels,
+): string {
+  // marked v15 types parseInline as `string | Promise<string>`; async:false
+  // guarantees a string in practice, with a runtime fallback below.
   // Layer 1: strip raw HTML tags from markdown source before marked sees it.
   const cleaned = stripRawHtml(md)
-  const { text, map } = protectMath(cleaned)
+  const { text, map } = protectMath(cleaned, mathCopyLabels)
   // `breaks` turns a single "\n" into <br> (soft break). Off for assistant
   // markdown (standard rendering); on for literal user input / thinking where
   // the author's line breaks are meaningful.
@@ -351,9 +388,14 @@ export function inlineMarkdownToHtml(md: string, cites?: CiteRef[], breaks = fal
  * `table` block — paragraphs/headings stay on the inline path. Same two-layer
  * defence (strip raw HTML → sanitize) and math protection.
  */
-export function blockMarkdownToHtml(md: string, cites?: CiteRef[], breaks = false): string {
+export function blockMarkdownToHtml(
+  md: string,
+  cites?: CiteRef[],
+  breaks = false,
+  mathCopyLabels?: MathCopyLabels,
+): string {
   const cleaned = stripRawHtml(md)
-  const { text, map } = protectMath(cleaned)
+  const { text, map } = protectMath(cleaned, mathCopyLabels)
   let out = marked.parse(text, { async: false, breaks })
   if (typeof out !== 'string') {
     return escapeHtml(md)
@@ -371,7 +413,7 @@ export function blockMarkdownToHtml(md: string, cites?: CiteRef[], breaks = fals
  * Tokenize markdown into a flat block list our React renderer can map over.
  *
  * Display math (`$$…$$` / `\[…\]`) is extracted FIRST, before `marked` ever
- * sees it, and emitted as standalone `math` blocks rendered straight by KaTeX.
+ * sees it, and emitted as standalone `math` blocks that retain the raw LaTeX.
  * Otherwise marked splits multi-line display math across paragraphs (or escapes
  * `\[` → `[`), which left raw LaTeX like `[ \frac{…} ]` on screen. Inline math
  * (`$…$` / `\(…\)`) stays on the per-block path in inlineMarkdownToHtml.
@@ -384,7 +426,7 @@ export function tokenizeMarkdown(md: string, breaks = false): MarkdownBlock[] {
   while ((m = displayMath.exec(md)) !== null) {
     lexInto(blocks, md.slice(lastIndex, m.index), breaks)
     const tex = (m[1] ?? m[2] ?? '').trim()
-    if (tex) blocks.push({ type: 'math', content: renderTex(tex, true) })
+    if (tex) blocks.push({ type: 'math', content: tex })
     lastIndex = m.index + m[0].length
   }
   lexInto(blocks, md.slice(lastIndex), breaks)

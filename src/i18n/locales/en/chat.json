@@ -190,6 +190,9 @@
   "actions": {
     "copy": "Copy",
     "copied": "Copied",
+    "copyLatex": "Copy LaTeX",
+    "latexCopied": "LaTeX copied",
+    "copyLatexFailed": "Couldn’t copy the LaTeX",
     "exportDocx": "Export as Word",
     "exportDocxFailed": "Export failed",
     "creditsUsed": "{{credits}} credits used",
