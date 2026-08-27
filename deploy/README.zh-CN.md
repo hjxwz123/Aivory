@@ -1,11 +1,17 @@
-# Aivory — 生产部署
+# Aivory — 部署配置
 
 <p align="center">
   <a href="./README.md">English</a> ·
   <a href="./README.zh-CN.md"><strong>简体中文</strong></a>
 </p>
 
-这个目录用于通过 Docker Compose 部署完整栈：
+这个目录提供两套彼此独立的 Docker Compose 配置：
+
+- `docker-compose.personal.yml`：只启动一个 app 容器，使用 SQLite 业务库、SQLite
+  内嵌向量和进程内缓存/队列，不内置沙箱。
+- `docker-compose.prod.yml`：原有 PostgreSQL + Redis + Qdrant 完整栈。
+
+完整栈包含：
 
 | 服务 | 镜像 / 构建 | 作用 |
 | --- | --- | --- |
@@ -19,17 +25,68 @@
 
 ## 后端选择机制
 
-生产和本地开发使用的是同一个 API 二进制。它会在启动时检查环境 URL，并据此选择后端：
+个人版、完整版和本地开发使用同一个 API 二进制，启动时按配置选择后端：
 
 - `DATABASE_URL=postgres://...` 使用 Postgres（通过 `pgcompat` 驱动）；其它值（例如 `*.db` 路径）使用内嵌 SQLite。
 - 设置 `REDIS_URL` 时使用 Redis；未设置时使用进程内内存缓存。
-- 设置 `QDRANT_URL` 时使用 Qdrant；未设置时关闭向量搜索，RAG 回退为注入当前范围内的完整文档文本。
+- `VECTOR_BACKEND=auto`（默认）保持原有规则：有 `QDRANT_URL` 就使用 Qdrant，
+  否则关闭向量并回退为注入当前范围内的完整文档文本。
+- `VECTOR_BACKEND=qdrant` 强制使用 Qdrant，并要求设置 `QDRANT_URL`。
+- `VECTOR_BACKEND=sqlite` 要求 SQLite `DATABASE_URL`，启用内嵌精确余弦检索；
+  个人版 Compose 固定使用该值。
+- `VECTOR_BACKEND=disabled` 显式关闭向量检索。
 
-因此，**本地运行不需要额外安装这些服务**：不设置这些 URL 就会使用 SQLite + 内存缓存 + 全文上下文兜底。这个 compose 文件设置了三者，Docker 部署默认使用 Qdrant。
+完整版 Compose 继续像以前一样固定使用 PostgreSQL、Redis、Qdrant。个人版 Compose
+固定使用 SQLite、清空远程服务 URL 并启用 SQLite 向量，即使环境文件误留了 Redis/Qdrant
+地址也不会偷偷连回外部服务。
 
-分块向量只写入 Qdrant。关系型数据库只保存分块文本和检索元数据，检索时会用数据库校验 Qdrant 命中；当 Qdrant 不可用或为空时，RAG 会注入完整上下文兜底。删除文档、知识库或对话时，也会删除 Qdrant 中对应的点。
+完整版向量仍只写入 Qdrant。个人版向量会归一化并以二进制形式写入同一个 SQLite
+数据库，由应用进程执行精确检索，并随逻辑备份一起导出。两种后端使用相同的作用域
+校验，删除文档、知识库或对话时也会删除对应向量。
 
-## Docker 快速部署
+## 个人版部署
+
+```bash
+cd deploy
+cp .env.personal.example .env.personal
+# 设置 JWT_SECRET；需要高质量语义检索时，也可在这里或后台配置 embedding。
+$EDITOR .env.personal
+docker compose --env-file .env.personal -f docker-compose.personal.yml pull
+docker compose --env-file .env.personal -f docker-compose.personal.yml up -d
+```
+
+访问 `http://<host>`。个人版默认只启动 `app`，不会挂载 Docker socket，也不会拉取两张
+沙箱镜像。未配置沙箱前 Python 执行不可用。
+
+使用外部沙箱时，可在「管理后台 → 工具」填写 URL 和 Bearer 密钥，或在启动前通过
+`.env.personal` 设置 `SANDBOX_BASE_URL` 和 `SANDBOX_API_KEY`。需要在个人版机器本地
+部署内置沙箱时，在 `.env.personal` 中设置下面一对值：
+
+```dotenv
+SANDBOX_BASE_URL=http://sandbox:8000
+SANDBOX_API_KEY=aivory-personal-sandbox
+```
+
+然后在两条命令中加入可选 profile：
+
+```bash
+docker compose --env-file .env.personal -f docker-compose.personal.yml --profile sandbox pull
+docker compose --env-file .env.personal -f docker-compose.personal.yml --profile sandbox up -d
+```
+
+该 profile 会启动 `sandbox` 和 `sandbox-image-keepalive`。sidecar 需要通过宿主机
+Docker socket 创建受限的会话容器，因此只应在可接受这一权限的主机启用；默认单容器
+个人版绝不会挂载该 socket。
+
+`DATA_DIR` 默认是 `./data-personal`。其中的 `aivory.db` 同时包含业务数据和向量；上传
+文件、生成产物、本地对象与后台备份也在该目录下。请整体备份这个目录。个人版只支持
+单个 app 实例，不要扩容 app，也不要把 SQLite 文件放在 NFS 上。
+
+零配置时仍可使用内置的本地 hash embedding，但它只适合作为基础兜底。需要可靠的语义
+检索时，请配置 OpenAI 兼容的 embedding 接口，并确保 `EMBEDDING_DIM` 与模型实际输出
+一致。更换 embedding 模型或维度后，需要在管理后台重建已有向量。
+
+## 完整版部署
 
 ```bash
 cd deploy
@@ -105,13 +162,21 @@ SANDBOX_IMAGE_TAG=latest
 
 ## Embedding 维度
 
-Qdrant 按 embedding 宽度使用独立 collection（`aivory_c<dim>`）。如果配置真实 embedding 模型，请确保 `EMBEDDING_DIM`（以及管理后台中该模型的 `dim`）与模型输出维度一致。否则会使用本地 256 维 embedder，它的 collection 与 1536 维模型向量不兼容。
+Qdrant 按 embedding 宽度使用独立 collection（`aivory_c<dim>`）；SQLite 内嵌后端会在
+每条向量旁记录维度。如果配置真实 embedding 模型，请确保 `EMBEDDING_DIM`（以及管理
+后台中该模型的 `dim`）与模型输出维度一致。本地 256 维向量与外部模型的 1536 维向量
+在两种后端中都会保持隔离。
 
 ## TLS 与域名
 
 `app` 容器在主机 80 端口提供明文 HTTP。公开部署时应在前面放 TLS 终止层，例如 Caddy、Traefik 或云负载均衡。因为 SPA 和 `/api` 共用一个 origin，**不需要按域名配置任何内容**：可以把任意数量的域名指向代理，只要代理转发 `Host` header 即可（常见反向代理默认都会转发）。无需 `PUBLIC_ORIGIN` / `ALLOWED_ORIGINS`。
 
 ## 备份
+
+个人版的业务数据和向量都在 `DATA_DIR/aivory.db`，管理员逻辑备份会包含
+`vector_points`。同时仍应整体备份 `DATA_DIR`，确保上传文件与生成产物保持一致。
+
+完整版保持原有备份行为不变：
 
 持久化数据在命名卷中：`pgdata`、`redisdata`、`qdrantdata`。上传文件和生成产物绑定挂载到 `DATA_DIR`（默认 `./data`）。备份时请把它们一起备份，确保向量、数据库行和磁盘文件保持一致。
 

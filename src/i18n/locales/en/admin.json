@@ -647,6 +647,7 @@
     "mcpAvailabilityEmpty": "No MCP services have been configured.",
     "mcpLoadFailed": "MCP services could not be loaded. Their current availability has not changed.",
     "mcpUnavailable": "The most recent connection attempt failed.",
+    "configureSandboxFirst": "Configure a sandbox first",
     "manageMCP": "Manage MCP"
   },
   "mcp": {
@@ -856,9 +857,10 @@
       "smtpTlsHint": "On for port 465. Port 587 uses STARTTLS (off).",
       "sandboxSection": "Code sandbox",
       "sandboxUrl": "Sandbox URL",
-      "sandboxUrlHint": "Empty = bundled sandbox. Set only to point at an external one.",
+      "sandboxUrlHint": "Leave blank to use the deployment's sandbox URL, or set an external endpoint here.",
+      "sandboxMissing": "No local sandbox is available. Configure a sandbox URL.",
       "sandboxKey": "Sandbox API key",
-      "sandboxKeyHint": "Bearer key for the sandbox. Empty = built-in key.",
+      "sandboxKeyHint": "Bearer key for the sandbox. Leave blank to use the deployment value.",
       "sandboxExecTimeout": "Execution timeout (seconds)",
       "sandboxExecTimeoutHint": "Max seconds per run. Empty = 120. Range 10–600.",
       "storageSection": "Object storage",

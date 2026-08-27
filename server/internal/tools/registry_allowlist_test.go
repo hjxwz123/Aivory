@@ -49,6 +49,32 @@ func TestRegistryUsesAivoryNameForLocalWebSearch(t *testing.T) {
 	}
 }
 
+func TestRegistryWithholdsPythonUntilSandboxIsConfigured(t *testing.T) {
+	withoutSandbox := NewRegistry(nil, config.Config{}, log.New(io.Discard, "", 0))
+	for _, definition := range withoutSandbox.List("") {
+		if definition.Name == "python_execute" {
+			t.Fatal("python_execute was advertised without a configured sandbox")
+		}
+	}
+	foundRegistered := false
+	for _, definition := range withoutSandbox.ListRegistered() {
+		if definition.Name == "python_execute" {
+			foundRegistered = true
+		}
+	}
+	if !foundRegistered {
+		t.Fatal("admin registry list did not retain unavailable python_execute")
+	}
+
+	withSandbox := NewRegistry(nil, config.Config{SandboxBaseURL: "http://sandbox.internal"}, log.New(io.Discard, "", 0))
+	for _, definition := range withSandbox.List("") {
+		if definition.Name == "python_execute" {
+			return
+		}
+	}
+	t.Fatal("python_execute was not advertised with a configured sandbox")
+}
+
 func TestRegistryRunRechecksCurrentGroupAndGlobalPolicy(t *testing.T) {
 	ctx := context.Background()
 	db := openToolsTestDB(t)

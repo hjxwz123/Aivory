@@ -102,12 +102,20 @@ func main() {
 	// ingest time, but the env defaults make a fresh install Just Work when
 	// the operator has only set SANDBOX_BASE_URL.
 	ragSvc.SetSandboxFallback(cfg.SandboxBaseURL, cfg.SandboxAPIKey)
-	// Vector backend: Qdrant in production; when QDRANT_URL is unset the RAG
-	// layer injects full in-scope document text instead of vector retrieval.
-	if cfg.QdrantURL != "" {
+	// Vector backend: auto keeps the historical Qdrant-or-disabled behaviour;
+	// personal deployments explicitly select the embedded SQLite backend.
+	vectorBackend, err := config.ResolveVectorBackend(cfg)
+	if err != nil {
+		logger.Fatalf("vector config: %v", err)
+	}
+	switch vectorBackend {
+	case config.VectorBackendQdrant:
 		ragSvc.SetVectorStore(vector.NewQdrant(cfg.QdrantURL, cfg.QdrantAPIKey))
 		logger.Printf("vector: qdrant (%s)", redactURL(cfg.QdrantURL))
-	} else {
+	case config.VectorBackendSQLite:
+		ragSvc.SetVectorStore(vector.NewSQLite(db))
+		logger.Printf("vector: sqlite (embedded in %s)", driverName(cfg.DatabaseURL))
+	default:
 		logger.Printf("vector: disabled (full-context fallback over %s)", driverName(cfg.DatabaseURL))
 	}
 	if cfg.RedisURL != "" {
@@ -120,13 +128,12 @@ func main() {
 		logger.Printf("rag queue: in-process (dev)")
 	}
 	toolRegistry := tools.NewRegistry(db, cfg, logger)
-	// Surface the sandbox wiring at boot — the #1 reason python_execute silently
-	// falls back to "safe-mode" (and the model says it can't run code / host
-	// downloads) is an empty SANDBOX_BASE_URL in the API container.
+	// Surface the sandbox wiring at boot. Without a URL, python_execute is
+	// withheld from model declarations and user tool catalogs.
 	if cfg.SandboxBaseURL != "" {
 		logger.Printf("sandbox: %s", redactURL(cfg.SandboxBaseURL))
 	} else {
-		logger.Printf("sandbox: disabled (set SANDBOX_BASE_URL; python_execute runs in safe-mode)")
+		logger.Printf("sandbox: disabled (set SANDBOX_BASE_URL; python_execute unavailable)")
 	}
 
 	// §4.5 archived-workspace GC: the sidecar drops one /workspace tarball into
@@ -145,10 +152,14 @@ func main() {
 					logger.Printf("archive GC: recovered from panic: %v", r)
 				}
 			}()
+			sb := toolRegistry.Sandbox()
+			if sb == nil || !sb.Enabled() {
+				return
+			}
 			if days := archiveTTLDays(db); days > 0 {
 				ctx, cancel := context.WithTimeout(context.Background(), runPruneCtxTimeout)
 				defer cancel()
-				deleted, err := toolRegistry.Sandbox().PruneArchives(ctx, time.Duration(days)*24*time.Hour)
+				deleted, err := sb.PruneArchives(ctx, time.Duration(days)*24*time.Hour)
 				switch {
 				case err != nil:
 					logger.Printf("archive GC: prune failed: %v", err)

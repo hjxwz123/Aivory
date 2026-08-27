@@ -29,9 +29,12 @@ func listBuiltinToolsAdmin(d Deps, w http.ResponseWriter, _ *http.Request) {
 	}
 	items := []item{}
 	if d.Tools != nil {
-		for _, definition := range d.Tools.List("") {
+		for _, definition := range d.Tools.ListRegistered() {
 			globallyEnabled := !disabled[definition.Name]
 			if definition.Name == "save_memory" && !memoryEnabled {
+				globallyEnabled = false
+			}
+			if definition.Name == "python_execute" && !sandboxConfigured(d) {
 				globallyEnabled = false
 			}
 			items = append(items, item{

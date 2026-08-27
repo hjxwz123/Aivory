@@ -17,6 +17,8 @@ dist-ssr
 server/data/
 server/aivory
 server/.env
+/deploy/.env.personal
+/deploy/data-personal/
 
 # Claude Code session state (local tooling, never committed).
 .claude/

@@ -647,6 +647,7 @@
     "mcpAvailabilityEmpty": "MCP サービスは設定されていません。",
     "mcpLoadFailed": "MCP サービスを読み込めませんでした。現在の可用性は変更されていません。",
     "mcpUnavailable": "直近の接続試行に失敗しました。",
+    "configureSandboxFirst": "先にサンドボックスを設定してください",
     "manageMCP": "MCP を管理"
   },
   "mcp": {
@@ -856,9 +857,10 @@
       "smtpTlsHint": "ポート 465 はオン。587 は STARTTLS(オフ)。",
       "sandboxSection": "コードサンドボックス",
       "sandboxUrl": "サンドボックスURL",
-      "sandboxUrlHint": "空欄で内蔵サンドボックス。外部を使う場合のみ指定。",
+      "sandboxUrlHint": "空欄の場合はデプロイ設定の URL を使用します。外部サービスも指定できます。",
+      "sandboxMissing": "ローカルサンドボックスがありません。サンドボックス URL を設定してください。",
       "sandboxKey": "サンドボックスAPIキー",
-      "sandboxKeyHint": "サンドボックス用 Bearer キー。空欄で内蔵キー。",
+      "sandboxKeyHint": "サンドボックス用 Bearer キー。空欄の場合はデプロイ設定の値を使用します。",
       "sandboxExecTimeout": "実行タイムアウト（秒）",
       "sandboxExecTimeoutHint": "1 回の最大秒数。空欄 = 120。範囲 10–600。",
       "storageSection": "オブジェクトストレージ",

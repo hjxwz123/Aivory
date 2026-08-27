@@ -1,7 +1,8 @@
 // Package vector is the pluggable similarity-search backend for RAG. In
-// production it is backed by Qdrant (one collection per embedding dimension).
-// When no QDRANT_URL is configured a Disabled store is used and the rag layer
-// injects full in-scope document text instead of doing vector retrieval.
+// production it is backed by Qdrant (one collection per embedding dimension),
+// while an explicitly selected personal profile uses embedded SQLite exact
+// search. When no backend is configured a Disabled store is used and the rag
+// layer injects full in-scope document text instead of vector retrieval.
 //
 // The store is intentionally thin: it knows nothing about chunking, routing or
 // fusion — it upserts vectors with a small payload, runs a filtered nearest-

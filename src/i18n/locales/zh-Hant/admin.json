@@ -647,6 +647,7 @@
     "mcpAvailabilityEmpty": "尚未設定 MCP 服務。",
     "mcpLoadFailed": "無法載入 MCP 服務，目前可用狀態未變更。",
     "mcpUnavailable": "最近一次連線嘗試失敗。",
+    "configureSandboxFirst": "請先設定沙箱",
     "manageMCP": "管理 MCP"
   },
   "mcp": {
@@ -856,9 +857,10 @@
       "smtpTlsHint": "465 連接埠開啟;587 用 STARTTLS(不開)。",
       "sandboxSection": "程式碼沙箱",
       "sandboxUrl": "沙箱地址",
-      "sandboxUrlHint": "留空使用內建沙箱;僅指向外部沙箱時填寫。",
+      "sandboxUrlHint": "留空時使用部署環境設定的沙箱位址，也可以在此指定外部沙箱。",
+      "sandboxMissing": "本機沒有沙箱，請設定沙箱位址。",
       "sandboxKey": "沙箱金鑰",
-      "sandboxKeyHint": "呼叫沙箱的 Bearer 金鑰。留空用內建金鑰。",
+      "sandboxKeyHint": "呼叫沙箱的 Bearer 金鑰。留空時使用部署環境設定的金鑰。",
       "sandboxExecTimeout": "執行逾時(秒)",
       "sandboxExecTimeoutHint": "單次執行最長秒數。留空 = 120。範圍 10–600。",
       "storageSection": "物件儲存",

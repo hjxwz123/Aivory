@@ -1549,6 +1549,13 @@ func adminSettingsGet(d Deps, w http.ResponseWriter, _ *http.Request) {
 			out[k] = json.RawMessage("null")
 		}
 	}
+	// Read-only runtime capability. It is intentionally outside settingsKeys so
+	// clients cannot persist or spoof it through PATCH /admin/settings.
+	if sandboxConfigured(d) {
+		out["sandbox_configured"] = json.RawMessage("true")
+	} else {
+		out["sandbox_configured"] = json.RawMessage("false")
+	}
 	writeJSON(w, 200, maskSensitiveSettings(out))
 }
 

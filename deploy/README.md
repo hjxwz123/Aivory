@@ -1,11 +1,17 @@
-# Aivory — production deployment
+# Aivory — deployment profiles
 
 <p align="center">
   <a href="./README.md"><strong>English</strong></a> ·
   <a href="./README.zh-CN.md">简体中文</a>
 </p>
 
-This folder deploys the full stack with Docker Compose:
+This folder contains two independent Docker Compose profiles:
+
+- `docker-compose.personal.yml`: one app container with SQLite business data,
+  embedded SQLite vectors, and in-process cache/queue; no bundled sandbox.
+- `docker-compose.prod.yml`: the existing full Postgres + Redis + Qdrant stack.
+
+The full stack contains:
 
 | Service    | Image / build              | Role                                    |
 | ---------- | -------------------------- | --------------------------------------- |
@@ -20,25 +26,77 @@ just the deployment cheat-sheet.
 
 ## How backend selection works
 
-The API binary is the **same** one used in local dev. It picks each backend by
-inspecting an environment URL at boot:
+The API binary is the **same** in both profiles. It resolves backends at boot:
 
 - `DATABASE_URL=postgres://…` → Postgres (via the `pgcompat` driver); anything
   else (e.g. a `*.db` path) → embedded SQLite.
 - `REDIS_URL` set → Redis; unset → in-process memory cache.
-- `QDRANT_URL` set → Qdrant; unset → vector search disabled, RAG injects the
-  full in-scope document text as a fallback.
+- `VECTOR_BACKEND=auto` (default) preserves the old rule: a configured
+  `QDRANT_URL` selects Qdrant, otherwise vectors are disabled and RAG falls back
+  to full in-scope document text.
+- `VECTOR_BACKEND=qdrant` requires `QDRANT_URL`.
+- `VECTOR_BACKEND=sqlite` requires a SQLite `DATABASE_URL` and enables embedded
+  exact cosine vector search. The personal profile pins this setting.
+- `VECTOR_BACKEND=disabled` explicitly disables vector retrieval.
 
-So **nothing needs to be installed locally** to run the app — leave those URLs
-unset and it runs on SQLite + memory + full-context RAG fallback. This compose
-file sets all three, and Docker deployments use Qdrant by default.
+The full Compose file still pins Postgres, Redis, and Qdrant exactly as before.
+The personal Compose file pins SQLite, clears the remote service URLs, and
+selects embedded vectors; copied environment values cannot silently re-enable
+Redis or Qdrant.
 
-Chunk vectors are stored only in Qdrant. The relational database stores chunk
-text and retrieval metadata, which lets the retriever validate Qdrant hits and
-fall back to full-context injection if Qdrant is unavailable or empty. Deleting
-a document/KB/conversation removes its points from Qdrant too.
+Full-stack vectors remain in Qdrant. Personal vectors are normalized and stored
+as binary rows in the same SQLite database, searched exactly in-process, and
+included in logical backups. Both backends apply the same scope checks and
+delete vectors when their document, KB, or conversation is removed.
 
-## Quick deploy with Docker
+## Personal deployment
+
+```bash
+cd deploy
+cp .env.personal.example .env.personal
+# Set JWT_SECRET. Configure embeddings here or later in admin when required.
+$EDITOR .env.personal
+docker compose --env-file .env.personal -f docker-compose.personal.yml pull
+docker compose --env-file .env.personal -f docker-compose.personal.yml up -d
+```
+
+Open `http://<host>`. By default this profile starts only `app`; it does not
+mount the Docker socket or pull either sandbox image. Python execution is
+unavailable until a sandbox is configured.
+
+For an external sandbox, configure its URL and Bearer key under **Admin →
+Tools**, or set `SANDBOX_BASE_URL` and `SANDBOX_API_KEY` in `.env.personal`
+before startup. To deploy the bundled sandbox locally instead, set these
+matching values in `.env.personal`:
+
+```dotenv
+SANDBOX_BASE_URL=http://sandbox:8000
+SANDBOX_API_KEY=aivory-personal-sandbox
+```
+
+Then add the optional profile to both commands:
+
+```bash
+docker compose --env-file .env.personal -f docker-compose.personal.yml --profile sandbox pull
+docker compose --env-file .env.personal -f docker-compose.personal.yml --profile sandbox up -d
+```
+
+The profile starts `sandbox` and `sandbox-image-keepalive`. The sidecar uses the
+host Docker socket to create locked-down session containers, so enable it only
+on a host where that privilege is acceptable. The socket is never mounted in
+the default one-container profile.
+
+`DATA_DIR` defaults to `./data-personal`. Its `aivory.db` contains both business
+rows and vectors; the same directory also holds uploads, artifacts, local
+objects, and admin backup archives. Back up the whole directory. This profile is
+single-instance only: do not scale `app` or place the SQLite file on NFS.
+
+The bundled local hash embedder works without configuration but is a basic
+fallback. For production-quality semantic retrieval, configure an
+OpenAI-compatible embedding endpoint and ensure `EMBEDDING_DIM` matches its
+actual output. Rebuild vectors in admin after changing model or dimension.
+
+## Full-stack deployment
 
 ```bash
 cd deploy
@@ -134,10 +192,11 @@ env file. Passing `--env-file .env` removes the latter ambiguity.
 
 ## Embedding dimension
 
-Qdrant uses one collection per embedding width (`aivory_c<dim>`). If you
-configure a real embedding model, set `EMBEDDING_DIM` (and/or the model's `dim`
-in the admin UI) to match — otherwise the local 256-dim embedder is used and
-its collection won't match a 1536-dim model's vectors.
+Qdrant uses one collection per embedding width (`aivory_c<dim>`); embedded
+SQLite stores the dimension beside each vector. If you configure a real
+embedding model, set `EMBEDDING_DIM` (and/or the model's `dim` in admin) to match.
+The local 256-dim vectors stay isolated from a 1536-dim external model in either
+backend.
 
 ## TLS & domains
 
@@ -149,6 +208,12 @@ forwards the `Host` header (every reverse proxy does by default). No
 `PUBLIC_ORIGIN` / `ALLOWED_ORIGINS`.
 
 ## Backups
+
+For the personal profile, business rows and vectors are both inside
+`DATA_DIR/aivory.db`; the admin logical backup includes `vector_points`. Back up
+the whole `DATA_DIR` as well so uploads and artifacts stay consistent with it.
+
+For the full profile, the existing behavior is unchanged:
 
 Persisted in named volumes: `pgdata`, `redisdata`, `qdrantdata`. Uploads and
 artifacts are bind-mounted from `DATA_DIR` (default `./data`). Back these up

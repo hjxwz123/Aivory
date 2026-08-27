@@ -133,7 +133,7 @@ Knowledge bases turn uploaded files into reusable context for conversations and 
 
 - **Broad document support**: text, PDF, DOCX, PPTX, XLSX, and images, with fast local parsing for text-layer documents and optional MinerU OCR for scanned content
 - **Structure-aware ingestion**: hierarchical chunks, heading breadcrumbs, overlap, and preservation of code, tables, and math blocks
-- **Hybrid retrieval**: Qdrant vectors and PostgreSQL BM25 fused with Reciprocal Rank Fusion, plus similarity-driven top-K
+- **Hybrid retrieval**: Qdrant or embedded SQLite vectors fused with relational keyword scoring, plus similarity-driven top-K
 - **Query routing**: a task model selects `retrieve`, `full_doc`, or `none` before context is assembled
 - **Document operations**: file status, preview, filtering, replacement, deletion, and storage through local files or S3-compatible object storage
 
@@ -191,6 +191,47 @@ Most runtime configuration takes effect on the next request, without editing env
 
 Requires Docker 24+ with the Compose plugin.
 
+### Personal deployment
+
+The personal profile keeps semantic vector retrieval but removes Postgres,
+Redis, Qdrant, and the bundled sandbox containers. Business data and normalized
+vectors live in one SQLite file, while cache and background work stay
+in-process. Python execution remains disabled until an administrator configures
+an external sandbox URL under **Admin → Tools**.
+
+```bash
+git clone https://github.com/hjxwz123/Aivory.git
+cd Aivory/deploy
+cp .env.personal.example .env.personal
+$EDITOR .env.personal  # set JWT_SECRET; optionally configure embeddings
+docker compose --env-file .env.personal -f docker-compose.personal.yml pull
+docker compose --env-file .env.personal -f docker-compose.personal.yml up -d
+```
+
+The profile starts only the `app` container by default. Its bind mount defaults
+to `deploy/data-personal`; the SQLite database, embedded vectors, uploads,
+artifacts, and admin backups are all under that directory. It is a
+single-app-instance profile and must not be horizontally scaled.
+
+To add the bundled Python sandbox, uncomment these matching values in
+`.env.personal`:
+
+```dotenv
+SANDBOX_BASE_URL=http://sandbox:8000
+SANDBOX_API_KEY=aivory-personal-sandbox
+```
+
+Then start the optional profile instead. It adds the sandbox sidecar and a
+runtime-image keepalive container, and mounts the host Docker socket only into
+the sidecar:
+
+```bash
+docker compose --env-file .env.personal -f docker-compose.personal.yml --profile sandbox pull
+docker compose --env-file .env.personal -f docker-compose.personal.yml --profile sandbox up -d
+```
+
+### Full deployment
+
 ```bash
 # 1. Clone
 git clone https://github.com/hjxwz123/Aivory.git
@@ -214,7 +255,7 @@ before `pull` and `up -d --no-build`; see [the deployment guide](deploy/README.m
 
 Open `http://localhost`. The setup screen appears on first launch — the first account you create becomes the administrator. Go to `/admin/channels` to add a provider key and create a model.
 
-Five containers come up:
+The full deployment starts five application services:
 
 | Container | Image | Role |
 |-----------|-------|------|
@@ -313,11 +354,11 @@ graph TB
 
     PROV <-->|streaming| LLM["☁️ Model providers"]
     TOOLS --> SBX["Sandbox sidecar<br/>Python · per-conversation files"]
-    RAGP --> QD[("Qdrant<br/>vectors")]
+    RAGP --> QD[("Vector backend<br/>Qdrant full · SQLite personal")]
     RAGP -.->|"scanned docs only"| MRU["MinerU cloud OCR"]
 
-    ORCH --> DB[("SQLite dev /<br/>Postgres prod")]
-    ORCH --> RDS[("Redis<br/>cache · pub/sub")]
+    ORCH --> DB[("SQLite personal/dev /<br/>Postgres full")]
+    ORCH --> RDS[("Redis full / memory personal<br/>cache · pub/sub")]
     ORCH -.-> OBJ["S3 / Aliyun OSS<br/>(optional)"]
 ```
 
@@ -359,9 +400,9 @@ These are intentionally **not** listed in `.env.example` — leave it alone unle
 
 - **Frontend**: React 19, TypeScript 5, Vite 5, Tailwind 4, Radix UI, Zustand, i18next, lucide-react
 - **Backend**: Go 1.22, standard `net/http`, hand-rolled typed queries
-- **Storage**: PostgreSQL 16 (production) / SQLite (embedded dev fallback)
+- **Storage**: PostgreSQL 16 (full deployment) / SQLite (personal and local)
 - **Cache & coordination**: Redis 7
-- **Vector search**: Qdrant 1.12 (full-context fallback when no vector backend is configured)
+- **Vector search**: Qdrant 1.12 (full deployment) / embedded SQLite exact cosine search (personal)
 - **Document parsing**: MinerU cloud API (PDF / DOCX / PPTX / images via OCR)
 - **Internationalization**: 5 locales — English, Simplified Chinese, Traditional Chinese, Japanese, French
 
@@ -383,13 +424,15 @@ These are intentionally **not** listed in `.env.example` — leave it alone unle
 │       ├── llm/              Provider adapters + orchestrator + task LLM + memory worker
 │       ├── tools/            All 8 built-in tools
 │       ├── rag/              parse → chunk → embed → query-route → retrieve
-│       ├── vector/           Qdrant client (+ PG fallback)
+│       ├── vector/           Qdrant and embedded SQLite vector backends
 │       ├── store/            Schema + typed queries (SQLite / PostgreSQL)
 │       ├── sandbox/          HTTP client for the Python sandbox sidecar
 │       └── storage/          S3 / OSS presign client
-├── deploy/                   Production Docker stack
+├── deploy/                   Docker deployment profiles
 │   ├── docker-compose.prod.yml
-│   └── .env.example
+│   ├── docker-compose.personal.yml
+│   ├── .env.example
+│   └── .env.personal.example
 └── docs/screenshots/         Screenshots referenced in this README
 ```
 

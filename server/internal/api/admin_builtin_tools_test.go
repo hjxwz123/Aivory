@@ -18,9 +18,10 @@ import (
 )
 
 func TestListBuiltinToolsAdminUsesLiveSortedRegistry(t *testing.T) {
-	registry := toolpkg.NewRegistry(nil, config.Config{}, log.New(io.Discard, "", 0))
+	cfg := config.Config{SandboxBaseURL: "http://sandbox.internal"}
+	registry := toolpkg.NewRegistry(nil, cfg, log.New(io.Discard, "", 0))
 	rec := httptest.NewRecorder()
-	listBuiltinToolsAdmin(Deps{Tools: registry}, rec, httptest.NewRequest(http.MethodGet, "/api/admin/tools/builtins", nil))
+	listBuiltinToolsAdmin(Deps{Config: cfg, Tools: registry}, rec, httptest.NewRequest(http.MethodGet, "/api/admin/tools/builtins", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -54,6 +55,29 @@ func TestListBuiltinToolsAdminUsesLiveSortedRegistry(t *testing.T) {
 	if strings.TrimSpace(rec.Body.String()) != "[]" {
 		t.Fatalf("nil registry response = %s", rec.Body.String())
 	}
+}
+
+func TestListBuiltinToolsAdminKeepsUnavailablePythonVisible(t *testing.T) {
+	registry := toolpkg.NewRegistry(nil, config.Config{}, log.New(io.Discard, "", 0))
+	rec := httptest.NewRecorder()
+	listBuiltinToolsAdmin(Deps{Tools: registry}, rec, httptest.NewRequest(http.MethodGet, "/api/admin/tools/builtins", nil))
+
+	var items []struct {
+		Name            string `json:"name"`
+		GloballyEnabled bool   `json:"globally_enabled"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &items); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range items {
+		if item.Name == "python_execute" {
+			if item.GloballyEnabled {
+				t.Fatal("python_execute reported enabled without a configured sandbox")
+			}
+			return
+		}
+	}
+	t.Fatal("unavailable python_execute was hidden from the admin capability list")
 }
 
 func TestListBuiltinToolsAdminMarksGlobalAvailability(t *testing.T) {
