@@ -25,10 +25,10 @@ type OfficialToolDefinition struct {
 	Request json.RawMessage `json:"request"`
 }
 
-// DefaultOpenAIResponsesOfficialTools returns the hosted tools that were
-// historically hard-coded by the OpenAI Responses provider. A fresh slice and
-// fresh request buffers are returned so callers may safely customize them.
-func DefaultOpenAIResponsesOfficialTools() []OfficialToolDefinition {
+// legacyOpenAIResponsesOfficialTools contains the hosted tools historically
+// hard-coded by the OpenAI Responses provider. It is only used to expand old
+// string-array rows; newly created models never receive these tools implicitly.
+func legacyOpenAIResponsesOfficialTools() []OfficialToolDefinition {
 	searchContextSize := envcfg.Str("AIVORY_LLM_OFFICIAL_TOOL_SPEC", "medium")
 	webSearchRequest, _ := json.Marshal(map[string]any{
 		"tools": []map[string]any{{
@@ -53,13 +53,6 @@ func DefaultOpenAIResponsesOfficialTools() []OfficialToolDefinition {
 			Request: json.RawMessage(`{"tools":[{"type":"image_generation"}]}`),
 		},
 	}
-}
-
-// DefaultOpenAIResponsesOfficialToolsJSON returns the canonical persisted form
-// of DefaultOpenAIResponsesOfficialTools.
-func DefaultOpenAIResponsesOfficialToolsJSON() json.RawMessage {
-	raw, _ := json.Marshal(DefaultOpenAIResponsesOfficialTools())
-	return json.RawMessage(raw)
 }
 
 // ParseOfficialTools accepts both the current definition array and the legacy
@@ -144,7 +137,7 @@ func legacyOfficialToolDefinition(name string) (OfficialToolDefinition, error) {
 	if name == "" {
 		return OfficialToolDefinition{}, errors.New("name is required")
 	}
-	for _, definition := range DefaultOpenAIResponsesOfficialTools() {
+	for _, definition := range legacyOpenAIResponsesOfficialTools() {
 		if definition.Name == name {
 			definition.Request = append(json.RawMessage(nil), definition.Request...)
 			return definition, nil

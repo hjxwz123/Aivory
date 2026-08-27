@@ -90,11 +90,9 @@ func TestImportOpenAIChannelModelsClassifiesAndSkipsDuplicates(t *testing.T) {
 		if !model.Enabled || !model.Vision || !model.Stream || model.ToolMode != "native" || model.Currency != "USD" {
 			t.Errorf("unexpected defaults for %s: %+v", model.RequestID, model)
 		}
-		if model.Kind == "chat" {
-			tools, parseErr := store.ParseOfficialTools(model.OfficialTools)
-			if parseErr != nil || len(tools) != 3 {
-				t.Errorf("responses tools for %s = %+v, err=%v", model.RequestID, tools, parseErr)
-			}
+		tools, parseErr := store.ParseOfficialTools(model.OfficialTools)
+		if parseErr != nil || len(tools) != 0 {
+			t.Errorf("imported model %s received default official tools: %+v, err=%v", model.RequestID, tools, parseErr)
 		}
 	}
 	if kinds["gpt-5"] != "chat" || kinds["text-embedding-3-small"] != "embedding" || kinds["gpt-image-1"] != "image" {

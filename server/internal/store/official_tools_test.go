@@ -35,12 +35,12 @@ func TestNormalizeOfficialToolsSupportsLegacyAndCustomDefinitions(t *testing.T) 
 	}
 }
 
-func TestDefaultOpenAIResponsesOfficialToolsPreservesWebSearchContextEnv(t *testing.T) {
+func TestLegacyOpenAIResponsesOfficialToolsPreservesWebSearchContextEnv(t *testing.T) {
 	t.Setenv("AIVORY_LLM_OFFICIAL_TOOL_SPEC", "high")
 
-	definitions := DefaultOpenAIResponsesOfficialTools()
+	definitions := legacyOpenAIResponsesOfficialTools()
 	if len(definitions) != 3 {
-		t.Fatalf("default definitions = %d, want 3", len(definitions))
+		t.Fatalf("legacy definitions = %d, want 3", len(definitions))
 	}
 	var request struct {
 		Tools []struct {
