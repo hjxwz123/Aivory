@@ -4,6 +4,12 @@ import { describe, expect, it, vi } from 'vitest'
 import { Markdown } from '@/components/chat/markdown'
 import type { Citation } from '@/types/chat'
 
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (_key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? _key,
+  }),
+}))
+
 function renderHeadingCitation(citation: Citation): string {
   return renderToStaticMarkup(
     createElement(Markdown, {

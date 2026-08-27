@@ -3,13 +3,16 @@ import {
   tokenizeMarkdown,
   inlineMarkdownToHtml,
   blockMarkdownToHtml,
+  renderMathToHtml,
   type CiteRef,
+  type MathCopyLabels,
   type MarkdownBlock,
 } from '@/lib/markdown'
 import { CodeBlock } from './code-block'
 import { MermaidDiagram } from './mermaid-diagram'
 import { cn, safeHref } from '@/lib/utils'
 import { rewriteSandboxArtifactLinks } from '@/lib/artifact-links'
+import { useMathCopy } from '@/hooks/use-math-copy'
 
 import type { ArtifactRef, Citation } from '@/types/chat'
 import {
@@ -64,6 +67,7 @@ interface MarkdownBlockViewProps {
   blockKeyPrefix?: string
   cites: CiteRef[]
   breaks: boolean
+  mathCopyLabels: MathCopyLabels
 }
 
 /**
@@ -74,17 +78,33 @@ interface MarkdownBlockViewProps {
  * semantics and the final rendered output remain identical.
  */
 const MarkdownBlockView = memo(
-  function MarkdownBlockView({ block: b, index, live, blockKeyPrefix, cites, breaks }: MarkdownBlockViewProps) {
+  function MarkdownBlockView({
+    block: b,
+    index,
+    live,
+    blockKeyPrefix,
+    cites,
+    breaks,
+    mathCopyLabels,
+  }: MarkdownBlockViewProps) {
     const blockAnim = live ? 'animate-[fade-in_500ms_var(--ease-out)_backwards]' : undefined
 
     switch (b.type) {
       case 'heading':
-        return <HeadingTag depth={b.depth ?? 2} html={inlineMarkdownToHtml(b.content, cites, breaks)} className={blockAnim} />
+        return (
+          <HeadingTag
+            depth={b.depth ?? 2}
+            html={inlineMarkdownToHtml(b.content, cites, breaks, mathCopyLabels)}
+            className={blockAnim}
+          />
+        )
       case 'paragraph':
         return (
           <p
             className={cn('leading-relaxed text-[var(--color-fg)]', blockAnim)}
-            dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(b.content, cites, breaks) }}
+            dangerouslySetInnerHTML={{
+              __html: inlineMarkdownToHtml(b.content, cites, breaks, mathCopyLabels),
+            }}
           />
         )
       case 'list':
@@ -98,7 +118,9 @@ const MarkdownBlockView = memo(
               '[&_ul_ul]:list-[circle] [&_ul_ul]:my-0.5 [&_ol_ol]:my-0.5 [&_li_p]:my-0',
               blockAnim,
             )}
-            dangerouslySetInnerHTML={{ __html: blockMarkdownToHtml(b.content, cites, breaks) }}
+            dangerouslySetInnerHTML={{
+              __html: blockMarkdownToHtml(b.content, cites, breaks, mathCopyLabels),
+            }}
           />
         )
       case 'code':
@@ -121,16 +143,25 @@ const MarkdownBlockView = memo(
               'border-l-2 border-[var(--color-border-strong)] pl-4 text-[var(--color-fg-muted)] italic',
               blockAnim,
             )}
-            dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(b.content, cites, breaks) }}
+            dangerouslySetInnerHTML={{
+              __html: inlineMarkdownToHtml(b.content, cites, breaks, mathCopyLabels),
+            }}
           />
         )
       case 'math':
-        return (
-          <div
-            className={cn('my-3 overflow-x-auto', blockAnim)}
-            dangerouslySetInnerHTML={{ __html: b.content }}
-          />
-        )
+        {
+          const html = renderMathToHtml(b.content, true, mathCopyLabels)
+          return html ? (
+            <div
+              className={cn('my-3 min-w-0', blockAnim)}
+              dangerouslySetInnerHTML={{ __html: html }}
+            />
+          ) : (
+            <div className={cn('my-3 overflow-x-auto whitespace-pre-wrap', blockAnim)}>
+              {`$$${b.content}$$`}
+            </div>
+          )
+        }
       case 'hr':
         return <hr className={cn('my-6 border-[var(--color-divider)]', blockAnim)} />
       case 'table':
@@ -145,7 +176,9 @@ const MarkdownBlockView = memo(
               '[&_tr:last-child_td]:border-b-0',
               blockAnim,
             )}
-            dangerouslySetInnerHTML={{ __html: blockMarkdownToHtml(b.content, cites, breaks) }}
+            dangerouslySetInnerHTML={{
+              __html: blockMarkdownToHtml(b.content, cites, breaks, mathCopyLabels),
+            }}
           />
         )
       default:
@@ -158,6 +191,7 @@ const MarkdownBlockView = memo(
     prev.blockKeyPrefix === next.blockKeyPrefix &&
     prev.cites === next.cites &&
     prev.breaks === next.breaks &&
+    prev.mathCopyLabels === next.mathCopyLabels &&
     prev.block.type === next.block.type &&
     prev.block.content === next.block.content &&
     prev.block.depth === next.block.depth &&
@@ -194,6 +228,7 @@ export const Markdown = memo(function Markdown({
   onOpenDocumentCitation,
   breaks = false,
 }: MarkdownProps) {
+  const { announcement, handleMathCopy, labels: mathCopyLabels } = useMathCopy()
   const contentWithArtifactLinks = useMemo(
     () => rewriteSandboxArtifactLinks(content, artifacts),
     [content, artifacts],
@@ -233,10 +268,17 @@ export const Markdown = memo(function Markdown({
     },
     [citations, onOpenDocumentCitation],
   )
+  const handleContentClick = useCallback(
+    (event: MouseEvent<HTMLDivElement>) => {
+      handleMathCopy(event)
+      handleCitationClick(event)
+    },
+    [handleCitationClick, handleMathCopy],
+  )
   if (!content) return null
 
   return (
-    <div className={cn('prose-aivory', className)} onClick={handleCitationClick}>
+    <div className={cn('prose-aivory', className)} onClick={handleContentClick}>
       {blocks.map((block, index) => (
         <MarkdownBlockView
           key={index}
@@ -246,8 +288,12 @@ export const Markdown = memo(function Markdown({
           blockKeyPrefix={blockKeyPrefix}
           cites={cites}
           breaks={breaks}
+          mathCopyLabels={mathCopyLabels}
         />
       ))}
+      <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {announcement}
+      </span>
     </div>
   )
 })

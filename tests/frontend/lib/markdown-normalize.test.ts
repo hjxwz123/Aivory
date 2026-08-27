@@ -55,3 +55,29 @@ describe('normalizeThinkingMarkdown', () => {
     expect(n).toContain('```\n**不是标题**\n```')
   })
 })
+
+describe('copyable markdown formulae', () => {
+  it('preserves inline LaTeX as safely escaped copy metadata', () => {
+    const html = inlineMarkdownToHtml('Solve \\(x^2 + "quoted" & y < z\\).')
+
+    expect(html).toContain('data-math-copy="true"')
+    expect(html).toContain('data-latex="x^2 + &quot;quoted&quot; &amp; y &lt; z"')
+    expect(html).toContain('data-display="false"')
+    expect(html).toContain('aria-label="Copy LaTeX"')
+  })
+
+  it('keeps block LaTeX raw until the React renderer adds KaTeX', () => {
+    const blocks = tokenizeMarkdown('Before\n\n$$\\sum_i x_i$$\n\nAfter')
+    const math = blocks.find((block) => block.type === 'math')
+
+    expect(math?.content).toBe('\\sum_i x_i')
+    expect(math?.content).not.toContain('katex')
+  })
+
+  it('leaves math delimiters inside inline code literal', () => {
+    const html = inlineMarkdownToHtml('Use `$x^2$` in the example.')
+
+    expect(html).toContain('<code>$x^2$</code>')
+    expect(html).not.toContain('data-math-copy="true"')
+  })
+})

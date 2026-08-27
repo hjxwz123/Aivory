@@ -185,6 +185,9 @@
   "actions": {
     "copy": "コピー",
     "copied": "コピーしました",
+    "copyLatex": "LaTeX をコピー",
+    "latexCopied": "LaTeX をコピーしました",
+    "copyLatexFailed": "LaTeX をコピーできませんでした",
     "exportDocx": "Word としてエクスポート",
     "exportDocxFailed": "エクスポートに失敗しました",
     "creditsUsed": "{{credits}} クレジット使用",

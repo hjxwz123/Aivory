@@ -1178,6 +1178,95 @@ mark.inline-thread-mark:hover {
   overflow-x: auto;
   overflow-y: hidden;
 }
+
+/* Read-only formulas are quiet copy controls. The formula remains visually
+   primary; affordance appears through cursor, hover/focus, and brief feedback. */
+.math-copy-trigger {
+  appearance: none;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  margin: 0 -0.08em;
+  padding: 0 0.08em;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  text-align: inherit;
+  vertical-align: middle;
+  cursor: copy;
+  user-select: text;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+.math-copy-content {
+  display: inline-block;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.math-copy-trigger[data-display='true'] {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0.125rem 0.25rem;
+  text-align: center;
+}
+
+.math-copy-trigger[data-display='true'] .math-copy-content {
+  display: block;
+  width: 100%;
+}
+
+@media (hover: hover) {
+  .math-copy-trigger:hover {
+    background: var(--color-bg-muted);
+  }
+}
+
+.math-copy-trigger:active {
+  background: var(--color-accent-soft);
+}
+
+.math-copy-trigger:focus-visible {
+  outline-color: var(--color-ring);
+}
+
+.math-copy-trigger[data-copied='true'] {
+  background: var(--color-success-soft);
+}
+
+.math-copy-trigger[data-copied='true']::after {
+  content: attr(data-copied-label);
+  position: absolute;
+  z-index: var(--z-tooltip);
+  bottom: calc(100% + 0.375rem);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--radius-xs);
+  background: var(--color-fg);
+  color: var(--color-bg);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: 1.25;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
+
+.math-copy-trigger[data-display='true'][data-copied='true']::after {
+  top: 0.375rem;
+  right: 0.5rem;
+  bottom: auto;
+  left: auto;
+  transform: none;
+}
 .prose-aivory hr { border: none; border-top: 1px solid var(--color-divider); margin: 2em 0; }
 .prose-aivory table {
   width: 100%;
