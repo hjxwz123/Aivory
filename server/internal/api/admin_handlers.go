@@ -275,25 +275,9 @@ func normalizeModelExtraParams(m *store.Model) error {
 
 // decodeModelPatch preserves updateModelAdmin's decode-over-existing-row
 // behavior while also reporting whether the client explicitly sent
-// extra_params. That distinction matters when a chat model becomes image or
-// embedding: an omitted field should not leave inherited chat-only values
-// behind, whereas an explicit non-empty value remains a validation error.
-func decodeCreateModelReq(r *http.Request, req *createModelReq) (officialToolsProvided bool, err error) {
-	var raw json.RawMessage
-	if err := decodeJSON(r, &raw); err != nil {
-		return false, err
-	}
-	if err := json.Unmarshal(raw, req); err != nil {
-		return false, err
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return false, err
-	}
-	_, officialToolsProvided = fields["official_tools"]
-	return officialToolsProvided, nil
-}
-
+// extra_params or official_tools. Those distinctions let kind changes clear
+// inherited chat-only values while ordinary partial updates preserve existing
+// hosted-tool configuration.
 func decodeModelPatch(r *http.Request, m *store.Model) (extraParamsProvided, officialToolsProvided bool, err error) {
 	var raw json.RawMessage
 	if err := decodeJSON(r, &raw); err != nil {
@@ -337,8 +321,7 @@ func listModelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 
 func createModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	var req createModelReq
-	officialToolsProvided, err := decodeCreateModelReq(r, &req)
-	if err != nil {
+	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
@@ -352,11 +335,6 @@ func createModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	if m.ChannelID == "" || m.RequestID == "" || m.Label == "" {
 		writeError(w, 400, errors.New("channel_id, request_id, label required"))
 		return
-	}
-	if !officialToolsProvided && (m.Kind == "" || m.Kind == "chat") {
-		if channel, err := store.GetChannel(r.Context(), d.DB, m.ChannelID); err == nil && channel.Type == "openai" && channel.APIFormat == "responses" {
-			m.OfficialTools = store.DefaultOpenAIResponsesOfficialToolsJSON()
-		}
 	}
 	if officialTools, err := store.NormalizeOfficialTools(m.OfficialTools); err != nil {
 		writeError(w, http.StatusBadRequest, err)

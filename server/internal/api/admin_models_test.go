@@ -38,11 +38,12 @@ func TestCreateModelReqTracksExplicitResearchEnabled(t *testing.T) {
 	}
 }
 
-func TestAdminModelOfficialToolsDefaultsValidationAndPublicMasking(t *testing.T) {
+func TestAdminModelOfficialToolsNoDefaultsValidationAndPublicMasking(t *testing.T) {
 	db := openMigrated(t, filepath.Join(t.TempDir(), "model-official-tools.db"))
 	defer db.Close()
 	mustExec(t, db, `INSERT INTO channels(id,name,type,api_format,base_url,api_key,enabled) VALUES
 		('ch_responses','OpenAI Responses','openai','responses','https://api.example','sk',1),
+		('ch_openai_chat','OpenAI Chat','openai','chat','https://api.example','sk',1),
 		('ch_vendor','Vendor','claude','','https://vendor.example','sk',1)`)
 	d := Deps{
 		DB:     db,
@@ -76,36 +77,31 @@ func TestAdminModelOfficialToolsDefaultsValidationAndPublicMasking(t *testing.T)
 		return model
 	}
 
-	// Omission on a newly-created OpenAI Responses model installs the three
-	// historical hosted-tool definitions, including their full request objects.
-	rec := post(`{"channel_id":"ch_responses","request_id":"gpt-default-tools","label":"Defaults"}`)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("default create status = %d, body=%s", rec.Code, rec.Body.String())
-	}
-	defaultModel := decodeModel(rec)
-	defaultTools, err := store.ParseOfficialTools(defaultModel.OfficialTools)
-	if err != nil || len(defaultTools) != 3 {
-		t.Fatalf("default official tools = %+v, err=%v", defaultTools, err)
-	}
-	if defaultTools[0].Name != "web_search" || !strings.Contains(string(defaultTools[0].Request), `"search_context_size":"medium"`) {
-		t.Fatalf("default web search definition = %+v", defaultTools[0])
-	}
-
-	// The Responses defaults are chat capabilities. Image and embedding rows may
-	// share the same channel, but must not acquire hidden, unusable chat tools.
-	for _, kind := range []string{"image", "embedding"} {
-		rec = post(`{"channel_id":"ch_responses","kind":"` + kind + `","request_id":"gpt-` + kind + `","label":"` + kind + `"}`)
+	// No provider or model kind receives hosted tools implicitly. Administrators
+	// must explicitly configure every provider-hosted request fragment.
+	for index, testCase := range []struct {
+		channelID string
+		kind      string
+	}{
+		{channelID: "ch_responses", kind: "chat"},
+		{channelID: "ch_openai_chat", kind: "chat"},
+		{channelID: "ch_vendor", kind: "chat"},
+		{channelID: "ch_responses", kind: "image"},
+		{channelID: "ch_responses", kind: "embedding"},
+	} {
+		requestID := "no-default-tools-" + strconv.Itoa(index)
+		rec := post(`{"channel_id":"` + testCase.channelID + `","kind":"` + testCase.kind + `","request_id":"` + requestID + `","label":"No defaults"}`)
 		if rec.Code != http.StatusCreated {
-			t.Fatalf("%s create status = %d, body=%s", kind, rec.Code, rec.Body.String())
+			t.Fatalf("%s/%s create status = %d, body=%s", testCase.channelID, testCase.kind, rec.Code, rec.Body.String())
 		}
-		nonChatModel := decodeModel(rec)
-		if string(nonChatModel.OfficialTools) != "[]" {
-			t.Fatalf("%s model received chat official tools: %s", kind, nonChatModel.OfficialTools)
+		model := decodeModel(rec)
+		if string(model.OfficialTools) != "[]" {
+			t.Fatalf("%s/%s model received default official tools: %s", testCase.channelID, testCase.kind, model.OfficialTools)
 		}
 	}
 
-	// Explicit [] is distinct from omission and keeps hosted tools disabled.
-	rec = post(`{"channel_id":"ch_responses","request_id":"gpt-no-tools","label":"No tools","official_tools":[]}`)
+	// Explicit [] is accepted and also keeps hosted tools disabled.
+	rec := post(`{"channel_id":"ch_responses","request_id":"gpt-no-tools","label":"No tools","official_tools":[]}`)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("explicit empty create status = %d, body=%s", rec.Code, rec.Body.String())
 	}

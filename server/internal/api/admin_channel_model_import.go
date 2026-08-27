@@ -116,9 +116,6 @@ func importChannelModelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 			Stream:      true,
 			Currency:    "USD",
 		}
-		if strings.EqualFold(channel.Type, "openai") && channel.APIFormat == "responses" && found.Kind == "chat" {
-			model.OfficialTools = store.DefaultOpenAIResponsesOfficialToolsJSON()
-		}
 		if _, err := store.CreateModel(r.Context(), d.DB, model); err != nil {
 			if errors.Is(err, store.ErrModelRequestExists) {
 				result.SkippedExisting++
