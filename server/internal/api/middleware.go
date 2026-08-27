@@ -151,6 +151,20 @@ func csrfOK(allowed []string, r *http.Request) bool {
 	if _, err := r.Cookie("auth_token"); err != nil {
 		return true
 	}
+	return csrfCookieOriginOK(allowed, r)
+}
+
+// csrfRefreshOK protects endpoints authenticated only by the HttpOnly refresh
+// cookie. At browser startup auth_token may not exist yet, so csrfOK alone is
+// insufficient for /auth/session and /auth/refresh.
+func csrfRefreshOK(allowed []string, r *http.Request) bool {
+	if _, err := r.Cookie("refresh_token"); err != nil {
+		return true
+	}
+	return csrfCookieOriginOK(allowed, r)
+}
+
+func csrfCookieOriginOK(allowed []string, r *http.Request) bool {
 	origin := strings.TrimRight(r.Header.Get("Origin"), "/")
 	if origin == "" {
 		return !strings.EqualFold(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")), "cross-site")

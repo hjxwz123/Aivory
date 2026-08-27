@@ -70,7 +70,7 @@ func TestCreateInitialAdminAllowsOneConcurrentWinner(t *testing.T) {
 	}
 }
 
-func TestRotateRefreshTokenHasOneConcurrentWinner(t *testing.T) {
+func TestConcurrentRefreshReuseLeavesNoActiveSession(t *testing.T) {
 	db := openAuthSecurityDB(t, "refresh.db")
 	user, err := CreateUser(t.Context(), db, "user@example.test", "User", "hash")
 	if err != nil {
@@ -99,7 +99,7 @@ func TestRotateRefreshTokenHasOneConcurrentWinner(t *testing.T) {
 				successes.Add(1)
 				return
 			}
-			if !errors.Is(err, ErrInvalidRefreshToken) {
+			if !errors.Is(err, ErrInvalidRefreshToken) && !errors.Is(err, ErrRefreshTokenReplay) {
 				errs <- err
 			}
 		}(i)
@@ -114,12 +114,11 @@ func TestRotateRefreshTokenHasOneConcurrentWinner(t *testing.T) {
 		t.Fatalf("successful refresh rotations = %d, want 1", got)
 	}
 	var active int
-	var inherited int64
-	if err := db.QueryRow(`SELECT COUNT(*), COALESCE(MAX(created_at),0) FROM refresh_tokens WHERE user_id=? AND revoked=0`, user.ID).Scan(&active, &inherited); err != nil {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM refresh_tokens WHERE user_id=? AND revoked=0`, user.ID).Scan(&active); err != nil {
 		t.Fatalf("read active refresh tokens: %v", err)
 	}
-	if active != 1 || inherited != createdAt {
-		t.Fatalf("active tokens=%d inherited created_at=%d, want 1/%d", active, inherited, createdAt)
+	if active != 0 {
+		t.Fatalf("active tokens=%d, want 0 after concurrent replay detection", active)
 	}
 }
 
@@ -155,7 +154,7 @@ func TestPasswordResetCannotRaceInARefreshSuccessor(t *testing.T) {
 		close(start)
 		wg.Wait()
 
-		if rotateErr != nil && !errors.Is(rotateErr, ErrInvalidRefreshToken) {
+		if rotateErr != nil && !errors.Is(rotateErr, ErrInvalidRefreshToken) && !errors.Is(rotateErr, ErrRefreshTokenReplay) {
 			t.Fatalf("iteration %d rotate: %v", i, rotateErr)
 		}
 		if resetErr != nil {
@@ -207,7 +206,7 @@ func TestRevokeSessionCannotMissConcurrentRefreshSuccessor(t *testing.T) {
 		close(start)
 		wg.Wait()
 
-		if rotateErr != nil && !errors.Is(rotateErr, ErrInvalidRefreshToken) {
+		if rotateErr != nil && !errors.Is(rotateErr, ErrInvalidRefreshToken) && !errors.Is(rotateErr, ErrRefreshTokenReplay) {
 			t.Fatalf("iteration %d rotate: %v", i, rotateErr)
 		}
 		if revokeErr != nil || !revoked {
@@ -259,7 +258,7 @@ func TestRevokeOtherSessionsCannotMissConcurrentRefreshSuccessor(t *testing.T) {
 		close(start)
 		wg.Wait()
 
-		if rotateErr != nil && !errors.Is(rotateErr, ErrInvalidRefreshToken) {
+		if rotateErr != nil && !errors.Is(rotateErr, ErrInvalidRefreshToken) && !errors.Is(rotateErr, ErrRefreshTokenReplay) {
 			t.Fatalf("iteration %d rotate: %v", i, rotateErr)
 		}
 		if revokeErr != nil {
@@ -303,7 +302,7 @@ func TestRefreshRotationPreservesStableSessionID(t *testing.T) {
 	}
 }
 
-func TestConsumedRefreshJTIReplayFailsWithoutRevivingOrRevokingSuccessor(t *testing.T) {
+func TestConsumedRefreshJTIReplayRevokesTheWholeSessionFamily(t *testing.T) {
 	db := openAuthSecurityDB(t, "refresh-replay-policy.db")
 	user, err := CreateUser(t.Context(), db, "refresh-replay@example.test", "Replay", "hash")
 	if err != nil {
@@ -315,12 +314,12 @@ func TestConsumedRefreshJTIReplayFailsWithoutRevivingOrRevokingSuccessor(t *test
 	if _, err := RotateRefreshToken(t.Context(), db, "replay-old", user.ID, user.TokenVer, "replay-new", time.Now().Add(time.Hour), SessionMeta{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := RotateRefreshToken(t.Context(), db, "replay-old", user.ID, user.TokenVer, "replay-third", time.Now().Add(time.Hour), SessionMeta{}); !errors.Is(err, ErrInvalidRefreshToken) {
-		t.Fatalf("replayed refresh error=%v, want ErrInvalidRefreshToken", err)
+	if _, err := RotateRefreshToken(t.Context(), db, "replay-old", user.ID, user.TokenVer, "replay-third", time.Now().Add(time.Hour), SessionMeta{}); !errors.Is(err, ErrRefreshTokenReplay) {
+		t.Fatalf("replayed refresh error=%v, want ErrRefreshTokenReplay", err)
 	}
 	valid, err := IsRefreshSessionValid(t.Context(), db, user.ID, "replay-old")
-	if err != nil || !valid {
-		t.Fatalf("successor family valid=(%v,%v), want true,nil", valid, err)
+	if err != nil || valid {
+		t.Fatalf("replayed family valid=(%v,%v), want false,nil", valid, err)
 	}
 }
 
@@ -356,7 +355,7 @@ func TestSetUserStatusCannotRaceInARefreshSuccessor(t *testing.T) {
 		close(start)
 		wg.Wait()
 
-		if rotateErr != nil && !errors.Is(rotateErr, ErrInvalidRefreshToken) {
+		if rotateErr != nil && !errors.Is(rotateErr, ErrInvalidRefreshToken) && !errors.Is(rotateErr, ErrRefreshTokenReplay) {
 			t.Fatalf("iteration %d rotate: %v", i, rotateErr)
 		}
 		if statusErr != nil {
@@ -408,7 +407,7 @@ func TestRevokeAllSessionsCannotMissConcurrentRefreshSuccessor(t *testing.T) {
 		close(start)
 		wg.Wait()
 
-		if rotateErr != nil && !errors.Is(rotateErr, ErrInvalidRefreshToken) {
+		if rotateErr != nil && !errors.Is(rotateErr, ErrInvalidRefreshToken) && !errors.Is(rotateErr, ErrRefreshTokenReplay) {
 			t.Fatalf("iteration %d rotate: %v", i, rotateErr)
 		}
 		if revokeErr != nil {

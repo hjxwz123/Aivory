@@ -8,9 +8,15 @@ import (
 	"time"
 )
 
-// ErrInvalidRefreshToken means the presented token is missing, expired,
-// revoked, belongs to another user, or predates a token-version rotation.
-var ErrInvalidRefreshToken = errors.New("invalid refresh token")
+var (
+	// ErrInvalidRefreshToken means the presented token is missing, expired,
+	// belongs to another user, or predates a token-version rotation.
+	ErrInvalidRefreshToken = errors.New("invalid refresh token")
+	// ErrRefreshTokenReplay means a still-live refresh token was already
+	// consumed. Callers must treat this as a credential-theft signal: its entire
+	// session family has been revoked before this error is returned.
+	ErrRefreshTokenReplay = errors.New("refresh token replay detected")
+)
 
 // RotateRefreshToken consumes oldJTI exactly once and inserts its replacement
 // in the same transaction. Locking the user row first establishes the same lock
@@ -56,7 +62,32 @@ func RotateRefreshToken(
 		 FROM refresh_tokens
 		 WHERE jti=? AND user_id=? AND revoked=0 AND expires_at>?`,
 		oldJTI, userID, now).Scan(&createdAt, &sessionID); errors.Is(err, sql.ErrNoRows) {
-		return "", ErrInvalidRefreshToken
+		// A revoked, unexpired JTI is an attempted reuse of a token that already
+		// won a rotation race. The only safe response is to revoke the successor
+		// too, so a copied refresh cookie cannot silently take over a session.
+		var replaySessionID string
+		replayErr := tx.QueryRowContext(ctx,
+			`SELECT CASE WHEN trim(session_id)<>'' THEN session_id ELSE jti END
+			 FROM refresh_tokens
+			 WHERE jti=? AND user_id=? AND revoked=1 AND expires_at>?`,
+			oldJTI, userID, now).Scan(&replaySessionID)
+		if errors.Is(replayErr, sql.ErrNoRows) {
+			return "", ErrInvalidRefreshToken
+		}
+		if replayErr != nil {
+			return "", replayErr
+		}
+		if _, replayErr = tx.ExecContext(ctx,
+			`UPDATE refresh_tokens SET revoked=1
+			 WHERE user_id=? AND revoked=0
+			   AND CASE WHEN trim(session_id)<>'' THEN session_id ELSE jti END=?`,
+			userID, replaySessionID); replayErr != nil {
+			return "", replayErr
+		}
+		if replayErr = tx.Commit(); replayErr != nil {
+			return "", replayErr
+		}
+		return "", ErrRefreshTokenReplay
 	} else if err != nil {
 		return "", err
 	}
@@ -93,8 +124,7 @@ func RotateRefreshToken(
 	return sessionID, nil
 }
 
-// A consumed JTI is intentionally rejected without revoking the whole family.
-// A duplicate in-flight refresh is indistinguishable from token theft at this
-// layer; revoking the family here would also revoke the legitimate successor
-// that won the same rotation race. Callers can explicitly revoke the family via
-// RevokeUserSession when a reuse detector has stronger evidence.
+// A consumed, unexpired JTI revokes the entire family (see
+// ErrRefreshTokenReplay). Browser clients serialize refreshes across tabs; a
+// second device that presents a copied cookie is therefore treated as theft,
+// not as a benign retry.
