@@ -46,6 +46,44 @@ func TestAdminSettingsKeysAreUniqueAndExcludeRetiredPurchasingSettings(t *testin
 	}
 }
 
+func TestAdminSettingsReportsEffectiveSandboxAvailability(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "sandbox-availability.db"))
+	defer db.Close()
+	t.Cleanup(store.InvalidateConfig)
+	store.InvalidateConfig()
+
+	readConfigured := func(d Deps) bool {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		adminSettingsGet(d, rec, httptest.NewRequest(http.MethodGet, "/api/admin/settings", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		var response map[string]json.RawMessage
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		var configured bool
+		if err := json.Unmarshal(response["sandbox_configured"], &configured); err != nil {
+			t.Fatalf("decode sandbox_configured: %v", err)
+		}
+		return configured
+	}
+
+	if readConfigured(Deps{DB: db}) {
+		t.Fatal("empty sandbox configuration reported available")
+	}
+	if !readConfigured(Deps{DB: db, Config: config.Config{SandboxBaseURL: "http://sandbox.internal"}}) {
+		t.Fatal("boot-time SANDBOX_BASE_URL was not reported available")
+	}
+	if err := store.SetSetting(db, "sandbox_base_url", "https://sandbox.example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if !readConfigured(Deps{DB: db}) {
+		t.Fatal("admin sandbox URL was not reported available")
+	}
+}
+
 func TestSearchEngineSettingNormalizesAndRejectsUnsafeNames(t *testing.T) {
 	db := openMigrated(t, filepath.Join(t.TempDir(), "search-engines-settings.db"))
 	defer db.Close()

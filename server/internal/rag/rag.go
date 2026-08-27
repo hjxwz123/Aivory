@@ -941,10 +941,10 @@ func (s *Service) runPipeline(ctx context.Context, docID string, cache *parseCac
 	if s.vec.Enabled() && len(points) > 0 {
 		stageStart = time.Now()
 		if err := s.vec.Upsert(ctx, dim, points); err != nil {
-			return fmt.Errorf("qdrant upsert failed: %w", err)
+			return fmt.Errorf("vector upsert failed: %w", err)
 		}
 		if s.logger != nil {
-			s.logger.Printf("rag: qdrant upsert done doc=%s file=%q points=%d dim=%d took=%s", docID, d.Filename, len(points), dim, time.Since(stageStart).Round(time.Millisecond))
+			s.logger.Printf("rag: vector upsert done doc=%s file=%q points=%d dim=%d took=%s", docID, d.Filename, len(points), dim, time.Since(stageStart).Round(time.Millisecond))
 		}
 	}
 	// Record embedding spend (§8.3, purpose=embedding). Skipped
@@ -1676,13 +1676,13 @@ func (s *Service) searchScope(ctx context.Context, userID, convID string, em Emb
 	hits, err := s.vec.Search(ctx, dim, qVec, scope, denseSearchLegLimit)
 	if err != nil {
 		if s.logger != nil {
-			s.logger.Printf("rag: qdrant search failed (%v) — using database fallback", err)
+			s.logger.Printf("rag: vector search failed (%v) — using database fallback", err)
 		}
 		return nil, fmt.Errorf("%w: %v", errVectorBackendUnavailable, err)
 	}
 	kwHits, kwErr := s.vec.SearchKeyword(ctx, dim, query, scope, keywordSearchLegLimit)
 	if kwErr != nil && s.logger != nil {
-		s.logger.Printf("rag: qdrant keyword search failed (%v) — continuing with dense hits", kwErr)
+		s.logger.Printf("rag: vector keyword search failed (%v) — continuing with dense hits", kwErr)
 	}
 	merged := map[string]retrievalCandidate{}
 	for _, h := range hits {
@@ -1790,7 +1790,7 @@ func (s *Service) ensureVectorIndexComplete(ctx context.Context, scope vector.Sc
 	status, err := s.vec.VectorChunkStatuses(ctx, dim, scope)
 	if err != nil {
 		if s.logger != nil {
-			s.logger.Printf("rag: qdrant consistency check failed (%v) — using database fallback", err)
+			s.logger.Printf("rag: vector consistency check failed (%v) — using database fallback", err)
 		}
 		return fmt.Errorf("%w: %v", errVectorBackendUnavailable, err)
 	}
@@ -1815,7 +1815,7 @@ func (s *Service) ensureVectorIndexComplete(ctx context.Context, scope vector.Sc
 			sample = sample[:5]
 		}
 		if s.logger != nil {
-			s.logger.Printf("rag: qdrant index incomplete for dim=%d scope={kb:%v conv:%s}; missing %d/%d chunks, empty vectors %d/%d (sample %v) — using database fallback", dim, scope.KBIDs, scope.ConversationID, len(missing), len(expected), len(empty), len(expected), sample)
+			s.logger.Printf("rag: vector index incomplete for dim=%d scope={kb:%v conv:%s}; missing %d/%d chunks, empty vectors %d/%d (sample %v) — using database fallback", dim, scope.KBIDs, scope.ConversationID, len(missing), len(expected), len(empty), len(expected), sample)
 		}
 		return fmt.Errorf("%w: vector index missing %d chunks and has %d empty vectors", errVectorBackendUnavailable, len(missing), len(empty))
 	}

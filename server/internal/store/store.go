@@ -726,6 +726,13 @@ func rebuildSQLiteChunksWithoutEmbedding(db *sql.DB) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// A fresh migration may already have created the embedded-vector table with
+	// a foreign key to the legacy chunks table. No released version could have
+	// populated it yet, so drop and recreate it around the legacy table rebuild
+	// to keep the FK pointed at the final chunks table.
+	if _, err := tx.Exec(`DROP TABLE IF EXISTS vector_points`); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(`ALTER TABLE chunks RENAME TO chunks__legacy_embedding`); err != nil {
 		return err
 	}
@@ -750,6 +757,13 @@ func rebuildSQLiteChunksWithoutEmbedding(db *sql.DB) error {
 		 SELECT id, document_id, kb_id, conversation_id, seq, parent_id, COALESCE(NULLIF(chunk_type,''), 'text'), content, image_ref, COALESCE(meta, '{}'), COALESCE(embedding_model, '')
 		 FROM chunks__legacy_embedding`,
 		`DROP TABLE chunks__legacy_embedding`,
+		`CREATE TABLE vector_points (
+			chunk_id  TEXT NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+			dimension INTEGER NOT NULL CHECK (dimension > 0),
+			embedding BLOB NOT NULL,
+			PRIMARY KEY (chunk_id, dimension)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_vector_points_dimension ON vector_points(dimension)`,
 	} {
 		if _, err := tx.Exec(ddl); err != nil {
 			return err

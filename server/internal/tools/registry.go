@@ -88,15 +88,31 @@ func (r *Registry) Register(t Tool) {
 	r.mu.Unlock()
 }
 
-// List returns every registered tool definition. The orchestrator applies the
-// loaded model's allowlist and global kill-switch; keeping storage access out of
-// the registry avoids duplicate queries and also lets this list drive the admin
-// capability endpoint. The list is sorted for deterministic serialization.
+// List returns every currently usable registered tool definition. The
+// orchestrator applies the loaded model's allowlist and global kill-switch.
+// Python is withheld when no sandbox URL is configured so models cannot select
+// a tool that has no execution backend. The list is sorted for deterministic
+// serialization.
 func (r *Registry) List(_ string) []llm.ToolDef {
+	return r.listRegistered(false)
+}
+
+// ListRegistered includes tools whose runtime dependency is unavailable. It is
+// used by the admin capability page so an unavailable tool remains visible and
+// can explain what must be configured.
+func (r *Registry) ListRegistered() []llm.ToolDef {
+	return r.listRegistered(true)
+}
+
+func (r *Registry) listRegistered(includeUnavailable bool) []llm.ToolDef {
+	sandboxEnabled := r.sandbox != nil && r.sandbox.Enabled()
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := []llm.ToolDef{}
 	for _, t := range r.tools {
+		if !includeUnavailable && t.Name() == "python_execute" && !sandboxEnabled {
+			continue
+		}
 		out = append(out, llm.ToolDef{
 			Name:        t.Name(),
 			Description: t.Description(),
@@ -279,6 +295,9 @@ func (r *Registry) checkCurrentToolAccess(
 	isMCP bool,
 	tc *llm.ToolContext,
 ) error {
+	if !isMCP && name == "python_execute" && (r.sandbox == nil || !r.sandbox.Enabled()) {
+		return errors.New("python_execute is unavailable: sandbox is not configured")
+	}
 	if r.db == nil || tc == nil || strings.TrimSpace(tc.UserID) == "" {
 		return nil
 	}

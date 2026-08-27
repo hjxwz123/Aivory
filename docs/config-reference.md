@@ -2,10 +2,10 @@
 
 > 版本 v2.0 · 2026-07-15 · 由整仓源码生成（对应本次改动：所有此前「硬编码但值得调整」的参数均已改为环境变量可覆盖）
 >
-> **这 315 个环境变量全部是可选的，未在 `.env.example` 中列出。** 不设置任何一个，Aivory 使用下表所列的默认值。只有当你需要调整某个具体参数时，才在部署环境里添加对应的变量。
+> **这 316 个环境变量全部是可选的，未在 `.env.example` 中列出。** 不设置任何一个，Aivory 使用下表所列的默认值。只有当你需要调整某个具体参数时，才在部署环境里添加对应的变量。
 > 如果需要调整，把用到的变量抄一份加进你自己的 `.env` 即可（`.env.example` 保持精简，不会自动包含这些高级选项）。
 >
-> **后端（Go）**：286 个，读取自进程环境变量，改动后**需重启 `aivory-api` 进程**生效。
+> **后端（Go）**：287 个，读取自进程环境变量，改动后**需重启 `aivory-api` 进程**生效。
 > **前端（Vite）**：23 个 `VITE_*` 变量，在**构建时**内联（`npm run build` / `vite build`），必须在构建环境设置，**运行时**改容器环境变量无效，需要重新构建产物。
 > **沙盒服务（Python）**：6 个 `SANDBOX_*` 变量（与已有的 `SANDBOX_*` 变量同一命名空间），读取自 `sandbox-service` 进程环境，改动后**需重启该进程**生效。
 > 类型：`duration`（Go 时长字符串，如 `90s`/`5m`/`2h`/`500ms`；对 Vite/Python 变量用纯数字，单位见默认值列）、`int`/`int64`、`float`、`bool`（`1/true/yes/on` 与 `0/false/no/off`）、`string`。
@@ -28,7 +28,7 @@
 
 ## 0. 总览
 
-共 **315** 个环境变量，按子系统分布：
+共 **316** 个环境变量，按子系统分布：
 
 | 子系统 | 变量数 |
 | --- | --- |
@@ -40,9 +40,9 @@
 | 6. 认证 / 会话 / 验证码 | 15 |
 | 7. 上传 / 文件 / 分享 | 18 |
 | 8. 管理后台任务（备份 / 向量维护 / 兑换码） | 27 |
-| 9. 服务器启动 / 配置加载 | 3 |
+| 9. 服务器启动 / 配置加载 | 4 |
 | 10. 前端 | 23 |
-| **合计** | **315** |
+| **合计** | **316** |
 
 ---
 
@@ -436,6 +436,7 @@ HTTP server 超时、优雅关闭、启动流程常量等。
 
 | 环境变量 | 类型 | 默认值 | 位置 | 说明 |
 | --- | --- | --- | --- | --- |
+| `VECTOR_BACKEND` | `string` | `"auto"` | `config/config.go` | Selects the vector backend at process startup. `auto` preserves compatibility: use Qdrant when `QDRANT_URL` is set, otherwise disable vector retrieval and use full-context fallback. `qdrant` requires `QDRANT_URL`; `sqlite` requires a non-PostgreSQL `DATABASE_URL` and enables embedded exact cosine search; `disabled` always disables vector retrieval. Invalid combinations stop startup with an explicit error. |
 | `AIVORY_CMD_ARCHIVE_GC_BOOT_SETTLE_DELAY` | `duration` | `2*time.Minute` | `cmd/api/main.go:40` | Delay after server boot before the first archived-workspace GC sweep, so a cold start isn't swept immediately. |
 | `AIVORY_CMD_RUN_PRUNE` | `duration` | `5*time.Minute` | `cmd/api/main.go:41` | Context timeout for one archived-workspace GC prune run against object storage. |
 | `AIVORY_CMD_ARCHIVE_GC_SWEEP_INTERVAL` | `duration` | `6*time.Hour` | `cmd/api/main.go:42` | Interval between archived-workspace GC sweeps that delete stale /workspace tarballs from object storage. |

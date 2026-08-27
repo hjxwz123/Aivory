@@ -1,0 +1,107 @@
+# Aivory personal stack: SQLite business data, embedded SQLite vectors, and
+# in-process cache/queue. It starts only app by default; --profile sandbox adds
+# the optional local Python sandbox and its runtime-image keepalive service.
+#
+# Start from deploy/:
+#   cp .env.personal.example .env.personal
+#   docker compose --env-file .env.personal -f docker-compose.personal.yml pull
+#   docker compose --env-file .env.personal -f docker-compose.personal.yml up -d
+#
+# This file is deliberately separate from docker-compose.prod.yml. Existing
+# Postgres + Redis + Qdrant deployments keep their services, volumes and config.
+
+name: aivory-personal
+
+services:
+  app:
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-hjxwz123}/aivory-app:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "80:8787"
+    env_file:
+      - .env.personal
+    environment:
+      AIVORY_LISTEN: ":8787"
+      AIVORY_ENV: production
+      # Personal backend profile. Explicit empty remote URLs prevent an
+      # accidentally copied environment value from re-enabling external stores.
+      DATABASE_URL: "/app/data/aivory.db?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
+      VECTOR_BACKEND: sqlite
+      REDIS_URL: ""
+      QDRANT_URL: ""
+      QDRANT_API_KEY: ""
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env.personal}
+      BACKUP_DIR: ${BACKUP_DIR:-/app/data/backups}
+      MAX_BACKUP_BYTES: ${MAX_BACKUP_BYTES:-21474836480}
+      ENABLE_MOCK_PROVIDER: ${ENABLE_MOCK_PROVIDER:-false}
+      SEARCH_PROVIDER: ${SEARCH_PROVIDER:-}
+      SEARCH_API_KEY: ${SEARCH_API_KEY:-}
+      SEARCH_BASE_URL: ${SEARCH_BASE_URL:-}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-1536}
+      MINERU_API_URL: ${MINERU_API_URL:-}
+      MINERU_API_KEY: ${MINERU_API_KEY:-}
+      # Leave blank for the default one-container profile. When starting the
+      # bundled sandbox profile, set SANDBOX_BASE_URL=http://sandbox:8000 in
+      # .env.personal so python_execute is declared only when it has a backend.
+      SANDBOX_BASE_URL: ${SANDBOX_BASE_URL:-}
+      SANDBOX_API_KEY: ${SANDBOX_API_KEY:-}
+    volumes:
+      # One host directory contains the SQLite DB (including vectors), uploads,
+      # generated artifacts, local objects and admin backup archives.
+      - ${DATA_DIR:-./data-personal}:/app/data
+    networks: [internal]
+
+  # Optional local sandbox. It is intentionally behind an explicit profile so
+  # the personal default stays one container and never mounts docker.sock.
+  # Start it with: docker compose --profile sandbox ... up -d
+  sandbox:
+    profiles: ["sandbox"]
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-hjxwz123}/aivory-sandbox-sidecar:${SANDBOX_IMAGE_TAG:-${IMAGE_TAG:-latest}}
+    restart: unless-stopped
+    environment:
+      SANDBOX_API_KEY: ${SANDBOX_API_KEY:-aivory-personal-sandbox}
+      SANDBOX_IMAGE: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-hjxwz123}/aivory-sandbox:${SANDBOX_IMAGE_TAG:-${IMAGE_TAG:-latest}}
+      SANDBOX_PULL_ON_START: "1"
+      SANDBOX_MEMORY: ${SANDBOX_MEMORY:-2g}
+      SANDBOX_CPUS: ${SANDBOX_CPUS:-1}
+      SANDBOX_MAX_SESSIONS: ${SANDBOX_MAX_SESSIONS:-4}
+      SANDBOX_MAX_UPLOAD_BYTES: ${SANDBOX_MAX_UPLOAD_BYTES:-41943040}
+      SANDBOX_MAX_BODY_BYTES: ${SANDBOX_MAX_BODY_BYTES:-58720256}
+      SANDBOX_EXEC_TIMEOUT_CAP_MS: ${SANDBOX_EXEC_TIMEOUT_CAP_MS:-600000}
+      SANDBOX_IDLE_TTL_CAP_SECONDS: ${SANDBOX_IDLE_TTL_CAP_SECONDS:-86400}
+      SANDBOX_READ_ONLY_ROOTFS: "1"
+      SANDBOX_WORKSPACE_SIZE: ${SANDBOX_WORKSPACE_SIZE:-512m}
+      SANDBOX_LOCAL_STORAGE_DIR: /var/lib/aivory/sandbox-archives
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    mem_limit: 1g
+    pids_limit: 512
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - sandbox-archives:/var/lib/aivory/sandbox-archives
+    networks: [internal]
+
+  # Pins the runtime image locally so an image-prune job cannot make the next
+  # python_execute wait for a large cold pull. It is also profile-gated.
+  sandbox-image-keepalive:
+    profiles: ["sandbox"]
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-hjxwz123}/aivory-sandbox:${SANDBOX_IMAGE_TAG:-${IMAGE_TAG:-latest}}
+    command: ["sleep", "infinity"]
+    restart: unless-stopped
+    network_mode: none
+    mem_limit: 64m
+    pids_limit: 16
+
+volumes:
+  sandbox-archives:
+
+networks:
+  internal:
+    driver: bridge

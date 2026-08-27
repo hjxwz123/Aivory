@@ -17,13 +17,14 @@ const defaultDevJWTSecret = "dev-secret-change-me-aivory-2026"
 
 // Config holds the resolved environment for one server process.
 type Config struct {
-	Listen       string
-	Env          string
-	DatabaseURL  string
-	RedisURL     string
-	QdrantURL    string
-	QdrantAPIKey string
-	JWTSecret    string
+	Listen        string
+	Env           string
+	DatabaseURL   string
+	RedisURL      string
+	VectorBackend string
+	QdrantURL     string
+	QdrantAPIKey  string
+	JWTSecret     string
 	// JWTSecretEphemeral is true when JWT_SECRET was not provided and a random
 	// secret was minted at boot (dev/local only). Sessions reset on restart.
 	JWTSecretEphemeral bool
@@ -67,13 +68,14 @@ type Config struct {
 // server starts in development with zero configuration.
 func Load() Config {
 	cfg := Config{
-		Listen:       getenv("AIVORY_LISTEN", ":8787"),
-		Env:          getenv("AIVORY_ENV", "development"),
-		DatabaseURL:  getenv("DATABASE_URL", "./data/aivory.db?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"),
-		RedisURL:     getenv("REDIS_URL", ""),
-		QdrantURL:    getenv("QDRANT_URL", ""),
-		QdrantAPIKey: getenv("QDRANT_API_KEY", ""),
-		JWTSecret:    getenv("JWT_SECRET", ""),
+		Listen:        getenv("AIVORY_LISTEN", ":8787"),
+		Env:           getenv("AIVORY_ENV", "development"),
+		DatabaseURL:   getenv("DATABASE_URL", "./data/aivory.db?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"),
+		RedisURL:      getenv("REDIS_URL", ""),
+		VectorBackend: strings.ToLower(strings.TrimSpace(getenv("VECTOR_BACKEND", "auto"))),
+		QdrantURL:     getenv("QDRANT_URL", ""),
+		QdrantAPIKey:  getenv("QDRANT_API_KEY", ""),
+		JWTSecret:     getenv("JWT_SECRET", ""),
 		// Short-lived access tokens limit the damage window if a token is stolen:
 		// the stolen token expires quickly even without explicit revocation.
 		// 30 minutes is the recommended ceiling; operators may lower it further
@@ -163,6 +165,9 @@ func looksDeployed(cfg Config) bool {
 // silently booted with the public dev JWT secret: real deployments use Postgres,
 // local dev uses SQLite. SQLite + an explicit dev env still boots with defaults.
 func Validate(cfg Config) error {
+	if _, err := ResolveVectorBackend(cfg); err != nil {
+		return err
+	}
 	if !looksDeployed(cfg) {
 		return nil
 	}
@@ -176,6 +181,44 @@ func Validate(cfg Config) error {
 	// created through the first-run setup flow (§ first-run setup), so there is no
 	// default admin password to guard here.
 	return nil
+}
+
+const (
+	VectorBackendAuto     = "auto"
+	VectorBackendQdrant   = "qdrant"
+	VectorBackendSQLite   = "sqlite"
+	VectorBackendDisabled = "disabled"
+)
+
+// ResolveVectorBackend turns the explicit backend mode into the concrete
+// implementation selected at boot. "auto" preserves the historical behaviour:
+// a configured QDRANT_URL enables Qdrant, otherwise vector retrieval is disabled.
+func ResolveVectorBackend(cfg Config) (string, error) {
+	backend := strings.ToLower(strings.TrimSpace(cfg.VectorBackend))
+	if backend == "" {
+		backend = VectorBackendAuto
+	}
+	switch backend {
+	case VectorBackendAuto:
+		if strings.TrimSpace(cfg.QdrantURL) != "" {
+			return VectorBackendQdrant, nil
+		}
+		return VectorBackendDisabled, nil
+	case VectorBackendQdrant:
+		if strings.TrimSpace(cfg.QdrantURL) == "" {
+			return "", fmt.Errorf("VECTOR_BACKEND=qdrant requires QDRANT_URL")
+		}
+		return VectorBackendQdrant, nil
+	case VectorBackendSQLite:
+		if isPostgresURL(cfg.DatabaseURL) {
+			return "", fmt.Errorf("VECTOR_BACKEND=sqlite requires a SQLite DATABASE_URL, not PostgreSQL")
+		}
+		return VectorBackendSQLite, nil
+	case VectorBackendDisabled:
+		return VectorBackendDisabled, nil
+	default:
+		return "", fmt.Errorf("invalid VECTOR_BACKEND %q (expected auto, qdrant, sqlite, or disabled)", cfg.VectorBackend)
+	}
 }
 
 // isPostgresURL reports whether the DSN addresses PostgreSQL (mirrors the

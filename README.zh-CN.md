@@ -112,7 +112,7 @@
 
 - **广泛的文档支持**：文本、PDF、DOCX、PPTX、XLSX 和图片；文字层文档优先本地快速解析，扫描件可选 MinerU OCR
 - **结构感知入库**：层级分块、标题路径、合理重叠，并完整保留代码、表格和数学公式
-- **混合检索**：Qdrant 向量与 PostgreSQL BM25 通过 RRF 融合，并按相似度动态决定 Top-K
+- **混合检索**：Qdrant 或 SQLite 内嵌向量与关系型关键词评分通过 RRF 融合，并按相似度动态决定 Top-K
 - **查询路由**：任务模型在拼装上下文前选择 `retrieve`、`full_doc` 或 `none`
 - **完整文档管理**：状态跟踪、预览、筛选、替换、删除，以及本地文件或 S3 兼容对象存储
 
@@ -170,6 +170,42 @@
 
 需要 Docker 24+ 与 Compose 插件。
 
+### 个人版
+
+个人版保留语义向量检索，但不启动 PostgreSQL、Redis、Qdrant 和两个沙箱容器。业务
+数据与归一化向量都写入同一个 SQLite 文件，缓存与后台任务使用进程内实现。Python
+执行默认关闭；需要时由管理员在「管理后台 → 工具」中配置外部沙箱地址。
+
+```bash
+git clone https://github.com/hjxwz123/Aivory.git
+cd Aivory/deploy
+cp .env.personal.example .env.personal
+$EDITOR .env.personal  # 设置 JWT_SECRET；按需配置 embedding
+docker compose --env-file .env.personal -f docker-compose.personal.yml pull
+docker compose --env-file .env.personal -f docker-compose.personal.yml up -d
+```
+
+个人版默认只启动 `app` 一个容器。宿主机数据目录默认是 `deploy/data-personal`，SQLite
+数据库、内嵌向量、上传文件、生成产物和后台备份都在该目录中。个人版只支持单个 app
+实例，不要横向扩容。
+
+需要部署内置 Python 沙箱时，在 `.env.personal` 中取消注释并保持以下两项配对：
+
+```dotenv
+SANDBOX_BASE_URL=http://sandbox:8000
+SANDBOX_API_KEY=aivory-personal-sandbox
+```
+
+再使用可选 profile 启动。它会额外启动沙箱 sidecar 和运行时镜像保活容器，且仅 sidecar
+会挂载宿主机 Docker socket：
+
+```bash
+docker compose --env-file .env.personal -f docker-compose.personal.yml --profile sandbox pull
+docker compose --env-file .env.personal -f docker-compose.personal.yml --profile sandbox up -d
+```
+
+### 完整版
+
 ```bash
 # 1. 克隆（只需要 deploy/ 子目录）
 git clone https://github.com/hjxwz123/Aivory.git
@@ -224,7 +260,7 @@ docker compose --env-file .env -f docker-compose.prod.yml up -d
 
 **首次启动**：进入初始化页面，填写昵称、邮箱和密码，该账号成为管理员。随后去 `/admin/channels` 添加第一个 Provider key，并创建模型。
 
-五个容器：
+完整版包含五个应用服务：
 
 | 容器 | 镜像 | 作用 |
 |------|------|------|
@@ -263,11 +299,11 @@ graph TB
 
     PROV <-->|流式| LLM["☁️ 模型服务商"]
     TOOLS --> SBX["沙箱 sidecar<br/>Python · 会话级文件"]
-    RAGP --> QD[("Qdrant<br/>向量库")]
+    RAGP --> QD[("向量后端<br/>完整版 Qdrant · 个人版 SQLite")]
     RAGP -.->|"仅扫描件"| MRU["MinerU 云 OCR"]
 
-    ORCH --> DB[("SQLite 开发 /<br/>Postgres 生产")]
-    ORCH --> RDS[("Redis<br/>缓存 · 发布订阅")]
+    ORCH --> DB[("SQLite 个人版/开发 /<br/>Postgres 完整版")]
+    ORCH --> RDS[("完整版 Redis / 个人版内存<br/>缓存 · 发布订阅")]
     ORCH -.-> OBJ["S3 / 阿里云 OSS<br/>(可选)"]
 ```
 
@@ -331,9 +367,9 @@ STATIC_DIR=../dist ./aivory
 
 - **前端**：React 19、TypeScript 5、Vite 5、Tailwind 4、Radix UI、Zustand、i18next、lucide-react
 - **后端**：Go 1.22、标准 `net/http`、手写 sqlc 风格查询
-- **存储**：PostgreSQL 16（生产）/ SQLite（嵌入式开发兜底）
+- **存储**：PostgreSQL 16（完整版）/ SQLite（个人版与本地运行）
 - **缓存与协调**：Redis 7
-- **向量检索**：Qdrant 1.12（未配置向量后端时使用全文上下文兜底）
+- **向量检索**：Qdrant 1.12（完整版）/ SQLite 内嵌精确余弦检索（个人版）
 - **文档解析**：MinerU 云 API（PDF / DOCX / PPTX / 图片 OCR）
 - **可选**：S3 / 阿里云 OSS 作源文件桶，SearXNG 作自部署搜索引擎
 
@@ -352,13 +388,15 @@ STATIC_DIR=../dist ./aivory
 │       ├── tools/            aivory_web_search / web_fetch / python_execute / image_generate /
 │       │                     save_memory / use_skill
 │       ├── rag/              解析 → 切块 → 嵌入 → 查询路由 → 检索
-│       ├── vector/           Qdrant 客户端（+ PG 兜底）
+│       ├── vector/           Qdrant 与 SQLite 内嵌向量后端
 │       ├── store/            Postgres / SQLite 表结构与查询
 │       ├── sandbox/          Python 沙箱 sidecar 的 HTTP 客户端
 │       └── storage/          S3 / OSS 上传 + 预签名 HTTP 客户端
-├── deploy/                   生产部署
+├── deploy/                   Docker 部署配置
 │   ├── docker-compose.prod.yml
-│   └── .env.example          环境变量模板
+│   ├── docker-compose.personal.yml
+│   ├── .env.example          完整版环境变量模板
+│   └── .env.personal.example 个人版环境变量模板
 └── docs/                     设计笔记、规约
 ```
 

@@ -750,6 +750,17 @@ CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(document_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_kb ON chunks(kb_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_conv ON chunks(conversation_id);
 
+-- Embedded vector storage for the explicitly selected personal SQLite backend.
+-- Production Qdrant deployments leave this table empty; keeping it in both
+-- dialect schemas makes logical backup/restore engine-agnostic.
+CREATE TABLE IF NOT EXISTS vector_points (
+  chunk_id  TEXT NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+  dimension INTEGER NOT NULL CHECK (dimension > 0),
+  embedding BLOB NOT NULL,
+  PRIMARY KEY (chunk_id, dimension)
+);
+CREATE INDEX IF NOT EXISTS idx_vector_points_dimension ON vector_points(dimension);
+
 CREATE TABLE IF NOT EXISTS memories (
   id                 TEXT PRIMARY KEY,
   user_id            TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

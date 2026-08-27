@@ -647,6 +647,7 @@
     "mcpAvailabilityEmpty": "Aucun service MCP n’est configuré.",
     "mcpLoadFailed": "Impossible de charger les services MCP. Leur disponibilité actuelle n’a pas été modifiée.",
     "mcpUnavailable": "La dernière tentative de connexion a échoué.",
+    "configureSandboxFirst": "Configurez d’abord un bac à sable",
     "manageMCP": "Gérer MCP"
   },
   "mcp": {
@@ -856,9 +857,10 @@
       "smtpTlsHint": "Activé pour le port 465. Port 587 : STARTTLS (désactivé).",
       "sandboxSection": "Bac à sable de code",
       "sandboxUrl": "URL du bac à sable",
-      "sandboxUrlHint": "Vide = sandbox intégré. À renseigner pour un sandbox externe.",
+      "sandboxUrlHint": "Laissez vide pour utiliser l’URL du déploiement, ou indiquez ici un service externe.",
+      "sandboxMissing": "Aucun bac à sable local n’est disponible. Configurez une URL de bac à sable.",
       "sandboxKey": "Clé d'API du bac à sable",
-      "sandboxKeyHint": "Clé Bearer du sandbox. Vide = clé intégrée.",
+      "sandboxKeyHint": "Clé Bearer du bac à sable. Laissez vide pour utiliser la valeur du déploiement.",
       "sandboxExecTimeout": "Délai d'exécution (secondes)",
       "sandboxExecTimeoutHint": "Durée max par exécution (s). Vide = 120. Plage 10–600.",
       "storageSection": "Stockage d'objets",

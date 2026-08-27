@@ -103,9 +103,48 @@ func TestSelectableToolsCatalogIsFlatSafeAndDeduplicatesMCPService(t *testing.T)
 	}
 }
 
+func TestSelectableToolsCatalogHidesPythonWithoutSandbox(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "tools-catalog-no-sandbox.db"))
+	t.Cleanup(func() { _ = db.Close() })
+	t.Cleanup(store.InvalidateConfig)
+	store.InvalidateConfig()
+	ctx := context.Background()
+	mustExec(t, db, `INSERT INTO users(id,email,password_hash,role,status) VALUES('u1','personal@example.test','hash','user','active')`)
+	channel, err := store.CreateChannel(ctx, db, "Personal tools", "openai", "responses", "https://provider.example.test/v1", "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := store.CreateModel(ctx, db, store.Model{
+		ChannelID: channel.ID, Kind: "chat", RequestID: "personal-tools", Label: "Personal tools",
+		Enabled: true, ToolMode: "native", BuiltinTools: json.RawMessage(`["web_fetch","python_execute"]`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := toolregistry.NewRegistry(db, config.Config{}, log.New(io.Discard, "", 0))
+	req := httptest.NewRequest(http.MethodGet, "/api/tools?model_id="+model.ID, nil)
+	req = req.WithContext(context.WithValue(req.Context(), userCtxKey{}, &store.User{ID: "u1", Role: "user", Status: "active"}))
+	recorder := httptest.NewRecorder()
+	listSelectableToolsHandler(Deps{DB: db, Tools: registry}, recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var rows []selectableToolResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &rows); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if row.ID == "builtin:python_execute" {
+			t.Fatalf("python_execute remained selectable without a sandbox: %#v", rows)
+		}
+	}
+}
+
 func TestSelectableToolsCatalogKeepsRestrictedCandidatesDisabled(t *testing.T) {
 	db := openMigrated(t, filepath.Join(t.TempDir(), "tools-catalog-restricted.db"))
 	t.Cleanup(func() { _ = db.Close() })
+	t.Cleanup(store.InvalidateConfig)
+	store.InvalidateConfig()
 	ctx := context.Background()
 	permissions := store.DefaultUserGroupPermissions()
 	permissions.Tools = store.ResourceAccessPolicy{Mode: store.ResourceAccessSelected, IDs: []string{"builtin:web_fetch"}}
@@ -126,11 +165,12 @@ func TestSelectableToolsCatalogKeepsRestrictedCandidatesDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry := toolregistry.NewRegistry(db, config.Config{}, log.New(io.Discard, "", 0))
+	cfg := config.Config{SandboxBaseURL: "http://sandbox.internal"}
+	registry := toolregistry.NewRegistry(db, cfg, log.New(io.Discard, "", 0))
 	req := httptest.NewRequest(http.MethodGet, "/api/tools?model_id="+model.ID, nil)
 	req = req.WithContext(context.WithValue(req.Context(), userCtxKey{}, &store.User{ID: "u1", Role: "user", Status: "active"}))
 	recorder := httptest.NewRecorder()
-	listSelectableToolsHandler(Deps{DB: db, Tools: registry}, recorder, req)
+	listSelectableToolsHandler(Deps{DB: db, Config: cfg, Tools: registry}, recorder, req)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}

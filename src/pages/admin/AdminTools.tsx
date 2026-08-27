@@ -152,6 +152,7 @@ export default function AdminTools() {
         for (const key of OWNED_KEYS) {
           if (key in saved) next[key] = saved[key]
         }
+        if ('sandbox_configured' in saved) next.sandbox_configured = saved.sandbox_configured
         return next
       })
       toast.success(t('admin:settings.saved'))
@@ -171,6 +172,11 @@ export default function AdminTools() {
   function readStringArray(key: string): string[] {
     const value = draft[key]
     return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+  }
+
+  function readBool(key: string, fallback = false): boolean {
+    const value = draft[key]
+    return typeof value === 'boolean' ? value : fallback
   }
 
   function setToolEnabled(name: string, enabled: boolean) {
@@ -203,6 +209,7 @@ export default function AdminTools() {
   }
 
   const searchProvider = readString('search_provider')
+  const sandboxConfigured = readBool('sandbox_configured', true)
 
   return (
     <div className="mx-auto max-w-[76rem]">
@@ -252,7 +259,9 @@ export default function AdminTools() {
             ) : (
               <div className="mt-4 divide-y divide-[var(--color-divider)] border-y border-[var(--color-divider)]">
                 {builtinTools.map((tool) => {
-                  const enabled = !readStringArray('disabled_tools').includes(tool.name)
+                  const requiresSandbox = tool.name === 'python_execute'
+                  const unavailable = requiresSandbox && !sandboxConfigured
+                  const enabled = !unavailable && !readStringArray('disabled_tools').includes(tool.name)
                   return (
                     <label key={tool.name} className="flex min-h-14 items-center gap-4 py-2.5">
                       <span className="min-w-0 flex-1">
@@ -263,11 +272,18 @@ export default function AdminTools() {
                           {t(`admin:models.builtinTools.descriptions.${tool.name}`, { defaultValue: tool.description })}
                         </span>
                       </span>
-                      <Switch
-                        checked={enabled}
-                        disabled={saving}
-                        onCheckedChange={(value) => setToolEnabled(tool.name, value)}
-                      />
+                      <span className="flex shrink-0 items-center gap-2.5">
+                        {unavailable ? (
+                          <span className="max-w-[8.5rem] text-right text-[11px] leading-4 text-[var(--color-fg-subtle)] sm:max-w-none sm:whitespace-nowrap">
+                            {t('admin:tools.configureSandboxFirst')}
+                          </span>
+                        ) : null}
+                        <Switch
+                          checked={enabled}
+                          disabled={saving || unavailable}
+                          onCheckedChange={(value) => setToolEnabled(tool.name, value)}
+                        />
+                      </span>
                     </label>
                   )
                 })}
@@ -419,6 +435,12 @@ export default function AdminTools() {
           {/* Code sandbox ---------------------------------------------------- */}
           <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5">
             <h2 className="font-serif text-lg text-[var(--color-fg)]">{t('admin:settings.fields.sandboxSection')}</h2>
+            {!sandboxConfigured ? (
+              <p className="mt-2 flex items-center gap-2 text-xs text-[var(--color-fg-muted)]" role="status">
+                <AlertTriangle size={14} aria-hidden className="shrink-0" />
+                <span>{t('admin:settings.fields.sandboxMissing')}</span>
+              </p>
+            ) : null}
             <div className="mt-4 flex flex-col gap-5">
               <Field
                 label={t('admin:settings.fields.sandboxUrl')}

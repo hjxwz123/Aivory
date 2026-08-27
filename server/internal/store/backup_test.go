@@ -51,6 +51,7 @@ func TestBackupRoundTrip(t *testing.T) {
 		{`INSERT INTO messages(id,conversation_id,parent_id,role,input_tokens,cost) VALUES('m2','c1','m1','assistant',42,0.0125)`, nil},
 		{`INSERT INTO documents(id,conversation_id,filename,mime_type,size_bytes,status) VALUES('d1','c1','f.txt','text/plain',10,'ready')`, nil},
 		{`INSERT INTO chunks(id,document_id,seq,content,embedding_model) VALUES('ch1','d1',0,'hello','e')`, nil},
+		{`INSERT INTO vector_points(chunk_id,dimension,embedding) VALUES('ch1',2,?)`, []any{[]byte{0, 0, 128, 63, 0, 0, 0, 0}}},
 	}
 	for _, s := range seed {
 		if _, err := db.ExecContext(ctx, s.q, s.args...); err != nil {
@@ -123,7 +124,7 @@ func TestBackupRoundTrip(t *testing.T) {
 	for tbl, want := range map[string]int{
 		"users": 1, "credit_adjustment_notifications": 1, "credit_ledger": 1, "credit_reservations": 1, "quota_ledger": 1, "billing_usage": 1,
 		"payment_orders": 1, "payment_order_attempts": 1, "payment_events": 1,
-		"workspaces": 1, "workspace_members": 1, "conversations": 1, "conversation_compaction_leases": 0, "messages": 2, "chunks": 1, "documents": 1,
+		"workspaces": 1, "workspace_members": 1, "conversations": 1, "conversation_compaction_leases": 0, "messages": 2, "chunks": 1, "vector_points": 1, "documents": 1,
 	} {
 		var n int
 		if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+tbl).Scan(&n); err != nil {
@@ -375,6 +376,14 @@ func TestMigrateDropsLegacyChunkEmbedding(t *testing.T) {
 	if content != "hello" {
 		t.Fatalf("legacy chunk content changed: %q", content)
 	}
+	var vectorFKTarget string
+	if err := db.QueryRowContext(ctx,
+		`SELECT "table" FROM pragma_foreign_key_list('vector_points') WHERE "from"='chunk_id'`).Scan(&vectorFKTarget); err != nil {
+		t.Fatalf("inspect vector_points foreign key: %v", err)
+	}
+	if vectorFKTarget != "chunks" {
+		t.Fatalf("vector_points foreign key targets %q, want chunks", vectorFKTarget)
+	}
 }
 
 func TestBackupTableOrderCoversSchemaTables(t *testing.T) {
@@ -432,6 +441,7 @@ func TestConfigTableOrderExcludesUserDataTables(t *testing.T) {
 		"files",
 		"documents",
 		"chunks",
+		"vector_points",
 		"memories",
 		"usage_logs",
 		"usage_stats",
