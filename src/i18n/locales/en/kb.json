@@ -33,6 +33,7 @@
     "uploaded": "Document uploaded",
     "uploadFailed": "Upload failed",
     "failedReason": "Indexing failed. You can retry after fixing the related configuration.",
+    "parserNotConfigured": "Indexing failed because document parsing (MinerU) is not configured. Ask an administrator to configure it, then retry.",
     "retry": "Retry",
     "retryQueued": "Indexing queued again",
     "retryFailed": "Retry failed",

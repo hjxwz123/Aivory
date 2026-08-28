@@ -33,6 +33,7 @@
     "uploaded": "文件已上傳",
     "uploadFailed": "上傳失敗",
     "failedReason": "索引失敗。可以在修正相關設定後重試。",
+    "parserNotConfigured": "文件解析服務（MinerU）未配置，無法為該文件建立索引。請聯絡管理員配置後重試。",
     "retry": "重試",
     "retryQueued": "已重新提交索引",
     "retryFailed": "重試失敗",

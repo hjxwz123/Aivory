@@ -554,14 +554,19 @@ type WorkspaceKnowledgeBaseMemberPermission struct {
 
 // Document — §5 documents row. status: pending|parsing|embedding|ready|failed.
 type Document struct {
-	ID               string `json:"id"`
-	KBID             string `json:"kb_id"`
-	ConversationID   string `json:"conversation_id"`
-	Filename         string `json:"filename"`
-	MimeType         string `json:"mime_type"`
-	SizeBytes        int64  `json:"size_bytes"`
-	Status           string `json:"status"`
-	Error            string `json:"error"`
+	ID             string `json:"id"`
+	KBID           string `json:"kb_id"`
+	ConversationID string `json:"conversation_id"`
+	Filename       string `json:"filename"`
+	MimeType       string `json:"mime_type"`
+	SizeBytes      int64  `json:"size_bytes"`
+	Status         string `json:"status"`
+	Error          string `json:"error"`
+	// ErrorCode is a stable machine code derived from Error by the API
+	// sanitizer (e.g. "document_parser_not_configured"). It is never read
+	// from the database; user-facing responses carry it after the raw
+	// diagnostics in Error have been blanked.
+	ErrorCode        string `json:"error_code,omitempty"`
 	ChunkCount       int    `json:"chunk_count"`
 	StoragePath      string `json:"-"`
 	UploadedByUserID string `json:"uploaded_by_user_id"`

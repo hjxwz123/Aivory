@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"aivory/server/internal/envcfg"
+	"aivory/server/internal/rag"
 	"aivory/server/internal/store"
 )
 
@@ -54,6 +55,18 @@ func userKnowledgeBases(rows []store.KnowledgeBase) []knowledgeBaseResponse {
 	return items
 }
 
+// documentErrorCode lifts a stable machine code out of the internal ingest
+// diagnostics BEFORE userDocuments/userDocument blank the raw text, so the
+// client can localize actionable failure classes (currently: MinerU OCR not
+// configured) without string-matching English prose. Adding a new class?
+// mint it as a rag-level sentinel and extend this switch.
+func documentErrorCode(errText string) string {
+	if strings.Contains(errText, rag.ParserNotConfiguredCode) {
+		return rag.ParserNotConfiguredCode
+	}
+	return ""
+}
+
 // userDocuments removes internal ingest diagnostics from ordinary user
 // responses. Administrators retain the original store.Document payload through
 // their dedicated drill-down endpoints.
@@ -61,6 +74,7 @@ func userDocuments(rows []store.Document) []store.Document {
 	items := make([]store.Document, len(rows))
 	copy(items, rows)
 	for i := range items {
+		items[i].ErrorCode = documentErrorCode(items[i].Error)
 		items[i].Error = ""
 	}
 	return items
@@ -71,6 +85,7 @@ func userDocument(doc *store.Document) *store.Document {
 		return nil
 	}
 	item := *doc
+	item.ErrorCode = documentErrorCode(item.Error)
 	item.Error = ""
 	return &item
 }

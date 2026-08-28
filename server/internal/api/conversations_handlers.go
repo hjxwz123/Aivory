@@ -1215,6 +1215,10 @@ type convFile struct {
 	DocumentID     string `json:"document_id,omitempty"`
 	DocumentStatus string `json:"document_status,omitempty"`
 	DocumentError  string `json:"document_error,omitempty"`
+	// DocumentErrorCode is the stable machine code derived from the ingest
+	// diagnostics (see documentErrorCode) — the composer renders a localized
+	// "document parsing not configured" hint from it after a page refresh.
+	DocumentErrorCode string `json:"document_error_code,omitempty"`
 }
 
 // listConversationFilesHandler returns every file currently attached to the
@@ -1256,6 +1260,7 @@ func listConversationFilesHandler(d Deps, w http.ResponseWriter, r *http.Request
 			row.DocumentID = doc.ID
 			row.DocumentStatus = doc.Status
 			row.DocumentError = doc.Error
+			row.DocumentErrorCode = documentErrorCode(doc.Error)
 		}
 		out = append(out, row)
 	}

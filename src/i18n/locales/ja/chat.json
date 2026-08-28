@@ -102,6 +102,8 @@
     "indexing": "インデックス作成中…",
     "ingestFailed": "このファイルを読み取れませんでした",
     "ingestFailedAction": "解析に失敗しました。削除するか",
+    "parserNotConfigured": "文書解析が設定されていません。管理者に設定を依頼してから",
+    "parserNotConfiguredToast": "このサーバーには文書解析（OCR）が設定されていません",
     "ingestRetryFailed": "再試行に失敗しました",
     "retry": "再試行",
     "knowledgeBases": "ナレッジベース",

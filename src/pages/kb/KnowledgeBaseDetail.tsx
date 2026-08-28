@@ -48,6 +48,7 @@ import { userCan } from '@/lib/user-permissions'
 import { Switch } from '@/components/ui/switch'
 import { subscribeAccessInvalidation } from '@/lib/access-events'
 import { knowledgeBaseErrorText, knowledgeBaseOperationErrorText } from '@/lib/knowledge-base-errors'
+import { DOCUMENT_PARSER_NOT_CONFIGURED } from '@/lib/document-errors'
 import { normalizeExactUserEmailQuery } from '@/lib/user-email-search'
 
 const kbDocStatusPollInterval = envNum('VITE_AIVORY_KB_DOC_STATUS_POLL_INTERVAL', 2200)
@@ -437,7 +438,7 @@ export default function KnowledgeBaseDetail() {
       await kbsApi.retryDoc(id, d.id)
       if (docOperationEpochRef.current !== operationEpoch || busyDocRef.current !== operation) return
       setDocs((current) => current.map((doc) => (
-        doc.id === d.id ? { ...doc, status: 'pending', error: '', chunk_count: 0 } : doc
+        doc.id === d.id ? { ...doc, status: 'pending', error: '', error_code: undefined, chunk_count: 0 } : doc
       )))
       toast.success(t('kb:detail.retryQueued'))
       await load(true)
@@ -693,7 +694,11 @@ export default function KnowledgeBaseDetail() {
                     {d.status === 'failed' ? (
                       <p className="mt-1.5 flex items-start gap-1.5 text-[12px] text-[var(--color-danger)] leading-snug">
                         <AlertTriangle size={12} className="mt-px shrink-0" aria-hidden />
-                        <span>{t('kb:detail.failedReason')}</span>
+                        <span>
+                          {d.error_code === DOCUMENT_PARSER_NOT_CONFIGURED
+                            ? t('kb:detail.parserNotConfigured', { defaultValue: 'Indexing failed because document parsing (MinerU) is not configured. Ask an administrator to configure it, then retry.' })
+                            : t('kb:detail.failedReason')}
+                        </span>
                       </p>
                     ) : null}
                     {(d.status === 'parsing' || d.status === 'embedding') ? (

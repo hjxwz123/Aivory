@@ -1045,6 +1045,9 @@ export interface ApiDocument {
   size_bytes: number
   status: 'pending' | 'parsing' | 'embedding' | 'ready' | 'failed'
   error: string
+  /** Stable machine code derived from the ingest error before the raw
+   *  diagnostics are blanked (see DOCUMENT_PARSER_NOT_CONFIGURED). */
+  error_code?: string
   chunk_count: number
   uploaded_by_user_id?: string
   uploaded_by_name?: string
@@ -1218,6 +1221,9 @@ export interface ApiConversationFile {
   document_id?: string
   document_status?: ApiDocument['status']
   document_error?: string
+  /** Machine code for the draft document's ingest failure — survives page
+   *  refresh so the composer chip can render the right localized reason. */
+  document_error_code?: string
 }
 
 export interface ApiConversation {

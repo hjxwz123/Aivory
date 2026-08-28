@@ -102,6 +102,8 @@
     "indexing": "Indexing…",
     "ingestFailed": "Couldn't read this file",
     "ingestFailedAction": "Parsing failed. Remove it or",
+    "parserNotConfigured": "Document parsing isn't configured. Ask your admin to enable it, then",
+    "parserNotConfiguredToast": "Document parsing (OCR) is not configured on this server",
     "ingestRetryFailed": "Retry failed",
     "retry": "retry",
     "knowledgeBases": "Knowledge bases",

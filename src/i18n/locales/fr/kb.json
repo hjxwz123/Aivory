@@ -33,6 +33,7 @@
     "uploaded": "Document importé",
     "uploadFailed": "Échec de l'importation",
     "failedReason": "Échec de l'indexation. Vous pouvez réessayer après avoir corrigé la configuration concernée.",
+    "parserNotConfigured": "L'indexation a échoué car l'analyse de documents (MinerU) n'est pas configurée. Demandez à un administrateur de la configurer, puis réessayez.",
     "retry": "Réessayer",
     "retryQueued": "Indexation remise en file d'attente",
     "retryFailed": "Échec de la nouvelle tentative",
