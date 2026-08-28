@@ -221,6 +221,7 @@
   --z-sticky: 20;
   --z-overlay: 40;
   --z-drawer: 50;
+  --z-tour: 55;
   --z-dialog: 60;
   --z-popover: 70;
   --z-toast: 80;

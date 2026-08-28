@@ -81,7 +81,7 @@ export default function AdminModelPolicy() {
               value={readString('default_model_id')}
               onValueChange={(value) => setDraft((current) => ({ ...current, default_model_id: value }))}
             >
-              <SelectTrigger id="default-model">
+              <SelectTrigger id="default-model" data-admin-tour="model-policy-default-model">
                 <SelectValue placeholder={t('admin:settings.fields.pickModel')} />
               </SelectTrigger>
               <SelectContent>

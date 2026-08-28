@@ -37,33 +37,55 @@
     "retry": "Retry",
     "skip": "Skip for now",
     "finish": "Finish guide",
+    "tour": {
+      "label": "Configuration walkthrough",
+      "preparing": "Opening configuration…",
+      "stepProgress": "{{current}} of {{total}}",
+      "requiredProgress": "Required setup",
+      "recommendedProgress": "Recommended setup",
+      "configured": "Configured",
+      "needsSetup": "Needs setup",
+      "back": "Back",
+      "next": "Next",
+      "finish": "Finish guide",
+      "skip": "Skip for now",
+      "close": "Close",
+      "retry": "Retry",
+      "openTarget": "Open setting",
+      "targetUnavailable": "This setting is still loading."
+    },
     "taskComplete": "Complete",
     "taskIncomplete": "Needs setup",
     "task": {
       "channel": {
         "title": "Connect a channel",
         "description": "Connect a model provider first.",
-        "action": "Configure channel"
+        "action": "Configure channel",
+        "tour": "Create a channel for your model provider here."
       },
       "chatModel": {
         "title": "Add a chat model",
         "description": "Add an enabled chat model. Supported models can be imported from its channel.",
-        "action": "Configure models"
+        "action": "Configure models",
+        "tour": "Create or import an enabled chat model from a channel."
       },
       "defaultModel": {
         "title": "Choose a default chat model",
         "description": "Use an enabled chat model for new conversations.",
-        "action": "Choose default"
+        "action": "Choose default",
+        "tour": "Select the enabled chat model new conversations should use."
       },
       "embedding": {
         "title": "Add an embedding model",
         "description": "Enable document search and knowledge bases.",
-        "action": "Configure embeddings"
+        "action": "Configure embeddings",
+        "tour": "Choose an enabled embedding model to turn on document search."
       },
       "search": {
         "title": "Connect web search",
         "description": "Enable web search for models and users.",
-        "action": "Configure search"
+        "action": "Configure search",
+        "tour": "Choose a search provider to enable web search."
       },
       "sandbox": {
         "title": "Connect a sandbox",
@@ -71,12 +93,17 @@
           "personal": "Optional. Configure an external sandbox, or start the optional bundled sandbox profile, for Python and file tools.",
           "full": "Optional. Configure a reachable sandbox address for Python and file tools."
         },
-        "action": "Configure sandbox"
+        "action": "Configure sandbox",
+        "tour": {
+          "personal": "Set an external sandbox URL, or use the optional bundled sandbox profile for Python and file tools.",
+          "full": "Enter the reachable sandbox URL used for Python and file tools."
+        }
       },
       "smtp": {
         "title": "Configure email delivery",
         "description": "Recommended for verification, recovery, invitations, and operational email.",
-        "action": "Configure email"
+        "action": "Configure email",
+        "tour": "Enter your SMTP host to enable verification and other email delivery."
       }
     }
   },

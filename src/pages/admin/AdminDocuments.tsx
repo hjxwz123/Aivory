@@ -191,7 +191,7 @@ export default function AdminDocuments() {
                     setDraft({ ...draft, embedding_model_id: v === 'none' ? '' : v })
                   }
                 >
-                  <SelectTrigger id="embed-model">
+                  <SelectTrigger id="embed-model" data-admin-tour="documents-embedding-model">
                     <SelectValue placeholder={t('admin:settings.fields.pickModel')} />
                   </SelectTrigger>
                   <SelectContent>

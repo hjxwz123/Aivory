@@ -76,6 +76,7 @@ export default function AdminSystemEmail() {
             >
               <Input
                 id="smtp-host"
+                data-admin-tour="email-smtp-host"
                 value={readString('smtp_host')}
                 placeholder="smtp.example.com"
                 onChange={(event) => setDraft((current) => ({ ...current, smtp_host: event.target.value }))}
