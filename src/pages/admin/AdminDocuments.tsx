@@ -18,6 +18,7 @@ import { Field } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/hooks/use-toast'
+import { embeddingGuardErrorText } from '@/lib/admin-embedding-errors'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 
 type Settings = Record<string, unknown>
@@ -62,16 +63,19 @@ export default function AdminDocuments() {
   const [embeddingModels, setEmbeddingModels] = useState<ApiModel[]>([])
   const [draft, setDraft] = useState<Settings>({})
   const [lockedEmbeddingModelID, setLockedEmbeddingModelID] = useState('')
+  const [embeddingModelsLoaded, setEmbeddingModelsLoaded] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
   async function load() {
     setLoading(true)
+    setEmbeddingModelsLoaded(false)
     try {
       const [s, em] = await Promise.all([adminApi.settings(), adminApi.models('embedding')])
       setDraft(s)
       setLockedEmbeddingModelID(typeof s.embedding_model_id === 'string' ? s.embedding_model_id : '')
       setEmbeddingModels(em)
+      setEmbeddingModelsLoaded(true)
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
     } finally {
@@ -104,18 +108,18 @@ export default function AdminDocuments() {
       for (const k of OWNED_KEYS) {
         if (k in draft) patch[k] = draft[k]
       }
-      await adminApi.updateSettings(patch)
-      const nextEmbedding = draft.embedding_model_id
-      if (typeof nextEmbedding === 'string' && nextEmbedding) {
-        setLockedEmbeddingModelID(nextEmbedding)
-      }
+      const saved = await adminApi.updateSettings(patch)
+      // Re-derive the lock from the server's authoritative post-write snapshot:
+      // the PATCH returns the full settings map, so a repair-save that CLEARED a
+      // dangling lock (select "—") no longer leaves a stale lock id (and its
+      // dangling hint) behind.
+      setLockedEmbeddingModelID(
+        typeof saved.embedding_model_id === 'string' ? saved.embedding_model_id : '',
+      )
       toast.success(t('admin:settings.saved'))
     } catch (e) {
-      toast.error(e instanceof ApiError && e.message === 'embedding_model_locked'
-        ? t('admin:documents.embeddingModelLockedError')
-        : e instanceof ApiError
-          ? e.message
-          : t('admin:common.failed'))
+      toast.error(embeddingGuardErrorText(t, e)
+        || (e instanceof ApiError ? e.message : t('admin:common.failed')))
     } finally {
       setSaving(false)
     }
@@ -134,7 +138,13 @@ export default function AdminDocuments() {
     return typeof v === 'boolean' ? v : fallback
   }
 
-  const embeddingModelLocked = lockedEmbeddingModelID !== ''
+  // A lock pointing at a deleted model protects nothing, yet keeps refusing
+  // every KB creation with knowledge_base_unavailable (the historical
+  // delete-channel cascade damage). The server allows repairing exactly this
+  // state, so the client must not keep the picker disabled for it.
+  const embeddingModelDangling =
+    lockedEmbeddingModelID !== '' && !embeddingModels.some((m) => m.id === lockedEmbeddingModelID)
+  const embeddingModelLocked = lockedEmbeddingModelID !== '' && !embeddingModelDangling
   const storageProvider = readString('storage_provider')
   const mineruStorageReady =
     (storageProvider === 's3' && Boolean(readString('storage_s3_bucket'))) ||
@@ -167,7 +177,12 @@ export default function AdminDocuments() {
                 htmlFor="embed-model"
                 hint={embeddingModelLocked
                   ? t('admin:documents.embeddingModelLockedHint')
-                  : t('admin:documents.embeddingModelHint')}
+                  : embeddingModelDangling
+                    ? t('admin:documents.embeddingModelDanglingHint', {
+                        defaultValue:
+                          'The previously selected embedding model was deleted. Pick a replacement and save to restore knowledge-base features; existing knowledge bases must be re-indexed.',
+                      })
+                    : t('admin:documents.embeddingModelHint')}
               >
                 <Select
                   value={readString('embedding_model_id') || 'none'}
@@ -189,6 +204,16 @@ export default function AdminDocuments() {
                   </SelectContent>
                 </Select>
               </Field>
+              {embeddingModelsLoaded && embeddingModels.length === 0 ? (
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-xs text-[var(--color-fg-subtle)]">
+                    {t('admin:documents.embeddingModelEmpty')}
+                  </p>
+                  <Button asChild variant="secondary" size="sm" className="shrink-0">
+                    <Link to="/admin/models?kind=embedding">{t('admin:documents.addEmbeddingModel')}</Link>
+                  </Button>
+                </div>
+              ) : null}
             </div>
           </div>
 

@@ -9,10 +9,11 @@
  * and matches the editorial-feel "one job per surface" rule.
  */
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Plus, Settings as SettingsIcon, Trash2, Tags as TagsIcon } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
+import { embeddingGuardErrorText } from '@/lib/admin-embedding-errors'
 import type { ApiChannel, ApiModel } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -59,6 +60,7 @@ const emptyCreate: CreateDraft = {
 export default function AdminModels() {
   const { t } = useTranslation(['admin', 'common'])
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [channels, setChannels] = useState<ApiChannel[]>([])
   const [models, setModels] = useState<ApiModel[]>([])
   const [loading, setLoading] = useState(true)
@@ -73,6 +75,11 @@ export default function AdminModels() {
   const deletingRef = useRef(false)
   const [togglingModelIds, setTogglingModelIds] = useState<Set<string>>(() => new Set())
   const togglingModelIdsRef = useRef(new Set<string>())
+
+  const requestedKind = searchParams.get('kind')
+  const createKind: ApiModel['kind'] = (KINDS as readonly string[]).includes(requestedKind ?? '')
+    ? requestedKind as ApiModel['kind']
+    : 'chat'
 
   async function load() {
     setLoading(true)
@@ -94,7 +101,7 @@ export default function AdminModels() {
   function openNew() {
     setCreator({
       open: true,
-      draft: { ...emptyCreate, channel_id: channels[0]?.id ?? '' },
+      draft: { ...emptyCreate, kind: createKind, channel_id: channels[0]?.id ?? '' },
     })
   }
 
@@ -154,7 +161,7 @@ export default function AdminModels() {
       setConfirmDelete(null)
       await load()
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+      toast.error(embeddingGuardErrorText(t, e) || (e instanceof ApiError ? e.message : t('admin:common.failed')))
     } finally {
       deletingRef.current = false
       setDeleting(false)
@@ -181,7 +188,7 @@ export default function AdminModels() {
       await adminApi.updateModel(m.id, { enabled: next })
     } catch (e) {
       setModels((list) => list.map((x) => (x.id === m.id ? { ...x, enabled: m.enabled } : x)))
-      toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+      toast.error(embeddingGuardErrorText(t, e) || (e instanceof ApiError ? e.message : t('admin:common.failed')))
     } finally {
       togglingModelIdsRef.current.delete(m.id)
       setTogglingModelIds(new Set(togglingModelIdsRef.current))
