@@ -2017,6 +2017,12 @@ func TestAdminSettingsPatchSkipsNullValues(t *testing.T) {
 func TestEmbeddingModelSettingIsLockedAfterConfigured(t *testing.T) {
 	db := openMigrated(t, filepath.Join(t.TempDir(), "settings-lock.db"))
 	defer db.Close()
+	// Live lock: emb1 exists as a real embedding model. (A lock pointing at a
+	// missing model is deliberately repairable — covered by
+	// TestEmbeddingSettingLockRepairableWhenModelMissing.)
+	mustExec(t, db, `INSERT INTO channels(id,name,type,api_format,base_url,api_key,enabled) VALUES('ch1','Emb','openai','chat','https://api.example','sk',1)`)
+	mustExec(t, db, `INSERT INTO models(id,channel_id,kind,request_id,label,enabled,dim) VALUES('emb1','ch1','embedding','text-embedding-3-small','Emb1',1,1536)`)
+	mustExec(t, db, `INSERT INTO models(id,channel_id,kind,request_id,label,enabled,dim) VALUES('emb2','ch1','embedding','text-embedding-3-large','Emb2',1,3072)`)
 	mustExec(t, db, `INSERT INTO settings(key,value) VALUES('embedding_model_id','"emb1"')`)
 	d := Deps{DB: db, Config: config.Config{UploadDir: t.TempDir(), ArtifactDir: t.TempDir()}, Logger: log.New(io.Discard, "", 0)}
 
@@ -2037,6 +2043,12 @@ func TestEmbeddingModelSettingIsLockedAfterConfigured(t *testing.T) {
 func TestConfigImportCannotChangeLockedEmbeddingModel(t *testing.T) {
 	db := openMigrated(t, filepath.Join(t.TempDir(), "config-lock.db"))
 	defer db.Close()
+	// Live lock (emb1 exists): config import must not repoint it — see the
+	// note in TestEmbeddingModelSettingIsLockedAfterConfigured for the
+	// dangling-lock repair semantics.
+	mustExec(t, db, `INSERT INTO channels(id,name,type,api_format,base_url,api_key,enabled) VALUES('ch1','Emb','openai','chat','https://api.example','sk',1)`)
+	mustExec(t, db, `INSERT INTO models(id,channel_id,kind,request_id,label,enabled,dim) VALUES('emb1','ch1','embedding','text-embedding-3-small','Emb1',1,1536)`)
+	mustExec(t, db, `INSERT INTO models(id,channel_id,kind,request_id,label,enabled,dim) VALUES('emb2','ch1','embedding','text-embedding-3-large','Emb2',1,3072)`)
 	mustExec(t, db, `INSERT INTO settings(key,value) VALUES('embedding_model_id','"emb1"')`)
 	d := Deps{DB: db, Config: config.Config{UploadDir: t.TempDir(), ArtifactDir: t.TempDir()}, Logger: log.New(io.Discard, "", 0)}
 

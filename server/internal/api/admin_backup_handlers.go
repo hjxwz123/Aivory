@@ -2803,7 +2803,9 @@ func validateConfigArchiveEmbeddingModelSettingLock(zr *zip.Reader, d Deps) erro
 		if row.Key != "embedding_model_id" {
 			continue
 		}
-		return ensureEmbeddingModelSettingCanChange(d, json.RawMessage(row.Value))
+		// Archive-preflight variant: the target model may be delivered in this
+		// same archive, so only the lock semantics are enforced, not the target.
+		return ensureEmbeddingModelSettingCanChangeFromArchive(d, json.RawMessage(row.Value))
 	}
 }
 

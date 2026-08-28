@@ -28,6 +28,7 @@ import { toast } from '@/hooks/use-toast'
 import { Badge } from '@/components/ui/badge'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { normalizeOpenAIBaseUrl } from '@/lib/channel-base-url'
+import { embeddingGuardErrorText } from '@/lib/admin-embedding-errors'
 
 type Editable = Partial<ApiChannel> & { api_key?: string }
 type ChannelEditor = {
@@ -160,7 +161,7 @@ export default function AdminChannels() {
       setConfirmDelete(null)
       await load()
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+      toast.error(embeddingGuardErrorText(t, e) || (e instanceof ApiError ? e.message : t('admin:common.failed')))
     } finally {
       deletingRef.current = false
       setDeleting(false)

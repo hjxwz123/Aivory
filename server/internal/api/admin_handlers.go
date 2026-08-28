@@ -241,6 +241,24 @@ func normalizeOpenAIChannelBaseURL(raw string) (string, error) {
 
 func deleteChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")
+	// The channels→models FK is ON DELETE CASCADE: without this guard a channel
+	// delete silently destroys the global-locked embedding model (its settings
+	// row has no FK), dangling the write-once embedding_model_id lock with no
+	// API repair path. KB-locked models already die on the KB FK — but as an
+	// opaque 500; refusing both up front yields a clean, client-mappable 409.
+	modelIDs, err := modelIDsInChannel(r.Context(), d.DB, id)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	if err := guardEmbeddingModelsDeletion(r.Context(), d, modelIDs); err != nil {
+		if errors.Is(err, errEmbeddingModelLocked) || errors.Is(err, errEmbeddingModelInUse) {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
+		writeError(w, 500, err)
+		return
+	}
 	if err := store.DeleteChannel(r.Context(), d.DB, id); err != nil {
 		writeError(w, 500, err)
 		return
@@ -462,7 +480,7 @@ func updateModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
-	if err := ensureLockedEmbeddingModelCanUpdate(d, *existing, m); err != nil {
+	if err := ensureLockedEmbeddingModelCanUpdate(r.Context(), d, *existing, m); err != nil {
 		if errors.Is(err, errEmbeddingModelLocked) {
 			writeError(w, http.StatusConflict, errEmbeddingModelLocked)
 			return
@@ -496,9 +514,9 @@ func updateModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 
 func deleteModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")
-	if err := ensureLockedEmbeddingModelCanDelete(d, id); err != nil {
-		if errors.Is(err, errEmbeddingModelLocked) {
-			writeError(w, http.StatusConflict, errEmbeddingModelLocked)
+	if err := ensureLockedEmbeddingModelCanDelete(r.Context(), d, id); err != nil {
+		if errors.Is(err, errEmbeddingModelLocked) || errors.Is(err, errEmbeddingModelInUse) {
+			writeError(w, http.StatusConflict, err)
 			return
 		}
 		writeError(w, 500, err)
@@ -1952,19 +1970,84 @@ func isSupportedContextCompactionChannelType(channelType string) bool {
 }
 
 func ensureEmbeddingModelSettingCanChange(d Deps, next json.RawMessage) error {
+	return checkEmbeddingModelSettingChange(d, next, true)
+}
+
+// ensureEmbeddingModelSettingCanChangeFromArchive is the config-import
+// preflight variant: identical lock semantics, but the replacement target is
+// NOT validated. A legitimate archive ships the settings row together with the
+// embedding model row it references, and neither exists yet at preflight time
+// when restoring onto a fresh instance — validating here would reject the only
+// consistent state the archive is about to create.
+func ensureEmbeddingModelSettingCanChangeFromArchive(d Deps, next json.RawMessage) error {
+	return checkEmbeddingModelSettingChange(d, next, false)
+}
+
+func checkEmbeddingModelSettingChange(d Deps, next json.RawMessage, validateTarget bool) error {
 	var nextID string
 	if err := json.Unmarshal(next, &nextID); err != nil {
 		return errInvalidInput
 	}
+	nextID = strings.TrimSpace(nextID)
 	curID, err := lockedEmbeddingModelID(d)
 	if err != nil {
 		return err
 	}
-	if curID == "" {
+	if curID == nextID {
 		return nil
 	}
-	if curID != strings.TrimSpace(nextID) {
+	if curID == "" {
+		// First set: nothing is locked yet. The live PATCH requires a real
+		// enabled embedding model so the write-once lock can never be
+		// established onto a chat/ghost id (which the repair valve below
+		// would then have to heal again anyway).
+		if validateTarget && nextID != "" {
+			return validateEmbeddingSettingTarget(d, nextID)
+		}
+		return nil
+	}
+	// Repair valve: the lock exists to protect a LIVE vector space. A lock on a
+	// missing row (the historical deleteChannelAdmin cascade, or a re-created
+	// ghost id), or on a row that can never serve embeddings (wrong kind /
+	// disabled — reachable via archive drift or manual SQL), protects nothing —
+	// while configuredEmbeddingModel keeps refusing every KB creation and the
+	// delete guards keep refusing to remove the bogus row: a permanent API
+	// dead end. Allow exactly those transitions.
+	cur, lookupErr := store.GetModel(context.Background(), d.DB, curID)
+	repairable := false
+	if errors.Is(lookupErr, store.ErrNotFound) {
+		repairable = true
+	} else if lookupErr != nil {
+		return lookupErr
+	} else if cur != nil {
+		repairable = cur.Kind != "embedding" || !cur.Enabled
+	}
+	if !repairable {
 		return errEmbeddingModelLocked
+	}
+	if validateTarget && nextID != "" {
+		if err := validateEmbeddingSettingTarget(d, nextID); err != nil {
+			return err
+		}
+	}
+	if d.Logger != nil {
+		d.Logger.Printf("admin: repairing unusable embedding_model_id lock %q -> %q", curID, nextID)
+	}
+	return nil
+}
+
+// validateEmbeddingSettingTarget rejects lock values that could never serve an
+// embedding request: missing row, disabled, or not kind=embedding.
+func validateEmbeddingSettingTarget(d Deps, id string) error {
+	m, err := store.GetModel(context.Background(), d.DB, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return errInvalidInput
+	}
+	if err != nil {
+		return err
+	}
+	if m == nil || !m.Enabled || m.Kind != "embedding" {
+		return errInvalidInput
 	}
 	return nil
 }
@@ -1985,9 +2068,12 @@ func lockedEmbeddingModelID(d Deps) (string, error) {
 	return strings.TrimSpace(curID), nil
 }
 
-func ensureLockedEmbeddingModelCanUpdate(d Deps, before, after store.Model) error {
-	lockedID, err := lockedEmbeddingModelID(d)
-	if err != nil || lockedID == "" || before.ID != lockedID {
+func ensureLockedEmbeddingModelCanUpdate(ctx context.Context, d Deps, before, after store.Model) error {
+	// Protected while the global setting locks onto this id OR any KB does —
+	// chunks carry the "emb:<model id>" name and Qdrant collections the dim, so
+	// identity drift strands those vector spaces whichever row wrote the lock.
+	protected, err := guardEmbeddingModelUpdate(ctx, d, before.ID)
+	if err != nil || !protected {
 		return err
 	}
 	if before.Kind != after.Kind ||
@@ -2000,15 +2086,8 @@ func ensureLockedEmbeddingModelCanUpdate(d Deps, before, after store.Model) erro
 	return nil
 }
 
-func ensureLockedEmbeddingModelCanDelete(d Deps, id string) error {
-	lockedID, err := lockedEmbeddingModelID(d)
-	if err != nil || lockedID == "" {
-		return err
-	}
-	if lockedID == id {
-		return errEmbeddingModelLocked
-	}
-	return nil
+func ensureLockedEmbeddingModelCanDelete(ctx context.Context, d Deps, id string) error {
+	return guardEmbeddingModelsDeletion(ctx, d, []string{id})
 }
 
 func lockedEmbeddingModelFieldChanged(existing store.Model, row map[string]json.RawMessage) (bool, error) {
@@ -2081,17 +2160,21 @@ func backupBoolField(row map[string]json.RawMessage, key string) (bool, bool, er
 }
 
 func ensureLockedEmbeddingModelArchiveRowCanChange(d Deps, row map[string]json.RawMessage) error {
-	lockedID, err := lockedEmbeddingModelID(d)
-	if err != nil || lockedID == "" {
-		return err
-	}
+	// Same predicate as the HTTP PATCH guard: an archive must not rewrite the
+	// vector identity of a model that the global setting OR any KB locks —
+	// knowledge_bases is never imported, so the archive could otherwise strand
+	// those chunk/Qdrant spaces behind the content-blind FK.
 	rowID, ok, err := backupStringField(row, "id")
-	if err != nil || !ok || rowID != lockedID {
+	if err != nil || !ok {
 		return err
 	}
-	existing, err := store.GetModel(context.Background(), d.DB, lockedID)
+	protected, err := guardEmbeddingModelUpdate(context.Background(), d, rowID)
+	if err != nil || !protected {
+		return err
+	}
+	existing, err := store.GetModel(context.Background(), d.DB, rowID)
 	if err != nil {
-		return nil
+		return nil // absent row: the import may (re)create it
 	}
 	changed, err := lockedEmbeddingModelFieldChanged(*existing, row)
 	if err != nil {

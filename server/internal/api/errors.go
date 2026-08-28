@@ -62,6 +62,10 @@ var (
 	// RAG embedding model lock. Once set, changing the global embedding model
 	// would strand existing Qdrant collections/chunks under the old model.
 	errEmbeddingModelLocked = errors.New("embedding_model_locked")
+	// A channel/model record cannot be deleted because an embedding model it
+	// owns (or is) is still referenced by a knowledge base's locked embedding
+	// model. Stable machine code — admin UI maps it to a localized notice.
+	errEmbeddingModelInUse = errors.New("embedding_model_in_use")
 
 	// Auth-flow error codes (login/register/forgot-reset/2FA-login/first-run
 	// setup/OAuth signup). Stable machine codes — every one has a matching

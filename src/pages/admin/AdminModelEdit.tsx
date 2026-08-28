@@ -66,6 +66,7 @@ import {
   toggleModelMCPServerID,
 } from '@/lib/model-mcp-tools'
 import { showsDedicatedImageControls } from '@/lib/admin-model-sections'
+import { embeddingGuardErrorText } from '@/lib/admin-embedding-errors'
 import { cn } from '@/lib/utils'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 
@@ -511,7 +512,12 @@ export default function AdminModelEdit() {
       setDraft({ ...modelToDraft(updated), skills: skillIds ?? [] })
       toast.success(t('admin:models.updated'))
     } catch (e) {
-      if (e instanceof ApiError && e.status === 409) {
+      // Embedding-guard 409s share the status with name_exists but a totally
+      // different story — map them before the generic conflict branch.
+      const guardText = embeddingGuardErrorText(t, e)
+      if (guardText) {
+        toast.error(guardText)
+      } else if (e instanceof ApiError && e.status === 409) {
         toast.error(t('admin:common.nameExists', { defaultValue: 'A record with this name already exists.' }))
       } else {
         toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
