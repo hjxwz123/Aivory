@@ -6,6 +6,80 @@
     "navigating": "ページを開いています…",
     "stillWaiting": "サーバーの応答に時間がかかっています。引き続き待機中です…"
   },
+  "onboarding": {
+    "review": "セットアップガイドを再表示",
+    "dialogLabel": "設定ガイド",
+    "eyebrow": "Aivory を準備",
+    "title": "初期設定を完了",
+    "lead": "まず会話を使うための最小構成を整え、必要に応じて推奨機能を追加します。",
+    "profile": {
+      "personal": "個人向けデプロイ",
+      "full": "フルデプロイ"
+    },
+    "profileDescription": {
+      "personal": "フルデプロイの軽量なサブセットで、日常利用に必要な中核設定を含みます。",
+      "full": "中核設定に加えて、チーム利用と本番環境向けの推奨設定を表示します。"
+    },
+    "required": {
+      "title": "開始に必要",
+      "lead": "会話を利用できるようにするための設定です。"
+    },
+    "optional": {
+      "title": "推奨設定",
+      "lead": "日常利用を充実させるため、必要に応じて追加します。"
+    },
+    "progress": "必須設定 {{completed}} / {{total}} 件が完了",
+    "allRequiredReady": "必須設定が完了しました",
+    "requiredRemaining": "必須設定があと {{count}} 件あります",
+    "requiredChanged": "必須設定が変更されました。確認してからガイドを完了してください。",
+    "loading": "設定を読み込んでいます…",
+    "loadFailed": "設定ガイドを読み込めませんでした。",
+    "retry": "再試行",
+    "skip": "今はスキップ",
+    "finish": "ガイドを完了",
+    "taskComplete": "完了",
+    "taskIncomplete": "要設定",
+    "task": {
+      "channel": {
+        "title": "チャネルを接続",
+        "description": "最初にモデルプロバイダーを接続します。",
+        "action": "チャネルを設定"
+      },
+      "chatModel": {
+        "title": "チャットモデルを追加",
+        "description": "有効なチャットモデルを追加します。対応モデルはチャネルから自動取得できます。",
+        "action": "モデルを設定"
+      },
+      "defaultModel": {
+        "title": "デフォルトのチャットモデルを選択",
+        "description": "新しい会話に使用する有効なチャットモデルを指定します。",
+        "action": "デフォルトを選択"
+      },
+      "embedding": {
+        "title": "埋め込みモデルを追加",
+        "description": "ドキュメント検索とナレッジベースを有効にします。",
+        "action": "埋め込みを設定"
+      },
+      "search": {
+        "title": "ウェブ検索を接続",
+        "description": "モデルとユーザー向けのウェブ検索を有効にします。",
+        "action": "検索を設定"
+      },
+      "sandbox": {
+        "title": "サンドボックスを接続",
+        "description": {
+          "personal": "任意です。外部サンドボックスを設定するか、任意の付属サンドボックスプロファイルを起動して、Python とファイルツールを利用できます。",
+          "full": "任意です。Python とファイルツール用に到達可能なサンドボックスアドレスを設定します。"
+        },
+        "action": "サンドボックスを設定"
+      },
+      "smtp": {
+        "title": "メール配信を設定",
+        "description": "検証、パスワード再設定、招待、運用メールに推奨です。",
+        "action": "メールを設定"
+      }
+    }
+  },
   "common": {
     "edit": "編集",
     "delete": "削除",

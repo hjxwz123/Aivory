@@ -388,6 +388,11 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("PATCH", "/api/kbs/:id/workspace-members/:uid", requireAuth(d, requireKnowledgeBaseHandler(updateWorkspaceKBMemberHandler)))
 
 	// Admin endpoints.
+	// The setup guide is per administrator but derives every checklist item from
+	// the live deployment configuration, so it belongs before the broad admin
+	// resource surface below.
+	mux.handle("GET", "/api/admin/onboarding", requireAdmin(d, adminOnboardingGet))
+	mux.handle("PATCH", "/api/admin/onboarding", requireAdmin(d, adminOnboardingSet))
 	mux.handle("GET", "/api/admin/channels", requireAdmin(d, listChannelsAdmin))
 	mux.handle("POST", "/api/admin/channels", requireAdmin(d, createChannelAdmin))
 	mux.handle("POST", "/api/admin/channels/:id/models/import", requireAdmin(d, importChannelModelsAdmin))

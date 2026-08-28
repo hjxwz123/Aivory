@@ -23,6 +23,7 @@ import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import { userCan } from '@/lib/user-permissions'
+import { acquireStartupDialog } from '@/lib/startup-dialog-queue'
 
 // No chat-preference step on purpose: a new account keeps NO reply-style
 // preference (neutral default) unless the user actively picks one later in
@@ -43,6 +44,8 @@ const ACCENT_PREVIEW: Record<AccentPref, string> = {
   mono: 'linear-gradient(135deg, oklch(26% 0 0) 0 50%, oklch(96% 0 0) 50% 100%)',
 }
 const THEME_OPTS: ThemePref[] = ['light', 'dark', 'system']
+const WELCOME_WIZARD_EXIT_MS = 360
+const WELCOME_CELEBRATION_EXIT_MS = 200
 
 /**
  * First-login welcome — a small wizard (one choice per page). Shows once per
@@ -94,18 +97,38 @@ export function WelcomeCard() {
     chatWidth: ChatWidthPref
     memory: boolean
   } | null>(null)
+  const startupRequestRef = useRef(0)
+  const startupReleaseRef = useRef<(() => void) | null>(null)
 
   // Open once when first eligible, snapshotting the current prefs so Skip can
-  // undo any live previews the user made. `mounted` keeps the dialog in the tree
-  // through its exit animation even after `open` flips false.
+  // undo any live previews the user made. Hold the startup-dialog slot through
+  // both the wizard and its short celebration so global notices cannot stack.
   useEffect(() => {
-    if (eligible && !mounted && initial.current === null) {
+    if (!eligible || mounted || initial.current !== null) return
+    const requestID = ++startupRequestRef.current
+    let cancelled = false
+    void acquireStartupDialog().then((release) => {
+      if (cancelled || requestID !== startupRequestRef.current) {
+        release()
+        return
+      }
+      startupReleaseRef.current = release
       initial.current = { lang, accent, theme: themePref, chatWidth, memory }
       setMounted(true)
       setOpen(true)
+    })
+    return () => {
+      cancelled = true
+      if (startupRequestRef.current === requestID) startupRequestRef.current += 1
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eligible])
+
+  useEffect(() => () => {
+    startupRequestRef.current += 1
+    startupReleaseRef.current?.()
+    startupReleaseRef.current = null
+  }, [])
 
   if (!mounted) return null
 
@@ -123,7 +146,11 @@ export function WelcomeCard() {
   // close), then unmount after it finishes.
   function close() {
     setOpen(false)
-    window.setTimeout(() => setMounted(false), 360)
+    window.setTimeout(() => {
+      setMounted(false)
+      startupReleaseRef.current?.()
+      startupReleaseRef.current = null
+    }, WELCOME_WIZARD_EXIT_MS)
   }
 
   async function handleStart() {
@@ -142,7 +169,7 @@ export function WelcomeCard() {
       // Close the wizard (plays the zoom-out), then hand off to the welcome
       // dialog once the exit animation finishes.
       setOpen(false)
-      window.setTimeout(() => setWelcomeOpen(true), 360)
+      window.setTimeout(() => setWelcomeOpen(true), WELCOME_WIZARD_EXIT_MS)
     } catch (e) {
       toast.error(t('common:common.error'), e instanceof Error ? e.message : undefined)
     } finally {
@@ -153,7 +180,11 @@ export function WelcomeCard() {
   // Dismiss the welcome dialog and unmount the whole flow.
   function finishWelcome() {
     setWelcomeOpen(false)
-    window.setTimeout(() => setMounted(false), 200)
+    window.setTimeout(() => {
+      setMounted(false)
+      startupReleaseRef.current?.()
+      startupReleaseRef.current = null
+    }, WELCOME_CELEBRATION_EXIT_MS)
   }
 
   async function handleSkip() {

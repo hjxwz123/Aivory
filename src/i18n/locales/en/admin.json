@@ -6,6 +6,80 @@
     "navigating": "Opening page…",
     "stillWaiting": "The server is taking longer to respond. Still waiting…"
   },
+  "onboarding": {
+    "review": "Review setup guide",
+    "dialogLabel": "Configuration guide",
+    "eyebrow": "Get Aivory ready",
+    "title": "Complete your first configuration",
+    "lead": "Start with the minimum configuration for a working chat, then add recommended capabilities when you are ready.",
+    "profile": {
+      "personal": "Personal deployment",
+      "full": "Full deployment"
+    },
+    "profileDescription": {
+      "personal": "A lightweight subset of the full deployment, with the core configuration for everyday use.",
+      "full": "Alongside the core configuration, this includes recommendations for teams and production use."
+    },
+    "required": {
+      "title": "Required to start",
+      "lead": "Complete these to make chat available."
+    },
+    "optional": {
+      "title": "Recommended",
+      "lead": "Add these when you need richer everyday use."
+    },
+    "progress": "{{completed}} of {{total}} required steps complete",
+    "allRequiredReady": "Required setup is complete",
+    "requiredRemaining": "{{count}} required steps remaining",
+    "requiredChanged": "Required configuration changed. Review the checklist before finishing.",
+    "loading": "Loading configuration…",
+    "loadFailed": "Could not load the configuration guide.",
+    "retry": "Retry",
+    "skip": "Skip for now",
+    "finish": "Finish guide",
+    "taskComplete": "Complete",
+    "taskIncomplete": "Needs setup",
+    "task": {
+      "channel": {
+        "title": "Connect a channel",
+        "description": "Connect a model provider first.",
+        "action": "Configure channel"
+      },
+      "chatModel": {
+        "title": "Add a chat model",
+        "description": "Add an enabled chat model. Supported models can be imported from its channel.",
+        "action": "Configure models"
+      },
+      "defaultModel": {
+        "title": "Choose a default chat model",
+        "description": "Use an enabled chat model for new conversations.",
+        "action": "Choose default"
+      },
+      "embedding": {
+        "title": "Add an embedding model",
+        "description": "Enable document search and knowledge bases.",
+        "action": "Configure embeddings"
+      },
+      "search": {
+        "title": "Connect web search",
+        "description": "Enable web search for models and users.",
+        "action": "Configure search"
+      },
+      "sandbox": {
+        "title": "Connect a sandbox",
+        "description": {
+          "personal": "Optional. Configure an external sandbox, or start the optional bundled sandbox profile, for Python and file tools.",
+          "full": "Optional. Configure a reachable sandbox address for Python and file tools."
+        },
+        "action": "Configure sandbox"
+      },
+      "smtp": {
+        "title": "Configure email delivery",
+        "description": "Recommended for verification, recovery, invitations, and operational email.",
+        "action": "Configure email"
+      }
+    }
+  },
   "common": {
     "edit": "Edit",
     "delete": "Delete",

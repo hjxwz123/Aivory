@@ -26,7 +26,7 @@ func ListChannels(ctx context.Context, db *sql.DB) ([]Channel, error) {
 			return nil, err
 		}
 		c.Enabled = en == 1
-		c.HasAPIKey = c.APIKey != ""
+		c.HasAPIKey = strings.TrimSpace(c.APIKey) != ""
 		c.APIKey = "" // never leak
 		out = append(out, c)
 	}
@@ -48,7 +48,7 @@ func GetChannel(ctx context.Context, db *sql.DB, id string) (*Channel, error) {
 		return nil, err
 	}
 	c.Enabled = en == 1
-	c.HasAPIKey = c.APIKey != ""
+	c.HasAPIKey = strings.TrimSpace(c.APIKey) != ""
 	return &c, nil
 }
 
@@ -67,7 +67,7 @@ func GetChannelByName(ctx context.Context, db *sql.DB, name string) (*Channel, e
 		return nil, err
 	}
 	c.Enabled = en == 1
-	c.HasAPIKey = c.APIKey != ""
+	c.HasAPIKey = strings.TrimSpace(c.APIKey) != ""
 	return &c, nil
 }
 

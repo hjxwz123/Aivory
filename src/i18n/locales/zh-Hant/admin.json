@@ -6,6 +6,80 @@
     "navigating": "正在開啟頁面…",
     "stillWaiting": "伺服器回應較慢，仍在等待…"
   },
+  "onboarding": {
+    "review": "重新查看設定引導",
+    "dialogLabel": "設定引導",
+    "eyebrow": "準備好 Aivory",
+    "title": "完成首次設定",
+    "lead": "先完成可用對話所需的最小設定，再依需求啟用建議功能。",
+    "profile": {
+      "personal": "個人部署",
+      "full": "完整部署"
+    },
+    "profileDescription": {
+      "personal": "個人部署是完整部署的輕量子集，保留日常使用所需的核心設定。",
+      "full": "完整部署在核心設定之外，還列出適用於團隊與生產環境的建議設定。"
+    },
+    "required": {
+      "title": "可用所需",
+      "lead": "完成這些設定後即可開始對話。"
+    },
+    "optional": {
+      "title": "建議設定",
+      "lead": "依需求啟用，讓日常使用更完整。"
+    },
+    "progress": "已完成 {{completed}} / {{total}} 項必要設定",
+    "allRequiredReady": "必要設定已完成",
+    "requiredRemaining": "還差 {{count}} 項必要設定",
+    "requiredChanged": "必要設定已變更，請檢查清單後再完成引導。",
+    "loading": "正在載入設定…",
+    "loadFailed": "無法載入設定引導。",
+    "retry": "重試",
+    "skip": "暫時略過",
+    "finish": "完成引導",
+    "taskComplete": "已完成",
+    "taskIncomplete": "待設定",
+    "task": {
+      "channel": {
+        "title": "連接渠道",
+        "description": "先連接一個模型服務商。",
+        "action": "設定渠道"
+      },
+      "chatModel": {
+        "title": "新增對話模型",
+        "description": "新增一個已啟用的對話模型，可從所屬渠道自動匯入支援的模型。",
+        "action": "設定模型"
+      },
+      "defaultModel": {
+        "title": "選擇預設對話模型",
+        "description": "為新對話指定一個已啟用的對話模型。",
+        "action": "選擇預設模型"
+      },
+      "embedding": {
+        "title": "新增嵌入模型",
+        "description": "啟用文件檢索與知識庫。",
+        "action": "設定嵌入模型"
+      },
+      "search": {
+        "title": "連接網頁搜尋",
+        "description": "為模型和使用者啟用網頁搜尋。",
+        "action": "設定搜尋"
+      },
+      "sandbox": {
+        "title": "連接沙盒",
+        "description": {
+          "personal": "可選。可設定外部沙盒，或啟動可選的內建沙盒設定檔，以使用 Python 和檔案工具。",
+          "full": "可選。設定可連線的沙盒位址，以使用 Python 和檔案工具。"
+        },
+        "action": "設定沙盒"
+      },
+      "smtp": {
+        "title": "設定郵件寄送",
+        "description": "建議用於驗證、找回密碼、邀請和營運郵件。",
+        "action": "設定郵件"
+      }
+    }
+  },
   "common": {
     "edit": "編輯",
     "delete": "刪除",

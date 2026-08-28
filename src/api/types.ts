@@ -658,6 +658,21 @@ export interface ApiChannelModelImportResult {
   skipped_unsupported: number
 }
 
+/** One configuration check returned by the per-administrator setup guide. */
+export interface ApiAdminOnboardingStep {
+  id: 'channel' | 'chat_model' | 'default_model' | 'embedding' | 'search' | 'sandbox' | 'smtp'
+  complete: boolean
+}
+
+/** Current administrator's setup-guide state plus live deployment readiness. */
+export interface ApiAdminOnboarding {
+  deployment_profile: 'personal' | 'full'
+  status: 'unseen' | 'dismissed' | 'completed'
+  required: ApiAdminOnboardingStep[]
+  optional: ApiAdminOnboardingStep[]
+  full_optional: ApiAdminOnboardingStep[]
+}
+
 export type ApiPaymentProvider = 'stripe' | 'epay' | 'waffo'
 export type ApiPaymentEnvironment = 'live' | 'test'
 

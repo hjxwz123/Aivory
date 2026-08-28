@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next'
 import {
   ArrowLeft,
   BarChart3,
+  Compass,
   Cpu,
   CreditCard,
   LayoutDashboard,
@@ -17,9 +18,14 @@ import {
   Users,
 } from 'lucide-react'
 import { useAuth } from '@/store/auth'
+import { adminApi } from '@/api'
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { UserMenu } from '@/components/sidebar/sidebar'
+import { Tooltip } from '@/components/ui/tooltip'
+import { AdminOnboardingDialog } from '@/components/admin/admin-onboarding-dialog'
+import type { ApiAdminOnboarding } from '@/api/types'
+import { acquireStartupDialog } from '@/lib/startup-dialog-queue'
 import {
   ADMIN_NAV_GROUPS,
   ADMIN_OVERVIEW,
@@ -34,6 +40,8 @@ import { useRequestActivity } from '@/lib/request-activity'
 
 const NAVIGATION_MIN_VISIBLE_MS = 180
 const NAVIGATION_WATCHDOG_MS = 10_000
+const STARTUP_DIALOG_EXIT_MS = 180
+const MOBILE_SHEET_EXIT_MS = 180
 
 const GROUP_ICONS = {
   ai: Cpu,
@@ -49,15 +57,184 @@ export default function AdminLayout() {
   const location = useLocation()
   const user = useAuth((s) => s.user)
   const status = useAuth((s) => s.status)
+  const authPolicy = useAuth((s) => s.authPolicy)
+  const authPolicyLoaded = useAuth((s) => s.authPolicyLoaded)
   const { t } = useTranslation(['admin', 'nav', 'common'])
   const [mobileOpen, setMobileOpen] = useState(false)
   const [navigationTarget, setNavigationTarget] = useState<string | null>(null)
+  const [onboardingOpen, setOnboardingOpen] = useState(false)
+  const [onboardingRefreshKey, setOnboardingRefreshKey] = useState(0)
+  const [onboardingSnapshot, setOnboardingSnapshot] = useState<ApiAdminOnboarding | null>(null)
   const contentScrollRef = useRef<HTMLDivElement>(null)
+  const onboardingStartupClaimedRef = useRef(false)
+  const onboardingStartupRequestRef = useRef(0)
+  const onboardingStartupReleaseRef = useRef<(() => void) | null>(null)
+  const onboardingStartupReleaseTimerRef = useRef<number | null>(null)
+  const onboardingOpenTimerRef = useRef<number | null>(null)
+  const onboardingOpenRef = useRef(false)
+  const mobileOpenRef = useRef(false)
   const navigationStartedAtRef = useRef(0)
   const navigationPendingRef = useRef(false)
   const navigationFinishTimerRef = useRef<number | null>(null)
   const navigationWatchdogRef = useRef<number | null>(null)
   const requestActivity = useRequestActivity()
+
+  const handleOnboardingSnapshot = useCallback((snapshot: ApiAdminOnboarding) => {
+    // Manual replays refresh the live checklist as well. Keeping the newest
+    // status prevents a just-completed or skipped guide from auto-opening later.
+    setOnboardingSnapshot(snapshot)
+  }, [])
+
+  useEffect(() => {
+    mobileOpenRef.current = mobileOpen
+  }, [mobileOpen])
+
+  const presentOnboarding = useCallback((startupRequestID?: number) => {
+    if (onboardingOpenTimerRef.current !== null) {
+      window.clearTimeout(onboardingOpenTimerRef.current)
+      onboardingOpenTimerRef.current = null
+    }
+    if (onboardingStartupReleaseTimerRef.current !== null) {
+      window.clearTimeout(onboardingStartupReleaseTimerRef.current)
+      onboardingStartupReleaseTimerRef.current = null
+    }
+    const waitForMobileSheet = mobileOpenRef.current
+    setMobileOpen(false)
+    const present = () => {
+      onboardingOpenTimerRef.current = null
+      if (startupRequestID !== undefined && startupRequestID !== onboardingStartupRequestRef.current) return
+      onboardingOpenRef.current = true
+      setOnboardingOpen(true)
+    }
+    if (waitForMobileSheet) {
+      onboardingOpenTimerRef.current = window.setTimeout(present, MOBILE_SHEET_EXIT_MS)
+      return
+    }
+    present()
+  }, [])
+
+  const queueOnboardingPresentation = useCallback((requestID: number) => {
+    void acquireStartupDialog().then((release) => {
+      // A newer automatic or manual request superseded this one while it was
+      // waiting. Always release the acquired slot so the next dialog can run.
+      if (requestID !== onboardingStartupRequestRef.current) {
+        release()
+        return
+      }
+      onboardingStartupReleaseRef.current = release
+      presentOnboarding(requestID)
+    })
+  }, [presentOnboarding])
+
+  const openOnboarding = useCallback(() => {
+    // Manual replays share the startup-dialog queue with announcements and
+    // credit notices. Reuse a still-held slot when reopening during this
+    // guide's exit animation; otherwise wait for the active dialog to finish.
+    onboardingStartupClaimedRef.current = true
+    if (onboardingStartupReleaseRef.current) {
+      onboardingStartupRequestRef.current += 1
+      presentOnboarding()
+    } else {
+      const requestID = ++onboardingStartupRequestRef.current
+      queueOnboardingPresentation(requestID)
+    }
+    setOnboardingRefreshKey((current) => current + 1)
+  }, [presentOnboarding, queueOnboardingPresentation])
+
+  const releaseOnboardingStartup = useCallback(() => {
+    const release = onboardingStartupReleaseRef.current
+    onboardingOpenRef.current = false
+    if (!release) return
+    if (onboardingStartupReleaseTimerRef.current !== null) {
+      window.clearTimeout(onboardingStartupReleaseTimerRef.current)
+    }
+    onboardingStartupReleaseTimerRef.current = window.setTimeout(() => {
+      onboardingStartupReleaseTimerRef.current = null
+      if (onboardingOpenRef.current) return
+      if (onboardingStartupReleaseRef.current !== release) return
+      onboardingStartupReleaseRef.current = null
+      release()
+    }, STARTUP_DIALOG_EXIT_MS)
+  }, [])
+
+  const onboardingPasswordPolicy = user?.oauth_initial_password_policy ?? authPolicy.oauth_initial_password_policy
+  const onboardingNeedsPassword = user?.has_password === false && onboardingPasswordPolicy === 'required'
+  const onboardingAutoEligible =
+    authPolicyLoaded &&
+    status === 'authenticated' &&
+    user?.role === 'admin' &&
+    Boolean((user?.settings as Record<string, unknown> | undefined)?.onboarded) &&
+    !onboardingNeedsPassword
+
+  // The first-run guide waits for the account welcome/password gates and shares
+  // the same startup-dialog lock as announcements and credit notices. Manual
+  // replays use that queue as well, so no two modal workflows can overlap.
+  useEffect(() => {
+    if (onboardingSnapshot?.status !== 'unseen' || !onboardingAutoEligible || onboardingStartupClaimedRef.current) return
+
+    onboardingStartupClaimedRef.current = true
+    const requestID = ++onboardingStartupRequestRef.current
+    let cancelled = false
+    let settled = false
+    void acquireStartupDialog().then((release) => {
+      if (cancelled || requestID !== onboardingStartupRequestRef.current) {
+        settled = true
+        release()
+        return
+      }
+      void adminApi.onboarding().then((latest) => {
+        settled = true
+        if (cancelled || requestID !== onboardingStartupRequestRef.current || latest.status !== 'unseen') {
+          release()
+          return
+        }
+        setOnboardingSnapshot(latest)
+        onboardingStartupReleaseRef.current = release
+        presentOnboarding(requestID)
+      }).catch(() => {
+        settled = true
+        release()
+      })
+    })
+    return () => {
+      cancelled = true
+      // Strict mode replays effects before the queue or freshness check settles.
+      // Allow the second effect instance to claim the slot instead of losing the
+      // guide while the cancelled request releases its own slot.
+      if (!settled) onboardingStartupClaimedRef.current = false
+    }
+  }, [onboardingAutoEligible, onboardingSnapshot, presentOnboarding])
+
+  useEffect(() => () => {
+    onboardingStartupRequestRef.current += 1
+    onboardingOpenRef.current = false
+    const release = onboardingStartupReleaseRef.current
+    onboardingStartupReleaseRef.current = null
+    if (onboardingStartupReleaseTimerRef.current !== null) {
+      window.clearTimeout(onboardingStartupReleaseTimerRef.current)
+      onboardingStartupReleaseTimerRef.current = null
+    }
+    if (onboardingOpenTimerRef.current !== null) {
+      window.clearTimeout(onboardingOpenTimerRef.current)
+      onboardingOpenTimerRef.current = null
+    }
+    release?.()
+  }, [])
+
+  const handleOnboardingOpenChange = useCallback((nextOpen: boolean) => {
+    onboardingOpenRef.current = nextOpen
+    setOnboardingOpen(nextOpen)
+    if (!nextOpen) releaseOnboardingStartup()
+  }, [releaseOnboardingStartup])
+
+  const handleOnboardingNavigate = useCallback((to: string) => {
+    // Task rows are a progress handoff, not an explicit skip. Close directly
+    // through the shell so AdminOnboardingDialog keeps an unseen guide unseen.
+    onboardingOpenRef.current = false
+    setOnboardingOpen(false)
+    releaseOnboardingStartup()
+    navigate(to)
+  }, [navigate, releaseOnboardingStartup])
 
   const clearNavigationActivity = useCallback(() => {
     navigationPendingRef.current = false
@@ -258,7 +435,19 @@ export default function AdminLayout() {
           <ArrowLeft size={12} aria-hidden />
           {t('admin:backToChat')}
         </button>
-        <h2 className="px-5 pt-1 font-serif text-[15px] text-[var(--color-fg)]">{t('admin:title')}</h2>
+        <div className="flex items-center justify-between gap-2 px-4 pt-1">
+          <h2 className="min-w-0 flex-1 truncate font-serif text-[15px] text-[var(--color-fg)]">{t('admin:title')}</h2>
+          <Tooltip content={t('admin:onboarding.review')} side="right">
+            <button
+              type="button"
+              onClick={openOnboarding}
+              aria-label={t('admin:onboarding.review')}
+              className="inline-flex size-8 shrink-0 items-center justify-center rounded-[8px] text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+            >
+              <Compass size={15} aria-hidden />
+            </button>
+          </Tooltip>
+        </div>
         <nav className="mt-4 min-h-0 flex-1 overflow-y-auto px-3 pb-4">
           {renderNavItems()}
         </nav>
@@ -312,7 +501,19 @@ export default function AdminLayout() {
                   <ArrowLeft size={12} aria-hidden />
                   {t('admin:backToChat')}
                 </button>
-                <h2 className="px-5 pt-1 font-serif text-[15px] text-[var(--color-fg)]">{t('admin:title')}</h2>
+                <div className="flex items-center justify-between gap-2 px-4 pt-1">
+                  <h2 className="min-w-0 flex-1 truncate font-serif text-[15px] text-[var(--color-fg)]">{t('admin:title')}</h2>
+                  <Tooltip content={t('admin:onboarding.review')} side="right">
+                    <button
+                      type="button"
+                      onClick={() => { setMobileOpen(false); openOnboarding() }}
+                      aria-label={t('admin:onboarding.review')}
+                      className="inline-flex size-8 shrink-0 items-center justify-center rounded-[8px] text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                    >
+                      <Compass size={15} aria-hidden />
+                    </button>
+                  </Tooltip>
+                </div>
                 <nav className="mt-4 min-h-0 flex-1 overflow-y-auto px-3 pb-4">
                   {renderNavItems()}
                 </nav>
@@ -320,6 +521,16 @@ export default function AdminLayout() {
             </SheetContent>
           </Sheet>
           <h2 className="min-w-0 flex-1 truncate font-serif text-[15px] text-[var(--color-fg)]">{t('admin:title')}</h2>
+          <Tooltip content={t('admin:onboarding.review')}>
+            <button
+              type="button"
+              onClick={openOnboarding}
+              aria-label={t('admin:onboarding.review')}
+              className="inline-flex size-[var(--tap-min)] shrink-0 items-center justify-center rounded-[10px] text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+            >
+              <Compass size={18} aria-hidden />
+            </button>
+          </Tooltip>
           <UserMenu placement="header" />
         </div>
 
@@ -357,6 +568,13 @@ export default function AdminLayout() {
           </div>
         )}
       </main>
+      <AdminOnboardingDialog
+        open={onboardingOpen}
+        onOpenChange={handleOnboardingOpenChange}
+        refreshKey={onboardingRefreshKey}
+        onSnapshot={handleOnboardingSnapshot}
+        onNavigate={handleOnboardingNavigate}
+      />
     </div>
   )
 }
