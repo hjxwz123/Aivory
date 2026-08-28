@@ -102,6 +102,8 @@
     "indexing": "索引中…",
     "ingestFailed": "无法读取此文件",
     "ingestFailedAction": "解析失败，请移除或者",
+    "parserNotConfigured": "文档解析未配置，请让管理员配置后",
+    "parserNotConfiguredToast": "该服务器未配置文档解析（OCR）服务",
     "ingestRetryFailed": "重试失败",
     "retry": "重试",
     "knowledgeBases": "知识库",

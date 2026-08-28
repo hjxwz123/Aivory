@@ -69,6 +69,14 @@ func init() {
 	os.Exit(0)
 }
 
+// ParserNotConfiguredCode is a stable machine code embedded at the front of
+// the extraction-failure reason when a binary document needs OCR but MinerU
+// (or its S3/OSS fetch dependency) is not fully configured. The API layer
+// lifts this code into documents' error_code field before blanking the raw
+// diagnostics for users, so the composer/KB UI can say "document parsing is
+// not configured" without string-matching English prose.
+const ParserNotConfiguredCode = "document_parser_not_configured"
+
 // parseDocument extracts text from a document (§4.11-C). The decision rule:
 //
 //   - mime says text/* / json / xml / csv / markdown → local read (MinerU
@@ -221,7 +229,9 @@ func parseDocument(
 	var reason string
 	switch {
 	case !mineruReady:
-		reason = "It looks scanned/image-only, which needs MinerU OCR — but MinerU isn't fully configured. Missing: " + mineruIssueSummary + ". Configure mineru_api_url + mineru_api_token and S3/OSS object storage (local storage cannot be used by MinerU), then re-upload."
+		// Keep "MinerU" in the prose — tests + AdminDocuments drill-down rely on
+		// it; the leading code is what the client matches on.
+		reason = ParserNotConfiguredCode + ": this document looks scanned/image-only, which needs MinerU OCR — but MinerU isn't fully configured. Missing: " + mineruIssueSummary + ". Configure mineru_api_url + mineru_api_token and S3/OSS object storage (local storage cannot be used by MinerU), then re-upload."
 	case mineruErr != nil:
 		reason = "MinerU OCR was attempted but failed: " + mineruErr.Error() + ". Check the MinerU API token/quota and that object storage is reachable, then re-upload."
 	default:

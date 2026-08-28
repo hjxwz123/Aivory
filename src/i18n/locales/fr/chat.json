@@ -102,6 +102,8 @@
     "indexing": "Indexation…",
     "ingestFailed": "Impossible de lire ce fichier",
     "ingestFailedAction": "Échec de l’analyse. Supprimez-le ou",
+    "parserNotConfigured": "L’analyse de documents n’est pas configurée. Demandez à votre administrateur de l’activer, puis",
+    "parserNotConfiguredToast": "L’analyse de documents (OCR) n’est pas configurée sur ce serveur",
     "ingestRetryFailed": "Nouvelle tentative échouée",
     "retry": "réessayez",
     "knowledgeBases": "Bases de connaissances",

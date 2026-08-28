@@ -50,6 +50,7 @@ import {
   type ToolModeCapabilities,
   visibleToolModes,
 } from '@/lib/tool-mode'
+import { DOCUMENT_PARSER_NOT_CONFIGURED } from '@/lib/document-errors'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { kbsApi, audioApi, conversationsApi, libraryApi } from '@/api/endpoints'
@@ -258,6 +259,9 @@ interface PendingAttachment extends Attachment {
    *  'embedding' the send button is blocked so the FIRST question always lands
    *  after the file is searchable (§ chat uploads). */
   ingest?: 'parsing' | 'embedding' | 'ready' | 'failed'
+  /** Stable machine code when ingest === 'failed' (e.g. the document parser is
+   *  not configured) — lets the chip render an actionable localized reason. */
+  ingestErrorCode?: string
 }
 
 function restoredAttachmentKind(kind: string): Attachment['kind'] {
@@ -319,6 +323,7 @@ function restoreConversationFile(file: ApiConversationFile, scopeId: string): Pe
     uploadScopeId: scopeId,
     documentId: file.document_id,
     ingest: restoredIngestStatus(file.document_status),
+    ingestErrorCode: file.document_error_code,
   }
 }
 
@@ -1763,8 +1768,15 @@ export function Composer({
             setAttachments((s) => s.map((a) => (a.id === attId ? { ...a, ingest: 'ready' } : a)))
             done = true
           } else if (doc.status === 'failed') {
-            setAttachments((s) => s.map((a) => (a.id === attId ? { ...a, ingest: 'failed' } : a)))
-            toast.error(t('composer.ingestFailed', { defaultValue: 'Could not read this file' }))
+            const parserMissing = doc.error_code === DOCUMENT_PARSER_NOT_CONFIGURED
+            setAttachments((s) => s.map((a) => (
+              a.id === attId ? { ...a, ingest: 'failed', ingestErrorCode: doc.error_code } : a
+            )))
+            toast.error(
+              parserMissing
+                ? t('composer.parserNotConfiguredToast', { defaultValue: 'Document parsing (OCR) is not configured on this server' })
+                : t('composer.ingestFailed', { defaultValue: 'Could not read this file' }),
+            )
             done = true
           } else {
             const ing: 'embedding' | 'parsing' = doc.status === 'embedding' ? 'embedding' : 'parsing'
@@ -1867,7 +1879,7 @@ export function Composer({
       clearTimeout(tm)
       pollTimers.current.delete(a.id)
     }
-    setAttachments((s) => s.map((x) => (x.id === a.id ? { ...x, ingest: 'parsing' } : x)))
+    setAttachments((s) => s.map((x) => (x.id === a.id ? { ...x, ingest: 'parsing', ingestErrorCode: undefined } : x)))
     try {
       await conversationsApi.retryDoc(a.uploadScopeId, a.documentId)
       if (!attachmentsRef.current.some((x) => x.id === a.id)) return
@@ -3125,7 +3137,9 @@ export function Composer({
                     {failed ? (
                       <span className="flex min-w-0 items-center gap-1">
                         <span className="truncate">
-                          {t('composer.ingestFailedAction', { defaultValue: 'Parsing failed. Remove it or' })}
+                          {a.ingestErrorCode === DOCUMENT_PARSER_NOT_CONFIGURED
+                            ? t('composer.parserNotConfigured', { defaultValue: 'Document parsing isn\'t configured. Ask your admin to enable it, then' })
+                            : t('composer.ingestFailedAction', { defaultValue: 'Parsing failed. Remove it or' })}
                         </span>
                         <button
                           type="button"
