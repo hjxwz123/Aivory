@@ -7,6 +7,7 @@ import { api, apiUrl, getAccessToken, ApiError, apiUpload, assertNetworkOnline, 
 import { withRequestActivity, type RequestActivityMode } from '@/lib/request-activity'
 import type {
   ApiAdminMessageFeedbackPage,
+  ApiAdminOnboarding,
   ApiAdminUserFeedbackPage,
   ApiAdminFile,
   ApiAdminGeneratedImagePage,
@@ -818,6 +819,10 @@ export const issueFeedbackApi = {
 // ----- Admin --------------------------------------------------------------
 
 export const adminApi = {
+  onboarding: () => api<ApiAdminOnboarding>('/admin/onboarding'),
+  updateOnboarding: (action: 'skip' | 'complete' | 'reset') =>
+    api<ApiAdminOnboarding>('/admin/onboarding', { method: 'PATCH', body: { action } }),
+
   channels: () => api<ApiChannel[]>('/admin/channels'),
   createChannel: (body: Partial<ApiChannel> & { api_key?: string }) =>
     api<ApiChannel>('/admin/channels', { method: 'POST', body }),

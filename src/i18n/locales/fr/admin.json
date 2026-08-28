@@ -6,6 +6,80 @@
     "navigating": "Ouverture de la page…",
     "stillWaiting": "Le serveur met plus de temps à répondre. Toujours en attente…"
   },
+  "onboarding": {
+    "review": "Revoir le guide de configuration",
+    "dialogLabel": "Guide de configuration",
+    "eyebrow": "Préparer Aivory",
+    "title": "Terminer la première configuration",
+    "lead": "Configurez d'abord le minimum pour un chat fonctionnel, puis ajoutez les capacités recommandées selon vos besoins.",
+    "profile": {
+      "personal": "Déploiement personnel",
+      "full": "Déploiement complet"
+    },
+    "profileDescription": {
+      "personal": "Un sous-ensemble léger du déploiement complet, avec la configuration essentielle au quotidien.",
+      "full": "En plus de la configuration essentielle, il propose des recommandations pour les équipes et la production."
+    },
+    "required": {
+      "title": "Requis pour commencer",
+      "lead": "Terminez ces éléments pour rendre le chat disponible."
+    },
+    "optional": {
+      "title": "Recommandé",
+      "lead": "Ajoutez-les selon vos besoins quotidiens."
+    },
+    "progress": "{{completed}} des {{total}} étapes requises terminées",
+    "allRequiredReady": "La configuration requise est terminée",
+    "requiredRemaining": "Il reste {{count}} étapes requises",
+    "requiredChanged": "La configuration requise a changé. Vérifiez la liste avant de terminer.",
+    "loading": "Chargement de la configuration…",
+    "loadFailed": "Impossible de charger le guide de configuration.",
+    "retry": "Réessayer",
+    "skip": "Passer pour l'instant",
+    "finish": "Terminer le guide",
+    "taskComplete": "Terminé",
+    "taskIncomplete": "À configurer",
+    "task": {
+      "channel": {
+        "title": "Connecter un canal",
+        "description": "Connectez d'abord un fournisseur de modèles.",
+        "action": "Configurer le canal"
+      },
+      "chatModel": {
+        "title": "Ajouter un modèle de chat",
+        "description": "Ajoutez un modèle de chat activé. Les modèles compatibles peuvent être importés depuis son canal.",
+        "action": "Configurer les modèles"
+      },
+      "defaultModel": {
+        "title": "Choisir le modèle de chat par défaut",
+        "description": "Utilisez un modèle de chat activé pour les nouvelles conversations.",
+        "action": "Choisir le modèle"
+      },
+      "embedding": {
+        "title": "Ajouter un modèle d’embedding",
+        "description": "Activez la recherche documentaire et les bases de connaissances.",
+        "action": "Configurer les embeddings"
+      },
+      "search": {
+        "title": "Connecter la recherche web",
+        "description": "Activez la recherche web pour les modèles et les utilisateurs.",
+        "action": "Configurer la recherche"
+      },
+      "sandbox": {
+        "title": "Connecter un sandbox",
+        "description": {
+          "personal": "Facultatif. Configurez un sandbox externe ou démarrez le profil sandbox fourni et facultatif pour les outils Python et fichiers.",
+          "full": "Facultatif. Configurez une adresse de sandbox accessible pour les outils Python et fichiers."
+        },
+        "action": "Configurer le sandbox"
+      },
+      "smtp": {
+        "title": "Configurer l’envoi d’e-mails",
+        "description": "Recommandé pour la vérification, la récupération, les invitations et les e-mails opérationnels.",
+        "action": "Configurer l’e-mail"
+      }
+    }
+  },
   "common": {
     "edit": "Modifier",
     "delete": "Supprimer",

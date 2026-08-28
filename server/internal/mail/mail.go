@@ -11,6 +11,7 @@ import (
 	"crypto/tls"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"log"
@@ -52,8 +53,11 @@ func NewSMTPSender(db *sql.DB, logger *log.Logger) *SMTPSender {
 
 func (s *SMTPSender) loadConfig() (smtpConfig, error) {
 	var cfg smtpConfig
-	readStr := func(key string) (string, error) {
+	readStr := func(key string, optional bool) (string, error) {
 		raw, err := store.GetSetting(s.DB, key)
+		if optional && errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
 		if err != nil {
 			return "", fmt.Errorf("read %s: %w", key, err)
 		}
@@ -63,8 +67,11 @@ func (s *SMTPSender) loadConfig() (smtpConfig, error) {
 		}
 		return strings.TrimSpace(v), nil
 	}
-	readBool := func(key string) (bool, error) {
+	readBool := func(key string, optional bool) (bool, error) {
 		raw, err := store.GetSetting(s.DB, key)
+		if optional && errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
 		if err != nil {
 			return false, fmt.Errorf("read %s: %w", key, err)
 		}
@@ -75,22 +82,25 @@ func (s *SMTPSender) loadConfig() (smtpConfig, error) {
 		return v, nil
 	}
 	var err error
-	if cfg.Host, err = readStr("smtp_host"); err != nil {
+	if cfg.Host, err = readStr("smtp_host", false); err != nil {
 		return cfg, err
 	}
-	if cfg.Port, err = readStr("smtp_port"); err != nil {
+	// Optional settings were not seeded in older deployments. Treat a missing
+	// row as its documented zero value while continuing to reject malformed
+	// values from an existing row.
+	if cfg.Port, err = readStr("smtp_port", true); err != nil {
 		return cfg, err
 	}
-	if cfg.User, err = readStr("smtp_user"); err != nil {
+	if cfg.User, err = readStr("smtp_user", true); err != nil {
 		return cfg, err
 	}
-	if cfg.Password, err = readStr("smtp_password"); err != nil {
+	if cfg.Password, err = readStr("smtp_password", true); err != nil {
 		return cfg, err
 	}
-	if cfg.From, err = readStr("smtp_from"); err != nil {
+	if cfg.From, err = readStr("smtp_from", true); err != nil {
 		return cfg, err
 	}
-	if cfg.TLS, err = readBool("smtp_tls"); err != nil {
+	if cfg.TLS, err = readBool("smtp_tls", true); err != nil {
 		return cfg, err
 	}
 	if cfg.Host == "" {

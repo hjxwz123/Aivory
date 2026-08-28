@@ -6,6 +6,80 @@
     "navigating": "正在打开页面…",
     "stillWaiting": "服务器响应较慢，仍在等待…"
   },
+  "onboarding": {
+    "review": "重新查看配置引导",
+    "dialogLabel": "配置引导",
+    "eyebrow": "准备好 Aivory",
+    "title": "完成首次配置",
+    "lead": "先完成可用对话所需的最小配置，再按需启用推荐能力。",
+    "profile": {
+      "personal": "个人部署",
+      "full": "完整部署"
+    },
+    "profileDescription": {
+      "personal": "个人部署是完整部署的轻量子集，保留日常使用所需的核心配置。",
+      "full": "完整部署在核心配置之外，还列出适用于团队和生产环境的推荐配置。"
+    },
+    "required": {
+      "title": "可用所需",
+      "lead": "完成这些配置后即可开始对话。"
+    },
+    "optional": {
+      "title": "推荐配置",
+      "lead": "按需启用，让日常使用更完整。"
+    },
+    "progress": "已完成 {{completed}} / {{total}} 项必需配置",
+    "allRequiredReady": "必需配置已完成",
+    "requiredRemaining": "还差 {{count}} 项必需配置",
+    "requiredChanged": "必需配置已变更，请检查清单后再完成引导。",
+    "loading": "正在加载配置…",
+    "loadFailed": "无法加载配置引导。",
+    "retry": "重试",
+    "skip": "暂时跳过",
+    "finish": "完成引导",
+    "taskComplete": "已完成",
+    "taskIncomplete": "待配置",
+    "task": {
+      "channel": {
+        "title": "连接渠道",
+        "description": "先连接一个模型服务商。",
+        "action": "配置渠道"
+      },
+      "chatModel": {
+        "title": "添加对话模型",
+        "description": "添加一个已启用的对话模型，可从所属渠道自动导入支持的模型。",
+        "action": "配置模型"
+      },
+      "defaultModel": {
+        "title": "选择默认对话模型",
+        "description": "为新对话指定一个已启用的对话模型。",
+        "action": "选择默认模型"
+      },
+      "embedding": {
+        "title": "添加嵌入模型",
+        "description": "启用文档检索和知识库。",
+        "action": "配置嵌入模型"
+      },
+      "search": {
+        "title": "连接网页搜索",
+        "description": "为模型和用户启用网页搜索。",
+        "action": "配置搜索"
+      },
+      "sandbox": {
+        "title": "连接沙盒",
+        "description": {
+          "personal": "可选。可配置外部沙盒，或启动可选的内置沙盒配置，以使用 Python 和文件工具。",
+          "full": "可选。配置可访问的沙盒地址，以使用 Python 和文件工具。"
+        },
+        "action": "配置沙盒"
+      },
+      "smtp": {
+        "title": "配置邮件发送",
+        "description": "推荐用于验证、找回密码、邀请和运营邮件。",
+        "action": "配置邮件"
+      }
+    }
+  },
   "common": {
     "edit": "编辑",
     "delete": "删除",
