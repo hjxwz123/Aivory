@@ -37,33 +37,55 @@
     "retry": "重試",
     "skip": "暫時略過",
     "finish": "完成引導",
+    "tour": {
+      "label": "設定導覽",
+      "preparing": "正在開啟設定…",
+      "stepProgress": "第 {{current}} / {{total}} 步",
+      "requiredProgress": "必要設定",
+      "recommendedProgress": "建議設定",
+      "configured": "已設定",
+      "needsSetup": "待設定",
+      "back": "上一步",
+      "next": "下一步",
+      "finish": "完成引導",
+      "skip": "暫時略過",
+      "close": "關閉",
+      "retry": "重試",
+      "openTarget": "開啟設定",
+      "targetUnavailable": "此設定仍在載入中。"
+    },
     "taskComplete": "已完成",
     "taskIncomplete": "待設定",
     "task": {
       "channel": {
         "title": "連接渠道",
         "description": "先連接一個模型服務商。",
-        "action": "設定渠道"
+        "action": "設定渠道",
+        "tour": "在這裡建立用於連接模型服務商的渠道。"
       },
       "chatModel": {
         "title": "新增對話模型",
         "description": "新增一個已啟用的對話模型，可從所屬渠道自動匯入支援的模型。",
-        "action": "設定模型"
+        "action": "設定模型",
+        "tour": "建立或從渠道匯入一個已啟用的對話模型。"
       },
       "defaultModel": {
         "title": "選擇預設對話模型",
         "description": "為新對話指定一個已啟用的對話模型。",
-        "action": "選擇預設模型"
+        "action": "選擇預設模型",
+        "tour": "選擇新對話預設使用的已啟用對話模型。"
       },
       "embedding": {
         "title": "新增嵌入模型",
         "description": "啟用文件檢索與知識庫。",
-        "action": "設定嵌入模型"
+        "action": "設定嵌入模型",
+        "tour": "選擇已啟用的嵌入模型以開啟文件檢索。"
       },
       "search": {
         "title": "連接網頁搜尋",
         "description": "為模型和使用者啟用網頁搜尋。",
-        "action": "設定搜尋"
+        "action": "設定搜尋",
+        "tour": "選擇搜尋服務商以啟用網頁搜尋。"
       },
       "sandbox": {
         "title": "連接沙盒",
@@ -71,12 +93,17 @@
           "personal": "可選。可設定外部沙盒，或啟動可選的內建沙盒設定檔，以使用 Python 和檔案工具。",
           "full": "可選。設定可連線的沙盒位址，以使用 Python 和檔案工具。"
         },
-        "action": "設定沙盒"
+        "action": "設定沙盒",
+        "tour": {
+          "personal": "填寫外部沙盒位址，或依需求啟用隨附的可選沙盒設定檔，以使用 Python 和檔案工具。",
+          "full": "填寫可連線的沙盒位址，以使用 Python 和檔案工具。"
+        }
       },
       "smtp": {
         "title": "設定郵件寄送",
         "description": "建議用於驗證、找回密碼、邀請和營運郵件。",
-        "action": "設定郵件"
+        "action": "設定郵件",
+        "tour": "填寫 SMTP 主機以啟用驗證及其他郵件寄送。"
       }
     }
   },

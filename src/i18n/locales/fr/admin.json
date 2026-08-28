@@ -37,33 +37,55 @@
     "retry": "Réessayer",
     "skip": "Passer pour l'instant",
     "finish": "Terminer le guide",
+    "tour": {
+      "label": "Parcours de configuration",
+      "preparing": "Ouverture de la configuration…",
+      "stepProgress": "{{current}} sur {{total}}",
+      "requiredProgress": "Configuration requise",
+      "recommendedProgress": "Configuration recommandée",
+      "configured": "Configuré",
+      "needsSetup": "À configurer",
+      "back": "Retour",
+      "next": "Suivant",
+      "finish": "Terminer le guide",
+      "skip": "Passer pour l'instant",
+      "close": "Fermer",
+      "retry": "Réessayer",
+      "openTarget": "Ouvrir le réglage",
+      "targetUnavailable": "Ce réglage est encore en cours de chargement."
+    },
     "taskComplete": "Terminé",
     "taskIncomplete": "À configurer",
     "task": {
       "channel": {
         "title": "Connecter un canal",
         "description": "Connectez d'abord un fournisseur de modèles.",
-        "action": "Configurer le canal"
+        "action": "Configurer le canal",
+        "tour": "Créez ici un canal pour votre fournisseur de modèles."
       },
       "chatModel": {
         "title": "Ajouter un modèle de chat",
         "description": "Ajoutez un modèle de chat activé. Les modèles compatibles peuvent être importés depuis son canal.",
-        "action": "Configurer les modèles"
+        "action": "Configurer les modèles",
+        "tour": "Créez ou importez un modèle de chat activé depuis un canal."
       },
       "defaultModel": {
         "title": "Choisir le modèle de chat par défaut",
         "description": "Utilisez un modèle de chat activé pour les nouvelles conversations.",
-        "action": "Choisir le modèle"
+        "action": "Choisir le modèle",
+        "tour": "Choisissez le modèle de chat activé des nouvelles conversations."
       },
       "embedding": {
         "title": "Ajouter un modèle d’embedding",
         "description": "Activez la recherche documentaire et les bases de connaissances.",
-        "action": "Configurer les embeddings"
+        "action": "Configurer les embeddings",
+        "tour": "Choisissez un modèle d’embedding activé pour activer la recherche documentaire."
       },
       "search": {
         "title": "Connecter la recherche web",
         "description": "Activez la recherche web pour les modèles et les utilisateurs.",
-        "action": "Configurer la recherche"
+        "action": "Configurer la recherche",
+        "tour": "Choisissez un fournisseur de recherche pour activer la recherche web."
       },
       "sandbox": {
         "title": "Connecter un sandbox",
@@ -71,12 +93,17 @@
           "personal": "Facultatif. Configurez un sandbox externe ou démarrez le profil sandbox fourni et facultatif pour les outils Python et fichiers.",
           "full": "Facultatif. Configurez une adresse de sandbox accessible pour les outils Python et fichiers."
         },
-        "action": "Configurer le sandbox"
+        "action": "Configurer le sandbox",
+        "tour": {
+          "personal": "Indiquez l’URL d’un sandbox externe, ou utilisez le profil sandbox fourni et facultatif pour les outils Python et fichiers.",
+          "full": "Indiquez l’URL accessible du sandbox pour les outils Python et fichiers."
+        }
       },
       "smtp": {
         "title": "Configurer l’envoi d’e-mails",
         "description": "Recommandé pour la vérification, la récupération, les invitations et les e-mails opérationnels.",
-        "action": "Configurer l’e-mail"
+        "action": "Configurer l’e-mail",
+        "tour": "Indiquez l’hôte SMTP pour activer la vérification et les autres e-mails."
       }
     }
   },

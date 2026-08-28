@@ -367,7 +367,7 @@ export default function AdminTools() {
                     setDraft({ ...draft, search_provider: v === 'none' ? '' : v })
                   }
                 >
-                  <SelectTrigger id="search-provider">
+                  <SelectTrigger id="search-provider" data-admin-tour="tools-search-provider">
                     <SelectValue placeholder={t('admin:settings.fields.searchProviderPlaceholder')} />
                   </SelectTrigger>
                   <SelectContent>
@@ -449,6 +449,7 @@ export default function AdminTools() {
               >
                 <Input
                   id="sandbox-url"
+                  data-admin-tour="tools-sandbox-url"
                   name="sandbox_base_url"
                   type="url"
                   autoComplete="off"

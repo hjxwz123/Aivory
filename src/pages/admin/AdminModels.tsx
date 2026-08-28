@@ -211,7 +211,7 @@ export default function AdminModels() {
           >
             {t('admin:modelTags.manage', { defaultValue: 'Manage tags' })}
           </Button>
-          <Button className="min-h-[var(--tap-min)] min-w-0 px-2 sm:min-h-0 sm:px-4" leadingIcon={<Plus size={15} aria-hidden />} onClick={openNew}>
+          <Button data-admin-tour="models-create" className="min-h-[var(--tap-min)] min-w-0 px-2 sm:min-h-0 sm:px-4" leadingIcon={<Plus size={15} aria-hidden />} onClick={openNew}>
             {t('admin:models.new')}
           </Button>
         </div>

@@ -23,7 +23,7 @@ import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { UserMenu } from '@/components/sidebar/sidebar'
 import { Tooltip } from '@/components/ui/tooltip'
-import { AdminOnboardingDialog } from '@/components/admin/admin-onboarding-dialog'
+import { AdminOnboardingTour } from '@/components/admin/admin-onboarding-tour'
 import type { ApiAdminOnboarding } from '@/api/types'
 import { acquireStartupDialog } from '@/lib/startup-dialog-queue'
 import {
@@ -40,7 +40,7 @@ import { useRequestActivity } from '@/lib/request-activity'
 
 const NAVIGATION_MIN_VISIBLE_MS = 180
 const NAVIGATION_WATCHDOG_MS = 10_000
-const STARTUP_DIALOG_EXIT_MS = 180
+const STARTUP_DIALOG_PRESENTED_RELEASE_MS = 180
 const MOBILE_SHEET_EXIT_MS = 180
 
 const GROUP_ICONS = {
@@ -127,9 +127,8 @@ export default function AdminLayout() {
   }, [presentOnboarding])
 
   const openOnboarding = useCallback(() => {
-    // Manual replays share the startup-dialog queue with announcements and
-    // credit notices. Reuse a still-held slot when reopening during this
-    // guide's exit animation; otherwise wait for the active dialog to finish.
+    // Manual replays wait behind active startup notices, then release that
+    // slot as soon as the non-modal coachmark is visible.
     onboardingStartupClaimedRef.current = true
     if (onboardingStartupReleaseRef.current) {
       onboardingStartupRequestRef.current += 1
@@ -141,20 +140,18 @@ export default function AdminLayout() {
     setOnboardingRefreshKey((current) => current + 1)
   }, [presentOnboarding, queueOnboardingPresentation])
 
-  const releaseOnboardingStartup = useCallback(() => {
+  const releaseOnboardingStartup = useCallback((delay = STARTUP_DIALOG_PRESENTED_RELEASE_MS) => {
     const release = onboardingStartupReleaseRef.current
-    onboardingOpenRef.current = false
     if (!release) return
     if (onboardingStartupReleaseTimerRef.current !== null) {
       window.clearTimeout(onboardingStartupReleaseTimerRef.current)
     }
     onboardingStartupReleaseTimerRef.current = window.setTimeout(() => {
       onboardingStartupReleaseTimerRef.current = null
-      if (onboardingOpenRef.current) return
       if (onboardingStartupReleaseRef.current !== release) return
       onboardingStartupReleaseRef.current = null
       release()
-    }, STARTUP_DIALOG_EXIT_MS)
+    }, delay)
   }, [])
 
   const onboardingPasswordPolicy = user?.oauth_initial_password_policy ?? authPolicy.oauth_initial_password_policy
@@ -166,9 +163,9 @@ export default function AdminLayout() {
     Boolean((user?.settings as Record<string, unknown> | undefined)?.onboarded) &&
     !onboardingNeedsPassword
 
-  // The first-run guide waits for the account welcome/password gates and shares
-  // the same startup-dialog lock as announcements and credit notices. Manual
-  // replays use that queue as well, so no two modal workflows can overlap.
+  // The first-run tour waits for the account welcome/password gates and shares
+  // the startup lock only until its first coachmark is visible. It is then
+  // non-modal, so announcements and other normal dialogs can continue above it.
   useEffect(() => {
     if (onboardingSnapshot?.status !== 'unseen' || !onboardingAutoEligible || onboardingStartupClaimedRef.current) return
 
@@ -227,14 +224,9 @@ export default function AdminLayout() {
     if (!nextOpen) releaseOnboardingStartup()
   }, [releaseOnboardingStartup])
 
-  const handleOnboardingNavigate = useCallback((to: string) => {
-    // Task rows are a progress handoff, not an explicit skip. Close directly
-    // through the shell so AdminOnboardingDialog keeps an unseen guide unseen.
-    onboardingOpenRef.current = false
-    setOnboardingOpen(false)
+  const handleOnboardingPresented = useCallback(() => {
     releaseOnboardingStartup()
-    navigate(to)
-  }, [navigate, releaseOnboardingStartup])
+  }, [releaseOnboardingStartup])
 
   const clearNavigationActivity = useCallback(() => {
     navigationPendingRef.current = false
@@ -568,12 +560,12 @@ export default function AdminLayout() {
           </div>
         )}
       </main>
-      <AdminOnboardingDialog
+      <AdminOnboardingTour
         open={onboardingOpen}
         onOpenChange={handleOnboardingOpenChange}
         refreshKey={onboardingRefreshKey}
         onSnapshot={handleOnboardingSnapshot}
-        onNavigate={handleOnboardingNavigate}
+        onPresented={handleOnboardingPresented}
       />
     </div>
   )
