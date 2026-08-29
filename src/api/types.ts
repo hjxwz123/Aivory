@@ -660,7 +660,7 @@ export interface ApiChannelModelImportResult {
 
 /** One configuration check returned by the per-administrator setup guide. */
 export interface ApiAdminOnboardingStep {
-  id: 'channel' | 'chat_model' | 'default_model' | 'embedding' | 'search' | 'sandbox' | 'smtp'
+  id: 'channel' | 'chat_model' | 'default_model' | 'task_model' | 'tool_route_model' | 'embedding' | 'search' | 'sandbox' | 'smtp'
   complete: boolean
 }
 

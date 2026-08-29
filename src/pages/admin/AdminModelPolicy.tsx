@@ -63,6 +63,7 @@ export default function AdminModelPolicy() {
   }
 
   const fallbackModelId = readString('fallback_model_id')
+  const taskModelId = readString('task_model_id')
 
   return (
     <div className="mx-auto max-w-[76rem]">
@@ -100,13 +101,16 @@ export default function AdminModelPolicy() {
             hint={t('admin:settings.fields.taskModelHint')}
           >
             <Select
-              value={readString('task_model_id')}
-              onValueChange={(value) => setDraft((current) => ({ ...current, task_model_id: value }))}
+              value={taskModelId || 'inherit'}
+              onValueChange={(value) =>
+                setDraft((current) => ({ ...current, task_model_id: value === 'inherit' ? '' : value }))
+              }
             >
-              <SelectTrigger id="task-model">
-                <SelectValue placeholder={t('admin:settings.fields.pickModel')} />
+              <SelectTrigger id="task-model" data-admin-tour="model-policy-task-model">
+                <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="inherit">{t('admin:settings.fields.currentConversationModel')}</SelectItem>
                 {models.map((model) => (
                   <SelectItem key={model.id} value={model.id}>
                     {model.label}
@@ -122,16 +126,16 @@ export default function AdminModelPolicy() {
             hint={t('admin:settings.fields.toolRouteModelHint')}
           >
             <Select
-              value={readString('tool_route_model_id') || 'none'}
+              value={readString('tool_route_model_id') || 'inherit'}
               onValueChange={(value) =>
-                setDraft((current) => ({ ...current, tool_route_model_id: value === 'none' ? '' : value }))
+                setDraft((current) => ({ ...current, tool_route_model_id: value === 'inherit' ? '' : value }))
               }
             >
-              <SelectTrigger id="tool-route-model">
+              <SelectTrigger id="tool-route-model" data-admin-tour="model-policy-tool-route-model">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">{t('admin:settings.fields.fallbackNone')}</SelectItem>
+                <SelectItem value="inherit">{t('admin:settings.fields.currentConversationModel')}</SelectItem>
                 {models.map((model) => (
                   <SelectItem key={model.id} value={model.id}>
                     {model.label}

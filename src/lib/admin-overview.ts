@@ -30,7 +30,8 @@ export function getOverviewHealth(data: AdminOverviewHealthInput) {
 
   const channelReady = data.channelCount > 0
   const defaultModelReady = Boolean(defaultModel && data.modelIds.has(defaultModel))
-  const taskModelReady = Boolean(taskModel && data.modelIds.has(taskModel))
+  const taskModelInherited = taskModel === ''
+  const taskModelReady = taskModelInherited || data.modelIds.has(taskModel)
   const emailReady = !emailVerification || smtpReady
   const paymentsReady = data.paymentChannelCount === 0 || data.paymentMethodCount > 0
 
@@ -41,6 +42,7 @@ export function getOverviewHealth(data: AdminOverviewHealthInput) {
     storageReady,
     channelReady,
     defaultModelReady,
+    taskModelInherited,
     taskModelReady,
     emailReady,
     paymentsReady,

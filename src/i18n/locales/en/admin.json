@@ -47,7 +47,7 @@
       "needsSetup": "Needs setup",
       "back": "Back",
       "next": "Next",
-      "finish": "Finish guide",
+      "finish": "Finish",
       "skip": "Skip for now",
       "close": "Close",
       "retry": "Retry",
@@ -74,6 +74,14 @@
         "description": "Use an enabled chat model for new conversations.",
         "action": "Choose default",
         "tour": "Select the enabled chat model new conversations should use."
+      },
+      "taskModel": {
+        "title": "Task model (optional)",
+        "tour": "If unset, internal tasks use the current conversation model. If it is a reasoning model, titles, summaries, and other internal tasks may slow replies."
+      },
+      "toolRouteModel": {
+        "title": "Tool routing model (optional)",
+        "tour": "If unset, the current conversation model decides when to use tools. If it is a reasoning model, tool routing may slow replies."
       },
       "embedding": {
         "title": "Add an embedding model",
@@ -264,6 +272,7 @@
       "moderationHint": "Screens each user prompt (not history).",
       "moderationModeKeyword": "Keyword match",
       "moderationModeModel": "Moderation model",
+      "moderationModeModelUnavailable": "Configure a moderation model before selecting model review.",
       "imageTimeout": "Generation timeout (seconds)",
       "imageTimeoutHint": "Cut a single image request after this many seconds. 0 = no per-model cap."
     },
@@ -888,10 +897,11 @@
       "settlementCurrencyHint": "Three-letter ISO 4217 code used for group and permanent-credit prices. Changing it does not convert existing prices.",
       "settlementCurrencyInvalid": "Enter a valid three-letter currency code.",
       "defaultModel": "Default chat model",
+      "currentConversationModel": "Use current conversation model",
       "taskModel": "Task model (internal LLM calls)",
-      "taskModelHint": "Used for titles, query routing, compression summaries, memory triage.",
+      "taskModelHint": "Used for titles, query routing, compression summaries, and memory triage. If unset, the current conversation model is used.",
       "toolRouteModel": "Tool routing model",
-      "toolRouteModelHint": "Dedicated low-latency, non-reasoning model for Auto tools. None sends tools directly to the chat model.",
+      "toolRouteModelHint": "Optional low-latency model for Auto tools. If unset, the current conversation model routes the tools.",
       "keep": "Keep recent rounds",
       "keepHint": "Baseline number of recent user/assistant rounds kept verbatim when older history is compacted. Minimum: 1.",
       "tokenTrigger": "Compact above (tokens)",
@@ -915,8 +925,8 @@
       "compactionPromptPlaceholder": "Leave empty to use the built-in summary instructions.",
       "compactionRangeError": "Keep at least 1 round; the target low watermark must be 25–80%, retained messages 10–50%, the summary target 5–80%, both summary budgets at least 256 tokens, and the request budget at least 8192 tokens.",
       "compactionModel": "Summary model",
-      "compactionModelHint": "Optional. Uses this chat model for context compaction; otherwise uses the current conversation model, then the task model.",
-      "compactionModelInherited": "Use conversation/task model",
+      "compactionModelHint": "Optional. Uses this chat model for context compaction; otherwise uses the current conversation model.",
+      "compactionModelInherited": "Use current conversation model",
       "compactionModelUnavailable": "Unavailable model ({{id}})",
       "compactionModelsLoading": "Loading chat models…",
       "compactionModelsLoadFailed": "Could not load chat models. Other compaction settings remain available.",
@@ -1944,7 +1954,8 @@
       "defaultModel": "Default chat model",
       "defaultModelMissing": "Chat cannot start until a valid default model is selected.",
       "taskModel": "Internal task model",
-      "taskModelMissing": "Titles, routing, summaries and memory extraction need a task model.",
+      "currentConversationModel": "Uses the current conversation model",
+      "taskModelMissing": "Select a valid task model or leave it empty to use the current conversation model.",
       "configured": "Configured",
       "email": "Email verification",
       "notRequired": "Not required",

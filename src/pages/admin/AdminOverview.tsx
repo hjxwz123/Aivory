@@ -131,8 +131,12 @@ export default function AdminOverview() {
       ok: health.taskModelReady,
       label: t('admin:overview.checks.taskModel', { defaultValue: 'Internal task model' }),
       detail: health.taskModelReady
-        ? t('admin:overview.checks.configured', { defaultValue: 'Configured' })
-        : t('admin:overview.checks.taskModelMissing', { defaultValue: 'Titles, routing, summaries and memory extraction need a task model.' }),
+        ? health.taskModelInherited
+          ? t('admin:overview.checks.currentConversationModel', { defaultValue: 'Uses the current conversation model' })
+          : t('admin:overview.checks.configured', { defaultValue: 'Configured' })
+        : t('admin:overview.checks.taskModelMissing', {
+            defaultValue: 'Select a valid task model or leave it empty to use the current conversation model.',
+          }),
       to: '/admin/settings/model-policy',
     },
     {

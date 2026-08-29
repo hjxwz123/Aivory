@@ -189,7 +189,7 @@ export default function AdminContextMemory() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="inherit">
-                      {t('admin:settings.fields.compactionModelInherited')}
+                      {t('admin:settings.fields.currentConversationModel')}
                     </SelectItem>
                     {compactionModelId && !selectedCompactionModelExists ? (
                       <SelectItem value={compactionModelId}>

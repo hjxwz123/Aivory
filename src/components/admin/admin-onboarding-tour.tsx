@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { ArrowLeft, ArrowRight, Check, CircleAlert, Compass, Database, Mail, Search, Terminal, Waypoints, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Brain, Check, CircleAlert, Compass, Database, Mail, Search, Terminal, Waypoints, Wrench, X } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
 import type { ApiAdminOnboarding, ApiAdminOnboardingStep } from '@/api/types'
 import { Button } from '@/components/ui/button'
@@ -68,6 +68,20 @@ const STEP_META: Record<StepID, StepMeta> = {
     target: 'model-policy-default-model',
     icon: Compass,
     titleKey: 'defaultModel',
+  },
+  task_model: {
+    id: 'task_model',
+    to: '/admin/settings/model-policy',
+    target: 'model-policy-task-model',
+    icon: Brain,
+    titleKey: 'taskModel',
+  },
+  tool_route_model: {
+    id: 'tool_route_model',
+    to: '/admin/settings/model-policy',
+    target: 'model-policy-tool-route-model',
+    icon: Wrench,
+    titleKey: 'toolRouteModel',
   },
   embedding: {
     id: 'embedding',
@@ -690,17 +704,18 @@ export function AdminOnboardingTour({ open, onOpenChange, refreshKey, onSnapshot
               className="shrink-0 px-2"
               size="sm"
               onClick={() => {
-                if (allRequiredReady) {
+                if (!canAdvance) {
                   void finish()
                   return
                 }
-                void next()
+                if (allRequiredReady) void finish()
+                else void next()
               }}
               loading={saving !== null}
-              disabled={saving !== null}
-              trailingIcon={!allRequiredReady ? <ArrowRight size={14} aria-hidden /> : undefined}
+              disabled={saving !== null || (!canAdvance && !allRequiredReady)}
+              trailingIcon={canAdvance && !allRequiredReady ? <ArrowRight size={14} aria-hidden /> : undefined}
             >
-              {allRequiredReady ? t('onboarding.tour.finish') : t('onboarding.tour.next')}
+              {!canAdvance || allRequiredReady ? t('onboarding.tour.finish') : t('onboarding.tour.next')}
             </Button>
           </div>
         </div>
