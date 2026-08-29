@@ -85,3 +85,36 @@ func TestAdminModelPolicySettingsRequireAvailableChatModel(t *testing.T) {
 		t.Fatalf("cleared task model=%s err=%v", raw, err)
 	}
 }
+
+func TestAdminModelPolicySettingsValidateDefaultToolMode(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "default-tool-mode-settings.db"))
+	defer db.Close()
+	d := Deps{DB: db}
+
+	patch := func(body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPatch, "/api/admin/settings", strings.NewReader(body))
+		req.Header.Set("content-type", "application/json")
+		rec := httptest.NewRecorder()
+		adminSettingsSet(d, rec, req)
+		return rec
+	}
+
+	for _, mode := range []string{"auto", "enabled", "disabled"} {
+		rec := patch(`{"tool_mode_default":"` + mode + `"}`)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("mode %q status=%d body=%s", mode, rec.Code, rec.Body.String())
+		}
+		if raw, err := store.GetSetting(db, "tool_mode_default"); err != nil || string(raw) != `"`+mode+`"` {
+			t.Fatalf("stored mode=%s err=%v, want %q", raw, err, mode)
+		}
+	}
+	for _, body := range []string{
+		`{"tool_mode_default":"sometimes"}`,
+		`{"tool_mode_default":true}`,
+	} {
+		if rec := patch(body); rec.Code != http.StatusBadRequest {
+			t.Fatalf("invalid body %s status=%d response=%s", body, rec.Code, rec.Body.String())
+		}
+	}
+}

@@ -201,6 +201,12 @@ describe('tool mode migration', () => {
     expect(resolveDefaultToolMode({ tool_mode_default: 'sometimes' })).toBe('auto')
   })
 
+  it('uses the administrator fallback only when the account has no explicit choice', () => {
+    expect(resolveDefaultToolMode({}, 'disabled')).toBe('disabled')
+    expect(resolveDefaultToolMode({ tool_mode_default: 'enabled' }, 'disabled')).toBe('enabled')
+    expect(resolveDefaultToolMode({ disable_tools_default: false }, 'disabled')).toBe('enabled')
+  })
+
   it('migrates old local booleans to auto without losing drafts or model params', () => {
     const migrated = parsePersistedComposerPrefs({
       mode: 'default',
