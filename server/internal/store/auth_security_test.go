@@ -70,6 +70,49 @@ func TestCreateInitialAdminAllowsOneConcurrentWinner(t *testing.T) {
 	}
 }
 
+func TestSaveRefreshTokenForLoginKeepsMultipleDeviceSessions(t *testing.T) {
+	db := openAuthSecurityDB(t, "multi-device-login.db")
+	user, err := CreateUser(t.Context(), db, "multi-device@example.test", "Multi Device", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, device := range []string{"desktop", "mobile"} {
+		if err := SaveRefreshTokenForLogin(
+			t.Context(), db, device+"-jti", user.ID, user.TokenVer,
+			LoginSessionWithout2FA, "", time.Now().Add(time.Hour),
+			SessionMeta{UserAgent: device},
+		); err != nil {
+			t.Fatalf("save %s session: %v", device, err)
+		}
+	}
+	sessions, err := ListUserSessions(t.Context(), db, user.ID)
+	if err != nil || len(sessions) != 2 {
+		t.Fatalf("sessions=%+v err=%v, want two active devices", sessions, err)
+	}
+}
+
+func TestSaveRefreshTokenForLoginRejectsChangedSecurityState(t *testing.T) {
+	db := openAuthSecurityDB(t, "stale-login-state.db")
+	user, err := CreateUser(t.Context(), db, "stale-login@example.test", "Stale Login", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := BumpTokenVersion(t.Context(), db, user.ID); err != nil {
+		t.Fatal(err)
+	}
+	err = SaveRefreshTokenForLogin(
+		t.Context(), db, "stale-jti", user.ID, user.TokenVer,
+		LoginSessionWithout2FA, "", time.Now().Add(time.Hour), SessionMeta{},
+	)
+	if !errors.Is(err, ErrLoginStateChanged) {
+		t.Fatalf("stale login error=%v, want ErrLoginStateChanged", err)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM refresh_tokens WHERE jti='stale-jti'`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("stale session count=%d err=%v, want 0", count, err)
+	}
+}
+
 func TestConcurrentRefreshReuseLeavesNoActiveSession(t *testing.T) {
 	db := openAuthSecurityDB(t, "refresh.db")
 	user, err := CreateUser(t.Context(), db, "user@example.test", "User", "hash")

@@ -350,9 +350,9 @@ func TestRefreshHandlerConsumesOneTokenOnlyOnce(t *testing.T) {
 	}
 }
 
-func TestFreshLoginReplacesPreviousBrowserSession(t *testing.T) {
-	d := newAuthSecurityDeps(t, "exclusive-login.db")
-	user, err := store.CreateUser(t.Context(), d.DB, "exclusive@example.test", "Exclusive", "hash")
+func TestFreshLoginKeepsOtherBrowserSessionsActive(t *testing.T) {
+	d := newAuthSecurityDeps(t, "multi-device-login.db")
+	user, err := store.CreateUser(t.Context(), d.DB, "multi-device@example.test", "Multi Device", "hash")
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -362,8 +362,9 @@ func TestFreshLoginReplacesPreviousBrowserSession(t *testing.T) {
 	first := httptest.NewRecorder()
 	finaliseLoginSession(d, first, firstReq, user, store.LoginMethodPassword)
 	firstAccess := responseCookie(first, "auth_token")
-	if first.Code != http.StatusOK || firstAccess == nil {
-		t.Fatalf("first login status=%d access=%v body=%s", first.Code, firstAccess, first.Body.String())
+	firstRefresh := responseCookie(first, "refresh_token")
+	if first.Code != http.StatusOK || firstAccess == nil || firstRefresh == nil {
+		t.Fatalf("first login status=%d access=%v refresh=%v body=%s", first.Code, firstAccess, firstRefresh, first.Body.String())
 	}
 
 	secondReq := httptest.NewRequest(http.MethodPost, "https://app.example.test/api/auth/login", nil)
@@ -376,8 +377,15 @@ func TestFreshLoginReplacesPreviousBrowserSession(t *testing.T) {
 	}
 
 	sessions, err := store.ListUserSessions(t.Context(), d.DB, user.ID)
-	if err != nil || len(sessions) != 1 || sessions[0].UserAgent != "second-browser" {
-		t.Fatalf("active sessions=%+v err=%v, want only second browser", sessions, err)
+	if err != nil || len(sessions) != 2 {
+		t.Fatalf("active sessions=%+v err=%v, want two browsers", sessions, err)
+	}
+	agents := map[string]bool{}
+	for _, session := range sessions {
+		agents[session.UserAgent] = true
+	}
+	if !agents["first-browser"] || !agents["second-browser"] {
+		t.Fatalf("active session agents=%v, want both browsers", agents)
 	}
 
 	called := false
@@ -389,8 +397,8 @@ func TestFreshLoginReplacesPreviousBrowserSession(t *testing.T) {
 	oldReq.Header.Set("Authorization", "Bearer "+firstAccess.Value)
 	old := httptest.NewRecorder()
 	h.ServeHTTP(old, oldReq)
-	if old.Code != http.StatusUnauthorized || called {
-		t.Fatalf("replaced access status=%d called=%v, want 401/false", old.Code, called)
+	if old.Code != http.StatusNoContent || !called {
+		t.Fatalf("first-device access status=%d called=%v, want 204/true", old.Code, called)
 	}
 
 	called = false
@@ -399,7 +407,29 @@ func TestFreshLoginReplacesPreviousBrowserSession(t *testing.T) {
 	current := httptest.NewRecorder()
 	h.ServeHTTP(current, currentReq)
 	if current.Code != http.StatusNoContent || !called {
-		t.Fatalf("replacement access status=%d called=%v, want 204/true", current.Code, called)
+		t.Fatalf("second-device access status=%d called=%v, want 204/true", current.Code, called)
+	}
+
+	logoutReq := httptest.NewRequest(http.MethodPost, "https://app.example.test/api/auth/logout", nil)
+	logoutReq.AddCookie(firstRefresh)
+	logout := httptest.NewRecorder()
+	logoutHandler(d, logout, logoutReq)
+	if logout.Code != http.StatusOK {
+		t.Fatalf("first-device logout status=%d body=%s", logout.Code, logout.Body.String())
+	}
+
+	called = false
+	firstAfterLogout := httptest.NewRecorder()
+	h.ServeHTTP(firstAfterLogout, oldReq)
+	if firstAfterLogout.Code != http.StatusUnauthorized || called {
+		t.Fatalf("logged-out first device status=%d called=%v, want 401/false", firstAfterLogout.Code, called)
+	}
+
+	called = false
+	secondAfterLogout := httptest.NewRecorder()
+	h.ServeHTTP(secondAfterLogout, currentReq)
+	if secondAfterLogout.Code != http.StatusNoContent || !called {
+		t.Fatalf("remaining second device status=%d called=%v, want 204/true", secondAfterLogout.Code, called)
 	}
 }
 

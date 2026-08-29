@@ -801,8 +801,12 @@ func finaliseSession(d Deps, w http.ResponseWriter, r *http.Request, user *store
 // Keeping the method explicit prevents refresh-token rotation (which calls
 // finaliseSession above) from creating duplicate login-history rows.
 func finaliseLoginSession(d Deps, w http.ResponseWriter, r *http.Request, user *store.User, method string) {
+	authMode := store.LoginSessionWithout2FA
+	if method == store.LoginMethodPassword2FA {
+		authMode = store.LoginSessionWithVerified2FA
+	}
 	finaliseSessionResponseWithOAuthGuard(
-		d, w, r, user, 0, method, nil, store.OAuthCallbackSessionWithout2FA,
+		d, w, r, user, 0, method, nil, authMode,
 	)
 }
 
@@ -815,13 +819,13 @@ func finaliseOAuthLoginSession(
 	guard store.OAuthProviderCallbackGuard,
 ) {
 	finaliseSessionResponseWithOAuthGuard(
-		d, w, r, user, 0, method, &guard, store.OAuthCallbackSessionWithVerified2FA,
+		d, w, r, user, 0, method, &guard, store.LoginSessionWithVerified2FA,
 	)
 }
 
 func finaliseSessionResponse(d Deps, w http.ResponseWriter, r *http.Request, user *store.User, inheritCreatedAt int64, loginMethod string) {
 	finaliseSessionResponseWithOAuthGuard(
-		d, w, r, user, inheritCreatedAt, loginMethod, nil, store.OAuthCallbackSessionWithout2FA,
+		d, w, r, user, inheritCreatedAt, loginMethod, nil, store.LoginSessionWithout2FA,
 	)
 }
 
@@ -833,7 +837,7 @@ func finaliseSessionResponseWithOAuthGuard(
 	inheritCreatedAt int64,
 	loginMethod string,
 	guard *store.OAuthProviderCallbackGuard,
-	authMode store.OAuthCallbackSessionAuthMode,
+	authMode store.LoginSessionAuthMode,
 ) {
 	// A login/refresh is the moment that matters most for token_ver correctness:
 	// clear any stale hot auth entry before the browser starts its first burst of
@@ -841,6 +845,10 @@ func finaliseSessionResponseWithOAuthGuard(
 	invalidateAuthUser(d, user.ID)
 	access, exp, err := issueSessionCookiesWithOAuthGuard(d, w, r, user, inheritCreatedAt, guard, authMode)
 	if err != nil {
+		if errors.Is(err, store.ErrLoginStateChanged) {
+			writeError(w, http.StatusUnauthorized, errSessionExpired)
+			return
+		}
 		writeError(w, 500, err)
 		return
 	}
@@ -870,7 +878,7 @@ func recordSuccessfulLogin(d Deps, r *http.Request, userID, method string) {
 // expiry so the JSON path can echo them.
 func issueSessionCookies(d Deps, w http.ResponseWriter, r *http.Request, user *store.User, inheritCreatedAt int64) (string, time.Time, error) {
 	return issueSessionCookiesWithOAuthGuard(
-		d, w, r, user, inheritCreatedAt, nil, store.OAuthCallbackSessionWithout2FA,
+		d, w, r, user, inheritCreatedAt, nil, store.LoginSessionWithout2FA,
 	)
 }
 
@@ -881,7 +889,7 @@ func issueSessionCookiesWithOAuthGuard(
 	user *store.User,
 	inheritCreatedAt int64,
 	guard *store.OAuthProviderCallbackGuard,
-	authMode store.OAuthCallbackSessionAuthMode,
+	authMode store.LoginSessionAuthMode,
 ) (string, time.Time, error) {
 	refresh, refreshExp, jti, err := d.Auth.IssueRefresh(user.ID, user.TokenVer)
 	if err != nil {
@@ -897,10 +905,7 @@ func issueSessionCookiesWithOAuthGuard(
 		if err != nil {
 			return "", time.Time{}, err
 		}
-		expectedTotpSecret := ""
-		if authMode == store.OAuthCallbackSessionWithVerified2FA {
-			expectedTotpSecret = user.TotpSecret
-		}
+		expectedTotpSecret := loginSessionTotpSecret(user, authMode)
 		if err := store.SaveRefreshTokenForOAuthCallback(
 			r.Context(), d.DB, *guard, jti, user.ID, user.TokenVer,
 			authMode, expectedTotpSecret, refreshExp, meta,
@@ -910,7 +915,10 @@ func issueSessionCookiesWithOAuthGuard(
 		setSessionCookies(w, r, access, exp, refresh, refreshExp)
 		return access, exp, nil
 	}
-	if err := store.ReplaceUserRefreshSession(r.Context(), d.DB, jti, user.ID, refreshExp, meta); err != nil {
+	if err := store.SaveRefreshTokenForLogin(
+		r.Context(), d.DB, jti, user.ID, user.TokenVer, authMode,
+		loginSessionTotpSecret(user, authMode), refreshExp, meta,
+	); err != nil {
 		return "", time.Time{}, err
 	}
 	access, exp, err := d.Auth.IssueAccessForSession(user.ID, user.Role, user.TokenVer, jti)
@@ -921,6 +929,13 @@ func issueSessionCookiesWithOAuthGuard(
 
 	setSessionCookies(w, r, access, exp, refresh, refreshExp)
 	return access, exp, nil
+}
+
+func loginSessionTotpSecret(user *store.User, authMode store.LoginSessionAuthMode) string {
+	if user != nil && authMode == store.LoginSessionWithVerified2FA {
+		return user.TotpSecret
+	}
+	return ""
 }
 
 func setSessionCookies(w http.ResponseWriter, r *http.Request, access string, accessExp time.Time, refresh string, refreshExp time.Time) {
