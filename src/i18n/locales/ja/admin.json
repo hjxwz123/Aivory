@@ -47,7 +47,7 @@
       "needsSetup": "要設定",
       "back": "戻る",
       "next": "次へ",
-      "finish": "ガイドを完了",
+      "finish": "完了して閉じる",
       "skip": "今はスキップ",
       "close": "閉じる",
       "retry": "再試行",
@@ -74,6 +74,14 @@
         "description": "新しい会話に使用する有効なチャットモデルを指定します。",
         "action": "デフォルトを選択",
         "tour": "新しい会話で使う有効なチャットモデルを選びます。"
+      },
+      "taskModel": {
+        "title": "タスクモデル（任意）",
+        "tour": "未設定時は現在の会話モデルを使用します。現在の会話モデルが推論モデルの場合、タイトルや要約などの内部タスクにより返信が遅くなることがあります。"
+      },
+      "toolRouteModel": {
+        "title": "ツールルーティングモデル（任意）",
+        "tour": "未設定時は現在の会話モデルがツール使用を判断します。現在の会話モデルが推論モデルの場合、ツール判断により返信が遅くなることがあります。"
       },
       "embedding": {
         "title": "埋め込みモデルを追加",
@@ -264,6 +272,7 @@
       "moderationHint": "各プロンプトを審査(履歴は除く)。",
       "moderationModeKeyword": "キーワード一致",
       "moderationModeModel": "審査モデル",
+      "moderationModeModelUnavailable": "モデル審査を選ぶ前に、モデレーションモデルを設定してください。",
       "imageTimeout": "生成タイムアウト(秒)",
       "imageTimeoutHint": "1回の画像リクエストがこの秒数を超えたら中断。0 = 制限なし。"
     },
@@ -888,10 +897,11 @@
       "settlementCurrencyHint": "ユーザーグループと永久クレジットの価格に使う3文字の ISO 4217 通貨コードです。変更しても既存価格は自動換算されません。",
       "settlementCurrencyInvalid": "有効な3文字の通貨コードを入力してください。",
       "defaultModel": "既定のチャットモデル",
+      "currentConversationModel": "現在の会話モデルを使用",
       "taskModel": "タスクモデル（内部LLM呼び出し）",
-      "taskModelHint": "タイトル、クエリルーティング、圧縮の要約、メモリーのトリアージに使用されます。",
+      "taskModelHint": "タイトル、クエリルーティング、圧縮要約、メモリーのトリアージに使用します。未設定時は現在の会話モデルを使います。",
       "toolRouteModel": "ツールルーティングモデル",
-      "toolRouteModelHint": "自動ツール用の低遅延・非推論モデルです。なしの場合、チャットモデルがツールを直接判断します。",
+      "toolRouteModelHint": "自動ツール用の任意の低遅延モデルです。未設定時は現在の会話モデルがツールをルーティングします。",
       "keep": "直近のラウンドを保持",
       "keepHint": "古い履歴を圧縮するとき、そのまま保持する直近のユーザー／アシスタントラウンド数の基準値です。最小値は 1 です。",
       "tokenTrigger": "圧縮するトークン数のしきい値",
@@ -915,8 +925,8 @@
       "compactionPromptPlaceholder": "空欄の場合は組み込みの要約指示を使用します。",
       "compactionRangeError": "少なくとも 1 ラウンドを保持し、低水位は 25～80%、メッセージは 10～50%、要約目標は 5～80%、両方の要約予算は 256 token 以上、リクエスト予算は 8192 token 以上にしてください。",
       "compactionModel": "要約モデル",
-      "compactionModelHint": "任意。このチャットモデルでコンテキストを圧縮します。未指定の場合は現在の会話モデル、次にタスクモデルを使用します。",
-      "compactionModelInherited": "会話／タスクモデルを使用",
+      "compactionModelHint": "任意。このチャットモデルでコンテキストを圧縮します。未指定の場合は現在の会話モデルを使用します。",
+      "compactionModelInherited": "現在の会話モデルを使用",
       "compactionModelUnavailable": "利用できないモデル（{{id}}）",
       "compactionModelsLoading": "チャットモデルを読み込み中…",
       "compactionModelsLoadFailed": "チャットモデルを読み込めませんでした。他の圧縮設定は引き続き利用できます。",
@@ -1944,7 +1954,8 @@
       "defaultModel": "既定のチャットモデル",
       "defaultModelMissing": "有効な既定モデルを選択するまでチャットを開始できません。",
       "taskModel": "内部タスクモデル",
-      "taskModelMissing": "タイトル、ルーティング、要約、メモリ抽出にはタスクモデルが必要です。",
+      "currentConversationModel": "現在の会話モデルを使用",
+      "taskModelMissing": "有効なタスクモデルを選ぶか、空欄にして現在の会話モデルを使用してください。",
       "configured": "設定済み",
       "email": "メール認証",
       "notRequired": "不要",

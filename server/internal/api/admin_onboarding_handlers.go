@@ -158,6 +158,14 @@ func buildAdminOnboardingResponse(r *http.Request, d Deps, userSettings json.Raw
 	if err != nil {
 		return adminOnboardingResponse{}, err
 	}
+	taskModelID, err := onboardingSettingString(d.DB, "task_model_id")
+	if err != nil {
+		return adminOnboardingResponse{}, err
+	}
+	toolRouteModelID, err := onboardingSettingString(d.DB, "tool_route_model_id")
+	if err != nil {
+		return adminOnboardingResponse{}, err
+	}
 	embeddingModelID, err := onboardingSettingString(d.DB, "embedding_model_id")
 	if err != nil {
 		return adminOnboardingResponse{}, err
@@ -192,6 +200,8 @@ func buildAdminOnboardingResponse(r *http.Request, d Deps, userSettings json.Raw
 			{ID: "default_model", Complete: usableChatModels[defaultModelID]},
 		},
 		Optional: []adminOnboardingStep{
+			{ID: "task_model", Complete: usableChatModels[taskModelID]},
+			{ID: "tool_route_model", Complete: usableChatModels[toolRouteModelID]},
 			{ID: "embedding", Complete: embeddingReady},
 			{ID: "search", Complete: searchReady && !disabledBuiltinTools["aivory_web_search"]},
 			{ID: "sandbox", Complete: sandboxConfigured(d) && !disabledBuiltinTools["python_execute"]},

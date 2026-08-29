@@ -47,7 +47,7 @@
       "needsSetup": "待配置",
       "back": "上一步",
       "next": "下一步",
-      "finish": "完成引导",
+      "finish": "完成并关闭",
       "skip": "暂时跳过",
       "close": "关闭",
       "retry": "重试",
@@ -74,6 +74,14 @@
         "description": "为新对话指定一个已启用的对话模型。",
         "action": "选择默认模型",
         "tour": "选择新对话默认使用的已启用对话模型。"
+      },
+      "taskModel": {
+        "title": "任务模型（可选）",
+        "tour": "未配置时使用当前对话模型。若当前对话模型是思考模型，标题、摘要等内部任务可能导致回复变慢。"
+      },
+      "toolRouteModel": {
+        "title": "工具路由模型（可选）",
+        "tour": "未配置时由当前对话模型判断是否使用工具。若当前对话模型是思考模型，工具判断可能导致回复变慢。"
       },
       "embedding": {
         "title": "添加嵌入模型",
@@ -266,6 +274,7 @@
       "moderationHint": "审核每条用户提示(不含历史)。",
       "moderationModeKeyword": "关键词匹配",
       "moderationModeModel": "审核模型",
+      "moderationModeModelUnavailable": "请先配置审核模型，才能选择模型审核。",
       "imageTimeout": "生成超时(秒)",
       "imageTimeoutHint": "单次图片请求超过该秒数即中断。0 = 不限。"
     },
@@ -892,10 +901,11 @@
       "settlementCurrencyHint": "用户组和永久积分价格使用的三位 ISO 4217 货币代码。修改后不会自动换算现有价格。",
       "settlementCurrencyInvalid": "请输入有效的三位货币代码。",
       "defaultModel": "默认对话模型",
+      "currentConversationModel": "使用当前对话模型",
       "taskModel": "任务模型(内部 LLM 调用)",
-      "taskModelHint": "用于标题、查询路由、压缩摘要、记忆抽取。",
+      "taskModelHint": "用于标题、查询路由、压缩摘要和记忆抽取。未设置时使用当前对话模型。",
       "toolRouteModel": "工具路由模型",
-      "toolRouteModelHint": "自动工具模式专用的低延迟、非推理模型。选择「无」时直接把工具交给对话模型判断。",
+      "toolRouteModelHint": "自动工具模式可选的低延迟模型。未设置时使用当前对话模型进行工具路由。",
       "keep": "保留最近轮数",
       "keepHint": "压缩较早内容时，原样保留的最近用户／助手对话轮数基准，最小为 1。",
       "tokenTrigger": "超过多少 token 时压缩",
@@ -919,8 +929,8 @@
       "compactionPromptPlaceholder": "留空以使用内置摘要指令。",
       "compactionRangeError": "至少保留 1 轮；目标低水位须为 25–80%，消息比例须为 10–50%，摘要目标须为 5–80%，两个摘要预算不得低于 256 token，请求预算不得低于 8192 token。",
       "compactionModel": "摘要模型",
-      "compactionModelHint": "选填。使用此对话模型压缩上下文；未指定时依次使用当前对话模型和任务模型。",
-      "compactionModelInherited": "使用对话／任务模型",
+      "compactionModelHint": "选填。使用此对话模型压缩上下文；未指定时使用当前对话模型。",
+      "compactionModelInherited": "使用当前对话模型",
       "compactionModelUnavailable": "不可用的模型（{{id}}）",
       "compactionModelsLoading": "正在加载对话模型…",
       "compactionModelsLoadFailed": "无法加载对话模型，其他压缩设置仍可使用。",
@@ -1948,7 +1958,8 @@
       "defaultModel": "默认对话模型",
       "defaultModelMissing": "选择有效的默认模型后才能开始对话。",
       "taskModel": "内部任务模型",
-      "taskModelMissing": "标题、路由、摘要和记忆抽取需要任务模型。",
+      "currentConversationModel": "使用当前对话模型",
+      "taskModelMissing": "请选择有效的任务模型，或留空以使用当前对话模型。",
       "configured": "已配置",
       "email": "邮箱验证",
       "notRequired": "未要求",

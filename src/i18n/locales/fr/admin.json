@@ -47,7 +47,7 @@
       "needsSetup": "À configurer",
       "back": "Retour",
       "next": "Suivant",
-      "finish": "Terminer le guide",
+      "finish": "Terminer",
       "skip": "Passer pour l'instant",
       "close": "Fermer",
       "retry": "Réessayer",
@@ -74,6 +74,14 @@
         "description": "Utilisez un modèle de chat activé pour les nouvelles conversations.",
         "action": "Choisir le modèle",
         "tour": "Choisissez le modèle de chat activé des nouvelles conversations."
+      },
+      "taskModel": {
+        "title": "Modèle de tâches (facultatif)",
+        "tour": "S'il n'est pas configuré, les tâches internes utilisent le modèle de la conversation en cours. Si c'est un modèle de raisonnement, les titres, résumés et autres tâches internes peuvent ralentir les réponses."
+      },
+      "toolRouteModel": {
+        "title": "Modèle de routage des outils (facultatif)",
+        "tour": "S'il n'est pas configuré, le modèle de la conversation décide quand utiliser les outils. Si c'est un modèle de raisonnement, ce routage peut ralentir les réponses."
       },
       "embedding": {
         "title": "Ajouter un modèle d’embedding",
@@ -264,6 +272,7 @@
       "moderationHint": "Filtre chaque invite (hors historique).",
       "moderationModeKeyword": "Mots-clés",
       "moderationModeModel": "Modèle de modération",
+      "moderationModeModelUnavailable": "Configurez un modèle de modération avant de sélectionner la modération par modèle.",
       "imageTimeout": "Délai de génération (secondes)",
       "imageTimeoutHint": "Interrompt une requête image après ce nombre de secondes. 0 = aucune limite."
     },
@@ -888,10 +897,11 @@
       "settlementCurrencyHint": "Code ISO 4217 à trois lettres utilisé pour les prix des groupes et des crédits permanents. Le modifier ne convertit pas les prix existants.",
       "settlementCurrencyInvalid": "Saisissez un code devise valide à trois lettres.",
       "defaultModel": "Modèle de chat par défaut",
+      "currentConversationModel": "Utiliser le modèle de la conversation en cours",
       "taskModel": "Modèle de tâches (appels LLM internes)",
-      "taskModelHint": "Utilisé pour les titres, le routage de requêtes, les résumés de compression, le triage de mémoire.",
+      "taskModelHint": "Utilisé pour les titres, le routage, les résumés de compression et le triage de mémoire. S'il est vide, le modèle de la conversation en cours est utilisé.",
       "toolRouteModel": "Modèle de routage des outils",
-      "toolRouteModelHint": "Modèle dédié, rapide et sans raisonnement pour le mode Auto. Aucun laisse le modèle de chat décider directement.",
+      "toolRouteModelHint": "Modèle rapide facultatif pour les outils en mode Auto. S'il est vide, le modèle de la conversation en cours route les outils.",
       "keep": "Conserver les tours récents",
       "keepHint": "Nombre de référence de tours utilisateur/assistant récents conservés tels quels lors du compactage de l'historique. Minimum : 1.",
       "tokenTrigger": "Compacter au-delà de (tokens)",
@@ -915,8 +925,8 @@
       "compactionPromptPlaceholder": "Laissez vide pour utiliser les instructions de résumé intégrées.",
       "compactionRangeError": "Conservez au moins 1 tour ; le seuil bas doit être entre 25 et 80 %, les messages entre 10 et 50 %, la cible entre 5 et 80 %, les deux budgets de résumé au moins à 256 tokens et le budget de requête au moins à 8192 tokens.",
       "compactionModel": "Modèle de résumé",
-      "compactionModelHint": "Facultatif. Utilise ce modèle de chat pour le compactage ; sinon utilise le modèle de la conversation en cours, puis le modèle de tâches.",
-      "compactionModelInherited": "Utiliser le modèle de conversation/tâches",
+      "compactionModelHint": "Facultatif. Utilise ce modèle de chat pour le compactage ; sinon utilise le modèle de la conversation en cours.",
+      "compactionModelInherited": "Utiliser le modèle de la conversation en cours",
       "compactionModelUnavailable": "Modèle indisponible ({{id}})",
       "compactionModelsLoading": "Chargement des modèles de chat…",
       "compactionModelsLoadFailed": "Impossible de charger les modèles de chat. Les autres paramètres de compactage restent disponibles.",
@@ -1944,7 +1954,8 @@
       "defaultModel": "Modèle de chat par défaut",
       "defaultModelMissing": "Le chat nécessite un modèle par défaut valide.",
       "taskModel": "Modèle de tâches interne",
-      "taskModelMissing": "Les titres, le routage, les résumés et la mémoire nécessitent un modèle de tâches.",
+      "currentConversationModel": "Utilise le modèle de la conversation en cours",
+      "taskModelMissing": "Sélectionnez un modèle de tâche valide ou laissez-le vide pour utiliser le modèle de la conversation en cours.",
       "configured": "Configuré",
       "email": "Vérification de l’e-mail",
       "notRequired": "Non requise",

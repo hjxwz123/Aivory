@@ -2,7 +2,8 @@
 // described in design.md §2.3-F. It centralises "small + fast" model invocations
 // (title generation, RAG query routing, long-context compression summaries,
 // memory triage, cross-vendor history downgrade) so they all share one
-// configuration: settings.task_model_id.
+// configuration: settings.task_model_id, with the current conversation model
+// as the session-scoped fallback when that setting is empty.
 //
 // Why a separate helper:
 //   - One knob to swap the small model (Haiku / Flash-class) without touching
@@ -298,10 +299,10 @@ func standaloneCompactionBillingFromContext(ctx context.Context) *standaloneComp
 // Run issues a single non-streaming task model call and returns the raw text
 // response. The call is logged to usage_logs with the kind as `purpose`.
 //
-// Errors when its required model setting is absent: most tasks use
-// task_model_id (with the existing default-model fallback), while tool routing
-// requires tool_route_model_id explicitly. Callers must provide their own
-// deterministic/fail-open fallback.
+// When a dedicated model setting is absent, internal calls use the current
+// conversation model (when the call is associated with a conversation). This
+// keeps task helpers, automatic tool routing, and context compaction aligned
+// with the model the user selected for the turn. Explicit settings still win.
 func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts RunOpts) (string, error) {
 	if t == nil || t.db == nil {
 		return "", errors.New("task llm not initialised")
@@ -313,7 +314,11 @@ func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts Ru
 	// an attempt that failed before producing usable output. Other task kinds keep
 	// their existing single-model semantics.
 	if kind == TaskCompact && strings.TrimSpace(opts.ModelID) == "" {
-		candidates, err := resolveCompactionModelCandidates(ctx, t.db, opts.FallbackModelID)
+		conversationModelID := strings.TrimSpace(opts.FallbackModelID)
+		if conversationModelID == "" {
+			conversationModelID = conversationModelIDForTask(ctx, t.db, opts.ConversationID)
+		}
+		candidates, err := resolveCompactionModelCandidates(ctx, t.db, conversationModelID)
 		if err != nil {
 			return "", err
 		}
@@ -357,13 +362,17 @@ func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opt
 	}
 	modelID := opts.ModelID
 	if modelID == "" {
+		conversationModelID := strings.TrimSpace(opts.FallbackModelID)
+		if conversationModelID == "" {
+			conversationModelID = conversationModelIDForTask(ctx, t.db, opts.ConversationID)
+		}
 		var rerr error
 		if toolRoute {
-			modelID, rerr = resolveToolRouteModelID(t.db)
+			modelID, rerr = resolveToolRouteModelID(t.db, conversationModelID)
 		} else if kind == TaskCompact {
-			modelID, rerr = resolveCompactionModelID(ctx, t.db, opts.FallbackModelID)
+			modelID, rerr = resolveCompactionModelID(ctx, t.db, conversationModelID)
 		} else {
-			modelID, rerr = resolveTaskModelID(t.db)
+			modelID, rerr = resolveTaskModelID(t.db, conversationModelID)
 		}
 		if rerr != nil {
 			return "", rerr
@@ -824,16 +833,36 @@ func (t *TaskLLM) RunJSONString(ctx context.Context, kindStr, prompt string, out
 	return t.RunJSON(ctx, TaskKind(kindStr), prompt, out, opts)
 }
 
-// resolveTaskModelID reads settings.task_model_id, falling back to
-// default_model_id if unset.
-func resolveTaskModelID(db *sql.DB) (string, error) {
+// conversationModelIDForTask reads the model persisted on the conversation.
+// Task calls already carry the conversation id for billing, so this provides a
+// central fallback without requiring every caller to duplicate a conversation
+// lookup. An unavailable/empty row simply means there is no session fallback.
+func conversationModelIDForTask(ctx context.Context, db *sql.DB, conversationID string) string {
+	if db == nil || strings.TrimSpace(conversationID) == "" {
+		return ""
+	}
+	var id string
+	if err := db.QueryRowContext(ctx, `SELECT model_id FROM conversations WHERE id=?`, strings.TrimSpace(conversationID)).Scan(&id); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(id)
+}
+
+// resolveTaskModelID reads settings.task_model_id, falling back to the current
+// conversation model and then default_model_id if unset.
+func resolveTaskModelID(db *sql.DB, conversationModelID string) (string, error) {
 	var id string
 	if raw, err := store.GetSetting(db, "task_model_id"); err == nil {
 		_ = json.Unmarshal(raw, &id)
+		id = strings.TrimSpace(id)
+	}
+	if id == "" {
+		id = strings.TrimSpace(conversationModelID)
 	}
 	if id == "" {
 		if raw, err := store.GetSetting(db, "default_model_id"); err == nil {
 			_ = json.Unmarshal(raw, &id)
+			id = strings.TrimSpace(id)
 		}
 	}
 	if id == "" {
@@ -908,17 +937,20 @@ func resolveCompactionModelCandidates(ctx context.Context, db *sql.DB, conversat
 	return out, nil
 }
 
-// resolveToolRouteModelID deliberately has no default-model fallback. Automatic
-// routing sits on the user-visible critical path, so an administrator must pick
-// a dedicated cheap, low-latency classifier explicitly. When it is unset the
-// orchestrator fails open and lets the main model see the configured tools.
-func resolveToolRouteModelID(db *sql.DB) (string, error) {
+// resolveToolRouteModelID prefers the administrator's dedicated route model,
+// then the current conversation model. There is intentionally no global default
+// fallback: a route call without a conversation cannot safely guess which chat
+// model should make the decision.
+func resolveToolRouteModelID(db *sql.DB, conversationModelID string) (string, error) {
 	var id string
 	if raw, err := store.GetSetting(db, "tool_route_model_id"); err == nil {
 		_ = json.Unmarshal(raw, &id)
 	}
 	if strings.TrimSpace(id) == "" {
-		return "", errors.New("settings.tool_route_model_id is unset")
+		id = strings.TrimSpace(conversationModelID)
+	}
+	if strings.TrimSpace(id) == "" {
+		return "", errors.New("settings.tool_route_model_id and conversation model are unset")
 	}
 	return strings.TrimSpace(id), nil
 }

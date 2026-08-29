@@ -47,7 +47,7 @@
       "needsSetup": "待設定",
       "back": "上一步",
       "next": "下一步",
-      "finish": "完成引導",
+      "finish": "完成並關閉",
       "skip": "暫時略過",
       "close": "關閉",
       "retry": "重試",
@@ -74,6 +74,14 @@
         "description": "為新對話指定一個已啟用的對話模型。",
         "action": "選擇預設模型",
         "tour": "選擇新對話預設使用的已啟用對話模型。"
+      },
+      "taskModel": {
+        "title": "任務模型（可選）",
+        "tour": "未設定時使用目前對話模型。若目前對話模型是思考模型，標題、摘要等內部任務可能導致回覆變慢。"
+      },
+      "toolRouteModel": {
+        "title": "工具路由模型（可選）",
+        "tour": "未設定時由目前對話模型判斷是否使用工具。若目前對話模型是思考模型，工具判斷可能導致回覆變慢。"
       },
       "embedding": {
         "title": "新增嵌入模型",
@@ -264,6 +272,7 @@
       "moderationHint": "審核每條使用者提示(不含歷史)。",
       "moderationModeKeyword": "關鍵詞匹配",
       "moderationModeModel": "審核模型",
+      "moderationModeModelUnavailable": "請先設定審核模型，才能選擇模型審核。",
       "imageTimeout": "生成逾時(秒)",
       "imageTimeoutHint": "單次圖片請求超過該秒數即中斷。0 = 不限。"
     },
@@ -888,10 +897,11 @@
       "settlementCurrencyHint": "使用者組與永久積分價格使用的三位 ISO 4217 貨幣代碼。修改後不會自動換算現有價格。",
       "settlementCurrencyInvalid": "請輸入有效的三位貨幣代碼。",
       "defaultModel": "預設對話模型",
+      "currentConversationModel": "使用目前對話模型",
       "taskModel": "任務模型(內部 LLM 呼叫)",
-      "taskModelHint": "用於標題、查詢路由、壓縮摘要、記憶抽取。",
+      "taskModelHint": "用於標題、查詢路由、壓縮摘要與記憶抽取。未設定時使用目前對話模型。",
       "toolRouteModel": "工具路由模型",
-      "toolRouteModelHint": "自動工具模式專用的低延遲、非推理模型。選擇「無」時直接由對話模型判斷工具。",
+      "toolRouteModelHint": "自動工具模式可選的低延遲模型。未設定時使用目前對話模型進行工具路由。",
       "keep": "保留最近輪數",
       "keepHint": "壓縮較早內容時，原樣保留的最近使用者／助理對話輪數基準，最小為 1。",
       "tokenTrigger": "超過多少 token 時壓縮",
@@ -915,8 +925,8 @@
       "compactionPromptPlaceholder": "留空以使用內建摘要指令。",
       "compactionRangeError": "至少保留 1 輪；目標低水位須為 25–80%，訊息比例須為 10–50%，摘要目標須為 5–80%，兩個摘要預算不得低於 256 token，請求預算不得低於 8192 token。",
       "compactionModel": "摘要模型",
-      "compactionModelHint": "選填。使用此對話模型壓縮上下文；未指定時依序使用目前對話模型與任務模型。",
-      "compactionModelInherited": "使用對話／任務模型",
+      "compactionModelHint": "選填。使用此對話模型壓縮上下文；未指定時使用目前對話模型。",
+      "compactionModelInherited": "使用目前對話模型",
       "compactionModelUnavailable": "無法使用的模型（{{id}}）",
       "compactionModelsLoading": "正在載入對話模型…",
       "compactionModelsLoadFailed": "無法載入對話模型，其他壓縮設定仍可使用。",
@@ -1944,7 +1954,8 @@
       "defaultModel": "預設對話模型",
       "defaultModelMissing": "選擇有效的預設模型後才能開始對話。",
       "taskModel": "內部任務模型",
-      "taskModelMissing": "標題、路由、摘要與記憶擷取需要任務模型。",
+      "currentConversationModel": "使用目前對話模型",
+      "taskModelMissing": "請選擇有效的任務模型，或留空以使用目前對話模型。",
       "configured": "已設定",
       "email": "電子郵件驗證",
       "notRequired": "未要求",

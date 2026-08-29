@@ -203,6 +203,7 @@ export default function AdminModelEdit() {
   const [mcpServers, setMCPServers] = useState<ApiMCPServer[]>([])
   const [mcpServersLoading, setMCPServersLoading] = useState(true)
   const [mcpServersError, setMCPServersError] = useState(false)
+  const [moderationModelConfigured, setModerationModelConfigured] = useState(false)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
@@ -219,7 +220,7 @@ export default function AdminModelEdit() {
       setMCPServersLoading(true)
       setMCPServersError(false)
       try {
-        const [c, m, tg, sk, bt, mcp] = await Promise.all([
+        const [c, m, tg, sk, bt, mcp, settingsResult] = await Promise.all([
           adminApi.channels(),
           adminApi.models(),
           adminApi.modelTags().catch(() => [] as ApiModelTag[]),
@@ -235,6 +236,10 @@ export default function AdminModelEdit() {
             .mcpServers()
             .then((servers) => ({ servers, failed: false }))
             .catch(() => ({ servers: [] as ApiMCPServer[], failed: true })),
+          adminApi
+            .settings()
+            .then((value) => ({ value, failed: false }))
+            .catch(() => ({ value: {} as Record<string, unknown>, failed: true })),
         ])
         if (cancelled) return
         setChannels(c)
@@ -244,6 +249,12 @@ export default function AdminModelEdit() {
         setBuiltinToolsError(bt.failed)
         setMCPServers(mcp.servers)
         setMCPServersError(mcp.failed)
+        const moderationModelId =
+          typeof settingsResult.value.moderation_model_id === 'string' ? settingsResult.value.moderation_model_id.trim() : ''
+        const hasModerationModel = m.some(
+          (model) => model.id === moderationModelId && model.kind === 'chat' && model.enabled,
+        )
+        setModerationModelConfigured(!settingsResult.failed && hasModerationModel)
         const found = m.find((row) => row.id === id)
         if (!found) {
           setNotFound(true)
@@ -1452,7 +1463,9 @@ export default function AdminModelEdit() {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="keyword">{t('admin:models.fields.moderationModeKeyword')}</SelectItem>
-                            <SelectItem value="model">{t('admin:models.fields.moderationModeModel')}</SelectItem>
+                            <SelectItem value="model" disabled={!moderationModelConfigured}>
+                              {t('admin:models.fields.moderationModeModel')}
+                            </SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -1460,6 +1473,13 @@ export default function AdminModelEdit() {
                     <p className="mt-2 text-[11px] text-[var(--color-fg-subtle)]">
                       {t('admin:models.fields.moderationHint')}
                     </p>
+                    {!moderationModelConfigured && (
+                      <p className="mt-1 text-[11px] text-[var(--color-fg-subtle)]">
+                        {t('admin:models.fields.moderationModeModelUnavailable', {
+                          defaultValue: 'Configure a moderation model before selecting model review.',
+                        })}
+                      </p>
+                    )}
                   </div>
                 </Field>
               </div>

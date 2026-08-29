@@ -35,7 +35,7 @@ func (p *toolRouteCaptureProvider) Stream(
 	tools ToolRunner,
 	_ func(SseEvent),
 ) (*UnifiedResult, error) {
-	if req.Model.RequestID == "task-route-test" {
+	if req.Model.RequestID == "task-route-test" || strings.Contains(req.SystemPrompt, "Reply only 0 or 1") {
 		p.taskRequests = append(p.taskRequests, req)
 		var output string
 		switch {
@@ -248,7 +248,7 @@ func TestAutoSmallToolDeclarationSkipsClassifier(t *testing.T) {
 	}
 }
 
-func TestAutoWithoutDedicatedRouteModelFailsOpenWithoutUsingTaskOrDefaultModel(t *testing.T) {
+func TestAutoWithoutDedicatedRouteModelUsesConversationModel(t *testing.T) {
 	orchestrator, provider, model, conv, logs, db := setupToolRouteTest(t)
 	if err := store.SetSetting(db, "tool_route_model_id", ""); err != nil {
 		t.Fatalf("clear tool route model: %v", err)
@@ -258,14 +258,40 @@ func TestAutoWithoutDedicatedRouteModelFailsOpenWithoutUsingTaskOrDefaultModel(t
 		ToolMode: ToolModeAuto,
 		UserText: "Explain dependency injection",
 	})
-	if provider.routeCalls != 0 || len(provider.taskRequests) != 0 {
-		t.Fatalf("unset dedicated model fell back to another model: route=%d task=%d", provider.routeCalls, len(provider.taskRequests))
+	if provider.routeCalls != 1 || len(provider.taskRequests) != 1 {
+		t.Fatalf("unset dedicated model route calls = %d/%d, want 1/1", provider.routeCalls, len(provider.taskRequests))
 	}
-	if len(provider.mainRequests) != 1 || !provider.mainRequests[0].ToolsEnabled {
-		t.Fatalf("unset dedicated model did not fail open: %+v", provider.mainRequests)
+	if provider.taskRequests[0].Model.ID != model.ID {
+		t.Fatalf("route model = %q, want current conversation model %q", provider.taskRequests[0].Model.ID, model.ID)
 	}
-	if !strings.Contains(logs.String(), "settings.tool_route_model_id is unset") {
-		t.Fatalf("missing dedicated-model diagnostic: %s", logs.String())
+	if len(provider.mainRequests) != 1 || provider.mainRequests[0].ToolsEnabled {
+		t.Fatalf("conversation route verdict was not applied: %+v", provider.mainRequests)
+	}
+	if strings.Contains(logs.String(), "enabling tools") {
+		t.Fatalf("conversation-model route unexpectedly failed open: %s", logs.String())
+	}
+}
+
+func TestTaskWithoutConfiguredTaskModelUsesConversationModel(t *testing.T) {
+	orchestrator, provider, model, conv, _, db := setupToolRouteTest(t)
+	if err := store.SetSetting(db, "task_model_id", "   "); err != nil {
+		t.Fatalf("clear task model: %v", err)
+	}
+	if err := store.SetSetting(db, "default_model_id", ""); err != nil {
+		t.Fatalf("clear default model: %v", err)
+	}
+
+	text, err := orchestrator.task.Run(context.Background(), TaskTitle, "hello", RunOpts{
+		UserID: conv.UserID, ConversationID: conv.ID,
+	})
+	if err != nil {
+		t.Fatalf("task run: %v", err)
+	}
+	if strings.TrimSpace(text) == "" {
+		t.Fatalf("task output is empty")
+	}
+	if len(provider.mainRequests) != 1 || provider.mainRequests[0].Model.ID != model.ID {
+		t.Fatalf("task model = %+v, want current conversation model %q", provider.mainRequests, model.ID)
 	}
 }
 

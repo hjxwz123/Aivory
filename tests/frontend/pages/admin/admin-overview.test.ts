@@ -33,6 +33,16 @@ describe('admin overview health status', () => {
     })
   })
 
+  it('treats an unset task model as inheriting the current conversation model', () => {
+    const status = getOverviewHealth(
+      overviewData({ settings: { default_model_id: 'chat-default', task_model_id: '', storage_provider: 'local' } }),
+    )
+
+    expect(status.taskModelInherited).toBe(true)
+    expect(status.taskModelReady).toBe(true)
+    expect(status.allReady).toBe(true)
+  })
+
   it.each([
     ['channel', overviewData({ channelCount: 0 })],
     ['default model', overviewData({ settings: { default_model_id: 'missing', task_model_id: 'task-default', storage_provider: 'local' } })],
