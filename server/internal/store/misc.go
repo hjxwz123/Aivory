@@ -1648,13 +1648,13 @@ type SessionMeta struct {
 	CreatedAt int64
 }
 
-// OAuthCallbackSessionAuthMode identifies which authentication state the
-// callback proved before its final, guarded session INSERT.
-type OAuthCallbackSessionAuthMode int
+// LoginSessionAuthMode identifies which authentication state was proved before
+// a new device session is inserted.
+type LoginSessionAuthMode int
 
 const (
-	OAuthCallbackSessionWithout2FA OAuthCallbackSessionAuthMode = iota
-	OAuthCallbackSessionWithVerified2FA
+	LoginSessionWithout2FA LoginSessionAuthMode = iota
+	LoginSessionWithVerified2FA
 )
 
 // SaveRefreshToken records a non-revoked refresh token for the user along with
@@ -1663,22 +1663,28 @@ func SaveRefreshToken(ctx context.Context, db *sql.DB, jti, userID string, expir
 	return saveRefreshToken(ctx, db, jti, userID, expiresAt, meta)
 }
 
-// ReplaceUserRefreshSession starts a fresh, exclusive browser session. The
-// user-row lock serializes concurrent logins and refresh rotation; after commit
-// exactly one active session family remains for the user. This intentionally
-// lives beside SaveRefreshToken because internal/admin callers may still need
-// to construct multiple session fixtures without applying the product policy.
-func ReplaceUserRefreshSession(ctx context.Context, db *sql.DB, jti, userID string, expiresAt time.Time, meta SessionMeta) error {
+// SaveRefreshTokenForLogin appends a device session only while the account and
+// 2FA state still match what the login flow verified. Locking the user row in
+// the same transaction prevents a password reset, ban, or 2FA change from
+// racing a stale session into existence. Other device sessions stay active.
+func SaveRefreshTokenForLogin(
+	ctx context.Context,
+	db *sql.DB,
+	jti, userID string,
+	expectedTokenVer int,
+	authMode LoginSessionAuthMode,
+	expectedTotpSecret string,
+	expiresAt time.Time,
+	meta SessionMeta,
+) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if err := lockRefreshSessionUser(ctx, tx, userID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE refresh_tokens SET revoked=1 WHERE user_id=? AND revoked=0`, userID); err != nil {
+	if err := lockLoginSessionUser(
+		ctx, tx, userID, expectedTokenVer, authMode, expectedTotpSecret,
+	); err != nil {
 		return err
 	}
 	if err := saveRefreshToken(ctx, tx, jti, userID, expiresAt, meta); err != nil {
@@ -1696,7 +1702,7 @@ func SaveRefreshTokenForOAuthCallback(
 	guard OAuthProviderCallbackGuard,
 	jti, userID string,
 	expectedTokenVer int,
-	authMode OAuthCallbackSessionAuthMode,
+	authMode LoginSessionAuthMode,
 	expectedTotpSecret string,
 	expiresAt time.Time,
 	meta SessionMeta,
@@ -1709,22 +1715,52 @@ func SaveRefreshTokenForOAuthCallback(
 		return err
 	}
 	defer tx.Rollback()
-	// This conditional UPDATE is deliberately the transaction's first lock. It
-	// both matches configuration import's user -> provider order and atomically
-	// rejects a callback whose account, token generation, or 2FA state changed.
-	var locked sql.Result
-	switch authMode {
-	case OAuthCallbackSessionWithout2FA:
-		if expectedTotpSecret != "" {
+	// The user lock is deliberately first so account-security writes and the
+	// provider guard cannot interleave with session issuance.
+	if err := lockLoginSessionUser(
+		ctx, tx, userID, expectedTokenVer, authMode, expectedTotpSecret,
+	); err != nil {
+		if errors.Is(err, ErrLoginStateChanged) {
 			return ErrOAuthLoginStateChanged
+		}
+		return err
+	}
+	if err := validateOAuthProviderCallbackGuardTx(ctx, tx, guard); err != nil {
+		return err
+	}
+	if err := saveRefreshToken(ctx, tx, jti, userID, expiresAt, meta); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func lockLoginSessionUser(
+	ctx context.Context,
+	tx *sql.Tx,
+	userID string,
+	expectedTokenVer int,
+	authMode LoginSessionAuthMode,
+	expectedTotpSecret string,
+) error {
+	if expectedTokenVer < 0 {
+		return ErrLoginStateChanged
+	}
+	var (
+		locked sql.Result
+		err    error
+	)
+	switch authMode {
+	case LoginSessionWithout2FA:
+		if expectedTotpSecret != "" {
+			return ErrLoginStateChanged
 		}
 		locked, err = tx.ExecContext(ctx,
 			`UPDATE users SET token_ver=token_ver
 			 WHERE id=? AND status='active' AND token_ver=? AND totp_enabled=0`,
 			userID, expectedTokenVer)
-	case OAuthCallbackSessionWithVerified2FA:
+	case LoginSessionWithVerified2FA:
 		if expectedTotpSecret == "" {
-			return ErrOAuthLoginStateChanged
+			return ErrLoginStateChanged
 		}
 		locked, err = tx.ExecContext(ctx,
 			`UPDATE users SET token_ver=token_ver
@@ -1732,7 +1768,7 @@ func SaveRefreshTokenForOAuthCallback(
 			   AND totp_enabled=1 AND totp_secret=?`,
 			userID, expectedTokenVer, expectedTotpSecret)
 	default:
-		return ErrOAuthLoginStateChanged
+		return ErrLoginStateChanged
 	}
 	if err != nil {
 		return err
@@ -1740,22 +1776,9 @@ func SaveRefreshTokenForOAuthCallback(
 	if n, err := locked.RowsAffected(); err != nil {
 		return err
 	} else if n != 1 {
-		return ErrOAuthLoginStateChanged
+		return ErrLoginStateChanged
 	}
-	if err := validateOAuthProviderCallbackGuardTx(ctx, tx, guard); err != nil {
-		return err
-	}
-	// OAuth is a fresh login too. Revoke any prior browser session in the same
-	// transaction as the callback guard and replacement-session insert so an old
-	// device cannot race the callback and remain signed in.
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE refresh_tokens SET revoked=1 WHERE user_id=? AND revoked=0`, userID); err != nil {
-		return err
-	}
-	if err := saveRefreshToken(ctx, tx, jti, userID, expiresAt, meta); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return nil
 }
 
 func saveRefreshToken(

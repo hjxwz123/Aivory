@@ -109,7 +109,7 @@ func TestOAuthProviderCallbackGuardIsAtomicWithIdentityAndSessionWrites(t *testi
 	}
 	if err := SaveRefreshTokenForOAuthCallback(
 		t.Context(), db, guard, "callback-jti", "u1", 0,
-		OAuthCallbackSessionWithout2FA, "", time.Now().Add(time.Hour), SessionMeta{},
+		LoginSessionWithout2FA, "", time.Now().Add(time.Hour), SessionMeta{},
 	); !errors.Is(err, ErrOAuthProviderChanged) {
 		t.Fatalf("guarded session error=%v, want ErrOAuthProviderChanged", err)
 	}
@@ -144,15 +144,21 @@ func TestSaveRefreshTokenForOAuthCallbackEnforcesAuthenticationMode(t *testing.T
 	t.Run("without 2FA accepts disabled", func(t *testing.T) {
 		db := setupOAuthDB(t)
 		guard := newGuard(t, db)
+		if err := SaveRefreshToken(
+			t.Context(), db, "existing-device", "u1", time.Now().Add(time.Hour),
+			SessionMeta{UserAgent: "existing-browser"},
+		); err != nil {
+			t.Fatal(err)
+		}
 		if err := SaveRefreshTokenForOAuthCallback(
 			t.Context(), db, guard, "direct-jti", "u1", 0,
-			OAuthCallbackSessionWithout2FA, "", time.Now().Add(time.Hour), SessionMeta{},
+			LoginSessionWithout2FA, "", time.Now().Add(time.Hour), SessionMeta{},
 		); err != nil {
 			t.Fatalf("direct OAuth session: %v", err)
 		}
 		var count int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM refresh_tokens WHERE jti='direct-jti'`).Scan(&count); err != nil || count != 1 {
-			t.Fatalf("direct OAuth refresh count=%d err=%v, want 1", count, err)
+		if err := db.QueryRow(`SELECT COUNT(*) FROM refresh_tokens WHERE user_id='u1' AND revoked=0`).Scan(&count); err != nil || count != 2 {
+			t.Fatalf("active OAuth sessions=%d err=%v, want existing and new devices", count, err)
 		}
 	})
 
@@ -164,7 +170,7 @@ func TestSaveRefreshTokenForOAuthCallbackEnforcesAuthenticationMode(t *testing.T
 		}
 		err := SaveRefreshTokenForOAuthCallback(
 			t.Context(), db, guard, "no-2fa-jti", "u1", 0,
-			OAuthCallbackSessionWithout2FA, "", time.Now().Add(time.Hour), SessionMeta{},
+			LoginSessionWithout2FA, "", time.Now().Add(time.Hour), SessionMeta{},
 		)
 		if !errors.Is(err, ErrOAuthLoginStateChanged) {
 			t.Fatalf("no-2FA session error=%v, want ErrOAuthLoginStateChanged", err)
@@ -181,7 +187,7 @@ func TestSaveRefreshTokenForOAuthCallbackEnforcesAuthenticationMode(t *testing.T
 		}
 		if err := SaveRefreshTokenForOAuthCallback(
 			t.Context(), db, guard, "verified-2fa-jti", "u1", 0,
-			OAuthCallbackSessionWithVerified2FA, secret, time.Now().Add(time.Hour), SessionMeta{},
+			LoginSessionWithVerified2FA, secret, time.Now().Add(time.Hour), SessionMeta{},
 		); err != nil {
 			t.Fatalf("verified 2FA session: %v", err)
 		}
@@ -200,7 +206,7 @@ func TestSaveRefreshTokenForOAuthCallbackEnforcesAuthenticationMode(t *testing.T
 		}
 		err := SaveRefreshTokenForOAuthCallback(
 			t.Context(), db, guard, "rotated-2fa-jti", "u1", 0,
-			OAuthCallbackSessionWithVerified2FA, verifiedSecret, time.Now().Add(time.Hour), SessionMeta{},
+			LoginSessionWithVerified2FA, verifiedSecret, time.Now().Add(time.Hour), SessionMeta{},
 		)
 		if !errors.Is(err, ErrOAuthLoginStateChanged) {
 			t.Fatalf("rotated 2FA session error=%v, want ErrOAuthLoginStateChanged", err)

@@ -34,6 +34,9 @@ var (
 	// ErrOAuthLoginStateChanged means the user status, token version, or expected
 	// 2FA state changed before an OAuth callback could atomically issue a session.
 	ErrOAuthLoginStateChanged = errors.New("oauth_login_state_changed")
+	// ErrLoginStateChanged means a password/setup login lost a race with an
+	// account security change before its session could be persisted.
+	ErrLoginStateChanged = errors.New("login_state_changed")
 	// ErrPasswordChanged means a current-password change lost a race after its
 	// caller verified an older password hash.
 	ErrPasswordChanged = errors.New("password_changed")

@@ -236,7 +236,7 @@ func completeOAuthLoginWithGuard(
 		return
 	}
 	if _, _, err := issueSessionCookiesWithOAuthGuard(
-		d, w, r, user, 0, guard, store.OAuthCallbackSessionWithout2FA,
+		d, w, r, user, 0, guard, store.LoginSessionWithout2FA,
 	); err != nil {
 		fail("session_error")
 		return
