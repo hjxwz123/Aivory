@@ -206,7 +206,7 @@ export default function Personalization() {
       {/* Response style */}
       <section className="mb-12">
         <div className="mb-5">
-          <h2 className="tracking-tight text-xl text-[var(--color-fg)]">
+          <h2 className="text-lg font-medium tracking-normal text-[var(--color-fg)]">
             {t('settings:personalization.styleTitle')}
           </h2>
           <p className="mt-1.5 text-sm text-[var(--color-fg-muted)]">{t('settings:personalization.styleSubtitle')}</p>
@@ -274,7 +274,7 @@ export default function Personalization() {
       {defaultToolModeSelectionAllowed ? (
         <section className="mb-12">
           <div className="mb-5">
-            <h2 className="tracking-tight text-xl text-[var(--color-fg)]">
+            <h2 className="text-lg font-medium tracking-normal text-[var(--color-fg)]">
               {t('settings:personalization.toolsTitle', { defaultValue: 'Tools' })}
             </h2>
             <p className="mt-1.5 text-sm text-[var(--color-fg-muted)]">
@@ -378,7 +378,7 @@ export default function Personalization() {
       {memoryAvailable && (
         <section className="mb-12">
           <div className="mb-5">
-            <h2 className="tracking-tight text-xl text-[var(--color-fg)]">
+            <h2 className="text-lg font-medium tracking-normal text-[var(--color-fg)]">
               {t('settings:personalization.memoryTitle')}
             </h2>
             <p className="mt-1.5 text-sm text-[var(--color-fg-muted)]">{t('settings:personalization.memorySubtitle')}</p>
