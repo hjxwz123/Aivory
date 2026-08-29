@@ -194,6 +194,10 @@ Most runtime configuration takes effect on the next request, without editing env
 
 ## Quick start
 
+> **Required for domain deployments:** When using a domain or HTTPS reverse proxy, set
+> `ALLOWED_ORIGINS=https://chat.example.com` in `.env` or `.env.personal`. Otherwise,
+> cookie-authenticated requests may return `cross-site request blocked`. Same-origin IP/HTTP testing may leave it unset.
+
 Requires Docker 24+ with the Compose plugin.
 
 See the [documentation](https://docs.aivorygo.com) for guided deployment,
@@ -385,7 +389,7 @@ The env file only holds boot-time essentials:
 | Group | Keys | Purpose |
 |-------|------|---------|
 | **Image** | `IMAGE_OWNER`, `IMAGE_TAG`, `SANDBOX_IMAGE_TAG` | GHCR namespace, shared release version, and optional historical sandbox override |
-| **Network** | *(none)* | App serves SPA + `/api` on one origin; host port is the `80:8787` mapping in compose. No domain/CORS env. |
+| **Network** | `ALLOWED_ORIGINS` | Required for a domain or HTTPS reverse proxy; exact browser origin(s), without paths. Same-origin IP/HTTP testing may leave it unset. |
 | **Postgres** | `POSTGRES_USER/PASSWORD/DB` | Database credentials |
 | **Redis** | `REDIS_PASSWORD` | Cache auth |
 | **Auth** | `JWT_SECRET` | Required; ≥ 32 chars |

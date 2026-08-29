@@ -173,6 +173,10 @@
 
 ## 快速开始（推荐：Docker）
 
+> **域名部署必填：** 使用域名或 HTTPS 反向代理时，请在 `.env` 或 `.env.personal` 中设置
+> `ALLOWED_ORIGINS=https://chat.example.com`，否则登录会话、积分领取和备份导入等请求可能返回
+> `cross-site request blocked`。纯 IP 同源 HTTP 测试可不设置。
+
 需要 Docker 24+ 与 Compose 插件。
 
 部署、升级和配置参考请查看[使用文档](https://docs.aivorygo.com)。希望先了解产品再
@@ -264,7 +268,7 @@ docker compose --env-file .env -f docker-compose.prod.yml pull
 docker compose --env-file .env -f docker-compose.prod.yml up -d
 ```
 
-完成后访问 `http://localhost`（默认映射主机 80 端口；如被占用，改 `docker-compose.prod.yml` 里的 `"80:8787"` 映射即可，无需任何环境变量）。前端与 `/api` 同源,**解析到哪个域名哪个域名就能用**,不需要配 `PUBLIC_ORIGIN` / `ALLOWED_ORIGINS`。
+完成后访问 `http://localhost`（默认映射主机 80 端口；如被占用，修改 `docker-compose.prod.yml` 里的 `"80:8787"` 映射）。使用域名或 HTTPS 反向代理时，必须在 `.env` 中将 `ALLOWED_ORIGINS` 设置为浏览器实际访问的 Origin。
 
 **首次启动**：进入初始化页面，填写昵称、邮箱和密码，该账号成为管理员。随后去 `/admin/channels` 添加第一个 Provider key，并创建模型。
 
@@ -329,7 +333,7 @@ Aivory 的绝大多数配置项**通过管理后台实时改**，不依赖环境
 | 分组 | 键 | 用途 |
 |------|----|----|
 | **镜像** | `IMAGE_OWNER`、`IMAGE_TAG`、`SANDBOX_IMAGE_TAG` | GHCR 命名空间、统一发布版本和历史沙箱兼容覆盖（可选） |
-| **网络** | *（无）* | 前端与 `/api` 同源，任意域名自适应；主机端口在 compose 的 `80:8787` 映射里改，无需域名/CORS 变量 |
+| **网络** | `ALLOWED_ORIGINS` | 使用域名或 HTTPS 反向代理时必填浏览器实际 Origin（不含路径）；纯 IP 同源 HTTP 测试可留空 |
 | **Postgres** | `POSTGRES_USER/PASSWORD/DB` | 数据库凭据 |
 | **Redis** | `REDIS_PASSWORD` | 必填，启用 `requirepass` |
 | **Qdrant** | `QDRANT_API_KEY` | 可选 API key |

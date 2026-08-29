@@ -2,9 +2,8 @@
 #
 # Aivory single-container image: builds the Vite SPA, builds the Go API, and
 # ships ONE runtime that serves BOTH from the same origin. The Go process serves
-# the built SPA from STATIC_DIR and routes /api/* to the backend, so there is no
-# nginx tier, no cross-origin, and any domain the container is reached on works
-# without configuring PUBLIC_ORIGIN / ALLOWED_ORIGINS.
+# the built SPA from STATIC_DIR and routes /api/* to the backend. Domain or HTTPS
+# reverse-proxy deployments must set ALLOWED_ORIGINS to the public browser origin.
 #
 # Build context is the repository root.
 #
