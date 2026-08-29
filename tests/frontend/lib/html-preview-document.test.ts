@@ -48,6 +48,32 @@ describe('buildHtmlPreviewDocument', () => {
     expect(rebuilt.match(/data-aivory-tailwind/g)).toHaveLength(1)
   })
 
+  it('rewrites Google Fonts stylesheets and font files to reachable mirrors', () => {
+    const document = buildHtmlPreviewDocument(`
+      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap">
+      <style>
+        @font-face { src: url('//fonts.gstatic.com/s/inter/v20/inter.woff2') format('woff2'); }
+      </style>
+    `)
+
+    expect(document).toContain(
+      'https://fonts.loli.net/css2?family=Inter:wght@400;700&display=swap',
+    )
+    expect(document).toContain('https://gstatic.loli.net/s/inter/v20/inter.woff2')
+    expect(document).not.toContain('fonts.googleapis.com')
+    expect(document).not.toContain('fonts.gstatic.com')
+  })
+
+  it('upgrades HTTP Google Fonts references while preserving their paths', () => {
+    const document = buildHtmlPreviewDocument(
+      '<style>@import url(http://fonts.googleapis.com/css?family=Roboto);</style>',
+    )
+
+    expect(document).toContain(
+      '@import url(https://fonts.loli.net/css?family=Roboto)',
+    )
+  })
+
   it('keeps an empty preview empty', () => {
     expect(buildHtmlPreviewDocument('')).toBe('')
   })
