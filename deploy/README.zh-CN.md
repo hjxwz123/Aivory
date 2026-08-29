@@ -93,8 +93,7 @@ Docker socket 创建受限的会话容器，因此只应在可接受这一权限
 cd deploy
 cp .env.example .env
 # 编辑 .env：至少设置 POSTGRES_PASSWORD、REDIS_PASSWORD 和 JWT_SECRET。
-# 不需要设置 domain/CORS/port 环境变量。app 在同一 origin 上同时提供 SPA 和 /api，
-# 所以它被哪个 host 访问，哪个 host 就能工作，包括多个域名。
+# 使用域名或 HTTPS 反向代理时，还必须设置准确的 ALLOWED_ORIGINS。
 docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
 ```
@@ -170,7 +169,7 @@ Qdrant 按 embedding 宽度使用独立 collection（`aivory_c<dim>`）；SQLite
 
 ## TLS 与域名
 
-`app` 容器在主机 80 端口提供明文 HTTP。公开部署时应在前面放 TLS 终止层，例如 Caddy、Traefik 或云负载均衡。因为 SPA 和 `/api` 共用一个 origin，**不需要按域名配置任何内容**：可以把任意数量的域名指向代理，只要代理转发 `Host` header 即可（常见反向代理默认都会转发）。无需 `PUBLIC_ORIGIN` / `ALLOWED_ORIGINS`。
+`app` 容器在主机 80 端口提供明文 HTTP。公开部署时应在前面放 TLS 终止层，例如 Caddy、Traefik 或云负载均衡，并将 `ALLOWED_ORIGINS` 设置为浏览器实际访问的 Origin，例如 `ALLOWED_ORIGINS=https://chat.example.com`。多个地址可写成 `ALLOWED_ORIGINS=https://chat.example.com,https://admin.example.com:8443`；不要填写路径或末尾 `/`，纯 IP 同源 HTTP 测试可留空。
 
 ## 备份
 

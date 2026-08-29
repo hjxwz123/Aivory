@@ -103,8 +103,7 @@ actual output. Rebuild vectors in admin after changing model or dimension.
 cd deploy
 cp .env.example .env
 # edit .env: set POSTGRES_PASSWORD, REDIS_PASSWORD, and JWT_SECRET at minimum.
-# There is NO domain/CORS/port env to set — the app serves the SPA and /api on
-# one origin, so whatever host it's reached on works (multiple domains included).
+# For a domain or HTTPS reverse proxy, also set the exact ALLOWED_ORIGINS value.
 docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
 ```
@@ -202,11 +201,11 @@ backend.
 ## TLS & domains
 
 The `app` container serves plain HTTP on host port 80. For public deployments put
-a TLS terminator (Caddy, Traefik, or a cloud LB) in front of it. Because the SPA
-and `/api` share one origin, there is **nothing to configure per domain** — point
-as many domains as you like at the proxy and each one works, as long as the proxy
-forwards the `Host` header (every reverse proxy does by default). No
-`PUBLIC_ORIGIN` / `ALLOWED_ORIGINS`.
+a TLS terminator (Caddy, Traefik, or a cloud LB) in front of it. Set
+`ALLOWED_ORIGINS` to the exact browser origin, for example
+`ALLOWED_ORIGINS=https://chat.example.com`. For multiple origins, use
+`ALLOWED_ORIGINS=https://chat.example.com,https://admin.example.com:8443`; do not
+include paths or trailing slashes. Same-origin IP/HTTP testing may leave it unset.
 
 ## Backups
 

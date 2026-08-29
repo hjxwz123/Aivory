@@ -151,11 +151,9 @@ services:
     pids_limit: 16
 
   # Single application container: the Go process serves BOTH the built SPA and
-  # the /api backend from one origin (STATIC_DIR is baked into the image). No
-  # separate nginx/web tier — so there's no cross-origin, and whatever domain the
-  # container is reached on just works (no PUBLIC_ORIGIN / ALLOWED_ORIGINS / port
-  # plumbing). Put a TLS terminator (Caddy / cloud LB) in front for HTTPS; it
-  # only needs to forward the Host header (any reverse proxy does by default).
+  # the /api backend from one origin (STATIC_DIR is baked into the image). For a
+  # domain or HTTPS reverse proxy, set ALLOWED_ORIGINS in .env to the exact public
+  # browser origin. Put the TLS terminator (Caddy / cloud LB) in front of app.
   app:
     # Prebuilt image from the docker-images.yml workflow. Override IMAGE_OWNER
     # in .env if you forked into a different account.
@@ -196,9 +194,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
       BACKUP_DIR: ${BACKUP_DIR:-/app/data/backups}
       MAX_BACKUP_BYTES: ${MAX_BACKUP_BYTES:-21474836480}
-      # No CORS config needed: the SPA is served same-origin by this process, so
-      # any domain works. (ALLOWED_ORIGINS only matters if you split the frontend
-      # onto a DIFFERENT origin than the API — not this single-container setup.)
+      # ALLOWED_ORIGINS is injected by env_file above. It is required for domain
+      # or HTTPS reverse-proxy deployments; use exact origins without paths.
       # No admin is seeded from the environment — on first boot the deployment has
       # zero users and the first account created via the setup screen becomes the
       # administrator (§ first-run setup).
