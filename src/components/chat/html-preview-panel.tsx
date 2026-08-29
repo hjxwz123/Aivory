@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { Maximize2, Minimize2, RotateCw } from 'lucide-react'
 import { ChatSidePanel, ChatSidePanelHeader } from '@/components/chat/chat-side-panel'
 import { Tooltip } from '@/components/ui/tooltip'
+import { buildHtmlPreviewDocument } from '@/lib/html-preview-document'
 import { useHtmlPreview } from '@/store/html-preview'
 
 /**
@@ -32,23 +33,6 @@ import { useHtmlPreview } from '@/store/html-preview'
  * - `referrerPolicy="no-referrer"` keeps our URL out of any subresource it loads.
  */
 
-// EXTERNAL_HEAD is injected into the previewed document's <head> so external
-// resources render (mixed-content upgrade) and links open in a new tab safely.
-const EXTERNAL_HEAD =
-  '<meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">' +
-  '<base target="_blank" rel="noopener noreferrer">'
-
-// withExternalResources injects EXTERNAL_HEAD into the document head. Handles a
-// full document (insert after <head> or <html>) and a bare fragment (prepend —
-// the browser hoists <base>/<meta> into the implicit head).
-function withExternalResources(html: string): string {
-  if (!html) return html
-  const headOpen = /<head[^>]*>/i
-  if (headOpen.test(html)) return html.replace(headOpen, (m) => m + EXTERNAL_HEAD)
-  const htmlOpen = /<html[^>]*>/i
-  if (htmlOpen.test(html)) return html.replace(htmlOpen, (m) => `${m}<head>${EXTERNAL_HEAD}</head>`)
-  return EXTERNAL_HEAD + html
-}
 export function HtmlPreviewPanel() {
   const open = useHtmlPreview((s) => s.open)
   const html = useHtmlPreview((s) => s.html)
@@ -152,7 +136,7 @@ function PreviewBody({ doc, reloadKey, onRefresh, onClose }: PreviewBodyProps) {
           title={t('code.previewTitle')}
           sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
           referrerPolicy="no-referrer"
-          srcDoc={withExternalResources(doc)}
+          srcDoc={buildHtmlPreviewDocument(doc)}
           className="block size-full border-0 bg-[var(--color-preview-canvas)]"
         />
       </div>
