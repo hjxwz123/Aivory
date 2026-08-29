@@ -1,14 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { FolderOpen, Plus, Trash2, X } from 'lucide-react'
-import { Sheet, SheetContent } from '@/components/ui/sheet'
-import { Tooltip } from '@/components/ui/tooltip'
+import { Plus, Trash2 } from 'lucide-react'
+import { ChatSidePanel, ChatSidePanelHeader } from '@/components/chat/chat-side-panel'
 import { ProgressRing } from '@/components/ui/progress-ring'
 import { useConversationFiles } from '@/store/conversation-files'
 import { useConversations } from '@/store/conversations'
 import { useWorkspaces } from '@/store/workspaces'
-import { useMediaQuery } from '@/hooks/use-media-query'
 import { fileIconFor } from '@/lib/file-icon'
 import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
@@ -24,7 +22,6 @@ import { filterFilesForImageCapability, NON_IMAGE_ATTACHMENT_ACCEPT } from '@/li
 export function ConversationFilesPanel() {
   const open = useConversationFiles((s) => s.open)
   const close = useConversationFiles((s) => s.close)
-  const isDesktop = useMediaQuery('(min-width: 1024px)')
   const { t } = useTranslation('chat')
   const { pathname } = useLocation()
 
@@ -36,28 +33,10 @@ export function ConversationFilesPanel() {
     close()
   }, [pathname, close])
 
-  if (isDesktop) {
-    if (!open) return null
-    return (
-      <aside
-        aria-label={t('files.title')}
-        className={cn(
-          'hidden lg:flex flex-col shrink-0 h-full w-[clamp(20rem,30vw,30rem)]',
-          'border-l border-[var(--color-divider)] bg-[var(--color-bg)]',
-          'animate-[panel-in_240ms_var(--ease-out)]',
-        )}
-      >
-        <FilesBody onClose={close} />
-      </aside>
-    )
-  }
-
   return (
-    <Sheet open={open} onOpenChange={(o) => { if (!o) close() }}>
-      <SheetContent side="right" size="lg" label={t('files.title')} className="w-[min(26rem,94vw)] p-0">
-        <FilesBody onClose={close} />
-      </SheetContent>
-    </Sheet>
+    <ChatSidePanel open={open} title={t('files.title')} onClose={close}>
+      <FilesBody onClose={close} />
+    </ChatSidePanel>
   )
 }
 
@@ -131,22 +110,7 @@ function FilesBody({ onClose }: { onClose: () => void }) {
 
   return (
     <>
-      <header className="flex items-center gap-2 h-12 px-3 border-b border-[var(--color-divider)] shrink-0">
-        <FolderOpen size={14} aria-hidden className="text-[var(--color-fg-muted)]" />
-        <span className="flex-1 min-w-0 truncate tracking-tight text-[15px] text-[var(--color-fg)]">
-          {t('files.title')}
-        </span>
-        <Tooltip content={t('files.close')}>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={t('files.close')}
-            className="inline-flex items-center justify-center size-8 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-          >
-            <X size={14} aria-hidden />
-          </button>
-        </Tooltip>
-      </header>
+      <ChatSidePanelHeader title={t('files.title')} closeLabel={t('files.close')} onClose={onClose} />
 
       {!isWorkspaceGuest ? <div className="px-3 pt-3 shrink-0">
         <input

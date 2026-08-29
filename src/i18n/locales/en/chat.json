@@ -418,7 +418,6 @@
     "previewFullscreen": "Fullscreen",
     "previewExitFullscreen": "Exit fullscreen",
     "previewClose": "Close preview",
-    "previewSandboxHint": "Rendered in an isolated sandbox — page scripts cannot reach your data.",
     "mermaidFailed": "Could not render this diagram — showing source."
   },
   "diagram": {

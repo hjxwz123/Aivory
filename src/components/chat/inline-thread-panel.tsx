@@ -1,16 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { MessagesSquare, X, CornerDownLeft, Quote } from 'lucide-react'
-import { Sheet, SheetContent } from '@/components/ui/sheet'
-import { Tooltip } from '@/components/ui/tooltip'
+import { CornerDownLeft, Quote } from 'lucide-react'
+import { ChatSidePanel, ChatSidePanelHeader } from '@/components/chat/chat-side-panel'
 import { Markdown } from '@/components/chat/markdown'
 import { MathText } from '@/components/chat/math-text'
 import { useInlineThreadDrawer } from '@/store/inline-thread'
 import { resolveArmedTurnFlags, useConversations } from '@/store/conversations'
 import { useSettings } from '@/store/settings'
 import { useWorkspaces } from '@/store/workspaces'
-import { useMediaQuery } from '@/hooks/use-media-query'
 import { cn } from '@/lib/utils'
 import { hasMathContent } from '@/lib/math-content'
 
@@ -26,7 +24,6 @@ export function InlineThreadPanel() {
   const childId = useInlineThreadDrawer((s) => s.childId)
   const quote = useInlineThreadDrawer((s) => s.quote)
   const close = useInlineThreadDrawer((s) => s.close)
-  const isDesktop = useMediaQuery('(min-width: 1024px)')
   const { t } = useTranslation('chat')
   const { pathname } = useLocation()
 
@@ -52,28 +49,11 @@ export function InlineThreadPanel() {
     close()
   }, [pathname, close])
 
-  if (isDesktop) {
-    if (!open) return null
-    return (
-      <aside
-        aria-label={t('inline.title', { defaultValue: 'Sub-conversation' })}
-        className={cn(
-          'hidden lg:flex flex-col shrink-0 h-full w-[clamp(22rem,34vw,34rem)]',
-          'bg-[var(--color-surface)]',
-          'animate-[panel-in_240ms_var(--ease-out)]',
-        )}
-      >
-        <ThreadBody quote={quote} childId={childId} onClose={close} />
-      </aside>
-    )
-  }
-
+  const title = t('inline.title', { defaultValue: 'Sub-conversation' })
   return (
-    <Sheet open={open} onOpenChange={(o) => { if (!o) close() }}>
-      <SheetContent side="right" size="lg" label={t('inline.title', { defaultValue: 'Sub-conversation' })} className="w-[min(28rem,94vw)] !border-l-0">
-        <ThreadBody quote={quote} childId={childId} onClose={close} />
-      </SheetContent>
-    </Sheet>
+    <ChatSidePanel open={open} title={title} onClose={close}>
+      <ThreadBody quote={quote} childId={childId} onClose={close} />
+    </ChatSidePanel>
   )
 }
 
@@ -117,22 +97,11 @@ function ThreadBody({ quote, childId, onClose }: { quote: string; childId: strin
 
   return (
     <>
-      <header className="flex h-12 shrink-0 items-center gap-2 px-3">
-        <MessagesSquare size={14} aria-hidden className="text-[var(--color-secondary)]" />
-        <span className="min-w-0 flex-1 truncate font-sans text-[15px] font-medium tracking-normal text-[var(--color-fg)]">
-          {t('inline.title', { defaultValue: 'Sub-conversation' })}
-        </span>
-        <Tooltip content={t('code.previewClose', { defaultValue: 'Close' })}>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={t('code.previewClose', { defaultValue: 'Close' })}
-            className="inline-flex items-center justify-center size-8 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-          >
-            <X size={14} aria-hidden />
-          </button>
-        </Tooltip>
-      </header>
+      <ChatSidePanelHeader
+        title={t('inline.title', { defaultValue: 'Sub-conversation' })}
+        closeLabel={t('code.previewClose', { defaultValue: 'Close' })}
+        onClose={onClose}
+      />
 
       {/* Anchored excerpt */}
       {quote ? (
