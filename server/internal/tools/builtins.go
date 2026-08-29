@@ -85,6 +85,15 @@ func webFetchJinaBase() string {
 	return envcfg.Str("AIVORY_TOOLS_WEB_FETCH_JINA_BASE", "https://r.jina.ai")
 }
 
+// Jina expects an escaped target path, while some compatible readers require
+// the original URL to remain visible after the reader base.
+func webFetchJinaURLMode() string {
+	if strings.EqualFold(envcfg.Str("AIVORY_TOOLS_WEB_FETCH_JINA_URL_MODE", "escaped"), "raw") {
+		return "raw"
+	}
+	return "escaped"
+}
+
 // webSearchTool implements §4.4 via a pluggable Searcher. When no backend is
 // configured it returns a polite placeholder so callers never crash.
 type webSearchTool struct {
@@ -534,13 +543,16 @@ func capExtractedText(text string) string {
 	return text
 }
 
-// jinaReaderURL builds the reader URL for a target, e.g.
-// https://r.jina.ai/<url-encoded target>. The base is operator-configurable so
-// a self-hosted Jina-compatible reader can be pointed at.
+// jinaReaderURL builds the reader URL for a target. Escaped mode produces the
+// Jina form https://r.jina.ai/<url-encoded target>; raw mode supports readers
+// such as markdown.new that expect the original URL after their base address.
 func jinaReaderURL(base, target string) (string, error) {
 	b, err := url.Parse(base)
 	if err != nil || b.Host == "" || (b.Scheme != "https" && b.Scheme != "http") {
 		return "", fmt.Errorf("invalid reader base %q", base)
+	}
+	if webFetchJinaURLMode() == "raw" {
+		return strings.TrimRight(base, "/") + "/" + target, nil
 	}
 	return strings.TrimRight(base, "/") + "/" + url.PathEscape(target), nil
 }

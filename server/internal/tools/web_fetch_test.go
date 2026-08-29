@@ -188,6 +188,7 @@ func TestWebFetchJinaFallbackDisabled(t *testing.T) {
 }
 
 func TestJinaReaderURL(t *testing.T) {
+	t.Setenv("AIVORY_TOOLS_WEB_FETCH_JINA_URL_MODE", "escaped")
 	got, err := jinaReaderURL("https://r.jina.ai", "https://example.com/a?b=c")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -207,6 +208,28 @@ func TestJinaReaderURL(t *testing.T) {
 	}
 	if _, err := jinaReaderURL("ftp://reader.example", "https://example.com/x"); err == nil {
 		t.Fatal("expected error for non-http reader base")
+	}
+}
+
+func TestJinaReaderURLRawMode(t *testing.T) {
+	t.Setenv("AIVORY_TOOLS_WEB_FETCH_JINA_URL_MODE", "raw")
+	got, err := jinaReaderURL("https://markdown.new/", "https://example.com/a?b=c")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if want := "https://markdown.new/https://example.com/a?b=c"; got != want {
+		t.Fatalf("jinaReaderURL = %q, want %q", got, want)
+	}
+}
+
+func TestJinaReaderURLUnknownModeFallsBackToEscaped(t *testing.T) {
+	t.Setenv("AIVORY_TOOLS_WEB_FETCH_JINA_URL_MODE", "unsupported")
+	got, err := jinaReaderURL("https://reader.example", "https://example.com/a?b=c")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if want := "https://reader.example/https:%2F%2Fexample.com%2Fa%3Fb=c"; got != want {
+		t.Fatalf("jinaReaderURL = %q, want %q", got, want)
 	}
 }
 

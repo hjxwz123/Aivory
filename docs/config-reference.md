@@ -246,6 +246,10 @@
 | `AIVORY_TOOLS_IN_TOP_K` | `int` | `5` | `tools/builtins.go:37` | Default result count for the `aivory_web_search` tool when the model's call omits top_k. |
 | `AIVORY_TOOLS_WEB_FETCH_RESPONSE_BODY_READ_CAP` | `int64` | `256*1024` | `tools/builtins.go:38` | Byte cap on the HTTP response body web_fetch reads before stripping HTML. |
 | `AIVORY_TOOLS_WEB_FETCH_EXTRACTED_TEXT_CHAR_CAP` | `int` | `32000` | `tools/builtins.go:39` | Character cap on web_fetch's HTML-stripped text before it is truncated with an ellipsis marker. |
+| `AIVORY_TOOLS_WEB_FETCH_DIRECT_TIMEOUT` | `duration` | `12s` | `tools/builtins.go` | Single-attempt timeout for web fetch connecting directly to the target site. |
+| `AIVORY_TOOLS_WEB_FETCH_JINA_FALLBACK` | `bool` | `true` | `tools/builtins.go` | Whether to use a Reader fallback when direct web fetch fails. |
+| `AIVORY_TOOLS_WEB_FETCH_JINA_BASE` | `string` | `https://r.jina.ai` | `tools/builtins.go` | Base address of the trusted Jina-compatible Reader service. |
+| `AIVORY_TOOLS_WEB_FETCH_JINA_URL_MODE` | `string` | `escaped` | `tools/builtins.go` | Use `escaped` for Jina Reader or `raw` for compatible services such as `https://markdown.new`; unknown values use `escaped`. |
 | `AIVORY_TOOLS_PYTHON_EXECUTE_UPLOAD_STAGING_FILE_SIZE` | `int64` | `40*1024*1024` | `tools/builtins.go:40` | Per-file size ceiling above which a conversation upload is skipped when staging files into the python sandbox. Keep the sidecar's `SANDBOX_MAX_UPLOAD_BYTES` and `SANDBOX_MAX_BODY_BYTES` at least large enough when raising it. |
 | `AIVORY_TOOLS_PYTHON_EXECUTE_STDOUT_STDERR_TRUNCATION_CAP` | `int` | `32*1024` | `tools/builtins.go:42` | Character cap for truncating python_execute stdout/stderr before it is surfaced to the model. |
 | `AIVORY_TOOLS_IN_N` | `int` | `4` | `tools/builtins.go:43` | Maximum number of images a single image_generate call may request. |
