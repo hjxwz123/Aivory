@@ -222,7 +222,10 @@ func TestOpenAIImageEditCanSelectPriorCanvasBeforeCurrentReferences(t *testing.T
 		return imageSuccessResponse(string(body)), nil
 	})
 
-	if _, _, err := tool.Execute(context.Background(), []byte(`{"prompt":"redesign everything","action":"edit","base_image":"previous_generation"}`), &llm.ToolContext{
+	// A chat model can retain the first turn's attachment index when it
+	// continues editing the previous generated result. The index is stale and
+	// must be ignored because previous_generation has no attachment position.
+	if _, _, err := tool.Execute(context.Background(), []byte(`{"prompt":"redesign everything","action":"edit","base_image":"previous_generation","base_image_index":1}`), &llm.ToolContext{
 		UserID: "u_flow", ConvID: convID, MessageID: "a_edit", ImageModelID: "m_flow", DB: tool.db,
 		ImageInputIDs: referenceIDs, ImageUserPrompt: "右侧换成参考图中的网站页面，右下角硬件参考另一张图，其他不变",
 	}); err != nil {

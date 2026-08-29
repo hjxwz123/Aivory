@@ -1465,7 +1465,7 @@ func (t *imageGenerateTool) Description() string {
 func (t *imageGenerateTool) InputSchema() json.RawMessage {
 	// Image ids stay server-side. The chat model selects a semantic source and a
 	// 1-based current-attachment position instead of copying opaque file ids.
-	return json.RawMessage(`{"type":"object","properties":{"prompt":{"type":"string","description":"The requested new image or the exact edit instruction. For edits, describe only the requested change and preserve everything else."},"action":{"type":"string","enum":["generate","edit"],"description":"Use generate only when the user wants a new image. Use edit only when the user wants to modify an existing image."},"base_image":{"type":"string","enum":["none","previous_generation","current_attachment"],"description":"For generate use none. For edit, choose previous_generation only when continuing the prior generated result, or current_attachment when an image uploaded this turn is the authoritative base."},"base_image_index":{"type":"integer","minimum":1,"description":"Required for edit with base_image=current_attachment when more than one image was uploaded this turn. This is the 1-based attachment position."},"n":{"type":"integer","default":1},"size":{"type":"string","description":"Optional explicit output size. OpenAI-format requests recognize the aspect ratio and the 1K, 2K, or 4K resolution tier from the exact user instruction; omitted resolution defaults to 2K. The final GPT Image 2 WIDTHxHEIGHT is normalized to legal multiples of 16. Edits preserve the selected base image's ratio unless the user requests another ratio. GPT Image 1.x is mapped to its supported fixed sizes."}},"required":["prompt","action","base_image"]}`)
+	return json.RawMessage(`{"type":"object","properties":{"prompt":{"type":"string","description":"The requested new image or the exact edit instruction. For edits, describe only the requested change and preserve everything else."},"action":{"type":"string","enum":["generate","edit"],"description":"Use generate only when the user wants a new image. Use edit only when the user wants to modify an existing image."},"base_image":{"type":"string","enum":["none","previous_generation","current_attachment"],"description":"For generate use none. For edit, choose previous_generation only when continuing the prior generated result, or current_attachment when an image uploaded this turn is the authoritative base."},"base_image_index":{"type":"integer","minimum":1,"description":"Use only with base_image=current_attachment. This is the 1-based attachment position; omit it for previous_generation."},"n":{"type":"integer","default":1},"size":{"type":"string","description":"Optional explicit output size. OpenAI-format requests recognize the aspect ratio and the 1K, 2K, or 4K resolution tier from the exact user instruction; omitted resolution defaults to 2K. The final GPT Image 2 WIDTHxHEIGHT is normalized to legal multiples of 16. Edits preserve the selected base image's ratio unless the user requests another ratio. GPT Image 1.x is mapped to its supported fixed sizes."}},"required":["prompt","action","base_image"]}`)
 }
 
 type imgInput struct {
@@ -1494,6 +1494,13 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	}
 	in.Action = strings.ToLower(strings.TrimSpace(in.Action))
 	in.BaseImage = strings.ToLower(strings.TrimSpace(in.BaseImage))
+	// Chat models may carry a stale attachment index over from an earlier edit
+	// when continuing the previous generated image. That index has no semantic
+	// meaning for previous_generation, so discard it before strict validation;
+	// generation and current-attachment edits retain their existing checks.
+	if in.Action == "edit" && in.BaseImage == "previous_generation" {
+		in.BaseImageIndex = 0
+	}
 	if err := validateImageOperation(in); err != nil {
 		return "", nil, err
 	}
