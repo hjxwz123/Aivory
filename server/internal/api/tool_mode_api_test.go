@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"aivory/server/internal/llm"
 	"aivory/server/internal/store"
 )
 
@@ -114,5 +115,28 @@ func TestNormalizeToolModeSettingsPatchKeepsLegacyClientsCoherent(t *testing.T) 
 				t.Fatalf("normalized patch = %#v, want mode=%q legacy=%v", tc.patch, tc.wantMode, tc.wantLegacy)
 			}
 		})
+	}
+}
+
+func TestEffectiveDefaultToolModePrefersUserThenDeployment(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "tool-mode-default.db"))
+	defer db.Close()
+	store.InvalidateConfig()
+	t.Cleanup(store.InvalidateConfig)
+
+	if got := effectiveDefaultToolMode(db, nil); got != llm.ToolModeAuto {
+		t.Fatalf("missing deployment default = %q, want auto", got)
+	}
+	if err := store.SetSetting(db, "tool_mode_default", llm.ToolModeDisabled); err != nil {
+		t.Fatal(err)
+	}
+	if got := effectiveDefaultToolMode(db, json.RawMessage(`{}`)); got != llm.ToolModeDisabled {
+		t.Fatalf("deployment default = %q, want disabled", got)
+	}
+	if got := effectiveDefaultToolMode(db, json.RawMessage(`{"tool_mode_default":"enabled"}`)); got != llm.ToolModeEnabled {
+		t.Fatalf("user default = %q, want enabled", got)
+	}
+	if got := effectiveDefaultToolMode(db, json.RawMessage(`{"disable_tools_default":false}`)); got != llm.ToolModeEnabled {
+		t.Fatalf("legacy user default = %q, want enabled", got)
 	}
 }

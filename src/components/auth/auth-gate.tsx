@@ -106,9 +106,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
     }
     // Keep the account default available synchronously to the composer and the
     // new-chat action. The resolver also preserves explicit choices from the
-    // legacy disable_tools_default boolean; an entirely absent value is auto.
-    useComposerPrefs.getState().setDefaultToolMode(resolveDefaultToolMode(user.settings))
-  }, [status, user?.settings, syncUserSettings])
+    // legacy disable_tools_default boolean; an entirely absent account value
+    // inherits the deployment-wide administrator default attached to the user.
+    useComposerPrefs.getState().setDefaultToolMode(resolveDefaultToolMode(user.settings, user.tool_mode_default))
+  }, [status, user?.settings, user?.tool_mode_default, syncUserSettings])
 
   // Once authenticated, hydrate the per-user data caches. This is keyed by user
   // id so a refresh that returns an equivalent user object cannot fan out into
@@ -129,7 +130,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
     // Apply the account default exactly once per login. All three values matter:
     // unlike the former boolean, auto/enabled must also replace a
     // persisted mode left by another account or an earlier session.
-    const defaultToolMode = resolveDefaultToolMode(useAuth.getState().user?.settings)
+    const currentUser = useAuth.getState().user
+    const defaultToolMode = resolveDefaultToolMode(currentUser?.settings, currentUser?.tool_mode_default)
     useComposerPrefs.getState().setDefaultToolMode(defaultToolMode)
     useComposerPrefs.getState().setToolMode(defaultToolMode)
     void useWorkspaces

@@ -88,23 +88,25 @@ func TestResolveTurnToolModeCompatibilityAndPrecedence(t *testing.T) {
 		name     string
 		explicit json.RawMessage
 		legacy   bool
+		fallback string
 		want     string
 		wantErr  bool
 	}{
-		{"legacy omitted defaults enabled", nil, false, llm.ToolModeEnabled, false},
-		{"legacy true disables", nil, true, llm.ToolModeDisabled, false},
-		{"explicit auto", raw(llm.ToolModeAuto), false, llm.ToolModeAuto, false},
-		{"explicit disabled wins over legacy false", raw(llm.ToolModeDisabled), false, llm.ToolModeDisabled, false},
-		{"explicit enabled wins over legacy true", raw(llm.ToolModeEnabled), true, llm.ToolModeEnabled, false},
-		{"legacy official maps to enabled", raw(llm.ToolModeOfficial), true, llm.ToolModeEnabled, false},
-		{"explicit empty is invalid", raw(""), false, "", true},
-		{"unknown is invalid", raw("sometimes"), false, "", true},
-		{"explicit null is invalid", json.RawMessage("null"), false, "", true},
-		{"explicit boolean is invalid", json.RawMessage("true"), false, "", true},
+		{"omitted uses administrator fallback", nil, false, llm.ToolModeDisabled, llm.ToolModeDisabled, false},
+		{"omitted invalid fallback uses auto", nil, false, "sometimes", llm.ToolModeAuto, false},
+		{"legacy true disables", nil, true, llm.ToolModeEnabled, llm.ToolModeDisabled, false},
+		{"explicit auto", raw(llm.ToolModeAuto), false, llm.ToolModeDisabled, llm.ToolModeAuto, false},
+		{"explicit disabled wins over fallback", raw(llm.ToolModeDisabled), false, llm.ToolModeEnabled, llm.ToolModeDisabled, false},
+		{"explicit enabled wins over legacy true", raw(llm.ToolModeEnabled), true, llm.ToolModeDisabled, llm.ToolModeEnabled, false},
+		{"legacy official maps to enabled", raw(llm.ToolModeOfficial), true, llm.ToolModeDisabled, llm.ToolModeEnabled, false},
+		{"explicit empty is invalid", raw(""), false, llm.ToolModeAuto, "", true},
+		{"unknown is invalid", raw("sometimes"), false, llm.ToolModeAuto, "", true},
+		{"explicit null is invalid", json.RawMessage("null"), false, llm.ToolModeAuto, "", true},
+		{"explicit boolean is invalid", json.RawMessage("true"), false, llm.ToolModeAuto, "", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := resolveTurnToolMode(tc.explicit, tc.legacy)
+			got, err := resolveTurnToolMode(tc.explicit, tc.legacy, tc.fallback)
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("error = %v, wantErr %v", err, tc.wantErr)
 			}

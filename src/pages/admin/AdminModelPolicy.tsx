@@ -22,6 +22,7 @@ const OWNED_KEYS = [
   'default_model_id',
   'task_model_id',
   'tool_route_model_id',
+  'tool_mode_default',
   'verify_model_id',
   'fallback_model_id',
   'fallback_ttft_sec',
@@ -178,6 +179,28 @@ export default function AdminModelPolicy() {
                   selectableModels={selectableModels}
                   unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
                 />
+              </SelectContent>
+            </Select>
+          </Field>
+
+          <Field
+            label={t('admin:settings.fields.defaultToolMode')}
+            htmlFor="default-tool-mode"
+            hint={t('admin:settings.fields.defaultToolModeHint')}
+          >
+            <Select
+              value={readString('tool_mode_default') || 'auto'}
+              onValueChange={(value) =>
+                setDraft((current) => ({ ...current, tool_mode_default: value }))
+              }
+            >
+              <SelectTrigger id="default-tool-mode">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">{t('admin:settings.fields.toolModeAuto')}</SelectItem>
+                <SelectItem value="enabled">{t('admin:settings.fields.toolModeEnabled')}</SelectItem>
+                <SelectItem value="disabled">{t('admin:settings.fields.toolModeDisabled')}</SelectItem>
               </SelectContent>
             </Select>
           </Field>

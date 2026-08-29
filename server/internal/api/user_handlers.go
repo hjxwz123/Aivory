@@ -25,6 +25,7 @@ func attachGroupInfo(d Deps, r *http.Request, u *store.User) {
 	if u == nil {
 		return
 	}
+	u.ToolModeDefault = effectiveDefaultToolMode(d.DB, u.Settings)
 	// Keep the transient /me payload aligned with authorization. Legacy or
 	// temporarily dangling group references use the permissive compatibility
 	// policy instead of serializing an all-false Go zero value.

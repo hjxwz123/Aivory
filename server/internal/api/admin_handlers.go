@@ -1355,7 +1355,7 @@ func analyticsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 // ===== Settings =====
 
 var settingsKeys = []string{
-	"default_model_id", "task_model_id", "context_compaction_model_id", "tool_route_model_id", "embedding_model_id",
+	"default_model_id", "task_model_id", "context_compaction_model_id", "tool_route_model_id", "tool_mode_default", "embedding_model_id",
 	"keep_recent_rounds", "summary_max_tokens", "summary_target_percent", "summary_merge_max_tokens", "compaction_request_max_tokens", "context_compaction_prompt", "compaction_enabled",
 	"compaction_token_trigger", "compaction_token_cap", "compaction_token_target_percentage", "compaction_retention_percentage",
 	"memory_enabled", "daily_message_limit", "daily_image_limit", "signup_open",
@@ -1752,6 +1752,16 @@ func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.R
 					return 0, err
 				}
 				v = normalized
+			case "tool_mode_default":
+				var mode string
+				if json.Unmarshal(v, &mode) != nil {
+					return 0, errInvalidInput
+				}
+				normalized, valid := normalizedDefaultToolMode(strings.TrimSpace(mode))
+				if !valid {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(normalized)
 			case "compaction_enabled":
 				var enabled bool
 				if json.Unmarshal(v, &enabled) != nil {

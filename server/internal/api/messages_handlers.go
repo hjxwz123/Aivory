@@ -142,8 +142,9 @@ type postMessageReq struct {
 	WebSearch bool `json:"web_search"`
 	// Fast marks a fast-mode turn (§fast-mode): the model is resolved server-side
 	// from the admin's fast model and masked from the user; Verify / Deep Research
-	// / no-tools are all forced off; tools run on a quartered budget without
-	// python_execute. Overrides ModelID (which the client omits on a fast turn).
+	// / no-tools are all forced off; local system tools use independent fast-mode
+	// budgets while provider-hosted tools keep their configured declarations.
+	// Overrides ModelID (which the client omits on a fast turn).
 	Fast           bool             `json:"fast"`
 	Attachments    []llm.Attachment `json:"attachments"`
 	ParamOverrides map[string]any   `json:"params"`
@@ -966,16 +967,19 @@ func validTurnToolMode(mode string) bool {
 }
 
 // resolveTurnToolMode maps the legacy no_tools boolean onto the three-state
-// protocol. An omitted/false legacy flag means enabled so old clients retain
-// their previous behavior; new clients send tool_mode explicitly (normally
-// auto). Invalid explicit values are rejected instead of silently changing how
+// protocol. An explicit per-turn choice always wins; when it is omitted, an
+// explicit legacy disable wins and otherwise the account/deployment default is
+// used. Invalid explicit values are rejected instead of silently changing how
 // a turn is executed.
-func resolveTurnToolMode(explicit json.RawMessage, legacyNoTools bool) (string, error) {
+func resolveTurnToolMode(explicit json.RawMessage, legacyNoTools bool, defaultMode string) (string, error) {
 	if len(explicit) == 0 {
 		if legacyNoTools {
 			return llm.ToolModeDisabled, nil
 		}
-		return llm.ToolModeEnabled, nil
+		if normalized, valid := normalizedDefaultToolMode(defaultMode); valid {
+			return normalized, nil
+		}
+		return llm.ToolModeAuto, nil
 	}
 	var mode string
 	if err := json.Unmarshal(explicit, &mode); err != nil {
@@ -1261,7 +1265,7 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// orchestrator/provider layer strips image blocks from the model request when
 	// vision is unavailable, while python_execute can still stage the original
 	// bytes from the conversation file row. Do not reject the turn before SSE.
-	toolMode, err := resolveTurnToolMode(req.ToolMode, req.NoTools)
+	toolMode, err := resolveTurnToolMode(req.ToolMode, req.NoTools, effectiveDefaultToolMode(d.DB, u.Settings))
 	if err != nil {
 		writeError(w, 400, err)
 		return
@@ -1694,7 +1698,7 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		d, u.ID, id, conv.WorkspaceID,
 		generationKnowledgeBaseIDs(r.Context(), d.DB, u.ID, conv, turnKBIDs, turnKBSelectionConfigured),
 	)
-	toolMode, err := resolveTurnToolMode(body.ToolMode, body.NoTools)
+	toolMode, err := resolveTurnToolMode(body.ToolMode, body.NoTools, effectiveDefaultToolMode(d.DB, u.Settings))
 	if err != nil {
 		writeError(w, 400, err)
 		return
