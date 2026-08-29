@@ -1257,14 +1257,10 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 409, err)
 		return
 	}
-	// Images are a provider-only capability. Resolve the exact model this turn
-	// will use and check SERVER-side file classifications before opening SSE; a
-	// client cannot disguise an image as another attachment kind to reach a
-	// non-vision model (or its sandbox).
-	if err := ensureImageAttachmentsSupported(r.Context(), d.DB, conv, req.ModelID, req.Fast, req.Attachments); err != nil {
-		writeError(w, imageCapabilityErrorStatus(err), err)
-		return
-	}
+	// Images remain durable conversation files even for text-only models. The
+	// orchestrator/provider layer strips image blocks from the model request when
+	// vision is unavailable, while python_execute can still stage the original
+	// bytes from the conversation file row. Do not reject the turn before SSE.
 	toolMode, err := resolveTurnToolMode(req.ToolMode, req.NoTools)
 	if err != nil {
 		writeError(w, 400, err)

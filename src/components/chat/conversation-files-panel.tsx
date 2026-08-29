@@ -10,7 +10,6 @@ import { useWorkspaces } from '@/store/workspaces'
 import { fileIconFor } from '@/lib/file-icon'
 import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
-import { filterFilesForImageCapability, NON_IMAGE_ATTACHMENT_ACCEPT } from '@/lib/vision-capability'
 
 /**
  * ConversationFilesPanel — the right-edge drawer listing every file the
@@ -71,22 +70,11 @@ function FilesBody({ onClose }: { onClose: () => void }) {
     if (isWorkspaceGuest) return
     const list = e.target.files
     if (!list || !list.length) return
-    // Files added here are conversation context, not attachments on the next
-    // user message. Images therefore cannot reach a provider-native multimodal
-    // request from this drawer and must be attached in the Composer instead.
-    const filtered = filterFilesForImageCapability(Array.from(list), 'blocked')
-    if (filtered.rejectedImages.length > 0) {
-      toast.error(
-        t('files.imageUseComposer'),
-        filtered.rejectedImages.map((file) => file.name).join(', '),
-      )
-    }
-    if (!filtered.accepted.length) {
-      e.target.value = ''
-      return
-    }
     try {
-      await upload(filtered.accepted)
+      // Conversation files are sandbox inputs regardless of the active model's
+      // native vision capability. Provider serialization handles image stripping
+      // for text-only models; the original bytes remain available to Python.
+      await upload(Array.from(list))
       toast.success(t('files.added'))
     } catch {
       toast.error(t('files.addFailed'))
@@ -118,7 +106,6 @@ function FilesBody({ onClose }: { onClose: () => void }) {
           type="file"
           multiple
           hidden
-          accept={NON_IMAGE_ATTACHMENT_ACCEPT}
           onChange={(e) => void onPick(e)}
         />
         <button

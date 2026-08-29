@@ -372,32 +372,14 @@ func uploadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		kind = "image"
 		mimeType = imageMIME
 	}
-	// Images only exist inside a conversation and go directly to a provider that
-	// supports image input. Enforce this before uploadDestPath creates a user
-	// directory or os.Create writes bytes. model_id / fast describe the current
-	// composer selection; omitted values fall back to the persisted conversation.
+	// Images are conversation-scoped files. They may be useful to Python/sandbox
+	// tools even when the selected chat model cannot consume native image input,
+	// so capability is enforced at provider serialization time rather than at
+	// upload time. model_id / fast are intentionally not used here: rejecting the
+	// upload would prevent the file from being persisted and staged for tooling.
 	if kind == "image" {
 		if scopeConv == nil {
 			writeError(w, imageCapabilityErrorStatus(errImageConversationScope), errImageConversationScope)
-			return
-		}
-		fast, provided, err := optionalBoolQuery(r, "fast")
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
-		if !provided {
-			fast = scopeConv.Fast
-		}
-		model, err := resolveEffectiveConversationModel(
-			r.Context(), d.DB, scopeConv, r.URL.Query().Get("model_id"), fast,
-		)
-		if err != nil {
-			writeError(w, imageCapabilityErrorStatus(err), err)
-			return
-		}
-		if !modelSupportsImageInput(model) {
-			writeError(w, http.StatusUnprocessableEntity, errImageInputUnsupported)
 			return
 		}
 	}

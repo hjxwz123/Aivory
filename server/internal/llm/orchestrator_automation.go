@@ -58,7 +58,9 @@ func configuredOfficialToolRequests(raw json.RawMessage, fast bool) ([]string, [
 // model is cheaper and faster than adding another network round trip. Only the
 // remaining ambiguous turns reach the dedicated route model, with no history,
 // file names, schemas, request fragments, skill descriptions, or instructions.
-// Failures are fail-open because the main model can still decline every tool.
+// If no route model is configured, TaskLLM uses the current conversation model;
+// provider failures remain fail-open because the main model can still decline
+// every tool.
 func (o *Orchestrator) autoTurnNeedsTools(
 	ctx context.Context,
 	req RunRequest,
@@ -265,6 +267,13 @@ func toolRouteAttachmentKinds(attachments []Attachment) []string {
 
 func toolRouteCurrentAttachmentNeedsFileTool(attachments []Attachment) bool {
 	for _, attachment := range attachments {
+		// Text-only models cannot inspect image bytes natively. Treat an image
+		// attachment as a deterministic file-tool signal so an enabled
+		// python/MCP tool can access the staged upload instead of relying on the
+		// route classifier to infer that intent from the user's wording.
+		if attachmentIsImage(attachment) {
+			return true
+		}
 		kind := strings.ToLower(strings.TrimSpace(attachment.Kind))
 		if kind == "sheet" || kind == "code" || isSandboxSpreadsheetFilename(attachment.Filename) {
 			return true

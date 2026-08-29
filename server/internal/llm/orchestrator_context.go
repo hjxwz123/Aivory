@@ -262,9 +262,9 @@ func assistantRendersEmpty(m store.Message) bool {
 // base64 image blocks to their messages so vision-capable providers can see
 // them (§4.6). Errors are silent — a missing file never blocks the turn.
 //
-// §4.6 vision gating: if the resolved model is not vision-capable, image
-// attachments are SKIPPED with a visible note appended to the user turn so the
-// user sees "this model can't read images, pick a vision-capable one".
+// §4.6 vision gating: non-vision requests are normally filtered before this
+// function runs. Retain the defensive branch below for legacy/misclassified
+// history so no image bytes can reach a text-only provider.
 //
 // Documents are deliberately NOT attached as native provider file/document
 // blocks. Every LLM API request uses the RAG text path for PDFs/DOCX/PPTX/etc.:
@@ -296,8 +296,10 @@ func (o *Orchestrator) resolveAttachments(ctx context.Context, userID, convID st
 			switch imageState {
 			case verifiedAttachmentImage:
 				if !visionCapable {
-					// This path covers legacy history whose stored message metadata did
-					// not say image. Current requests are rejected before SSE by the API.
+					// This path covers legacy history whose stored metadata did not say
+					// image. Current normalized attachments are removed from the
+					// provider request earlier, while their durable file rows remain
+					// available to sandbox tools.
 					if !notedNonVision && onEvent != nil {
 						onEvent(SseEvent{Type: "rag", Status: "warning", Summary: "model does not support images; attached images were skipped"})
 						notedNonVision = true

@@ -62,7 +62,7 @@
       }
     },
     "imageUnsupported": "目前模型不支援圖片輸入，請選擇支援視覺的模型。",
-    "imagesWillBeIgnored": "目前模型不支援識圖，本次對話中的圖片將被忽略。",
+    "imagesWillBeIgnored": "目前模型不支援直接識圖，圖片不會作為視覺輸入傳送，但會保留在對話沙盒供工具使用。",
     "imageIgnoredNeedsText": "目前模型不支援識圖，圖片將被忽略。請新增文字後再傳送。",
     "imagePromptRequired": "請描述你希望如何修改這張參考圖。",
     "imagePromptOptimization": "提示詞最佳化",
