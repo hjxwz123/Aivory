@@ -7,12 +7,19 @@ import { BlurText } from '@/components/landing/fx/blur-text'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Field } from '@/components/ui/label'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Separator } from '@/components/ui/separator'
 import { toast } from '@/hooks/use-toast'
 import { useAuth } from '@/store/auth'
 import { OAuthButtons } from '@/components/auth/oauth-buttons'
 import { PuzzleCaptchaDialog } from '@/components/auth/puzzle-captcha-dialog'
 import { authErrorText } from '@/lib/auth-errors'
+import {
+  loadRememberedPassword,
+  rememberPasswordPreference,
+  setRememberPasswordPreference,
+  storeRememberedPassword,
+} from '@/lib/password-credentials'
 
 /**
  * Only follow a post-login `from` when it's a root-relative internal path
@@ -48,6 +55,7 @@ export default function Login() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [email, setEmail] = useState('')
   const [pw, setPw] = useState('')
+  const [rememberPassword, setRememberPassword] = useState(rememberPasswordPreference)
   const [showPw, setShowPw] = useState(false)
   const [loading, setLoading] = useState(false)
   const [errors, setErrors] = useState<{ email?: string; pw?: string; general?: string }>({})
@@ -62,6 +70,18 @@ export default function Login() {
   const [captchaToken, setCaptchaToken] = useState<string | null>(null)
   const [captchaOpen, setCaptchaOpen] = useState(false)
   const handledOAuthError = useRef('')
+
+  useEffect(() => {
+    let active = true
+    void loadRememberedPassword().then((credential) => {
+      if (!active || !credential) return
+      setEmail((current) => current || credential.email)
+      setPw((current) => current || credential.password)
+    })
+    return () => {
+      active = false
+    }
+  }, [])
 
   // Surface a failed OAuth round-trip (the callback redirects here with
   // ?oauth_error=…), then strip the param so a refresh doesn't re-toast.
@@ -110,6 +130,7 @@ export default function Login() {
     const ok = await login(email, pw, loginCaptchaRequired ? token ?? undefined : undefined)
     setLoading(false)
     if (ok === '2fa') {
+      if (rememberPassword) void storeRememberedPassword(email, pw)
       // Password accepted; the 2FA code form now takes over.
       setErrors({})
       setCode('')
@@ -140,6 +161,7 @@ export default function Login() {
       setErrors({ general: authErrorText(t, err, t('errors.required')) })
       return
     }
+    if (rememberPassword) void storeRememberedPassword(email, pw)
     toast.success(t('login.welcome'), t('login.signingIn'))
     const from = safeRedirect((location.state as { from?: string } | null)?.from)
     navigate(from, { replace: true })
@@ -282,6 +304,7 @@ export default function Login() {
         <motion.form
           variants={stagger}
           className="flex flex-col gap-4"
+          autoComplete={rememberPassword ? 'on' : 'off'}
           onSubmit={(e) => void submit(e)}
         >
           {banned ? (
@@ -306,9 +329,10 @@ export default function Login() {
             <Field label={t('fields.email')} htmlFor="email" error={errors.email}>
               <Input
                 id="email"
+                name="email"
                 type="email"
                 value={email}
-                autoComplete="email"
+                autoComplete={rememberPassword ? 'email' : 'off'}
                 onChange={(e) => setEmail(e.target.value)}
                 leadingIcon={<Mail size={14} aria-hidden />}
                 placeholder={t('fields.emailPlaceholder')}
@@ -321,9 +345,10 @@ export default function Login() {
             <Field label={t('fields.password')} htmlFor="pw" error={errors.pw}>
               <Input
                 id="pw"
+                name="password"
                 type={showPw ? 'text' : 'password'}
                 value={pw}
-                autoComplete="current-password"
+                autoComplete={rememberPassword ? 'current-password' : 'off'}
                 onChange={(e) => setPw(e.target.value)}
                 leadingIcon={<Lock size={14} aria-hidden />}
                 invalid={!!errors.pw}
@@ -341,7 +366,18 @@ export default function Login() {
               />
             </Field>
           </motion.div>
-          <motion.div variants={fadeUp} className="text-right">
+          <motion.div variants={fadeUp} className="flex items-center justify-between gap-4">
+            <label className="inline-flex cursor-pointer select-none items-center gap-2 text-xs text-[var(--color-fg-muted)]">
+              <Checkbox
+                checked={rememberPassword}
+                onChange={(event) => {
+                  const remember = event.target.checked
+                  setRememberPassword(remember)
+                  setRememberPasswordPreference(remember)
+                }}
+              />
+              <span>{t('login.rememberPassword')}</span>
+            </label>
             <Link to="/forgot-password" className="text-xs text-[var(--color-accent)] hover:text-[var(--color-accent-hover)]">
               {t('login.forgot')}
             </Link>
