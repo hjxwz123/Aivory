@@ -413,7 +413,6 @@
     "previewFullscreen": "全画面",
     "previewExitFullscreen": "全画面を終了",
     "previewClose": "プレビューを閉じる",
-    "previewSandboxHint": "隔離されたサンドボックスでレンダリング — ページのスクリプトはあなたのデータにアクセスできません。",
     "mermaidFailed": "この図をレンダリングできませんでした — ソースを表示しています。"
   },
   "diagram": {

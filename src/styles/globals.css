@@ -570,17 +570,46 @@
   background-size: 160px 160px;
 }
 
-/* Inline split-panel enter (HTML preview drawer on desktop). Width appears
-   with the flex re-layout; the content glides in instead of jump-cutting. */
-@keyframes panel-in {
+/* The three mutually exclusive desktop chat panels share one quiet transition.
+   Width participates so the conversation column does not jump on open/close. */
+.chat-side-panel,
+.chat-side-panel-inner {
+  width: clamp(22rem, 34vw, 36rem);
+}
+
+.chat-side-panel[data-state='open'] {
+  animation: chat-side-panel-in 220ms var(--ease-out) both;
+}
+
+.chat-side-panel[data-state='closed'] {
+  animation: chat-side-panel-out 180ms var(--ease-in) both;
+}
+
+@keyframes chat-side-panel-in {
   from {
+    width: 0;
     opacity: 0;
-    transform: translateX(16px);
+    transform: translateX(12px);
   }
 
   to {
+    width: clamp(22rem, 34vw, 36rem);
     opacity: 1;
     transform: translateX(0);
+  }
+}
+
+@keyframes chat-side-panel-out {
+  from {
+    width: clamp(22rem, 34vw, 36rem);
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  to {
+    width: 0;
+    opacity: 0;
+    transform: translateX(12px);
   }
 }
 
