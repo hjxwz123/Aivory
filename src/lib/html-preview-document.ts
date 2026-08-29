@@ -1,12 +1,13 @@
+import tailwindBrowserUrl from '@tailwindcss/browser?url'
+
 const PREVIEW_RESOURCE_HEAD =
   '<meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">' +
   '<base target="_blank" rel="noopener noreferrer">'
 
-const TAILWIND_BROWSER_URL = 'https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.1.12'
-const TAILWIND_RUNTIME = `<script src="${TAILWIND_BROWSER_URL}"></script>`
+const TAILWIND_RUNTIME = `<script data-aivory-tailwind src="${tailwindBrowserUrl}"></script>`
 
 const CLASS_ATTRIBUTE = /\bclass\s*=\s*(["'])(.*?)\1/gis
-const EXISTING_TAILWIND = /cdn\.tailwindcss\.com|@tailwindcss\/browser|text\/tailwindcss|tailwind(?:css)?(?:\.config|[./-](?:min\.)?css)/i
+const EXISTING_TAILWIND = /data-aivory-tailwind|cdn\.tailwindcss\.com|@tailwindcss\/browser|text\/tailwindcss|tailwind(?:css)?(?:\.config|[./-](?:min\.)?css)/i
 const STANDALONE_UTILITY = /^(?:block|inline|inline-block|hidden|flex|inline-flex|grid|inline-grid|table|contents|flow-root|container|relative|absolute|fixed|sticky|grow|grow-0|shrink|shrink-0|truncate|italic|antialiased|uppercase|lowercase|capitalize|underline|overline|line-through|no-underline|transition|transform|appearance-none|sr-only|not-sr-only)$/
 const PREFIXED_UTILITY = /^(?:-?(?:m[trblxy]?|p[trblxy]?|inset(?:-[xy])?|top|right|bottom|left|gap(?:-[xy])?|space-[xy]|w|min-w|max-w|h|min-h|max-h|size|z|order|basis|translate-[xy]|rotate|scale|skew-[xy])-|(?:items|justify|content|self|place|grid|col|row|auto-cols|auto-rows|text|font|leading|tracking|whitespace|break|bg|from|via|to|border|rounded|shadow|ring|divide|outline|opacity|overflow|overscroll|object|fill|stroke|transition|duration|delay|ease|cursor|select|resize|pointer-events)-)/
 
