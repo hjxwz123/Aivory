@@ -682,7 +682,7 @@ export function AdminOnboardingTour({ open, onOpenChange, refreshKey, onSnapshot
 
         <div className="mt-4 grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-end gap-2">
           <Button
-            variant="ghost"
+            variant="secondary"
             size="sm"
             className="shrink-0 px-2"
             leadingIcon={<ArrowLeft size={14} aria-hidden />}
@@ -692,30 +692,24 @@ export function AdminOnboardingTour({ open, onOpenChange, refreshKey, onSnapshot
             {t('onboarding.tour.back')}
           </Button>
           <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
-            <Button className="shrink-0 px-2" variant="ghost" size="sm" onClick={() => { void dismiss() }} disabled={saving !== null}>
-              {onboarding.status === 'unseen' ? t('onboarding.tour.skip') : t('onboarding.tour.close')}
-            </Button>
-            {allRequiredReady && canAdvance ? (
-              <Button className="shrink-0 px-2" variant="secondary" size="sm" onClick={() => { void next() }} disabled={saving !== null} trailingIcon={<ArrowRight size={14} aria-hidden />}>
-                {t('onboarding.tour.next')}
+            {onboarding.status === 'unseen' ? (
+              <Button className="shrink-0 px-2" variant="ghost" size="sm" onClick={() => { void dismiss() }} disabled={saving !== null}>
+                {t('onboarding.tour.skip')}
               </Button>
             ) : null}
             <Button
               className="shrink-0 px-2"
+              variant={canAdvance ? 'secondary' : 'primary'}
               size="sm"
               onClick={() => {
-                if (!canAdvance) {
-                  void finish()
-                  return
-                }
-                if (allRequiredReady) void finish()
-                else void next()
+                if (canAdvance) void next()
+                else void finish()
               }}
               loading={saving !== null}
               disabled={saving !== null || (!canAdvance && !allRequiredReady)}
-              trailingIcon={canAdvance && !allRequiredReady ? <ArrowRight size={14} aria-hidden /> : undefined}
+              trailingIcon={canAdvance ? <ArrowRight size={14} aria-hidden /> : undefined}
             >
-              {!canAdvance || allRequiredReady ? t('onboarding.tour.finish') : t('onboarding.tour.next')}
+              {canAdvance ? t('onboarding.tour.next') : t('onboarding.tour.finish')}
             </Button>
           </div>
         </div>
