@@ -104,6 +104,7 @@ export default function ChatThread() {
   const positionedFor = useRef<string | null>(null)
   const [autoFollow, setAutoFollow] = useState(true)
   const [showJump, setShowJump] = useState(false)
+  const [conversationScrolled, setConversationScrolled] = useState(false)
 
   const [renaming, setRenaming] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -160,6 +161,7 @@ export default function ChatThread() {
     // snapping (the bottom-pin first-load path is for fresh opens, not jumps).
     setAutoFollow(!jumpTo)
     setShowJump(false)
+    setConversationScrolled(false)
     setOutlineOpen(false)
     positionedFor.current = jumpTo ? (id ?? null) : null
   }, [id, jumpTo])
@@ -207,8 +209,10 @@ export default function ChatThread() {
     const el = e.currentTarget
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
     const atBottom = distanceFromBottom < 80
+    const scrolled = el.scrollTop > 2
     setAutoFollow(atBottom)
     setShowJump(!atBottom && el.scrollHeight - el.clientHeight > 200)
+    setConversationScrolled((current) => (current === scrolled ? current : scrolled))
   }
 
   if (!conversation) {
@@ -593,6 +597,14 @@ export default function ChatThread() {
             <MessageList conversation={conversation} scrollToMessageId={jumpTo} jumpKey={jumpKey} />
           )}
         </div>
+        <div
+          aria-hidden
+          className={cn(
+            'pointer-events-none absolute inset-x-0 top-0 z-10 h-5 transition-opacity duration-150 motion-reduce:transition-none',
+            conversationScrolled ? 'opacity-100' : 'opacity-0',
+          )}
+          style={{ background: 'linear-gradient(to bottom, var(--color-bg), transparent)' }}
+        />
         <ConversationMinimap conversation={conversation} scrollContainerRef={scrollRef} />
       </div>
       <InlineThreadLayer conversationId={conversation.id} scrollRef={scrollRef} readOnly={isWorkspaceGuest} />

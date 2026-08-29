@@ -271,7 +271,7 @@
   --layout-sidebar-w-max: 25rem;
   /* desktop sidebar: 224 min / 280 default / 400 max */
   --layout-sidebar-w-collapsed: 3.5rem;
-  --layout-topbar-h: 3.5rem;
+  --layout-topbar-h: 3rem;
   --layout-composer-max-w: 50rem;
   --layout-content-max-w: 76rem;
   --layout-prose-max-w: 44rem;
