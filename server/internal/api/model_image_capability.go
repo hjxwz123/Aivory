@@ -239,9 +239,10 @@ func attachmentNormalizationErrorStatus(err error) int {
 	return http.StatusInternalServerError
 }
 
-// ensureImageAttachmentsSupported performs the pre-SSE image gate for a turn.
-// Its attachments must already have passed normalizeConversationAttachments;
-// therefore Kind and MimeType are server-owned, byte-signature-aware values.
+// ensureImageAttachmentsSupported is retained for callers that need to inspect
+// the effective model's native image capability. Message creation deliberately
+// does not call it: an image can be a sandbox-only input for a text model, and
+// rejecting it before persistence would lose the upload on refresh/retry.
 func ensureImageAttachmentsSupported(
 	ctx context.Context,
 	db *sql.DB,

@@ -62,7 +62,7 @@
       }
     },
     "imageUnsupported": "Le modèle actuel ne prend pas en charge les images. Choisissez un modèle compatible avec la vision.",
-    "imagesWillBeIgnored": "Ce modèle ne prend pas en charge les images. Les images de cette conversation seront ignorées.",
+    "imagesWillBeIgnored": "Ce modèle ne peut pas lire directement les images. Elles ne seront pas envoyées comme entrée visuelle, mais resteront disponibles dans le bac à sable de la conversation pour les outils.",
     "imageIgnoredNeedsText": "Ce modèle ne prend pas en charge les images : elles seront donc ignorées. Ajoutez du texte avant d'envoyer.",
     "imagePromptRequired": "Décrivez comment modifier l’image de référence.",
     "imagePromptOptimization": "Optimisation du prompt",

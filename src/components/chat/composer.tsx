@@ -89,9 +89,7 @@ import { ProgressRing } from '@/components/ui/progress-ring'
 import { SkillIcon } from '@/components/ui/skill-icon'
 import { envNum } from '@/lib/env-config'
 import {
-  filterFilesForImageCapability,
   isImageFileLike,
-  NON_IMAGE_ATTACHMENT_ACCEPT,
   resolveImageAttachmentCapability,
 } from '@/lib/vision-capability'
 import {
@@ -1397,7 +1395,10 @@ export function Composer({
     fast: effectiveFast,
     fastVision,
   })
-  const canAttachImages = imageAttachmentCapability === 'allowed'
+  // Uploading an image is independent from native provider vision support. A
+  // text-only model must still be able to receive the file as a durable
+  // conversation upload so python_execute/MCP tools can inspect or edit it;
+  // provider serialization decides whether the image bytes are inlined.
   // A fast turn resolves to the platform-selected model, while modelId stays on
   // the last advanced choice so switching back can restore it. Never surface or
   // submit that advanced model's parameter controls during the fast turn.
@@ -1456,7 +1457,7 @@ export function Composer({
   )
   const hasUnsupportedImageAttachment = useMemo(
     () =>
-      !canAttachImages &&
+      imageAttachmentCapability === 'blocked' &&
       attachments.some(
         (attachment) =>
           attachment.kind === 'image' ||
@@ -1467,7 +1468,7 @@ export function Composer({
             type: '',
           }),
       ),
-    [attachments, canAttachImages],
+    [attachments, imageAttachmentCapability],
   )
   const unsupportedImageNotifiedRef = useRef(false)
   useEffect(() => {
@@ -1479,27 +1480,10 @@ export function Composer({
     unsupportedImageNotifiedRef.current = true
     toast.warning(
       t('composer.imagesWillBeIgnored', {
-        defaultValue: 'This model doesn\'t support image input. Images in this conversation will be ignored.',
+        defaultValue: "This model can't read images directly. Images won't be sent as visual input, but remain available in the conversation sandbox for tools.",
       }),
     )
   }, [hasUnsupportedImageAttachment, t])
-  // §4.6 ignore, not block: when the model can't read images, image attachments
-  // on the draft are dropped from the request instead of erroring. Documents
-  // (pdf/doc/sheet/code) are never images and still travel as usual.
-  const sendableAttachments = useMemo(() => {
-    if (!hasUnsupportedImageAttachment) return attachments
-    return attachments.filter(
-      (attachment) =>
-        attachment.kind !== 'image' &&
-        !isImageFileLike({
-          name: attachment.name,
-          type: '',
-        }),
-    )
-  }, [attachments, hasUnsupportedImageAttachment])
-  // An image-only draft leaves nothing to send once the images are ignored —
-  // block it with a caption request instead of submitting an empty turn.
-  const ignoredImagesLeaveNothing = hasUnsupportedImageAttachment && value.trim().length === 0
   const voiceActive = recording || streamConnecting || transcribing || voiceStarting
   const canSubmit =
     hasSendableMessageContent(value, attachments, isImageMode) &&
@@ -1509,7 +1493,6 @@ export function Composer({
     !uploading &&
     !restoringAttachments &&
     !documentNotReady &&
-    !ignoredImagesLeaveNothing &&
     !imagePermissionDenied &&
     !selectedModelUnavailable &&
     !executingCurrentCommand
@@ -1553,16 +1536,6 @@ export function Composer({
       return
     }
     if (!hasSendableMessageContent(text, attachments, isImageMode)) return
-    if (ignoredImagesLeaveNothing) {
-      // The draft is only images, which the current model can't read. Ignoring
-      // them would leave an empty request, so ask for a caption instead.
-      toast.warning(
-        t('composer.imageIgnoredNeedsText', {
-          defaultValue: 'This model doesn\'t support image input, so the image will be ignored. Add some text before sending.',
-        }),
-      )
-      return
-    }
     if (text.length > MAX_LEN) {
       // Overflow fallback (multi-paste / dictation can pass the paste hook):
       // move the whole draft into a .txt attachment; the user adds a short
@@ -1593,7 +1566,11 @@ export function Composer({
       // Uploads happen on attach now (so parsing starts immediately and the send is
       // gated until 'ready'); by here every attachment is already a real backend id.
       const params = effectiveFast ? {} : filterVisibleParams(visibleParamControls, paramValues)
-      onSubmit(text, sendableAttachments, {
+      // Keep image attachments in the persisted turn even for text-only models.
+      // The server strips them only from provider-native input; retaining the
+      // file id is what lets sandbox tools access the original bytes and lets a
+      // refreshed conversation restore the branch faithfully.
+      onSubmit(text, attachments, {
         mode: effectiveMode === 'default' ? undefined : effectiveMode,
         params: Object.keys(params).length > 0 ? params : undefined,
         imageStyleId: isImageMode && imageStyleId ? imageStyleId : undefined,
@@ -1902,16 +1879,10 @@ export function Composer({
       toast.error(t('composer.permissions.fileUpload', { defaultValue: 'Your user group cannot upload files.' }))
       return 0
     }
-    const filtered = filterFilesForImageCapability(Array.from(files), imageAttachmentCapability)
-    if (filtered.rejectedImages.length > 0) {
-      toast.error(
-        t('composer.imageUnsupported', {
-          defaultValue: 'The current model does not support image input. Choose a vision-capable model.',
-        }),
-        filtered.rejectedImages.map((file) => file.name).join(', '),
-      )
-    }
-    const all = filtered.accepted
+    // Do not reject images here. They are uploaded as conversation files even
+    // when the active model lacks vision, then omitted from the provider input
+    // while remaining available to sandbox/tool calls.
+    const all = Array.from(files)
     if (!all.length) return 0
     // A local preview is the acknowledgement for paste / picker / drop. Add it
     // before any network work so a cold upload-policy request cannot leave the
@@ -3265,7 +3236,6 @@ export function Composer({
             ref={fileRef}
             hidden
             multiple
-            accept={canAttachImages ? undefined : NON_IMAGE_ATTACHMENT_ACCEPT}
             onChange={(e) => {
               void handleAttach(e.currentTarget.files)
               e.currentTarget.value = ''
@@ -3355,7 +3325,7 @@ export function Composer({
                     <Sigma size={18} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden />
                     {t('composer.formula.action')}
                   </button>
-                  {canUploadFiles && canAttachImages ? (
+                  {canUploadFiles ? (
                     <button
                       type="button"
                       onClick={() => {
@@ -3494,7 +3464,7 @@ export function Composer({
               </button>
             </Tooltip>
 
-            {canUploadFiles && canAttachImages ? (
+            {canUploadFiles ? (
               <Tooltip content={t('composer.addImage')}>
                 <button
                   type="button"

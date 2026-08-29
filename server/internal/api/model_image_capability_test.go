@@ -133,12 +133,15 @@ func TestEnsureImageAttachmentsSupportedUsesNormalizedServerMetadata(t *testing.
 	}
 }
 
-func TestValidateTurnContentAllowsOnlyVisionChatWithoutText(t *testing.T) {
+func TestValidateTurnContentAllowsImageOnlyTurnsForChatAndRequiresPromptForImageModel(t *testing.T) {
 	fx := seedImageCapabilityFixture(t)
 	image := []llm.Attachment{{ID: "f_image", Filename: "photo.png", Kind: "image", MimeType: "image/png"}}
 
 	if err := validateTurnContent(context.Background(), fx.deps.DB, fx.conv, "m_vision", false, "", image); err != nil {
 		t.Fatalf("vision chat rejected image-only turn: %v", err)
+	}
+	if err := validateTurnContent(context.Background(), fx.deps.DB, fx.conv, "m_plain", false, "", image); err != nil {
+		t.Fatalf("text-only chat rejected sandbox image-only turn: %v", err)
 	}
 	if err := validateTurnContent(context.Background(), fx.deps.DB, fx.conv, "m_image", false, "", image); !errors.Is(err, errImagePromptRequired) {
 		t.Fatalf("image model error = %v, want image prompt required", err)
@@ -263,17 +266,21 @@ func TestUploadDetectsImageBytesBehindTextFilenameBeforeDisk(t *testing.T) {
 	fx := seedImageCapabilityFixture(t)
 	png := append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 32)...)
 
-	rejected := httptest.NewRecorder()
+	acceptedOnTextModel := httptest.NewRecorder()
 	uploadFileHandler(
 		fx.deps,
-		rejected,
+		acceptedOnTextModel,
 		uploadRequestWithFile(t, "/api/files?conversation_id=c1&model_id=m_plain&fast=0", fx.user, "notes.txt", png),
 	)
-	if rejected.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("disguised image status=%d body=%s, want 422", rejected.Code, rejected.Body.String())
+	if acceptedOnTextModel.Code != http.StatusCreated {
+		t.Fatalf("disguised image status=%d body=%s, want 201", acceptedOnTextModel.Code, acceptedOnTextModel.Body.String())
 	}
-	if _, err := os.Stat(filepath.Join(fx.uploadDir, fx.user.ID)); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("rejected disguised image created upload directory: %v", err)
+	var textModelFile store.File
+	if err := json.Unmarshal(acceptedOnTextModel.Body.Bytes(), &textModelFile); err != nil {
+		t.Fatalf("decode text-model upload: %v", err)
+	}
+	if textModelFile.Kind != "image" || textModelFile.MimeType != "image/png" {
+		t.Fatalf("text-model upload classification=%q/%q, want image/image/png", textModelFile.Kind, textModelFile.MimeType)
 	}
 
 	accepted := httptest.NewRecorder()
@@ -294,7 +301,7 @@ func TestUploadDetectsImageBytesBehindTextFilenameBeforeDisk(t *testing.T) {
 	}
 }
 
-func TestUploadImageRequiresConversationAndCapableEffectiveModelBeforeDisk(t *testing.T) {
+func TestUploadImageRequiresConversationButNotModelCapability(t *testing.T) {
 	fx := seedImageCapabilityFixture(t)
 
 	for _, tc := range []struct {
@@ -304,7 +311,7 @@ func TestUploadImageRequiresConversationAndCapableEffectiveModelBeforeDisk(t *te
 		wantError  string
 	}{
 		{name: "no conversation scope", target: "/api/files", wantStatus: http.StatusBadRequest, wantError: "conversation_id is required"},
-		{name: "conversation non-vision model", target: "/api/files?conversation_id=c1", wantStatus: http.StatusUnprocessableEntity, wantError: "does not support image input"},
+		{name: "conversation non-vision model", target: "/api/files?conversation_id=c1", wantStatus: http.StatusCreated},
 		{name: "explicit vision model", target: "/api/files?conversation_id=c1&model_id=m_vision&fast=false", wantStatus: http.StatusCreated},
 		{name: "explicit image model", target: "/api/files?conversation_id=c1&model_id=m_image&fast=0", wantStatus: http.StatusCreated},
 		{name: "hidden fast vision model", target: "/api/files?conversation_id=c1&model_id=m_plain&fast=true", wantStatus: http.StatusCreated},
@@ -325,39 +332,10 @@ func TestUploadImageRequiresConversationAndCapableEffectiveModelBeforeDisk(t *te
 	if err != nil {
 		t.Fatalf("read upload dir: %v", err)
 	}
-	// Only the three accepted requests may have created files. The two rejected
-	// requests ran before uploadDestPath/os.Create.
-	if len(entries) != 3 {
-		t.Fatalf("upload dir contains %d files, want 3 accepted uploads only", len(entries))
-	}
-}
-
-func TestPostMessageRejectsServerImageForNonVisionBeforeSSE(t *testing.T) {
-	fx := seedImageCapabilityFixture(t)
-	db := fx.deps.DB
-	mustExec(t, db, `INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,storage_path,kind)
-		VALUES('f_image','u1','c1','photo.png','image/png',10,'/tmp/photo.png','image')`)
-	body := `{"text":"inspect this","model_id":"m_plain","attachments":[{"id":"f_image","filename":"notes.txt","mime_type":"text/plain","kind":"other"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/api/conversations/c1/messages", strings.NewReader(body))
-	ctx := context.WithValue(req.Context(), userCtxKey{}, fx.user)
-	ctx = context.WithValue(ctx, pathCtxKey{}, map[string]string{"id": "c1"})
-	req = req.WithContext(ctx)
-	rec := httptest.NewRecorder()
-
-	postMessageHandler(Deps{DB: db}, rec, req)
-
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("status=%d body=%s, want 422", rec.Code, rec.Body.String())
-	}
-	if !strings.HasPrefix(rec.Header().Get("Content-Type"), "application/json") {
-		t.Fatalf("content type=%q, SSE opened before rejection", rec.Header().Get("Content-Type"))
-	}
-	if !strings.Contains(rec.Body.String(), errImageInputUnsupported.Error()) {
-		t.Fatalf("body=%s, want clear image capability error", rec.Body.String())
-	}
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM messages WHERE conversation_id='c1'`).Scan(&count); err != nil || count != 0 {
-		t.Fatalf("rejected turn persisted %d messages, err=%v", count, err)
+	// All four scoped uploads are accepted because capability is enforced when
+	// building provider input, not when persisting the conversation file.
+	if len(entries) != 4 {
+		t.Fatalf("upload dir contains %d files, want 4 accepted uploads", len(entries))
 	}
 }
 
