@@ -893,6 +893,12 @@
       "defaultProviderRequired": "Select the default provider used for automatic redirect.",
       "adminIdentityRequired": "The current administrator is not linked to the required provider. The policy was not saved to prevent a lockout."
     },
+    "modelPolicy": {
+      "unavailable": "Choose an enabled chat model whose channel is also enabled.",
+      "stale": "One or more saved policy models are unavailable. Replace them with an enabled model, inherit the conversation model, or select none.",
+      "empty": "No chat model is available for model policies. Enable a chat model and its channel first.",
+      "unavailableOption": "Unavailable"
+    },
     "fields": {
       "settlementCurrency": "Settlement currency",
       "settlementCurrencyHint": "Three-letter ISO 4217 code used for group and permanent-credit prices. Changing it does not convert existing prices.",

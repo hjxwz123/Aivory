@@ -893,6 +893,12 @@
       "defaultProviderRequired": "請選擇自動跳轉使用的預設身分來源。",
       "adminIdentityRequired": "目前管理員尚未綁定所需身分來源，為避免鎖定後台，未儲存此政策。"
     },
+    "modelPolicy": {
+      "unavailable": "請選擇已啟用且所屬渠道也已啟用的聊天模型。",
+      "stale": "部分已儲存的模型策略目前不可用。請改用可用模型，或選擇沿用目前對話模型／不使用。",
+      "empty": "目前沒有可用於模型策略的聊天模型，請先啟用聊天模型及其所屬渠道。",
+      "unavailableOption": "不可用"
+    },
     "fields": {
       "settlementCurrency": "結算貨幣",
       "settlementCurrencyHint": "使用者組與永久積分價格使用的三位 ISO 4217 貨幣代碼。修改後不會自動換算現有價格。",

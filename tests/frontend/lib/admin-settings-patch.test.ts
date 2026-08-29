@@ -56,6 +56,10 @@ describe('changedAdminSettings', () => {
     for (const [locale, messages] of Object.entries(locales)) {
       expect(messages.admin.settings.authPolicy.autoProvisionHint, `${locale} OAuth hint`).toBeTruthy()
       expect(messages.admin.settings.fields.signupOpenHint, `${locale} direct signup hint`).toBeTruthy()
+      expect(messages.admin.settings.modelPolicy.unavailable, `${locale} unavailable model error`).toBeTruthy()
+      expect(messages.admin.settings.modelPolicy.stale, `${locale} stale model warning`).toBeTruthy()
+      expect(messages.admin.settings.modelPolicy.empty, `${locale} empty model policy`).toBeTruthy()
+      expect(messages.admin.settings.modelPolicy.unavailableOption, `${locale} unavailable option`).toBeTruthy()
       expect(messages.auth.register.passwordSignupClosed, `${locale} closed signup message`).toBeTruthy()
     }
   })

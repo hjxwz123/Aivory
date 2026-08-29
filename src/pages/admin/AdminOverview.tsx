@@ -25,6 +25,7 @@ import { useLanguage } from '@/store/language'
 interface OverviewData {
   settings: Record<string, unknown>
   channelCount: number
+  enabledChannelCount: number
   modelIds: Set<string>
   modelCount: number
   groupCount: number
@@ -65,10 +66,16 @@ export default function AdminOverview() {
         adminApi.paymentMethods(),
         adminApi.users('', 1, 0),
       ])
+      const enabledChannelIDs = new Set(channels.filter((channel) => channel.enabled).map((channel) => channel.id))
       const overview: OverviewData = {
         settings,
         channelCount: channels.length,
-        modelIds: new Set(models.map((model) => model.id)),
+        enabledChannelCount: enabledChannelIDs.size,
+        modelIds: new Set(
+          models
+            .filter((model) => model.kind === 'chat' && model.enabled && enabledChannelIDs.has(model.channel_id))
+            .map((model) => model.id),
+        ),
         modelCount: models.length,
         groupCount: groups.length,
         paymentChannelCount: paymentChannels.length,
@@ -113,7 +120,7 @@ export default function AdminOverview() {
       ok: health.channelReady,
       label: t('admin:overview.checks.channels', { defaultValue: 'Upstream channel' }),
       detail: health.channelReady
-        ? t('admin:overview.checks.channelsReady', { defaultValue: '{{count}} channel(s) configured', count: data.channelCount })
+        ? t('admin:overview.checks.channelsReady', { defaultValue: '{{count}} channel(s) configured', count: data.enabledChannelCount })
         : t('admin:overview.checks.channelsMissing', { defaultValue: 'Create a channel before adding usable models.' }),
       to: '/admin/channels',
     },

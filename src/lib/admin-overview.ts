@@ -1,6 +1,6 @@
 export interface AdminOverviewHealthInput {
   settings: Record<string, unknown>
-  channelCount: number
+  enabledChannelCount: number
   modelIds: ReadonlySet<string>
   paymentChannelCount: number
   paymentMethodCount: number
@@ -28,7 +28,7 @@ export function getOverviewHealth(data: AdminOverviewHealthInput) {
         readString(data.settings, 'storage_aliyun_access_key_secret'),
       ))
 
-  const channelReady = data.channelCount > 0
+  const channelReady = data.enabledChannelCount > 0
   const defaultModelReady = Boolean(defaultModel && data.modelIds.has(defaultModel))
   const taskModelInherited = taskModel === ''
   const taskModelReady = taskModelInherited || data.modelIds.has(taskModel)

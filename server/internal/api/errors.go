@@ -67,6 +67,11 @@ var (
 	// model. Stable machine code — admin UI maps it to a localized notice.
 	errEmbeddingModelInUse = errors.New("embedding_model_in_use")
 
+	// Admin model policies may only reference chat models that can serve a new
+	// request. Stable machine code so the settings UI can explain stale or
+	// concurrently-disabled selections without exposing database details.
+	errModelPolicyModelUnavailable = errors.New("model_policy_model_unavailable")
+
 	// Auth-flow error codes (login/register/forgot-reset/2FA-login/first-run
 	// setup/OAuth signup). Stable machine codes — every one has a matching
 	// src/i18n/*/auth.json `errorCodes.*` key so the client localizes it instead

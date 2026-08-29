@@ -1,13 +1,20 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { TriangleAlert } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
-import type { ApiModel } from '@/api/types'
+import type { ApiChannel, ApiModel } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Field } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/hooks/use-toast'
 import { PanelFallback } from '@/components/ui/panel-fallback'
+import { changedAdminSettings } from '@/lib/admin-settings-patch'
+import {
+  availablePolicyModels,
+  modelPolicyErrorText,
+  unavailablePolicyModelIDs,
+} from '@/lib/admin-model-policy'
 
 type Settings = Record<string, unknown>
 
@@ -23,15 +30,19 @@ const OWNED_KEYS = [
 export default function AdminModelPolicy() {
   const { t } = useTranslation(['admin', 'common'])
   const [models, setModels] = useState<ApiModel[]>([])
+  const [channels, setChannels] = useState<ApiChannel[]>([])
   const [draft, setDraft] = useState<Settings>({})
+  const [savedSettings, setSavedSettings] = useState<Settings>({})
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    Promise.all([adminApi.settings(), adminApi.models('chat')])
-      .then(([settings, chatModels]) => {
+    Promise.all([adminApi.settings(), adminApi.models('chat'), adminApi.channels()])
+      .then(([settings, chatModels, nextChannels]) => {
         setDraft(settings)
+        setSavedSettings(settings)
         setModels(chatModels)
+        setChannels(nextChannels)
       })
       .catch((error) => toast.error(error instanceof ApiError ? error.message : t('admin:common.failed')))
       .finally(() => setLoading(false))
@@ -47,16 +58,19 @@ export default function AdminModelPolicy() {
   }
 
   async function save() {
+    const patch = changedAdminSettings(draft, savedSettings, OWNED_KEYS)
+    if (Object.keys(patch).length === 0) {
+      toast.success(t('admin:settings.saved'))
+      return
+    }
     setSaving(true)
     try {
-      const patch: Settings = {}
-      for (const key of OWNED_KEYS) {
-        if (key in draft) patch[key] = draft[key]
-      }
-      await adminApi.updateSettings(patch)
+      const updated = await adminApi.updateSettings(patch)
+      setDraft(updated)
+      setSavedSettings(updated)
       toast.success(t('admin:settings.saved'))
     } catch (error) {
-      toast.error(error instanceof ApiError ? error.message : t('admin:common.failed'))
+      toast.error(modelPolicyErrorText(t, error) || (error instanceof ApiError ? error.message : t('admin:common.failed')))
     } finally {
       setSaving(false)
     }
@@ -64,6 +78,8 @@ export default function AdminModelPolicy() {
 
   const fallbackModelId = readString('fallback_model_id')
   const taskModelId = readString('task_model_id')
+  const selectableModels = availablePolicyModels(models, channels)
+  const unavailableModelIDs = unavailablePolicyModelIDs(draft, selectableModels)
 
   return (
     <div className="mx-auto max-w-[76rem]">
@@ -77,6 +93,24 @@ export default function AdminModelPolicy() {
         <PanelFallback />
       ) : (
         <section className="mt-8 flex flex-col gap-5">
+          {unavailableModelIDs.length > 0 ? (
+            <div
+              role="alert"
+              className="flex items-start gap-2.5 rounded-[8px] bg-[var(--color-warning-soft)] px-3.5 py-3 text-sm leading-relaxed text-[var(--color-warning)]"
+            >
+              <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+              <span>{t('admin:settings.modelPolicy.stale')}</span>
+            </div>
+          ) : null}
+          {selectableModels.length === 0 ? (
+            <div
+              role="status"
+              className="rounded-[8px] bg-[var(--color-bg-muted)] px-3.5 py-3 text-sm leading-relaxed text-[var(--color-fg-muted)]"
+            >
+              {t('admin:settings.modelPolicy.empty')}
+            </div>
+          ) : null}
+
           <Field label={t('admin:settings.fields.defaultModel')} htmlFor="default-model">
             <Select
               value={readString('default_model_id')}
@@ -86,11 +120,12 @@ export default function AdminModelPolicy() {
                 <SelectValue placeholder={t('admin:settings.fields.pickModel')} />
               </SelectTrigger>
               <SelectContent>
-                {models.map((model) => (
-                  <SelectItem key={model.id} value={model.id}>
-                    {model.label}
-                  </SelectItem>
-                ))}
+                <PolicyModelOptions
+                  currentId={readString('default_model_id')}
+                  models={models}
+                  selectableModels={selectableModels}
+                  unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
+                />
               </SelectContent>
             </Select>
           </Field>
@@ -111,11 +146,12 @@ export default function AdminModelPolicy() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="inherit">{t('admin:settings.fields.currentConversationModel')}</SelectItem>
-                {models.map((model) => (
-                  <SelectItem key={model.id} value={model.id}>
-                    {model.label}
-                  </SelectItem>
-                ))}
+                <PolicyModelOptions
+                  currentId={taskModelId}
+                  models={models}
+                  selectableModels={selectableModels}
+                  unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
+                />
               </SelectContent>
             </Select>
           </Field>
@@ -136,11 +172,12 @@ export default function AdminModelPolicy() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="inherit">{t('admin:settings.fields.currentConversationModel')}</SelectItem>
-                {models.map((model) => (
-                  <SelectItem key={model.id} value={model.id}>
-                    {model.label}
-                  </SelectItem>
-                ))}
+                <PolicyModelOptions
+                  currentId={readString('tool_route_model_id')}
+                  models={models}
+                  selectableModels={selectableModels}
+                  unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
+                />
               </SelectContent>
             </Select>
           </Field>
@@ -161,11 +198,12 @@ export default function AdminModelPolicy() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">{t('admin:settings.fields.fallbackNone')}</SelectItem>
-                {models.map((model) => (
-                  <SelectItem key={model.id} value={model.id}>
-                    {model.label}
-                  </SelectItem>
-                ))}
+                <PolicyModelOptions
+                  currentId={readString('verify_model_id')}
+                  models={models}
+                  selectableModels={selectableModels}
+                  unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
+                />
               </SelectContent>
             </Select>
           </Field>
@@ -187,11 +225,12 @@ export default function AdminModelPolicy() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">{t('admin:settings.fields.fallbackNone')}</SelectItem>
-                  {models.map((model) => (
-                    <SelectItem key={model.id} value={model.id}>
-                      {model.label}
-                    </SelectItem>
-                  ))}
+                  <PolicyModelOptions
+                    currentId={fallbackModelId}
+                    models={models}
+                    selectableModels={selectableModels}
+                    unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
+                  />
                 </SelectContent>
               </Select>
             </Field>
@@ -226,5 +265,37 @@ export default function AdminModelPolicy() {
         </section>
       )}
     </div>
+  )
+}
+
+function PolicyModelOptions({
+  currentId,
+  models,
+  selectableModels,
+  unavailableLabel,
+}: {
+  currentId: string
+  models: ApiModel[]
+  selectableModels: ApiModel[]
+  unavailableLabel: string
+}) {
+  const selectableIDs = new Set(selectableModels.map((model) => model.id))
+  const unavailableCurrent = currentId && !selectableIDs.has(currentId)
+    ? models.find((model) => model.id === currentId)
+    : undefined
+
+  return (
+    <>
+      {currentId && !selectableIDs.has(currentId) ? (
+        <SelectItem value={currentId} disabled>
+          {unavailableCurrent?.label ?? currentId} ({unavailableLabel})
+        </SelectItem>
+      ) : null}
+      {selectableModels.map((model) => (
+        <SelectItem key={model.id} value={model.id}>
+          {model.label}
+        </SelectItem>
+      ))}
+    </>
   )
 }
