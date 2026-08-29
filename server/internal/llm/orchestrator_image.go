@@ -88,12 +88,14 @@ func (o *Orchestrator) runImageTurn(
 	// so resolveImageModel uses exactly it.
 	imageGenerationCount = ClampImageGenerationCount(imageGenerationCount)
 	toolPayload := map[string]any{
-		"prompt":           imagePlan.Prompt,
-		"action":           imagePlan.Action,
-		"base_image":       imagePlan.BaseImage,
-		"base_image_index": imagePlan.BaseImageIndex,
-		"n":                imageGenerationCount,
-		"input_images":     inputImageIDs,
+		"prompt":       imagePlan.Prompt,
+		"action":       imagePlan.Action,
+		"base_image":   imagePlan.BaseImage,
+		"n":            imageGenerationCount,
+		"input_images": inputImageIDs,
+	}
+	if imagePlan.BaseImageIndex > 0 {
+		toolPayload["base_image_index"] = imagePlan.BaseImageIndex
 	}
 	if configuredSize, ok := imageRequestParams["size"].(string); ok && strings.TrimSpace(configuredSize) != "" {
 		toolPayload["size"] = strings.TrimSpace(configuredSize)

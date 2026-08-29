@@ -101,8 +101,6 @@ func shouldReplayNativeToolHistory(fast bool, toolMode string, localToolCount in
 	return !fast && toolMode == "native" && (localToolCount > 0 || hostedTools)
 }
 
-const fastModeCodeHistoryPlaceholder = "[A previous code-analysis step was omitted in Fast mode.]"
-
 const unsupportedToolHistoryPlaceholder = "[A previous tool step was omitted because this model does not support that tool.]"
 
 // stripRetiredKnowledgeSearchToolBlocks removes persisted calls from the former
@@ -181,56 +179,6 @@ func stripDisallowedBuiltinToolBlocks(history []UnifiedMessage, allowed map[stri
 		}
 		filtered.Attachments = append([]Attachment(nil), message.Attachments...)
 		out[index] = filtered
-	}
-	return out
-}
-
-// stripFastModeCodeBlocks removes canonical history for code tools that fast
-// mode does not offer. Raw replay is disabled by the caller before conversion,
-// so this provider-neutral block filter covers OpenAI Chat/Responses, Anthropic,
-// Gemini, and any fallback request built from the resulting unified history.
-func stripFastModeCodeBlocks(history []UnifiedMessage) []UnifiedMessage {
-	deniedNames := map[string]bool{
-		"python_execute":   true,
-		"code_interpreter": true,
-	}
-	deniedIDs := map[string]bool{}
-	for _, message := range history {
-		for _, block := range message.Blocks {
-			if block.Kind == "tool_call" && deniedNames[strings.ToLower(strings.TrimSpace(block.ToolName))] && block.ToolID != "" {
-				deniedIDs[block.ToolID] = true
-			}
-		}
-	}
-
-	out := make([]UnifiedMessage, len(history))
-	for i, message := range history {
-		filtered := message
-		if isPromptToolRawEnvelope(message.Raw) {
-			filtered.Raw = filterPromptToolRawEnvelope(message.Raw, func(name string) bool {
-				return !deniedNames[strings.ToLower(strings.TrimSpace(name))]
-			})
-		} else {
-			filtered.Raw = nil
-		}
-		if message.Blocks != nil {
-			filtered.Blocks = make([]UnifiedBlock, 0, len(message.Blocks))
-		}
-		affected := false
-		for _, block := range message.Blocks {
-			nameDenied := deniedNames[strings.ToLower(strings.TrimSpace(block.ToolName))]
-			linkedOutput := block.Kind == "tool_output" && block.ToolID != "" && deniedIDs[block.ToolID]
-			if (block.Kind == "tool_call" || block.Kind == "tool_output") && (nameDenied || linkedOutput) {
-				affected = true
-				continue
-			}
-			filtered.Blocks = append(filtered.Blocks, cloneUnifiedBlock(block))
-		}
-		if affected && strings.TrimSpace(renderBlocksAsText(filtered.Blocks)) == "" {
-			filtered.Blocks = append(filtered.Blocks, UnifiedBlock{Kind: "text", Text: fastModeCodeHistoryPlaceholder})
-		}
-		filtered.Attachments = append([]Attachment(nil), message.Attachments...)
-		out[i] = filtered
 	}
 	return out
 }

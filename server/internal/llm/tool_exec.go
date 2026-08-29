@@ -529,6 +529,8 @@ func canonicalToolInput(name string, input []byte) []byte {
 			return canonicalSearchInput(object)
 		case "web_fetch":
 			return canonicalFetchInput(object)
+		case "image_generate":
+			return canonicalImageGenerateInput(object)
 		}
 	}
 	canonical, err := json.Marshal(normalizeJSONValue(value))
@@ -536,6 +538,21 @@ func canonicalToolInput(name string, input []byte) []byte {
 		return bytes.TrimSpace(input)
 	}
 	return canonical
+}
+
+func canonicalImageGenerateInput(object map[string]any) []byte {
+	canonical, _ := normalizeJSONValue(object).(map[string]any)
+	action, _ := canonical["action"].(string)
+	baseImage, _ := canonical["base_image"].(string)
+	action = strings.ToLower(strings.TrimSpace(action))
+	baseImage = strings.ToLower(strings.TrimSpace(baseImage))
+	canonical["action"] = action
+	canonical["base_image"] = baseImage
+	if action == "generate" || (action == "edit" && baseImage == "previous_generation") {
+		delete(canonical, "base_image_index")
+	}
+	encoded, _ := json.Marshal(canonical)
+	return encoded
 }
 
 func canonicalSearchInput(object map[string]any) []byte {

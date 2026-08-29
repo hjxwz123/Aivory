@@ -153,9 +153,9 @@ func TestImageCommonOperationsUseExpectedMockedRequests(t *testing.T) {
 		wantCount        int
 	}{
 		{
-			name: "generate a new image ignores old and uploaded images", withPrevious: true,
+			name: "generate ignores a stale base index plus old and uploaded images", withPrevious: true,
 			inputIDs:   []string{"common_landscape"},
-			toolInput:  `{"prompt":"生成一个全新的简洁产品图","action":"generate","base_image":"none"}`,
+			toolInput:  `{"prompt":"生成一个全新的简洁产品图","action":"generate","base_image":"none","base_image_index":1}`,
 			userPrompt: "生成一个全新的简洁产品图", wantPath: "/v1/images/generations",
 			wantPrompt: "生成一个全新的简洁产品图", wantSize: "2048x2048", wantCount: 1,
 		},
@@ -306,7 +306,6 @@ func TestImageCommonInvalidOperationsStopBeforeProvider(t *testing.T) {
 		{name: "empty prompt", toolInput: `{"prompt":" ","action":"generate","base_image":"none"}`, wantError: "prompt required"},
 		{name: "missing action", toolInput: `{"prompt":"draw","base_image":"none"}`, wantError: "action must be generate or edit"},
 		{name: "generation cannot select a previous base", withPrevious: true, toolInput: `{"prompt":"draw","action":"generate","base_image":"previous_generation"}`, wantError: "requires base_image=none"},
-		{name: "generation cannot include an attachment index", toolInput: `{"prompt":"draw","action":"generate","base_image":"none","base_image_index":1}`, wantError: "must not set base_image_index"},
 		{name: "edit must select a base", toolInput: `{"prompt":"edit","action":"edit","base_image":"none"}`, wantError: "Please specify whether to edit"},
 		{name: "current attachment edit needs an upload", toolInput: `{"prompt":"edit","action":"edit","base_image":"current_attachment","base_image_index":1}`, wantError: "no current-turn image attachment"},
 		{name: "multiple uploads need a valid index", inputIDs: []string{"common_landscape", "common_portrait"}, toolInput: `{"prompt":"edit","action":"edit","base_image":"current_attachment"}`, wantError: "must select one of the 2"},

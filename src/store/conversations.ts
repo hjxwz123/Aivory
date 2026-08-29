@@ -355,7 +355,7 @@ interface ConversationStore {
     /** Explicit candidate subset; undefined means every available tool. */
     selectedToolIds?: string[]
     /** §fast-mode: run this turn in fast mode (model resolved server-side + masked;
-     *  verify/DR forced off; fixed enabled policy, quartered budget, no Python). */
+     *  verify/DR forced off; local tools use independent budgets, hosted tools remain configured). */
     fast?: boolean
     /** Home "instant send": the conversation is an OPTIMISTIC local placeholder
      *  (temp id) — create the real one server-side FIRST, re-key the cache to

@@ -274,13 +274,16 @@ type ToolContext struct {
 	WorkspaceAccessCheck func(context.Context) error
 	// DeepResearch raises the per-turn tool budgets (deep_research.go).
 	DeepResearch bool
-	// Fast quarters the per-turn tool budgets and withholds python_execute
-	// entirely (§fast-mode) — fast turns trade tool depth for speed.
+	// Fast uses independently configured per-turn tool budgets (§fast-mode).
+	// A fast limit of zero withholds that tool from the model entirely.
 	Fast bool
 	// BuiltinTools is the model's resolved local-tool default selection. nil means
 	// all registered tools; a non-nil empty map means no local tool is selected by
 	// default. Global and user-group ceilings are applied separately.
 	BuiltinTools map[string]bool
+	// SystemTools is the subset of declared local Functions implemented by Aivory.
+	// A non-nil map keeps MCP calls outside per-tool, total-call, and time budgets.
+	SystemTools map[string]bool
 	// AdminSkillIDs is the user-group ceiling for administrator-managed skills.
 	// nil permits every model-bound skill; a non-nil map permits only listed IDs.
 	AdminSkillIDs map[string]bool
@@ -400,6 +403,10 @@ func (tc *ToolContext) AllowsBuiltinTool(name string) bool {
 	return tc.BuiltinTools[name]
 }
 
+func (tc *ToolContext) isSystemTool(name string) bool {
+	return tc == nil || tc.SystemTools == nil || tc.SystemTools[name]
+}
+
 // AllowsAdminSkill is the final execution and asset-staging boundary for an
 // administrator-managed skill. Model bindings and this group ceiling must both
 // allow a skill before its instructions or files can be loaded.
@@ -471,36 +478,39 @@ var deepResearchToolLimits = map[string]int{
 var (
 	maxToolCallsPerTurn     = envcfg.Int("AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN", 48)
 	maxToolCallsPerTurnDeep = envcfg.Int("AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN_DEEP", 150)
+	maxToolCallsPerTurnFast = configuredFastMaxToolCallsPerTurn()
 	maxToolTimePerTurn      = envcfg.Dur("AIVORY_LLM_MAX_TOOL_TIME_PER_TURN", 15*time.Minute)
 	maxToolTimePerTurnDeep  = envcfg.Dur("AIVORY_LLM_MAX_TOOL_TIME_PER_TURN_DEEP", 4*time.Minute)
 	maxToolTimePerTurnFast  = envcfg.Dur("AIVORY_LLM_MAX_TOOL_TIME_PER_TURN_FAST", 3*time.Minute)
 )
 
-// §fast-mode budgets: each tool's per-turn cap is a QUARTER of normal (min 1 for
-// an available tool), python_execute is dropped entirely (never in the map, so
-// charge() also blocks it), and the global ceiling is quartered too. Derived from
-// perTurnToolLimits so operator env overrides on the base caps still propagate.
-var fastToolLimits = func() map[string]int {
-	m := make(map[string]int, len(perTurnToolLimits))
-	for k, v := range perTurnToolLimits {
-		if k == "python_execute" {
-			continue // withheld in fast mode
-		}
-		q := v / 4
-		if q < 1 {
-			q = 1
-		}
-		m[k] = q
-	}
-	return m
-}()
+// §fast-mode budgets are independent from normal-mode settings. Zero hides a
+// local system tool; a positive value exposes it and caps calls per message.
+var fastToolLimits = configuredFastToolLimits()
 
-var maxToolCallsPerTurnFast = func() int {
-	if q := maxToolCallsPerTurn / 4; q >= 1 {
-		return q
+func configuredFastToolLimits() map[string]int {
+	return map[string]int{
+		toolnames.AivoryWebSearch: envcfg.Int("AIVORY_LLM_FAST_TOOL_LIMITS_WEB_SEARCH", 4),
+		"web_fetch":               envcfg.Int("AIVORY_LLM_FAST_TOOL_LIMITS_WEB_FETCH", 3),
+		"fetch_image":             envcfg.Int("AIVORY_LLM_FAST_TOOL_LIMITS_FETCH_IMAGE", 0),
+		"image_generate":          envcfg.Int("AIVORY_LLM_FAST_TOOL_LIMITS_IMAGE_GENERATE", 2),
+		"python_execute":          envcfg.Int("AIVORY_LLM_FAST_TOOL_LIMITS_PYTHON_EXECUTE", 0),
 	}
-	return 1
-}()
+}
+
+func configuredFastMaxToolCallsPerTurn() int {
+	return envcfg.Int("AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN_FAST", 12)
+}
+
+func fastModeDisabledToolSet() map[string]bool {
+	disabled := make(map[string]bool)
+	for name, limit := range fastToolLimits {
+		if limit <= 0 {
+			disabled[name] = true
+		}
+	}
+	return disabled
+}
 
 // filterDisabledTools drops any tool named in the global `disabled_tools`
 // setting (§B6 partial: a platform-wide tool kill-switch — e.g. turn off
@@ -908,6 +918,9 @@ func (tc *ToolContext) charge(name string) error {
 	if !tc.AllowsBuiltinTool(name) {
 		return fmt.Errorf("tool %q is not enabled for this model", name)
 	}
+	if !tc.isSystemTool(name) {
+		return nil
+	}
 	limits := perTurnToolLimits
 	totalCap := maxToolCallsPerTurn
 	timeCap := maxToolTimePerTurn
@@ -920,10 +933,10 @@ func (tc *ToolContext) charge(name string) error {
 		limits = fastToolLimits
 		totalCap = maxToolCallsPerTurnFast
 		timeCap = maxToolTimePerTurnFast
-		// Sandbox-backed tools are withheld from fast turns; block them
-		// defensively even if one somehow reaches the runner.
-		if name == "python_execute" || name == "fetch_image" {
-			return errors.New("sandbox tools are unavailable in fast mode")
+		// Zero is an explicit deny in fast mode, including as defense in depth
+		// when an undeclared tool call somehow reaches the runner.
+		if limit, configured := limits[name]; configured && limit <= 0 {
+			return fmt.Errorf("tool %q is unavailable in fast mode", name)
 		}
 	}
 	tc.budgetMu.Lock()
@@ -1306,14 +1319,11 @@ func compactionHistoryForRequest(
 	currentProvider, currentModelID string,
 	nativeToolReplay bool,
 	allowedTools map[string]bool,
-	fastMode, vision bool,
+	_ bool, vision bool,
 ) []UnifiedMessage {
 	unified := storeToUnified(history, currentProvider, currentModelID, nativeToolReplay)
 	unified = stripRetiredKnowledgeSearchToolBlocks(unified)
 	unified = stripDisallowedBuiltinToolBlocks(unified, allowedTools)
-	if fastMode {
-		unified = stripFastModeCodeBlocks(unified)
-	}
 	if !vision {
 		unified = stripImageBlocks(unified)
 	}
@@ -1496,7 +1506,7 @@ type RunRequest struct {
 	// Fast marks a fast-mode turn (§fast-mode). The model is resolved server-side
 	// from the admin's single fast model (ModelID is ignored); Verify and
 	// ModeDeepResearch are forced off; tools stay ON but each tool's per-turn
-	// budget is quartered and python_execute is withheld; and the resolved model
+	// budget is independently configured; and the resolved model
 	// is NOT written back onto the conversation. Every user-facing surface masks
 	// the real model as "快速".
 	Fast bool
@@ -1642,7 +1652,7 @@ func (o *Orchestrator) streamWithFallback(
 	o.logger.Printf("llm: upstream model %q produced no output in %ds — switching to fallback %q", primaryModelID, ttft, fbID)
 	// Single attempt, no watchdog → no chaining. Streams into the SAME onEvent,
 	// so the frontend just keeps filling the existing (empty) message.
-	return fbProvider.Stream(ctx, fbReq, toolRunnerForModelRequest(runner, fbID, fbReq.Tools), onEvent)
+	return fbProvider.Stream(ctx, fbReq, toolRunnerForModelRequest(runner, fbID, fbReq.Tools, fbReq.SystemTools), onEvent)
 }
 
 // buildFallbackRequest clones the in-flight request but swaps in the fallback
@@ -1684,6 +1694,7 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 	baseToolsEnabled := base.ToolsEnabled || len(base.Tools) > 0 || len(base.OfficialToolRequests) > 0
 	req.ToolsEnabled = baseToolsEnabled && fallbackToolMode != "none"
 	req.Tools = nil
+	req.SystemTools = nil
 	req.OfficialToolNames = nil
 	req.OfficialToolRequests = nil
 	req.ToolModePrompt = false
@@ -1694,7 +1705,7 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 			builtinDefs = filterToolDefsByName(builtinDefs, map[string]bool{"save_memory": true})
 		}
 		if req.Fast {
-			builtinDefs = filterToolDefsByName(builtinDefs, map[string]bool{"python_execute": true, "fetch_image": true})
+			builtinDefs = filterToolDefsByName(builtinDefs, fastModeDisabledToolSet())
 		}
 		if base.SelectedToolsConfigured {
 			builtinDefs = filterBuiltinToolsBySelection(builtinDefs, selectedTools)
@@ -1708,7 +1719,8 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 			mcpDefs = filterModelMCPTools(mcpDefs, fallbackMCPServers)
 		}
 		req.Tools = append(builtinDefs, flattenMCPToolDefs(mcpDefs)...)
-		req.OfficialToolNames, req.OfficialToolRequests = configuredOfficialToolRequests(m.OfficialTools, req.Fast)
+		req.SystemTools = toolDefNameSet(builtinDefs)
+		req.OfficialToolNames, req.OfficialToolRequests = configuredOfficialToolRequests(m.OfficialTools)
 		req.OfficialToolNames, req.OfficialToolRequests = filterHostedToolsByAccess(
 			req.OfficialToolNames, req.OfficialToolRequests, base.ToolAccessPolicy,
 		)
@@ -2329,8 +2341,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		return nil, ErrDrawingPermission
 	}
 	// §fast-mode locks the turn's shape: no Verify, no Deep Research, and tools
-	// stay ON (fast can't disable tools) but run on a quartered budget without
-	// python_execute — enforced where tools + budgets are assembled below.
+	// stay ON (fast can't disable tools) but run on independent fast-mode budgets.
 	if fastMode {
 		req.Verify = false
 		// `modelId` remains on the user's last advanced choice while the UI is in
@@ -2775,8 +2786,9 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	hostedToolNames := []string(nil)
 	hostedToolRequests := []json.RawMessage(nil)
 	toolDefs := []ToolDef{}
+	systemToolDefs := []ToolDef{}
 	if toolMode != "none" {
-		hostedToolNames, hostedToolRequests = configuredOfficialToolRequests(model.OfficialTools, fastMode)
+		hostedToolNames, hostedToolRequests = configuredOfficialToolRequests(model.OfficialTools)
 		hostedToolNames, hostedToolRequests = filterHostedToolsByAccess(hostedToolNames, hostedToolRequests, req.ToolAccessPolicy)
 		if req.SelectedToolsConfigured {
 			hostedToolNames, hostedToolRequests = filterHostedToolsBySelection(hostedToolNames, hostedToolRequests, selectedTools)
@@ -2785,11 +2797,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		if !memoryEnabled {
 			builtinDefs = filterToolDefsByName(builtinDefs, map[string]bool{"save_memory": true})
 		}
-		// §fast-mode withholds python_execute (no sandbox on a fast turn) — drop it
-		// from local Functions and the hosted code interpreter from provider tools.
-		// Tool budgets are also quartered via ToolContext.Fast (charge()).
+		// Fast-mode limits set to zero withhold only the corresponding local
+		// system Function. Provider-hosted tools are not part of local budgets.
 		if fastMode {
-			builtinDefs = filterToolDefsByName(builtinDefs, map[string]bool{"python_execute": true})
+			builtinDefs = filterToolDefsByName(builtinDefs, fastModeDisabledToolSet())
 		}
 		if req.SelectedToolsConfigured {
 			builtinDefs = filterBuiltinToolsBySelection(builtinDefs, selectedTools)
@@ -2802,6 +2813,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		} else {
 			mcpDefs = filterModelMCPTools(mcpDefs, mcpServers)
 		}
+		systemToolDefs = append(systemToolDefs, builtinDefs...)
 		toolDefs = append(builtinDefs, flattenMCPToolDefs(mcpDefs)...)
 	}
 	if req.ToolMode == ToolModeAuto {
@@ -3051,9 +3063,9 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// before automatic tool routing. The no-Python forced read below uses that same
 	// authoritative list, and its injected preview counts toward compaction.
 	// §4.5-B spreadsheet injection without Python. Spreadsheets (xlsx/csv/…) are
-	// normally read through python_execute, but fast mode deliberately withholds
-	// that tool and a no-tools/model-disabled turn may not expose it either. In all
-	// of those cases parse the sheet IN-PROCESS (stdlib, rag.SpreadsheetPreview)
+	// normally read through python_execute, but the current mode or policy may not
+	// expose that local tool. In those cases parse the sheet IN-PROCESS
+	// (stdlib, rag.SpreadsheetPreview)
 	// and inject a bounded <uploaded-data-preview> block on the message layer.
 	// Text/code files are already RAG-injected and images go to vision, so only
 	// spreadsheets need this fallback.
@@ -3071,10 +3083,9 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// deliberately absent from the provider declaration. Replaying a prior native
 	// Function call in that mixed request would therefore make the upstream reject
 	// the history even though the hosted declaration itself is valid.
-	// Fast mode cannot safely replay a provider-native exchange: Raw may contain
-	// python_execute/code_interpreter calls even though this turn no longer
-	// declares either tool. Fall back to canonical blocks for every provider, then
-	// remove the prohibited code-tool blocks below.
+	// Fast mode uses canonical history because its independently configured local
+	// tool surface can differ from the earlier turn. The allowlist below removes
+	// only calls not declared for this request; hosted tools remain eligible.
 	nativeToolReplay := shouldReplayNativeToolHistory(fastMode, toolMode, len(toolDefs), useHostedTools)
 	// Raw provider exchanges are replayable only for the model that produced
 	// them. In particular, OpenAI Responses encrypted reasoning cannot be sent
@@ -3491,6 +3502,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			Fallback:  fallbackCreds,
 		},
 		Tools:                   toolDefs,
+		SystemTools:             toolDefNameSet(systemToolDefs),
 		OfficialToolNames:       hostedToolNames,
 		OfficialToolRequests:    hostedToolRequests,
 		SelectedToolIDs:         append([]string(nil), req.SelectedToolIDs...),
@@ -3571,12 +3583,13 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			// §4.20: meter chat-driven image_generate against the same credit flow.
 			ImageBilling: o,
 			DeepResearch: req.Mode == ModeDeepResearch,
-			Fast:         fastMode, // §fast-mode: quartered tool budgets + no python_execute
+			Fast:         fastMode, // §fast-mode: independently configured tool budgets
 			// Bind execution to the exact definitions declared for this turn. This
-			// includes model policy, global disabled_tools, fast mode, official/no-
-			// tools state, and prevents an unsolicited provider call from bypassing
-			// declaration filtering.
+			// includes model policy, global disabled_tools, fast local-tool limits,
+			// official/no-tools state, and prevents an unsolicited provider call from
+			// bypassing declaration filtering.
 			BuiltinTools:  toolDefNameSet(toolDefs),
+			SystemTools:   toolDefNameSet(systemToolDefs),
 			AdminSkillIDs: adminSkillIDSet(req.ToolAccessPolicy),
 			citationIndexes: func() *citationIndexAllocator {
 				if !hasAttachedKnowledgeBase {
