@@ -10,7 +10,7 @@ function overviewData(patch: Partial<OverviewInput> = {}): OverviewInput {
       task_model_id: 'task-default',
       storage_provider: 'local',
     },
-    channelCount: 1,
+    enabledChannelCount: 1,
     modelIds: new Set(['chat-default', 'task-default']),
     paymentChannelCount: 0,
     paymentMethodCount: 0,
@@ -44,7 +44,7 @@ describe('admin overview health status', () => {
   })
 
   it.each([
-    ['channel', overviewData({ channelCount: 0 })],
+    ['channel', overviewData({ enabledChannelCount: 0 })],
     ['default model', overviewData({ settings: { default_model_id: 'missing', task_model_id: 'task-default', storage_provider: 'local' } })],
     ['task model', overviewData({ settings: { default_model_id: 'chat-default', task_model_id: 'missing', storage_provider: 'local' } })],
     ['SMTP', overviewData({ settings: { default_model_id: 'chat-default', task_model_id: 'task-default', storage_provider: 'local', email_verification_required: true } })],

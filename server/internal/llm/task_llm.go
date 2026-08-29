@@ -368,11 +368,11 @@ func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opt
 		}
 		var rerr error
 		if toolRoute {
-			modelID, rerr = resolveToolRouteModelID(t.db, conversationModelID)
+			modelID, rerr = resolveToolRouteModelID(ctx, t.db, conversationModelID)
 		} else if kind == TaskCompact {
 			modelID, rerr = resolveCompactionModelID(ctx, t.db, conversationModelID)
 		} else {
-			modelID, rerr = resolveTaskModelID(t.db, conversationModelID)
+			modelID, rerr = resolveTaskModelID(ctx, t.db, conversationModelID)
 		}
 		if rerr != nil {
 			return "", rerr
@@ -385,15 +385,15 @@ func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opt
 	if !model.Enabled {
 		return "", wrapCompactionModelAttempt(fmt.Errorf("task model %q is disabled", modelID), kind == TaskCompact)
 	}
-	if kind == TaskCompact && model.Kind != "chat" {
-		return "", wrapCompactionModelAttempt(fmt.Errorf("compaction model %q is not a chat model", modelID), true)
+	if model.Kind != "chat" {
+		return "", wrapCompactionModelAttempt(fmt.Errorf("task model %q is not a chat model", modelID), kind == TaskCompact)
 	}
 	channel, err := store.GetChannel(ctx, t.db, model.ChannelID)
 	if err != nil {
 		return "", wrapCompactionModelAttempt(err, kind == TaskCompact)
 	}
-	if kind == TaskCompact && !channel.Enabled {
-		return "", wrapCompactionModelAttempt(fmt.Errorf("compaction model channel %q is disabled", channel.ID), true)
+	if !channel.Enabled {
+		return "", wrapCompactionModelAttempt(fmt.Errorf("task model channel %q is disabled", channel.ID), kind == TaskCompact)
 	}
 	provider, err := t.reg.Get(channel.Type)
 	if err != nil {
@@ -849,26 +849,19 @@ func conversationModelIDForTask(ctx context.Context, db *sql.DB, conversationID 
 }
 
 // resolveTaskModelID reads settings.task_model_id, falling back to the current
-// conversation model and then default_model_id if unset.
-func resolveTaskModelID(db *sql.DB, conversationModelID string) (string, error) {
-	var id string
-	if raw, err := store.GetSetting(db, "task_model_id"); err == nil {
-		_ = json.Unmarshal(raw, &id)
-		id = strings.TrimSpace(id)
+// conversation model and then default_model_id. Unavailable configured models
+// are skipped as well as blank ones so an emergency model/channel disable does
+// not strand titles, retrieval routing, memory work, and other auxiliary tasks.
+func resolveTaskModelID(ctx context.Context, db *sql.DB, conversationModelID string) (string, error) {
+	candidates := []string{
+		settingModelID(db, "task_model_id"),
+		strings.TrimSpace(conversationModelID),
+		settingModelID(db, "default_model_id"),
 	}
-	if id == "" {
-		id = strings.TrimSpace(conversationModelID)
+	if id := firstUsableTaskModelID(ctx, db, candidates); id != "" {
+		return id, nil
 	}
-	if id == "" {
-		if raw, err := store.GetSetting(db, "default_model_id"); err == nil {
-			_ = json.Unmarshal(raw, &id)
-			id = strings.TrimSpace(id)
-		}
-	}
-	if id == "" {
-		return "", errors.New("settings.task_model_id (and default_model_id) are unset")
-	}
-	return id, nil
+	return "", errors.New("no enabled chat model on an enabled channel is available for task calls")
 }
 
 // resolveCompactionModelID lets administrators isolate long-chat summaries on
@@ -940,19 +933,48 @@ func resolveCompactionModelCandidates(ctx context.Context, db *sql.DB, conversat
 // resolveToolRouteModelID prefers the administrator's dedicated route model,
 // then the current conversation model. There is intentionally no global default
 // fallback: a route call without a conversation cannot safely guess which chat
-// model should make the decision.
-func resolveToolRouteModelID(db *sql.DB, conversationModelID string) (string, error) {
+// model should make the decision. A disabled dedicated model/channel behaves as
+// unavailable, allowing automatic routing to keep working after a kill-switch.
+func resolveToolRouteModelID(ctx context.Context, db *sql.DB, conversationModelID string) (string, error) {
+	candidates := []string{
+		settingModelID(db, "tool_route_model_id"),
+		strings.TrimSpace(conversationModelID),
+	}
+	if id := firstUsableTaskModelID(ctx, db, candidates); id != "" {
+		return id, nil
+	}
+	return "", errors.New("no enabled chat model on an enabled channel is available for tool routing")
+}
+
+func settingModelID(db *sql.DB, key string) string {
 	var id string
-	if raw, err := store.GetSetting(db, "tool_route_model_id"); err == nil {
+	if raw, err := store.GetSetting(db, key); err == nil {
 		_ = json.Unmarshal(raw, &id)
 	}
-	if strings.TrimSpace(id) == "" {
-		id = strings.TrimSpace(conversationModelID)
+	return strings.TrimSpace(id)
+}
+
+func firstUsableTaskModelID(ctx context.Context, db *sql.DB, candidates []string) string {
+	seen := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		model, err := store.GetModel(ctx, db, candidate)
+		if err != nil || !model.Enabled || model.Kind != "chat" {
+			continue
+		}
+		channel, err := store.GetChannel(ctx, db, model.ChannelID)
+		if err == nil && channel.Enabled {
+			return candidate
+		}
 	}
-	if strings.TrimSpace(id) == "" {
-		return "", errors.New("settings.tool_route_model_id and conversation model are unset")
-	}
-	return strings.TrimSpace(id), nil
+	return ""
 }
 
 // toolRouteTaskParams replaces the selected model's admin extra_params for the

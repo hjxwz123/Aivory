@@ -893,6 +893,12 @@
       "defaultProviderRequired": "Sélectionnez le fournisseur utilisé pour la redirection automatique.",
       "adminIdentityRequired": "L’administrateur actuel n’est pas lié au fournisseur requis. La politique n’a pas été enregistrée afin d’éviter un verrouillage."
     },
+    "modelPolicy": {
+      "unavailable": "Choisissez un modèle de chat actif dont le canal est également actif.",
+      "stale": "Un ou plusieurs modèles enregistrés sont indisponibles. Remplacez-les par un modèle actif, héritez du modèle de la conversation ou sélectionnez aucun modèle.",
+      "empty": "Aucun modèle de chat n’est disponible pour les politiques. Activez d’abord un modèle de chat et son canal.",
+      "unavailableOption": "Indisponible"
+    },
     "fields": {
       "settlementCurrency": "Devise de règlement",
       "settlementCurrencyHint": "Code ISO 4217 à trois lettres utilisé pour les prix des groupes et des crédits permanents. Le modifier ne convertit pas les prix existants.",

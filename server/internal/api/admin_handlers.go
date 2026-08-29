@@ -1577,6 +1577,10 @@ func adminSettingsSet(d Deps, w http.ResponseWriter, r *http.Request) {
 			writeError(w, 400, errInvalidInput)
 			return
 		}
+		if errors.Is(err, errModelPolicyModelUnavailable) {
+			writeError(w, http.StatusConflict, errModelPolicyModelUnavailable)
+			return
+		}
 		if errors.Is(err, errAuthPolicyConflict) || errors.Is(err, errAuthPolicyProviderRequired) || errors.Is(err, errAuthPolicyAdminLinkRequired) {
 			writeError(w, http.StatusConflict, err)
 			return
@@ -1738,6 +1742,12 @@ func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.R
 				v, _ = json.Marshal(prompt)
 			case "context_compaction_model_id":
 				normalized, err := normalizeContextCompactionModelSetting(ctx, d, v)
+				if err != nil {
+					return 0, err
+				}
+				v = normalized
+			case "default_model_id", "task_model_id", "tool_route_model_id", "verify_model_id", "fallback_model_id":
+				normalized, err := normalizeAvailableChatModelSetting(ctx, d, v)
 				if err != nil {
 					return 0, err
 				}
@@ -1955,6 +1965,39 @@ func normalizeContextCompactionModelSetting(ctx context.Context, d Deps, raw jso
 	}
 	if !isSupportedContextCompactionChannelType(channel.Type) {
 		return nil, errInvalidInput
+	}
+	normalized, _ := json.Marshal(modelID)
+	return normalized, nil
+}
+
+func normalizeAvailableChatModelSetting(ctx context.Context, d Deps, raw json.RawMessage) (json.RawMessage, error) {
+	var modelID string
+	if json.Unmarshal(raw, &modelID) != nil {
+		return nil, errInvalidInput
+	}
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		return json.RawMessage(`""`), nil
+	}
+	model, err := store.GetModel(ctx, d.DB, modelID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, errModelPolicyModelUnavailable
+		}
+		return nil, err
+	}
+	if !model.Enabled || model.Kind != "chat" {
+		return nil, errModelPolicyModelUnavailable
+	}
+	channel, err := store.GetChannel(ctx, d.DB, model.ChannelID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, errModelPolicyModelUnavailable
+		}
+		return nil, err
+	}
+	if !channel.Enabled || !isSupportedContextCompactionChannelType(channel.Type) {
+		return nil, errModelPolicyModelUnavailable
 	}
 	normalized, _ := json.Marshal(modelID)
 	return normalized, nil

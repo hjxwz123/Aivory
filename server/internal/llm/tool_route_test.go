@@ -295,6 +295,96 @@ func TestTaskWithoutConfiguredTaskModelUsesConversationModel(t *testing.T) {
 	}
 }
 
+func TestDisabledDedicatedTaskModelFallsBackToConversationModel(t *testing.T) {
+	orchestrator, provider, model, conv, _, db := setupToolRouteTest(t)
+	var taskModelID string
+	if err := db.QueryRow(`SELECT id FROM models WHERE request_id='task-route-test'`).Scan(&taskModelID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE models SET enabled=0 WHERE id=?`, taskModelID); err != nil {
+		t.Fatal(err)
+	}
+
+	text, err := orchestrator.task.Run(context.Background(), TaskTitle, "hello", RunOpts{
+		UserID: conv.UserID, ConversationID: conv.ID,
+	})
+	if err != nil {
+		t.Fatalf("task run: %v", err)
+	}
+	if strings.TrimSpace(text) == "" {
+		t.Fatal("task output is empty")
+	}
+	if len(provider.mainRequests) != 1 || provider.mainRequests[0].Model.ID != model.ID {
+		t.Fatalf("task requests=%+v, want conversation model %q", provider.mainRequests, model.ID)
+	}
+}
+
+func TestDisabledToolRouteChannelFallsBackToConversationModel(t *testing.T) {
+	orchestrator, provider, model, conv, logs, db := setupToolRouteTest(t)
+	ctx := context.Background()
+	var taskModelID string
+	if err := db.QueryRow(`SELECT id FROM models WHERE request_id='task-route-test'`).Scan(&taskModelID); err != nil {
+		t.Fatal(err)
+	}
+	disabledChannel, err := store.CreateChannel(ctx, db, "Disabled route", "openai", "chat", "https://disabled.example/v1", "key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabled := false
+	if _, err := store.UpdateChannel(ctx, db, disabledChannel.ID, store.ChannelPatch{Enabled: &disabled}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE models SET channel_id=? WHERE id=?`, disabledChannel.ID, taskModelID); err != nil {
+		t.Fatal(err)
+	}
+
+	provider.routeResponse = "0"
+	runToolRouteTurn(t, orchestrator, model.ID, conv.ID, RunRequest{
+		ToolMode: ToolModeAuto,
+		UserText: "Explain dependency injection",
+	})
+	if provider.routeCalls != 1 || len(provider.taskRequests) != 1 {
+		t.Fatalf("route calls=%d task requests=%d, want 1/1", provider.routeCalls, len(provider.taskRequests))
+	}
+	if provider.taskRequests[0].Model.ID != model.ID {
+		t.Fatalf("route model=%q, want conversation model %q", provider.taskRequests[0].Model.ID, model.ID)
+	}
+	if len(provider.mainRequests) != 1 || provider.mainRequests[0].ToolsEnabled {
+		t.Fatalf("conversation-model route verdict was not applied: %+v", provider.mainRequests)
+	}
+	if strings.Contains(logs.String(), "enabling tools") {
+		t.Fatalf("available conversation fallback unexpectedly failed open: %s", logs.String())
+	}
+}
+
+func TestDisabledChannelRejectsExplicitTaskAndConversationCalls(t *testing.T) {
+	orchestrator, provider, model, conv, _, db := setupToolRouteTest(t)
+	var channelID, taskModelID string
+	if err := db.QueryRow(`SELECT channel_id FROM models WHERE id=?`, model.ID).Scan(&channelID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT id FROM models WHERE request_id='task-route-test'`).Scan(&taskModelID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE channels SET enabled=0 WHERE id=?`, channelID); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := orchestrator.task.Run(context.Background(), TaskTitle, "hello", RunOpts{
+		UserID: conv.UserID, ConversationID: conv.ID, ModelID: taskModelID,
+	}); err == nil || !strings.Contains(err.Error(), "channel") || !strings.Contains(err.Error(), "disabled") {
+		t.Fatalf("explicit task error=%v, want disabled channel", err)
+	}
+	if _, err := orchestrator.Run(context.Background(), RunRequest{
+		UserID: conv.UserID, ConversationID: conv.ID, ModelID: model.ID, UserText: "hello",
+	}, func(SseEvent) {}); err == nil || err.Error() != "channel is disabled" {
+		t.Fatalf("conversation error=%v, want channel is disabled", err)
+	}
+	if len(provider.taskRequests) != 0 || len(provider.mainRequests) != 0 {
+		t.Fatalf("disabled channel reached provider: task=%d main=%d", len(provider.taskRequests), len(provider.mainRequests))
+	}
+}
+
 func TestToolRouteCapabilityNamesKeepHostedAndLocalNamespacesDistinct(t *testing.T) {
 	local := []ToolDef{
 		{Name: "aivory_web_search"},

@@ -897,6 +897,12 @@
       "defaultProviderRequired": "请选择自动跳转使用的默认身份源。",
       "adminIdentityRequired": "当前管理员尚未绑定所需身份源，无法保存以免锁定后台。"
     },
+    "modelPolicy": {
+      "unavailable": "请选择已启用且所属渠道也已启用的聊天模型。",
+      "stale": "部分已保存的模型策略当前不可用。请改用可用模型，或选择继承当前对话模型/不使用。",
+      "empty": "当前没有可用于模型策略的聊天模型，请先启用聊天模型及其所属渠道。",
+      "unavailableOption": "不可用"
+    },
     "fields": {
       "settlementCurrency": "结算货币",
       "settlementCurrencyHint": "用户组和永久积分价格使用的三位 ISO 4217 货币代码。修改后不会自动换算现有价格。",

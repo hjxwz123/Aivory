@@ -2372,6 +2372,9 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if err != nil {
 		return nil, err
 	}
+	if !channel.Enabled {
+		return nil, errors.New("channel is disabled")
+	}
 	provider, err := o.reg.Get(channel.Type)
 	if err != nil {
 		return nil, err
