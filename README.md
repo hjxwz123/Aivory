@@ -15,6 +15,11 @@
 </p>
 
 <p align="center">
+  <a href="https://docs.aivorygo.com"><strong>Documentation</strong></a> ·
+  <a href="https://demo.aivorygo.com"><strong>Live demo</strong></a>
+</p>
+
+<p align="center">
   <a href="https://github.com/hjxwz123/Aivory/pkgs/container/aivory-app"><img alt="App image" src="https://img.shields.io/badge/ghcr.io-aivory--app-blue?logo=docker"></a>
   <img alt="Go 1.22" src="https://img.shields.io/badge/Go-1.22-00ADD8?logo=go">
   <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?logo=react">
@@ -190,6 +195,10 @@ Most runtime configuration takes effect on the next request, without editing env
 ## Quick start
 
 Requires Docker 24+ with the Compose plugin.
+
+See the [documentation](https://docs.aivorygo.com) for guided deployment,
+upgrades, and configuration references. To explore Aivory before self-hosting,
+open the [live demo](https://demo.aivorygo.com).
 
 ### Personal deployment
 
