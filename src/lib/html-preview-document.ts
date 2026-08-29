@@ -5,6 +5,8 @@ const PREVIEW_RESOURCE_HEAD =
   '<base target="_blank" rel="noopener noreferrer">'
 
 const TAILWIND_RUNTIME = `<script data-aivory-tailwind src="${tailwindBrowserUrl}"></script>`
+const GOOGLE_FONTS_STYLESHEET_HOST = /(?:https?:)?\/\/fonts\.googleapis\.com(?=\/)/gi
+const GOOGLE_FONTS_FILE_HOST = /(?:https?:)?\/\/fonts\.gstatic\.com(?=\/)/gi
 
 const CLASS_ATTRIBUTE = /\bclass\s*=\s*(["'])(.*?)\1/gis
 const EXISTING_TAILWIND = /data-aivory-tailwind|cdn\.tailwindcss\.com|@tailwindcss\/browser|text\/tailwindcss|tailwind(?:css)?(?:\.config|[./-](?:min\.)?css)/i
@@ -40,16 +42,23 @@ function usesTailwindUtilities(html: string): boolean {
   return false
 }
 
+function rewriteRestrictedResources(html: string): string {
+  return html
+    .replace(GOOGLE_FONTS_STYLESHEET_HOST, 'https://fonts.loli.net')
+    .replace(GOOGLE_FONTS_FILE_HOST, 'https://gstatic.loli.net')
+}
+
 /** Build an isolated preview document and support generated Tailwind fragments. */
 export function buildHtmlPreviewDocument(html: string): string {
   if (!html) return html
 
-  const previewHead = PREVIEW_RESOURCE_HEAD + (usesTailwindUtilities(html) ? TAILWIND_RUNTIME : '')
+  const previewHtml = rewriteRestrictedResources(html)
+  const previewHead = PREVIEW_RESOURCE_HEAD + (usesTailwindUtilities(previewHtml) ? TAILWIND_RUNTIME : '')
   const headOpen = /<head[^>]*>/i
-  if (headOpen.test(html)) return html.replace(headOpen, (match) => match + previewHead)
+  if (headOpen.test(previewHtml)) return previewHtml.replace(headOpen, (match) => match + previewHead)
 
   const htmlOpen = /<html[^>]*>/i
-  if (htmlOpen.test(html)) return html.replace(htmlOpen, (match) => `${match}<head>${previewHead}</head>`)
+  if (htmlOpen.test(previewHtml)) return previewHtml.replace(htmlOpen, (match) => `${match}<head>${previewHead}</head>`)
 
-  return previewHead + html
+  return previewHead + previewHtml
 }
