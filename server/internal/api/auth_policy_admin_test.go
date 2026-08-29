@@ -10,7 +10,7 @@ import (
 	"aivory/server/internal/store"
 )
 
-func TestEnterpriseAuthPolicyAllowsRequiredPasswordAndProtectsProvider(t *testing.T) {
+func TestEnterpriseAuthPolicyAllowsOAuthOnlySignupAndProtectsProvider(t *testing.T) {
 	d := newAuthSecurityDeps(t, "enterprise-auth-policy.db")
 	admin, err := store.CreateUserWithRole(t.Context(), d.DB, "admin@example.test", "Admin", "hash", "admin")
 	if err != nil {
@@ -27,16 +27,30 @@ func TestEnterpriseAuthPolicyAllowsRequiredPasswordAndProtectsProvider(t *testin
 	}
 
 	patch := httptest.NewRequest(http.MethodPatch, "/api/admin/settings", strings.NewReader(`{
-		"password_login_enabled": false,
-		"auth_entry_mode": "provider_picker",
-		"oauth_initial_password_policy": "required"
-	}`))
+			"signup_open": false,
+			"password_login_enabled": false,
+			"auth_entry_mode": "provider_picker",
+			"oauth_initial_password_policy": "required",
+			"oauth_auto_provision_enabled": true
+		}`))
 	patch.Header.Set("Content-Type", "application/json")
 	patch = patch.WithContext(context.WithValue(patch.Context(), userCtxKey{}, admin))
 	patchRec := httptest.NewRecorder()
 	adminSettingsSet(d, patchRec, patch)
 	if patchRec.Code != http.StatusOK {
 		t.Fatalf("save enterprise policy status=%d body=%s", patchRec.Code, patchRec.Body.String())
+	}
+	for key, want := range map[string]string{
+		"signup_open":                  "false",
+		"oauth_auto_provision_enabled": "true",
+	} {
+		var got string
+		if err := d.DB.QueryRow(`SELECT value FROM settings WHERE key=?`, key).Scan(&got); err != nil {
+			t.Fatalf("read %s: %v", key, err)
+		}
+		if got != want {
+			t.Fatalf("%s = %q, want %q", key, got, want)
+		}
 	}
 
 	mx := newMux()
