@@ -21,8 +21,9 @@ The full stack contains:
 | `sandbox`  | `ghcr.io/hjxwz123/aivory-sandbox-sidecar` | Bundled code-execution sandbox (internal-only). |
 | `app`      | `ghcr.io/hjxwz123/aivory-app` | One container serving BOTH the built SPA and the `/api` backend on the same origin. |
 
-See the [root README](../README.md) for the full project overview; this file is
-just the deployment cheat-sheet.
+See the [official documentation](https://docs.aivorygo.com) for guided deployment
+and configuration references, or the [root README](../README.md) for the full
+project overview. This file remains the versioned deployment cheat-sheet.
 
 ## How backend selection works
 

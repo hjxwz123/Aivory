@@ -12,6 +12,11 @@
 </p>
 
 <p align="center">
+  <a href="https://docs.aivorygo.com"><strong>使用文档</strong></a> ·
+  <a href="https://demo.aivorygo.com"><strong>在线体验</strong></a>
+</p>
+
+<p align="center">
   <a href="https://github.com/hjxwz123/Aivory/pkgs/container/aivory-app"><img alt="镜像" src="https://img.shields.io/badge/ghcr.io-aivory--app-blue?logo=docker"></a>
   <img alt="Go" src="https://img.shields.io/badge/Go-1.22-00ADD8?logo=go">
   <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react">
@@ -169,6 +174,9 @@
 ## 快速开始（推荐：Docker）
 
 需要 Docker 24+ 与 Compose 插件。
+
+部署、升级和配置参考请查看[使用文档](https://docs.aivorygo.com)。希望先了解产品再
+自行部署，可直接打开[在线体验](https://demo.aivorygo.com)。
 
 ### 个人版
 

@@ -21,7 +21,8 @@
 | `sandbox` | `ghcr.io/hjxwz123/aivory-sandbox-sidecar` | 内置代码执行沙箱，仅供内网访问。 |
 | `app` | `ghcr.io/hjxwz123/aivory-app` | 同一个容器同时提供构建后的 SPA 和 `/api` 后端，二者同源。 |
 
-完整项目介绍见[根目录 README](../README.zh-CN.md)。本文档只作为部署速查。
+部署与配置指南见[官方文档](https://docs.aivorygo.com)，完整项目介绍见
+[根目录 README](../README.zh-CN.md)。本文档继续作为随代码版本维护的部署速查。
 
 ## 后端选择机制
 
