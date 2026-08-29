@@ -242,8 +242,9 @@ func (t *webSearchTool) searchBatch(ctx context.Context, queries []string, topK 
 // trippers are nil in production (each falls back to the SSRF-safe client) and
 // only injected by tests to avoid real network I/O / port constraints.
 type webFetchTool struct {
-	direct http.RoundTripper
-	reader http.RoundTripper
+	direct        http.RoundTripper
+	reader        http.RoundTripper
+	directTimeout time.Duration
 }
 
 func (t *webFetchTool) directClient() *http.Client {
@@ -258,6 +259,13 @@ func (t *webFetchTool) readerClient() *http.Client {
 		return &http.Client{Transport: t.reader}
 	}
 	return ssrfSafeClient()
+}
+
+func (t *webFetchTool) directAttemptTimeout() time.Duration {
+	if t.directTimeout > 0 {
+		return t.directTimeout
+	}
+	return webFetchDirectAttemptTimeout
 }
 
 func (t *webFetchTool) Name() string { return "web_fetch" }
@@ -303,7 +311,7 @@ func (t *webFetchTool) fetchOne(ctx context.Context, rawURL string) (string, err
 	// Direct attempt first, on its own short deadline: an unreachable origin
 	// (black-holed/filtered network) otherwise hangs until the whole tool budget
 	// is spent and leaves nothing for the Jina fallback below.
-	directCtx, cancel := context.WithTimeout(ctx, webFetchDirectAttemptTimeout)
+	directCtx, cancel := context.WithTimeout(ctx, t.directAttemptTimeout())
 	text, err := t.attemptDirect(directCtx, u.String())
 	cancel()
 	if err == nil && strings.TrimSpace(text) != "" {
@@ -1494,11 +1502,10 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	}
 	in.Action = strings.ToLower(strings.TrimSpace(in.Action))
 	in.BaseImage = strings.ToLower(strings.TrimSpace(in.BaseImage))
-	// Chat models may carry a stale attachment index over from an earlier edit
-	// when continuing the previous generated image. That index has no semantic
-	// meaning for previous_generation, so discard it before strict validation;
-	// generation and current-attachment edits retain their existing checks.
-	if in.Action == "edit" && in.BaseImage == "previous_generation" {
+	// base_image_index selects a current attachment only. Models sometimes retain
+	// an old index while correctly choosing a fresh generation or the previous
+	// generated image; discard that irrelevant field before strict validation.
+	if in.Action == "generate" || (in.Action == "edit" && in.BaseImage == "previous_generation") {
 		in.BaseImageIndex = 0
 	}
 	if err := validateImageOperation(in); err != nil {

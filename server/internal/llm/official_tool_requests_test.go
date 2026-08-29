@@ -89,7 +89,7 @@ func TestEstimateRequestTokensCountsMergedExtraParameters(t *testing.T) {
 	}
 }
 
-func TestConfiguredHostedToolsUseRequestTypeForFastFilteringAndHistoryAliases(t *testing.T) {
+func TestConfiguredHostedToolsPreserveEveryProviderToolAndHistoryAlias(t *testing.T) {
 	raw := json.RawMessage(`[
 		{"name":"renamed_code_tool","icon":"terminal","request":{"tools":[{"type":"code_interpreter"}]}},
 		{"name":"renamed_image_tool","icon":"image","request":{"tools":[{"type":"image_generation"}]}},
@@ -97,15 +97,17 @@ func TestConfiguredHostedToolsUseRequestTypeForFastFilteringAndHistoryAliases(t 
 		{"name":"renamed_claude_search","icon":"search","request":{"tools":[{"type":"web_search_20250305","name":"web_search"}]}}
 	]`)
 
-	names, requests := configuredOfficialToolRequests(raw, true)
-	if strings.Join(names, "\x00") != "renamed_image_tool\x00renamed_search_tool\x00renamed_claude_search" {
-		t.Fatalf("fast hosted names = %v, want renamed code tool filtered by request type", names)
+	names, requests := configuredOfficialToolRequests(raw)
+	if strings.Join(names, "\x00") != "renamed_code_tool\x00renamed_image_tool\x00renamed_search_tool\x00renamed_claude_search" {
+		t.Fatalf("hosted names = %v, want every configured provider tool", names)
 	}
 	allowed := unifiedToolNameSet(nil, names, requests)
 	for _, name := range []string{
+		"renamed_code_tool",
 		"renamed_image_tool",
 		"renamed_search_tool",
 		"renamed_claude_search",
+		"code_interpreter",
 		"image_generation",
 		"web_search_preview",
 		"web_search_20250305",
@@ -115,9 +117,9 @@ func TestConfiguredHostedToolsUseRequestTypeForFastFilteringAndHistoryAliases(t 
 			t.Errorf("hosted history alias %q was not preserved: %#v", name, allowed)
 		}
 	}
-	for _, name := range []string{"renamed_code_tool", "code_interpreter", "python_execute", "image_generate"} {
+	for _, name := range []string{"python_execute", "image_generate"} {
 		if allowed[name] {
-			t.Errorf("fast or local-only tool name %q remained available: %#v", name, allowed)
+			t.Errorf("local-only tool name %q appeared in hosted aliases: %#v", name, allowed)
 		}
 	}
 }

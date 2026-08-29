@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -18,6 +19,13 @@ type errTransport struct{}
 
 func (errTransport) RoundTrip(*http.Request) (*http.Response, error) {
 	return nil, errors.New("dial tcp: i/o timeout")
+}
+
+type waitForContextTransport struct{}
+
+func (waitForContextTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	<-req.Context().Done()
+	return nil, req.Context().Err()
 }
 
 // statusTransport returns a fixed status + body for the direct attempt.
@@ -82,6 +90,27 @@ func TestWebFetchJinaFallbackOnDirectNetworkFailure(t *testing.T) {
 	}
 	if !strings.Contains(*lastPath, "http://1.1.1.1/some-page") {
 		t.Fatalf("reader path %q does not carry the target", *lastPath)
+	}
+}
+
+func TestWebFetchJinaFallbackAfterDirectAttemptTimesOut(t *testing.T) {
+	base, hits, _ := newFakeReader(t)
+	t.Setenv("AIVORY_TOOLS_WEB_FETCH_JINA_FALLBACK", "1")
+	t.Setenv("AIVORY_TOOLS_WEB_FETCH_JINA_BASE", base)
+
+	tool := &webFetchTool{
+		direct:        waitForContextTransport{},
+		reader:        http.DefaultTransport,
+		directTimeout: 10 * time.Millisecond,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	out, _, err := tool.Execute(ctx, []byte(`{"url":"http://1.1.1.1/slow"}`), nil)
+	if err != nil {
+		t.Fatalf("Execute failed after direct timeout: %v", err)
+	}
+	if !strings.Contains(out, "Reader content") || hits.Load() != 1 {
+		t.Fatalf("fallback output/hits = %q/%d, want reader content/1", out, hits.Load())
 	}
 }
 

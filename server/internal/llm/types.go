@@ -87,6 +87,9 @@ type UnifiedChatRequest struct {
 	History      []UnifiedMessage
 	Model        ModelInfo
 	Tools        []ToolDef
+	// SystemTools identifies the Aivory built-ins in Tools. It is orchestration-only
+	// metadata used to keep MCP and provider-hosted calls outside local budgets.
+	SystemTools map[string]bool `json:"-"`
 	// OfficialToolNames and OfficialToolRequests are the selected subset of the
 	// resolved model's administrator-configured provider-hosted tools, retained in
 	// administrator order. The historical field names match `official_tools`; no

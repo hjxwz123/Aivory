@@ -39,6 +39,18 @@ func TestTrackedToolNormalizesAndCachesReadOnlyRequest(t *testing.T) {
 	}
 }
 
+func TestImageGenerateRequestKeyIgnoresIrrelevantGenerateBaseIndex(t *testing.T) {
+	withStaleIndex := normalizedToolRequestKey("image_generate", json.RawMessage(
+		`{"prompt":"draw a poster","action":"generate","base_image":"none","base_image_index":1}`,
+	))
+	withoutIndex := normalizedToolRequestKey("image_generate", json.RawMessage(
+		`{"base_image":"none","action":"generate","prompt":"draw a poster"}`,
+	))
+	if withStaleIndex != withoutIndex {
+		t.Fatalf("equivalent generation requests produced different keys: %q != %q", withStaleIndex, withoutIndex)
+	}
+}
+
 func TestTrackedToolCoalescesConcurrentReadOnlyRequests(t *testing.T) {
 	tc := &ToolContext{}
 	started := make(chan struct{})

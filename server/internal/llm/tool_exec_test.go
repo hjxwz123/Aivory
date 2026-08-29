@@ -160,6 +160,81 @@ func TestToolContextChargeReturnsTypedBudgetErrors(t *testing.T) {
 	}
 }
 
+func TestToolContextBudgetsOnlyAivorySystemTools(t *testing.T) {
+	tc := &ToolContext{
+		SystemTools: map[string]bool{"aivory_web_search": true},
+		counts:      map[string]int{"__total__": maxToolCallsPerTurn},
+	}
+	if err := tc.charge("mcp_remote_lookup"); err != nil {
+		t.Fatalf("MCP call consumed the system-tool budget: %v", err)
+	}
+	if got := tc.counts["__total__"]; got != maxToolCallsPerTurn {
+		t.Fatalf("MCP call changed total system-tool count to %d", got)
+	}
+	if err := tc.charge("aivory_web_search"); !IsToolBudgetExceeded(err) {
+		t.Fatalf("system tool did not enforce the total budget: %v", err)
+	}
+}
+
+func TestFastToolBudgetsUseIndependentEnvironmentSettings(t *testing.T) {
+	for _, key := range []string{
+		"AIVORY_LLM_FAST_TOOL_LIMITS_WEB_SEARCH",
+		"AIVORY_LLM_FAST_TOOL_LIMITS_WEB_FETCH",
+		"AIVORY_LLM_FAST_TOOL_LIMITS_FETCH_IMAGE",
+		"AIVORY_LLM_FAST_TOOL_LIMITS_IMAGE_GENERATE",
+		"AIVORY_LLM_FAST_TOOL_LIMITS_PYTHON_EXECUTE",
+		"AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN_FAST",
+	} {
+		t.Setenv(key, "")
+	}
+	// Changing normal-mode limits must not change fast-mode defaults.
+	t.Setenv("AIVORY_LLM_PER_TURN_TOOL_LIMITS_WEB_SEARCH", "400")
+	t.Setenv("AIVORY_LLM_PER_TURN_TOOL_LIMITS_WEB_FETCH", "300")
+	t.Setenv("AIVORY_LLM_PER_TURN_TOOL_LIMITS_FETCH_IMAGE", "200")
+	t.Setenv("AIVORY_LLM_PER_TURN_TOOL_LIMITS_PYTHON_EXECUTE", "100")
+	t.Setenv("AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN", "120")
+
+	limits := configuredFastToolLimits()
+	wantDefaults := map[string]int{
+		"aivory_web_search": 4,
+		"web_fetch":         3,
+		"fetch_image":       0,
+		"image_generate":    2,
+		"python_execute":    0,
+	}
+	for name, want := range wantDefaults {
+		if got := limits[name]; got != want {
+			t.Fatalf("default fast %s limit=%d, want %d", name, got, want)
+		}
+	}
+	if got := configuredFastMaxToolCallsPerTurn(); got != 12 {
+		t.Fatalf("default fast total limit=%d, want 12", got)
+	}
+
+	t.Setenv("AIVORY_LLM_FAST_TOOL_LIMITS_WEB_SEARCH", "7")
+	t.Setenv("AIVORY_LLM_FAST_TOOL_LIMITS_WEB_FETCH", "5")
+	t.Setenv("AIVORY_LLM_FAST_TOOL_LIMITS_FETCH_IMAGE", "2")
+	t.Setenv("AIVORY_LLM_FAST_TOOL_LIMITS_IMAGE_GENERATE", "3")
+	t.Setenv("AIVORY_LLM_FAST_TOOL_LIMITS_PYTHON_EXECUTE", "1")
+	t.Setenv("AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN_FAST", "19")
+	limits = configuredFastToolLimits()
+	wantOverrides := map[string]int{
+		"aivory_web_search": 7,
+		"web_fetch":         5,
+		"fetch_image":       2,
+		"image_generate":    3,
+		"python_execute":    1,
+	}
+	for name, want := range wantOverrides {
+		if got := limits[name]; got != want {
+			t.Fatalf("configured fast %s limit=%d, want %d", name, got, want)
+		}
+	}
+	if got := configuredFastMaxToolCallsPerTurn(); got != 19 {
+		t.Fatalf("configured fast total limit=%d, want 19", got)
+	}
+}
+
 func TestToolBudgetFinalizationFailureDoesNotBecomeCancellation(t *testing.T) {
 	err := toolBudgetFinalizationError(
 		&ErrToolBudgetExceeded{Kind: "total_calls", Limit: 1},

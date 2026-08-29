@@ -31,7 +31,7 @@ const (
 // configuredOfficialToolRequests returns every administrator-configured hosted
 // tool in configuration order. The historical name mirrors the persisted
 // `official_tools` field; there is deliberately no user-supplied selection.
-func configuredOfficialToolRequests(raw json.RawMessage, fast bool) ([]string, []json.RawMessage) {
+func configuredOfficialToolRequests(raw json.RawMessage) ([]string, []json.RawMessage) {
 	definitions, err := store.ParseOfficialTools(raw)
 	if err != nil {
 		return nil, nil
@@ -40,11 +40,7 @@ func configuredOfficialToolRequests(raw json.RawMessage, fast bool) ([]string, [
 	requests := make([]json.RawMessage, 0, len(definitions))
 	for _, definition := range definitions {
 		name := strings.TrimSpace(definition.Name)
-		isHostedCodeTool := responsesRequestHasToolType(
-			MergeOfficialToolRequests(nil, []json.RawMessage{definition.Request}),
-			"code_interpreter",
-		)
-		if name == "" || (fast && (name == "code_interpreter" || isHostedCodeTool)) {
+		if name == "" {
 			continue
 		}
 		names = append(names, name)
@@ -947,7 +943,7 @@ func (r toolDefAllowlistRunner) Run(ctx context.Context, name string, input []by
 // toolRunnerForModelRequest retargets the concrete orchestrator runner during a
 // TTFT model switch. In particular, use_skill must query bindings for the
 // fallback model, not the primary model whose context built the first request.
-func toolRunnerForModelRequest(runner ToolRunner, modelID string, definitions []ToolDef) ToolRunner {
+func toolRunnerForModelRequest(runner ToolRunner, modelID string, definitions []ToolDef, systemTools map[string]bool) ToolRunner {
 	base := runner
 	if restricted, ok := runner.(toolDefAllowlistRunner); ok {
 		base = restricted.next
@@ -974,6 +970,7 @@ func toolRunnerForModelRequest(runner ToolRunner, modelID string, definitions []
 			DeepResearch:         source.DeepResearch,
 			Fast:                 source.Fast,
 			BuiltinTools:         toolDefNameSet(definitions),
+			SystemTools:          cloneBoolMap(systemTools),
 			AdminSkillIDs:        cloneBoolMap(source.AdminSkillIDs),
 			ImageModelID:         source.ImageModelID,
 			ImageRequestParams:   params,
@@ -1006,7 +1003,7 @@ func cloneBoolMap(source map[string]bool) map[string]bool {
 // 10s / sandbox 120s / image 60s) so one slow tool can't stall the turn.
 var toolTimeouts = map[string]time.Duration{
 	toolnames.AivoryWebSearch: envcfg.Dur("AIVORY_LLM_TOOL_TIMEOUTS", 10*time.Second),
-	"web_fetch":               envcfg.Dur("AIVORY_LLM_TOOL_TIMEOUTS_2", 30*time.Second),
+	"web_fetch":               envcfg.Dur("AIVORY_LLM_TOOL_TIMEOUTS_2", 60*time.Second),
 	"fetch_image":             envcfg.Dur("AIVORY_LLM_TOOL_TIMEOUTS_FETCH_IMAGE", 45*time.Second),
 	"python_execute":          120 * time.Second,
 	"image_generate":          envcfg.Dur("AIVORY_LLM_TOOL_TIMEOUTS_3", 600*time.Second), // slow third-party image gateways need a wide window
@@ -1086,7 +1083,7 @@ func (r *orchToolRunner) runUntracked(ctx context.Context, name string, input []
 		// configured cap + margin so raising the setting actually takes effect.
 		timeout = sandboxExecCtxTimeout(r.orch.db)
 	}
-	if remaining, limited := r.ctx.toolTimeRemaining(); limited {
+	if remaining, limited := r.ctx.toolTimeRemaining(); r.ctx.isSystemTool(name) && limited {
 		if remaining <= 0 {
 			return "", nil, r.ctx.toolTimeBudgetError()
 		}

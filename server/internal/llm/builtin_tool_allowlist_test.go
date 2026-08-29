@@ -844,7 +844,9 @@ func TestFallbackToolRunnerUsesFallbackModelContext(t *testing.T) {
 		},
 	}
 	runner := toolDefAllowlistRunner{next: primary, allowed: map[string]bool{"use_skill": true}}
-	fallbackRunner := toolRunnerForModelRequest(runner, "fallback-model", []ToolDef{{Name: "use_skill"}})
+	fallbackRunner := toolRunnerForModelRequest(
+		runner, "fallback-model", []ToolDef{{Name: "use_skill"}}, map[string]bool{"use_skill": true},
+	)
 	if _, _, err := fallbackRunner.Run(context.Background(), "use_skill", nil); err != nil {
 		t.Fatal(err)
 	}
