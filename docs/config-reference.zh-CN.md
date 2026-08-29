@@ -245,6 +245,10 @@
 | `AIVORY_TOOLS_IN_TOP_K` | `int` | `5` | `tools/builtins.go:37` | 模型调用未指定 top_k 时 `aivory_web_search` 工具的默认结果数量。 |
 | `AIVORY_TOOLS_WEB_FETCH_RESPONSE_BODY_READ_CAP` | `int64` | `256*1024` | `tools/builtins.go:38` | web_fetch 在剥离 HTML 前读取的 HTTP 响应体字节上限。 |
 | `AIVORY_TOOLS_WEB_FETCH_EXTRACTED_TEXT_CHAR_CAP` | `int` | `32000` | `tools/builtins.go:39` | web_fetch 剥离 HTML 后的文本在以省略标记截断前的字符上限。 |
+| `AIVORY_TOOLS_WEB_FETCH_DIRECT_TIMEOUT` | `duration` | `12s` | `tools/builtins.go` | 网页抓取直连目标站点的单次尝试超时。 |
+| `AIVORY_TOOLS_WEB_FETCH_JINA_FALLBACK` | `bool` | `true` | `tools/builtins.go` | 直连网页抓取失败时是否使用 Reader 回退。 |
+| `AIVORY_TOOLS_WEB_FETCH_JINA_BASE` | `string` | `https://r.jina.ai` | `tools/builtins.go` | 受信任的 Jina 兼容 Reader 服务基础地址。 |
+| `AIVORY_TOOLS_WEB_FETCH_JINA_URL_MODE` | `string` | `escaped` | `tools/builtins.go` | Jina Reader 使用 `escaped`，`https://markdown.new` 等兼容服务使用 `raw`；未知值按 `escaped` 处理。 |
 | `AIVORY_TOOLS_PYTHON_EXECUTE_UPLOAD_STAGING_FILE_SIZE` | `int64` | `40*1024*1024` | `tools/builtins.go:40` | 向 python 沙箱暂存文件时，超过该值则跳过某个会话上传文件的单文件大小上限。调高时还需确保 sidecar 的 `SANDBOX_MAX_UPLOAD_BYTES` 与 `SANDBOX_MAX_BODY_BYTES` 足够大。 |
 | `AIVORY_TOOLS_PYTHON_EXECUTE_STDOUT_STDERR_TRUNCATION_CAP` | `int` | `32*1024` | `tools/builtins.go:42` | python_execute 的 stdout/stderr 在呈现给模型前截断的字符上限。 |
 | `AIVORY_TOOLS_IN_N` | `int` | `4` | `tools/builtins.go:43` | 单次 image_generate 调用可请求的最大图像数量。 |
