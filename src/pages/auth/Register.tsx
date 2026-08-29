@@ -17,7 +17,6 @@ import { OAuthButtons } from '@/components/auth/oauth-buttons'
 import { PuzzleCaptchaDialog } from '@/components/auth/puzzle-captcha-dialog'
 import { authErrorText } from '@/lib/auth-errors'
 import { emailRetryAfterFromBody, useEmailCooldown } from '@/hooks/use-email-cooldown'
-import { cn } from '@/lib/utils'
 
 const ease: [number, number, number, number] = [0.2, 0.8, 0.2, 1]
 const stagger = { hidden: {}, visible: { transition: { staggerChildren: 0.06, delayChildren: 0.04 } } }
@@ -31,6 +30,7 @@ export default function Register() {
   const { t } = useTranslation('auth')
   const register = useAuth((s) => s.register)
   const signupOpen = useAuth((s) => s.signupOpen)
+  const oauthSignupOpen = useAuth((s) => s.authPolicy.oauth_auto_provision_enabled)
   const captchaRequired = useAuth((s) => s.captchaRequired)
   const pendingVerification = useAuth((s) => s.pendingVerification)
   const pendingVerificationRetryAfter = useAuth((s) => s.pendingVerificationRetryAfter)
@@ -73,8 +73,8 @@ export default function Register() {
 
   function submit(e: React.FormEvent) {
     e.preventDefault()
-    // Belt-and-braces: the fields/button are already disabled when signups are
-    // closed, but a stray Enter-key submit shouldn't reach the server either.
+    // The form is only rendered while password signup is open, but a stale
+    // submit event must not reach the server after the policy changes.
     if (!signupOpen) return
     const next: typeof errors = {}
     if (!name.trim()) next.name = t('errors.required')
@@ -278,142 +278,136 @@ export default function Register() {
         {t('register.subtitle')}
       </motion.p>
 
-      {/* A first-time visitor clicking "Continue with …" here would be trying to
-          SIGN UP — hide the section once that's closed (an existing user
-          signing back IN via OAuth still works fine from the login page). */}
-      {providers.length > 0 && signupOpen ? (
+      {providers.length > 0 && oauthSignupOpen ? (
         <>
           <motion.div variants={fadeUp} className="mt-7 flex flex-col gap-2">
             <OAuthButtons providers={providers} captchaRequired={captchaRequired} />
           </motion.div>
-          <motion.div
-            variants={fadeUp}
-            className="my-6 flex items-center gap-3 text-[11px] uppercase tracking-wider text-[var(--color-fg-subtle)]"
-          >
-            <Separator className="flex-1" />
-            <span>{t('login.or')}</span>
-            <Separator className="flex-1" />
-          </motion.div>
+          {signupOpen ? (
+            <motion.div
+              variants={fadeUp}
+              className="my-6 flex items-center gap-3 text-[11px] uppercase tracking-wider text-[var(--color-fg-subtle)]"
+            >
+              <Separator className="flex-1" />
+              <span>{t('login.or')}</span>
+              <Separator className="flex-1" />
+            </motion.div>
+          ) : null}
         </>
       ) : null}
 
-      <motion.form
-        variants={stagger}
-        className={`${providers.length > 0 && signupOpen ? '' : 'mt-7 '}flex flex-col gap-4`}
-        onSubmit={(e) => void submit(e)}
-      >
-        {!signupOpen ? (
-          <motion.div
-            variants={fadeUp}
-            className="rounded-[10px] border border-[var(--color-warning-soft)] bg-[var(--color-warning-soft)] text-[var(--color-warning)] px-3 py-2 text-sm"
-          >
-            {t('register.signupClosed', { defaultValue: 'New signups are currently disabled.' })}
-          </motion.div>
-        ) : null}
-        {errors.general ? (
-          <motion.div
-            variants={fadeUp}
-            className="rounded-[10px] border border-[var(--color-danger-soft)] bg-[var(--color-danger-soft)] text-[var(--color-danger)] px-3 py-2 text-sm"
-          >
-            {errors.general}
-          </motion.div>
-        ) : null}
-        <motion.div variants={fadeUp}>
-          <Field label={t('register.name')} htmlFor="name" error={errors.name}>
-            <Input
-              id="name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={t('register.namePlaceholder')}
-              leadingIcon={<User size={14} aria-hidden />}
-              autoComplete="name"
-              invalid={!!errors.name}
-              disabled={!signupOpen}
-              wrapperClassName="focus-within:ring-0"
-            />
-          </Field>
-        </motion.div>
-        <motion.div variants={fadeUp}>
-          <Field label={t('fields.email')} htmlFor="email" error={errors.email}>
-            <Input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              leadingIcon={<Mail size={14} aria-hidden />}
-              autoComplete="email"
-              invalid={!!errors.email}
-              disabled={!signupOpen}
-              wrapperClassName="focus-within:ring-0"
-            />
-          </Field>
-        </motion.div>
-        <motion.div variants={fadeUp}>
-          <Field label={t('fields.password')} htmlFor="pw" hint={t('fields.passwordHint')} error={errors.pw}>
-            <Input
-              id="pw"
-              type={showPw ? 'text' : 'password'}
-              value={pw}
-              onChange={(e) => setPw(e.target.value)}
-              leadingIcon={<Lock size={14} aria-hidden />}
-              autoComplete="new-password"
-              invalid={!!errors.pw}
-              disabled={!signupOpen}
-              wrapperClassName="focus-within:ring-0"
-              trailingSlot={
-                <button
-                  type="button"
-                  onClick={() => setShowPw((s) => !s)}
-                  disabled={!signupOpen}
-                  aria-label={showPw ? t('fields.hidePassword') : t('fields.showPassword')}
-                  className="inline-flex items-center justify-center size-7 rounded-[6px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] disabled:pointer-events-none disabled:opacity-60"
-                >
-                  {showPw ? <EyeOff size={13} aria-hidden /> : <Eye size={13} aria-hidden />}
-                </button>
-              }
-            />
-          </Field>
-        </motion.div>
-        <motion.label
-          variants={fadeUp}
-          className={cn(
-            'flex items-start gap-3 mt-1 select-none',
-            signupOpen ? 'cursor-pointer' : 'cursor-not-allowed opacity-60',
-          )}
+      {signupOpen ? (
+        <motion.form
+          variants={stagger}
+          className={`${providers.length > 0 && oauthSignupOpen ? '' : 'mt-7 '}flex flex-col gap-4`}
+          onSubmit={(e) => void submit(e)}
         >
-          <Checkbox
-            checked={agree}
-            onChange={(e) => setAgree(e.target.checked)}
-            aria-invalid={!!errors.agree}
-            disabled={!signupOpen}
-          />
-          <span className="text-xs text-[var(--color-fg-muted)] leading-snug">
-            <Trans
-              i18nKey="register.agree"
-              t={t}
-              components={{
-                terms: <Link to="/terms" target="_blank" className="text-[var(--color-accent)] hover:underline" />,
-                privacy: <Link to="/privacy" target="_blank" className="text-[var(--color-accent)] hover:underline" />,
-              }}
-              values={{ terms: t('register.terms'), privacy: t('register.privacy') }}
-            />
-            {errors.agree && <span className="block text-[var(--color-danger)] mt-1">{errors.agree}</span>}
-          </span>
-        </motion.label>
-        <motion.div variants={fadeUp}>
-          <Button
-            type="submit"
-            size="lg"
-            loading={loading}
-            disabled={!signupOpen}
-            trailingIcon={<ArrowRight size={15} aria-hidden />}
-            className="w-full"
+          {errors.general ? (
+            <motion.div
+              variants={fadeUp}
+              className="rounded-[10px] border border-[var(--color-danger-soft)] bg-[var(--color-danger-soft)] text-[var(--color-danger)] px-3 py-2 text-sm"
+            >
+              {errors.general}
+            </motion.div>
+          ) : null}
+          <motion.div variants={fadeUp}>
+            <Field label={t('register.name')} htmlFor="name" error={errors.name}>
+              <Input
+                id="name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder={t('register.namePlaceholder')}
+                leadingIcon={<User size={14} aria-hidden />}
+                autoComplete="name"
+                invalid={!!errors.name}
+                wrapperClassName="focus-within:ring-0"
+              />
+            </Field>
+          </motion.div>
+          <motion.div variants={fadeUp}>
+            <Field label={t('fields.email')} htmlFor="email" error={errors.email}>
+              <Input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                leadingIcon={<Mail size={14} aria-hidden />}
+                autoComplete="email"
+                invalid={!!errors.email}
+                wrapperClassName="focus-within:ring-0"
+              />
+            </Field>
+          </motion.div>
+          <motion.div variants={fadeUp}>
+            <Field label={t('fields.password')} htmlFor="pw" hint={t('fields.passwordHint')} error={errors.pw}>
+              <Input
+                id="pw"
+                type={showPw ? 'text' : 'password'}
+                value={pw}
+                onChange={(e) => setPw(e.target.value)}
+                leadingIcon={<Lock size={14} aria-hidden />}
+                autoComplete="new-password"
+                invalid={!!errors.pw}
+                wrapperClassName="focus-within:ring-0"
+                trailingSlot={
+                  <button
+                    type="button"
+                    onClick={() => setShowPw((s) => !s)}
+                    aria-label={showPw ? t('fields.hidePassword') : t('fields.showPassword')}
+                    className="inline-flex items-center justify-center size-7 rounded-[6px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]"
+                  >
+                    {showPw ? <EyeOff size={13} aria-hidden /> : <Eye size={13} aria-hidden />}
+                  </button>
+                }
+              />
+            </Field>
+          </motion.div>
+          <motion.label
+            variants={fadeUp}
+            className="flex items-start gap-3 mt-1 cursor-pointer select-none"
           >
-            {t('register.submit')}
-          </Button>
+            <Checkbox
+              checked={agree}
+              onChange={(e) => setAgree(e.target.checked)}
+              aria-invalid={!!errors.agree}
+            />
+            <span className="text-xs text-[var(--color-fg-muted)] leading-snug">
+              <Trans
+                i18nKey="register.agree"
+                t={t}
+                components={{
+                  terms: <Link to="/terms" target="_blank" className="text-[var(--color-accent)] hover:underline" />,
+                  privacy: <Link to="/privacy" target="_blank" className="text-[var(--color-accent)] hover:underline" />,
+                }}
+                values={{ terms: t('register.terms'), privacy: t('register.privacy') }}
+              />
+              {errors.agree && <span className="block text-[var(--color-danger)] mt-1">{errors.agree}</span>}
+            </span>
+          </motion.label>
+          <motion.div variants={fadeUp}>
+            <Button
+              type="submit"
+              size="lg"
+              loading={loading}
+              trailingIcon={<ArrowRight size={15} aria-hidden />}
+              className="w-full"
+            >
+              {t('register.submit')}
+            </Button>
+          </motion.div>
+        </motion.form>
+      ) : (
+        <motion.div
+          variants={fadeUp}
+          role="status"
+          className={`${providers.length > 0 && oauthSignupOpen ? 'mt-4' : 'mt-7'} rounded-[8px] bg-[var(--color-bg-muted)] px-3.5 py-3 text-sm leading-relaxed text-[var(--color-fg-muted)]`}
+        >
+          {providers.length > 0 && oauthSignupOpen
+            ? t('register.passwordSignupClosed')
+            : t('register.signupClosed', { defaultValue: 'New signups are currently disabled.' })}
         </motion.div>
-      </motion.form>
+      )}
 
       <motion.p variants={fadeUp} className="mt-7 text-center text-sm text-[var(--color-fg-muted)]">
         {t('register.haveAccount')}{' '}

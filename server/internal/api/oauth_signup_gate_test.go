@@ -84,6 +84,26 @@ func TestResolveOAuthUserBlocksNewSignupWhenClosed(t *testing.T) {
 	}
 }
 
+func TestResolveOAuthUserAllowsSignupWhenPasswordRegistrationClosed(t *testing.T) {
+	d := newOAuthGateTestDeps(t)
+	if err := store.SetSetting(d.DB, "signup_open", false); err != nil {
+		t.Fatalf("close password registration: %v", err)
+	}
+	if err := store.SetSetting(d.DB, "oauth_auto_provision_enabled", true); err != nil {
+		t.Fatalf("enable OAuth auto-provisioning: %v", err)
+	}
+	p := namespacedOAuthProviderForTest(&store.OAuthProvider{ID: "google", Kind: "google", Name: "Google"})
+	info := oauth.UserInfo{Subject: "oauth-only-signup", Email: "oauth-only@example.test", EmailVerified: true, Name: "OAuth Only"}
+
+	u, err := resolveOAuthUser(context.Background(), d, p, info, oauthSignupContext{})
+	if err != nil {
+		t.Fatalf("OAuth signup was blocked by signup_open=false: %v", err)
+	}
+	if u == nil || u.Email != info.Email {
+		t.Fatalf("OAuth signup user = %+v, want email %q", u, info.Email)
+	}
+}
+
 func TestResolveOAuthUserRequiresInitialSetupBeforeNewSignup(t *testing.T) {
 	d := newEmptyOAuthGateTestDeps(t)
 	p := namespacedOAuthProviderForTest(&store.OAuthProvider{ID: "google", Kind: "google", Name: "Google"})

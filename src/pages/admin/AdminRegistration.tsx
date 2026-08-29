@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Field } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/hooks/use-toast'
+import { changedAdminSettings } from '@/lib/admin-settings-patch'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useAuth } from '@/store/auth'
@@ -28,9 +29,18 @@ const OWNED_KEYS = [
   'oauth_auto_provision_enabled',
 ] as const
 
+const AUTH_POLICY_KEYS = [
+  'password_login_enabled',
+  'auth_entry_mode',
+  'auth_default_provider_id',
+  'oauth_initial_password_policy',
+  'oauth_auto_provision_enabled',
+] as const
+
 export default function AdminRegistration() {
   const { t } = useTranslation(['admin', 'common'])
   const [draft, setDraft] = useState<Settings>({})
+  const [savedSettings, setSavedSettings] = useState<Settings>({})
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [providers, setProviders] = useState<ApiOAuthProvider[]>([])
@@ -42,6 +52,7 @@ export default function AdminRegistration() {
     try {
       const [settings, nextProviders] = await Promise.all([adminApi.settings(), adminApi.oauthProviders()])
       setDraft(settings)
+      setSavedSettings(settings)
       setProviders(nextProviders)
     } catch (error) {
       const message = error instanceof ApiError ? error.message : t('admin:common.failed')
@@ -70,24 +81,28 @@ export default function AdminRegistration() {
   }
 
   async function save() {
+    const patch = changedAdminSettings(draft, savedSettings, OWNED_KEYS)
+    const authPolicyChanged = AUTH_POLICY_KEYS.some((key) => key in patch)
     const passwordLoginEnabled = readBool('password_login_enabled', true)
     const entryMode = (readString('auth_entry_mode') || 'login_page') as AuthEntryMode
     const readyProviders = providers.filter((provider) => provider.enabled)
-    if ((!passwordLoginEnabled || entryMode !== 'login_page') && readyProviders.length === 0) {
+    if (authPolicyChanged && (!passwordLoginEnabled || entryMode !== 'login_page') && readyProviders.length === 0) {
       toast.error(t('admin:settings.authPolicy.providerRequired'))
       return
     }
-    if (entryMode === 'auto_redirect' && !readString('auth_default_provider_id')) {
+    if (authPolicyChanged && entryMode === 'auto_redirect' && !readString('auth_default_provider_id')) {
       toast.error(t('admin:settings.authPolicy.defaultProviderRequired'))
+      return
+    }
+    if (Object.keys(patch).length === 0) {
+      toast.success(t('admin:settings.saved'))
       return
     }
     setSaving(true)
     try {
-      const patch: Settings = {}
-      for (const key of OWNED_KEYS) {
-        if (key in draft) patch[key] = draft[key]
-      }
-      await adminApi.updateSettings(patch)
+      const updated = await adminApi.updateSettings(patch)
+      setDraft(updated)
+      setSavedSettings(updated)
       await useAuth.getState().refreshAuthPolicy()
       toast.success(t('admin:settings.saved'))
     } catch (error) {
@@ -228,6 +243,7 @@ export default function AdminRegistration() {
 
               <ToggleRow
                 label={t('admin:settings.authPolicy.autoProvision')}
+                hint={t('admin:settings.authPolicy.autoProvisionHint')}
                 checked={readBool('oauth_auto_provision_enabled', true)}
                 onChange={(value) => setDraft((current) => ({ ...current, oauth_auto_provision_enabled: value }))}
               />
@@ -253,6 +269,7 @@ export default function AdminRegistration() {
             </h2>
             <ToggleRow
               label={t('admin:settings.fields.signupOpen')}
+              hint={t('admin:settings.fields.signupOpenHint')}
               checked={readBool('signup_open', true)}
               onChange={(value) => setDraft((current) => ({ ...current, signup_open: value }))}
             />
@@ -342,10 +359,23 @@ export default function AdminRegistration() {
   )
 }
 
-function ToggleRow({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
+function ToggleRow({
+  label,
+  hint,
+  checked,
+  onChange,
+}: {
+  label: string
+  hint?: string
+  checked: boolean
+  onChange: (value: boolean) => void
+}) {
   return (
-    <label className="flex items-center justify-between rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
-      <span className="text-sm">{label}</span>
+    <label className="flex items-center justify-between gap-4 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
+      <span className="min-w-0">
+        <span className="block text-sm text-[var(--color-fg)]">{label}</span>
+        {hint ? <span className="mt-1 block text-xs leading-relaxed text-[var(--color-fg-subtle)]">{hint}</span> : null}
+      </span>
       <Switch checked={checked} onCheckedChange={onChange} />
     </label>
   )
