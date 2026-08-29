@@ -1,15 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { buildHtmlPreviewDocument } from '@/lib/html-preview-document'
 
-const TAILWIND_BROWSER = '@tailwindcss/browser@4.1.12'
-
 describe('buildHtmlPreviewDocument', () => {
-  it('loads Tailwind for generated utility-class fragments', () => {
+  it('loads the bundled Tailwind runtime for generated utility-class fragments', () => {
     const document = buildHtmlPreviewDocument(
       '<div class="relative flex items-center rounded-2xl bg-white p-6">Preview</div>',
     )
 
-    expect(document).toContain(TAILWIND_BROWSER)
+    expect(document).toContain('data-aivory-tailwind')
+    expect(document).not.toContain('cdn.jsdelivr.net')
     expect(document).toContain('upgrade-insecure-requests')
     expect(document).toContain('target="_blank"')
   })
@@ -21,7 +20,7 @@ describe('buildHtmlPreviewDocument', () => {
 
     expect(document.indexOf('upgrade-insecure-requests')).toBeGreaterThan(document.indexOf('<head>'))
     expect(document.indexOf('upgrade-insecure-requests')).toBeLessThan(document.indexOf('<title>'))
-    expect(document).toContain(TAILWIND_BROWSER)
+    expect(document).toContain('data-aivory-tailwind')
   })
 
   it('does not add a second Tailwind runtime', () => {
@@ -30,7 +29,7 @@ describe('buildHtmlPreviewDocument', () => {
     const document = buildHtmlPreviewDocument(html)
 
     expect(document).toContain('cdn.tailwindcss.com')
-    expect(document).not.toContain(TAILWIND_BROWSER)
+    expect(document).not.toContain('data-aivory-tailwind')
   })
 
   it('leaves ordinary custom-class previews free of Tailwind resets', () => {
@@ -38,8 +37,15 @@ describe('buildHtmlPreviewDocument', () => {
       '<style>.widget.primary { color: red; }</style><div class="widget primary">Preview</div>',
     )
 
-    expect(document).not.toContain(TAILWIND_BROWSER)
+    expect(document).not.toContain('data-aivory-tailwind')
     expect(document).toContain('.widget.primary { color: red; }')
+  })
+
+  it('does not duplicate its bundled runtime when rebuilding a preview document', () => {
+    const initial = buildHtmlPreviewDocument('<main class="grid gap-4">Preview</main>')
+    const rebuilt = buildHtmlPreviewDocument(initial)
+
+    expect(rebuilt.match(/data-aivory-tailwind/g)).toHaveLength(1)
   })
 
   it('keeps an empty preview empty', () => {

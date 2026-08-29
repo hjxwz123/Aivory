@@ -30,6 +30,7 @@
     "@radix-ui/react-tabs": "^1.1.13",
     "@radix-ui/react-toast": "^1.2.15",
     "@radix-ui/react-tooltip": "^1.2.8",
+    "@tailwindcss/browser": "4.1.12",
     "@tiptap/core": "3.28.0",
     "@tiptap/extension-mathematics": "3.28.0",
     "@tiptap/extension-placeholder": "3.28.0",
