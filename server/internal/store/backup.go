@@ -37,7 +37,7 @@ var backupTableOrder = []string{
 	"channels", "mcp_servers", "skills", "prompts", "user_skills", "user_prompts", "oauth_providers",
 	"models", "model_group_quotas", "model_tags", "image_styles",
 	"redeem_codes", "redeem_redemptions",
-	"model_skills", "knowledge_bases", "knowledge_base_shares", "workspace_kb_member_permissions", "projects", "conversations", "conversation_compaction_leases", "messages", "message_feedback", "user_feedback",
+	"model_skills", "knowledge_bases", "knowledge_base_shares", "workspace_kb_member_permissions", "projects", "conversations", "conversation_compaction_leases", "conversation_generation_leases", "messages", "message_feedback", "user_feedback",
 	"conversation_shares", "files", "documents", "chunks", "vector_points", "memories",
 	"usage_stats", "usage_logs", "artifacts", "refresh_tokens", "oauth_identities",
 	"workspace_invites", "workspace_policies", "workspace_audit_logs",
@@ -289,7 +289,7 @@ func RestoreTable(ctx context.Context, ex RowExecer, table string, r io.Reader) 
 }
 
 func transientBackupTable(table string) bool {
-	return table == "conversation_compaction_leases"
+	return table == "conversation_compaction_leases" || table == "conversation_generation_leases"
 }
 
 // applyLegacyConversationVisibilityDefaults preserves the behavior of

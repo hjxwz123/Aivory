@@ -6,11 +6,12 @@ var (
 	errAuthRequired = errors.New("auth required")
 	// Stable machine code — the client matches this exact string to show the
 	// "your account has been suspended" notice + sign the user out.
-	errAccountBlocked = errors.New("account_suspended")
-	errSessionExpired = errors.New("session expired, please log in again")
-	errAdminOnly      = errors.New("admin only")
-	errInvalidInput   = errors.New("invalid input")
-	errNotFound       = errors.New("not found")
+	errAccountBlocked       = errors.New("account_suspended")
+	errSessionExpired       = errors.New("session expired, please log in again")
+	errAdminOnly            = errors.New("admin only")
+	errInvalidInput         = errors.New("invalid input")
+	errNotFound             = errors.New("not found")
+	errGenerationInProgress = errors.New("generation_in_progress")
 	// Authenticated but lacking the required workspace role (§workspace RBAC).
 	errForbidden = errors.New("forbidden")
 

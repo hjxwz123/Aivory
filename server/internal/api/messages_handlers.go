@@ -1295,6 +1295,42 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		req.Mode = ""
 	}
 	toolMode, req.WebSearch = normalizeTurnFlags(req.Mode, toolMode, req.WebSearch)
+	// A normal append is serial within its selected branch. Resolve and reserve
+	// the exact parent in one database transaction so the same account on another
+	// tab, device, or application replica cannot append beneath its unfinished
+	// assistant. An explicit branch edit deliberately bypasses this lease and
+	// remains able to run beside another branch.
+	var generationLease *store.ConversationGenerationLease
+	if !req.Branch {
+		ownerToken := strings.TrimSpace(req.GenerationID)
+		if ownerToken == "" {
+			ownerToken = store.GenID("genlease")
+		}
+		lease, parentID, acquired, leaseErr := store.TryAcquireConversationGenerationLease(
+			r.Context(), d.DB, id, req.ParentID, u.ID, ownerToken, generationcfg.ProtectedDuration(),
+		)
+		if leaseErr != nil {
+			if errors.Is(leaseErr, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, errNotFound)
+			} else {
+				writeError(w, http.StatusInternalServerError, leaseErr)
+			}
+			return
+		}
+		if !acquired {
+			writeError(w, http.StatusConflict, errGenerationInProgress)
+			return
+		}
+		generationLease = lease
+		req.ParentID = parentID
+		defer func() {
+			releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer releaseCancel()
+			if releaseErr := store.ReleaseConversationGenerationLease(releaseCtx, d.DB, generationLease); releaseErr != nil && d.Logger != nil {
+				d.Logger.Printf("release conversation generation lease (conv=%s): %v", id, releaseErr)
+			}
+		}()
+	}
 	// §8 hard rule: per-user concurrent generation cap. Reserve the slot FIRST,
 	// before the daily-message counter is incremented — otherwise a request that
 	// is rejected here (slot full) would still burn a daily count for a turn that
@@ -1368,7 +1404,9 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 
 	streamMessageID := ""
 	terminalSent := false
+	generationStartedPublished := false
 	sendEvent := func(ev llm.SseEvent) {
+		publishGenerationStart := false
 		if ev.Type == "message_start" && ev.MessageID != "" {
 			streamMessageID = ev.MessageID
 			// Install message-scoped cancellation before exposing the persisted id
@@ -1377,6 +1415,7 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			scopedStop.watchMessage(streamMessageID)
 			scopedStop.activate()
 			accessRevocation.watchMessage(streamMessageID)
+			publishGenerationStart = !generationStartedPublished
 		}
 		// A provider may ignore cancellation briefly or return buffered deltas after
 		// Stop/ban/workspace revocation. Never forward those late contents; only the
@@ -1403,6 +1442,12 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if appended {
+				if publishGenerationStart {
+					generationStartedPublished = true
+					// Publish only after message_start is replayable. A receiving
+					// device may immediately open the message stream.
+					publishUserEvent(d, r, u.ID, "conversation.updated", id)
+				}
 				_ = writer.SendID(ev, ev.Type, eventID)
 				return
 			}
@@ -1415,6 +1460,10 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		}
 		if ctx.Err() != nil && ev.Type != "message_start" && (ev.Type != "done" || ev.StopReason != "stopped") {
 			return
+		}
+		if publishGenerationStart {
+			generationStartedPublished = true
+			publishUserEvent(d, r, u.ID, "conversation.updated", id)
 		}
 		_ = writer.Send(ev, ev.Type)
 	}
