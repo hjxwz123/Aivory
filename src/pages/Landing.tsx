@@ -533,41 +533,29 @@ export default function Landing() {
         <section className="py-24 sm:py-32 border-t border-[var(--color-divider)]">
           <div className="mx-auto max-w-[76rem] px-5 sm:px-8">
             <SectionHeader title={t('landing:useCases.title')} />
-            {/* Numbered gallery cards: an oversized ghost numeral fills each
-              card's corner, the icon chip lifts on hover, and every term
-              drifts into focus as it scrolls in (§ welcome fx). */}
-            <dl className="mt-12 grid grid-cols-1 gap-5 sm:grid-cols-2" data-reveal-group>
-              {USE_CASE_KEYS.map(({ key, icon: Icon }, i) => (
+            {/* Quiet, neutral cards keep the use cases readable regardless of
+              the visitor's chosen accent preset. */}
+            <div className="mt-12 grid grid-cols-1 gap-5 sm:grid-cols-2" data-reveal-group>
+              {USE_CASE_KEYS.map(({ key, icon: Icon }) => (
                 <SpotlightCard
                   key={key}
-                  spotlightColor="color-mix(in oklch, var(--color-accent) 9%, transparent)"
-                  className="group rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6 sm:p-7 transition-transform duration-300 hover:-translate-y-1 hover:shadow-[var(--shadow-md)]"
+                  spotlightColor="color-mix(in oklch, var(--color-fg) 5%, transparent)"
+                  className="group rounded-[var(--radius-md)] border border-[var(--color-border-subtle)] bg-[var(--color-surface)] p-6 shadow-[var(--shadow-xs)] transition-[transform,border-color,background-color,box-shadow] duration-[var(--duration-base)] ease-[var(--ease-out)] hover:-translate-y-0.5 hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-raised)] hover:shadow-[var(--shadow-sm)] sm:p-7"
                 >
-                  <span
-                    aria-hidden
-                    className="pointer-events-none absolute -top-7 right-1 select-none font-serif text-[7rem] leading-none tracking-tight text-[color-mix(in_oklch,var(--color-fg)_6%,transparent)] transition-colors duration-500 group-hover:text-[color-mix(in_oklch,var(--color-accent)_16%,transparent)]"
-                  >
-                    {String(i + 1).padStart(2, '0')}
-                  </span>
-                  <span className="relative inline-flex size-10 items-center justify-center rounded-[11px] bg-[var(--color-accent-soft)] text-[var(--color-accent)] transition-transform duration-300 group-hover:-translate-y-0.5">
-                    <Icon size={17} aria-hidden />
-                  </span>
-                  <dt className="mt-4 font-serif text-xl tracking-tight text-[var(--color-fg)]">
-                    <span className="relative inline-block">
-                      {/* Each entry's term drifts into focus as it scrolls in. */}
-                      <BlurText text={t(`landing:useCases.items.${key}.title`)} delay={80} />
-                      <span
-                        aria-hidden
-                        className="absolute -bottom-1 left-0 h-px w-full origin-left scale-x-0 bg-[var(--color-accent)] transition-transform duration-300 group-hover:scale-x-100"
-                      />
+                  <div className="relative flex items-center gap-3.5">
+                    <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)] transition-[background-color,border-color,color,transform] duration-[var(--duration-base)] ease-[var(--ease-out)] group-hover:-translate-y-px group-hover:border-[var(--color-border-strong)] group-hover:bg-[var(--color-surface-sunken)] group-hover:text-[var(--color-fg)]">
+                      <Icon size={16} strokeWidth={1.8} aria-hidden />
                     </span>
-                  </dt>
-                  <dd className="relative mt-2.5 max-w-[46ch] text-sm text-[var(--color-fg-muted)] leading-relaxed text-pretty">
+                    <h3 className="font-serif text-xl tracking-tight text-[var(--color-fg)]">
+                      <BlurText text={t(`landing:useCases.items.${key}.title`)} delay={80} />
+                    </h3>
+                  </div>
+                  <p className="relative mt-3 max-w-[46ch] text-sm leading-relaxed text-pretty text-[var(--color-fg-muted)]">
                     {t(`landing:useCases.items.${key}.body`)}
-                  </dd>
+                  </p>
                 </SpotlightCard>
               ))}
-            </dl>
+            </div>
           </div>
         </section>
 
