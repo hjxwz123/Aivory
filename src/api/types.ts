@@ -661,6 +661,28 @@ export interface ApiChannelModelImportResult {
   skipped_unsupported: number
 }
 
+export type ApiChannelModelKind = 'chat' | 'image' | 'embedding'
+
+export interface ApiChannelModelCandidate {
+  request_id: string
+  label: string
+  description: string
+  kind: ApiChannelModelKind
+}
+
+export interface ApiChannelModelDiscoveryResult {
+  models: ApiChannelModelCandidate[]
+  discovered: number
+  skipped_unsupported: number
+}
+
+export interface ApiChannelModelBatchResult {
+  requested: number
+  created: number
+  skipped_existing: number
+  skipped_duplicate: number
+}
+
 /** One configuration check returned by the per-administrator setup guide. */
 export interface ApiAdminOnboardingStep {
   id: 'channel' | 'chat_model' | 'default_model' | 'task_model' | 'tool_route_model' | 'embedding' | 'search' | 'sandbox' | 'smtp'

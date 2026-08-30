@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -21,6 +22,12 @@ func newChannelModelImportFixture(t *testing.T) *channelAdminFixture {
 	fx.mux.handle(http.MethodPost, "/api/admin/channels/:id/models/import", func(w http.ResponseWriter, r *http.Request) {
 		importChannelModelsAdmin(d, w, r)
 	})
+	fx.mux.handle(http.MethodPost, "/api/admin/channels/models/discover", func(w http.ResponseWriter, r *http.Request) {
+		discoverDraftChannelModelsAdmin(d, w, r)
+	})
+	fx.mux.handle(http.MethodPost, "/api/admin/channels/:id/models/batch", func(w http.ResponseWriter, r *http.Request) {
+		createChannelModelsBatchAdmin(d, w, r)
+	})
 	return &fx
 }
 
@@ -34,6 +41,160 @@ func importChannelModelsRequest(t *testing.T, fx *channelAdminFixture, channelID
 		}
 	}
 	return recorder, result
+}
+
+func TestDiscoverDraftOpenAIChannelModelsDoesNotPersistChannelOrLeakKey(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			t.Errorf("request path = %q", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer preview-secret" {
+			t.Errorf("authorization = %q", got)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"data": []map[string]string{
+			{"id": "gpt-5"},
+			{"id": "gpt-image-1"},
+			{"id": "whisper-1"},
+		}})
+	}))
+	defer server.Close()
+
+	fx := newChannelModelImportFixture(t)
+	body, err := json.Marshal(map[string]string{
+		"type": "openai", "api_format": "responses", "base_url": server.URL + "/v1/", "api_key": "preview-secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := fx.request(t, http.MethodPost, "/api/admin/channels/models/discover", string(body))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var result channelModelDiscovery
+	if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Discovered != 3 || result.SkippedUnsupported != 1 || len(result.Models) != 2 {
+		t.Fatalf("discovery=%+v", result)
+	}
+	if result.Models[0].RequestID != "gpt-5" || result.Models[0].Kind != "chat" || result.Models[1].Kind != "image" {
+		t.Fatalf("models=%+v", result.Models)
+	}
+	if strings.Contains(recorder.Body.String(), "preview-secret") {
+		t.Fatalf("API key leaked in response: %s", recorder.Body.String())
+	}
+	channels, err := store.ListChannels(t.Context(), fx.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(channels) != 0 {
+		t.Fatalf("draft discovery persisted channels: %+v", channels)
+	}
+}
+
+func TestDiscoverDraftChannelModelsValidatesConfigurationAndStabilizesUpstreamErrors(t *testing.T) {
+	fx := newChannelModelImportFixture(t)
+	invalid := fx.request(t, http.MethodPost, "/api/admin/channels/models/discover", `{
+		"type":"openai","api_format":"chat","base_url":"https://api.example.com"
+	}`)
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("invalid base URL status=%d body=%s", invalid.Code, invalid.Body.String())
+	}
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "secret upstream detail"})
+	}))
+	defer upstream.Close()
+	body, err := json.Marshal(map[string]string{"type": "openai", "api_format": "chat", "base_url": upstream.URL + "/v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := fx.request(t, http.MethodPost, "/api/admin/channels/models/discover", string(body))
+	if failed.Code != http.StatusBadGateway || failed.Body.String() != "{\"error\":\"channel_model_discovery_failed\"}\n" {
+		t.Fatalf("upstream failure status=%d body=%s", failed.Code, failed.Body.String())
+	}
+}
+
+func TestCreateChannelModelsBatchNormalizesDeduplicatesAndSkipsExisting(t *testing.T) {
+	fx := newChannelModelImportFixture(t)
+	channel, err := store.CreateChannel(t.Context(), fx.db, "Batch", "openai", "chat", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateModel(t.Context(), fx.db, store.Model{
+		ChannelID: channel.ID, RequestID: "gpt-5", Label: "GPT-5", Kind: "chat", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	body := `{"models":[
+		{"request_id":" gpt-5 ","label":"GPT-5","kind":"chat"},
+		{"request_id":"GPT-5","label":"duplicate","kind":"chat"},
+		{"request_id":"gpt-image-1","label":"","kind":"IMAGE"},
+		{"request_id":"text-embedding-3-small","kind":"embedding"}
+	]}`
+	recorder := fx.request(t, http.MethodPost, "/api/admin/channels/"+channel.ID+"/models/batch", body)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var result channelModelBatchResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Requested != 4 || result.Created != 2 || result.SkippedExisting != 1 || result.SkippedDuplicate != 1 {
+		t.Fatalf("result=%+v", result)
+	}
+	models, err := store.ListModels(t.Context(), fx.db, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 3 {
+		t.Fatalf("models=%+v", models)
+	}
+	for _, model := range models {
+		if model.RequestID == "gpt-image-1" {
+			if model.Label != model.RequestID || model.Kind != "image" || !model.Enabled || !model.Vision || !model.Stream {
+				t.Fatalf("batch model defaults=%+v", model)
+			}
+		}
+	}
+}
+
+func TestCreateChannelModelsBatchRejectsInvalidInputBeforeWriting(t *testing.T) {
+	fx := newChannelModelImportFixture(t)
+	channel, err := store.CreateChannel(t.Context(), fx.db, "Invalid batch", "openai", "chat", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{
+		`{"models":[]}`,
+		`{"models":[{"request_id":"ok","kind":"chat"},{"request_id":"bad","kind":"audio"}]}`,
+		`{"models":[{"request_id":"","kind":"chat"}]}`,
+	} {
+		recorder := fx.request(t, http.MethodPost, "/api/admin/channels/"+channel.ID+"/models/batch", body)
+		if recorder.Code != http.StatusBadRequest {
+			t.Fatalf("body=%s status=%d response=%s", body, recorder.Code, recorder.Body.String())
+		}
+	}
+	tooMany := make([]discoveredChannelModel, channelModelDiscoveryModelLimit+1)
+	for i := range tooMany {
+		tooMany[i] = discoveredChannelModel{RequestID: "model-" + strconv.Itoa(i), Kind: "chat"}
+	}
+	tooManyBody, err := json.Marshal(map[string]any{"models": tooMany})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tooManyResponse := fx.request(t, http.MethodPost, "/api/admin/channels/"+channel.ID+"/models/batch", string(tooManyBody))
+	if tooManyResponse.Code != http.StatusBadRequest {
+		t.Fatalf("oversized status=%d body=%s", tooManyResponse.Code, tooManyResponse.Body.String())
+	}
+	models, err := store.ListModels(t.Context(), fx.db, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 0 {
+		t.Fatalf("invalid batch created models: %+v", models)
+	}
 }
 
 func TestImportOpenAIChannelModelsClassifiesAndSkipsDuplicates(t *testing.T) {
