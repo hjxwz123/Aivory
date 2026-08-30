@@ -353,6 +353,10 @@ func NewRouter(d Deps) http.Handler {
 	// detaches + drops the RAG doc.
 	mux.handle("GET", "/api/conversations/:id/files", requireAuth(d, listConversationFilesHandler))
 	mux.handle("DELETE", "/api/conversations/:id/files/:fileId", requireAuth(d, deleteConversationFileHandler))
+	// Conversation sandbox browser: list and preview only. There is intentionally
+	// no user-facing mutation route for sandbox workspace contents.
+	mux.handle("GET", "/api/conversations/:id/sandbox", requireAuth(d, sandboxFilesHandler))
+	mux.handle("GET", "/api/conversations/:id/sandbox/file", requireAuth(d, sandboxFileGetHandler))
 	sharingPermission := func(p store.UserGroupPermissions) bool { return p.AllowSharing }
 	mux.handle("GET", "/api/conversations/:id/share", requireAuth(d, requireCapabilityHandler(errSharingGroupPermission, sharingPermission, getShareHandler)))
 	mux.handle("POST", "/api/conversations/:id/share", requireAuth(d, requireCapabilityHandler(errSharingGroupPermission, sharingPermission, createShareHandler)))

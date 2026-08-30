@@ -502,6 +502,21 @@
     "remove": "移除 {{name}}",
     "removeFailed": "移除檔案失敗"
   },
+  "sandbox": {
+    "title": "沙盒檔案",
+    "tooltip": "沙盒檔案",
+    "close": "關閉沙盒檔案",
+    "refresh": "重新整理",
+    "location": "沙盒檔案位置",
+    "root": "根目錄",
+    "back": "返回上一層",
+    "loading": "載入中…",
+    "none": "此對話尚未建立沙盒工作區。",
+    "empty": "此資料夾是空的。",
+    "unavailable": "沙盒工作階段已過期，暫時無法瀏覽檔案。",
+    "loadFailed": "沙盒檔案暫時無法使用。",
+    "openFolder": "開啟 {{name}}"
+  },
   "inline": {
     "ask": "提問",
     "placeholder": "針對這段內容提問…",

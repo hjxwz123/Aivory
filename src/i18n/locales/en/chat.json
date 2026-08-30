@@ -507,6 +507,21 @@
     "remove": "Remove {{name}}",
     "removeFailed": "Could not remove the file"
   },
+  "sandbox": {
+    "title": "Sandbox files",
+    "tooltip": "Sandbox files",
+    "close": "Close sandbox files",
+    "refresh": "Refresh",
+    "location": "Sandbox file location",
+    "root": "Root directory",
+    "back": "Go up one folder",
+    "loading": "Loading…",
+    "none": "This conversation has not created a sandbox workspace yet.",
+    "empty": "This folder is empty.",
+    "unavailable": "The sandbox session expired, so its files cannot be browsed.",
+    "loadFailed": "Sandbox files are currently unavailable.",
+    "openFolder": "Open {{name}}"
+  },
   "inline": {
     "ask": "Ask",
     "placeholder": "Ask about this…",

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { MoreHorizontal, Pencil, Share2, Star, Trash2, Archive, ArrowDown, FolderKanban, Loader2, Menu, Files, GitBranch, Globe2, LockKeyhole } from 'lucide-react'
+import { MoreHorizontal, Pencil, Share2, Star, Trash2, Archive, ArrowDown, FolderKanban, Loader2, Menu, Files, GitBranch, Globe2, LockKeyhole, SquareTerminal } from 'lucide-react'
 import { Composer } from '@/components/chat/composer'
 import { MessageList } from '@/components/chat/message-list'
 import { UserMenu } from '@/components/sidebar/sidebar'
@@ -28,6 +28,7 @@ import { useUI } from '@/store/ui'
 import { useWorkspaces } from '@/store/workspaces'
 import { useAuth } from '@/store/auth'
 import { useConversationFiles } from '@/store/conversation-files'
+import { useSandboxFiles } from '@/store/sandbox-files'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { toast } from '@/hooks/use-toast'
 import { ConversationOutline } from '@/components/chat/conversation-outline'
@@ -90,6 +91,9 @@ export default function ChatThread() {
   const openFilesDrawer = useConversationFiles((s) => s.openDrawer)
   const closeFilesDrawer = useConversationFiles((s) => s.close)
   const filesDrawerOpen = useConversationFiles((s) => s.open)
+  const openSandboxDrawer = useSandboxFiles((s) => s.openDrawer)
+  const closeSandboxDrawer = useSandboxFiles((s) => s.close)
+  const sandboxDrawerOpen = useSandboxFiles((s) => s.open)
   // On mobile this page renders one combined bar (menu + title + controls), so
   // tell the layout to drop its standalone brand bar while we're mounted.
   useEffect(() => {
@@ -463,6 +467,22 @@ export default function ChatThread() {
               </button>
             </Tooltip>
           ) : null}
+          <Tooltip content={t('chat:sandbox.tooltip')}>
+            <button
+              type="button"
+              onClick={() => (sandboxDrawerOpen ? closeSandboxDrawer() : openSandboxDrawer(conversation.id))}
+              aria-label={t('chat:sandbox.title')}
+              aria-pressed={sandboxDrawerOpen}
+              className={cn(
+                'inline-flex items-center justify-center size-8 rounded-[8px] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                sandboxDrawerOpen
+                  ? 'bg-[var(--color-bg-muted)] text-[var(--color-fg)]'
+                  : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+              )}
+            >
+              <SquareTerminal size={14} aria-hidden />
+            </button>
+          </Tooltip>
           <Tooltip content={t('chat:files.tooltip')}>
             <button
               type="button"
@@ -740,6 +760,11 @@ export default function ChatThread() {
                 onClick={() => { setActionsOpen(false); setOutlineOpen(true) }}
               />
             ) : null}
+            <ThreadActionRow
+              icon={<SquareTerminal size={18} aria-hidden />}
+              label={t('chat:sandbox.title')}
+              onClick={() => { setActionsOpen(false); openSandboxDrawer(conversation.id) }}
+            />
             <ThreadActionRow
               icon={<Files size={18} aria-hidden />}
               label={t('chat:files.title')}

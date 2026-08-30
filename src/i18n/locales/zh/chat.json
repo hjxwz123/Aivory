@@ -502,6 +502,21 @@
     "remove": "移除 {{name}}",
     "removeFailed": "移除文件失败"
   },
+  "sandbox": {
+    "title": "沙盒文件",
+    "tooltip": "沙盒文件",
+    "close": "关闭沙盒文件",
+    "refresh": "刷新",
+    "location": "沙盒文件位置",
+    "root": "根目录",
+    "back": "返回上一级",
+    "loading": "加载中…",
+    "none": "此对话尚未创建沙盒工作区。",
+    "empty": "此目录为空。",
+    "unavailable": "沙盒会话已过期，暂时无法浏览文件。",
+    "loadFailed": "沙盒文件暂时不可用。",
+    "openFolder": "打开 {{name}}"
+  },
   "inline": {
     "ask": "提问",
     "placeholder": "针对这段内容提问…",
