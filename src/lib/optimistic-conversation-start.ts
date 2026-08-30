@@ -1,6 +1,6 @@
 interface EnterOptimisticConversationInput {
   createConversation: () => string
-  beforeNavigate?: () => void
+  beforeNavigate?: (conversationId: string) => void
   navigate: (conversationId: string) => void
   startBackgroundWork: (conversationId: string) => void | Promise<void>
 }
@@ -17,7 +17,7 @@ export function enterOptimisticConversation({
   startBackgroundWork,
 }: EnterOptimisticConversationInput): string {
   const conversationId = createConversation()
-  beforeNavigate?.()
+  beforeNavigate?.(conversationId)
   navigate(conversationId)
   void startBackgroundWork(conversationId)
   return conversationId

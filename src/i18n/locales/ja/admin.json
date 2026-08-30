@@ -931,7 +931,7 @@
       "toolRouteModel": "ツールルーティングモデル",
       "toolRouteModelHint": "自動ツール用の任意の低遅延モデルです。未設定時は現在の会話モデルがツールをルーティングします。",
       "defaultToolMode": "デフォルトのツールモード",
-      "defaultToolModeHint": "ユーザーがデフォルトのツールモードを選んでいない場合に使用します。ユーザー設定が優先されます。",
+      "defaultToolModeHint": "すべての新しい会話で使用します。ユーザーは個々の会話内でのみ変更できます。",
       "toolModeAuto": "自動",
       "toolModeEnabled": "オン",
       "toolModeDisabled": "オフ",

@@ -23,6 +23,7 @@ import { useConversations, sameConvListShape } from '@/store/conversations'
 import { useModels } from '@/store/models'
 import { useAuth } from '@/store/auth'
 import { useSettings } from '@/store/settings'
+import { useComposerPrefs } from '@/store/composer-prefs'
 import { useWorkspaces } from '@/store/workspaces'
 import { accentClasses, fileKindIcon, formatFileSize, PROJECT_ACCENT_OPTIONS } from '@/lib/project-helpers'
 import { Composer } from '@/components/chat/composer'
@@ -196,6 +197,7 @@ export default function ProjectDetail() {
     () => pendingConversationKey(userId, `project:${project?.id || id || 'unknown'}`, workspaceId),
     [id, project?.id, userId, workspaceId],
   )
+  const toolModeDraftScope = useMemo(() => `project:${project?.id || id || 'unknown'}`, [id, project?.id])
   const [pendingConversationId, setPendingConversationId] = useState<string | undefined>(() =>
     readPendingConversation(pendingStorageKey),
   )
@@ -280,7 +282,8 @@ export default function ProjectDetail() {
     setPendingConversationId(readPendingConversation(pendingStorageKey))
     setProjectComposerModelId('')
     setSelectedKnowledgeBaseIds([])
-  }, [pendingStorageKey])
+    useComposerPrefs.getState().clearToolMode(toolModeDraftScope)
+  }, [pendingStorageKey, toolModeDraftScope])
 
   // Project composers use the same durable draft handoff as the chat home.
   // Refreshing keeps the hidden conversation and lets Composer restore its files.
@@ -343,6 +346,9 @@ export default function ProjectDetail() {
             void conversationsApi.remove(created.id).catch(() => {})
             return undefined
           }
+          // Preserve a mode selected before the first attachment created this
+          // hidden project conversation.
+          useComposerPrefs.getState().moveToolModeScope(toolModeDraftScope, created.id)
           writePendingConversation(storageKey, created.id)
           pendingConvRef.current = created
           setPendingConversationId(created.id)
@@ -512,6 +518,7 @@ export default function ProjectDetail() {
     }
     pendingConsumedRef.current = true
     const pending = pendingConvRef.current
+    const sourceToolModeScope = pending?.id ?? toolModeDraftScope
     pendingConvRef.current = null
     setPendingConversationId(undefined)
     clearPendingConversation(pendingStorageKey)
@@ -522,6 +529,7 @@ export default function ProjectDetail() {
       pendingConsumedRef.current = false
       return
     }
+    useComposerPrefs.getState().moveToolModeScope(sourceToolModeScope, conv.id)
     if (!opts.fast && effectiveProjectModelId && conv.modelId !== effectiveProjectModelId) {
       void useConversations.getState().setModel(conv.id, effectiveProjectModelId)
     }
@@ -644,6 +652,7 @@ export default function ProjectDetail() {
                   }}
                   onSubmit={(text, atts, opts) => void startProjectChat(text, atts, opts)}
                   conversationId={pendingConversationId}
+                  draftScope={toolModeDraftScope}
                   kbIds={selectedKnowledgeBaseIds}
                   projectKBId={project.kbId}
                   onKBChange={setSelectedKnowledgeBaseIds}

@@ -249,6 +249,9 @@ export default function ChatHome() {
 
   useEffect(() => {
     setSelectedKnowledgeBaseIds([])
+    // A fresh home composer always starts from the administrator's deployment
+    // default. Conversation-specific overrides are kept under their IDs.
+    useComposerPrefs.getState().resetForNewConversation()
   }, [draftScope, workspaceId])
 
   // When the user attaches a file BEFORE sending, we must create the
@@ -355,6 +358,9 @@ export default function ChatHome() {
             void conversationsApi.remove(created.id).catch(() => {})
             return undefined
           }
+          // Keep a tool-mode choice made before the first attachment attached
+          // to the hidden conversation that now owns that upload.
+          useComposerPrefs.getState().moveToolModeScope(draftScope, created.id)
           // startNew claimed this in-flight reservation. Hand the row to the
           // optimistic send, but do not recreate a pending-draft storage entry
           // after navigation has already consumed it.
@@ -493,6 +499,7 @@ export default function ChatHome() {
     // A resolved draft is reused so uploaded files keep their original owner;
     // an invalid/failed reservation falls back to creating a fresh conversation.
     const pending = pendingConvRef.current
+    const sourceToolModeScope = pendingConversationId ?? draftScope
     const preparedConversation = pending
       ? Promise.resolve(pending)
       : pendingCreateRef.current ?? undefined
@@ -509,7 +516,10 @@ export default function ChatHome() {
           opts.fast === true,
           selectedKnowledgeBaseIds,
         ),
-      beforeNavigate: () => clearComposerDraft(draftScope),
+      beforeNavigate: (tempId) => {
+        clearComposerDraft(draftScope)
+        useComposerPrefs.getState().moveToolModeScope(sourceToolModeScope, tempId)
+      },
       // Commit the already-loaded thread before background conversation work
       // starts. This is the one transition where a visible response in the same
       // click matters more than React's normal event-batch deferral.
@@ -675,7 +685,12 @@ export default function ChatHome() {
                           icon={s.icon}
                           title={title}
                           prompt={prompt}
-                          onClick={() => void startNew(prompt, [], { ...resolveArmedTurnFlags(modelId), fast })}
+                          onClick={() =>
+                            void startNew(prompt, [], {
+                              ...resolveArmedTurnFlags(modelId, pendingConversationId ?? draftScope),
+                              fast,
+                            })
+                          }
                           className="h-full"
                         />
                       </div>

@@ -644,6 +644,9 @@ func Migrate(db *sql.DB) error {
 	if err := migrateBuiltinToolPolicies(db); err != nil {
 		return fmt.Errorf("migrate builtin tool policies: %w", err)
 	}
+	if err := migrateLegacyUserToolModeSettings(db); err != nil {
+		return fmt.Errorf("migrate legacy user tool settings: %w", err)
+	}
 	// One-time backfill: accounts that exist only because of an OAuth login were
 	// created with a random password they never chose, so mark them as
 	// password-unset to force them through the set-password gate. Guarded by a

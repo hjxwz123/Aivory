@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { MessageCircleQuestion, CornerDownLeft } from 'lucide-react'
 import { resolveArmedTurnFlags, useConversations } from '@/store/conversations'
+import { useComposerPrefs } from '@/store/composer-prefs'
 import { useInlineThreadDrawer } from '@/store/inline-thread'
 import { highlightThreads, threadIdForNode } from '@/lib/inline-highlight'
 
@@ -197,13 +198,16 @@ export function InlineThreadLayer({ conversationId, scrollRef, readOnly = false 
     if (readOnly || !pending) return
     const question = draft.trim()
     if (!question) return
-    const armed = resolveArmedTurnFlags(modelId)
+    const armed = resolveArmedTurnFlags(modelId, conversationId)
     const quote = pending.quote
     const messageId = pending.messageId
     dismiss()
     const child = await createInlineThread(conversationId, messageId, quote)
     if (!child) return
     openThread({ childId: child.id, quote })
+    const prefs = useComposerPrefs.getState()
+    prefs.setToolMode(child.id, armed.toolMode)
+    if (armed.webSearch) prefs.setForceWebSearch(child.id, true)
     void sendMessage({
       conversationId: child.id,
       text: question,

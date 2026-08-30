@@ -104,11 +104,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
     if (typeof accent === 'string' && (ACCENT_PRESETS as readonly string[]).includes(accent)) {
       useAccent.getState().applyAccent(accent as AccentPref)
     }
-    // Keep the account default available synchronously to the composer and the
-    // new-chat action. The resolver also preserves explicit choices from the
-    // legacy disable_tools_default boolean; an entirely absent account value
-    // inherits the deployment-wide administrator default attached to the user.
-    useComposerPrefs.getState().setDefaultToolMode(resolveDefaultToolMode(user.settings, user.tool_mode_default))
+    // The deployment-wide administrator policy is the only global default.
+    // Historical account-level tool settings are intentionally ignored.
+    useComposerPrefs.getState().setDefaultToolMode(resolveDefaultToolMode(user.tool_mode_default))
   }, [status, user?.settings, user?.tool_mode_default, syncUserSettings])
 
   // Once authenticated, hydrate the per-user data caches. This is keyed by user
@@ -127,13 +125,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
     }
     if (hydratedDataForUser.current === userId) return
     hydratedDataForUser.current = userId
-    // Apply the account default exactly once per login. All three values matter:
-    // unlike the former boolean, auto/enabled must also replace a
-    // persisted mode left by another account or an earlier session.
+    // Apply the administrator default exactly once per login. Conversation
+    // overrides stay scoped by id; only the unrelated new-chat draft is reset.
     const currentUser = useAuth.getState().user
-    const defaultToolMode = resolveDefaultToolMode(currentUser?.settings, currentUser?.tool_mode_default)
+    const defaultToolMode = resolveDefaultToolMode(currentUser?.tool_mode_default)
     useComposerPrefs.getState().setDefaultToolMode(defaultToolMode)
-    useComposerPrefs.getState().setToolMode(defaultToolMode)
+    useComposerPrefs.getState().resetForNewConversation()
     void useWorkspaces
       .getState()
       .load()

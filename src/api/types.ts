@@ -43,8 +43,7 @@ export interface ApiUser {
   /** Effective deployment authentication policy, attached to /me responses. */
   password_login_enabled?: boolean
   oauth_initial_password_policy?: OAuthInitialPasswordPolicy
-  /** Effective default tool policy. An explicit account preference takes
-   * precedence over the administrator's deployment-wide fallback. */
+  /** Administrator-controlled default tool policy for new conversations. */
   tool_mode_default?: 'auto' | 'disabled' | 'enabled'
   /** Unix seconds of the last password change (change/reset/first set).
    *  0 or absent = never changed since the account was created. */

@@ -1183,7 +1183,7 @@ describe('stopped turn optimistic-id reconciliation', () => {
       ],
       defaultId: 'model_1',
     })
-    useComposerPrefs.setState({ toolMode: 'enabled' })
+    useComposerPrefs.setState({ defaultToolMode: 'auto', toolModesByScope: { conv_stop: 'enabled' } })
     const requestBodies: Array<Record<string, unknown>> = []
     apiMocks.streamSSE.mockImplementation((_path: string, body: Record<string, unknown>) => {
       requestBodies.push(body)
@@ -1206,7 +1206,7 @@ describe('stopped turn optimistic-id reconciliation', () => {
     })
 
     resetStore()
-    useComposerPrefs.setState({ toolMode: 'auto' })
+    useComposerPrefs.setState({ toolModesByScope: {} })
     await useConversations.getState().sendMessage({
       conversationId: 'conv_stop',
       text: 'automatically choose tools',
@@ -1283,7 +1283,7 @@ describe('stopped turn optimistic-id reconciliation', () => {
     }
     resetStore([sourceUser, sourceAssistant])
     useComposerPrefs.setState({
-      toolMode: 'auto',
+      toolModesByScope: {},
       selectedToolIdsByModel: { model_1: [] },
     })
     let requestBody: Record<string, unknown> | undefined

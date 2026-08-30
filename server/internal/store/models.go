@@ -38,9 +38,9 @@ type User struct {
 	// authenticated OAuth user sees the same password rules as the login page.
 	PasswordLoginEnabled       bool   `json:"password_login_enabled"`
 	OAuthInitialPasswordPolicy string `json:"oauth_initial_password_policy"`
-	// ToolModeDefault is the effective account default after applying the user's
-	// explicit preference over the deployment-wide administrator fallback. It is
-	// attached transiently by the API and is never persisted on the users row.
+	// ToolModeDefault is the deployment-wide administrator policy applied to new
+	// conversations. Users may override it only for individual conversation turns.
+	// It is attached transiently by the API and is never persisted on the users row.
 	ToolModeDefault string `json:"tool_mode_default,omitempty"`
 	// PasswordChangedAt is the unix seconds of the user's last password change
 	// (change / reset / first OAuth set-password). 0 = never changed since the

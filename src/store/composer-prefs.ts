@@ -12,16 +12,16 @@ export interface PersistedComposerPrefs {
   /** Direct image-model turns rewrite prompts by default; users can opt out and
    * send their exact wording to the image provider. */
   optimizeImagePrompt: boolean
-  // Per-turn tool policy. Deep Research requires tools, so selecting it forces
-  // this to enabled; the setters keep that invariant in persisted state.
-  toolMode: ToolMode
-  // Forced non-tool web search is only meaningful in disabled mode; switching
-  // to auto/enabled clears it automatically.
-  forceWebSearch: boolean
-  // Account-level default mirrored from `tool_mode_default`. New conversations
-  // reset the live toolMode to this complete value (including auto/enabled), so
-  // a prior conversation's override cannot leak into the next one.
+  // Deployment default mirrored from the administrator's `tool_mode_default`.
+  // Users cannot replace this globally; a conversation may override it below.
   defaultToolMode: ToolMode
+  /** Per-conversation tool policy overrides. Missing means inherit the current
+   * administrator default. Draft scopes such as `new-chat` are cleared whenever
+   * the user explicitly starts another conversation. */
+  toolModesByScope: Record<string, ToolMode>
+  /** Forced non-tool web search is meaningful only while the same scope resolves
+   * to disabled mode. Keeping it scoped prevents one chat from arming another. */
+  forceWebSearchByScope: Record<string, true>
   /** Per-model explicit tool subsets. A missing model key means the model's
    * current defaults; a present empty array means the user selected none. */
   selectedToolIdsByModel: Record<string, string[]>
@@ -33,10 +33,12 @@ interface ComposerPrefsStore extends PersistedComposerPrefs {
   setMode: (mode: ComposerMode) => void
   setVerify: (verify: boolean) => void
   setOptimizeImagePrompt: (enabled: boolean) => void
-  setToolMode: (toolMode: ToolMode) => void
-  // Update the mirror of the server-side default tool policy.
+  setToolMode: (scope: string, toolMode: ToolMode) => void
+  clearToolMode: (scope: string) => void
+  moveToolModeScope: (fromScope: string, toScope: string) => void
+  // Update the mirror of the administrator-controlled default tool policy.
   setDefaultToolMode: (toolMode: ToolMode) => void
-  setForceWebSearch: (on: boolean) => void
+  setForceWebSearch: (scope: string, on: boolean) => void
   setSelectedToolIds: (modelId: string, ids: string[] | undefined) => void
   /** Restore the account/model defaults before starting an unrelated chat. */
   resetForNewConversation: () => void
@@ -52,9 +54,9 @@ const DEFAULT_PREFS: PersistedComposerPrefs = {
   mode: 'default',
   verify: false,
   optimizeImagePrompt: true,
-  toolMode: 'auto',
-  forceWebSearch: false,
   defaultToolMode: 'auto',
+  toolModesByScope: {},
+  forceWebSearchByScope: {},
   selectedToolIdsByModel: {},
   paramValuesByModel: {},
   draftsByScope: {},
@@ -131,34 +133,42 @@ function sanitizeSelectedToolIdsByModel(raw: unknown): Record<string, string[]> 
   return out
 }
 
-/** Sanitizes the localStorage payload and migrates the retired boolean policy. */
+function sanitizeToolModesByScope(raw: unknown): Record<string, ToolMode> {
+  if (!isRecord(raw)) return {}
+  const out: Record<string, ToolMode> = {}
+  for (const [scope, value] of Object.entries(raw)) {
+    if (!scope || scope.length > 180 || !isToolMode(value)) continue
+    out[scope] = value
+    if (Object.keys(out).length >= 512) break
+  }
+  return out
+}
+
+function sanitizeForceWebSearchByScope(raw: unknown): Record<string, true> {
+  if (!isRecord(raw)) return {}
+  const out: Record<string, true> = {}
+  for (const [scope, value] of Object.entries(raw)) {
+    if (!scope || scope.length > 180 || value !== true) continue
+    out[scope] = true
+    if (Object.keys(out).length >= 512) break
+  }
+  return out
+}
+
+/** Sanitizes localStorage without reviving the retired user-global tool mode. */
 export function parsePersistedComposerPrefs(parsed: unknown): PersistedComposerPrefs {
   if (!isRecord(parsed)) return DEFAULT_PREFS
-  // Do not translate the old local `noTools` booleans here. Older clients
-  // armed that value for every account whose server setting was absent, so it
-  // cannot distinguish an explicit user choice from the retired implicit
-  // default. Auth hydration resolves explicit legacy account settings; a
-  // missing new local value intentionally starts at the new default, auto.
-  const toolMode =
-    parsed.toolMode === 'official'
-      ? 'enabled'
-      : isToolMode(parsed.toolMode)
-        ? parsed.toolMode
-        : DEFAULT_PREFS.toolMode
-  const defaultToolMode =
-    parsed.defaultToolMode === 'official'
-      ? 'enabled'
-      : isToolMode(parsed.defaultToolMode)
-        ? parsed.defaultToolMode
-        : DEFAULT_PREFS.defaultToolMode
+  // `toolMode`, `defaultToolMode`, `forceWebSearch`, and the older `noTools`
+  // values were account-wide user preferences. Ignore them deliberately: only
+  // /me may hydrate the administrator default, and only the new scoped maps may
+  // retain a user's conversation-specific choice.
   return {
     mode: isMode(parsed.mode) ? parsed.mode : DEFAULT_PREFS.mode,
     verify: parsed.verify === true,
     optimizeImagePrompt: parsed.optimizeImagePrompt !== false,
-    toolMode,
-    // forced search only exists inside an explicitly disabled-tools turn
-    forceWebSearch: toolMode === 'disabled' && parsed.forceWebSearch === true,
-    defaultToolMode,
+    defaultToolMode: DEFAULT_PREFS.defaultToolMode,
+    toolModesByScope: sanitizeToolModesByScope(parsed.toolModesByScope),
+    forceWebSearchByScope: sanitizeForceWebSearchByScope(parsed.forceWebSearchByScope),
     selectedToolIdsByModel: sanitizeSelectedToolIdsByModel(parsed.selectedToolIdsByModel),
     paramValuesByModel: sanitizeParamValuesByModel(parsed.paramValuesByModel),
     draftsByScope: sanitizeDraftsByScope(parsed.draftsByScope),
@@ -170,7 +180,11 @@ function loadPrefs(): PersistedComposerPrefs {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return DEFAULT_PREFS
-    return parsePersistedComposerPrefs(JSON.parse(raw) as unknown)
+    const parsed = parsePersistedComposerPrefs(JSON.parse(raw) as unknown)
+    // Rewrite once on load so retired account-wide fields disappear from the
+    // browser storage instead of merely being ignored at runtime.
+    persistPrefs(parsed)
+    return parsed
   } catch {
     return DEFAULT_PREFS
   }
@@ -184,9 +198,9 @@ function persistedFrom(state: PersistedComposerPrefs, patch: Partial<PersistedCo
     mode: state.mode,
     verify: state.verify,
     optimizeImagePrompt: state.optimizeImagePrompt,
-    toolMode: state.toolMode,
-    forceWebSearch: state.forceWebSearch,
     defaultToolMode: state.defaultToolMode,
+    toolModesByScope: state.toolModesByScope,
+    forceWebSearchByScope: state.forceWebSearchByScope,
     selectedToolIdsByModel: state.selectedToolIdsByModel,
     paramValuesByModel: state.paramValuesByModel,
     draftsByScope: state.draftsByScope,
@@ -215,9 +229,7 @@ export const useComposerPrefs = create<ComposerPrefsStore>((set) => {
   return {
     ...initial,
     setMode(mode) {
-      // Deep Research always uses tools and bypasses automatic classification.
-      if (mode === 'deep-research') commit({ mode, toolMode: 'enabled', forceWebSearch: false })
-      else commit({ mode })
+      commit({ mode })
     },
     setVerify(verify) {
       commit({ verify })
@@ -225,23 +237,79 @@ export const useComposerPrefs = create<ComposerPrefsStore>((set) => {
     setOptimizeImagePrompt(optimizeImagePrompt) {
       commit({ optimizeImagePrompt })
     },
-    setToolMode(toolMode) {
-      // Every policy except enabled exits Deep Research, whose pipeline always
-      // requires tools. Only disabled mode may retain forced non-tool search.
-      if (toolMode === 'enabled') commit({ toolMode, forceWebSearch: false })
-      else if (toolMode === 'disabled') commit({ toolMode, mode: 'default', forceWebSearch: false })
-      else commit({ toolMode, mode: 'default', forceWebSearch: false })
+    setToolMode(scope, toolMode) {
+      const key = scope.trim()
+      if (!key) return
+      set((state) => {
+        const toolModesByScope = { ...state.toolModesByScope }
+        const forceWebSearchByScope = { ...state.forceWebSearchByScope }
+        if (toolMode === state.defaultToolMode) delete toolModesByScope[key]
+        else toolModesByScope[key] = toolMode
+        if (toolMode !== 'disabled') delete forceWebSearchByScope[key]
+        const patch: Partial<PersistedComposerPrefs> = {
+          toolModesByScope,
+          forceWebSearchByScope,
+        }
+        if (toolMode !== 'enabled') patch.mode = 'default'
+        persistPrefs(persistedFrom(state, patch))
+        return patch
+      })
+    },
+    clearToolMode(scope) {
+      const key = scope.trim()
+      if (!key) return
+      set((state) => {
+        if (!(key in state.toolModesByScope) && !(key in state.forceWebSearchByScope)) return {}
+        const toolModesByScope = { ...state.toolModesByScope }
+        const forceWebSearchByScope = { ...state.forceWebSearchByScope }
+        delete toolModesByScope[key]
+        delete forceWebSearchByScope[key]
+        const patch = { toolModesByScope, forceWebSearchByScope }
+        persistPrefs(persistedFrom(state, patch))
+        return patch
+      })
+    },
+    moveToolModeScope(fromScope, toScope) {
+      const from = fromScope.trim()
+      const to = toScope.trim()
+      if (!from || !to || from === to) return
+      set((state) => {
+        const hasMode = from in state.toolModesByScope
+        const hasSearch = from in state.forceWebSearchByScope
+        if (!hasMode && !hasSearch) return {}
+        const toolModesByScope = { ...state.toolModesByScope }
+        const forceWebSearchByScope = { ...state.forceWebSearchByScope }
+        if (hasMode) toolModesByScope[to] = toolModesByScope[from]
+        if (hasSearch) forceWebSearchByScope[to] = true
+        delete toolModesByScope[from]
+        delete forceWebSearchByScope[from]
+        const patch = { toolModesByScope, forceWebSearchByScope }
+        persistPrefs(persistedFrom(state, patch))
+        return patch
+      })
     },
     setDefaultToolMode(toolMode) {
-      // Mirror-only: callers apply the live mode through setToolMode so the
-      // Deep Research / forced-search invariants run in one place.
-      commit({ defaultToolMode: toolMode })
-    },
-    setForceWebSearch(on) {
-      // Only togglable while tools are explicitly disabled (the UI gates it too).
       set((state) => {
-        if (state.toolMode !== 'disabled') return {}
-        const patch = { forceWebSearch: on }
+        const forceWebSearchByScope = { ...state.forceWebSearchByScope }
+        for (const scope of Object.keys(forceWebSearchByScope)) {
+          const explicit = state.toolModesByScope[scope]
+          if ((explicit ?? toolMode) !== 'disabled') delete forceWebSearchByScope[scope]
+        }
+        const patch = { defaultToolMode: toolMode, forceWebSearchByScope }
+        persistPrefs(persistedFrom(state, patch))
+        return patch
+      })
+    },
+    setForceWebSearch(scope, on) {
+      const key = scope.trim()
+      if (!key) return
+      set((state) => {
+        const toolMode = state.toolModesByScope[key] ?? state.defaultToolMode
+        if (toolMode !== 'disabled') return {}
+        const forceWebSearchByScope = { ...state.forceWebSearchByScope }
+        if (on) forceWebSearchByScope[key] = true
+        else delete forceWebSearchByScope[key]
+        const patch = { forceWebSearchByScope }
         persistPrefs(persistedFrom(state, patch))
         return patch
       })
@@ -262,16 +330,21 @@ export const useComposerPrefs = create<ComposerPrefsStore>((set) => {
     },
     resetForNewConversation() {
       set((state) => {
-        const toolMode = state.defaultToolMode
+        const toolModesByScope = { ...state.toolModesByScope }
+        const forceWebSearchByScope = { ...state.forceWebSearchByScope }
+        delete toolModesByScope['new-chat']
+        delete toolModesByScope['new-draw']
+        delete forceWebSearchByScope['new-chat']
+        delete forceWebSearchByScope['new-draw']
         const patch: Partial<PersistedComposerPrefs> = {
-          toolMode,
-          forceWebSearch: false,
+          toolModesByScope,
+          forceWebSearchByScope,
           // A chosen subset is a turn override, not the next conversation's
           // model default. Clear every model so changing models in the new
           // conversation cannot revive a stale selection either.
           selectedToolIdsByModel: {},
         }
-        if (toolMode !== 'enabled') patch.mode = 'default'
+        if (state.defaultToolMode !== 'enabled') patch.mode = 'default'
         persistPrefs(persistedFrom(state, patch))
         return patch
       })

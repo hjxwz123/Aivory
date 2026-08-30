@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"aivory/server/internal/envcfg"
-	"aivory/server/internal/llm"
 	"aivory/server/internal/store"
 )
 
@@ -25,7 +24,7 @@ func attachGroupInfo(d Deps, r *http.Request, u *store.User) {
 	if u == nil {
 		return
 	}
-	u.ToolModeDefault = effectiveDefaultToolMode(d.DB, u.Settings)
+	u.ToolModeDefault = effectiveDefaultToolMode(d.DB)
 	// Keep the transient /me payload aligned with authorization. Legacy or
 	// temporarily dangling group references use the permissive compatibility
 	// policy instead of serializing an all-false Go zero value.
@@ -203,10 +202,6 @@ var settingsAllowlist = map[string]bool{
 	"code_theme":            true,
 	"user_message_markdown": true,
 	"onboarded":             true,
-	"tool_mode_default":     true,
-	// Legacy clients still write this boolean. New clients use the three-state
-	// tool_mode_default setting; keep the old key writable during migration.
-	"disable_tools_default": true,
 }
 
 // updateMeSettingsHandler merges patch keys into settings.
@@ -224,10 +219,6 @@ func updateMeSettingsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		if !settingsAllowlist[k] {
 			delete(patch, k)
 		}
-	}
-	if err := normalizeToolModeSettingsPatch(patch); err != nil {
-		writeError(w, 400, err)
-		return
 	}
 	permissions, permissionErr := requestPermissions(d, r)
 	if permissionErr != nil {
@@ -247,40 +238,6 @@ func updateMeSettingsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	invalidateAuthUser(d, u.ID)
 	writeJSON(w, 200, json.RawMessage(upd.Settings))
-}
-
-// Keep old and new clients coherent during rolling upgrades. A new three-state
-// write wins when both keys are present; auto degrades to legacy "tools on".
-// A legacy-only boolean write is promoted to the equivalent explicit mode so a
-// previously stored tool_mode_default cannot make the old client's change inert.
-func normalizeToolModeSettingsPatch(patch map[string]any) error {
-	if value, ok := patch["tool_mode_default"]; ok {
-		mode, isString := value.(string)
-		if !isString {
-			return errors.New("tool_mode_default must be one of: auto, disabled, enabled")
-		}
-		if mode == llm.ToolModeOfficial {
-			mode = llm.ToolModeEnabled
-			patch["tool_mode_default"] = mode
-		}
-		if !validTurnToolMode(mode) {
-			return errors.New("tool_mode_default must be one of: auto, disabled, enabled")
-		}
-		patch["disable_tools_default"] = mode == llm.ToolModeDisabled
-		return nil
-	}
-	if value, ok := patch["disable_tools_default"]; ok {
-		disabled, isBool := value.(bool)
-		if !isBool {
-			return errors.New("disable_tools_default must be a boolean")
-		}
-		if disabled {
-			patch["tool_mode_default"] = llm.ToolModeDisabled
-		} else {
-			patch["tool_mode_default"] = llm.ToolModeEnabled
-		}
-	}
-	return nil
 }
 
 // meUsageHandler returns the user's message-count over the last N days. Cost is
