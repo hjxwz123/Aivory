@@ -113,6 +113,7 @@
     "noKnowledgeBases": "还没有知识库。",
     "manageKnowledgeBases": "管理知识库",
     "incompatibleKnowledgeBase": "此知识库暂时不能与当前选择一起使用",
+    "generationInProgress": "请等待当前回复完成，或者先停止生成。",
     "knowledgeBaseMentionLabel": "附加知识库",
     "knowledgeBaseMentionEmpty": "没有匹配的知识库",
     "permissions": {

@@ -1359,6 +1359,27 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     const stoppedReconcile = pendingStoppedPathWork(input.conversationId)
     if (stoppedReconcile) await stoppedReconcile
 
+    // The composer normally enforces this, but store actions can also be
+    // triggered by stale renders, another component, or a realtime race. Keep
+    // normal appends serial on the visible branch; explicit branch edits retain
+    // their independent stream behavior.
+    const appendSnapshot = get().conversations.find((c) => c.id === input.conversationId)
+    const currentUserId = useAuth.getState().user?.id
+    const currentUserIsStreaming = appendSnapshot?.messages.some(
+      (message) =>
+        message.streaming &&
+        (!appendSnapshot.workspaceId ||
+          Boolean(
+            currentUserId &&
+              (message.authorId === currentUserId ||
+                (!message.authorId && appendSnapshot.creatorId === currentUserId)),
+          )),
+    )
+    if (!input.branch && currentUserIsStreaming) {
+      toast.info(i18n.t('chat:composer.generationInProgress'))
+      return
+    }
+
     // §4.15: an edit-resend creates a sibling branch. Do not stop the existing
     // branch's stream; stream frames are keyed by assistant message id and can be
     // replayed when that branch is reopened.
@@ -1912,6 +1933,33 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       }
     } catch (e) {
       if (abort.signal.aborted && streamHandoffs.delete(abort)) return
+      if (
+        !abort.signal.aborted &&
+        e instanceof ApiError &&
+        e.status === 409 &&
+        e.message === 'generation_in_progress'
+      ) {
+        // Another device/tab won the branch lease before this optimistic turn
+        // reached the server. Remove only this rejected local suffix, then load
+        // and follow the real in-flight assistant so the composer becomes Stop.
+        generatedLocalMessageIds.delete(userId)
+        generatedLocalMessageIds.delete(assistantId)
+        set((state) => ({
+          conversations: state.conversations.map((conversation) =>
+            conversation.id !== input.conversationId
+              ? conversation
+              : {
+                  ...conversation,
+                  messages: conversation.messages.filter(
+                    (message) => message.id !== userId && message.id !== assistantId,
+                  ),
+                },
+          ),
+        }))
+        toast.info(i18n.t('chat:composer.generationInProgress'))
+        await get().loadOne(input.conversationId)
+        return
+      }
       if (!abort.signal.aborted && serverAssistantId !== assistantId) {
         beginMessageStreamReplay(set, get, input.conversationId, serverAssistantId, abort)
         return

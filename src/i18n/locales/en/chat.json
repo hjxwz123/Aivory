@@ -113,6 +113,7 @@
     "noKnowledgeBases": "No knowledge bases yet.",
     "manageKnowledgeBases": "Manage knowledge bases",
     "incompatibleKnowledgeBase": "This library cannot be used with the current selection",
+    "generationInProgress": "Wait for the current reply to finish, or stop it first.",
     "knowledgeBaseMentionLabel": "Attach a knowledge base",
     "knowledgeBaseMentionEmpty": "No matching knowledge bases",
     "permissions": {

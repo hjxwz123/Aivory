@@ -113,6 +113,7 @@
     "noKnowledgeBases": "ナレッジベースはまだありません。",
     "manageKnowledgeBases": "ナレッジベースを管理",
     "incompatibleKnowledgeBase": "このライブラリは現在の選択と一緒に使用できません",
+    "generationInProgress": "現在の返信が完了するまで待つか、先に停止してください。",
     "knowledgeBaseMentionLabel": "ナレッジベースを添付",
     "knowledgeBaseMentionEmpty": "一致するナレッジベースがありません",
     "permissions": {
