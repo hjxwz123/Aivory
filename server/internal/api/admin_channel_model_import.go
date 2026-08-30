@@ -29,16 +29,16 @@ var (
 )
 
 type discoveredChannelModel struct {
-	RequestID   string
-	Label       string
-	Description string
-	Kind        string
+	RequestID   string `json:"request_id"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	Kind        string `json:"kind"`
 }
 
 type channelModelDiscovery struct {
-	Models             []discoveredChannelModel
-	Discovered         int
-	SkippedUnsupported int
+	Models             []discoveredChannelModel `json:"models"`
+	Discovered         int                      `json:"discovered"`
+	SkippedUnsupported int                      `json:"skipped_unsupported"`
 }
 
 type channelModelImportResponse struct {
@@ -46,6 +46,13 @@ type channelModelImportResponse struct {
 	Created            int `json:"created"`
 	SkippedExisting    int `json:"skipped_existing"`
 	SkippedUnsupported int `json:"skipped_unsupported"`
+}
+
+type channelModelBatchResponse struct {
+	Requested        int `json:"requested"`
+	Created          int `json:"created"`
+	SkippedExisting  int `json:"skipped_existing"`
+	SkippedDuplicate int `json:"skipped_duplicate"`
 }
 
 func newChannelModelDiscoveryHTTPClient() *http.Client {
@@ -77,6 +84,53 @@ func newChannelModelDiscoveryHTTPClient() *http.Client {
 	}
 }
 
+// discoverDraftChannelModelsAdmin previews the models exposed by credentials
+// that have not been saved yet. The temporary channel is never persisted and
+// its API key is never included in the response.
+func discoverDraftChannelModelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
+	var req createChannelReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, errInvalidInput)
+		return
+	}
+	req.Type = strings.TrimSpace(req.Type)
+	req.APIFormat = strings.TrimSpace(req.APIFormat)
+	req.BaseURL = strings.TrimSpace(req.BaseURL)
+	if req.Type != "openai" {
+		req.APIFormat = ""
+	}
+	if err := validateChannelType(req.Type, req.APIFormat); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if req.Type == "openai" {
+		baseURL, err := normalizeOpenAIChannelBaseURL(req.BaseURL)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		req.BaseURL = baseURL
+	}
+
+	channel := &store.Channel{
+		Type:      req.Type,
+		APIFormat: req.APIFormat,
+		BaseURL:   req.BaseURL,
+		APIKey:    req.APIKey,
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), channelModelDiscoveryTimeout)
+	defer cancel()
+	discovery, err := discoverChannelModels(ctx, channel)
+	if err != nil {
+		if d.Logger != nil {
+			d.Logger.Printf("admin: draft channel model discovery failed (type=%s): %v", channel.Type, err)
+		}
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": errChannelModelDiscoveryFailed.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, discovery)
+}
+
 func importChannelModelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	channel, err := store.GetChannel(r.Context(), d.DB, pathParam(r, "id"))
 	if err != nil {
@@ -104,18 +158,7 @@ func importChannelModelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		SkippedUnsupported: discovery.SkippedUnsupported,
 	}
 	for _, found := range discovery.Models {
-		model := store.Model{
-			ChannelID:   channel.ID,
-			Kind:        found.Kind,
-			RequestID:   found.RequestID,
-			Label:       found.Label,
-			Description: found.Description,
-			Enabled:     true,
-			ToolMode:    "native",
-			Vision:      true,
-			Stream:      true,
-			Currency:    "USD",
-		}
+		model := newDiscoveredChannelModel(channel.ID, found)
 		if _, err := store.CreateModel(r.Context(), d.DB, model); err != nil {
 			if errors.Is(err, store.ErrModelRequestExists) {
 				result.SkippedExisting++
@@ -128,6 +171,85 @@ func importChannelModelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, result)
+}
+
+func createChannelModelsBatchAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
+	channelID := pathParam(r, "id")
+	if _, err := store.GetChannel(r.Context(), d.DB, channelID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, errNotFound)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	var body struct {
+		Models []discoveredChannelModel `json:"models"`
+	}
+	if err := decodeJSON(r, &body); err != nil || len(body.Models) == 0 || len(body.Models) > channelModelDiscoveryModelLimit {
+		writeError(w, http.StatusBadRequest, errInvalidInput)
+		return
+	}
+
+	result := channelModelBatchResponse{Requested: len(body.Models)}
+	seen := make(map[string]struct{}, len(body.Models))
+	normalized := make([]discoveredChannelModel, 0, len(body.Models))
+	for _, candidate := range body.Models {
+		candidate.RequestID = strings.TrimSpace(candidate.RequestID)
+		candidate.Label = strings.TrimSpace(candidate.Label)
+		candidate.Description = strings.TrimSpace(candidate.Description)
+		candidate.Kind = strings.ToLower(strings.TrimSpace(candidate.Kind))
+		if candidate.RequestID == "" {
+			writeError(w, http.StatusBadRequest, errInvalidInput)
+			return
+		}
+		if candidate.Label == "" {
+			candidate.Label = candidate.RequestID
+		}
+		if candidate.Kind == "" {
+			candidate.Kind = "chat"
+		}
+		if candidate.Kind != "chat" && candidate.Kind != "image" && candidate.Kind != "embedding" {
+			writeError(w, http.StatusBadRequest, errInvalidInput)
+			return
+		}
+		key := strings.ToLower(candidate.RequestID)
+		if _, exists := seen[key]; exists {
+			result.SkippedDuplicate++
+			continue
+		}
+		seen[key] = struct{}{}
+		normalized = append(normalized, candidate)
+	}
+
+	for _, candidate := range normalized {
+		if _, err := store.CreateModel(r.Context(), d.DB, newDiscoveredChannelModel(channelID, candidate)); err != nil {
+			if errors.Is(err, store.ErrModelRequestExists) {
+				result.SkippedExisting++
+				continue
+			}
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		result.Created++
+	}
+	writeJSON(w, http.StatusCreated, result)
+}
+
+func newDiscoveredChannelModel(channelID string, found discoveredChannelModel) store.Model {
+	return store.Model{
+		ChannelID:   channelID,
+		Kind:        found.Kind,
+		RequestID:   found.RequestID,
+		Label:       found.Label,
+		Description: found.Description,
+		Enabled:     true,
+		ToolMode:    "native",
+		Vision:      true,
+		Stream:      true,
+		Currency:    "USD",
+	}
 }
 
 func discoverChannelModels(ctx context.Context, channel *store.Channel) (channelModelDiscovery, error) {
@@ -152,7 +274,10 @@ type channelModelAccumulator struct {
 }
 
 func newChannelModelAccumulator() *channelModelAccumulator {
-	return &channelModelAccumulator{seen: make(map[string]struct{})}
+	return &channelModelAccumulator{
+		result: channelModelDiscovery{Models: []discoveredChannelModel{}},
+		seen:   make(map[string]struct{}),
+	}
 }
 
 func (a *channelModelAccumulator) add(requestID, label, description, kind string, supported bool) error {

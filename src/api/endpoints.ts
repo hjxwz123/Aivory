@@ -34,6 +34,9 @@ import type {
   ApiAuthSessionResponse,
   ApiBuiltinTool,
   ApiChannel,
+  ApiChannelModelBatchResult,
+  ApiChannelModelCandidate,
+  ApiChannelModelDiscoveryResult,
   ApiChannelModelImportResult,
   ApiConversation,
   ApiConversationFile,
@@ -826,6 +829,13 @@ export const adminApi = {
   channels: () => api<ApiChannel[]>('/admin/channels'),
   createChannel: (body: Partial<ApiChannel> & { api_key?: string }) =>
     api<ApiChannel>('/admin/channels', { method: 'POST', body }),
+  discoverChannelModels: (body: Partial<ApiChannel> & { api_key?: string }) =>
+    api<ApiChannelModelDiscoveryResult>('/admin/channels/models/discover', { method: 'POST', body }),
+  createChannelModelsBatch: (id: string, models: ApiChannelModelCandidate[]) =>
+    api<ApiChannelModelBatchResult>(`/admin/channels/${encodeURIComponent(id)}/models/batch`, {
+      method: 'POST',
+      body: { models },
+    }),
   importChannelModels: (id: string) =>
     api<ApiChannelModelImportResult>(`/admin/channels/${encodeURIComponent(id)}/models/import`, { method: 'POST' }),
   reorderChannels: (ids: string[]) =>
