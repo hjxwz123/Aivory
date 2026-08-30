@@ -75,6 +75,54 @@ func TestRegistryWithholdsPythonUntilSandboxIsConfigured(t *testing.T) {
 	t.Fatal("python_execute was not advertised with a configured sandbox")
 }
 
+func TestRegistryWithholdsImageGenerationUntilImageModelIsConfigured(t *testing.T) {
+	ctx := context.Background()
+	db := openToolsTestDB(t)
+	registry := NewRegistry(db, config.Config{}, log.New(io.Discard, "", 0))
+
+	listed := func(definitions []llm.ToolDef, name string) bool {
+		for _, definition := range definitions {
+			if definition.Name == name {
+				return true
+			}
+		}
+		return false
+	}
+	if listed(registry.List(""), "image_generate") {
+		t.Fatal("image_generate was advertised without an enabled image model")
+	}
+	if !listed(registry.ListRegistered(), "image_generate") {
+		t.Fatal("admin registry list did not retain unavailable image_generate")
+	}
+
+	channel, err := store.CreateChannel(ctx, db, "Image runtime", "openai", "images", "https://images.example.test/v1", "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := store.CreateModel(ctx, db, store.Model{
+		ChannelID: channel.ID, Kind: "image", RequestID: "image-runtime", Label: "Image runtime", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !listed(registry.List(""), "image_generate") {
+		t.Fatal("image_generate was not advertised after configuring an enabled image model")
+	}
+
+	if _, err := db.ExecContext(ctx, `UPDATE models SET enabled=0 WHERE id=?`, model.ID); err != nil {
+		t.Fatal(err)
+	}
+	if listed(registry.List(""), "image_generate") {
+		t.Fatal("image_generate remained advertised after disabling the last image model")
+	}
+	_, _, err = registry.Run(ctx, "image_generate", []byte(`{"action":"generate","prompt":"test"}`), &llm.ToolContext{
+		BuiltinTools: map[string]bool{"image_generate": true},
+	})
+	if err == nil || !strings.Contains(err.Error(), "no image model is configured") {
+		t.Fatalf("runtime image model recheck error = %v", err)
+	}
+}
+
 func TestRegistryRunRechecksCurrentGroupAndGlobalPolicy(t *testing.T) {
 	ctx := context.Background()
 	db := openToolsTestDB(t)

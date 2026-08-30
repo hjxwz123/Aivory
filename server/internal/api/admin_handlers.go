@@ -1562,6 +1562,11 @@ func adminSettingsGet(d Deps, w http.ResponseWriter, _ *http.Request) {
 	} else {
 		out["sandbox_configured"] = json.RawMessage("false")
 	}
+	if imageModelConfigured(d) {
+		out["image_model_configured"] = json.RawMessage("true")
+	} else {
+		out["image_model_configured"] = json.RawMessage("false")
+	}
 	writeJSON(w, 200, maskSensitiveSettings(out))
 }
 

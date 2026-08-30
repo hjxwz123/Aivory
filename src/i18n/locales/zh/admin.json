@@ -787,6 +787,7 @@
     "mcpLoadFailed": "无法加载 MCP 服务，当前可用状态未发生改变。",
     "mcpUnavailable": "最近一次连接尝试失败。",
     "configureSandboxFirst": "请先配置沙盒",
+    "configureImageModelFirst": "请先配置图片模型",
     "manageMCP": "管理 MCP"
   },
   "mcp": {

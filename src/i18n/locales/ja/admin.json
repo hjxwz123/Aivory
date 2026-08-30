@@ -783,6 +783,7 @@
     "mcpLoadFailed": "MCP サービスを読み込めませんでした。現在の可用性は変更されていません。",
     "mcpUnavailable": "直近の接続試行に失敗しました。",
     "configureSandboxFirst": "先にサンドボックスを設定してください",
+    "configureImageModelFirst": "先に画像モデルを設定してください",
     "manageMCP": "MCP を管理"
   },
   "mcp": {

@@ -153,6 +153,7 @@ export default function AdminTools() {
           if (key in saved) next[key] = saved[key]
         }
         if ('sandbox_configured' in saved) next.sandbox_configured = saved.sandbox_configured
+        if ('image_model_configured' in saved) next.image_model_configured = saved.image_model_configured
         return next
       })
       toast.success(t('admin:settings.saved'))
@@ -210,6 +211,7 @@ export default function AdminTools() {
 
   const searchProvider = readString('search_provider')
   const sandboxConfigured = readBool('sandbox_configured', true)
+  const imageModelConfigured = readBool('image_model_configured', true)
 
   return (
     <div className="mx-auto max-w-[76rem]">
@@ -260,7 +262,10 @@ export default function AdminTools() {
               <div className="mt-4 divide-y divide-[var(--color-divider)] border-y border-[var(--color-divider)]">
                 {builtinTools.map((tool) => {
                   const requiresSandbox = tool.name === 'python_execute'
-                  const unavailable = requiresSandbox && !sandboxConfigured
+                  const requiresImageModel = tool.name === 'image_generate'
+                  const unavailable =
+                    (requiresSandbox && !sandboxConfigured) ||
+                    (requiresImageModel && !imageModelConfigured)
                   const enabled = !unavailable && !readStringArray('disabled_tools').includes(tool.name)
                   return (
                     <label key={tool.name} className="flex min-h-14 items-center gap-4 py-2.5">
@@ -275,7 +280,9 @@ export default function AdminTools() {
                       <span className="flex shrink-0 items-center gap-2.5">
                         {unavailable ? (
                           <span className="max-w-[8.5rem] text-right text-[11px] leading-4 text-[var(--color-fg-subtle)] sm:max-w-none sm:whitespace-nowrap">
-                            {t('admin:tools.configureSandboxFirst')}
+                            {requiresImageModel
+                              ? t('admin:tools.configureImageModelFirst')
+                              : t('admin:tools.configureSandboxFirst')}
                           </span>
                         ) : null}
                         <Switch

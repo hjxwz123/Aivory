@@ -84,6 +84,52 @@ func TestAdminSettingsReportsEffectiveSandboxAvailability(t *testing.T) {
 	}
 }
 
+func TestAdminSettingsReportsImageModelAvailability(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "image-model-availability.db"))
+	defer db.Close()
+
+	readConfigured := func() bool {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		adminSettingsGet(Deps{DB: db}, rec, httptest.NewRequest(http.MethodGet, "/api/admin/settings", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		var response map[string]json.RawMessage
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		var configured bool
+		if err := json.Unmarshal(response["image_model_configured"], &configured); err != nil {
+			t.Fatalf("decode image_model_configured: %v", err)
+		}
+		return configured
+	}
+
+	if readConfigured() {
+		t.Fatal("missing image model reported available")
+	}
+	channel, err := store.CreateChannel(t.Context(), db, "Settings image", "openai", "images", "https://images.example.test/v1", "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := store.CreateModel(t.Context(), db, store.Model{
+		ChannelID: channel.ID, Kind: "image", RequestID: "settings-image", Label: "Settings image", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !readConfigured() {
+		t.Fatal("enabled image model reported unavailable")
+	}
+	if _, err := db.ExecContext(t.Context(), `UPDATE models SET enabled=0 WHERE id=?`, model.ID); err != nil {
+		t.Fatal(err)
+	}
+	if readConfigured() {
+		t.Fatal("disabled image model reported available")
+	}
+}
+
 func TestSearchEngineSettingNormalizesAndRejectsUnsafeNames(t *testing.T) {
 	db := openMigrated(t, filepath.Join(t.TempDir(), "search-engines-settings.db"))
 	defer db.Close()

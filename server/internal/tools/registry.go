@@ -90,8 +90,8 @@ func (r *Registry) Register(t Tool) {
 
 // List returns every currently usable registered tool definition. The
 // orchestrator applies the loaded model's allowlist and global kill-switch.
-// Python is withheld when no sandbox URL is configured so models cannot select
-// a tool that has no execution backend. The list is sorted for deterministic
+// Tools with unavailable runtime dependencies are withheld so models cannot
+// select an operation that cannot execute. The list is sorted for deterministic
 // serialization.
 func (r *Registry) List(_ string) []llm.ToolDef {
 	return r.listRegistered(false)
@@ -104,13 +104,33 @@ func (r *Registry) ListRegistered() []llm.ToolDef {
 	return r.listRegistered(true)
 }
 
+// ImageGenerationConfigured reports whether the local image_generate tool has
+// an enabled image model to execute with. A nil database is treated as unknown
+// rather than unavailable so isolated registries used by tests and maintenance
+// callers retain their explicitly registered tools.
+func (r *Registry) ImageGenerationConfigured() bool {
+	return r.imageGenerationConfigured(context.Background())
+}
+
+func (r *Registry) imageGenerationConfigured(ctx context.Context) bool {
+	if r == nil || r.db == nil {
+		return true
+	}
+	models, err := store.ListModels(ctx, r.db, "image", true)
+	return err == nil && len(models) > 0
+}
+
 func (r *Registry) listRegistered(includeUnavailable bool) []llm.ToolDef {
 	sandboxEnabled := r.sandbox != nil && r.sandbox.Enabled()
+	imageGenerationEnabled := r.ImageGenerationConfigured()
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := []llm.ToolDef{}
 	for _, t := range r.tools {
 		if !includeUnavailable && t.Name() == "python_execute" && !sandboxEnabled {
+			continue
+		}
+		if !includeUnavailable && t.Name() == "image_generate" && !imageGenerationEnabled {
 			continue
 		}
 		out = append(out, llm.ToolDef{
@@ -297,6 +317,9 @@ func (r *Registry) checkCurrentToolAccess(
 ) error {
 	if !isMCP && name == "python_execute" && (r.sandbox == nil || !r.sandbox.Enabled()) {
 		return errors.New("python_execute is unavailable: sandbox is not configured")
+	}
+	if !isMCP && name == "image_generate" && !r.imageGenerationConfigured(ctx) {
+		return errors.New("image_generate is unavailable: no image model is configured")
 	}
 	if r.db == nil || tc == nil || strings.TrimSpace(tc.UserID) == "" {
 		return nil
