@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
@@ -255,7 +254,9 @@ func runBackupExportJob(d Deps, job *backupExportJob) {
 	tmpPath := finalPath + ".tmp"
 
 	adminBackupExports.update(job.ID, func(j *backupExportJob) { j.Progress = "reading_database" })
-	tx, err := d.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	unlockQdrant := lockQdrantArchiveIfNeeded(d, job.IncludeQdrant)
+	defer unlockQdrant()
+	tx, err := beginBackupSnapshot(ctx, d.DB)
 	if err != nil {
 		adminBackupExports.finish(job.ID, "failed", "", err.Error(), 0, 0)
 		return

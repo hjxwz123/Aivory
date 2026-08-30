@@ -24,7 +24,7 @@ import (
 // BackupVersion is the archive format version embedded in the manifest. Bump
 // it only on a breaking change to the on-disk shape; the importer refuses
 // archives newer than the version it understands.
-const BackupVersion = 2
+const BackupVersion = 3
 
 // backupTableOrder lists every table in FK-safe INSERT order (parents before
 // children). Restore inserts in this order and wipes in reverse, so foreign

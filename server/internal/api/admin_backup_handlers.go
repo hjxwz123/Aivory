@@ -32,6 +32,7 @@ var (
 	errInvalidBillingConfigArchive    = errors.New("invalid billing configuration in config archive")
 	errInvalidCompactionConfigArchive = errors.New("invalid context compaction configuration in archive")
 	errInvalidBackupStoragePath       = errors.New("invalid storage path in backup archive")
+	errInvalidBackupArchive           = errors.New("invalid or incomplete backup archive")
 	errBackupImportAdminUnauthorized  = errors.New("backup import requires a current active administrator")
 	errConfigImportAdminUnauthorized  = errors.New("config import requires a current active administrator")
 )
@@ -68,18 +69,19 @@ func validateArchiveVersion(label string, version, current int) error {
 
 // backupManifest is the archive's self-description (manifest.json).
 type backupManifest struct {
-	Format            string           `json:"format"` // always "aivory-backup"
-	Version           int              `json:"version"`
-	CreatedAt         int64            `json:"created_at"`
-	App               string           `json:"app"`
-	Dialect           string           `json:"dialect"` // sqlite | postgres (source)
-	Tables            []string         `json:"tables"`
-	Counts            map[string]int64 `json:"counts"`
-	IncludesFiles     bool             `json:"includes_files"`
-	IncludesQdrant    bool             `json:"includes_qdrant"`
-	QdrantPoints      int64            `json:"qdrant_points"`
-	SourceUploadDir   string           `json:"source_upload_dir"`
-	SourceArtifactDir string           `json:"source_artifact_dir"`
+	Format            string                          `json:"format"` // always "aivory-backup"
+	Version           int                             `json:"version"`
+	CreatedAt         int64                           `json:"created_at"`
+	App               string                          `json:"app"`
+	Dialect           string                          `json:"dialect"` // sqlite | postgres (source)
+	Tables            []string                        `json:"tables"`
+	Counts            map[string]int64                `json:"counts"`
+	IncludesFiles     bool                            `json:"includes_files"`
+	IncludesQdrant    bool                            `json:"includes_qdrant"`
+	QdrantPoints      int64                           `json:"qdrant_points"`
+	SourceUploadDir   string                          `json:"source_upload_dir"`
+	SourceArtifactDir string                          `json:"source_artifact_dir"`
+	Entries           map[string]backupEntryIntegrity `json:"entries,omitempty"`
 }
 
 type backupImportOAuthIdentity struct {
@@ -154,10 +156,12 @@ func exportBackupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	includeFiles := r.URL.Query().Get("files") == "1" || r.URL.Query().Get("files") == "true"
 	includeQdrant := shouldIncludeQdrant(d, r)
+	unlockQdrant := lockQdrantArchiveIfNeeded(d, includeQdrant)
+	defer unlockQdrant()
 
 	// A read transaction gives a consistent point-in-time snapshot. Open it before
 	// writing response headers so a connection failure can still return JSON.
-	tx, err := d.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := beginBackupSnapshot(ctx, d.DB)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -185,6 +189,7 @@ func writeBackupArchive(ctx context.Context, d Deps, tx *sql.Tx, w io.Writer, op
 		dialect = "postgres"
 	}
 	zw := zip.NewWriter(w)
+	tracked := newTrackedZipWriter(zw)
 	closed := false
 	defer func() {
 		if !closed {
@@ -195,7 +200,7 @@ func writeBackupArchive(ctx context.Context, d Deps, tx *sql.Tx, w io.Writer, op
 	// Database: one JSONL per table, FK-safe order.
 	counts := make(map[string]int64)
 	for _, t := range store.BackupTableOrder() {
-		fw, err := zw.Create("db/" + t + ".jsonl")
+		fw, err := tracked.Create("db/" + t + ".jsonl")
 		if err != nil {
 			return backupArchiveResult{}, fmt.Errorf("create entry %s: %w", t, err)
 		}
@@ -208,10 +213,10 @@ func writeBackupArchive(ctx context.Context, d Deps, tx *sql.Tx, w io.Writer, op
 
 	// On-disk files (optional).
 	if opts.IncludeFiles {
-		if err := addDirToZip(zw, d.Config.UploadDir, backupZipUploads); err != nil {
+		if err := addRequiredDirToZip(tracked, d.Config.UploadDir, backupZipUploads); err != nil {
 			return backupArchiveResult{}, fmt.Errorf("uploads: %w", err)
 		}
-		if err := addDirToZip(zw, d.Config.ArtifactDir, backupZipArtifacts); err != nil {
+		if err := addRequiredDirToZip(tracked, d.Config.ArtifactDir, backupZipArtifacts); err != nil {
 			return backupArchiveResult{}, fmt.Errorf("artifacts: %w", err)
 		}
 	}
@@ -219,7 +224,7 @@ func writeBackupArchive(ctx context.Context, d Deps, tx *sql.Tx, w io.Writer, op
 	var qdrantPoints int64
 	includesQdrant := false
 	if opts.IncludeQdrant && strings.TrimSpace(d.Config.QdrantURL) != "" {
-		n, err := exportQdrantToZip(ctx, d, zw)
+		n, err := exportQdrantToZip(ctx, d, tracked)
 		if err != nil {
 			return backupArchiveResult{}, fmt.Errorf("qdrant export: %w", err)
 		}
@@ -227,6 +232,12 @@ func writeBackupArchive(ctx context.Context, d Deps, tx *sql.Tx, w io.Writer, op
 		includesQdrant = true
 	}
 
+	entries := tracked.Finish()
+	if opts.IncludeFiles {
+		if err := validateExportedStorageReferences(ctx, tx, d, entries); err != nil {
+			return backupArchiveResult{}, fmt.Errorf("validate stored files: %w", err)
+		}
+	}
 	// Manifest last (random-access zip — order doesn't matter to the reader).
 	man := backupManifest{
 		Format:            "aivory-backup",
@@ -241,6 +252,7 @@ func writeBackupArchive(ctx context.Context, d Deps, tx *sql.Tx, w io.Writer, op
 		QdrantPoints:      qdrantPoints,
 		SourceUploadDir:   filepath.Clean(d.Config.UploadDir),
 		SourceArtifactDir: filepath.Clean(d.Config.ArtifactDir),
+		Entries:           entries,
 	}
 	mw, err := zw.Create("manifest.json")
 	if err != nil {
@@ -271,7 +283,7 @@ func shouldIncludeQdrant(d Deps, r *http.Request) bool {
 // config secrets (channel API keys, OAuth secrets, SMTP/storage/search keys).
 func exportConfigAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	tx, err := d.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := beginBackupSnapshot(ctx, d.DB)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -397,35 +409,69 @@ func sqlPlaceholders(n int) string {
 
 // addDirToZip walks a directory tree into the archive under prefix (trailing
 // slash). A missing/empty dir is not an error — there may simply be no uploads.
-func addDirToZip(zw *zip.Writer, root, prefix string) error {
+func addRequiredDirToZip(zw zipEntryCreator, root, prefix string) error {
+	root = filepath.Clean(root)
+	info, err := os.Stat(root)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s is not a directory", root)
+	}
+	return addDirToZip(zw, root, prefix)
+}
+
+func addDirToZip(zw zipEntryCreator, root, prefix string) error {
 	root = filepath.Clean(root)
 	info, err := os.Stat(root)
 	if err != nil || !info.IsDir() {
 		return nil
 	}
 	return filepath.WalkDir(root, func(p string, de fs.DirEntry, walkErr error) error {
-		if walkErr != nil || de.IsDir() || de.Type()&os.ModeSymlink != 0 {
-			return nil // skip unreadable entries rather than abort the whole export
+		if walkErr != nil {
+			return walkErr
 		}
-		rel, err := filepath.Rel(root, p)
-		if err != nil {
+		if de.IsDir() || de.Type()&os.ModeSymlink != 0 || !de.Type().IsRegular() {
 			return nil
 		}
-		fw, err := zw.Create(prefix + filepath.ToSlash(rel))
+		rel, err := filepath.Rel(root, p)
 		if err != nil {
 			return err
 		}
 		safePath, err := fileguard.ResolveExisting(p, root)
 		if err != nil {
-			return nil
+			return err
 		}
 		f, err := os.Open(safePath)
 		if err != nil {
-			return nil
+			return err
 		}
-		defer f.Close()
-		_, err = io.Copy(fw, f)
-		return err
+		before, err := f.Stat()
+		if err != nil {
+			_ = f.Close()
+			return err
+		}
+		fw, err := zw.Create(prefix + filepath.ToSlash(rel))
+		if err != nil {
+			_ = f.Close()
+			return err
+		}
+		_, copyErr := io.Copy(fw, f)
+		after, statErr := f.Stat()
+		closeErr := f.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		if statErr != nil {
+			return statErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		if before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
+			return fmt.Errorf("file changed while backup was reading it: %s", p)
+		}
+		return nil
 	})
 }
 
@@ -595,6 +641,10 @@ func importBackupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	if err := validateBackupArchive(zr, man); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("%w: %v", errInvalidBackupArchive, err))
+		return
+	}
 
 	// Keep only the subject id from the request context here. The authoritative
 	// role/status/security snapshot is loaded again inside the restore
@@ -606,32 +656,79 @@ func importBackupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Keep filesystem and Qdrant restoration inside the authorization-locked
-	// database transaction. A concurrent demotion/ban cannot return first and
-	// then observe this request continuing to write external state.
+	// Prepare all external state before opening the destructive DB transaction.
+	// Files are extracted into sibling staging directories; Qdrant's current
+	// collections are captured for compensation. Neither step changes live state.
+	fileRestore, err := prepareBackupFileRestore(d, zr, man)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("prepare file restore: %w", err))
+		return
+	}
+	if fileRestore != nil {
+		defer func() { _ = fileRestore.Rollback() }()
+	}
+	unlockQdrant := lockQdrantArchiveIfNeeded(d, man.IncludesQdrant)
+	defer unlockQdrant()
+	qdrantRestore, err := prepareBackupQdrantRestore(ctx, d, zr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("prepare Qdrant restore: %w", err))
+		return
+	}
+	if qdrantRestore != nil {
+		defer func() {
+			rollbackCtx, cancel := context.WithTimeout(context.Background(), qdrantArchiveRequestTimeout)
+			defer cancel()
+			_ = qdrantRestore.Rollback(rollbackCtx)
+			_ = qdrantRestore.Commit()
+		}()
+	}
+
 	filesRestored := 0
+	if fileRestore != nil {
+		filesRestored = fileRestore.files
+	}
 	var qdrantRestored int64
-	qdrantErr := ""
 	counts, err := restoreDatabase(ctx, d, zr, man, importingAdmin.ID, func() error {
-		if man.IncludesFiles {
-			filesRestored = restoreFilesFromZip(d, zr)
+		if err := fileRestore.Apply(); err != nil {
+			return fmt.Errorf("publish restored files: %w", err)
 		}
-		qdrantRestored, qdrantErr = restoreQdrantFromZip(ctx, d, zr)
+		if err := qdrantRestore.Apply(ctx); err != nil {
+			return err
+		}
+		if qdrantRestore != nil {
+			qdrantRestored = qdrantRestore.restored
+		}
 		return nil
 	})
 	if err != nil {
+		var rollbackErrs []error
+		if qdrantRestore != nil {
+			rollbackCtx, cancel := context.WithTimeout(context.Background(), qdrantArchiveRequestTimeout)
+			if rollbackErr := qdrantRestore.Rollback(rollbackCtx); rollbackErr != nil {
+				rollbackErrs = append(rollbackErrs, fmt.Errorf("Qdrant rollback failed: %w", rollbackErr))
+			}
+			cancel()
+		}
+		if rollbackErr := fileRestore.Rollback(); rollbackErr != nil {
+			rollbackErrs = append(rollbackErrs, fmt.Errorf("file rollback failed: %w", rollbackErr))
+		}
+		if len(rollbackErrs) > 0 {
+			err = errors.Join(append([]error{err}, rollbackErrs...)...)
+		}
 		if errors.Is(err, errBackupImportAdminUnauthorized) {
 			writeError(w, http.StatusForbidden, err)
-		} else if errors.Is(err, errInvalidBillingConfigArchive) || errors.Is(err, errInvalidCompactionConfigArchive) || errors.Is(err, errInvalidOAuthConfigArchive) || errors.Is(err, errInvalidBackupStoragePath) {
+		} else if errors.Is(err, errInvalidBillingConfigArchive) || errors.Is(err, errInvalidCompactionConfigArchive) || errors.Is(err, errInvalidOAuthConfigArchive) || errors.Is(err, errInvalidBackupStoragePath) || errors.Is(err, errInvalidBackupArchive) {
 			writeError(w, http.StatusBadRequest, err)
 		} else {
 			writeError(w, http.StatusInternalServerError, fmt.Errorf("restore failed (no changes committed): %w", err))
 		}
 		return
 	}
-
-	if qdrantErr != "" {
-		d.Logger.Printf("backup import: qdrant restore warning: %s", qdrantErr)
+	if cleanupErr := fileRestore.Commit(); cleanupErr != nil {
+		d.Logger.Printf("backup import: clean previous file trees: %v", cleanupErr)
+	}
+	if cleanupErr := qdrantRestore.Commit(); cleanupErr != nil {
+		d.Logger.Printf("backup import: clean Qdrant rollback archive: %v", cleanupErr)
 	}
 
 	// The settings cache (and the admin's own session) now reflect wiped data.
@@ -645,7 +742,7 @@ func importBackupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		"files_restored":   filesRestored,
 		"includes_files":   man.IncludesFiles,
 		"qdrant_restored":  qdrantRestored,
-		"qdrant_error":     qdrantErr,
+		"qdrant_error":     "",
 		"relogin_required": true,
 	})
 }

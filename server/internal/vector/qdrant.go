@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"aivory/server/internal/envcfg"
@@ -33,14 +34,32 @@ var (
 	qdrantScrollPageSizeVectorChunkStatuses = envcfg.Int("AIVORY_VECTOR_QDRANT_SCROLL_PAGE_SIZE_VECTORCHUNKSTATUSES", 256)
 )
 
+var qdrantArchiveGate sync.RWMutex
+var qdrantArchiveGeneration atomic.Uint64
+
+// LockQdrantArchive blocks application Qdrant reads and writes while backup
+// code captures or replaces the complete collection set. The returned function
+// must be deferred by the caller.
+func LockQdrantArchive() func() {
+	qdrantArchiveGate.Lock()
+	return func() {
+		// Any replacement can invalidate each long-lived client's ensured cache.
+		// Bump while writes are still excluded so the next operation re-checks the
+		// physical collection set before issuing a point request.
+		qdrantArchiveGeneration.Add(1)
+		qdrantArchiveGate.Unlock()
+	}
+}
+
 // Qdrant is an HTTP client for a Qdrant server. Safe for concurrent use.
 type Qdrant struct {
 	baseURL string
 	apiKey  string
 	http    *http.Client
 
-	mu      sync.Mutex
-	ensured map[int]bool // dimensions whose collection has been created
+	mu                sync.Mutex
+	ensured           map[int]bool // dimensions whose collection has been created
+	archiveGeneration uint64
 }
 
 // NewQdrant builds a client for baseURL (e.g. http://qdrant:6333). apiKey may
@@ -122,6 +141,11 @@ func (q *Qdrant) ensureCollection(ctx context.Context, dim int) error {
 		return fmt.Errorf("vector: invalid dimension %d", dim)
 	}
 	q.mu.Lock()
+	generation := qdrantArchiveGeneration.Load()
+	if q.archiveGeneration != generation {
+		q.ensured = map[int]bool{}
+		q.archiveGeneration = generation
+	}
 	done := q.ensured[dim]
 	q.mu.Unlock()
 	if done {
@@ -175,6 +199,8 @@ func pointID(chunkID string) string {
 
 // Upsert writes points into the dimension's collection.
 func (q *Qdrant) Upsert(ctx context.Context, dim int, points []Point) error {
+	qdrantArchiveGate.RLock()
+	defer qdrantArchiveGate.RUnlock()
 	if len(points) == 0 {
 		return nil
 	}
@@ -199,6 +225,8 @@ func (q *Qdrant) Upsert(ctx context.Context, dim int, points []Point) error {
 
 // Search runs a filtered nearest-neighbour query.
 func (q *Qdrant) Search(ctx context.Context, dim int, vector []float32, scope Scope, topK int) ([]Hit, error) {
+	qdrantArchiveGate.RLock()
+	defer qdrantArchiveGate.RUnlock()
 	if len(vector) == 0 || topK <= 0 {
 		return nil, nil
 	}
@@ -241,6 +269,8 @@ func (q *Qdrant) Search(ctx context.Context, dim int, vector []float32, scope Sc
 // overlap in the caller — but we still pre-filter with text-match so the
 // fusion's keyword leg is independent of the dense leg's top-K.
 func (q *Qdrant) SearchKeyword(ctx context.Context, dim int, query string, scope Scope, topK int) ([]Hit, error) {
+	qdrantArchiveGate.RLock()
+	defer qdrantArchiveGate.RUnlock()
 	if query == "" || topK <= 0 {
 		return nil, nil
 	}
@@ -290,6 +320,8 @@ func (q *Qdrant) SearchKeyword(ctx context.Context, dim int, query string, scope
 // fetches only chunk_id (no vectors/content) because the relational DB remains
 // the source of truth for rendering and full-context fallback.
 func (q *Qdrant) ExistingChunkIDs(ctx context.Context, dim int, scope Scope) (map[string]bool, error) {
+	qdrantArchiveGate.RLock()
+	defer qdrantArchiveGate.RUnlock()
 	ids := map[string]bool{}
 	if err := q.ensureCollection(ctx, dim); err != nil {
 		return nil, err
@@ -338,6 +370,8 @@ func (q *Qdrant) ExistingChunkIDs(ctx context.Context, dim int, scope Scope) (ma
 // a future caller cannot accidentally turn a tenant-scoped check into a global
 // collection scan.
 func (q *Qdrant) VectorChunkStatuses(ctx context.Context, dim int, scope Scope) (map[string]ChunkVectorStatus, error) {
+	qdrantArchiveGate.RLock()
+	defer qdrantArchiveGate.RUnlock()
 	status := map[string]ChunkVectorStatus{}
 	should := scopeShould(scope)
 	if len(should) == 0 {
@@ -353,6 +387,8 @@ func (q *Qdrant) VectorChunkStatuses(ctx context.Context, dim int, scope Scope) 
 // audit/rebuild. Keeping it separate makes an unfiltered scan visible at every
 // call site instead of overloading Scope{} with privileged semantics.
 func (q *Qdrant) AllVectorChunkStatuses(ctx context.Context, dim int) (map[string]ChunkVectorStatus, error) {
+	qdrantArchiveGate.RLock()
+	defer qdrantArchiveGate.RUnlock()
 	if err := q.ensureCollection(ctx, dim); err != nil {
 		return nil, err
 	}
@@ -501,15 +537,21 @@ collectionLoop:
 
 // DeleteByDocument removes all points for a document.
 func (q *Qdrant) DeleteByDocument(ctx context.Context, documentID string) error {
+	qdrantArchiveGate.RLock()
+	defer qdrantArchiveGate.RUnlock()
 	return q.deleteByField(ctx, "document_id", documentID)
 }
 
 // DeleteByKB removes all points for a knowledge base.
 func (q *Qdrant) DeleteByKB(ctx context.Context, kbID string) error {
+	qdrantArchiveGate.RLock()
+	defer qdrantArchiveGate.RUnlock()
 	return q.deleteByField(ctx, "kb_id", kbID)
 }
 
 // DeleteByConversation removes all points for a conversation.
 func (q *Qdrant) DeleteByConversation(ctx context.Context, conversationID string) error {
+	qdrantArchiveGate.RLock()
+	defer qdrantArchiveGate.RUnlock()
 	return q.deleteByField(ctx, "conversation_id", conversationID)
 }
