@@ -993,6 +993,7 @@ function ConversationItem({
   const [shareOpen, setShareOpen] = useState(false)
   const [confirm, setConfirm] = useState(false)
   const displayTitle = `${conversation.starred ? '☆ ' : ''}${conversation.title || t('untitled')}`
+  const streaming = isConversationStreaming(conversation)
 
   useEffect(() => {
     if (!canManageConversation) {
@@ -1033,6 +1034,15 @@ function ConversationItem({
                 active ? 'text-[var(--color-fg)] font-medium' : 'text-[var(--color-fg-muted)]',
               )}
             />
+            {streaming ? (
+              <span
+                role="status"
+                aria-label={t('sidebar.replying')}
+                className="inline-flex size-4 shrink-0 items-center justify-center text-[var(--color-fg-subtle)]"
+              >
+                <Loader2 size={12} className="animate-spin motion-reduce:animate-none" aria-hidden />
+              </span>
+            ) : null}
             {conversation.workspaceId && !conversation.isPublic ? (
               <Tooltip content={t('visibility.privateTooltip')}>
                 <span
