@@ -557,6 +557,19 @@ CREATE TABLE IF NOT EXISTS conversation_compaction_leases (
 CREATE INDEX IF NOT EXISTS idx_conversation_compaction_leases_expires
   ON conversation_compaction_leases(expires_at);
 
+-- Each principal's normal appends are serialized per branch. Other workspace
+-- members, explicit branch edits, and regenerations continue independently.
+CREATE TABLE IF NOT EXISTS conversation_generation_leases (
+  conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  branch_key      TEXT NOT NULL,
+  principal_id    TEXT NOT NULL,
+  owner_token     TEXT NOT NULL,
+  expires_at      BIGINT NOT NULL,
+  PRIMARY KEY (conversation_id, branch_key, principal_id)
+);
+CREATE INDEX IF NOT EXISTS idx_conversation_generation_leases_expires
+  ON conversation_generation_leases(expires_at);
+
 CREATE TABLE IF NOT EXISTS messages (
   id                 TEXT PRIMARY KEY,
   conversation_id    TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,

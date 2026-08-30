@@ -202,6 +202,21 @@ func TestHTTPGenerationScopedStopDoesNotCancelConcurrentEditedBranch(t *testing.
 		`{"text":"original question","generation_id":"`+generationStopFirstID+`","tool_mode":"enabled","fast":true}`)
 	waitGenerationStopProviderStarted(t, provider.started[0], "first generation")
 
+	// A normal follow-up on the same active branch must not be accepted while its
+	// assistant is still streaming. This is enforced by the server, so another
+	// device/tab cannot bypass the current tab's Stop-only composer state.
+	blockedResponse := branchHTTPDoJSON(t, client, http.MethodPost,
+		server.URL+"/api/conversations/"+conversation.ID+"/messages", token,
+		`{"text":"must wait for the first answer","generation_id":"66666666-6666-4666-8666-666666666666","tool_mode":"enabled","fast":true}`)
+	blockedBody, blockedReadErr := io.ReadAll(blockedResponse.Body)
+	blockedResponse.Body.Close()
+	if blockedReadErr != nil {
+		t.Fatalf("read blocked normal append response: %v", blockedReadErr)
+	}
+	if blockedResponse.StatusCode != http.StatusConflict || !strings.Contains(string(blockedBody), `"error":"generation_in_progress"`) {
+		t.Fatalf("blocked normal append status=%d body=%s, want 409 generation_in_progress", blockedResponse.StatusCode, blockedBody)
+	}
+
 	// Editing the root while the first answer is still running creates a sibling
 	// user branch in the same conversation. Both provider calls must remain live.
 	secondResponse := branchHTTPPostMessage(t, client, server.URL, token, conversation.ID,
