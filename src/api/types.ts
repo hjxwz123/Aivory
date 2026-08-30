@@ -1265,6 +1265,19 @@ export interface ApiConversationFile {
   document_error_code?: string
 }
 
+/** One file in a conversation's read-only sandbox workspace. Paths are relative to /workspace. */
+export interface ApiSandboxFile {
+  path: string
+  size: number
+}
+
+export interface ApiSandboxFiles {
+  session: string
+  files: ApiSandboxFile[]
+  /** The session was recycled, or the deployed sidecar cannot list files. */
+  unavailable?: boolean
+}
+
 export interface ApiConversation {
   id: string
   user_id: string

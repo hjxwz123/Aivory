@@ -40,6 +40,7 @@ import type {
   ApiChannelModelImportResult,
   ApiConversation,
   ApiConversationFile,
+  ApiSandboxFiles,
   ApiCreditPackage,
   ApiCreditAdjustmentNotification,
   ApiCredits,
@@ -702,6 +703,11 @@ export const conversationsApi = {
     api<{ ok: true }>(`/conversations/${encodeURIComponent(id)}/files/${encodeURIComponent(fileId)}`, {
       method: 'DELETE',
     }),
+  // Read-only sandbox browser. No user mutation endpoint exists by design.
+  sandboxFiles: (id: string) =>
+    api<ApiSandboxFiles>(`/conversations/${encodeURIComponent(id)}/sandbox`),
+  sandboxFileUrl: (id: string, path: string) =>
+    apiUrl(`/conversations/${encodeURIComponent(id)}/sandbox/file?path=${encodeURIComponent(path)}`),
   // Public read-only sharing (§ sharing).
   getShare: (id: string) =>
     api<{ share: ApiShareInfo | null }>(`/conversations/${encodeURIComponent(id)}/share`),

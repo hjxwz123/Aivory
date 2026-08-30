@@ -502,6 +502,21 @@
     "remove": "Retirer {{name}}",
     "removeFailed": "Impossible de retirer le fichier"
   },
+  "sandbox": {
+    "title": "Fichiers du bac à sable",
+    "tooltip": "Fichiers du bac à sable",
+    "close": "Fermer les fichiers du bac à sable",
+    "refresh": "Actualiser",
+    "location": "Emplacement des fichiers du bac à sable",
+    "root": "Dossier racine",
+    "back": "Remonter d’un dossier",
+    "loading": "Chargement…",
+    "none": "Cette conversation n’a pas encore créé d’espace de travail isolé.",
+    "empty": "Ce dossier est vide.",
+    "unavailable": "La session du bac à sable a expiré ; ses fichiers ne sont plus accessibles.",
+    "loadFailed": "Les fichiers du bac à sable sont actuellement indisponibles.",
+    "openFolder": "Ouvrir {{name}}"
+  },
   "inline": {
     "ask": "Demander",
     "placeholder": "Poser une question à ce sujet…",

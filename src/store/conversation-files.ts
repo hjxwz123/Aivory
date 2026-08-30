@@ -4,6 +4,7 @@ import { apiUpload } from '@/api/client'
 import type { ApiConversationFile } from '@/api/types'
 import { useHtmlPreview } from './html-preview'
 import { useInlineThreadDrawer } from './inline-thread'
+import { useSandboxFiles } from './sandbox-files'
 
 /**
  * conversation-files — drives the right-side drawer that lists every file the
@@ -35,9 +36,10 @@ export const useConversationFiles = create<ConversationFilesStore>((set, get) =>
   uploadJob: null,
 
   openDrawer(conversationId) {
-    // Mutual exclusion: the three right-edge drawers share the same column.
+    // Mutual exclusion: the right-edge drawers share the same column.
     useHtmlPreview.getState().close()
     useInlineThreadDrawer.getState().close()
+    useSandboxFiles.getState().close()
     set({ open: true, conversationId })
     void get().load(conversationId)
   },

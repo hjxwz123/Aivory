@@ -44,8 +44,8 @@ func sandboxFilesAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 
 func sandboxFileGetAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	convID := pathParam(r, "id")
-	path := r.URL.Query().Get("path")
-	if path == "" {
+	filePath := r.URL.Query().Get("path")
+	if !validSandboxFilePath(filePath) {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
@@ -59,7 +59,7 @@ func sandboxFileGetAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
-	data, err := sb.GetFile(r.Context(), sid, path)
+	data, err := sb.GetFile(r.Context(), sid, filePath)
 	if err != nil {
 		writeError(w, 502, err)
 		return
@@ -68,7 +68,26 @@ func sandboxFileGetAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
-	ct := mime.TypeByExtension(filepath.Ext(path))
+	serveSandboxFile(w, filePath, data)
+}
+
+// validSandboxFilePath accepts only the relative paths returned by the
+// sidecar's /files/list endpoint. The sidecar independently resolves and
+// confines paths under /workspace; this keeps the public API boundary narrow.
+func validSandboxFilePath(filePath string) bool {
+	if filePath == "" || strings.ContainsRune(filePath, '\x00') || strings.HasPrefix(filePath, "/") || strings.Contains(filePath, "\\") {
+		return false
+	}
+	for _, segment := range strings.Split(filePath, "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return false
+		}
+	}
+	return true
+}
+
+func serveSandboxFile(w http.ResponseWriter, filePath string, data []byte) {
+	ct := mime.TypeByExtension(filepath.Ext(filePath))
 	if ct == "" {
 		ct = http.DetectContentType(data)
 	}
@@ -92,7 +111,11 @@ func sandboxFileGetAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		ct = "application/octet-stream"
 	}
 	w.Header().Set("content-type", ct)
-	w.Header().Set("content-disposition", disposition+"; filename=\""+filepath.Base(path)+"\"")
+	contentDisposition := mime.FormatMediaType(disposition, map[string]string{"filename": filepath.Base(filePath)})
+	if contentDisposition == "" {
+		contentDisposition = disposition
+	}
+	w.Header().Set("content-disposition", contentDisposition)
 	_, _ = w.Write(data)
 }
 
