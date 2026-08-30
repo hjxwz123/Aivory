@@ -140,7 +140,7 @@ export function WorkspaceMenuItems({
                 <span className="truncate">{w.name}</span>
               </DropdownMenuItem>
             ))}
-            <DropdownMenuSeparator />
+            {activeId || mayCreate ? <DropdownMenuSeparator /> : null}
             {activeId ? (
               <DropdownMenuItem onClick={onManage}>
                 <Users size={13} aria-hidden />
