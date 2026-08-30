@@ -783,6 +783,7 @@
     "mcpLoadFailed": "無法載入 MCP 服務，目前可用狀態未變更。",
     "mcpUnavailable": "最近一次連線嘗試失敗。",
     "configureSandboxFirst": "請先設定沙箱",
+    "configureImageModelFirst": "請先設定圖片模型",
     "manageMCP": "管理 MCP"
   },
   "mcp": {

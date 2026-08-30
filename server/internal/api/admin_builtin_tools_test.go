@@ -80,6 +80,50 @@ func TestListBuiltinToolsAdminKeepsUnavailablePythonVisible(t *testing.T) {
 	t.Fatal("unavailable python_execute was hidden from the admin capability list")
 }
 
+func TestListBuiltinToolsAdminKeepsImageGenerationVisibleButUnavailableWithoutModel(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "builtin-tools-image-model.db"))
+	defer db.Close()
+	registry := toolpkg.NewRegistry(db, config.Config{}, log.New(io.Discard, "", 0))
+
+	availability := func() map[string]bool {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		listBuiltinToolsAdmin(Deps{DB: db, Tools: registry}, rec, httptest.NewRequest(http.MethodGet, "/api/admin/tools/builtins", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		var items []struct {
+			Name            string `json:"name"`
+			GloballyEnabled bool   `json:"globally_enabled"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &items); err != nil {
+			t.Fatal(err)
+		}
+		result := make(map[string]bool, len(items))
+		for _, item := range items {
+			result[item.Name] = item.GloballyEnabled
+		}
+		return result
+	}
+
+	before := availability()
+	if enabled, visible := before["image_generate"]; !visible || enabled {
+		t.Fatalf("image_generate availability without model = visible:%v enabled:%v", visible, enabled)
+	}
+	channel, err := store.CreateChannel(t.Context(), db, "Admin image", "openai", "images", "https://images.example.test/v1", "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateModel(t.Context(), db, store.Model{
+		ChannelID: channel.ID, Kind: "image", RequestID: "admin-image", Label: "Admin image", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if enabled := availability()["image_generate"]; !enabled {
+		t.Fatal("image_generate did not become available after configuring an image model")
+	}
+}
+
 func TestListBuiltinToolsAdminMarksGlobalAvailability(t *testing.T) {
 	db := openMigrated(t, filepath.Join(t.TempDir(), "builtin-tools-availability.db"))
 	defer db.Close()

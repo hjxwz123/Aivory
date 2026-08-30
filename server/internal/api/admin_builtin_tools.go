@@ -17,6 +17,7 @@ func listBuiltinToolsAdmin(d Deps, w http.ResponseWriter, _ *http.Request) {
 	}
 	disabled := map[string]bool{}
 	memoryEnabled := true
+	imageGenerationEnabled := imageModelConfigured(d)
 	if d.DB != nil {
 		if raw, err := store.GetSetting(d.DB, "disabled_tools"); err == nil && len(raw) > 0 {
 			if names, _, parseErr := store.ParseBuiltinTools(raw); parseErr == nil {
@@ -35,6 +36,9 @@ func listBuiltinToolsAdmin(d Deps, w http.ResponseWriter, _ *http.Request) {
 				globallyEnabled = false
 			}
 			if definition.Name == "python_execute" && !sandboxConfigured(d) {
+				globallyEnabled = false
+			}
+			if definition.Name == "image_generate" && !imageGenerationEnabled {
 				globallyEnabled = false
 			}
 			items = append(items, item{

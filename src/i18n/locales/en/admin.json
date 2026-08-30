@@ -783,6 +783,7 @@
     "mcpLoadFailed": "MCP services could not be loaded. Their current availability has not changed.",
     "mcpUnavailable": "The most recent connection attempt failed.",
     "configureSandboxFirst": "Configure a sandbox first",
+    "configureImageModelFirst": "Configure an image model first",
     "manageMCP": "Manage MCP"
   },
   "mcp": {

@@ -783,6 +783,7 @@
     "mcpLoadFailed": "Impossible de charger les services MCP. Leur disponibilité actuelle n’a pas été modifiée.",
     "mcpUnavailable": "La dernière tentative de connexion a échoué.",
     "configureSandboxFirst": "Configurez d’abord un bac à sable",
+    "configureImageModelFirst": "Configurez d’abord un modèle d’image",
     "manageMCP": "Gérer MCP"
   },
   "mcp": {
