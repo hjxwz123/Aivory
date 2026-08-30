@@ -19,6 +19,8 @@ interface MoveToProjectSubProps {
   conversationId: string
   /** The conversation's current project, if any. */
   currentProjectId?: string
+  /** Render a group divider only when this submenu is actually available. */
+  separatorBefore?: boolean
 }
 
 /**
@@ -27,7 +29,7 @@ interface MoveToProjectSubProps {
  * project, a "Remove from project" entry that turns it back into a loose chat.
  * Drop it inside any <DropdownMenuContent>.
  */
-export function MoveToProjectSub({ conversationId, currentProjectId }: MoveToProjectSubProps) {
+export function MoveToProjectSub({ conversationId, currentProjectId, separatorBefore = false }: MoveToProjectSubProps) {
   const { t } = useTranslation(['chat', 'projects'])
   const projects = useProjects((s) => s.projects)
   const setProject = useConversations((s) => s.setProject)
@@ -51,35 +53,38 @@ export function MoveToProjectSub({ conversationId, currentProjectId }: MoveToPro
   }
 
   return (
-    <DropdownMenuSub>
-      <DropdownMenuSubTrigger>
-        <FolderKanban size={13} aria-hidden />
-        {t('chat:sidebar.moveToProject')}
-      </DropdownMenuSubTrigger>
-      <DropdownMenuSubContent>
-        {currentProjectId ? (
-          <>
-            <DropdownMenuItem onClick={() => void move(undefined)}>
-              <FolderMinus size={13} aria-hidden />
-              {t('chat:sidebar.removeFromProject')}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-          </>
-        ) : null}
-        {!canUseKnowledgeBases ? null : projects.length === 0 ? (
-          <DropdownMenuItem disabled>{t('projects:moveTo.none')}</DropdownMenuItem>
-        ) : (
-          projects.map((p) => (
-            <DropdownMenuItem key={p.id} onClick={() => void move(p.id, p.name)}>
-              <span className={cn('size-2 shrink-0 rounded-full', accentClasses(p.accent).bar)} aria-hidden />
-              <span className="truncate">{p.name}</span>
-              {p.id === currentProjectId ? (
-                <Check size={13} aria-hidden className="ml-auto text-[var(--color-fg-muted)]" />
-              ) : null}
-            </DropdownMenuItem>
-          ))
-        )}
-      </DropdownMenuSubContent>
-    </DropdownMenuSub>
+    <>
+      {separatorBefore ? <DropdownMenuSeparator /> : null}
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger>
+          <FolderKanban size={13} aria-hidden />
+          {t('chat:sidebar.moveToProject')}
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent>
+          {currentProjectId ? (
+            <>
+              <DropdownMenuItem onClick={() => void move(undefined)}>
+                <FolderMinus size={13} aria-hidden />
+                {t('chat:sidebar.removeFromProject')}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          ) : null}
+          {!canUseKnowledgeBases ? null : projects.length === 0 ? (
+            <DropdownMenuItem disabled>{t('projects:moveTo.none')}</DropdownMenuItem>
+          ) : (
+            projects.map((p) => (
+              <DropdownMenuItem key={p.id} onClick={() => void move(p.id, p.name)}>
+                <span className={cn('size-2 shrink-0 rounded-full', accentClasses(p.accent).bar)} aria-hidden />
+                <span className="truncate">{p.name}</span>
+                {p.id === currentProjectId ? (
+                  <Check size={13} aria-hidden className="ml-auto text-[var(--color-fg-muted)]" />
+                ) : null}
+              </DropdownMenuItem>
+            ))
+          )}
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+    </>
   )
 }

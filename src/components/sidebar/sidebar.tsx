@@ -1093,10 +1093,11 @@ function ConversationItem({
                 </DropdownMenuItem>
               ) : null}
               {canManageConversation ? (
-                <>
-                  <DropdownMenuSeparator />
-                  <MoveToProjectSub conversationId={conversation.id} currentProjectId={conversation.projectId} />
-                </>
+                <MoveToProjectSub
+                  conversationId={conversation.id}
+                  currentProjectId={conversation.projectId}
+                  separatorBefore
+                />
               ) : null}
               {!conversation.workspaceId ? (
                 <>
