@@ -113,6 +113,7 @@
     "noKnowledgeBases": "Aucune base de connaissances pour l'instant.",
     "manageKnowledgeBases": "Gérer les bases de connaissances",
     "incompatibleKnowledgeBase": "Cette bibliothèque ne peut pas être utilisée avec la sélection actuelle",
+    "generationInProgress": "Attendez la fin de la réponse actuelle ou arrêtez-la d’abord.",
     "knowledgeBaseMentionLabel": "Joindre une base de connaissances",
     "knowledgeBaseMentionEmpty": "Aucune base de connaissances correspondante",
     "permissions": {
