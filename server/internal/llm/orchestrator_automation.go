@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	toolRouteMaxOutputTokens = 2
+	toolRouteMaxOutputTokens = 16
 	toolRouteInputRuneCap    = 240
 	toolRouteInputHeadRunes  = 150
 	toolRouteCustomNameCap   = 24

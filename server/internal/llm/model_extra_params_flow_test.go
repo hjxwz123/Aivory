@@ -23,7 +23,7 @@ func (p *captureRequestProvider) Stream(_ context.Context, req UnifiedChatReques
 	return &UnifiedResult{Blocks: []UnifiedBlock{{Kind: "text", Text: "ok"}}}, nil
 }
 
-func TestModelExtraParamsFlowToTaskAndFallback(t *testing.T) {
+func TestModelExtraParamsFlowToEveryTaskAndFallback(t *testing.T) {
 	ctx := context.Background()
 	db, err := store.Open(filepath.Join(t.TempDir(), "extra-params.db"))
 	if err != nil {
@@ -64,10 +64,28 @@ func TestModelExtraParamsFlowToTaskAndFallback(t *testing.T) {
 	reg := NewRegistry(log.New(io.Discard, "", 0))
 	reg.Register(provider)
 	task := NewTaskLLM(db, reg, log.New(io.Discard, "", 0))
-	if _, err := task.Run(ctx, TaskTitle, "hello", RunOpts{ModelID: taskModel.ID}); err != nil {
-		t.Fatalf("task run: %v", err)
+	for _, kind := range []TaskKind{
+		TaskTitle,
+		TaskRouter,
+		TaskRAGEvidenceJudge,
+		TaskRAGMapReduce,
+		TaskCompact,
+		TaskMemoryExtract,
+		TaskMemoryAdjudicate,
+		TaskDowngrade,
+		TaskResearchPlan,
+		TaskResearchVerify,
+		TaskResearchValidate,
+		TaskModeration,
+		TaskSearchQueries,
+		TaskToolRoute,
+		TaskImageIntent,
+	} {
+		if _, err := task.Run(ctx, kind, "hello", RunOpts{ModelID: taskModel.ID}); err != nil {
+			t.Fatalf("%s task run: %v", kind, err)
+		}
+		assertJSONObjectsEqual(t, provider.req.ExtraParams, taskModel.ExtraParams)
 	}
-	assertJSONObjectsEqual(t, provider.req.ExtraParams, taskModel.ExtraParams)
 
 	o := &Orchestrator{db: db, reg: reg, logger: log.New(io.Discard, "", 0)}
 	base := UnifiedChatRequest{ExtraParams: taskModel.ExtraParams}

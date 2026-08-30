@@ -37,7 +37,7 @@ var (
 	// budget. Sixty tokens can yield a successful provider response with no
 	// visible title at all, so leave enough room for brief reasoning plus the
 	// requested <=8-word label.
-	titleGenerationOutputTokens     = 256
+	titleGenerationOutputTokens     = 512
 	attachmentImageInlineBytes      = envcfg.Int64("AIVORY_LLM_ATTACHMENT_IMAGE_INLINE_BYTES", 20*1024*1024)
 	sandboxUploadStagingFileSize    = envcfg.Int64("AIVORY_TOOLS_PYTHON_EXECUTE_UPLOAD_STAGING_FILE_SIZE", 40*1024*1024)
 	toolRouteTimeout                = envcfg.Dur("AIVORY_LLM_TOOL_ROUTE_TIMEOUT", 5*time.Second)
