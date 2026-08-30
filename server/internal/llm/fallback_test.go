@@ -89,6 +89,9 @@ func TestOpenAIBaseURL(t *testing.T) {
 	}{
 		{name: "default", want: "https://api.openai.com/v1"},
 		{name: "versioned", in: "https://proxy.example.com/openai/v1", want: "https://proxy.example.com/openai/v1"},
+		{name: "version two", in: "https://proxy.example.com/openai/v2", want: "https://proxy.example.com/openai/v2"},
+		{name: "version three", in: "https://proxy.example.com/openai/v3", want: "https://proxy.example.com/openai/v3"},
+		{name: "custom root", in: "https://proxy.example.com/openai/custom", want: "https://proxy.example.com/openai/custom"},
 		{name: "trailing slash", in: "https://proxy.example.com/openai/v1/", want: "https://proxy.example.com/openai/v1"},
 		{name: "legacy host root", in: "https://proxy.example.com", want: "https://proxy.example.com/v1"},
 	} {

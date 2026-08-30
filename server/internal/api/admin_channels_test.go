@@ -42,19 +42,19 @@ func (fx channelAdminFixture) request(t *testing.T, method, path, body string) *
 	return rec
 }
 
-func TestCreateOpenAIChannelRequiresVersionedBaseURL(t *testing.T) {
+func TestCreateOpenAIChannelRejectsInvalidBaseURL(t *testing.T) {
 	fx := newChannelAdminFixture(t)
 	for _, baseURL := range []string{
-		"https://api.openai.com",
 		"api.openai.com/v1",
-		"https://api.openai.com/v10",
-		"https://api.openai.com/v1/chat/completions",
 		"https://api.openai.com/v1?tenant=one",
+		"https://user:secret@api.openai.com/v2",
+		"ftp://api.openai.com/v3",
+		"https://api.openai.com/open ai/v1",
 	} {
 		t.Run(baseURL, func(t *testing.T) {
 			body := `{"name":"Invalid ` + baseURL + `","type":"openai","api_format":"chat","base_url":"` + baseURL + `"}`
 			rec := fx.request(t, http.MethodPost, "/api/admin/channels", body)
-			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "ending in /v1") {
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "absolute HTTP(S) URL") {
 				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 			}
 		})
@@ -63,7 +63,14 @@ func TestCreateOpenAIChannelRequiresVersionedBaseURL(t *testing.T) {
 
 func TestCreateOpenAIChannelNormalizesVersionedBaseURL(t *testing.T) {
 	fx := newChannelAdminFixture(t)
-	for i, baseURL := range []string{"", "https://api.openai.com/v1", "https://proxy.example.com/openai/v1/"} {
+	for i, baseURL := range []string{
+		"",
+		"https://api.openai.com",
+		"https://api.openai.com/v1",
+		"https://proxy.example.com/openai/v2/",
+		"https://proxy.example.com/openai/v3/",
+		"https://proxy.example.com/openai/custom/",
+	} {
 		body, err := json.Marshal(map[string]any{
 			"name": "OpenAI " + strconv.Itoa(i), "type": "openai", "api_format": "chat", "base_url": baseURL,
 		})
@@ -91,22 +98,17 @@ func TestChannelBaseURLValidationUsesEffectiveUpdateState(t *testing.T) {
 		('legacy','Legacy OpenAI','openai','chat','https://legacy.example'),
 		('claude','Claude','claude','','https://claude.example')`)
 
-	// Unrelated edits remain possible for legacy rows created before this rule.
+	// Unrelated edits remain possible for legacy rows.
 	if rec := fx.request(t, http.MethodPatch, "/api/admin/channels/legacy", `{"name":"Legacy renamed"}`); rec.Code != http.StatusOK {
 		t.Fatalf("legacy rename status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	for _, tc := range []struct {
-		path string
-		body string
-	}{
-		{path: "/api/admin/channels/legacy", body: `{"base_url":"https://proxy.example"}`},
-		{path: "/api/admin/channels/claude", body: `{"type":"openai","api_format":"chat"}`},
-	} {
-		if rec := fx.request(t, http.MethodPatch, tc.path, tc.body); rec.Code != http.StatusBadRequest {
-			t.Fatalf("%s status=%d body=%s", tc.path, rec.Code, rec.Body.String())
-		}
+	if rec := fx.request(t, http.MethodPatch, "/api/admin/channels/legacy", `{"base_url":"proxy.example/v2"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid update status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	rec := fx.request(t, http.MethodPatch, "/api/admin/channels/legacy", `{"base_url":"https://proxy.example/openai/v1/"}`)
+	if rec := fx.request(t, http.MethodPatch, "/api/admin/channels/claude", `{"type":"openai","api_format":"chat"}`); rec.Code != http.StatusOK {
+		t.Fatalf("type update status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	rec := fx.request(t, http.MethodPatch, "/api/admin/channels/legacy", `{"base_url":"https://proxy.example/openai/v3/"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("valid update status=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -114,7 +116,7 @@ func TestChannelBaseURLValidationUsesEffectiveUpdateState(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &channel); err != nil {
 		t.Fatal(err)
 	}
-	if channel.BaseURL != "https://proxy.example/openai/v1" {
+	if channel.BaseURL != "https://proxy.example/openai/v3" {
 		t.Fatalf("normalized base URL = %q", channel.BaseURL)
 	}
 }

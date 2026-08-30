@@ -153,7 +153,7 @@
       "apiFormatHint": "Chat models only.",
       "baseUrl": "Base URL",
       "baseUrlHint": "Leave blank to use the vendor default.",
-      "openAIBaseUrlHint": "OpenAI URLs must end in /v1, for example https://api.openai.com/v1. Leave blank to use the default.",
+      "openAIBaseUrlHint": "Enter the upstream API root, such as /v1, /v2, /v3, or a custom path. Leave blank to use the default.",
       "apiKey": "API key",
       "apiKeyHintNew": "",
       "apiKeyHintEdit": "Leave blank to keep the saved key.",
@@ -199,7 +199,7 @@
     },
     "errors": {
       "nameRequired": "Name required",
-      "openAIBaseUrlV1Required": "The OpenAI Base URL must be a complete HTTP(S) URL ending in /v1."
+      "openAIBaseUrlInvalid": "The OpenAI Base URL must be a complete HTTP(S) URL."
     },
     "labels": {
       "noKey": "key not set",

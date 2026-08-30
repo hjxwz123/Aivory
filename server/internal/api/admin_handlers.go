@@ -152,9 +152,8 @@ func updateChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err)
 		return
 	}
-	// Legacy OpenAI rows may still contain a host-only URL. Keep unrelated
-	// partial updates working, but require the version root whenever the channel
-	// type or base URL is being configured.
+	// Validate the effective OpenAI URL whenever the channel type or base URL is
+	// being configured. The upstream API root may use any version or custom path.
 	if effType == "openai" && (p.Type != nil || p.BaseURL != nil) {
 		baseURL, err := normalizeOpenAIChannelBaseURL(effBaseURL)
 		if err != nil {
@@ -212,31 +211,42 @@ func validateChannelType(typ, apiFormat string) error {
 	return nil
 }
 
-var errOpenAIBaseURLV1Required = errors.New("openai base_url must be an absolute HTTP(S) URL ending in /v1")
+var (
+	errOpenAIBaseURLInvalid    = errors.New("openai base_url must be an absolute HTTP(S) URL")
+	errOpenAIBaseURLV1Required = errors.New("base_url must be an absolute HTTP(S) URL ending in /v1")
+)
 
 // normalizeOpenAIChannelBaseURL keeps the documented empty-value default, but
-// requires configured URLs to stop at the version root. Provider code appends
-// resource paths such as /chat/completions and /images/generations.
+// otherwise accepts any upstream API root. Provider code appends resource paths
+// such as /chat/completions and /images/generations.
 func normalizeOpenAIChannelBaseURL(raw string) (string, error) {
 	baseURL := strings.TrimSpace(raw)
 	if baseURL == "" {
 		return "", nil
 	}
 	if strings.ContainsAny(baseURL, " \t\r\n") {
-		return "", errOpenAIBaseURLV1Required
+		return "", errOpenAIBaseURLInvalid
 	}
 
 	parsed, err := url.Parse(baseURL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" ||
 		parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return "", errOpenAIBaseURLV1Required
+		return "", errOpenAIBaseURLInvalid
 	}
 	parsed.Path = strings.TrimRight(parsed.Path, "/")
 	parsed.RawPath = ""
-	if !strings.HasSuffix(parsed.Path, "/v1") {
+	return parsed.String(), nil
+}
+
+// Rerank is a separate OpenAI-compatible service whose adapter appends
+// /rerank. Keep its existing version-root contract independent from model
+// channel URLs, which may use /v2, /v3, or vendor-specific roots.
+func normalizeRerankBaseURL(raw string) (string, error) {
+	baseURL, err := normalizeOpenAIChannelBaseURL(raw)
+	if err != nil || (baseURL != "" && !strings.HasSuffix(baseURL, "/v1")) {
 		return "", errOpenAIBaseURLV1Required
 	}
-	return parsed.String(), nil
+	return baseURL, nil
 }
 
 func deleteChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
@@ -1819,7 +1829,7 @@ func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.R
 				if json.Unmarshal(v, &baseURL) != nil {
 					return 0, errInvalidInput
 				}
-				normalized, err := normalizeOpenAIChannelBaseURL(baseURL)
+				normalized, err := normalizeRerankBaseURL(baseURL)
 				if err != nil {
 					return 0, errInvalidInput
 				}
@@ -1936,7 +1946,7 @@ func validateEffectiveRerankSettings(db *sql.DB, patch map[string]json.RawMessag
 	}
 
 	if effective.enabled {
-		baseURL, err := normalizeOpenAIChannelBaseURL(effective.baseURL)
+		baseURL, err := normalizeRerankBaseURL(effective.baseURL)
 		if err != nil || baseURL == "" || strings.TrimSpace(effective.model) == "" {
 			return errInvalidInput
 		}

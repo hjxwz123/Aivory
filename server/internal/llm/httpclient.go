@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -23,15 +24,16 @@ func providerBaseURL(baseURL, vendorDefault string) string {
 	return vendorDefault
 }
 
-// OpenAIBaseURL returns the versioned API root expected in channel settings.
-// Appending /v1 for legacy host-only rows keeps existing installations working
-// while new and edited channels are required to store the explicit version.
+// OpenAIBaseURL returns the configured upstream API root exactly as supplied.
+// Host-only legacy rows still receive /v1 for backward compatibility, while
+// explicit /v2, /v3, and vendor-specific paths are preserved.
 func OpenAIBaseURL(baseURL string) string {
 	base := providerBaseURL(baseURL, "https://api.openai.com/v1")
-	if strings.HasSuffix(base, "/v1") {
-		return base
+	parsed, err := url.Parse(base)
+	if err == nil && (parsed.Path == "" || parsed.Path == "/") {
+		return strings.TrimRight(base, "/") + "/v1"
 	}
-	return base + "/v1"
+	return base
 }
 
 // providerHTTPClient is the shared client for all upstream model-provider calls
