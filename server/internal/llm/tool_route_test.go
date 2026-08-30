@@ -973,9 +973,11 @@ func TestToolRoutePromptUsesOnlyCompactCurrentTurnSignals(t *testing.T) {
 			t.Fatalf("tool-route prompt leaked unavailable/private value %q: %s", absent, prompt)
 		}
 	}
-	if request.MaxOutputTokens != toolRouteMaxOutputTokens || string(request.ExtraParams) != `{"temperature":0}` || request.Model.Fallback != nil {
+	wantRouteParams := json.RawMessage(`{"temperature":0.9,"reasoning":{"effort":"high"}}`)
+	if request.MaxOutputTokens != toolRouteMaxOutputTokens || request.Model.Fallback != nil {
 		t.Fatalf("tool route request was not latency constrained: max=%d extra=%s fallback=%+v", request.MaxOutputTokens, request.ExtraParams, request.Model.Fallback)
 	}
+	assertJSONObjectsEqual(t, request.ExtraParams, wantRouteParams)
 
 	// An exact enabled skill name is a deterministic positive signal and must not
 	// spend a second classifier round trip.

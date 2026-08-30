@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log"
 	"path/filepath"
@@ -170,7 +171,7 @@ func TestAnthropicThinkingKeepsLegacyExpansionOutsideStrictCalls(t *testing.T) {
 	}
 }
 
-func TestToolRouteTaskParamsSuppressConfiguredReasoning(t *testing.T) {
+func TestToolRouteTaskParamDefaults(t *testing.T) {
 	tests := []struct {
 		name      string
 		provider  string
@@ -189,6 +190,16 @@ func TestToolRouteTaskParamsSuppressConfiguredReasoning(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestToolRouteTaskParamsPreserveConfiguredValues(t *testing.T) {
+	configured := json.RawMessage(`{"temperature":0.7,"reasoning":{"effort":"low"},"vendor_flag":true}`)
+	got := mergedToolRouteTaskParams("openai", "reasoning-model", configured)
+	assertJSONObjectsEqual(t, got, configured)
+
+	geminiConfigured := json.RawMessage(`{"generationConfig":{"temperature":0.4,"thinkingConfig":{"thinkingBudget":128},"topP":0.8}}`)
+	got = mergedToolRouteTaskParams("gemini", "gemini-2.5-flash", geminiConfigured)
+	assertJSONObjectsEqual(t, got, geminiConfigured)
 }
 
 func TestTaskLLMReportsDiagnosticAfterEmptyRetry(t *testing.T) {

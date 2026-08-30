@@ -419,11 +419,9 @@ func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opt
 	} else if maxTok <= 0 {
 		maxTok = taskDefaultMaxOutputTokens
 	}
-	extraParams := json.RawMessage(nil)
+	extraParams := model.ExtraParams
 	if toolRoute {
-		extraParams = toolRouteTaskParams(channel.Type, model.RequestID)
-	} else if model.Kind == "chat" {
-		extraParams = model.ExtraParams
+		extraParams = mergedToolRouteTaskParams(channel.Type, model.RequestID, extraParams)
 	}
 	req := UnifiedChatRequest{
 		UserID:         opts.UserID,
@@ -977,12 +975,13 @@ func firstUsableTaskModelID(ctx context.Context, db *sql.DB, candidates []string
 	return ""
 }
 
-// toolRouteTaskParams replaces the selected model's admin extra_params for the
-// classifier. This prevents an inherited reasoning/thinking configuration from
-// consuming the two-token output budget; Gemini thinking is disabled where the
-// API supports it (Gemini 3 uses its lowest supported level), and temperature
-// zero keeps the one-character verdict deterministic. The dedicated route model
-// itself should be a non-reasoning Flash/Haiku/nano-class model.
+// toolRouteTaskParams supplies conservative defaults for the classifier.
+// Administrator-configured model extra_params are merged on top by
+// mergedToolRouteTaskParams, so tool routing follows the same model-level
+// configuration contract as titles, moderation, compaction, and every other
+// internal task. Gemini thinking is disabled by default where the API supports
+// it (Gemini 3 uses its lowest supported level), while an explicit administrator
+// value remains authoritative.
 func toolRouteTaskParams(channelType, requestID string) json.RawMessage {
 	if providerIDForChannelType(channelType) == "google" {
 		if strings.Contains(strings.ToLower(requestID), "gemini-3") {
@@ -991,6 +990,16 @@ func toolRouteTaskParams(channelType, requestID string) json.RawMessage {
 		return json.RawMessage(`{"generationConfig":{"temperature":0,"thinkingConfig":{"thinkingBudget":0}}}`)
 	}
 	return json.RawMessage(`{"temperature":0}`)
+}
+
+func mergedToolRouteTaskParams(channelType, requestID string, configured json.RawMessage) json.RawMessage {
+	params := store.MergeModelExtraParams(nil, toolRouteTaskParams(channelType, requestID))
+	params = store.MergeModelExtraParams(params, configured)
+	merged, err := json.Marshal(params)
+	if err != nil {
+		return configured
+	}
+	return merged
 }
 
 // defaultSystem returns the system prompt used when callers don't supply one.
