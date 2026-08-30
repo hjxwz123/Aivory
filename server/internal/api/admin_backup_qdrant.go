@@ -4,15 +4,18 @@ import (
 	"archive/zip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"aivory/server/internal/envcfg"
+	"aivory/server/internal/vector"
 )
 
 const (
@@ -127,7 +130,7 @@ func (c *qdrantArchiveClient) listAivoryCollections(ctx context.Context) ([]stri
 	return names, nil
 }
 
-func exportQdrantToZip(ctx context.Context, d Deps, zw *zip.Writer) (int64, error) {
+func exportQdrantToZip(ctx context.Context, d Deps, zw zipEntryCreator) (int64, error) {
 	client := newQdrantArchiveClient(d)
 	if client == nil {
 		return 0, nil
@@ -200,7 +203,7 @@ func (c *qdrantArchiveClient) exportCollection(ctx context.Context, name string,
 		}
 		for _, p := range out.Result.Points {
 			if len(p.ID) == 0 || len(p.Vector) == 0 || string(p.Vector) == "null" {
-				continue
+				return total, errors.New("qdrant export returned an invalid point")
 			}
 			if len(p.Payload) == 0 {
 				p.Payload = json.RawMessage(`{}`)
@@ -218,62 +221,215 @@ func (c *qdrantArchiveClient) exportCollection(ctx context.Context, name string,
 	return total, nil
 }
 
-func restoreQdrantFromZip(ctx context.Context, d Deps, zr *zip.Reader) (int64, string) {
+func restoreQdrantFromZip(ctx context.Context, d Deps, zr *zip.Reader) (int64, error) {
 	client := newQdrantArchiveClient(d)
 	if client == nil {
 		if findZipFile(zr, qdrantZipManifest) != nil {
-			return 0, "archive contains Qdrant vectors, but QDRANT_URL is not configured"
+			return 0, fmt.Errorf("archive contains Qdrant vectors, but QDRANT_URL is not configured")
 		}
-		return 0, ""
+		return 0, nil
 	}
 	entry := findZipFile(zr, qdrantZipManifest)
 	if entry == nil {
 		if err := client.deleteAivoryCollections(ctx); err != nil {
-			return 0, err.Error()
+			return 0, err
 		}
-		return 0, ""
+		return 0, nil
 	}
 	rc, err := entry.Open()
 	if err != nil {
-		return 0, err.Error()
+		return 0, err
 	}
 	var man qdrantArchiveManifest
 	err = json.NewDecoder(rc).Decode(&man)
 	_ = rc.Close()
 	if err != nil {
-		return 0, fmt.Sprintf("invalid qdrant manifest: %v", err)
+		return 0, fmt.Errorf("invalid qdrant manifest: %w", err)
 	}
 	if man.Format != "aivory-qdrant" {
-		return 0, "invalid qdrant manifest format"
+		return 0, fmt.Errorf("invalid qdrant manifest format")
 	}
-	if man.Version > qdrantArchiveVersion {
-		return 0, fmt.Sprintf("qdrant archive v%d is newer than this server supports (v%d)", man.Version, qdrantArchiveVersion)
+	if man.Version < 1 || man.Version > qdrantArchiveVersion {
+		return 0, fmt.Errorf("qdrant archive v%d is unsupported (supported versions: v1 through v%d)", man.Version, qdrantArchiveVersion)
+	}
+	if err := validateQdrantRestoreEntries(zr, man); err != nil {
+		return 0, err
 	}
 	if err := client.deleteAivoryCollections(ctx); err != nil {
-		return 0, err.Error()
+		return 0, err
 	}
 	var total int64
 	for _, coll := range man.Collections {
 		if !validQdrantCollectionName(coll.Name) {
-			return total, fmt.Sprintf("invalid qdrant collection name %q", coll.Name)
+			return total, fmt.Errorf("invalid qdrant collection name %q", coll.Name)
 		}
 		if coll.Dim <= 0 {
-			return total, fmt.Sprintf("invalid qdrant dimension for %q", coll.Name)
+			return total, fmt.Errorf("invalid qdrant dimension for %q", coll.Name)
 		}
 		entry := findZipFile(zr, coll.Entry)
 		if entry == nil {
-			return total, fmt.Sprintf("missing qdrant collection entry %q", coll.Entry)
+			return total, fmt.Errorf("missing qdrant collection entry %q", coll.Entry)
 		}
 		if err := client.ensureCollection(ctx, coll.Name, coll.Dim); err != nil {
-			return total, err.Error()
+			return total, err
 		}
 		n, err := client.importCollection(ctx, coll.Name, entry)
 		if err != nil {
-			return total, err.Error()
+			return total, err
 		}
 		total += n
 	}
-	return total, ""
+	return total, nil
+}
+
+func validateQdrantRestoreEntries(zr *zip.Reader, man qdrantArchiveManifest) error {
+	seenNames := map[string]bool{}
+	seenEntries := map[string]bool{}
+	for _, coll := range man.Collections {
+		if !validQdrantCollectionName(coll.Name) || coll.Dim <= 0 || coll.Points < 0 {
+			return fmt.Errorf("invalid qdrant collection metadata for %q", coll.Name)
+		}
+		if seenNames[coll.Name] || seenEntries[coll.Entry] {
+			return fmt.Errorf("duplicate qdrant collection or entry %q", coll.Name)
+		}
+		seenNames[coll.Name] = true
+		seenEntries[coll.Entry] = true
+		entry := findZipFile(zr, coll.Entry)
+		if entry == nil {
+			return fmt.Errorf("missing qdrant collection entry %q", coll.Entry)
+		}
+		rc, err := entry.Open()
+		if err != nil {
+			return err
+		}
+		dec := json.NewDecoder(rc)
+		var count int64
+		for {
+			var point qdrantDumpPoint
+			if err := dec.Decode(&point); err == io.EOF {
+				break
+			} else if err != nil {
+				_ = rc.Close()
+				return fmt.Errorf("decode %s: %w", coll.Entry, err)
+			}
+			if len(point.ID) == 0 || len(point.Vector) == 0 || string(point.Vector) == "null" {
+				_ = rc.Close()
+				return fmt.Errorf("%s contains an invalid point", coll.Entry)
+			}
+			count++
+		}
+		_ = rc.Close()
+		if count != coll.Points {
+			return fmt.Errorf("qdrant collection %s points=%d, manifest=%d", coll.Name, count, coll.Points)
+		}
+	}
+	return nil
+}
+
+type backupQdrantRestore struct {
+	d            Deps
+	archive      *zip.Reader
+	previousFile *os.File
+	previousPath string
+	previous     *zip.Reader
+	restored     int64
+	applied      bool
+	committed    bool
+}
+
+func lockQdrantArchiveIfNeeded(d Deps, include bool) func() {
+	if !include && strings.TrimSpace(d.Config.QdrantURL) == "" {
+		return func() {}
+	}
+	return vector.LockQdrantArchive()
+}
+
+func prepareBackupQdrantRestore(ctx context.Context, d Deps, zr *zip.Reader) (*backupQdrantRestore, error) {
+	archiveHasQdrant := findZipFile(zr, qdrantZipManifest) != nil
+	if strings.TrimSpace(d.Config.QdrantURL) == "" {
+		if archiveHasQdrant {
+			return nil, errors.New("archive contains Qdrant vectors, but QDRANT_URL is not configured")
+		}
+		return nil, nil
+	}
+
+	tmp, err := os.CreateTemp("", "aivory-qdrant-rollback-*.zip")
+	if err != nil {
+		return nil, fmt.Errorf("create Qdrant rollback archive: %w", err)
+	}
+	path := tmp.Name()
+	ok := false
+	defer func() {
+		if !ok {
+			_ = tmp.Close()
+			_ = os.Remove(path)
+		}
+	}()
+	zw := zip.NewWriter(tmp)
+	if _, err := exportQdrantToZip(ctx, d, zw); err != nil {
+		_ = zw.Close()
+		return nil, fmt.Errorf("capture current Qdrant state: %w", err)
+	}
+	if err := zw.Close(); err != nil {
+		return nil, fmt.Errorf("close Qdrant rollback archive: %w", err)
+	}
+	info, err := tmp.Stat()
+	if err != nil {
+		return nil, err
+	}
+	previous, err := zip.NewReader(tmp, info.Size())
+	if err != nil {
+		return nil, err
+	}
+	ok = true
+	return &backupQdrantRestore{
+		d: d, archive: zr, previousFile: tmp, previousPath: path, previous: previous,
+	}, nil
+}
+
+func (r *backupQdrantRestore) Apply(ctx context.Context) error {
+	if r == nil || r.applied {
+		return nil
+	}
+	r.applied = true // replacement may become destructive before returning an error
+	n, err := restoreQdrantFromZip(ctx, r.d, r.archive)
+	if err == nil {
+		r.restored = n
+		return nil
+	}
+	rollbackCtx, cancel := context.WithTimeout(context.Background(), qdrantArchiveRequestTimeout)
+	defer cancel()
+	rollbackErr := r.Rollback(rollbackCtx)
+	if rollbackErr != nil {
+		return errors.Join(fmt.Errorf("restore Qdrant: %w", err), fmt.Errorf("rollback Qdrant: %w", rollbackErr))
+	}
+	return fmt.Errorf("restore Qdrant: %w", err)
+}
+
+func (r *backupQdrantRestore) Rollback(ctx context.Context) error {
+	if r == nil || r.committed || !r.applied {
+		return nil
+	}
+	_, err := restoreQdrantFromZip(ctx, r.d, r.previous)
+	if err == nil {
+		r.applied = false
+		r.restored = 0
+	}
+	return err
+}
+
+func (r *backupQdrantRestore) Commit() error {
+	if r == nil || r.committed {
+		return nil
+	}
+	r.committed = true
+	if r.previousFile != nil {
+		_ = r.previousFile.Close()
+	}
+	if r.previousPath != "" {
+		return os.Remove(r.previousPath)
+	}
+	return nil
 }
 
 func (c *qdrantArchiveClient) deleteAivoryCollections(ctx context.Context) error {
@@ -344,7 +500,7 @@ func (c *qdrantArchiveClient) importCollection(ctx context.Context, name string,
 			return total, err
 		}
 		if len(p.ID) == 0 || len(p.Vector) == 0 || string(p.Vector) == "null" {
-			continue
+			return total, errors.New("invalid qdrant point")
 		}
 		if len(p.Payload) == 0 {
 			p.Payload = json.RawMessage(`{}`)

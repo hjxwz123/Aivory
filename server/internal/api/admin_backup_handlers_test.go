@@ -525,8 +525,8 @@ func TestBackupExportImportRoundTripsQdrant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read manifest: %v", err)
 	}
-	if man.Version != 2 {
-		t.Fatalf("backup manifest version=%d, want breaking namespace format v2", man.Version)
+	if man.Version != 3 {
+		t.Fatalf("backup manifest version=%d, want integrity format v3", man.Version)
 	}
 	if !man.IncludesQdrant || man.QdrantPoints != 1 {
 		t.Fatalf("manifest qdrant = includes:%v points:%d, want true/1", man.IncludesQdrant, man.QdrantPoints)
@@ -2101,10 +2101,11 @@ func TestConfigImportCannotChangeLockedEmbeddingModel(t *testing.T) {
 }
 
 type fakeQdrant struct {
-	url    string
-	server *httptest.Server
-	mu     sync.Mutex
-	points map[string][]qdrantDumpPoint
+	url                 string
+	server              *httptest.Server
+	mu                  sync.Mutex
+	points              map[string][]qdrantDumpPoint
+	failPointUpsertOnce bool
 }
 
 func newFakeQdrant(t *testing.T) *fakeQdrant {
@@ -2134,6 +2135,12 @@ func (f *fakeQdrant) clear() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.points = map[string][]qdrantDumpPoint{}
+}
+
+func (f *fakeQdrant) failNextPointUpsert() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failPointUpsertOnce = true
 }
 
 func (f *fakeQdrant) serveHTTP(w http.ResponseWriter, r *http.Request) {
@@ -2187,6 +2194,12 @@ func (f *fakeQdrant) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f.mu.Lock()
+		if f.failPointUpsertOnce {
+			f.failPointUpsertOnce = false
+			f.mu.Unlock()
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "injected upsert failure"})
+			return
+		}
 		f.points[name] = append(f.points[name], body.Points...)
 		f.mu.Unlock()
 		writeJSON(w, http.StatusOK, map[string]any{"result": true})
