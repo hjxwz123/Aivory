@@ -9,6 +9,9 @@ A tiny, self-hosted Python execution sandbox for local development. It implement
 the HTTP protocol the Go backend already speaks
 (`server/internal/sandbox/sandbox.go`), so wiring it up is just an env var.
 
+- [Complete sandbox guide](https://docs.aivorygo.com/docs/sandbox/overview/)
+- [Sandbox Sidecar API reference](https://docs.aivorygo.com/docs/sandbox/api/)
+
 It is **not** a from-scratch sandbox: each session is a locked-down Docker
 container running a pre-baked Python image. `/workspace` persists across `exec`
 calls within a session (like ChatGPT Code Interpreter), and Chinese renders
