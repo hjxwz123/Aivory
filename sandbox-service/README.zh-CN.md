@@ -5,7 +5,10 @@
   <a href="./README.zh-CN.md"><strong>简体中文</strong></a>
 </p>
 
-这是一个小型自托管 Python 执行沙箱，主要用于本地开发。它实现了 Go 后端已经使用的 3 个核心 HTTP 端点协议（见 `server/internal/sandbox/sandbox.go`），因此接入只需要配置一个环境变量。
+这是一个小型自托管 Python 执行沙箱，主要用于本地开发。它实现了 Go 后端已经使用的核心 HTTP 协议（见 `server/internal/sandbox/sandbox.go`），因此接入只需要配置一个环境变量。
+
+- [完整沙箱说明](https://docs.aivorygo.com/zh-Hans/docs/sandbox/overview/)
+- [Sandbox Sidecar API 文档](https://docs.aivorygo.com/zh-Hans/docs/sandbox/api/)
 
 它**不是**从零手写的沙箱：每个 session 都是一个锁定后的 Docker 容器，运行预构建 Python 镜像。`/workspace` 会在同一个 session 的多次 `exec` 调用之间保留（类似 ChatGPT Code Interpreter），并且镜像内置 Noto CJK 字体，所以中文可以正常渲染。
 
