@@ -153,7 +153,7 @@
       "apiFormatHint": "チャットモデルのみ。",
       "baseUrl": "ベースURL",
       "baseUrlHint": "空欄にするとベンダーの既定値を使用します。",
-      "openAIBaseUrlHint": "OpenAI URL は /v1 で終わる必要があります（例：https://api.openai.com/v1）。空欄の場合は既定値を使用します。",
+      "openAIBaseUrlHint": "上流 API のルートを入力します。/v1、/v2、/v3、または独自パスを使用できます。空欄の場合は既定値を使用します。",
       "apiKey": "APIキー",
       "apiKeyHintNew": "",
       "apiKeyHintEdit": "空欄にすると保存済みのキーを保持します。",
@@ -199,7 +199,7 @@
     },
     "errors": {
       "nameRequired": "名前は必須です",
-      "openAIBaseUrlV1Required": "OpenAI のベースURLには、/v1 で終わる完全な HTTP(S) URL を指定してください。"
+      "openAIBaseUrlInvalid": "OpenAI のベースURLには完全な HTTP(S) URL を指定してください。"
     },
     "labels": {
       "noKey": "キー未設定",

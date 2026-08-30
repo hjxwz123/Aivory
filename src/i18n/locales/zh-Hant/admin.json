@@ -153,7 +153,7 @@
       "apiFormatHint": "僅對話模型使用。",
       "baseUrl": "Base URL",
       "baseUrlHint": "留空使用廠商預設端點。",
-      "openAIBaseUrlHint": "OpenAI 位址必須以 /v1 結尾，例如 https://api.openai.com/v1；留空使用預設位址。",
+      "openAIBaseUrlHint": "填寫上游 API 根位址，可使用 /v1、/v2、/v3 或自訂路徑；留空使用預設位址。",
       "apiKey": "API Key",
       "apiKeyHintNew": "",
       "apiKeyHintEdit": "留空保留原金鑰。",
@@ -199,7 +199,7 @@
     },
     "errors": {
       "nameRequired": "請填寫名稱",
-      "openAIBaseUrlV1Required": "OpenAI Base URL 必須是以 /v1 結尾的完整 HTTP(S) 位址。"
+      "openAIBaseUrlInvalid": "OpenAI Base URL 必須是完整的 HTTP(S) 位址。"
     },
     "labels": {
       "noKey": "未設定金鑰",

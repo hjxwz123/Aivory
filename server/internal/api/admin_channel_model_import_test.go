@@ -45,7 +45,7 @@ func importChannelModelsRequest(t *testing.T, fx *channelAdminFixture, channelID
 
 func TestDiscoverDraftOpenAIChannelModelsDoesNotPersistChannelOrLeakKey(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/models" {
+		if r.URL.Path != "/v3/models" {
 			t.Errorf("request path = %q", r.URL.Path)
 		}
 		if got := r.Header.Get("Authorization"); got != "Bearer preview-secret" {
@@ -61,7 +61,7 @@ func TestDiscoverDraftOpenAIChannelModelsDoesNotPersistChannelOrLeakKey(t *testi
 
 	fx := newChannelModelImportFixture(t)
 	body, err := json.Marshal(map[string]string{
-		"type": "openai", "api_format": "responses", "base_url": server.URL + "/v1/", "api_key": "preview-secret",
+		"type": "openai", "api_format": "responses", "base_url": server.URL + "/v3/", "api_key": "preview-secret",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -94,9 +94,8 @@ func TestDiscoverDraftOpenAIChannelModelsDoesNotPersistChannelOrLeakKey(t *testi
 
 func TestDiscoverDraftChannelModelsValidatesConfigurationAndStabilizesUpstreamErrors(t *testing.T) {
 	fx := newChannelModelImportFixture(t)
-	invalid := fx.request(t, http.MethodPost, "/api/admin/channels/models/discover", `{
-		"type":"openai","api_format":"chat","base_url":"https://api.example.com"
-	}`)
+	invalid := fx.request(t, http.MethodPost, "/api/admin/channels/models/discover",
+		`{"type":"openai","api_format":"chat","base_url":"api.example.com/v2"}`)
 	if invalid.Code != http.StatusBadRequest {
 		t.Fatalf("invalid base URL status=%d body=%s", invalid.Code, invalid.Body.String())
 	}

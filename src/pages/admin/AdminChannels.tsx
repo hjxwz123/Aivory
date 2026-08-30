@@ -523,7 +523,7 @@ export default function AdminChannels() {
                   error={editor.draft.type === 'openai'
                     && showBaseUrlError
                     && normalizeOpenAIBaseUrl(editor.draft.base_url ?? '') === null
-                    ? t('admin:channels.errors.openAIBaseUrlV1Required')
+                    ? t('admin:channels.errors.openAIBaseUrlInvalid')
                     : undefined}
                 >
                   <Input

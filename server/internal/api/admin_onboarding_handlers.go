@@ -244,8 +244,8 @@ func onboardingChannelUsable(channel store.Channel) bool {
 
 // onboardingOpenAIBaseURLUsable accepts the historical host-only shape that
 // llm.OpenAIBaseURL still upgrades to /v1, while rejecting URLs that cannot
-// become a valid HTTP request. New and edited channels remain subject to the
-// stricter /v1 normalization in the admin handlers.
+// become a valid HTTP request. New and edited channels use the same URL shape
+// while also accepting explicit /v2, /v3, and vendor-specific API roots.
 func onboardingOpenAIBaseURLUsable(raw string) bool {
 	if raw == "" {
 		return true

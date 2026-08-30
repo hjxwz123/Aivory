@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"aivory/server/internal/llm"
 	"aivory/server/internal/store"
 )
 
@@ -312,10 +313,7 @@ func (a *channelModelAccumulator) add(requestID, label, description, kind string
 }
 
 func discoverOpenAIChannelModels(ctx context.Context, channel *store.Channel) (channelModelDiscovery, error) {
-	baseURL := strings.TrimRight(strings.TrimSpace(channel.BaseURL), "/")
-	if baseURL == "" {
-		baseURL = "https://api.openai.com/v1"
-	}
+	baseURL := llm.OpenAIBaseURL(channel.BaseURL)
 	var response struct {
 		Data []struct {
 			ID string `json:"id"`
