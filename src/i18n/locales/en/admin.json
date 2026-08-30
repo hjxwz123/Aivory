@@ -931,7 +931,7 @@
       "toolRouteModel": "Tool routing model",
       "toolRouteModelHint": "Optional low-latency model for Auto tools. If unset, the current conversation model routes the tools.",
       "defaultToolMode": "Default tool mode",
-      "defaultToolModeHint": "Used when a user has not chosen a default tool mode. The user's own setting takes precedence.",
+      "defaultToolModeHint": "Used for every new conversation. Users may override it only within an individual conversation.",
       "toolModeAuto": "Auto",
       "toolModeEnabled": "On",
       "toolModeDisabled": "Off",

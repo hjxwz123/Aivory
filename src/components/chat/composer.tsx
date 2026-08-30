@@ -687,11 +687,16 @@ export function Composer({
   const setVerify = useComposerPrefs((s) => s.setVerify)
   const optimizeImagePrompt = useComposerPrefs((s) => s.optimizeImagePrompt)
   const setOptimizeImagePrompt = useComposerPrefs((s) => s.setOptimizeImagePrompt)
-  // The persisted tool policy still drives request routing. Mode and candidate
-  // selection share one progressive "Tools" menu but remain independent state.
-  const toolMode = useComposerPrefs((s) => s.toolMode)
+  // Tool policy is scoped to this conversation (or the new-chat draft). The
+  // administrator-provided default is used whenever this scope has no override.
+  const toolModeScope = conversationId ?? draftScope ?? 'new-chat'
+  const hasToolModeOverride = useComposerPrefs((s) =>
+    Object.prototype.hasOwnProperty.call(s.toolModesByScope, toolModeScope),
+  )
+  const toolMode = useComposerPrefs((s) => s.toolModesByScope[toolModeScope] ?? s.defaultToolMode)
   const setToolMode = useComposerPrefs((s) => s.setToolMode)
-  const forceWebSearch = useComposerPrefs((s) => s.forceWebSearch)
+  const clearToolMode = useComposerPrefs((s) => s.clearToolMode)
+  const forceWebSearch = useComposerPrefs((s) => s.forceWebSearchByScope[toolModeScope] === true)
   const setForceWebSearch = useComposerPrefs((s) => s.setForceWebSearch)
   const selectedToolIds = useComposerPrefs((s) =>
     modelId ? s.selectedToolIdsByModel[modelId] : undefined,
@@ -1414,12 +1419,12 @@ export function Composer({
       : availableToolMode
   const effectiveWebSearch = effectiveToolMode === 'disabled' && supportsWebSearch && forceWebSearch
 
-  // A global mode can outlive a model switch. Concrete modes unavailable on the
-  // new model always return to the product default instead of silently arming a
-  // different tool family.
+  // A conversation override can outlive a model switch. Concrete modes
+  // unavailable on the new model fall back to automatic instead of silently
+  // arming a different tool family.
   useEffect(() => {
-    if (currentModel && availableToolMode !== toolMode) setToolMode('auto')
-  }, [availableToolMode, currentModel, setToolMode, toolMode])
+    if (currentModel && availableToolMode !== toolMode) setToolMode(toolModeScope, 'auto')
+  }, [availableToolMode, currentModel, setToolMode, toolMode, toolModeScope])
   const handleParamValuesChange = useCallback(
     (next: Record<string, unknown>) => {
       setCachedParamValues(modelId, next)
@@ -2148,14 +2153,13 @@ export function Composer({
               : 'Answer directly without making tools available.',
       }),
       selected: availableToolMode === itemMode,
-      onSelect: () => setToolMode(itemMode),
+      onSelect: () => setToolMode(toolModeScope, itemMode),
     }
   })
   const toolModeSummary =
     toolModeItems.find((item) => item.mode === availableToolMode)?.label ??
     t('composer.features.toolModeAuto', { defaultValue: 'Automatic' })
-  const toolUseConfigured =
-    hasCustomToolSelection || (!researchActive && availableToolMode !== 'auto')
+  const toolUseConfigured = hasCustomToolSelection || (!researchActive && hasToolModeOverride)
 
   const webSearchItem: FeatureItem | undefined =
     showToolUseSelector && supportsWebSearch && availableToolMode === 'disabled'
@@ -2165,7 +2169,7 @@ export function Composer({
           label: t('composer.features.webSearch', { defaultValue: 'Web search' }),
           active: forceWebSearch,
           enter: true,
-          toggle: () => setForceWebSearch(!forceWebSearch),
+          toggle: () => setForceWebSearch(toolModeScope, !forceWebSearch),
         }
       : undefined
 
@@ -2173,7 +2177,7 @@ export function Composer({
   // removable chip even when an older persisted policy is still non-default.
   const toolUseOverride: FeatureItem | undefined =
     showToolUseSelector &&
-    (hasCustomToolSelection || (availableToolMode !== 'auto' && !researchActive))
+    (hasCustomToolSelection || (hasToolModeOverride && !researchActive))
       ? {
           key: 'tool-use',
           icon: <Wrench size={16} aria-hidden />,
@@ -2185,7 +2189,7 @@ export function Composer({
           active: true,
           clearLabel: t('composer.toolSelection.resetToolUse', { defaultValue: 'Reset tool use' }),
           toggle: () => {
-            if (!researchActive && availableToolMode !== 'auto') setToolMode('auto')
+            if (!researchActive) clearToolMode(toolModeScope)
             if (hasCustomToolSelection) handleSelectedToolIdsChange(undefined)
           },
         }

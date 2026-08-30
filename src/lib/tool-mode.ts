@@ -23,7 +23,7 @@ export function visibleToolModes(capabilities: ToolModeCapabilities): ToolMode[]
   return TOOL_MODE_MENU_ORDER.filter((mode) => toolModeAvailable(mode, capabilities))
 }
 
-/** A persisted per-turn/default choice can outlive a model switch. Concrete
+/** A persisted per-conversation choice can outlive a model switch. Concrete
  * modes that the new model cannot provide fall back to automatic. */
 export function normalizeToolModeForCapabilities(
   mode: ToolMode,
@@ -50,23 +50,11 @@ export function resolveModelToolModeCapabilities(
 }
 
 /**
- * Resolves the account-level default while preserving choices made by clients
- * that predate the three-state tool mode. A missing legacy value was the old
- * implicit default, so it becomes the new default (`auto`); explicit legacy
- * booleans remain explicit user choices. Accounts without either setting use
- * the deployment default supplied by the authenticated profile.
+ * Resolves the administrator-controlled deployment default supplied by the
+ * authenticated profile. User settings are deliberately not accepted here:
+ * users may override tool mode only inside an individual conversation.
  */
-export function resolveDefaultToolMode(
-  settings: Record<string, unknown> | null | undefined,
-  inheritedDefault?: unknown,
-): ToolMode {
-  if (isToolMode(settings?.tool_mode_default)) return settings.tool_mode_default
-  // Retired hosted-only mode now means the complete administrator-configured
-  // collection. This also migrates existing account settings on hydration.
-  if (settings?.tool_mode_default === 'official') return 'enabled'
-  if (settings?.disable_tools_default === true) return 'disabled'
-  if (settings?.disable_tools_default === false) return 'enabled'
+export function resolveDefaultToolMode(inheritedDefault?: unknown): ToolMode {
   if (isToolMode(inheritedDefault)) return inheritedDefault
-  if (inheritedDefault === 'official') return 'enabled'
   return 'auto'
 }

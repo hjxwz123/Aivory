@@ -1265,7 +1265,7 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// orchestrator/provider layer strips image blocks from the model request when
 	// vision is unavailable, while python_execute can still stage the original
 	// bytes from the conversation file row. Do not reject the turn before SSE.
-	toolMode, err := resolveTurnToolMode(req.ToolMode, req.NoTools, effectiveDefaultToolMode(d.DB, u.Settings))
+	toolMode, err := resolveTurnToolMode(req.ToolMode, req.NoTools, effectiveDefaultToolMode(d.DB))
 	if err != nil {
 		writeError(w, 400, err)
 		return
@@ -1698,7 +1698,7 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		d, u.ID, id, conv.WorkspaceID,
 		generationKnowledgeBaseIDs(r.Context(), d.DB, u.ID, conv, turnKBIDs, turnKBSelectionConfigured),
 	)
-	toolMode, err := resolveTurnToolMode(body.ToolMode, body.NoTools, effectiveDefaultToolMode(d.DB, u.Settings))
+	toolMode, err := resolveTurnToolMode(body.ToolMode, body.NoTools, effectiveDefaultToolMode(d.DB))
 	if err != nil {
 		writeError(w, 400, err)
 		return

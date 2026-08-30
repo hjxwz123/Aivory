@@ -83,7 +83,7 @@ function ThreadBody({ quote, childId, onClose }: { quote: string; childId: strin
     const text = draft.trim()
     if (isWorkspaceGuest || !text || !childId) return
     setDraft('')
-    const armed = resolveArmedTurnFlags(conv?.modelId)
+    const armed = resolveArmedTurnFlags(conv?.modelId, childId)
     void sendMessage({
       conversationId: childId,
       text,

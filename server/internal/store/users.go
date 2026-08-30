@@ -31,6 +31,14 @@ var (
 	ErrPasswordAlreadySet = errors.New("password already set")
 )
 
+const legacyUserToolModeSettingsCleanupKey = "user_tool_mode_settings_cleanup_v1"
+
+var legacyUserToolModeSettingKeys = [...]string{
+	"tool_mode_default",
+	"disable_tools_default",
+	"official_tool_names_default",
+}
+
 // NormalizeUserEmail returns the canonical sign-in address accepted for every
 // account creation and email-change path. ParseAddress alone accepts display
 // names, so require its parsed address to match the trimmed input exactly.
@@ -490,7 +498,16 @@ func UpdateUserSettings(ctx context.Context, db *sql.DB, userID string, patch ma
 		_ = json.Unmarshal([]byte(raw), &current)
 	}
 	for k, v := range patch {
+		if isLegacyUserToolModeSettingKey(k) {
+			continue
+		}
 		current[k] = v
+	}
+	// Remove retired global tool-mode settings whenever a user row is rewritten.
+	// This keeps the cleanup effective during rolling upgrades and for rows that
+	// were restored from an older backup after the one-time migration ran.
+	for _, key := range legacyUserToolModeSettingKeys {
+		delete(current, key)
 	}
 	b, _ := json.Marshal(current)
 	if _, err := tx.ExecContext(ctx, `UPDATE users SET settings=? WHERE id=?`, string(b), userID); err != nil {
@@ -500,6 +517,98 @@ func UpdateUserSettings(ctx context.Context, db *sql.DB, userID string, patch ma
 		return nil, err
 	}
 	return FindUserByID(ctx, db, userID)
+}
+
+func isLegacyUserToolModeSettingKey(key string) bool {
+	for _, legacyKey := range legacyUserToolModeSettingKeys {
+		if key == legacyKey {
+			return true
+		}
+	}
+	return false
+}
+
+// migrateLegacyUserToolModeSettings removes account-wide tool settings that
+// were superseded by the administrator deployment default and conversation-
+// scoped overrides. The migration is deliberately narrow: every unrelated
+// user setting is copied byte-for-byte at the JSON value level and retained.
+func migrateLegacyUserToolModeSettings(db *sql.DB) error {
+	var marker string
+	err := db.QueryRow(`SELECT value FROM settings WHERE key=?`, legacyUserToolModeSettingsCleanupKey).Scan(&marker)
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	if marker != "" {
+		return nil
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck — best-effort after commit or early return
+
+	query := `SELECT id, settings FROM users ORDER BY id`
+	if usePostgres {
+		query += ` FOR UPDATE`
+	}
+	rows, err := tx.Query(query)
+	if err != nil {
+		return err
+	}
+	type userSettingsRow struct {
+		id       string
+		settings string
+	}
+	var users []userSettingsRow
+	for rows.Next() {
+		var row userSettingsRow
+		if err := rows.Scan(&row.id, &row.settings); err != nil {
+			rows.Close()
+			return err
+		}
+		users = append(users, row)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+
+	for _, row := range users {
+		if strings.TrimSpace(row.settings) == "" {
+			continue
+		}
+		current := map[string]json.RawMessage{}
+		if err := json.Unmarshal([]byte(row.settings), &current); err != nil {
+			// Settings were historically stored as opaque JSON. Do not block a
+			// deployment because one malformed legacy row cannot be decoded.
+			continue
+		}
+		changed := false
+		for _, key := range legacyUserToolModeSettingKeys {
+			if _, exists := current[key]; exists {
+				delete(current, key)
+				changed = true
+			}
+		}
+		if !changed {
+			continue
+		}
+		encoded, err := json.Marshal(current)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE users SET settings=? WHERE id=?`, string(encoded), row.id); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`INSERT INTO settings(key, value) VALUES(?, '1') ON CONFLICT(key) DO NOTHING`, legacyUserToolModeSettingsCleanupKey); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // backfillUserOnboarded marks legacy accounts as already past first-login

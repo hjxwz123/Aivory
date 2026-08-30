@@ -935,7 +935,7 @@
       "toolRouteModel": "工具路由模型",
       "toolRouteModelHint": "自动工具模式可选的低延迟模型。未设置时使用当前对话模型进行工具路由。",
       "defaultToolMode": "默认工具调用方式",
-      "defaultToolModeHint": "用户未设置默认工具调用方式时采用此设置，用户自己的设置优先。",
+      "defaultToolModeHint": "新对话默认采用此工具调用方式，用户只能在单个对话中临时修改。",
       "toolModeAuto": "自动",
       "toolModeEnabled": "开启",
       "toolModeDisabled": "关闭",

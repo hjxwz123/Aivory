@@ -61,7 +61,7 @@ import { sanitizeToolErrorOutput, sanitizeUserVisibleError } from '@/lib/user-vi
 // triggered, instead of silently reverting to defaults. verify is gated on
 // availability. Deep Research is normalized to enabled because its pipeline
 // always needs tools and must bypass the automatic classifier.
-export function resolveArmedTurnFlags(_modelId?: string): {
+export function resolveArmedTurnFlags(_modelId?: string, scope?: string): {
   mode?: ComposerMode
   verify?: boolean
   toolMode: ToolMode
@@ -71,12 +71,16 @@ export function resolveArmedTurnFlags(_modelId?: string): {
 } {
   const p = useComposerPrefs.getState()
   const mode = p.mode !== 'default' ? p.mode : undefined
-  const toolMode = resolveTurnToolMode(p.toolMode, { mode })
+  const toolMode = resolveTurnToolMode(
+    scope ? p.toolModesByScope[scope] ?? p.defaultToolMode : p.defaultToolMode,
+    { mode },
+  )
+  const forceWebSearch = scope ? p.forceWebSearchByScope[scope] === true : false
   return {
     mode,
     verify: p.verify && useModels.getState().verifyAvailable ? true : undefined,
     toolMode,
-    webSearch: toolMode === 'disabled' && p.forceWebSearch ? true : undefined,
+    webSearch: toolMode === 'disabled' && forceWebSearch ? true : undefined,
     selectedToolIds: _modelId ? p.selectedToolIdsByModel[_modelId] : undefined,
     optimizeImagePrompt: p.optimizeImagePrompt,
   }
@@ -1530,6 +1534,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       }
       const tempId = input.conversationId
       const realId = created.id
+      useComposerPrefs.getState().moveToolModeScope(tempId, realId)
       const latestKnowledgeBaseIds = [
         ...(get().conversations.find((conversation) => conversation.id === tempId)?.kbIds ?? []),
       ]
@@ -1990,7 +1995,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     // — it stays the original turn's mode (below), so regenerating a deep-research
     // reply re-runs research rather than adopting whatever mode is toggled now.
     const regenerateModelId = modelId ?? conv?.modelId
-    const armed = resolveArmedTurnFlags(regenerateModelId)
+    const armed = resolveArmedTurnFlags(regenerateModelId, conversationId)
     // §fast-mode: regenerate honours the conversation's CURRENT 快速/进阶 selection
     // (like verify/tool-policy above) — a fast conversation re-runs fast; switching to
     // 进阶 first makes the retry use the real model.

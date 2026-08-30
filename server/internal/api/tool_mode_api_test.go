@@ -44,7 +44,7 @@ func TestPostMessageRejectsInvalidExplicitToolModeBeforeStreaming(t *testing.T) 
 	}
 }
 
-func TestUpdateMeSettingsValidatesToolModeDefault(t *testing.T) {
+func TestUpdateMeSettingsIgnoresUserGlobalToolMode(t *testing.T) {
 	db := openMigrated(t, filepath.Join(t.TempDir(), "tool-mode-settings.db"))
 	defer db.Close()
 	if _, err := db.Exec(`INSERT INTO users(id,email,password_hash,role) VALUES('u1','settings@example.com','h','user')`); err != nil {
@@ -53,7 +53,7 @@ func TestUpdateMeSettingsValidatesToolModeDefault(t *testing.T) {
 	user := &store.User{ID: "u1", Role: "user"}
 
 	rec := httptest.NewRecorder()
-	updateMeSettingsHandler(Deps{DB: db}, rec, toolModeTestRequest(t, http.MethodPatch, "/api/me/settings", `{"tool_mode_default":"official","official_tool_names_default":["web_search","image_generation","web_search"]}`, user))
+	updateMeSettingsHandler(Deps{DB: db}, rec, toolModeTestRequest(t, http.MethodPatch, "/api/me/settings", `{"tool_mode_default":"disabled","disable_tools_default":true,"persona_nickname":"kept"}`, user))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("valid status = %d, body=%s", rec.Code, rec.Body.String())
 	}
@@ -61,82 +61,30 @@ func TestUpdateMeSettingsValidatesToolModeDefault(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &settings); err != nil {
 		t.Fatalf("decode settings: %v", err)
 	}
-	if settings["tool_mode_default"] != "enabled" {
-		t.Fatalf("saved default = %#v, want legacy official normalized to enabled", settings["tool_mode_default"])
+	if settings["persona_nickname"] != "kept" {
+		t.Fatalf("allowed setting was not saved: %#v", settings)
 	}
-	if settings["disable_tools_default"] != false {
-		t.Fatalf("legacy default = %#v, want false for enabled fallback", settings["disable_tools_default"])
+	if _, exists := settings["tool_mode_default"]; exists {
+		t.Fatalf("user global tool mode was persisted: %#v", settings)
 	}
-	if _, exists := settings["official_tool_names_default"]; exists {
-		t.Fatalf("retired user tool selection was persisted: %#v", settings["official_tool_names_default"])
-	}
-
-	for _, body := range []string{
-		`{"tool_mode_default":"sometimes"}`,
-		`{"tool_mode_default":true}`,
-	} {
-		t.Run(body, func(t *testing.T) {
-			rec := httptest.NewRecorder()
-			updateMeSettingsHandler(Deps{DB: db}, rec, toolModeTestRequest(t, http.MethodPatch, "/api/me/settings", body, user))
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
-			}
-		})
+	if _, exists := settings["disable_tools_default"]; exists {
+		t.Fatalf("legacy user global tool mode was persisted: %#v", settings)
 	}
 }
 
-func TestNormalizeToolModeSettingsPatchKeepsLegacyClientsCoherent(t *testing.T) {
-	cases := []struct {
-		name       string
-		patch      map[string]any
-		wantMode   string
-		wantLegacy bool
-		wantErr    bool
-	}{
-		{name: "new auto", patch: map[string]any{"tool_mode_default": "auto"}, wantMode: "auto", wantLegacy: false},
-		{name: "new disabled", patch: map[string]any{"tool_mode_default": "disabled"}, wantMode: "disabled", wantLegacy: true},
-		{name: "new enabled", patch: map[string]any{"tool_mode_default": "enabled"}, wantMode: "enabled", wantLegacy: false},
-		{name: "legacy official normalizes", patch: map[string]any{"tool_mode_default": "official"}, wantMode: "enabled", wantLegacy: false},
-		{name: "new wins over contradictory legacy", patch: map[string]any{"tool_mode_default": "auto", "disable_tools_default": true}, wantMode: "auto", wantLegacy: false},
-		{name: "legacy true promotes", patch: map[string]any{"disable_tools_default": true}, wantMode: "disabled", wantLegacy: true},
-		{name: "legacy false promotes", patch: map[string]any{"disable_tools_default": false}, wantMode: "enabled", wantLegacy: false},
-		{name: "legacy invalid", patch: map[string]any{"disable_tools_default": "yes"}, wantErr: true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			err := normalizeToolModeSettingsPatch(tc.patch)
-			if (err != nil) != tc.wantErr {
-				t.Fatalf("error = %v, wantErr %v", err, tc.wantErr)
-			}
-			if tc.wantErr {
-				return
-			}
-			if tc.patch["tool_mode_default"] != tc.wantMode || tc.patch["disable_tools_default"] != tc.wantLegacy {
-				t.Fatalf("normalized patch = %#v, want mode=%q legacy=%v", tc.patch, tc.wantMode, tc.wantLegacy)
-			}
-		})
-	}
-}
-
-func TestEffectiveDefaultToolModePrefersUserThenDeployment(t *testing.T) {
+func TestEffectiveDefaultToolModeUsesDeploymentOnly(t *testing.T) {
 	db := openMigrated(t, filepath.Join(t.TempDir(), "tool-mode-default.db"))
 	defer db.Close()
 	store.InvalidateConfig()
 	t.Cleanup(store.InvalidateConfig)
 
-	if got := effectiveDefaultToolMode(db, nil); got != llm.ToolModeAuto {
+	if got := effectiveDefaultToolMode(db); got != llm.ToolModeAuto {
 		t.Fatalf("missing deployment default = %q, want auto", got)
 	}
 	if err := store.SetSetting(db, "tool_mode_default", llm.ToolModeDisabled); err != nil {
 		t.Fatal(err)
 	}
-	if got := effectiveDefaultToolMode(db, json.RawMessage(`{}`)); got != llm.ToolModeDisabled {
+	if got := effectiveDefaultToolMode(db); got != llm.ToolModeDisabled {
 		t.Fatalf("deployment default = %q, want disabled", got)
-	}
-	if got := effectiveDefaultToolMode(db, json.RawMessage(`{"tool_mode_default":"enabled"}`)); got != llm.ToolModeEnabled {
-		t.Fatalf("user default = %q, want enabled", got)
-	}
-	if got := effectiveDefaultToolMode(db, json.RawMessage(`{"disable_tools_default":false}`)); got != llm.ToolModeEnabled {
-		t.Fatalf("legacy user default = %q, want enabled", got)
 	}
 }

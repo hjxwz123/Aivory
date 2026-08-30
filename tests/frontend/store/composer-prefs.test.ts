@@ -20,9 +20,9 @@ function resetPrefs() {
     mode: 'default',
     verify: false,
     optimizeImagePrompt: true,
-    toolMode: 'auto',
-    forceWebSearch: false,
     defaultToolMode: 'auto',
+    toolModesByScope: {},
+    forceWebSearchByScope: {},
     selectedToolIdsByModel: {},
     paramValuesByModel: {},
     draftsByScope: {},
@@ -38,7 +38,6 @@ describe('composer tool mode', () => {
 
   it('starts from the new automatic default', () => {
     const prefs = useComposerPrefs.getState()
-    expect(prefs.toolMode).toBe('auto')
     expect(prefs.defaultToolMode).toBe('auto')
     expect(resolveArmedTurnFlags()).toMatchObject({ toolMode: 'auto' })
   })
@@ -56,23 +55,19 @@ describe('composer tool mode', () => {
 
   it('forces Deep Research to enabled and clears forced search', () => {
     const prefs = useComposerPrefs.getState()
-    prefs.setToolMode('disabled')
-    useComposerPrefs.getState().setForceWebSearch(true)
+    prefs.setToolMode('test', 'disabled')
+    useComposerPrefs.getState().setForceWebSearch('test', true)
     useComposerPrefs.getState().setMode('deep-research')
 
-    expect(useComposerPrefs.getState()).toMatchObject({
-      mode: 'deep-research',
-      toolMode: 'enabled',
-      forceWebSearch: false,
-    })
-    expect(resolveArmedTurnFlags()).toMatchObject({ mode: 'deep-research', toolMode: 'enabled' })
+    expect(useComposerPrefs.getState()).toMatchObject({ mode: 'deep-research', defaultToolMode: 'auto' })
+    expect(resolveArmedTurnFlags(undefined, 'test')).toMatchObject({ mode: 'deep-research', toolMode: 'enabled' })
   })
 
   it('clears forced search when a new/default disabled policy is applied', () => {
-    useComposerPrefs.setState({ toolMode: 'disabled', forceWebSearch: true })
-    useComposerPrefs.getState().setToolMode('disabled')
+    useComposerPrefs.setState({ toolModesByScope: { test: 'disabled' }, forceWebSearchByScope: { test: true } })
+    useComposerPrefs.getState().setToolMode('test', 'disabled')
 
-    expect(useComposerPrefs.getState().forceWebSearch).toBe(false)
+    expect(useComposerPrefs.getState().forceWebSearchByScope).toEqual({ test: true })
   })
 
   it('resets every new-chat entry to the complete account default and drops per-model tool overrides', () => {
@@ -81,8 +76,8 @@ describe('composer tool mode', () => {
     vi.stubGlobal('localStorage', { setItem })
     useComposerPrefs.setState({
       defaultToolMode: 'enabled',
-      toolMode: 'disabled',
-      forceWebSearch: true,
+      toolModesByScope: { 'new-chat': 'disabled' },
+      forceWebSearchByScope: { 'new-chat': true },
       selectedToolIdsByModel: {
         model_1: ['builtin:aivory_web_search'],
         model_2: [],
@@ -91,23 +86,46 @@ describe('composer tool mode', () => {
 
     resetComposerForNewConversation()
 
-    expect(useComposerPrefs.getState()).toMatchObject({ toolMode: 'enabled', forceWebSearch: false })
+    expect(useComposerPrefs.getState()).toMatchObject({ defaultToolMode: 'enabled', toolModesByScope: {}, forceWebSearchByScope: {} })
     expect(useComposerPrefs.getState().selectedToolIdsByModel).toEqual({})
     const [, persisted] = setItem.mock.lastCall ?? []
     expect(JSON.parse(String(persisted)).selectedToolIdsByModel).toEqual({})
   })
 
   it('allows forced search only while tools are disabled', () => {
-    useComposerPrefs.getState().setForceWebSearch(true)
-    expect(useComposerPrefs.getState().forceWebSearch).toBe(false)
+    useComposerPrefs.getState().setForceWebSearch('test', true)
+    expect(useComposerPrefs.getState().forceWebSearchByScope).toEqual({})
 
-    useComposerPrefs.getState().setToolMode('disabled')
-    useComposerPrefs.getState().setForceWebSearch(true)
-    expect(resolveArmedTurnFlags()).toMatchObject({ toolMode: 'disabled', webSearch: true })
+    useComposerPrefs.getState().setToolMode('test', 'disabled')
+    useComposerPrefs.getState().setForceWebSearch('test', true)
+    expect(resolveArmedTurnFlags(undefined, 'test')).toMatchObject({ toolMode: 'disabled', webSearch: true })
 
-    useComposerPrefs.getState().setToolMode('enabled')
-    expect(useComposerPrefs.getState().forceWebSearch).toBe(false)
-    expect(resolveArmedTurnFlags().webSearch).toBeUndefined()
+    useComposerPrefs.getState().setToolMode('test', 'enabled')
+    expect(useComposerPrefs.getState().forceWebSearchByScope).toEqual({})
+    expect(resolveArmedTurnFlags(undefined, 'test').webSearch).toBeUndefined()
+  })
+
+  it('keeps tool mode overrides isolated per conversation and inherits the admin default', () => {
+    useComposerPrefs.getState().setDefaultToolMode('disabled')
+    useComposerPrefs.getState().setToolMode('conversation-a', 'enabled')
+
+    expect(resolveArmedTurnFlags(undefined, 'conversation-a').toolMode).toBe('enabled')
+    expect(resolveArmedTurnFlags(undefined, 'conversation-b').toolMode).toBe('disabled')
+
+    useComposerPrefs.getState().clearToolMode('conversation-a')
+    expect(resolveArmedTurnFlags(undefined, 'conversation-a').toolMode).toBe('disabled')
+  })
+
+  it('moves a scoped override when an optimistic conversation receives its real id', () => {
+    useComposerPrefs.getState().setToolMode('new-chat', 'disabled')
+    useComposerPrefs.getState().setForceWebSearch('new-chat', true)
+    useComposerPrefs.getState().moveToolModeScope('new-chat', 'conversation-real')
+
+    expect(resolveArmedTurnFlags(undefined, 'conversation-real')).toMatchObject({
+      toolMode: 'disabled',
+      webSearch: true,
+    })
+    expect(resolveArmedTurnFlags(undefined, 'new-chat').toolMode).toBe('auto')
   })
 
   it('does not persist a user-owned hosted-tool selection', () => {
@@ -115,7 +133,7 @@ describe('composer tool mode', () => {
     vi.stubGlobal('window', {})
     vi.stubGlobal('localStorage', { setItem })
 
-    useComposerPrefs.getState().setToolMode('enabled')
+    useComposerPrefs.getState().setToolMode('test', 'enabled')
 
     expect(useComposerPrefs.getState()).not.toHaveProperty('officialToolNamesByModel')
     expect(setItem).toHaveBeenLastCalledWith('aivory.composer-prefs.v1', expect.not.stringContaining('officialToolNamesByModel'))
@@ -183,28 +201,16 @@ describe('model tool capability', () => {
 })
 
 describe('tool mode migration', () => {
-  it('prefers every valid new account setting over a contradictory legacy value', () => {
-    expect(resolveDefaultToolMode({ tool_mode_default: 'auto', disable_tools_default: true })).toBe('auto')
-    expect(resolveDefaultToolMode({ tool_mode_default: 'disabled', disable_tools_default: false })).toBe('disabled')
-    expect(resolveDefaultToolMode({ tool_mode_default: 'enabled', disable_tools_default: true })).toBe('enabled')
-    expect(resolveDefaultToolMode({ tool_mode_default: 'official', disable_tools_default: true })).toBe('enabled')
+  it('accepts only the administrator-provided deployment default', () => {
+    expect(resolveDefaultToolMode('auto')).toBe('auto')
+    expect(resolveDefaultToolMode('disabled')).toBe('disabled')
+    expect(resolveDefaultToolMode('enabled')).toBe('enabled')
   })
 
-  it('preserves explicit legacy account choices', () => {
-    expect(resolveDefaultToolMode({ disable_tools_default: true })).toBe('disabled')
-    expect(resolveDefaultToolMode({ disable_tools_default: false })).toBe('enabled')
-  })
-
-  it('uses automatic mode for missing or invalid account settings', () => {
+  it('uses automatic mode for missing or invalid administrator settings', () => {
     expect(resolveDefaultToolMode(undefined)).toBe('auto')
     expect(resolveDefaultToolMode({})).toBe('auto')
-    expect(resolveDefaultToolMode({ tool_mode_default: 'sometimes' })).toBe('auto')
-  })
-
-  it('uses the administrator fallback only when the account has no explicit choice', () => {
-    expect(resolveDefaultToolMode({}, 'disabled')).toBe('disabled')
-    expect(resolveDefaultToolMode({ tool_mode_default: 'enabled' }, 'disabled')).toBe('enabled')
-    expect(resolveDefaultToolMode({ disable_tools_default: false }, 'disabled')).toBe('enabled')
+    expect(resolveDefaultToolMode('sometimes')).toBe('auto')
   })
 
   it('migrates old local booleans to auto without losing drafts or model params', () => {
@@ -221,9 +227,9 @@ describe('tool mode migration', () => {
     expect(migrated).toMatchObject({
       mode: 'default',
       verify: true,
-      toolMode: 'auto',
       defaultToolMode: 'auto',
-      forceWebSearch: false,
+      toolModesByScope: {},
+      forceWebSearchByScope: {},
       paramValuesByModel: { model_1: { temperature: 0.4, thinking: true } },
       draftsByScope: { 'new-chat': 'unfinished question' },
     })
