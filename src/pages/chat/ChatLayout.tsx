@@ -6,6 +6,7 @@ import { Sidebar } from '@/components/sidebar/sidebar'
 import { HtmlPreviewPanel } from '@/components/chat/html-preview-panel'
 import { InlineThreadPanel } from '@/components/chat/inline-thread-panel'
 import { ConversationFilesPanel } from '@/components/chat/conversation-files-panel'
+import { QueuedTurnDispatcher } from '@/components/chat/queued-turn-dispatcher'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useSettings } from '@/store/settings'
 import { useUI } from '@/store/ui'
@@ -81,6 +82,7 @@ export default function ChatLayout() {
         'pl-[var(--safe-left)] pr-[var(--safe-right)]',
       )}
     >
+      <QueuedTurnDispatcher />
       <div className="flex flex-1 min-h-0 w-full">
       {isDesktop ? (
         <Sidebar variant="desktop" />

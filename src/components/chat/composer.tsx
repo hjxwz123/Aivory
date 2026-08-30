@@ -40,6 +40,9 @@ import {
   PackageOpen,
   Sparkles,
   Ban,
+  Clock3,
+  ListPlus,
+  Undo2,
 } from 'lucide-react'
 import type { Attachment } from '@/types/chat'
 import {
@@ -62,6 +65,7 @@ import { useMediaQuery } from '@/hooks/use-media-query'
 import { useModels } from '@/store/models'
 import { useAuth } from '@/store/auth'
 import { useComposerPrefs } from '@/store/composer-prefs'
+import { useQueuedTurns } from '@/store/queued-turns'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api, apiUpload, ApiError } from '@/api/client'
 import { blockReload } from '@/lib/sync-guards'
@@ -202,6 +206,10 @@ function markFileCommitted(id: string) {
     const oldest = committedFileIds.values().next().value
     if (oldest !== undefined) committedFileIds.delete(oldest)
   }
+}
+
+function unmarkFileCommitted(id: string) {
+  committedFileIds.delete(id)
 }
 
 // Speech-to-text capability is shared across composer instances. Besides the
@@ -706,6 +714,11 @@ export function Composer({
   const setCachedParamValues = useComposerPrefs((s) => s.setParamValues)
   const cachedDraft = useComposerPrefs((s) => (draftScope ? s.draftsByScope[draftScope] : undefined))
   const setCachedDraft = useComposerPrefs((s) => s.setDraft)
+  const queuedTurn = useQueuedTurns((s) =>
+    conversationId ? s.turnsByConversation[conversationId] : undefined,
+  )
+  const enqueueTurn = useQueuedTurns((s) => s.enqueue)
+  const withdrawTurn = useQueuedTurns((s) => s.withdraw)
   const paramValues = cachedParamValues ?? EMPTY_PARAM_VALUES
   const [value, setValue] = useState(() => (draftScope ? cachedDraft ?? initialValue : initialValue))
   const valueRef = useRef(value)
@@ -1157,6 +1170,7 @@ export function Composer({
     value.trim().length > 0 ||
     attachments.length > 0 ||
     selectedSkills.length > 0 ||
+    Boolean(queuedTurn) ||
     (kbIds ?? []).some((id) => id && id !== projectKBId) ||
     recording ||
     transcribing ||
@@ -1490,17 +1504,52 @@ export function Composer({
     )
   }, [hasUnsupportedImageAttachment, t])
   const voiceActive = recording || streamConnecting || transcribing || voiceStarting
-  const canSubmit =
+  const draftReady =
     hasSendableMessageContent(value, attachments, isImageMode) &&
     (canUploadFiles || attachments.length === 0) &&
     !voiceActive &&
-    !streaming &&
     !uploading &&
     !restoringAttachments &&
     !documentNotReady &&
     !imagePermissionDenied &&
     !selectedModelUnavailable &&
     !executingCurrentCommand
+  const canSubmit = draftReady && !streaming && !queuedTurn
+  const canQueue =
+    draftReady &&
+    Boolean(streaming && conversationId && !queuedTurn) &&
+    !(value.trim() === '/compact' && attachments.length === 0)
+
+  function currentTurnOptions() {
+    const params = effectiveFast ? {} : filterVisibleParams(visibleParamControls, paramValues)
+    return {
+      mode: effectiveMode === 'default' ? undefined : effectiveMode,
+      params: Object.keys(params).length > 0 ? params : undefined,
+      imageStyleId: isImageMode && imageStyleId ? imageStyleId : undefined,
+      optimizeImagePrompt: isImageMode ? optimizeImagePrompt : undefined,
+      verify: effectiveVerify ? true : undefined,
+      toolMode: effectiveToolMode,
+      webSearch: effectiveWebSearch ? true : undefined,
+      selectedUserSkillIds: selectedUserSkillIdsForRequest(selectedSkills),
+      selectedToolIds,
+      fast: effectiveFast ? true : undefined,
+    }
+  }
+
+  function clearCommittedDraft(committed: PendingAttachment[]) {
+    updateValue('')
+    // Queued attachments are reserved for the future turn just like immediately
+    // sent files: a late draft restore must not add them back into the composer.
+    pollTimers.current.forEach((timer) => clearTimeout(timer))
+    pollTimers.current.clear()
+    committed.forEach((attachment) => {
+      committedAttachmentIds.current.add(attachment.id)
+      markFileCommitted(attachment.id)
+      if (attachment.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(attachment.previewUrl)
+    })
+    setAttachments([])
+    setSelectedSkills([])
+  }
 
   async function handleSubmit() {
     if (submittingRef.current) return
@@ -1515,7 +1564,7 @@ export function Composer({
       await runCompactCommand()
       return
     }
-    if (voiceActive || streaming || uploading || restoringAttachments || documentNotReady || executingCurrentCommand) return
+    if (voiceActive || uploading || restoringAttachments || documentNotReady || executingCurrentCommand) return
     if (imagePermissionDenied) {
       toast.error(
         t('messages.error.drawingPermission', {
@@ -1566,44 +1615,80 @@ export function Composer({
       }
       return
     }
+    if (streaming) {
+      if (!conversationId || queuedTurn) return
+      const options = currentTurnOptions()
+      const queued = enqueueTurn({
+        conversationId,
+        text,
+        modelId,
+        attachments,
+        ...options,
+      })
+      if (queued) clearCommittedDraft(attachments)
+      return
+    }
+    // A queued turn may be waiting for a stopped branch to finish its bounded
+    // path reconciliation. Keep later drafts behind it until onStarted proves
+    // the queued follow-up is now the active generation.
+    if (queuedTurn) return
     submittingRef.current = true
     try {
       // Uploads happen on attach now (so parsing starts immediately and the send is
       // gated until 'ready'); by here every attachment is already a real backend id.
-      const params = effectiveFast ? {} : filterVisibleParams(visibleParamControls, paramValues)
       // Keep image attachments in the persisted turn even for text-only models.
       // The server strips them only from provider-native input; retaining the
       // file id is what lets sandbox tools access the original bytes and lets a
       // refreshed conversation restore the branch faithfully.
-      onSubmit(text, attachments, {
-        mode: effectiveMode === 'default' ? undefined : effectiveMode,
-        params: Object.keys(params).length > 0 ? params : undefined,
-        imageStyleId: isImageMode && imageStyleId ? imageStyleId : undefined,
-        optimizeImagePrompt: isImageMode ? optimizeImagePrompt : undefined,
-        verify: effectiveVerify ? true : undefined,
-        toolMode: effectiveToolMode,
-        webSearch: effectiveWebSearch ? true : undefined,
-        selectedUserSkillIds: selectedUserSkillIdsForRequest(selectedSkills),
-        selectedToolIds,
-        fast: effectiveFast ? true : undefined,
-      })
-      updateValue('')
-      // Stop any leftover pollers and revoke blob: URLs — uploadAttachment already
-      // swapped its own. Persistent /api/files/… URLs stay so the bubble can render.
-      pollTimers.current.forEach((tm) => clearTimeout(tm))
-      pollTimers.current.clear()
-      attachments.forEach((a) => {
-        committedAttachmentIds.current.add(a.id)
-        // Also record at module scope so the freshly-mounted thread composer
-        // (first send from home) filters this id out of its draft-file restore.
-        markFileCommitted(a.id)
-        if (a.previewUrl && a.previewUrl.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl)
-      })
-      setAttachments([])
-      setSelectedSkills([])
+      onSubmit(text, attachments, currentTurnOptions())
+      clearCommittedDraft(attachments)
     } finally {
       submittingRef.current = false
     }
+  }
+
+  function withdrawQueuedMessage() {
+    if (!conversationId) return
+    const withdrawn = withdrawTurn(conversationId)
+    if (!withdrawn) return
+
+    // Do not destroy a newer draft the user started after queueing. The recalled
+    // message returns first, followed by the newer text, so both remain editable.
+    const currentText = valueRef.current
+    const restoredText = withdrawn.text.trim()
+      ? currentText.trim()
+        ? `${withdrawn.text}\n\n${currentText}`
+        : withdrawn.text
+      : currentText
+    updateValue(restoredText)
+
+    for (const attachment of withdrawn.attachments) {
+      committedAttachmentIds.current.delete(attachment.id)
+      unmarkFileCommitted(attachment.id)
+    }
+    setAttachments((current) => {
+      const present = new Set(current.map((attachment) => attachment.id))
+      const restored: PendingAttachment[] = withdrawn.attachments
+        .filter((attachment) => !present.has(attachment.id))
+        .map((attachment) => ({
+          ...attachment,
+          uploadScopeId: conversationId,
+          ingest: attachment.documentId ? 'ready' : undefined,
+        }))
+      return [...restored, ...current]
+    })
+
+    const recalledSkillIds = new Set(withdrawn.selectedUserSkillIds ?? [])
+    if (recalledSkillIds.size > 0) {
+      setSelectedSkills((current) => {
+        const present = new Set(current.map((skill) => skill.id))
+        return [
+          ...librarySkills.filter((skill) => recalledSkillIds.has(skill.id) && !present.has(skill.id)),
+          ...current,
+        ]
+      })
+    }
+    requestAnimationFrame(() => ref.current?.focus('end'))
   }
 
   // Upload one held file into the given conversation scope (rag=1 for doc-like
@@ -2682,8 +2767,25 @@ export function Composer({
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
   )
   const primaryActionSurface = 'inline-flex size-8 items-center justify-center rounded-full'
+  const queuedSummary = queuedTurn
+    ? queuedTurn.text.trim() || queuedTurn.attachments.map((attachment) => attachment.name).join(', ')
+    : ''
 
-  const primaryAction = streaming ? (
+  const primaryAction = canQueue ? (
+    <Tooltip content={t('composer.queue')}>
+      <button
+        type="button"
+        onClick={() => void handleSubmit()}
+        aria-label={t('composer.queue')}
+        data-composer-action="queue"
+        className={cn(primaryActionHitArea, 'hover:opacity-90')}
+      >
+        <span className={cn(primaryActionSurface, 'bg-[var(--color-fg)] text-[var(--color-fg-inverted)]')}>
+          <ListPlus size={15} aria-hidden />
+        </span>
+      </button>
+    </Tooltip>
+  ) : streaming ? (
     <Tooltip content={t('composer.stop')}>
       <button
         type="button"
@@ -2694,6 +2796,29 @@ export function Composer({
       >
         <span className={cn(primaryActionSurface, 'bg-[var(--color-fg)] text-[var(--color-fg-inverted)]')}>
           <StopCircle size={15} aria-hidden />
+        </span>
+      </button>
+    </Tooltip>
+  ) : queuedTurn ? (
+    <Tooltip
+      content={queuedTurn.status === 'dispatching' ? t('composer.queuedSending') : t('composer.queued')}
+    >
+      <button
+        type="button"
+        disabled
+        aria-label={queuedTurn.status === 'dispatching' ? t('composer.queuedSending') : t('composer.queued')}
+        data-composer-action="queue-pending"
+        className={cn(
+          primaryActionHitArea,
+          queuedTurn.status === 'dispatching' ? 'cursor-wait' : 'cursor-default',
+        )}
+      >
+        <span className={cn(primaryActionSurface, 'bg-[var(--color-bg-muted)] text-[var(--color-fg-subtle)]')}>
+          {queuedTurn.status === 'dispatching' ? (
+            <Loader2 size={15} className="animate-spin motion-reduce:animate-none" aria-hidden />
+          ) : (
+            <Clock3 size={15} aria-hidden />
+          )}
         </span>
       </button>
     </Tooltip>
@@ -2992,6 +3117,46 @@ export function Composer({
             document.body,
           )
         : null}
+
+      {queuedTurn ? (
+        <div
+          className="mx-3 mt-2 flex min-h-10 min-w-0 items-center gap-2 border-b border-[var(--color-divider)] px-0.5 text-sm"
+        >
+          <Clock3 size={14} className="shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
+          <span
+            role="status"
+            aria-live="polite"
+            className="flex min-w-0 flex-1 items-center gap-2"
+          >
+            <span className="shrink-0 text-xs font-medium text-[var(--color-fg-muted)]">
+              {queuedTurn.status === 'dispatching'
+                ? t('composer.queuedSending')
+                : t('composer.queued')}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-[var(--color-fg)]" title={queuedSummary}>
+              {queuedSummary}
+            </span>
+          </span>
+          <Tooltip content={t('composer.withdrawQueued')}>
+            <button
+              type="button"
+              onClick={withdrawQueuedMessage}
+              disabled={queuedTurn.status === 'dispatching'}
+              aria-label={t('composer.withdrawQueued')}
+              className={cn(
+                'inline-flex size-8 shrink-0 items-center justify-center rounded-full text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:size-10',
+                queuedTurn.status === 'dispatching' && 'cursor-wait opacity-55',
+              )}
+            >
+              {queuedTurn.status === 'dispatching' ? (
+                <Loader2 size={14} className="animate-spin motion-reduce:animate-none" aria-hidden />
+              ) : (
+                <Undo2 size={14} aria-hidden />
+              )}
+            </button>
+          </Tooltip>
+        </div>
+      ) : null}
 
       {/* Attachments preview. The armed-mode (research) state is shown by the
           toolbar button below, so we don't repeat a chip above the input.

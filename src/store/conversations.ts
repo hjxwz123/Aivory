@@ -373,6 +373,9 @@ interface ConversationStore {
     /** Fires with the real conversation id once `createFirst` has created it, so
      *  the caller can swap the temp id in the URL (navigate replace). */
     onConversationId?: (realId: string) => void
+    /** Internal lifecycle hook for queued turns. Fires only after the
+     * optimistic user and assistant rows have been added to the conversation. */
+    onStarted?: () => void
   }) => Promise<void>
   /** Insert an OPTIMISTIC (client-only, temp id) conversation so the home page
    *  can navigate to its thread instantly; the real one is created on send via
@@ -1517,6 +1520,13 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         }
       }),
     }))
+    // A queued turn remains withdrawable while a stopped path is reconciling.
+    // Consume it only after this optimistic update makes the new send visible.
+    try {
+      input.onStarted?.()
+    } catch {
+      /* lifecycle observers must never interrupt message delivery */
+    }
     // Home "instant send": the seed above ran against an OPTIMISTIC conversation
     // (temp id) so the thread could render immediately. Now create the REAL
     // conversation server-side, re-key the cache to its id, and point the rest of
