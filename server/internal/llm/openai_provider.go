@@ -726,86 +726,119 @@ func responseOutputHasFunctionCalls(items []map[string]any) bool {
 }
 
 // responsesEasyInputMessage is the channel-neutral representation for prior
-// user/assistant text. In particular, assistant output_text belongs to the
-// stricter ResponseOutputMessage schema (id/status/type are required); rebuilt
-// history must use input_text instead so model/channel switches do not create a
-// partially populated output item.
+// user/assistant text. String content selects the EasyInputMessage schema
+// without pretending rebuilt history is a complete ResponseOutputMessage or
+// relying on the ambiguous assistant content-array discriminator used by
+// Responses-compatible gateways.
 func responsesEasyInputMessage(role, text string) map[string]any {
 	return map[string]any{
 		"role":    role,
-		"content": []map[string]any{{"type": "input_text", "text": text}},
+		"content": text,
 	}
 }
 
-// normalizeResponsesReplayItems makes terminal output items safe to send back
-// through a stateless Responses request. Official output messages are converted
-// to EasyInputMessage because their ids and output-only metadata are unnecessary
-// for text history and are not portable across compatible gateways. Tool-call
-// items stay native for call/output pairing; relays that omit their optional or
-// required terminal status are repaired after the item is already done.
-func normalizeResponsesReplayItems(items []map[string]any) []map[string]any {
+// prepareResponsesReplayItems preserves complete response.output messages for
+// stateless tool continuation. Legacy assistant messages that cannot form a
+// valid ResponseOutputMessage degrade to portable string-content history.
+// Terminal calls from compatible gateways get a missing status repaired without
+// mutating the captured provider response.
+func prepareResponsesReplayItems(items []map[string]any) []map[string]any {
 	if len(items) == 0 {
 		return items
 	}
-	normalized := make([]map[string]any, 0, len(items))
+	prepared := make([]map[string]any, 0, len(items))
 	for _, item := range items {
-		if easy, ok := responsesOutputMessageAsEasyInput(item); ok {
-			normalized = append(normalized, easy)
+		if responsesOutputMessageReplayable(item) {
+			prepared = append(prepared, responsesCompletedReplayItem(item))
 			continue
 		}
-		itemType, _ := item["type"].(string)
-		if strings.HasSuffix(itemType, "_call") {
-			if status, _ := item["status"].(string); strings.TrimSpace(status) == "" {
-				clone := make(map[string]any, len(item)+1)
-				for key, value := range item {
-					clone[key] = value
-				}
-				clone["status"] = "completed"
-				item = clone
-			}
+		if easy, ok := responsesAssistantMessageAsEasyInput(item); ok {
+			prepared = append(prepared, easy)
+			continue
 		}
-		normalized = append(normalized, item)
+		prepared = append(prepared, responsesCompletedReplayItem(item))
 	}
-	return normalized
+	return prepared
 }
 
-func responsesOutputMessageAsEasyInput(item map[string]any) (map[string]any, bool) {
+func responsesCompletedReplayItem(item map[string]any) map[string]any {
+	itemType, _ := item["type"].(string)
+	if !strings.HasSuffix(itemType, "_call") {
+		return item
+	}
+	if status, _ := item["status"].(string); strings.TrimSpace(status) != "" {
+		return item
+	}
+	clone := make(map[string]any, len(item)+1)
+	for key, value := range item {
+		clone[key] = value
+	}
+	clone["status"] = "completed"
+	return clone
+}
+
+func responsesOutputMessageReplayable(item map[string]any) bool {
 	itemType, _ := item["type"].(string)
 	role, _ := item["role"].(string)
 	if itemType != "message" || role != "assistant" {
-		return nil, false
+		return false
+	}
+	if id, _ := item["id"].(string); strings.TrimSpace(id) == "" {
+		return false
+	}
+	if status, _ := item["status"].(string); strings.TrimSpace(status) == "" {
+		return false
 	}
 	content, ok := jsonArrayItems(item["content"])
-	if !ok {
-		if text, isText := item["content"].(string); isText && text != "" {
-			return responsesEasyInputMessage(role, text), true
-		}
-		return nil, false
+	if !ok || len(content) == 0 {
+		return false
 	}
-	parts := make([]map[string]any, 0, len(content))
 	for _, rawPart := range content {
 		part, _ := rawPart.(map[string]any)
 		if part == nil {
-			continue
+			return false
 		}
 		partType, _ := part["type"].(string)
-		var text string
-		switch partType {
-		case "output_text", "input_text":
-			text, _ = part["text"].(string)
-		case "refusal":
-			text, _ = part["refusal"].(string)
-		default:
-			continue
-		}
-		if text != "" {
-			parts = append(parts, map[string]any{"type": "input_text", "text": text})
+		if partType != "output_text" && partType != "refusal" {
+			return false
 		}
 	}
-	if len(parts) == 0 {
+	return true
+}
+
+func responsesAssistantMessageAsEasyInput(item map[string]any) (map[string]any, bool) {
+	role, _ := item["role"].(string)
+	if role != "assistant" {
 		return nil, false
 	}
-	easy := map[string]any{"role": "assistant", "content": parts}
+	itemType, _ := item["type"].(string)
+	if itemType != "" && itemType != "message" {
+		return nil, false
+	}
+	var text strings.Builder
+	if content, ok := jsonArrayItems(item["content"]); ok {
+		for _, rawPart := range content {
+			part, _ := rawPart.(map[string]any)
+			if part == nil {
+				continue
+			}
+			partType, _ := part["type"].(string)
+			switch partType {
+			case "output_text", "input_text":
+				partText, _ := part["text"].(string)
+				text.WriteString(partText)
+			case "refusal":
+				partText, _ := part["refusal"].(string)
+				text.WriteString(partText)
+			}
+		}
+	} else if value, isText := item["content"].(string); isText {
+		text.WriteString(value)
+	}
+	if text.Len() == 0 {
+		return nil, false
+	}
+	easy := responsesEasyInputMessage(role, text.String())
 	if phase, _ := item["phase"].(string); phase != "" {
 		easy["phase"] = phase
 	}
@@ -1028,44 +1061,41 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		if m.Role == "assistant" && len(m.Raw) > 2 && !isPromptToolRawEnvelope(m.Raw) && !nativeRawContainsImage(m.Raw) {
 			var items []map[string]any
 			if err := json.Unmarshal(m.Raw, &items); err == nil && len(items) > 0 && items[0]["type"] != nil {
-				input = append(input, normalizeResponsesReplayItems(items)...)
+				input = append(input, prepareResponsesReplayItems(items)...)
 				continue
 			}
 		}
 		messageText := renderBlocksAsText(m.Blocks)
-		parts := []map[string]any{}
-		if messageText != "" {
-			// Both user and assistant turns are EasyInputMessage history here.
-			// output_text is reserved for complete ResponseOutputMessage items.
-			parts = append(parts, map[string]any{"type": "input_text", "text": messageText})
-		}
-		if m.Role == "user" && len(pendingGeneratedImages) > 0 {
-			parts = append(parts, pendingGeneratedImages...)
-			pendingGeneratedImages = nil
-		}
-		// Multimodal: pass image blocks through. Document attachments are
-		// intentionally excluded: PDFs/DOCX/PPTX/etc. always enter the model
-		// through the RAG text path, never native provider file blocks.
-		for _, b := range m.Blocks {
-			// input_image is only valid on the user role; rebuilt assistant history is
-			// text-only. Drop images that rode onto a non-user turn.
-			if req.Model.Vision && m.Role == "user" && b.Kind == "image" && b.Data != "" {
-				parts = append(parts, map[string]any{
-					"type":      "input_image",
-					"image_url": "data:" + b.MimeType + ";base64," + b.Data,
+		if m.Role == "assistant" {
+			if messageText != "" {
+				input = append(input, responsesEasyInputMessage("assistant", messageText))
+			}
+		} else {
+			parts := []map[string]any{}
+			if messageText != "" {
+				parts = append(parts, map[string]any{"type": "input_text", "text": messageText})
+			}
+			if len(pendingGeneratedImages) > 0 {
+				parts = append(parts, pendingGeneratedImages...)
+				pendingGeneratedImages = nil
+			}
+			// Multimodal: pass image blocks through. Document attachments are
+			// intentionally excluded: PDFs/DOCX/PPTX/etc. always enter the model
+			// through the RAG text path, never native provider file blocks.
+			for _, b := range m.Blocks {
+				if req.Model.Vision && b.Kind == "image" && b.Data != "" {
+					parts = append(parts, map[string]any{
+						"type":      "input_image",
+						"image_url": "data:" + b.MimeType + ";base64," + b.Data,
+					})
+				}
+			}
+			if len(parts) > 0 {
+				input = append(input, map[string]any{
+					"role":    "user",
+					"content": parts,
 				})
 			}
-		}
-		// A direct image-model turn is persisted as an assistant artifact with no
-		// text. Its binary image belongs on the following user turn as input_image;
-		// emitting an empty assistant text item here is both semantically wrong and is
-		// rejected by some Responses-compatible gateways. Other genuinely empty
-		// messages have already been removed by storeToUnified.
-		if len(parts) > 0 {
-			input = append(input, map[string]any{
-				"role":    m.Role,
-				"content": parts,
-			})
 		}
 		if hostedImageContext && m.Role == "assistant" {
 			for _, b := range m.Blocks {
@@ -1779,7 +1809,7 @@ func finalizeOpenAIResponsesStream(
 			}
 		}
 	}
-	return calls, hosted, normalizeResponsesReplayItems(outputItems)
+	return calls, hosted, prepareResponsesReplayItems(outputItems)
 }
 
 // parseResponsesOutput is retained for callers that need a non-streaming JSON
