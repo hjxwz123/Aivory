@@ -2890,6 +2890,9 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 				GenMs:      time.Since(turnStart).Milliseconds(),
 			}
 		}
+		if p.Status == "error" {
+			p.Blocks = ensureAssistantFailureBlocks(p.Blocks)
+		}
 		// Terminal persistence must outlive the generation signal. A Stop can arrive
 		// after the provider has returned a complete result but just before the DB
 		// update; writing on the canceled turn context would fail and let the fallback

@@ -14,7 +14,7 @@ import (
 
 // UnifiedBlock is the canonical message-block shape stored in DB (§2.3-C).
 type UnifiedBlock struct {
-	Kind string `json:"kind"` // text | thinking | tool_call | tool_output | citation | image | document | artifact | research
+	Kind string `json:"kind"` // text | thinking | tool_call | tool_output | citation | image | document | artifact | research | error
 	Text string `json:"text,omitempty"`
 	// ThinkingMs is the total observable reasoning time for the turn. It is
 	// stored only on the first thinking block so a message with multiple

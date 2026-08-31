@@ -13,16 +13,22 @@ import (
 	"aivory/server/internal/store"
 )
 
-type generationInterruptedProvider struct{}
+type generationInterruptedProvider struct {
+	requests []UnifiedChatRequest
+}
 
 func (*generationInterruptedProvider) ID() string { return "openai" }
 
-func (*generationInterruptedProvider) Stream(
+func (p *generationInterruptedProvider) Stream(
 	_ context.Context,
-	_ UnifiedChatRequest,
+	req UnifiedChatRequest,
 	_ ToolRunner,
 	onEvent func(SseEvent),
 ) (*UnifiedResult, error) {
+	p.requests = append(p.requests, req)
+	if len(req.History) > 0 && renderBlocksAsText(req.History[len(req.History)-1].Blocks) == "fail before first token" {
+		return nil, errors.New("upstream request failed before output")
+	}
 	onEvent(SseEvent{Type: "text_delta", Text: "partial answer"})
 	onEvent(SseEvent{Type: "tool_start", Name: "lookup", ID: "tool_1"})
 	return &UnifiedResult{
@@ -80,7 +86,8 @@ func TestOrchestratorPersistsGenerationInterruptionAndErrorCode(t *testing.T) {
 
 	logger := log.New(io.Discard, "", 0)
 	registry := NewRegistry(logger)
-	registry.Register(&generationInterruptedProvider{})
+	provider := &generationInterruptedProvider{}
+	registry.Register(provider)
 	orchestrator := NewOrchestrator(db, registry, generationInterruptedTools{}, nil, nil, nil, nil, nil, logger)
 	var events []SseEvent
 	_, runErr := orchestrator.Run(ctx, RunRequest{
@@ -146,5 +153,63 @@ func TestOrchestratorPersistsGenerationInterruptionAndErrorCode(t *testing.T) {
 	}
 	if !strings.Contains(string(wire), `"code":"generation_interrupted"`) {
 		t.Fatalf("error event wire JSON = %s", wire)
+	}
+
+	var noOutputEvents []SseEvent
+	_, noOutputErr := orchestrator.Run(ctx, RunRequest{
+		UserID: "u1", ConversationID: conversation.ID, ModelID: model.ID,
+		UserText: "fail before first token", ToolMode: ToolModeDisabled,
+	}, func(event SseEvent) { noOutputEvents = append(noOutputEvents, event) })
+	if noOutputErr == nil || !strings.Contains(noOutputErr.Error(), "failed before output") {
+		t.Fatalf("no-output Run error = %v", noOutputErr)
+	}
+	var noOutputMessageID string
+	for _, event := range noOutputEvents {
+		if event.Type == "error" {
+			noOutputMessageID = event.MessageID
+		}
+	}
+	if noOutputMessageID == "" {
+		t.Fatalf("no-output failure emitted no message-scoped error: %+v", noOutputEvents)
+	}
+	noOutputMessage, err := store.GetMessage(ctx, db, noOutputMessageID)
+	if err != nil {
+		t.Fatalf("load no-output failure: %v", err)
+	}
+	var noOutputBlocks []UnifiedBlock
+	if err := json.Unmarshal(noOutputMessage.Blocks, &noOutputBlocks); err != nil {
+		t.Fatalf("decode no-output blocks: %v", err)
+	}
+	if noOutputMessage.Status != "error" || len(noOutputBlocks) != 1 ||
+		noOutputBlocks[0].Kind != "error" || noOutputBlocks[0].Text != assistantFailureHistoryText {
+		t.Fatalf("persisted no-output failure = status %q blocks %+v", noOutputMessage.Status, noOutputBlocks)
+	}
+
+	_, continueErr := orchestrator.Run(ctx, RunRequest{
+		UserID: "u1", ConversationID: conversation.ID, ModelID: model.ID,
+		UserText: "continue", ToolMode: ToolModeDisabled,
+	}, func(SseEvent) {})
+	if continueErr == nil {
+		t.Fatal("follow-up provider should retain the fixture's partial interruption")
+	}
+	if len(provider.requests) < 3 {
+		t.Fatalf("captured provider requests = %d", len(provider.requests))
+	}
+	followupHistory := provider.requests[len(provider.requests)-1].History
+	failureQuestionIndex := -1
+	for i, message := range followupHistory {
+		if message.Role == "user" && renderBlocksAsText(message.Blocks) == "fail before first token" {
+			failureQuestionIndex = i
+			break
+		}
+	}
+	if failureQuestionIndex < 0 || failureQuestionIndex+2 >= len(followupHistory) {
+		t.Fatalf("follow-up history lost failed round: %+v", followupHistory)
+	}
+	if got := renderBlocksAsText(followupHistory[failureQuestionIndex+1].Blocks); got != assistantFailureHistoryText {
+		t.Fatalf("follow-up history failure marker = %q", got)
+	}
+	if got := renderBlocksAsText(followupHistory[failureQuestionIndex+2].Blocks); got != "continue" {
+		t.Fatalf("follow-up history tail = %q", got)
 	}
 }
