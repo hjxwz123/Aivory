@@ -753,7 +753,11 @@ export const conversationsApi = {
       { method: 'POST', body: input },
     ),
   stop: (id: string, target?: { generation_id?: string; message_id?: string }) =>
-    api<{ ok: true }>(`/conversations/${encodeURIComponent(id)}/stop`, { method: 'POST', body: target }),
+    api<{ ok: true }>(`/conversations/${encodeURIComponent(id)}/stop`, {
+      method: 'POST',
+      body: target,
+      keepalive: true,
+    }),
   setActiveLeaf: (id: string, leaf_id: string) =>
     api<{ conversation: ApiConversation; messages: ApiMessage[] }>(
       `/conversations/${encodeURIComponent(id)}/active-leaf`,

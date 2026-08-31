@@ -119,3 +119,40 @@ func TestLatestAssistantInSubtreeRejectsInvalidStart(t *testing.T) {
 		})
 	}
 }
+
+func TestLatestAssistantInSubtreeFollowsNewestChildAtEachLevel(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "subtree-newest-child.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+	if err := Migrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	exec(t, db, `INSERT INTO users(id,email,password_hash,role) VALUES('u1','a@b.c','h','user')`)
+	exec(t, db, `INSERT INTO conversations(id,user_id,title) VALUES('c1','u1','One')`)
+	create := func(id, parent, role string, createdAt int64) {
+		t.Helper()
+		if _, err := CreateMessage(ctx, db, Message{
+			ID: id, ConversationID: "c1", ParentID: parent, Role: role, CreatedAt: createdAt,
+		}); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+	}
+	create("root", "", "user", 1)
+	create("older-answer", "root", "assistant", 2)
+	create("globally-deep-question", "older-answer", "user", 8)
+	create("globally-deep-answer", "globally-deep-question", "assistant", 9)
+	create("newer-answer", "root", "assistant", 10)
+	create("newer-branch-question", "newer-answer", "user", 11)
+	create("newer-branch-answer", "newer-branch-question", "assistant", 12)
+
+	got, err := LatestAssistantInSubtree(ctx, db, "c1", "root")
+	if err != nil {
+		t.Fatalf("latest subtree: %v", err)
+	}
+	if got != "newer-branch-answer" {
+		t.Fatalf("latest subtree leaf=%q, want newer-branch-answer", got)
+	}
+}

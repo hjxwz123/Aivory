@@ -839,6 +839,35 @@ func messageStopTopic(userID, conversationID, messageID string) string {
 	return "user:" + userID + ":conv:" + conversationID + ":message:" + messageID + ":stop"
 }
 
+func generationMessageKey(userID, conversationID, generationID string) string {
+	return "generation-message:user:" + userID + ":conv:" + conversationID + ":generation:" + generationID
+}
+
+func rememberGenerationMessage(d Deps, userID, conversationID, generationID, messageID string) {
+	if generationID == "" || messageID == "" {
+		return
+	}
+	d.Cache.Set(generationMessageKey(userID, conversationID, generationID), messageID, scopedStopIntentTTL())
+}
+
+func markMessageStopping(d Deps, userID, conversationID, messageID string) {
+	if messageID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	changed, err := store.MarkMessageStoppingForUser(ctx, d.DB, messageID, conversationID, userID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		if d.Logger != nil {
+			d.Logger.Printf("stop: persist stopping state failed (conv=%s msg=%s user=%s): %v", conversationID, messageID, userID, err)
+		}
+		return
+	}
+	if changed {
+		msgcache.Bump(d.Cache, conversationID)
+	}
+}
+
 func scopedStopIntentKey(topic string) string {
 	return "stop-intent:" + topic
 }
@@ -1434,11 +1463,15 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		publishGenerationStart := false
 		if ev.Type == "message_start" && ev.MessageID != "" {
 			streamMessageID = ev.MessageID
+			rememberGenerationMessage(d, u.ID, id, req.GenerationID, streamMessageID)
 			// Install message-scoped cancellation before exposing the persisted id
 			// to the browser. Capture it even after a concurrent revoke canceled the
 			// context, so that revoke can still scrub the just-created placeholder.
 			scopedStop.watchMessage(streamMessageID)
 			scopedStop.activate()
+			if scopedStop.stopRequested.Load() {
+				markMessageStopping(d, u.ID, id, streamMessageID)
+			}
 			accessRevocation.watchMessage(streamMessageID)
 			publishGenerationStart = !generationStartedPublished
 		}
@@ -1937,8 +1970,12 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	sendEvent := func(ev llm.SseEvent) {
 		if ev.Type == "message_start" && ev.MessageID != "" {
 			streamMessageID = ev.MessageID
+			rememberGenerationMessage(d, u.ID, id, body.GenerationID, streamMessageID)
 			scopedStop.watchMessage(streamMessageID)
 			scopedStop.activate()
+			if scopedStop.stopRequested.Load() {
+				markMessageStopping(d, u.ID, id, streamMessageID)
+			}
 			accessRevocation.watchMessage(streamMessageID)
 		}
 		if ctx.Err() != nil && ev.Type != "message_start" && (ev.Type != "done" || ev.StopReason != "stopped") {
