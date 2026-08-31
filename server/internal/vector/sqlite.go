@@ -95,6 +95,10 @@ func (s *SQLite) Search(ctx context.Context, dim int, query []float32, scope Sco
 	}
 	ranked := make([]sqliteRank, 0)
 	for rows.Next() {
+		if err := ctx.Err(); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
 		var id string
 		var raw []byte
 		if err := rows.Scan(&id, &raw); err != nil {
@@ -151,6 +155,10 @@ func (s *SQLite) SearchKeyword(ctx context.Context, dim int, query string, scope
 	}
 	ranked := make([]sqliteRank, 0)
 	for rows.Next() {
+		if err := ctx.Err(); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
 		var id, content string
 		if err := rows.Scan(&id, &content); err != nil {
 			_ = rows.Close()
@@ -287,6 +295,9 @@ func (s *SQLite) ranksToHits(ctx context.Context, ranked []sqliteRank, topK int)
 	if len(ranked) == 0 || topK <= 0 {
 		return nil, nil
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	sort.Slice(ranked, func(i, j int) bool {
 		if ranked[i].score == ranked[j].score {
 			return ranked[i].id < ranked[j].id
@@ -306,6 +317,9 @@ func (s *SQLite) ranksToHits(ctx context.Context, ranked []sqliteRank, topK int)
 	}
 	hits := make([]Hit, 0, len(ranked))
 	for _, rank := range ranked {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if payload, ok := payloads[rank.id]; ok {
 			hits = append(hits, Hit{Score: rank.score, Payload: payload})
 		}

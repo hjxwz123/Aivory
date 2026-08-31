@@ -110,6 +110,33 @@ type Service struct {
 	conversationIngestLocks map[string]*conversationIngestLock
 }
 
+// logRetrievalStage traces the synchronous online-RAG path without exposing a
+// query, filename or document content. Paired started/completed records make the
+// last non-returning dependency visible when a chat never reaches its main
+// provider request.
+func (s *Service) logRetrievalStage(ctx context.Context, convID, stage, status string, started time.Time, details string) {
+	if s == nil || s.logger == nil {
+		return
+	}
+	duration := time.Duration(0)
+	if !started.IsZero() {
+		duration = time.Since(started).Round(time.Millisecond)
+	}
+	stats := s.db.Stats()
+	s.logger.Printf(
+		"rag: retrieval stage (conv=%s msg=%s stage=%s status=%s duration=%s db_open=%d db_in_use=%d db_idle=%d db_wait_count=%d db_wait_ms=%d%s)",
+		convID, billingMessageID(ctx), stage, status, duration,
+		stats.OpenConnections, stats.InUse, stats.Idle, stats.WaitCount, stats.WaitDuration.Milliseconds(), details,
+	)
+}
+
+func retrievalStageErrorKind(err error) string {
+	if err == nil {
+		return ""
+	}
+	return fmt.Sprintf("%T", err)
+}
+
 type conversationIngestLock struct {
 	mu   sync.Mutex
 	refs int
@@ -1204,38 +1231,77 @@ func (s *Service) retrieve(ctx context.Context, userID, convID string, kbIDs []s
 	if strings.TrimSpace(query) == "" {
 		return nil, nil
 	}
+	retrieveStarted := time.Now()
+	s.logRetrievalStage(ctx, convID, "retrieve", "started", time.Time{},
+		fmt.Sprintf(" knowledge_bases=%d restricted_documents=%t document_ids=%d vector_enabled=%t",
+			len(kbIDs), opts.restrictDocuments, len(opts.documentIDs), s.vec.Enabled()))
 	kbIDs = fixedKnowledgeBaseScope(kbIDs)
 	conversationEnabled := convID != "" && (!opts.restrictDocuments || len(opts.documentIDs) > 0)
 	if err := store.ValidateKBEmbeddingCompatibility(ctx, s.db, kbIDs); err != nil {
+		s.logRetrievalStage(ctx, convID, "retrieve", "failed", retrieveStarted,
+			fmt.Sprintf(" phase=validate_scope error_kind=%q", retrievalStageErrorKind(err)))
 		return nil, fmt.Errorf("rag: validate knowledge-base retrieval scope: %w", err)
 	}
 	terms := tokenize(strings.ToLower(query))
 	if topK <= 0 {
 		topK = retrieveDefaultTopK
 	}
+	var (
+		scopeCache  []store.Chunk
+		scopeErr    error
+		scopeLoaded bool
+	)
 	listScope := func() ([]store.Chunk, error) {
-		scope, err := store.ListChunksInScope(ctx, s.db, kbIDs, convID)
-		if err != nil {
-			return nil, err
+		if !scopeLoaded {
+			scopeStarted := time.Now()
+			s.logRetrievalStage(ctx, convID, "retrieve_scope", "started", time.Time{},
+				fmt.Sprintf(" knowledge_bases=%d document_ids=%d", len(kbIDs), len(opts.documentIDs)))
+			scopeLoaded = true
+			scopeCache, scopeErr = store.ListChunksInScope(ctx, s.db, kbIDs, convID)
+			if scopeErr == nil {
+				scopeCache = filterChunksByDocuments(scopeCache, opts.documentIDs, opts.restrictDocuments)
+			}
+			scopeStatus := "completed"
+			if scopeErr != nil {
+				scopeStatus = "failed"
+			}
+			s.logRetrievalStage(ctx, convID, "retrieve_scope", scopeStatus, scopeStarted,
+				fmt.Sprintf(" chunks=%d error_kind=%q", len(scopeCache), retrievalStageErrorKind(scopeErr)))
 		}
-		return filterChunksByDocuments(scope, opts.documentIDs, opts.restrictDocuments), nil
+		return scopeCache, scopeErr
 	}
 	fullContext := func() ([]Snippet, error) {
 		scope, err := listScope()
 		if err != nil {
 			return nil, err
 		}
+		fallbackStarted := time.Now()
+		s.logRetrievalStage(ctx, convID, "relational_fallback", "started", time.Time{},
+			fmt.Sprintf(" chunks=%d", len(scope)))
 		cfg := s.ragSettings()
 		if len(kbIDs) == 0 && scopeContentTokens(scope) > cfg.FullTextThreshold {
-			return boundedConversationFallback(scope, terms, cfg.TopK, cfg.DynamicTopK, cfg.FullTextThreshold), nil
+			out := boundedConversationFallback(scope, terms, cfg.TopK, cfg.DynamicTopK, cfg.FullTextThreshold)
+			s.logRetrievalStage(ctx, convID, "relational_fallback", "completed", fallbackStarted,
+				fmt.Sprintf(" mode=bounded sources=%d", len(out)))
+			return out, nil
 		}
-		return fullTextSnippets(scope), nil
+		out := fullTextSnippets(scope)
+		s.logRetrievalStage(ctx, convID, "relational_fallback", "completed", fallbackStarted,
+			fmt.Sprintf(" mode=full_text sources=%d", len(out)))
+		return out, nil
 	}
 	if !s.vec.Enabled() {
 		if opts.strict {
 			return nil, errVectorBackendUnavailable
 		}
-		return fullContext()
+		out, err := fullContext()
+		status := "completed"
+		if err != nil {
+			status = "failed"
+		}
+		s.logRetrievalStage(ctx, convID, "retrieve", status, retrieveStarted,
+			fmt.Sprintf(" mode=relational sources=%d error_kind=%q", len(out), retrievalStageErrorKind(err)))
+		return out, err
 	}
 
 	// Resolve the embedding model(s) covering the scope and search each model's
@@ -1661,10 +1727,21 @@ func (s *Service) searchScope(ctx context.Context, userID, convID string, em Emb
 	if !s.vec.Enabled() {
 		return nil, errVectorBackendUnavailable
 	}
+	searchStarted := time.Now()
+	s.logRetrievalStage(ctx, convID, "search_scope", "started", time.Time{},
+		fmt.Sprintf(" embedding_model=%s dimension=%d knowledge_bases=%d document_ids=%d",
+			emName, dim, len(scope.KBIDs), len(scope.DocumentIDs)))
+	embedStarted := time.Now()
+	s.logRetrievalStage(ctx, convID, "query_embedding", "started", time.Time{},
+		fmt.Sprintf(" embedding_model=%s dimension=%d", emName, dim))
 	qVec, cached, err := s.embedQueryCached(ctx, em, emName, query)
 	if err != nil {
+		s.logRetrievalStage(ctx, convID, "query_embedding", "failed", embedStarted,
+			fmt.Sprintf(" embedding_model=%s error_kind=%q", emName, retrievalStageErrorKind(err)))
 		return nil, err
 	}
+	s.logRetrievalStage(ctx, convID, "query_embedding", "completed", embedStarted,
+		fmt.Sprintf(" embedding_model=%s vector_dimension=%d cached=%t", emName, len(qVec), cached))
 	// Trust the actual query-vector width over the configured dim (a model that
 	// emits 1024 despite a 1536 config still hits the right collection).
 	if len(qVec) > 0 && len(qVec) != dim {
@@ -1679,24 +1756,54 @@ func (s *Service) searchScope(ctx context.Context, userID, convID string, em Emb
 	}
 	// §4.11-E independent legs: 30 dense ∥ 30 keyword, fused later; the same scope
 	// so a chunk that hits in only one leg survives.
+	liveStarted := time.Now()
+	s.logRetrievalStage(ctx, convID, "live_chunks", "started", time.Time{}, "")
 	live, err := s.liveChildChunks(ctx, scope)
 	if err != nil {
+		s.logRetrievalStage(ctx, convID, "live_chunks", "failed", liveStarted,
+			fmt.Sprintf(" error_kind=%q", retrievalStageErrorKind(err)))
 		return nil, err
 	}
+	s.logRetrievalStage(ctx, convID, "live_chunks", "completed", liveStarted,
+		fmt.Sprintf(" chunks=%d", len(live)))
 	if len(live) == 0 {
+		s.logRetrievalStage(ctx, convID, "search_scope", "completed", searchStarted, " candidates=0 reason=no_live_chunks")
 		return nil, nil
 	}
+	indexStarted := time.Now()
+	s.logRetrievalStage(ctx, convID, "vector_index_check", "started", time.Time{},
+		fmt.Sprintf(" chunks=%d dimension=%d", len(live), dim))
 	if err := s.ensureVectorIndexComplete(ctx, scope, emName, dim, live); err != nil {
+		s.logRetrievalStage(ctx, convID, "vector_index_check", "failed", indexStarted,
+			fmt.Sprintf(" error_kind=%q", retrievalStageErrorKind(err)))
 		return nil, err
 	}
+	s.logRetrievalStage(ctx, convID, "vector_index_check", "completed", indexStarted,
+		fmt.Sprintf(" chunks=%d", len(live)))
+	denseStarted := time.Now()
+	s.logRetrievalStage(ctx, convID, "dense_search", "started", time.Time{},
+		fmt.Sprintf(" limit=%d dimension=%d", denseSearchLegLimit, dim))
 	hits, err := s.vec.Search(ctx, dim, qVec, scope, denseSearchLegLimit)
 	if err != nil {
+		s.logRetrievalStage(ctx, convID, "dense_search", "failed", denseStarted,
+			fmt.Sprintf(" error_kind=%q", retrievalStageErrorKind(err)))
 		if s.logger != nil {
 			s.logger.Printf("rag: vector search failed (%v) — using database fallback", err)
 		}
 		return nil, fmt.Errorf("%w: %v", errVectorBackendUnavailable, err)
 	}
+	s.logRetrievalStage(ctx, convID, "dense_search", "completed", denseStarted,
+		fmt.Sprintf(" hits=%d", len(hits)))
+	keywordStarted := time.Now()
+	s.logRetrievalStage(ctx, convID, "keyword_search", "started", time.Time{},
+		fmt.Sprintf(" limit=%d dimension=%d", keywordSearchLegLimit, dim))
 	kwHits, kwErr := s.vec.SearchKeyword(ctx, dim, query, scope, keywordSearchLegLimit)
+	keywordStatus := "completed"
+	if kwErr != nil {
+		keywordStatus = "failed"
+	}
+	s.logRetrievalStage(ctx, convID, "keyword_search", keywordStatus, keywordStarted,
+		fmt.Sprintf(" hits=%d error_kind=%q", len(kwHits), retrievalStageErrorKind(kwErr)))
 	if kwErr != nil && s.logger != nil {
 		s.logger.Printf("rag: vector keyword search failed (%v) — continuing with dense hits", kwErr)
 	}
@@ -1772,6 +1879,8 @@ func (s *Service) searchScope(ctx context.Context, userID, convID string, em Emb
 	for _, c := range merged {
 		out = append(out, c)
 	}
+	s.logRetrievalStage(ctx, convID, "search_scope", "completed", searchStarted,
+		fmt.Sprintf(" candidates=%d dense_hits=%d keyword_hits=%d", len(out), len(hits), len(kwHits)))
 	return out, nil
 }
 
@@ -2853,6 +2962,10 @@ func (s *Service) RouteAndRetrieveDocumentScope(ctx context.Context, userID, con
 }
 
 func (s *Service) routeAndRetrieve(ctx context.Context, userID, convID string, kbIDs []string, userText string, history []string, topK int, retrieveOpts retrieveOptions) ([]Snippet, RouteDecision, error) {
+	routeStarted := time.Now()
+	s.logRetrievalStage(ctx, convID, "route_and_retrieve", "started", time.Time{},
+		fmt.Sprintf(" knowledge_bases=%d document_ids=%d current_document_ids=%d restricted_documents=%t",
+			len(kbIDs), len(retrieveOpts.documentIDs), len(retrieveOpts.currentDocumentIDs), retrieveOpts.restrictDocuments))
 	kbIDs = fixedKnowledgeBaseScope(kbIDs)
 	hasKnowledgeBase := len(kbIDs) > 0
 	initialQuery := userText
@@ -2870,11 +2983,18 @@ func (s *Service) routeAndRetrieve(ctx context.Context, userID, convID string, k
 	// runPipeline). They are normally injected in full. For a multi-attachment
 	// scope above the shared budget, query-matching evidence takes priority and the
 	// pinned text uses only the remaining budget.
+	routeScopeStarted := time.Now()
+	s.logRetrievalStage(ctx, convID, "route_scope", "started", time.Time{},
+		fmt.Sprintf(" knowledge_bases=%d", len(kbIDs)))
 	scope, scopeErr := store.ListChunksInScope(ctx, s.db, kbIDs, convID)
 	if scopeErr != nil && retrieveOpts.strict {
+		s.logRetrievalStage(ctx, convID, "route_scope", "failed", routeScopeStarted,
+			fmt.Sprintf(" error_kind=%q", retrievalStageErrorKind(scopeErr)))
 		return nil, decision, fmt.Errorf("rag: list retrieval scope: %w", scopeErr)
 	}
 	scope = filterChunksByDocuments(scope, retrieveOpts.documentIDs, retrieveOpts.restrictDocuments)
+	s.logRetrievalStage(ctx, convID, "route_scope", "completed", routeScopeStarted,
+		fmt.Sprintf(" chunks=%d error_kind=%q", len(scope), retrievalStageErrorKind(scopeErr)))
 	pinned := []store.Chunk{}
 	embeddedTokens := 0
 	pinnedTokens := 0
@@ -2893,6 +3013,8 @@ func (s *Service) routeAndRetrieve(ctx context.Context, userID, convID string, k
 	// routing round trip and inject the complete conversation document scope.
 	if len(scope) > 0 && pinnedTokens+embeddedTokens <= cfg.FullTextThreshold {
 		decision.Strategy = "full_text"
+		s.logRetrievalStage(ctx, convID, "route_and_retrieve", "completed", routeStarted,
+			fmt.Sprintf(" strategy=full_text chunks=%d tokens=%d", len(scope), pinnedTokens+embeddedTokens))
 		return fullTextSnippets(scope), decision, nil
 	}
 	// The migration case is specifically the old per-file policy: several
@@ -2946,7 +3068,10 @@ func (s *Service) routeAndRetrieve(ctx context.Context, userID, convID string, k
 	allScopeOpts := retrieveOpts
 
 	if s.task == nil {
+		s.logRetrievalStage(ctx, convID, "router", "skipped", time.Time{}, " reason=no_task_model")
 		out, err := s.retrieve(ctx, userID, convID, kbIDs, initialQuery, cfg.TopK, allScopeOpts)
+		s.logRetrievalStage(ctx, convID, "route_and_retrieve", "completed", routeStarted,
+			fmt.Sprintf(" strategy=%s sources=%d error_kind=%q", decision.Strategy, len(out), retrievalStageErrorKind(err)))
 		return withPinned(out), decision, err
 	}
 	prompt := buildRouterPrompt(userText, docHints)
@@ -2955,11 +3080,20 @@ func (s *Service) routeAndRetrieve(ctx context.Context, userID, convID string, k
 	// it. A slow or hung task-model channel must degrade to plain retrieval with
 	// the original query (the same fallback as s.task == nil), not stall the
 	// user's reply for minutes.
+	routerStarted := time.Now()
+	s.logRetrievalStage(ctx, convID, "router", "started", time.Time{},
+		fmt.Sprintf(" timeout=%s document_hints=%d", routerCallTimeout, len(docHints)))
 	rctx, cancelRouter := context.WithTimeout(ctx, routerCallTimeout)
 	err := s.task.RunJSON(rctx, "task.router", prompt, &d, RouterOpts{
 		UserID: userID, ConversationID: convID, MessageID: billingMessageID(ctx), WorkspaceID: billingWorkspaceID(ctx),
 	})
 	cancelRouter()
+	routerStatus := "completed"
+	if err != nil {
+		routerStatus = "failed"
+	}
+	s.logRetrievalStage(ctx, convID, "router", routerStatus, routerStarted,
+		fmt.Sprintf(" strategy=%s queries=%d error_kind=%q", d.Strategy, len(d.Queries), retrievalStageErrorKind(err)))
 	if err == nil {
 		switch d.Strategy {
 		case "retrieve", "full_doc", "none":
@@ -3049,8 +3183,17 @@ func (s *Service) routeAndRetrieve(ctx context.Context, userID, convID string, k
 		decision.Queries = queries
 		subsets := make([][]Snippet, 0, len(queries))
 		var firstErr error
-		for _, q := range queries {
+		for queryIndex, q := range queries {
+			queryStarted := time.Now()
+			s.logRetrievalStage(ctx, convID, "fallback_query", "started", time.Time{},
+				fmt.Sprintf(" query_index=%d query_count=%d", queryIndex+1, len(queries)))
 			subset, err := s.retrieve(ctx, userID, convID, kbIDs, q, cfg.TopK, allScopeOpts)
+			queryStatus := "completed"
+			if err != nil {
+				queryStatus = "failed"
+			}
+			s.logRetrievalStage(ctx, convID, "fallback_query", queryStatus, queryStarted,
+				fmt.Sprintf(" query_index=%d sources=%d error_kind=%q", queryIndex+1, len(subset), retrievalStageErrorKind(err)))
 			if err != nil {
 				if firstErr == nil {
 					firstErr = err
@@ -3064,6 +3207,8 @@ func (s *Service) routeAndRetrieve(ctx context.Context, userID, convID string, k
 		// reserves room for a later exact rewrite instead of letting the first query
 		// crowd it out.
 		merged := mergeRetrievedSnippets(subsets, cfg.TopK, cfg.DynamicTopK)
+		s.logRetrievalStage(ctx, convID, "route_and_retrieve", "completed", routeStarted,
+			fmt.Sprintf(" strategy=%s queries=%d sources=%d error_kind=%q", decision.Strategy, len(queries), len(merged), retrievalStageErrorKind(firstErr)))
 		return withPinned(merged), decision, firstErr
 	}
 }

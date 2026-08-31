@@ -104,6 +104,7 @@
 | `AIVORY_LLM_INLINE_QUOTE_SOURCE_INJECTION_CAP` | `int` | `8000` | `llm/orchestrator.go:30` | 内联引用子对话中，随高亮摘录一并注入的来源消息文本在截断前的最大字符（rune）数。 |
 | `AIVORY_LLM_ATTACHMENT_IMAGE_INLINE_BYTES` | `int64` | `20*1024*1024` | `llm/orchestrator.go` | 单个已验证图片附件在以 base64 写入渠道请求前的独立硬上限；读取过程同样受限，旧的错误大小元数据无法绕过。 |
 | `AIVORY_LLM_TOOL_ROUTE_TIMEOUT` | `duration` | `5*time.Second` | `llm/orchestrator.go` | 自动工具模式等待专用路由模型的端到端时延预算；超时后按 fail-open 规则开启工具。 |
+| `AIVORY_LLM_INLINE_COMPACTION_TIMEOUT` | `duration` | `30*time.Second` | `llm/orchestrator.go` | 同步长上下文压缩允许占用的首 token 前最长时间；超时或失败后使用确定性的最近历史窗口继续对话。 |
 | `AIVORY_LLM_TOOL_ROUTE_SCHEMA_TOKEN_THRESHOLD` | `int` | `512` | `llm/orchestrator.go` | 工具声明不超过此估算 token 数时，自动模式跳过额外路由请求，直接交给主模型原生判断。设为 0 可让所有模糊请求都经过分类。 |
 | `AIVORY_LLM_SANDBOX_EXEC_TIMEOUT_CLAMP_RANGE_MAX` | `int` | `600` | `llm/orchestrator.go:39` | 为 python_execute 调用上下文计时时，管理员配置的 sandbox_exec_timeout_sec 被钳制的上限（秒）。 |
 | `AIVORY_LLM_SANDBOX_EXEC_TIMEOUT_CLAMP_RANGE_MIN` | `int` | `10` | `llm/orchestrator.go:40` | 为 python_execute 调用上下文计时时，管理员配置的 sandbox_exec_timeout_sec 被钳制的下限（秒）。 |
@@ -196,6 +197,7 @@
 | `AIVORY_RAG_SNIPPET_OF` | `int` | `240` | `rag/rag.go:70` | 调用方未指定上限时，结果摘要的默认字节长度上限（按 rune 安全截断）。 |
 | `AIVORY_RAG_SPLIT_PARAGRAPHS_AND_TABLES` | `int` | `800` | `rag/rag.go:71` | 低于此字节长度的图像 markdown 段落被作为单个原子块保留而不再拆分。 |
 | `AIVORY_RAG_ROUTER_CALL_TIMEOUT` | `duration` | `12*time.Second` | `rag/rag.go:72` | 首 token 热路径上任务路由 JSON LLM 调用（task.router）在回退到普通检索前的超时时限。 |
+| `AIVORY_RAG_QUERY_TIMEOUT` | `duration` | `30*time.Second` | `llm/orchestrator.go` | 在线 RAG 的端到端首 token 前预算，覆盖路由、回退检索、嵌入/向量搜索和全文摘要；超时后 fail-open，不注入不完整证据并继续主对话。 |
 | `AIVORY_RAG_MAP_REDUCE_SUMMARISE` | `int` | `200` | `rag/rag.go:73` | map-reduce 分组摘要提示中向任务模型要求的中文字数上限（≤N 字）。 |
 | `AIVORY_RAG_COLLECT_DOC_HINTS` | `int` | `120` | `rag/rag.go:74` | 路由器文档提示行中为消解指代而保留的每个文档正文的前导字节数。 |
 | `AIVORY_RAG_COLLECT_DOC_HINTS_2` | `int` | `12` | `rag/rag.go:75` | 为检索路由器收集的每文档提示行的最大数量。 |
