@@ -28,6 +28,8 @@ func TestCreateInlineThreadKeepsWorkspaceBoundary(t *testing.T) {
 			for _, userID := range []string{"workspace-owner", "source-creator", "thread-creator"} {
 				mustExec(t, db, `INSERT INTO users(id,email,password_hash,role,status) VALUES(?,?, 'h','user','active')`, userID, userID+"@example.test")
 			}
+			mustExec(t, db, `INSERT INTO channels(id,name,type,enabled) VALUES('inline-workspace-channel','Provider','openai',1)`)
+			mustExec(t, db, `INSERT INTO models(id,channel_id,kind,request_id,label,enabled) VALUES('model-1','inline-workspace-channel','chat','model-1','Workspace chat',1)`)
 			workspace, err := store.CreateWorkspace(t.Context(), db, "workspace-owner", "Inline threads")
 			if err != nil {
 				t.Fatalf("create workspace: %v", err)

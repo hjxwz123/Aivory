@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -61,13 +62,37 @@ func adminMCPServerJSON(server store.MCPServer) adminMCPServerResponse {
 	if len(discoveredTools) == 0 {
 		discoveredTools = json.RawMessage(`[]`)
 	}
+	// Re-sanitize at the serialization boundary as well as during discovery.
+	// This protects rows restored from an older backup or written before metadata
+	// redaction existed from exposing a configured header value in the API.
+	discoveredTools = redactMCPToolSnapshot(discoveredTools, server.Headers)
 	return adminMCPServerResponse{
 		ID: server.ID, Name: server.Name, Icon: server.Icon, Description: server.Description,
-		URL: server.URL, Headers: headers, Enabled: server.Enabled,
-		DiscoveredTools: discoveredTools, ProtocolVersion: server.ProtocolVersion,
-		LastError: server.LastError, LastSyncedAt: server.LastSyncedAt,
+		URL: mcpResponseURL(server.URL), Headers: headers, Enabled: server.Enabled,
+		DiscoveredTools: discoveredTools,
+		ProtocolVersion: redactMCPHeaderValues(server.ProtocolVersion, server.Headers),
+		LastError:       redactMCPHeaderValues(server.LastError, server.Headers), LastSyncedAt: server.LastSyncedAt,
 		CreatedAt: server.CreatedAt, UpdatedAt: server.UpdatedAt,
 	}
+}
+
+// mcpResponseURL keeps legacy/imported endpoint credentials out of HTTP
+// responses. Current writes reject userinfo, query parameters, and fragments,
+// but an upgraded database may still contain one of those older values. The
+// runtime rejects such rows too, so returning only the non-secret endpoint does
+// not hide a usable configuration from the editor; saving it migrates the row
+// onto the supported headers-based authentication contract.
+func mcpResponseURL(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return ""
+	}
+	parsed.User = nil
+	parsed.RawQuery = ""
+	parsed.ForceQuery = false
+	parsed.Fragment = ""
+	parsed.RawFragment = ""
+	return parsed.String()
 }
 
 func listMCPServersAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
@@ -174,15 +199,22 @@ func updateMCPServerAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	updated, err := store.UpdateMCPServer(r.Context(), d.DB, id, patch)
+	metadataChanged := effective.URL != current.URL || !stringMapsEqual(effective.Headers, current.Headers)
+	needsFreshDiscovery := metadataChanged || (!current.Enabled && effective.Enabled)
+	patch.ResetDiscovery = needsFreshDiscovery
+	updated, err := store.UpdateMCPServerIfCurrent(r.Context(), d.DB, *current, patch)
 	if err != nil {
 		writeMCPServerError(w, err)
 		return
 	}
+	enabledChanged := current.Enabled != updated.Enabled
+	if d.Tools != nil && (needsFreshDiscovery || mcpRuntimeCapabilityChanged(*current, *updated)) {
+		d.Tools.InvalidateMCPServer(id)
+	}
 	if mcpRuntimeCapabilityTightened(*current, *updated) {
 		revokeGlobalCapabilitySnapshots(d)
 		publishGlobalEvent(d, "account.permissions_updated")
-	} else if mcpRuntimeCapabilityChanged(*current, *updated) || mcpCatalogPresentationChanged(*current, *updated) {
+	} else if enabledChanged || mcpRuntimeCapabilityChanged(*current, *updated) || mcpCatalogPresentationChanged(*current, *updated) {
 		publishGlobalEvent(d, "account.permissions_updated")
 	}
 	writeJSON(w, http.StatusOK, adminMCPServerJSON(*updated))
@@ -198,6 +230,9 @@ func deleteMCPServerAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	if err := store.DeleteMCPServer(r.Context(), d.DB, id); err != nil {
 		writeMCPServerError(w, err)
 		return
+	}
+	if d.Tools != nil {
+		d.Tools.InvalidateMCPServer(id)
 	}
 	if mcpServerHasTools(*current) {
 		revokeGlobalCapabilitySnapshots(d)
@@ -223,34 +258,51 @@ func runMCPDiscoveryAdmin(d Deps, w http.ResponseWriter, r *http.Request, persis
 	}
 	client, err := mcp.NewClient(mcp.Config{URL: server.URL, Headers: server.Headers})
 	if err != nil {
-		writeMCPDiscoveryFailure(d, w, r.Context(), id, server.ProtocolVersion, server.Headers, err)
+		writeMCPDiscoveryFailure(d, w, r.Context(), *server, server.ProtocolVersion, err)
 		return
 	}
 	discovery, err := client.Discover(r.Context())
 	if err != nil {
-		writeMCPDiscoveryFailure(d, w, r.Context(), id, server.ProtocolVersion, server.Headers, err)
+		writeMCPDiscoveryFailure(d, w, r.Context(), *server, server.ProtocolVersion, err)
 		return
 	}
 	remoteTools, err := client.ListTools(r.Context())
 	if err != nil {
-		writeMCPDiscoveryFailure(d, w, r.Context(), id, discovery.ProtocolVersion, server.Headers, err)
+		writeMCPDiscoveryFailure(d, w, r.Context(), *server, discovery.ProtocolVersion, err)
+		return
+	}
+	// A remote endpoint can echo configured credentials in tool metadata (for
+	// example, a description or JSON-Schema default). Never persist that value in
+	// a snapshot that is later shown to other users or sent to an LLM.
+	remoteTools, err = redactMCPToolSecrets(remoteTools, server.Headers)
+	if err != nil {
+		writeMCPDiscoveryFailure(d, w, r.Context(), *server, discovery.ProtocolVersion, err)
 		return
 	}
 	var snapshot json.RawMessage
 	if persistTools {
 		raw, marshalErr := json.Marshal(remoteTools)
 		if marshalErr != nil {
-			writeMCPDiscoveryFailure(d, w, r.Context(), id, discovery.ProtocolVersion, server.Headers, marshalErr)
+			writeMCPDiscoveryFailure(d, w, r.Context(), *server, discovery.ProtocolVersion, marshalErr)
 			return
 		}
 		snapshot = raw
 	}
-	updated, err := store.UpdateMCPServerSyncState(
-		r.Context(), d.DB, id, snapshot, discovery.ProtocolVersion, "", 0,
+	updated, err := store.UpdateMCPServerSyncStateIfCurrent(
+		r.Context(), d.DB, *server, snapshot, discovery.ProtocolVersion, "", 0,
 	)
 	if err != nil {
+		if errors.Is(err, store.ErrMCPDiscoveryStateChanged) {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
 		writeMCPServerError(w, err)
 		return
+	}
+	if persistTools && d.Tools != nil {
+		// A successful sync starts a fresh remote protocol session even when the
+		// schema is unchanged; a server restart may have invalidated the cached id.
+		d.Tools.InvalidateMCPServer(id)
 	}
 	if persistTools && server.Enabled && !jsonValuesEqual(server.DiscoveredTools, updated.DiscoveredTools) {
 		revokeGlobalCapabilitySnapshots(d)
@@ -263,8 +315,7 @@ func mcpServerHasTools(server store.MCPServer) bool {
 	if !server.Enabled {
 		return false
 	}
-	var tools []json.RawMessage
-	return json.Unmarshal(server.DiscoveredTools, &tools) == nil && len(tools) > 0
+	return mcpDiscoveredToolsPresent(server.DiscoveredTools)
 }
 
 func mcpRuntimeCapabilityChanged(before, after store.MCPServer) bool {
@@ -328,19 +379,30 @@ func writeMCPDiscoveryFailure(
 	d Deps,
 	w http.ResponseWriter,
 	ctx context.Context,
-	id string,
+	server store.MCPServer,
 	protocolVersion string,
-	headers map[string]string,
 	discoveryErr error,
 ) {
-	message := sanitizeMCPDiscoveryError(discoveryErr, headers)
+	message := sanitizeMCPDiscoveryError(discoveryErr, server.Headers)
 	if len(message) > 4000 {
 		message = message[:4000]
 		for !utf8.ValidString(message) {
 			message = message[:len(message)-1]
 		}
 	}
-	_, _ = store.UpdateMCPServerSyncState(ctx, d.DB, id, nil, protocolVersion, message, 0)
+	_, err := store.UpdateMCPServerSyncStateIfCurrent(
+		ctx, d.DB, server, nil, protocolVersion, message, 0,
+	)
+	if errors.Is(err, store.ErrMCPDiscoveryStateChanged) {
+		writeError(w, http.StatusConflict, err)
+		return
+	}
+	if err == nil && d.Tools != nil {
+		// The failed handshake may have negotiated a different protocol or
+		// invalidated the remote session. Retire any cached client even though the
+		// last successful tools snapshot remains available for display/retry.
+		d.Tools.InvalidateMCPServer(server.ID)
+	}
 	writeError(w, http.StatusBadGateway, errors.New(message))
 }
 
@@ -349,26 +411,167 @@ func sanitizeMCPDiscoveryError(discoveryErr error, headers map[string]string) st
 	if discoveryErr != nil && strings.TrimSpace(discoveryErr.Error()) != "" {
 		message = strings.TrimSpace(discoveryErr.Error())
 	}
-	// Replace longer values first so overlapping credentials cannot leave a
-	// visible suffix. Header names are intentionally retained for diagnostics.
+	return redactMCPHeaderValues(message, headers)
+}
+
+// redactMCPHeaderValues replaces configured header values longest-first. Header
+// names are intentionally retained for diagnostics, while empty and already
+// masked values are ignored because they carry no secret.
+func redactMCPHeaderValues(value string, headers map[string]string) string {
+	if value == "" || len(headers) == 0 {
+		return value
+	}
 	values := make([]string, 0, len(headers))
-	for _, value := range headers {
-		if value != "" && value != mcpHeaderMask {
-			values = append(values, value)
+	seen := map[string]struct{}{}
+	for _, secret := range headers {
+		if secret == "" || secret == mcpHeaderMask {
+			continue
 		}
+		if _, ok := seen[secret]; ok {
+			continue
+		}
+		seen[secret] = struct{}{}
+		values = append(values, secret)
 	}
 	sort.Slice(values, func(i, j int) bool { return len(values[i]) > len(values[j]) })
-	for _, value := range values {
-		message = strings.ReplaceAll(message, value, mcpHeaderMask)
+	for _, secret := range values {
+		value = strings.ReplaceAll(value, secret, mcpHeaderMask)
 	}
-	return message
+	return value
+}
+
+var errMCPJSONKeyCollision = errors.New("MCP tool metadata keys conflict after credential redaction")
+
+// redactMCPJSONValues recursively replaces secret-bearing object keys and
+// string values while preserving the JSON shape expected by providers.
+func redactMCPJSONValues(raw json.RawMessage, headers map[string]string) (json.RawMessage, error) {
+	if len(raw) == 0 || len(headers) == 0 {
+		return raw, nil
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, errors.New("invalid MCP tool metadata JSON")
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return nil, errors.New("invalid MCP tool metadata JSON")
+	}
+	var redact func(any) (any, bool, error)
+	redact = func(input any) (any, bool, error) {
+		switch typed := input.(type) {
+		case string:
+			redacted := redactMCPHeaderValues(typed, headers)
+			return redacted, redacted != typed, nil
+		case []any:
+			changed := false
+			for index := range typed {
+				redactedItem, itemChanged, err := redact(typed[index])
+				if err != nil {
+					return nil, false, err
+				}
+				typed[index] = redactedItem
+				changed = changed || itemChanged
+			}
+			return typed, changed, nil
+		case map[string]any:
+			changed := false
+			redactedMap := make(map[string]any, len(typed))
+			for key, item := range typed {
+				redactedKey := redactMCPHeaderValues(key, headers)
+				if _, exists := redactedMap[redactedKey]; exists {
+					return nil, false, errMCPJSONKeyCollision
+				}
+				redactedItem, itemChanged, err := redact(item)
+				if err != nil {
+					return nil, false, err
+				}
+				redactedMap[redactedKey] = redactedItem
+				changed = changed || redactedKey != key || itemChanged
+			}
+			return redactedMap, changed, nil
+		}
+		return input, false, nil
+	}
+	redacted, changed, err := redact(value)
+	if err != nil {
+		return nil, err
+	}
+	if !changed {
+		return raw, nil
+	}
+	encoded, err := json.Marshal(redacted)
+	if err != nil {
+		return nil, errors.New("encode redacted MCP tool metadata JSON")
+	}
+	return encoded, nil
+}
+
+// redactMCPToolSecrets sanitizes every user-visible/raw metadata field except
+// Name. The protocol name is retained as the trusted routing key used by
+// tools/call; descriptions, titles, schemas, annotations, and icon metadata
+// cannot leak configured header values into snapshots or model prompts.
+func redactMCPToolSecrets(tools []mcp.Tool, headers map[string]string) ([]mcp.Tool, error) {
+	if len(tools) == 0 || len(headers) == 0 {
+		return tools, nil
+	}
+	redacted := append([]mcp.Tool(nil), tools...)
+	for index := range redacted {
+		tool := &redacted[index]
+		tool.Title = redactMCPHeaderValues(tool.Title, headers)
+		tool.Description = redactMCPHeaderValues(tool.Description, headers)
+		var err error
+		if tool.InputSchema, err = redactMCPJSONValues(tool.InputSchema, headers); err != nil {
+			return nil, err
+		}
+		if tool.OutputSchema, err = redactMCPJSONValues(tool.OutputSchema, headers); err != nil {
+			return nil, err
+		}
+		if tool.Annotations, err = redactMCPJSONValues(tool.Annotations, headers); err != nil {
+			return nil, err
+		}
+		if tool.Meta, err = redactMCPJSONValues(tool.Meta, headers); err != nil {
+			return nil, err
+		}
+		if len(tool.Icons) > 0 {
+			tool.Icons = append([]mcp.Icon(nil), tool.Icons...)
+		}
+		for iconIndex := range tool.Icons {
+			tool.Icons[iconIndex].Source = redactMCPHeaderValues(tool.Icons[iconIndex].Source, headers)
+			tool.Icons[iconIndex].MimeType = redactMCPHeaderValues(tool.Icons[iconIndex].MimeType, headers)
+			tool.Icons[iconIndex].Sizes = append([]string(nil), tool.Icons[iconIndex].Sizes...)
+			for sizeIndex := range tool.Icons[iconIndex].Sizes {
+				tool.Icons[iconIndex].Sizes[sizeIndex] = redactMCPHeaderValues(tool.Icons[iconIndex].Sizes[sizeIndex], headers)
+			}
+		}
+	}
+	return redacted, nil
+}
+
+// redactMCPToolSnapshot sanitizes a persisted tools/list array before it crosses
+// an API boundary. Discovery already sanitizes new writes, but legacy backups
+// and direct database imports may predate that guarantee.
+func redactMCPToolSnapshot(raw json.RawMessage, headers map[string]string) json.RawMessage {
+	if len(raw) == 0 || len(headers) == 0 {
+		return raw
+	}
+	redacted, err := redactMCPJSONValues(raw, headers)
+	if err != nil {
+		// A legacy/imported snapshot with ambiguous redacted keys cannot be
+		// represented faithfully. Hide the complete snapshot at this display
+		// boundary instead of returning either credential-bearing key.
+		return json.RawMessage(`[]`)
+	}
+	return redacted
 }
 
 func writeMCPServerError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, errNotFound)
-	case errors.Is(err, store.ErrMCPServerNameExists), errors.Is(err, store.ErrMCPServerIDExists):
+	case errors.Is(err, store.ErrMCPServerNameExists), errors.Is(err, store.ErrMCPServerIDExists),
+		errors.Is(err, store.ErrMCPDiscoveryStateChanged):
 		writeError(w, http.StatusConflict, err)
 	default:
 		writeError(w, http.StatusInternalServerError, err)
@@ -410,6 +613,9 @@ func validateMCPServerMetadata(server store.MCPServer) error {
 	}
 	if parsed.User != nil {
 		return errors.New("MCP URL must not contain credentials")
+	}
+	if parsed.RawQuery != "" || parsed.ForceQuery {
+		return errors.New("MCP URL must not contain query parameters")
 	}
 	if parsed.Fragment != "" {
 		return errors.New("MCP URL must not contain a fragment")

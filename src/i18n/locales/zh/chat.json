@@ -162,6 +162,11 @@
       "title": "选择工具",
       "description": "模型只会使用你在这里选择的工具。",
       "search": "搜索工具",
+      "segment": {
+        "official": "官方工具",
+        "mine": "我的工具"
+      },
+      "segmentEmpty": "还没有添加 MCP，去资源库添加。",
       "selectAll": "全选",
       "clear": "清空",
       "loading": "正在加载工具",
@@ -709,10 +714,51 @@
     "switchSpace": "切换空间",
     "managePermissions": "管理权限",
     "memberPermissions": "成员权限",
-    "memberPermissionsBody": "设置 {{name}} 在此工作空间中可以创建和管理的内容。",
+    "memberPermissionsBody": "设置 {{name}} 在此工作空间中可以使用、创建和管理的内容。",
     "permissionsSaved": "成员权限已更新。",
     "permissionsSaveFailed": "成员权限更新失败。",
+    "permissionsConflict": "成员权限已在其他位置更新。",
+    "permissionsConflictHint": "你的未保存更改已保留。请先重新加载，避免覆盖较新的设置。",
+    "reloadPermissions": "重新加载权限",
     "permissions": {
+      "groups": {
+        "useResources": {
+          "label": "使用工作空间资源",
+          "description": "选择成员可以在对话和项目中使用的资源类型。"
+        },
+        "createResources": {
+          "label": "创建工作空间资源",
+          "description": "创建权限与使用权限相互独立。"
+        },
+        "workspaceContent": {
+          "label": "工作空间内容",
+          "description": "控制项目、对话和知识库操作。"
+        }
+      },
+      "can_use_prompts": {
+        "label": "使用提示词",
+        "description": "使用工作空间资源库中的提示词。"
+      },
+      "can_use_skills": {
+        "label": "使用技能",
+        "description": "运行工作空间资源库中共享的技能。"
+      },
+      "can_use_mcp": {
+        "label": "使用 MCP 服务",
+        "description": "调用此工作空间中可用 MCP 服务提供的工具。"
+      },
+      "can_create_prompts": {
+        "label": "创建提示词",
+        "description": "在此工作空间创建新的提示词。"
+      },
+      "can_create_skills": {
+        "label": "创建技能",
+        "description": "在此工作空间创建新的技能。"
+      },
+      "can_create_mcp": {
+        "label": "创建 MCP 服务",
+        "description": "在此工作空间注册新的 MCP 服务。"
+      },
       "can_create_projects": {
         "label": "创建项目",
         "description": "创建新项目及其项目知识库。"
@@ -788,14 +834,43 @@
     "policyLoadFailed": "工作空间策略加载失败。",
     "policySaved": "工作空间能力已更新。",
     "policySaveFailed": "工作空间策略更新失败。",
+    "policyConflict": "工作空间能力已在其他位置更新。",
+    "policyConflictHint": "你的未保存更改已保留。请先重新加载，避免覆盖较新的设置。",
+    "reloadPolicy": "重新加载能力",
     "policy": {
-      "AllowSandbox": {
-        "label": "Python 沙盒",
-        "description": "运行 python_execute / code_interpreter 工具。"
+      "groups": {
+        "core": {
+          "label": "核心能力",
+          "description": "工作空间级开关对所有成员生效，包括管理员。"
+        },
+        "resources": {
+          "label": "资源库",
+          "description": "关闭某一类资源后，会隐藏对应标签并禁止在对话中使用。"
+        },
+        "content": {
+          "label": "工作空间内容",
+          "description": "控制共享知识与文件操作。"
+        }
       },
-      "AllowImageGeneration": {
-        "label": "图片生成",
-        "description": "图片模型与图片工具。"
+      "AllowToolCalling": {
+        "label": "工具调用",
+        "description": "允许模型调用内置工具和 MCP 服务。"
+      },
+      "AllowDrawing": {
+        "label": "绘图",
+        "description": "允许使用独立绘图模式和绘图模型。"
+      },
+      "AllowMCP": {
+        "label": "MCP 服务",
+        "description": "显示 MCP 服务，并在启用工具调用时允许使用其工具。"
+      },
+      "AllowSkills": {
+        "label": "技能",
+        "description": "在此工作空间显示并使用技能资源。"
+      },
+      "AllowPrompts": {
+        "label": "提示词",
+        "description": "在此工作空间显示并使用提示词资源。"
       },
       "AllowKnowledgeBases": {
         "label": "知识库",

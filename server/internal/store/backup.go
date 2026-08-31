@@ -34,7 +34,7 @@ const BackupVersion = 3
 var backupTableOrder = []string{
 	"settings", "users", "credit_adjustment_notifications", "login_histories", "workspaces", "workspace_members", "user_groups", "credit_ledger", "credit_reservations", "quota_ledger", "billing_usage", "credit_packages",
 	"payment_channels", "payment_methods", "payment_orders", "payment_order_attempts", "payment_events",
-	"channels", "mcp_servers", "skills", "prompts", "user_skills", "user_prompts", "oauth_providers",
+	"channels", "mcp_servers", "skills", "prompts", "user_skills", "user_prompts", "user_mcp_servers", "oauth_providers",
 	"models", "model_group_quotas", "model_tags", "image_styles",
 	"redeem_codes", "redeem_redemptions",
 	"model_skills", "knowledge_bases", "knowledge_base_shares", "workspace_kb_member_permissions", "projects", "conversations", "conversation_compaction_leases", "conversation_generation_leases", "messages", "message_feedback", "user_feedback",
@@ -395,6 +395,7 @@ var tablePrimaryKeys = map[string][]string{
 	"prompts":                         {"id"},
 	"user_skills":                     {"id"},
 	"user_prompts":                    {"id"},
+	"user_mcp_servers":                {"id"},
 	"oauth_providers":                 {"id"},
 	"models":                          {"id"},
 	"model_group_quotas":              {"model_id", "group_id"},

@@ -10,6 +10,29 @@ import (
 	"aivory/server/internal/store"
 )
 
+func TestWorkspaceUserSkillsBypassPersonalCatalogPolicy(t *testing.T) {
+	shared := store.UserSkill{ID: "shared", WorkspaceID: "workspace-1", SourceSkillID: "blocked-catalog-skill"}
+	personal := store.UserSkill{ID: "personal", SourceSkillID: "blocked-catalog-skill"}
+
+	for _, policy := range []*ToolAccessPolicy{
+		{SkillMode: store.ResourceAccessNone},
+		{SkillMode: store.ResourceAccessSelected, SkillIDs: []string{"other-catalog-skill"}},
+	} {
+		if !userSkillAccessPolicyAllows(policy, shared) {
+			t.Fatalf("workspace skill denied by personal policy %+v", policy)
+		}
+		if userSkillAccessPolicyAllows(policy, personal) {
+			t.Fatalf("personal skill bypassed personal policy %+v", policy)
+		}
+		if err := validateUserSkillAccessPolicy(policy, []store.UserSkill{shared}); err != nil {
+			t.Fatalf("workspace skill validation failed for policy %+v: %v", policy, err)
+		}
+		if err := validateUserSkillAccessPolicy(policy, []store.UserSkill{personal}); !errors.Is(err, store.ErrInvalidUserSkillSelection) {
+			t.Fatalf("personal skill validation error=%v, want ErrInvalidUserSkillSelection", err)
+		}
+	}
+}
+
 func TestSelectedUserSkillsPersistInjectAtUserAuthorityAndRegenerate(t *testing.T) {
 	orchestrator, provider, model, conversation, _, db := setupToolRouteTest(t)
 	skill, err := store.CreateUserSkill(t.Context(), db, store.UserSkill{

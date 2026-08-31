@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Palette, Check } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils'
 interface StylePickerProps {
   value: string
   onChange: (id: string) => void
+  workspaceId?: string
   className?: string
 }
 
@@ -18,19 +19,29 @@ interface StylePickerProps {
  * model is selected. A popover of example-thumbnail swatches; the style's hidden
  * prompt lives server-side and is never fetched here.
  */
-export function StylePicker({ value, onChange, className }: StylePickerProps) {
+export function StylePicker({ value, onChange, workspaceId, className }: StylePickerProps) {
   const { t } = useTranslation('chat')
   const [styles, setStyles] = useState<ApiImageStyle[]>([])
   const [loaded, setLoaded] = useState(false)
+  const loadRequestRef = useRef(0)
   const selected = styles.find((s) => s.id === value)
 
+  useEffect(() => {
+    loadRequestRef.current += 1
+    setStyles([])
+    setLoaded(false)
+  }, [workspaceId])
+
   const load = async () => {
+    const requestId = ++loadRequestRef.current
     try {
-      setStyles(await imageApi.styles())
+      const next = await imageApi.styles(workspaceId)
+      if (requestId !== loadRequestRef.current) return
+      setStyles(next)
     } catch {
       /* ignore — picker just shows no styles */
     } finally {
-      setLoaded(true)
+      if (requestId === loadRequestRef.current) setLoaded(true)
     }
   }
 

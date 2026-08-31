@@ -83,6 +83,8 @@ import type {
   ApiSharedConversation,
   ApiSkill,
   ApiSkillAsset,
+  ApiUserMCP,
+  ApiUserMCPTestResult,
   ApiUserPrompt,
   ApiUserSkill,
   ApiUsageRecord,
@@ -315,7 +317,11 @@ export const modelsApi = {
       /** Anonymous capability only; the hidden fast model identity stays server-side. */
       fast_vision?: boolean
     }>(`/models${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`),
-  listImage: () => api<{ models: ApiModel[]; default_id: string }>('/image-models'),
+  /** Image models are workspace-scoped when a workspace is active. */
+  listImage: (workspaceId?: string) =>
+    api<{ models: ApiModel[]; default_id: string }>(
+      `/image-models${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`,
+    ),
   /** Model tags for the picker's filter chips (§ model tags). */
   tags: () => api<ApiModelTag[]>('/model-tags'),
 }
@@ -331,7 +337,8 @@ export const toolsApi = {
 
 export const imageApi = {
   /** Enabled styles for the composer style picker (hidden prompt stripped). */
-  styles: () => api<ApiImageStyle[]>('/image/styles'),
+  styles: (workspaceId?: string) =>
+    api<ApiImageStyle[]>(`/image/styles${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`),
   /** The signed-in user's own generated-image gallery (§4.20). */
   myImages: (
     limit = envNum('VITE_AIVORY_IMAGE_API_MY_IMAGES_LIMIT', 60),
@@ -366,6 +373,18 @@ export const libraryApi = {
     api<{ ok: true }>(`/me/prompts/${encodeURIComponent(id)}${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`, { method: 'DELETE' }),
   addCatalogPrompt: (sourceId: string, workspaceId?: string) =>
     api<ApiUserPrompt>('/me/prompts/from-catalog', { method: 'POST', body: { source_id: sourceId, workspace_id: workspaceId } }),
+  mcps: (workspaceId?: string) =>
+    api<ApiUserMCP[]>(`/me/mcps${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`),
+  createMCP: (body: Pick<ApiUserMCP, 'name' | 'icon' | 'description' | 'url' | 'headers' | 'enabled'>, workspaceId?: string) =>
+    api<ApiUserMCP>('/me/mcps', { method: 'POST', body: { ...body, workspace_id: workspaceId } }),
+  updateMCP: (id: string, body: Partial<Pick<ApiUserMCP, 'name' | 'icon' | 'description' | 'url' | 'headers' | 'enabled'>>, workspaceId?: string) =>
+    api<ApiUserMCP>(`/me/mcps/${encodeURIComponent(id)}${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`, { method: 'PATCH', body }),
+  removeMCP: (id: string, workspaceId?: string) =>
+    api<{ ok: true }>(`/me/mcps/${encodeURIComponent(id)}${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`, { method: 'DELETE' }),
+  testMCP: (id: string, workspaceId?: string) =>
+    api<ApiUserMCPTestResult>(`/me/mcps/${encodeURIComponent(id)}/test${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`, { method: 'POST' }),
+  syncMCP: (id: string, workspaceId?: string) =>
+    api<ApiUserMCP>(`/me/mcps/${encodeURIComponent(id)}/sync${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`, { method: 'POST' }),
 }
 
 // ----- User groups (membership tiers) --------------------------------------
@@ -528,8 +547,36 @@ export const workspacesApi = {
     api<{ ok: true }>(`/workspaces/${encodeURIComponent(id)}/invites/${encodeURIComponent(inviteId)}`, { method: 'DELETE' }),
   getPolicy: (id: string) =>
     api<ApiWorkspacePolicy>(`/workspaces/${encodeURIComponent(id)}/policy`),
-  updatePolicy: (id: string, body: Partial<Omit<ApiWorkspacePolicy, 'WorkspaceID' | 'UpdatedBy' | 'UpdatedAt'>>) =>
-    api<ApiWorkspacePolicy>(`/workspaces/${encodeURIComponent(id)}/policy`, { method: 'PATCH', body }),
+  policyModels: (id: string) =>
+    api<{ models: Array<Pick<ApiModel, 'id' | 'label' | 'kind'>> }>(
+      `/workspaces/${encodeURIComponent(id)}/policy/models`,
+    ),
+  updatePolicy: (id: string, body: Partial<Omit<ApiWorkspacePolicy, 'WorkspaceID' | 'UpdatedBy' | 'UpdatedAt'>>) => {
+    // Policy responses intentionally keep Go's exported field names for
+    // backwards compatibility, while PATCH payloads use the API's snake_case
+    // contract. Map at this boundary so callers can work with the typed
+    // response shape without silently sending fields the decoder ignores.
+    const fieldNames: Record<string, string> = {
+      AllowedModelIDs: 'allowed_model_ids',
+      AllowedToolIDs: 'allowed_tool_ids',
+      AllowedMCPServerIDs: 'allowed_mcp_server_ids',
+      AllowToolCalling: 'allow_tool_calling',
+      AllowDrawing: 'allow_drawing',
+      AllowMCP: 'allow_mcp',
+      AllowSkills: 'allow_skills',
+      AllowPrompts: 'allow_prompts',
+      AllowSandbox: 'allow_sandbox',
+      AllowImageGeneration: 'allow_image_generation',
+      AllowKnowledgeBases: 'allow_knowledge_bases',
+      AllowFileUpload: 'allow_file_upload',
+      MemberMonthlyCreditLimit: 'member_monthly_credit_limit',
+    }
+    const payload: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(body)) {
+      if (value !== undefined) payload[fieldNames[key] ?? key] = value
+    }
+    return api<ApiWorkspacePolicy>(`/workspaces/${encodeURIComponent(id)}/policy`, { method: 'PATCH', body: payload })
+  },
   usage: (id: string, days = 30) =>
     api<{ days: number; usage: ApiWorkspaceUsageRow[] }>(
       `/workspaces/${encodeURIComponent(id)}/usage?days=${days}`,

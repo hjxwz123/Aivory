@@ -831,7 +831,10 @@
       "addHeader": "新增請求標頭",
       "removeHeader": "移除第 {{index}} 個請求標頭",
       "showHeader": "顯示請求標頭值",
-      "hideHeader": "隱藏請求標頭值"
+      "hideHeader": "隱藏請求標頭值",
+      "showHeaderL10n": "顯示值",
+      "hideHeaderL10n": "隱藏值",
+      "removeHeaderL10n": "移除第 {{index}} 個請求標頭"
     },
     "status": {
       "connected": "連線正常",

@@ -22,6 +22,30 @@ func listImageStylesPublic(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, []any{})
 		return
 	}
+	if workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id")); workspaceID != "" {
+		u := authUser(r)
+		if u == nil {
+			writeJSON(w, http.StatusOK, []any{})
+			return
+		}
+		if _, err := store.GetWorkspaceForMember(r.Context(), d.DB, workspaceID, u.ID); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, errNotFound)
+			} else {
+				writeError(w, http.StatusInternalServerError, err)
+			}
+			return
+		}
+		policy, err := store.GetWorkspacePolicy(r.Context(), d.DB, workspaceID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if !policy.AllowDrawing {
+			writeJSON(w, http.StatusOK, []any{})
+			return
+		}
+	}
 	styles, err := store.ListImageStyles(r.Context(), d.DB, true)
 	if err != nil {
 		writeError(w, 500, err)

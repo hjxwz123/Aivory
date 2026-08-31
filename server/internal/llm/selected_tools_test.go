@@ -10,7 +10,14 @@ import (
 )
 
 type selectedToolsRegistry struct {
-	calls []string
+	calls        []string
+	mcpListCalls []selectedToolsMCPListCall
+}
+
+type selectedToolsMCPListCall struct {
+	modelID     string
+	userID      string
+	workspaceID string
 }
 
 func (r *selectedToolsRegistry) List(string) []ToolDef {
@@ -21,7 +28,10 @@ func (r *selectedToolsRegistry) List(string) []ToolDef {
 	}
 }
 
-func (r *selectedToolsRegistry) ListMCP(string) []MCPToolDef {
+func (r *selectedToolsRegistry) ListMCP(modelID string, userID string, workspaceID string) []MCPToolDef {
+	r.mcpListCalls = append(r.mcpListCalls, selectedToolsMCPListCall{
+		modelID: modelID, userID: userID, workspaceID: workspaceID,
+	})
 	largeSchema := json.RawMessage(`{"type":"object","description":"` + strings.Repeat("y", 2400) + `"}`)
 	return []MCPToolDef{
 		{
@@ -35,6 +45,20 @@ func (r *selectedToolsRegistry) ListMCP(string) []MCPToolDef {
 				Name: "mcp_paper_search_def456", Description: "Search papers", InputSchema: largeSchema,
 			},
 			ServerID: "papers", DisplayName: "Paper search", DisplayDescription: "Search literature", Icon: "BookOpen",
+		},
+		{
+			ToolDef: ToolDef{
+				Name: "mcp_private_notes_123abc", Description: "Search personal notes", InputSchema: largeSchema,
+			},
+			ServerID: "personal", DisplayName: "Personal notes", DisplayDescription: "Search private notes", Icon: "Notebook",
+			UserOwned: true, OwnerExempt: true,
+		},
+		{
+			ToolDef: ToolDef{
+				Name: "mcp_team_docs_456def", Description: "Search team docs", InputSchema: largeSchema,
+			},
+			ServerID: "team", DisplayName: "Team docs", DisplayDescription: "Search shared docs", Icon: "Users",
+			UserOwned: true, OwnerExempt: false,
 		},
 	}
 }
@@ -103,6 +127,11 @@ func TestSelectedToolIDsOmittedUsesModelDefaultsAndExplicitEmptyMeansNone(t *tes
 				t.Fatalf("default-off MCP tool %q was declared: %+v", name, request.Tools)
 			}
 		}
+		for _, name := range []string{"mcp_private_notes_123abc", "mcp_team_docs_456def"} {
+			if requestHasTool(request, name) {
+				t.Fatalf("user MCP tool %q became a model default: %+v", name, request.Tools)
+			}
+		}
 	})
 
 	t.Run("explicit empty auto", func(t *testing.T) {
@@ -119,6 +148,218 @@ func TestSelectedToolIDsOmittedUsesModelDefaultsAndExplicitEmptyMeansNone(t *tes
 			t.Fatalf("empty selection exposed tools: %+v", provider.mainRequests)
 		}
 	})
+}
+
+func TestUserMCPSelectionUsesScopedNamespaceAndOwnerExemption(t *testing.T) {
+	orchestrator, provider, model, conversation, _, _ := setupToolRouteTest(t)
+	registry := &selectedToolsRegistry{}
+	orchestrator.tools = registry
+	runToolRouteTurn(t, orchestrator, model.ID, conversation.ID, RunRequest{
+		ToolMode: ToolModeEnabled, SelectedToolsConfigured: true,
+		SelectedToolIDs:  []string{"usermcp:personal", "usermcp:team"},
+		ToolAccessPolicy: &ToolAccessPolicy{Mode: store.ResourceAccessNone},
+	})
+
+	request := provider.mainRequests[0]
+	if !requestHasTool(request, "mcp_private_notes_123abc") {
+		t.Fatalf("owner-exempt user MCP was not declared: %+v", request.Tools)
+	}
+	if requestHasTool(request, "mcp_team_docs_456def") {
+		t.Fatalf("teammate user MCP bypassed group policy: %+v", request.Tools)
+	}
+	if len(registry.mcpListCalls) == 0 {
+		t.Fatal("scoped MCP registry was not consulted")
+	}
+	call := registry.mcpListCalls[len(registry.mcpListCalls)-1]
+	if call.modelID != model.ID || call.userID != "u1" || call.workspaceID != "" {
+		t.Fatalf("primary MCP scope = %+v", call)
+	}
+}
+
+func TestUserMCPOwnerExemptionCannotBypassHardDenies(t *testing.T) {
+	registry := &selectedToolsRegistry{}
+	defs := registry.ListMCP("model", "u1", "")
+	ownerPolicy := &ToolAccessPolicy{
+		Mode:                  store.ResourceAccessNone,
+		AllowToolCalling:      true,
+		ToolCallingConfigured: true,
+		AllowMCP:              true,
+		MCPConfigured:         true,
+		DenyIDs:               []string{"usermcp:personal"},
+	}
+	filtered := filterMCPToolsByAccess(defs, ownerPolicy)
+	for _, definition := range filtered {
+		if definition.ServerID == "personal" {
+			t.Fatalf("owner exemption bypassed explicit deny: %+v", filtered)
+		}
+	}
+
+	workspacePolicy := *ownerPolicy
+	workspacePolicy.DenyIDs = nil
+	workspacePolicy.AllowMCP = false
+	filtered = filterMCPToolsByAccess(defs, &workspacePolicy)
+	for _, definition := range filtered {
+		if definition.UserOwned {
+			t.Fatalf("owner exemption bypassed workspace MCP switch: %+v", filtered)
+		}
+	}
+
+	workspacePolicy.AllowMCP = true
+	workspacePolicy.AllowToolCalling = false
+	filtered = filterMCPToolsByAccess(defs, &workspacePolicy)
+	for _, definition := range filtered {
+		if definition.UserOwned {
+			t.Fatalf("owner exemption bypassed workspace tool-calling switch: %+v", filtered)
+		}
+	}
+}
+
+func TestFallbackRebuildPreservesUserMCPSelectionAndWorkspaceScope(t *testing.T) {
+	orchestrator, _, model, _, _, db := setupToolRouteTest(t)
+	registry := &selectedToolsRegistry{}
+	orchestrator.tools = registry
+	workspace, err := store.CreateWorkspace(context.Background(), db, "u1", "Fallback MCP scope")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fallback, err := store.CreateModel(context.Background(), db, store.Model{
+		ChannelID: model.ChannelID, Kind: "chat", RequestID: "user-mcp-fallback", Label: "User MCP fallback",
+		Enabled: true, Stream: true, ToolMode: "native",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, _, _, err := orchestrator.buildFallbackRequest(context.Background(), UnifiedChatRequest{
+		UserID: "u1", WorkspaceID: workspace.ID, ToolsEnabled: true,
+		SelectedToolsConfigured: true, SelectedToolIDs: []string{"usermcp:personal"},
+		ToolAccessPolicy: &ToolAccessPolicy{Mode: store.ResourceAccessNone},
+	}, fallback.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(request.Tools) != 1 || request.Tools[0].Name != "mcp_private_notes_123abc" {
+		t.Fatalf("fallback user MCP tools=%+v", request.Tools)
+	}
+	if len(registry.mcpListCalls) == 0 {
+		t.Fatal("fallback did not consult scoped MCP registry")
+	}
+	call := registry.mcpListCalls[len(registry.mcpListCalls)-1]
+	if call.modelID != fallback.ID || call.userID != "u1" || call.workspaceID != workspace.ID {
+		t.Fatalf("fallback MCP scope = %+v", call)
+	}
+}
+
+func TestFallbackRebuildRechecksWorkspaceMemberMCPPermission(t *testing.T) {
+	orchestrator, _, model, _, _, db := setupToolRouteTest(t)
+	registry := &selectedToolsRegistry{}
+	orchestrator.tools = registry
+	ctx := context.Background()
+	if _, err := db.Exec(`INSERT INTO users(id,email,password_hash,role) VALUES('u2','fallback-member@example.test','h','user')`); err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := store.CreateWorkspace(ctx, db, "u1", "Fallback member policy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.JoinWorkspace(ctx, db, workspace.ID, "u2"); err != nil {
+		t.Fatal(err)
+	}
+	permissions := store.WorkspaceMemberPermissions{
+		CanCreateProjects: true, CanPrivateConversations: true,
+		CanCreatePrompts: true, CanCreateSkills: true, CanCreateMCP: true,
+		CanUsePrompts: true, CanUseSkills: false, CanUseMCP: false,
+		CanCreateKB: true, CanAddKBFiles: true, CanDeleteKBContent: true,
+		CanDeleteConversations: true,
+	}
+	if _, err := store.UpdateWorkspaceMemberPermissions(ctx, db, workspace.ID, "u1", "u2", permissions); err != nil {
+		t.Fatal(err)
+	}
+	fallback, err := store.CreateModel(ctx, db, store.Model{
+		ChannelID: model.ChannelID, Kind: "chat", RequestID: "member-policy-fallback", Label: "Member policy fallback",
+		Enabled: true, Stream: true, ToolMode: "native",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, _, _, err := orchestrator.buildFallbackRequest(ctx, UnifiedChatRequest{
+		UserID: "u2", WorkspaceID: workspace.ID, ToolsEnabled: true,
+		SelectedToolsConfigured: true, SelectedToolIDs: []string{"usermcp:personal"},
+		ToolAccessPolicy: &ToolAccessPolicy{
+			Mode: store.ResourceAccessAll, AllowToolCalling: true, ToolCallingConfigured: true,
+			AllowMCP: true, MCPConfigured: true, AllowSkills: true,
+			SkillMode: store.ResourceAccessAll,
+		},
+	}, fallback.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.ToolAccessPolicy == nil || request.ToolAccessPolicy.AllowMCP || request.ToolAccessPolicy.AllowSkills {
+		t.Fatalf("fallback member policy was not re-applied: %+v", request.ToolAccessPolicy)
+	}
+	if len(request.Tools) != 0 {
+		t.Fatalf("fallback declared MCP tools after member revocation: %+v", request.Tools)
+	}
+}
+
+func TestFallbackRebuildRechecksCurrentUserGroupMCPPermission(t *testing.T) {
+	orchestrator, _, model, _, _, db := setupToolRouteTest(t)
+	registry := &selectedToolsRegistry{}
+	orchestrator.tools = registry
+	ctx := context.Background()
+	workspace, err := store.CreateWorkspace(ctx, db, "u1", "Fallback group policy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fallback, err := store.CreateModel(ctx, db, store.Model{
+		ChannelID: model.ChannelID, Kind: "chat", RequestID: "group-policy-fallback", Label: "Group policy fallback",
+		Enabled: true, Stream: true, ToolMode: "native",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	permissions := store.DefaultUserGroupPermissions()
+	permissions.Tools = store.ResourceAccessPolicy{Mode: store.ResourceAccessNone}
+	raw, err := json.Marshal(permissions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO user_groups(id,name,permissions) VALUES('fallback-none','Fallback none',?);
+		UPDATE users SET role='user', group_id='fallback-none' WHERE id='u1'`, string(raw)); err != nil {
+		t.Fatal(err)
+	}
+
+	request, _, _, err := orchestrator.buildFallbackRequest(ctx, UnifiedChatRequest{
+		UserID: "u1", WorkspaceID: workspace.ID, ToolsEnabled: true,
+		SelectedToolsConfigured: true,
+		SelectedToolIDs:         []string{"mcp:rail", "usermcp:team"},
+		// Model the permissive request-start snapshot captured before the group
+		// policy was revoked. The fallback must intersect it with the current row.
+		ToolAccessPolicy: groupToolAccessPolicy(store.DefaultUserGroupPermissions()),
+	}, fallback.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(request.Tools) != 0 {
+		t.Fatalf("fallback exposed official or teammate user MCP after group revocation: %+v", request.Tools)
+	}
+}
+
+func TestFallbackRebuildFailsClosedWhenCurrentUserGroupPermissionLookupFails(t *testing.T) {
+	orchestrator, _, model, _, _, db := setupToolRouteTest(t)
+	fallback, err := store.CreateModel(context.Background(), db, store.Model{
+		ChannelID: model.ChannelID, Kind: "chat", RequestID: "missing-user-fallback", Label: "Missing user fallback",
+		Enabled: true, Stream: true, ToolMode: "native",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, err = orchestrator.buildFallbackRequest(context.Background(), UnifiedChatRequest{
+		UserID: "missing-user", ToolsEnabled: true,
+		SelectedToolsConfigured: true, SelectedToolIDs: []string{"mcp:rail", "usermcp:team"},
+	}, fallback.ID)
+	if err == nil || !strings.Contains(err.Error(), "resolve fallback user-group permissions") {
+		t.Fatalf("fallback permission lookup error=%v", err)
+	}
 }
 
 func TestModelMCPDefaultsFilterOmittedSelectionButNotExplicitUserSelection(t *testing.T) {

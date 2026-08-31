@@ -162,6 +162,11 @@
       "title": "Choisir les outils",
       "description": "Le modèle utilisera uniquement les outils sélectionnés ici.",
       "search": "Rechercher des outils",
+      "segment": {
+        "official": "Outils officiels",
+        "mine": "Mes outils"
+      },
+      "segmentEmpty": "Aucun service MCP pour l’instant — ajoutez-en dans la Bibliothèque.",
       "selectAll": "Tout sélectionner",
       "clear": "Effacer",
       "loading": "Chargement des outils",
@@ -709,10 +714,51 @@
     "switchSpace": "Changer d'espace",
     "managePermissions": "Gérer les permissions",
     "memberPermissions": "Permissions du membre",
-    "memberPermissionsBody": "Définissez ce que {{name}} peut créer et gérer dans cet espace de travail.",
+    "memberPermissionsBody": "Définissez ce que {{name}} peut utiliser, créer et gérer dans cet espace de travail.",
     "permissionsSaved": "Permissions du membre mises à jour.",
     "permissionsSaveFailed": "Impossible de mettre à jour les permissions du membre.",
+    "permissionsConflict": "Les permissions du membre ont été modifiées sur le serveur.",
+    "permissionsConflictHint": "Vos modifications non enregistrées sont conservées. Rechargez avant d'enregistrer pour ne pas remplacer des réglages plus récents.",
+    "reloadPermissions": "Recharger les permissions",
     "permissions": {
+      "groups": {
+        "useResources": {
+          "label": "Utiliser les ressources de l'espace",
+          "description": "Choisissez les familles de ressources utilisables dans les conversations et projets."
+        },
+        "createResources": {
+          "label": "Créer des ressources",
+          "description": "Les droits de création sont indépendants des droits d'utilisation."
+        },
+        "workspaceContent": {
+          "label": "Contenu de l'espace",
+          "description": "Contrôlez les projets, conversations et bases de connaissances."
+        }
+      },
+      "can_use_prompts": {
+        "label": "Utiliser les prompts",
+        "description": "Appliquer les prompts de la bibliothèque de l'espace."
+      },
+      "can_use_skills": {
+        "label": "Utiliser les compétences",
+        "description": "Exécuter les compétences partagées dans la bibliothèque."
+      },
+      "can_use_mcp": {
+        "label": "Utiliser les services MCP",
+        "description": "Appeler les outils des services MCP disponibles dans cet espace."
+      },
+      "can_create_prompts": {
+        "label": "Créer des prompts",
+        "description": "Créer de nouveaux prompts dans cet espace."
+      },
+      "can_create_skills": {
+        "label": "Créer des compétences",
+        "description": "Créer de nouvelles compétences dans cet espace."
+      },
+      "can_create_mcp": {
+        "label": "Créer des services MCP",
+        "description": "Enregistrer de nouveaux services MCP dans cet espace."
+      },
       "can_create_projects": {
         "label": "Créer des projets",
         "description": "Créer de nouveaux projets et leurs bases de connaissances."
@@ -788,14 +834,43 @@
     "policyLoadFailed": "Impossible de charger la stratégie de l'espace.",
     "policySaved": "Capacités de l'espace mises à jour.",
     "policySaveFailed": "Impossible de mettre à jour la stratégie de l'espace.",
+    "policyConflict": "Les capacités de l'espace ont été modifiées sur le serveur.",
+    "policyConflictHint": "Vos modifications non enregistrées sont conservées. Rechargez avant d'enregistrer pour ne pas remplacer des réglages plus récents.",
+    "reloadPolicy": "Recharger les capacités",
     "policy": {
-      "AllowSandbox": {
-        "label": "Bac à sable Python",
-        "description": "Exécuter les outils python_execute / code_interpreter."
+      "groups": {
+        "core": {
+          "label": "Capacités principales",
+          "description": "Ces contrôles s'appliquent à tous les membres, y compris les administrateurs."
+        },
+        "resources": {
+          "label": "Bibliothèque de ressources",
+          "description": "Désactivez une famille pour masquer son onglet et bloquer son utilisation dans les conversations."
+        },
+        "content": {
+          "label": "Contenu de l'espace",
+          "description": "Contrôlez les connaissances partagées et les fichiers."
+        }
       },
-      "AllowImageGeneration": {
-        "label": "Génération d'images",
-        "description": "Modèles et outils d'image."
+      "AllowToolCalling": {
+        "label": "Appels d'outils",
+        "description": "Autoriser les appels d'outils du modèle, y compris les outils intégrés et les services MCP."
+      },
+      "AllowDrawing": {
+        "label": "Dessin",
+        "description": "Autoriser le mode dessin dédié et les modèles d'image."
+      },
+      "AllowMCP": {
+        "label": "Services MCP",
+        "description": "Afficher les services MCP et autoriser leurs outils si l'appel d'outils est activé."
+      },
+      "AllowSkills": {
+        "label": "Compétences",
+        "description": "Afficher et utiliser les compétences de cet espace."
+      },
+      "AllowPrompts": {
+        "label": "Prompts",
+        "description": "Afficher et utiliser les prompts de cet espace."
       },
       "AllowKnowledgeBases": {
         "label": "Bases de connaissances",

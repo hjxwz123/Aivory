@@ -56,7 +56,88 @@ func libraryWorkspaceID(r *http.Request) string {
 	return strings.TrimSpace(r.URL.Query().Get("workspace_id"))
 }
 
-func authorizeLibraryWorkspace(d Deps, w http.ResponseWriter, r *http.Request, workspaceID string, write bool) bool {
+const (
+	libraryCapabilitySkill  = "skill"
+	libraryCapabilityPrompt = "prompt"
+	libraryCapabilityMCP    = "mcp"
+)
+
+func workspaceLibraryCapabilityAllowed(policy store.WorkspacePolicy, capability string) bool {
+	switch strings.ToLower(strings.TrimSpace(capability)) {
+	case libraryCapabilitySkill:
+		return policy.AllowSkills
+	case libraryCapabilityPrompt:
+		return policy.AllowPrompts
+	case libraryCapabilityMCP:
+		return policy.AllowMCP
+	default:
+		return true
+	}
+}
+
+func workspaceMemberLibraryCapabilityAllowed(workspace *store.Workspace, capability string, create bool) bool {
+	if workspace == nil {
+		return false
+	}
+	if create {
+		var selected bool
+		switch strings.ToLower(strings.TrimSpace(capability)) {
+		case libraryCapabilitySkill:
+			selected = workspace.CanCreateSkills
+		case libraryCapabilityPrompt:
+			selected = workspace.CanCreatePrompts
+		case libraryCapabilityMCP:
+			selected = workspace.CanCreateMCP
+		default:
+			return workspace.CanCreateSkillsPrompts
+		}
+		if !selected {
+			return false
+		}
+		// Granular creation fields are authoritative after migration. The retired
+		// aggregate is only a compatibility mirror and must not override an
+		// explicitly enabled granular capability.
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(capability)) {
+	case libraryCapabilitySkill:
+		return workspace.CanUseSkills
+	case libraryCapabilityPrompt:
+		return workspace.CanUsePrompts
+	case libraryCapabilityMCP:
+		return workspace.CanUseMCP
+	default:
+		return true
+	}
+}
+
+func workspaceLibraryUseEnabled(d Deps, r *http.Request, workspaceID, capability string) (bool, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return true, nil
+	}
+	workspace, err := store.GetWorkspaceForMember(r.Context(), d.DB, workspaceID, authUser(r).ID)
+	if err != nil {
+		return false, err
+	}
+	policy, err := store.GetWorkspacePolicy(r.Context(), d.DB, workspaceID)
+	if err != nil {
+		return false, err
+	}
+	return workspaceLibraryCapabilityAllowed(policy, capability) && workspaceMemberLibraryCapabilityAllowed(workspace, capability, false), nil
+}
+
+// authorizeLibraryWorkspaceCapability applies the workspace-wide capability
+// switch and, for mutations, the member's granular create permission. Read
+// access intentionally does not require CanUse*: members may need to inspect
+// or maintain resources even when they are not allowed to select them in chat.
+func authorizeLibraryWorkspaceCapability(
+	d Deps,
+	w http.ResponseWriter,
+	r *http.Request,
+	workspaceID, capability string,
+	write bool,
+) bool {
 	workspaceID = strings.TrimSpace(workspaceID)
 	if workspaceID == "" {
 		return true
@@ -70,11 +151,54 @@ func authorizeLibraryWorkspace(d Deps, w http.ResponseWriter, r *http.Request, w
 		writeError(w, http.StatusInternalServerError, err)
 		return false
 	}
-	if write && (workspace.Role == store.WorkspaceRoleGuest || !workspace.CanCreateSkillsPrompts) {
+	policy, err := store.GetWorkspacePolicy(r.Context(), d.DB, workspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return false
+	}
+	if !workspaceLibraryCapabilityAllowed(policy, capability) {
+		writeError(w, http.StatusForbidden, errForbidden)
+		return false
+	}
+	if write && (workspace.Role == store.WorkspaceRoleGuest || !workspaceMemberLibraryCapabilityAllowed(workspace, capability, true)) {
 		writeError(w, http.StatusForbidden, errForbidden)
 		return false
 	}
 	return true
+}
+
+// authorizeLibraryWorkspaceUse is the execution/selectability counterpart to
+// authorizeLibraryWorkspaceCapability. It is used for operations such as MCP
+// test/sync and tool-catalog reads where a member must be allowed to use the
+// capability, while creation and metadata mutation remain separately gated.
+func authorizeLibraryWorkspaceUse(
+	d Deps,
+	w http.ResponseWriter,
+	r *http.Request,
+	workspaceID, capability string,
+) bool {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return true
+	}
+	allowed, err := workspaceLibraryUseEnabled(d, r, workspaceID, capability)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, errNotFound)
+			return false
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return false
+	}
+	if !allowed {
+		writeError(w, http.StatusForbidden, errForbidden)
+		return false
+	}
+	return true
+}
+
+func authorizeLibraryWorkspace(d Deps, w http.ResponseWriter, r *http.Request, workspaceID string, write bool) bool {
+	return authorizeLibraryWorkspaceCapability(d, w, r, workspaceID, "", write)
 }
 
 type adminPromptCreatePayload struct {
@@ -148,6 +272,25 @@ func listLibraryCatalogHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if !authorizeLibraryWorkspace(d, w, r, workspaceID, false) {
 		return
 	}
+	var workspace *store.Workspace
+	var workspacePolicy store.WorkspacePolicy
+	if workspaceID != "" {
+		var err error
+		workspace, err = store.GetWorkspaceForMember(r.Context(), d.DB, workspaceID, authUser(r).ID)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, errNotFound)
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		workspacePolicy, err = store.GetWorkspacePolicy(r.Context(), d.DB, workspaceID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+	}
 	permissions, permissionErr := requestPermissions(d, r)
 	if permissionErr != nil {
 		writeError(w, http.StatusForbidden, errPermissionDenied)
@@ -171,6 +314,9 @@ func listLibraryCatalogHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 
 	safeSkills := make([]catalogSkill, 0, len(skills))
 	for _, skill := range skills {
+		if workspace != nil && (!workspacePolicy.AllowSkills || !workspace.CanUseSkills) {
+			continue
+		}
 		if !store.ResourcePolicyAllows(permissions.Skills, skill.ID) {
 			continue
 		}
@@ -182,6 +328,9 @@ func listLibraryCatalogHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	safePrompts := make([]catalogPrompt, 0, len(prompts))
 	for _, prompt := range prompts {
+		if workspace != nil && (!workspacePolicy.AllowPrompts || !workspace.CanUsePrompts) {
+			continue
+		}
 		if !store.ResourcePolicyAllows(permissions.Prompts, prompt.ID) {
 			continue
 		}
@@ -296,13 +445,34 @@ func deletePromptAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 
 func listMySkillsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	workspaceID := libraryWorkspaceID(r)
-	if !authorizeLibraryWorkspace(d, w, r, workspaceID, false) {
+	if !authorizeLibraryWorkspaceCapability(d, w, r, workspaceID, libraryCapabilitySkill, false) {
 		return
 	}
-	permissions, permissionErr := requestPermissions(d, r)
-	if permissionErr != nil {
-		writeError(w, http.StatusForbidden, errSkillGroupPermission)
-		return
+	canUse := true
+	if workspaceID != "" {
+		var err error
+		canUse, err = workspaceLibraryUseEnabled(d, r, workspaceID, libraryCapabilitySkill)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, errNotFound)
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+	}
+	// Personal skills remain subject to the user's group catalog policy. A
+	// workspace skill is a shared workspace-owned resource, so its visibility
+	// is governed by the workspace capability/member permissions instead of the
+	// administrator catalog selection.
+	var permissions store.UserGroupPermissions
+	if workspaceID == "" {
+		var permissionErr error
+		permissions, permissionErr = requestPermissions(d, r)
+		if permissionErr != nil {
+			writeError(w, http.StatusForbidden, errSkillGroupPermission)
+			return
+		}
 	}
 	rows, err := store.ListUserSkillsScoped(r.Context(), d.DB, authUser(r).ID, workspaceID)
 	if err != nil {
@@ -311,7 +481,13 @@ func listMySkillsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	filtered := rows[:0]
 	for _, skill := range rows {
-		if store.UserSkillPolicyAllows(permissions.Skills, skill) {
+		if workspaceID != "" || store.UserSkillPolicyAllows(permissions.Skills, skill) {
+			// Members who cannot use workspace skills may still inspect metadata
+			// and maintain rows they own. Do not expose another creator's
+			// instructions through that management view.
+			if workspaceID != "" && !canUse && !skill.CanManage {
+				skill.Instructions = ""
+			}
 			filtered = append(filtered, skill)
 		}
 	}
@@ -319,11 +495,6 @@ func listMySkillsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 }
 
 func createMySkillHandler(d Deps, w http.ResponseWriter, r *http.Request) {
-	permissions, permissionErr := requestPermissions(d, r)
-	if permissionErr != nil || permissions.Skills.Mode != store.ResourceAccessAll {
-		writeError(w, http.StatusForbidden, errSkillGroupPermission)
-		return
-	}
 	var body userSkillPayload
 	if err := decodePrivateLibraryPayload(r, &body, map[string]bool{"name": true, "description": true, "instructions": true, "workspaceid": true}); err != nil {
 		writeError(w, http.StatusBadRequest, errInvalidInput)
@@ -334,7 +505,14 @@ func createMySkillHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body.WorkspaceID = strings.TrimSpace(body.WorkspaceID)
-	if !authorizeLibraryWorkspace(d, w, r, body.WorkspaceID, true) {
+	if body.WorkspaceID == "" {
+		permissions, permissionErr := requestPermissions(d, r)
+		if permissionErr != nil || permissions.Skills.Mode != store.ResourceAccessAll {
+			writeError(w, http.StatusForbidden, errSkillGroupPermission)
+			return
+		}
+	}
+	if !authorizeLibraryWorkspaceCapability(d, w, r, body.WorkspaceID, libraryCapabilitySkill, true) {
 		return
 	}
 	skill := store.UserSkill{
@@ -358,7 +536,7 @@ func updateMySkillHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	ownerID := authUser(r).ID
 	id := pathParam(r, "id")
 	workspaceID := libraryWorkspaceID(r)
-	if !authorizeLibraryWorkspace(d, w, r, workspaceID, true) {
+	if !authorizeLibraryWorkspaceCapability(d, w, r, workspaceID, libraryCapabilitySkill, false) {
 		return
 	}
 	current, err := store.GetUserSkillScoped(r.Context(), d.DB, id, ownerID, workspaceID)
@@ -366,10 +544,12 @@ func updateMySkillHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeLibraryStoreError(w, err)
 		return
 	}
-	permissions, permissionErr := requestPermissions(d, r)
-	if permissionErr != nil || !store.UserSkillPolicyAllows(permissions.Skills, *current) {
-		writeError(w, http.StatusForbidden, errSkillGroupPermission)
-		return
+	if workspaceID == "" {
+		permissions, permissionErr := requestPermissions(d, r)
+		if permissionErr != nil || !store.UserSkillPolicyAllows(permissions.Skills, *current) {
+			writeError(w, http.StatusForbidden, errSkillGroupPermission)
+			return
+		}
 	}
 	if !current.CanManage {
 		writeError(w, http.StatusForbidden, errForbidden)
@@ -407,7 +587,7 @@ func deleteMySkillHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	ownerID := authUser(r).ID
 	id := pathParam(r, "id")
 	workspaceID := libraryWorkspaceID(r)
-	if !authorizeLibraryWorkspace(d, w, r, workspaceID, true) {
+	if !authorizeLibraryWorkspaceCapability(d, w, r, workspaceID, libraryCapabilitySkill, false) {
 		return
 	}
 	current, err := store.GetUserSkillScoped(r.Context(), d.DB, id, ownerID, workspaceID)
@@ -415,10 +595,12 @@ func deleteMySkillHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeLibraryStoreError(w, err)
 		return
 	}
-	permissions, permissionErr := requestPermissions(d, r)
-	if permissionErr != nil || !store.UserSkillPolicyAllows(permissions.Skills, *current) {
-		writeError(w, http.StatusForbidden, errSkillGroupPermission)
-		return
+	if workspaceID == "" {
+		permissions, permissionErr := requestPermissions(d, r)
+		if permissionErr != nil || !store.UserSkillPolicyAllows(permissions.Skills, *current) {
+			writeError(w, http.StatusForbidden, errSkillGroupPermission)
+			return
+		}
 	}
 	if !current.CanManage {
 		writeError(w, http.StatusForbidden, errForbidden)
@@ -441,7 +623,10 @@ func copySkillFromCatalogHandler(d Deps, w http.ResponseWriter, r *http.Request)
 		return
 	}
 	body.WorkspaceID = strings.TrimSpace(body.WorkspaceID)
-	if !authorizeLibraryWorkspace(d, w, r, body.WorkspaceID, true) {
+	if !authorizeLibraryWorkspaceCapability(d, w, r, body.WorkspaceID, libraryCapabilitySkill, true) {
+		return
+	}
+	if !authorizeLibraryWorkspaceUse(d, w, r, body.WorkspaceID, libraryCapabilitySkill) {
 		return
 	}
 	source, err := store.GetSkill(r.Context(), d.DB, strings.TrimSpace(body.SourceID))
@@ -507,13 +692,33 @@ func privateSkillNameFromCatalog(name, sourceID string) string {
 
 func listMyPromptsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	workspaceID := libraryWorkspaceID(r)
-	if !authorizeLibraryWorkspace(d, w, r, workspaceID, false) {
+	if !authorizeLibraryWorkspaceCapability(d, w, r, workspaceID, libraryCapabilityPrompt, false) {
 		return
 	}
-	permissions, permissionErr := requestPermissions(d, r)
-	if permissionErr != nil {
-		writeError(w, http.StatusForbidden, errPromptGroupPermission)
-		return
+	canUse := true
+	if workspaceID != "" {
+		var err error
+		canUse, err = workspaceLibraryUseEnabled(d, r, workspaceID, libraryCapabilityPrompt)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, errNotFound)
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+	}
+	// As with skills, only the personal library is filtered by the user's
+	// administrator catalog policy. Workspace prompts are shared resources and
+	// use workspace/member capability checks instead.
+	var permissions store.UserGroupPermissions
+	if workspaceID == "" {
+		var permissionErr error
+		permissions, permissionErr = requestPermissions(d, r)
+		if permissionErr != nil {
+			writeError(w, http.StatusForbidden, errPromptGroupPermission)
+			return
+		}
 	}
 	rows, err := store.ListUserPromptsScoped(r.Context(), d.DB, authUser(r).ID, workspaceID)
 	if err != nil {
@@ -522,7 +727,10 @@ func listMyPromptsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	filtered := rows[:0]
 	for _, prompt := range rows {
-		if store.UserPromptPolicyAllows(permissions.Prompts, prompt) {
+		if workspaceID != "" || store.UserPromptPolicyAllows(permissions.Prompts, prompt) {
+			if workspaceID != "" && !canUse && !prompt.CanManage {
+				prompt.Content = ""
+			}
 			filtered = append(filtered, prompt)
 		}
 	}
@@ -530,11 +738,6 @@ func listMyPromptsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 }
 
 func createMyPromptHandler(d Deps, w http.ResponseWriter, r *http.Request) {
-	permissions, permissionErr := requestPermissions(d, r)
-	if permissionErr != nil || permissions.Prompts.Mode != store.ResourceAccessAll {
-		writeError(w, http.StatusForbidden, errPromptGroupPermission)
-		return
-	}
 	var body userPromptPayload
 	if err := decodePrivateLibraryPayload(r, &body, map[string]bool{"name": true, "description": true, "content": true, "workspaceid": true}); err != nil {
 		writeError(w, http.StatusBadRequest, errInvalidInput)
@@ -545,7 +748,14 @@ func createMyPromptHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body.WorkspaceID = strings.TrimSpace(body.WorkspaceID)
-	if !authorizeLibraryWorkspace(d, w, r, body.WorkspaceID, true) {
+	if body.WorkspaceID == "" {
+		permissions, permissionErr := requestPermissions(d, r)
+		if permissionErr != nil || permissions.Prompts.Mode != store.ResourceAccessAll {
+			writeError(w, http.StatusForbidden, errPromptGroupPermission)
+			return
+		}
+	}
+	if !authorizeLibraryWorkspaceCapability(d, w, r, body.WorkspaceID, libraryCapabilityPrompt, true) {
 		return
 	}
 	prompt := store.UserPrompt{
@@ -569,7 +779,7 @@ func updateMyPromptHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	ownerID := authUser(r).ID
 	id := pathParam(r, "id")
 	workspaceID := libraryWorkspaceID(r)
-	if !authorizeLibraryWorkspace(d, w, r, workspaceID, true) {
+	if !authorizeLibraryWorkspaceCapability(d, w, r, workspaceID, libraryCapabilityPrompt, false) {
 		return
 	}
 	current, err := store.GetUserPromptScoped(r.Context(), d.DB, id, ownerID, workspaceID)
@@ -577,10 +787,12 @@ func updateMyPromptHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeLibraryStoreError(w, err)
 		return
 	}
-	permissions, permissionErr := requestPermissions(d, r)
-	if permissionErr != nil || !store.UserPromptPolicyAllows(permissions.Prompts, *current) {
-		writeError(w, http.StatusForbidden, errPromptGroupPermission)
-		return
+	if workspaceID == "" {
+		permissions, permissionErr := requestPermissions(d, r)
+		if permissionErr != nil || !store.UserPromptPolicyAllows(permissions.Prompts, *current) {
+			writeError(w, http.StatusForbidden, errPromptGroupPermission)
+			return
+		}
 	}
 	if !current.CanManage {
 		writeError(w, http.StatusForbidden, errForbidden)
@@ -618,7 +830,7 @@ func deleteMyPromptHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	ownerID := authUser(r).ID
 	id := pathParam(r, "id")
 	workspaceID := libraryWorkspaceID(r)
-	if !authorizeLibraryWorkspace(d, w, r, workspaceID, true) {
+	if !authorizeLibraryWorkspaceCapability(d, w, r, workspaceID, libraryCapabilityPrompt, false) {
 		return
 	}
 	current, err := store.GetUserPromptScoped(r.Context(), d.DB, id, ownerID, workspaceID)
@@ -626,10 +838,12 @@ func deleteMyPromptHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeLibraryStoreError(w, err)
 		return
 	}
-	permissions, permissionErr := requestPermissions(d, r)
-	if permissionErr != nil || !store.UserPromptPolicyAllows(permissions.Prompts, *current) {
-		writeError(w, http.StatusForbidden, errPromptGroupPermission)
-		return
+	if workspaceID == "" {
+		permissions, permissionErr := requestPermissions(d, r)
+		if permissionErr != nil || !store.UserPromptPolicyAllows(permissions.Prompts, *current) {
+			writeError(w, http.StatusForbidden, errPromptGroupPermission)
+			return
+		}
 	}
 	if !current.CanManage {
 		writeError(w, http.StatusForbidden, errForbidden)
@@ -652,7 +866,10 @@ func copyPromptFromCatalogHandler(d Deps, w http.ResponseWriter, r *http.Request
 		return
 	}
 	body.WorkspaceID = strings.TrimSpace(body.WorkspaceID)
-	if !authorizeLibraryWorkspace(d, w, r, body.WorkspaceID, true) {
+	if !authorizeLibraryWorkspaceCapability(d, w, r, body.WorkspaceID, libraryCapabilityPrompt, true) {
+		return
+	}
+	if !authorizeLibraryWorkspaceUse(d, w, r, body.WorkspaceID, libraryCapabilityPrompt) {
 		return
 	}
 	source, err := store.GetPrompt(r.Context(), d.DB, strings.TrimSpace(body.SourceID))

@@ -74,6 +74,252 @@ func TestWorkspaceMemberPermissionsLegacyJSONKeepsConversationDeletionEnabled(t 
 	}
 }
 
+func TestWorkspaceMemberPermissionsGranularCreationIsIndependentAndConservative(t *testing.T) {
+	var permissions WorkspaceMemberPermissions
+	if err := json.Unmarshal([]byte(`{
+		"can_create_prompts":true,
+		"can_create_skills":true,
+		"can_create_mcp":false,
+		"can_use_prompts":true,
+		"can_use_skills":false,
+		"can_use_mcp":true
+	}`), &permissions); err != nil {
+		t.Fatal(err)
+	}
+	if !permissions.CanCreatePrompts || !permissions.CanCreateSkills || permissions.CanCreateMCP {
+		t.Fatalf("granular create fields=%+v", permissions)
+	}
+	if permissions.CanCreateSkillsPrompts {
+		t.Fatalf("legacy aggregate broadened disabled MCP: %+v", permissions)
+	}
+	if !permissions.CanUsePrompts || permissions.CanUseSkills || !permissions.CanUseMCP {
+		t.Fatalf("granular use fields=%+v", permissions)
+	}
+
+	// An old payload with only the combined bit still maps to all three new
+	// creation capabilities, preserving rolling-upgrade behavior.
+	var legacy WorkspaceMemberPermissions
+	if err := json.Unmarshal([]byte(`{"can_create_skills_prompts":true}`), &legacy); err != nil {
+		t.Fatal(err)
+	}
+	if !legacy.CanCreateSkillsPrompts || !legacy.CanCreatePrompts || !legacy.CanCreateSkills || !legacy.CanCreateMCP {
+		t.Fatalf("legacy aggregate did not expand conservatively: %+v", legacy)
+	}
+}
+
+func TestWorkspaceMemberPermissionsPartialJSONPreservesOmittedCapabilities(t *testing.T) {
+	db := openKBPermissionTestDB(t)
+	ctx := context.Background()
+	initial := fullWorkspaceMemberPermissions()
+	initial.CanCreateSkills = false
+	initial.CanUsePrompts = false
+	initial.CanUseMCP = false
+	initial.CanDeleteConversations = false
+	if _, err := UpdateWorkspaceMemberPermissions(ctx, db, "ws1", "owner", "member", initial); err != nil {
+		t.Fatalf("seed member permissions: %v", err)
+	}
+
+	// This is the shape an older client sends: it round-trips the retired
+	// aggregate while changing an unrelated permission and knows none of the new
+	// granular use fields. Missing fields must preserve their stored values.
+	var legacyPatch WorkspaceMemberPermissions
+	if err := json.Unmarshal([]byte(`{
+		"can_create_projects":false,
+		"can_create_skills_prompts":false
+	}`), &legacyPatch); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := UpdateWorkspaceMemberPermissions(ctx, db, "ws1", "owner", "member", legacyPatch)
+	if err != nil {
+		t.Fatalf("apply legacy partial patch: %v", err)
+	}
+	if updated.CanCreateProjects {
+		t.Fatalf("explicit project creation update was ignored: %+v", updated)
+	}
+	if !updated.CanCreatePrompts || updated.CanCreateSkills || !updated.CanCreateMCP {
+		t.Fatalf("legacy aggregate round-trip rewrote granular creation: %+v", updated)
+	}
+	if updated.CanUsePrompts || !updated.CanUseSkills || updated.CanUseMCP {
+		t.Fatalf("omitted use permissions were rewritten: %+v", updated)
+	}
+	if updated.CanDeleteConversations {
+		t.Fatalf("omitted conversation deletion was broadened: %+v", updated)
+	}
+}
+
+func TestWorkspaceMemberPermissionsLegacyAggregateStillSupportsIntentionalToggle(t *testing.T) {
+	db := openKBPermissionTestDB(t)
+	ctx := context.Background()
+	initial := fullWorkspaceMemberPermissions()
+	initial.CanCreateSkills = false
+	if _, err := UpdateWorkspaceMemberPermissions(ctx, db, "ws1", "owner", "member", initial); err != nil {
+		t.Fatalf("seed member permissions: %v", err)
+	}
+
+	var enable WorkspaceMemberPermissions
+	if err := json.Unmarshal([]byte(`{"can_create_skills_prompts":true}`), &enable); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := UpdateWorkspaceMemberPermissions(ctx, db, "ws1", "owner", "member", enable)
+	if err != nil {
+		t.Fatalf("enable legacy aggregate: %v", err)
+	}
+	if !updated.CanCreatePrompts || !updated.CanCreateSkills || !updated.CanCreateMCP || !updated.CanCreateSkillsPrompts {
+		t.Fatalf("legacy aggregate enable did not reach all creation fields: %+v", updated)
+	}
+
+	var disable WorkspaceMemberPermissions
+	if err := json.Unmarshal([]byte(`{"can_create_skills_prompts":false}`), &disable); err != nil {
+		t.Fatal(err)
+	}
+	updated, err = UpdateWorkspaceMemberPermissions(ctx, db, "ws1", "owner", "member", disable)
+	if err != nil {
+		t.Fatalf("disable legacy aggregate: %v", err)
+	}
+	if updated.CanCreatePrompts || updated.CanCreateSkills || updated.CanCreateMCP || updated.CanCreateSkillsPrompts {
+		t.Fatalf("legacy aggregate disable did not reach all creation fields: %+v", updated)
+	}
+}
+
+func TestWorkspaceMemberPermissionsAggregateIncludesMCP(t *testing.T) {
+	db := openKBPermissionTestDB(t)
+	ctx := context.Background()
+	permissions := fullWorkspaceMemberPermissions()
+	permissions.CanCreateMCP = false
+	updated, err := UpdateWorkspaceMemberPermissions(ctx, db, "ws1", "owner", "member", permissions)
+	if err != nil {
+		t.Fatalf("update member permissions: %v", err)
+	}
+	if updated.CanCreateSkillsPrompts {
+		t.Fatalf("aggregate broadened disabled MCP: %+v", updated)
+	}
+	var aggregate, prompts, skills, mcp bool
+	if err := db.QueryRow(`SELECT can_create_skills_prompts, can_create_prompts, can_create_skills, can_create_mcp
+		FROM workspace_members WHERE workspace_id='ws1' AND user_id='member'`).Scan(&aggregate, &prompts, &skills, &mcp); err != nil {
+		t.Fatal(err)
+	}
+	if aggregate || !prompts || !skills || mcp {
+		t.Fatalf("stored granular permissions aggregate=%v prompts=%v skills=%v mcp=%v", aggregate, prompts, skills, mcp)
+	}
+}
+
+func TestWorkspaceMemberPermissionsGranularFieldsRemainAuthoritativeWhenAggregateIsStale(t *testing.T) {
+	db := openKBPermissionTestDB(t)
+	ctx := context.Background()
+	exec(t, db, `UPDATE workspace_members SET can_create_skills_prompts=0 WHERE workspace_id='ws1' AND user_id='member'`)
+	workspace, err := GetWorkspaceForMember(ctx, db, "ws1", "member")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !workspace.CanCreateSkillsPrompts || !workspace.CanCreatePrompts || !workspace.CanCreateSkills || !workspace.CanCreateMCP {
+		t.Fatalf("stale aggregate narrowed granular permissions on read: %+v", workspace)
+	}
+	members, err := ListWorkspaceMembers(ctx, db, "ws1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, member := range members {
+		if member.UserID != "member" {
+			continue
+		}
+		if !member.CanCreateSkillsPrompts || !member.CanCreatePrompts || !member.CanCreateSkills || !member.CanCreateMCP {
+			t.Fatalf("stale aggregate narrowed granular permissions in member listing: %+v", member)
+		}
+		return
+	}
+	t.Fatal("legacy member missing from member listing")
+}
+
+func TestWorkspaceMemberPermissionsGranularFieldsDriveLibraryCreationIndependently(t *testing.T) {
+	db := openKBPermissionTestDB(t)
+	ctx := context.Background()
+	// Leave the retired aggregate at its default value while disabling only skill
+	// creation. The granular field must be authoritative for the corresponding
+	// resource, and must not accidentally disable prompts or MCP.
+	exec(t, db, `UPDATE workspace_members
+		SET can_create_skills=0, can_create_skills_prompts=1
+		WHERE workspace_id='ws1' AND user_id='member'`)
+	if _, err := CreateUserSkill(ctx, db, UserSkill{
+		UserID: "member", WorkspaceID: "ws1", Name: "blocked-skill", Description: "blocked", Instructions: "blocked",
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("skill creation with granular deny err=%v, want ErrNotFound", err)
+	}
+	if _, err := CreateUserPrompt(ctx, db, UserPrompt{
+		UserID: "member", WorkspaceID: "ws1", Name: "allowed-prompt", Description: "allowed", Content: "allowed",
+	}); err != nil {
+		t.Fatalf("prompt creation was narrowed by skill-only deny: %v", err)
+	}
+}
+
+func TestWorkspaceMemberRolePromotionReturnsFullAdminCapabilities(t *testing.T) {
+	db := openKBPermissionTestDB(t)
+	ctx := context.Background()
+	if _, err := UpdateWorkspaceMemberPermissions(ctx, db, "ws1", "owner", "member", WorkspaceMemberPermissions{}); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := UpdateWorkspaceMemberRole(ctx, db, "ws1", "owner", "member", WorkspaceRoleAdmin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Role != WorkspaceRoleAdmin || updated.IsOwner {
+		t.Fatalf("promoted member identity=%+v", updated)
+	}
+	if !updated.CanCreateProjects || !updated.CanPrivateConversations ||
+		!updated.CanCreateSkillsPrompts || !updated.CanCreatePrompts ||
+		!updated.CanCreateSkills || !updated.CanCreateMCP ||
+		!updated.CanUsePrompts || !updated.CanUseSkills || !updated.CanUseMCP ||
+		!updated.CanCreateKB || !updated.CanAddKBFiles ||
+		!updated.CanDeleteKBContent || !updated.CanDeleteConversations {
+		t.Fatalf("promoted admin capabilities=%+v, want all enabled", updated)
+	}
+}
+
+func TestWorkspaceMemberGuestRoundTripPreservesStoredPermissions(t *testing.T) {
+	db := openKBPermissionTestDB(t)
+	ctx := context.Background()
+	want := fullWorkspaceMemberPermissions()
+	want.CanCreateProjects = false
+	want.CanCreateSkills = false
+	want.CanCreateMCP = false
+	want.CanUsePrompts = false
+	want.CanUseMCP = false
+	want.CanDeleteConversations = false
+	if _, err := UpdateWorkspaceMemberPermissions(ctx, db, "ws1", "owner", "member", want); err != nil {
+		t.Fatalf("seed member permissions: %v", err)
+	}
+
+	assertPreserved := func(stage string, member *WorkspaceMember) {
+		t.Helper()
+		if member.CanCreateProjects != want.CanCreateProjects ||
+			member.CanCreatePrompts != want.CanCreatePrompts ||
+			member.CanCreateSkills != want.CanCreateSkills ||
+			member.CanCreateMCP != want.CanCreateMCP ||
+			member.CanUsePrompts != want.CanUsePrompts ||
+			member.CanUseSkills != want.CanUseSkills ||
+			member.CanUseMCP != want.CanUseMCP ||
+			member.CanDeleteConversations != want.CanDeleteConversations {
+			t.Fatalf("%s permissions=%+v, want stored values preserved", stage, member)
+		}
+	}
+	guest, err := UpdateWorkspaceMemberRole(ctx, db, "ws1", "owner", "member", WorkspaceRoleGuest)
+	if err != nil {
+		t.Fatalf("demote member to guest: %v", err)
+	}
+	if guest.Role != WorkspaceRoleGuest {
+		t.Fatalf("demoted role=%q, want guest", guest.Role)
+	}
+	assertPreserved("guest", guest)
+
+	member, err := UpdateWorkspaceMemberRole(ctx, db, "ws1", "owner", "member", WorkspaceRoleMember)
+	if err != nil {
+		t.Fatalf("restore guest to member: %v", err)
+	}
+	if member.Role != WorkspaceRoleMember {
+		t.Fatalf("restored role=%q, want member", member.Role)
+	}
+	assertPreserved("restored member", member)
+}
+
 func TestWorkspaceConversationDeletionPermissionMigrationDefaultsExistingMembers(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "workspace-delete-capability-migration.db"))
 	if err != nil {
@@ -100,6 +346,57 @@ func TestWorkspaceConversationDeletionPermissionMigrationDefaultsExistingMembers
 	}
 	if !canDelete {
 		t.Fatal("existing workspace member lost conversation deletion during migration")
+	}
+}
+
+func TestWorkspaceMemberGranularCreationMigrationBackfillsLegacyAggregate(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "workspace-granular-create-migration.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	exec(t, db, `INSERT INTO users(id,email,password_hash,role) VALUES
+		('granular-owner','granular-owner@example.test','h','user'),
+		('granular-denied','granular-denied@example.test','h','user'),
+		('granular-allowed','granular-allowed@example.test','h','user')`)
+	exec(t, db, `INSERT INTO workspaces(id,name,owner_id,invite_token) VALUES
+		('granular-ws','Granular migration','granular-owner','granular-token')`)
+	exec(t, db, `INSERT INTO workspace_members(workspace_id,user_id,role,can_create_skills_prompts) VALUES
+		('granular-ws','granular-owner','admin',1),
+		('granular-ws','granular-denied','member',0),
+		('granular-ws','granular-allowed','member',1)`)
+
+	// Rebuild this table into the shape used before the granular columns were
+	// introduced, then run the real migration. The old aggregate value must be
+	// copied into all three new columns exactly once.
+	for _, column := range []string{"can_create_prompts", "can_create_skills", "can_create_mcp"} {
+		exec(t, db, "ALTER TABLE workspace_members DROP COLUMN "+column)
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatalf("migrate legacy granular permissions: %v", err)
+	}
+	rows, err := db.Query(`SELECT user_id, can_create_skills_prompts, can_create_prompts, can_create_skills, can_create_mcp
+		FROM workspace_members WHERE workspace_id='granular-ws' ORDER BY user_id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var userID string
+		var aggregate, prompts, skills, mcp bool
+		if err := rows.Scan(&userID, &aggregate, &prompts, &skills, &mcp); err != nil {
+			t.Fatal(err)
+		}
+		want := userID != "granular-denied"
+		if aggregate != want || prompts != want || skills != want || mcp != want {
+			t.Fatalf("migrated %s aggregate=%v prompts=%v skills=%v mcp=%v, want all=%v", userID, aggregate, prompts, skills, mcp, want)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -831,7 +831,10 @@
       "addHeader": "Ajouter un en-tête",
       "removeHeader": "Supprimer l’en-tête {{index}}",
       "showHeader": "Afficher la valeur",
-      "hideHeader": "Masquer la valeur"
+      "hideHeader": "Masquer la valeur",
+      "showHeaderL10n": "Afficher la valeur",
+      "hideHeaderL10n": "Masquer la valeur",
+      "removeHeaderL10n": "Supprimer l’en-tête {{index}}"
     },
     "status": {
       "connected": "Connecté",

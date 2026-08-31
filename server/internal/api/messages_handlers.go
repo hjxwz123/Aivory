@@ -431,8 +431,9 @@ func (snapshot *generationWorkspaceAccessSnapshot) stillCurrent(ctx context.Cont
 }
 
 func workspacePoliciesEqual(a, b store.WorkspacePolicy) bool {
-	if a.WorkspaceID != b.WorkspaceID || a.AllowSandbox != b.AllowSandbox ||
-		a.AllowImageGeneration != b.AllowImageGeneration ||
+	if a.WorkspaceID != b.WorkspaceID || a.AllowToolCalling != b.AllowToolCalling ||
+		a.AllowDrawing != b.AllowDrawing || a.AllowMCP != b.AllowMCP ||
+		a.AllowSkills != b.AllowSkills || a.AllowPrompts != b.AllowPrompts ||
 		a.AllowKnowledgeBases != b.AllowKnowledgeBases || a.AllowFileUpload != b.AllowFileUpload ||
 		a.MemberMonthlyCreditLimit != b.MemberMonthlyCreditLimit {
 		return false
@@ -1016,7 +1017,7 @@ func parseSelectedToolIDs(raw json.RawMessage) (ids []string, configured bool, e
 			return nil, true, errors.New("selected_tool_ids contains an invalid tool id")
 		}
 		switch id[:separator] {
-		case "builtin", "hosted", "mcp":
+		case "builtin", "hosted", "mcp", "usermcp":
 		default:
 			return nil, true, errors.New("selected_tool_ids contains an invalid tool id")
 		}
@@ -1275,7 +1276,12 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	selectedToolIDs, selectedToolsConfigured = applyTurnToolPermissions(permissions, selectedToolIDs, selectedToolsConfigured)
+	// The user-MCP owner exemption resolves "usermcp:<id>" ids against the
+	// requester's personal library and the conversation's active workspace.
+	selectedToolIDs, selectedToolsConfigured = applyTurnToolPermissions(
+		permissions, selectedToolIDs, selectedToolsConfigured,
+		toolPolicyScope{ctx: r.Context(), db: d.DB, userID: u.ID, workspaceID: conv.WorkspaceID},
+	)
 	if !toolPolicyAllowsID(permissions, "builtin:aivory_web_search") {
 		req.WebSearch = false
 	}
@@ -1757,7 +1763,12 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	selectedToolIDs, selectedToolsConfigured = applyTurnToolPermissions(permissions, selectedToolIDs, selectedToolsConfigured)
+	// The user-MCP owner exemption resolves "usermcp:<id>" ids against the
+	// requester's personal library and the conversation's active workspace.
+	selectedToolIDs, selectedToolsConfigured = applyTurnToolPermissions(
+		permissions, selectedToolIDs, selectedToolsConfigured,
+		toolPolicyScope{ctx: r.Context(), db: d.DB, userID: u.ID, workspaceID: conv.WorkspaceID},
+	)
 	if !toolPolicyAllowsID(permissions, "builtin:aivory_web_search") {
 		body.WebSearch = false
 	}

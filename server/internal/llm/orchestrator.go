@@ -244,7 +244,7 @@ type ToolRegistry interface {
 }
 
 type mcpToolRegistry interface {
-	ListMCP(modelID string) []MCPToolDef
+	ListMCP(modelID string, userID string, workspaceID string) []MCPToolDef
 }
 
 // providerArtifactRegistry is optionally implemented by the concrete tools
@@ -289,6 +289,12 @@ type ToolContext struct {
 	AdminSkillIDs map[string]bool
 	// ImageModelID is the user's pre-selected image model (§4.12-B).
 	ImageModelID string
+	// DirectImageTurn marks the internal image-model pipeline's call to
+	// image_generate. It is deliberately distinct from ordinary model tool
+	// calling: a workspace may disable tools while still allowing the dedicated
+	// drawing mode. The registry still checks AllowDrawing and all other runtime
+	// permissions before honoring this marker.
+	DirectImageTurn bool
 	// ImageRequestParams is the already allowlisted request fragment produced
 	// from the selected image model's param_controls. It is carried out-of-band
 	// instead of in image_generate's public schema so a chat model cannot forge
@@ -575,12 +581,11 @@ func modelMCPServerIDSet(raw json.RawMessage) map[string]bool {
 }
 
 func filterModelMCPTools(defs []MCPToolDef, allowed map[string]bool) []MCPToolDef {
-	if allowed == nil {
-		return defs
-	}
 	out := make([]MCPToolDef, 0, len(defs))
 	for _, definition := range defs {
-		if allowed[definition.ServerID] {
+		// User MCP servers are always explicit per-turn choices and can never be
+		// smuggled into a model's administrator MCP defaults.
+		if !definition.UserOwned && (allowed == nil || allowed[definition.ServerID]) {
 			out = append(out, definition)
 		}
 	}
@@ -597,6 +602,9 @@ func (p *ToolAccessPolicy) Allows(id string) bool {
 func toolAccessPolicyAllows(policy *ToolAccessPolicy, id string) bool {
 	if policy == nil {
 		return true
+	}
+	if !toolAccessPolicyHardAllows(policy, id) {
+		return false
 	}
 	for _, denied := range policy.DenyIDs {
 		if denied == id {
@@ -618,9 +626,6 @@ func toolAccessPolicyAllows(policy *ToolAccessPolicy, id string) bool {
 			return false
 		}
 	}
-	if !policy.AllowDrawing && (id == "builtin:image_generate" || id == "hosted:image_generation") {
-		return false
-	}
 	if !policy.AllowMemory && id == "builtin:save_memory" {
 		return false
 	}
@@ -630,18 +635,94 @@ func toolAccessPolicyAllows(policy *ToolAccessPolicy, id string) bool {
 	return true
 }
 
+// toolAccessPolicyHardAllows contains restrictions that no resource owner is
+// allowed to bypass. In particular, workspace capability switches are
+// intentionally separate from Mode/IDs: an owner exemption may ignore a
+// member's selected tool list, but it can never turn tools or MCP back on after
+// a workspace administrator has disabled them.
+func toolAccessPolicyHardAllows(policy *ToolAccessPolicy, id string) bool {
+	if policy == nil {
+		return true
+	}
+	for _, denied := range policy.DenyIDs {
+		if denied == id {
+			return false
+		}
+	}
+	if policy.ToolCallingConfigured && !policy.AllowToolCalling && isCatalogToolID(id) {
+		return false
+	}
+	if policy.MCPConfigured && !policy.AllowMCP && isMCPCatalogID(id) {
+		return false
+	}
+	return true
+}
+
+func toolCallingAllowed(policy *ToolAccessPolicy) bool {
+	return policy == nil || !policy.ToolCallingConfigured || policy.AllowToolCalling
+}
+
+func mcpAllowed(policy *ToolAccessPolicy) bool {
+	return policy == nil || !policy.MCPConfigured || policy.AllowMCP
+}
+
+func isCatalogToolID(id string) bool {
+	return strings.HasPrefix(id, "builtin:") ||
+		strings.HasPrefix(id, "hosted:") ||
+		isMCPCatalogID(id)
+}
+
+func isMCPCatalogID(id string) bool {
+	return strings.HasPrefix(id, "mcp:") || strings.HasPrefix(id, "usermcp:")
+}
+
 func groupToolAccessPolicy(permissions store.UserGroupPermissions) *ToolAccessPolicy {
 	allowSkills := permissions.Skills.Mode == store.ResourceAccessAll ||
 		(permissions.Skills.Mode == store.ResourceAccessSelected && len(permissions.Skills.IDs) > 0)
-	return &ToolAccessPolicy{
-		Mode:         permissions.Tools.Mode,
-		IDs:          append([]string(nil), permissions.Tools.IDs...),
-		AllowDrawing: permissions.AllowDrawing,
-		AllowMemory:  permissions.AllowMemory,
-		AllowSkills:  allowSkills,
-		SkillMode:    permissions.Skills.Mode,
-		SkillIDs:     append([]string(nil), permissions.Skills.IDs...),
+	policy := &ToolAccessPolicy{
+		Mode:                  permissions.Tools.Mode,
+		IDs:                   append([]string(nil), permissions.Tools.IDs...),
+		AllowToolCalling:      true,
+		ToolCallingConfigured: true,
+		AllowMCP:              true,
+		MCPConfigured:         true,
+		AllowDrawing:          permissions.AllowDrawing,
+		AllowMemory:           permissions.AllowMemory,
+		AllowSkills:           allowSkills,
+		SkillMode:             permissions.Skills.Mode,
+		SkillIDs:              append([]string(nil), permissions.Skills.IDs...),
 	}
+	// Group-level drawing permission still controls image generation surfaces.
+	// Keep that restriction as an explicit group deny so the workspace-level
+	// AllowDrawing switch can remain independent from ordinary tool calling.
+	if !permissions.AllowDrawing {
+		policy.DenyIDs = []string{"builtin:image_generate", "hosted:image_generation"}
+	}
+	return policy
+}
+
+// workspaceToolAccessPolicy translates the workspace-wide capability switches
+// into the same policy shape used by the model/group filters. The API normally
+// supplies an already-folded policy, but the orchestrator repeats this fold for
+// non-HTTP callers and for regenerated/fallback turns. AllowToolCalling is the
+// sole workspace gate for tool execution; AllowDrawing independently governs
+// direct image-model turns.
+func workspaceToolAccessPolicy(policy store.WorkspacePolicy) *ToolAccessPolicy {
+	out := &ToolAccessPolicy{
+		Mode:                  store.ResourceAccessAll,
+		AllowToolCalling:      policy.AllowToolCalling,
+		ToolCallingConfigured: true,
+		AllowMCP:              policy.AllowMCP,
+		MCPConfigured:         true,
+		AllowDrawing:          policy.AllowDrawing,
+		AllowMemory:           true,
+		AllowSkills:           policy.AllowSkills,
+		SkillMode:             store.ResourceAccessAll,
+	}
+	if !policy.AllowSkills {
+		out.SkillMode = store.ResourceAccessNone
+	}
+	return out
 }
 
 func intersectResourceAccess(
@@ -699,15 +780,23 @@ func intersectToolAccessPolicies(requested, current *ToolAccessPolicy) *ToolAcce
 	skillMode, skillIDs := intersectResourceAccess(requested.SkillMode, requested.SkillIDs, current.SkillMode, current.SkillIDs)
 	denyIDs := append([]string(nil), requested.DenyIDs...)
 	denyIDs = append(denyIDs, current.DenyIDs...)
+	allowToolCalling := (!requested.ToolCallingConfigured || requested.AllowToolCalling) &&
+		(!current.ToolCallingConfigured || current.AllowToolCalling)
+	allowMCP := (!requested.MCPConfigured || requested.AllowMCP) &&
+		(!current.MCPConfigured || current.AllowMCP)
 	return &ToolAccessPolicy{
-		Mode:         mode,
-		IDs:          ids,
-		AllowDrawing: requested.AllowDrawing && current.AllowDrawing,
-		AllowMemory:  requested.AllowMemory && current.AllowMemory,
-		AllowSkills:  requested.AllowSkills && current.AllowSkills && skillMode != store.ResourceAccessNone,
-		SkillMode:    skillMode,
-		SkillIDs:     skillIDs,
-		DenyIDs:      denyIDs,
+		Mode:                  mode,
+		IDs:                   ids,
+		AllowToolCalling:      allowToolCalling,
+		ToolCallingConfigured: requested.ToolCallingConfigured || current.ToolCallingConfigured,
+		AllowMCP:              allowMCP,
+		MCPConfigured:         requested.MCPConfigured || current.MCPConfigured,
+		AllowDrawing:          requested.AllowDrawing && current.AllowDrawing,
+		AllowMemory:           requested.AllowMemory && current.AllowMemory,
+		AllowSkills:           requested.AllowSkills && current.AllowSkills && skillMode != store.ResourceAccessNone,
+		SkillMode:             skillMode,
+		SkillIDs:              skillIDs,
+		DenyIDs:               denyIDs,
 	}
 }
 
@@ -744,6 +833,13 @@ func adminSkillIDSet(policy *ToolAccessPolicy) map[string]bool {
 }
 
 func userSkillAccessPolicyAllows(policy *ToolAccessPolicy, skill store.UserSkill) bool {
+	// Shared workspace skills are checked against the workspace policy and
+	// member capability before selection is resolved. They must not be treated
+	// as personal catalog copies here: a personal selected/none policy is an
+	// administrator-catalog ceiling for private rows only.
+	if strings.TrimSpace(skill.WorkspaceID) != "" {
+		return true
+	}
 	if policy == nil || policy.SkillMode == "" || policy.SkillMode == store.ResourceAccessAll {
 		return true
 	}
@@ -755,6 +851,48 @@ func validateUserSkillAccessPolicy(policy *ToolAccessPolicy, skills []store.User
 		if !userSkillAccessPolicyAllows(policy, skill) {
 			return store.ErrInvalidUserSkillSelection
 		}
+	}
+	return nil
+}
+
+// validateWorkspaceUserSkillAccess enforces the member-level and workspace-
+// wide skill-use switches for direct orchestrator callers. HTTP handlers run a
+// similar check before entering Run, but regenerated turns and internal jobs
+// can bypass that boundary. Empty selections are intentionally allowed: a
+// member who cannot use skills must still be able to send an ordinary message.
+func validateWorkspaceUserSkillAccess(
+	ctx context.Context,
+	db *sql.DB,
+	workspaceID string,
+	userID string,
+	ids []string,
+) error {
+	if strings.TrimSpace(workspaceID) == "" || strings.TrimSpace(userID) == "" {
+		return nil
+	}
+	hasSelection := false
+	for _, id := range ids {
+		if strings.TrimSpace(id) != "" {
+			hasSelection = true
+			break
+		}
+	}
+	if !hasSelection {
+		return nil
+	}
+	member, err := store.GetWorkspaceForMember(ctx, db, workspaceID, userID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return store.ErrInvalidUserSkillSelection
+		}
+		return fmt.Errorf("resolve workspace skill permission: %w", err)
+	}
+	policy, err := store.GetWorkspacePolicy(ctx, db, workspaceID)
+	if err != nil {
+		return fmt.Errorf("resolve workspace skill policy: %w", err)
+	}
+	if !member.CanUseSkills || !policy.AllowSkills {
+		return store.ErrInvalidUserSkillSelection
 	}
 	return nil
 }
@@ -778,7 +916,15 @@ func filterMCPToolsByAccess(defs []MCPToolDef, policy *ToolAccessPolicy) []MCPTo
 	}
 	out := make([]MCPToolDef, 0, len(defs))
 	for _, definition := range defs {
-		if toolAccessPolicyAllows(policy, "mcp:"+definition.ServerID) {
+		id := "mcp:" + definition.ServerID
+		if definition.UserOwned {
+			id = "usermcp:" + definition.ServerID
+		}
+		// OwnerExempt only bypasses the member/group Mode/IDs selection. Hard
+		// workspace denies (DenyIDs, AllowToolCalling, AllowMCP) are checked first
+		// and always win.
+		if toolAccessPolicyHardAllows(policy, id) &&
+			(definition.OwnerExempt || toolAccessPolicyAllows(policy, id)) {
 			out = append(out, definition)
 		}
 	}
@@ -799,6 +945,64 @@ func filterHostedToolsByAccess(names []string, requests []json.RawMessage, polic
 		outRequests = append(outRequests, requests[index])
 	}
 	return outNames, outRequests
+}
+
+// filterBuiltinToolsByWorkspacePolicy applies the database-backed workspace
+// allowlist to declarations built by direct orchestrator callers. HTTP handlers
+// normally fold this into ToolAccessPolicy first, but the raw policy is kept
+// here because a transparent fallback (and other internal callers) must not be
+// able to reintroduce a tool that the workspace administrator removed.
+func filterBuiltinToolsByWorkspacePolicy(defs []ToolDef, policy *store.WorkspacePolicy) []ToolDef {
+	if policy == nil {
+		return defs
+	}
+	out := make([]ToolDef, 0, len(defs))
+	for _, definition := range defs {
+		if !policy.ToolDeniedByPolicy("builtin:" + definition.Name) {
+			out = append(out, definition)
+		}
+	}
+	return out
+}
+
+func filterHostedToolsByWorkspacePolicy(names []string, requests []json.RawMessage, policy *store.WorkspacePolicy) ([]string, []json.RawMessage) {
+	if policy == nil {
+		return names, requests
+	}
+	outNames := make([]string, 0, len(names))
+	outRequests := make([]json.RawMessage, 0, len(requests))
+	for index, name := range names {
+		if index >= len(requests) || policy.ToolDeniedByPolicy("hosted:"+name) {
+			continue
+		}
+		outNames = append(outNames, name)
+		outRequests = append(outRequests, requests[index])
+	}
+	return outNames, outRequests
+}
+
+// Workspace MCP allowlists describe administrator-owned servers. User-owned
+// servers are selected explicitly by the member and are instead governed by
+// the workspace-wide tool/MCP capability switches plus the member/runtime
+// checks. This distinction prevents an administrator's server-id list from
+// accidentally denying a member's private or workspace-scoped MCP.
+func filterMCPToolsByWorkspacePolicy(defs []MCPToolDef, policy *store.WorkspacePolicy) []MCPToolDef {
+	if policy == nil {
+		return defs
+	}
+	out := make([]MCPToolDef, 0, len(defs))
+	for _, definition := range defs {
+		if definition.UserOwned {
+			if policy.AllowToolCalling && policy.AllowMCP {
+				out = append(out, definition)
+			}
+			continue
+		}
+		if !policy.ToolDeniedByPolicy("mcp:" + definition.ServerID) {
+			out = append(out, definition)
+		}
+	}
+	return out
 }
 
 func selectedToolIDSet(ids []string, configured bool) map[string]bool {
@@ -833,7 +1037,11 @@ func filterMCPToolsBySelection(defs []MCPToolDef, selected map[string]bool) []MC
 	}
 	out := make([]MCPToolDef, 0, len(defs))
 	for _, definition := range defs {
-		if selected["mcp:"+definition.ServerID] {
+		id := "mcp:" + definition.ServerID
+		if definition.UserOwned {
+			id = "usermcp:" + definition.ServerID
+		}
+		if selected[id] {
 			out = append(out, definition)
 		}
 	}
@@ -864,12 +1072,12 @@ func filterHostedToolsBySelection(names []string, requests []json.RawMessage, se
 	return outNames, outRequests
 }
 
-func (o *Orchestrator) listMCPTools(modelID string) []MCPToolDef {
+func (o *Orchestrator) listMCPTools(modelID string, userID string, workspaceID string) []MCPToolDef {
 	registry, ok := o.tools.(mcpToolRegistry)
 	if !ok {
 		return nil
 	}
-	return registry.ListMCP(modelID)
+	return registry.ListMCP(modelID, userID, workspaceID)
 }
 
 func toolDefsContain(defs []ToolDef, name string) bool {
@@ -1662,15 +1870,81 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 	if err != nil {
 		return base, nil, "", err
 	}
+	if !m.Enabled {
+		return base, nil, "", errors.New("fallback model is disabled")
+	}
+	if m.Kind != "chat" {
+		return base, nil, "", errors.New("fallback model is not a chat model")
+	}
+	var fallbackWorkspacePolicy *store.WorkspacePolicy
+	// A TTFT fallback may begin seconds after the primary request was assembled.
+	// Re-read the caller's group policy here instead of relying only on the
+	// request-start snapshot: otherwise a group revocation can remove an official
+	// or teammate-owned MCP service while its declaration/schema is still sent to
+	// the fallback provider. Intersecting preserves every earlier restriction and
+	// only narrows the request. Lookup failures fail closed before any fallback
+	// provider call.
+	fallbackAccessPolicy := base.ToolAccessPolicy
+	if strings.TrimSpace(base.UserID) != "" {
+		currentPermissions, permissionsErr := store.UserGroupPermissionsForUser(ctx, o.db, base.UserID)
+		if permissionsErr != nil {
+			return base, nil, "", fmt.Errorf("resolve fallback user-group permissions: %w", permissionsErr)
+		}
+		fallbackAccessPolicy = intersectToolAccessPolicies(
+			base.ToolAccessPolicy, groupToolAccessPolicy(currentPermissions),
+		)
+	}
+	if strings.TrimSpace(base.WorkspaceID) != "" {
+		policy, policyErr := store.GetWorkspacePolicy(ctx, o.db, base.WorkspaceID)
+		if policyErr != nil {
+			return base, nil, "", fmt.Errorf("resolve fallback workspace tool policy: %w", policyErr)
+		}
+		if !policy.ModelAllowedByPolicy(m.ID) {
+			return base, nil, "", errors.New("fallback model is not allowed in this workspace")
+		}
+		member, memberErr := store.GetWorkspaceForMember(ctx, o.db, base.WorkspaceID, base.UserID)
+		if memberErr != nil {
+			if errors.Is(memberErr, store.ErrNotFound) {
+				return base, nil, "", errors.New("fallback user is no longer a workspace member")
+			}
+			return base, nil, "", fmt.Errorf("resolve fallback workspace member permissions: %w", memberErr)
+		}
+		if member == nil {
+			return base, nil, "", errors.New("fallback user is no longer a workspace member")
+		}
+		// Match the primary Run path: workspace member capabilities are an
+		// independent ceiling beneath the workspace-wide switches. Re-read them
+		// here because a TTFT fallback may start after an administrator revoked MCP
+		// or skill use from the member who initiated the primary request.
+		if !member.CanUseMCP {
+			policy.AllowMCP = false
+		}
+		if !member.CanUseSkills {
+			policy.AllowSkills = false
+		}
+		fallbackWorkspacePolicy = &policy
+		// Re-intersect the request snapshot with the policy currently committed in
+		// the database. This closes the revocation window for a fallback that starts
+		// after an administrator changes the workspace capabilities. Start from the
+		// already revalidated policy so this workspace intersection cannot discard a
+		// user-group revocation read a few lines above.
+		fallbackAccessPolicy = intersectToolAccessPolicies(
+			fallbackAccessPolicy, workspaceToolAccessPolicy(policy),
+		)
+	}
 	ch, err := store.GetChannel(ctx, o.db, m.ChannelID)
 	if err != nil {
 		return base, nil, "", err
+	}
+	if !ch.Enabled {
+		return base, nil, "", errors.New("fallback channel is disabled")
 	}
 	prov, err := o.reg.Get(ch.Type)
 	if err != nil {
 		return base, nil, "", err
 	}
 	req := base // shallow copy; slices (history/tools/…) are read-only during the stream
+	req.ToolAccessPolicy = fallbackAccessPolicy
 	req.Model = ModelInfo{
 		ID: m.ID, RequestID: m.RequestID, Provider: ch.Type, Vision: m.Vision,
 		BaseURL: ch.BaseURL, APIKey: ch.APIKey, APIFormat: ch.APIFormat,
@@ -1692,7 +1966,7 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 	// over the unified collection. Otherwise, a turn whose policy enabled tools is
 	// rebuilt from the fallback model's own complete administrator configuration.
 	baseToolsEnabled := base.ToolsEnabled || len(base.Tools) > 0 || len(base.OfficialToolRequests) > 0
-	req.ToolsEnabled = baseToolsEnabled && fallbackToolMode != "none"
+	req.ToolsEnabled = baseToolsEnabled && fallbackToolMode != "none" && toolCallingAllowed(fallbackAccessPolicy)
 	req.Tools = nil
 	req.SystemTools = nil
 	req.OfficialToolNames = nil
@@ -1700,7 +1974,8 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 	req.ToolModePrompt = false
 	if req.ToolsEnabled {
 		selectedTools := selectedToolIDSet(base.SelectedToolIDs, base.SelectedToolsConfigured)
-		builtinDefs := filterBuiltinToolsByAccess(o.filterDisabledTools(o.tools.List(m.ID)), base.ToolAccessPolicy)
+		builtinDefs := filterBuiltinToolsByAccess(o.filterDisabledTools(o.tools.List(m.ID)), fallbackAccessPolicy)
+		builtinDefs = filterBuiltinToolsByWorkspacePolicy(builtinDefs, fallbackWorkspacePolicy)
 		if !store.MemoryEnabledForUser(ctx, o.db, base.UserID) {
 			builtinDefs = filterToolDefsByName(builtinDefs, map[string]bool{"save_memory": true})
 		}
@@ -1712,7 +1987,10 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 		} else {
 			builtinDefs = filterModelBuiltinTools(builtinDefs, fallbackBuiltinTools)
 		}
-		mcpDefs := filterMCPToolsByAccess(o.listMCPTools(m.ID), base.ToolAccessPolicy)
+		mcpDefs := filterMCPToolsByAccess(
+			o.listMCPTools(m.ID, base.UserID, base.WorkspaceID), fallbackAccessPolicy,
+		)
+		mcpDefs = filterMCPToolsByWorkspacePolicy(mcpDefs, fallbackWorkspacePolicy)
 		if base.SelectedToolsConfigured {
 			mcpDefs = filterMCPToolsBySelection(mcpDefs, selectedTools)
 		} else {
@@ -1722,7 +2000,10 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 		req.SystemTools = toolDefNameSet(builtinDefs)
 		req.OfficialToolNames, req.OfficialToolRequests = configuredOfficialToolRequests(m.OfficialTools)
 		req.OfficialToolNames, req.OfficialToolRequests = filterHostedToolsByAccess(
-			req.OfficialToolNames, req.OfficialToolRequests, base.ToolAccessPolicy,
+			req.OfficialToolNames, req.OfficialToolRequests, fallbackAccessPolicy,
+		)
+		req.OfficialToolNames, req.OfficialToolRequests = filterHostedToolsByWorkspacePolicy(
+			req.OfficialToolNames, req.OfficialToolRequests, fallbackWorkspacePolicy,
 		)
 		if base.SelectedToolsConfigured {
 			req.OfficialToolNames, req.OfficialToolRequests = filterHostedToolsBySelection(
@@ -1777,8 +2058,8 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 		}
 		fallbackOpts.ToolNames = toolDefNames(req.Tools)
 		fallbackOpts.SkillToolAvailable = toolDefsContain(req.Tools, "use_skill")
-		if base.ToolAccessPolicy != nil {
-			fallbackOpts.SkillMode = base.ToolAccessPolicy.SkillMode
+		if fallbackAccessPolicy != nil {
+			fallbackOpts.SkillMode = fallbackAccessPolicy.SkillMode
 		}
 		if !toolDefsContain(req.Tools, "python_execute") {
 			fallbackOpts.SandboxFiles = nil
@@ -1790,14 +2071,14 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 		fallbackOpts.Skills = nil
 		fallbackOpts.SkillsFull = nil
 		selectedTools := selectedToolIDSet(base.SelectedToolIDs, base.SelectedToolsConfigured)
-		fallbackAllowsSkills := toolAccessPolicyAllows(base.ToolAccessPolicy, "builtin:use_skill")
+		fallbackAllowsSkills := toolAccessPolicyAllows(fallbackAccessPolicy, "builtin:use_skill")
 		if base.SelectedToolsConfigured {
 			fallbackAllowsSkills = fallbackAllowsSkills && selectedTools["builtin:use_skill"]
 		} else {
 			fallbackAllowsSkills = fallbackAllowsSkills && (fallbackBuiltinTools == nil || fallbackBuiltinTools["use_skill"])
 		}
 		if fallbackOpts.SkillsAllowed && fallbackAllowsSkills && !globalDisabledTools["use_skill"] {
-			fallbackOpts.Skills, fallbackOpts.SkillsFull = loadEnabledModelSkills(ctx, o.db, m.ID, base.ToolAccessPolicy)
+			fallbackOpts.Skills, fallbackOpts.SkillsFull = loadEnabledModelSkills(ctx, o.db, m.ID, fallbackAccessPolicy)
 		}
 		fallbackOpts.SkillsAllowed = fallbackOpts.SkillsAllowed && fallbackAllowsSkills && !globalDisabledTools["use_skill"]
 
@@ -2298,6 +2579,44 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		return nil, fmt.Errorf("resolve current user-group permissions: %w", err)
 	}
 	req.ToolAccessPolicy = intersectToolAccessPolicies(req.ToolAccessPolicy, groupToolAccessPolicy(currentPermissions))
+	workspaceToolsAllowed := true
+	var workspacePolicy *store.WorkspacePolicy
+	if strings.TrimSpace(conv.WorkspaceID) != "" {
+		policy, policyErr := store.GetWorkspacePolicy(ctx, o.db, conv.WorkspaceID)
+		if policyErr != nil {
+			// A missing policy row is handled by the store as permissive; any other
+			// lookup error must fail closed before a model/provider call.
+			return nil, fmt.Errorf("resolve workspace tool policy: %w", policyErr)
+		}
+		workspacePolicy = &policy
+		// Member capability switches are a second ceiling inside a workspace.
+		// Keep them in the orchestrator policy as well as the registry's final
+		// execution check so a stale/direct caller cannot even declare MCP or the
+		// use_skill function after an administrator revokes the capability.
+		workspaceMember, memberErr := store.GetWorkspaceForMember(ctx, o.db, conv.WorkspaceID, req.UserID)
+		if memberErr != nil {
+			if errors.Is(memberErr, store.ErrNotFound) {
+				return nil, store.ErrForbidden
+			}
+			return nil, fmt.Errorf("resolve workspace member tool permissions: %w", memberErr)
+		}
+		if workspaceMember == nil {
+			return nil, store.ErrForbidden
+		}
+		if !workspaceMember.CanUseMCP {
+			policy.AllowMCP = false
+		}
+		if !workspaceMember.CanUseSkills {
+			policy.AllowSkills = false
+		}
+		workspaceToolsAllowed = policy.AllowToolCalling
+		req.ToolAccessPolicy = intersectToolAccessPolicies(
+			req.ToolAccessPolicy, workspaceToolAccessPolicy(policy),
+		)
+		// Keep the member-derived capability changes for the direct declaration
+		// filters below as well as the ToolAccessPolicy intersection.
+		workspacePolicy = &policy
+	}
 	if !currentPermissions.AllowKnowledgeBases &&
 		(strings.TrimSpace(conv.ProjectID) != "" || len(conversationKnowledgeBaseSelection(conv, req)) > 0) {
 		return nil, ErrKnowledgeBasePermission
@@ -2337,6 +2656,9 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if !model.Enabled {
 		return nil, errors.New("model is disabled")
 	}
+	if workspacePolicy != nil && !workspacePolicy.ModelAllowedByPolicy(model.ID) {
+		return nil, errors.New("model is not allowed in this workspace")
+	}
 	if model.Kind == "image" && req.ToolAccessPolicy != nil && !req.ToolAccessPolicy.AllowDrawing {
 		return nil, ErrDrawingPermission
 	}
@@ -2369,6 +2691,21 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if req.Fast || req.Mode == ModeDeepResearch {
 		turnToolMode = ToolModeEnabled
 	}
+	// Fast and Deep Research normally force tools on, but a workspace-wide tool
+	// shutdown is a harder capability boundary and must win over those mode
+	// defaults. This also normalizes forged requests before any provider setup.
+	if !workspaceToolsAllowed {
+		turnToolMode = ToolModeDisabled
+		// Deep Research owns an internal search/fetch pipeline and therefore is
+		// itself a tool-capability mode. Do not leave the mode set after a
+		// workspace administrator has disabled tool calling: otherwise the
+		// planner/writer task models would still run and the research engine could
+		// emit a misleading research panel despite having no permitted tools.
+		req.Mode = ""
+		// ForceWebSearch is the no-tools fallback and executes the search registry
+		// directly. It must not become a back door around the workspace switch.
+		req.ForceWebSearch = false
+	}
 	req.ToolMode = turnToolMode
 	// Per-user hosted-tool selections were retired. Ignore the compatibility
 	// field for every mode; administrator model configuration is authoritative.
@@ -2397,6 +2734,9 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	selectedUserSkills := []store.UserSkill{}
 	normalizedSelectedUserSkillIDs := []string{}
 	if !req.ReuseExistingUserMessage {
+		if err := validateWorkspaceUserSkillAccess(ctx, o.db, conv.WorkspaceID, req.UserID, req.SelectedUserSkillIDs); err != nil {
+			return nil, err
+		}
 		selectedUserSkills, normalizedSelectedUserSkillIDs, err = store.ResolveUserSkillSelectionScoped(ctx, o.db, req.UserID, conv.WorkspaceID, req.SelectedUserSkillIDs, true)
 		if err != nil {
 			return nil, err
@@ -2476,6 +2816,9 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			// a shared conversation must never read another user's private skills.
 			var persistedIDs []string
 			_ = json.Unmarshal(existing.SelectedUserSkillIDs, &persistedIDs)
+			if err := validateWorkspaceUserSkillAccess(ctx, o.db, conv.WorkspaceID, req.UserID, persistedIDs); err != nil {
+				return nil, err
+			}
 			selectedUserSkills, normalizedSelectedUserSkillIDs, err = store.ResolveUserSkillSelectionScoped(ctx, o.db, req.UserID, conv.WorkspaceID, persistedIDs, false)
 			if err != nil {
 				return nil, err
@@ -2783,6 +3126,12 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if toolMode == "" {
 		toolMode = "native"
 	}
+	if !toolCallingAllowed(req.ToolAccessPolicy) {
+		// A workspace/group tool-calling shutdown is stronger than the model's
+		// configured mode (including prompt-mode and automatic routing).
+		toolMode = "none"
+		req.NoTools = true
+	}
 	hostedToolNames := []string(nil)
 	hostedToolRequests := []json.RawMessage(nil)
 	toolDefs := []ToolDef{}
@@ -2790,10 +3139,14 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if toolMode != "none" {
 		hostedToolNames, hostedToolRequests = configuredOfficialToolRequests(model.OfficialTools)
 		hostedToolNames, hostedToolRequests = filterHostedToolsByAccess(hostedToolNames, hostedToolRequests, req.ToolAccessPolicy)
+		hostedToolNames, hostedToolRequests = filterHostedToolsByWorkspacePolicy(
+			hostedToolNames, hostedToolRequests, workspacePolicy,
+		)
 		if req.SelectedToolsConfigured {
 			hostedToolNames, hostedToolRequests = filterHostedToolsBySelection(hostedToolNames, hostedToolRequests, selectedTools)
 		}
 		builtinDefs := filterBuiltinToolsByAccess(o.filterDisabledTools(o.tools.List(model.ID)), req.ToolAccessPolicy)
+		builtinDefs = filterBuiltinToolsByWorkspacePolicy(builtinDefs, workspacePolicy)
 		if !memoryEnabled {
 			builtinDefs = filterToolDefsByName(builtinDefs, map[string]bool{"save_memory": true})
 		}
@@ -2807,7 +3160,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		} else {
 			builtinDefs = filterModelBuiltinTools(builtinDefs, builtinTools)
 		}
-		mcpDefs := filterMCPToolsByAccess(o.listMCPTools(model.ID), req.ToolAccessPolicy)
+		mcpDefs := filterMCPToolsByAccess(
+			o.listMCPTools(model.ID, req.UserID, conv.WorkspaceID), req.ToolAccessPolicy,
+		)
+		mcpDefs = filterMCPToolsByWorkspacePolicy(mcpDefs, workspacePolicy)
 		if req.SelectedToolsConfigured {
 			mcpDefs = filterMCPToolsBySelection(mcpDefs, selectedTools)
 		} else {
@@ -3047,7 +3403,9 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// rides the same message-layer injection as RAG. Citations join the turn's
 	// source list. Kept OUT of formatRAGContext so they aren't double-wrapped as
 	// KB context.
-	if req.NoTools && req.ForceWebSearch && (builtinTools == nil || builtinTools[toolnames.AivoryWebSearch]) {
+	if req.NoTools && req.ForceWebSearch &&
+		(toolAccessPolicyAllows(req.ToolAccessPolicy, "builtin:"+toolnames.AivoryWebSearch)) &&
+		(builtinTools == nil || builtinTools[toolnames.AivoryWebSearch]) {
 		// Offset the search citations past any KB snippets already collected this
 		// turn so the two source sets don't both start at [1].
 		searchCtx := withTaskBillingMessageID(ctx, assistantMsg.ID)
@@ -3508,6 +3866,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		SelectedToolIDs:         append([]string(nil), req.SelectedToolIDs...),
 		SelectedToolsConfigured: req.SelectedToolsConfigured,
 		ToolAccessPolicy:        req.ToolAccessPolicy,
+		WorkspaceID:             conv.WorkspaceID,
 		ToolsEnabled:            toolsEnabled,
 		Fast:                    fastMode,
 		ToolModePrompt:          toolMode == "prompt" && len(toolDefs) > 0,

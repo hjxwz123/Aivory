@@ -45,6 +45,7 @@ import { initials } from '@/components/ui/avatar.utils'
 import { useAuth } from '@/store/auth'
 import { useWorkspaces } from '@/store/workspaces'
 import { userCan } from '@/lib/user-permissions'
+import { workspaceCapabilitiesForScope } from '@/lib/workspace-permissions'
 import { Switch } from '@/components/ui/switch'
 import { subscribeAccessInvalidation } from '@/lib/access-events'
 import { knowledgeBaseErrorText, knowledgeBaseOperationErrorText } from '@/lib/knowledge-base-errors'
@@ -59,11 +60,41 @@ export default function KnowledgeBaseDetail() {
   const navigate = useNavigate()
   const user = useAuth((s) => s.user)
   const [kb, setKB] = useState<ApiKnowledgeBase | null>(null)
+  const activeWorkspaceId = useWorkspaces((s) => s.activeId)
+  // Before the KB is hydrated, use the active scope to prefetch its policy.
+  // Once the row arrives, an explicitly personal KB must stay personal even if
+  // the user currently has a workspace selected; otherwise a workspace upload
+  // policy could hide or expose controls on the wrong library.
+  const kbWorkspaceId = kb
+    ? (kb.workspace_id || undefined)
+    : (activeWorkspaceId || undefined)
+  const workspacePolicy = useWorkspaces((s) =>
+    kbWorkspaceId ? s.policies[kbWorkspaceId] : undefined,
+  )
+  const loadWorkspacePolicy = useWorkspaces((s) => s.loadPolicy)
+  const workspacesLoaded = useWorkspaces((s) => s.loaded)
+  const workspacePolicyLoading = useWorkspaces((s) =>
+    kbWorkspaceId ? s.policyLoading[kbWorkspaceId] === true : false,
+  )
+  const workspaceSwitching = useWorkspaces((s) => s.switching)
+  const workspacePolicyError = useWorkspaces((s) =>
+    kbWorkspaceId ? s.policyErrors[kbWorkspaceId] : null,
+  )
+  const workspaceCaps = workspaceCapabilitiesForScope(kbWorkspaceId, workspacePolicy, {
+    workspacesLoaded,
+    policyLoading: workspacePolicyLoading,
+    switching: workspaceSwitching,
+    policyError: workspacePolicyError,
+  })
+  const workspacePolicyPending = Boolean(
+    kbWorkspaceId && !workspacePolicy && (!workspacesLoaded || workspacePolicyLoading || workspaceSwitching),
+  )
+  const canUseWorkspaceKnowledgeBases = workspaceCaps.knowledgeBases
   // §workspace RBAC: visibility management needs the creator id or admin role.
   const workspaceRole = useWorkspaces((s) => (kb?.workspace_id ? s.workspaces.find((w) => w.id === kb.workspace_id)?.role : undefined))
   const [kbVisibilityBusy, setKBVisibilityBusy] = useState(false)
   async function toggleKBVisibility() {
-    if (!kb || kbVisibilityBusy) return
+    if (!kb || !canUseKnowledgeBases || kbVisibilityBusy) return
     setKBVisibilityBusy(true)
     try {
       const updated = await kbsApi.update(kb.id, { is_public: kb.is_public === false })
@@ -77,9 +108,10 @@ export default function KnowledgeBaseDetail() {
       setKBVisibilityBusy(false)
     }
   }
-  const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases')
+  const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases') && canUseWorkspaceKnowledgeBases
   const canShareKnowledgeBases = userCan(user, 'allow_knowledge_base_sharing')
-  const canUploadFiles = userCan(user, 'allow_file_upload')
+  const canUploadFiles = userCan(user, 'allow_file_upload') &&
+    workspaceCaps.fileUpload
   const [docs, setDocs] = useState<ApiDocument[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
@@ -122,7 +154,7 @@ export default function KnowledgeBaseDetail() {
   }, [search])
 
   async function deleteKB() {
-    if (!id || deletingKBRef.current) return
+    if (!id || !canUseKnowledgeBases || deletingKBRef.current) return
     deletingKBRef.current = true
     setDeletingKB(true)
     try {
@@ -210,6 +242,17 @@ export default function KnowledgeBaseDetail() {
     }
   }, [debouncedSearch, id, t, uploaderID])
 
+  // A direct detail link can resolve a KB outside the currently selected
+  // workspace. Hydrate that workspace's policy once the KB identity is known;
+  // the capability helper remains permissive while the request is in flight to
+  // match the rest of the workspace UI's rollout-compatible behavior.
+  useEffect(() => {
+    if (!kbWorkspaceId) return
+    const state = useWorkspaces.getState()
+    if (state.policies[kbWorkspaceId] || state.policyLoading[kbWorkspaceId]) return
+    void loadWorkspacePolicy(kbWorkspaceId)
+  }, [kbWorkspaceId, loadWorkspacePolicy])
+
   const handleOperationError = useCallback((error: unknown, fallback: string) => {
     toast.error(knowledgeBaseOperationErrorText(t, error, fallback))
     if (!(error instanceof ApiError) || (error.status !== 403 && error.status !== 404)) return
@@ -241,13 +284,20 @@ export default function KnowledgeBaseDetail() {
     () =>
       subscribeAccessInvalidation((event) => {
         if (event.kind === 'account' || event.kind === 'workspace' || event.kind === 'knowledge-base') {
+          if (workspacePolicyPending) return
           void load()
         }
       }),
-    [load],
+    [load, workspacePolicyPending],
   )
 
   useEffect(() => {
+    if (workspacePolicyPending) {
+      loadEpochRef.current += 1
+      setLoading(true)
+      setLoadError('')
+      return
+    }
     if (!canUseKnowledgeBases) {
       setLoading(false)
       setKB(null)
@@ -256,7 +306,7 @@ export default function KnowledgeBaseDetail() {
       return
     }
     void load()
-  }, [canUseKnowledgeBases, load])
+  }, [canUseKnowledgeBases, load, workspacePolicyPending])
 
   useEffect(() => {
     if (!canUseKnowledgeBases || !canUploadFiles || !kb?.can_upload) {
@@ -407,7 +457,7 @@ export default function KnowledgeBaseDetail() {
   )
 
   async function remove(d: ApiDocument) {
-    if (!id || busyDocRef.current) return
+    if (!id || !canUseKnowledgeBases || busyDocRef.current) return
     const operation = { id: d.id, action: 'delete' as const }
     const operationEpoch = ++docOperationEpochRef.current
     busyDocRef.current = operation
@@ -429,7 +479,7 @@ export default function KnowledgeBaseDetail() {
   }
 
   async function retry(d: ApiDocument) {
-    if (!id || busyDocRef.current || d.status !== 'failed') return
+    if (!id || !canUseKnowledgeBases || busyDocRef.current || d.status !== 'failed') return
     const operation = { id: d.id, action: 'retry' as const }
     const operationEpoch = ++docOperationEpochRef.current
     busyDocRef.current = operation
@@ -460,7 +510,7 @@ export default function KnowledgeBaseDetail() {
 
   async function saveRename() {
     const filename = renameFilename.trim()
-    if (!id || !renameDoc || !filename || busyDocRef.current) return
+    if (!id || !canUseKnowledgeBases || !renameDoc || !filename || busyDocRef.current) return
     const operation = { id: renameDoc.id, action: 'rename' as const }
     const operationEpoch = ++docOperationEpochRef.current
     busyDocRef.current = operation
@@ -483,13 +533,29 @@ export default function KnowledgeBaseDetail() {
     }
   }
 
+  if (workspacePolicyPending) {
+    return (
+      <div className="flex-1 grid place-items-center p-10">
+        <div className="w-full max-w-md space-y-3" role="status" aria-label={t('common:common.loading')}>
+          <Skeleton className="h-6 w-2/5" />
+          <Skeleton className="h-24 w-full" />
+          <Skeleton className="h-12 w-full" />
+        </div>
+      </div>
+    )
+  }
+
   if (!canUseKnowledgeBases) {
     return (
       <div className="flex-1 grid place-items-center p-10">
         <EmptyState
           icon={<FileText size={20} aria-hidden />}
           title={t('kb:groupPermissionTitle', { defaultValue: 'Knowledge bases unavailable' })}
-          description={t('kb:groupPermissionRequired', { defaultValue: 'Your user group does not have knowledge-base access.' })}
+          description={
+            canUseWorkspaceKnowledgeBases
+              ? t('kb:groupPermissionRequired', { defaultValue: 'Your user group does not have knowledge-base access.' })
+              : t('kb:workspaceDisabledBody', { defaultValue: 'The workspace administrator has disabled knowledge bases.' })
+          }
           action={<Button onClick={() => navigate('/')}>{t('common:actions.back')}</Button>}
         />
       </div>

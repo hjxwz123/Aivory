@@ -831,7 +831,10 @@
       "addHeader": "Add header",
       "removeHeader": "Remove header {{index}}",
       "showHeader": "Show header value",
-      "hideHeader": "Hide header value"
+      "hideHeader": "Hide header value",
+      "showHeaderL10n": "Show value",
+      "hideHeaderL10n": "Hide value",
+      "removeHeaderL10n": "Remove header {{index}}"
     },
     "status": {
       "connected": "Connected",

@@ -104,16 +104,18 @@ func (o *Orchestrator) runImageTurn(
 	var mu sync.Mutex
 	artifacts := []ArtifactRef{}
 	tc := &ToolContext{
-		UserID:             req.UserID,
-		WorkspaceID:        conv.WorkspaceID,
-		ConvID:             conv.ID,
-		MessageID:          assistantMsg.ID,
-		ModelID:            model.ID,
-		ImageModelID:       model.ID,
-		ImageRequestParams: imageRequestParams,
-		ImageInputIDs:      inputImageIDs,
-		ImageUserPrompt:    req.UserText,
-		DB:                 o.db,
+		UserID:               req.UserID,
+		WorkspaceID:          conv.WorkspaceID,
+		ConvID:               conv.ID,
+		MessageID:            assistantMsg.ID,
+		ModelID:              model.ID,
+		ImageModelID:         model.ID,
+		DirectImageTurn:      true,
+		ImageRequestParams:   imageRequestParams,
+		ImageInputIDs:        inputImageIDs,
+		ImageUserPrompt:      req.UserText,
+		WorkspaceAccessCheck: req.WorkspaceAccessCheck,
+		DB:                   o.db,
 		// The orchestrator already ran the credit-aware checkImageQuota above, so
 		// the tool must not also hard-cap this turn (§4.20).
 		SkipImageQuota: true,
@@ -125,6 +127,9 @@ func (o *Orchestrator) runImageTurn(
 		},
 		counts: map[string]int{},
 	}
+	// Direct image turns bypass orchToolRunner, so Registry.Run performs the
+	// same WorkspaceAccessCheck pre-flight for this context before any provider
+	// request is made.
 	output, _, err := o.tools.Run(ctx, "image_generate", toolInput, tc)
 
 	// Persist on a DETACHED context: a stop / kill / maxGenDuration cancels `ctx`

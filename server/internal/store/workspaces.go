@@ -67,6 +67,12 @@ type Workspace struct {
 	CanCreateProjects       bool   `json:"can_create_projects"`
 	CanPrivateConversations bool   `json:"can_private_conversations"`
 	CanCreateSkillsPrompts  bool   `json:"can_create_skills_prompts"`
+	CanCreatePrompts        bool   `json:"can_create_prompts"`
+	CanCreateSkills         bool   `json:"can_create_skills"`
+	CanCreateMCP            bool   `json:"can_create_mcp"`
+	CanUsePrompts           bool   `json:"can_use_prompts"`
+	CanUseSkills            bool   `json:"can_use_skills"`
+	CanUseMCP               bool   `json:"can_use_mcp"`
 	CanCreateKB             bool   `json:"can_create_kb"`
 	CanAddKBFiles           bool   `json:"can_add_kb_files"`
 	CanDeleteKBContent      bool   `json:"can_delete_kb_content"`
@@ -81,6 +87,12 @@ type WorkspaceMember struct {
 	CanCreateProjects       bool   `json:"can_create_projects"`
 	CanPrivateConversations bool   `json:"can_private_conversations"`
 	CanCreateSkillsPrompts  bool   `json:"can_create_skills_prompts"`
+	CanCreatePrompts        bool   `json:"can_create_prompts"`
+	CanCreateSkills         bool   `json:"can_create_skills"`
+	CanCreateMCP            bool   `json:"can_create_mcp"`
+	CanUsePrompts           bool   `json:"can_use_prompts"`
+	CanUseSkills            bool   `json:"can_use_skills"`
+	CanUseMCP               bool   `json:"can_use_mcp"`
 	CanCreateKB             bool   `json:"can_create_kb"`
 	CanAddKBFiles           bool   `json:"can_add_kb_files"`
 	CanDeleteKBContent      bool   `json:"can_delete_kb_content"`
@@ -95,10 +107,20 @@ type WorkspaceMemberPermissions struct {
 	CanCreateProjects       bool `json:"can_create_projects"`
 	CanPrivateConversations bool `json:"can_private_conversations"`
 	CanCreateSkillsPrompts  bool `json:"can_create_skills_prompts"`
+	CanCreatePrompts        bool `json:"can_create_prompts"`
+	CanCreateSkills         bool `json:"can_create_skills"`
+	CanCreateMCP            bool `json:"can_create_mcp"`
+	CanUsePrompts           bool `json:"can_use_prompts"`
+	CanUseSkills            bool `json:"can_use_skills"`
+	CanUseMCP               bool `json:"can_use_mcp"`
 	CanCreateKB             bool `json:"can_create_kb"`
 	CanAddKBFiles           bool `json:"can_add_kb_files"`
 	CanDeleteKBContent      bool `json:"can_delete_kb_content"`
 	CanDeleteConversations  bool `json:"can_delete_conversations"`
+	// jsonFields is populated only by UnmarshalJSON. It lets the PATCH store
+	// path distinguish an omitted field from an explicit false without changing
+	// the public response shape or the full-replacement semantics of Go callers.
+	jsonFields map[string]json.RawMessage
 }
 
 // UnmarshalJSON keeps API clients from before can_delete_conversations was
@@ -115,15 +137,149 @@ func (p *WorkspaceMemberPermissions) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*p = WorkspaceMemberPermissions(decoded)
+	legacyCreate, legacyPresent := fields["can_create_skills_prompts"]
+	_, promptCreatePresent := fields["can_create_prompts"]
+	_, skillCreatePresent := fields["can_create_skills"]
+	_, mcpCreatePresent := fields["can_create_mcp"]
+	_, mcpCreateAliasPresent := fields["can_create_mcps"]
+	if !promptCreatePresent {
+		if legacyPresent {
+			if err := json.Unmarshal(legacyCreate, &p.CanCreatePrompts); err != nil {
+				return err
+			}
+		} else {
+			p.CanCreatePrompts = true
+		}
+	}
+	if !skillCreatePresent {
+		if legacyPresent {
+			if err := json.Unmarshal(legacyCreate, &p.CanCreateSkills); err != nil {
+				return err
+			}
+		} else {
+			p.CanCreateSkills = true
+		}
+	}
+	if !mcpCreatePresent {
+		if raw, aliasPresent := fields["can_create_mcps"]; aliasPresent {
+			if err := json.Unmarshal(raw, &p.CanCreateMCP); err != nil {
+				return err
+			}
+		} else if legacyPresent {
+			if err := json.Unmarshal(legacyCreate, &p.CanCreateMCP); err != nil {
+				return err
+			}
+		} else {
+			p.CanCreateMCP = true
+		}
+	}
+	// Usage permissions are intentionally independent from creation. Omitted
+	// fields preserve the historical permissive behavior for older clients.
+	if _, present := fields["can_use_prompts"]; !present {
+		p.CanUsePrompts = true
+	}
+	if _, present := fields["can_use_skills"]; !present {
+		p.CanUseSkills = true
+	}
+	if _, present := fields["can_use_mcp"]; !present {
+		p.CanUseMCP = true
+	}
+	// Keep the legacy aggregate as a non-broadening compatibility mirror. When
+	// no creation fields were supplied at all, the granular defaults above
+	// preserve the historical permissive behavior for an omitted JSON object.
+	// A payload containing only the legacy aggregate has already copied that
+	// value into all three granular fields, so this AND produces the same value.
+	if legacyPresent || promptCreatePresent || skillCreatePresent || mcpCreatePresent || mcpCreateAliasPresent {
+		p.CanCreateSkillsPrompts = p.CanCreatePrompts && p.CanCreateSkills && p.CanCreateMCP
+	} else {
+		p.CanCreateSkillsPrompts = true
+	}
 	if _, present := fields["can_delete_conversations"]; !present {
 		p.CanDeleteConversations = true
 	}
+	p.jsonFields = fields
 	return nil
+}
+
+// mergeOmittedJSONFields turns a JSON-decoded permission payload into the
+// effective full row written by UpdateWorkspaceMemberPermissions. Older
+// clients do not know the granular create/use fields; preserving their current
+// values prevents an unrelated edit from silently widening or narrowing them.
+//
+// The retired aggregate remains usable by old clients. A round-trip of the
+// current aggregate preserves the independent values behind it, while an
+// actual aggregate toggle still intentionally updates all three create bits.
+func (p WorkspaceMemberPermissions) mergeOmittedJSONFields(current WorkspaceMemberPermissions) WorkspaceMemberPermissions {
+	if p.jsonFields == nil {
+		return p
+	}
+	present := func(name string) bool {
+		_, ok := p.jsonFields[name]
+		return ok
+	}
+	preserve := func(name string, incoming *bool, existing bool) {
+		if !present(name) {
+			*incoming = existing
+		}
+	}
+
+	preserve("can_create_projects", &p.CanCreateProjects, current.CanCreateProjects)
+	preserve("can_private_conversations", &p.CanPrivateConversations, current.CanPrivateConversations)
+	preserve("can_create_kb", &p.CanCreateKB, current.CanCreateKB)
+	preserve("can_add_kb_files", &p.CanAddKBFiles, current.CanAddKBFiles)
+	preserve("can_delete_kb_content", &p.CanDeleteKBContent, current.CanDeleteKBContent)
+	preserve("can_delete_conversations", &p.CanDeleteConversations, current.CanDeleteConversations)
+	preserve("can_use_prompts", &p.CanUsePrompts, current.CanUsePrompts)
+	preserve("can_use_skills", &p.CanUseSkills, current.CanUseSkills)
+	preserve("can_use_mcp", &p.CanUseMCP, current.CanUseMCP)
+
+	promptPresent := present("can_create_prompts")
+	skillPresent := present("can_create_skills")
+	mcpPresent := present("can_create_mcp") || present("can_create_mcps")
+	granularPresent := promptPresent || skillPresent || mcpPresent
+	legacyPresent := present("can_create_skills_prompts")
+	switch {
+	case granularPresent:
+		if !promptPresent {
+			p.CanCreatePrompts = current.CanCreatePrompts
+		}
+		if !skillPresent {
+			p.CanCreateSkills = current.CanCreateSkills
+		}
+		if !mcpPresent {
+			p.CanCreateMCP = current.CanCreateMCP
+		}
+	case legacyPresent:
+		currentAggregate := normalizeWorkspaceMemberCreationAggregate(
+			current.CanCreatePrompts, current.CanCreateSkills, current.CanCreateMCP,
+		)
+		if p.CanCreateSkillsPrompts == currentAggregate {
+			// This is the value an old client received from the server. Treat an
+			// unchanged round-trip as a no-op for the hidden granular fields.
+			p.CanCreatePrompts = current.CanCreatePrompts
+			p.CanCreateSkills = current.CanCreateSkills
+			p.CanCreateMCP = current.CanCreateMCP
+		} else {
+			p.CanCreatePrompts = p.CanCreateSkillsPrompts
+			p.CanCreateSkills = p.CanCreateSkillsPrompts
+			p.CanCreateMCP = p.CanCreateSkillsPrompts
+		}
+	default:
+		p.CanCreatePrompts = current.CanCreatePrompts
+		p.CanCreateSkills = current.CanCreateSkills
+		p.CanCreateMCP = current.CanCreateMCP
+	}
+	p.CanCreateSkillsPrompts = normalizeWorkspaceMemberCreationAggregate(
+		p.CanCreatePrompts, p.CanCreateSkills, p.CanCreateMCP,
+	)
+	return p
 }
 
 func fullWorkspaceMemberPermissions() WorkspaceMemberPermissions {
 	return WorkspaceMemberPermissions{
-		CanCreateProjects: true, CanPrivateConversations: true, CanCreateSkillsPrompts: true, CanCreateKB: true,
+		CanCreateProjects: true, CanPrivateConversations: true, CanCreateSkillsPrompts: true,
+		CanCreatePrompts: true, CanCreateSkills: true, CanCreateMCP: true,
+		CanUsePrompts: true, CanUseSkills: true, CanUseMCP: true, CanCreateKB: true,
 		CanAddKBFiles: true, CanDeleteKBContent: true, CanDeleteConversations: true,
 	}
 }
@@ -131,11 +287,50 @@ func fullWorkspaceMemberPermissions() WorkspaceMemberPermissions {
 func applyWorkspacePermissions(workspace *Workspace, permissions WorkspaceMemberPermissions) {
 	workspace.CanCreateProjects = permissions.CanCreateProjects
 	workspace.CanPrivateConversations = permissions.CanPrivateConversations
-	workspace.CanCreateSkillsPrompts = permissions.CanCreateSkillsPrompts
+	workspace.CanCreatePrompts = permissions.CanCreatePrompts
+	workspace.CanCreateSkills = permissions.CanCreateSkills
+	workspace.CanCreateMCP = permissions.CanCreateMCP
+	workspace.CanCreateSkillsPrompts = permissions.CanCreatePrompts && permissions.CanCreateSkills && permissions.CanCreateMCP
+	workspace.CanUsePrompts = permissions.CanUsePrompts
+	workspace.CanUseSkills = permissions.CanUseSkills
+	workspace.CanUseMCP = permissions.CanUseMCP
 	workspace.CanCreateKB = permissions.CanCreateKB
 	workspace.CanAddKBFiles = permissions.CanAddKBFiles
 	workspace.CanDeleteKBContent = permissions.CanDeleteKBContent
 	workspace.CanDeleteConversations = permissions.CanDeleteConversations
+}
+
+// normalizeWorkspaceMemberCreationAggregate computes the retired combined
+// creation bit from the three granular capabilities. The aggregate is a
+// compatibility mirror only; after migration the granular columns are the
+// authoritative source of permission decisions.
+func normalizeWorkspaceMemberCreationAggregate(
+	canCreatePrompts, canCreateSkills, canCreateMCP bool,
+) bool {
+	return canCreatePrompts && canCreateSkills && canCreateMCP
+}
+
+func normalizeWorkspaceCreationAggregate(workspace *Workspace) {
+	if workspace == nil {
+		return
+	}
+	// Never let a stale aggregate value rewrite granular fields on read. Legacy
+	// aggregate-only rows are expanded during Migrate, while API JSON payloads
+	// are expanded by WorkspaceMemberPermissions.UnmarshalJSON.
+	workspace.CanCreateSkillsPrompts = normalizeWorkspaceMemberCreationAggregate(
+		workspace.CanCreatePrompts, workspace.CanCreateSkills, workspace.CanCreateMCP,
+	)
+}
+
+func normalizeWorkspaceMemberCreationAggregateFields(member *WorkspaceMember) {
+	if member == nil {
+		return
+	}
+	// The aggregate is response-only compatibility metadata. A stale aggregate
+	// must not narrow the authoritative granular fields on read.
+	member.CanCreateSkillsPrompts = normalizeWorkspaceMemberCreationAggregate(
+		member.CanCreatePrompts, member.CanCreateSkills, member.CanCreateMCP,
+	)
 }
 
 // workspaceResourceAccessPredicate is the authoritative access boundary for a
@@ -448,6 +643,12 @@ func GetWorkspaceForMember(ctx context.Context, db *sql.DB, id, userID string) (
 		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_create_projects,0) END,
 		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_private_conversations,0) END,
 		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_create_skills_prompts,0) END,
+		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_create_prompts,0) END,
+		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_create_skills,0) END,
+		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_create_mcp,0) END,
+		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_use_prompts,0) END,
+		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_use_skills,0) END,
+		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_use_mcp,0) END,
 		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_create_kb,0) END,
 		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_add_kb_files,0) END,
 		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_delete_kb_content,0) END,
@@ -455,11 +656,13 @@ func GetWorkspaceForMember(ctx context.Context, db *sql.DB, id, userID string) (
 		   FROM workspaces w
 		   LEFT JOIN workspace_members m ON m.workspace_id=w.id AND m.user_id=?
 		  WHERE w.id=? AND (w.owner_id=? OR m.user_id=?)`,
-		userID, userID, userID, userID, userID, userID, userID, userID,
+		userID, userID, userID, userID, userID, userID, userID, userID, userID, userID, userID, userID, userID, userID,
 		userID, id, userID, userID,
 	).Scan(
 		&w.ID, &w.Name, &w.OwnerID, &w.InviteToken, &w.CreatedAt, &w.Role,
-		&w.CanCreateProjects, &w.CanPrivateConversations, &w.CanCreateSkillsPrompts, &w.CanCreateKB,
+		&w.CanCreateProjects, &w.CanPrivateConversations, &w.CanCreateSkillsPrompts,
+		&w.CanCreatePrompts, &w.CanCreateSkills, &w.CanCreateMCP,
+		&w.CanUsePrompts, &w.CanUseSkills, &w.CanUseMCP, &w.CanCreateKB,
 		&w.CanAddKBFiles, &w.CanDeleteKBContent, &w.CanDeleteConversations,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -469,6 +672,7 @@ func GetWorkspaceForMember(ctx context.Context, db *sql.DB, id, userID string) (
 		return nil, err
 	}
 	w.IsOwner = w.OwnerID == userID
+	normalizeWorkspaceCreationAggregate(&w)
 	w.InviteToken = ""
 	return &w, nil
 }
@@ -491,6 +695,12 @@ func ListWorkspacesForUser(ctx context.Context, db *sql.DB, userID string) ([]Wo
 		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_create_projects,0) END,
 		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_private_conversations,0) END,
 		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_create_skills_prompts,0) END,
+		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_create_prompts,0) END,
+		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_create_skills,0) END,
+		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_create_mcp,0) END,
+		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_use_prompts,0) END,
+		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_use_skills,0) END,
+		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_use_mcp,0) END,
 		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_create_kb,0) END,
 		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_add_kb_files,0) END,
 		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_delete_kb_content,0) END,
@@ -499,7 +709,7 @@ func ListWorkspacesForUser(ctx context.Context, db *sql.DB, userID string) ([]Wo
 		   FROM workspaces w
 		   LEFT JOIN workspace_members m ON m.workspace_id=w.id AND m.user_id=?
 		  WHERE w.owner_id=? OR m.user_id=? ORDER BY w.created_at ASC`,
-		userID, userID, userID, userID, userID, userID, userID, userID,
+		userID, userID, userID, userID, userID, userID, userID, userID, userID, userID, userID, userID, userID, userID,
 		userID, userID, userID)
 	if err != nil {
 		return nil, err
@@ -510,12 +720,15 @@ func ListWorkspacesForUser(ctx context.Context, db *sql.DB, userID string) ([]Wo
 		var w Workspace
 		if err := rows.Scan(
 			&w.ID, &w.Name, &w.OwnerID, &w.InviteToken, &w.CreatedAt, &w.Role,
-			&w.CanCreateProjects, &w.CanPrivateConversations, &w.CanCreateSkillsPrompts, &w.CanCreateKB,
+			&w.CanCreateProjects, &w.CanPrivateConversations, &w.CanCreateSkillsPrompts,
+			&w.CanCreatePrompts, &w.CanCreateSkills, &w.CanCreateMCP,
+			&w.CanUsePrompts, &w.CanUseSkills, &w.CanUseMCP, &w.CanCreateKB,
 			&w.CanAddKBFiles, &w.CanDeleteKBContent, &w.CanDeleteConversations, &w.MemberCount,
 		); err != nil {
 			return nil, err
 		}
 		w.IsOwner = w.OwnerID == userID
+		normalizeWorkspaceCreationAggregate(&w)
 		// Legacy workspace tokens are never a user-facing capability.
 		w.InviteToken = ""
 		out = append(out, w)
@@ -556,6 +769,12 @@ func ListWorkspaceMembers(ctx context.Context, db *sql.DB, workspaceID string) (
 		        CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_create_projects END,
 		        CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_private_conversations END,
 		        CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_create_skills_prompts END,
+		        CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_create_prompts END,
+		        CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_create_skills END,
+		        CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_create_mcp END,
+		        CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_use_prompts END,
+		        CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_use_skills END,
+		        CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_use_mcp END,
 		        CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_create_kb END,
 		        CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_add_kb_files END,
 		        CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_delete_kb_content END,
@@ -576,12 +795,15 @@ func ListWorkspaceMembers(ctx context.Context, db *sql.DB, workspaceID string) (
 		if err := rows.Scan(
 			&m.UserID, &m.Role, &m.IsOwner,
 			&m.CanCreateProjects, &m.CanPrivateConversations, &m.CanCreateSkillsPrompts,
+			&m.CanCreatePrompts, &m.CanCreateSkills, &m.CanCreateMCP,
+			&m.CanUsePrompts, &m.CanUseSkills, &m.CanUseMCP,
 			&m.CanCreateKB, &m.CanAddKBFiles, &m.CanDeleteKBContent, &m.CanDeleteConversations,
 			&m.JoinedAt, &m.Name, &m.Email, &settings,
 		); err != nil {
 			return nil, err
 		}
 		m.AvatarURL = avatarFromSettings(settings)
+		normalizeWorkspaceMemberCreationAggregateFields(&m)
 		out = append(out, m)
 	}
 	return out, rows.Err()
@@ -602,8 +824,39 @@ func UpdateWorkspaceMemberPermissions(
 		return nil, err
 	}
 	defer tx.Rollback() //nolint:errcheck
+	if permissions.jsonFields != nil {
+		var current WorkspaceMemberPermissions
+		err := tx.QueryRowContext(ctx, `SELECT
+				can_create_projects,can_private_conversations,can_create_skills_prompts,
+				can_create_prompts,can_create_skills,can_create_mcp,
+				can_use_prompts,can_use_skills,can_use_mcp,can_create_kb,
+				can_add_kb_files,can_delete_kb_content,can_delete_conversations
+			FROM workspace_members WHERE workspace_id=? AND user_id=?`, workspaceID, memberID).Scan(
+			&current.CanCreateProjects, &current.CanPrivateConversations, &current.CanCreateSkillsPrompts,
+			&current.CanCreatePrompts, &current.CanCreateSkills, &current.CanCreateMCP,
+			&current.CanUsePrompts, &current.CanUseSkills, &current.CanUseMCP, &current.CanCreateKB,
+			&current.CanAddKBFiles, &current.CanDeleteKBContent, &current.CanDeleteConversations,
+		)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		if err != nil {
+			return nil, err
+		}
+		permissions = permissions.mergeOmittedJSONFields(current)
+	}
+	// The aggregate column is a compatibility mirror only. Keep it at the
+	// intersection of all three independent creation capabilities so an older
+	// reader cannot regain MCP/prompt/skill creation that a new caller disabled.
+	// Direct Go callers use full-replacement semantics and must populate the
+	// granular fields explicitly; JSON PATCH callers were merged above.
+	permissions.CanCreateSkillsPrompts = normalizeWorkspaceMemberCreationAggregate(
+		permissions.CanCreatePrompts, permissions.CanCreateSkills, permissions.CanCreateMCP,
+	)
 	res, err := tx.ExecContext(ctx, `UPDATE workspace_members
-		SET can_create_projects=?, can_private_conversations=?, can_create_skills_prompts=?, can_create_kb=?,
+		SET can_create_projects=?, can_private_conversations=?, can_create_skills_prompts=?,
+		    can_create_prompts=?, can_create_skills=?, can_create_mcp=?,
+		    can_use_prompts=?, can_use_skills=?, can_use_mcp=?, can_create_kb=?,
 		    can_add_kb_files=?, can_delete_kb_content=?, can_delete_conversations=?
 		WHERE workspace_id=? AND user_id=?
 		  AND NOT EXISTS (SELECT 1 FROM workspaces w
@@ -616,7 +869,10 @@ func UpdateWorkspaceMemberPermissions(
 		           AND `+isAdminRoleSQL("actor_member.role")+`
 		      )))`,
 		boolInt(permissions.CanCreateProjects), boolInt(permissions.CanPrivateConversations),
-		boolInt(permissions.CanCreateSkillsPrompts), boolInt(permissions.CanCreateKB), boolInt(permissions.CanAddKBFiles),
+		boolInt(permissions.CanCreateSkillsPrompts),
+		boolInt(permissions.CanCreatePrompts), boolInt(permissions.CanCreateSkills), boolInt(permissions.CanCreateMCP),
+		boolInt(permissions.CanUsePrompts), boolInt(permissions.CanUseSkills), boolInt(permissions.CanUseMCP),
+		boolInt(permissions.CanCreateKB), boolInt(permissions.CanAddKBFiles),
 		boolInt(permissions.CanDeleteKBContent), boolInt(permissions.CanDeleteConversations), workspaceID, memberID, actorID, actorID)
 	if err != nil {
 		return nil, err
@@ -631,6 +887,12 @@ func UpdateWorkspaceMemberPermissions(
 			"can_create_projects":       permissions.CanCreateProjects,
 			"can_private_conversations": permissions.CanPrivateConversations,
 			"can_create_skills_prompts": permissions.CanCreateSkillsPrompts,
+			"can_create_prompts":        permissions.CanCreatePrompts,
+			"can_create_skills":         permissions.CanCreateSkills,
+			"can_create_mcp":            permissions.CanCreateMCP,
+			"can_use_prompts":           permissions.CanUsePrompts,
+			"can_use_skills":            permissions.CanUseSkills,
+			"can_use_mcp":               permissions.CanUseMCP,
 			"can_create_kb":             permissions.CanCreateKB,
 			"can_add_kb_files":          permissions.CanAddKBFiles,
 			"can_delete_kb_content":     permissions.CanDeleteKBContent,
@@ -644,6 +906,8 @@ func UpdateWorkspaceMemberPermissions(
 			CASE WHEN w.owner_id=m.user_id THEN 'admin' ELSE `+normalizeWorkspaceRoleSQL("m.role")+` END,
 			CASE WHEN w.owner_id=m.user_id THEN 1 ELSE 0 END,
 			m.can_create_projects,m.can_private_conversations,m.can_create_skills_prompts,
+			m.can_create_prompts,m.can_create_skills,m.can_create_mcp,
+			m.can_use_prompts,m.can_use_skills,m.can_use_mcp,
 			m.can_create_kb,m.can_add_kb_files,m.can_delete_kb_content,m.can_delete_conversations,m.joined_at,
 			COALESCE(u.name,''),COALESCE(u.email,''),COALESCE(u.settings,'')
 		FROM workspace_members m
@@ -652,6 +916,8 @@ func UpdateWorkspaceMemberPermissions(
 		WHERE m.workspace_id=? AND m.user_id=?`, workspaceID, memberID).Scan(
 		&member.UserID, &member.Role, &member.IsOwner,
 		&member.CanCreateProjects, &member.CanPrivateConversations, &member.CanCreateSkillsPrompts,
+		&member.CanCreatePrompts, &member.CanCreateSkills, &member.CanCreateMCP,
+		&member.CanUsePrompts, &member.CanUseSkills, &member.CanUseMCP,
 		&member.CanCreateKB, &member.CanAddKBFiles, &member.CanDeleteKBContent, &member.CanDeleteConversations,
 		&member.JoinedAt, &member.Name, &member.Email, &settings,
 	)
@@ -659,6 +925,7 @@ func UpdateWorkspaceMemberPermissions(
 		return nil, err
 	}
 	member.AvatarURL = avatarFromSettings(settings)
+	normalizeWorkspaceMemberCreationAggregateFields(&member)
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -747,8 +1014,20 @@ func UpdateWorkspaceMemberRole(
 	if err := tx.QueryRowContext(ctx, `SELECT m.user_id,
 			CASE WHEN w.owner_id=m.user_id THEN 'admin' ELSE `+normalizeWorkspaceRoleSQL("m.role")+` END,
 			CASE WHEN w.owner_id=m.user_id THEN 1 ELSE 0 END,
-			m.can_create_projects,m.can_private_conversations,m.can_create_skills_prompts,
-			m.can_create_kb,m.can_add_kb_files,m.can_delete_kb_content,m.can_delete_conversations,m.joined_at,
+			CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_create_projects END,
+			CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_private_conversations END,
+			CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_create_skills_prompts END,
+			CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_create_prompts END,
+			CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_create_skills END,
+			CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_create_mcp END,
+			CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_use_prompts END,
+			CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_use_skills END,
+			CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_use_mcp END,
+			CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_create_kb END,
+			CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_add_kb_files END,
+			CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_delete_kb_content END,
+			CASE WHEN w.owner_id=m.user_id OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE m.can_delete_conversations END,
+			m.joined_at,
 			COALESCE(u.name,''),COALESCE(u.email,''),COALESCE(u.settings,'')
 		FROM workspace_members m
 		JOIN workspaces w ON w.id=m.workspace_id
@@ -756,12 +1035,15 @@ func UpdateWorkspaceMemberRole(
 		WHERE m.workspace_id=? AND m.user_id=?`, workspaceID, memberID).Scan(
 		&member.UserID, &member.Role, &member.IsOwner,
 		&member.CanCreateProjects, &member.CanPrivateConversations, &member.CanCreateSkillsPrompts,
+		&member.CanCreatePrompts, &member.CanCreateSkills, &member.CanCreateMCP,
+		&member.CanUsePrompts, &member.CanUseSkills, &member.CanUseMCP,
 		&member.CanCreateKB, &member.CanAddKBFiles, &member.CanDeleteKBContent, &member.CanDeleteConversations,
 		&member.JoinedAt, &member.Name, &member.Email, &settings,
 	); err != nil {
 		return nil, err
 	}
 	member.AvatarURL = avatarFromSettings(settings)
+	normalizeWorkspaceMemberCreationAggregateFields(&member)
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -1154,6 +1436,13 @@ func DeleteWorkspaceRow(ctx context.Context, db *sql.DB, workspaceID, expectedOw
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM user_prompts WHERE workspace_id=?`, workspaceID); err != nil {
+		return err
+	}
+	// User MCP rows deliberately keep workspace_id as a plain scope column (the
+	// same shape as user skills/prompts), so deleting the workspace cannot rely
+	// on an FK cascade. Remove them in this transaction as well: their headers
+	// may contain credentials and must not survive as unreachable orphan rows.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM user_mcp_servers WHERE workspace_id=?`, workspaceID); err != nil {
 		return err
 	}
 	res, err := tx.ExecContext(ctx,

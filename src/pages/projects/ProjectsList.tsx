@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils'
 import { useWorkspaces } from '@/store/workspaces'
 import { useAuth } from '@/store/auth'
 import { userCan } from '@/lib/user-permissions'
+import { workspaceCapabilitiesForScope } from '@/lib/workspace-permissions'
 
 type Filter = 'all' | 'pinned'
 
@@ -28,12 +29,35 @@ export default function ProjectsList() {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<Filter>('all')
   const [createOpen, setCreateOpen] = useState(false)
+  const activeWorkspaceId = useWorkspaces((s) => s.activeId)
   const activeWorkspace = useWorkspaces((s) =>
     s.activeId ? s.workspaces.find((workspace) => workspace.id === s.activeId) : undefined,
   )
+  const activeWorkspacePolicy = useWorkspaces((s) =>
+    s.activeId ? s.policies[s.activeId] : undefined,
+  )
+  const workspacesLoaded = useWorkspaces((s) => s.loaded)
+  const workspacePolicyLoading = useWorkspaces((s) =>
+    s.activeId ? s.policyLoading[s.activeId] === true : false,
+  )
+  const workspaceSwitching = useWorkspaces((s) => s.switching)
+  const workspacePolicyError = useWorkspaces((s) =>
+    activeWorkspaceId ? s.policyErrors[activeWorkspaceId] : null,
+  )
+  const workspaceCaps = workspaceCapabilitiesForScope(activeWorkspaceId, activeWorkspacePolicy, {
+    workspacesLoaded,
+    policyLoading: workspacePolicyLoading,
+    switching: workspaceSwitching,
+    policyError: workspacePolicyError,
+  })
+  const workspacePolicyPending = Boolean(
+    activeWorkspaceId && !activeWorkspacePolicy && (!workspacesLoaded || workspacePolicyLoading || workspaceSwitching),
+  )
   const user = useAuth((s) => s.user)
-  const canCreateProject = userCan(user, 'allow_knowledge_bases') &&
-    (!activeWorkspace || activeWorkspace.can_create_projects)
+  const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases') &&
+    workspaceCaps.knowledgeBases
+  const canCreateProject = canUseKnowledgeBases &&
+    (!activeWorkspaceId || activeWorkspace?.can_create_projects === true)
 
   const chatCounts = useMemo(() => {
     const map = new Map<string, number>()
@@ -89,7 +113,16 @@ export default function ProjectsList() {
             {t('projects:list.subtitle')}
           </p>
 
-          {!loaded && loadError ? (
+          {workspacePolicyPending ? (
+            <ProjectsListSkeleton label={t('common:common.loading')} />
+          ) : !canUseKnowledgeBases ? (
+            <EmptyState
+              className="mt-8"
+              icon={<FolderKanban size={20} aria-hidden />}
+              title={t('projects:list.accessDenied', { defaultValue: 'Projects are unavailable in this workspace.' })}
+              description={t('projects:list.accessDeniedBody', { defaultValue: 'The workspace administrator has disabled knowledge bases and projects.' })}
+            />
+          ) : !loaded && loadError ? (
             <EmptyState
               className="mt-8"
               icon={<FolderKanban size={20} aria-hidden />}

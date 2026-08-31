@@ -107,6 +107,29 @@ func Migrate(db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("inspect legacy user-group CNY price: %w", err)
 	}
+	// Granular workspace permissions were added after the original workspace
+	// RBAC columns. Remember which columns existed before applying the embedded
+	// schema so legacy values can be backfilled exactly once on an upgrade.
+	workspaceMemberCreatePromptsExisted, err := columnExists(db, "workspace_members", "can_create_prompts")
+	if err != nil {
+		return fmt.Errorf("inspect workspace member prompt-create permission: %w", err)
+	}
+	workspaceMemberCreateSkillsExisted, err := columnExists(db, "workspace_members", "can_create_skills")
+	if err != nil {
+		return fmt.Errorf("inspect workspace member skill-create permission: %w", err)
+	}
+	workspaceMemberCreateMCPExisted, err := columnExists(db, "workspace_members", "can_create_mcp")
+	if err != nil {
+		return fmt.Errorf("inspect workspace member MCP-create permission: %w", err)
+	}
+	workspacePolicyToolCallingExisted, err := columnExists(db, "workspace_policies", "allow_tool_calling")
+	if err != nil {
+		return fmt.Errorf("inspect workspace tool-calling policy: %w", err)
+	}
+	workspacePolicyDrawingExisted, err := columnExists(db, "workspace_policies", "allow_drawing")
+	if err != nil {
+		return fmt.Errorf("inspect workspace drawing policy: %w", err)
+	}
 	schema := schemaSQL
 	addImageRef := `ALTER TABLE chunks ADD COLUMN image_ref TEXT`
 	addOfficialTools := `ALTER TABLE models ADD COLUMN official_tools TEXT NOT NULL DEFAULT '[]'`
@@ -234,6 +257,12 @@ func Migrate(db *sql.DB) error {
 	addWorkspaceCanCreateProjects := `ALTER TABLE workspace_members ADD COLUMN can_create_projects INTEGER NOT NULL DEFAULT 1`
 	addWorkspaceCanPrivateConversations := `ALTER TABLE workspace_members ADD COLUMN can_private_conversations INTEGER NOT NULL DEFAULT 1`
 	addWorkspaceCanCreateSkillsPrompts := `ALTER TABLE workspace_members ADD COLUMN can_create_skills_prompts INTEGER NOT NULL DEFAULT 1`
+	addWorkspaceCanCreatePrompts := `ALTER TABLE workspace_members ADD COLUMN can_create_prompts INTEGER NOT NULL DEFAULT 1`
+	addWorkspaceCanCreateSkills := `ALTER TABLE workspace_members ADD COLUMN can_create_skills INTEGER NOT NULL DEFAULT 1`
+	addWorkspaceCanCreateMCP := `ALTER TABLE workspace_members ADD COLUMN can_create_mcp INTEGER NOT NULL DEFAULT 1`
+	addWorkspaceCanUsePrompts := `ALTER TABLE workspace_members ADD COLUMN can_use_prompts INTEGER NOT NULL DEFAULT 1`
+	addWorkspaceCanUseSkills := `ALTER TABLE workspace_members ADD COLUMN can_use_skills INTEGER NOT NULL DEFAULT 1`
+	addWorkspaceCanUseMCP := `ALTER TABLE workspace_members ADD COLUMN can_use_mcp INTEGER NOT NULL DEFAULT 1`
 	addWorkspaceCanCreateKB := `ALTER TABLE workspace_members ADD COLUMN can_create_kb INTEGER NOT NULL DEFAULT 1`
 	addWorkspaceCanAddKBFiles := `ALTER TABLE workspace_members ADD COLUMN can_add_kb_files INTEGER NOT NULL DEFAULT 1`
 	addWorkspaceCanDeleteKBContent := `ALTER TABLE workspace_members ADD COLUMN can_delete_kb_content INTEGER NOT NULL DEFAULT 1`
@@ -242,6 +271,11 @@ func Migrate(db *sql.DB) error {
 	// A durable deletion fence prevents creations from racing a multi-step
 	// workspace teardown. It is reset when a recoverable teardown fails.
 	addWorkspaceDeleting := `ALTER TABLE workspaces ADD COLUMN deleting INTEGER NOT NULL DEFAULT 0`
+	addWorkspaceAllowToolCalling := `ALTER TABLE workspace_policies ADD COLUMN allow_tool_calling INTEGER NOT NULL DEFAULT 1`
+	addWorkspaceAllowDrawing := `ALTER TABLE workspace_policies ADD COLUMN allow_drawing INTEGER NOT NULL DEFAULT 1`
+	addWorkspaceAllowMCP := `ALTER TABLE workspace_policies ADD COLUMN allow_mcp INTEGER NOT NULL DEFAULT 1`
+	addWorkspaceAllowSkills := `ALTER TABLE workspace_policies ADD COLUMN allow_skills INTEGER NOT NULL DEFAULT 1`
+	addWorkspaceAllowPrompts := `ALTER TABLE workspace_policies ADD COLUMN allow_prompts INTEGER NOT NULL DEFAULT 1`
 	// §workspace RBAC phase 2 — private/workspace visibility on projects and
 	// knowledge bases. Existing shared rows stay shared (DEFAULT 1).
 	addKBIsPublic := `ALTER TABLE knowledge_bases ADD COLUMN is_public INTEGER NOT NULL DEFAULT 1`
@@ -360,12 +394,23 @@ func Migrate(db *sql.DB) error {
 		addWorkspaceCanCreateProjects = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_create_projects INTEGER NOT NULL DEFAULT 1`
 		addWorkspaceCanPrivateConversations = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_private_conversations INTEGER NOT NULL DEFAULT 1`
 		addWorkspaceCanCreateSkillsPrompts = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_create_skills_prompts INTEGER NOT NULL DEFAULT 1`
+		addWorkspaceCanCreatePrompts = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_create_prompts INTEGER NOT NULL DEFAULT 1`
+		addWorkspaceCanCreateSkills = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_create_skills INTEGER NOT NULL DEFAULT 1`
+		addWorkspaceCanCreateMCP = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_create_mcp INTEGER NOT NULL DEFAULT 1`
+		addWorkspaceCanUsePrompts = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_use_prompts INTEGER NOT NULL DEFAULT 1`
+		addWorkspaceCanUseSkills = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_use_skills INTEGER NOT NULL DEFAULT 1`
+		addWorkspaceCanUseMCP = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_use_mcp INTEGER NOT NULL DEFAULT 1`
 		addWorkspaceCanCreateKB = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_create_kb INTEGER NOT NULL DEFAULT 1`
 		addWorkspaceCanAddKBFiles = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_add_kb_files INTEGER NOT NULL DEFAULT 1`
 		addWorkspaceCanDeleteKBContent = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_delete_kb_content INTEGER NOT NULL DEFAULT 1`
 		addWorkspaceCanDeleteConversations = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_delete_conversations INTEGER NOT NULL DEFAULT 1`
 		addWorkspaceInvitePurpose = `ALTER TABLE workspace_invites ADD COLUMN IF NOT EXISTS purpose TEXT NOT NULL DEFAULT 'manual'`
 		addWorkspaceDeleting = `ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS deleting INTEGER NOT NULL DEFAULT 0`
+		addWorkspaceAllowToolCalling = `ALTER TABLE workspace_policies ADD COLUMN IF NOT EXISTS allow_tool_calling INTEGER NOT NULL DEFAULT 1`
+		addWorkspaceAllowDrawing = `ALTER TABLE workspace_policies ADD COLUMN IF NOT EXISTS allow_drawing INTEGER NOT NULL DEFAULT 1`
+		addWorkspaceAllowMCP = `ALTER TABLE workspace_policies ADD COLUMN IF NOT EXISTS allow_mcp INTEGER NOT NULL DEFAULT 1`
+		addWorkspaceAllowSkills = `ALTER TABLE workspace_policies ADD COLUMN IF NOT EXISTS allow_skills INTEGER NOT NULL DEFAULT 1`
+		addWorkspaceAllowPrompts = `ALTER TABLE workspace_policies ADD COLUMN IF NOT EXISTS allow_prompts INTEGER NOT NULL DEFAULT 1`
 		addKBIsPublic = `ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS is_public INTEGER NOT NULL DEFAULT 1`
 		addProjectIsPublic = `ALTER TABLE projects ADD COLUMN IF NOT EXISTS is_public INTEGER NOT NULL DEFAULT 1`
 		addModelFast = `ALTER TABLE models ADD COLUMN IF NOT EXISTS fast INTEGER NOT NULL DEFAULT 0`
@@ -428,7 +473,8 @@ func Migrate(db *sql.DB) error {
 		addModelFallbackChannel, addUsageChannel, addUsageFallback, addUsageStatus, addUsageError,
 		addUsageRequestMethod, addUsageRequestURL, addUsageRequestHeaders, addUsageRequestBody, addUsageTTFTFallback,
 		addFileDraft, addDocumentIngestUpdatedAt, addDocumentUploader,
-		addWorkspaceCanCreateProjects, addWorkspaceCanPrivateConversations, addWorkspaceCanCreateSkillsPrompts, addWorkspaceCanCreateKB, addWorkspaceCanAddKBFiles, addWorkspaceCanDeleteKBContent, addWorkspaceCanDeleteConversations, addWorkspaceInvitePurpose, addWorkspaceDeleting,
+		addWorkspaceCanCreateProjects, addWorkspaceCanPrivateConversations, addWorkspaceCanCreateSkillsPrompts, addWorkspaceCanCreatePrompts, addWorkspaceCanCreateSkills, addWorkspaceCanCreateMCP, addWorkspaceCanUsePrompts, addWorkspaceCanUseSkills, addWorkspaceCanUseMCP, addWorkspaceCanCreateKB, addWorkspaceCanAddKBFiles, addWorkspaceCanDeleteKBContent, addWorkspaceCanDeleteConversations, addWorkspaceInvitePurpose, addWorkspaceDeleting,
+		addWorkspaceAllowToolCalling, addWorkspaceAllowDrawing, addWorkspaceAllowMCP, addWorkspaceAllowSkills, addWorkspaceAllowPrompts,
 		addKBIsPublic, addProjectIsPublic,
 		addModelFast, addConvFast, addMsgFast,
 		addSkillDisplayDescription, addUserSkillIcon, addUserSkillWorkspace, addUserPromptWorkspace, addMsgSelectedUserSkills,
@@ -543,6 +589,10 @@ func Migrate(db *sql.DB) error {
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_prompts_workspace_name_unique ON user_prompts(workspace_id, lower(trim(name))) WHERE workspace_id<>''`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_prompts_source_unique ON user_prompts(user_id, source_prompt_id) WHERE workspace_id='' AND source_prompt_id IS NOT NULL`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_prompts_workspace_source_unique ON user_prompts(workspace_id, source_prompt_id) WHERE workspace_id<>'' AND source_prompt_id IS NOT NULL`,
+		// User MCP servers share the same two-scope name namespace: personal
+		// rows are unique per creator, workspace rows unique per shared space.
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_mcp_servers_user_name_unique ON user_mcp_servers(user_id, lower(trim(name))) WHERE workspace_id=''`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_mcp_servers_workspace_name_unique ON user_mcp_servers(workspace_id, lower(trim(name))) WHERE workspace_id<>''`,
 	} {
 		_, _ = db.Exec(ddl)
 	}
@@ -563,6 +613,7 @@ func Migrate(db *sql.DB) error {
 		"prompts":                         {"name", "description", "content", "enabled", "sort_order"},
 		"user_skills":                     {"user_id", "workspace_id", "name", "description", "icon", "instructions", "source_skill_id"},
 		"user_prompts":                    {"user_id", "workspace_id", "name", "description", "content", "source_prompt_id"},
+		"user_mcp_servers":                {"id", "user_id", "workspace_id", "name", "icon", "description", "url", "headers", "enabled", "discovered_tools", "protocol_version", "last_error", "last_synced_at", "created_at", "updated_at"},
 		"users":                           {"group_id", "totp_secret", "totp_enabled", "group_expires_at", "previous_group_id", "password_set", "password_changed_at", "last_seen_at", "credits_permanent", "credits_permanent_micros", "credit_cycle_anchor", "quota_cycle_anchor", "sort_order"},
 		"usage_logs":                      {"credits", "workspace_id", "channel_id", "fallback", "status", "error", "request_method", "request_url", "request_headers", "request_body", "ttft_fallback_model"},
 		"usage_stats":                     {"source_log_id", "user_id", "conversation_id", "message_id", "model_id", "purpose", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "images_count", "cost", "currency", "credits", "workspace_id", "channel_id", "fallback", "ttft_fallback_model", "created_at"},
@@ -582,7 +633,8 @@ func Migrate(db *sql.DB) error {
 		"files":                           {"draft"},
 		"documents":                       {"ingest_updated_at", "uploaded_by_user_id"},
 		"knowledge_base_shares":           {"kb_id", "user_id", "role", "created_at", "updated_at"},
-		"workspace_members":               {"workspace_id", "user_id", "role", "can_create_projects", "can_private_conversations", "can_create_skills_prompts", "can_create_kb", "can_add_kb_files", "can_delete_kb_content", "can_delete_conversations", "joined_at"},
+		"workspace_members":               {"workspace_id", "user_id", "role", "can_create_projects", "can_private_conversations", "can_create_skills_prompts", "can_create_prompts", "can_create_skills", "can_create_mcp", "can_use_prompts", "can_use_skills", "can_use_mcp", "can_create_kb", "can_add_kb_files", "can_delete_kb_content", "can_delete_conversations", "joined_at"},
+		"workspace_policies":              {"workspace_id", "allowed_model_ids", "allowed_tool_ids", "allowed_mcp_server_ids", "allow_sandbox", "allow_image_generation", "allow_tool_calling", "allow_drawing", "allow_mcp", "allow_skills", "allow_prompts", "allow_knowledge_bases", "allow_file_upload", "member_monthly_credit_limit", "updated_by", "updated_at"},
 		"workspace_invites":               {"id", "workspace_id", "token", "email", "role", "expires_at", "max_uses", "used_count", "created_by", "purpose", "revoked_at", "created_at"},
 		"workspaces":                      {"id", "name", "owner_id", "invite_token", "deleting", "created_at"},
 		"workspace_kb_member_permissions": {"kb_id", "user_id", "can_add_files", "can_delete_content", "updated_at"},
@@ -595,6 +647,43 @@ func Migrate(db *sql.DB) error {
 	for table, cols := range columnChecks {
 		if _, err := db.Exec(fmt.Sprintf(`SELECT %s FROM %s WHERE 1=0`, strings.Join(cols, ", "), table)); err != nil {
 			return fmt.Errorf("schema column check failed for %q (an additive migration may have silently failed): %w", table, err)
+		}
+	}
+	// Preserve the historical combined skill/prompt creation switch when an
+	// existing database first acquires the granular columns. The MCP creation
+	// flag follows the same conservative ceiling because old rows had no way to
+	// express a separate MCP capability. Usage switches default to enabled for
+	// compatibility: they did not exist before this migration.
+	if !workspaceMemberCreatePromptsExisted {
+		if _, err := db.Exec(`UPDATE workspace_members
+			SET can_create_prompts=CASE WHEN can_create_skills_prompts=1 THEN 1 ELSE 0 END`); err != nil {
+			return fmt.Errorf("backfill workspace prompt-create permissions: %w", err)
+		}
+	}
+	if !workspaceMemberCreateSkillsExisted {
+		if _, err := db.Exec(`UPDATE workspace_members
+			SET can_create_skills=CASE WHEN can_create_skills_prompts=1 THEN 1 ELSE 0 END`); err != nil {
+			return fmt.Errorf("backfill workspace skill-create permissions: %w", err)
+		}
+	}
+	if !workspaceMemberCreateMCPExisted {
+		if _, err := db.Exec(`UPDATE workspace_members
+			SET can_create_mcp=CASE WHEN can_create_skills_prompts=1 THEN 1 ELSE 0 END`); err != nil {
+			return fmt.Errorf("backfill workspace MCP-create permissions: %w", err)
+		}
+	}
+	// Legacy workspace policy rows used two independent switches. A merged tool
+	// switch must never broaden either old restriction; drawing inherits the old
+	// image-generation switch until an administrator explicitly edits it.
+	if !workspacePolicyToolCallingExisted {
+		if _, err := db.Exec(`UPDATE workspace_policies
+			SET allow_tool_calling=CASE WHEN allow_sandbox=1 AND allow_image_generation=1 THEN 1 ELSE 0 END`); err != nil {
+			return fmt.Errorf("backfill workspace tool-calling policy: %w", err)
+		}
+	}
+	if !workspacePolicyDrawingExisted {
+		if _, err := db.Exec(`UPDATE workspace_policies SET allow_drawing=CASE WHEN allow_image_generation=1 THEN 1 ELSE 0 END`); err != nil {
+			return fmt.Errorf("backfill workspace drawing policy: %w", err)
 		}
 	}
 	if err := EnableUsageStatsMirror(context.Background(), db); err != nil {

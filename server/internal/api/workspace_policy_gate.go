@@ -17,9 +17,11 @@ import (
 // boundary is role-based.
 
 // enforceWorkspaceTurnPolicy validates a generation turn against the
-// conversation's workspace policy: model allowlist, image generation,
+// conversation's workspace policy: model allowlist, direct drawing,
 // attachments, knowledge bases and the member monthly credit limit. A nil
-// conversation or personal conversation passes untouched.
+// conversation or personal conversation passes untouched. Direct drawing is
+// intentionally separate from tool-calling image generation; the latter is
+// covered by AllowToolCalling at the tool boundary.
 func enforceWorkspaceTurnPolicy(
 	ctx context.Context,
 	db *sql.DB,
@@ -40,7 +42,7 @@ func enforceWorkspaceTurnPolicy(
 		if !policy.ModelAllowedByPolicy(effectiveModel.ID) {
 			return errWorkspaceModelDisabled
 		}
-		if effectiveModel.Kind == "image" && !policy.AllowImageGeneration {
+		if effectiveModel.Kind == "image" && !policy.AllowDrawing {
 			return errWorkspaceImageDisabled
 		}
 	}
@@ -58,6 +60,33 @@ func enforceWorkspaceTurnPolicy(
 		if used >= policy.MemberMonthlyCreditLimit {
 			return errWorkspaceCreditLimitExceeded
 		}
+	}
+	return nil
+}
+
+// enforceWorkspaceConversationModelPolicy applies the model-related subset of
+// the turn policy when a conversation stores or inherits a model selection.
+// Keeping invalid state out of the conversation avoids a picker that appears to
+// accept a model only for the subsequent message request to fail. Credit limits
+// and content capabilities intentionally remain turn-time checks.
+func enforceWorkspaceConversationModelPolicy(
+	ctx context.Context,
+	db *sql.DB,
+	workspaceID string,
+	model *store.Model,
+) error {
+	if workspaceID == "" || model == nil {
+		return nil
+	}
+	policy, err := store.GetWorkspacePolicy(ctx, db, workspaceID)
+	if err != nil {
+		return err
+	}
+	if !policy.ModelAllowedByPolicy(model.ID) {
+		return errWorkspaceModelDisabled
+	}
+	if model.Kind == "image" && !policy.AllowDrawing {
+		return errWorkspaceImageDisabled
 	}
 	return nil
 }
@@ -107,9 +136,13 @@ func workspacePolicyErrorStatus(err error) int {
 	return http.StatusInternalServerError
 }
 
-// applyWorkspaceToolPolicy folds the workspace tool/MCP allowlists and the
-// sandbox / image switches into the group-derived tool policy. The base
-// policy stays the hard ceiling; the workspace can only narrow it.
+// applyWorkspaceToolPolicy folds workspace capability switches into the
+// group-derived tool policy. Official tool/MCP allowlists stay in
+// WorkspacePolicy and are applied by the catalog, orchestrator (including
+// fallback), and runtime registry. Mixing those official ids into Mode/IDs
+// would incorrectly exclude user-owned MCP servers, which use a separate
+// namespace and scoped ownership checks. Tool calling is the sole workspace
+// gate for every tool; AllowDrawing only governs direct image-model turns.
 func applyWorkspaceToolPolicy(
 	base *llm.ToolAccessPolicy,
 	policy store.WorkspacePolicy,
@@ -120,30 +153,24 @@ func applyWorkspaceToolPolicy(
 	merged := *base
 	merged.IDs = append([]string(nil), base.IDs...)
 	merged.DenyIDs = append([]string(nil), base.DenyIDs...)
-
-	if wsAllowed := append(append([]string(nil), policy.AllowedToolIDs...), policy.AllowedMCPServerIDs...); len(wsAllowed) > 0 {
-		if merged.Mode == "" || merged.Mode == store.ResourceAccessAll {
-			merged.Mode = store.ResourceAccessSelected
-			merged.IDs = wsAllowed
-		} else if merged.Mode == store.ResourceAccessSelected {
-			allowed := map[string]bool{}
-			for _, id := range wsAllowed {
-				allowed[id] = true
-			}
-			intersection := make([]string, 0, len(merged.IDs))
-			for _, id := range merged.IDs {
-				if allowed[id] {
-					intersection = append(intersection, id)
-				}
-			}
-			merged.IDs = intersection
-		}
+	// Workspace capability switches are hard ceilings. Mark them configured even
+	// when the stored value is false so the orchestrator cannot mistake an
+	// explicit shutdown for an omitted field from an older caller.
+	baseToolCallingAllowed := !base.ToolCallingConfigured || base.AllowToolCalling
+	merged.AllowToolCalling = baseToolCallingAllowed && policy.AllowToolCalling
+	merged.ToolCallingConfigured = true
+	baseMCPAllowed := !base.MCPConfigured || base.AllowMCP
+	merged.AllowMCP = baseMCPAllowed && policy.AllowMCP
+	merged.MCPConfigured = true
+	merged.AllowDrawing = base.AllowDrawing && policy.AllowDrawing
+	merged.AllowSkills = base.AllowSkills && policy.AllowSkills
+	if !policy.AllowToolCalling {
+		merged.Mode = store.ResourceAccessNone
+		merged.IDs = nil
 	}
-	if !policy.AllowSandbox {
-		merged.DenyIDs = append(merged.DenyIDs, "builtin:python_execute", "builtin:fetch_image", "builtin:code_interpreter")
-	}
-	if !policy.AllowImageGeneration {
-		merged.DenyIDs = append(merged.DenyIDs, "builtin:image_generate", "hosted:image_generation")
+	if !policy.AllowSkills {
+		merged.SkillMode = store.ResourceAccessNone
+		merged.SkillIDs = nil
 	}
 	return &merged
 }
@@ -163,7 +190,17 @@ func workspaceTurnToolPolicy(
 	policy, err := store.GetWorkspacePolicy(ctx, db, conv.WorkspaceID)
 	if err != nil {
 		// Fail closed: an unreadable policy denies every tool.
-		denied := &llm.ToolAccessPolicy{Mode: store.ResourceAccessNone}
+		denied := &llm.ToolAccessPolicy{
+			Mode:                  store.ResourceAccessNone,
+			AllowToolCalling:      false,
+			ToolCallingConfigured: true,
+			AllowMCP:              false,
+			MCPConfigured:         true,
+			AllowDrawing:          false,
+			AllowMemory:           false,
+			AllowSkills:           false,
+			SkillMode:             store.ResourceAccessNone,
+		}
 		return denied
 	}
 	return applyWorkspaceToolPolicy(base, policy)

@@ -835,7 +835,10 @@
       "addHeader": "添加请求头",
       "removeHeader": "移除第 {{index}} 个请求头",
       "showHeader": "显示请求头值",
-      "hideHeader": "隐藏请求头值"
+      "hideHeader": "隐藏请求头值",
+      "showHeaderL10n": "显示值",
+      "hideHeaderL10n": "隐藏值",
+      "removeHeaderL10n": "移除第 {{index}} 个请求头"
     },
     "status": {
       "connected": "连接正常",

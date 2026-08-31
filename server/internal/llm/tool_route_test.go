@@ -918,6 +918,45 @@ func TestFastAndDeepResearchSkipToolClassifier(t *testing.T) {
 	})
 }
 
+func TestWorkspaceToolCallingOffDisablesDeepResearchAndForcedSearch(t *testing.T) {
+	orchestrator, provider, model, conversation, _, db := setupToolRouteTest(t)
+	workspace, err := store.CreateWorkspace(context.Background(), db, "u1", "No tools")
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE conversations SET workspace_id=? WHERE id=?`, workspace.ID, conversation.ID); err != nil {
+		t.Fatalf("scope conversation to workspace: %v", err)
+	}
+	allowToolCalling := false
+	if _, err := store.UpdateWorkspacePolicy(context.Background(), db, workspace.ID, "u1", store.WorkspacePolicyPatch{
+		AllowToolCalling: &allowToolCalling,
+	}); err != nil {
+		t.Fatalf("disable workspace tools: %v", err)
+	}
+
+	// Both flags are intentionally forged on the request. A workspace-level hard
+	// deny must remove the deep-research planner/search pipeline and the
+	// no-tools forced-search fallback before any task-model or registry call.
+	provider.invokeTool = "aivory_web_search"
+	runToolRouteTurn(t, orchestrator, model.ID, conversation.ID, RunRequest{
+		ToolMode: ToolModeEnabled, Mode: ModeDeepResearch, ForceWebSearch: true,
+		UserText: "Research this topic",
+	})
+	if len(provider.taskRequests) != 0 {
+		t.Fatalf("workspace tool shutdown still invoked task/research pipeline: %d requests", len(provider.taskRequests))
+	}
+	if len(provider.mainRequests) != 1 {
+		t.Fatalf("main requests=%d, want 1", len(provider.mainRequests))
+	}
+	request := provider.mainRequests[0]
+	if request.ToolsEnabled || len(request.Tools) != 0 || len(request.OfficialToolRequests) != 0 {
+		t.Fatalf("workspace tool shutdown exposed tools: enabled=%v tools=%+v hosted=%v", request.ToolsEnabled, request.Tools, request.OfficialToolNames)
+	}
+	if provider.toolRunErr == nil || !strings.Contains(provider.toolRunErr.Error(), "not enabled") {
+		t.Fatalf("forged provider tool call was not rejected by no-tools declaration: %v", provider.toolRunErr)
+	}
+}
+
 func TestToolRoutePromptUsesOnlyCompactCurrentTurnSignals(t *testing.T) {
 	orchestrator, provider, model, conv, _, db := setupToolRouteTest(t)
 	fallbackChannel, err := store.CreateChannel(context.Background(), db, "Route fallback", "openai", "chat", "https://fallback.invalid", "fallback-key")

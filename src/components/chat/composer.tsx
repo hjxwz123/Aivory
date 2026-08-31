@@ -108,8 +108,18 @@ import { modelHasBuiltinTools, modelSupportsBuiltinTool } from '@/lib/builtin-to
 import { hasImageAttachment, hasSendableMessageContent } from '@/lib/chat-message-input'
 import { knowledgeBaseSelectionContext } from '@/lib/knowledge-base-selection'
 import { userCan } from '@/lib/user-permissions'
+import {
+  workspaceCapabilitiesForScope,
+  workspaceMemberCanUse,
+  workspaceModelPolicyKey,
+  workspacePolicyResolvedForScope,
+} from '@/lib/workspace-permissions'
 import { subscribeAccessInvalidation } from '@/lib/access-events'
-import { findSelectedModel, isSelectedModelUnavailable } from '@/lib/model-selection'
+import {
+  findSelectedModel,
+  isModelCatalogReadyForScope,
+  isSelectedModelUnavailable,
+} from '@/lib/model-selection'
 import {
   IMAGE_UPLOAD_PASSTHROUGH_BYTES,
   IMAGE_UPLOAD_TARGET_BYTES,
@@ -158,6 +168,12 @@ interface ComposerProps {
   draftScope?: string
   /** Conversation id (so uploads carry the right scope). */
   conversationId?: string
+  /**
+   * Workspace scope for permissions and resource requests. Omit to follow the
+   * active workspace; pass `null` explicitly for a personal conversation while
+   * another workspace is selected in the sidebar.
+   */
+  workspaceId?: string | null
   /** Existing thread surface. Home may pre-create an empty conversation only
    * to scope uploads; chat commands must not be offered there. */
   commandsEnabled?: boolean
@@ -429,6 +445,7 @@ interface ToolSelectionAction {
   summary: string
   count?: number
   custom: boolean
+  disabled?: boolean
   onOpen: () => void
 }
 
@@ -611,6 +628,7 @@ function ToolUseSelector({
         <button
           type="button"
           aria-haspopup="dialog"
+          disabled={toolSelection.disabled}
           aria-label={`${toolSelection.label}: ${toolSelection.summary}`}
           onClick={() => {
             onAfter?.()
@@ -619,6 +637,7 @@ function ToolUseSelector({
           className={cn(
             'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-[8px] px-2 text-[11.5px] font-medium interactive',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+            toolSelection.disabled && 'cursor-not-allowed opacity-55',
             toolSelection.custom
               ? 'bg-[var(--color-tool-selection-soft)] text-[var(--color-tool-selection-text)] hover:bg-[var(--color-tool-selection)]/15'
               : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
@@ -667,6 +686,7 @@ export function Composer({
   autoFocus = false,
   draftScope,
   conversationId,
+  workspaceId: scopedWorkspaceId,
   commandsEnabled = false,
   ensureConversationId,
   onAttachmentsDrained,
@@ -679,13 +699,49 @@ export function Composer({
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const user = useAuth((state) => state.user)
-  const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases')
-  const canUploadFiles = userCan(user, 'allow_file_upload')
+  const activeWorkspaceId = useWorkspaces((state) => state.activeId ?? undefined)
+  const workspaceId = scopedWorkspaceId !== undefined ? scopedWorkspaceId ?? undefined : activeWorkspaceId
+  const workspacesLoaded = useWorkspaces((state) => state.loaded)
+  const workspacePolicyLoading = useWorkspaces((state) =>
+    workspaceId ? state.policyLoading[workspaceId] === true : false,
+  )
+  const workspaceSwitching = useWorkspaces((state) => state.switching)
+  const workspacePolicyError = useWorkspaces((state) =>
+    workspaceId ? state.policyErrors[workspaceId] : null,
+  )
+  const activeWorkspace = useWorkspaces((state) =>
+    workspaceId ? state.workspaces.find((workspace) => workspace.id === workspaceId) : undefined,
+  )
+  const workspacePolicy = useWorkspaces((state) =>
+    workspaceId ? state.policies[workspaceId] : undefined,
+  )
+  const workspaceCaps = workspaceCapabilitiesForScope(workspaceId, workspacePolicy, {
+    workspacesLoaded,
+    policyLoading: workspacePolicyLoading,
+    switching: workspaceSwitching,
+    policyError: workspacePolicyError,
+  })
+  const workspacePolicyResolved = workspacePolicyResolvedForScope(workspaceId, workspacePolicy, {
+    workspacesLoaded,
+    policyLoading: workspacePolicyLoading,
+    switching: workspaceSwitching,
+    policyError: workspacePolicyError,
+  })
+  const workspaceToolCallingExplicitlyDisabled =
+    workspacePolicyResolved && !workspaceCaps.toolCalling
+  // Resource-library read access is intentionally broader than use access,
+  // but the composer must never suggest or submit a resource a member cannot
+  // use. During workspace hydration, fail closed until the member row arrives.
+  const canUseWorkspacePrompts = (!workspaceId || workspaceCaps.prompts) &&
+    (!workspaceId || workspaceMemberCanUse(activeWorkspace, 'prompt'))
+  const canUseWorkspaceSkills = (!workspaceId || workspaceCaps.skills) &&
+    (!workspaceId || workspaceMemberCanUse(activeWorkspace, 'skill'))
+  const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases') && workspaceCaps.knowledgeBases
+  const canUploadFiles = userCan(user, 'allow_file_upload') && workspaceCaps.fileUpload
   const canUploadFilesRef = useRef(canUploadFiles)
   canUploadFilesRef.current = canUploadFiles
   const canUseVoice = userCan(user, 'allow_voice_transcription')
-  const canDraw = userCan(user, 'allow_drawing')
-  const workspaceId = useWorkspaces((state) => state.activeId ?? undefined)
+  const canDraw = userCan(user, 'allow_drawing') && workspaceCaps.drawing
   const workspaceIdRef = useRef(workspaceId)
   workspaceIdRef.current = workspaceId
   const mode = useComposerPrefs((s) => s.mode)
@@ -786,8 +842,13 @@ export function Composer({
   const [featuresOpen, setFeaturesOpen] = useState(false)
   const [toolSelectionOpen, setToolSelectionOpen] = useState(false)
   const handleSelectedToolIdsChange = useCallback(
-    (ids: string[] | undefined) => setSelectedToolIds(modelId, ids),
-    [modelId, setSelectedToolIds],
+    (ids: string[] | undefined) => {
+      // Keep the UI fail-closed while a workspace policy is being refreshed,
+      // without treating that temporary state as a user preference change.
+      if (workspaceId && !workspacePolicyResolved) return
+      setSelectedToolIds(modelId, workspaceCaps.toolCalling ? ids : undefined)
+    },
+    [modelId, setSelectedToolIds, workspaceCaps.toolCalling, workspaceId, workspacePolicyResolved],
   )
   const loadKBList = useCallback(async () => {
     if (!canUseKnowledgeBases) {
@@ -824,26 +885,38 @@ export function Composer({
     setLibraryLoading(true)
     setLibrarySkills([])
     setLibraryPrompts([])
-    setSelectedSkills([])
     try {
       const [skills, prompts] = await Promise.all([
-        libraryApi.skills(requestedWorkspaceID),
-        libraryApi.prompts(requestedWorkspaceID),
+        canUseWorkspaceSkills
+          ? libraryApi.skills(requestedWorkspaceID)
+          : Promise.resolve([] as ApiUserSkill[]),
+        canUseWorkspacePrompts
+          ? libraryApi.prompts(requestedWorkspaceID)
+          : Promise.resolve([] as ApiUserPrompt[]),
       ])
       if (requestID !== libraryLoadRequestRef.current || workspaceIdRef.current !== requestedWorkspaceID) return
-      setLibrarySkills(skills)
-      setLibraryPrompts(prompts)
+      // Keep the resource rows available to the library page, but only expose
+      // families this member may use inside the composer. This also prevents a
+      // stale permission response from leaving selectable skill ids in state.
+      setLibrarySkills(canUseWorkspaceSkills ? skills : [])
+      setLibraryPrompts(canUseWorkspacePrompts ? prompts : [])
       const allowedSkills = new Set(skills.map((skill) => skill.id))
-      setSelectedSkills((current) => current.filter((skill) => allowedSkills.has(skill.id)))
+      setSelectedSkills((current) =>
+        workspaceId && !workspacePolicyResolved
+          ? current
+          : canUseWorkspaceSkills
+            ? current.filter((skill) => allowedSkills.has(skill.id))
+            : [],
+      )
     } catch {
       if (requestID !== libraryLoadRequestRef.current || workspaceIdRef.current !== requestedWorkspaceID) return
       setLibrarySkills([])
       setLibraryPrompts([])
-      setSelectedSkills([])
+      if (!workspaceId || workspacePolicyResolved) setSelectedSkills([])
     } finally {
       if (requestID === libraryLoadRequestRef.current && workspaceIdRef.current === requestedWorkspaceID) setLibraryLoading(false)
     }
-  }, [])
+  }, [canUseWorkspacePrompts, canUseWorkspaceSkills, workspaceId, workspacePolicyResolved])
 
   useEffect(() => {
     // KB visibility is workspace-scoped. Invalidate both cached rows and any
@@ -953,6 +1026,15 @@ export function Composer({
     setSelectedSkills([])
     setCommandQuery(null)
   }, [conversationId, draftScope])
+
+  useEffect(() => {
+    // A permission update can arrive while a composer is open. Remove any
+    // already-selected skills immediately so a queued/sent turn cannot carry
+    // a now-forbidden skill id while the next library request is in flight.
+    if (workspacePolicyResolved && !canUseWorkspaceSkills) setSelectedSkills([])
+    if (workspacePolicyResolved && !canUseWorkspacePrompts)
+      setCommandQuery((current) => current?.trigger === '/' ? current : null)
+  }, [canUseWorkspacePrompts, canUseWorkspaceSkills, workspacePolicyResolved])
   useEffect(() => {
     const el = chipsRailRef.current
     if (!el) return
@@ -1362,8 +1444,17 @@ export function Composer({
   }
   const currentModel = useModels((s) => findSelectedModel(modelId, s.models, s.imageModels))
   const modelsLoaded = useModels((s) => s.loaded)
+  const modelsLoadedScope = useModels((s) => s.loadedScope)
+  const modelsLoadedPolicyKey = useModels((s) => s.loadedPolicyKey)
   const fastAvailable = useModels((s) => s.fastAvailable)
   const fastVision = useModels((s) => s.fastVision)
+  const modelCatalogReady = isModelCatalogReadyForScope({
+    loaded: modelsLoaded,
+    loadedScope: modelsLoadedScope,
+    loadedPolicyKey: modelsLoadedPolicyKey,
+    expectedScope: workspaceId ?? null,
+    expectedPolicyKey: workspaceModelPolicyKey(workspaceId, workspacePolicy),
+  })
   const effectiveFast = Boolean(fast) && fastAvailable
   const selectedModelUnavailable = isSelectedModelUnavailable({
     modelId,
@@ -1388,6 +1479,7 @@ export function Composer({
   const builtinToolsAvailable = !isImageMode && modelHasBuiltinTools(currentModel)
   const configuredToolsAvailable = Boolean(
     !isImageMode &&
+      workspaceCaps.toolCalling &&
       (currentModel?.tools_available ??
         (builtinToolsAvailable || (Array.isArray(currentModel?.official_tools) && currentModel.official_tools.length > 0))),
   )
@@ -1399,11 +1491,15 @@ export function Composer({
     () =>
       resolveModelToolModeCapabilities(currentModel?.tool_mode, {
         available: configuredToolsAvailable,
+        forcedDisabled: !workspaceCaps.toolCalling,
       }),
-    [configuredToolsAvailable, currentModel?.tool_mode],
+    [configuredToolsAvailable, currentModel?.tool_mode, workspaceCaps.toolCalling],
   )
   const modelResearchEnabled = currentModel?.research_enabled ?? true
-  const researchEnabled = groupResearchEnabled && modelResearchEnabled && supportsWebSearch
+  // Deep Research is implemented through the web-search tool. A workspace-wide
+  // tool ban therefore removes the mode itself, not just its underlying tool,
+  // so the composer can never advertise a mode that the turn cannot execute.
+  const researchEnabled = workspaceCaps.toolCalling && groupResearchEnabled && modelResearchEnabled && supportsWebSearch
   // §verify: only offer the toggle when an admin has configured an auditor model.
   const verifyAvailable = useModels((s) => s.verifyAvailable)
   const paramControls = currentModel?.param_controls
@@ -1427,18 +1523,62 @@ export function Composer({
   const availableToolMode = normalizeToolModeForCapabilities(toolMode, toolModeCapabilities)
   // Fast and image turns retain the prior fixed enabled behavior. Deep Research
   // also requires enabled mode and bypasses the automatic task classifier.
-  const effectiveToolMode: ToolMode =
-    effectiveFast || isImageMode || effectiveMode === 'deep-research'
+  const effectiveToolMode: ToolMode = !workspaceCaps.toolCalling
+    ? 'disabled'
+    : effectiveFast || isImageMode || effectiveMode === 'deep-research'
       ? 'enabled'
       : availableToolMode
-  const effectiveWebSearch = effectiveToolMode === 'disabled' && supportsWebSearch && forceWebSearch
+  const effectiveWebSearch = workspaceCaps.toolCalling &&
+    effectiveToolMode === 'disabled' && supportsWebSearch && forceWebSearch
 
   // A conversation override can outlive a model switch. Concrete modes
   // unavailable on the new model fall back to automatic instead of silently
   // arming a different tool family.
   useEffect(() => {
-    if (currentModel && availableToolMode !== toolMode) setToolMode(toolModeScope, 'auto')
-  }, [availableToolMode, currentModel, setToolMode, toolMode, toolModeScope])
+    if (workspacePolicyResolved && currentModel && availableToolMode !== toolMode) {
+      setToolMode(toolModeScope, workspaceCaps.toolCalling ? 'auto' : 'disabled')
+    }
+  }, [
+    availableToolMode,
+    currentModel,
+    setToolMode,
+    toolMode,
+    toolModeScope,
+    workspaceCaps.toolCalling,
+    workspacePolicyResolved,
+  ])
+
+  useEffect(() => {
+    // Forced web search is a tool-backed escape hatch for the normal
+    // "disabled" mode. A workspace tool ban must revoke that persisted flag as
+    // well, otherwise a stale preference could be sent on the next turn.
+    if (workspaceToolCallingExplicitlyDisabled && forceWebSearch) {
+      setForceWebSearch(toolModeScope, false)
+    }
+    // Explicit per-model selections are another way older request paths could
+    // accidentally re-enable tools. Drop them while the workspace ban is
+    // active; the server remains authoritative, but the client should never
+    // send a contradictory payload in the first place.
+    if (workspaceToolCallingExplicitlyDisabled && modelId && selectedToolIds !== undefined) {
+      setSelectedToolIds(modelId, undefined)
+    }
+    // Deep Research also relies on tool calling. Clear the persisted mode when
+    // the workspace revokes tools so re-enabling tools later does not silently
+    // resurrect a choice the administrator already invalidated.
+    if (workspaceToolCallingExplicitlyDisabled && mode === 'deep-research') {
+      setMode('default')
+    }
+  }, [
+    forceWebSearch,
+    modelId,
+    mode,
+    selectedToolIds,
+    setForceWebSearch,
+    setMode,
+    setSelectedToolIds,
+    toolModeScope,
+    workspaceToolCallingExplicitlyDisabled,
+  ])
   const handleParamValuesChange = useCallback(
     (next: Record<string, unknown>) => {
       setCachedParamValues(modelId, next)
@@ -1512,6 +1652,7 @@ export function Composer({
     !restoringAttachments &&
     !documentNotReady &&
     !imagePermissionDenied &&
+    modelCatalogReady &&
     !selectedModelUnavailable &&
     !executingCurrentCommand
   const canSubmit = draftReady && !streaming && !queuedTurn
@@ -1530,8 +1671,10 @@ export function Composer({
       verify: effectiveVerify ? true : undefined,
       toolMode: effectiveToolMode,
       webSearch: effectiveWebSearch ? true : undefined,
-      selectedUserSkillIds: selectedUserSkillIdsForRequest(selectedSkills),
-      selectedToolIds,
+      selectedUserSkillIds: selectedUserSkillIdsForRequest(
+        canUseWorkspaceSkills ? selectedSkills : [],
+      ),
+      selectedToolIds: workspaceCaps.toolCalling ? selectedToolIds : undefined,
       fast: effectiveFast ? true : undefined,
     }
   }
@@ -1565,6 +1708,10 @@ export function Composer({
       return
     }
     if (voiceActive || uploading || restoringAttachments || documentNotReady || executingCurrentCommand) return
+    // A workspace switch clears and reloads the scoped model catalog. Ignore a
+    // stale keyboard/click submit until the catalog represents this workspace
+    // and policy; loading is not the same as a revoked model and stays silent.
+    if (!modelCatalogReady) return
     if (imagePermissionDenied) {
       toast.error(
         t('messages.error.drawingPermission', {
@@ -1678,7 +1825,9 @@ export function Composer({
       return [...restored, ...current]
     })
 
-    const recalledSkillIds = new Set(withdrawn.selectedUserSkillIds ?? [])
+    const recalledSkillIds = canUseWorkspaceSkills
+      ? new Set(withdrawn.selectedUserSkillIds ?? [])
+      : new Set<string>()
     if (recalledSkillIds.size > 0) {
       setSelectedSkills((current) => {
         const present = new Set(current.map((skill) => skill.id))
@@ -2175,7 +2324,11 @@ export function Composer({
   const researchActive = effectiveMode === 'deep-research'
   const featureItems: FeatureItem[] = []
   const showTurnFeatures = !isImageMode && !effectiveFast
-  const showToolUseSelector = showTurnFeatures && toolModeSelectionAllowed
+  // A workspace-wide tool ban still leaves a useful, explicit one-option mode
+  // control: users can see that the effective mode is Off, while the tool
+  // picker itself is disabled below. This also reconciles stale per-chat
+  // preferences instead of making the UI appear to silently ignore them.
+  const showToolUseSelector = showTurnFeatures && (toolModeSelectionAllowed || !workspaceCaps.toolCalling)
   if (showTurnFeatures) {
     if (researchEnabled) {
       featureItems.push({
@@ -2238,7 +2391,10 @@ export function Composer({
               : 'Answer directly without making tools available.',
       }),
       selected: availableToolMode === itemMode,
-      onSelect: () => setToolMode(toolModeScope, itemMode),
+      onSelect: () => {
+        if (workspaceId && !workspacePolicyResolved) return
+        setToolMode(toolModeScope, workspaceCaps.toolCalling ? itemMode : 'disabled')
+      },
     }
   })
   const toolModeSummary =
@@ -2247,14 +2403,21 @@ export function Composer({
   const toolUseConfigured = hasCustomToolSelection || (!researchActive && hasToolModeOverride)
 
   const webSearchItem: FeatureItem | undefined =
-    showToolUseSelector && supportsWebSearch && availableToolMode === 'disabled'
+    showToolUseSelector && workspaceCaps.toolCalling && supportsWebSearch && availableToolMode === 'disabled'
       ? {
           key: 'web-search',
           icon: <Globe size={16} aria-hidden />,
           label: t('composer.features.webSearch', { defaultValue: 'Web search' }),
           active: forceWebSearch,
           enter: true,
-          toggle: () => setForceWebSearch(toolModeScope, !forceWebSearch),
+          toggle: () => {
+            if (workspaceId && !workspacePolicyResolved) return
+            if (!workspaceCaps.toolCalling) {
+              setForceWebSearch(toolModeScope, false)
+              return
+            }
+            setForceWebSearch(toolModeScope, !forceWebSearch)
+          },
         }
       : undefined
 
@@ -2274,6 +2437,7 @@ export function Composer({
           active: true,
           clearLabel: t('composer.toolSelection.resetToolUse', { defaultValue: 'Reset tool use' }),
           toggle: () => {
+            if ((workspaceId && !workspacePolicyResolved) || !workspaceCaps.toolCalling) return
             if (!researchActive) clearToolMode(toolModeScope)
             if (hasCustomToolSelection) handleSelectedToolIdsChange(undefined)
           },
@@ -2300,7 +2464,9 @@ export function Composer({
             summary: toolSelectionSummary,
             count: hasCustomToolSelection ? selectedToolIds.length : undefined,
             custom: hasCustomToolSelection,
+            disabled: !workspaceCaps.toolCalling,
             onOpen: () => {
+              if (!workspaceCaps.toolCalling) return
               setMoreOpen(false)
               setFeaturesOpen(false)
               setToolSelectionOpen(true)
@@ -2486,6 +2652,7 @@ export function Composer({
         .slice(0, 10)
     }
     const skillItems: ComposerCommandItem[] = librarySkills
+      .filter(() => canUseWorkspaceSkills)
       .filter((skill) => !selectedSkills.some((selected) => selected.id === skill.id))
       .filter((skill) => matches(skill.name, skillDisplayDescription(skill)))
       .map((skill) => ({
@@ -2496,6 +2663,7 @@ export function Composer({
         skill,
       }))
     const promptItems: ComposerCommandItem[] = libraryPrompts
+      .filter(() => canUseWorkspacePrompts)
       .filter((prompt) => matches(prompt.name, prompt.description))
       .map((prompt) => ({
         kind: 'prompt' as const,
@@ -2527,6 +2695,8 @@ export function Composer({
     selectedSkills,
     commandsEnabled,
     conversationId,
+    canUseWorkspacePrompts,
+    canUseWorkspaceSkills,
     t,
   ])
 
@@ -2682,6 +2852,7 @@ export function Composer({
     const query = commandQuery
     if (!query) return
     if (item.kind === 'skill') {
+      if (!canUseWorkspaceSkills) return
       ref.current?.replaceRange(query.from, query.to, '')
       setSelectedSkills((current) => addSelectedUserSkill(current, item.skill))
       setDismissedCommandKey('')
@@ -2690,6 +2861,7 @@ export function Composer({
       setDismissedCommandKey('')
       void runCompactCommand()
     } else if (item.kind === 'prompt') {
+      if (!canUseWorkspacePrompts) return
       ref.current?.replaceRange(query.from, query.to, item.prompt.content)
       setDismissedCommandKey(commandKey)
     } else {
@@ -3564,13 +3736,13 @@ export function Composer({
                 </button>
               </Tooltip>
             ) : null}
-            {isImageMode ? <StylePicker value={imageStyleId} onChange={setImageStyleId} className="min-w-0 max-w-[42vw] shrink" /> : null}
+            {isImageMode ? <StylePicker value={imageStyleId} onChange={setImageStyleId} workspaceId={workspaceId} className="min-w-0 max-w-[42vw] shrink" /> : null}
 
             {/* On phones the header already carries the model picker (ChatThread),
                 so we drop the composer's to keep the row uncluttered. New-chat
                 (ChatHome) has no header picker, so it keeps this one. */}
             {!modelPickerInHeader ? (
-              <ModelPicker value={modelId} onChange={onModelChange} fast={fast} onFastChange={onFastChange} className="min-w-0 max-w-[42vw] shrink" />
+            <ModelPicker value={modelId} onChange={onModelChange} fast={fast} onFastChange={onFastChange} workspaceId={workspaceId} className="min-w-0 max-w-[42vw] shrink" />
             ) : null}
           </div>
 
@@ -3667,7 +3839,7 @@ export function Composer({
               </Tooltip>
             ) : null}
 
-            {isImageMode ? <StylePicker value={imageStyleId} onChange={setImageStyleId} /> : null}
+            {isImageMode ? <StylePicker value={imageStyleId} onChange={setImageStyleId} workspaceId={workspaceId} /> : null}
 
             {/* Per-model param_controls (§2.3-G). Picked values flow up via onSubmit(). */}
             {visibleParamControls ? (
@@ -3755,7 +3927,7 @@ export function Composer({
           ) : null}
           {/* Pinned — model picker + send/stop, always visible (never shrinks). */}
           <div className="flex shrink-0 items-center gap-1.5 pl-1">
-            <ModelPicker value={modelId} onChange={onModelChange} fast={fast} onFastChange={onFastChange} />
+            <ModelPicker value={modelId} onChange={onModelChange} fast={fast} onFastChange={onFastChange} workspaceId={workspaceId} />
             {primaryAction}
           </div>
         </div>
@@ -3775,6 +3947,7 @@ export function Composer({
         open={toolSelectionOpen}
         onOpenChange={setToolSelectionOpen}
         modelId={modelId}
+        workspaceId={workspaceId}
         selectedIds={selectedToolIds}
         onChange={handleSelectedToolIdsChange}
       />

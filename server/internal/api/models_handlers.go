@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"net/http"
 	"strings"
@@ -130,10 +131,51 @@ func listImageModelsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"models": []any{}, "default_id": ""})
 		return
 	}
+	var workspacePolicy *store.WorkspacePolicy
+	// Drawing is a workspace capability as well as a group capability. Keep the
+	// picker empty for members of a workspace that disabled direct image models;
+	// enforceWorkspaceTurnPolicy remains the authoritative execution check.
+	if workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id")); workspaceID != "" {
+		u := authUser(r)
+		if u == nil {
+			writeJSON(w, http.StatusOK, map[string]any{"models": []any{}, "default_id": ""})
+			return
+		}
+		if role, err := store.IsWorkspaceMember(r.Context(), d.DB, workspaceID, u.ID); err != nil || role == "" {
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+			} else {
+				writeError(w, http.StatusNotFound, errNotFound)
+			}
+			return
+		}
+		policy, err := store.GetWorkspacePolicy(r.Context(), d.DB, workspaceID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if !policy.AllowDrawing {
+			writeJSON(w, http.StatusOK, map[string]any{"models": []any{}, "default_id": ""})
+			return
+		}
+		workspacePolicy = &policy
+	}
 	models, err := store.ListModels(r.Context(), d.DB, "image", true)
 	if err != nil {
 		writeError(w, 500, err)
 		return
+	}
+	// The execution gate rejects a model outside the workspace allowlist. Apply
+	// the same ceiling to the picker so a member cannot select an image model
+	// that will only fail after an SSE turn has already started.
+	if workspacePolicy != nil && len(workspacePolicy.AllowedModelIDs) > 0 {
+		filtered := models[:0]
+		for _, model := range models {
+			if workspacePolicy.ModelAllowedByPolicy(model.ID) {
+				filtered = append(filtered, model)
+			}
+		}
+		models = filtered
 	}
 	writeJSON(w, 200, modelsResponse(d, r, models))
 }
@@ -154,6 +196,21 @@ func listSkillsPublicHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if permissionErr != nil {
 		writeError(w, http.StatusForbidden, errSkillGroupPermission)
 		return
+	}
+	if workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id")); workspaceID != "" {
+		allowed, err := workspaceLibraryUseEnabled(d, r, workspaceID, libraryCapabilitySkill)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, errNotFound)
+			} else {
+				writeError(w, http.StatusInternalServerError, err)
+			}
+			return
+		}
+		if !allowed {
+			writeJSON(w, http.StatusOK, []publicSkill{})
+			return
+		}
 	}
 	skills, err := store.ListSkills(r.Context(), d.DB, true)
 	if err != nil {
@@ -234,6 +291,32 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 			Tools:   store.ResourceAccessPolicy{Mode: store.ResourceAccessNone},
 		}
 	}
+	// Workspace capability switches are presentation ceilings for model/tool
+	// pickers. Execution re-checks the same policy in the orchestrator, but stale
+	// clients should not be told that disabled tool classes are available.
+	workspaceToolCallingAllowed := true
+	workspaceMCPAllowed := true
+	workspaceSkillsAllowed := true
+	var workspacePolicy *store.WorkspacePolicy
+	var workspaceMember *store.Workspace
+	if workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id")); workspaceID != "" {
+		policy, policyErr := store.GetWorkspacePolicy(r.Context(), d.DB, workspaceID)
+		if policyErr != nil {
+			workspaceToolCallingAllowed, workspaceMCPAllowed, workspaceSkillsAllowed = false, false, false
+		} else {
+			workspacePolicy = &policy
+			workspaceToolCallingAllowed = policy.AllowToolCalling
+			workspaceMCPAllowed = policy.AllowMCP
+			workspaceSkillsAllowed = policy.AllowSkills
+		}
+		if workspace, memberErr := store.GetWorkspaceForMember(r.Context(), d.DB, workspaceID, userID); memberErr != nil || workspace == nil {
+			workspaceToolCallingAllowed, workspaceMCPAllowed, workspaceSkillsAllowed = false, false, false
+		} else {
+			workspaceMember = workspace
+			workspaceMCPAllowed = workspaceMCPAllowed && workspace.CanUseMCP
+			workspaceSkillsAllowed = workspaceSkillsAllowed && workspace.CanUseSkills
+		}
+	}
 
 	// Global USD→credit rate, read once. 0 (default / unset) disables the credit
 	// system, so image models show no per-image credit cost.
@@ -265,15 +348,30 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 	}
 	availableBuiltinTools := make(map[string]bool, len(registeredBuiltinTools))
 	for _, name := range registeredBuiltinTools {
+		if !workspaceToolCallingAllowed || (!workspaceSkillsAllowed && name == "use_skill") {
+			continue
+		}
+		if workspacePolicy != nil && !workspaceCatalogToolAllowed("builtin:"+name, workspacePolicy, workspaceMember) {
+			continue
+		}
 		if disabledBuiltinTools[name] || !toolPolicyAllowsID(permissions, "builtin:"+name) {
 			continue
 		}
 		availableBuiltinTools[name] = true
 	}
 	mcpToolsAvailable := false
-	if d.Tools != nil {
-		for _, definition := range d.Tools.ListMCP("") {
-			if toolPolicyAllowsID(permissions, "mcp:"+definition.ServerID) {
+	if workspaceToolCallingAllowed && workspaceMCPAllowed && d.Tools != nil {
+		workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id"))
+		mcpScope := toolPolicyScope{ctx: r.Context(), db: d.DB, userID: userID, workspaceID: workspaceID}
+		for _, definition := range d.Tools.ListMCP("", userID, workspaceID) {
+			id := "mcp:" + definition.ServerID
+			if definition.UserOwned {
+				id = userMCPToolIDPrefix + definition.ServerID
+			}
+			if workspacePolicy != nil && !workspaceCatalogToolAllowed(id, workspacePolicy, workspaceMember) {
+				continue
+			}
+			if toolPolicyAllowsID(permissions, id, mcpScope) {
 				mcpToolsAvailable = true
 				break
 			}
@@ -299,10 +397,14 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 			}
 		}
 		hostedToolsAvailable := false
-		if m.ToolMode != "none" {
+		if workspaceToolCallingAllowed && m.ToolMode != "none" {
 			if definitions, err := store.ParseOfficialTools(m.OfficialTools); err == nil {
 				for _, definition := range definitions {
-					if toolPolicyAllowsID(permissions, "hosted:"+strings.TrimSpace(definition.Name)) {
+					id := "hosted:" + strings.TrimSpace(definition.Name)
+					if workspacePolicy != nil && !workspaceCatalogToolAllowed(id, workspacePolicy, workspaceMember) {
+						continue
+					}
+					if toolPolicyAllowsID(permissions, id) {
 						hostedToolsAvailable = true
 						break
 					}

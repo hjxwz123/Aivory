@@ -206,7 +206,9 @@ func TestWorkspaceLibraryIsScopedAndRoleAware(t *testing.T) {
 	if _, err := UpdateUserSkillScoped(ctx, db, memberSkill.ID, "u2", "ws1", *memberSkill); err != nil {
 		t.Fatalf("member could not edit own skill: %v", err)
 	}
-	if _, err := db.Exec(`UPDATE workspace_members SET can_create_skills_prompts=0 WHERE workspace_id='ws1' AND user_id='u2'`); err != nil {
+	if _, err := db.Exec(`UPDATE workspace_members
+		SET can_create_skills_prompts=0, can_create_prompts=0, can_create_skills=0, can_create_mcp=0
+		WHERE workspace_id='ws1' AND user_id='u2'`); err != nil {
 		t.Fatal(err)
 	}
 	memberRows, err = ListUserSkillsScoped(ctx, db, "u2", "ws1")
@@ -214,8 +216,9 @@ func TestWorkspaceLibraryIsScopedAndRoleAware(t *testing.T) {
 		t.Fatalf("revoked member workspace rows=%+v err=%v", memberRows, err)
 	}
 	for _, row := range memberRows {
-		if row.CanManage {
-			t.Fatalf("revoked member unexpectedly can manage %s", row.ID)
+		wantManage := row.ID == memberSkill.ID
+		if row.CanManage != wantManage {
+			t.Fatalf("revoked member can_manage for %s=%v want=%v", row.ID, row.CanManage, wantManage)
 		}
 	}
 	if _, err := CreateUserPrompt(ctx, db, UserPrompt{
@@ -223,8 +226,13 @@ func TestWorkspaceLibraryIsScopedAndRoleAware(t *testing.T) {
 	}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("revoked member prompt create err=%v, want ErrNotFound", err)
 	}
-	if _, err := UpdateUserSkillScoped(ctx, db, memberSkill.ID, "u2", "ws1", *memberSkill); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("revoked member skill update err=%v, want ErrNotFound", err)
+	memberSkill.Description = "edited after create permission revoke"
+	updatedSkill, err := UpdateUserSkillScoped(ctx, db, memberSkill.ID, "u2", "ws1", *memberSkill)
+	if err != nil {
+		t.Fatalf("revoked member skill update err=%v", err)
+	}
+	if updatedSkill.Description != memberSkill.Description {
+		t.Fatalf("revoked member skill description=%q want=%q", updatedSkill.Description, memberSkill.Description)
 	}
 	if _, err := CreateUserPrompt(ctx, db, UserPrompt{
 		UserID: "u3", WorkspaceID: "ws1", Name: "guest-prompt", Description: "guest", Content: "should fail",

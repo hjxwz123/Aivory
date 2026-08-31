@@ -1,5 +1,21 @@
 import type { ApiModel } from '@/api/types'
 
+export function isModelCatalogReadyForScope({
+  loaded,
+  loadedScope,
+  loadedPolicyKey,
+  expectedScope,
+  expectedPolicyKey,
+}: {
+  loaded: boolean
+  loadedScope: string | null | undefined
+  loadedPolicyKey: string | undefined
+  expectedScope: string | null
+  expectedPolicyKey: string
+}): boolean {
+  return loaded && loadedScope === expectedScope && loadedPolicyKey === expectedPolicyKey
+}
+
 export function findSelectedModel(
   modelId: string,
   models: ApiModel[],

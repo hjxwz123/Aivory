@@ -21,6 +21,45 @@ type testRPCRequest struct {
 	Params  map[string]json.RawMessage `json:"params"`
 }
 
+func TestNewClientDoesNotEchoMalformedEndpoint(t *testing.T) {
+	const secret = "legacy-url-secret"
+	_, err := NewClient(Config{URL: "http://[invalid-" + secret})
+	if err == nil {
+		t.Fatal("malformed MCP URL was accepted")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("MCP URL validation leaked endpoint input: %v", err)
+	}
+}
+
+func TestDiscoverRejectsProtocolVersionCredentialEcho(t *testing.T) {
+	const secret = "Bearer reflected-protocol-secret"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		request, ok := readTestRequest(t, w, r)
+		if !ok {
+			return
+		}
+		writeTestResult(t, w, request.ID, map[string]any{
+			"protocolVersion": secret,
+			"serverInfo":      map[string]any{"name": "hostile"},
+			"capabilities":    map[string]any{},
+		})
+	}))
+	defer server.Close()
+
+	client, err := NewClient(Config{URL: server.URL, Headers: map[string]string{"Authorization": secret}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.Discover(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "invalid MCP protocol version") {
+		t.Fatalf("credential-like protocol version error=%v", err)
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("protocol validation error leaked reflected credential: %v", err)
+	}
+}
+
 func TestModernJSONLifecycle(t *testing.T) {
 	t.Parallel()
 
@@ -396,6 +435,56 @@ func TestResponseLimitAndTimeout(t *testing.T) {
 	})
 }
 
+func TestListToolsCumulativeResponseLimit(t *testing.T) {
+	t.Parallel()
+
+	const responseLimit = int64(700)
+	var listCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		request, ok := readTestRequest(t, w, r)
+		if !ok {
+			return
+		}
+		switch request.Method {
+		case "server/discover":
+			writeTestResult(t, w, request.ID, map[string]any{
+				"protocolVersion": ModernProtocolVersion,
+				"serverInfo":      map[string]any{"name": "paged"},
+				"capabilities":    map[string]any{},
+			})
+		case "tools/list":
+			listCalls++
+			result := map[string]any{
+				"tools": []any{map[string]any{
+					"name":        fmt.Sprintf("tool_%d", listCalls),
+					"description": strings.Repeat("x", 400),
+					"inputSchema": map[string]any{"type": "object"},
+				}},
+			}
+			if listCalls == 1 {
+				result["nextCursor"] = "page-2"
+			}
+			writeTestResult(t, w, request.ID, result)
+		default:
+			http.Error(w, "unexpected method", http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(Config{URL: server.URL, MaxResponseBytes: responseLimit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.ListTools(context.Background())
+	var sizeErr *ResponseTooLargeError
+	if !errors.As(err, &sizeErr) || sizeErr.Limit != responseLimit {
+		t.Fatalf("error = %v", err)
+	}
+	if listCalls != 2 {
+		t.Fatalf("tools/list calls = %d, want 2", listCalls)
+	}
+}
+
 func TestConfigAndArgumentsValidation(t *testing.T) {
 	t.Parallel()
 
@@ -403,6 +492,8 @@ func TestConfigAndArgumentsValidation(t *testing.T) {
 		{},
 		{URL: "ftp://example.com/mcp"},
 		{URL: "https://user:pass@example.com/mcp"},
+		{URL: "https://example.com/mcp?token=secret"},
+		{URL: "https://example.com/mcp?"},
 		{URL: "https://example.com/mcp#fragment"},
 		{URL: "https://example.com/mcp", Headers: map[string]string{"Bad Header": "value"}},
 		{URL: "https://example.com/mcp", Headers: map[string]string{"X-Header": "bad\nvalue"}},

@@ -40,6 +40,8 @@ interface ComposerPrefsStore extends PersistedComposerPrefs {
   setDefaultToolMode: (toolMode: ToolMode) => void
   setForceWebSearch: (scope: string, on: boolean) => void
   setSelectedToolIds: (modelId: string, ids: string[] | undefined) => void
+  /** Drop explicit tool subsets when the active workspace changes. */
+  clearSelectedToolIds: () => void
   /** Restore the account/model defaults before starting an unrelated chat. */
   resetForNewConversation: () => void
   setParamValues: (modelId: string, values: Record<string, unknown>) => void
@@ -326,6 +328,14 @@ export const useComposerPrefs = create<ComposerPrefsStore>((set) => {
         }
         persistPrefs(persistedFrom(state, { selectedToolIdsByModel }))
         return { selectedToolIdsByModel }
+      })
+    },
+    clearSelectedToolIds() {
+      set((state) => {
+        if (Object.keys(state.selectedToolIdsByModel).length === 0) return {}
+        const patch = { selectedToolIdsByModel: {} }
+        persistPrefs(persistedFrom(state, patch))
+        return patch
       })
     },
     resetForNewConversation() {

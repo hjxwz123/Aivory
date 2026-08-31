@@ -117,6 +117,114 @@ func TestMCPServerStoreRejectsDuplicateNameAndInvalidDiscovery(t *testing.T) {
 	}
 }
 
+func TestMCPServerDiscoveryCASRejectsNewerResult(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "mcp-discovery-cas.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	created, err := CreateMCPServer(ctx, db, MCPServer{
+		Name: "CAS", Icon: "Blocks", Description: "compare and swap",
+		URL: "https://cas.example.test/mcp", Headers: map[string]string{"Authorization": "Bearer cas"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	enabled := true
+	if created, err = UpdateMCPServer(ctx, db, created.ID, MCPServerPatch{Enabled: &enabled}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := UpdateMCPServerSyncStateIfCurrent(ctx, db, *created,
+		json.RawMessage(`[{"name":"first","inputSchema":{"type":"object"}}]`),
+		"2026-07-28", "", 10)
+	if err != nil {
+		t.Fatalf("first CAS sync: %v", err)
+	}
+	if first.LastSyncedAt != 10 {
+		t.Fatalf("first sync timestamp=%d want=10", first.LastSyncedAt)
+	}
+	if _, err := UpdateMCPServerSyncStateIfCurrent(ctx, db, *created,
+		json.RawMessage(`[{"name":"stale","inputSchema":{"type":"object"}}]`),
+		"2026-07-28", "", 11); !errors.Is(err, ErrMCPDiscoveryStateChanged) {
+		t.Fatalf("stale CAS error=%v want ErrMCPDiscoveryStateChanged", err)
+	}
+	latest, err := GetMCPServer(ctx, db, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(latest.DiscoveredTools, []byte(`"first"`)) || bytes.Contains(latest.DiscoveredTools, []byte(`"stale"`)) {
+		t.Fatalf("stale CAS replaced snapshot: %s", latest.DiscoveredTools)
+	}
+	// A metadata edit also invalidates a result even if no newer discovery has
+	// completed yet.
+	url := "https://cas-new.example.test/mcp"
+	if _, err := UpdateMCPServer(ctx, db, created.ID, MCPServerPatch{URL: &url}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UpdateMCPServerSyncStateIfCurrent(ctx, db, *first,
+		json.RawMessage(`[{"name":"old-endpoint","inputSchema":{"type":"object"}}]`),
+		"2026-07-28", "", 12); !errors.Is(err, ErrMCPDiscoveryStateChanged) {
+		t.Fatalf("metadata-stale CAS error=%v want ErrMCPDiscoveryStateChanged", err)
+	}
+}
+
+func TestMCPServerMetadataResetIsAtomicAndVersioned(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "mcp-metadata-reset.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	created, err := CreateMCPServer(ctx, db, MCPServer{
+		Name: "Atomic", URL: "https://old.example.test/mcp", Enabled: true,
+		Headers: map[string]string{"Authorization": "Bearer old"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := UpdateMCPServerSyncStateIfCurrent(ctx, db, *created,
+		json.RawMessage(`[{"name":"old_tool","inputSchema":{"type":"object"}}]`),
+		"2026-07-28", "old error", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newer, err := UpdateMCPServerSyncStateIfCurrent(ctx, db, *first,
+		json.RawMessage(`[{"name":"newer_tool","inputSchema":{"type":"object"}}]`),
+		"2026-07-28", "", 11)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	newURL := "https://new.example.test/mcp"
+	patch := MCPServerPatch{URL: &newURL, ResetDiscovery: true}
+	if _, err := UpdateMCPServerIfCurrent(ctx, db, *first, patch); !errors.Is(err, ErrMCPDiscoveryStateChanged) {
+		t.Fatalf("stale metadata update error=%v, want ErrMCPDiscoveryStateChanged", err)
+	}
+	unchanged, err := GetMCPServer(ctx, db, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unchanged.URL != newer.URL || !bytes.Contains(unchanged.DiscoveredTools, []byte(`"newer_tool"`)) {
+		t.Fatalf("stale metadata update changed authoritative row: %+v", unchanged)
+	}
+
+	reset, err := UpdateMCPServerIfCurrent(ctx, db, *newer, patch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reset.URL != newURL || string(reset.DiscoveredTools) != "[]" ||
+		reset.ProtocolVersion != "" || reset.LastError != "" || reset.LastSyncedAt != 0 {
+		t.Fatalf("metadata and discovery state were not reset together: %+v", reset)
+	}
+}
+
 func TestMCPServerIncludedInFullAndConfigBackups(t *testing.T) {
 	for name, tables := range map[string][]string{
 		"full":   BackupTableOrder(),
