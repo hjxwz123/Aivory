@@ -725,6 +725,93 @@ func responseOutputHasFunctionCalls(items []map[string]any) bool {
 	return false
 }
 
+// responsesEasyInputMessage is the channel-neutral representation for prior
+// user/assistant text. In particular, assistant output_text belongs to the
+// stricter ResponseOutputMessage schema (id/status/type are required); rebuilt
+// history must use input_text instead so model/channel switches do not create a
+// partially populated output item.
+func responsesEasyInputMessage(role, text string) map[string]any {
+	return map[string]any{
+		"role":    role,
+		"content": []map[string]any{{"type": "input_text", "text": text}},
+	}
+}
+
+// normalizeResponsesReplayItems makes terminal output items safe to send back
+// through a stateless Responses request. Official output messages are converted
+// to EasyInputMessage because their ids and output-only metadata are unnecessary
+// for text history and are not portable across compatible gateways. Tool-call
+// items stay native for call/output pairing; relays that omit their optional or
+// required terminal status are repaired after the item is already done.
+func normalizeResponsesReplayItems(items []map[string]any) []map[string]any {
+	if len(items) == 0 {
+		return items
+	}
+	normalized := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		if easy, ok := responsesOutputMessageAsEasyInput(item); ok {
+			normalized = append(normalized, easy)
+			continue
+		}
+		itemType, _ := item["type"].(string)
+		if strings.HasSuffix(itemType, "_call") {
+			if status, _ := item["status"].(string); strings.TrimSpace(status) == "" {
+				clone := make(map[string]any, len(item)+1)
+				for key, value := range item {
+					clone[key] = value
+				}
+				clone["status"] = "completed"
+				item = clone
+			}
+		}
+		normalized = append(normalized, item)
+	}
+	return normalized
+}
+
+func responsesOutputMessageAsEasyInput(item map[string]any) (map[string]any, bool) {
+	itemType, _ := item["type"].(string)
+	role, _ := item["role"].(string)
+	if itemType != "message" || role != "assistant" {
+		return nil, false
+	}
+	content, ok := jsonArrayItems(item["content"])
+	if !ok {
+		if text, isText := item["content"].(string); isText && text != "" {
+			return responsesEasyInputMessage(role, text), true
+		}
+		return nil, false
+	}
+	parts := make([]map[string]any, 0, len(content))
+	for _, rawPart := range content {
+		part, _ := rawPart.(map[string]any)
+		if part == nil {
+			continue
+		}
+		partType, _ := part["type"].(string)
+		var text string
+		switch partType {
+		case "output_text", "input_text":
+			text, _ = part["text"].(string)
+		case "refusal":
+			text, _ = part["refusal"].(string)
+		default:
+			continue
+		}
+		if text != "" {
+			parts = append(parts, map[string]any{"type": "input_text", "text": text})
+		}
+	}
+	if len(parts) == 0 {
+		return nil, false
+	}
+	easy := map[string]any{"role": "assistant", "content": parts}
+	if phase, _ := item["phase"].(string); phase != "" {
+		easy["phase"] = phase
+	}
+	return easy, true
+}
+
 type openAIResponseCallBuf struct {
 	ID, Name string
 	Args     strings.Builder
@@ -941,18 +1028,16 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		if m.Role == "assistant" && len(m.Raw) > 2 && !isPromptToolRawEnvelope(m.Raw) && !nativeRawContainsImage(m.Raw) {
 			var items []map[string]any
 			if err := json.Unmarshal(m.Raw, &items); err == nil && len(items) > 0 && items[0]["type"] != nil {
-				input = append(input, items...)
+				input = append(input, normalizeResponsesReplayItems(items)...)
 				continue
 			}
 		}
 		messageText := renderBlocksAsText(m.Blocks)
-		ctype := "input_text"
-		if m.Role == "assistant" {
-			ctype = "output_text"
-		}
 		parts := []map[string]any{}
 		if messageText != "" {
-			parts = append(parts, map[string]any{"type": ctype, "text": messageText})
+			// Both user and assistant turns are EasyInputMessage history here.
+			// output_text is reserved for complete ResponseOutputMessage items.
+			parts = append(parts, map[string]any{"type": "input_text", "text": messageText})
 		}
 		if m.Role == "user" && len(pendingGeneratedImages) > 0 {
 			parts = append(parts, pendingGeneratedImages...)
@@ -962,8 +1047,8 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		// intentionally excluded: PDFs/DOCX/PPTX/etc. always enter the model
 		// through the RAG text path, never native provider file blocks.
 		for _, b := range m.Blocks {
-			// input_image is only valid on the user role; an assistant/output message
-			// takes output_text only. Drop images that rode onto a non-user turn.
+			// input_image is only valid on the user role; rebuilt assistant history is
+			// text-only. Drop images that rode onto a non-user turn.
 			if req.Model.Vision && m.Role == "user" && b.Kind == "image" && b.Data != "" {
 				parts = append(parts, map[string]any{
 					"type":      "input_image",
@@ -973,7 +1058,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		}
 		// A direct image-model turn is persisted as an assistant artifact with no
 		// text. Its binary image belongs on the following user turn as input_image;
-		// emitting an empty output_text item here is both semantically wrong and is
+		// emitting an empty assistant text item here is both semantically wrong and is
 		// rejected by some Responses-compatible gateways. Other genuinely empty
 		// messages have already been removed by storeToUnified.
 		if len(parts) > 0 {
@@ -1166,10 +1251,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 			if text != "" {
 				// Keep the visible partial answer in replay history, but never retain
 				// a current-round function/hosted call without its required output.
-				partialInput = append(partialInput, map[string]any{
-					"role":    "assistant",
-					"content": []map[string]any{{"type": "output_text", "text": text}},
-				})
+				partialInput = append(partialInput, responsesEasyInputMessage("assistant", text))
 			}
 			partialRaw, _ := json.Marshal(partialInput[historyLen:])
 			// Stop button / kill: preserve the partial (§6.2).
@@ -1197,10 +1279,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 			}
 			if len(calls) > 0 || len(hosted) > 0 || strings.TrimSpace(text) == "" {
 				if text != "" {
-					input = append(input, map[string]any{
-						"role":    "assistant",
-						"content": []map[string]any{{"type": "output_text", "text": text}},
-					})
+					input = append(input, responsesEasyInputMessage("assistant", text))
 				}
 				raw, _ := json.Marshal(input[historyLen:])
 				return &UnifiedResult{
@@ -1211,10 +1290,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 			if len(outputItems) > 0 {
 				input = append(input, outputItems...)
 			} else {
-				input = append(input, map[string]any{
-					"role":    "assistant",
-					"content": []map[string]any{{"type": "output_text", "text": text}},
-				})
+				input = append(input, responsesEasyInputMessage("assistant", text))
 			}
 			raw, _ := json.Marshal(input[historyLen:])
 			return &UnifiedResult{
@@ -1238,10 +1314,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		} else if text != "" {
 			// Compatibility fallback for OpenAI-compatible gateways that stream
 			// deltas but omit response.completed.output.
-			input = append(input, map[string]any{
-				"role":    "assistant",
-				"content": []map[string]any{{"type": "output_text", "text": text}},
-			})
+			input = append(input, responsesEasyInputMessage("assistant", text))
 		}
 
 		if len(calls) == 0 {
@@ -1266,6 +1339,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 					"type":    "function_call",
 					"call_id": c.ID,
 					"name":    c.Name,
+					"status":  "completed",
 					// Responses requires `arguments` to be a JSON STRING. Passing
 					// json.RawMessage serialises it as an OBJECT and the API rejects
 					// it with "expected a string, got an object" on input[N].arguments.
@@ -1705,7 +1779,7 @@ func finalizeOpenAIResponsesStream(
 			}
 		}
 	}
-	return calls, hosted, outputItems
+	return calls, hosted, normalizeResponsesReplayItems(outputItems)
 }
 
 // parseResponsesOutput is retained for callers that need a non-streaming JSON
