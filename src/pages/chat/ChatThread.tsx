@@ -30,6 +30,7 @@ import { useAuth } from '@/store/auth'
 import { useConversationFiles } from '@/store/conversation-files'
 import { useSandboxFiles } from '@/store/sandbox-files'
 import { useMediaQuery } from '@/hooks/use-media-query'
+import { formatDocumentTitle, useDocumentTitle } from '@/hooks/use-document-title'
 import { toast } from '@/hooks/use-toast'
 import { ConversationOutline } from '@/components/chat/conversation-outline'
 import { ConversationMinimap } from '@/components/chat/conversation-minimap'
@@ -53,6 +54,11 @@ export default function ChatThread() {
   const navigate = useNavigate()
   const { t } = useTranslation(['chat', 'common', 'projects', 'kb'])
   const conversation = useConversations((s) => s.conversations.find((c) => c.id === id))
+  useDocumentTitle(
+    conversation
+      ? formatDocumentTitle(conversation.title.trim() || t('untitled'), t('common:appName'))
+      : undefined,
+  )
   const [loadStatus, setLoadStatus] = useState<'idle' | 'loading' | 'done'>('idle')
   const loadOne = useConversations((s) => s.loadOne)
   const loadInlineThreads = useConversations((s) => s.loadInlineThreads)
