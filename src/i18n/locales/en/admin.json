@@ -76,12 +76,12 @@
         "tour": "Select the enabled chat model new conversations should use."
       },
       "taskModel": {
-        "title": "Task model (optional)",
-        "tour": "If unset, internal tasks use the current conversation model. If it is a reasoning model, titles, summaries, and other internal tasks may slow replies."
+        "title": "Other internal task model (optional)",
+        "tour": "Handles memory, research planning, search-query generation, and other tasks without a dedicated model. If unset, it uses the current conversation model."
       },
       "toolRouteModel": {
-        "title": "Tool routing model (optional)",
-        "tour": "If unset, the current conversation model decides when to use tools. If it is a reasoning model, tool routing may slow replies."
+        "title": "Query routing model (optional)",
+        "tour": "Quickly decides whether a user query needs tools. If unset, the current conversation model decides. Prefer a low-latency, non-reasoning model."
       },
       "embedding": {
         "title": "Add an embedding model",
@@ -669,23 +669,25 @@
       "actions": "Actions"
     },
     "purposes": {
-      "chat": "Chat",
-      "image": "Image",
-      "embedding": "Embedding",
-      "task_title": "Title generation",
-      "task_router": "Query routing",
-      "task_compact": "Context compaction",
-      "task_memory_extract": "Memory extraction",
-      "task_memory_adjudicate": "Memory adjudication",
-      "task_downgrade": "Cross-vendor downgrade",
-      "task_image_prompt": "Image prompt",
-      "task_image_intent": "Image operation routing",
-      "task_tool_route": "Tool routing",
-      "task_search_queries": "Search query generation",
-      "task_research_plan": "Research plan",
-      "task_research_verify": "Research verify",
-      "task_moderation": "Moderation",
-      "task_research_validate": "Research cross-validation"
+      "chat": "Chat response",
+      "image": "Image generation",
+      "embedding": "Document embedding",
+      "task_title": "Title generation (conversation title)",
+      "task_router": "File routing (file selection and RAG strategy)",
+      "task_rag_evidence_judge": "RAG evidence sufficiency check",
+      "task_rag_map_reduce": "Long-document summary (map-reduce)",
+      "task_compact": "Context compaction (conversation summary)",
+      "task_memory_extract": "Memory extraction (user facts)",
+      "task_memory_adjudicate": "Memory adjudication (conflict handling)",
+      "task_downgrade": "Cross-provider history conversion",
+      "task_image_prompt": "Image prompt optimization",
+      "task_image_intent": "Image routing (generate or edit)",
+      "task_tool_route": "Query routing (decide whether to use tools)",
+      "task_search_queries": "Web search query generation",
+      "task_research_plan": "Deep Research planning",
+      "task_research_verify": "Deep Research coverage check",
+      "task_moderation": "Content safety review",
+      "task_research_validate": "Deep Research evidence cross-check"
     },
     "empty": "No calls in the selected window.",
     "leadRecords": "Every API call, one row. Filter and prune the log below.",
@@ -702,7 +704,7 @@
       "status": "Status",
       "purpose": "Purpose",
       "allPurposes": "All purposes",
-      "taskAll": "Task models (all)"
+      "taskAll": "All internal model tasks"
     },
     "deleteConfirm": {
       "title": "Delete these usage records?",
@@ -930,10 +932,15 @@
       "settlementCurrencyInvalid": "Enter a valid three-letter currency code.",
       "defaultModel": "Default chat model",
       "currentConversationModel": "Use current conversation model",
-      "taskModel": "Task model (internal LLM calls)",
-      "taskModelHint": "Used for titles, query routing, compression summaries, and memory triage. If unset, the current conversation model is used.",
-      "toolRouteModel": "Tool routing model",
-      "toolRouteModelHint": "Optional low-latency model for Auto tools. If unset, the current conversation model routes the tools.",
+      "inheritTaskModel": "Use other internal task model",
+      "titleModel": "Title generation model",
+      "titleModelHint": "Generates short conversation-list titles. Prefer a low-latency, non-reasoning model. If unset, the other internal task model and then the current conversation model are used.",
+      "queryRouteModel": "Query routing model",
+      "queryRouteModelHint": "Decides whether a user query needs tools in Auto mode. Prefer a low-latency, non-reasoning model. If unset, the current conversation model is used.",
+      "fileRouteModel": "File routing model",
+      "fileRouteModelHint": "Chooses no file context, targeted retrieval, or full-document coverage and resolves current-file references. Prefer a low-latency, non-reasoning model with reliable JSON output. If unset, the other internal task model and then the current conversation model are used.",
+      "taskModel": "Other internal task model",
+      "taskModelHint": "Used for memory extraction and adjudication, research planning and verification, search-query generation, and other internal tasks. If unset, the current conversation model is used.",
       "defaultToolMode": "Default tool mode",
       "defaultToolModeHint": "Used for every new conversation. Users may override it only within an individual conversation.",
       "toolModeAuto": "Auto",
@@ -1991,9 +1998,9 @@
       "channelsMissing": "Create a channel before adding usable models.",
       "defaultModel": "Default chat model",
       "defaultModelMissing": "Chat cannot start until a valid default model is selected.",
-      "taskModel": "Internal task model",
+      "taskModel": "Other internal task model",
       "currentConversationModel": "Uses the current conversation model",
-      "taskModelMissing": "Select a valid task model or leave it empty to use the current conversation model.",
+      "taskModelMissing": "Select a valid model for other internal tasks or leave it empty to use the current conversation model.",
       "configured": "Configured",
       "email": "Email verification",
       "notRequired": "Not required",

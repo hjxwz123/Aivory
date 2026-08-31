@@ -40,6 +40,8 @@ const PAGE_SIZE = envNum('VITE_AIVORY_PAGE_SIZE', 50)
 const TASK_PURPOSES = [
   'task.title',
   'task.router',
+  'task.rag_evidence_judge',
+  'task.rag_map_reduce',
   'task.compact',
   'task.memory_extract',
   'task.memory_adjudicate',
@@ -149,6 +151,12 @@ export default function AdminUsage() {
     return t(key, { defaultValue: '' }) || purpose
   }
 
+  function purposeFilterLabel(value: string): string {
+    if (value === 'all') return t('usage.filters.allPurposes')
+    if (value === 'task') return t('usage.filters.taskAll')
+    return purposeLabel(value)
+  }
+
   async function deleteOne(id: number) {
     if (busy || busyId !== null) return
     setBusyId(id)
@@ -256,16 +264,18 @@ export default function AdminUsage() {
         <div className="col-span-2 min-w-0 sm:col-span-1">
           <label className="block text-[12px] text-[var(--color-fg-subtle)] mb-1">{t('usage.filters.purpose', { defaultValue: 'Purpose' })}</label>
           <Select value={purpose} onValueChange={setPurpose}>
-            <SelectTrigger>
-              <SelectValue />
+            <SelectTrigger title={purposeFilterLabel(purpose)}>
+              <SelectValue className="min-w-0 flex-1 truncate text-left" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="max-w-[min(32rem,calc(100vw-2rem))]">
               <SelectItem value="all">{t('usage.filters.allPurposes', { defaultValue: 'All purposes' })}</SelectItem>
               <SelectItem value="chat">{purposeLabel('chat')}</SelectItem>
               <SelectItem value="image">{purposeLabel('image')}</SelectItem>
               <SelectItem value="embedding">{purposeLabel('embedding')}</SelectItem>
               {/* "task" is the backend umbrella matching every task.* sub-purpose */}
-              <SelectItem value="task">{t('usage.filters.taskAll', { defaultValue: 'Task models (all)' })}</SelectItem>
+              <SelectItem value="task">
+                {t('usage.filters.taskAll', { defaultValue: 'All internal model tasks' })}
+              </SelectItem>
               {TASK_PURPOSES.map((p) => (
                 <SelectItem key={p} value={p}>
                   {purposeLabel(p)}

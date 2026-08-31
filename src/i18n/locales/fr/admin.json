@@ -76,12 +76,12 @@
         "tour": "Choisissez le modèle de chat activé des nouvelles conversations."
       },
       "taskModel": {
-        "title": "Modèle de tâches (facultatif)",
-        "tour": "S'il n'est pas configuré, les tâches internes utilisent le modèle de la conversation en cours. Si c'est un modèle de raisonnement, les titres, résumés et autres tâches internes peuvent ralentir les réponses."
+        "title": "Modèle des autres tâches internes (facultatif)",
+        "tour": "Utilisé pour la mémoire, la planification de recherche, la génération de requêtes et les tâches sans modèle dédié. S'il est vide, le modèle de la conversation est utilisé."
       },
       "toolRouteModel": {
-        "title": "Modèle de routage des outils (facultatif)",
-        "tour": "S'il n'est pas configuré, le modèle de la conversation décide quand utiliser les outils. Si c'est un modèle de raisonnement, ce routage peut ralentir les réponses."
+        "title": "Modèle de routage des requêtes (facultatif)",
+        "tour": "Décide rapidement si une requête utilisateur nécessite des outils. S'il est vide, le modèle de la conversation décide. Préférez un modèle rapide sans raisonnement."
       },
       "embedding": {
         "title": "Ajouter un modèle d’embedding",
@@ -669,23 +669,25 @@
       "actions": "Actions"
     },
     "purposes": {
-      "chat": "Chat",
-      "image": "Image",
-      "embedding": "Embedding",
-      "task_title": "Génération de titre",
-      "task_router": "Routage de requête",
-      "task_compact": "Compactage du contexte",
-      "task_memory_extract": "Extraction de mémoire",
-      "task_memory_adjudicate": "Arbitrage de mémoire",
-      "task_downgrade": "Rétrogradation inter-fournisseurs",
-      "task_image_prompt": "Prompt d'image",
-      "task_image_intent": "Routage génération/modification d'image",
-      "task_tool_route": "Routage des outils",
-      "task_search_queries": "Génération de requêtes de recherche",
-      "task_research_plan": "Plan de recherche",
-      "task_research_verify": "Vérification de recherche",
-      "task_moderation": "Modération",
-      "task_research_validate": "Validation croisée de recherche"
+      "chat": "Réponse de chat",
+      "image": "Génération d’image",
+      "embedding": "Vectorisation de documents",
+      "task_title": "Génération du titre (conversation)",
+      "task_router": "Routage des fichiers (sélection et stratégie RAG)",
+      "task_rag_evidence_judge": "Vérification de la suffisance des preuves RAG",
+      "task_rag_map_reduce": "Résumé des documents longs (map-reduce)",
+      "task_compact": "Compactage du contexte (résumé de conversation)",
+      "task_memory_extract": "Extraction de mémoire (faits utilisateur)",
+      "task_memory_adjudicate": "Arbitrage de mémoire (gestion des conflits)",
+      "task_downgrade": "Conversion de l’historique entre fournisseurs",
+      "task_image_prompt": "Optimisation du prompt d’image",
+      "task_image_intent": "Routage d’image (génération ou modification)",
+      "task_tool_route": "Routage de requête (décider d’utiliser des outils)",
+      "task_search_queries": "Génération de requêtes de recherche web",
+      "task_research_plan": "Planification de recherche approfondie",
+      "task_research_verify": "Vérification de la couverture de recherche",
+      "task_moderation": "Contrôle de sécurité du contenu",
+      "task_research_validate": "Validation croisée des preuves de recherche"
     },
     "empty": "Aucun appel dans la fenêtre sélectionnée.",
     "leadRecords": "Un appel API = une ligne. Filtrez et nettoyez le journal ci-dessous.",
@@ -702,7 +704,7 @@
       "status": "Statut",
       "purpose": "Usage",
       "allPurposes": "Tous les usages",
-      "taskAll": "Modèles de tâche (tous)"
+      "taskAll": "Toutes les tâches internes du modèle"
     },
     "deleteConfirm": {
       "title": "Supprimer ces enregistrements ?",
@@ -930,10 +932,15 @@
       "settlementCurrencyInvalid": "Saisissez un code devise valide à trois lettres.",
       "defaultModel": "Modèle de chat par défaut",
       "currentConversationModel": "Utiliser le modèle de la conversation en cours",
-      "taskModel": "Modèle de tâches (appels LLM internes)",
-      "taskModelHint": "Utilisé pour les titres, le routage, les résumés de compression et le triage de mémoire. S'il est vide, le modèle de la conversation en cours est utilisé.",
-      "toolRouteModel": "Modèle de routage des outils",
-      "toolRouteModelHint": "Modèle rapide facultatif pour les outils en mode Auto. S'il est vide, le modèle de la conversation en cours route les outils.",
+      "inheritTaskModel": "Utiliser le modèle des autres tâches internes",
+      "titleModel": "Modèle de génération des titres",
+      "titleModelHint": "Génère les titres courts de la liste des conversations. Préférez un modèle rapide sans raisonnement. S'il est vide, le modèle des autres tâches internes puis celui de la conversation sont utilisés.",
+      "queryRouteModel": "Modèle de routage des requêtes",
+      "queryRouteModelHint": "Décide si une requête utilisateur nécessite des outils en mode Auto. Préférez un modèle rapide sans raisonnement. S'il est vide, le modèle de la conversation est utilisé.",
+      "fileRouteModel": "Modèle de routage des fichiers",
+      "fileRouteModelHint": "Choisit de ne pas utiliser de fichier, d'effectuer une recherche ciblée ou de couvrir le document entier, et résout les références au fichier courant. Préférez un modèle rapide sans raisonnement produisant du JSON fiable. S'il est vide, le modèle des autres tâches internes puis celui de la conversation sont utilisés.",
+      "taskModel": "Modèle des autres tâches internes",
+      "taskModelHint": "Utilisé pour l'extraction et l'arbitrage de mémoire, la planification et la vérification de recherche, la génération de requêtes de recherche et les autres tâches internes. S'il est vide, le modèle de la conversation est utilisé.",
       "defaultToolMode": "Mode d'outil par défaut",
       "defaultToolModeHint": "Utilisé pour chaque nouvelle conversation. Les utilisateurs peuvent le remplacer uniquement dans une conversation donnée.",
       "toolModeAuto": "Auto",
@@ -1991,9 +1998,9 @@
       "channelsMissing": "Créez un canal avant d’ajouter des modèles utilisables.",
       "defaultModel": "Modèle de chat par défaut",
       "defaultModelMissing": "Le chat nécessite un modèle par défaut valide.",
-      "taskModel": "Modèle de tâches interne",
+      "taskModel": "Modèle des autres tâches internes",
       "currentConversationModel": "Utilise le modèle de la conversation en cours",
-      "taskModelMissing": "Sélectionnez un modèle de tâche valide ou laissez-le vide pour utiliser le modèle de la conversation en cours.",
+      "taskModelMissing": "Sélectionnez un modèle valide pour les autres tâches internes ou laissez-le vide pour utiliser le modèle de la conversation en cours.",
       "configured": "Configuré",
       "email": "Vérification de l’e-mail",
       "notRequired": "Non requise",

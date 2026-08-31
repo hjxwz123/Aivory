@@ -76,12 +76,12 @@
         "tour": "选择新对话默认使用的已启用对话模型。"
       },
       "taskModel": {
-        "title": "任务模型（可选）",
-        "tour": "未配置时使用当前对话模型。若当前对话模型是思考模型，标题、摘要等内部任务可能导致回复变慢。"
+        "title": "其他内部任务模型（可选）",
+        "tour": "用于记忆、研究规划和搜索查询生成等未单独配置的内部任务；未配置时使用当前对话模型。"
       },
       "toolRouteModel": {
-        "title": "工具路由模型（可选）",
-        "tour": "未配置时由当前对话模型判断是否使用工具。若当前对话模型是思考模型，工具判断可能导致回复变慢。"
+        "title": "查询路由模型（可选）",
+        "tour": "用于快速判断用户查询是否需要调用工具；未配置时由当前对话模型判断。建议使用低延迟、非思考模型。"
       },
       "embedding": {
         "title": "添加嵌入模型",
@@ -673,23 +673,25 @@
       "actions": "操作"
     },
     "purposes": {
-      "chat": "对话",
-      "image": "图片",
-      "embedding": "嵌入",
-      "task_title": "标题生成",
-      "task_router": "查询路由",
-      "task_compact": "上下文压缩",
-      "task_memory_extract": "记忆抽取",
-      "task_memory_adjudicate": "记忆裁决",
-      "task_downgrade": "跨厂商降级",
-      "task_image_prompt": "图片提示词",
-      "task_image_intent": "图片生成/编辑路由",
-      "task_tool_route": "工具路由",
-      "task_search_queries": "搜索查询生成",
-      "task_research_plan": "研究规划",
-      "task_research_verify": "研究核验",
-      "task_moderation": "内容审核",
-      "task_research_validate": "研究交叉验证"
+      "chat": "对话回复",
+      "image": "图片生成",
+      "embedding": "文档向量化",
+      "task_title": "标题生成（对话标题）",
+      "task_router": "文件路由（选择文件与 RAG 方式）",
+      "task_rag_evidence_judge": "RAG 证据充分性判断",
+      "task_rag_map_reduce": "长文档全文摘要（分段归并）",
+      "task_compact": "上下文压缩（对话历史摘要）",
+      "task_memory_extract": "记忆抽取（提取用户事实）",
+      "task_memory_adjudicate": "记忆裁决（处理新旧冲突）",
+      "task_downgrade": "跨模型历史转换",
+      "task_image_prompt": "图片提示词优化",
+      "task_image_intent": "图片任务路由（新建或编辑）",
+      "task_tool_route": "查询路由（判断是否调用工具）",
+      "task_search_queries": "网页搜索词生成",
+      "task_research_plan": "深度研究规划",
+      "task_research_verify": "深度研究覆盖核验",
+      "task_moderation": "内容安全审核",
+      "task_research_validate": "深度研究证据交叉验证"
     },
     "empty": "所选窗口内没有调用记录。",
     "leadRecords": "每条 API 调用一条记录。在下方筛选并清理日志。",
@@ -706,7 +708,7 @@
       "status": "状态",
       "purpose": "用途",
       "allPurposes": "全部用途",
-      "taskAll": "任务模型（全部）"
+      "taskAll": "全部内部模型任务"
     },
     "deleteConfirm": {
       "title": "删除这些用量记录？",
@@ -934,10 +936,15 @@
       "settlementCurrencyInvalid": "请输入有效的三位货币代码。",
       "defaultModel": "默认对话模型",
       "currentConversationModel": "使用当前对话模型",
-      "taskModel": "任务模型(内部 LLM 调用)",
-      "taskModelHint": "用于标题、查询路由、压缩摘要和记忆抽取。未设置时使用当前对话模型。",
-      "toolRouteModel": "工具路由模型",
-      "toolRouteModelHint": "自动工具模式可选的低延迟模型。未设置时使用当前对话模型进行工具路由。",
+      "inheritTaskModel": "使用其他内部任务模型",
+      "titleModel": "标题生成模型",
+      "titleModelHint": "生成对话列表中的简短标题。建议使用低延迟、非思考模型；未设置时依次使用其他内部任务模型和当前对话模型。",
+      "queryRouteModel": "查询路由模型",
+      "queryRouteModelHint": "在自动工具模式下判断用户查询是否需要调用工具。建议使用低延迟、非思考模型；未设置时使用当前对话模型。",
+      "fileRouteModel": "文件路由模型",
+      "fileRouteModelHint": "在组装文件上下文前选择跳过、片段检索或全文读取，并解析当前文件指代。建议使用能稳定输出 JSON 的低延迟、非思考模型；未设置时依次使用其他内部任务模型和当前对话模型。",
+      "taskModel": "其他内部任务模型",
+      "taskModelHint": "用于记忆抽取与裁决、研究规划与核验、搜索查询生成等其余内部任务。未设置时使用当前对话模型。",
       "defaultToolMode": "默认工具调用方式",
       "defaultToolModeHint": "新对话默认采用此工具调用方式，用户只能在单个对话中临时修改。",
       "toolModeAuto": "自动",
@@ -1995,9 +2002,9 @@
       "channelsMissing": "创建可用模型前需要先配置渠道。",
       "defaultModel": "默认对话模型",
       "defaultModelMissing": "选择有效的默认模型后才能开始对话。",
-      "taskModel": "内部任务模型",
+      "taskModel": "其他内部任务模型",
       "currentConversationModel": "使用当前对话模型",
-      "taskModelMissing": "请选择有效的任务模型，或留空以使用当前对话模型。",
+      "taskModelMissing": "请选择有效的其他内部任务模型，或留空以使用当前对话模型。",
       "configured": "已配置",
       "email": "邮箱验证",
       "notRequired": "未要求",

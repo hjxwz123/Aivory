@@ -1,13 +1,13 @@
 // Package llm — TaskLLM is the unified entry point for internal LLM calls
 // described in design.md §2.3-F. It centralises "small + fast" model invocations
-// (title generation, RAG query routing, long-context compression summaries,
-// memory triage, cross-vendor history downgrade) so they all share one
-// configuration: settings.task_model_id, with the current conversation model
-// as the session-scoped fallback when that setting is empty.
+// (title generation, file/RAG routing, tool-use routing, long-context compression
+// summaries, memory triage, and cross-vendor history downgrade). Most tasks use
+// settings.task_model_id; latency-sensitive routes may have a dedicated model,
+// with explicit fallback chains when those settings are empty or unavailable.
 //
 // Why a separate helper:
-//   - One knob to swap the small model (Haiku / Flash-class) without touching
-//     callers.
+//   - Central model selection, including dedicated title, file-routing,
+//     tool-routing, and compaction settings, without duplicating policy in callers.
 //   - Built-in `purpose` taxonomy so usage_logs can split costs per task type
 //     (per design.md §8.3 — task model calls still cost money and must be
 //     traced).
@@ -45,9 +45,8 @@ var (
 
 var ErrTaskBillingRecord = errors.New("task billing record failed")
 
-// TaskKind enumerates the internal task purposes. Used both for routing
-// (lookup of task_model_id today, future per-task models tomorrow) and for
-// the `purpose` column of usage_logs.
+// TaskKind enumerates the internal task purposes. It drives both task-specific
+// model selection and the `purpose` column of usage_logs.
 type TaskKind string
 
 const (
@@ -96,7 +95,7 @@ const (
 	TaskImageIntent TaskKind = "task.image_intent"
 )
 
-// TaskLLM dispatches small internal model calls to the configured task model.
+// TaskLLM dispatches small internal model calls according to model policy.
 type TaskLLM struct {
 	db     *sql.DB
 	reg    *Registry
@@ -371,6 +370,10 @@ func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opt
 			modelID, rerr = resolveToolRouteModelID(ctx, t.db, conversationModelID)
 		} else if kind == TaskCompact {
 			modelID, rerr = resolveCompactionModelID(ctx, t.db, conversationModelID)
+		} else if kind == TaskTitle {
+			modelID, rerr = resolveDedicatedTaskModelID(ctx, t.db, "title_model_id", conversationModelID)
+		} else if kind == TaskRouter {
+			modelID, rerr = resolveDedicatedTaskModelID(ctx, t.db, "file_route_model_id", conversationModelID)
 		} else {
 			modelID, rerr = resolveTaskModelID(ctx, t.db, conversationModelID)
 		}
@@ -849,9 +852,26 @@ func conversationModelIDForTask(ctx context.Context, db *sql.DB, conversationID 
 // resolveTaskModelID reads settings.task_model_id, falling back to the current
 // conversation model and then default_model_id. Unavailable configured models
 // are skipped as well as blank ones so an emergency model/channel disable does
-// not strand titles, retrieval routing, memory work, and other auxiliary tasks.
+// not strand memory, research, query-generation, and other auxiliary tasks.
 func resolveTaskModelID(ctx context.Context, db *sql.DB, conversationModelID string) (string, error) {
 	candidates := []string{
+		settingModelID(db, "task_model_id"),
+		strings.TrimSpace(conversationModelID),
+		settingModelID(db, "default_model_id"),
+	}
+	if id := firstUsableTaskModelID(ctx, db, candidates); id != "" {
+		return id, nil
+	}
+	return "", errors.New("no enabled chat model on an enabled channel is available for task calls")
+}
+
+// resolveDedicatedTaskModelID isolates latency-sensitive task kinds while
+// retaining task_model_id as an upgrade-compatible fallback. Existing
+// installations therefore keep their current behavior until an administrator
+// explicitly selects a dedicated title or file-routing model.
+func resolveDedicatedTaskModelID(ctx context.Context, db *sql.DB, settingKey, conversationModelID string) (string, error) {
+	candidates := []string{
+		settingModelID(db, settingKey),
 		settingModelID(db, "task_model_id"),
 		strings.TrimSpace(conversationModelID),
 		settingModelID(db, "default_model_id"),

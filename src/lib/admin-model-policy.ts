@@ -5,6 +5,8 @@ import type { ApiChannel, ApiModel } from '@/api/types'
 export const MODEL_POLICY_MODEL_KEYS = [
   'default_model_id',
   'task_model_id',
+  'title_model_id',
+  'file_route_model_id',
   'tool_route_model_id',
   'verify_model_id',
   'fallback_model_id',
