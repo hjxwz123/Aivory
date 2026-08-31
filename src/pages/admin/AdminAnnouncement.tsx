@@ -10,7 +10,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Megaphone, Upload, X } from 'lucide-react'
-import { adminApi, ApiError } from '@/api'
+import { adminApi, ApiError, invalidateAnnouncementCache } from '@/api'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
@@ -121,6 +121,7 @@ export default function AdminAnnouncement() {
         bar_updated_at: barChanged ? now : barLoaded.current.updatedAt || now,
       }
       await adminApi.updateSettings({ announcement: payload })
+      invalidateAnnouncementCache()
       barLoaded.current = { enabled: barEnabled, html: barHtml.trim(), updatedAt: payload.bar_updated_at }
       toast.success(t('admin:announcement.saved'))
     } catch (e) {

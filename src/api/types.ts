@@ -89,6 +89,32 @@ export interface ApiUsageTotals {
   conversations: number
   workspaces: number
 }
+
+export interface ApiAdminOverviewHealth {
+  channel_ready: boolean
+  default_model_ready: boolean
+  task_model_inherited: boolean
+  task_model_ready: boolean
+  email_verification: boolean
+  smtp_ready: boolean
+  email_ready: boolean
+  storage_provider: string
+  storage_ready: boolean
+  payments_ready: boolean
+  all_ready: boolean
+}
+
+export interface ApiAdminOverview {
+  channel_count: number
+  enabled_channel_count: number
+  model_count: number
+  group_count: number
+  payment_channel_count: number
+  payment_method_count: number
+  user_count: number
+  health: ApiAdminOverviewHealth
+  today: ApiUsageTotals | null
+}
 export interface ApiUsageTrendPoint {
   bucket_start: number
   input_tokens: number
@@ -607,6 +633,8 @@ export interface ApiAuthSessionResponse {
   user?: ApiUser
   access_token?: string
   expires_at?: number
+  /** Coalesced startup policy. Optional for rolling upgrades from older servers. */
+  auth_policy?: ApiAuthPolicy
 }
 
 export type AuthEntryMode = 'login_page' | 'provider_picker' | 'auto_redirect'

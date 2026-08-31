@@ -6,6 +6,7 @@
 import { api, apiUrl, getAccessToken, ApiError, apiUpload, assertNetworkOnline, type UploadProgress } from './client'
 import { withRequestActivity, type RequestActivityMode } from '@/lib/request-activity'
 import type {
+  ApiAdminOverview,
   ApiAdminMessageFeedbackPage,
   ApiAdminOnboarding,
   ApiAdminUserFeedbackPage,
@@ -136,6 +137,55 @@ export type ApiMCPServerInput = Pick<
 
 // ----- Auth ----------------------------------------------------------------
 
+export interface ApiAnnouncement {
+  enabled: boolean
+  title: string
+  body: string
+  image_url: string
+  remember_dismiss: boolean
+  require_read: boolean
+  updated_at: number
+  bar_enabled: boolean
+  bar_html: string
+  bar_updated_at: number
+}
+
+const ANNOUNCEMENT_CACHE_MS = 15_000
+let announcementValue: ApiAnnouncement | null = null
+let announcementLoadedAt = 0
+let announcementInFlight: Promise<ApiAnnouncement> | null = null
+let announcementCacheGeneration = 0
+
+function loadAnnouncement(): Promise<ApiAnnouncement> {
+  if (announcementValue && Date.now() - announcementLoadedAt < ANNOUNCEMENT_CACHE_MS) {
+    return Promise.resolve(announcementValue)
+  }
+  if (announcementInFlight) return announcementInFlight
+  const generation = announcementCacheGeneration
+  const request = api<ApiAnnouncement>('/announcement')
+    .then((value) => {
+      // Saving an announcement can invalidate the cache while this request is
+      // still in flight. Do not let the stale response repopulate the cache.
+      if (generation === announcementCacheGeneration) {
+        announcementValue = value
+        announcementLoadedAt = Date.now()
+      }
+      return value
+    })
+    .finally(() => {
+      if (announcementInFlight === request) announcementInFlight = null
+    })
+  announcementInFlight = request
+  return request
+}
+
+export function invalidateAnnouncementCache(): void {
+  announcementCacheGeneration += 1
+  announcementValue = null
+  announcementLoadedAt = 0
+  announcementInFlight = null
+}
+
 export const authApi = {
   signupOpen: () =>
     api<{ open: boolean; captcha_required: boolean; login_captcha_required: boolean }>('/public/signup-open'),
@@ -245,20 +295,9 @@ export const authApi = {
   updateSettings: (patch: Record<string, unknown>) =>
     api<Record<string, unknown>>('/me/settings', { method: 'PATCH', body: patch }),
   // Global announcement (§ announcement). enabled=false when none is active.
-  // Pinned top bar (bar_*) is independent of the popup.
-  announcement: () =>
-    api<{
-      enabled: boolean
-      title: string
-      body: string
-      image_url: string
-      remember_dismiss: boolean
-      require_read: boolean
-      updated_at: number
-      bar_enabled: boolean
-      bar_html: string
-      bar_updated_at: number
-    }>('/announcement'),
+  // The popup and pinned bar mount together; coalesce their reads into one
+  // request and mirror the server's short settings-cache lifetime.
+  announcement: loadAnnouncement,
   // Cost is intentionally NOT exposed to users — only message volume.
   usage: () => api<{ days: number; messages: number }>('/me/usage'),
   // Active sessions (§ account → active sessions). `current` is the stable
@@ -642,7 +681,7 @@ export interface ConversationCompactionResult {
 export const conversationsApi = {
   list: (
     projectId?: string,
-    limit = envNum('VITE_AIVORY_CONVERSATIONS_API_LIST_LIMIT', 200),
+    limit = envNum('VITE_AIVORY_CONVERSATIONS_API_LIST_LIMIT', 20),
     offset = 0,
     workspaceId?: string,
   ) =>
@@ -875,6 +914,7 @@ export const issueFeedbackApi = {
 // ----- Admin --------------------------------------------------------------
 
 export const adminApi = {
+  overview: () => api<ApiAdminOverview>('/admin/overview'),
   onboarding: () => api<ApiAdminOnboarding>('/admin/onboarding'),
   updateOnboarding: (action: 'skip' | 'complete' | 'reset') =>
     api<ApiAdminOnboarding>('/admin/onboarding', { method: 'PATCH', body: { action } }),

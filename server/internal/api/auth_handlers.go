@@ -219,10 +219,11 @@ type authResp struct {
 // missing or expired refresh cookie is an expected state on the login screen,
 // so that probe reports it as a normal 200 response instead of an HTTP error.
 type authSessionResp struct {
-	Authenticated bool        `json:"authenticated"`
-	User          *store.User `json:"user,omitempty"`
-	AccessToken   string      `json:"access_token,omitempty"`
-	ExpiresAt     int64       `json:"expires_at,omitempty"`
+	Authenticated bool              `json:"authenticated"`
+	User          *store.User       `json:"user,omitempty"`
+	AccessToken   string            `json:"access_token,omitempty"`
+	ExpiresAt     int64             `json:"expires_at,omitempty"`
+	AuthPolicy    *publicAuthPolicy `json:"auth_policy,omitempty"`
 }
 
 // registerHandler creates a new account (default role=user) and sets the
@@ -773,13 +774,20 @@ func sessionHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, errors.New("cross-site request blocked"))
 		return
 	}
+	// The client always needs this policy to choose its entry/password flow.
+	// Folding it into the browser session probe removes one high-latency HTTP
+	// round trip; the standalone public endpoint remains for explicit refreshes.
+	var publicPolicy *publicAuthPolicy
+	if policy, policyErr := resolvePublicAuthPolicy(r.Context(), d); policyErr == nil {
+		publicPolicy = &policy
+	}
 	session, err := refreshSession(d, r)
 	if err != nil {
 		var authFailure *refreshAuthFailure
 		if errors.As(err, &authFailure) {
 			clearCookie(w, "auth_token")
 			clearCookie(w, "refresh_token")
-			writeJSON(w, http.StatusOK, authSessionResp{Authenticated: false})
+			writeJSON(w, http.StatusOK, authSessionResp{Authenticated: false, AuthPolicy: publicPolicy})
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err)
@@ -790,6 +798,7 @@ func sessionHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		User:          session.user,
 		AccessToken:   session.access,
 		ExpiresAt:     session.accessExp.Unix(),
+		AuthPolicy:    publicPolicy,
 	})
 }
 

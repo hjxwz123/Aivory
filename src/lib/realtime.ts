@@ -41,6 +41,7 @@ import {
   collectDoomedConversationIds,
   captureKnowledgeBaseSelectionGuard,
   preservePendingKnowledgeBaseSelection,
+  CONV_PAGE,
   MSG_PAGE,
 } from '@/store/conversations'
 import { activeWorkspaceId, useWorkspaces } from '@/store/workspaces'
@@ -51,7 +52,6 @@ import type { KnowledgeBaseSelectionRequestGuard } from '@/store/conversations'
 
 const SYNC_THROTTLE_MS = envNum('VITE_AIVORY_REALTIME_SYNC_THROTTLE_MS', 800)
 const RECONNECT_MAX_MS = 30_000
-const SYNC_PAGE = 200
 // Rows that vanished from the synced page get an individual metadata refetch
 // (archive/move detection); bounded per sync so a pathological burst can't fan
 // out into dozens of GETs.
@@ -64,6 +64,9 @@ interface RealtimeEvent {
 }
 
 let initialized = false
+let routeEnabled = false
+let syncLifecycle: (() => void) | null = null
+let lastHelloUserId: string | null = null
 let currentUserId: string | null = null
 let currentConnectionKey: string | null = null
 let controller: AbortController | null = null
@@ -77,7 +80,11 @@ export function initRealtime(): void {
   if (initialized) return
   initialized = true
   const sync = () => {
-    const user = useAuth.getState().user
+    const authenticatedUser = useAuth.getState().user
+    if (!authenticatedUser || (lastHelloUserId && lastHelloUserId !== authenticatedUser.id)) {
+      lastHelloUserId = null
+    }
+    const user = routeEnabled ? authenticatedUser : null
     const uid = user?.id ?? null
     const connectionKey = uid ? `${uid}:${user?.group_id ?? ''}` : null
     if (connectionKey === currentConnectionKey) return
@@ -90,13 +97,22 @@ export function initRealtime(): void {
     const gen = ++loopGen
     if (uid && connectionKey) void runLoop(uid, connectionKey, gen)
   }
+  syncLifecycle = sync
   useAuth.subscribe(sync)
   sync()
+}
+
+/** Keep the conversation event stream scoped to routes that render chat data. */
+export function setRealtimeEnabled(enabled: boolean): void {
+  if (routeEnabled === enabled) return
+  routeEnabled = enabled
+  syncLifecycle?.()
 }
 
 async function runLoop(uid: string, connectionKey: string, gen: number): Promise<void> {
   let attempt = 0
   let everConnected = false
+  const resumingRoute = lastHelloUserId === uid
   while (currentUserId === uid && currentConnectionKey === connectionKey && gen === loopGen) {
     const ctl = new AbortController()
     controller = ctl
@@ -115,13 +131,14 @@ async function runLoop(uid: string, connectionKey: string, gen: number): Promise
         if (!ev || typeof ev !== 'object') continue
         if (ev.type === 'hello') {
           attempt = 0
-          // A reconnect usually means a backend deploy or a network gap: check
-          // the app version, and re-sync anything missed while disconnected.
-          void checkForUpdate()
-          void reconcileAccessState('account')
-          if (everConnected) {
-            scheduleListSync(true)
+          // The first hello immediately follows AuthGate's authoritative startup
+          // loads, so replaying them here only doubles the request burst. A real
+          // reconnect can have missed deploy/config/events and must reconcile.
+          if (everConnected || resumingRoute) {
+            void checkForUpdate()
+            void reconcileAccessState('account')
           }
+          lastHelloUserId = uid
           everConnected = true
           continue
         }
@@ -310,7 +327,7 @@ async function runListSync(): Promise<void> {
   syncing = true
   try {
     const ws = activeWorkspaceId()
-    const { conversations: rows } = await conversationsApi.list(undefined, SYNC_PAGE, 0, ws)
+    const { conversations: rows } = await conversationsApi.list(undefined, CONV_PAGE, 0, ws)
     // A workspace/user switch mid-flight: this page belongs to the old
     // identity — merging it would bleed foreign rows into the new view.
     if (ws !== activeWorkspaceId() || currentUserId !== uid || useAuth.getState().user?.id !== uid) return

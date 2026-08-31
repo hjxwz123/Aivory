@@ -18,6 +18,8 @@ import { useTheme } from '@/store/theme'
 import { Tooltip } from '@/components/ui/tooltip'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { AnnouncementBar } from '@/components/announcement/announcement-bar'
+import { AnnouncementPopup } from '@/components/announcement/announcement-popup'
+import { CreditAdjustmentNotice } from '@/components/credits/credit-adjustment-notice'
 import { useHotkeys } from '@/hooks/use-hotkeys'
 import { Logo } from '@/components/brand/logo'
 import { RouteFade } from '@/components/ui/route-fade'
@@ -84,6 +86,8 @@ export default function ChatLayout() {
       )}
     >
       <QueuedTurnDispatcher />
+      <AnnouncementPopup />
+      <CreditAdjustmentNotice />
       <div className="flex flex-1 min-h-0 w-full">
       {isDesktop ? (
         <Sidebar variant="desktop" />

@@ -8,8 +8,6 @@ import { NetworkStatusBanner } from '@/components/network-status-banner'
 import { CommandMenu } from '@/components/command-menu/command-menu'
 import { WelcomeCard } from '@/components/welcome/welcome-card'
 import { SetPasswordGate } from '@/components/welcome/set-password-gate'
-import { AnnouncementPopup } from '@/components/announcement/announcement-popup'
-import { CreditAdjustmentNotice } from '@/components/credits/credit-adjustment-notice'
 import { AuthGate } from '@/components/auth/auth-gate'
 import SettingsDialog from '@/pages/settings/SettingsLayout'
 import { useCommandMenu } from '@/hooks/use-command-menu'
@@ -19,7 +17,8 @@ import { resetComposerForNewConversation } from '@/store/composer-prefs'
 import { useUI } from '@/store/ui'
 import { useSettingsModal } from '@/store/settings-modal'
 import { initAppUpdate, maybeApplyUpdate } from '@/lib/app-update'
-import { initRealtime } from '@/lib/realtime'
+import { initRealtime, setRealtimeEnabled } from '@/lib/realtime'
+import { isChatShellPath } from '@/lib/app-paths'
 
 const Landing = lazy(() => import('@/pages/Landing'))
 const ChatLayout = lazy(() => import('@/pages/chat/ChatLayout'))
@@ -211,6 +210,9 @@ export default function App() {
     initRealtime()
     initAppUpdate()
   }, [])
+  useEffect(() => {
+    setRealtimeEnabled(isChatShellPath(location.pathname))
+  }, [location.pathname])
   // A route navigation is a safe, invisible moment to apply a pending upgrade
   // (never fires while a message is streaming — see maybeApplyUpdate). The
   // settings dialog no longer navigates (pure UI state), so every pathname
@@ -324,8 +326,6 @@ export default function App() {
         <CommandMenu />
         <SetPasswordGate />
         <WelcomeCard />
-        <AnnouncementPopup />
-        <CreditAdjustmentNotice />
         <Toaster />
       </AuthGate>
     </TooltipProvider>
