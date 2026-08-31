@@ -15,8 +15,8 @@ import { cn } from '@/lib/utils'
  * ConversationFilesPanel — the right-edge drawer listing every file the
  * conversation actually references (§ conversation files). Uploading here is
  * identical to attaching in the composer; removing detaches the file so future
- * turns stop seeing it (the originating message is untouched). Shares the right
- * column with the HTML preview + inline-thread drawers (mutually exclusive).
+ * turns stop seeing it while its originating message keeps a deleted-file
+ * marker. Shares the right column with the HTML preview + inline-thread drawers.
  */
 export function ConversationFilesPanel() {
   const open = useConversationFiles((s) => s.open)
@@ -86,9 +86,14 @@ function FilesBody({ onClose }: { onClose: () => void }) {
   async function onRemove(id: string) {
     if (isWorkspaceGuest) return
     if (removingId) return
+    if (!conversationId) return
+    const targetConversationId = conversationId
     setRemovingId(id)
     try {
       await remove(id)
+      useConversations
+        .getState()
+        .markAttachmentsDeleted([id], targetConversationId)
     } catch {
       toast.error(t('files.removeFailed'))
     } finally {

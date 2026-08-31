@@ -44,6 +44,7 @@ import {
   type FileTypeFilter,
 } from '@/lib/file-preview-kind'
 import { cn } from '@/lib/utils'
+import { useConversations } from '@/store/conversations'
 
 const PAGE_SIZE = envNum('VITE_AIVORY_PAGE_SIZE', 50)
 const ALL = 'all'
@@ -266,6 +267,9 @@ export default function UserFiles() {
     setBusy(true)
     try {
       await authApi.deleteMyFiles([{ source: file.source, id: file.id }])
+      useConversations
+        .getState()
+        .markAttachmentsDeleted([file.id], file.conversation_id || undefined)
       if (rowKey(file) === preview?.key) {
         clearPreview()
         setSelectedKey('')
