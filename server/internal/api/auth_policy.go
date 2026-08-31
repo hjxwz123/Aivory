@@ -142,17 +142,14 @@ func readyOAuthProviders(ctx context.Context, d Deps) ([]store.OAuthProvider, er
 	return ready, nil
 }
 
-func publicAuthPolicyHandler(d Deps, w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
+func resolvePublicAuthPolicy(ctx context.Context, d Deps) (publicAuthPolicy, error) {
 	policy, err := loadAuthPolicy(d)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return publicAuthPolicy{}, err
 	}
-	providers, err := readyOAuthProviders(r.Context(), d)
+	providers, err := readyOAuthProviders(ctx, d)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return publicAuthPolicy{}, err
 	}
 	response := publicAuthPolicy{
 		PasswordLoginEnabled:       policy.PasswordLoginEnabled,
@@ -178,6 +175,16 @@ func publicAuthPolicyHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		} else {
 			response.EntryMode = authEntryLoginPage
 		}
+	}
+	return response, nil
+}
+
+func publicAuthPolicyHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	response, err := resolvePublicAuthPolicy(r.Context(), d)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
 	}
 	writeJSON(w, http.StatusOK, response)
 }

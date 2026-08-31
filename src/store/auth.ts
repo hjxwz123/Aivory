@@ -182,6 +182,8 @@ export const useAuth = create<AuthState>((set, get) => ({
 
   async hydrate() {
     const seq = beginAuthOp()
+    let authPolicyRequest: Promise<ApiAuthPolicy> | null = null
+    let authenticatedSession = false
     set({ status: 'authenticating' })
     try {
       // A signed-out first visit is a normal state. The session probe returns
@@ -189,7 +191,13 @@ export const useAuth = create<AuthState>((set, get) => ({
       // network error before the login screen is shown.
       const resp = await refreshBrowserSession()
       if (!isLatestAuthOp(seq)) return
+      // New servers coalesce the public policy into the session probe. Keep a
+      // fallback request for rolling upgrades where an older server omits it.
+      authPolicyRequest = resp.auth_policy
+        ? Promise.resolve(resp.auth_policy)
+        : authApi.authPolicy().catch(() => DEFAULT_AUTH_POLICY)
       if (resp.authenticated && resp.user && resp.access_token) {
+        authenticatedSession = true
         resetAuthFailureState()
         setAccessToken(resp.access_token)
         // Authenticated ⇒ the deployment has users; resolve the setup probe
@@ -202,33 +210,46 @@ export const useAuth = create<AuthState>((set, get) => ({
     } catch {
       if (!isLatestAuthOp(seq)) return
       set({ user: null, status: 'unauthenticated' })
-    } finally {
-      // First-run probe: a fresh deployment (zero users) routes to /setup. Probe
-      // it in PARALLEL with public login policy so a slow/failed sibling call can't delay
-      // the routing decision, and mark it resolved either way so the AuthGate
-      // stops waiting (otherwise the gate is stuck on the default needsSetup).
-      const [signup, setup, authPolicy] = await Promise.allSettled([
-        authApi.signupOpen(),
-        authApi.needsSetup(),
-        authApi.authPolicy(),
-      ])
+    }
+    if (!isLatestAuthOp(seq)) {
+      // Observe a compatibility request if one was started, but do not launch
+      // any additional probes for an auth operation that was superseded.
+      if (authPolicyRequest) await Promise.allSettled([authPolicyRequest])
+      return
+    }
+    authPolicyRequest ??= authApi.authPolicy().catch(() => DEFAULT_AUTH_POLICY)
+    if (authenticatedSession) {
+      const authPolicy = await authPolicyRequest
       if (isLatestAuthOp(seq)) {
-        if (signup.status === 'fulfilled') {
-          set({
-            signupOpen: signup.value.open,
-            captchaRequired: signup.value.captcha_required,
-            loginCaptchaRequired: signup.value.login_captcha_required,
-          })
-        }
-        if (setup.status === 'fulfilled') {
-          set({ needsSetup: setup.value.needs_setup })
-        }
+        set({ authPolicy, authPolicyLoaded: true, setupProbed: true })
+      }
+      return
+    }
+    // First-run probe: a fresh deployment (zero users) routes to /setup. Probe
+    // it in parallel with signup policy, and mark it resolved either way so
+    // the AuthGate cannot stay stuck on the default needsSetup value. These
+    // two probes are deliberately skipped for authenticated sessions.
+    const [signup, setup, authPolicy] = await Promise.allSettled([
+      authApi.signupOpen(),
+      authApi.needsSetup(),
+      authPolicyRequest,
+    ])
+    if (isLatestAuthOp(seq)) {
+      if (signup.status === 'fulfilled') {
         set({
-          authPolicy: authPolicy.status === 'fulfilled' ? authPolicy.value : DEFAULT_AUTH_POLICY,
-          authPolicyLoaded: true,
-          setupProbed: true,
+          signupOpen: signup.value.open,
+          captchaRequired: signup.value.captcha_required,
+          loginCaptchaRequired: signup.value.login_captcha_required,
         })
       }
+      if (setup.status === 'fulfilled') {
+        set({ needsSetup: setup.value.needs_setup })
+      }
+      set({
+        authPolicy: authPolicy.status === 'fulfilled' ? authPolicy.value : DEFAULT_AUTH_POLICY,
+        authPolicyLoaded: true,
+        setupProbed: true,
+      })
     }
   },
 

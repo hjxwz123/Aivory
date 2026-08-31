@@ -42,6 +42,9 @@ func TestSessionHandlerTreatsMissingRefreshCookieAsUnauthenticated(t *testing.T)
 	if got.Authenticated || got.User != nil || got.AccessToken != "" {
 		t.Fatalf("session response = %+v, want unauthenticated", got)
 	}
+	if got.AuthPolicy == nil || !got.AuthPolicy.PasswordLoginEnabled || got.AuthPolicy.EntryMode != authEntryLoginPage {
+		t.Fatalf("session auth policy = %+v, want default public policy", got.AuthPolicy)
+	}
 }
 
 func TestSessionHandlerRestoresValidRefreshSession(t *testing.T) {
@@ -72,6 +75,9 @@ func TestSessionHandlerRestoresValidRefreshSession(t *testing.T) {
 	}
 	if !got.Authenticated || got.User == nil || got.User.ID != user.ID || got.AccessToken == "" || got.ExpiresAt == 0 {
 		t.Fatalf("session response = %+v, want authenticated user %q with access token", got, user.ID)
+	}
+	if got.AuthPolicy == nil || got.AuthPolicy.EntryMode != authEntryLoginPage {
+		t.Fatalf("session auth policy = %+v, want coalesced public policy", got.AuthPolicy)
 	}
 }
 

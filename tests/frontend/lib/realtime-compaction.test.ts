@@ -45,6 +45,7 @@ vi.mock('@/store/auth', () => ({
   },
 }))
 vi.mock('@/store/conversations', () => ({
+  CONV_PAGE: 20,
   MSG_PAGE: 50,
   captureKnowledgeBaseSelectionGuard: vi.fn(),
   collectDoomedConversationIds: () => new Set<string>(),
@@ -75,7 +76,8 @@ describe('automatic compaction notifications', () => {
 
   it('keeps automatic compaction silent', async () => {
     realtimeAuth.user = { id: 'user-1', group_id: 'group-1' }
-    const { initRealtime } = await import('@/lib/realtime')
+    const { initRealtime, setRealtimeEnabled } = await import('@/lib/realtime')
+    setRealtimeEnabled(true)
     initRealtime()
     await Promise.resolve()
     await Promise.resolve()

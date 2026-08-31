@@ -23,6 +23,7 @@ import { invalidateAccessState } from '@/lib/access-events'
 import { ACCENT_PRESETS, type AccentPref, type ThemePref } from '@/types/settings'
 import { apiUrl } from '@/api'
 import { oauthStartPath } from '@/lib/oauth'
+import { isChatShellPath } from '@/lib/app-paths'
 
 const PUBLIC_PATHS = ['/welcome', '/login', '/register', '/forgot-password', '/share', '/setup', '/privacy', '/terms']
 
@@ -46,7 +47,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const refreshProfile = useAuth((s) => s.refreshProfile)
   const syncUserSettings = useSettings((s) => s.syncUserSettings)
   const location = useLocation()
-  const hydratedDataForUser = useRef<string | null>(null)
+  const hydratedChatDataForUser = useRef<string | null>(null)
 
   const authQuery = new URLSearchParams(location.search)
   const emailVerificationInProgress =
@@ -109,22 +110,24 @@ export function AuthGate({ children }: { children: ReactNode }) {
     useComposerPrefs.getState().setDefaultToolMode(resolveDefaultToolMode(user.tool_mode_default))
   }, [status, user?.settings, user?.tool_mode_default, syncUserSettings])
 
-  // Once authenticated, hydrate the per-user data caches. This is keyed by user
-  // id so a refresh that returns an equivalent user object cannot fan out into
-  // repeated conversations/projects/models requests.
+  // Hydrate chat-shell caches only on routes that render them. Admin, legal and
+  // public pages must not pay for conversations/projects/workspaces/models they
+  // never display. The user id guard still prevents equivalent profile refreshes
+  // from fanning out into duplicate loads.
   useEffect(() => {
     const userId = user?.id ?? null
     if (status !== 'authenticated' || !user || !userId) {
-      hydratedDataForUser.current = null
+      hydratedChatDataForUser.current = null
       return
     }
+    if (!isChatShellPath(location.pathname)) return
     const passwordPolicy = user.oauth_initial_password_policy ?? authPolicy.oauth_initial_password_policy
     if (user.has_password === false && passwordPolicy === 'required') {
-      hydratedDataForUser.current = null
+      hydratedChatDataForUser.current = null
       return
     }
-    if (hydratedDataForUser.current === userId) return
-    hydratedDataForUser.current = userId
+    if (hydratedChatDataForUser.current === userId) return
+    hydratedChatDataForUser.current = userId
     // Apply the administrator default exactly once per login. Conversation
     // overrides stay scoped by id; only the unrelated new-chat draft is reset.
     const currentUser = useAuth.getState().user
@@ -141,6 +144,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     void loadModels()
   }, [
     authPolicy.oauth_initial_password_policy,
+    location.pathname,
     status,
     user,
     user?.has_password,

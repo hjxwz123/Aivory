@@ -32,6 +32,8 @@ import { isModelCatalogReadyForScope } from '@/lib/model-selection'
 import { userCan } from '@/lib/user-permissions'
 import { workspaceCapabilitiesForScope, workspaceModelPolicyKey } from '@/lib/workspace-permissions'
 import { enterOptimisticConversation } from '@/lib/optimistic-conversation-start'
+import { useMediaQuery } from '@/hooks/use-media-query'
+import { mediaQuery } from '@/lib/design-tokens'
 
 gsap.registerPlugin(useGSAP)
 
@@ -236,6 +238,7 @@ export default function ChatHome() {
     expectedPolicyKey: workspaceModelPolicyKey(workspaceId, workspacePolicy),
   })
   const clearComposerDraft = useComposerPrefs((s) => s.clearDraft)
+  const isPhone = useMediaQuery(mediaQuery.phone)
 
   // The home screen has no title to show, so on mobile it drops the layout's
   // standalone brand bar entirely (§ mobile home redesign) — a light floating
@@ -637,7 +640,7 @@ export default function ChatHome() {
 
       {/* Phone chat home: welcome copy occupies the available center space while
           the composer remains in a dedicated bottom work area. */}
-      {!drawMode && (
+      {!drawMode && isPhone && (
         <div className="relative z-10 flex min-h-0 flex-1 flex-col px-3 sm:hidden">
           <header className="flex min-h-0 flex-1 flex-col items-center justify-center pb-8 pt-12 text-center">
             <h1 className="home-rise max-w-[18rem] text-balance font-sans text-[1.6rem] font-semibold leading-[1.14] tracking-tight text-[var(--color-fg)]">
@@ -664,10 +667,10 @@ export default function ChatHome() {
         </div>
       )}
 
-      <div
+      {(drawMode || !isPhone) && <div
         className={cn(
           'relative z-10 mx-auto min-h-full w-full max-w-[var(--layout-message-max-w)] flex-col px-[var(--layout-gutter-mobile)] sm:px-8',
-          drawMode ? 'flex' : 'hidden sm:flex',
+          'flex',
         )}
       >
         {/* HERO — greeting + composer, vertically centered in the first screenful
@@ -775,7 +778,7 @@ export default function ChatHome() {
             <MyGallery />
           </div>
         )}
-      </div>
+      </div>}
     </div>
   )
 }
