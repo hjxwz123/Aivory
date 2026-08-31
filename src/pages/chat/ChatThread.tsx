@@ -39,6 +39,7 @@ import { cn, truncate } from '@/lib/utils'
 import { userCan } from '@/lib/user-permissions'
 import { workspaceCapabilitiesForScope } from '@/lib/workspace-permissions'
 import { findSelectedModel } from '@/lib/model-selection'
+import { chatScrollState, reconcileChatScroll } from '@/lib/chat-scroll'
 import type { Attachment } from '@/types/chat'
 import type { ToolMode } from '@/lib/tool-mode'
 
@@ -135,6 +136,10 @@ export default function ChatThread() {
   // streaming token).
   const positionedFor = useRef<string | null>(null)
   const [autoFollow, setAutoFollow] = useState(true)
+  // ResizeObserver callbacks run outside React's render cycle. Keep the latest
+  // follow intent in a ref so async document/citation/composer reflows never use
+  // a stale closure and pull a user who is reading older messages back down.
+  const autoFollowRef = useRef(true)
   const [showJump, setShowJump] = useState(false)
   const [conversationScrolled, setConversationScrolled] = useState(false)
 
@@ -199,12 +204,23 @@ export default function ChatThread() {
     // MessageList scrolls to the target instead. Mark the conversation as already
     // positioned so a later scroll-to-bottom follows the tail smoothly rather than
     // snapping (the bottom-pin first-load path is for fresh opens, not jumps).
-    setAutoFollow(!jumpTo)
+    const shouldFollow = !jumpTo
+    autoFollowRef.current = shouldFollow
+    setAutoFollow(shouldFollow)
     setShowJump(false)
     setConversationScrolled(false)
     setOutlineOpen(false)
     positionedFor.current = jumpTo ? (id ?? null) : null
   }, [id, jumpTo])
+
+  const applyScrollState = useCallback((el: HTMLDivElement) => {
+    const state = chatScrollState(el)
+    autoFollowRef.current = state.atBottom
+    setAutoFollow((current) => (current === state.atBottom ? current : state.atBottom))
+    setShowJump((current) => (current === state.showJump ? current : state.showJump))
+    setConversationScrolled((current) => (current === state.scrolled ? current : state.scrolled))
+    return state
+  }, [])
 
   // Hard-pin the scroller to the bottom across the next few frames. Late-laying-out
   // content (an empty assistant bubble that fills in, code blocks, math, images)
@@ -213,8 +229,11 @@ export default function ChatThread() {
   const pinToBottom = useCallback(() => {
     const el = scrollRef.current
     if (!el) return () => { }
+    autoFollowRef.current = true
+    setAutoFollow(true)
     const pin = () => {
-      el.scrollTop = el.scrollHeight
+      reconcileChatScroll(el, true)
+      applyScrollState(el)
     }
     pin()
     const raf = requestAnimationFrame(() => {
@@ -226,7 +245,7 @@ export default function ChatThread() {
       cancelAnimationFrame(raf)
       clearTimeout(tmo)
     }
-  }, [])
+  }, [applyScrollState])
 
   // Keep the newest message in view. The first load of a conversation pins
   // instantly; afterwards we follow the tail smoothly while the user is parked at
@@ -246,14 +265,43 @@ export default function ChatThread() {
   }, [conversation?.id, conversation?.messages, autoFollow, streaming, pinToBottom])
 
   function handleScroll(e: React.UIEvent<HTMLDivElement>) {
-    const el = e.currentTarget
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-    const atBottom = distanceFromBottom < 80
-    const scrolled = el.scrollTop > 2
-    setAutoFollow(atBottom)
-    setShowJump(!atBottom && el.scrollHeight - el.clientHeight > 200)
-    setConversationScrolled((current) => (current === scrolled ? current : scrolled))
+    applyScrollState(e.currentTarget)
   }
+
+  // Document ingestion, RAG citations/reasoning collapsing, image decoding, the
+  // bounded post-stream path reload, and attachment chips changing composer
+  // height all resize the transcript without necessarily emitting `scroll`.
+  // Preserve a real bottom follow across those reflows; otherwise only refresh
+  // the arrow/fade state and leave an upward-reading user exactly where they are.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+
+    let frame = 0
+    const reconcile = () => {
+      if (frame) cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        frame = 0
+        const state = reconcileChatScroll(el, autoFollowRef.current)
+        autoFollowRef.current = state.atBottom
+        setAutoFollow((current) => (current === state.atBottom ? current : state.atBottom))
+        setShowJump((current) => (current === state.showJump ? current : state.showJump))
+        setConversationScrolled((current) => (current === state.scrolled ? current : state.scrolled))
+      })
+    }
+
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(reconcile)
+    observer?.observe(el)
+    if (el.firstElementChild instanceof HTMLElement) observer?.observe(el.firstElementChild)
+    window.addEventListener('resize', reconcile)
+    reconcile()
+
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', reconcile)
+      if (frame) cancelAnimationFrame(frame)
+    }
+  }, [conversation?.id, conversation?.messages.length, loadStatus])
 
   if (!conversation) {
     // A workspace switch transiently drops the open conversation from the
@@ -339,8 +387,9 @@ export default function ChatThread() {
 
   function jumpToBottom() {
     const el = scrollRef.current
-    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    autoFollowRef.current = true
     setAutoFollow(true)
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
   }
 
   // §model switch: switching to a model that can't read images while the
