@@ -1218,7 +1218,11 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// before any readiness/capability check or persistence. This both enforces the
 	// conversation access boundary and prevents forged kind/MIME/name/URL fields
 	// from reaching the orchestrator and provider serializers.
-	req.Attachments, err = normalizeConversationAttachments(r.Context(), d.DB, id, u.ID, req.Attachments)
+	attachmentLeafID := req.ParentID
+	if attachmentLeafID == "" {
+		attachmentLeafID = conv.ActiveLeafID
+	}
+	req.Attachments, err = normalizeConversationBranchAttachments(r.Context(), d.DB, id, u.ID, attachmentLeafID, req.Attachments)
 	if err != nil {
 		writeError(w, attachmentNormalizationErrorStatus(err), err)
 		return
@@ -1258,7 +1262,7 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := ensureAttachedDocumentsReadyForUser(r.Context(), d.DB, id, u.ID, req.Attachments); err != nil {
+	if err := ensureAttachedDocumentsReadyForUserBranch(r.Context(), d.DB, id, u.ID, attachmentLeafID, req.Attachments); err != nil {
 		writeError(w, 409, err)
 		return
 	}
@@ -1336,6 +1340,21 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 				d.Logger.Printf("release conversation generation lease (conv=%s): %v", id, releaseErr)
 			}
 		}()
+	}
+	// A parent-less append is normalized against the active leaf observed at the
+	// start of the request. The generation lease resolves that parent atomically;
+	// if another tab switched branches in between, re-check attachments and
+	// unsent drafts against the parent the message will actually use.
+	if req.ParentID != attachmentLeafID {
+		req.Attachments, err = normalizeConversationBranchAttachments(r.Context(), d.DB, id, u.ID, req.ParentID, req.Attachments)
+		if err != nil {
+			writeError(w, attachmentNormalizationErrorStatus(err), err)
+			return
+		}
+		if err := ensureAttachedDocumentsReadyForUserBranch(r.Context(), d.DB, id, u.ID, req.ParentID, req.Attachments); err != nil {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
 	}
 	// §8 hard rule: per-user concurrent generation cap. Reserve the slot FIRST,
 	// before the daily-message counter is incremented — otherwise a request that
@@ -1555,6 +1574,10 @@ func ensureAttachedDocumentsReady(ctx context.Context, db *sql.DB, convID string
 // In a shared conversation, another member's composer draft must not make this
 // request fail or become an attachment candidate.
 func ensureAttachedDocumentsReadyForUser(ctx context.Context, db *sql.DB, convID, userID string, atts []llm.Attachment) error {
+	return ensureAttachedDocumentsReadyForUserBranch(ctx, db, convID, userID, "", atts)
+}
+
+func ensureAttachedDocumentsReadyForUserBranch(ctx context.Context, db *sql.DB, convID, userID, leafID string, atts []llm.Attachment) error {
 	docIDs := []string{}
 	fileIDs := []string{}
 	seen := map[string]bool{}
@@ -1589,7 +1612,13 @@ func ensureAttachedDocumentsReadyForUser(ctx context.Context, db *sql.DB, convID
 	if strings.TrimSpace(userID) == "" {
 		drafts, err = store.ListDraftFilesForConversation(ctx, db, convID)
 	} else {
-		drafts, err = store.ListDraftFilesForConversationForUser(ctx, db, convID, userID)
+		var files []store.File
+		files, err = store.ListFilesByConversationBranch(ctx, db, convID, userID, leafID)
+		for _, file := range files {
+			if file.Draft {
+				drafts = append(drafts, file)
+			}
+		}
 	}
 	if err != nil {
 		return err

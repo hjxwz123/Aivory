@@ -102,6 +102,17 @@ func normalizeConversationAttachments(
 	userID string,
 	attachments []llm.Attachment,
 ) ([]llm.Attachment, error) {
+	return normalizeConversationBranchAttachments(ctx, db, conversationID, userID, "", attachments)
+}
+
+func normalizeConversationBranchAttachments(
+	ctx context.Context,
+	db *sql.DB,
+	conversationID string,
+	userID string,
+	leafID string,
+	attachments []llm.Attachment,
+) ([]llm.Attachment, error) {
 	if len(attachments) == 0 {
 		return nil, nil
 	}
@@ -113,6 +124,14 @@ func normalizeConversationAttachments(
 		}
 		ids = append(ids, id)
 	}
+	visibleFiles, err := store.ListFilesByConversationBranch(ctx, db, conversationID, userID, leafID)
+	if err != nil {
+		return nil, fmt.Errorf("load conversation branch attachments: %w", err)
+	}
+	visibleIDs := make(map[string]bool, len(visibleFiles))
+	for _, file := range visibleFiles {
+		visibleIDs[file.ID] = true
+	}
 	files, err := store.ConversationFilesByIDs(ctx, db, conversationID, userID, ids)
 	if err != nil {
 		return nil, fmt.Errorf("load conversation attachments: %w", err)
@@ -120,11 +139,12 @@ func normalizeConversationAttachments(
 	missingIDs := make([]string, 0, len(attachments))
 	for _, attachment := range attachments {
 		id := strings.TrimSpace(attachment.ID)
-		if _, ok := files[id]; !ok {
+		if _, ok := files[id]; !ok || !visibleIDs[id] {
+			delete(files, id)
 			missingIDs = append(missingIDs, id)
 		}
 	}
-	historical, err := store.HistoricalConversationAttachmentIDs(ctx, db, conversationID, missingIDs)
+	historical, err := store.HistoricalConversationBranchAttachmentIDs(ctx, db, conversationID, leafID, missingIDs)
 	if err != nil {
 		return nil, fmt.Errorf("load historical conversation attachments: %w", err)
 	}

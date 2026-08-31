@@ -457,6 +457,12 @@ func uploadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		MimeType: mimeType, SizeBytes: n,
 		Kind: kind, StoragePath: path,
 		Draft: draft,
+		BranchMessageID: func() string {
+			if scopeConv == nil {
+				return ""
+			}
+			return scopeConv.ActiveLeafID
+		}(),
 	})
 	if err != nil {
 		// The row never landed — don't leave the copied bytes orphaned on disk.

@@ -495,9 +495,9 @@ func (o *Orchestrator) forcedWebSearch(ctx context.Context, req RunRequest, conv
 // staging. The original bytes are made available regardless of format so
 // Python can perform targeted edits without reconstructing Office/PDF files.
 // Shared by the system-prompt listing and the no-tools forced read.
-func listSandboxFiles(ctx context.Context, db *sql.DB, convID, userID string, roots ...string) []ProjectFileSummary {
+func listSandboxFiles(ctx context.Context, db *sql.DB, convID, userID, leafID string, roots ...string) []ProjectFileSummary {
 	out := []ProjectFileSummary{}
-	convFiles, err := store.ListFilesByConversation(ctx, db, convID, userID)
+	convFiles, err := store.ListFilesByConversationBranch(ctx, db, convID, userID, leafID)
 	if err == nil {
 		for _, f := range convFiles {
 			if f.SizeBytes < 0 || f.SizeBytes > sandboxUploadStagingFileSize {
@@ -513,7 +513,7 @@ func listSandboxFiles(ctx context.Context, db *sql.DB, convID, userID string, ro
 			out = append(out, ProjectFileSummary{Name: f.Filename, Kind: kind})
 		}
 	}
-	if artifacts, err := store.ListImageArtifactsByConversation(ctx, db, convID, userID); err == nil {
+	if artifacts, err := store.ListImageArtifactsByConversationBranch(ctx, db, convID, userID, leafID); err == nil {
 		for _, artifact := range artifacts {
 			if !reusableGeneratedImageSource(artifact.Source) || !storedSandboxArtifactLooksLikeImage(artifact, roots...) {
 				continue
@@ -597,8 +597,8 @@ const (
 // so xlsx/csv are parsed server-side and injected as prompt context. Returns ""
 // when there are no sheets or none could be parsed (each failure is logged and
 // skipped, so one bad file doesn't sink the rest).
-func (o *Orchestrator) previewSpreadsheetFiles(ctx context.Context, userID, convID string) string {
-	files, err := store.ListFilesByConversation(ctx, o.db, convID, userID)
+func (o *Orchestrator) previewSpreadsheetFiles(ctx context.Context, userID, convID, leafID string) string {
+	files, err := store.ListFilesByConversationBranch(ctx, o.db, convID, userID, leafID)
 	if err != nil {
 		return ""
 	}

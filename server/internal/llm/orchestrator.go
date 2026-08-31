@@ -3094,10 +3094,14 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if err != nil {
 		return nil, err
 	}
+	branchDocumentIDs, err := store.ConversationDocumentIDsForBranch(ctx, o.db, conv.ID, req.UserID, userMsg.ID)
+	if err != nil {
+		return nil, err
+	}
 	// Resolve staged files before automatic tool routing. The route model receives
 	// only a presence bit; exact file names are used solely by deterministic local
 	// fast paths and never leave this process.
-	sandboxFiles := listSandboxFiles(ctx, o.db, conv.ID, req.UserID, o.uploadDir, o.artifactDir)
+	sandboxFiles := listSandboxFiles(ctx, o.db, conv.ID, req.UserID, userMsg.ID, o.uploadDir, o.artifactDir)
 	builtinTools := modelBuiltinToolSet(model.BuiltinTools)
 	mcpServers := modelMCPServerIDSet(model.MCPServerIDs)
 	globalDisabledTools := o.disabledToolSet()
@@ -3282,7 +3286,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// what made the model fall back to python-side PDF parsing.
 	// §4.11-B: run inline RAG when a KB is bound OR the conversation itself has an
 	// ingested upload (chat-attached files are conversation-scoped, not in a KB).
-	ragScoped := len(kbIDs) > 0 || (o.rag != nil && store.ConversationHasReadyDocs(ctx, o.db, conv.ID))
+	ragScoped := len(kbIDs) > 0 || len(branchDocumentIDs) > 0
 	currentDocumentIDs := attachmentDocumentIDs(req.Attachments)
 	if o.rag != nil && ragScoped && req.Mode != ModeDeepResearch {
 		ragCtx := rag.WithBillingMessageID(ctx, assistantMsg.ID)
@@ -3304,8 +3308,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 				nil,
 				8,
 				rag.IterativeRetrievalOptions{
-					ForceRetrieve: ragMode == "inject",
-					DocumentIDs:   currentDocumentIDs,
+					ForceRetrieve:      ragMode == "inject",
+					DocumentIDs:        branchDocumentIDs,
+					RestrictDocuments:  true,
+					CurrentDocumentIDs: currentDocumentIDs,
 					OnProgress: func(progress rag.IterativeRetrievalProgress) {
 						onEvent(SseEvent{Type: "rag", Status: string(progress)})
 					},
@@ -3319,10 +3325,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			sourceCount := len(snippets)
 			onEvent(SseEvent{Type: "rag", Status: string(status), SourceCount: &sourceCount})
 		} else if ragMode == "inject" {
-			snippets, ragErr = o.rag.Retrieve(ragCtx, req.UserID, conv.ID, kbIDs, req.UserText, 8)
+			snippets, ragErr = o.rag.RetrieveDocuments(ragCtx, req.UserID, conv.ID, kbIDs, branchDocumentIDs, req.UserText, 8)
 			decision = rag.RouteDecision{Strategy: "retrieve"}
 		} else {
-			snippets, decision, ragErr = o.rag.RouteAndRetrieveDocuments(ragCtx, req.UserID, conv.ID, kbIDs, currentDocumentIDs, req.UserText, nil, 8)
+			snippets, decision, ragErr = o.rag.RouteAndRetrieveDocumentScope(ragCtx, req.UserID, conv.ID, kbIDs, branchDocumentIDs, currentDocumentIDs, req.UserText, nil, 8)
 		}
 		// Never SILENTLY swallow a retrieval failure (e.g. mixed embedding
 		// models/dims, embedder down). We still answer without RAG context — the
@@ -3431,7 +3437,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// Text/code files are already RAG-injected and images go to vision, so only
 	// spreadsheets need this fallback.
 	if shouldInjectSpreadsheetPreview(sandboxFiles, pythonExecuteAvailable) {
-		if sheetText := o.previewSpreadsheetFiles(ctx, req.UserID, conv.ID); sheetText != "" {
+		if sheetText := o.previewSpreadsheetFiles(ctx, req.UserID, conv.ID, userMsg.ID); sheetText != "" {
 			if ragContext != "" {
 				ragContext += "\n\n"
 			}

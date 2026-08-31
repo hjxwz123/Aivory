@@ -1113,8 +1113,9 @@ func createMessage(ctx context.Context, db *sql.DB, m Message, userID string) (*
 			// but keep the invariant in the transaction as well so a caller cannot
 			// commit another workspace member's draft by supplying its id.
 			args = append(args, strings.TrimSpace(m.AuthorID))
+			args = append([]any{m.ID}, args...)
 			if _, err := tx.ExecContext(ctx,
-				`UPDATE files SET draft=0 WHERE conversation_id=? AND id IN (`+idPlaceholders(len(attachedFileIDs))+`) AND draft=1 AND user_id=?`, args...); err != nil {
+				`UPDATE files SET draft=0, branch_message_id=? WHERE conversation_id=? AND id IN (`+idPlaceholders(len(attachedFileIDs))+`) AND draft=1 AND user_id=?`, args...); err != nil {
 				return nil, err
 			}
 		}

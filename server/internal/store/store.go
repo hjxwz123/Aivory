@@ -248,6 +248,9 @@ func Migrate(db *sql.DB) error {
 	// Composer uploads remain drafts until the user message carrying them is
 	// persisted. This lets the client restore only unsent attachments on refresh.
 	addFileDraft := `ALTER TABLE files ADD COLUMN draft INTEGER NOT NULL DEFAULT 0`
+	// Conversation uploads inherit only along the message branch where they were
+	// created. An empty value is retained for legacy rows and root uploads.
+	addFileBranchMessage := `ALTER TABLE files ADD COLUMN branch_message_id TEXT NOT NULL DEFAULT ''`
 	// Persisted ingest heartbeat lets the RAG watchdog distinguish a live long-
 	// running parse from a task abandoned by timeout, crash, or lease expiry.
 	addDocumentIngestUpdatedAt := `ALTER TABLE documents ADD COLUMN ingest_updated_at INTEGER NOT NULL DEFAULT 0`
@@ -389,6 +392,7 @@ func Migrate(db *sql.DB) error {
 		addUsageRequestBody = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS request_body TEXT NOT NULL DEFAULT ''`
 		addUsageTTFTFallback = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS ttft_fallback_model TEXT NOT NULL DEFAULT ''`
 		addFileDraft = `ALTER TABLE files ADD COLUMN IF NOT EXISTS draft INTEGER NOT NULL DEFAULT 0`
+		addFileBranchMessage = `ALTER TABLE files ADD COLUMN IF NOT EXISTS branch_message_id TEXT NOT NULL DEFAULT ''`
 		addDocumentIngestUpdatedAt = `ALTER TABLE documents ADD COLUMN IF NOT EXISTS ingest_updated_at BIGINT NOT NULL DEFAULT 0`
 		addDocumentUploader = `ALTER TABLE documents ADD COLUMN IF NOT EXISTS uploaded_by_user_id TEXT NOT NULL DEFAULT ''`
 		addWorkspaceCanCreateProjects = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_create_projects INTEGER NOT NULL DEFAULT 1`
@@ -472,7 +476,7 @@ func Migrate(db *sql.DB) error {
 		addConvWorkspace, addConvIsPublic, addProjWorkspace, addKBWorkspace, addMsgAuthor, addUsageWorkspace, addGroupMaxWorkspaces, addGroupMaxStorage, addGroupIsPublic, addGroupIsPurchasable, addGroupPermissions,
 		addModelFallbackChannel, addUsageChannel, addUsageFallback, addUsageStatus, addUsageError,
 		addUsageRequestMethod, addUsageRequestURL, addUsageRequestHeaders, addUsageRequestBody, addUsageTTFTFallback,
-		addFileDraft, addDocumentIngestUpdatedAt, addDocumentUploader,
+		addFileDraft, addFileBranchMessage, addDocumentIngestUpdatedAt, addDocumentUploader,
 		addWorkspaceCanCreateProjects, addWorkspaceCanPrivateConversations, addWorkspaceCanCreateSkillsPrompts, addWorkspaceCanCreatePrompts, addWorkspaceCanCreateSkills, addWorkspaceCanCreateMCP, addWorkspaceCanUsePrompts, addWorkspaceCanUseSkills, addWorkspaceCanUseMCP, addWorkspaceCanCreateKB, addWorkspaceCanAddKBFiles, addWorkspaceCanDeleteKBContent, addWorkspaceCanDeleteConversations, addWorkspaceInvitePurpose, addWorkspaceDeleting,
 		addWorkspaceAllowToolCalling, addWorkspaceAllowDrawing, addWorkspaceAllowMCP, addWorkspaceAllowSkills, addWorkspaceAllowPrompts,
 		addKBIsPublic, addProjectIsPublic,
@@ -546,6 +550,7 @@ func Migrate(db *sql.DB) error {
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_session ON refresh_tokens(user_id, session_id)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_docs_kb_uploader ON documents(kb_id, uploaded_by_user_id, created_at DESC)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_files_conversation_id ON files(conversation_id)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_files_conversation_branch ON files(conversation_id, branch_message_id)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_files_storage_draft ON files(storage_path, draft)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_docs_ingest_state ON documents(status, ingest_updated_at)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_messages_conv_created ON messages(conversation_id, created_at)`)
@@ -630,7 +635,7 @@ func Migrate(db *sql.DB) error {
 		"projects":                        {"workspace_id", "is_public"},
 		"knowledge_bases":                 {"workspace_id", "is_public"},
 		"chunks":                          {"image_ref"},
-		"files":                           {"draft"},
+		"files":                           {"draft", "branch_message_id"},
 		"documents":                       {"ingest_updated_at", "uploaded_by_user_id"},
 		"knowledge_base_shares":           {"kb_id", "user_id", "role", "created_at", "updated_at"},
 		"workspace_members":               {"workspace_id", "user_id", "role", "can_create_projects", "can_private_conversations", "can_create_skills_prompts", "can_create_prompts", "can_create_skills", "can_create_mcp", "can_use_prompts", "can_use_skills", "can_use_mcp", "can_create_kb", "can_add_kb_files", "can_delete_kb_content", "can_delete_conversations", "joined_at"},

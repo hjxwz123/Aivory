@@ -105,7 +105,7 @@ func TestListSandboxFilesAdvertisesEveryConversationUpload(t *testing.T) {
 			t.Fatalf("seed %q: %v", q, err)
 		}
 	}
-	files := listSandboxFiles(ctx, db, "c1", "u1")
+	files := listSandboxFiles(ctx, db, "c1", "u1", "")
 	want := map[string]string{
 		"data.csv": "sheet", "original.docx": "document", "slides.pptx": "document",
 		"contract.pdf": "document", "photo.png": "image",
@@ -277,7 +277,7 @@ func TestPreviewSpreadsheetFilesInjectsParsedCSV(t *testing.T) {
 	}
 
 	o := &Orchestrator{db: db}
-	out := o.previewSpreadsheetFiles(context.Background(), "u1", "c1")
+	out := o.previewSpreadsheetFiles(context.Background(), "u1", "c1", "")
 	if !strings.Contains(out, "<uploaded-data-preview>") || !strings.Contains(out, "</uploaded-data-preview>") {
 		t.Fatalf("missing wrapper block:\n%s", out)
 	}
@@ -309,7 +309,7 @@ func TestPreviewSpreadsheetFilesEmptyWhenNoSheets(t *testing.T) {
 		t.Fatalf("conv: %v", err)
 	}
 	o := &Orchestrator{db: db}
-	if out := o.previewSpreadsheetFiles(context.Background(), "u1", "c1"); out != "" {
+	if out := o.previewSpreadsheetFiles(context.Background(), "u1", "c1", ""); out != "" {
 		t.Fatalf("expected empty injection, got %q", out)
 	}
 }
@@ -346,7 +346,7 @@ func TestPreviewSpreadsheetFilesCapsHugeSheet(t *testing.T) {
 		t.Fatalf("file: %v", err)
 	}
 	o := &Orchestrator{db: db}
-	out := o.previewSpreadsheetFiles(context.Background(), "u1", "c1")
+	out := o.previewSpreadsheetFiles(context.Background(), "u1", "c1", "")
 	if !strings.Contains(out, "…(truncated)") {
 		t.Fatalf("oversized preview should be truncated")
 	}

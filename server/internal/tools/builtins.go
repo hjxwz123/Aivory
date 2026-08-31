@@ -1056,7 +1056,7 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 				}
 			}
 		}
-		if files, err := store.ListFilesByConversation(ctx, tc.DB, tc.ConvID, tc.UserID); err == nil {
+		if files, err := store.ListFilesByConversationBranch(ctx, tc.DB, tc.ConvID, tc.UserID, tc.MessageID); err == nil {
 			for _, f := range files {
 				data, err := readSandboxUpload(f.StoragePath, f.SizeBytes, pythonExecuteUploadStagingFileSize, t.uploadDir)
 				if err != nil {
@@ -1071,7 +1071,7 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		// Generated images are artifacts rather than rows in files. Mount only
 		// image_generate / hosted image-generation outputs so Python can edit the
 		// image produced by a previous turn without exposing unrelated tool output.
-		if artifacts, err := store.ListImageArtifactsByConversation(ctx, tc.DB, tc.ConvID, tc.UserID); err == nil {
+		if artifacts, err := store.ListImageArtifactsByConversationBranch(ctx, tc.DB, tc.ConvID, tc.UserID, tc.MessageID); err == nil {
 			for _, artifact := range artifacts {
 				if !reusableGeneratedImageSource(artifact.Source) {
 					continue
