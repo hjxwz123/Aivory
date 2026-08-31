@@ -1294,11 +1294,12 @@ type convFile struct {
 func listConversationFilesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	convID := pathParam(r, "id")
-	if _, err := store.GetConversation(r.Context(), d.DB, convID, u.ID); err != nil {
+	conv, err := store.GetConversation(r.Context(), d.DB, convID, u.ID)
+	if err != nil {
 		writeError(w, 404, errNotFound)
 		return
 	}
-	files, err := store.ListFilesByConversation(r.Context(), d.DB, convID, u.ID)
+	files, err := store.ListFilesByConversationBranch(r.Context(), d.DB, convID, u.ID, conv.ActiveLeafID)
 	if err != nil {
 		writeError(w, 500, err)
 		return

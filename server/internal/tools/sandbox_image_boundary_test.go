@@ -566,6 +566,73 @@ func TestPythonExecuteRejectsOutOfRootAndSymlinkedDatabasePaths(t *testing.T) {
 	}
 }
 
+func TestPythonExecuteStagesOnlyCurrentBranchResources(t *testing.T) {
+	ctx := context.Background()
+	db := openToolsTestDB(t)
+	for _, query := range []string{
+		`INSERT INTO users(id,email,password_hash) VALUES('u_branch','branch@example.test','h')`,
+		`INSERT INTO conversations(id,user_id,title) VALUES('c_branch','u_branch','Branches')`,
+		`INSERT INTO messages(id,conversation_id,parent_id,role,author_id,status) VALUES('root','c_branch',NULL,'user','u_branch','complete')`,
+		`INSERT INTO messages(id,conversation_id,parent_id,role,author_id,status) VALUES('branch_1','c_branch','root','assistant','u_branch','complete')`,
+		`INSERT INTO messages(id,conversation_id,parent_id,role,author_id,status) VALUES('branch_2','c_branch','root','assistant','u_branch','streaming')`,
+	} {
+		if _, err := db.ExecContext(ctx, query); err != nil {
+			t.Fatal(err)
+		}
+	}
+	uploads := t.TempDir()
+	write := func(name string, data []byte) string {
+		t.Helper()
+		path := filepath.Join(uploads, name)
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	for _, file := range []store.File{
+		{ID: "root_file", UserID: "u_branch", ConversationID: "c_branch", Filename: "root.txt", StoragePath: write("root.txt", []byte("root")), SizeBytes: 4, BranchMessageID: "root"},
+		{ID: "branch_1_file", UserID: "u_branch", ConversationID: "c_branch", Filename: "one.txt", StoragePath: write("one.txt", []byte("one")), SizeBytes: 3, BranchMessageID: "branch_1"},
+		{ID: "branch_2_file", UserID: "u_branch", ConversationID: "c_branch", Filename: "two.txt", StoragePath: write("two.txt", []byte("two")), SizeBytes: 3, BranchMessageID: "branch_2"},
+	} {
+		if _, err := store.CreateFile(ctx, db, file); err != nil {
+			t.Fatal(err)
+		}
+	}
+	png := append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 24)...)
+	for _, artifact := range []store.Artifact{
+		{ID: "root_artifact", MessageID: "root", Filename: "root.png", StoragePath: write("root.png", png), MimeType: "image/png", SizeBytes: int64(len(png))},
+		{ID: "branch_1_artifact", MessageID: "branch_1", Filename: "one.png", StoragePath: write("one.png", png), MimeType: "image/png", SizeBytes: int64(len(png))},
+		{ID: "branch_2_artifact", MessageID: "branch_2", Filename: "two.png", StoragePath: write("two.png", png), MimeType: "image/png", SizeBytes: int64(len(png))},
+	} {
+		if _, err := store.CreateArtifact(ctx, db, artifact); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	fake := &recordingSandbox{execResult: &sandbox.Result{Stdout: "done\n"}}
+	tool := &pythonExecuteTool{sandbox: fake, uploadDir: uploads, artifactDir: uploads, logger: log.New(io.Discard, "", 0)}
+	if _, _, err := tool.Execute(ctx, []byte(`{"code":"print('done')"}`), &llm.ToolContext{
+		UserID: "u_branch", ConvID: "c_branch", MessageID: "branch_2", DB: db,
+		BuiltinTools: map[string]bool{"python_execute": true},
+	}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	want := map[string]bool{
+		"/workspace/uploads/root.txt":           true,
+		"/workspace/uploads/two.txt":            true,
+		"/workspace/uploads/generated-root.png": true,
+		"/workspace/uploads/generated-two.png":  true,
+	}
+	if len(fake.putFiles) != len(want) {
+		t.Fatalf("staged files=%+v; want current branch only", fake.putFiles)
+	}
+	for _, staged := range fake.putFiles {
+		if !want[staged.path] {
+			t.Fatalf("sibling resource reached sandbox: %q", staged.path)
+		}
+	}
+}
+
 func openToolsTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	db, err := store.Open(filepath.Join(t.TempDir(), "tools.db"))

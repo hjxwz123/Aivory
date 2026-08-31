@@ -45,8 +45,8 @@ func TestConversationDocumentsShareCumulativePinnedBudget(t *testing.T) {
 	// the full-text threshold when the router selects B for complete coverage.
 	router := &recordingRouter{decision: RouteDecision{Strategy: "full_doc", DocumentIDs: []string{second.ID}}}
 	svc.SetTaskLLM(router)
-	currentOnly, decision, err := svc.RouteAndRetrieveDocuments(
-		ctx, "u1", "c1", nil, []string{second.ID}, "summarize this document", nil, 8,
+	currentOnly, decision, err := svc.RouteAndRetrieveDocumentScope(
+		ctx, "u1", "c1", nil, []string{first.ID, second.ID}, []string{second.ID}, "summarize this document", nil, 8,
 	)
 	if err != nil {
 		t.Fatalf("route current attachment: %v", err)

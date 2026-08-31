@@ -1170,8 +1170,10 @@ func (s *Service) embedQueryCached(ctx context.Context, em Embedder, emName, que
 }
 
 type retrieveOptions struct {
-	strict      bool
-	documentIDs []string
+	strict             bool
+	restrictDocuments  bool
+	documentIDs        []string
+	currentDocumentIDs []string
 }
 
 // Retrieve preserves the established fail-open behaviour used by a single
@@ -1185,7 +1187,10 @@ func (s *Service) Retrieve(ctx context.Context, userID, convID string, kbIDs []s
 // RetrieveDocuments restricts conversation-upload evidence to documents
 // attached to the current user turn. Knowledge-base IDs remain in scope.
 func (s *Service) RetrieveDocuments(ctx context.Context, userID, convID string, kbIDs, documentIDs []string, query string, topK int) ([]Snippet, error) {
-	return s.retrieve(ctx, userID, convID, kbIDs, query, topK, retrieveOptions{documentIDs: fixedDocumentScope(documentIDs)})
+	fixed := fixedDocumentScope(documentIDs)
+	return s.retrieve(ctx, userID, convID, kbIDs, query, topK, retrieveOptions{
+		restrictDocuments: true, documentIDs: fixed, currentDocumentIDs: fixed,
+	})
 }
 
 // retrieveStrict is reserved for the KB iterative API. In that path an index
@@ -1200,6 +1205,7 @@ func (s *Service) retrieve(ctx context.Context, userID, convID string, kbIDs []s
 		return nil, nil
 	}
 	kbIDs = fixedKnowledgeBaseScope(kbIDs)
+	conversationEnabled := convID != "" && (!opts.restrictDocuments || len(opts.documentIDs) > 0)
 	if err := store.ValidateKBEmbeddingCompatibility(ctx, s.db, kbIDs); err != nil {
 		return nil, fmt.Errorf("rag: validate knowledge-base retrieval scope: %w", err)
 	}
@@ -1212,7 +1218,7 @@ func (s *Service) retrieve(ctx context.Context, userID, convID string, kbIDs []s
 		if err != nil {
 			return nil, err
 		}
-		return filterChunksByDocuments(scope, opts.documentIDs), nil
+		return filterChunksByDocuments(scope, opts.documentIDs, opts.restrictDocuments), nil
 	}
 	fullContext := func() ([]Snippet, error) {
 		scope, err := listScope()
@@ -1276,29 +1282,35 @@ func (s *Service) retrieve(ctx context.Context, userID, convID string, kbIDs []s
 				return fullContext()
 			}
 			cands = kbCands
-			convScope := vector.Scope{ConversationID: convID, DocumentIDs: opts.documentIDs}
-			if convCands, cerr := s.searchScope(ctx, userID, convID, gEm, gName, gDim, convScope, query, terms); cerr == nil {
-				if !opts.strict && len(convCands) == 0 && s.vectorScopeHasEmbeddedChunks(ctx, convScope) {
+			if conversationEnabled {
+				convScope := vector.Scope{ConversationID: convID, DocumentIDs: opts.documentIDs}
+				if convCands, cerr := s.searchScope(ctx, userID, convID, gEm, gName, gDim, convScope, query, terms); cerr == nil {
+					if !opts.strict && len(convCands) == 0 && s.vectorScopeHasEmbeddedChunks(ctx, convScope) {
+						return fullContext()
+					}
+					cands = appendUniqueCandidates(cands, convCands)
+				} else if errors.Is(cerr, errVectorBackendUnavailable) {
+					if opts.strict {
+						return nil, cerr
+					}
 					return fullContext()
-				}
-				cands = appendUniqueCandidates(cands, convCands)
-			} else if errors.Is(cerr, errVectorBackendUnavailable) {
-				if opts.strict {
-					return nil, cerr
-				}
-				return fullContext()
-			} else {
-				if opts.strict {
-					return nil, cerr
-				}
-				if s.logger != nil {
-					s.logger.Printf("rag: conversation-scope retrieval failed for %s: %v", convID, cerr)
+				} else {
+					if opts.strict {
+						return nil, cerr
+					}
+					if s.logger != nil {
+						s.logger.Printf("rag: conversation-scope retrieval failed for %s: %v", convID, cerr)
+					}
 				}
 			}
 		} else {
 			// One model across KBs (+ the conversation when its model matches): a
 			// single combined-scope search — exactly the prior behaviour.
-			scope := vector.Scope{KBIDs: kbIDs, ConversationID: convID, DocumentIDs: opts.documentIDs}
+			conversationScopeID := ""
+			if conversationEnabled {
+				conversationScopeID = convID
+			}
+			scope := vector.Scope{KBIDs: kbIDs, ConversationID: conversationScopeID, DocumentIDs: opts.documentIDs}
 			cands, err = s.searchScope(ctx, userID, convID, kbEm, kbName, kbDim, scope, query, terms)
 			if err != nil {
 				if errors.Is(err, errVectorBackendUnavailable) {
@@ -1314,6 +1326,9 @@ func (s *Service) retrieve(ctx context.Context, userID, convID string, kbIDs []s
 			}
 		}
 	} else {
+		if !conversationEnabled {
+			return nil, nil
+		}
 		gEm, gName, gDim := s.resolveEmbedder(ctx)
 		var err error
 		scope := vector.Scope{ConversationID: convID, DocumentIDs: opts.documentIDs}
@@ -1337,13 +1352,13 @@ func (s *Service) retrieve(ctx context.Context, userID, convID string, kbIDs []s
 	// retrieval couldn't find a freshly-uploaded small/code file at all — only
 	// auto-mode's pinned injection covered them. Conversation-scoped only (KB docs
 	// always embed). (§4.11 skip-embed)
-	if convID != "" {
+	if conversationEnabled {
 		seen := make(map[string]bool, len(cands))
 		for _, c := range cands {
 			seen[c.chunkID] = true
 		}
 		for _, c := range s.keywordOnlyUnembedded(ctx, kbIDs, convID, terms) {
-			if !documentAllowed(c.documentID, opts.documentIDs) {
+			if !documentAllowed(c.documentID, opts.documentIDs, opts.restrictDocuments) {
 				continue
 			}
 			if !seen[c.chunkID] {
@@ -1626,6 +1641,7 @@ func (s *Service) vectorScopeHasEmbeddedChunks(ctx context.Context, scope vector
 		}
 		return false
 	}
+	rows = filterChunksByVectorScope(rows, scope)
 	for _, r := range rows {
 		if r.ChunkType != "parent" && strings.TrimSpace(r.EmbeddingModel) != "" {
 			return true
@@ -1827,6 +1843,7 @@ func (s *Service) liveChildChunks(ctx context.Context, scope vector.Scope) (map[
 	if err != nil {
 		return nil, err
 	}
+	rows = filterChunksByVectorScope(rows, scope)
 	live := make(map[string]store.Chunk, len(rows))
 	for _, r := range rows {
 		if r.ChunkType == "parent" || strings.TrimSpace(r.EmbeddingModel) == "" {
@@ -1835,6 +1852,19 @@ func (s *Service) liveChildChunks(ctx context.Context, scope vector.Scope) (map[
 		live[r.ID] = r
 	}
 	return live, nil
+}
+
+func filterChunksByVectorScope(chunks []store.Chunk, scope vector.Scope) []store.Chunk {
+	if len(scope.DocumentIDs) == 0 {
+		return chunks
+	}
+	out := make([]store.Chunk, 0, len(chunks))
+	for _, chunk := range chunks {
+		if chunk.KBID != "" || documentAllowed(chunk.DocumentID, scope.DocumentIDs, true) {
+			out = append(out, chunk)
+		}
+	}
+	return out
 }
 
 // appendUniqueCandidates appends candidates from src not already in dst (by chunk
@@ -2679,10 +2709,15 @@ const (
 // Retrieve directly and can never be routed to none.
 type IterativeRetrievalOptions struct {
 	ForceRetrieve bool
-	// DocumentIDs narrows the conversation-upload side of a mixed KB + chat-file
-	// scope to files attached to the current user turn.
-	DocumentIDs []string
-	OnProgress  func(IterativeRetrievalProgress)
+	// DocumentIDs is the complete allowed conversation-document scope. When
+	// RestrictDocuments is true, an empty list explicitly disables conversation
+	// evidence while leaving selected knowledge bases available.
+	DocumentIDs       []string
+	RestrictDocuments bool
+	// CurrentDocumentIDs is routing metadata only: it marks which allowed files
+	// were attached to the latest user message.
+	CurrentDocumentIDs []string
+	OnProgress         func(IterativeRetrievalProgress)
 }
 
 // IterativeRetrievalResult contains both the evidence and enough control-plane
@@ -2798,11 +2833,23 @@ func (s *Service) RouteAndRetrieve(ctx context.Context, userID, convID string, k
 	return s.routeAndRetrieve(ctx, userID, convID, kbIDs, userText, history, topK, retrieveOptions{})
 }
 
-// RouteAndRetrieveDocuments supplies current-turn attachment IDs as routing
-// metadata. The router may select full_doc targets from the whole conversation;
-// retrieve always searches the whole conversation document scope.
+// RouteAndRetrieveDocuments restricts conversation evidence to documentIDs.
+// The same IDs are marked current_turn in routing metadata for compatibility;
+// callers with a wider allowed path use routeAndRetrieve directly.
 func (s *Service) RouteAndRetrieveDocuments(ctx context.Context, userID, convID string, kbIDs, documentIDs []string, userText string, history []string, topK int) ([]Snippet, RouteDecision, error) {
-	return s.routeAndRetrieve(ctx, userID, convID, kbIDs, userText, history, topK, retrieveOptions{documentIDs: fixedDocumentScope(documentIDs)})
+	fixed := fixedDocumentScope(documentIDs)
+	return s.routeAndRetrieve(ctx, userID, convID, kbIDs, userText, history, topK, retrieveOptions{
+		restrictDocuments: true, documentIDs: fixed, currentDocumentIDs: fixed,
+	})
+}
+
+// RouteAndRetrieveDocumentScope separates the inherited branch scope from the
+// files attached on the latest turn, which are only a router disambiguation hint.
+func (s *Service) RouteAndRetrieveDocumentScope(ctx context.Context, userID, convID string, kbIDs, allowedDocumentIDs, currentDocumentIDs []string, userText string, history []string, topK int) ([]Snippet, RouteDecision, error) {
+	return s.routeAndRetrieve(ctx, userID, convID, kbIDs, userText, history, topK, retrieveOptions{
+		restrictDocuments: true,
+		documentIDs:       fixedDocumentScope(allowedDocumentIDs), currentDocumentIDs: fixedDocumentScope(currentDocumentIDs),
+	})
 }
 
 func (s *Service) routeAndRetrieve(ctx context.Context, userID, convID string, kbIDs []string, userText string, history []string, topK int, retrieveOpts retrieveOptions) ([]Snippet, RouteDecision, error) {
@@ -2827,6 +2874,7 @@ func (s *Service) routeAndRetrieve(ctx context.Context, userID, convID string, k
 	if scopeErr != nil && retrieveOpts.strict {
 		return nil, decision, fmt.Errorf("rag: list retrieval scope: %w", scopeErr)
 	}
+	scope = filterChunksByDocuments(scope, retrieveOpts.documentIDs, retrieveOpts.restrictDocuments)
 	pinned := []store.Chunk{}
 	embeddedTokens := 0
 	pinnedTokens := 0
@@ -2894,9 +2942,8 @@ func (s *Service) routeAndRetrieve(ctx context.Context, userID, convID string, k
 		}
 		return merged
 	}
-	docHints := buildDocumentRouteHints(scope, retrieveOpts.documentIDs)
+	docHints := buildDocumentRouteHints(scope, retrieveOpts.currentDocumentIDs)
 	allScopeOpts := retrieveOpts
-	allScopeOpts.documentIDs = nil
 
 	if s.task == nil {
 		out, err := s.retrieve(ctx, userID, convID, kbIDs, initialQuery, cfg.TopK, allScopeOpts)
@@ -2931,7 +2978,7 @@ func (s *Service) routeAndRetrieve(ctx context.Context, userID, convID string, k
 	case "none":
 		return nil, decision, nil
 	case "full_doc":
-		selectedIDs := validatedFullDocumentIDs(decision.DocumentIDs, retrieveOpts.documentIDs, scope)
+		selectedIDs := validatedFullDocumentIDs(decision.DocumentIDs, retrieveOpts.currentDocumentIDs, scope)
 		selectedScope := filterChunksToDocumentIDs(scope, selectedIDs)
 		if len(selectedScope) == 0 {
 			selectedScope = scope
@@ -3050,7 +3097,14 @@ func (s *Service) RouteAndRetrieveIterative(
 	cfg := s.ragSettings()
 	limit := iterativeCandidateLimit(topK, cfg.TopK)
 	fixedUserID, fixedConvID := userID, convID
-	retrieveOpts := retrieveOptions{strict: true, documentIDs: fixedDocumentScope(opts.DocumentIDs)}
+	currentDocumentIDs := opts.CurrentDocumentIDs
+	if currentDocumentIDs == nil {
+		currentDocumentIDs = opts.DocumentIDs
+	}
+	retrieveOpts := retrieveOptions{
+		strict: true, restrictDocuments: opts.RestrictDocuments || opts.DocumentIDs != nil,
+		documentIDs: fixedDocumentScope(opts.DocumentIDs), currentDocumentIDs: fixedDocumentScope(currentDocumentIDs),
+	}
 
 	var (
 		first    []Snippet
@@ -3215,8 +3269,8 @@ func fixedDocumentScope(documentIDs []string) []string {
 	return out
 }
 
-func documentAllowed(documentID string, documentIDs []string) bool {
-	if len(documentIDs) == 0 {
+func documentAllowed(documentID string, documentIDs []string, restricted bool) bool {
+	if !restricted {
 		return true
 	}
 	for _, allowed := range documentIDs {
@@ -3227,15 +3281,15 @@ func documentAllowed(documentID string, documentIDs []string) bool {
 	return false
 }
 
-func filterChunksByDocuments(chunks []store.Chunk, documentIDs []string) []store.Chunk {
-	if len(documentIDs) == 0 {
+func filterChunksByDocuments(chunks []store.Chunk, documentIDs []string, restricted bool) []store.Chunk {
+	if !restricted {
 		return chunks
 	}
 	out := make([]store.Chunk, 0, len(chunks))
 	for _, chunk := range chunks {
 		// KB evidence is independent of chat attachments. Only the conversation
 		// upload branch is narrowed to the current turn's documents.
-		if chunk.KBID != "" || documentAllowed(chunk.DocumentID, documentIDs) {
+		if chunk.KBID != "" || documentAllowed(chunk.DocumentID, documentIDs, true) {
 			out = append(out, chunk)
 		}
 	}
@@ -3884,7 +3938,7 @@ func buildRouterPrompt(userText string, docHints []string) string {
 	b.WriteString("\n\n")
 	b.WriteString(`Rules:
 - Use "none" when the question is unrelated to the documents (general chit-chat, math, code unrelated to files).
-- Use "retrieve" for targeted evidence. Retrieval searches every conversation document; return useful rewritten queries and an empty document_ids array.
+- Use "retrieve" for targeted evidence. Retrieval searches only the conversation documents listed above; return useful rewritten queries and an empty document_ids array.
 - Use "full_doc" when complete-document coverage is required. Return exactly the document_ids that need complete coverage.
 - current_turn marks files attached to the latest message and helps resolve references in the latest question.
 Reply with strict JSON: {"strategy":"retrieve|full_doc|none","document_ids":["document-id"],"queries":["query"]}`)

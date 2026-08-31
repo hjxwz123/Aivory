@@ -677,8 +677,12 @@ type File struct {
 	Kind           string `json:"kind"`
 	// Draft is true for a composer upload that has not yet been committed to a
 	// user message. Conversation-file drawer uploads are immediately committed.
-	Draft       bool   `json:"draft"`
-	StoragePath string `json:"-"`
+	Draft bool `json:"draft"`
+	// BranchMessageID anchors drawer uploads and unsent composer drafts to the
+	// message path where they were created. It is internal authorization state,
+	// not client-controlled attachment metadata.
+	BranchMessageID string `json:"-"`
+	StoragePath     string `json:"-"`
 	// URL is filled by the handler (not the DB) so the frontend can render
 	// thumbnails / download links without keeping the blob URL alive.
 	URL string `json:"url,omitempty"`

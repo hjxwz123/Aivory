@@ -61,6 +61,47 @@ func TestRetrieveDocumentsScopesCurrentTurnToAttachedDocument(t *testing.T) {
 	}
 }
 
+func TestRetrieveDocumentsEmptyScopeDoesNotFallBackToConversation(t *testing.T) {
+	ctx := context.Background()
+	db := seedEmbeddedConversationDoc(t, ctx)
+	defer db.Close()
+
+	svc := New(db, nil, log.New(io.Discard, "", 0))
+	got, err := svc.RetrieveDocuments(ctx, "u1", "c1", nil, nil, "anything", 8)
+	if err != nil {
+		t.Fatalf("retrieve empty document scope: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("empty allowed scope leaked conversation documents: %+v", got)
+	}
+}
+
+func TestRetrieveDocumentsEmptyConversationScopeKeepsKnowledgeBase(t *testing.T) {
+	ctx := context.Background()
+	db := seedEmbeddedConversationDoc(t, ctx)
+	defer db.Close()
+	for _, query := range []string{
+		`INSERT INTO channels(id,name,type,api_format,base_url,api_key,enabled) VALUES('kb-channel','Emb','openai','chat','https://api.example','sk',1)`,
+		`INSERT INTO models(id,channel_id,kind,request_id,label,enabled,dim) VALUES('kb-embedding','kb-channel','embedding','embedding','Embedding',1,256)`,
+		`INSERT INTO knowledge_bases(id,user_id,name,embedding_model_id,embedding_dim) VALUES('kb1','u1','Allowed KB','kb-embedding',256)`,
+		`INSERT INTO documents(id,kb_id,filename,mime_type,size_bytes,status) VALUES('kb-doc','kb1','kb.txt','text/plain',100,'ready')`,
+		`INSERT INTO chunks(id,document_id,kb_id,seq,chunk_type,content,embedding_model) VALUES('kb-chunk','kb-doc','kb1',0,'text','knowledge base evidence','')`,
+	} {
+		if _, err := db.ExecContext(ctx, query); err != nil {
+			t.Fatalf("seed KB: %v", err)
+		}
+	}
+
+	svc := New(db, nil, log.New(io.Discard, "", 0))
+	got, err := svc.RetrieveDocuments(ctx, "u1", "c1", []string{"kb1"}, nil, "anything", 8)
+	if err != nil {
+		t.Fatalf("retrieve KB with empty conversation scope: %v", err)
+	}
+	if len(got) != 1 || got[0].Snippet != "knowledge base evidence" || got[0].Source != "kb" {
+		t.Fatalf("KB scope was lost or conversation documents leaked: %+v", got)
+	}
+}
+
 func TestRetrieveFullContextFallbackDoesNotTruncate(t *testing.T) {
 	ctx := context.Background()
 	db := seedEmbeddedConversationDoc(t, ctx)

@@ -101,19 +101,19 @@ func CreateFile(ctx context.Context, db *sql.DB, f File) (*File, error) {
 	var result sql.Result
 	if f.ConversationID == "" {
 		result, err = tx.ExecContext(ctx,
-			`INSERT INTO files(id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, draft, created_at) VALUES(?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT INTO files(id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, draft, branch_message_id, created_at) VALUES(?, ?, NULL, ?, ?, ?, ?, ?, ?, '', ?)`,
 			f.ID, f.UserID, f.Filename, f.MimeType, f.SizeBytes, f.StoragePath, f.Kind, boolInt(f.Draft), now)
 	} else {
 		args := []any{
 			f.ID, f.UserID, f.ConversationID, f.Filename, f.MimeType,
-			f.SizeBytes, f.StoragePath, f.Kind, boolInt(f.Draft), now,
+			f.SizeBytes, f.StoragePath, f.Kind, boolInt(f.Draft), strings.TrimSpace(f.BranchMessageID), now,
 			f.ConversationID,
 		}
 		args = append(args, conversationMemberMutationArgs(f.UserID)...)
 		// Uploads are mutations: workspace guests are read-only, so the member
 		// mutation predicate (access + non-guest) replaces the plain read one.
-		q := `INSERT INTO files(id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, draft, created_at)
-			 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+		q := `INSERT INTO files(id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, draft, branch_message_id, created_at)
+			 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 			   FROM conversations c
 			  WHERE c.id=? AND ` + conversationMemberMutationPredicate("c")
 		if workspaceID != "" {
@@ -138,10 +138,10 @@ func CreateFile(ctx context.Context, db *sql.DB, f File) (*File, error) {
 	var conversationID sql.NullString
 	var draft int
 	if err := tx.QueryRowContext(ctx,
-		`SELECT id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, draft, created_at
+		`SELECT id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, draft, branch_message_id, created_at
 		   FROM files WHERE id=?`, f.ID,
 	).Scan(&created.ID, &created.UserID, &conversationID, &created.Filename, &created.MimeType,
-		&created.SizeBytes, &created.StoragePath, &created.Kind, &draft, &created.CreatedAt); err != nil {
+		&created.SizeBytes, &created.StoragePath, &created.Kind, &draft, &created.BranchMessageID, &created.CreatedAt); err != nil {
 		return nil, err
 	}
 	created.ConversationID = conversationID.String
@@ -152,6 +152,108 @@ func CreateFile(ctx context.Context, db *sql.DB, f File) (*File, error) {
 	return &created, nil
 }
 
+// ListFilesByConversationBranch returns only files inherited by the path from
+// the conversation root to leafID. New files use branch_message_id; legacy
+// attachment rows are reconstructed from persisted message attachments. A
+// legacy file never referenced by any message remains conversation-global so
+// an upgrade does not make old drawer uploads disappear.
+func ListFilesByConversationBranch(ctx context.Context, db *sql.DB, convID, userID, leafID string) ([]File, error) {
+	files, err := ListFilesByConversation(ctx, db, convID, userID)
+	if err != nil || len(files) == 0 {
+		return files, err
+	}
+	pathMessageIDs, pathAttachmentIDs, allAttachmentIDs, err := conversationBranchIDs(ctx, db, convID, leafID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]File, 0, len(files))
+	for _, file := range files {
+		anchor := strings.TrimSpace(file.BranchMessageID)
+		if pathAttachmentIDs[file.ID] || (anchor != "" && pathMessageIDs[anchor]) || (anchor == "" && !allAttachmentIDs[file.ID]) {
+			out = append(out, file)
+		}
+	}
+	return out, nil
+}
+
+func conversationBranchIDs(ctx context.Context, db *sql.DB, convID, leafID string) (map[string]bool, map[string]bool, map[string]bool, error) {
+	all, err := ListAllMessages(ctx, db, convID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if leafID == "" {
+		if err := db.QueryRowContext(ctx, `SELECT COALESCE(active_leaf_id, '') FROM conversations WHERE id=?`, convID).Scan(&leafID); err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	byID := make(map[string]Message, len(all))
+	allAttachmentIDs := map[string]bool{}
+	for _, message := range all {
+		byID[message.ID] = message
+		for _, fileID := range attachmentFileIDs(message.Attachments) {
+			allAttachmentIDs[fileID] = true
+		}
+	}
+	if _, ok := byID[leafID]; !ok && len(all) > 0 {
+		leafID = all[len(all)-1].ID
+	}
+	pathMessageIDs := map[string]bool{}
+	pathAttachmentIDs := map[string]bool{}
+	for current := leafID; current != "" && !pathMessageIDs[current]; {
+		message, ok := byID[current]
+		if !ok {
+			break
+		}
+		pathMessageIDs[current] = true
+		for _, fileID := range attachmentFileIDs(message.Attachments) {
+			pathAttachmentIDs[fileID] = true
+		}
+		current = message.ParentID
+	}
+	return pathMessageIDs, pathAttachmentIDs, allAttachmentIDs, nil
+}
+
+// ConversationDocumentIDsForBranch resolves ready conversation-document twins
+// for the files visible from leafID. Documents with no historical files twin
+// are legacy conversation resources and remain globally visible.
+func ConversationDocumentIDsForBranch(ctx context.Context, db *sql.DB, convID, userID, leafID string) ([]string, error) {
+	if _, err := GetConversation(ctx, db, convID, userID); err != nil {
+		return nil, err
+	}
+	files, err := ListFilesByConversationBranch(ctx, db, convID, userID, leafID)
+	if err != nil {
+		return nil, err
+	}
+	visiblePaths := make(map[string]bool, len(files))
+	for _, file := range files {
+		if path := strings.TrimSpace(file.StoragePath); path != "" {
+			visiblePaths[path] = true
+		}
+	}
+	rows, err := db.QueryContext(ctx,
+		`SELECT d.id, d.storage_path,
+		        EXISTS(SELECT 1 FROM files f WHERE f.conversation_id=d.conversation_id AND f.storage_path=d.storage_path)
+		   FROM documents d
+		  WHERE d.conversation_id=? AND d.status='ready'
+		  ORDER BY d.created_at ASC`, convID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var id, storagePath string
+		var hasFileTwin bool
+		if err := rows.Scan(&id, &storagePath, &hasFileTwin); err != nil {
+			return nil, err
+		}
+		if visiblePaths[storagePath] || !hasFileTwin {
+			out = append(out, id)
+		}
+	}
+	return out, rows.Err()
+}
+
 // ListFilesByConversation returns a conversation's uploaded files (oldest
 // first) — used to stage data files into the sandbox /workspace/uploads (§4.5).
 func ListFilesByConversation(ctx context.Context, db *sql.DB, convID, userID string) ([]File, error) {
@@ -159,7 +261,7 @@ func ListFilesByConversation(ctx context.Context, db *sql.DB, convID, userID str
 	args = append(args, workspaceResourceAccessArgs(userID)...)
 	args = append(args, userID)
 	rows, err := db.QueryContext(ctx,
-		`SELECT id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, draft, created_at
+		`SELECT id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, draft, branch_message_id, created_at
 		 FROM files f
 		 WHERE f.conversation_id=?
 		   AND EXISTS (
@@ -178,7 +280,7 @@ func ListFilesByConversation(ctx context.Context, db *sql.DB, convID, userID str
 		var f File
 		var conv sql.NullString
 		var draft int
-		if err := rows.Scan(&f.ID, &f.UserID, &conv, &f.Filename, &f.MimeType, &f.SizeBytes, &f.StoragePath, &f.Kind, &draft, &f.CreatedAt); err != nil {
+		if err := rows.Scan(&f.ID, &f.UserID, &conv, &f.Filename, &f.MimeType, &f.SizeBytes, &f.StoragePath, &f.Kind, &draft, &f.BranchMessageID, &f.CreatedAt); err != nil {
 			return nil, err
 		}
 		f.ConversationID = conv.String
@@ -290,6 +392,27 @@ func HistoricalConversationAttachmentIDs(ctx context.Context, db *sql.DB, convID
 		}
 	}
 	return out, rows.Err()
+}
+
+// HistoricalConversationBranchAttachmentIDs is the branch-scoped form used
+// when accepting stale references after deletion. A deleted file from a sibling
+// branch is not a valid exception for the current message path.
+func HistoricalConversationBranchAttachmentIDs(ctx context.Context, db *sql.DB, convID, leafID string, fileIDs []string) (map[string]bool, error) {
+	wanted := cleanIDs(fileIDs)
+	out := make(map[string]bool, len(wanted))
+	if len(wanted) == 0 {
+		return out, nil
+	}
+	_, pathAttachmentIDs, _, err := conversationBranchIDs(ctx, db, convID, leafID)
+	if err != nil {
+		return nil, err
+	}
+	for _, fileID := range wanted {
+		if pathAttachmentIDs[fileID] {
+			out[fileID] = true
+		}
+	}
+	return out, nil
 }
 
 // markConversationAttachmentDeleted records that a message's former file
@@ -2101,6 +2224,27 @@ func ListImageArtifactsByConversation(ctx context.Context, db *sql.DB, convID, u
 		out = append(out, a)
 	}
 	return out, rows.Err()
+}
+
+// ListImageArtifactsByConversationBranch returns generated images produced by
+// messages on the root-to-leaf path only. Artifacts from sibling branches must
+// not be mounted into a later Python sandbox.
+func ListImageArtifactsByConversationBranch(ctx context.Context, db *sql.DB, convID, userID, leafID string) ([]Artifact, error) {
+	artifacts, err := ListImageArtifactsByConversation(ctx, db, convID, userID)
+	if err != nil || len(artifacts) == 0 {
+		return artifacts, err
+	}
+	messageIDs, _, _, err := conversationBranchIDs(ctx, db, convID, leafID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Artifact, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		if messageIDs[artifact.MessageID] {
+			out = append(out, artifact)
+		}
+	}
+	return out, nil
 }
 
 // CreateArtifact inserts a new artifact row for maintenance/import callers.
