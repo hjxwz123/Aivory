@@ -23,6 +23,7 @@ import {
   Coins,
   Flag,
   ImageOff,
+  FileX2,
   Zap,
   Sigma,
   Square,
@@ -304,6 +305,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
   // Lightbox: which image is being previewed (null = closed). Driven from the
   // attachment id so the Dialog re-mounts cleanly on each preview.
   const [lightbox, setLightbox] = useState<{
+    attachmentId?: string
     src: string
     alt?: string
     downloadUrl?: string
@@ -312,6 +314,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
   // Non-image attachment preview (pdf / docx / text / fallback) — opens a modal
   // instead of letting the click download the file.
   const [filePreview, setFilePreview] = useState<{
+    attachmentId?: string
     name: string
     url?: string
     kind: Attachment['kind']
@@ -387,6 +390,26 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing])
 
+  // An attachment can be deleted from the conversation drawer or Files page
+  // while this editor is open. Preserve the user's text draft, but propagate
+  // only the authoritative unavailable state into the attachment chips.
+  useEffect(() => {
+    if (!editing) return
+    const deletedIds = new Set(
+      (message.attachments ?? [])
+        .filter((attachment) => attachment.deleted)
+        .map((attachment) => attachment.id),
+    )
+    if (deletedIds.size === 0) return
+    setDraftAtts((current) =>
+      current.map((attachment) =>
+        deletedIds.has(attachment.id)
+          ? { ...attachment, deleted: true, previewUrl: undefined }
+          : attachment,
+      ),
+    )
+  }, [editing, message.attachments])
+
   // Focus the textarea shortly after entering edit mode. Cleanup cancels the
   // timer if the row unmounts or edit mode exits before it fires.
   useEffect(() => {
@@ -453,7 +476,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
   function commitEdit() {
     const next = draft.trim()
     if (!next) return
-    onEdit?.(message.id, next, draftAtts)
+    onEdit?.(message.id, next, draftAtts.filter((attachment) => !attachment.deleted))
     setEditing(false)
   }
 
@@ -568,6 +591,18 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
 
   const visible = hovered || menuOpen || message.liked || message.disliked || feedbackPanelOpen || feedbackSubmitted
   const attachments = message.attachments ?? []
+  useEffect(() => {
+    const isDeleted = (attachmentId?: string) =>
+      Boolean(
+        attachmentId &&
+        message.attachments?.some(
+          (attachment) => attachment.id === attachmentId && attachment.deleted,
+        ),
+      )
+    if (isDeleted(lightbox?.attachmentId)) setLightbox(null)
+    if (isDeleted(filePreview?.attachmentId)) setFilePreview(null)
+  }, [filePreview?.attachmentId, lightbox?.attachmentId, message.attachments])
+
   const imageAttachments = attachments.filter(
     (attachment) => attachment.kind === 'image' && attachment.previewUrl && !attachment.deleted && !brokenAtts.has(attachment.id),
   )
@@ -772,6 +807,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                         key={attachment.id}
                         type="button"
                         onClick={() => setLightbox({
+                          attachmentId: attachment.id,
                           src: attachment.previewUrl!,
                           alt: attachment.name,
                           downloadUrl: attachment.previewUrl,
@@ -803,26 +839,8 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                 {otherAttachments.length > 0 ? (
                   <div className="grid min-w-0 gap-1.5">
                     {otherAttachments.map((attachment) => {
-                      if (attachment.kind === 'image' && (attachment.deleted || brokenAtts.has(attachment.id))) {
-                        return (
-                          <span
-                            key={attachment.id}
-                            className="inline-flex h-14 min-w-0 max-w-[22rem] items-center gap-2.5 rounded-[10px] border border-dashed border-[var(--color-border)] bg-[var(--color-surface-raised)] px-2.5 text-[var(--color-fg-subtle)]"
-                            title={attachment.name}
-                          >
-                            <span className="grid size-9 shrink-0 place-items-center rounded-[9px] bg-[var(--color-danger-soft)] text-[var(--color-danger)]">
-                              <ImageOff size={18} aria-hidden />
-                            </span>
-                            <span className="grid min-w-0 gap-0.5 text-left">
-                              <span className="truncate text-[0.8125rem] font-semibold leading-tight">
-                                {attachment.name}
-                              </span>
-                              <span className="text-[0.75rem] leading-tight">
-                                {t('attachmentDeleted', { defaultValue: 'File deleted' })}
-                              </span>
-                            </span>
-                          </span>
-                        )
+                      if (attachment.deleted || (attachment.kind === 'image' && brokenAtts.has(attachment.id))) {
+                        return <DeletedAttachmentChip key={attachment.id} attachment={attachment} />
                       }
 
                       return (
@@ -831,6 +849,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                           type="button"
                           onClick={() =>
                             setFilePreview({
+                              attachmentId: attachment.id,
                               name: attachment.name,
                               url: attachment.previewUrl,
                               kind: attachment.kind,
@@ -1764,6 +1783,33 @@ function BranchSwitcher({
 
 /* ───────────────────────── attachment chips ─────────────────────────── */
 
+/** A historical attachment remains in the transcript after its backing file
+ * is removed, but it must no longer expose any preview or download action. */
+function DeletedAttachmentChip({ attachment }: { attachment: Attachment }) {
+  const { t } = useTranslation('chat')
+  const status = t('attachmentDeleted', { defaultValue: 'File deleted' })
+  const Icon = attachment.kind === 'image' ? ImageOff : FileX2
+
+  return (
+    <span
+      data-attachment-deleted={attachment.deleted ? 'true' : undefined}
+      aria-label={`${attachment.name}: ${status}`}
+      className="inline-flex h-14 min-w-0 max-w-[22rem] items-center gap-2.5 rounded-[10px] border border-dashed border-[var(--color-border)] bg-[var(--color-surface-raised)] px-2.5 text-[var(--color-fg-subtle)]"
+      title={attachment.name}
+    >
+      <span className="grid size-9 shrink-0 place-items-center rounded-[9px] bg-[var(--color-danger-soft)] text-[var(--color-danger)]">
+        <Icon size={18} aria-hidden />
+      </span>
+      <span className="grid min-w-0 gap-0.5 text-left">
+        <span className="truncate text-[0.8125rem] font-semibold leading-tight">
+          {attachment.name}
+        </span>
+        <span className="text-[0.75rem] leading-tight">{status}</span>
+      </span>
+    </span>
+  )
+}
+
 /**
  * EditableImageChip — image thumbnail (~64px square) shown inside the edit
  * surface. A small ✕ button (top-right, fades in on hover) removes the image
@@ -1798,10 +1844,26 @@ function EditableImageChip({ att, onRemove }: { att: Attachment; onRemove: () =>
  */
 function EditableFileChip({ att, onRemove }: { att: Attachment; onRemove: () => void }) {
   const { t } = useTranslation('chat')
+  const deletedLabel = t('attachmentDeleted', { defaultValue: 'File deleted' })
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-[10px] bg-[var(--color-bg-muted)] border border-[var(--color-border-subtle)] px-2 py-1 text-[11.5px] text-[var(--color-fg-muted)] max-w-[18rem]">
-      <AttachmentTypeIcon attachment={att} size={12} className="text-[var(--color-fg-subtle)]" />
-      <span className="truncate">{att.name}</span>
+    <span
+      data-attachment-deleted={att.deleted ? 'true' : undefined}
+      className={cn(
+        'inline-flex max-w-[18rem] items-center gap-1.5 rounded-[10px] border bg-[var(--color-bg-muted)] px-2 py-1 text-[11.5px] text-[var(--color-fg-muted)]',
+        att.deleted ? 'border-dashed border-[var(--color-border)]' : 'border-[var(--color-border-subtle)]',
+      )}
+    >
+      {att.deleted ? (
+        <FileX2 size={12} className="shrink-0 text-[var(--color-danger)]" aria-hidden />
+      ) : (
+        <AttachmentTypeIcon attachment={att} size={12} className="text-[var(--color-fg-subtle)]" />
+      )}
+      <span className="grid min-w-0 leading-tight">
+        <span className="truncate">{att.name}</span>
+        {att.deleted ? (
+          <span className="text-[10px] text-[var(--color-danger)]">{deletedLabel}</span>
+        ) : null}
+      </span>
       <button
         type="button"
         aria-label={t('actions.removeAttachment', { defaultValue: 'Remove attachment' })}

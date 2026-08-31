@@ -322,6 +322,10 @@ interface ConversationStore {
    *  swap it into the cache. Called after a stream completes so branch pickers
    *  appear and optimistic flat-append siblings collapse into the tree (§4.15). */
   reloadActivePath: (id: string) => Promise<void>
+  /** Mark deleted file/document references unavailable in every cached copy of
+   *  the affected messages. Used by same-tab delete flows whose realtime echo
+   *  is intentionally suppressed. */
+  markAttachmentsDeleted: (referenceIds: string[], conversationId?: string) => void
   setModel: (id: string, modelId: string) => Promise<void>
   /** §fast-mode: toggle the 快速/进阶 selection for a conversation. */
   setFast: (id: string, fast: boolean) => Promise<void>
@@ -1215,6 +1219,44 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     } catch {
       /* keep the optimistic copy if the reconcile fetch fails */
     }
+  },
+
+  markAttachmentsDeleted(referenceIds, conversationId) {
+    const deletedIds = new Set(referenceIds.filter(Boolean))
+    if (deletedIds.size === 0) return
+
+    set((state) => ({
+      conversations: state.conversations.map((conversation) => {
+        if (conversationId && conversation.id !== conversationId) return conversation
+        let conversationChanged = false
+        const messages = conversation.messages.map((message) => {
+          if (!message.attachments?.some(
+            (attachment) =>
+              deletedIds.has(attachment.id) ||
+              Boolean(attachment.documentId && deletedIds.has(attachment.documentId)),
+          )) {
+            return message
+          }
+
+          let messageChanged = false
+          const attachments = message.attachments.map((attachment) => {
+            if (
+              !deletedIds.has(attachment.id) &&
+              !(attachment.documentId && deletedIds.has(attachment.documentId))
+            ) {
+              return attachment
+            }
+            if (attachment.deleted && !attachment.previewUrl) return attachment
+            messageChanged = true
+            return { ...attachment, deleted: true, previewUrl: undefined }
+          })
+          if (!messageChanged) return message
+          conversationChanged = true
+          return { ...message, attachments }
+        })
+        return conversationChanged ? { ...conversation, messages } : conversation
+      }),
+    }))
   },
 
   async setModel(id, modelId) {

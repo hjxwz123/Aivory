@@ -7,6 +7,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import type { Message } from '@/types/chat'
 
 vi.mock('react-i18next', () => ({
+  initReactI18next: { type: '3rdParty', init: vi.fn() },
   useTranslation: () => ({
     t: (key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? key,
     i18n: { language: 'en' },
@@ -83,5 +84,75 @@ describe('MessageRow image attachment containment', () => {
     expect(html).toContain('grid-cols-[repeat(auto-fit,minmax(min(6rem,100%),1fr))]')
     expect(html).toContain('w-[min(22rem,calc(100cqw-2.125rem))]')
     expect(html).toContain('aspect-square w-full')
+  })
+})
+
+describe('MessageRow deleted attachments', () => {
+  it('renders a deleted document as a non-interactive historical reference', () => {
+    const html = renderRow({
+      id: 'message-deleted-pdf',
+      role: 'user',
+      content: 'Review this contract.',
+      createdAt: 1,
+      attachments: [
+        {
+          id: 'file-deleted',
+          name: 'contract.pdf',
+          kind: 'pdf',
+          size: 1,
+          previewUrl: '/api/files/file-deleted',
+          deleted: true,
+        },
+      ],
+    })
+
+    expect(html).toContain('data-attachment-deleted="true"')
+    expect(html).toContain('contract.pdf')
+    expect(html).toContain('File deleted')
+    expect(html).not.toContain('aria-label="Preview file"')
+  })
+
+  it('keeps a deleted image out of the lightbox trigger', () => {
+    const html = renderRow({
+      id: 'message-deleted-image',
+      role: 'user',
+      content: 'Use this reference.',
+      createdAt: 1,
+      attachments: [
+        {
+          id: 'image-deleted',
+          name: 'reference.png',
+          kind: 'image',
+          size: 1,
+          previewUrl: '/api/files/image-deleted',
+          deleted: true,
+        },
+      ],
+    })
+
+    expect(html).toContain('data-attachment-deleted="true"')
+    expect(html).toContain('File deleted')
+    expect(html).not.toContain('aria-label="View image"')
+  })
+
+  it('leaves an available document previewable', () => {
+    const html = renderRow({
+      id: 'message-active-pdf',
+      role: 'user',
+      content: 'Review this contract.',
+      createdAt: 1,
+      attachments: [
+        {
+          id: 'file-active',
+          name: 'active-contract.pdf',
+          kind: 'pdf',
+          size: 1,
+          previewUrl: '/api/files/file-active',
+        },
+      ],
+    })
+
+    expect(html).toContain('aria-label="Preview file"')
+    expect(html).not.toContain('data-attachment-deleted="true"')
   })
 })

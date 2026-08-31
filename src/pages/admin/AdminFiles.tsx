@@ -45,6 +45,7 @@ import {
   type FileTypeFilter,
 } from '@/lib/file-preview-kind'
 import { cn } from '@/lib/utils'
+import { useConversations } from '@/store/conversations'
 
 const PAGE_SIZE = envNum('VITE_AIVORY_PAGE_SIZE', 50)
 const ALL = 'all'
@@ -308,6 +309,11 @@ export default function AdminFiles() {
     setBusy(true)
     try {
       const response = await adminApi.deleteFiles(items.map((file) => ({ source: file.source, id: file.id })))
+      for (const file of items) {
+        useConversations
+          .getState()
+          .markAttachmentsDeleted([file.id], file.conversation_id || undefined)
+      }
       if (preview && items.some((file) => rowKey(file) === preview.key)) {
         clearPreview()
         setSelectedKey('')
