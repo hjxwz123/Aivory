@@ -117,10 +117,9 @@ function currentLocale(): string {
   return i18n.language || 'en'
 }
 
-// Sidebar conversation page size. Kept at the server default so users with ≤200
-// conversations load everything up front (no behaviour change); heavier users
-// page in older conversations on scroll via loadMore().
-const CONV_PAGE = envNum('VITE_AIVORY_CONV_PAGE', 200)
+// Sidebar conversation page size. Keep the initial payload small; older
+// conversations page in automatically when the bottom sentinel nears view.
+export const CONV_PAGE = envNum('VITE_AIVORY_CONV_PAGE', 20)
 
 // Server-side pagination cursor for the sidebar list. Tracked separately from the
 // cache size so that conversations PREPENDED out-of-order (loadOne of an old chat

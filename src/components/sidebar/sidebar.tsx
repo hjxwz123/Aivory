@@ -155,7 +155,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
   const listScrollRef = useRef<HTMLDivElement>(null)
   const loadMoreRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (!hasMore) return
+    if (!hasMore || loadingMore) return
     const node = loadMoreRef.current
     const root = listScrollRef.current
     if (!node || !root) return
@@ -167,7 +167,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
     )
     io.observe(node)
     return () => io.disconnect()
-  }, [hasMore, loadMore])
+  }, [hasMore, loadingMore, loadMore])
   const activeConversations = useMemo(
     // Sort by last-updated so a conversation jumps to the top the moment the
     // user sends/continues a message in it (sendMessage bumps updatedAt). The

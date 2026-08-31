@@ -269,7 +269,7 @@ SSE 心跳、流恢复窗口、生成时长上限、分页与搜索上限、消�
 
 | 环境变量 | 类型 | 默认值 | 位置 | 说明 |
 | --- | --- | --- | --- | --- |
-| `AIVORY_API_LIMIT_2` | `int` | `200` | `api/conversations_handlers.go:26` | Default page size for the list-conversations endpoint when the request omits a limit param. |
+| `AIVORY_API_LIMIT_2` | `int` | `20` | `api/conversations_handlers.go:26` | Default page size for the list-conversations endpoint when the request omits a limit param. |
 | `AIVORY_API_LIMIT_3` | `int` | `500` | `api/conversations_handlers.go:32` | Hard upper bound clamped onto the ?limit query param of the list-conversations endpoint. |
 | `AIVORY_API_SEARCH_MESSAGE_HIT_LIMIT` | `int` | `40` | `api/conversations_handlers.go:99` | Max number of message-content matches returned by the conversation search endpoint (title matches capped separately). |
 | `AIVORY_API_IMPORT_MAX_CONVERSATIONS` | `int` | `1000` | `api/conversations_handlers.go:164` | Max conversations a single import request may create; exceeding it rejects the import. |
@@ -463,7 +463,7 @@ HTTP server 超时、优雅关闭、启动流程常量等。
 | --- | --- | --- | --- | --- |
 | `VITE_AIVORY_IMAGE_API_MY_IMAGES_LIMIT` | `envNum` | `60` | `src/api/endpoints.ts:181` | Default limit (page size) for fetching the signed-in user's own generated-image gallery. |
 | `VITE_AIVORY_WORKSPACES_API_ADMIN_LIST_LIMIT` | `envNum` | `200` | `src/api/endpoints.ts:289` | Default limit (page size) for the admin workspaces listing request. |
-| `VITE_AIVORY_CONVERSATIONS_API_LIST_LIMIT` | `envNum` | `200` | `src/api/endpoints.ts:318` | Default limit (page size) for the conversations listing request. |
+| `VITE_AIVORY_CONVERSATIONS_API_LIST_LIMIT` | `envNum` | `20` | `src/api/endpoints.ts:318` | Default limit (page size) for the conversations listing request. |
 | `VITE_AIVORY_CONVERSATIONS_API_LIST_ARCHIVED_LIMIT` | `envNum` | `200` | `src/api/endpoints.ts:326` | Default limit (page size) for the archived-conversations listing request. |
 | `VITE_AIVORY_ADMIN_API_USERS_LIMIT` | `envNum` | `50` | `src/api/endpoints.ts:594` | Default limit (page size) for the admin users listing request. |
 | `VITE_AIVORY_ADMIN_API_USER_IMAGES_LIMIT` | `envNum` | `60` | `src/api/endpoints.ts:626` | Default limit (page size) for the admin drill-down into a user's generated-image gallery. |
@@ -482,5 +482,5 @@ HTTP server 超时、优雅关闭、启动流程常量等。
 | `VITE_AIVORY_ONLINE_WINDOW_S` | `envNum` | `300` | `src/pages/admin/AdminUsers.tsx:42` | Recency window (seconds) within which a user's last activity marks them online in the admin users table. |
 | `VITE_AIVORY_PAGE_SIZE_3` | `envNum` | `50` | `src/pages/admin/AdminUsers.tsx:83` | Rows per page (server-side limit) requested for the admin users list table. |
 | `VITE_AIVORY_KB_DOC_STATUS_POLL_INTERVAL` | `envNum` | `2200` | `src/pages/kb/KnowledgeBaseDetail.tsx:41` | Polling interval (ms) for refreshing knowledge-base document status while any document is still parsing/embedding. |
-| `VITE_AIVORY_CONV_PAGE` | `envNum` | `200` | `src/store/conversations.ts:52` | Conversations fetched per sidebar list page (initial load + infinite-scroll loadMore). |
+| `VITE_AIVORY_CONV_PAGE` | `envNum` | `20` | `src/store/conversations.ts:52` | Conversations fetched per sidebar list page (initial load + infinite-scroll loadMore). |
 | `VITE_AIVORY_MSG_PAGE` | `envNum` | `40` | `src/store/conversations.ts:66` | Messages fetched per page when opening a conversation (first page + scroll-up loadOlderMessages). |
