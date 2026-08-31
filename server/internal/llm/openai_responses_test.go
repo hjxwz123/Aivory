@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"aivory/server/internal/store"
 )
 
 func TestHostedToolsKeepProviderNamesSeparateFromLocalFunctions(t *testing.T) {
@@ -23,6 +25,187 @@ func TestHostedToolsKeepProviderNamesSeparateFromLocalFunctions(t *testing.T) {
 		if got := hostedToolName(input); got != want {
 			t.Errorf("hostedToolName(%q) = %q, want %q", input, got, want)
 		}
+	}
+}
+
+func TestNormalizeResponsesReplayItemsUsesPortableAssistantHistory(t *testing.T) {
+	items := []map[string]any{
+		{
+			"id": "msg_old", "type": "message", "role": "assistant", "phase": "final_answer",
+			"content": []any{map[string]any{"type": "output_text", "text": "previous answer"}},
+		},
+		{"id": "fc_old", "type": "function_call", "call_id": "call_old", "name": "lookup", "arguments": `{}`},
+		{"id": "ws_old", "type": "web_search_call", "action": map[string]any{}},
+		{"id": "rs_old", "type": "reasoning", "encrypted_content": "opaque"},
+	}
+
+	got := normalizeResponsesReplayItems(items)
+	if len(got) != len(items) {
+		t.Fatalf("normalized items = %d, want %d: %#v", len(got), len(items), got)
+	}
+	message := got[0]
+	if message["role"] != "assistant" || message["phase"] != "final_answer" {
+		t.Fatalf("assistant EasyInputMessage metadata = %#v", message)
+	}
+	if _, exists := message["status"]; exists {
+		t.Fatalf("EasyInputMessage unexpectedly retained output status: %#v", message)
+	}
+	if _, exists := message["id"]; exists {
+		t.Fatalf("EasyInputMessage unexpectedly retained provider id: %#v", message)
+	}
+	content, _ := message["content"].([]map[string]any)
+	if len(content) != 1 || content[0]["type"] != "input_text" || content[0]["text"] != "previous answer" {
+		t.Fatalf("assistant EasyInputMessage content = %#v", message["content"])
+	}
+	for _, index := range []int{1, 2} {
+		if got[index]["status"] != "completed" {
+			t.Fatalf("terminal call item %d status = %#v", index, got[index])
+		}
+	}
+	if _, exists := got[3]["status"]; exists {
+		t.Fatalf("reasoning item gained an unsupported status: %#v", got[3])
+	}
+	if _, exists := items[1]["status"]; exists {
+		t.Fatal("normalization mutated its input")
+	}
+}
+
+func TestOpenAIResponsesCanonicalAssistantHistoryUsesInputText(t *testing.T) {
+	var captured map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = io.WriteString(w, strings.Join([]string{
+			`data: {"type":"response.output_text.delta","delta":"new answer"}`,
+			`data: {"type":"response.completed","response":{"output":[]}}`,
+			``,
+		}, "\n\n"))
+	}))
+	defer srv.Close()
+
+	_, err := (&OpenAIProvider{}).Stream(context.Background(), UnifiedChatRequest{
+		Model: ModelInfo{RequestID: "gpt-test", BaseURL: srv.URL, APIKey: "k", APIFormat: "responses"},
+		History: []UnifiedMessage{
+			{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "first question"}}},
+			{Role: "assistant", Blocks: []UnifiedBlock{{Kind: "text", Text: "old answer"}}},
+			{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "follow up"}}},
+		},
+	}, nil, func(SseEvent) {})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	input, _ := captured["input"].([]any)
+	if len(input) != 3 {
+		t.Fatalf("input = %#v, want three canonical messages", captured["input"])
+	}
+	assistant, _ := input[1].(map[string]any)
+	content, _ := assistant["content"].([]any)
+	part, _ := content[0].(map[string]any)
+	if assistant["role"] != "assistant" || part["type"] != "input_text" || part["text"] != "old answer" {
+		t.Fatalf("assistant history is not an EasyInputMessage: %#v", assistant)
+	}
+	if _, exists := assistant["status"]; exists {
+		t.Fatalf("canonical assistant history must not require output status: %#v", assistant)
+	}
+}
+
+func TestOpenAIResponsesRepairsLegacyRawMessageWithoutStatus(t *testing.T) {
+	var captured map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"output":[]}}`+"\n\n")
+	}))
+	defer srv.Close()
+
+	legacyRaw := json.RawMessage(`[{"id":"msg_old","type":"message","role":"assistant","content":[{"type":"output_text","text":"legacy answer"}]}]`)
+	_, err := (&OpenAIProvider{}).Stream(context.Background(), UnifiedChatRequest{
+		Model: ModelInfo{RequestID: "gpt-test", BaseURL: srv.URL, APIKey: "k", APIFormat: "responses"},
+		History: []UnifiedMessage{
+			{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "first question"}}},
+			{Role: "assistant", Blocks: []UnifiedBlock{{Kind: "text", Text: "legacy answer"}}, Raw: legacyRaw},
+			{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "follow up"}}},
+		},
+	}, nil, func(SseEvent) {})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	encoded, _ := json.Marshal(captured["input"])
+	if bytes.Contains(encoded, []byte(`"output_text"`)) {
+		t.Fatalf("legacy output message was replayed without normalization: %s", encoded)
+	}
+	if !bytes.Contains(encoded, []byte(`"input_text"`)) || !bytes.Contains(encoded, []byte(`"legacy answer"`)) {
+		t.Fatalf("legacy assistant text was lost during normalization: %s", encoded)
+	}
+}
+
+func TestOpenAIResponsesModelAndChannelSwitchesUsePortableHistory(t *testing.T) {
+	legacyRaw := json.RawMessage(`[{"id":"msg_old","type":"message","role":"assistant","content":[{"type":"output_text","text":"old answer"}]}]`)
+	for _, test := range []struct {
+		name             string
+		storedProvider   string
+		storedModel      string
+		currentProvider  string
+		currentModel     string
+		nativeToolReplay bool
+	}{
+		{
+			name: "different model on another responses channel", storedProvider: "openai", storedModel: "model-a",
+			currentProvider: "openai", currentModel: "model-b", nativeToolReplay: true,
+		},
+		{
+			name: "different provider channel", storedProvider: "anthropic", storedModel: "model-a",
+			currentProvider: "openai", currentModel: "model-a", nativeToolReplay: true,
+		},
+		{
+			name: "native replay disabled after format or tool-mode switch", storedProvider: "openai", storedModel: "model-a",
+			currentProvider: "openai", currentModel: "model-a", nativeToolReplay: false,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			stored := []store.Message{
+				{Role: "user", Blocks: textBlocks("first question"), Status: "complete"},
+				{
+					Role: "assistant", Provider: test.storedProvider, ModelID: test.storedModel,
+					Blocks: textBlocks("old answer"), Raw: legacyRaw, Status: "complete",
+				},
+				{Role: "user", Blocks: textBlocks("follow up"), Status: "complete"},
+			}
+			history := storeToUnified(
+				stored, test.currentProvider, test.currentModel, test.nativeToolReplay,
+			)
+			if len(history) != 3 || len(history[1].Raw) != 0 {
+				t.Fatalf("switched history retained incompatible native Raw: %+v", history)
+			}
+
+			var captured map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+					t.Errorf("decode request: %v", err)
+				}
+				w.Header().Set("content-type", "text/event-stream")
+				_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"output":[]}}`+"\n\n")
+			}))
+			defer srv.Close()
+
+			_, err := (&OpenAIProvider{}).Stream(context.Background(), UnifiedChatRequest{
+				Model: ModelInfo{
+					ID: test.currentModel, RequestID: "gpt-test", BaseURL: srv.URL, APIKey: "k", APIFormat: "responses",
+				},
+				History: history,
+			}, nil, func(SseEvent) {})
+			if err != nil {
+				t.Fatalf("Stream: %v", err)
+			}
+			encoded, _ := json.Marshal(captured["input"])
+			if bytes.Contains(encoded, []byte(`"output_text"`)) || !bytes.Contains(encoded, []byte(`"input_text"`)) {
+				t.Fatalf("switched history was not rebuilt as portable input: %s", encoded)
+			}
+		})
 	}
 }
 
@@ -615,13 +798,16 @@ func TestOpenAIResponsesToolLoopReplaysOutputItems(t *testing.T) {
 		case "reasoning":
 			hasReasoning = item["encrypted_content"] == "enc"
 		case "function_call":
-			hasFunctionCall = item["call_id"] == "call_1"
+			hasFunctionCall = item["call_id"] == "call_1" && item["status"] == "completed"
 		case "function_call_output":
 			hasFunctionOutput = item["call_id"] == "call_1" && item["output"] == "tool output"
 		}
 	}
 	if !hasReasoning || !hasFunctionCall || !hasFunctionOutput {
 		t.Fatalf("second request input missing continuation items: %#v", secondInput)
+	}
+	if bytes.Contains(result.Raw, []byte(`"output_text"`)) || !bytes.Contains(result.Raw, []byte(`"input_text"`)) {
+		t.Fatalf("persisted tool-loop raw retained a status-dependent output message: %s", result.Raw)
 	}
 }
 
