@@ -268,7 +268,7 @@ SSE 心跳、流恢复窗口、生成时长上限、分页与搜索上限、消�
 
 | 环境变量 | 类型 | 默认值 | 位置 | 说明 |
 | --- | --- | --- | --- | --- |
-| `AIVORY_API_LIMIT_2` | `int` | `200` | `api/conversations_handlers.go:26` | list-conversations 接口在请求未提供 limit 参数时的默认分页大小。 |
+| `AIVORY_API_LIMIT_2` | `int` | `20` | `api/conversations_handlers.go:26` | list-conversations 接口在请求未提供 limit 参数时的默认分页大小。 |
 | `AIVORY_API_LIMIT_3` | `int` | `500` | `api/conversations_handlers.go:32` | 会话列表接口 ?limit 查询参数的硬性上限，超出即钳制到此值。 |
 | `AIVORY_API_SEARCH_MESSAGE_HIT_LIMIT` | `int` | `40` | `api/conversations_handlers.go:99` | 会话搜索接口返回的消息正文命中数上限（标题命中另有单独上限）。 |
 | `AIVORY_API_IMPORT_MAX_CONVERSATIONS` | `int` | `1000` | `api/conversations_handlers.go:164` | 单次导入请求可创建的会话数上限，超出则拒绝导入。 |
@@ -462,7 +462,7 @@ HTTP server 超时、优雅关闭、启动流程常量等。
 | --- | --- | --- | --- | --- |
 | `VITE_AIVORY_IMAGE_API_MY_IMAGES_LIMIT` | `envNum` | `60` | `src/api/endpoints.ts:181` | 拉取当前登录用户自己的生成图库时的默认每页数量（limit）。 |
 | `VITE_AIVORY_WORKSPACES_API_ADMIN_LIST_LIMIT` | `envNum` | `200` | `src/api/endpoints.ts:289` | 管理员工作区列表请求的默认每页数量（limit）。 |
-| `VITE_AIVORY_CONVERSATIONS_API_LIST_LIMIT` | `envNum` | `200` | `src/api/endpoints.ts:318` | 会话列表请求的默认每页数量（limit）。 |
+| `VITE_AIVORY_CONVERSATIONS_API_LIST_LIMIT` | `envNum` | `20` | `src/api/endpoints.ts:318` | 会话列表请求的默认每页数量（limit）。 |
 | `VITE_AIVORY_CONVERSATIONS_API_LIST_ARCHIVED_LIMIT` | `envNum` | `200` | `src/api/endpoints.ts:326` | 已归档会话列表请求的默认每页数量（limit）。 |
 | `VITE_AIVORY_ADMIN_API_USERS_LIMIT` | `envNum` | `50` | `src/api/endpoints.ts:594` | 管理员用户列表请求的默认每页数量（limit）。 |
 | `VITE_AIVORY_ADMIN_API_USER_IMAGES_LIMIT` | `envNum` | `60` | `src/api/endpoints.ts:626` | 管理员下钻查看某用户生成图库时的默认每页数量（limit）。 |
@@ -481,5 +481,5 @@ HTTP server 超时、优雅关闭、启动流程常量等。
 | `VITE_AIVORY_ONLINE_WINDOW_S` | `envNum` | `300` | `src/pages/admin/AdminUsers.tsx:42` | 管理员用户表格中，用户最后活动落在该时间窗口（秒）内即视为在线。 |
 | `VITE_AIVORY_PAGE_SIZE_3` | `envNum` | `50` | `src/pages/admin/AdminUsers.tsx:83` | 管理员用户列表表格请求的每页行数（服务端 limit）。 |
 | `VITE_AIVORY_KB_DOC_STATUS_POLL_INTERVAL` | `envNum` | `2200` | `src/pages/kb/KnowledgeBaseDetail.tsx:41` | 当仍有文档处于解析/嵌入阶段时，轮询刷新知识库文档状态的间隔（毫秒）。 |
-| `VITE_AIVORY_CONV_PAGE` | `envNum` | `200` | `src/store/conversations.ts:52` | 侧边栏会话列表每页拉取的会话数（首屏加载与滚动加载）。 |
+| `VITE_AIVORY_CONV_PAGE` | `envNum` | `20` | `src/store/conversations.ts:52` | 侧边栏会话列表每页拉取的会话数（首屏加载与滚动加载）。 |
 | `VITE_AIVORY_MSG_PAGE` | `envNum` | `40` | `src/store/conversations.ts:66` | 打开会话时每页拉取的消息数（首页与向上滚动加载更早消息）。 |

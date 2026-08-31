@@ -16,7 +16,7 @@ import (
 )
 
 // listConversationsHandler returns the user's conversations with pagination.
-// Query params: project_id, archived=only, limit (default 200, max 500), offset (default 0).
+// Query params: project_id, archived=only, limit (default 20, max 500), offset (default 0).
 func listConversationsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	projectID := r.URL.Query().Get("project_id")
@@ -26,7 +26,7 @@ func listConversationsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("archived") == "only" {
 		archivedFilter = "archived"
 	}
-	limit := envcfg.Int("AIVORY_API_LIMIT_2", 200)
+	limit := envcfg.Int("AIVORY_API_LIMIT_2", 20)
 	if ls := r.URL.Query().Get("limit"); ls != "" {
 		if n, err := strconv.Atoi(ls); err == nil && n > 0 {
 			limit = n

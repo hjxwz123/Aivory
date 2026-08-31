@@ -11,9 +11,9 @@ import (
 
 // Pagination limits for conversation listings.
 var (
-	listConversationsLimit           = 200
+	listConversationsLimit           = 20
 	listConversationsLimit2          = 500
-	listWorkspaceConversationsLimit  = 200
+	listWorkspaceConversationsLimit  = 20
 	listWorkspaceConversationsLimit2 = 500
 )
 
@@ -58,7 +58,7 @@ func SetConvProviderStateKey(ctx context.Context, db *sql.DB, convID, key, value
 
 // ListConversations returns conversations for a user, optionally filtered by
 // project. archivedFilter "any" returns all; "active" hides archived.
-// limit controls the page size (default 200, max 500); offset is the row offset.
+// limit controls the page size (default 20, max 500); offset is the row offset.
 func ListConversations(ctx context.Context, db *sql.DB, userID, projectID, archivedFilter string, limit, offset int) ([]Conversation, error) {
 	if limit <= 0 {
 		limit = listConversationsLimit
