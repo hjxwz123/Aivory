@@ -28,49 +28,66 @@ func TestHostedToolsKeepProviderNamesSeparateFromLocalFunctions(t *testing.T) {
 	}
 }
 
-func TestNormalizeResponsesReplayItemsUsesPortableAssistantHistory(t *testing.T) {
+func TestPrepareResponsesReplayItemsPreservesNativeAndRepairsLegacyItems(t *testing.T) {
 	items := []map[string]any{
 		{
-			"id": "msg_old", "type": "message", "role": "assistant", "phase": "final_answer",
-			"content": []any{map[string]any{"type": "output_text", "text": "previous answer"}},
+			"id": "msg_native", "type": "message", "role": "assistant", "status": "completed", "phase": "final_answer",
+			"content": []any{map[string]any{"type": "output_text", "text": "native answer", "annotations": []any{}}},
+		},
+		{
+			"id": "msg_legacy", "type": "message", "role": "assistant", "phase": "commentary",
+			"content": []any{map[string]any{"type": "output_text", "text": "legacy answer"}},
+		},
+		{
+			"role": "assistant", "phase": "final_answer",
+			"content": []any{map[string]any{"type": "input_text", "text": "old portable answer"}},
 		},
 		{"id": "fc_old", "type": "function_call", "call_id": "call_old", "name": "lookup", "arguments": `{}`},
-		{"id": "ws_old", "type": "web_search_call", "action": map[string]any{}},
+		{"id": "ws_old", "type": "web_search_call", "status": "failed", "action": map[string]any{}},
 		{"id": "rs_old", "type": "reasoning", "encrypted_content": "opaque"},
 	}
 
-	got := normalizeResponsesReplayItems(items)
+	got := prepareResponsesReplayItems(items)
 	if len(got) != len(items) {
-		t.Fatalf("normalized items = %d, want %d: %#v", len(got), len(items), got)
+		t.Fatalf("prepared items = %d, want %d: %#v", len(got), len(items), got)
 	}
-	message := got[0]
-	if message["role"] != "assistant" || message["phase"] != "final_answer" {
-		t.Fatalf("assistant EasyInputMessage metadata = %#v", message)
+	native := got[0]
+	if native["id"] != "msg_native" || native["status"] != "completed" || native["phase"] != "final_answer" {
+		t.Fatalf("native output message metadata changed: %#v", native)
 	}
-	if _, exists := message["status"]; exists {
-		t.Fatalf("EasyInputMessage unexpectedly retained output status: %#v", message)
+	nativeContent, _ := jsonArrayItems(native["content"])
+	nativePart, _ := nativeContent[0].(map[string]any)
+	if nativePart["type"] != "output_text" || nativePart["text"] != "native answer" || nativePart["annotations"] == nil {
+		t.Fatalf("native output content changed: %#v", native["content"])
 	}
-	if _, exists := message["id"]; exists {
-		t.Fatalf("EasyInputMessage unexpectedly retained provider id: %#v", message)
+	legacy := got[1]
+	if legacy["role"] != "assistant" || legacy["phase"] != "commentary" || legacy["content"] != "legacy answer" {
+		t.Fatalf("legacy output was not converted to portable history: %#v", legacy)
 	}
-	content, _ := message["content"].([]map[string]any)
-	if len(content) != 1 || content[0]["type"] != "input_text" || content[0]["text"] != "previous answer" {
-		t.Fatalf("assistant EasyInputMessage content = %#v", message["content"])
-	}
-	for _, index := range []int{1, 2} {
-		if got[index]["status"] != "completed" {
-			t.Fatalf("terminal call item %d status = %#v", index, got[index])
+	for _, field := range []string{"id", "status", "type"} {
+		if _, exists := legacy[field]; exists {
+			t.Fatalf("portable legacy message retained %s: %#v", field, legacy)
 		}
 	}
-	if _, exists := got[3]["status"]; exists {
-		t.Fatalf("reasoning item gained an unsupported status: %#v", got[3])
+	oldPortable := got[2]
+	if oldPortable["content"] != "old portable answer" || oldPortable["phase"] != "final_answer" {
+		t.Fatalf("old invalid EasyInputMessage was not repaired: %#v", oldPortable)
+	}
+	if got[3]["status"] != "completed" || got[4]["status"] != "failed" {
+		t.Fatalf("call statuses were not repaired/preserved: %#v %#v", got[3], got[4])
+	}
+	if _, exists := got[5]["status"]; exists {
+		t.Fatalf("reasoning item gained an unsupported status: %#v", got[5])
 	}
 	if _, exists := items[1]["status"]; exists {
-		t.Fatal("normalization mutated its input")
+		t.Fatal("preparation mutated the legacy message")
+	}
+	if _, exists := items[3]["status"]; exists {
+		t.Fatal("preparation mutated the function call")
 	}
 }
 
-func TestOpenAIResponsesCanonicalAssistantHistoryUsesInputText(t *testing.T) {
+func TestOpenAIResponsesCanonicalAssistantHistoryUsesPortableString(t *testing.T) {
 	var captured map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
@@ -101,13 +118,13 @@ func TestOpenAIResponsesCanonicalAssistantHistoryUsesInputText(t *testing.T) {
 		t.Fatalf("input = %#v, want three canonical messages", captured["input"])
 	}
 	assistant, _ := input[1].(map[string]any)
-	content, _ := assistant["content"].([]any)
-	part, _ := content[0].(map[string]any)
-	if assistant["role"] != "assistant" || part["type"] != "input_text" || part["text"] != "old answer" {
+	if assistant["role"] != "assistant" || assistant["content"] != "old answer" {
 		t.Fatalf("assistant history is not an EasyInputMessage: %#v", assistant)
 	}
-	if _, exists := assistant["status"]; exists {
-		t.Fatalf("canonical assistant history must not require output status: %#v", assistant)
+	for _, field := range []string{"id", "status", "type"} {
+		if _, exists := assistant[field]; exists {
+			t.Fatalf("canonical assistant history retained %s: %#v", field, assistant)
+		}
 	}
 }
 
@@ -122,7 +139,7 @@ func TestOpenAIResponsesRepairsLegacyRawMessageWithoutStatus(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	legacyRaw := json.RawMessage(`[{"id":"msg_old","type":"message","role":"assistant","content":[{"type":"output_text","text":"legacy answer"}]}]`)
+	legacyRaw := json.RawMessage(`[{"id":"msg_old","type":"message","role":"assistant","phase":"commentary","content":[{"type":"output_text","text":"legacy answer"}]}]`)
 	_, err := (&OpenAIProvider{}).Stream(context.Background(), UnifiedChatRequest{
 		Model: ModelInfo{RequestID: "gpt-test", BaseURL: srv.URL, APIKey: "k", APIFormat: "responses"},
 		History: []UnifiedMessage{
@@ -134,12 +151,15 @@ func TestOpenAIResponsesRepairsLegacyRawMessageWithoutStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	encoded, _ := json.Marshal(captured["input"])
-	if bytes.Contains(encoded, []byte(`"output_text"`)) {
-		t.Fatalf("legacy output message was replayed without normalization: %s", encoded)
+	input, _ := captured["input"].([]any)
+	legacy, _ := input[1].(map[string]any)
+	if legacy["role"] != "assistant" || legacy["phase"] != "commentary" || legacy["content"] != "legacy answer" {
+		t.Fatalf("legacy assistant text or phase was lost: %#v", legacy)
 	}
-	if !bytes.Contains(encoded, []byte(`"input_text"`)) || !bytes.Contains(encoded, []byte(`"legacy answer"`)) {
-		t.Fatalf("legacy assistant text was lost during normalization: %s", encoded)
+	for _, field := range []string{"id", "status", "type"} {
+		if _, exists := legacy[field]; exists {
+			t.Fatalf("legacy assistant retained incomplete output field %s: %#v", field, legacy)
+		}
 	}
 }
 
@@ -201,9 +221,15 @@ func TestOpenAIResponsesModelAndChannelSwitchesUsePortableHistory(t *testing.T) 
 			if err != nil {
 				t.Fatalf("Stream: %v", err)
 			}
-			encoded, _ := json.Marshal(captured["input"])
-			if bytes.Contains(encoded, []byte(`"output_text"`)) || !bytes.Contains(encoded, []byte(`"input_text"`)) {
-				t.Fatalf("switched history was not rebuilt as portable input: %s", encoded)
+			input, _ := captured["input"].([]any)
+			assistant, _ := input[1].(map[string]any)
+			if assistant["role"] != "assistant" || assistant["content"] != "old answer" {
+				t.Fatalf("switched history was not rebuilt as portable input: %#v", assistant)
+			}
+			for _, field := range []string{"id", "status", "type"} {
+				if _, exists := assistant[field]; exists {
+					t.Fatalf("switched history retained native field %s: %#v", field, assistant)
+				}
 			}
 		})
 	}
@@ -724,6 +750,23 @@ func TestOpenAIResponsesOfficialToolsSurviveExtraParamsMerge(t *testing.T) {
 
 func TestOpenAIResponsesToolLoopReplaysOutputItems(t *testing.T) {
 	var requests []map[string]any
+	hasNativeAssistantMessage := func(input []any, id, phase, text string) bool {
+		for _, raw := range input {
+			item, _ := raw.(map[string]any)
+			if item["id"] != id {
+				continue
+			}
+			content, _ := jsonArrayItems(item["content"])
+			if len(content) == 0 {
+				return false
+			}
+			part, _ := content[0].(map[string]any)
+			return item["type"] == "message" && item["role"] == "assistant" &&
+				item["status"] == "completed" && item["phase"] == phase &&
+				part["type"] == "output_text" && part["text"] == text
+		}
+		return false
+	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		var captured map[string]any
@@ -737,17 +780,38 @@ func TestOpenAIResponsesToolLoopReplaysOutputItems(t *testing.T) {
 			_, _ = w.Write([]byte(strings.Join([]string{
 				`data: {"type":"response.output_item.added","item":{"id":"rs_1","type":"reasoning","summary":[]}}`,
 				`data: {"type":"response.output_item.done","item":{"id":"rs_1","type":"reasoning","summary":[],"encrypted_content":"enc"}}`,
+				`data: {"type":"response.output_item.added","item":{"id":"msg_commentary","type":"message","role":"assistant","status":"in_progress","phase":"commentary","content":[]}}`,
+				`data: {"type":"response.output_text.delta","item_id":"msg_commentary","delta":"checking"}`,
+				`data: {"type":"response.output_item.done","item":{"id":"msg_commentary","type":"message","role":"assistant","status":"completed","phase":"commentary","content":[{"type":"output_text","text":"checking","annotations":[]}]}}`,
 				`data: {"type":"response.output_item.added","item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":""}}`,
 				`data: {"type":"response.function_call_arguments.done","item_id":"fc_1","arguments":"{\"q\":\"x\"}"}`,
 				`data: {"type":"response.output_item.done","item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"q\":\"x\"}"}}`,
-				`data: {"type":"response.completed","response":{"output":[{"id":"rs_1","type":"reasoning","summary":[],"encrypted_content":"enc"},{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"q\":\"x\"}"}]}}`,
+				`data: {"type":"response.completed","response":{"output":[{"id":"rs_1","type":"reasoning","summary":[],"encrypted_content":"enc"},{"id":"msg_commentary","type":"message","role":"assistant","status":"completed","phase":"commentary","content":[{"type":"output_text","text":"checking","annotations":[]}]},{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"q\":\"x\"}"}]}}`,
 				`data: [DONE]`,
 				``,
 			}, "\n\n")))
 		case 2:
+			input, _ := captured["input"].([]any)
+			if !hasNativeAssistantMessage(input, "msg_commentary", "commentary", "checking") {
+				http.Error(w, `{"error":{"message":"Invalid assistant continuation"}}`, http.StatusBadRequest)
+				return
+			}
 			_, _ = w.Write([]byte(strings.Join([]string{
 				`data: {"type":"response.output_text.delta","delta":"done"}`,
-				`data: {"type":"response.completed","response":{"output":[{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}]}}`,
+				`data: {"type":"response.completed","response":{"output":[{"id":"msg_1","type":"message","role":"assistant","status":"completed","phase":"final_answer","content":[{"type":"output_text","text":"done"}]}]}}`,
+				`data: [DONE]`,
+				``,
+			}, "\n\n")))
+		case 3:
+			input, _ := captured["input"].([]any)
+			if !hasNativeAssistantMessage(input, "msg_commentary", "commentary", "checking") ||
+				!hasNativeAssistantMessage(input, "msg_1", "final_answer", "done") {
+				http.Error(w, `{"error":{"message":"Invalid persisted assistant history"}}`, http.StatusBadRequest)
+				return
+			}
+			_, _ = w.Write([]byte(strings.Join([]string{
+				`data: {"type":"response.output_text.delta","delta":"follow-up done"}`,
+				`data: {"type":"response.completed","response":{"output":[{"id":"msg_2","type":"message","role":"assistant","status":"completed","phase":"final_answer","content":[{"type":"output_text","text":"follow-up done"}]}]}}`,
 				`data: [DONE]`,
 				``,
 			}, "\n\n")))
@@ -791,23 +855,48 @@ func TestOpenAIResponsesToolLoopReplaysOutputItems(t *testing.T) {
 		t.Fatalf("first request include = %#v, want reasoning.encrypted_content", requests[0]["include"])
 	}
 	secondInput, _ := requests[1]["input"].([]any)
-	var hasReasoning, hasFunctionCall, hasFunctionOutput bool
+	var hasReasoning, hasCommentary, hasFunctionCall, hasFunctionOutput bool
 	for _, raw := range secondInput {
 		item, _ := raw.(map[string]any)
 		switch item["type"] {
 		case "reasoning":
 			hasReasoning = item["encrypted_content"] == "enc"
+		case "message":
+			content, _ := jsonArrayItems(item["content"])
+			var part map[string]any
+			if len(content) > 0 {
+				part, _ = content[0].(map[string]any)
+			}
+			hasCommentary = item["id"] == "msg_commentary" && item["status"] == "completed" &&
+				item["phase"] == "commentary" && part["type"] == "output_text" && part["text"] == "checking"
 		case "function_call":
 			hasFunctionCall = item["call_id"] == "call_1" && item["status"] == "completed"
 		case "function_call_output":
 			hasFunctionOutput = item["call_id"] == "call_1" && item["output"] == "tool output"
 		}
 	}
-	if !hasReasoning || !hasFunctionCall || !hasFunctionOutput {
+	if !hasReasoning || !hasCommentary || !hasFunctionCall || !hasFunctionOutput {
 		t.Fatalf("second request input missing continuation items: %#v", secondInput)
 	}
-	if bytes.Contains(result.Raw, []byte(`"output_text"`)) || !bytes.Contains(result.Raw, []byte(`"input_text"`)) {
-		t.Fatalf("persisted tool-loop raw retained a status-dependent output message: %s", result.Raw)
+	if !bytes.Contains(result.Raw, []byte(`"output_text"`)) || bytes.Contains(result.Raw, []byte(`"type":"input_text"`)) {
+		t.Fatalf("persisted tool-loop raw did not retain valid native output messages: %s", result.Raw)
+	}
+
+	followReq := req
+	followReq.History = []UnifiedMessage{
+		{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "use a tool"}}},
+		{Role: "assistant", Blocks: result.Blocks, Raw: result.Raw},
+		{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "follow up"}}},
+	}
+	followResult, err := p.Stream(context.Background(), followReq, staticToolRunner("tool output"), func(SseEvent) {})
+	if err != nil {
+		t.Fatalf("follow-up stream: %v", err)
+	}
+	if followResult == nil || len(followResult.Blocks) == 0 || followResult.Blocks[len(followResult.Blocks)-1].Text != "follow-up done" {
+		t.Fatalf("follow-up result blocks = %+v, want final text follow-up done", followResult)
+	}
+	if len(requests) != 3 {
+		t.Fatalf("requests after persisted follow-up = %d, want 3", len(requests))
 	}
 }
 
