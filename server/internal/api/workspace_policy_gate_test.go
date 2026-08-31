@@ -21,33 +21,49 @@ func TestApplyWorkspaceToolPolicy(t *testing.T) {
 		t.Fatalf("permissive workspace narrowed the policy: %+v", kept)
 	}
 
-	// Sandbox / image switches subtract even from all-tools mode.
+	// The merged tool-calling switch subtracts every tool from all-tools mode.
 	policy := store.DefaultWorkspacePolicy("ws")
-	policy.AllowSandbox = false
-	policy.AllowImageGeneration = false
+	policy.AllowToolCalling = false
 	narrowed := applyWorkspaceToolPolicy(base, policy)
-	for _, denied := range []string{"builtin:python_execute", "builtin:code_interpreter", "builtin:image_generate", "hosted:image_generation"} {
+	for _, denied := range []string{"builtin:python_execute", "builtin:code_interpreter", "builtin:image_generate", "hosted:image_generation", "mcp:wiki", "usermcp:mine"} {
 		if narrowed.Allows(denied) {
 			t.Fatalf("switch did not deny %s: %+v", denied, narrowed)
 		}
 	}
-	if !narrowed.Allows("builtin:web_search") {
-		t.Fatalf("switch wrongly denied web_search: %+v", narrowed)
+	if narrowed.Mode != store.ResourceAccessNone {
+		t.Fatalf("tool-calling shutdown did not force none mode: %+v", narrowed)
+	}
+	// Direct drawing is independent from tool calling. It is folded into the
+	// image-model gate by the turn handler, not used to deny image tools here.
+	policy = store.DefaultWorkspacePolicy("ws")
+	policy.AllowDrawing = false
+	drawingOff := applyWorkspaceToolPolicy(base, policy)
+	if drawingOff.AllowDrawing {
+		t.Fatalf("drawing switch was not folded: %+v", drawingOff)
+	}
+	if !drawingOff.Allows("builtin:image_generate") {
+		t.Fatalf("drawing switch incorrectly denied a tool invocation: %+v", drawingOff)
 	}
 
-	// A workspace tool allowlist converts all-mode into the selected subset.
+	// Official workspace allowlists stay out of the generic group Mode/IDs. The
+	// orchestrator and registry apply them through WorkspacePolicy so user-owned
+	// MCP ids can remain in their independent namespace.
 	policy = store.DefaultWorkspacePolicy("ws")
 	policy.AllowedToolIDs = []string{"builtin:web_search", "hosted:image_generation"}
 	policy.AllowedMCPServerIDs = []string{"mcp:wiki"}
 	selected := applyWorkspaceToolPolicy(base, policy)
-	if selected.Mode != store.ResourceAccessSelected || len(selected.IDs) != 3 {
-		t.Fatalf("allowlist not applied: %+v", selected)
+	if selected.Mode != store.ResourceAccessAll || len(selected.IDs) != 0 {
+		t.Fatalf("official allowlist leaked into group selection policy: %+v", selected)
 	}
-	if !selected.Allows("mcp:wiki") || selected.Allows("builtin:python_execute") {
-		t.Fatalf("mcp allowlist misapplied: %+v", selected)
+	if !selected.Allows("usermcp:teammate") {
+		t.Fatalf("group-all policy removed teammate user MCP: %+v", selected)
+	}
+	if policy.ToolDeniedByPolicy("builtin:web_search") || !policy.ToolDeniedByPolicy("builtin:not-listed") {
+		t.Fatalf("dedicated workspace allowlist filter is inconsistent: %+v", policy)
 	}
 
-	// A selected group ceiling intersects with the workspace allowlist.
+	// A selected group ceiling remains the group ceiling; the dedicated workspace
+	// filter subsequently narrows official declarations without widening it.
 	selectedBase := &llm.ToolAccessPolicy{
 		Mode: store.ResourceAccessSelected,
 		IDs:  []string{"builtin:web_search", "builtin:python_execute"},
@@ -55,11 +71,34 @@ func TestApplyWorkspaceToolPolicy(t *testing.T) {
 	policy = store.DefaultWorkspacePolicy("ws")
 	policy.AllowedToolIDs = []string{"builtin:web_search", "builtin:save_memory"}
 	intersected := applyWorkspaceToolPolicy(selectedBase, policy)
-	if len(intersected.IDs) != 1 || intersected.IDs[0] != "builtin:web_search" {
-		t.Fatalf("intersection wrong: %+v", intersected)
+	if len(intersected.IDs) != 2 || intersected.IDs[0] != "builtin:web_search" || intersected.IDs[1] != "builtin:python_execute" {
+		t.Fatalf("workspace allowlist rewrote group ceiling: %+v", intersected)
 	}
 	if intersected.Allows("builtin:save_memory") {
 		t.Fatalf("group ceiling widened by workspace policy: %+v", intersected)
+	}
+
+	// Official-server allowlists must not remove a user-owned MCP id already
+	// present in a selected group ceiling either.
+	selectedBase = &llm.ToolAccessPolicy{
+		Mode: store.ResourceAccessSelected,
+		IDs:  []string{"usermcp:mine", "builtin:web_search", "builtin:python_execute"},
+	}
+	policy = store.DefaultWorkspacePolicy("ws")
+	policy.AllowedToolIDs = []string{"builtin:web_search"}
+	policy.AllowedMCPServerIDs = []string{"mcp:official", "usermcp:should-be-ignored"}
+	intersected = applyWorkspaceToolPolicy(selectedBase, policy)
+	if len(intersected.IDs) != 3 || intersected.IDs[0] != "usermcp:mine" ||
+		intersected.IDs[1] != "builtin:web_search" || intersected.IDs[2] != "builtin:python_execute" {
+		t.Fatalf("user MCP was narrowed by official workspace allowlist: %+v", intersected)
+	}
+	if store.DefaultWorkspacePolicy("ws").ToolDeniedByPolicy("usermcp:mine") {
+		t.Fatal("permissive workspace denied user MCP")
+	}
+	policy.AllowedToolIDs = []string{"builtin:web_search"}
+	policy.AllowedMCPServerIDs = []string{"mcp:official"}
+	if policy.ToolDeniedByPolicy("usermcp:mine") {
+		t.Fatal("official workspace allowlist denied user MCP")
 	}
 
 	// A none group ceiling stays none.
@@ -107,8 +146,8 @@ func TestGenerationWorkspaceAccessSnapshotRevokesRolePolicyAndVisibilityChanges(
 	if err != nil {
 		t.Fatalf("capture after restore: %v", err)
 	}
-	sandboxOff := false
-	if _, err := store.UpdateWorkspacePolicy(ctx, db, workspace.ID, "owner", store.WorkspacePolicyPatch{AllowSandbox: &sandboxOff}); err != nil {
+	toolCallingOff := false
+	if _, err := store.UpdateWorkspacePolicy(ctx, db, workspace.ID, "owner", store.WorkspacePolicyPatch{AllowToolCalling: &toolCallingOff}); err != nil {
 		t.Fatalf("tighten policy: %v", err)
 	}
 	if snapshot.stillCurrent(ctx, db) {

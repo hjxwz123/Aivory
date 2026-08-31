@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { ApiModel } from '@/api/types'
-import { findSelectedModel, isSelectedModelUnavailable } from '@/lib/model-selection'
+import {
+  findSelectedModel,
+  isModelCatalogReadyForScope,
+  isSelectedModelUnavailable,
+} from '@/lib/model-selection'
 
 function model(id: string, kind: ApiModel['kind'] = 'chat'): ApiModel {
   return {
@@ -30,6 +34,57 @@ function model(id: string, kind: ApiModel['kind'] = 'chat'): ApiModel {
 }
 
 describe('model selection availability', () => {
+  it('accepts only a loaded catalog for the expected workspace and policy', () => {
+    expect(
+      isModelCatalogReadyForScope({
+        loaded: true,
+        loadedScope: 'workspace-b',
+        loadedPolicyKey: 'policy-b',
+        expectedScope: 'workspace-b',
+        expectedPolicyKey: 'policy-b',
+      }),
+    ).toBe(true)
+    expect(
+      isModelCatalogReadyForScope({
+        loaded: true,
+        loadedScope: 'workspace-a',
+        loadedPolicyKey: 'policy-a',
+        expectedScope: 'workspace-b',
+        expectedPolicyKey: 'policy-b',
+      }),
+    ).toBe(false)
+    expect(
+      isModelCatalogReadyForScope({
+        loaded: true,
+        loadedScope: 'workspace-b',
+        loadedPolicyKey: 'policy-a',
+        expectedScope: 'workspace-b',
+        expectedPolicyKey: 'policy-b',
+      }),
+    ).toBe(false)
+    expect(
+      isModelCatalogReadyForScope({
+        loaded: false,
+        loadedScope: 'workspace-b',
+        loadedPolicyKey: 'policy-b',
+        expectedScope: 'workspace-b',
+        expectedPolicyKey: 'policy-b',
+      }),
+    ).toBe(false)
+  })
+
+  it('recognizes the personal-space catalog explicitly', () => {
+    expect(
+      isModelCatalogReadyForScope({
+        loaded: true,
+        loadedScope: null,
+        loadedPolicyKey: 'personal',
+        expectedScope: null,
+        expectedPolicyKey: 'personal',
+      }),
+    ).toBe(true)
+  })
+
   it('does not visually substitute the first chat model for a missing selection', () => {
     expect(findSelectedModel('revoked-image', [model('chat')], [])).toBeUndefined()
   })

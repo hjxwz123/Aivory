@@ -4,22 +4,24 @@
   "newSkill": "Nouvelle compétence",
   "kinds": {
     "skill": "Compétence",
-    "prompt": "Invite"
+    "prompt": "Invite",
+    "mcp": "MCP"
   },
   "tabs": {
     "mine": "Ma bibliothèque",
     "catalog": "Catalogue"
   },
-  "search": "Rechercher des compétences et invites",
+  "search": "Rechercher des compétences, invites et services MCP",
   "filter": {
     "label": "Filtrer par type",
     "all": "Tout",
     "skill": "Compétences",
-    "prompt": "Invites"
+    "prompt": "Invites",
+    "mcp": "Services MCP"
   },
   "empty": {
     "search": "Aucun élément correspondant",
-    "mine": "Vous n’avez encore aucune compétence ni invite",
+    "mine": "Vous n’avez encore aucune compétence, invite ni service MCP",
     "catalog": "Le catalogue est vide"
   },
   "catalog": {
@@ -50,6 +52,39 @@
     "nameExists": "Un élément portant ce nom existe déjà dans votre bibliothèque.",
     "created": "Créé",
     "updated": "Mis à jour"
+  },
+  "mcpEditor": {
+    "newTitle": "Nouveau service MCP",
+    "editTitle": "Modifier le service MCP",
+    "name": "Nom",
+    "icon": "Icône",
+    "description": "Description de l’outil",
+    "url": "URL Streamable HTTP",
+    "urlHint": "L’endpoint doit accepter les requêtes MCP JSON-RPC via Streamable HTTP.",
+    "headers": "En-têtes de requête",
+    "headerKey": "Nom de l’en-tête",
+    "headerValue": "Valeur de l’en-tête",
+    "addHeader": "Ajouter un en-tête",
+    "enabled": "Activé",
+    "enabledHint": "Une fois activé, ses outils synchronisés apparaissent dans « Mes outils » du sélecteur d’outils.",
+    "test": "Tester",
+    "testOk": "Connexion réussie",
+    "testFailed": "Échec de la connexion",
+    "sync": "Synchroniser",
+    "synced": "Outils synchronisés",
+    "toolsCount_one": "{{count}} outil",
+    "toolsCount_other": "{{count}} outils"
+  },
+  "mcpStatus": {
+    "error": "Erreur de connexion",
+    "notSynced": "Non synchronisé"
+  },
+  "permissions": {
+    "createResource": "Vous ne pouvez pas créer cette ressource dans cet espace.",
+    "manageResource": "Vous ne pouvez pas gérer cette ressource dans cet espace.",
+    "createMcp": "Vous ne pouvez pas créer de service MCP dans cet espace.",
+    "manageMcp": "Vous ne pouvez pas gérer ce service MCP.",
+    "useMcp": "Vous ne pouvez pas utiliser les services MCP dans cet espace."
   },
   "remove": {
     "title": "Supprimer cet élément ?",

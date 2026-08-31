@@ -43,6 +43,7 @@ import { truncate, modKey } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/store/auth'
 import { userCan } from '@/lib/user-permissions'
+import { workspaceCapabilitiesForScope } from '@/lib/workspace-permissions'
 
 export function CommandMenu() {
   const open = useCommandMenu((s) => s.open)
@@ -73,12 +74,32 @@ export function CommandMenu() {
   const currentLang = useLanguage((s) => s.lang)
   const setLang = useLanguage((s) => s.setLang)
   const [newProjectOpen, setNewProjectOpen] = useState(false)
+  const activeWorkspaceIdValue = useWorkspaces((state) => state.activeId)
   const activeWorkspace = useWorkspaces((state) =>
     state.activeId ? state.workspaces.find((workspace) => workspace.id === state.activeId) : undefined,
   )
+  const activeWorkspacePolicy = useWorkspaces((state) =>
+    state.activeId ? state.policies[state.activeId] : undefined,
+  )
+  const workspacesLoaded = useWorkspaces((state) => state.loaded)
+  const activeWorkspacePolicyLoading = useWorkspaces((state) =>
+    state.activeId ? state.policyLoading[state.activeId] === true : false,
+  )
+  const activeWorkspaceSwitching = useWorkspaces((state) => state.switching)
+  const activeWorkspacePolicyError = useWorkspaces((state) =>
+    state.activeId ? state.policyErrors[state.activeId] : null,
+  )
   const user = useAuth((state) => state.user)
-  const canCreateProject = userCan(user, 'allow_knowledge_bases') &&
-    (!activeWorkspace || activeWorkspace.can_create_projects)
+  const workspaceCaps = workspaceCapabilitiesForScope(activeWorkspaceIdValue, activeWorkspacePolicy, {
+    workspacesLoaded,
+    policyLoading: activeWorkspacePolicyLoading,
+    switching: activeWorkspaceSwitching,
+    policyError: activeWorkspacePolicyError,
+  })
+  const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases') &&
+    workspaceCaps.knowledgeBases
+  const canCreateProject = canUseKnowledgeBases &&
+    (!activeWorkspaceIdValue || activeWorkspace?.can_create_projects === true)
 
   // ── Content search ────────────────────────────────────────────────────────
   // The typed query, debounced, drives a backend search over message CONTENT
@@ -121,7 +142,7 @@ export function CommandMenu() {
         })
     }, 200)
     return () => clearTimeout(tmo)
-  }, [query])
+  }, [activeWorkspaceIdValue, query])
   // Reset the query whenever the menu closes so it reopens clean.
   useEffect(() => {
     if (!open) {
@@ -218,37 +239,41 @@ export function CommandMenu() {
                 </CommandItem>
               </CommandGroup>
 
-              <CommandSeparator />
+              {canUseKnowledgeBases ? (
+                <>
+                  <CommandSeparator />
 
-              <CommandGroup heading={t('projects:commandMenu.group')}>
-                {canCreateProject ? (
-                  <CommandItem
-                    value="new project"
-                    onSelect={() => run(() => setNewProjectOpen(true))}
-                  >
-                    <Plus size={14} aria-hidden />
-                    {t('projects:commandMenu.newProject')}
-                  </CommandItem>
-                ) : null}
-                <CommandItem
-                  value="all projects"
-                  onSelect={() => run(() => navigate('/projects'))}
-                >
-                  <FolderKanban size={14} aria-hidden />
-                  {t('projects:commandMenu.viewAll')}
-                </CommandItem>
-                {recentProjects.map((p) => (
-                  <CommandItem
-                    key={p.id}
-                    value={`project ${p.name} ${p.id}`}
-                    onSelect={() => run(() => navigate(`/projects/${p.id}`))}
-                  >
-                    <FolderKanban size={14} className="text-[var(--color-secondary)]" aria-hidden />
-                    {t('projects:commandMenu.open', { name: truncate(p.name, 40) })}
-                    <ArrowRight size={12} className="ml-auto text-[var(--color-fg-subtle)]" aria-hidden />
-                  </CommandItem>
-                ))}
-              </CommandGroup>
+                  <CommandGroup heading={t('projects:commandMenu.group')}>
+                    {canCreateProject ? (
+                      <CommandItem
+                        value="new project"
+                        onSelect={() => run(() => setNewProjectOpen(true))}
+                      >
+                        <Plus size={14} aria-hidden />
+                        {t('projects:commandMenu.newProject')}
+                      </CommandItem>
+                    ) : null}
+                    <CommandItem
+                      value="all projects"
+                      onSelect={() => run(() => navigate('/projects'))}
+                    >
+                      <FolderKanban size={14} aria-hidden />
+                      {t('projects:commandMenu.viewAll')}
+                    </CommandItem>
+                    {recentProjects.map((p) => (
+                      <CommandItem
+                        key={p.id}
+                        value={`project ${p.name} ${p.id}`}
+                        onSelect={() => run(() => navigate(`/projects/${p.id}`))}
+                      >
+                        <FolderKanban size={14} className="text-[var(--color-secondary)]" aria-hidden />
+                        {t('projects:commandMenu.open', { name: truncate(p.name, 40) })}
+                        <ArrowRight size={12} className="ml-auto text-[var(--color-fg-subtle)]" aria-hidden />
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </>
+              ) : null}
 
               <CommandSeparator />
 

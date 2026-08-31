@@ -36,6 +36,7 @@ import { ConversationMinimap } from '@/components/chat/conversation-minimap'
 import { accentClasses } from '@/lib/project-helpers'
 import { cn, truncate } from '@/lib/utils'
 import { userCan } from '@/lib/user-permissions'
+import { workspaceCapabilitiesForScope } from '@/lib/workspace-permissions'
 import { findSelectedModel } from '@/lib/model-selection'
 import type { Attachment } from '@/types/chat'
 import type { ToolMode } from '@/lib/tool-mode'
@@ -67,7 +68,6 @@ export default function ChatThread() {
   const user = useAuth((s) => s.user)
   const meId = user?.id
   const canShare = userCan(user, 'allow_sharing')
-  const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases')
   const project = useProjects((s) =>
     conversation?.projectId ? s.projects.find((p) => p.id === conversation.projectId) : undefined,
   )
@@ -84,6 +84,28 @@ export default function ChatThread() {
       ? s.workspaces.find((workspace) => workspace.id === conversation.workspaceId)
       : undefined,
   )
+  const conversationWorkspacePolicy = useWorkspaces((s) =>
+    conversation?.workspaceId ? s.policies[conversation.workspaceId] : undefined,
+  )
+  const workspacesLoaded = useWorkspaces((s) => s.loaded)
+  const conversationPolicyLoading = useWorkspaces((s) =>
+    conversation?.workspaceId ? s.policyLoading[conversation.workspaceId] === true : false,
+  )
+  const conversationPolicyError = useWorkspaces((s) =>
+    conversation?.workspaceId ? s.policyErrors[conversation.workspaceId] : null,
+  )
+  const workspaceCaps = workspaceCapabilitiesForScope(
+    conversation?.workspaceId,
+    conversationWorkspacePolicy,
+    {
+      workspacesLoaded,
+      policyLoading: conversationPolicyLoading,
+      switching: wsSwitching,
+      policyError: conversationPolicyError,
+    },
+  )
+  const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases') &&
+    workspaceCaps.knowledgeBases
   const isWorkspaceGuest = conversationWorkspace?.role === 'guest'
   const canDeleteConversations =
     userCan(user, 'allow_conversation_deletion') &&
@@ -128,6 +150,14 @@ export default function ChatThread() {
   useEffect(() => {
     if (conversationWorkspace?.can_private_conversations === false) setConfirmPrivate(false)
   }, [conversationWorkspace?.can_private_conversations])
+
+  useEffect(() => {
+    const workspaceId = conversation?.workspaceId
+    if (!workspaceId) return
+    const state = useWorkspaces.getState()
+    if (state.policies[workspaceId] || state.policyLoading[workspaceId]) return
+    void state.loadPolicy(workspaceId)
+  }, [conversation?.workspaceId])
 
   useEffect(() => {
     if (!canDeleteConversations) setConfirmDelete(false)
@@ -448,7 +478,14 @@ export default function ChatThread() {
               onToggle={requestVisibilityToggle}
             />
           ) : null}
-          <ModelPicker value={conversation.modelId} onChange={handleModelChange} fast={conversation.fast} onFastChange={handleFastChange} disabled={isWorkspaceGuest} />
+          <ModelPicker
+            value={conversation.modelId}
+            onChange={handleModelChange}
+            fast={conversation.fast}
+            onFastChange={handleFastChange}
+            workspaceId={conversation.workspaceId ?? null}
+            disabled={isWorkspaceGuest}
+          />
           {!isWorkspaceGuest ? (
             <Tooltip content={t('chat:topbar.outlineTooltip', { defaultValue: 'Conversation outline' })}>
               <button
@@ -561,6 +598,7 @@ export default function ChatThread() {
                 onChange={handleModelChange}
                 fast={conversation.fast}
                 onFastChange={handleFastChange}
+                workspaceId={conversation.workspaceId ?? null}
                 menuAlign="center"
                 className="h-auto min-w-0 max-w-[52vw] gap-1 px-1.5 py-0.5 text-[11.5px] rounded-[7px]"
                 disabled={isWorkspaceGuest}
@@ -665,7 +703,9 @@ export default function ChatThread() {
                 {t('kb:groupPermissionTitle', { defaultValue: 'Knowledge bases unavailable' })}
               </p>
               <p className="mt-1 text-[12px] leading-relaxed text-[var(--color-fg-muted)]">
-                {t('kb:groupPermissionRequired', { defaultValue: 'Your user group does not have knowledge-base access.' })}
+                {conversation.workspaceId && !workspaceCaps.knowledgeBases
+                  ? t('kb:workspaceDisabledBody', { defaultValue: 'The workspace administrator has disabled knowledge bases.' })
+                  : t('kb:groupPermissionRequired', { defaultValue: 'Your user group does not have knowledge-base access.' })}
               </p>
             </div>
           ) : (
@@ -684,6 +724,7 @@ export default function ChatThread() {
               streaming={Boolean(streaming)}
               autoFocus
               conversationId={conversation.id}
+              workspaceId={conversation.workspaceId ?? null}
               commandsEnabled={conversation.creatorId === meId}
               kbIds={conversation.kbIds}
               projectKBId={project?.kbId}

@@ -500,6 +500,32 @@ CREATE TABLE IF NOT EXISTS user_prompts (
 );
 CREATE INDEX IF NOT EXISTS idx_user_prompts_user ON user_prompts(user_id, updated_at DESC);
 
+-- User-managed Streamable HTTP MCP endpoints for the resource library. Mirrors
+-- the mcp_servers snapshot contract (headers may carry credentials and are only
+-- exposed masked by the API; discovered_tools is the last successful tools/list
+-- snapshot) with the user_skills/user_prompts scoping columns: workspace_id=''
+-- is the personal library, non-empty is shared inside that workspace. The
+-- name-uniqueness partial indexes live in Migrate (see store.go).
+CREATE TABLE IF NOT EXISTS user_mcp_servers (
+  id               TEXT PRIMARY KEY,
+  user_id          TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  workspace_id     TEXT NOT NULL DEFAULT '',
+  name             TEXT NOT NULL,
+  icon             TEXT NOT NULL DEFAULT '',
+  description      TEXT NOT NULL DEFAULT '',
+  url              TEXT NOT NULL,
+  headers          TEXT NOT NULL DEFAULT '{}',
+  enabled          INTEGER NOT NULL DEFAULT 0,
+  discovered_tools TEXT NOT NULL DEFAULT '[]',
+  protocol_version TEXT NOT NULL DEFAULT '',
+  last_error       TEXT NOT NULL DEFAULT '',
+  last_synced_at   INTEGER NOT NULL DEFAULT 0,
+  created_at       INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  updated_at       INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_user_mcp_servers_user ON user_mcp_servers(user_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_user_mcp_servers_workspace ON user_mcp_servers(workspace_id, updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS model_skills (
   model_id TEXT NOT NULL REFERENCES models(id) ON DELETE CASCADE,
   skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
@@ -974,6 +1000,12 @@ CREATE TABLE IF NOT EXISTS workspace_members (
   can_create_projects      INTEGER NOT NULL DEFAULT 1,
   can_private_conversations INTEGER NOT NULL DEFAULT 1,
   can_create_skills_prompts INTEGER NOT NULL DEFAULT 1,
+  can_create_prompts       INTEGER NOT NULL DEFAULT 1,
+  can_create_skills        INTEGER NOT NULL DEFAULT 1,
+  can_create_mcp           INTEGER NOT NULL DEFAULT 1,
+  can_use_prompts          INTEGER NOT NULL DEFAULT 1,
+  can_use_skills           INTEGER NOT NULL DEFAULT 1,
+  can_use_mcp              INTEGER NOT NULL DEFAULT 1,
   can_create_kb            INTEGER NOT NULL DEFAULT 1,
   can_add_kb_files         INTEGER NOT NULL DEFAULT 1,
   can_delete_kb_content    INTEGER NOT NULL DEFAULT 1,
@@ -1025,6 +1057,11 @@ CREATE TABLE IF NOT EXISTS workspace_policies (
   allowed_mcp_server_ids      TEXT NOT NULL DEFAULT '[]',
   allow_sandbox               INTEGER NOT NULL DEFAULT 1,
   allow_image_generation      INTEGER NOT NULL DEFAULT 1,
+  allow_tool_calling          INTEGER NOT NULL DEFAULT 1,
+  allow_drawing               INTEGER NOT NULL DEFAULT 1,
+  allow_mcp                   INTEGER NOT NULL DEFAULT 1,
+  allow_skills                INTEGER NOT NULL DEFAULT 1,
+  allow_prompts               INTEGER NOT NULL DEFAULT 1,
   allow_knowledge_bases       INTEGER NOT NULL DEFAULT 1,
   allow_file_upload           INTEGER NOT NULL DEFAULT 1,
   member_monthly_credit_limit REAL NOT NULL DEFAULT 0,

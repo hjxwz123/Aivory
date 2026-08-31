@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"sort"
 	"strings"
@@ -52,6 +53,35 @@ func listSelectableToolsHandler(d Deps, w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusForbidden, errToolGroupPermission)
 		return
 	}
+	// Resolve the workspace capability once for the whole catalog request. The
+	// group policy below controls whether a row is selectable; workspace policy
+	// controls whether a capability is exposed at all. Keeping the two checks
+	// separate is important for the owner exemption on user MCP rows.
+	var workspacePolicy *store.WorkspacePolicy
+	var workspaceMember *store.Workspace
+	workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id"))
+	if workspaceID != "" {
+		user := authUser(r)
+		if user == nil {
+			writeError(w, http.StatusNotFound, errNotFound)
+			return
+		}
+		member, memberErr := store.GetWorkspaceForMember(r.Context(), d.DB, workspaceID, user.ID)
+		if errors.Is(memberErr, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, errNotFound)
+			return
+		}
+		if memberErr != nil {
+			writeError(w, http.StatusInternalServerError, memberErr)
+			return
+		}
+		policy, policyErr := store.GetWorkspacePolicy(r.Context(), d.DB, workspaceID)
+		if policyErr != nil {
+			writeError(w, http.StatusInternalServerError, policyErr)
+			return
+		}
+		workspaceMember, workspacePolicy = member, &policy
+	}
 	items := []selectableToolResponse{}
 	if model.ToolMode == "none" || d.Tools == nil {
 		writeJSON(w, http.StatusOK, items)
@@ -102,6 +132,9 @@ func listSelectableToolsHandler(d Deps, w http.ResponseWriter, r *http.Request) 
 			continue
 		}
 		id := "builtin:" + name
+		if !workspaceCatalogToolAllowed(id, workspacePolicy, workspaceMember) {
+			continue
+		}
 		display := builtinToolDisplay[name]
 		label := display.name
 		if label == "" {
@@ -124,6 +157,9 @@ func listSelectableToolsHandler(d Deps, w http.ResponseWriter, r *http.Request) 
 				continue
 			}
 			id := "hosted:" + name
+			if !workspaceCatalogToolAllowed(id, workspacePolicy, workspaceMember) {
+				continue
+			}
 			description := hostedToolDescriptions[name]
 			if description == "" {
 				description = "Use " + name + " when it is useful for the request."
@@ -140,12 +176,15 @@ func listSelectableToolsHandler(d Deps, w http.ResponseWriter, r *http.Request) 
 	}
 
 	seenMCP := map[string]bool{}
-	for _, definition := range d.Tools.ListMCP(model.ID) {
+	for _, definition := range d.Tools.ListMCP(model.ID, "", "") {
 		if seenMCP[definition.ServerID] {
 			continue
 		}
 		seenMCP[definition.ServerID] = true
 		id := "mcp:" + definition.ServerID
+		if !workspaceCatalogToolAllowed(id, workspacePolicy, workspaceMember) {
+			continue
+		}
 		items = append(items, selectableToolResponse{
 			ID: id, Name: definition.DisplayName,
 			Description: definition.DisplayDescription, Icon: definition.Icon,
@@ -154,28 +193,40 @@ func listSelectableToolsHandler(d Deps, w http.ResponseWriter, r *http.Request) 
 		})
 	}
 
-	// §workspace RBAC phase 4: with a workspace scope, hide tools/MCP servers
-	// the workspace policy disables (execution-time enforcement remains
-	// authoritative in the orchestrator).
-	if workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id")); workspaceID != "" {
-		u := authUser(r)
-		role, memberErr := store.IsWorkspaceMember(r.Context(), d.DB, workspaceID, u.ID)
-		if memberErr != nil || role == "" {
-			writeError(w, http.StatusNotFound, errNotFound)
-			return
+	// §user MCP: one row per user-owned server. A row is offered only when it is enabled and
+	// a successful sync stored tools — never-synced or broken endpoints would
+	// otherwise create ghost selections. Workspace capability checks happen here
+	// as well as in the runtime registry, so a member denied MCP never sees a
+	// selectable row. The requesting user's personal and active-workspace rows
+	// are the only ones the store scoping returns; group Tools policy still
+	// applies to servers owned by teammates, while the requester's own servers
+	// are exempt via the toolPolicyScope below.
+	if user := authUser(r); user != nil {
+		readScopes := []string{""}
+		if workspaceID != "" {
+			readScopes = append(readScopes, workspaceID)
 		}
-		policy, policyErr := store.GetWorkspacePolicy(r.Context(), d.DB, workspaceID)
-		if policyErr != nil {
-			writeError(w, http.StatusInternalServerError, policyErr)
-			return
-		}
-		visible := items[:0]
-		for _, item := range items {
-			if !policy.ToolDeniedByPolicy(item.ID) {
-				visible = append(visible, item)
+		scope := toolPolicyScope{ctx: r.Context(), db: d.DB, userID: user.ID, workspaceID: workspaceID}
+		for _, scopeID := range readScopes {
+			userServers, serversErr := store.ListUserMCPServersScoped(r.Context(), d.DB, user.ID, scopeID)
+			if serversErr != nil {
+				writeError(w, http.StatusInternalServerError, serversErr)
+				return
+			}
+			for _, server := range userServers {
+				if !server.Enabled || !mcpDiscoveredToolsPresent(server.DiscoveredTools) {
+					continue
+				}
+				id := userMCPToolIDPrefix + server.ID
+				if !workspaceCatalogToolAllowed(id, workspacePolicy, workspaceMember) {
+					continue
+				}
+				items = append(items, selectableToolResponse{
+					ID: id, Name: server.Name, Description: server.Description, Icon: server.Icon,
+					Allowed: toolPolicyAllowsID(permissions, id, scope), DefaultSelected: false,
+				})
 			}
 		}
-		items = visible
 	}
 
 	sort.SliceStable(items, func(i, j int) bool {
@@ -186,4 +237,34 @@ func listSelectableToolsHandler(d Deps, w http.ResponseWriter, r *http.Request) 
 		return left < right
 	})
 	writeJSON(w, http.StatusOK, items)
+}
+
+// workspaceCatalogToolAllowed is deliberately stricter than the group
+// `Allowed` flag. A workspace switch removes a capability from the catalog;
+// it must not merely mark the row disabled because callers can otherwise keep
+// stale selections and repeatedly attempt a forbidden operation. User MCP
+// ids skip the administrator MCP allowlist (`AllowedMCPServerIDs`): those rows
+// are governed by the explicit workspace MCP switch and the member capability
+// and receive their group-level owner exemption separately.
+func workspaceCatalogToolAllowed(
+	id string,
+	policy *store.WorkspacePolicy,
+	member *store.Workspace,
+) bool {
+	if policy == nil {
+		return true
+	}
+	if !policy.AllowToolCalling {
+		return false
+	}
+	if strings.HasPrefix(id, "usermcp:") {
+		return policy.AllowMCP && (member == nil || member.CanUseMCP)
+	}
+	if strings.HasPrefix(id, "mcp:") {
+		return policy.AllowMCP && (member == nil || member.CanUseMCP) && !policy.ToolDeniedByPolicy(id)
+	}
+	if id == "builtin:use_skill" && (!policy.AllowSkills || (member != nil && !member.CanUseSkills)) {
+		return false
+	}
+	return !policy.ToolDeniedByPolicy(id)
 }

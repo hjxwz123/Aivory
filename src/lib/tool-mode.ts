@@ -7,12 +7,15 @@ export function isToolMode(value: unknown): value is ToolMode {
 
 export interface ToolModeCapabilities {
   available: boolean
+  /** A workspace-wide tool policy can force the only legal mode to disabled. */
+  forcedDisabled?: boolean
 }
 
 /** Stable order for tool modes that the current model actually supports. */
 export const TOOL_MODE_MENU_ORDER: readonly ToolMode[] = ['auto', 'enabled', 'disabled']
 
 export function toolModeAvailable(mode: ToolMode, capabilities: ToolModeCapabilities): boolean {
+  if (capabilities.forcedDisabled) return mode === 'disabled'
   if (mode === 'enabled') return capabilities.available
   return true
 }
@@ -29,7 +32,7 @@ export function normalizeToolModeForCapabilities(
   mode: ToolMode,
   capabilities: ToolModeCapabilities,
 ): ToolMode {
-  return toolModeAvailable(mode, capabilities) ? mode : 'auto'
+  return toolModeAvailable(mode, capabilities) ? mode : capabilities.forcedDisabled ? 'disabled' : 'auto'
 }
 
 /** Whether a model exposes the per-turn tool policy to users. */
@@ -46,7 +49,9 @@ export function resolveModelToolModeCapabilities(
   modelToolMode: ModelToolMode | null | undefined,
   capabilities: ToolModeCapabilities,
 ): ToolModeCapabilities {
-  return modelAllowsToolModeSelection(modelToolMode) ? capabilities : { available: false }
+  return modelAllowsToolModeSelection(modelToolMode)
+    ? capabilities
+    : { available: false, forcedDisabled: capabilities.forcedDisabled }
 }
 
 /**

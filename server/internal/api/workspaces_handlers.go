@@ -148,6 +148,14 @@ func updateWorkspaceMemberPermissionsHandler(d Deps, w http.ResponseWriter, r *h
 		r.Context(), d.DB, workspaceID, u.ID, memberID, permissions,
 	)
 	if err != nil {
+		if errors.Is(err, store.ErrForbidden) {
+			// The store repeats the actor/target check inside the membership
+			// transaction. A concurrent demotion can therefore race the handler's
+			// optimistic authorization check; surface that as a policy denial rather
+			// than leaking it as a generic server failure.
+			writeError(w, http.StatusForbidden, errForbidden)
+			return
+		}
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, errNotFound)
 			return
@@ -476,6 +484,46 @@ func getWorkspacePolicyHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, policy)
 }
 
+type workspacePolicyModel struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	Kind  string `json:"kind"`
+}
+
+// listWorkspacePolicyModelsHandler returns the complete enabled model catalog
+// needed to edit a workspace allowlist. It deliberately ignores the acting
+// administrator's user-group drawing entitlement: this policy controls every
+// workspace member, so using the actor's ordinary picker would silently omit
+// image models and make an explicit allowlist destructive. Fast model identity
+// remains hidden, matching the public model catalog; selecting an explicit
+// allowlist therefore continues to disable fast mode for that workspace.
+func listWorkspacePolicyModelsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	workspaceID := pathParam(r, "id")
+	decision, err := store.AuthorizeWorkspace(r.Context(), d.DB, store.WorkspaceAuthorizationRequest{
+		WorkspaceID: workspaceID, UserID: u.ID, Action: store.ActionWorkspaceSettingsUpdate,
+	})
+	if err != nil || !decision.Allowed {
+		writeError(w, http.StatusNotFound, errNotFound)
+		return
+	}
+	models, err := store.ListModels(r.Context(), d.DB, "", true)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	response := make([]workspacePolicyModel, 0, len(models))
+	for _, model := range models {
+		if model.Fast || (model.Kind != "chat" && model.Kind != "image") {
+			continue
+		}
+		response = append(response, workspacePolicyModel{
+			ID: model.ID, Label: model.Label, Kind: model.Kind,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"models": response})
+}
+
 // updateWorkspacePolicyHandler narrows the workspace capability policy.
 // Workspace admins only; the store re-authorizes inside the membership-lock
 // transaction. Guests never gain from a permissive policy — their read-only
@@ -487,6 +535,11 @@ func updateWorkspacePolicyHandler(d Deps, w http.ResponseWriter, r *http.Request
 		AllowedModelIDs          *[]string `json:"allowed_model_ids"`
 		AllowedToolIDs           *[]string `json:"allowed_tool_ids"`
 		AllowedMCPServerIDs      *[]string `json:"allowed_mcp_server_ids"`
+		AllowToolCalling         *bool     `json:"allow_tool_calling"`
+		AllowDrawing             *bool     `json:"allow_drawing"`
+		AllowMCP                 *bool     `json:"allow_mcp"`
+		AllowSkills              *bool     `json:"allow_skills"`
+		AllowPrompts             *bool     `json:"allow_prompts"`
 		AllowSandbox             *bool     `json:"allow_sandbox"`
 		AllowImageGeneration     *bool     `json:"allow_image_generation"`
 		AllowKnowledgeBases      *bool     `json:"allow_knowledge_bases"`
@@ -508,6 +561,11 @@ func updateWorkspacePolicyHandler(d Deps, w http.ResponseWriter, r *http.Request
 		AllowedModelIDs:          req.AllowedModelIDs,
 		AllowedToolIDs:           req.AllowedToolIDs,
 		AllowedMCPServerIDs:      req.AllowedMCPServerIDs,
+		AllowToolCalling:         req.AllowToolCalling,
+		AllowDrawing:             req.AllowDrawing,
+		AllowMCP:                 req.AllowMCP,
+		AllowSkills:              req.AllowSkills,
+		AllowPrompts:             req.AllowPrompts,
 		AllowSandbox:             req.AllowSandbox,
 		AllowImageGeneration:     req.AllowImageGeneration,
 		AllowKnowledgeBases:      req.AllowKnowledgeBases,
@@ -600,6 +658,10 @@ func teardownWorkspace(d Deps, r *http.Request, ws *store.Workspace) (returnErr 
 	if err := store.MarkWorkspaceDeleting(r.Context(), d.DB, ws.ID, ws.OwnerID); err != nil {
 		return err
 	}
+	userMCPServerIDs, err := store.UserMCPServerIDsForWorkspace(r.Context(), d.DB, ws.ID)
+	if err != nil {
+		return err
+	}
 	// From this point every error must make the fence retryable, including a
 	// failure before streaming messages have been scrubbed.
 	teardownComplete := false
@@ -684,6 +746,11 @@ func teardownWorkspace(d Deps, r *http.Request, ws *store.Workspace) (returnErr 
 	}
 	if err := store.DeleteWorkspaceRow(r.Context(), d.DB, ws.ID, ws.OwnerID); err != nil {
 		return err
+	}
+	if d.Tools != nil {
+		for _, serverID := range userMCPServerIDs {
+			d.Tools.InvalidateMCPServer(serverID)
+		}
 	}
 	teardownComplete = true
 	return nil

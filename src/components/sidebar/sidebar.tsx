@@ -81,6 +81,7 @@ import { duration } from '@/lib/design-tokens'
 import { accentClasses } from '@/lib/project-helpers'
 import { partitionConversationNavigation } from '@/lib/conversation-navigation'
 import { userCan } from '@/lib/user-permissions'
+import { workspaceCapabilitiesForScope } from '@/lib/workspace-permissions'
 import { type DateBucket, bucketFor, modKey, cn, truncate } from '@/lib/utils'
 import { toast } from '@/hooks/use-toast'
 import { useTranslation } from 'react-i18next'
@@ -100,10 +101,34 @@ function isConversationStreaming(conversation: Conversation): boolean {
 
 export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
   const user = useAuth((s) => s.user)
-  const canDraw = userCan(user, 'allow_drawing')
-  const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases')
+  const activeWsId = useWorkspaces((s) => s.activeId)
+  const activeWorkspacePolicy = useWorkspaces((s) =>
+    s.activeId ? s.policies[s.activeId] : undefined,
+  )
+  const workspacesLoaded = useWorkspaces((s) => s.loaded)
+  const workspacePolicyLoading = useWorkspaces((s) =>
+    s.activeId ? s.policyLoading[s.activeId] === true : false,
+  )
+  const switching = useWorkspaces((s) => s.switching)
+  const workspacePolicyError = useWorkspaces((s) =>
+    activeWsId ? s.policyErrors[activeWsId] : null,
+  )
+  const workspaceCaps = workspaceCapabilitiesForScope(activeWsId, activeWorkspacePolicy, {
+    workspacesLoaded,
+    policyLoading: workspacePolicyLoading,
+    switching,
+    policyError: workspacePolicyError,
+  })
+  const canDraw = userCan(user, 'allow_drawing') && workspaceCaps.drawing
+  const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases') && workspaceCaps.knowledgeBases
   const activeWorkspace = useWorkspaces((s) => (s.activeId ? s.workspaces.find((w) => w.id === s.activeId) : undefined))
-  const canCreateProject = canUseKnowledgeBases && (!activeWorkspace || activeWorkspace.can_create_projects)
+  const canCreateProject = canUseKnowledgeBases &&
+    (!activeWsId || activeWorkspace?.can_create_projects === true)
+  // The library route remains directly addressable for backwards
+  // compatibility, but once all three workspace resource families are turned
+  // off there is no useful sidebar destination to show.
+  const resourceLibraryVisible = !activeWsId ||
+    workspaceCaps.prompts || workspaceCaps.skills || workspaceCaps.mcp
   const navigate = useNavigate()
   const { id: currentId } = useParams<{ id?: string }>()
   const location = useLocation()
@@ -115,8 +140,6 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
   // content — so a streaming turn's per-token message updates don't re-run the
   // filter/sort/bucket pipeline below or reconcile every row (§ perf).
   const allConversationsRaw = useConversations((s) => s.conversations, sameConvListShape)
-  const activeWsId = useWorkspaces((s) => s.activeId)
-  const switching = useWorkspaces((s) => s.switching)
   // §workspaces isolation: the cache can transiently hold rows from another
   // space (loadOne of a cross-space deep link, a stale in-flight list) — the
   // sidebar only ever RENDERS the current space's rows.
@@ -586,27 +609,29 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
           </Tooltip>
         )}
 
-        <Tooltip
-          content={collapsed ? tNav('resources', { defaultValue: 'Library' }) : ''}
-          side="right"
-        >
-          <Link
-            to="/skills"
-            onClick={onClose}
-            aria-current={skillsActive ? 'page' : undefined}
-            className={cn(
-              'inline-flex h-8 items-center gap-2 rounded-[8px] text-[13px] interactive max-lg:h-[var(--tap-min)] max-sm:!h-9 max-sm:gap-1.5',
-              skillsActive
-                ? 'bg-[var(--color-bg-muted)] text-[var(--color-fg)] font-medium'
-                : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-              collapsed ? 'w-8 justify-center px-0' : 'w-full justify-start px-2.5',
-            )}
+        {resourceLibraryVisible && (
+          <Tooltip
+            content={collapsed ? tNav('resources', { defaultValue: 'Library' }) : ''}
+            side="right"
           >
-            <LibraryBig size={15} aria-hidden />
-            {!collapsed && <span>{tNav('resources', { defaultValue: 'Library' })}</span>}
-          </Link>
-        </Tooltip>
+            <Link
+              to="/skills"
+              onClick={onClose}
+              aria-current={skillsActive ? 'page' : undefined}
+              className={cn(
+                'inline-flex h-8 items-center gap-2 rounded-[8px] text-[13px] interactive max-lg:h-[var(--tap-min)] max-sm:!h-9 max-sm:gap-1.5',
+                skillsActive
+                  ? 'bg-[var(--color-bg-muted)] text-[var(--color-fg)] font-medium'
+                  : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                collapsed ? 'w-8 justify-center px-0' : 'w-full justify-start px-2.5',
+              )}
+            >
+              <LibraryBig size={15} aria-hidden />
+              {!collapsed && <span>{tNav('resources', { defaultValue: 'Library' })}</span>}
+            </Link>
+          </Tooltip>
+        )}
       </div>
 
       {/* Conversation list — while a workspace switch is reloading data, the list
@@ -625,7 +650,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
               switching && 'opacity-0 pointer-events-none',
             )}
           >
-            <section className="py-1.5 max-sm:py-1">
+            {canUseKnowledgeBases ? <section className="py-1.5 max-sm:py-1">
               <div className="flex items-center pr-2">
                 <h3 className="min-w-0 flex-1 px-4 py-1 text-[10px] font-medium uppercase tracking-wider text-[var(--color-fg-subtle)] max-lg:py-1.5 max-lg:text-[11px] max-sm:px-3 max-sm:py-0.5">
                   <Link
@@ -757,7 +782,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
                   })}
                 </ul>
               )}
-            </section>
+            </section> : null}
 
             {starred.length > 0 && (
               <Group
@@ -1106,6 +1131,7 @@ function ConversationItem({
                 <MoveToProjectSub
                   conversationId={conversation.id}
                   currentProjectId={conversation.projectId}
+                  workspaceId={conversation.workspaceId ?? null}
                   separatorBefore
                 />
               ) : null}

@@ -55,7 +55,7 @@ func TestRegistryListMCPMapsSnapshotWithoutUnsafeDefinitions(t *testing.T) {
 	initialCollision := mcpFunctionName("server-a", trimmedRemoteName)
 	registry.Register(stubRegistryTool{name: initialCollision, output: "local collision"})
 
-	definitions := registry.ListMCP("")
+	definitions := registry.ListMCP("", "", "")
 	if len(definitions) != 2 {
 		t.Fatalf("ListMCP returned %d definitions, want 2: %#v", len(definitions), definitions)
 	}
@@ -89,11 +89,104 @@ func TestRegistryListMCPMapsSnapshotWithoutUnsafeDefinitions(t *testing.T) {
 	alphaBinding := registry.mcpBindings[definitions[0].Name]
 	betaBinding := registry.mcpBindings[definitions[1].Name]
 	registry.mu.RUnlock()
-	if alphaBinding != (mcpBinding{ServerID: "server-a", RemoteName: trimmedRemoteName}) {
+	if alphaBinding.ServerID != "server-a" || alphaBinding.RemoteName != trimmedRemoteName || alphaBinding.RuntimeFingerprint == "" {
 		t.Fatalf("alpha binding = %#v", alphaBinding)
 	}
-	if betaBinding != (mcpBinding{ServerID: "server-b", RemoteName: trimmedRemoteName}) {
+	if betaBinding.ServerID != "server-b" || betaBinding.RemoteName != trimmedRemoteName || betaBinding.RuntimeFingerprint == "" {
 		t.Fatalf("beta binding = %#v", betaBinding)
+	}
+}
+
+func TestRegistryListMCPRedactsLegacySnapshotMetadata(t *testing.T) {
+	db := newMCPRegistryTestDB(t)
+	const secret = "Bearer legacy-snapshot-secret"
+	createMCPRegistryServer(t, db, store.MCPServer{
+		ID: "legacy-secret-server", Name: "Legacy secret", Icon: "Shield",
+		Description: "Legacy snapshot", URL: "https://legacy.example.test/mcp",
+		Headers: map[string]string{"Authorization": secret}, Enabled: true,
+		DiscoveredTools: json.RawMessage(`[{"name":"lookup","title":"` + secret + ` title","description":"description ` + secret + `","inputSchema":{"type":"object","properties":{"token":{"description":"` + secret + `","default":"` + secret + `"}}},"_meta":{"echo":"` + secret + `"},"icons":[{"src":"https://cdn.example.test/` + secret + `"}]}]`),
+	})
+	registry := NewRegistry(db, config.Config{}, log.New(io.Discard, "", 0))
+	definitions := registry.ListMCP("", "", "")
+	if len(definitions) != 1 {
+		t.Fatalf("definitions=%#v", definitions)
+	}
+	definition := definitions[0]
+	if strings.Contains(definition.Description, secret) || strings.Contains(string(definition.InputSchema), secret) {
+		t.Fatalf("legacy snapshot leaked secret: description=%q schema=%s", definition.Description, definition.InputSchema)
+	}
+	if !strings.Contains(string(definition.InputSchema), mcpRuntimeSecretMask) {
+		t.Fatalf("legacy snapshot was not visibly redacted: %s", definition.InputSchema)
+	}
+}
+
+func TestRegistryListMCPRedactsHeaderSecretsFromSchemaPropertyNames(t *testing.T) {
+	db := newMCPRegistryTestDB(t)
+	const secret = "Bearer schema-property-secret"
+	createMCPRegistryServer(t, db, store.MCPServer{
+		ID: "schema-key-secret-server", Name: "Schema key secret", Icon: "Shield",
+		Description: "Schema key redaction", URL: "https://schema-key.example.test/mcp",
+		Headers: map[string]string{"Authorization": secret}, Enabled: true,
+		DiscoveredTools: json.RawMessage(`[{"name":"lookup","inputSchema":{"type":"object","properties":{` +
+			`"account-` + secret + `":{"type":"string"}}},"_meta":{"trace-` + secret + `":"safe"}}]`),
+	})
+	registry := NewRegistry(db, config.Config{}, log.New(io.Discard, "", 0))
+	definitions := registry.ListMCP("", "", "")
+	if len(definitions) != 1 {
+		t.Fatalf("definitions=%#v", definitions)
+	}
+	schema := string(definitions[0].InputSchema)
+	if strings.Contains(schema, secret) || !strings.Contains(schema, "account-"+mcpRuntimeSecretMask) {
+		t.Fatalf("schema property name was not redacted: %s", schema)
+	}
+	metadata, safe := redactMCPJSONSnapshot(
+		json.RawMessage(`{"trace-`+secret+`":{"value":"safe"}}`),
+		map[string]string{"Authorization": secret},
+	)
+	if !safe || strings.Contains(string(metadata), secret) ||
+		!strings.Contains(string(metadata), "trace-"+mcpRuntimeSecretMask) {
+		t.Fatalf("runtime metadata key was not redacted safely: safe=%t metadata=%s", safe, metadata)
+	}
+}
+
+func TestRegistryListMCPFailsClosedOnRedactedSchemaKeyCollision(t *testing.T) {
+	db := newMCPRegistryTestDB(t)
+	const secret = "Bearer schema-collision-secret"
+	createMCPRegistryServer(t, db, store.MCPServer{
+		ID: "schema-key-collision-server", Name: "Schema key collision", Icon: "Shield",
+		Description: "Schema collision", URL: "https://schema-collision.example.test/mcp",
+		Headers: map[string]string{"Authorization": secret}, Enabled: true,
+		DiscoveredTools: json.RawMessage(`[{"name":"lookup","inputSchema":{"type":"object","properties":{` +
+			`"account-` + secret + `":{"type":"string"},"account-` + mcpRuntimeSecretMask + `":{"type":"number"}}}}]`),
+	})
+	registry := NewRegistry(db, config.Config{}, log.New(io.Discard, "", 0))
+	if definitions := registry.ListMCP("", "", ""); len(definitions) != 0 {
+		t.Fatalf("colliding schema was exposed to the model: %#v", definitions)
+	}
+}
+
+func TestRegistryMCPFunctionNameRedactsHeaderSecretInRemoteName(t *testing.T) {
+	db := newMCPRegistryTestDB(t)
+	const secret = "Bearer-name-secret"
+	createMCPRegistryServer(t, db, store.MCPServer{
+		ID: "name-secret-server", Name: "Name secret", Icon: "Shield",
+		Description: "Name secret test", URL: "https://name-secret.example.test/mcp",
+		Headers: map[string]string{"Authorization": secret}, Enabled: true,
+		DiscoveredTools: json.RawMessage(`[{"name":"lookup-` + secret + `","description":"safe","inputSchema":{"type":"object"}}]`),
+	})
+	registry := NewRegistry(db, config.Config{}, log.New(io.Discard, "", 0))
+	definitions := registry.ListMCP("", "", "")
+	if len(definitions) != 1 {
+		t.Fatalf("definitions=%#v", definitions)
+	}
+	if strings.Contains(definitions[0].Name, secret) {
+		t.Fatalf("synthetic function name leaked header secret: %q", definitions[0].Name)
+	}
+	registry.mu.RLock()
+	binding := registry.mcpBindings[definitions[0].Name]
+	registry.mu.RUnlock()
+	if binding.RemoteName != "lookup-"+secret {
+		t.Fatalf("binding remote name=%q, want original protocol name", binding.RemoteName)
 	}
 }
 
@@ -195,7 +288,7 @@ func TestRegistryRunMCPRoutesRemoteMethodAndRechecksEnabledState(t *testing.T) {
 	registry := NewRegistry(db, config.Config{}, log.New(io.Discard, "", 0))
 	localCollision := mcpFunctionName(created.ID, remoteName)
 	registry.Register(stubRegistryTool{name: localCollision, output: "local collision"})
-	definitions := registry.ListMCP("")
+	definitions := registry.ListMCP("", "", "")
 	if len(definitions) != 1 {
 		t.Fatalf("ListMCP definitions = %#v", definitions)
 	}
@@ -251,6 +344,20 @@ func TestRegistryRunMCPRoutesRemoteMethodAndRechecksEnabledState(t *testing.T) {
 		if record.Method == "tools/call" && record.RemoteName != remoteName {
 			t.Fatalf("synthetic name leaked into remote route: %#v", record)
 		}
+	}
+	// Simulate a metadata update performed by another application process. No
+	// in-memory invalidation callback reaches this registry, so the declaration's
+	// persisted runtime fingerprint must still reject the stale Function instead
+	// of silently routing it to the newly configured endpoint.
+	if _, err := db.Exec(`UPDATE mcp_servers SET url=? WHERE id=?`, "https://rotated.example.test/mcp", created.ID); err != nil {
+		t.Fatalf("rotate MCP endpoint: %v", err)
+	}
+	_, _, err = registry.Run(context.Background(), functionName, json.RawMessage(`{"query":"rotated"}`), toolContext)
+	if err == nil || !strings.Contains(err.Error(), "configuration changed") {
+		t.Fatalf("stale MCP declaration after cross-process rotation error=%v", err)
+	}
+	if _, err := db.Exec(`UPDATE mcp_servers SET url=? WHERE id=?`, mcpServer.URL, created.ID); err != nil {
+		t.Fatalf("restore MCP endpoint: %v", err)
 	}
 
 	disabled := false

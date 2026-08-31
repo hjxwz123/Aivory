@@ -293,6 +293,13 @@ export interface ApiWorkspace {
   can_create_projects: boolean
   can_private_conversations: boolean
   can_create_skills_prompts: boolean
+  /** Granular workspace resource permissions (new policy fields). */
+  can_create_prompts?: boolean
+  can_create_skills?: boolean
+  can_create_mcp?: boolean
+  can_use_prompts?: boolean
+  can_use_skills?: boolean
+  can_use_mcp?: boolean
   can_create_kb: boolean
   can_add_kb_files: boolean
   can_delete_kb_content: boolean
@@ -311,6 +318,12 @@ export interface ApiWorkspaceMember {
   can_create_projects: boolean
   can_private_conversations: boolean
   can_create_skills_prompts: boolean
+  can_create_prompts?: boolean
+  can_create_skills?: boolean
+  can_create_mcp?: boolean
+  can_use_prompts?: boolean
+  can_use_skills?: boolean
+  can_use_mcp?: boolean
   can_create_kb: boolean
   can_add_kb_files: boolean
   can_delete_kb_content: boolean
@@ -321,6 +334,13 @@ export interface ApiWorkspaceMemberPermissions {
   can_create_projects: boolean
   can_private_conversations: boolean
   can_create_skills_prompts: boolean
+  /** Creation and usage are intentionally independent capabilities. */
+  can_create_prompts?: boolean
+  can_create_skills?: boolean
+  can_create_mcp?: boolean
+  can_use_prompts?: boolean
+  can_use_skills?: boolean
+  can_use_mcp?: boolean
   can_create_kb: boolean
   can_add_kb_files: boolean
   can_delete_kb_content: boolean
@@ -349,8 +369,15 @@ export interface ApiWorkspacePolicy {
   AllowedModelIDs: string[]
   AllowedToolIDs: string[]
   AllowedMCPServerIDs: string[]
-  AllowSandbox: boolean
-  AllowImageGeneration: boolean
+  /** Workspace-wide capability switches. */
+  AllowToolCalling: boolean
+  AllowDrawing: boolean
+  AllowMCP: boolean
+  AllowSkills: boolean
+  AllowPrompts: boolean
+  /** Deprecated fields retained for older deployments. */
+  AllowSandbox?: boolean
+  AllowImageGeneration?: boolean
   AllowKnowledgeBases: boolean
   AllowFileUpload: boolean
   MemberMonthlyCreditLimit: number
@@ -999,6 +1026,44 @@ export interface ApiUserPrompt {
   source_prompt_id?: string
   created_at: number
   updated_at: number
+}
+
+/** One remote method discovered from a user-managed Streamable HTTP MCP server. */
+export interface ApiUserMCPTool {
+  name: string
+  title?: string
+  description?: string
+  inputSchema?: Record<string, unknown>
+}
+
+/** A Streamable HTTP MCP connection managed by the signed-in user in the
+ * resource library, mirroring the administrator `ApiMCPServer` row. Header
+ * values in read responses may be masked; a row only becomes selectable in
+ * the tool picker once it is enabled and has a non-empty `discovered_tools`
+ * snapshot. */
+export interface ApiUserMCP {
+  id: string
+  workspace_id?: string
+  can_manage: boolean
+  name: string
+  icon: string
+  description: string
+  url: string
+  headers: Record<string, string>
+  enabled: boolean
+  protocol_version?: string
+  discovered_tools?: ApiUserMCPTool[]
+  last_error?: string
+  last_synced_at?: number
+  created_at?: number
+  updated_at?: number
+}
+
+/** Result of `POST /me/mcps/:id/test`. The probe never persists anything. */
+export interface ApiUserMCPTestResult {
+  ok: boolean
+  tools?: ApiUserMCPTool[]
+  error?: string
 }
 
 export interface ApiLibraryCatalogSkill {

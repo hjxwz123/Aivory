@@ -67,6 +67,7 @@ import { conversationsApi } from '@/api/endpoints'
 import type { ApiConversation } from '@/api/types'
 import { resolveNewConversationFastMode } from '@/lib/chat-defaults'
 import { userCan } from '@/lib/user-permissions'
+import { workspaceCapabilitiesForScope } from '@/lib/workspace-permissions'
 import { subscribeAccessInvalidation } from '@/lib/access-events'
 
 type ProjectUploadHandlers = {
@@ -81,9 +82,7 @@ export default function ProjectDetail() {
   const navigate = useNavigate()
   const { t } = useTranslation(['projects', 'chat', 'common', 'kb'])
   const user = useAuth((s) => s.user)
-  const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases')
-  const canUseKnowledgeBasesRef = useRef(canUseKnowledgeBases)
-  canUseKnowledgeBasesRef.current = canUseKnowledgeBases
+  const activeWorkspaceId = useWorkspaces((s) => s.activeId)
 
   const project = useProjects((s) => s.projects.find((p) => p.id === id))
   const loadOne = useProjects((s) => s.loadOne)
@@ -95,6 +94,40 @@ export default function ProjectDetail() {
   const uploadFile = useProjects((s) => s.uploadFile)
   const removeFile = useProjects((s) => s.removeFile)
   const renameFile = useProjects((s) => s.renameFile)
+  // A detail link can be opened directly, so prefer the project's own scope
+  // once it is hydrated instead of blindly trusting the currently selected
+  // workspace. This keeps a policy from one workspace from leaking into
+  // another project's controls.
+  // Use the project's persisted scope once it is hydrated. A personal project
+  // has no workspace id and must not inherit the currently selected workspace's
+  // policy (or accidentally create its next conversation inside that space).
+  // While the detail request is still resolving, the active id is only used to
+  // prefetch a likely policy and is replaced as soon as the project row arrives.
+  const projectWorkspaceId = project
+    ? (project.workspaceId || undefined)
+    : (activeWorkspaceId || undefined)
+  const workspacePolicy = useWorkspaces((s) =>
+    projectWorkspaceId ? s.policies[projectWorkspaceId] : undefined,
+  )
+  const loadWorkspacePolicy = useWorkspaces((s) => s.loadPolicy)
+  const workspacesLoaded = useWorkspaces((s) => s.loaded)
+  const workspacePolicyLoading = useWorkspaces((s) =>
+    projectWorkspaceId ? s.policyLoading[projectWorkspaceId] === true : false,
+  )
+  const workspaceSwitching = useWorkspaces((s) => s.switching)
+  const workspacePolicyError = useWorkspaces((s) =>
+    projectWorkspaceId ? s.policyErrors[projectWorkspaceId] : null,
+  )
+  const workspaceCaps = workspaceCapabilitiesForScope(projectWorkspaceId, workspacePolicy, {
+    workspacesLoaded,
+    policyLoading: workspacePolicyLoading,
+    switching: workspaceSwitching,
+    policyError: workspacePolicyError,
+  })
+  const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases') &&
+    (!projectWorkspaceId || workspaceCaps.knowledgeBases)
+  const canUseKnowledgeBasesRef = useRef(canUseKnowledgeBases)
+  canUseKnowledgeBasesRef.current = canUseKnowledgeBases
   const [resolvingProject, setResolvingProject] = useState(
     () => Boolean(id && !useProjects.getState().getProject(id)),
   )
@@ -117,6 +150,16 @@ export default function ProjectDetail() {
     }
   }, [canUseKnowledgeBases, id, loadOne])
 
+  // The workspace store normally hydrates the active policy during login or a
+  // space switch. Direct project links may belong to a different scope, so
+  // fetch that policy lazily as soon as the project identity is known.
+  useEffect(() => {
+    if (!projectWorkspaceId) return
+    const state = useWorkspaces.getState()
+    if (state.policies[projectWorkspaceId] || state.policyLoading[projectWorkspaceId]) return
+    void loadWorkspacePolicy(projectWorkspaceId)
+  }, [loadWorkspacePolicy, projectWorkspaceId])
+
   // Summary-only subscription so a streaming conversation's per-token updates
   // don't re-render this page (same fix as sidebar/command-menu).
   const allConversations = useConversations((s) => s.conversations, sameConvListShape)
@@ -126,7 +169,7 @@ export default function ProjectDetail() {
   const defaultModelId = useModels((s) => s.defaultId)
   const fastAvailable = useModels((s) => s.fastAvailable)
   const userId = user?.id
-  const workspaceId = useWorkspaces((s) => s.activeId ?? undefined)
+  const workspaceId = projectWorkspaceId
   const setGlobalDefaultModel = useModels((s) => s.setDefaultId)
   const [projectComposerModelId, setProjectComposerModelId] = useState('')
   const [pickedFast, setPickedFast] = useState<boolean | null>(null)
@@ -215,7 +258,7 @@ export default function ProjectDetail() {
   )
   const [visibilityBusy, setVisibilityBusy] = useState(false)
   async function toggleProjectVisibility() {
-    if (!project || visibilityBusy) return
+    if (!project || !canUseKnowledgeBasesRef.current || visibilityBusy) return
     setVisibilityBusy(true)
     const ok = await setProjectVisibility(project.id, !project.isPublic)
     setVisibilityBusy(false)
@@ -242,6 +285,19 @@ export default function ProjectDetail() {
     if (canDeleteProject) return
     setConfirmDelete(false)
   }, [canDeleteProject])
+
+  useEffect(() => {
+    if (canUseKnowledgeBases) return
+    // Close every mutation surface when the workspace policy changes while
+    // this page is open. The backend remains authoritative, but keeping stale
+    // dialogs mounted would invite a request that is guaranteed to be denied.
+    setRenameOpen(false)
+    setEditOpen(false)
+    setEditingInstructions(false)
+    setAddFileOpen(false)
+    setRenameFileState(null)
+    setConfirmDelete(false)
+  }, [canUseKnowledgeBases])
 
   useEffect(
     () =>
@@ -381,6 +437,18 @@ export default function ProjectDetail() {
     return <ProjectDetailSkeleton label={t('common:common.loading')} />
   }
 
+  if (!canUseKnowledgeBases) {
+    return (
+      <div className="flex-1 grid place-items-center px-5">
+        <EmptyState
+          title={t('projects:detail.accessDenied', { defaultValue: 'Projects are unavailable in this workspace.' })}
+          description={t('projects:detail.accessDeniedBody', { defaultValue: 'The workspace administrator has disabled knowledge bases and projects.' })}
+          action={<Button onClick={() => navigate('/projects')}>{t('projects:detail.goToProjects')}</Button>}
+        />
+      </div>
+    )
+  }
+
   if (!project) {
     return (
       <div className="flex-1 grid place-items-center">
@@ -399,7 +467,7 @@ export default function ProjectDetail() {
     setEditingInstructions(true)
   }
   async function saveInstructions() {
-    if (!project) return
+    if (!project || !canUseKnowledgeBasesRef.current) return
     setSavingInstructions(true)
     try {
       const saved = await updateProject(project.id, { instructions: instructionsDraft })
@@ -418,7 +486,7 @@ export default function ProjectDetail() {
     setRenameOpen(true)
   }
   async function submitRename() {
-    if (!project || renaming || !renameDraft.trim()) return
+    if (!project || !canUseKnowledgeBasesRef.current || renaming || !renameDraft.trim()) return
     setRenaming(true)
     try {
       if (await renameProject(project.id, renameDraft)) {
@@ -442,7 +510,7 @@ export default function ProjectDetail() {
     setEditOpen(true)
   }
   async function submitEdit() {
-    if (!project || savingDetails) return
+    if (!project || !canUseKnowledgeBasesRef.current || savingDetails) return
     // Send empty strings (not undefined) so clearing the description/marker is
     // actually transmitted — JSON.stringify drops undefined fields, which would
     // silently keep the old value on the backend.
@@ -467,7 +535,7 @@ export default function ProjectDetail() {
   }
 
   async function submitDelete() {
-    if (!project || !canDeleteProject) return
+    if (!project || !canUseKnowledgeBasesRef.current || !canDeleteProject) return
     if (deletingRef.current) return
     deletingRef.current = true
     setDeleting(true)
@@ -652,6 +720,7 @@ export default function ProjectDetail() {
                   }}
                   onSubmit={(text, atts, opts) => void startProjectChat(text, atts, opts)}
                   conversationId={pendingConversationId}
+                  workspaceId={workspaceId ?? null}
                   draftScope={toolModeDraftScope}
                   kbIds={selectedKnowledgeBaseIds}
                   projectKBId={project.kbId}
@@ -933,7 +1002,11 @@ export default function ProjectDetail() {
                             </button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <MoveToProjectSub conversationId={c.id} currentProjectId={project.id} />
+                            <MoveToProjectSub
+                              conversationId={c.id}
+                              currentProjectId={project.id}
+                              workspaceId={c.workspaceId ?? null}
+                            />
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>

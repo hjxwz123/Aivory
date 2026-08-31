@@ -14,14 +14,19 @@ var (
 	// configuration changed after the caller read it. Callers must reload the
 	// row instead of merging a stale update with a different trust domain.
 	ErrOAuthProviderChanged = errors.New("oauth_provider_changed")
-	ErrUserGroupNameExists  = errors.New("name_exists")
-	ErrModelRequestExists   = errors.New("model_request_exists")
-	ErrModelTagNameExists   = errors.New("name_exists")
-	ErrImageStyleNameExists = errors.New("name_exists")
-	ErrProjectNameExists    = errors.New("name_exists")
-	ErrKBNameExists         = errors.New("name_exists")
-	ErrProjectLimitExceeded = errors.New("project limit exceeded")
-	ErrKBLimitExceeded      = errors.New("knowledge base limit exceeded")
+	// ErrMCPDiscoveryStateChanged means the endpoint, credentials, enabled state,
+	// or a newer discovery result changed after a tools/list request started.
+	// Discovery callers must discard their result instead of overwriting the
+	// newer row with metadata fetched under an obsolete trust configuration.
+	ErrMCPDiscoveryStateChanged = errors.New("mcp_discovery_state_changed")
+	ErrUserGroupNameExists      = errors.New("name_exists")
+	ErrModelRequestExists       = errors.New("model_request_exists")
+	ErrModelTagNameExists       = errors.New("name_exists")
+	ErrImageStyleNameExists     = errors.New("name_exists")
+	ErrProjectNameExists        = errors.New("name_exists")
+	ErrKBNameExists             = errors.New("name_exists")
+	ErrProjectLimitExceeded     = errors.New("project limit exceeded")
+	ErrKBLimitExceeded          = errors.New("knowledge base limit exceeded")
 	// ErrOAuthIdentityConflict — the (provider, subject) is already linked to a
 	// DIFFERENT local user, so it can't be bound here (§ identity linking).
 	ErrOAuthIdentityConflict = errors.New("oauth_identity_conflict")

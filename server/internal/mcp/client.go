@@ -144,8 +144,9 @@ func (c *Client) discoverModern(ctx context.Context) (Discovery, error) {
 	if err := json.Unmarshal(result, &payload); err != nil {
 		return Discovery{}, fmt.Errorf("decode server/discover result: %w", err)
 	}
-	if payload.ProtocolVersion == "" {
-		payload.ProtocolVersion = ModernProtocolVersion
+	payload.ProtocolVersion, err = normalizeProtocolVersion(payload.ProtocolVersion, ModernProtocolVersion)
+	if err != nil {
+		return Discovery{}, err
 	}
 	return payload.discovery(ModeModern), nil
 }
@@ -175,8 +176,10 @@ func (c *Client) discoverLegacy(ctx context.Context) (Discovery, string, error) 
 			attemptErrors = append(attemptErrors, fmt.Errorf("decode initialize %s result: %w", version, err))
 			continue
 		}
-		if payload.ProtocolVersion == "" {
-			payload.ProtocolVersion = version
+		payload.ProtocolVersion, err = normalizeProtocolVersion(payload.ProtocolVersion, version)
+		if err != nil {
+			attemptErrors = append(attemptErrors, fmt.Errorf("initialize %s: %w", version, err))
+			continue
 		}
 		if err := c.rpcNotify(ctx, "notifications/initialized", map[string]any{}, callOptions{
 			protocolVersion: payload.ProtocolVersion,
@@ -187,6 +190,34 @@ func (c *Client) discoverLegacy(ctx context.Context) (Discovery, string, error) 
 		return payload.discovery(ModeLegacy), meta.sessionID, nil
 	}
 	return Discovery{}, "", errors.Join(attemptErrors...)
+}
+
+func normalizeProtocolVersion(value, fallback string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		value = fallback
+	}
+	// MCP protocol versions use the YYYY-MM-DD format. Besides rejecting an
+	// unusable negotiation, this prevents a hostile server from reflecting a
+	// configured credential into persisted/API-visible protocol metadata.
+	if len(value) != len("2006-01-02") {
+		return "", errors.New("invalid MCP protocol version")
+	}
+	for index, char := range value {
+		if index == 4 || index == 7 {
+			if char != '-' {
+				return "", errors.New("invalid MCP protocol version")
+			}
+			continue
+		}
+		if char < '0' || char > '9' {
+			return "", errors.New("invalid MCP protocol version")
+		}
+	}
+	if _, err := time.Parse("2006-01-02", value); err != nil {
+		return "", errors.New("invalid MCP protocol version")
+	}
+	return value, nil
 }
 
 // ListTools returns all tools exposed by the endpoint, following MCP cursors up
@@ -200,6 +231,7 @@ func (c *Client) ListTools(ctx context.Context) ([]Tool, error) {
 	tools := make([]Tool, 0)
 	cursor := ""
 	seenCursors := make(map[string]struct{})
+	var responseBytes int64
 	for page := 0; page < maxListPages; page++ {
 		params := make(map[string]any)
 		if cursor != "" {
@@ -211,6 +243,14 @@ func (c *Client) ListTools(ctx context.Context) ([]Tool, error) {
 		if err != nil {
 			return nil, fmt.Errorf("list MCP tools: %w", err)
 		}
+		// post already bounds each HTTP response. Apply the same limit to the
+		// complete paginated operation so a server cannot force us to retain up to
+		// maxListPages individually-valid responses in memory.
+		resultBytes := int64(len(result))
+		if resultBytes > c.maxResponseBytes-responseBytes {
+			return nil, &ResponseTooLargeError{Limit: c.maxResponseBytes}
+		}
+		responseBytes += resultBytes
 		var payload struct {
 			Tools      []Tool `json:"tools"`
 			NextCursor string `json:"nextCursor"`
@@ -348,13 +388,23 @@ func validateEndpoint(raw string) (string, error) {
 	}
 	u, err := url.ParseRequestURI(raw)
 	if err != nil {
-		return "", fmt.Errorf("invalid MCP URL: %w", err)
+		// url.Error includes the original URL. Imported/legacy rows can predate
+		// API validation and may contain a credential in that string, so keep the
+		// validation error intentionally generic at this lowest shared boundary.
+		return "", errors.New("invalid MCP URL")
 	}
 	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return "", errors.New("MCP URL must be an absolute http or https URL")
 	}
 	if u.User != nil {
 		return "", errors.New("MCP URL must not contain user information")
+	}
+	// Credentials belong in the write-only headers map. Query strings are
+	// routinely copied into request logs, proxy metrics, browser history, and
+	// API responses, so allowing them would make a token-bearing endpoint easy
+	// to disclose. Reject both a non-empty query and a bare force-query marker.
+	if u.RawQuery != "" || u.ForceQuery {
+		return "", errors.New("MCP URL must not contain query parameters")
 	}
 	return u.String(), nil
 }

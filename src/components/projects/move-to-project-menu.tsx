@@ -14,6 +14,8 @@ import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/store/auth'
 import { userCan } from '@/lib/user-permissions'
+import { useWorkspaces } from '@/store/workspaces'
+import { workspaceCapabilitiesForScope } from '@/lib/workspace-permissions'
 
 interface MoveToProjectSubProps {
   conversationId: string
@@ -21,6 +23,8 @@ interface MoveToProjectSubProps {
   currentProjectId?: string
   /** Render a group divider only when this submenu is actually available. */
   separatorBefore?: boolean
+  /** Workspace scope of the conversation. Omit to follow the active workspace. */
+  workspaceId?: string | null
 }
 
 /**
@@ -29,12 +33,32 @@ interface MoveToProjectSubProps {
  * project, a "Remove from project" entry that turns it back into a loose chat.
  * Drop it inside any <DropdownMenuContent>.
  */
-export function MoveToProjectSub({ conversationId, currentProjectId, separatorBefore = false }: MoveToProjectSubProps) {
+export function MoveToProjectSub({ conversationId, currentProjectId, separatorBefore = false, workspaceId: scopedWorkspaceId }: MoveToProjectSubProps) {
   const { t } = useTranslation(['chat', 'projects'])
   const projects = useProjects((s) => s.projects)
   const setProject = useConversations((s) => s.setProject)
   const user = useAuth((s) => s.user)
-  const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases')
+  const activeWorkspaceId = useWorkspaces((s) => s.activeId)
+  const workspaceId = scopedWorkspaceId !== undefined ? scopedWorkspaceId : activeWorkspaceId
+  const workspacesLoaded = useWorkspaces((s) => s.loaded)
+  const workspacePolicyLoading = useWorkspaces((s) =>
+    workspaceId ? s.policyLoading[workspaceId] === true : false,
+  )
+  const workspaceSwitching = useWorkspaces((s) => s.switching)
+  const workspacePolicyError = useWorkspaces((s) =>
+    workspaceId ? s.policyErrors[workspaceId] : null,
+  )
+  const activeWorkspacePolicy = useWorkspaces((s) =>
+    workspaceId ? s.policies[workspaceId] : undefined,
+  )
+  const workspaceCaps = workspaceCapabilitiesForScope(workspaceId, activeWorkspacePolicy, {
+    workspacesLoaded,
+    policyLoading: workspacePolicyLoading,
+    switching: workspaceSwitching,
+    policyError: workspacePolicyError,
+  })
+  const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases') &&
+    workspaceCaps.knowledgeBases
 
   if (!canUseKnowledgeBases && !currentProjectId) return null
 

@@ -4,22 +4,24 @@
   "newSkill": "New skill",
   "kinds": {
     "skill": "Skill",
-    "prompt": "Prompt"
+    "prompt": "Prompt",
+    "mcp": "MCP"
   },
   "tabs": {
     "mine": "Mine",
     "catalog": "Catalog"
   },
-  "search": "Search skills and prompts",
+  "search": "Search skills, prompts, and MCP services",
   "filter": {
     "label": "Filter by type",
     "all": "All",
     "skill": "Skills",
-    "prompt": "Prompts"
+    "prompt": "Prompts",
+    "mcp": "MCP services"
   },
   "empty": {
     "search": "No matching items",
-    "mine": "You have no skills or prompts yet",
+    "mine": "You have no skills, prompts, or MCP services yet",
     "catalog": "The catalog is empty"
   },
   "catalog": {
@@ -50,6 +52,39 @@
     "nameExists": "An item with this name already exists in your library.",
     "created": "Created",
     "updated": "Updated"
+  },
+  "mcpEditor": {
+    "newTitle": "New MCP service",
+    "editTitle": "Edit MCP service",
+    "name": "Name",
+    "icon": "Icon",
+    "description": "Tool description",
+    "url": "Streamable HTTP URL",
+    "urlHint": "The endpoint must accept MCP JSON-RPC requests over Streamable HTTP.",
+    "headers": "Request headers",
+    "headerKey": "Header name",
+    "headerValue": "Header value",
+    "addHeader": "Add header",
+    "enabled": "Enabled",
+    "enabledHint": "When enabled, its synchronized tools appear under “My tools” in the tool picker.",
+    "test": "Test",
+    "testOk": "Connection successful",
+    "testFailed": "Connection failed",
+    "sync": "Sync tools",
+    "synced": "Tools synchronized",
+    "toolsCount_one": "{{count}} tool",
+    "toolsCount_other": "{{count}} tools"
+  },
+  "mcpStatus": {
+    "error": "Connection error",
+    "notSynced": "Not synced"
+  },
+  "permissions": {
+    "createResource": "You cannot create this resource in the workspace.",
+    "manageResource": "You cannot manage this resource in the workspace.",
+    "createMcp": "You cannot create MCP services in this workspace.",
+    "manageMcp": "You cannot manage this MCP service.",
+    "useMcp": "You cannot use MCP services in this workspace."
   },
   "remove": {
     "title": "Delete this item?",

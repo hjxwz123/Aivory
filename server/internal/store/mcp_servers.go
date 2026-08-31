@@ -157,9 +157,33 @@ type MCPServerPatch struct {
 	URL         *string
 	Headers     *map[string]string
 	Enabled     *bool
+	// ResetDiscovery atomically retires the snapshot negotiated for the previous
+	// endpoint/credentials. API callers set it when trust-bearing metadata changes
+	// or a disabled service is re-enabled, so runtime readers can never observe a
+	// new endpoint paired with stale tool definitions between two SQL statements.
+	ResetDiscovery bool
 }
 
 func UpdateMCPServer(ctx context.Context, db *sql.DB, id string, patch MCPServerPatch) (*MCPServer, error) {
+	return updateMCPServer(ctx, db, id, nil, patch)
+}
+
+// UpdateMCPServerIfCurrent applies a metadata patch only while the endpoint,
+// credentials, enabled state, and discovery generation still match expected.
+// Handlers use this with ResetDiscovery so the decision to retire a snapshot is
+// based on the same row version the SQL statement updates.
+func UpdateMCPServerIfCurrent(
+	ctx context.Context, db *sql.DB, expected MCPServer, patch MCPServerPatch,
+) (*MCPServer, error) {
+	if strings.TrimSpace(expected.ID) == "" {
+		return nil, ErrNotFound
+	}
+	return updateMCPServer(ctx, db, expected.ID, &expected, patch)
+}
+
+func updateMCPServer(
+	ctx context.Context, db *sql.DB, id string, expected *MCPServer, patch MCPServerPatch,
+) (*MCPServer, error) {
 	parts := []string{}
 	args := []any{}
 	if patch.Name != nil {
@@ -190,13 +214,30 @@ func UpdateMCPServer(ctx context.Context, db *sql.DB, id string, patch MCPServer
 		parts = append(parts, "enabled=?")
 		args = append(args, boolInt(*patch.Enabled))
 	}
+	if patch.ResetDiscovery {
+		parts = append(parts,
+			"discovered_tools=?", "protocol_version=?", "last_error=?", "last_synced_at=?",
+		)
+		args = append(args, "[]", "", "", int64(0))
+	}
 	if len(parts) == 0 {
 		return GetMCPServer(ctx, db, id)
 	}
 	parts = append(parts, "updated_at=?")
-	args = append(args, time.Now().Unix(), id)
+	args = append(args, time.Now().Unix())
+	where := "id=?"
+	args = append(args, id)
+	if expected != nil {
+		headers, err := json.Marshal(nonNilMCPHeaders(expected.Headers))
+		if err != nil {
+			return nil, fmt.Errorf("encode expected MCP headers: %w", err)
+		}
+		where += ` AND url=? AND headers=? AND enabled=? AND discovered_tools=? AND protocol_version=? AND last_synced_at=?`
+		args = append(args, expected.URL, string(headers), boolInt(expected.Enabled),
+			string(expected.DiscoveredTools), expected.ProtocolVersion, expected.LastSyncedAt)
+	}
 	result, err := db.ExecContext(ctx,
-		`UPDATE mcp_servers SET `+strings.Join(parts, ", ")+` WHERE id=?`, args...)
+		`UPDATE mcp_servers SET `+strings.Join(parts, ", ")+` WHERE `+where, args...)
 	if err != nil {
 		if isMCPServerNameUniqueErr(err) {
 			return nil, ErrMCPServerNameExists
@@ -204,6 +245,9 @@ func UpdateMCPServer(ctx context.Context, db *sql.DB, id string, patch MCPServer
 		return nil, err
 	}
 	if count, _ := result.RowsAffected(); count == 0 {
+		if expected != nil {
+			return nil, ErrMCPDiscoveryStateChanged
+		}
 		return nil, ErrNotFound
 	}
 	return GetMCPServer(ctx, db, id)
@@ -216,6 +260,49 @@ func UpdateMCPServerSyncState(
 	ctx context.Context,
 	db *sql.DB,
 	id string,
+	discoveredTools json.RawMessage,
+	protocolVersion string,
+	lastError string,
+	lastSyncedAt int64,
+) (*MCPServer, error) {
+	return updateMCPServerSyncState(
+		ctx, db, id, nil, discoveredTools, protocolVersion, lastError, lastSyncedAt,
+	)
+}
+
+// UpdateMCPServerSyncStateIfCurrent is the discovery compare-and-swap path.
+// The remote handshake may take seconds, so every trust-bearing field and the
+// previous discovery generation are matched in the UPDATE itself. A metadata
+// edit, disable, deletion, or newer sync therefore makes this result stale and
+// prevents it from replacing the authoritative row.
+func UpdateMCPServerSyncStateIfCurrent(
+	ctx context.Context,
+	db *sql.DB,
+	expected MCPServer,
+	discoveredTools json.RawMessage,
+	protocolVersion string,
+	lastError string,
+	lastSyncedAt int64,
+) (*MCPServer, error) {
+	if strings.TrimSpace(expected.ID) == "" {
+		return nil, ErrNotFound
+	}
+	if lastSyncedAt <= expected.LastSyncedAt {
+		lastSyncedAt = time.Now().Unix()
+		if lastSyncedAt <= expected.LastSyncedAt {
+			lastSyncedAt = expected.LastSyncedAt + 1
+		}
+	}
+	return updateMCPServerSyncState(
+		ctx, db, expected.ID, &expected, discoveredTools, protocolVersion, lastError, lastSyncedAt,
+	)
+}
+
+func updateMCPServerSyncState(
+	ctx context.Context,
+	db *sql.DB,
+	id string,
+	expected *MCPServer,
 	discoveredTools json.RawMessage,
 	protocolVersion string,
 	lastError string,
@@ -234,13 +321,31 @@ func UpdateMCPServerSyncState(
 		parts = append(parts, "discovered_tools=?")
 		args = append(args, string(normalized))
 	}
+	where := "id=?"
 	args = append(args, id)
+	if expected != nil {
+		headers, err := json.Marshal(nonNilMCPHeaders(expected.Headers))
+		if err != nil {
+			return nil, fmt.Errorf("encode expected MCP headers: %w", err)
+		}
+		// Name/icon/description are included as well as endpoint credentials. They
+		// do not change the transport, but a concurrent editor should still receive
+		// the response for the row they saved, not an older discovery request.
+		where += ` AND name=? AND icon=? AND description=? AND url=? AND headers=? AND enabled=? AND last_synced_at=?`
+		args = append(args,
+			expected.Name, expected.Icon, expected.Description, expected.URL, string(headers),
+			boolInt(expected.Enabled), expected.LastSyncedAt,
+		)
+	}
 	result, err := db.ExecContext(ctx,
-		`UPDATE mcp_servers SET `+strings.Join(parts, ", ")+` WHERE id=?`, args...)
+		`UPDATE mcp_servers SET `+strings.Join(parts, ", ")+` WHERE `+where, args...)
 	if err != nil {
 		return nil, err
 	}
 	if count, _ := result.RowsAffected(); count == 0 {
+		if expected != nil {
+			return nil, ErrMCPDiscoveryStateChanged
+		}
 		return nil, ErrNotFound
 	}
 	return GetMCPServer(ctx, db, id)

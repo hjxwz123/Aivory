@@ -13,6 +13,8 @@ import { ModelIcon } from '@/components/chat/model-icon'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/store/auth'
 import { userCan } from '@/lib/user-permissions'
+import { workspaceCapabilitiesForScope } from '@/lib/workspace-permissions'
+import { useWorkspaces } from '@/store/workspaces'
 import { findSelectedModel, isSelectedModelUnavailable } from '@/lib/model-selection'
 
 interface ModelPickerProps {
@@ -27,6 +29,9 @@ interface ModelPickerProps {
   menuAlign?: 'start' | 'center' | 'end'
   /** Keep the current model visible while preventing changes in read-only views. */
   disabled?: boolean
+  /** Workspace scope for policy-gated image models. Omit to follow the active
+   * workspace; pass `null` for a personal conversation. */
+  workspaceId?: string | null
 }
 
 /**
@@ -43,11 +48,33 @@ export function ModelPicker({
   className,
   menuAlign = 'end',
   disabled = false,
+  workspaceId: scopedWorkspaceId,
 }: ModelPickerProps) {
   const models = useModels((s) => s.models)
   const storedImageModels = useModels((s) => s.imageModels)
   const user = useAuth((state) => state.user)
-  const imageModels = userCan(user, 'allow_drawing') ? storedImageModels : []
+  const activeWorkspaceId = useWorkspaces((state) => state.activeId ?? undefined)
+  const workspaceId = scopedWorkspaceId !== undefined ? scopedWorkspaceId ?? undefined : activeWorkspaceId
+  const workspacesLoaded = useWorkspaces((state) => state.loaded)
+  const workspacePolicyLoading = useWorkspaces((state) =>
+    workspaceId ? state.policyLoading[workspaceId] === true : false,
+  )
+  const workspaceSwitching = useWorkspaces((state) => state.switching)
+  const workspacePolicyError = useWorkspaces((state) =>
+    workspaceId ? state.policyErrors[workspaceId] : null,
+  )
+  const workspacePolicy = useWorkspaces((state) =>
+    workspaceId ? state.policies[workspaceId] : undefined,
+  )
+  const workspaceCaps = workspaceCapabilitiesForScope(workspaceId, workspacePolicy, {
+    workspacesLoaded,
+    policyLoading: workspacePolicyLoading,
+    switching: workspaceSwitching,
+    policyError: workspacePolicyError,
+  })
+  const imageModels = userCan(user, 'allow_drawing') && workspaceCaps.drawing
+    ? storedImageModels
+    : []
   const tags = useModels((s) => s.tags)
   const fastAvailable = useModels((s) => s.fastAvailable)
   const modelsLoaded = useModels((s) => s.loaded)

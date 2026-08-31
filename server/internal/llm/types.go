@@ -106,6 +106,11 @@ type UnifiedChatRequest struct {
 	// It is carried into transparent model fallback so a fallback cannot broaden
 	// access even when its own default tool set is larger.
 	ToolAccessPolicy *ToolAccessPolicy
+	// WorkspaceID keeps the conversation's workspace scope across a transparent
+	// TTFT model fallback. The runtime registry rebuilds the user-MCP tool set
+	// per turn from (UserID, WorkspaceID); without it a fallback would silently
+	// degrade personal or workspace user servers.
+	WorkspaceID string
 	// ToolsEnabled records the resolved turn policy independently of whether the
 	// primary model happens to configure any tools. TTFT fallback uses it to rebuild
 	// the fallback model's complete administrator-configured tool collection.
@@ -148,11 +153,26 @@ type UnifiedChatRequest struct {
 // decides which local tools start selected; this policy decides which catalog
 // entries the current user may ever declare or execute.
 type ToolAccessPolicy struct {
-	Mode         string
-	IDs          []string
-	AllowDrawing bool
-	AllowMemory  bool
-	AllowSkills  bool
+	Mode string
+	IDs  []string
+	// AllowToolCalling is the workspace-wide switch for every model tool
+	// declaration and execution. Group policies and personal conversations set
+	// this to true; a workspace policy may narrow it to false.
+	AllowToolCalling bool
+	// ToolCallingConfigured distinguishes an explicit false from the zero value
+	// of a policy created by an older internal caller. It is intentionally not a
+	// user-facing field; new policy constructors must set it to true.
+	ToolCallingConfigured bool
+	// AllowMCP is the workspace-wide MCP capability. It is checked in addition
+	// to the normal tool allowlist so user-owned MCP servers cannot use the
+	// owner exemption to bypass a workspace shutdown.
+	AllowMCP bool
+	// MCPConfigured has the same backwards-compatibility role as
+	// ToolCallingConfigured for AllowMCP.
+	MCPConfigured bool
+	AllowDrawing  bool
+	AllowMemory   bool
+	AllowSkills   bool
 	// SkillMode and SkillIDs independently cap administrator-managed skills.
 	// A group may allow use_skill as a tool while exposing only selected skills.
 	SkillMode string
@@ -215,13 +235,20 @@ type ToolDef struct {
 
 // MCPToolDef is one executable Function discovered from an administrator-
 // configured MCP service. ServerID groups multiple remote methods behind the
-// single service-level item presented in the user tool picker.
+// single service-level item presented in the user tool picker. UserOwned marks
+// a user-scoped "usermcp:" server so the orchestrator can keep private
+// servers out of models.mcp_server_ids defaults and the filters can route the
+// selection through the right catalog namespace. OwnerExempt is true only when
+// the scoped row was created by the current caller; teammate-owned workspace
+// rows remain subject to the user's group tool policy.
 type MCPToolDef struct {
 	ToolDef
 	ServerID           string
 	DisplayName        string
 	DisplayDescription string
 	Icon               string
+	UserOwned          bool
+	OwnerExempt        bool
 }
 
 // SseEvent is the on-the-wire shape per §6.2. Always lowercase, snake_case.

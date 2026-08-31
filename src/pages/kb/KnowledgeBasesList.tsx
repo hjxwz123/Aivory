@@ -35,21 +35,43 @@ import { formatRelativeDate } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { useAuth } from '@/store/auth'
 import { userCan } from '@/lib/user-permissions'
+import { workspaceCapabilitiesForScope } from '@/lib/workspace-permissions'
 import { subscribeAccessInvalidation } from '@/lib/access-events'
 import { knowledgeBaseErrorText, knowledgeBaseOperationErrorText } from '@/lib/knowledge-base-errors'
 
 export default function KnowledgeBasesList() {
   const { t } = useTranslation(['kb', 'common'])
   const user = useAuth((s) => s.user)
-  const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases')
   // §workspaces: KBs aren't part of reloadSpaceData(), so this page re-fetches
   // itself when the active space changes (after the switch settles).
   const activeWsId = useWorkspaces((s) => s.activeId)
   const wsSwitching = useWorkspaces((s) => s.switching)
+  const workspacesLoaded = useWorkspaces((s) => s.loaded)
   const activeWorkspace = useWorkspaces((s) =>
     s.activeId ? s.workspaces.find((workspace) => workspace.id === s.activeId) : undefined,
   )
-  const canCreateKnowledgeBase = !activeWsId || activeWorkspace?.can_create_kb === true
+  const activeWorkspacePolicy = useWorkspaces((s) =>
+    s.activeId ? s.policies[s.activeId] : undefined,
+  )
+  const workspacePolicyLoading = useWorkspaces((s) =>
+    s.activeId ? s.policyLoading[s.activeId] === true : false,
+  )
+  const workspacePolicyError = useWorkspaces((s) =>
+    s.activeId ? s.policyErrors[s.activeId] : null,
+  )
+  const workspaceCaps = workspaceCapabilitiesForScope(activeWsId, activeWorkspacePolicy, {
+    workspacesLoaded,
+    policyLoading: workspacePolicyLoading,
+    switching: wsSwitching,
+    policyError: workspacePolicyError,
+  })
+  const workspacePolicyPending = Boolean(
+    activeWsId && !activeWorkspacePolicy && (!workspacesLoaded || workspacePolicyLoading || wsSwitching),
+  )
+  const canUseWorkspaceKnowledgeBases = workspaceCaps.knowledgeBases
+  const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases') && canUseWorkspaceKnowledgeBases
+  const canCreateKnowledgeBase = canUseKnowledgeBases &&
+    (!activeWsId || activeWorkspace?.can_create_kb === true)
   const [rows, setRows] = useState<ApiKnowledgeBase[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
@@ -85,43 +107,57 @@ export default function KnowledgeBasesList() {
   }, [t])
 
   useEffect(() => {
+    if (workspacePolicyPending) {
+      loadEpochRef.current += 1
+      setRows([])
+      setOpen(false)
+      setToDelete(null)
+      setLoadError('')
+      setLoading(true)
+      return
+    }
     if (!canUseKnowledgeBases) {
       loadEpochRef.current += 1
       setRows([])
       setOpen(false)
       setToDelete(null)
-      setLoadError('knowledge_base_group_permission_required')
+      setLoadError(canUseWorkspaceKnowledgeBases ? 'knowledge_base_group_permission_required' : 'workspace_knowledge_base_disabled')
       setLoading(false)
       return
     }
     if (wsSwitching) return
     void load()
-  }, [activeWsId, canUseKnowledgeBases, load, wsSwitching])
+  }, [activeWsId, canUseKnowledgeBases, canUseWorkspaceKnowledgeBases, load, workspacePolicyPending, wsSwitching])
 
   useEffect(
     () =>
       subscribeAccessInvalidation((event) => {
         if (event.kind !== 'account' && event.kind !== 'workspace' && event.kind !== 'knowledge-base') return
-        if (!userCan(useAuth.getState().user, 'allow_knowledge_bases')) {
+        if (workspacePolicyPending) return
+        if (!canUseKnowledgeBases) {
           loadEpochRef.current += 1
           setRows([])
           setOpen(false)
           setToDelete(null)
-          setLoadError('knowledge_base_group_permission_required')
+          setLoadError(
+            canUseWorkspaceKnowledgeBases
+              ? 'knowledge_base_group_permission_required'
+              : 'workspace_knowledge_base_disabled',
+          )
           setLoading(false)
           return
         }
         void load()
       }),
-    [load],
+    [canUseKnowledgeBases, canUseWorkspaceKnowledgeBases, load, workspacePolicyPending],
   )
 
   useEffect(() => {
     if (open && (!canUseKnowledgeBases || !canCreateKnowledgeBase)) setOpen(false)
-  }, [canCreateKnowledgeBase, canUseKnowledgeBases, open])
+  }, [canCreateKnowledgeBase, canUseKnowledgeBases, open, workspacePolicyPending])
 
   async function doDelete() {
-    if (!toDelete) return
+    if (!toDelete || !canUseKnowledgeBases) return
     setDeleting(true)
     try {
       await kbsApi.remove(toDelete.id)
@@ -145,7 +181,9 @@ export default function KnowledgeBasesList() {
       setOpen(false)
       toast.error(
         !canUseKnowledgeBases
-          ? t('kb:groupPermissionRequired')
+          ? canUseWorkspaceKnowledgeBases
+            ? t('kb:groupPermissionRequired')
+            : t('kb:workspaceDisabledBody', { defaultValue: 'The workspace administrator has disabled knowledge bases.' })
           : t('kb:workspaceCreatePermissionRequired'),
       )
       return
@@ -195,7 +233,19 @@ export default function KnowledgeBasesList() {
           </p>
 
           <section className="mt-6">
-            {loading ? (
+            {workspacePolicyPending ? (
+              <KnowledgeBasesSkeleton label={t('common:common.loading')} />
+            ) : !canUseKnowledgeBases ? (
+              <EmptyState
+                icon={<Database size={20} aria-hidden />}
+                title={t('kb:workspaceDisabledTitle', { defaultValue: 'Knowledge bases are unavailable in this workspace.' })}
+                description={
+                  canUseWorkspaceKnowledgeBases
+                    ? t('kb:groupPermissionRequired', { defaultValue: 'Your user group does not have knowledge-base access.' })
+                    : t('kb:workspaceDisabledBody', { defaultValue: 'The workspace administrator has disabled knowledge bases.' })
+                }
+              />
+            ) : loading ? (
               <KnowledgeBasesSkeleton label={t('common:common.loading')} />
             ) : loadError ? (
               <EmptyState
@@ -204,6 +254,8 @@ export default function KnowledgeBasesList() {
                 description={
                   loadError === 'knowledge_base_group_permission_required'
                     ? t('kb:groupPermissionRequired', { defaultValue: 'Your user group does not have knowledge-base access.' })
+                    : loadError === 'workspace_knowledge_base_disabled'
+                      ? t('kb:workspaceDisabledBody', { defaultValue: 'The workspace administrator has disabled knowledge bases.' })
                     : knowledgeBaseErrorText(t, loadError, loadError)
                 }
                 action={

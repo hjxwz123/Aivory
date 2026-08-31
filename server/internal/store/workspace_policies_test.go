@@ -44,25 +44,51 @@ func TestWorkspacePolicyStoreSemantics(t *testing.T) {
 		t.Fatalf("policy audit fields: %+v", updated)
 	}
 
-	// Partial patches keep untouched fields.
+	// Legacy fields remain writable for rolling clients, but they must not
+	// change the new capability switches. The retired sandbox switch alone no
+	// longer denies a tool at runtime.
 	sandbox := false
 	updated, err = UpdateWorkspacePolicy(ctx, fx.db, fx.workspaceID, "owner", WorkspacePolicyPatch{AllowSandbox: &sandbox})
 	if err != nil {
 		t.Fatalf("owner policy update: %v", err)
 	}
-	if updated.AllowSandbox || updated.AllowFileUpload || len(updated.AllowedModelIDs) != 1 {
+	if updated.AllowSandbox || !updated.AllowToolCalling || updated.AllowFileUpload || len(updated.AllowedModelIDs) != 1 {
 		t.Fatalf("patch clobbered other fields: %+v", updated)
 	}
 
-	// Tool/MCP allowlist + switch semantics.
-	if !updated.ToolDeniedByPolicy("builtin:python_execute") {
-		t.Fatal("sandbox switch did not deny python_execute")
+	if updated.ToolDeniedByPolicy("builtin:python_execute") {
+		t.Fatal("retired sandbox switch unexpectedly denied python_execute")
 	}
-	if !updated.ToolDeniedByPolicy("builtin:code_interpreter") {
-		t.Fatal("sandbox switch did not deny code_interpreter")
+	image := false
+	updated, err = UpdateWorkspacePolicy(ctx, fx.db, fx.workspaceID, "owner", WorkspacePolicyPatch{AllowImageGeneration: &image})
+	if err != nil {
+		t.Fatalf("legacy image policy update: %v", err)
 	}
-	if updated.ToolDeniedByPolicy("builtin:web_search") {
-		t.Fatal("sandbox switch wrongly denied web_search")
+	if !updated.AllowToolCalling || !updated.AllowDrawing {
+		t.Fatalf("legacy image switch changed new capabilities: %+v", updated)
+	}
+	if updated.ToolDeniedByPolicy("builtin:image_generate") {
+		t.Fatal("retired image switch unexpectedly denied image tool")
+	}
+
+	// The merged tool switch is the sole workspace-wide tool gate.
+	toolCalling := false
+	updated, err = UpdateWorkspacePolicy(ctx, fx.db, fx.workspaceID, "owner", WorkspacePolicyPatch{AllowToolCalling: &toolCalling})
+	if err != nil {
+		t.Fatalf("tool-calling policy update: %v", err)
+	}
+	for _, denied := range []string{"builtin:python_execute", "builtin:image_generate", "hosted:image_generation", "mcp:server-x", "usermcp:server-y"} {
+		if !updated.ToolDeniedByPolicy(denied) {
+			t.Fatalf("tool-calling switch did not deny %s", denied)
+		}
+	}
+	if updated.ToolDeniedByPolicy("not-a-catalog-entry") {
+		t.Fatal("tool-calling switch denied an unrelated id")
+	}
+	toolCalling = true
+	updated, err = UpdateWorkspacePolicy(ctx, fx.db, fx.workspaceID, "owner", WorkspacePolicyPatch{AllowToolCalling: &toolCalling})
+	if err != nil {
+		t.Fatalf("re-enable tool-calling policy: %v", err)
 	}
 	tools := []string{"builtin:web_search"}
 	updated, err = UpdateWorkspacePolicy(ctx, fx.db, fx.workspaceID, "owner", WorkspacePolicyPatch{AllowedToolIDs: &tools})

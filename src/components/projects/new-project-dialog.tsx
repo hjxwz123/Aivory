@@ -22,6 +22,7 @@ import { cn } from '@/lib/utils'
 import { useWorkspaces } from '@/store/workspaces'
 import { useAuth } from '@/store/auth'
 import { userCan } from '@/lib/user-permissions'
+import { workspaceCapabilitiesForScope } from '@/lib/workspace-permissions'
 
 interface NewProjectDialogProps {
   open: boolean
@@ -39,12 +40,35 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
   const { t } = useTranslation(['projects', 'common', 'kb'])
   const create = useProjects((s) => s.createProject)
   const navigate = useNavigate()
+  const activeWorkspaceId = useWorkspaces((s) => s.activeId)
   const activeWorkspace = useWorkspaces((s) =>
     s.activeId ? s.workspaces.find((workspace) => workspace.id === s.activeId) : undefined,
   )
+  const activeWorkspacePolicy = useWorkspaces((s) =>
+    s.activeId ? s.policies[s.activeId] : undefined,
+  )
+  const workspacesLoaded = useWorkspaces((s) => s.loaded)
+  const workspacePolicyLoading = useWorkspaces((s) =>
+    s.activeId ? s.policyLoading[s.activeId] === true : false,
+  )
+  const workspaceSwitching = useWorkspaces((s) => s.switching)
+  const workspacePolicyError = useWorkspaces((s) =>
+    activeWorkspaceId ? s.policyErrors[activeWorkspaceId] : null,
+  )
+  const workspaceCaps = workspaceCapabilitiesForScope(activeWorkspaceId, activeWorkspacePolicy, {
+    workspacesLoaded,
+    policyLoading: workspacePolicyLoading,
+    switching: workspaceSwitching,
+    policyError: workspacePolicyError,
+  })
+  const workspacePolicyPending = Boolean(
+    activeWorkspaceId && !activeWorkspacePolicy && (!workspacesLoaded || workspacePolicyLoading || workspaceSwitching),
+  )
   const user = useAuth((s) => s.user)
-  const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases')
-  const canCreateProject = canUseKnowledgeBases && (!activeWorkspace || activeWorkspace.can_create_projects)
+  const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases') &&
+    workspaceCaps.knowledgeBases
+  const canCreateProject = canUseKnowledgeBases &&
+    (!activeWorkspaceId || activeWorkspace?.can_create_projects === true)
 
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -69,8 +93,8 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
   // project creation. Otherwise restoring the permission later reopens an old
   // draft without another user action.
   useEffect(() => {
-    if (open && !canCreateProject) onOpenChange(false)
-  }, [canCreateProject, onOpenChange, open])
+    if (open && !workspacePolicyPending && !canCreateProject) onOpenChange(false)
+  }, [canCreateProject, onOpenChange, open, workspacePolicyPending])
 
   async function submit() {
     if (!canCreateProject) {

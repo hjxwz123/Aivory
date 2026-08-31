@@ -831,7 +831,10 @@
       "addHeader": "ヘッダーを追加",
       "removeHeader": "ヘッダー {{index}} を削除",
       "showHeader": "ヘッダー値を表示",
-      "hideHeader": "ヘッダー値を隠す"
+      "hideHeader": "ヘッダー値を隠す",
+      "showHeaderL10n": "値を表示",
+      "hideHeaderL10n": "値を隠す",
+      "removeHeaderL10n": "ヘッダー {{index}} を削除"
     },
     "status": {
       "connected": "接続済み",

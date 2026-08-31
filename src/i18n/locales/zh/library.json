@@ -4,22 +4,24 @@
   "newSkill": "新建技能",
   "kinds": {
     "skill": "技能",
-    "prompt": "提示词"
+    "prompt": "提示词",
+    "mcp": "MCP"
   },
   "tabs": {
     "mine": "我的",
     "catalog": "公共目录"
   },
-  "search": "搜索技能与提示词",
+  "search": "搜索技能、提示词和 MCP 服务",
   "filter": {
     "label": "类型筛选",
     "all": "全部",
     "skill": "技能",
-    "prompt": "提示词"
+    "prompt": "提示词",
+    "mcp": "MCP 服务"
   },
   "empty": {
     "search": "没有匹配的内容",
-    "mine": "还没有自己的技能或提示词",
+    "mine": "还没有自己的技能、提示词或 MCP 服务",
     "catalog": "公共目录暂无内容"
   },
   "catalog": {
@@ -50,6 +52,39 @@
     "nameExists": "我的内容中已存在同名项目。",
     "created": "已创建",
     "updated": "已更新"
+  },
+  "mcpEditor": {
+    "newTitle": "新建 MCP 服务",
+    "editTitle": "编辑 MCP 服务",
+    "name": "名称",
+    "icon": "图标",
+    "description": "工具描述",
+    "url": "Streamable HTTP URL",
+    "urlHint": "端点必须通过 Streamable HTTP 接收 MCP JSON-RPC 请求。",
+    "headers": "请求头",
+    "headerKey": "请求头名称",
+    "headerValue": "请求头值",
+    "addHeader": "添加请求头",
+    "enabled": "启用",
+    "enabledHint": "启用后，其已同步的工具会出现在工具选择弹窗的「我的工具」中。",
+    "test": "测试",
+    "testOk": "连接成功",
+    "testFailed": "连接失败",
+    "sync": "同步工具",
+    "synced": "工具已同步",
+    "toolsCount_one": "{{count}} 个工具",
+    "toolsCount_other": "{{count}} 个工具"
+  },
+  "mcpStatus": {
+    "error": "连接异常",
+    "notSynced": "未同步"
+  },
+  "permissions": {
+    "createResource": "你没有在此工作空间创建该资源的权限。",
+    "manageResource": "你没有在此工作空间管理该资源的权限。",
+    "createMcp": "你没有在此工作空间创建 MCP 服务的权限。",
+    "manageMcp": "你没有管理此 MCP 服务的权限。",
+    "useMcp": "你没有在此工作空间使用 MCP 服务的权限。"
   },
   "remove": {
     "title": "删除这项内容？",

@@ -152,6 +152,19 @@ describe('composer tool mode', () => {
     expect(useComposerPrefs.getState().selectedToolIdsByModel).toEqual({ model_2: [] })
   })
 
+  it('clears explicit tool subsets when the active workspace changes', () => {
+    useComposerPrefs.setState({
+      selectedToolIdsByModel: {
+        model_1: ['usermcp:private-server'],
+        model_2: ['builtin:web'],
+      },
+    })
+
+    useComposerPrefs.getState().clearSelectedToolIds()
+
+    expect(useComposerPrefs.getState().selectedToolIdsByModel).toEqual({})
+  })
+
   it('snapshots omitted, empty, and non-empty selections for the requested model', () => {
     useComposerPrefs.setState({
       selectedToolIdsByModel: {

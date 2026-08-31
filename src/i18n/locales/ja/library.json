@@ -4,22 +4,24 @@
   "newSkill": "新しいスキル",
   "kinds": {
     "skill": "スキル",
-    "prompt": "プロンプト"
+    "prompt": "プロンプト",
+    "mcp": "MCP"
   },
   "tabs": {
     "mine": "マイライブラリ",
     "catalog": "カタログ"
   },
-  "search": "スキルとプロンプトを検索",
+  "search": "スキル、プロンプト、MCP サービスを検索",
   "filter": {
     "label": "種類で絞り込む",
     "all": "すべて",
     "skill": "スキル",
-    "prompt": "プロンプト"
+    "prompt": "プロンプト",
+    "mcp": "MCP サービス"
   },
   "empty": {
     "search": "一致する項目はありません",
-    "mine": "スキルやプロンプトはまだありません",
+    "mine": "スキル、プロンプト、MCP サービスはまだありません",
     "catalog": "カタログは空です"
   },
   "catalog": {
@@ -50,6 +52,39 @@
     "nameExists": "同じ名前の項目がすでにあります。",
     "created": "作成しました",
     "updated": "更新しました"
+  },
+  "mcpEditor": {
+    "newTitle": "MCP サービスを追加",
+    "editTitle": "MCP サービスを編集",
+    "name": "名前",
+    "icon": "アイコン",
+    "description": "ツールの説明",
+    "url": "Streamable HTTP URL",
+    "urlHint": "エンドポイントは Streamable HTTP 経由の MCP JSON-RPC リクエストを受け付ける必要があります。",
+    "headers": "リクエストヘッダー",
+    "headerKey": "ヘッダー名",
+    "headerValue": "ヘッダー値",
+    "addHeader": "ヘッダーを追加",
+    "enabled": "有効にする",
+    "enabledHint": "有効にすると、同期済みのツールがツール選択の「マイツール」に表示されます。",
+    "test": "テスト",
+    "testOk": "接続に成功しました",
+    "testFailed": "接続に失敗しました",
+    "sync": "ツールを同期",
+    "synced": "ツールを同期しました",
+    "toolsCount_one": "{{count}} 件のツール",
+    "toolsCount_other": "{{count}} 件のツール"
+  },
+  "mcpStatus": {
+    "error": "接続エラー",
+    "notSynced": "未同期"
+  },
+  "permissions": {
+    "createResource": "このワークスペースでこのリソースを作成する権限がありません。",
+    "manageResource": "このワークスペースでこのリソースを管理する権限がありません。",
+    "createMcp": "このワークスペースで MCP サービスを作成する権限がありません。",
+    "manageMcp": "この MCP サービスを管理する権限がありません。",
+    "useMcp": "このワークスペースで MCP サービスを使用する権限がありません。"
   },
   "remove": {
     "title": "この項目を削除しますか？",

@@ -16,6 +16,8 @@ import {
 import { Button } from '@/components/ui/button'
 import { toast } from '@/hooks/use-toast'
 import { userCan } from '@/lib/user-permissions'
+import { workspaceCapabilitiesForScope } from '@/lib/workspace-permissions'
+import { useWorkspaces } from '@/store/workspaces'
 import { persistUserSettings } from '@/lib/user-settings'
 
 export default function Models() {
@@ -27,7 +29,25 @@ export default function Models() {
   const load = useModels((s) => s.load)
   const setGlobalDefaultModel = useModels((s) => s.setDefaultId)
   const user = useAuth((s) => s.user)
-  const canDraw = userCan(user, 'allow_drawing')
+  const workspacePolicy = useWorkspaces((state) =>
+    state.activeId ? state.policies[state.activeId] : undefined,
+  )
+  const workspaceId = useWorkspaces((state) => state.activeId)
+  const workspacesLoaded = useWorkspaces((state) => state.loaded)
+  const workspacePolicyLoading = useWorkspaces((state) =>
+    state.activeId ? state.policyLoading[state.activeId] === true : false,
+  )
+  const workspaceSwitching = useWorkspaces((state) => state.switching)
+  const workspacePolicyError = useWorkspaces((state) =>
+    state.activeId ? state.policyErrors[state.activeId] : null,
+  )
+  const workspaceCaps = workspaceCapabilitiesForScope(workspaceId, workspacePolicy, {
+    workspacesLoaded,
+    policyLoading: workspacePolicyLoading,
+    switching: workspaceSwitching,
+    policyError: workspacePolicyError,
+  })
+  const canDraw = userCan(user, 'allow_drawing') && workspaceCaps.drawing
   const { t } = useTranslation(['settings', 'common'])
 
   // Image-generation model pre-selection (§4.12-B). Persists to user settings.

@@ -42,6 +42,9 @@ type Deps struct {
 	RAG          *rag.Service
 	Orchestrator *llm.Orchestrator
 	Logger       *log.Logger
+	// UserMCPHTTPClient is an optional test injection. Production leaves it nil
+	// and user MCP handlers construct the dial-time restricted netsafe client.
+	UserMCPHTTPClient *http.Client
 }
 
 // Env-overridable per-IP rate-limit budgets ("<N> per <window>") and the CORS
@@ -270,6 +273,14 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("POST", "/api/me/prompts/from-catalog", requireAuth(d, copyPromptFromCatalogHandler))
 	mux.handle("PATCH", "/api/me/prompts/:id", requireAuth(d, updateMyPromptHandler))
 	mux.handle("DELETE", "/api/me/prompts/:id", requireAuth(d, deleteMyPromptHandler))
+	// User MCP servers (§ resource library): personal + workspace-shared
+	// Streamable-HTTP endpoints with the same scoping rules as skills/prompts.
+	mux.handle("GET", "/api/me/mcps", requireAuth(d, listMyMCPServersHandler))
+	mux.handle("POST", "/api/me/mcps", requireAuth(d, createMyMCPServerHandler))
+	mux.handle("PATCH", "/api/me/mcps/:id", requireAuth(d, updateMyMCPServerHandler))
+	mux.handle("DELETE", "/api/me/mcps/:id", requireAuth(d, deleteMyMCPServerHandler))
+	mux.handle("POST", "/api/me/mcps/:id/test", requireAuth(d, testMyMCPServerHandler))
+	mux.handle("POST", "/api/me/mcps/:id/sync", requireAuth(d, syncMyMCPServerHandler))
 	mux.handle("GET", "/api/model-tags", requireAuth(d, listModelTagsPublic))
 	// §4.20 Image styles — enabled catalog for the composer style picker (hidden
 	// prompt stripped). Image generation itself reuses the chat message endpoint.
@@ -308,6 +319,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("DELETE", "/api/workspaces/:id/invites/:inviteId", requireAuth(d, revokeWorkspaceInviteHandler))
 	mux.handle("POST", "/api/workspaces/:id/transfer", requireAuth(d, transferWorkspaceOwnershipHandler))
 	mux.handle("GET", "/api/workspaces/:id/policy", requireAuth(d, getWorkspacePolicyHandler))
+	mux.handle("GET", "/api/workspaces/:id/policy/models", requireAuth(d, listWorkspacePolicyModelsHandler))
 	mux.handle("PATCH", "/api/workspaces/:id/policy", requireAuth(d, updateWorkspacePolicyHandler))
 	mux.handle("GET", "/api/workspaces/:id/usage", requireAuth(d, workspaceUsageHandler))
 	mux.handle("GET", "/api/workspaces/:id/audit", requireAuth(d, workspaceAuditLogHandler))

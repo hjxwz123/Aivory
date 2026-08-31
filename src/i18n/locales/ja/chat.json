@@ -162,6 +162,11 @@
       "title": "ツールを選択",
       "description": "モデルはここで選択したツールのみ使用します。",
       "search": "ツールを検索",
+      "segment": {
+        "official": "公式ツール",
+        "mine": "マイツール"
+      },
+      "segmentEmpty": "MCP サービスはまだありません。リソースライブラリから追加してください。",
       "selectAll": "すべて選択",
       "clear": "クリア",
       "loading": "ツールを読み込み中",
@@ -709,10 +714,51 @@
     "switchSpace": "スペースを切り替え",
     "managePermissions": "権限を管理",
     "memberPermissions": "メンバー権限",
-    "memberPermissionsBody": "{{name}} がこのワークスペースで作成・管理できる内容を設定します。",
+    "memberPermissionsBody": "{{name}} がこのワークスペースで使用・作成・管理できる内容を設定します。",
     "permissionsSaved": "メンバー権限を更新しました。",
     "permissionsSaveFailed": "メンバー権限を更新できませんでした。",
+    "permissionsConflict": "メンバー権限がサーバー側で更新されました。",
+    "permissionsConflictHint": "未保存の変更は保持されています。新しい設定を上書きしないよう、保存前に再読み込みしてください。",
+    "reloadPermissions": "権限を再読み込み",
     "permissions": {
+      "groups": {
+        "useResources": {
+          "label": "ワークスペースのリソースを使用",
+          "description": "会話やプロジェクトで使用できるリソースの種類を選択します。"
+        },
+        "createResources": {
+          "label": "ワークスペースのリソースを作成",
+          "description": "作成権限と使用権限は個別に設定できます。"
+        },
+        "workspaceContent": {
+          "label": "ワークスペースのコンテンツ",
+          "description": "プロジェクト、会話、ナレッジベースの操作を管理します。"
+        }
+      },
+      "can_use_prompts": {
+        "label": "プロンプトを使用",
+        "description": "ワークスペースのリソースライブラリにあるプロンプトを適用します。"
+      },
+      "can_use_skills": {
+        "label": "スキルを使用",
+        "description": "ワークスペースのリソースライブラリに共有されたスキルを実行します。"
+      },
+      "can_use_mcp": {
+        "label": "MCP サービスを使用",
+        "description": "このワークスペースで利用可能な MCP サービスのツールを呼び出します。"
+      },
+      "can_create_prompts": {
+        "label": "プロンプトを作成",
+        "description": "このワークスペースに新しいプロンプトを作成します。"
+      },
+      "can_create_skills": {
+        "label": "スキルを作成",
+        "description": "このワークスペースに新しいスキルを作成します。"
+      },
+      "can_create_mcp": {
+        "label": "MCP サービスを作成",
+        "description": "このワークスペースに新しい MCP サービスを登録します。"
+      },
       "can_create_projects": {
         "label": "プロジェクトを作成",
         "description": "新しいプロジェクトとそのナレッジベースを作成します。"
@@ -788,14 +834,43 @@
     "policyLoadFailed": "ワークスペースポリシーを読み込めませんでした。",
     "policySaved": "ワークスペース機能を更新しました。",
     "policySaveFailed": "ワークスペースポリシーを更新できませんでした。",
+    "policyConflict": "ワークスペース機能がサーバー側で更新されました。",
+    "policyConflictHint": "未保存の変更は保持されています。新しい設定を上書きしないよう、保存前に再読み込みしてください。",
+    "reloadPolicy": "機能を再読み込み",
     "policy": {
-      "AllowSandbox": {
-        "label": "Python サンドボックス",
-        "description": "python_execute / code_interpreter ツールを実行。"
+      "groups": {
+        "core": {
+          "label": "コア機能",
+          "description": "ワークスペース全体の設定は管理者を含むすべてのメンバーに適用されます。"
+        },
+        "resources": {
+          "label": "リソースライブラリ",
+          "description": "種類を無効にすると対応するタブが非表示になり、会話での利用も禁止されます。"
+        },
+        "content": {
+          "label": "ワークスペースのコンテンツ",
+          "description": "共有ナレッジとファイル操作を管理します。"
+        }
       },
-      "AllowImageGeneration": {
-        "label": "画像生成",
-        "description": "画像モデルと画像ツール。"
+      "AllowToolCalling": {
+        "label": "ツール呼び出し",
+        "description": "組み込みツールや MCP サービスを含むモデルのツール呼び出しを許可します。"
+      },
+      "AllowDrawing": {
+        "label": "描画",
+        "description": "専用の描画モードと画像モデルを許可します。"
+      },
+      "AllowMCP": {
+        "label": "MCP サービス",
+        "description": "MCP サービスを表示し、ツール呼び出しが有効な場合にそのツールを許可します。"
+      },
+      "AllowSkills": {
+        "label": "スキル",
+        "description": "このワークスペースのスキルリソースを表示・利用します。"
+      },
+      "AllowPrompts": {
+        "label": "プロンプト",
+        "description": "このワークスペースのプロンプトリソースを表示・利用します。"
       },
       "AllowKnowledgeBases": {
         "label": "ナレッジベース",

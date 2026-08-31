@@ -135,6 +135,47 @@ func TestMCPAdminCRUDMasksAndPreservesHeaders(t *testing.T) {
 	}
 }
 
+func TestMCPResponsesStripLegacyURLCredentials(t *testing.T) {
+	const legacyURL = "https://legacy-user:legacy-password@mcp.example.test/rpc?token=legacy-query-secret#fragment"
+	const headerSecret = "legacy-header-secret"
+	want := "https://mcp.example.test/rpc"
+
+	admin := adminMCPServerJSON(store.MCPServer{
+		URL: legacyURL, Headers: map[string]string{"Authorization": headerSecret},
+		ProtocolVersion: "echo-" + headerSecret, LastError: "request failed for " + headerSecret,
+	})
+	if admin.URL != want {
+		t.Fatalf("admin response URL=%q want=%q", admin.URL, want)
+	}
+	user := userMCPServerJSON(store.UserMCPServer{
+		URL: legacyURL, Headers: map[string]string{"Authorization": headerSecret},
+		ProtocolVersion: "echo-" + headerSecret, LastError: "request failed for " + headerSecret,
+	})
+	if user.URL != want {
+		t.Fatalf("user response URL=%q want=%q", user.URL, want)
+	}
+
+	adminJSON, err := json.Marshal(admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userJSON, err := json.Marshal(user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, response := range [][]byte{adminJSON, userJSON} {
+		for _, secret := range []string{"legacy-user", "legacy-password", "legacy-query-secret", "fragment", headerSecret} {
+			if strings.Contains(string(response), secret) {
+				t.Fatalf("MCP response leaked legacy URL value %q: %s", secret, response)
+			}
+		}
+	}
+
+	if got := mcpResponseURL(":// malformed token=legacy-query-secret"); got != "" {
+		t.Fatalf("malformed legacy URL was exposed as %q", got)
+	}
+}
+
 func TestMCPAdminValidatesURLHeadersAndDuplicateNames(t *testing.T) {
 	fixture := newMCPAdminFixture(t)
 	base := map[string]any{
@@ -147,6 +188,7 @@ func TestMCPAdminValidatesURLHeadersAndDuplicateNames(t *testing.T) {
 	}{
 		{"non-http URL", map[string]any{"url": "file:///etc/passwd"}},
 		{"credentials in URL", map[string]any{"url": "https://user:pass@example.test/mcp"}},
+		{"query parameters in URL", map[string]any{"url": "https://example.test/mcp?token=secret"}},
 		{"URL fragment", map[string]any{"url": "https://example.test/mcp#fragment"}},
 		{"invalid header name", map[string]any{"headers": map[string]string{"Bad Header": "value"}}},
 		{"header newline", map[string]any{"headers": map[string]string{"X-Test": "a\r\nb"}}},
@@ -231,7 +273,12 @@ func TestMCPAdminTestPreservesSnapshotAndSyncUpdatesIt(t *testing.T) {
 			writeMCPAdminRPCResult(t, w, request.ID, map[string]any{
 				"tools": []any{map[string]any{
 					"name": "search_papers", "description": "Search papers",
-					"inputSchema": map[string]any{"type": "object"},
+					"inputSchema": map[string]any{
+						"type": "object", "properties": map[string]any{
+							"query-" + authorization: map[string]any{"type": "string"},
+						},
+					},
+					"_meta": map[string]any{"trace-" + authorization: "safe"},
 				}},
 			})
 		default:
@@ -285,6 +332,10 @@ func TestMCPAdminTestPreservesSnapshotAndSyncUpdatesIt(t *testing.T) {
 	}
 	if len(syncedTools) != 1 || syncedTools[0].Name != "search_papers" {
 		t.Fatalf("sync did not replace snapshot: %s", synced.DiscoveredTools)
+	}
+	if !strings.Contains(string(synced.DiscoveredTools), "query-"+mcpHeaderMask) ||
+		!strings.Contains(string(synced.DiscoveredTools), "trace-"+mcpHeaderMask) {
+		t.Fatalf("sync did not redact secret-bearing JSON keys: %s", synced.DiscoveredTools)
 	}
 	stored, err := store.GetMCPServer(t.Context(), fixture.db, created.ID)
 	if err != nil {
@@ -356,6 +407,61 @@ func TestMCPAdminDiscoveryFailureRedactsSecretsAndPreservesSnapshot(t *testing.T
 				t.Fatalf("admin list leaked failure credential: %s", listedRecorder.Body.String())
 			}
 		})
+	}
+}
+
+func TestMCPAdminSnapshotJSONRedactsLegacyToolMetadata(t *testing.T) {
+	const secret = "Bearer legacy-api-secret"
+	server := store.MCPServer{
+		ID: "legacy-json", Name: "Legacy", Description: "legacy", URL: "https://legacy.example.test/mcp",
+		Headers:         map[string]string{"Authorization": secret},
+		DiscoveredTools: json.RawMessage(`[{"name":"lookup","description":"` + secret + `","inputSchema":{"type":"object","default":"` + secret + `"}}]`),
+	}
+	response := adminMCPServerJSON(server)
+	if strings.Contains(string(response.DiscoveredTools), secret) {
+		t.Fatalf("legacy API snapshot leaked secret: %s", response.DiscoveredTools)
+	}
+	if !strings.Contains(string(response.DiscoveredTools), mcpHeaderMask) {
+		t.Fatalf("legacy API snapshot was not redacted: %s", response.DiscoveredTools)
+	}
+}
+
+func TestMCPAdminSnapshotJSONRedactsSecretsWithoutDroppingExtensions(t *testing.T) {
+	const secret = "legacy-extension-secret"
+	server := store.MCPServer{
+		ID: "legacy-extension", Name: "Legacy", Description: "legacy", URL: "https://legacy.example.test/mcp",
+		Headers:         map[string]string{"X-Token": secret},
+		DiscoveredTools: json.RawMessage(`[{"name":"` + secret + `-tool","inputSchema":{"type":"object","x-large":9007199254740993},"futureField":{"nested":"` + secret + `"}}]`),
+	}
+	response := adminMCPServerJSON(server)
+	if strings.Contains(string(response.DiscoveredTools), secret) {
+		t.Fatalf("legacy extension snapshot leaked secret: %s", response.DiscoveredTools)
+	}
+	if !strings.Contains(string(response.DiscoveredTools), mcpHeaderMask) {
+		t.Fatalf("legacy extension snapshot was not redacted: %s", response.DiscoveredTools)
+	}
+	if !strings.Contains(string(response.DiscoveredTools), "futureField") ||
+		!strings.Contains(string(response.DiscoveredTools), "x-large") ||
+		!strings.Contains(string(response.DiscoveredTools), "9007199254740993") {
+		t.Fatalf("legacy extension fields were dropped or changed: %s", response.DiscoveredTools)
+	}
+}
+
+func TestMCPAdminSnapshotJSONFailsClosedOnRedactedKeyCollision(t *testing.T) {
+	const secret = "legacy-collision-secret"
+	collisionSchema := json.RawMessage(`{"type":"object","properties":{` +
+		`"field-` + secret + `":{"type":"string"},"field-` + mcpHeaderMask + `":{"type":"number"}}}`)
+	if _, err := redactMCPJSONValues(collisionSchema, map[string]string{"X-Token": secret}); err == nil {
+		t.Fatal("discovery redaction accepted colliding schema property names")
+	}
+	server := store.MCPServer{
+		ID: "legacy-collision", Name: "Legacy", Description: "legacy", URL: "https://legacy.example.test/mcp",
+		Headers:         map[string]string{"X-Token": secret},
+		DiscoveredTools: json.RawMessage(`[{"name":"lookup","inputSchema":` + string(collisionSchema) + `}]`),
+	}
+	response := adminMCPServerJSON(server)
+	if got := string(response.DiscoveredTools); got != "[]" {
+		t.Fatalf("colliding legacy snapshot was not hidden: %s", got)
 	}
 }
 

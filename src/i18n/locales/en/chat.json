@@ -164,6 +164,11 @@
       "title": "Choose tools",
       "description": "The model will only use tools selected here.",
       "search": "Search tools",
+      "segment": {
+        "official": "Official tools",
+        "mine": "My tools"
+      },
+      "segmentEmpty": "No MCP services yet — add one in the Library.",
       "selectAll": "Select all",
       "clear": "Clear",
       "loading": "Loading tools",
@@ -714,10 +719,51 @@
     "switchSpace": "Switch space",
     "managePermissions": "Manage permissions",
     "memberPermissions": "Member permissions",
-    "memberPermissionsBody": "Set what {{name}} can create and manage across this workspace.",
+    "memberPermissionsBody": "Set what {{name}} can use, create, and manage across this workspace.",
     "permissionsSaved": "Member permissions updated.",
     "permissionsSaveFailed": "Could not update member permissions.",
+    "permissionsConflict": "Member permissions changed on the server.",
+    "permissionsConflictHint": "Your unsaved changes are preserved. Reload before saving to avoid overwriting newer settings.",
+    "reloadPermissions": "Reload permissions",
     "permissions": {
+      "groups": {
+        "useResources": {
+          "label": "Use workspace resources",
+          "description": "Choose which resource families this member can use in chats and projects."
+        },
+        "createResources": {
+          "label": "Create workspace resources",
+          "description": "Creation rights are independent from usage rights."
+        },
+        "workspaceContent": {
+          "label": "Workspace content",
+          "description": "Control projects, conversations, and knowledge-base operations."
+        }
+      },
+      "can_use_prompts": {
+        "label": "Use prompts",
+        "description": "Apply prompts from the workspace library."
+      },
+      "can_use_skills": {
+        "label": "Use skills",
+        "description": "Run skills shared in the workspace library."
+      },
+      "can_use_mcp": {
+        "label": "Use MCP services",
+        "description": "Call tools exposed by MCP services available in this workspace."
+      },
+      "can_create_prompts": {
+        "label": "Create prompts",
+        "description": "Create new prompts in this workspace."
+      },
+      "can_create_skills": {
+        "label": "Create skills",
+        "description": "Create new skills in this workspace."
+      },
+      "can_create_mcp": {
+        "label": "Create MCP services",
+        "description": "Register new MCP services in this workspace."
+      },
       "can_create_projects": {
         "label": "Create projects",
         "description": "Create new projects and their project knowledge bases."
@@ -793,14 +839,43 @@
     "policyLoadFailed": "Could not load the workspace policy.",
     "policySaved": "Workspace capabilities updated.",
     "policySaveFailed": "Could not update the workspace policy.",
+    "policyConflict": "Workspace capabilities changed on the server.",
+    "policyConflictHint": "Your unsaved changes are preserved. Reload before saving to avoid overwriting newer settings.",
+    "reloadPolicy": "Reload capabilities",
     "policy": {
-      "AllowSandbox": {
-        "label": "Python sandbox",
-        "description": "Run python_execute / code_interpreter tools."
+      "groups": {
+        "core": {
+          "label": "Core capabilities",
+          "description": "Workspace-wide controls apply to every member, including admins."
+        },
+        "resources": {
+          "label": "Resource library",
+          "description": "Turn off a family to hide its library tab and block its use in conversations."
+        },
+        "content": {
+          "label": "Workspace content",
+          "description": "Control shared knowledge and file operations."
+        }
       },
-      "AllowImageGeneration": {
-        "label": "Image generation",
-        "description": "Image models and image tools."
+      "AllowToolCalling": {
+        "label": "Tool calling",
+        "description": "Allow model tool calls, including built-in tools and MCP services."
+      },
+      "AllowDrawing": {
+        "label": "Drawing",
+        "description": "Allow the dedicated drawing mode and image models."
+      },
+      "AllowMCP": {
+        "label": "MCP services",
+        "description": "Show MCP services and allow their tools when tool calling is enabled."
+      },
+      "AllowSkills": {
+        "label": "Skills",
+        "description": "Show and use skill resources in this workspace."
+      },
+      "AllowPrompts": {
+        "label": "Prompts",
+        "description": "Show and use prompt resources in this workspace."
       },
       "AllowKnowledgeBases": {
         "label": "Knowledge bases",

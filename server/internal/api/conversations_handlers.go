@@ -204,12 +204,6 @@ func createConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		}
 		req.ModelID = strings.TrimSpace(req.ModelID)
 	}
-	if !permissions.AllowDrawing && req.ModelID != "" {
-		if model, modelErr := store.GetModel(r.Context(), d.DB, req.ModelID); modelErr == nil && model.Kind == "image" {
-			writeError(w, http.StatusForbidden, errDrawingGroupPermission)
-			return
-		}
-	}
 	fast := false
 	if req.Fast != nil {
 		fast = *req.Fast
@@ -228,6 +222,12 @@ func createConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			writeError(w, 404, errNotFound)
 			return
 		}
+	}
+	if err := validateConversationModelSelection(
+		r.Context(), d.DB, req.WorkspaceID, req.ModelID, fast, permissions,
+	); err != nil {
+		writeError(w, conversationModelSelectionErrorStatus(err), err)
+		return
 	}
 	// Validate the project belongs to this user before attaching (don't trust
 	// the client-supplied project_id). GetProject is member-aware, and the
@@ -271,6 +271,41 @@ func validUserDefaultConversationModel(ctx context.Context, db *sql.DB, settings
 		return ""
 	}
 	return id
+}
+
+// validateConversationModelSelection resolves Fast mode exactly as a real turn
+// does, then applies both the current user-group drawing capability and the
+// workspace model ceiling. A deployment with no configured model may still
+// create an empty conversation; an explicit stale/disabled model is rejected.
+func validateConversationModelSelection(
+	ctx context.Context,
+	db *sql.DB,
+	workspaceID, modelID string,
+	fast bool,
+	permissions store.UserGroupPermissions,
+) error {
+	selection := &store.Conversation{ModelID: strings.TrimSpace(modelID)}
+	model, err := resolveEffectiveConversationModel(ctx, db, selection, "", fast)
+	if errors.Is(err, errNoModelConfigured) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if model.Kind == "image" && !permissions.AllowDrawing {
+		return errDrawingGroupPermission
+	}
+	return enforceWorkspaceConversationModelPolicy(ctx, db, strings.TrimSpace(workspaceID), model)
+}
+
+func conversationModelSelectionErrorStatus(err error) int {
+	if errors.Is(err, errDrawingGroupPermission) {
+		return http.StatusForbidden
+	}
+	if errors.Is(err, errWorkspaceModelDisabled) || errors.Is(err, errWorkspaceImageDisabled) {
+		return workspacePolicyErrorStatus(err)
+	}
+	return imageCapabilityErrorStatus(err)
 }
 
 // Import limits — bound the work a single import request can schedule.
@@ -385,6 +420,17 @@ func createInlineThreadHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	src, err := store.GetConversation(r.Context(), d.DB, srcID, u.ID)
 	if err != nil {
 		writeError(w, 404, errNotFound)
+		return
+	}
+	permissions, permissionErr := requestPermissions(d, r)
+	if permissionErr != nil {
+		writeError(w, http.StatusForbidden, errPermissionDenied)
+		return
+	}
+	if err := validateConversationModelSelection(
+		r.Context(), d.DB, src.WorkspaceID, src.ModelID, src.Fast, permissions,
+	); err != nil {
+		writeError(w, conversationModelSelectionErrorStatus(err), err)
 		return
 	}
 	var req createInlineThreadReq
@@ -536,18 +582,29 @@ func updateConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, errKnowledgeBaseGroupPermission)
 		return
 	}
-	if !permissions.AllowDrawing && p.ModelID != nil && strings.TrimSpace(*p.ModelID) != "" {
-		if model, modelErr := store.GetModel(r.Context(), d.DB, strings.TrimSpace(*p.ModelID)); modelErr == nil && model.Kind == "image" {
-			writeError(w, http.StatusForbidden, errDrawingGroupPermission)
-			return
-		}
-	}
 	var current *store.Conversation
-	if p.IsPublic != nil || p.KBIDs != nil || p.ProjectID != nil {
+	if p.IsPublic != nil || p.KBIDs != nil || p.ProjectID != nil || p.ModelID != nil || p.Fast != nil {
 		var err error
 		current, err = store.GetConversation(r.Context(), d.DB, id, u.ID)
 		if err != nil {
 			writeError(w, 404, errNotFound)
+			return
+		}
+	}
+	if p.ModelID != nil || p.Fast != nil {
+		modelID := current.ModelID
+		if p.ModelID != nil {
+			modelID = strings.TrimSpace(*p.ModelID)
+			p.ModelID = &modelID
+		}
+		fast := current.Fast
+		if p.Fast != nil {
+			fast = *p.Fast
+		}
+		if err := validateConversationModelSelection(
+			r.Context(), d.DB, current.WorkspaceID, modelID, fast, permissions,
+		); err != nil {
+			writeError(w, conversationModelSelectionErrorStatus(err), err)
 			return
 		}
 	}
@@ -1018,6 +1075,17 @@ func forkConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	conv, err := store.GetConversation(r.Context(), d.DB, id, u.ID)
 	if err != nil {
 		writeError(w, 404, errNotFound)
+		return
+	}
+	permissions, permissionErr := requestPermissions(d, r)
+	if permissionErr != nil {
+		writeError(w, http.StatusForbidden, errPermissionDenied)
+		return
+	}
+	if err := validateConversationModelSelection(
+		r.Context(), d.DB, conv.WorkspaceID, conv.ModelID, conv.Fast, permissions,
+	); err != nil {
+		writeError(w, conversationModelSelectionErrorStatus(err), err)
 		return
 	}
 	var body struct {

@@ -28,7 +28,9 @@ import type { Attachment } from '@/types/chat'
 import type { ApiConversation } from '@/api/types'
 import type { ToolMode } from '@/lib/tool-mode'
 import { resolveNewConversationFastMode } from '@/lib/chat-defaults'
+import { isModelCatalogReadyForScope } from '@/lib/model-selection'
 import { userCan } from '@/lib/user-permissions'
+import { workspaceCapabilitiesForScope, workspaceModelPolicyKey } from '@/lib/workspace-permissions'
 import { enterOptimisticConversation } from '@/lib/optimistic-conversation-start'
 
 gsap.registerPlugin(useGSAP)
@@ -199,9 +201,40 @@ export default function ChatHome() {
   const sendMessage = useConversations((s) => s.sendMessage)
   const defaultModelId = useModels((s) => s.defaultId)
   const imageModels = useModels((s) => s.imageModels)
+  const modelsLoaded = useModels((s) => s.loaded)
+  const modelsLoadedScope = useModels((s) => s.loadedScope)
+  const modelsLoadedPolicyKey = useModels((s) => s.loadedPolicyKey)
+  const modelsLoading = useModels((s) => s.loading)
   const user = useAuth((s) => s.user)
-  const canDraw = userCan(user, 'allow_drawing')
   const workspaceId = useWorkspaces((s) => s.activeId ?? undefined)
+  const workspacesLoaded = useWorkspaces((s) => s.loaded)
+  const workspacePolicyLoading = useWorkspaces((s) =>
+    s.activeId ? s.policyLoading[s.activeId] === true : false,
+  )
+  const workspaceSwitching = useWorkspaces((s) => s.switching)
+  const workspacePolicyError = useWorkspaces((s) =>
+    s.activeId ? s.policyErrors[s.activeId] : null,
+  )
+  const workspacePolicy = useWorkspaces((s) =>
+    s.activeId ? s.policies[s.activeId] : undefined,
+  )
+  const workspaceCaps = workspaceCapabilitiesForScope(workspaceId, workspacePolicy, {
+    workspacesLoaded,
+    policyLoading: workspacePolicyLoading,
+    switching: workspaceSwitching,
+    policyError: workspacePolicyError,
+  })
+  const canDraw = userCan(user, 'allow_drawing') && workspaceCaps.drawing
+  const workspacePolicyPending = Boolean(
+    workspaceId && !workspacePolicy && (!workspacesLoaded || workspacePolicyLoading || workspaceSwitching),
+  )
+  const modelCatalogReady = isModelCatalogReadyForScope({
+    loaded: modelsLoaded,
+    loadedScope: modelsLoadedScope,
+    loadedPolicyKey: modelsLoadedPolicyKey,
+    expectedScope: workspaceId ?? null,
+    expectedPolicyKey: workspaceModelPolicyKey(workspaceId, workspacePolicy),
+  })
   const clearComposerDraft = useComposerPrefs((s) => s.clearDraft)
 
   // The home screen has no title to show, so on mobile it drops the layout's
@@ -243,11 +276,27 @@ export default function ChatHome() {
     (pickedFast ?? resolveNewConversationFastMode(user?.settings, fastAvailable, drawMode))
 
   useEffect(() => {
-    if (!drawRequested || drawMode) return
+    // Keep a draw deep-link alive while the workspace policy and model catalog
+    // hydrate. Redirect only once both are known to deny drawing.
+    if (!drawRequested || drawMode || workspacePolicyPending) return
+    // A previously loaded personal/workspace catalog must not decide the draw
+    // route for the newly selected workspace. The model store records the
+    // scope represented by its latest response; wait for that scope to finish
+    // loading whenever drawing is otherwise permitted.
+    const modelScope = workspaceId ?? null
+    const modelPolicyKey = workspaceModelPolicyKey(workspaceId, workspacePolicy)
+    if (canDraw && (
+      modelsLoadedScope !== modelScope ||
+      modelsLoadedPolicyKey !== modelPolicyKey ||
+      !modelsLoaded ||
+      modelsLoading
+    )) return
     navigate('/', { replace: true })
-  }, [drawMode, drawRequested, navigate])
+  }, [canDraw, drawMode, drawRequested, modelsLoaded, modelsLoadedPolicyKey, modelsLoadedScope, modelsLoading, navigate, workspaceId, workspacePolicy, workspacePolicyPending])
 
   useEffect(() => {
+    setPickedModelId(null)
+    setPickedFast(null)
     setSelectedKnowledgeBaseIds([])
     // A fresh home composer always starts from the administrator's deployment
     // default. Conversation-specific overrides are kept under their IDs.
@@ -491,6 +540,7 @@ export default function ChatHome() {
       fast?: boolean
     },
   ) {
+    if (!modelCatalogReady) return
     if (startedRef.current) return
     startedRef.current = true
 

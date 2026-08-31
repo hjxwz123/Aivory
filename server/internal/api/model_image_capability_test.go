@@ -371,3 +371,157 @@ func TestListModelsExposesFastVisionWithoutHiddenIdentity(t *testing.T) {
 		t.Fatalf("fast flags=%v/%v, want true/false", payload["fast_available"], payload["fast_vision"])
 	}
 }
+
+func TestListImageModelsHonorsWorkspaceModelAllowlist(t *testing.T) {
+	fx := seedImageCapabilityFixture(t)
+	ctx := context.Background()
+	workspace, err := store.CreateWorkspace(ctx, fx.deps.DB, fx.user.ID, "Image allowlist")
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	allowed := []string{"m_image"}
+	if _, err := store.UpdateWorkspacePolicy(ctx, fx.deps.DB, workspace.ID, fx.user.ID, store.WorkspacePolicyPatch{
+		AllowedModelIDs: &allowed,
+	}); err != nil {
+		t.Fatalf("set workspace model allowlist: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/image-models?workspace_id="+workspace.ID, nil)
+	req = req.WithContext(context.WithValue(req.Context(), userCtxKey{}, fx.user))
+	rec := httptest.NewRecorder()
+	listImageModelsHandler(fx.deps, rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Models []struct {
+			ID string `json:"id"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Models) != 1 || payload.Models[0].ID != "m_image" {
+		t.Fatalf("workspace image models=%+v, want only m_image", payload.Models)
+	}
+}
+
+func TestListImageStylesHonorsWorkspaceDrawingPolicy(t *testing.T) {
+	fx := seedImageCapabilityFixture(t)
+	ctx := context.Background()
+	style, err := store.CreateImageStyle(ctx, fx.deps.DB, store.ImageStyle{
+		Name: "Editorial", ExampleImageURL: "https://example.test/editorial.png",
+		HiddenPrompt: "private style directive", Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create image style: %v", err)
+	}
+	workspace, err := store.CreateWorkspace(ctx, fx.deps.DB, fx.user.ID, "Drawing styles")
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	allowDrawing := false
+	if _, err := store.UpdateWorkspacePolicy(ctx, fx.deps.DB, workspace.ID, fx.user.ID, store.WorkspacePolicyPatch{
+		AllowDrawing: &allowDrawing,
+	}); err != nil {
+		t.Fatalf("disable workspace drawing: %v", err)
+	}
+
+	request := func(target string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		req = req.WithContext(context.WithValue(req.Context(), userCtxKey{}, fx.user))
+		rec := httptest.NewRecorder()
+		listImageStylesPublic(fx.deps, rec, req)
+		return rec
+	}
+
+	scoped := request("/api/image/styles?workspace_id=" + workspace.ID)
+	if scoped.Code != http.StatusOK {
+		t.Fatalf("scoped styles status=%d body=%s", scoped.Code, scoped.Body.String())
+	}
+	var scopedStyles []store.ImageStyle
+	if err := json.Unmarshal(scoped.Body.Bytes(), &scopedStyles); err != nil || len(scopedStyles) != 0 {
+		t.Fatalf("disabled workspace styles=%+v err=%v, want empty", scopedStyles, err)
+	}
+
+	personal := request("/api/image/styles")
+	if personal.Code != http.StatusOK {
+		t.Fatalf("personal styles status=%d body=%s", personal.Code, personal.Body.String())
+	}
+	var personalStyles []store.ImageStyle
+	if err := json.Unmarshal(personal.Body.Bytes(), &personalStyles); err != nil {
+		t.Fatalf("decode personal styles: %v", err)
+	}
+	if len(personalStyles) != 1 || personalStyles[0].ID != style.ID || personalStyles[0].HiddenPrompt != "" {
+		t.Fatalf("personal styles=%+v, want enabled style without hidden prompt", personalStyles)
+	}
+}
+
+func TestWorkspaceConversationModelSelectionRejectsDisabledCapabilities(t *testing.T) {
+	fx := seedImageCapabilityFixture(t)
+	ctx := context.Background()
+	workspace, err := store.CreateWorkspace(ctx, fx.deps.DB, fx.user.ID, "Conversation models")
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	create := func(modelID string) *httptest.ResponseRecorder {
+		t.Helper()
+		body := `{"model_id":"` + modelID + `","workspace_id":"` + workspace.ID + `"}`
+		req := httptest.NewRequest(http.MethodPost, "/api/conversations", strings.NewReader(body))
+		req = req.WithContext(context.WithValue(req.Context(), userCtxKey{}, fx.user))
+		rec := httptest.NewRecorder()
+		createConversationHandler(fx.deps, rec, req)
+		return rec
+	}
+
+	allowDrawing := false
+	if _, err := store.UpdateWorkspacePolicy(ctx, fx.deps.DB, workspace.ID, fx.user.ID, store.WorkspacePolicyPatch{
+		AllowDrawing: &allowDrawing,
+	}); err != nil {
+		t.Fatalf("disable workspace drawing: %v", err)
+	}
+	if rec := create("m_image"); rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), errWorkspaceImageDisabled.Error()) {
+		t.Fatalf("drawing-disabled create status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	allowDrawing = true
+	allowedModels := []string{"m_plain"}
+	if _, err := store.UpdateWorkspacePolicy(ctx, fx.deps.DB, workspace.ID, fx.user.ID, store.WorkspacePolicyPatch{
+		AllowDrawing: &allowDrawing, AllowedModelIDs: &allowedModels,
+	}); err != nil {
+		t.Fatalf("set workspace model allowlist: %v", err)
+	}
+	if rec := create("m_image"); rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), errWorkspaceModelDisabled.Error()) {
+		t.Fatalf("model-disabled create status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	createdResponse := create("m_plain")
+	if createdResponse.Code != http.StatusCreated {
+		t.Fatalf("allowed create status=%d body=%s", createdResponse.Code, createdResponse.Body.String())
+	}
+	var created store.Conversation
+	if err := json.Unmarshal(createdResponse.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created conversation: %v", err)
+	}
+
+	allowDrawing = false
+	allowedModels = []string{}
+	if _, err := store.UpdateWorkspacePolicy(ctx, fx.deps.DB, workspace.ID, fx.user.ID, store.WorkspacePolicyPatch{
+		AllowDrawing: &allowDrawing, AllowedModelIDs: &allowedModels,
+	}); err != nil {
+		t.Fatalf("disable drawing before update: %v", err)
+	}
+	patchReq := httptest.NewRequest(http.MethodPatch, "/api/conversations/"+created.ID, strings.NewReader(`{"model_id":"m_image"}`))
+	patchCtx := context.WithValue(patchReq.Context(), pathCtxKey{}, map[string]string{"id": created.ID})
+	patchReq = patchReq.WithContext(context.WithValue(patchCtx, userCtxKey{}, fx.user))
+	patchResponse := httptest.NewRecorder()
+	updateConversationHandler(fx.deps, patchResponse, patchReq)
+	if patchResponse.Code != http.StatusForbidden || !strings.Contains(patchResponse.Body.String(), errWorkspaceImageDisabled.Error()) {
+		t.Fatalf("drawing-disabled patch status=%d body=%s", patchResponse.Code, patchResponse.Body.String())
+	}
+	persisted, err := store.GetConversation(ctx, fx.deps.DB, created.ID, fx.user.ID)
+	if err != nil || persisted.ModelID != "m_plain" {
+		t.Fatalf("conversation after rejected patch=%+v err=%v", persisted, err)
+	}
+}

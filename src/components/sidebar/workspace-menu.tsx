@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle, ArrowLeftRight, Briefcase, Check, Copy, FileClock, Home, KeyRound, LogOut, Plus, RefreshCw, Settings2, ShieldCheck, SlidersHorizontal, Trash2, UserPlus, UserX, Users } from 'lucide-react'
-import { modelsApi, workspacesApi } from '@/api'
+import { workspacesApi } from '@/api'
 import type {
   ApiModel,
   ApiWorkspaceAuditLog,
@@ -38,6 +38,12 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { subscribeAccessInvalidation } from '@/lib/access-events'
+import {
+  canEditWorkspaceMemberPermissions,
+  memberCanCreate,
+  memberCanUse,
+  workspaceCapabilities,
+} from '@/lib/workspace-permissions'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -272,6 +278,9 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
   const actioningRef = useRef<{ workspaceID: string; epoch: number } | null>(null)
   const [editingMember, setEditingMember] = useState<ApiWorkspaceMember | null>(null)
   const [permissionDraft, setPermissionDraft] = useState<ApiWorkspaceMemberPermissions | null>(null)
+  const [permissionDraftDirty, setPermissionDraftDirty] = useState(false)
+  const permissionDraftDirtyRef = useRef(false)
+  const [permissionConflict, setPermissionConflict] = useState(false)
   const [savingPermissions, setSavingPermissions] = useState(false)
   const savingPermissionsRef = useRef<number | null>(null)
   const [roleBusyUid, setRoleBusyUid] = useState<string | null>(null)
@@ -308,6 +317,9 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
     setSavingPermissions(false)
     setEditingMember(null)
     setPermissionDraft(null)
+    permissionDraftDirtyRef.current = false
+    setPermissionDraftDirty(false)
+    setPermissionConflict(false)
     if (!open || !activeId) return
     setInviteToken('')
     setMembersLoading(true)
@@ -327,10 +339,32 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
       })
   }, [open, activeId, membersLoadAttempt])
 
+  // Each opening starts at the member overview. Keeping a previous workspace's
+  // policy/audit tab selected is disorienting after switching spaces, and can
+  // briefly leave a newly demoted manager looking at an empty panel.
+  useEffect(() => {
+    if (open) setTab('members')
+  }, [activeId, open])
+
   useEffect(
     () =>
       subscribeAccessInvalidation((event) => {
         if (!open || (event.kind !== 'account' && event.kind !== 'workspace')) return
+        // Preserve a locally edited draft when another administrator changes
+        // access state. Saving stays blocked until the manager explicitly
+        // reloads the authoritative member row.
+        if (permissionDraftDirtyRef.current || savingPermissionsRef.current !== null) {
+          setPermissionConflict(true)
+          return
+        }
+        // A clean editor still contains a snapshot of the old member row. Close
+        // it before reloading so the next edit starts from the newly committed
+        // permissions instead of overwriting another administrator's changes.
+        permissionDraftDirtyRef.current = false
+        setPermissionDraftDirty(false)
+        setPermissionConflict(false)
+        setEditingMember(null)
+        setPermissionDraft(null)
         setMembersLoadAttempt((attempt) => attempt + 1)
       }),
     [open],
@@ -387,11 +421,24 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
   }
 
   function editPermissions(member: ApiWorkspaceMember) {
+    // Admins (including the canonical owner) always have the full workspace
+    // capability ceiling. The API intentionally rejects member-permission
+    // writes for them, so a stale row must not be able to open a dead editor.
+    if (!canEditWorkspaceMemberPermissions(member)) return
     setEditingMember(member)
+    permissionDraftDirtyRef.current = false
+    setPermissionDraftDirty(false)
+    setPermissionConflict(false)
     setPermissionDraft({
       can_create_projects: member.can_create_projects,
       can_private_conversations: member.can_private_conversations,
       can_create_skills_prompts: member.can_create_skills_prompts,
+      can_create_prompts: memberCanCreate(member, 'prompt'),
+      can_create_skills: memberCanCreate(member, 'skill'),
+      can_create_mcp: memberCanCreate(member, 'mcp'),
+      can_use_prompts: memberCanUse(member, 'prompt'),
+      can_use_skills: memberCanUse(member, 'skill'),
+      can_use_mcp: memberCanUse(member, 'mcp'),
       can_create_kb: member.can_create_kb,
       can_add_kb_files: member.can_add_kb_files,
       can_delete_kb_content: member.can_delete_kb_content,
@@ -399,17 +446,38 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
     })
   }
 
+  function closePermissionEditor() {
+    permissionDraftDirtyRef.current = false
+    setPermissionDraftDirty(false)
+    setPermissionConflict(false)
+    setEditingMember(null)
+    setPermissionDraft(null)
+  }
+
   async function savePermissions() {
-    if (!editingMember || !permissionDraft || savingPermissionsRef.current !== null) return
+    if (!editingMember || !permissionDraft || permissionConflict || savingPermissionsRef.current !== null) return
     const epoch = operationEpochRef.current
     const memberID = editingMember.user_id
-    const draft = { ...permissionDraft }
+    // Keep the legacy combined bit as a conservative compatibility mirror for
+    // older API nodes. It must never broaden a granular permission: an older
+    // reader should only see the aggregate bit when every independent resource
+    // creation capability is enabled.
+    const draft = {
+      ...permissionDraft,
+      can_create_skills_prompts:
+        Boolean(permissionDraft.can_create_prompts) &&
+        Boolean(permissionDraft.can_create_skills) &&
+        Boolean(permissionDraft.can_create_mcp),
+    }
     savingPermissionsRef.current = epoch
     setSavingPermissions(true)
     try {
       const updated = await workspacesApi.updateMemberPermissions(activeId!, memberID, draft)
       if (epoch !== operationEpochRef.current) return
       setMembers((current) => current.map((member) => member.user_id === updated.user_id ? updated : member))
+      permissionDraftDirtyRef.current = false
+      setPermissionDraftDirty(false)
+      setPermissionConflict(false)
       setEditingMember(null)
       setPermissionDraft(null)
       toast.success(t('workspace.permissionsSaved', { defaultValue: 'Member permissions updated.' }))
@@ -499,9 +567,14 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
         </DialogHeader>
 
         <DialogBody className="space-y-4">
-        {/* §workspace RBAC: manager tabs — members / invites / capability policy. */}
-        {canManage ? (
-          <div role="tablist" aria-label={t('workspace.manageTabs', { defaultValue: 'Workspace management' })} className="flex min-w-0 gap-1 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-1">
+          {/* §workspace RBAC: manager tabs — members / invites / capability policy. */}
+          {canManage ? (
+            <div
+              role="tablist"
+              aria-orientation="horizontal"
+              aria-label={t('workspace.manageTabs', { defaultValue: 'Workspace management' })}
+              className="flex min-w-0 gap-1 overflow-x-auto overscroll-x-contain rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-1 scrollbar-thin"
+            >
             {([
               ['members', <Users key="i" size={13} aria-hidden />, t('workspace.tabMembers', { defaultValue: 'Members' })],
               ['invites', <KeyRound key="i" size={13} aria-hidden />, t('workspace.tabInvites', { defaultValue: 'Invites' })],
@@ -512,23 +585,48 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
                 key={key}
                 type="button"
                 role="tab"
+                id={`workspace-management-tab-${key}`}
+                aria-controls={`workspace-management-panel-${key}`}
                 aria-selected={tab === key}
+                tabIndex={tab === key ? 0 : -1}
                 onClick={() => setTab(key)}
-                className={`flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-[7px] px-1.5 py-1.5 text-[12px] font-medium interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] ${
+                onKeyDown={(event) => {
+                  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+                  const tabs = Array.from(
+                    event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [],
+                  )
+                  if (tabs.length === 0) return
+                  const current = tabs.indexOf(event.currentTarget)
+                  const next = event.key === 'Home'
+                    ? 0
+                    : event.key === 'End'
+                      ? tabs.length - 1
+                      : (current + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length
+                  event.preventDefault()
+                  tabs[next]?.focus()
+                  tabs[next]?.click()
+                }}
+                className={`flex min-h-[var(--tap-min)] shrink-0 items-center justify-center gap-1.5 rounded-[7px] px-2.5 text-[12px] font-medium interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] sm:min-h-0 sm:min-w-0 sm:flex-1 sm:px-1.5 sm:py-1.5 ${
                   tab === key
                     ? 'bg-[var(--color-bg)] text-[var(--color-fg)] shadow-sm'
                     : 'text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)]'
                 }`}
               >
                 <span className="shrink-0">{icon}</span>
-                <span className="min-w-0 truncate">{label}</span>
+                <span className="whitespace-nowrap">{label}</span>
               </button>
             ))}
-          </div>
-        ) : null}
+            </div>
+          ) : null}
 
         {tab !== 'members' && canManage ? null : (
-        <>
+        <div
+          id="workspace-management-panel-members"
+          role={canManage ? 'tabpanel' : undefined}
+          aria-labelledby={canManage ? 'workspace-management-tab-members' : undefined}
+          tabIndex={canManage ? 0 : undefined}
+          className="space-y-4 outline-none"
+        >
         {/* Invite link — admins may reset it (member-level invite); the current
             token is only exposed to the owner, so ordinary admins see the
             fresh link after rotating. */}
@@ -647,17 +745,19 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
                       </DropdownMenuContent>
                     </DropdownMenu>
                   ) : null}
-                  <Tooltip content={t('workspace.managePermissions', { defaultValue: 'Manage permissions' })}>
-                    <button
-                      type="button"
-                      onClick={() => editPermissions(m)}
-                      disabled={busyUid !== null}
-                      aria-label={t('workspace.managePermissions', { defaultValue: 'Manage permissions' })}
-                      className="inline-flex size-7 items-center justify-center rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:pointer-events-none disabled:opacity-50 max-sm:size-10"
-                    >
-                      <Settings2 size={13} aria-hidden />
-                    </button>
-                  </Tooltip>
+                  {canEditWorkspaceMemberPermissions(m) ? (
+                    <Tooltip content={t('workspace.managePermissions', { defaultValue: 'Manage permissions' })}>
+                      <button
+                        type="button"
+                        onClick={() => editPermissions(m)}
+                        disabled={busyUid !== null}
+                        aria-label={t('workspace.managePermissions', { defaultValue: 'Manage permissions' })}
+                        className="inline-flex size-7 items-center justify-center rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:pointer-events-none disabled:opacity-50 max-sm:size-10"
+                      >
+                        <Settings2 size={13} aria-hidden />
+                      </button>
+                    </Tooltip>
+                  ) : null}
                   <Tooltip content={t('workspace.kick', { defaultValue: 'Remove member' })}>
                     <button
                       type="button"
@@ -675,16 +775,40 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
             )
           })}
         </ul>
-        </>
+        </div>
         )}
         {tab === 'invites' && canManage && activeId ? (
-          <WorkspaceInvitesPanel workspaceID={activeId} isOwner={isOwner} />
+          <div
+            id="workspace-management-panel-invites"
+            role="tabpanel"
+            aria-labelledby="workspace-management-tab-invites"
+            tabIndex={0}
+            className="outline-none"
+          >
+            <WorkspaceInvitesPanel workspaceID={activeId} isOwner={isOwner} />
+          </div>
         ) : null}
         {tab === 'policy' && canManage && activeId ? (
-          <WorkspacePolicyPanel workspaceID={activeId} />
+          <div
+            id="workspace-management-panel-policy"
+            role="tabpanel"
+            aria-labelledby="workspace-management-tab-policy"
+            tabIndex={0}
+            className="outline-none"
+          >
+            <WorkspacePolicyPanel key={activeId} workspaceID={activeId} />
+          </div>
         ) : null}
         {tab === 'audit' && canManage && activeId ? (
-          <WorkspaceAuditPanel workspaceID={activeId} />
+          <div
+            id="workspace-management-panel-audit"
+            role="tabpanel"
+            aria-labelledby="workspace-management-tab-audit"
+            tabIndex={0}
+            className="outline-none"
+          >
+            <WorkspaceAuditPanel workspaceID={activeId} />
+          </div>
         ) : null}
         </DialogBody>
 
@@ -744,61 +868,109 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
       <Dialog
         open={editingMember !== null}
         onOpenChange={(next) => {
-          if (!next && !savingPermissions) {
-            setEditingMember(null)
-            setPermissionDraft(null)
-          }
+          if (!next && !savingPermissions) closePermissionEditor()
         }}
       >
-        <DialogContent size="sm" closeDisabled={savingPermissions}>
+        <DialogContent size="md" closeDisabled={savingPermissions}>
           <DialogHeader>
             <DialogTitle>{t('workspace.memberPermissions', { defaultValue: 'Member permissions' })}</DialogTitle>
             <DialogDescription>
               {t('workspace.memberPermissionsBody', {
                 name: editingMember?.name || editingMember?.email || '',
-                defaultValue: 'Set what {{name}} can create and manage across this workspace.',
+                defaultValue: 'Set what {{name}} can use, create, and manage across this workspace.',
               })}
             </DialogDescription>
           </DialogHeader>
-          <DialogBody className="divide-y divide-[var(--color-divider)] py-0">
+          <DialogBody className="min-h-0 max-h-[min(70dvh,38rem)] overflow-y-auto py-0">
             {permissionDraft && editingMember?.role === 'guest' ? (
               <p className="py-4 text-[12.5px] leading-5 text-[var(--color-fg-muted)]">
                 {t('workspace.readOnlyAccess', { defaultValue: 'Read-only access' })}
               </p>
             ) : null}
-            {permissionDraft && editingMember?.role !== 'guest' ? WORKSPACE_PERMISSION_ROWS.map((row) => (
-              <label key={row.key} className="flex min-h-14 cursor-pointer items-center gap-4 py-3">
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[13px] font-medium text-[var(--color-fg)]">
-                    {t(`workspace.permissions.${row.key}.label`, { defaultValue: row.label })}
-                  </span>
-                  <span className="mt-0.5 block text-[11.5px] leading-4 text-[var(--color-fg-subtle)]">
-                    {t(`workspace.permissions.${row.key}.description`, { defaultValue: row.description })}
-                  </span>
-                </span>
-                <Switch
-                  checked={permissionDraft[row.key]}
-                  disabled={savingPermissions}
-                  onCheckedChange={(checked) => setPermissionDraft((current) => current ? { ...current, [row.key]: checked } : current)}
-                  aria-label={t(`workspace.permissions.${row.key}.label`, { defaultValue: row.label })}
-                />
-              </label>
-            )) : null}
+            {permissionDraft && editingMember?.role !== 'guest' ? (
+              <div className="space-y-6 py-1">
+                {permissionConflict ? (
+                  <div role="alert" className="flex items-start gap-3 border-b border-[var(--color-warning)]/30 bg-[var(--color-warning)]/5 px-1 py-3">
+                    <AlertTriangle size={16} aria-hidden className="mt-0.5 shrink-0 text-[var(--color-warning)]" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[12.5px] font-medium text-[var(--color-fg)]">
+                        {t('workspace.permissionsConflict', { defaultValue: 'Member permissions changed on the server.' })}
+                      </p>
+                      <p className="mt-0.5 text-[11.5px] leading-4 text-[var(--color-fg-subtle)]">
+                        {t('workspace.permissionsConflictHint', { defaultValue: 'Your unsaved changes are preserved. Reload before saving to avoid overwriting newer settings.' })}
+                      </p>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="mt-2"
+                        onClick={() => {
+                          closePermissionEditor()
+                          setMembersLoadAttempt((attempt) => attempt + 1)
+                        }}
+                      >
+                        {t('workspace.reloadPermissions', { defaultValue: 'Reload permissions' })}
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+                {WORKSPACE_PERMISSION_GROUPS.map((group) => (
+                  <section key={group.id} aria-labelledby={`workspace-member-permissions-${group.id}`}>
+                    <div className="border-b border-[var(--color-divider)] py-3">
+                      <h3 id={`workspace-member-permissions-${group.id}`} className="text-[13px] font-semibold text-[var(--color-fg)]">
+                        {t(`workspace.permissions.groups.${group.id}.label`, { defaultValue: group.label })}
+                      </h3>
+                      <p className="mt-0.5 text-[11.5px] leading-4 text-[var(--color-fg-subtle)]">
+                        {t(`workspace.permissions.groups.${group.id}.description`, { defaultValue: group.description })}
+                      </p>
+                    </div>
+                    <div className="divide-y divide-[var(--color-divider)]">
+                      {group.rows.map((row) => (
+                        <label key={row.key} className="flex min-h-14 cursor-pointer items-center gap-4 py-3">
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-[13px] font-medium text-[var(--color-fg)]">
+                              {t(`workspace.permissions.${row.key}.label`, { defaultValue: row.label })}
+                            </span>
+                            <span className="mt-0.5 block text-[11.5px] leading-4 text-[var(--color-fg-subtle)]">
+                              {t(`workspace.permissions.${row.key}.description`, { defaultValue: row.description })}
+                            </span>
+                          </span>
+                          <Switch
+                            checked={Boolean(permissionDraft[row.key])}
+                            disabled={savingPermissions}
+                            onCheckedChange={(checked) => {
+                              permissionDraftDirtyRef.current = true
+                              setPermissionDraftDirty(true)
+                              setPermissionDraft((current) => current ? { ...current, [row.key]: checked } : current)
+                            }}
+                            aria-label={t(`workspace.permissions.${row.key}.label`, { defaultValue: row.label })}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            ) : null}
           </DialogBody>
           <DialogFooter>
             <Button
               variant="ghost"
               disabled={savingPermissions}
-              onClick={() => {
-                setEditingMember(null)
-                setPermissionDraft(null)
-              }}
+              onClick={closePermissionEditor}
             >
-              {t('common.cancel', { ns: 'common', defaultValue: 'Cancel' })}
+              {editingMember?.role === 'guest'
+                ? t('common.close', { ns: 'common', defaultValue: 'Close' })
+                : t('common.cancel', { ns: 'common', defaultValue: 'Cancel' })}
             </Button>
-            <Button loading={savingPermissions} onClick={() => void savePermissions()}>
-              {t('common.save', { ns: 'common', defaultValue: 'Save' })}
-            </Button>
+            {editingMember?.role !== 'guest' ? (
+              <Button
+                loading={savingPermissions}
+                disabled={!permissionDraftDirty || permissionConflict}
+                onClick={() => void savePermissions()}
+              >
+                {t('common.save', { ns: 'common', defaultValue: 'Save' })}
+              </Button>
+            ) : null}
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -806,18 +978,58 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
   )
 }
 
-const WORKSPACE_PERMISSION_ROWS: Array<{
+type WorkspaceMemberPermissionRow = {
   key: keyof ApiWorkspaceMemberPermissions
   label: string
   description: string
-}> = [
-  { key: 'can_create_projects', label: 'Create projects', description: 'Create new projects and their project libraries.' },
-  { key: 'can_create_skills_prompts', label: 'Create skills and prompts', description: 'Create and manage their own workspace skills and prompts.' },
-  { key: 'can_private_conversations', label: 'Private conversations', description: 'Create conversations visible only to themselves.' },
-  { key: 'can_create_kb', label: 'Create knowledge bases', description: 'Create new workspace knowledge bases.' },
-  { key: 'can_add_kb_files', label: 'Add knowledge-base files', description: 'Upload and paste content into workspace knowledge bases.' },
-  { key: 'can_delete_kb_content', label: 'Delete knowledge-base content', description: 'Delete or retry content when the specific library also allows it.' },
-  { key: 'can_delete_conversations', label: 'Delete conversations', description: 'Delete messages and conversations in this workspace, including conversations they created.' },
+}
+
+type WorkspaceMemberPermissionGroup = {
+  id: 'useResources' | 'createResources' | 'workspaceContent'
+  label: string
+  description: string
+  rows: WorkspaceMemberPermissionRow[]
+}
+
+/**
+ * Keep usage and creation controls adjacent but visibly separate. A member
+ * can, for example, use an MCP without being allowed to register one, which is
+ * why these must never share a switch or a fallback in the dialog.
+ */
+const WORKSPACE_PERMISSION_GROUPS: WorkspaceMemberPermissionGroup[] = [
+  {
+    id: 'useResources',
+    label: 'Use workspace resources',
+    description: 'Choose which resource families this member can use in chats and projects.',
+    rows: [
+      { key: 'can_use_prompts', label: 'Use prompts', description: 'Apply prompts from the workspace library.' },
+      { key: 'can_use_skills', label: 'Use skills', description: 'Run skills shared in the workspace library.' },
+      { key: 'can_use_mcp', label: 'Use MCP services', description: 'Call tools exposed by MCP services available in this workspace.' },
+    ],
+  },
+  {
+    id: 'createResources',
+    label: 'Create workspace resources',
+    description: 'Creation rights are independent from usage rights above.',
+    rows: [
+      { key: 'can_create_prompts', label: 'Create prompts', description: 'Create new prompts in this workspace.' },
+      { key: 'can_create_skills', label: 'Create skills', description: 'Create new skills in this workspace.' },
+      { key: 'can_create_mcp', label: 'Create MCP services', description: 'Register new MCP services in this workspace.' },
+    ],
+  },
+  {
+    id: 'workspaceContent',
+    label: 'Workspace content',
+    description: 'Control projects, conversations, and knowledge-base operations.',
+    rows: [
+      { key: 'can_create_projects', label: 'Create projects', description: 'Create new projects and their project libraries.' },
+      { key: 'can_private_conversations', label: 'Private conversations', description: 'Create conversations visible only to themselves.' },
+      { key: 'can_create_kb', label: 'Create knowledge bases', description: 'Create new workspace knowledge bases.' },
+      { key: 'can_add_kb_files', label: 'Add knowledge-base files', description: 'Upload and paste content into workspace knowledge bases.' },
+      { key: 'can_delete_kb_content', label: 'Delete knowledge-base content', description: 'Delete or retry content when the specific library also allows it.' },
+      { key: 'can_delete_conversations', label: 'Delete conversations', description: 'Delete messages and conversations in this workspace, including conversations they created.' },
+    ],
+  },
 ]
 
 /** §workspace RBAC phase 3 — invite records: create, copy link, revoke. */
@@ -1034,13 +1246,40 @@ function WorkspaceInvitesPanel({ workspaceID, isOwner }: { workspaceID: string; 
  *  the member monthly credit limit. */
 function WorkspacePolicyPanel({ workspaceID }: { workspaceID: string }) {
   const { t } = useTranslation('chat')
+  const setWorkspacePolicy = useWorkspaces((state) => state.setPolicy)
   const [policy, setPolicy] = useState<ApiWorkspacePolicy | null>(null)
-  const [models, setModels] = useState<ApiModel[]>([])
+  const [models, setModels] = useState<Array<Pick<ApiModel, 'id' | 'label' | 'kind'>>>([])
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
   const [attempt, setAttempt] = useState(0)
   const [saving, setSaving] = useState(false)
+  const savingRef = useRef(false)
+  const saveEpochRef = useRef(0)
+  const mountedRef = useRef(true)
+  const [policyDirty, setPolicyDirty] = useState(false)
+  const policyDirtyRef = useRef(false)
+  const [policyConflict, setPolicyConflict] = useState(false)
   const [limitDraft, setLimitDraft] = useState('0')
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      saveEpochRef.current += 1
+    }
+  }, [])
+
+  function markPolicyDirty() {
+    policyDirtyRef.current = true
+    setPolicyDirty(true)
+  }
+
+  function reloadPolicy() {
+    policyDirtyRef.current = false
+    setPolicyDirty(false)
+    setPolicyConflict(false)
+    setAttempt((value) => value + 1)
+  }
 
   useEffect(() => {
     let current = true
@@ -1048,21 +1287,41 @@ function WorkspacePolicyPanel({ workspaceID }: { workspaceID: string }) {
     setFailed(false)
     Promise.all([
       workspacesApi.getPolicy(workspaceID),
-      // Unscoped: the editor picks from ALL platform models, not the
-      // already-narrowed workspace list.
-      modelsApi.list(undefined),
+      // This manager-only catalog is independent from the operator's group and
+      // current workspace policy. A narrowed public picker would make saving
+      // an explicit allowlist destructive.
+      workspacesApi.policyModels(workspaceID),
     ])
-      .then(([p, m]) => {
+      .then(([p, modelCatalog]) => {
         if (current) {
           setPolicy(p)
-          setModels(m.models)
+          setWorkspacePolicy(workspaceID, p)
+          setModels(modelCatalog.models)
           setLimitDraft(String(p.MemberMonthlyCreditLimit))
+          policyDirtyRef.current = false
+          setPolicyDirty(false)
+          setPolicyConflict(false)
         }
       })
       .catch(() => { if (current) setFailed(true) })
       .finally(() => { if (current) setLoading(false) })
     return () => { current = false }
-  }, [workspaceID, attempt])
+  }, [attempt, setWorkspacePolicy, workspaceID])
+
+  // Reconcile an already-open policy editor when another tab/member changes
+  // workspace capabilities. The realtime layer refreshes the global policy
+  // cache and emits this event; without a local reload, clicking Save here
+  // could overwrite that newer server state with an old draft.
+  useEffect(() => {
+    return subscribeAccessInvalidation((event) => {
+      if (event.kind !== 'workspace') return
+      if (policyDirtyRef.current || savingRef.current) {
+        setPolicyConflict(true)
+        return
+      }
+      setAttempt((value) => value + 1)
+    })
+  }, [workspaceID])
 
   if (loading) {
     return <div className="space-y-2 py-2">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
@@ -1082,55 +1341,155 @@ function WorkspacePolicyPanel({ workspaceID }: { workspaceID: string }) {
   }
 
   const allModelsAllowed = policy.AllowedModelIDs.length === 0
-  const switches: Array<{ key: keyof ApiWorkspacePolicy; label: string; description: string }> = [
-    { key: 'AllowSandbox', label: 'Python sandbox', description: 'Run python_execute / code_interpreter tools.' },
-    { key: 'AllowImageGeneration', label: 'Image generation', description: 'Image models and image tools.' },
-    { key: 'AllowKnowledgeBases', label: 'Knowledge bases', description: 'Create and use workspace knowledge bases and projects.' },
-    { key: 'AllowFileUpload', label: 'File upload', description: 'Attach files to workspace conversations.' },
+  const capabilities = workspaceCapabilities(policy)
+  type CapabilityKey = 'AllowToolCalling' | 'AllowDrawing' | 'AllowMCP' | 'AllowSkills' | 'AllowPrompts' | 'AllowKnowledgeBases' | 'AllowFileUpload'
+  const capabilityGroups: Array<{
+    id: 'core' | 'resources' | 'content'
+    label: string
+    description: string
+    rows: Array<{ key: CapabilityKey; label: string; description: string }>
+  }> = [
+    {
+      id: 'core',
+      label: t('workspace.policy.groups.core.label', { defaultValue: 'Core capabilities' }),
+      description: t('workspace.policy.groups.core.description', { defaultValue: 'Workspace-wide controls apply to every member, including admins.' }),
+      rows: [
+        { key: 'AllowToolCalling', label: 'Tool calling', description: 'Allow model tool calls, including built-in tools and MCP services.' },
+        { key: 'AllowDrawing', label: 'Drawing', description: 'Allow the dedicated drawing mode and image models.' },
+      ],
+    },
+    {
+      id: 'resources',
+      label: t('workspace.policy.groups.resources.label', { defaultValue: 'Resource library' }),
+      description: t('workspace.policy.groups.resources.description', { defaultValue: 'Turn off a family to hide its library tab and block its use in conversations.' }),
+      rows: [
+        { key: 'AllowPrompts', label: 'Prompts', description: 'Show and use prompt resources in this workspace.' },
+        { key: 'AllowSkills', label: 'Skills', description: 'Show and use skill resources in this workspace.' },
+        { key: 'AllowMCP', label: 'MCP services', description: 'Show MCP services and allow their tools when tool calling is enabled.' },
+      ],
+    },
+    {
+      id: 'content',
+      label: t('workspace.policy.groups.content.label', { defaultValue: 'Workspace content' }),
+      description: t('workspace.policy.groups.content.description', { defaultValue: 'Control shared knowledge and file operations.' }),
+      rows: [
+        { key: 'AllowKnowledgeBases', label: 'Knowledge bases', description: 'Create and use workspace knowledge bases and projects.' },
+        { key: 'AllowFileUpload', label: 'File upload', description: 'Attach files to workspace conversations.' },
+      ],
+    },
   ]
 
   async function save() {
-    if (saving) return
+    if (savingRef.current || policyConflict || !policyDirty) return
+    const saveEpoch = ++saveEpochRef.current
+    const targetWorkspaceID = workspaceID
+    savingRef.current = true
     setSaving(true)
     try {
-      const updated = await workspacesApi.updatePolicy(workspaceID, {
+      const updated = await workspacesApi.updatePolicy(targetWorkspaceID, {
         AllowedModelIDs: policy!.AllowedModelIDs,
-        AllowSandbox: policy!.AllowSandbox,
-        AllowImageGeneration: policy!.AllowImageGeneration,
-        AllowKnowledgeBases: policy!.AllowKnowledgeBases,
-        AllowFileUpload: policy!.AllowFileUpload,
+        AllowToolCalling: capabilities.toolCalling,
+        AllowDrawing: capabilities.drawing,
+        AllowMCP: capabilities.mcp,
+        AllowSkills: capabilities.skills,
+        AllowPrompts: capabilities.prompts,
+        AllowKnowledgeBases: capabilities.knowledgeBases,
+        AllowFileUpload: capabilities.fileUpload,
         MemberMonthlyCreditLimit: Math.max(0, Number(limitDraft) || 0),
       })
+      if (!mountedRef.current || saveEpoch !== saveEpochRef.current) return
       setPolicy(updated)
+      setWorkspacePolicy(targetWorkspaceID, updated)
       setLimitDraft(String(updated.MemberMonthlyCreditLimit))
+      policyDirtyRef.current = false
+      setPolicyDirty(false)
+      setPolicyConflict(false)
       toast.success(t('workspace.policySaved', { defaultValue: 'Workspace capabilities updated.' }))
     } catch {
-      toast.error(t('workspace.policySaveFailed', { defaultValue: 'Could not update the workspace policy.' }))
+      if (mountedRef.current && saveEpoch === saveEpochRef.current) {
+        toast.error(t('workspace.policySaveFailed', { defaultValue: 'Could not update the workspace policy.' }))
+      }
     } finally {
-      setSaving(false)
+      if (saveEpoch === saveEpochRef.current) {
+        savingRef.current = false
+        if (mountedRef.current) setSaving(false)
+      }
     }
   }
 
   return (
     <div className="space-y-3">
-      <div className="divide-y divide-[var(--color-divider)] rounded-[10px] border border-[var(--color-border)]">
-        {switches.map((row) => (
-          <label key={row.key} className="flex min-h-14 cursor-pointer items-center gap-4 px-3 py-3">
-            <span className="min-w-0 flex-1">
-              <span className="block text-[13px] font-medium text-[var(--color-fg)]">
-                {t(`workspace.policy.${row.key}.label`, { defaultValue: row.label })}
-              </span>
-              <span className="mt-0.5 block text-[11.5px] leading-4 text-[var(--color-fg-subtle)]">
-                {t(`workspace.policy.${row.key}.description`, { defaultValue: row.description })}
-              </span>
-            </span>
-            <Switch
-              checked={Boolean(policy[row.key])}
-              disabled={saving}
-              onCheckedChange={(checked) => setPolicy((current) => current ? { ...current, [row.key]: checked } : current)}
-              aria-label={t(`workspace.policy.${row.key}.label`, { defaultValue: row.label })}
-            />
-          </label>
+      {policyConflict ? (
+        <div role="alert" className="flex items-start gap-3 border-b border-[var(--color-warning)]/30 bg-[var(--color-warning)]/5 px-1 py-3">
+          <AlertTriangle size={16} aria-hidden className="mt-0.5 shrink-0 text-[var(--color-warning)]" />
+          <div className="min-w-0 flex-1">
+            <p className="text-[12.5px] font-medium text-[var(--color-fg)]">
+              {t('workspace.policyConflict', { defaultValue: 'Workspace capabilities changed on the server.' })}
+            </p>
+            <p className="mt-0.5 text-[11.5px] leading-4 text-[var(--color-fg-subtle)]">
+              {t('workspace.policyConflictHint', { defaultValue: 'Your unsaved changes are preserved. Reload before saving to avoid overwriting newer settings.' })}
+            </p>
+            <Button size="sm" variant="secondary" className="mt-2" onClick={reloadPolicy}>
+              {t('workspace.reloadPolicy', { defaultValue: 'Reload capabilities' })}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+      <div className="space-y-4">
+        {capabilityGroups.map((group) => (
+          <section key={group.id} className="rounded-[10px] border border-[var(--color-border)] px-3">
+            <div className="border-b border-[var(--color-divider)] py-3">
+              <h3 className="text-[13px] font-semibold text-[var(--color-fg)]">{group.label}</h3>
+              <p className="mt-0.5 text-[11.5px] leading-4 text-[var(--color-fg-subtle)]">{group.description}</p>
+            </div>
+            <div className="divide-y divide-[var(--color-divider)]">
+              {group.rows.map((row) => {
+                const capability = row.key === 'AllowToolCalling'
+                  ? capabilities.toolCalling
+                  : row.key === 'AllowDrawing'
+                    ? capabilities.drawing
+                    : row.key === 'AllowMCP'
+                      ? capabilities.mcp
+                      : row.key === 'AllowSkills'
+                        ? capabilities.skills
+                        : row.key === 'AllowPrompts'
+                          ? capabilities.prompts
+                          : row.key === 'AllowKnowledgeBases'
+                            ? capabilities.knowledgeBases
+                            : capabilities.fileUpload
+                return (
+                  <label key={row.key} className="flex min-h-14 cursor-pointer items-center gap-4 py-3">
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[13px] font-medium text-[var(--color-fg)]">
+                        {t(`workspace.policy.${row.key}.label`, { defaultValue: row.label })}
+                      </span>
+                      <span className="mt-0.5 block text-[11.5px] leading-4 text-[var(--color-fg-subtle)]">
+                        {t(`workspace.policy.${row.key}.description`, { defaultValue: row.description })}
+                      </span>
+                    </span>
+                    <Switch
+                      checked={capability}
+                      disabled={saving}
+                      onCheckedChange={(checked) => {
+                        markPolicyDirty()
+                        setPolicy((current) => {
+                          if (!current) return current
+                          if (row.key === 'AllowToolCalling') return { ...current, AllowToolCalling: checked }
+                          if (row.key === 'AllowDrawing') return { ...current, AllowDrawing: checked }
+                          if (row.key === 'AllowMCP') return { ...current, AllowMCP: checked }
+                          if (row.key === 'AllowSkills') return { ...current, AllowSkills: checked }
+                          if (row.key === 'AllowPrompts') return { ...current, AllowPrompts: checked }
+                          if (row.key === 'AllowKnowledgeBases') return { ...current, AllowKnowledgeBases: checked }
+                          return { ...current, AllowFileUpload: checked }
+                        })
+                      }}
+                      aria-label={t(`workspace.policy.${row.key}.label`, { defaultValue: row.label })}
+                    />
+                  </label>
+                )
+              })}
+            </div>
+          </section>
         ))}
       </div>
 
@@ -1143,43 +1502,48 @@ function WorkspacePolicyPanel({ workspaceID }: { workspaceID: string }) {
             {t('workspace.policy.allModels', { defaultValue: 'All models' })}
             <Switch
               checked={allModelsAllowed}
-              disabled={saving}
-              onCheckedChange={(checked) => setPolicy((current) => current ? {
-                ...current,
-                AllowedModelIDs: checked ? [] : models.map((model) => model.id),
-              } : current)}
+              disabled={saving || (allModelsAllowed && models.length === 0)}
+              onCheckedChange={(checked) => {
+                markPolicyDirty()
+                setPolicy((current) => current ? {
+                  ...current,
+                  AllowedModelIDs: checked ? [] : models.map((model) => model.id),
+                } : current)
+              }}
               aria-label={t('workspace.policy.allModels', { defaultValue: 'All models' })}
             />
           </label>
         </div>
-        {!allModelsAllowed ? (
+        {models.length === 0 ? (
+          <p className="mt-1.5 text-[11.5px] text-[var(--color-fg-subtle)]">
+            {t('workspace.policy.noModels', { defaultValue: 'No models available.' })}
+          </p>
+        ) : !allModelsAllowed ? (
           <div className="mt-2 max-h-40 space-y-1 overflow-y-auto scrollbar-thin">
             {models.map((model) => {
               const checked = policy.AllowedModelIDs.includes(model.id)
               return (
-                <label key={model.id} className="flex cursor-pointer items-center gap-2.5 rounded-[7px] px-1.5 py-1.5 hover:bg-[var(--color-bg-muted)]">
+                <label key={model.id} className="flex min-h-9 cursor-pointer items-center gap-2.5 rounded-[7px] px-1.5 py-1.5 hover:bg-[var(--color-bg-muted)] max-sm:min-h-[var(--tap-min)]">
                   <input
                     type="checkbox"
                     checked={checked}
                     disabled={saving}
-                    onChange={(e) => setPolicy((current) => {
-                      if (!current) return current
-                      const next = e.target.checked
-                        ? [...current.AllowedModelIDs, model.id]
-                        : current.AllowedModelIDs.filter((id) => id !== model.id)
-                      return { ...current, AllowedModelIDs: next }
-                    })}
+                    onChange={(e) => {
+                      markPolicyDirty()
+                      setPolicy((current) => {
+                        if (!current) return current
+                        const next = e.target.checked
+                          ? [...current.AllowedModelIDs, model.id]
+                          : current.AllowedModelIDs.filter((id) => id !== model.id)
+                        return { ...current, AllowedModelIDs: next }
+                      })
+                    }}
                     className="size-3.5 accent-[var(--color-accent)]"
                   />
                   <span className="min-w-0 flex-1 truncate text-[12.5px] text-[var(--color-fg)]">{model.label || model.id}</span>
                 </label>
               )
             })}
-            {models.length === 0 ? (
-              <p className="py-2 text-center text-[12px] text-[var(--color-fg-subtle)]">
-                {t('workspace.policy.noModels', { defaultValue: 'No models available.' })}
-              </p>
-            ) : null}
           </div>
         ) : (
           <p className="mt-1.5 text-[11.5px] text-[var(--color-fg-subtle)]">
@@ -1198,7 +1562,10 @@ function WorkspacePolicyPanel({ workspaceID }: { workspaceID: string }) {
         <Input
           value={limitDraft}
           disabled={saving}
-          onChange={(e) => setLimitDraft(e.target.value)}
+          onChange={(e) => {
+            markPolicyDirty()
+            setLimitDraft(e.target.value)
+          }}
           type="number"
           min={0}
           step="0.01"
@@ -1208,7 +1575,7 @@ function WorkspacePolicyPanel({ workspaceID }: { workspaceID: string }) {
       </div>
 
       <div className="flex justify-end">
-        <Button loading={saving} onClick={() => void save()}>
+        <Button loading={saving} disabled={!policyDirty || policyConflict} onClick={() => void save()}>
           {t('common.save', { ns: 'common', defaultValue: 'Save' })}
         </Button>
       </div>

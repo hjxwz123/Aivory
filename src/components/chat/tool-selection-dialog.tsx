@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { RefreshCw, Search, Wrench } from 'lucide-react'
 import { toolsApi } from '@/api'
-import { activeWorkspaceId } from '@/store/workspaces'
+import { useWorkspaces } from '@/store/workspaces'
+import {
+  workspaceCapabilitiesForScope,
+  workspaceMemberCanUse,
+  workspacePolicyResolvedForScope,
+} from '@/lib/workspace-permissions'
 import type { ApiSelectableTool } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -17,6 +22,12 @@ import {
 import { Input } from '@/components/ui/input'
 import { resolveLucideIcon } from '@/lib/lucide-icons'
 import { committedToolSelection } from '@/lib/tool-selection'
+import {
+  countSelectedTools,
+  toolSegmentOf,
+  toolsInSegment,
+  type ToolSegment,
+} from '@/lib/tool-segments'
 import { subscribeAccessInvalidation } from '@/lib/access-events'
 import { cn } from '@/lib/utils'
 import { useTranslation } from 'react-i18next'
@@ -25,6 +36,9 @@ interface ToolSelectionDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   modelId: string
+  /** Workspace scope for the catalog request. Omit to follow the active
+   * workspace; pass `null` for a personal conversation. */
+  workspaceId?: string | null
   /** undefined means the model defaults; [] is an explicit empty selection. */
   selectedIds?: string[]
   onChange: (ids: string[] | undefined) => void
@@ -42,15 +56,49 @@ export function ToolSelectionDialog({
   open,
   onOpenChange,
   modelId,
+  workspaceId: scopedWorkspaceId,
   selectedIds,
   onChange,
   onApply,
 }: ToolSelectionDialogProps) {
   const { t } = useTranslation('chat')
+  const activeWorkspaceId = useWorkspaces((state) => state.activeId ?? undefined)
+  const workspaceId = scopedWorkspaceId !== undefined ? scopedWorkspaceId ?? undefined : activeWorkspaceId
+  const workspacesLoaded = useWorkspaces((state) => state.loaded)
+  const workspacePolicyLoading = useWorkspaces((state) =>
+    workspaceId ? state.policyLoading[workspaceId] === true : false,
+  )
+  const workspaceSwitching = useWorkspaces((state) => state.switching)
+  const workspacePolicyError = useWorkspaces((state) =>
+    workspaceId ? state.policyErrors[workspaceId] : null,
+  )
+  const activeWorkspace = useWorkspaces((state) =>
+    workspaceId ? state.workspaces.find((workspace) => workspace.id === workspaceId) : undefined,
+  )
+  const workspacePolicy = useWorkspaces((state) =>
+    workspaceId ? state.policies[workspaceId] : undefined,
+  )
+  const workspaceCaps = workspaceCapabilitiesForScope(workspaceId, workspacePolicy, {
+    workspacesLoaded,
+    policyLoading: workspacePolicyLoading,
+    switching: workspaceSwitching,
+    policyError: workspacePolicyError,
+  })
+  const workspacePolicyResolved = workspacePolicyResolvedForScope(workspaceId, workspacePolicy, {
+    workspacesLoaded,
+    policyLoading: workspacePolicyLoading,
+    switching: workspaceSwitching,
+    policyError: workspacePolicyError,
+  })
+  const workspaceToolCallingExplicitlyDisabled =
+    workspacePolicyResolved && !workspaceCaps.toolCalling
+  const canUseWorkspaceMCP = !workspaceId || workspaceMemberCanUse(activeWorkspace, 'mcp')
+  const canShowMineSegment = workspaceCaps.toolCalling && workspaceCaps.mcp && canUseWorkspaceMCP
   const [tools, setTools] = useState<ApiSelectableTool[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(false)
   const [query, setQuery] = useState('')
+  const [segment, setSegment] = useState<ToolSegment>('official')
   const [usingDefaults, setUsingDefaults] = useState(selectedIds === undefined)
   const [draftIds, setDraftIds] = useState<Set<string>>(() => new Set(selectedIds ?? []))
   const [reloadKey, setReloadKey] = useState(0)
@@ -58,15 +106,26 @@ export function ToolSelectionDialog({
 
   useEffect(() => {
     if (!open || !modelId) return
+    if (!workspaceCaps.toolCalling) {
+      setTools([])
+      setLoading(false)
+      setError(false)
+      setUsingDefaults(false)
+      setDraftIds(new Set())
+      return
+    }
     let cancelled = false
     setLoading(true)
     setError(false)
     void toolsApi
-      .list(modelId, activeWorkspaceId() ?? undefined)
+      .list(modelId, workspaceId)
       .then((items) => {
         if (cancelled) return
         setTools(items)
-        const allowed = new Set(items.filter((item) => item.allowed !== false).map((item) => item.id))
+        const allowed = new Set(items
+          .filter((item) => item.allowed !== false)
+          .filter((item) => canShowMineSegment || toolSegmentOf(item.id) !== 'mine')
+          .map((item) => item.id))
         const defaults = items
           .filter((item) => item.allowed !== false && item.default_selected === true)
           .map((item) => item.id)
@@ -86,11 +145,33 @@ export function ToolSelectionDialog({
     return () => {
       cancelled = true
     }
-  }, [modelId, onChange, open, reloadKey, selectedIds])
+  }, [canShowMineSegment, modelId, onChange, open, reloadKey, selectedIds, workspaceCaps.toolCalling, workspaceId])
 
   useEffect(() => {
-    if (!open) setQuery('')
+    if (!open) {
+      setQuery('')
+      setSegment('official')
+    }
   }, [open])
+
+  useEffect(() => {
+    if (!canShowMineSegment && segment === 'mine') setSegment('official')
+  }, [canShowMineSegment, segment])
+
+  useEffect(() => {
+    // A workspace switch or policy revocation can happen while the dialog is
+    // open. Drop the old segment/draft immediately so a later confirm cannot
+    // submit ids from the previous scope.
+    setSegment('official')
+    if (workspaceToolCallingExplicitlyDisabled && selectedIds !== undefined) onChange(undefined)
+    if (!workspaceCaps.toolCalling) setDraftIds(new Set())
+  }, [
+    onChange,
+    selectedIds,
+    workspaceCaps.toolCalling,
+    workspaceId,
+    workspaceToolCallingExplicitlyDisabled,
+  ])
 
   useEffect(
     () => {
@@ -106,9 +187,13 @@ export function ToolSelectionDialog({
         // Persisted selections can outlive a group policy or a global tool
         // switch. Trim them in the background even when the dialog is closed.
         const requestID = ++backgroundReconcileRequestRef.current
-        void toolsApi.list(modelId, activeWorkspaceId() ?? undefined).then((items) => {
+        if (!workspaceCaps.toolCalling) return
+        void toolsApi.list(modelId, workspaceId).then((items) => {
           if (requestID !== backgroundReconcileRequestRef.current || selectedIds === undefined) return
-          const allowed = new Set(items.filter((item) => item.allowed !== false).map((item) => item.id))
+          const allowed = new Set(items
+            .filter((item) => item.allowed !== false)
+            .filter((item) => canShowMineSegment || toolSegmentOf(item.id) !== 'mine')
+            .map((item) => item.id))
           const valid = selectedIds.filter((id) => allowed.has(id))
           if (!sameIds(selectedIds, valid)) onChange(valid)
         }).catch(() => undefined)
@@ -118,7 +203,7 @@ export function ToolSelectionDialog({
         unsubscribe()
       }
     },
-    [modelId, onChange, open, selectedIds],
+    [canShowMineSegment, modelId, onChange, open, selectedIds, workspaceCaps.toolCalling, workspaceId],
   )
 
   const presentedTools = useMemo(
@@ -139,21 +224,29 @@ export function ToolSelectionDialog({
     [t, tools],
   )
 
+  // Segment filters the VISIBLE list only; draftIds / allowedIDs / commit stay
+  // on the global merged set so nothing outside the segment is ever pruned.
   const filtered = useMemo(() => {
+    const inSegment = toolsInSegment(presentedTools, segment)
     const value = query.trim().toLocaleLowerCase()
-    if (!value) return presentedTools
-    return presentedTools.filter((tool) =>
+    if (!value) return inSegment
+    return inSegment.filter((tool) =>
       `${tool.displayName}\n${tool.displayDescription}`.toLocaleLowerCase().includes(value),
     )
-  }, [presentedTools, query])
+  }, [presentedTools, query, segment])
 
-  const allowedTools = useMemo(() => tools.filter((tool) => tool.allowed !== false), [tools])
+  const allowedTools = useMemo(
+    () => tools
+      .filter((tool) => tool.allowed !== false)
+      .filter((tool) => canShowMineSegment || toolSegmentOf(tool.id) !== 'mine'),
+    [canShowMineSegment, tools],
+  )
   const allowedIDs = useMemo(() => allowedTools.map((tool) => tool.id), [allowedTools])
   const defaultIDs = useMemo(
     () => allowedTools.filter((tool) => tool.default_selected === true).map((tool) => tool.id),
     [allowedTools],
   )
-  const selectedCount = [...draftIds].filter((id) => allowedIDs.includes(id)).length
+  const selectedCount = countSelectedTools(draftIds, allowedIDs)
 
   function toggle(id: string) {
     if (!allowedIDs.includes(id)) return
@@ -167,6 +260,19 @@ export function ToolSelectionDialog({
   }
 
   function applySelection() {
+    if (!workspaceCaps.toolCalling) {
+      // A missing/refreshing workspace policy is intentionally rendered as
+      // unavailable, but it is not an administrator decision. Closing the
+      // dialog must not turn that temporary fail-closed state into a persisted
+      // "use model defaults" preference. A settled tool ban is different: its
+      // stale selection must be removed before the next turn.
+      if (workspaceToolCallingExplicitlyDisabled) {
+        onChange(undefined)
+        onApply?.(undefined)
+      }
+      onOpenChange(false)
+      return
+    }
     const selection = committedToolSelection(allowedIDs, defaultIDs, draftIds)
     onChange(selection)
     onApply?.(selection)
@@ -186,6 +292,35 @@ export function ToolSelectionDialog({
         </DialogHeader>
 
         <DialogBody className="flex min-h-0 flex-col overflow-hidden px-4 pb-3 sm:px-6">
+          {canShowMineSegment ? (
+            <div className="shrink-0 pb-2">
+              <div
+                className="grid w-full grid-cols-2 items-center rounded-[9px] bg-[var(--color-bg-muted)] p-1 sm:inline-flex sm:w-auto sm:shrink-0"
+                role="group"
+                aria-label={t('composer.toolSelection.title', { defaultValue: 'Choose tools' })}
+              >
+                {(['official', 'mine'] as const).map((segmentOption) => (
+                  <button
+                    key={segmentOption}
+                    type="button"
+                    aria-pressed={segment === segmentOption}
+                    onClick={() => setSegment(segmentOption)}
+                    className={cn(
+                      'inline-flex min-w-0 items-center justify-center rounded-[7px] px-2 text-[12px] font-medium interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] h-[var(--tap-min)] sm:h-8 sm:px-2.5',
+                      segment === segmentOption
+                        ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]'
+                        : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
+                    )}
+                  >
+                    {t(`composer.toolSelection.segment.${segmentOption}`, {
+                      defaultValue: segmentOption === 'official' ? 'Official tools' : 'My tools',
+                    })}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           <div className="flex shrink-0 flex-wrap items-center gap-2 pb-3">
             <div className="relative min-w-[12rem] flex-1">
               <Search
@@ -259,9 +394,15 @@ export function ToolSelectionDialog({
               </div>
             ) : filtered.length === 0 ? (
               <div className="flex min-h-48 items-center justify-center px-5 py-8 text-center text-sm text-[var(--color-fg-muted)]">
-                {query
-                  ? t('composer.toolSelection.noResults', { defaultValue: 'No matching tools.' })
-                  : t('composer.toolSelection.empty', { defaultValue: 'No tools are available for this model.' })}
+                {query ? (
+                  t('composer.toolSelection.noResults', { defaultValue: 'No matching tools.' })
+                ) : segment === 'mine' ? (
+                  t('composer.toolSelection.segmentEmpty', {
+                    defaultValue: 'No MCP services yet — add one in the Library.',
+                  })
+                ) : (
+                  t('composer.toolSelection.empty', { defaultValue: 'No tools are available for this model.' })
+                )}
               </div>
             ) : (
               <div className="divide-y divide-[var(--color-divider)]">

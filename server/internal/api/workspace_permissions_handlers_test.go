@@ -100,6 +100,103 @@ func TestHTTPWorkspaceOwnerUpdatesMemberTotalPermissions(t *testing.T) {
 	}
 }
 
+func TestHTTPWorkspaceLegacyPermissionPatchDoesNotBroadenNewCapabilities(t *testing.T) {
+	owner, member, deps, workspaceID, _ := openWorkspacePermissionHTTPTest(t)
+	initial := store.WorkspaceMemberPermissions{
+		CanCreateProjects: true, CanPrivateConversations: true,
+		CanCreatePrompts: true, CanCreateSkills: true, CanCreateMCP: false,
+		CanUsePrompts: true, CanUseSkills: false, CanUseMCP: false,
+		CanCreateKB: true, CanAddKBFiles: true, CanDeleteKBContent: true,
+		CanDeleteConversations: false,
+	}
+	if _, err := store.UpdateWorkspaceMemberPermissions(
+		context.Background(), deps.DB, workspaceID, owner.ID, member.ID, initial,
+	); err != nil {
+		t.Fatalf("seed granular permissions: %v", err)
+	}
+
+	// The retired aggregate is false in the old client's GET response because
+	// one granular creation field is disabled. Saving another old control must
+	// not turn omitted MCP/use/deletion fields back on.
+	legacyBody := json.RawMessage(`{
+		"can_create_projects":false,
+		"can_private_conversations":true,
+		"can_create_skills_prompts":false,
+		"can_create_kb":true,
+		"can_add_kb_files":true,
+		"can_delete_kb_content":true
+	}`)
+	recorder := httptest.NewRecorder()
+	updateWorkspaceMemberPermissionsHandler(deps, recorder, workspacePermissionRequest(
+		t, http.MethodPatch, "/api/workspaces/x/members/y/permissions", owner,
+		map[string]string{"id": workspaceID, "uid": member.ID}, legacyBody,
+	))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("legacy patch status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var updated store.WorkspaceMember
+	if err := json.Unmarshal(recorder.Body.Bytes(), &updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.CanCreateProjects || !updated.CanCreatePrompts || !updated.CanCreateSkills || updated.CanCreateMCP {
+		t.Fatalf("legacy patch rewrote creation permissions: %+v", updated)
+	}
+	if !updated.CanUsePrompts || updated.CanUseSkills || updated.CanUseMCP || updated.CanDeleteConversations {
+		t.Fatalf("legacy patch broadened omitted permissions: %+v", updated)
+	}
+}
+
+func TestHTTPWorkspacePolicyModelCatalogIsManagerScopedAndGroupIndependent(t *testing.T) {
+	owner, member, deps, workspaceID, _ := openWorkspacePermissionHTTPTest(t)
+	mustExec(t, deps.DB, `INSERT INTO models(id,channel_id,kind,request_id,label,enabled,fast) VALUES
+		('policy-chat','permission-channel','chat','chat','Policy Chat',1,0),
+		('policy-image','permission-channel','image','image','Policy Image',1,0),
+		('policy-fast','permission-channel','chat','fast','Hidden Fast',1,1),
+		('policy-disabled','permission-channel','image','disabled','Disabled Image',0,0)`)
+	permissions := store.DefaultUserGroupPermissions()
+	permissions.AllowDrawing = false
+	rawPermissions, err := json.Marshal(permissions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, deps.DB, `UPDATE user_groups SET permissions=? WHERE id=?`, string(rawPermissions), store.DefaultGroupID)
+
+	request := func(user *store.User) *httptest.ResponseRecorder {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		listWorkspacePolicyModelsHandler(deps, recorder, workspacePermissionRequest(
+			t, http.MethodGet, "/api/workspaces/x/policy/models", user,
+			map[string]string{"id": workspaceID}, nil,
+		))
+		return recorder
+	}
+
+	denied := request(member)
+	if denied.Code != http.StatusNotFound {
+		t.Fatalf("ordinary member status=%d body=%s", denied.Code, denied.Body.String())
+	}
+	allowed := request(owner)
+	if allowed.Code != http.StatusOK {
+		t.Fatalf("workspace manager status=%d body=%s", allowed.Code, allowed.Body.String())
+	}
+	var payload struct {
+		Models []workspacePolicyModel `json:"models"`
+	}
+	if err := json.Unmarshal(allowed.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, model := range payload.Models {
+		seen[model.ID] = true
+	}
+	if !seen["policy-chat"] || !seen["policy-image"] {
+		t.Fatalf("manager policy catalog omitted enabled chat/image models: %+v", payload.Models)
+	}
+	if seen["policy-fast"] || seen["policy-disabled"] || seen["permission-embedding"] {
+		t.Fatalf("manager policy catalog exposed hidden/non-selectable models: %+v", payload.Models)
+	}
+}
+
 func TestHTTPWorkspaceKnowledgeBaseManagersUpdateOnlyLibraryLayer(t *testing.T) {
 	owner, member, deps, _, kbID := openWorkspacePermissionHTTPTest(t)
 

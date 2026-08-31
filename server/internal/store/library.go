@@ -128,7 +128,12 @@ func libraryWorkspaceReadPredicate(rowAlias string) string {
 	)`
 }
 
-func libraryWorkspaceManagePredicate(rowAlias string) string {
+// libraryWorkspaceManagePredicateFor returns the write/manage boundary for an
+// existing workspace library resource. Creation rights only control insertion:
+// revoking one must not lock a non-guest creator out of content they already
+// own. Workspace owners and admins may maintain every row in the workspace.
+func libraryWorkspaceManagePredicateFor(rowAlias, _ string) string {
+	creatorBoundary := isCollaboratorRoleSQL("library_member.role")
 	return `EXISTS (
 		SELECT 1 FROM workspaces library_workspace
 		LEFT JOIN workspace_members library_member
@@ -137,19 +142,85 @@ func libraryWorkspaceManagePredicate(rowAlias string) string {
 		  AND (library_workspace.owner_id=?
 		       OR ` + isAdminRoleSQL("library_member.role") + `
 		       OR (` + rowAlias + `.user_id=?
-		           AND library_member.can_create_skills_prompts=1
-		           AND ` + isCollaboratorRoleSQL("library_member.role") + `))
+		           AND ` + creatorBoundary + `))
 	)`
 }
 
-func libraryWorkspaceCreatePredicate(workspaceAlias string) string {
+// libraryWorkspaceCreateCapabilitySQL returns the authoritative granular
+// creation check. The pre-granular aggregate column is migrated into the three
+// granular columns at startup and is retained only as a response/input
+// compatibility mirror; consulting it here would let a stale aggregate revoke
+// one capability while the corresponding granular value is explicitly enabled.
+func libraryWorkspaceCreateCapabilitySQL(memberAlias, column string) string {
+	return `(` + memberAlias + `.` + column + `=1)`
+}
+
+// Legacy callers default to the historical combined skill/prompt capability.
+func libraryWorkspaceManagePredicate(rowAlias string) string {
+	return libraryWorkspaceManagePredicateFor(rowAlias, "legacy")
+}
+
+func libraryWorkspaceCreatePredicateFor(workspaceAlias, capability string) string {
+	column := map[string]string{
+		"skill":  "can_create_skills",
+		"prompt": "can_create_prompts",
+		"mcp":    "can_create_mcp",
+	}[strings.ToLower(strings.TrimSpace(capability))]
+	if column == "" {
+		column = "can_create_skills_prompts"
+	}
 	return `(` + workspaceAlias + `.owner_id=? OR EXISTS (
 		SELECT 1 FROM workspace_members library_creator
 		 WHERE library_creator.workspace_id=` + workspaceAlias + `.id
 		   AND library_creator.user_id=?
-		   AND (library_creator.can_create_skills_prompts=1 OR ` + isAdminRoleSQL("library_creator.role") + `)
+		   AND (` + isAdminRoleSQL("library_creator.role") + ` OR ` + libraryWorkspaceCreateCapabilitySQL("library_creator", column) + `)
 		   AND ` + isCollaboratorRoleSQL("library_creator.role") + `
 	))`
+}
+
+func libraryWorkspaceCreatePredicate(workspaceAlias string) string {
+	return libraryWorkspaceCreatePredicateFor(workspaceAlias, "legacy")
+}
+
+// libraryWorkspaceCapabilityPredicate is a fail-closed workspace-wide switch
+// check used by direct store reads and writes. A missing policy row means the
+// historical permissive default; an explicit row must opt the capability in.
+func libraryWorkspaceCapabilityPredicateForExpr(workspaceExpr, capability string) string {
+	column := map[string]string{
+		"skill":  "allow_skills",
+		"prompt": "allow_prompts",
+		"mcp":    "allow_mcp",
+	}[strings.ToLower(strings.TrimSpace(capability))]
+	if column == "" {
+		return "1=1"
+	}
+	return `(NOT EXISTS (SELECT 1 FROM workspace_policies library_policy0 WHERE library_policy0.workspace_id=` + workspaceExpr + `)
+		OR EXISTS (SELECT 1 FROM workspace_policies library_policy1 WHERE library_policy1.workspace_id=` + workspaceExpr + ` AND library_policy1.` + column + `=1))`
+}
+
+func libraryWorkspaceCapabilityPredicate(rowAlias, capability string) string {
+	return libraryWorkspaceCapabilityPredicateForExpr(rowAlias+`.workspace_id`, capability)
+}
+
+func workspaceLibraryCapabilityAllowed(ctx context.Context, db *sql.DB, workspaceID, capability string) (bool, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return true, nil
+	}
+	policy, err := GetWorkspacePolicy(ctx, db, workspaceID)
+	if err != nil {
+		return false, err
+	}
+	switch strings.ToLower(strings.TrimSpace(capability)) {
+	case "skill":
+		return policy.AllowSkills, nil
+	case "prompt":
+		return policy.AllowPrompts, nil
+	case "mcp":
+		return policy.AllowMCP, nil
+	default:
+		return true, nil
+	}
 }
 
 func ListUserSkills(ctx context.Context, db *sql.DB, userID string) ([]UserSkill, error) {
@@ -171,9 +242,9 @@ func ListUserSkillsScoped(ctx context.Context, db *sql.DB, userID, workspaceID s
 			WHERE us.user_id=? AND COALESCE(us.workspace_id,'')=''`
 		args = append(args, userID)
 	} else {
-		query += `CASE WHEN ` + libraryWorkspaceManagePredicate("us") + ` THEN 1 ELSE 0 END
+		query += `CASE WHEN ` + libraryWorkspaceManagePredicateFor("us", "skill") + ` THEN 1 ELSE 0 END
 			FROM user_skills us LEFT JOIN skills s ON s.id=us.source_skill_id
-			WHERE us.workspace_id=? AND ` + libraryWorkspaceReadPredicate("us")
+			WHERE us.workspace_id=? AND ` + libraryWorkspaceReadPredicate("us") + ` AND ` + libraryWorkspaceCapabilityPredicate("us", "skill")
 		args = append(args, userID, userID, userID, workspaceID, userID, userID)
 	}
 	query += ` ORDER BY us.updated_at DESC, us.name`
@@ -210,9 +281,9 @@ func GetUserSkillScoped(ctx context.Context, db *sql.DB, id, userID, workspaceID
 			WHERE us.id=? AND us.user_id=? AND COALESCE(us.workspace_id,'')=''`
 		args = append(args, id, userID)
 	} else {
-		query += `CASE WHEN ` + libraryWorkspaceManagePredicate("us") + ` THEN 1 ELSE 0 END
+		query += `CASE WHEN ` + libraryWorkspaceManagePredicateFor("us", "skill") + ` THEN 1 ELSE 0 END
 			FROM user_skills us LEFT JOIN skills s ON s.id=us.source_skill_id
-			WHERE us.id=? AND us.workspace_id=? AND ` + libraryWorkspaceReadPredicate("us")
+			WHERE us.id=? AND us.workspace_id=? AND ` + libraryWorkspaceReadPredicate("us") + ` AND ` + libraryWorkspaceCapabilityPredicate("us", "skill")
 		args = append(args, userID, userID, userID, id, workspaceID, userID, userID)
 	}
 	err := db.QueryRowContext(ctx, query, args...).Scan(
@@ -247,7 +318,8 @@ func CreateUserSkill(ctx context.Context, db *sql.DB, skill UserSkill) (*UserSki
 		skill.WorkspaceID = strings.TrimSpace(skill.WorkspaceID)
 		result, err = db.ExecContext(ctx, `INSERT INTO user_skills(id, user_id, workspace_id, name, description, icon, instructions, source_skill_id, created_at, updated_at)
 			SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM workspaces library_workspace
-			 WHERE library_workspace.id=? AND `+libraryWorkspaceCreatePredicate("library_workspace"),
+				 WHERE library_workspace.id=? AND `+libraryWorkspaceCreatePredicateFor("library_workspace", "skill")+`
+				   AND `+libraryWorkspaceCapabilityPredicateForExpr("library_workspace.id", "skill"),
 			skill.ID, skill.UserID, skill.WorkspaceID, skill.Name, skill.Description, skill.Icon, skill.Instructions,
 			nullableText(skill.SourceSkillID), now, now, skill.WorkspaceID, skill.UserID, skill.UserID)
 	}
@@ -285,7 +357,7 @@ func UpdateUserSkillScoped(ctx context.Context, db *sql.DB, id, userID, workspac
 			skill.Name, skill.Description, skill.Icon, skill.Instructions, time.Now().Unix(), id, userID)
 	} else {
 		result, err = db.ExecContext(ctx, `UPDATE user_skills SET name=?, description=?, icon=?, instructions=?, updated_at=?
-			WHERE id=? AND workspace_id=? AND `+libraryWorkspaceManagePredicate("user_skills"),
+				WHERE id=? AND workspace_id=? AND `+libraryWorkspaceManagePredicateFor("user_skills", "skill")+` AND `+libraryWorkspaceCapabilityPredicate("user_skills", "skill"),
 			skill.Name, skill.Description, skill.Icon, skill.Instructions, time.Now().Unix(), id, workspaceID,
 			userID, userID, userID)
 	}
@@ -313,7 +385,7 @@ func DeleteUserSkillScoped(ctx context.Context, db *sql.DB, id, userID, workspac
 		result, err = db.ExecContext(ctx, `DELETE FROM user_skills WHERE id=? AND user_id=? AND COALESCE(workspace_id,'')=''`, id, userID)
 	} else {
 		result, err = db.ExecContext(ctx, `DELETE FROM user_skills
-			WHERE id=? AND workspace_id=? AND `+libraryWorkspaceManagePredicate("user_skills"),
+				WHERE id=? AND workspace_id=? AND `+libraryWorkspaceManagePredicateFor("user_skills", "skill")+` AND `+libraryWorkspaceCapabilityPredicate("user_skills", "skill"),
 			id, workspaceID, userID, userID, userID)
 	}
 	if err != nil {
@@ -338,8 +410,8 @@ func ListUserPromptsScoped(ctx context.Context, db *sql.DB, userID, workspaceID 
 		query += `1 FROM user_prompts up WHERE up.user_id=? AND COALESCE(up.workspace_id,'')=''`
 		args = append(args, userID)
 	} else {
-		query += `CASE WHEN ` + libraryWorkspaceManagePredicate("up") + ` THEN 1 ELSE 0 END
-			FROM user_prompts up WHERE up.workspace_id=? AND ` + libraryWorkspaceReadPredicate("up")
+		query += `CASE WHEN ` + libraryWorkspaceManagePredicateFor("up", "prompt") + ` THEN 1 ELSE 0 END
+			FROM user_prompts up WHERE up.workspace_id=? AND ` + libraryWorkspaceReadPredicate("up") + ` AND ` + libraryWorkspaceCapabilityPredicate("up", "prompt")
 		args = append(args, userID, userID, userID, workspaceID, userID, userID)
 	}
 	query += ` ORDER BY up.updated_at DESC, up.name`
@@ -374,8 +446,8 @@ func GetUserPromptScoped(ctx context.Context, db *sql.DB, id, userID, workspaceI
 		query += `1 FROM user_prompts up WHERE up.id=? AND up.user_id=? AND COALESCE(up.workspace_id,'')=''`
 		args = append(args, id, userID)
 	} else {
-		query += `CASE WHEN ` + libraryWorkspaceManagePredicate("up") + ` THEN 1 ELSE 0 END
-			FROM user_prompts up WHERE up.id=? AND up.workspace_id=? AND ` + libraryWorkspaceReadPredicate("up")
+		query += `CASE WHEN ` + libraryWorkspaceManagePredicateFor("up", "prompt") + ` THEN 1 ELSE 0 END
+			FROM user_prompts up WHERE up.id=? AND up.workspace_id=? AND ` + libraryWorkspaceReadPredicate("up") + ` AND ` + libraryWorkspaceCapabilityPredicate("up", "prompt")
 		args = append(args, userID, userID, userID, id, workspaceID, userID, userID)
 	}
 	err := db.QueryRowContext(ctx, query, args...).Scan(
@@ -409,7 +481,8 @@ func CreateUserPrompt(ctx context.Context, db *sql.DB, prompt UserPrompt) (*User
 		prompt.WorkspaceID = strings.TrimSpace(prompt.WorkspaceID)
 		result, err = db.ExecContext(ctx, `INSERT INTO user_prompts(id, user_id, workspace_id, name, description, content, source_prompt_id, created_at, updated_at)
 			SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? FROM workspaces library_workspace
-			 WHERE library_workspace.id=? AND `+libraryWorkspaceCreatePredicate("library_workspace"),
+			 WHERE library_workspace.id=? AND `+libraryWorkspaceCreatePredicateFor("library_workspace", "prompt")+`
+			   AND `+libraryWorkspaceCapabilityPredicateForExpr("library_workspace.id", "prompt"),
 			prompt.ID, prompt.UserID, prompt.WorkspaceID, prompt.Name, prompt.Description, prompt.Content,
 			nullableText(prompt.SourcePromptID), now, now, prompt.WorkspaceID, prompt.UserID, prompt.UserID)
 	}
@@ -446,7 +519,7 @@ func UpdateUserPromptScoped(ctx context.Context, db *sql.DB, id, userID, workspa
 			prompt.Name, prompt.Description, prompt.Content, time.Now().Unix(), id, userID)
 	} else {
 		result, err = db.ExecContext(ctx, `UPDATE user_prompts SET name=?, description=?, content=?, updated_at=?
-			WHERE id=? AND workspace_id=? AND `+libraryWorkspaceManagePredicate("user_prompts"),
+			WHERE id=? AND workspace_id=? AND `+libraryWorkspaceManagePredicateFor("user_prompts", "prompt")+` AND `+libraryWorkspaceCapabilityPredicate("user_prompts", "prompt"),
 			prompt.Name, prompt.Description, prompt.Content, time.Now().Unix(), id, workspaceID,
 			userID, userID, userID)
 	}
@@ -474,7 +547,7 @@ func DeleteUserPromptScoped(ctx context.Context, db *sql.DB, id, userID, workspa
 		result, err = db.ExecContext(ctx, `DELETE FROM user_prompts WHERE id=? AND user_id=? AND COALESCE(workspace_id,'')=''`, id, userID)
 	} else {
 		result, err = db.ExecContext(ctx, `DELETE FROM user_prompts
-			WHERE id=? AND workspace_id=? AND `+libraryWorkspaceManagePredicate("user_prompts"),
+			WHERE id=? AND workspace_id=? AND `+libraryWorkspaceManagePredicateFor("user_prompts", "prompt")+` AND `+libraryWorkspaceCapabilityPredicate("user_prompts", "prompt"),
 			id, workspaceID, userID, userID, userID)
 	}
 	if err != nil {
@@ -500,8 +573,8 @@ func UserLibrarySourceSetsScoped(ctx context.Context, db *sql.DB, userID, worksp
 		skillQuery += ` AND user_id=?`
 		promptQuery += ` AND user_id=?`
 	} else {
-		skillQuery += ` AND ` + libraryWorkspaceReadPredicate("user_skills")
-		promptQuery += ` AND ` + libraryWorkspaceReadPredicate("user_prompts")
+		skillQuery += ` AND ` + libraryWorkspaceReadPredicate("user_skills") + ` AND ` + libraryWorkspaceCapabilityPredicate("user_skills", "skill")
+		promptQuery += ` AND ` + libraryWorkspaceReadPredicate("user_prompts") + ` AND ` + libraryWorkspaceCapabilityPredicate("user_prompts", "prompt")
 	}
 	skillArgs := []any{workspaceID}
 	promptArgs := []any{workspaceID}
@@ -576,7 +649,7 @@ func ResolveUserSkillSelectionScoped(ctx context.Context, db *sql.DB, userID, wo
 		query += `us.user_id=? AND COALESCE(us.workspace_id,'')='' AND `
 		args = append(args, userID)
 	} else {
-		query += `us.workspace_id=? AND ` + libraryWorkspaceReadPredicate("us") + ` AND `
+		query += `us.workspace_id=? AND ` + libraryWorkspaceReadPredicate("us") + ` AND ` + libraryWorkspaceCapabilityPredicate("us", "skill") + ` AND `
 		args = append(args, workspaceID, userID, userID)
 	}
 	query += `us.id IN (` + idPlaceholders(len(normalized)) + `)`

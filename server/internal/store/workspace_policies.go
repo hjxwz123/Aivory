@@ -19,9 +19,22 @@ type WorkspacePolicy struct {
 	WorkspaceID string
 	// Empty = every platform model/tool/MCP server. Tool/MCP entries use the
 	// prefixed catalog ids ("builtin:python_execute", "hosted:…", "mcp:…").
-	AllowedModelIDs      []string
-	AllowedToolIDs       []string
-	AllowedMCPServerIDs  []string
+	AllowedModelIDs     []string
+	AllowedToolIDs      []string
+	AllowedMCPServerIDs []string
+	// AllowToolCalling is the merged workspace-wide tool capability. When false
+	// every local, hosted, administrator MCP, and user MCP tool is unavailable.
+	AllowToolCalling bool
+	// AllowDrawing controls direct image-model/drawing turns. It is deliberately
+	// independent from image-generation tools, which are covered by
+	// AllowToolCalling.
+	AllowDrawing bool
+	AllowMCP     bool
+	AllowSkills  bool
+	AllowPrompts bool
+	// Deprecated compatibility switches. They remain readable for old clients
+	// and old policy rows, but are intentionally not consulted by the current
+	// runtime. New callers must use AllowToolCalling and AllowDrawing.
 	AllowSandbox         bool
 	AllowImageGeneration bool
 	AllowKnowledgeBases  bool
@@ -39,6 +52,11 @@ func DefaultWorkspacePolicy(workspaceID string) WorkspacePolicy {
 		AllowedModelIDs:          []string{},
 		AllowedToolIDs:           []string{},
 		AllowedMCPServerIDs:      []string{},
+		AllowToolCalling:         true,
+		AllowDrawing:             true,
+		AllowMCP:                 true,
+		AllowSkills:              true,
+		AllowPrompts:             true,
 		AllowSandbox:             true,
 		AllowImageGeneration:     true,
 		AllowKnowledgeBases:      true,
@@ -53,6 +71,11 @@ type WorkspacePolicyPatch struct {
 	AllowedModelIDs          *[]string
 	AllowedToolIDs           *[]string
 	AllowedMCPServerIDs      *[]string
+	AllowToolCalling         *bool
+	AllowDrawing             *bool
+	AllowMCP                 *bool
+	AllowSkills              *bool
+	AllowPrompts             *bool
 	AllowSandbox             *bool
 	AllowImageGeneration     *bool
 	AllowKnowledgeBases      *bool
@@ -96,9 +119,11 @@ func marshalIDList(ids []string) string {
 func scanWorkspacePolicy(s scanner) (WorkspacePolicy, error) {
 	var p WorkspacePolicy
 	var models, tools, mcp string
+	var toolCalling, drawing, allowMCP, allowSkills, allowPrompts int
 	var sandbox, image, kbs, upload int
 	if err := s.Scan(
 		&p.WorkspaceID, &models, &tools, &mcp,
+		&toolCalling, &drawing, &allowMCP, &allowSkills, &allowPrompts,
 		&sandbox, &image, &kbs, &upload,
 		&p.MemberMonthlyCreditLimit, &p.UpdatedBy, &p.UpdatedAt,
 	); err != nil {
@@ -114,6 +139,11 @@ func scanWorkspacePolicy(s scanner) (WorkspacePolicy, error) {
 	if p.AllowedMCPServerIDs, err = parseIDList(mcp); err != nil {
 		return p, err
 	}
+	p.AllowToolCalling = toolCalling == 1
+	p.AllowDrawing = drawing == 1
+	p.AllowMCP = allowMCP == 1
+	p.AllowSkills = allowSkills == 1
+	p.AllowPrompts = allowPrompts == 1
 	p.AllowSandbox = sandbox == 1
 	p.AllowImageGeneration = image == 1
 	p.AllowKnowledgeBases = kbs == 1
@@ -130,6 +160,7 @@ func GetWorkspacePolicy(ctx context.Context, db *sql.DB, workspaceID string) (Wo
 	}
 	p, err := scanWorkspacePolicy(db.QueryRowContext(ctx,
 		`SELECT workspace_id, allowed_model_ids, allowed_tool_ids, allowed_mcp_server_ids,
+		        allow_tool_calling, allow_drawing, allow_mcp, allow_skills, allow_prompts,
 		        allow_sandbox, allow_image_generation, allow_knowledge_bases, allow_file_upload,
 		        member_monthly_credit_limit, updated_by, updated_at
 		   FROM workspace_policies WHERE workspace_id=?`, workspaceID))
@@ -172,6 +203,7 @@ func UpdateWorkspacePolicy(ctx context.Context, db *sql.DB, workspaceID, actorID
 
 	current, err := scanWorkspacePolicy(tx.QueryRowContext(ctx,
 		`SELECT workspace_id, allowed_model_ids, allowed_tool_ids, allowed_mcp_server_ids,
+		        allow_tool_calling, allow_drawing, allow_mcp, allow_skills, allow_prompts,
 		        allow_sandbox, allow_image_generation, allow_knowledge_bases, allow_file_upload,
 		        member_monthly_credit_limit, updated_by, updated_at
 		   FROM workspace_policies WHERE workspace_id=?`, workspaceID))
@@ -190,6 +222,30 @@ func UpdateWorkspacePolicy(ctx context.Context, db *sql.DB, workspaceID, actorID
 	}
 	if patch.AllowedMCPServerIDs != nil {
 		current.AllowedMCPServerIDs = *patch.AllowedMCPServerIDs
+	}
+	if patch.AllowToolCalling != nil {
+		current.AllowToolCalling = *patch.AllowToolCalling
+		// Keep legacy readers from observing a broader policy while an older
+		// binary is still serving traffic. A new tool-calling shutdown may narrow
+		// the retired fields, but turning the merged switch back on must never
+		// erase an older, more restrictive setting. Crucially, this does not touch
+		// AllowDrawing: direct drawing is an independent capability now.
+		if !*patch.AllowToolCalling {
+			current.AllowSandbox = false
+			current.AllowImageGeneration = false
+		}
+	}
+	if patch.AllowDrawing != nil {
+		current.AllowDrawing = *patch.AllowDrawing
+	}
+	if patch.AllowMCP != nil {
+		current.AllowMCP = *patch.AllowMCP
+	}
+	if patch.AllowSkills != nil {
+		current.AllowSkills = *patch.AllowSkills
+	}
+	if patch.AllowPrompts != nil {
+		current.AllowPrompts = *patch.AllowPrompts
 	}
 	if patch.AllowSandbox != nil {
 		current.AllowSandbox = *patch.AllowSandbox
@@ -221,6 +277,21 @@ func UpdateWorkspacePolicy(ctx context.Context, db *sql.DB, workspaceID, actorID
 	if patch.AllowedMCPServerIDs != nil {
 		changed = append(changed, "allowed_mcp_server_ids")
 	}
+	if patch.AllowToolCalling != nil {
+		changed = append(changed, "allow_tool_calling")
+	}
+	if patch.AllowDrawing != nil {
+		changed = append(changed, "allow_drawing")
+	}
+	if patch.AllowMCP != nil {
+		changed = append(changed, "allow_mcp")
+	}
+	if patch.AllowSkills != nil {
+		changed = append(changed, "allow_skills")
+	}
+	if patch.AllowPrompts != nil {
+		changed = append(changed, "allow_prompts")
+	}
 	if patch.AllowSandbox != nil {
 		changed = append(changed, "allow_sandbox")
 	}
@@ -250,13 +321,19 @@ func UpdateWorkspacePolicy(ctx context.Context, db *sql.DB, workspaceID, actorID
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO workspace_policies(
 		   workspace_id, allowed_model_ids, allowed_tool_ids, allowed_mcp_server_ids,
+		   allow_tool_calling, allow_drawing, allow_mcp, allow_skills, allow_prompts,
 		   allow_sandbox, allow_image_generation, allow_knowledge_bases, allow_file_upload,
 		   member_monthly_credit_limit, updated_by, updated_at
-		 ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(workspace_id) DO UPDATE SET
 		   allowed_model_ids=excluded.allowed_model_ids,
 		   allowed_tool_ids=excluded.allowed_tool_ids,
 		   allowed_mcp_server_ids=excluded.allowed_mcp_server_ids,
+		   allow_tool_calling=excluded.allow_tool_calling,
+		   allow_drawing=excluded.allow_drawing,
+		   allow_mcp=excluded.allow_mcp,
+		   allow_skills=excluded.allow_skills,
+		   allow_prompts=excluded.allow_prompts,
 		   allow_sandbox=excluded.allow_sandbox,
 		   allow_image_generation=excluded.allow_image_generation,
 		   allow_knowledge_bases=excluded.allow_knowledge_bases,
@@ -266,6 +343,8 @@ func UpdateWorkspacePolicy(ctx context.Context, db *sql.DB, workspaceID, actorID
 		   updated_at=excluded.updated_at`,
 		current.WorkspaceID, marshalIDList(current.AllowedModelIDs),
 		marshalIDList(current.AllowedToolIDs), marshalIDList(current.AllowedMCPServerIDs),
+		boolInt(current.AllowToolCalling), boolInt(current.AllowDrawing), boolInt(current.AllowMCP),
+		boolInt(current.AllowSkills), boolInt(current.AllowPrompts),
 		boolInt(current.AllowSandbox), boolInt(current.AllowImageGeneration),
 		boolInt(current.AllowKnowledgeBases), boolInt(current.AllowFileUpload),
 		current.MemberMonthlyCreditLimit, current.UpdatedBy, current.UpdatedAt); err != nil {
@@ -292,14 +371,26 @@ func (p WorkspacePolicy) ModelAllowedByPolicy(modelID string) bool {
 }
 
 // ToolDeniedByPolicy reports whether a prefixed catalog tool id
-// ("builtin:…", "hosted:…", "mcp:…") is outside the workspace's tool/MCP
-// allowlists or blocked by the sandbox / image switches.
+// ("builtin:…", "hosted:…", "mcp:…", or "usermcp:…") is outside the
+// workspace's tool/MCP allowlists or blocked by a capability switch.
 func (p WorkspacePolicy) ToolDeniedByPolicy(id string) bool {
-	if !p.AllowSandbox && (id == "builtin:python_execute" || id == "builtin:fetch_image" || id == "builtin:code_interpreter") {
+	id = strings.TrimSpace(id)
+	if !p.AllowToolCalling && isWorkspaceToolID(id) {
 		return true
 	}
-	if !p.AllowImageGeneration && (id == "builtin:image_generate" || id == "hosted:image_generation") {
+	if !p.AllowMCP && isWorkspaceMCPID(id) {
 		return true
+	}
+	if !p.AllowSkills && id == "builtin:use_skill" {
+		return true
+	}
+	// User-owned MCP services are selected from the caller's scoped library and
+	// are not enumerable by a workspace administrator's official-server
+	// allowlist. The workspace-wide AllowToolCalling/AllowMCP switches above
+	// still apply; member/group ownership checks are enforced by the API and
+	// runtime registry.
+	if strings.HasPrefix(id, "usermcp:") {
+		return false
 	}
 	if len(p.AllowedToolIDs) > 0 || len(p.AllowedMCPServerIDs) > 0 {
 		allowed := false
@@ -311,7 +402,7 @@ func (p WorkspacePolicy) ToolDeniedByPolicy(id string) bool {
 		}
 		if !allowed {
 			for _, candidate := range p.AllowedMCPServerIDs {
-				if candidate == id {
+				if workspaceMCPIDsEqual(candidate, id) {
 					allowed = true
 					break
 				}
@@ -323,6 +414,39 @@ func (p WorkspacePolicy) ToolDeniedByPolicy(id string) bool {
 	}
 	return false
 }
+
+func isWorkspaceToolID(id string) bool {
+	return strings.HasPrefix(id, "builtin:") || strings.HasPrefix(id, "hosted:") ||
+		strings.HasPrefix(id, "mcp:") || strings.HasPrefix(id, "usermcp:")
+}
+
+func isWorkspaceMCPID(id string) bool {
+	return strings.HasPrefix(id, "mcp:") || strings.HasPrefix(id, "usermcp:")
+}
+
+// workspaceMCPIDsEqual accepts both namespaces for compatibility with policy
+// rows created before user-owned MCP servers had a distinct `usermcp:` prefix.
+func workspaceMCPIDsEqual(left, right string) bool {
+	left, right = strings.TrimSpace(left), strings.TrimSpace(right)
+	if left == right {
+		return true
+	}
+	if strings.HasPrefix(left, "mcp:") && strings.HasPrefix(right, "usermcp:") {
+		return strings.TrimPrefix(left, "mcp:") == strings.TrimPrefix(right, "usermcp:")
+	}
+	if strings.HasPrefix(left, "usermcp:") && strings.HasPrefix(right, "mcp:") {
+		return strings.TrimPrefix(left, "usermcp:") == strings.TrimPrefix(right, "mcp:")
+	}
+	return false
+}
+
+// SkillAllowedByPolicy and PromptAllowedByPolicy are the resource-level
+// counterparts to ToolDeniedByPolicy. They intentionally only address the
+// workspace-wide switch; administrator/member allowlists are folded by the
+// API/orchestrator separately.
+func (p WorkspacePolicy) SkillAllowedByPolicy() bool  { return p.AllowSkills }
+func (p WorkspacePolicy) PromptAllowedByPolicy() bool { return p.AllowPrompts }
+func (p WorkspacePolicy) MCPAllowedByPolicy() bool    { return p.AllowMCP }
 
 // WorkspaceMemberMonthlyUsage returns the credits a member has consumed in
 // one workspace since the current calendar month began (UTC).

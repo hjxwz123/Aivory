@@ -291,6 +291,29 @@ type MCPServer struct {
 	UpdatedAt       int64             `json:"updated_at"`
 }
 
+// UserMCPServer is a resource-library MCP endpoint owned by a user
+// (workspace_id=” personal, non-empty shared inside that workspace). It
+// carries the same credential-bearing Headers and tools/list snapshot as
+// MCPServer; HTTP responses must mask Headers and may only include CanManage.
+type UserMCPServer struct {
+	ID              string            `json:"id"`
+	UserID          string            `json:"-"`
+	WorkspaceID     string            `json:"workspace_id,omitempty"`
+	CanManage       bool              `json:"can_manage"`
+	Name            string            `json:"name"`
+	Icon            string            `json:"icon"`
+	Description     string            `json:"description"`
+	URL             string            `json:"url"`
+	Headers         map[string]string `json:"-"`
+	Enabled         bool              `json:"enabled"`
+	DiscoveredTools json.RawMessage   `json:"discovered_tools"`
+	ProtocolVersion string            `json:"protocol_version"`
+	LastError       string            `json:"last_error"`
+	LastSyncedAt    int64             `json:"last_synced_at"`
+	CreatedAt       int64             `json:"created_at"`
+	UpdatedAt       int64             `json:"updated_at"`
+}
+
 // OAuthIdentity is one third-party identity bound to a local user (an
 // oauth_identities row joined with its provider row), returned to the account
 // page's "identity sources" section (§ identity linking). ClientSecret and the
