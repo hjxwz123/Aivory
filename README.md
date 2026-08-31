@@ -139,7 +139,7 @@ Knowledge bases turn uploaded files into reusable context for conversations and 
 - **Broad document support**: text, PDF, DOCX, PPTX, XLSX, and images, with fast local parsing for text-layer documents and optional MinerU OCR for scanned content
 - **Structure-aware ingestion**: hierarchical chunks, heading breadcrumbs, overlap, and preservation of code, tables, and math blocks
 - **Hybrid retrieval**: Qdrant or embedded SQLite vectors fused with relational keyword scoring, plus similarity-driven top-K
-- **Query routing**: a task model selects `retrieve`, `full_doc`, or `none` before context is assembled
+- **File routing**: a dedicated file-routing model selects the relevant uploaded files and chooses `retrieve`, `full_doc`, or `none` before context is assembled; when unset, it falls back to the general internal-task model
 - **Document operations**: file status, preview, filtering, replacement, deletion, and storage through local files or S3-compatible object storage
 
 ---

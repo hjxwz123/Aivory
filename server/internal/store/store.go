@@ -1109,6 +1109,8 @@ func Seed(db *sql.DB, cfg config.Config) error {
 	for k, v := range map[string]string{
 		"default_model_id":            `""`,
 		"task_model_id":               `""`,
+		"title_model_id":              `""`,
+		"file_route_model_id":         `""`,
 		"context_compaction_model_id": `""`,
 		"tool_route_model_id":         `""`,
 		"image_prompt_model_id":       `""`,

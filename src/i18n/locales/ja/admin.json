@@ -76,12 +76,12 @@
         "tour": "新しい会話で使う有効なチャットモデルを選びます。"
       },
       "taskModel": {
-        "title": "タスクモデル（任意）",
-        "tour": "未設定時は現在の会話モデルを使用します。現在の会話モデルが推論モデルの場合、タイトルや要約などの内部タスクにより返信が遅くなることがあります。"
+        "title": "その他の内部タスクモデル（任意）",
+        "tour": "メモリー、調査計画、検索クエリ生成など、専用モデルがない内部タスクに使用します。未設定時は現在の会話モデルを使用します。"
       },
       "toolRouteModel": {
-        "title": "ツールルーティングモデル（任意）",
-        "tour": "未設定時は現在の会話モデルがツール使用を判断します。現在の会話モデルが推論モデルの場合、ツール判断により返信が遅くなることがあります。"
+        "title": "クエリルーティングモデル（任意）",
+        "tour": "ユーザーのクエリにツールが必要かをすばやく判断します。未設定時は現在の会話モデルが判断します。低遅延の非推論モデルを推奨します。"
       },
       "embedding": {
         "title": "埋め込みモデルを追加",
@@ -669,23 +669,25 @@
       "actions": "操作"
     },
     "purposes": {
-      "chat": "チャット",
-      "image": "画像",
-      "embedding": "埋め込み",
-      "task_title": "タイトル生成",
-      "task_router": "クエリルーティング",
-      "task_compact": "コンテキスト圧縮",
-      "task_memory_extract": "メモリー抽出",
-      "task_memory_adjudicate": "メモリー判定",
-      "task_downgrade": "ベンダー間ダウングレード",
-      "task_image_prompt": "画像プロンプト",
-      "task_image_intent": "画像生成・編集ルーティング",
-      "task_tool_route": "ツール判定",
-      "task_search_queries": "検索クエリ生成",
-      "task_research_plan": "リサーチ計画",
-      "task_research_verify": "リサーチ検証",
-      "task_moderation": "モデレーション",
-      "task_research_validate": "研究クロス検証"
+      "chat": "チャット応答",
+      "image": "画像生成",
+      "embedding": "文書の埋め込み生成",
+      "task_title": "タイトル生成（会話タイトル）",
+      "task_router": "ファイルルーティング（対象ファイルと RAG 方式の選択）",
+      "task_rag_evidence_judge": "RAG 証拠の充足判定",
+      "task_rag_map_reduce": "長文書の要約（MapReduce）",
+      "task_compact": "コンテキスト圧縮（会話履歴の要約）",
+      "task_memory_extract": "メモリー抽出（ユーザー情報）",
+      "task_memory_adjudicate": "メモリー裁定（新旧情報の競合処理）",
+      "task_downgrade": "プロバイダー間の履歴変換",
+      "task_image_prompt": "画像プロンプト最適化",
+      "task_image_intent": "画像処理ルーティング（新規生成または編集）",
+      "task_tool_route": "クエリルーティング（ツール利用の要否判定）",
+      "task_search_queries": "Web 検索クエリ生成",
+      "task_research_plan": "詳細調査の計画",
+      "task_research_verify": "詳細調査の網羅性確認",
+      "task_moderation": "コンテンツ安全性審査",
+      "task_research_validate": "調査証拠のクロスチェック"
     },
     "empty": "選択した期間内に呼び出しはありません。",
     "leadRecords": "API 呼び出しごとに 1 行。下で絞り込み・整理できます。",
@@ -702,7 +704,7 @@
       "status": "ステータス",
       "purpose": "用途",
       "allPurposes": "すべての用途",
-      "taskAll": "タスクモデル（すべて）"
+      "taskAll": "すべての内部モデルタスク"
     },
     "deleteConfirm": {
       "title": "これらの利用記録を削除しますか？",
@@ -930,10 +932,15 @@
       "settlementCurrencyInvalid": "有効な3文字の通貨コードを入力してください。",
       "defaultModel": "既定のチャットモデル",
       "currentConversationModel": "現在の会話モデルを使用",
-      "taskModel": "タスクモデル（内部LLM呼び出し）",
-      "taskModelHint": "タイトル、クエリルーティング、圧縮要約、メモリーのトリアージに使用します。未設定時は現在の会話モデルを使います。",
-      "toolRouteModel": "ツールルーティングモデル",
-      "toolRouteModelHint": "自動ツール用の任意の低遅延モデルです。未設定時は現在の会話モデルがツールをルーティングします。",
+      "inheritTaskModel": "その他の内部タスクモデルを使用",
+      "titleModel": "タイトル生成モデル",
+      "titleModelHint": "会話一覧の短いタイトルを生成します。低遅延の非推論モデルを推奨します。未設定時はその他の内部タスクモデル、次に現在の会話モデルを使用します。",
+      "queryRouteModel": "クエリルーティングモデル",
+      "queryRouteModelHint": "自動モードでユーザーのクエリにツールが必要かを判断します。低遅延の非推論モデルを推奨します。未設定時は現在の会話モデルを使用します。",
+      "fileRouteModel": "ファイルルーティングモデル",
+      "fileRouteModelHint": "ファイルコンテキストを組み立てる前に、使用しない、部分検索、全文参照のいずれかを選び、現在のファイルへの指示を解決します。安定して JSON を出力できる低遅延の非推論モデルを推奨します。未設定時はその他の内部タスクモデル、次に現在の会話モデルを使用します。",
+      "taskModel": "その他の内部タスクモデル",
+      "taskModelHint": "メモリーの抽出と裁定、調査の計画と検証、検索クエリ生成など、その他の内部タスクに使用します。未設定時は現在の会話モデルを使用します。",
       "defaultToolMode": "デフォルトのツールモード",
       "defaultToolModeHint": "すべての新しい会話で使用します。ユーザーは個々の会話内でのみ変更できます。",
       "toolModeAuto": "自動",
@@ -1991,9 +1998,9 @@
       "channelsMissing": "利用可能なモデルを追加する前にチャネルを作成してください。",
       "defaultModel": "既定のチャットモデル",
       "defaultModelMissing": "有効な既定モデルを選択するまでチャットを開始できません。",
-      "taskModel": "内部タスクモデル",
+      "taskModel": "その他の内部タスクモデル",
       "currentConversationModel": "現在の会話モデルを使用",
-      "taskModelMissing": "有効なタスクモデルを選ぶか、空欄にして現在の会話モデルを使用してください。",
+      "taskModelMissing": "その他の内部タスク用に有効なモデルを選ぶか、空欄にして現在の会話モデルを使用してください。",
       "configured": "設定済み",
       "email": "メール認証",
       "notRequired": "不要",

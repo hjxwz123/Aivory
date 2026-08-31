@@ -21,6 +21,8 @@ type Settings = Record<string, unknown>
 const OWNED_KEYS = [
   'default_model_id',
   'task_model_id',
+  'title_model_id',
+  'file_route_model_id',
   'tool_route_model_id',
   'tool_mode_default',
   'verify_model_id',
@@ -79,6 +81,8 @@ export default function AdminModelPolicy() {
 
   const fallbackModelId = readString('fallback_model_id')
   const taskModelId = readString('task_model_id')
+  const titleModelId = readString('title_model_id')
+  const fileRouteModelId = readString('file_route_model_id')
   const selectableModels = availablePolicyModels(models, channels)
   const unavailableModelIDs = unavailablePolicyModelIDs(draft, selectableModels)
 
@@ -132,6 +136,84 @@ export default function AdminModelPolicy() {
           </Field>
 
           <Field
+            label={t('admin:settings.fields.titleModel')}
+            htmlFor="title-model"
+            hint={t('admin:settings.fields.titleModelHint')}
+          >
+            <Select
+              value={titleModelId || 'inherit'}
+              onValueChange={(value) =>
+                setDraft((current) => ({ ...current, title_model_id: value === 'inherit' ? '' : value }))
+              }
+            >
+              <SelectTrigger id="title-model">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="inherit">{t('admin:settings.fields.inheritTaskModel')}</SelectItem>
+                <PolicyModelOptions
+                  currentId={titleModelId}
+                  models={models}
+                  selectableModels={selectableModels}
+                  unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
+                />
+              </SelectContent>
+            </Select>
+          </Field>
+
+          <Field
+            label={t('admin:settings.fields.queryRouteModel')}
+            htmlFor="tool-route-model"
+            hint={t('admin:settings.fields.queryRouteModelHint')}
+          >
+            <Select
+              value={readString('tool_route_model_id') || 'inherit'}
+              onValueChange={(value) =>
+                setDraft((current) => ({ ...current, tool_route_model_id: value === 'inherit' ? '' : value }))
+              }
+            >
+              <SelectTrigger id="tool-route-model" data-admin-tour="model-policy-tool-route-model">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="inherit">{t('admin:settings.fields.currentConversationModel')}</SelectItem>
+                <PolicyModelOptions
+                  currentId={readString('tool_route_model_id')}
+                  models={models}
+                  selectableModels={selectableModels}
+                  unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
+                />
+              </SelectContent>
+            </Select>
+          </Field>
+
+          <Field
+            label={t('admin:settings.fields.fileRouteModel')}
+            htmlFor="file-route-model"
+            hint={t('admin:settings.fields.fileRouteModelHint')}
+          >
+            <Select
+              value={fileRouteModelId || 'inherit'}
+              onValueChange={(value) =>
+                setDraft((current) => ({ ...current, file_route_model_id: value === 'inherit' ? '' : value }))
+              }
+            >
+              <SelectTrigger id="file-route-model">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="inherit">{t('admin:settings.fields.inheritTaskModel')}</SelectItem>
+                <PolicyModelOptions
+                  currentId={fileRouteModelId}
+                  models={models}
+                  selectableModels={selectableModels}
+                  unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
+                />
+              </SelectContent>
+            </Select>
+          </Field>
+
+          <Field
             label={t('admin:settings.fields.taskModel')}
             htmlFor="task-model"
             hint={t('admin:settings.fields.taskModelHint')}
@@ -149,32 +231,6 @@ export default function AdminModelPolicy() {
                 <SelectItem value="inherit">{t('admin:settings.fields.currentConversationModel')}</SelectItem>
                 <PolicyModelOptions
                   currentId={taskModelId}
-                  models={models}
-                  selectableModels={selectableModels}
-                  unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
-                />
-              </SelectContent>
-            </Select>
-          </Field>
-
-          <Field
-            label={t('admin:settings.fields.toolRouteModel')}
-            htmlFor="tool-route-model"
-            hint={t('admin:settings.fields.toolRouteModelHint')}
-          >
-            <Select
-              value={readString('tool_route_model_id') || 'inherit'}
-              onValueChange={(value) =>
-                setDraft((current) => ({ ...current, tool_route_model_id: value === 'inherit' ? '' : value }))
-              }
-            >
-              <SelectTrigger id="tool-route-model" data-admin-tour="model-policy-tool-route-model">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="inherit">{t('admin:settings.fields.currentConversationModel')}</SelectItem>
-                <PolicyModelOptions
-                  currentId={readString('tool_route_model_id')}
                   models={models}
                   selectableModels={selectableModels}
                   unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}

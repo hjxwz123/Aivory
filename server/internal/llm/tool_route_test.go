@@ -295,6 +295,89 @@ func TestTaskWithoutConfiguredTaskModelUsesConversationModel(t *testing.T) {
 	}
 }
 
+func TestDedicatedTitleAndFileRouteModelsOverrideGeneralTaskModel(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		settingKey string
+		kind       TaskKind
+	}{
+		{name: "title", settingKey: "title_model_id", kind: TaskTitle},
+		{name: "file route", settingKey: "file_route_model_id", kind: TaskRouter},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			orchestrator, provider, model, conv, _, db := setupToolRouteTest(t)
+			if err := store.SetSetting(db, tc.settingKey, model.ID); err != nil {
+				t.Fatalf("set %s: %v", tc.settingKey, err)
+			}
+
+			text, err := orchestrator.task.Run(context.Background(), tc.kind, "hello", RunOpts{
+				UserID: conv.UserID, ConversationID: conv.ID,
+			})
+			if err != nil {
+				t.Fatalf("task run: %v", err)
+			}
+			if strings.TrimSpace(text) == "" {
+				t.Fatal("task output is empty")
+			}
+			if len(provider.mainRequests) != 1 || provider.mainRequests[0].Model.ID != model.ID {
+				t.Fatalf("dedicated task requests=%+v, want model %q", provider.mainRequests, model.ID)
+			}
+			if len(provider.taskRequests) != 0 {
+				t.Fatalf("general task model was called: %+v", provider.taskRequests)
+			}
+		})
+	}
+}
+
+func TestUnavailableDedicatedTitleAndFileRouteModelsFallBackToGeneralTaskModel(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		settingKey string
+		kind       TaskKind
+	}{
+		{name: "title", settingKey: "title_model_id", kind: TaskTitle},
+		{name: "file route", settingKey: "file_route_model_id", kind: TaskRouter},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			orchestrator, provider, model, conv, _, db := setupToolRouteTest(t)
+			disabledModel, err := store.CreateModel(context.Background(), db, store.Model{
+				ChannelID: model.ChannelID,
+				Kind:      "chat",
+				RequestID: "disabled-" + strings.ReplaceAll(tc.name, " ", "-"),
+				Label:     "Disabled dedicated model",
+				Enabled:   false,
+				Stream:    true,
+				ToolMode:  "none",
+			})
+			if err != nil {
+				t.Fatalf("create disabled model: %v", err)
+			}
+			if err := store.SetSetting(db, tc.settingKey, disabledModel.ID); err != nil {
+				t.Fatalf("set %s: %v", tc.settingKey, err)
+			}
+
+			text, err := orchestrator.task.Run(context.Background(), tc.kind, "hello", RunOpts{
+				UserID: conv.UserID, ConversationID: conv.ID,
+			})
+			if err != nil {
+				t.Fatalf("task run: %v", err)
+			}
+			if strings.TrimSpace(text) == "" {
+				t.Fatal("task output is empty")
+			}
+			if len(provider.taskRequests) != 1 {
+				t.Fatalf("general task requests=%+v, want one fallback request", provider.taskRequests)
+			}
+			if provider.taskRequests[0].Model.ID == disabledModel.ID {
+				t.Fatalf("disabled dedicated model %q was called", disabledModel.ID)
+			}
+			if len(provider.mainRequests) != 0 {
+				t.Fatalf("conversation model was called before general task model: %+v", provider.mainRequests)
+			}
+		})
+	}
+}
+
 func TestDisabledDedicatedTaskModelFallsBackToConversationModel(t *testing.T) {
 	orchestrator, provider, model, conv, _, db := setupToolRouteTest(t)
 	var taskModelID string

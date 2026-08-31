@@ -27,9 +27,11 @@ describe('admin model policy availability', () => {
     expect(unavailablePolicyModelIDs({
       default_model_id: 'chat-on',
       task_model_id: 'chat-off',
+      title_model_id: 'chat-on',
+      file_route_model_id: 'missing-file-route',
       tool_route_model_id: 'chat-channel-off',
       verify_model_id: 'chat-off',
       fallback_model_id: 'missing',
-    }, available)).toEqual(['chat-off', 'chat-channel-off', 'missing'])
+    }, available)).toEqual(['chat-off', 'missing-file-route', 'chat-channel-off', 'missing'])
   })
 })
