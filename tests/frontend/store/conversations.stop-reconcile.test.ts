@@ -942,6 +942,30 @@ describe('stopped turn optimistic-id reconciliation', () => {
     })
   })
 
+  it('keeps a persisted internal failure block out of visible answer text', () => {
+    const interrupted = apiMessage(
+      'msg_reloaded_empty_interrupted',
+      'assistant',
+      'msg_reloaded_empty_user',
+      'error',
+      '',
+    )
+    interrupted.stop_reason = 'generation_interrupted'
+    interrupted.error = 'The model provider returned an error.'
+    interrupted.blocks = [
+      {
+        kind: 'error',
+        text: '[The previous assistant response failed before producing output.]',
+      },
+    ]
+
+    expect(toLocalMessage(interrupted)).toMatchObject({
+      content: '',
+      error: 'The model provider returned an error.',
+      errorCode: 'generation_interrupted',
+    })
+  })
+
   it('redacts transport details from a persisted failed tool result', () => {
     const assistant = apiMessage(
       'msg_reloaded_tool_error',

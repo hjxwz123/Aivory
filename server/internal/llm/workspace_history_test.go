@@ -45,21 +45,45 @@ func TestStoreToUnifiedDropsInflightPair(t *testing.T) {
 	}
 }
 
-// A completed-but-empty assistant (e.g. stopped before any output) is also dropped
-// with its question, for the same empty-content reason.
-func TestStoreToUnifiedDropsEmptyCompletedPair(t *testing.T) {
+// A terminal empty assistant is retained as a non-empty failure marker. Its user
+// question must remain available to later follow-ups instead of being discarded.
+func TestStoreToUnifiedKeepsEmptyCompletedPairAsFailure(t *testing.T) {
 	msgs := []store.Message{
 		{Role: "user", Blocks: textBlocks("Q1"), Status: "complete"},
 		{Role: "assistant", Blocks: textBlocks("A1"), Status: "complete"},
-		{Role: "user", Blocks: textBlocks("orphaned"), Status: "complete"},
+		{Role: "user", Blocks: textBlocks("must survive"), Status: "complete"},
 		{Role: "assistant", Blocks: json.RawMessage("[]"), Status: "complete"},
 	}
 	out := storeToUnified(msgs, "anthropic", "", true)
-	if len(out) != 2 {
-		t.Fatalf("want 2 messages, got %d", len(out))
+	if len(out) != 4 {
+		t.Fatalf("want 4 messages, got %d", len(out))
 	}
-	if out[len(out)-1].Role != "assistant" || renderBlocksAsText(out[len(out)-1].Blocks) != "A1" {
-		t.Errorf("tail should be the last complete answer A1")
+	if got := renderBlocksAsText(out[2].Blocks); got != "must survive" {
+		t.Fatalf("terminal empty assistant lost its user question: %q", got)
+	}
+	if out[3].Role != "assistant" || renderBlocksAsText(out[3].Blocks) != assistantFailureHistoryText {
+		t.Fatalf("terminal empty assistant was not normalized as failure: %+v", out[3])
+	}
+}
+
+func TestStoreToUnifiedKeepsQuestionBeforeFailedAssistantForFollowup(t *testing.T) {
+	msgs := []store.Message{
+		{Role: "user", Blocks: textBlocks("plan a quiet route through Portugal"), Status: "complete"},
+		{Role: "assistant", Blocks: json.RawMessage("[]"), Status: "error", StopReason: "generation_interrupted"},
+		{Role: "user", Blocks: textBlocks("continue"), Status: "complete"},
+	}
+	out := storeToUnified(msgs, "anthropic", "", true)
+	if len(out) != 3 {
+		t.Fatalf("want the failed round and follow-up, got %+v", out)
+	}
+	if got := renderBlocksAsText(out[0].Blocks); got != "plan a quiet route through Portugal" {
+		t.Fatalf("original question was lost: %q", got)
+	}
+	if got := renderBlocksAsText(out[1].Blocks); got != assistantFailureHistoryText {
+		t.Fatalf("failed response marker = %q", got)
+	}
+	if got := renderBlocksAsText(out[2].Blocks); got != "continue" {
+		t.Fatalf("follow-up = %q", got)
 	}
 }
 
@@ -133,8 +157,9 @@ func TestStoreToUnifiedDropsTurnThatBecomesEmptyAfterModelSwitch(t *testing.T) {
 	}
 
 	history := storeToUnified(msgs, "openai", "model-b", true)
-	if len(history) != 2 || renderBlocksAsText(history[1].Blocks) != "earlier answer" {
-		t.Fatalf("model switch retained an empty assistant turn: %+v", history)
+	if len(history) != 4 || renderBlocksAsText(history[2].Blocks) != "reason about this" ||
+		renderBlocksAsText(history[3].Blocks) != assistantFailureHistoryText {
+		t.Fatalf("model switch lost the turn that became empty: %+v", history)
 	}
 }
 

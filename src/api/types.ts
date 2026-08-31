@@ -1413,6 +1413,7 @@ export type ApiBlockKind =
   | 'document'
   | 'artifact'
   | 'research'
+  | 'error'
 
 export interface ApiBlock {
   kind: ApiBlockKind

@@ -40,6 +40,16 @@ func storeToUnified(msgs []store.Message, currentProvider, currentModelID string
 			cp[i].Raw = nil
 		}
 	}
+	// A terminal assistant row may legitimately have no provider output when the
+	// request failed before its first token. Keep the failed turn in history with a
+	// provider-safe, non-visible error block so its preceding user request remains
+	// available to follow-ups such as "continue". This also repairs legacy rows
+	// that were persisted with blocks=[] before failure blocks were introduced.
+	for i := range cp {
+		if cp[i].Role == "assistant" && cp[i].Status != "streaming" && assistantRendersEmpty(cp[i]) {
+			cp[i].Blocks = ensureAssistantFailureBlocks(cp[i].Blocks)
+		}
+	}
 	msgs = cp
 	// §workspaces concurrent turns: a shared conversation is one linear thread, so
 	// when B asks while A's answer is still generating, B's question chains directly
@@ -49,11 +59,13 @@ func storeToUnified(msgs []store.Message, currentProvider, currentModelID string
 	// empty text content blocks), failing B's whole turn. Drop any in-flight / empty
 	// assistant turn TOGETHER with its now-orphaned question — dropping only the
 	// answer would leave two consecutive user turns, which providers also reject.
+	// Terminal empty/error rows are normalized to a non-empty failure block above;
+	// they must remain in history so later turns retain the original user request.
 	// Purely a per-call transient: the stored messages are untouched, so once A
 	// finishes its real answer is used normally on the next turn.
 	drop := make([]bool, len(msgs))
 	for i, m := range msgs {
-		if m.Role == "assistant" && (m.Status == "streaming" || assistantRendersEmpty(m)) {
+		if m.Role == "assistant" && m.Status == "streaming" {
 			drop[i] = true
 			if i > 0 && msgs[i-1].Role == "user" {
 				drop[i-1] = true
@@ -79,6 +91,35 @@ func storeToUnified(msgs []store.Message, currentProvider, currentModelID string
 		out = append(out, um)
 	}
 	return out
+}
+
+const assistantFailureHistoryText = "[The previous assistant response failed before producing output.]"
+
+// ensureAssistantFailureBlocks preserves partial/provider output, but gives a
+// failed-before-output assistant row a canonical non-empty block. The frontend
+// intentionally does not render this internal block as answer text; status/error
+// still drives its localized failure banner. Provider history flattening does
+// render it, which preserves role alternation and the preceding user request.
+func ensureAssistantFailureBlocks(raw json.RawMessage) json.RawMessage {
+	var blocks []UnifiedBlock
+	if err := json.Unmarshal(raw, &blocks); err != nil {
+		blocks = nil
+	}
+	for _, block := range blocks {
+		switch block.Kind {
+		case "image", "document", "artifact":
+			return raw
+		}
+	}
+	if strings.TrimSpace(renderBlocksAsText(blocks)) != "" {
+		return raw
+	}
+	blocks = append(blocks, UnifiedBlock{Kind: "error", Text: assistantFailureHistoryText})
+	normalized, err := json.Marshal(blocks)
+	if err != nil {
+		return json.RawMessage(`[{"kind":"error","text":"[The previous assistant response failed before producing output.]"}]`)
+	}
+	return normalized
 }
 
 // activeAttachments excludes objects that were removed after their message was
@@ -489,14 +530,19 @@ func providerImageMIMEFromBytes(data []byte) string {
 }
 
 // renderBlocksAsText flattens a block list to plain text for history rebuild:
-// text blocks verbatim; tool rounds compressed to a one-line summary (§2.3-D
-// cross-vendor downgrade, e.g. "[已执行 python_execute，输出：均值=5.5]");
+// text/error blocks verbatim; tool rounds compressed to a one-line summary
+// (§2.3-D cross-vendor downgrade, e.g. "[已执行 python_execute，输出：均值=5.5]");
 // thinking blocks are never replayed as visible text.
 func renderBlocksAsText(blocks []UnifiedBlock) string {
 	var b strings.Builder
 	for _, blk := range blocks {
 		switch blk.Kind {
 		case "text":
+			if blk.Text != "" {
+				b.WriteString(blk.Text)
+				b.WriteString("\n")
+			}
+		case "error":
 			if blk.Text != "" {
 				b.WriteString(blk.Text)
 				b.WriteString("\n")
