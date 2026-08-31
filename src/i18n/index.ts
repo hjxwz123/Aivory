@@ -11,7 +11,6 @@ import enAuth from './locales/en/auth.json'
 import enSettings from './locales/en/settings.json'
 import enErrors from './locales/en/errors.json'
 import enProjects from './locales/en/projects.json'
-import enAdmin from './locales/en/admin.json'
 import enKb from './locales/en/kb.json'
 import enFiles from './locales/en/files.json'
 import enMemory from './locales/en/memory.json'
@@ -28,7 +27,6 @@ import zhAuth from './locales/zh/auth.json'
 import zhSettings from './locales/zh/settings.json'
 import zhErrors from './locales/zh/errors.json'
 import zhProjects from './locales/zh/projects.json'
-import zhAdmin from './locales/zh/admin.json'
 import zhKb from './locales/zh/kb.json'
 import zhFiles from './locales/zh/files.json'
 import zhMemory from './locales/zh/memory.json'
@@ -45,7 +43,6 @@ import zhHantAuth from './locales/zh-Hant/auth.json'
 import zhHantSettings from './locales/zh-Hant/settings.json'
 import zhHantErrors from './locales/zh-Hant/errors.json'
 import zhHantProjects from './locales/zh-Hant/projects.json'
-import zhHantAdmin from './locales/zh-Hant/admin.json'
 import zhHantKb from './locales/zh-Hant/kb.json'
 import zhHantFiles from './locales/zh-Hant/files.json'
 import zhHantMemory from './locales/zh-Hant/memory.json'
@@ -62,7 +59,6 @@ import jaAuth from './locales/ja/auth.json'
 import jaSettings from './locales/ja/settings.json'
 import jaErrors from './locales/ja/errors.json'
 import jaProjects from './locales/ja/projects.json'
-import jaAdmin from './locales/ja/admin.json'
 import jaKb from './locales/ja/kb.json'
 import jaFiles from './locales/ja/files.json'
 import jaMemory from './locales/ja/memory.json'
@@ -79,7 +75,6 @@ import frAuth from './locales/fr/auth.json'
 import frSettings from './locales/fr/settings.json'
 import frErrors from './locales/fr/errors.json'
 import frProjects from './locales/fr/projects.json'
-import frAdmin from './locales/fr/admin.json'
 import frKb from './locales/fr/kb.json'
 import frFiles from './locales/fr/files.json'
 import frMemory from './locales/fr/memory.json'
@@ -110,7 +105,6 @@ const resources = {
     settings: enSettings,
     errors: enErrors,
     projects: enProjects,
-    admin: enAdmin,
     kb: enKb,
       files: enFiles,
     memory: enMemory,
@@ -127,7 +121,6 @@ const resources = {
     settings: zhSettings,
     errors: zhErrors,
     projects: zhProjects,
-    admin: zhAdmin,
     kb: zhKb,
       files: zhFiles,
     memory: zhMemory,
@@ -144,7 +137,6 @@ const resources = {
     settings: zhHantSettings,
     errors: zhHantErrors,
     projects: zhHantProjects,
-    admin: zhHantAdmin,
     kb: zhHantKb,
       files: zhHantFiles,
     memory: zhHantMemory,
@@ -161,7 +153,6 @@ const resources = {
     settings: jaSettings,
     errors: jaErrors,
     projects: jaProjects,
-    admin: jaAdmin,
     kb: jaKb,
       files: jaFiles,
     memory: jaMemory,
@@ -178,7 +169,6 @@ const resources = {
     settings: frSettings,
     errors: frErrors,
     projects: frProjects,
-    admin: frAdmin,
     kb: frKb,
       files: frFiles,
     memory: frMemory,
