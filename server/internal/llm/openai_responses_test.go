@@ -630,6 +630,229 @@ func TestResponsesStreamReturnsCompletedOutputForToolContinuation(t *testing.T) 
 	}
 }
 
+func TestResponsesStreamDoesNotReplayIncompleteEncryptedContentFromItemAdded(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"type":"response.output_item.added","item":{"id":"rs_1","type":"reasoning","status":"in_progress","summary":[],"encrypted_content":"partial-ciphertext"}}`,
+		`data: {"type":"response.reasoning_text.done","item_id":"rs_1","content_index":0,"text":"inspect"}`,
+		`data: {"type":"response.output_item.done","item":{"id":"rs_1","type":"reasoning","status":"completed","summary":[],"content":[{"type":"reasoning_text","text":"inspect"}],"encrypted_content":null}}`,
+		`data: {"type":"response.completed","response":{"output":[{"id":"rs_1","type":"reasoning","status":"completed","summary":[],"content":[{"type":"reasoning_text","text":"inspect"}],"encrypted_content":null}]}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n\n")
+
+	_, _, _, _, _, _, outputItems, err := readOpenAIResponsesStream(strings.NewReader(stream), func(SseEvent) {})
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	if len(outputItems) != 1 {
+		t.Fatalf("output items = %#v", outputItems)
+	}
+	if encrypted := outputItems[0]["encrypted_content"]; encrypted != nil {
+		t.Fatalf("replayed incomplete encrypted_content from output_item.added: %#v", encrypted)
+	}
+}
+
+func TestResponsesStreamCapturesIncompleteTerminalSnapshot(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"type":"response.incomplete","response":{"usage":{"input_tokens":13,"output_tokens":21},"output":[{"id":"rs_1","type":"reasoning","status":"incomplete","summary":[],"encrypted_content":"enc-incomplete"},{"id":"msg_1","type":"message","role":"assistant","status":"incomplete","content":[{"type":"output_text","text":"partial answer"}]}]}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n\n")
+
+	_, _, _, _, _, usage, outputItems, err := readOpenAIResponsesStream(strings.NewReader(stream), func(SseEvent) {})
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	if usage.InputTokens != 13 || usage.OutputTokens != 21 {
+		t.Fatalf("usage = %+v, want 13/21", usage)
+	}
+	if len(outputItems) != 2 || outputItems[0]["encrypted_content"] != "enc-incomplete" || outputItems[1]["status"] != "incomplete" {
+		t.Fatalf("incomplete response output was not preserved: %#v", outputItems)
+	}
+}
+
+func TestResponsesStreamReassemblesMultipleReasoningTextParts(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"type":"response.output_item.added","item":{"id":"rs_1","type":"reasoning","status":"in_progress","content":[]}}`,
+		`data: {"type":"response.content_part.added","item_id":"rs_1","content_index":0,"part":{"type":"reasoning_text","text":""}}`,
+		`data: {"type":"response.reasoning_text.delta","item_id":"rs_1","content_index":0,"delta":"inspect "}`,
+		`data: {"type":"response.reasoning_text.delta","item_id":"rs_1","content_index":0,"delta":"sources"}`,
+		`data: {"type":"response.reasoning_text.done","item_id":"rs_1","content_index":0,"text":"inspect sources"}`,
+		`data: {"type":"response.content_part.done","item_id":"rs_1","content_index":1,"part":{"type":"reasoning_text","text":"compare evidence"}}`,
+		`data: {"type":"response.output_item.done","item":{"id":"rs_1","type":"reasoning","status":"completed","content":[]}}`,
+		`data: {"type":"response.completed","response":{"output":[{"id":"rs_1","type":"reasoning","status":"completed","content":[]}]}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n\n")
+
+	var thinking strings.Builder
+	_, _, _, _, _, _, outputItems, err := readOpenAIResponsesStream(strings.NewReader(stream), func(ev SseEvent) {
+		if ev.Type == "thinking_delta" {
+			thinking.WriteString(ev.Text)
+		}
+	})
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	if thinking.String() != "inspect sourcescompare evidence" {
+		t.Fatalf("streamed thinking = %q", thinking.String())
+	}
+	if len(outputItems) != 1 {
+		t.Fatalf("output items = %#v", outputItems)
+	}
+	content, _ := jsonArrayItems(outputItems[0]["content"])
+	if len(content) != 2 {
+		t.Fatalf("reasoning content = %#v, want two parts", outputItems[0]["content"])
+	}
+	first, _ := content[0].(map[string]any)
+	second, _ := content[1].(map[string]any)
+	if first["text"] != "inspect sources" || second["text"] != "compare evidence" {
+		t.Fatalf("reasoning parts = %#v", content)
+	}
+}
+
+func TestResponsesStreamUsesAuthoritativeFunctionArgumentsAndDeduplicatesItems(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"id":"fc_1","type":"function_call","status":"in_progress","call_id":"call_1","name":"lookup","arguments":""}}`,
+		`data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":0,"delta":"{\"q\":\"x\"}"}`,
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"id":"fc_1","type":"function_call","status":"in_progress","call_id":"call_1","name":"lookup","arguments":""}}`,
+		`data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":0,"delta":"{\"q\":\"x\"}"}`,
+		`data: {"type":"response.function_call_arguments.done","item_id":"fc_1","output_index":0,"arguments":"{\"q\":\"x\"}"}`,
+		`data: {"type":"response.output_item.done","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":""}}`,
+		`data: {"type":"response.completed","response":{"output":[{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":""}]}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n\n")
+
+	toolStarts := 0
+	_, _, calls, _, _, _, outputItems, err := readOpenAIResponsesStream(strings.NewReader(stream), func(event SseEvent) {
+		if event.Type == "tool_start" {
+			toolStarts++
+		}
+	})
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	if toolStarts != 1 {
+		t.Fatalf("tool_start events = %d, want one per item_id", toolStarts)
+	}
+	if len(calls) != 1 || calls[0].ID != "call_1" || string(calls[0].Input) != `{"q":"x"}` {
+		t.Fatalf("authoritative call = %#v", calls)
+	}
+	if len(outputItems) != 1 || outputItems[0]["arguments"] != `{"q":"x"}` || outputItems[0]["status"] != "completed" {
+		t.Fatalf("replay item did not retain completed arguments/status: %#v", outputItems)
+	}
+}
+
+func TestResponsesStreamUsesCompletedOnlyOutputAndFiltersNonCompletedCalls(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"type":"response.completed","response":{"usage":{"input_tokens":3,"output_tokens":2},"output":[{"id":"msg_1","type":"message","role":"assistant","status":"completed","provider_extension":{"trace":"kept"},"content":[{"type":"output_text","text":"terminal answer","annotations":[]}]},{"id":"fc_ok","type":"function_call","status":"completed","call_id":"call_ok","name":"lookup","arguments":"{}"},{"id":"fc_failed","type":"function_call","status":"failed","call_id":"call_failed","name":"lookup","arguments":"{}"},{"id":"fc_no_id","type":"function_call","status":"completed","name":"lookup","arguments":"{}"}]}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n\n")
+
+	text, _, calls, _, _, usage, outputItems, err := readOpenAIResponsesStream(strings.NewReader(stream), func(SseEvent) {})
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	if text != "terminal answer" || usage.InputTokens != 3 || usage.OutputTokens != 2 {
+		t.Fatalf("terminal snapshot text/usage = %q/%+v", text, usage)
+	}
+	if len(calls) != 1 || calls[0].ID != "call_ok" {
+		t.Fatalf("only completed calls with call_id may execute: %#v", calls)
+	}
+	if len(outputItems) != 4 {
+		t.Fatalf("terminal output = %#v", outputItems)
+	}
+	extension, _ := outputItems[0]["provider_extension"].(map[string]any)
+	if extension["trace"] != "kept" {
+		t.Fatalf("unknown terminal fields were not retained: %#v", outputItems[0])
+	}
+}
+
+func TestResponsesStreamIncompleteNeverExecutesTruncatedCall(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"id":"fc_1","type":"function_call","status":"in_progress","call_id":"call_1","name":"lookup","arguments":""}}`,
+		`data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":0,"delta":"{\"q\":"}`,
+		`data: {"type":"response.incomplete","response":{"incomplete_details":{"reason":"max_output_tokens"},"usage":{"input_tokens":9,"output_tokens":4},"output":[{"id":"fc_1","type":"function_call","status":"incomplete","call_id":"call_1","name":"lookup","arguments":"{\"q\":"},{"id":"msg_1","type":"message","role":"assistant","status":"incomplete","content":[{"type":"output_text","text":"partial"}]}]}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n\n")
+
+	text, _, calls, _, _, usage, outputItems, err := readOpenAIResponsesStream(strings.NewReader(stream), func(SseEvent) {})
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	if text != "partial" || usage.InputTokens != 9 || usage.OutputTokens != 4 {
+		t.Fatalf("incomplete snapshot text/usage = %q/%+v", text, usage)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("truncated call was returned executable: %#v", calls)
+	}
+	if len(outputItems) != 2 || outputItems[0]["status"] != "incomplete" {
+		t.Fatalf("incomplete output was not preserved: %#v", outputItems)
+	}
+}
+
+func TestResponsesStreamReconcilesTerminalOmissionsInOutputIndexOrder(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning","status":"in_progress","content":[]}}`,
+		`data: {"type":"response.reasoning_text.done","item_id":"rs_1","output_index":0,"content_index":0,"text":"must replay"}`,
+		`data: {"type":"response.output_item.done","output_index":0,"item":{"id":"rs_1","type":"reasoning","status":"completed","content":[]}}`,
+		`data: {"type":"response.output_item.added","output_index":2,"item":{"id":"fc_b","type":"function_call","status":"in_progress","call_id":"call_b","name":"beta","arguments":""}}`,
+		`data: {"type":"response.function_call_arguments.done","item_id":"fc_b","output_index":2,"arguments":"{}"}`,
+		`data: {"type":"response.output_item.done","output_index":2,"item":{"id":"fc_b","type":"function_call","status":"completed","call_id":"call_b","name":"beta","arguments":"{}"}}`,
+		`data: {"type":"response.output_item.added","output_index":1,"item":{"id":"fc_a","type":"function_call","status":"in_progress","call_id":"call_a","name":"alpha","arguments":""}}`,
+		`data: {"type":"response.function_call_arguments.done","item_id":"fc_a","output_index":1,"arguments":"{}"}`,
+		`data: {"type":"response.output_item.done","output_index":1,"item":{"id":"fc_a","type":"function_call","status":"completed","call_id":"call_a","name":"alpha","arguments":"{}"}}`,
+		`data: {"type":"response.completed","response":{"output":[{"id":"fc_a","type":"function_call","status":"completed","call_id":"call_a","name":"alpha","arguments":"{}"},{"id":"fc_b","type":"function_call","status":"completed","call_id":"call_b","name":"beta","arguments":"{}"}]}}`,
+		``,
+	}, "\n\n")
+
+	_, _, calls, _, _, _, outputItems, err := readOpenAIResponsesStream(strings.NewReader(stream), func(SseEvent) {})
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	if len(calls) != 2 || calls[0].ID != "call_a" || calls[1].ID != "call_b" {
+		t.Fatalf("call order = %#v", calls)
+	}
+	if len(outputItems) != 3 || outputItems[0]["id"] != "rs_1" || outputItems[1]["id"] != "fc_a" || outputItems[2]["id"] != "fc_b" {
+		t.Fatalf("reconciled output order = %#v", outputItems)
+	}
+}
+
+func TestResponsesStreamPreservesDoneOnlySummaryAndRefusal(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning","status":"in_progress","summary":[]}}`,
+		`data: {"type":"response.reasoning_summary_part.added","item_id":"rs_1","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":"","provider_marker":"kept"}}`,
+		`data: {"type":"response.reasoning_summary_text.done","item_id":"rs_1","output_index":0,"summary_index":0,"text":"plan"}`,
+		`data: {"type":"response.reasoning_summary_part.done","item_id":"rs_1","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":"plan","provider_marker":"kept"}}`,
+		`data: {"type":"response.output_item.done","output_index":0,"item":{"id":"rs_1","type":"reasoning","status":"completed","summary":[]}}`,
+		`data: {"type":"response.output_item.added","output_index":1,"item":{"id":"msg_1","type":"message","role":"assistant","status":"in_progress","content":[]}}`,
+		`data: {"type":"response.refusal.done","item_id":"msg_1","output_index":1,"content_index":0,"refusal":"cannot comply"}`,
+		`data: {"type":"response.output_item.done","output_index":1,"item":{"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[]}}`,
+		`data: {"type":"response.completed","response":{"output":[{"id":"rs_1","type":"reasoning","status":"completed","summary":[]},{"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[]}]}}`,
+		``,
+	}, "\n\n")
+
+	text, thinking, _, _, _, _, outputItems, err := readOpenAIResponsesStream(strings.NewReader(stream), func(SseEvent) {})
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	if text != "cannot comply" || thinking != "plan" {
+		t.Fatalf("done-only output = text %q, thinking %q", text, thinking)
+	}
+	summary, _ := jsonArrayItems(outputItems[0]["summary"])
+	content, _ := jsonArrayItems(outputItems[1]["content"])
+	if len(summary) != 1 || len(content) != 1 {
+		t.Fatalf("done-only parts were not retained: summary=%#v content=%#v", summary, content)
+	}
+	summaryPart, _ := summary[0].(map[string]any)
+	if summaryPart["text"] != "plan" || summaryPart["provider_marker"] != "kept" {
+		t.Fatalf("summary part fields = %#v", summaryPart)
+	}
+}
+
 // A response.failed AFTER response.completed is a relay-side protocol
 // violation (completed is terminal): some gateways append a bogus failed
 // event while closing the connection. It must be ignored — the answer and
@@ -720,7 +943,7 @@ func TestOpenAIResponsesOfficialToolsSurviveExtraParamsMerge(t *testing.T) {
 		Model:                ModelInfo{RequestID: "gpt-test", BaseURL: srv.URL, APIKey: "k", APIFormat: "responses"},
 		History:              []UnifiedMessage{{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "search"}}}},
 		OfficialToolNames:    []string{"custom_search"},
-		OfficialToolRequests: []json.RawMessage{json.RawMessage(`{"tools":[{"type":"web_search","search_context_size":"medium"}]}`)},
+		OfficialToolRequests: []json.RawMessage{json.RawMessage(`{"tools":[{"type":"web_search","search_context_size":"medium"}],"store":true}`)},
 		ExtraParams:          json.RawMessage(`{"tools":[{"type":"function","name":"extra_tool"}],"include":["custom.include"]}`),
 	}, nil, func(SseEvent) {})
 	if err != nil {
@@ -733,6 +956,9 @@ func TestOpenAIResponsesOfficialToolsSurviveExtraParamsMerge(t *testing.T) {
 	tool, _ := tools[0].(map[string]any)
 	if tool["type"] != "web_search" {
 		t.Fatalf("official web search tool = %#v", tool)
+	}
+	if captured["store"] != false || captured["stream"] != true {
+		t.Fatalf("provider-owned Responses fields were overridden: store=%#v stream=%#v", captured["store"], captured["stream"])
 	}
 	include, _ := captured["include"].([]any)
 	seen := map[string]bool{}
@@ -900,6 +1126,273 @@ func TestOpenAIResponsesToolLoopReplaysOutputItems(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesToolLoopReplaysStreamedReasoningText(t *testing.T) {
+	var requests []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var captured map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		requests = append(requests, captured)
+		w.Header().Set("Content-Type", "text/event-stream")
+		if len(requests) == 1 {
+			_, _ = io.WriteString(w, strings.Join([]string{
+				`data: {"type":"response.output_item.added","item":{"id":"rs_1","type":"reasoning","status":"in_progress","content":[]}}`,
+				`data: {"type":"response.content_part.added","item_id":"rs_1","content_index":0,"part":{"type":"reasoning_text","text":""}}`,
+				`data: {"type":"response.reasoning_text.delta","item_id":"rs_1","content_index":0,"delta":"inspect sources"}`,
+				`data: {"type":"response.reasoning_text.done","item_id":"rs_1","content_index":0,"text":"inspect sources"}`,
+				`data: {"type":"response.content_part.done","item_id":"rs_1","content_index":0,"part":{"type":"reasoning_text","text":"inspect sources"}}`,
+				// A compact terminal item may omit content. The content events above
+				// remain authoritative and must survive this later snapshot.
+				`data: {"type":"response.output_item.done","item":{"id":"rs_1","type":"reasoning","status":"completed","content":[]}}`,
+				`data: {"type":"response.output_item.added","item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":""}}`,
+				`data: {"type":"response.function_call_arguments.done","item_id":"fc_1","arguments":"{\"q\":\"x\"}"}`,
+				`data: {"type":"response.output_item.done","item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"q\":\"x\"}"}}`,
+				`data: {"type":"response.completed","response":{"output":[{"id":"rs_1","type":"reasoning","status":"completed","content":[]},{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"q\":\"x\"}"}]}}`,
+				`data: [DONE]`,
+				``,
+			}, "\n\n"))
+			return
+		}
+
+		input, _ := captured["input"].([]any)
+		var hasReasoningText, hasCall, hasOutput bool
+		for _, raw := range input {
+			item, _ := raw.(map[string]any)
+			switch item["type"] {
+			case "reasoning":
+				content, _ := jsonArrayItems(item["content"])
+				if len(content) > 0 {
+					part, _ := content[0].(map[string]any)
+					hasReasoningText = part["type"] == "reasoning_text" && part["text"] == "inspect sources"
+				}
+			case "function_call":
+				hasCall = item["call_id"] == "call_1"
+			case "function_call_output":
+				hasOutput = item["call_id"] == "call_1" && item["output"] == "tool output"
+			}
+		}
+		if !hasReasoningText || !hasCall || !hasOutput {
+			http.Error(w, `{"error":{"message":"reasoning_text was not passed back"}}`, http.StatusBadRequest)
+			return
+		}
+		_, _ = io.WriteString(w, strings.Join([]string{
+			`data: {"type":"response.output_text.delta","delta":"done"}`,
+			`data: {"type":"response.completed","response":{"output":[{"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"done"}]}]}}`,
+			`data: [DONE]`,
+			``,
+		}, "\n\n"))
+	}))
+	defer srv.Close()
+
+	result, err := (&OpenAIProvider{}).Stream(context.Background(), UnifiedChatRequest{
+		Model:   ModelInfo{RequestID: "deepseek-test", BaseURL: srv.URL, APIKey: "k", APIFormat: "responses"},
+		History: []UnifiedMessage{{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "use a tool"}}}},
+		Tools:   []ToolDef{{Name: "lookup", Description: "Lookup", InputSchema: json.RawMessage(`{"type":"object"}`)}},
+	}, staticToolRunner("tool output"), func(SseEvent) {})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("requests = %d, want 2", len(requests))
+	}
+	if result == nil || len(result.Blocks) == 0 || result.Blocks[len(result.Blocks)-1].Text != "done" {
+		t.Fatalf("result = %+v, want final text done", result)
+	}
+
+	followReq := UnifiedChatRequest{
+		Model: ModelInfo{RequestID: "deepseek-test", BaseURL: srv.URL, APIKey: "k", APIFormat: "responses"},
+		History: []UnifiedMessage{
+			{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "use a tool"}}},
+			{Role: "assistant", Blocks: result.Blocks, Raw: result.Raw},
+			{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "follow up"}}},
+		},
+	}
+	if _, err := (&OpenAIProvider{}).Stream(context.Background(), followReq, nil, func(SseEvent) {}); err != nil {
+		t.Fatalf("persisted follow-up: %v", err)
+	}
+	if len(requests) != 3 {
+		t.Fatalf("requests after persisted follow-up = %d, want 3", len(requests))
+	}
+}
+
+func TestOpenAIResponsesToolLoopReplaysAllInterleavedReasoningAndCallsInOrder(t *testing.T) {
+	var requests []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var captured map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		requests = append(requests, captured)
+		w.Header().Set("Content-Type", "text/event-stream")
+		if len(requests) == 1 {
+			_, _ = io.WriteString(w, strings.Join([]string{
+				`data: {"type":"response.output_item.added","item":{"id":"rs_a","type":"reasoning","status":"in_progress","content":[]}}`,
+				`data: {"type":"response.reasoning_text.done","item_id":"rs_a","content_index":0,"text":"plan first lookup"}`,
+				`data: {"type":"response.output_item.done","item":{"id":"rs_a","type":"reasoning","status":"completed","content":[]}}`,
+				`data: {"type":"response.output_item.added","item":{"id":"fc_a","type":"function_call","call_id":"call_a","name":"lookup_a","arguments":""}}`,
+				`data: {"type":"response.function_call_arguments.done","item_id":"fc_a","arguments":"{\"q\":\"a\"}"}`,
+				`data: {"type":"response.output_item.done","item":{"id":"fc_a","type":"function_call","call_id":"call_a","name":"lookup_a","arguments":"{\"q\":\"a\"}"}}`,
+				`data: {"type":"response.output_item.added","item":{"id":"rs_b","type":"reasoning","status":"in_progress","content":[]}}`,
+				`data: {"type":"response.content_part.done","item_id":"rs_b","content_index":0,"part":{"type":"reasoning_text","text":"plan second lookup"}}`,
+				`data: {"type":"response.output_item.done","item":{"id":"rs_b","type":"reasoning","status":"completed","content":[]}}`,
+				`data: {"type":"response.output_item.added","item":{"id":"fc_b","type":"function_call","call_id":"call_b","name":"lookup_b","arguments":""}}`,
+				`data: {"type":"response.function_call_arguments.done","item_id":"fc_b","arguments":"{\"q\":\"b\"}"}`,
+				`data: {"type":"response.output_item.done","item":{"id":"fc_b","type":"function_call","call_id":"call_b","name":"lookup_b","arguments":"{\"q\":\"b\"}"}}`,
+				`data: {"type":"response.completed","response":{"output":[{"id":"rs_a","type":"reasoning","status":"completed","content":[]},{"id":"fc_a","type":"function_call","call_id":"call_a","name":"lookup_a","arguments":"{\"q\":\"a\"}"},{"id":"rs_b","type":"reasoning","status":"completed","content":[]},{"id":"fc_b","type":"function_call","call_id":"call_b","name":"lookup_b","arguments":"{\"q\":\"b\"}"}]}}`,
+				`data: [DONE]`,
+				``,
+			}, "\n\n"))
+			return
+		}
+
+		input, _ := captured["input"].([]any)
+		var types []string
+		var reasoningTexts, callIDs, outputIDs []string
+		for _, raw := range input[1:] {
+			item, _ := raw.(map[string]any)
+			itemType, _ := item["type"].(string)
+			types = append(types, itemType)
+			switch itemType {
+			case "reasoning":
+				content, _ := jsonArrayItems(item["content"])
+				if len(content) > 0 {
+					part, _ := content[0].(map[string]any)
+					reasoningTexts = append(reasoningTexts, part["text"].(string))
+				}
+			case "function_call":
+				callIDs = append(callIDs, item["call_id"].(string))
+			case "function_call_output":
+				outputIDs = append(outputIDs, item["call_id"].(string))
+			}
+		}
+		wantTypes := "reasoning,function_call,reasoning,function_call,function_call_output,function_call_output"
+		if strings.Join(types, ",") != wantTypes || strings.Join(reasoningTexts, ",") != "plan first lookup,plan second lookup" ||
+			strings.Join(callIDs, ",") != "call_a,call_b" || strings.Join(outputIDs, ",") != "call_a,call_b" {
+			http.Error(w, `{"error":{"message":"continuation items were incomplete or reordered"}}`, http.StatusBadRequest)
+			return
+		}
+		_, _ = io.WriteString(w, strings.Join([]string{
+			`data: {"type":"response.output_text.delta","delta":"done"}`,
+			`data: {"type":"response.completed","response":{"output":[{"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"done"}]}]}}`,
+			`data: [DONE]`,
+			``,
+		}, "\n\n"))
+	}))
+	defer srv.Close()
+
+	result, err := (&OpenAIProvider{}).Stream(context.Background(), UnifiedChatRequest{
+		Model:   ModelInfo{RequestID: "deepseek-test", BaseURL: srv.URL, APIKey: "k", APIFormat: "responses"},
+		History: []UnifiedMessage{{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "use two tools"}}}},
+		Tools: []ToolDef{
+			{Name: "lookup_a", Description: "Lookup A", InputSchema: json.RawMessage(`{"type":"object"}`)},
+			{Name: "lookup_b", Description: "Lookup B", InputSchema: json.RawMessage(`{"type":"object"}`)},
+		},
+	}, staticToolRunner("tool output"), func(SseEvent) {})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	if len(requests) != 2 || result == nil || len(result.Blocks) == 0 || result.Blocks[len(result.Blocks)-1].Text != "done" {
+		t.Fatalf("requests=%d result=%+v", len(requests), result)
+	}
+}
+
+func TestOpenAIResponsesToolLoopDeduplicatesCallAndReplaysReasoningWithFinalArguments(t *testing.T) {
+	var requestCount atomic.Int32
+	var toolStarts atomic.Int32
+	var secondInput atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var captured map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		switch requestCount.Add(1) {
+		case 1:
+			_, _ = io.WriteString(w, strings.Join([]string{
+				`data: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning","status":"in_progress","content":[]}}`,
+				`data: {"type":"response.reasoning_text.done","item_id":"rs_1","output_index":0,"content_index":0,"text":"inspect"}`,
+				`data: {"type":"response.output_item.done","output_index":0,"item":{"id":"rs_1","type":"reasoning","status":"completed","content":[]}}`,
+				`data: {"type":"response.output_item.added","output_index":1,"item":{"id":"fc_1","type":"function_call","status":"in_progress","call_id":"call_1","name":"lookup","arguments":""}}`,
+				`data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":1,"delta":"{\"q\":"}`,
+				`data: {"type":"response.output_item.added","output_index":1,"item":{"id":"fc_1","type":"function_call","status":"in_progress","call_id":"call_1","name":"lookup","arguments":""}}`,
+				`data: {"type":"response.function_call_arguments.done","item_id":"fc_1","output_index":1,"arguments":"{\"q\":\"x\"}"}`,
+				`data: {"type":"response.output_item.done","output_index":1,"item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":""}}`,
+				`data: {"type":"response.completed","response":{"output":[{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":""}]}}`,
+				``,
+			}, "\n\n"))
+		case 2:
+			input, _ := captured["input"].([]any)
+			secondInput.Store(input)
+			_, _ = io.WriteString(w, strings.Join([]string{
+				`data: {"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":"done"}`,
+				`data: {"type":"response.completed","response":{"output":[{"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"done"}]}]}}`,
+				``,
+			}, "\n\n"))
+		default:
+			http.Error(w, "unexpected request", http.StatusInternalServerError)
+		}
+	}))
+	defer srv.Close()
+
+	runner := &responsesRecordingToolRunner{}
+	result, err := (&OpenAIProvider{}).Stream(context.Background(), UnifiedChatRequest{
+		Model:   ModelInfo{RequestID: "deepseek-test", BaseURL: srv.URL, APIKey: "k", APIFormat: "responses"},
+		History: []UnifiedMessage{{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "use lookup"}}}},
+		Tools:   []ToolDef{{Name: "lookup", Description: "Lookup", InputSchema: json.RawMessage(`{"type":"object"}`)}},
+	}, runner, func(event SseEvent) {
+		if event.Type == "tool_start" {
+			toolStarts.Add(1)
+		}
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	if result == nil || len(result.Blocks) == 0 || result.Blocks[len(result.Blocks)-1].Text != "done" {
+		t.Fatalf("result = %+v", result)
+	}
+	// One start comes from the provider stream and one from the executor with
+	// the finalized input. A duplicate output_item.added must not add a third.
+	if requestCount.Load() != 2 || runner.count.Load() != 1 || toolStarts.Load() != 2 {
+		t.Fatalf("requests/tools/starts = %d/%d/%d, want 2/1/2", requestCount.Load(), runner.count.Load(), toolStarts.Load())
+	}
+	if got, _ := runner.input.Load().(string); got != `{"q":"x"}` {
+		t.Fatalf("runner input = %q", got)
+	}
+
+	input, _ := secondInput.Load().([]any)
+	var replayTypes []string
+	var reasoningText, replayArguments string
+	var outputCount int
+	for _, raw := range input {
+		item, _ := raw.(map[string]any)
+		itemType, _ := item["type"].(string)
+		if itemType == "" {
+			continue
+		}
+		replayTypes = append(replayTypes, itemType)
+		switch itemType {
+		case "reasoning":
+			content, _ := jsonArrayItems(item["content"])
+			if len(content) > 0 {
+				part, _ := content[0].(map[string]any)
+				reasoningText, _ = part["text"].(string)
+			}
+		case "function_call":
+			replayArguments, _ = item["arguments"].(string)
+		case "function_call_output":
+			outputCount++
+		}
+	}
+	if strings.Join(replayTypes, ",") != "reasoning,function_call,function_call_output" ||
+		reasoningText != "inspect" || replayArguments != `{"q":"x"}` || outputCount != 1 {
+		t.Fatalf("second request replay = types %v reasoning %q args %q outputs %d", replayTypes, reasoningText, replayArguments, outputCount)
+	}
+}
+
 func TestOpenAIChatToolCallsAreOrderedAndEmitStartWhenNameArrivesLate(t *testing.T) {
 	stream := strings.Join([]string{
 		`data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"call_b","function":{"name":"beta","arguments":"{\"b\":1}"}}]}}]}`,
@@ -934,4 +1427,15 @@ type staticToolRunner string
 
 func (s staticToolRunner) Run(context.Context, string, []byte) (string, []Citation, error) {
 	return string(s), nil, nil
+}
+
+type responsesRecordingToolRunner struct {
+	count atomic.Int32
+	input atomic.Value
+}
+
+func (runner *responsesRecordingToolRunner) Run(_ context.Context, _ string, input []byte) (string, []Citation, error) {
+	runner.count.Add(1)
+	runner.input.Store(string(input))
+	return "tool output", nil, nil
 }

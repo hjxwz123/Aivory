@@ -716,13 +716,16 @@ func responsesRequestHasToolType(body map[string]any, toolType string) bool {
 	return false
 }
 
-func responseOutputHasFunctionCalls(items []map[string]any) bool {
+func responseOutputFunctionCallIDs(items []map[string]any) map[string]bool {
+	callIDs := map[string]bool{}
 	for _, item := range items {
 		if t, _ := item["type"].(string); t == "function_call" {
-			return true
+			if callID, _ := item["call_id"].(string); callID != "" {
+				callIDs[callID] = true
+			}
 		}
 	}
-	return false
+	return callIDs
 }
 
 // responsesEasyInputMessage is the channel-neutral representation for prior
@@ -759,6 +762,186 @@ func prepareResponsesReplayItems(items []map[string]any) []map[string]any {
 		prepared = append(prepared, responsesCompletedReplayItem(item))
 	}
 	return prepared
+}
+
+type responsesOutputMergeStage uint8
+
+const (
+	responsesOutputAdded responsesOutputMergeStage = iota
+	responsesOutputDone
+	responsesOutputTerminal
+)
+
+// responsesOutputItem accumulates one response.output item without allocating
+// a slice up to an untrusted content_index. Parts are materialized in numeric
+// order only when the item is ready for replay.
+type responsesOutputItem struct {
+	fields       map[string]any
+	parts        map[string]map[int]any
+	arrayPresent map[string]bool
+	itemDone     bool
+}
+
+func newResponsesOutputItem(itemID, itemType string) *responsesOutputItem {
+	fields := map[string]any{}
+	if itemID != "" {
+		fields["id"] = itemID
+	}
+	if itemType != "" {
+		fields["type"] = itemType
+	}
+	return &responsesOutputItem{
+		fields:       fields,
+		parts:        map[string]map[int]any{},
+		arrayPresent: map[string]bool{},
+	}
+}
+
+func (item *responsesOutputItem) merge(incoming map[string]any, stage responsesOutputMergeStage) {
+	if item == nil || incoming == nil {
+		return
+	}
+	for key, value := range incoming {
+		switch key {
+		case "content", "summary":
+			parts, isArray := jsonArrayItems(value)
+			if !isArray {
+				item.fields[key] = value
+				continue
+			}
+			item.arrayPresent[key] = true
+			for index, part := range parts {
+				item.mergePart(key, index, part, "", "", false)
+			}
+		case "encrypted_content":
+			// The official output_item.added ciphertext may be incomplete. Never
+			// retain it. An explicit null from output_item.done is authoritative,
+			// while a compact terminal snapshot must not erase a complete done value.
+			if stage == responsesOutputAdded {
+				continue
+			}
+			if stage == responsesOutputTerminal && item.itemDone && responsesJSONValueEmpty(value) &&
+				!responsesJSONValueEmpty(item.fields[key]) {
+				continue
+			}
+			item.fields[key] = value
+		case "arguments":
+			// Function arguments are progressive. The dedicated arguments.done
+			// event or a non-empty completed snapshot supplies the full string.
+			if stage == responsesOutputAdded {
+				continue
+			}
+			if responsesJSONValueEmpty(value) && !responsesJSONValueEmpty(item.fields[key]) {
+				continue
+			}
+			item.fields[key] = value
+		case "result":
+			// Hosted image bytes are persisted as artifacts, not replayed in Raw.
+			continue
+		default:
+			item.fields[key] = value
+		}
+	}
+	if stage == responsesOutputDone {
+		item.itemDone = true
+	}
+}
+
+func (item *responsesOutputItem) mergePart(arrayField string, index int, incoming any, textField, text string, appendText bool) {
+	if item == nil || index < 0 {
+		return
+	}
+	item.arrayPresent[arrayField] = true
+	if item.parts[arrayField] == nil {
+		item.parts[arrayField] = map[int]any{}
+	}
+	existing := item.parts[arrayField][index]
+	existingMap, existingIsMap := existing.(map[string]any)
+	incomingMap, incomingIsMap := incoming.(map[string]any)
+	if !incomingIsMap {
+		if incoming != nil || existing == nil {
+			item.parts[arrayField][index] = incoming
+		}
+		return
+	}
+	merged := make(map[string]any, len(existingMap)+len(incomingMap)+2)
+	if existingIsMap {
+		for key, value := range existingMap {
+			merged[key] = value
+		}
+	}
+	for key, value := range incomingMap {
+		if (key == "text" || key == "refusal") && responsesJSONValueEmpty(value) &&
+			!responsesJSONValueEmpty(merged[key]) {
+			continue
+		}
+		merged[key] = value
+	}
+	if textField != "" {
+		previous, _ := merged[textField].(string)
+		if appendText {
+			merged[textField] = previous + text
+		} else if text != "" || previous == "" {
+			merged[textField] = text
+		}
+	}
+	item.parts[arrayField][index] = merged
+}
+
+func (item *responsesOutputItem) setString(key, value string) {
+	if item == nil {
+		return
+	}
+	item.fields[key] = value
+}
+
+func (item *responsesOutputItem) stringField(key string) string {
+	if item == nil {
+		return ""
+	}
+	value, _ := item.fields[key].(string)
+	return value
+}
+
+func (item *responsesOutputItem) snapshot() map[string]any {
+	if item == nil {
+		return nil
+	}
+	result := make(map[string]any, len(item.fields)+len(item.arrayPresent))
+	for key, value := range item.fields {
+		result[key] = value
+	}
+	for arrayField := range item.arrayPresent {
+		indexed := item.parts[arrayField]
+		indexes := make([]int, 0, len(indexed))
+		for index, part := range indexed {
+			if part != nil {
+				indexes = append(indexes, index)
+			}
+		}
+		sort.Ints(indexes)
+		parts := make([]any, 0, len(indexes))
+		for _, index := range indexes {
+			parts = append(parts, indexed[index])
+		}
+		result[arrayField] = parts
+	}
+	return result
+}
+
+func responsesJSONValueEmpty(value any) bool {
+	switch typed := value.(type) {
+	case nil:
+		return true
+	case string:
+		return typed == ""
+	case []any:
+		return len(typed) == 0
+	case []map[string]any:
+		return len(typed) == 0
+	default:
+		return false
+	}
 }
 
 func responsesCompletedReplayItem(item map[string]any) map[string]any {
@@ -849,6 +1032,16 @@ type openAIResponseCallBuf struct {
 	ID, Name string
 	Args     strings.Builder
 	Started  bool
+	ItemDone bool
+	Complete bool
+}
+
+func (call *openAIResponseCallBuf) setArguments(arguments string) {
+	if call == nil {
+		return
+	}
+	call.Args.Reset()
+	call.Args.WriteString(arguments)
 }
 
 type openAIChatReasoning struct {
@@ -1165,6 +1358,16 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		if !finalizing {
 			body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
 		}
+		// Request fragments may contribute hosted tools and their options, but
+		// provider-owned transport and state fields remain authoritative. This
+		// implementation replays response items locally and never mixes that state
+		// with an upstream conversation or previous_response_id.
+		body["model"] = req.Model.RequestID
+		body["input"] = input
+		body["store"] = false
+		body["stream"] = true
+		delete(body, "conversation")
+		delete(body, "previous_response_id")
 		enforceOpenAIOutputTokenCap(body, req, true)
 		// Ask the API to return the sources the hosted web_search consulted, so
 		// we can surface them as citations. For stateless Responses tool loops
@@ -1363,19 +1566,21 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		// alongside their outputs — required by the Responses protocol). Official
 		// OpenAI responses include those items in response.output; keep this manual
 		// path only for compatible gateways that omit the completed output list.
-		if len(outputItems) == 0 || !responseOutputHasFunctionCalls(outputItems) {
-			for _, c := range calls {
-				input = append(input, map[string]any{
-					"type":    "function_call",
-					"call_id": c.ID,
-					"name":    c.Name,
-					"status":  "completed",
-					// Responses requires `arguments` to be a JSON STRING. Passing
-					// json.RawMessage serialises it as an OBJECT and the API rejects
-					// it with "expected a string, got an object" on input[N].arguments.
-					"arguments": string(c.Input),
-				})
+		replayedCallIDs := responseOutputFunctionCallIDs(outputItems)
+		for _, c := range calls {
+			if replayedCallIDs[c.ID] {
+				continue
 			}
+			input = append(input, map[string]any{
+				"type":    "function_call",
+				"call_id": c.ID,
+				"name":    c.Name,
+				"status":  "completed",
+				// Responses requires `arguments` to be a JSON STRING. Passing
+				// json.RawMessage serialises it as an OBJECT and the API rejects
+				// it with "expected a string, got an object" on input[N].arguments.
+				"arguments": string(c.Input),
+			})
 		}
 
 		// Execute tools concurrently, then feed function_call_output items.
@@ -1501,13 +1706,77 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 		citations = append(citations, c)
 		onEvent(SseEvent{Type: "citation", Citation: &c})
 	}
-	callsByItem := map[string]*openAIResponseCallBuf{} // item_id → buffer
+	callsByItem := map[string]*openAIResponseCallBuf{} // item_id -> buffer
 	order := []string{}
 	hostedByItem := map[string]*hostedToolCall{} // item_id → hosted tool round
 	hostedOrder := []string{}
-	outputByItem := map[string]map[string]any{} // item_id → finalized output item
+	hostedStarted := map[string]bool{}
+	outputByItem := map[string]*responsesOutputItem{} // item_id -> progressive output item
 	outputOrder := []string{}
+	outputSeen := map[string]bool{}
+	outputIndexByItem := map[string]int{}
+	outputDone := map[string]bool{}
 	completedOutput := []map[string]any{}
+	ensureOutput := func(itemID, itemType string) *responsesOutputItem {
+		if itemID == "" {
+			return nil
+		}
+		if existing := outputByItem[itemID]; existing != nil {
+			if itemType != "" && existing.stringField("type") == "" {
+				existing.setString("type", itemType)
+			}
+			return existing
+		}
+		item := newResponsesOutputItem(itemID, itemType)
+		outputByItem[itemID] = item
+		return item
+	}
+	rememberOutput := func(itemID string, outputIndex any) {
+		if itemID == "" {
+			return
+		}
+		if !outputSeen[itemID] {
+			outputSeen[itemID] = true
+			outputOrder = append(outputOrder, itemID)
+		}
+		if index, ok := responsesNonnegativeInteger(outputIndex); ok {
+			outputIndexByItem[itemID] = index
+		}
+	}
+	ensureCall := func(itemID string) (*openAIResponseCallBuf, bool) {
+		if itemID == "" {
+			return nil, false
+		}
+		if existing := callsByItem[itemID]; existing != nil {
+			return existing, false
+		}
+		call := &openAIResponseCallBuf{}
+		callsByItem[itemID] = call
+		order = append(order, itemID)
+		return call, true
+	}
+	updateCall := func(call *openAIResponseCallBuf, item map[string]any) {
+		if call == nil || item == nil {
+			return
+		}
+		if callID, _ := item["call_id"].(string); callID != "" {
+			call.ID = callID
+		}
+		if name, _ := item["name"].(string); name != "" {
+			call.Name = name
+		}
+	}
+	emitCallStart := func(call *openAIResponseCallBuf, itemID string) {
+		if call == nil || call.Started || call.Name == "" {
+			return
+		}
+		call.Started = true
+		callID := call.ID
+		if callID == "" {
+			callID = itemID
+		}
+		onEvent(SseEvent{Type: "tool_start", Name: call.Name, ID: callID})
+	}
 	ensureHosted := func(itemID, itemType string) *hostedToolCall {
 		if itemID == "" || !strings.HasSuffix(itemType, "_call") || itemType == "function_call" {
 			return nil
@@ -1538,8 +1807,156 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 		// duplicate several megabytes in messages.raw and every replay request.
 		delete(item, "result")
 	}
+	streamedParts := map[string]bool{}
+	partKey := func(kind, itemID string, index int) string {
+		return fmt.Sprintf("%s\x00%s\x00%d", kind, itemID, index)
+	}
+	emitPartDelta := func(kind, itemID string, index int, value string) {
+		if value == "" {
+			return
+		}
+		streamedParts[partKey(kind, itemID, index)] = true
+		switch kind {
+		case "reasoning", "summary":
+			reasoning.WriteString(value)
+			onEvent(SseEvent{Type: "thinking_delta", Text: value})
+		default:
+			text.WriteString(value)
+			onEvent(SseEvent{Type: "text_delta", Text: value})
+		}
+	}
+	emitPartDoneFallback := func(kind, itemID string, index int, value string) {
+		key := partKey(kind, itemID, index)
+		if streamedParts[key] {
+			return
+		}
+		emitPartDelta(kind, itemID, index, value)
+	}
+	hostedResultEmitted := map[string]bool{}
+	finishHosted := func(item map[string]any) {
+		itemID, _ := item["id"].(string)
+		h := hostedByItem[itemID]
+		if h == nil || hostedResultEmitted[itemID] {
+			return
+		}
+		status := "complete"
+		if s, _ := item["status"].(string); s != "" && s != "completed" {
+			status = "error"
+		}
+		if action, _ := item["action"].(map[string]any); action != nil {
+			if sources, ok := jsonArrayItems(action["sources"]); ok {
+				for _, source := range sources {
+					sourceMap, _ := source.(map[string]any)
+					if sourceMap == nil {
+						continue
+					}
+					url, _ := sourceMap["url"].(string)
+					title, _ := sourceMap["title"].(string)
+					addCitation(url, title, "")
+				}
+			}
+		}
+		hostedResultEmitted[itemID] = true
+		onEvent(SseEvent{Type: "tool_result", Name: h.Name, ID: itemID, Status: status})
+	}
+	appendTerminalText := func(builder *strings.Builder, completedText, eventType string) {
+		if completedText == "" {
+			return
+		}
+		current := builder.String()
+		delta := ""
+		switch {
+		case current == "":
+			delta = completedText
+		case strings.HasPrefix(completedText, current):
+			delta = strings.TrimPrefix(completedText, current)
+		}
+		if delta == "" {
+			return
+		}
+		builder.WriteString(delta)
+		onEvent(SseEvent{Type: eventType, Text: delta})
+	}
+	captureTerminalResponse := func(response map[string]any, completed bool) {
+		if response == nil {
+			return
+		}
+		if responseUsage, ok := response["usage"].(map[string]any); ok {
+			usage.InputTokens = intOf(responseUsage["input_tokens"])
+			usage.OutputTokens = intOf(responseUsage["output_tokens"])
+		}
+		output, hasOutput := jsonArrayItems(response["output"])
+		if !hasOutput {
+			return
+		}
+		completedOutput = completedOutput[:0]
+		for terminalIndex, raw := range output {
+			incoming, _ := raw.(map[string]any)
+			if incoming == nil {
+				continue
+			}
+			itemID, _ := incoming["id"].(string)
+			itemType, _ := incoming["type"].(string)
+			captureHostedImage(incoming)
+			item := ensureOutput(itemID, itemType)
+			if item == nil {
+				item = newResponsesOutputItem("", itemType)
+			}
+			item.merge(incoming, responsesOutputTerminal)
+			status, hasStatus := incoming["status"].(string)
+			if completed && (!hasStatus || status == "") && item.stringField("status") == "in_progress" {
+				item.setString("status", "completed")
+			}
+			if !completed && (!hasStatus || status == "") && !item.itemDone &&
+				(item.stringField("status") == "" || item.stringField("status") == "in_progress") {
+				item.setString("status", "incomplete")
+			}
+			if itemID != "" {
+				rememberOutput(itemID, nil)
+				if _, hasIndex := outputIndexByItem[itemID]; !hasIndex {
+					outputIndexByItem[itemID] = terminalIndex
+				}
+			}
+			if itemType == "function_call" {
+				call, _ := ensureCall(itemID)
+				if call != nil {
+					updateCall(call, incoming)
+					if arguments := item.stringField("arguments"); arguments != "" {
+						call.setArguments(arguments)
+					}
+					if completed {
+						call.Complete = status == "" || status == "completed"
+					} else if hasStatus && status != "" {
+						call.Complete = status == "completed"
+					} else if !call.ItemDone {
+						call.Complete = false
+					}
+					emitCallStart(call, itemID)
+				}
+			}
+			if strings.HasSuffix(itemType, "_call") && itemType != "function_call" {
+				h := ensureHosted(itemID, itemType)
+				if h != nil {
+					if !hostedStarted[itemID] {
+						hostedStarted[itemID] = true
+						onEvent(SseEvent{Type: "tool_start", Name: h.Name, ID: itemID})
+					}
+					if status != "" {
+						h.Status = status
+					} else if completed && h.Status == "" {
+						h.Status = "completed"
+					}
+					finishHosted(incoming)
+				}
+			}
+			completedOutput = append(completedOutput, item.snapshot())
+		}
+		appendTerminalText(&text, responsesVisibleText(completedOutput), "text_delta")
+		appendTerminalText(&reasoning, responsesReasoningText(completedOutput), "thinking_delta")
+	}
 	sawEvent := false
 	terminal := false
+	seenSequence := map[int]bool{}
 responseLoop:
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -1556,27 +1973,157 @@ responseLoop:
 		}
 		var ev map[string]any
 		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
-			calls, hosted, outputItems := finalizeOpenAIResponsesStream(callsByItem, order, hostedByItem, hostedOrder, outputByItem, outputOrder, completedOutput)
+			calls, hosted, outputItems := finalizeOpenAIResponsesStream(callsByItem, order, hostedByItem, hostedOrder, outputByItem, outputOrder, outputIndexByItem, outputDone, completedOutput, true)
 			return text.String(), reasoning.String(), calls, hosted, citations, usage, outputItems,
 				fmt.Errorf("openai responses stream invalid JSON: %w", err)
 		}
+		if rawSequence, exists := ev["sequence_number"]; exists {
+			if sequence, ok := responsesNonnegativeInteger(rawSequence); ok {
+				if seenSequence[sequence] {
+					continue
+				}
+				seenSequence[sequence] = true
+			}
+		}
 		if streamErr := providerEventError("openai responses", ev); streamErr != nil {
-			calls, hosted, outputItems := finalizeOpenAIResponsesStream(callsByItem, order, hostedByItem, hostedOrder, outputByItem, outputOrder, completedOutput)
+			calls, hosted, outputItems := finalizeOpenAIResponsesStream(callsByItem, order, hostedByItem, hostedOrder, outputByItem, outputOrder, outputIndexByItem, outputDone, completedOutput, true)
 			return text.String(), reasoning.String(), calls, hosted, citations, usage, outputItems, streamErr
 		}
 		typ, _ := ev["type"].(string)
 		switch typ {
-		case "response.output_text.delta":
+		case "response.output_text.delta", "response.output_text.done":
 			sawEvent = true
-			if s, _ := ev["delta"].(string); s != "" {
-				text.WriteString(s)
-				onEvent(SseEvent{Type: "text_delta", Text: s})
+			itemID, _ := ev["item_id"].(string)
+			index, _ := responsesNonnegativeInteger(ev["content_index"])
+			valueKey := "delta"
+			appendText := true
+			if typ == "response.output_text.done" {
+				valueKey = "text"
+				appendText = false
 			}
-		case "response.reasoning_summary_text.delta", "response.reasoning.delta":
+			value, _ := ev[valueKey].(string)
+			if item := ensureOutput(itemID, "message"); item != nil {
+				if item.stringField("role") == "" {
+					item.setString("role", "assistant")
+				}
+				item.mergePart("content", index, map[string]any{"type": "output_text"}, "text", value, appendText)
+				rememberOutput(itemID, ev["output_index"])
+			}
+			if appendText {
+				emitPartDelta("output", itemID, index, value)
+			} else {
+				emitPartDoneFallback("output", itemID, index, value)
+			}
+		case "response.refusal.delta", "response.refusal.done":
 			sawEvent = true
-			if s, _ := ev["delta"].(string); s != "" {
-				reasoning.WriteString(s)
-				onEvent(SseEvent{Type: "thinking_delta", Text: s})
+			itemID, _ := ev["item_id"].(string)
+			index, _ := responsesNonnegativeInteger(ev["content_index"])
+			valueKey := "delta"
+			appendText := true
+			if typ == "response.refusal.done" {
+				valueKey = "refusal"
+				appendText = false
+			}
+			value, _ := ev[valueKey].(string)
+			if item := ensureOutput(itemID, "message"); item != nil {
+				if item.stringField("role") == "" {
+					item.setString("role", "assistant")
+				}
+				item.mergePart("content", index, map[string]any{"type": "refusal"}, "refusal", value, appendText)
+				rememberOutput(itemID, ev["output_index"])
+			}
+			if appendText {
+				emitPartDelta("refusal", itemID, index, value)
+			} else {
+				emitPartDoneFallback("refusal", itemID, index, value)
+			}
+		case "response.reasoning_summary_text.delta", "response.reasoning_summary_text.done":
+			sawEvent = true
+			itemID, _ := ev["item_id"].(string)
+			index, _ := responsesNonnegativeInteger(ev["summary_index"])
+			valueKey := "delta"
+			appendText := true
+			if typ == "response.reasoning_summary_text.done" {
+				valueKey = "text"
+				appendText = false
+			}
+			value, _ := ev[valueKey].(string)
+			if item := ensureOutput(itemID, "reasoning"); item != nil {
+				item.mergePart("summary", index, map[string]any{"type": "summary_text"}, "text", value, appendText)
+				rememberOutput(itemID, ev["output_index"])
+			}
+			if appendText {
+				emitPartDelta("summary", itemID, index, value)
+			} else {
+				emitPartDoneFallback("summary", itemID, index, value)
+			}
+		case "response.reasoning.delta":
+			sawEvent = true
+			if value, _ := ev["delta"].(string); value != "" {
+				emitPartDelta("reasoning", "", 0, value)
+			}
+		case "response.reasoning_text.delta", "response.reasoning_text.done":
+			sawEvent = true
+			itemID, _ := ev["item_id"].(string)
+			index, _ := responsesNonnegativeInteger(ev["content_index"])
+			valueKey := "delta"
+			appendText := true
+			if typ == "response.reasoning_text.done" {
+				valueKey = "text"
+				appendText = false
+			}
+			value, _ := ev[valueKey].(string)
+			if item := ensureOutput(itemID, "reasoning"); item != nil {
+				item.mergePart("content", index, map[string]any{"type": "reasoning_text"}, "text", value, appendText)
+				rememberOutput(itemID, ev["output_index"])
+			}
+			if appendText {
+				emitPartDelta("reasoning", itemID, index, value)
+			} else {
+				emitPartDoneFallback("reasoning", itemID, index, value)
+			}
+		case "response.reasoning_summary_part.added", "response.reasoning_summary_part.done":
+			sawEvent = true
+			part, _ := ev["part"].(map[string]any)
+			itemID, _ := ev["item_id"].(string)
+			index, _ := responsesNonnegativeInteger(ev["summary_index"])
+			if item := ensureOutput(itemID, "reasoning"); item != nil && part != nil {
+				item.mergePart("summary", index, part, "", "", false)
+				rememberOutput(itemID, ev["output_index"])
+			}
+			if typ == "response.reasoning_summary_part.done" {
+				value, _ := part["text"].(string)
+				emitPartDoneFallback("summary", itemID, index, value)
+			}
+		case "response.content_part.added", "response.content_part.done":
+			sawEvent = true
+			part, _ := ev["part"].(map[string]any)
+			partType, _ := part["type"].(string)
+			itemID, _ := ev["item_id"].(string)
+			index, _ := responsesNonnegativeInteger(ev["content_index"])
+			defaultType := "message"
+			if partType == "reasoning_text" {
+				defaultType = "reasoning"
+			}
+			if item := ensureOutput(itemID, defaultType); item != nil && part != nil {
+				if defaultType == "message" && item.stringField("role") == "" {
+					item.setString("role", "assistant")
+				}
+				item.mergePart("content", index, part, "", "", false)
+				rememberOutput(itemID, ev["output_index"])
+			}
+			if typ == "response.content_part.done" {
+				switch partType {
+				case "reasoning_text":
+					value, _ := part["text"].(string)
+					emitPartDoneFallback("reasoning", itemID, index, value)
+				case "output_text":
+					value, _ := part["text"].(string)
+					emitPartDoneFallback("output", itemID, index, value)
+				case "refusal":
+					value, _ := part["refusal"].(string)
+					emitPartDoneFallback("refusal", itemID, index, value)
+				}
 			}
 		case "response.output_text.annotation.added":
 			sawEvent = true
@@ -1594,28 +2141,28 @@ responseLoop:
 			if it == nil {
 				continue
 			}
+			itemID, _ := it["id"].(string)
 			t, _ := it["type"].(string)
+			captureHostedImage(it)
+			if item := ensureOutput(itemID, t); item != nil {
+				item.merge(it, responsesOutputAdded)
+				rememberOutput(itemID, ev["output_index"])
+			}
 			if t == "function_call" {
-				itemID, _ := it["id"].(string)
-				callID, _ := it["call_id"].(string)
-				name, _ := it["name"].(string)
-				cb := &openAIResponseCallBuf{ID: callID, Name: name, Started: true}
-				callsByItem[itemID] = cb
-				order = append(order, itemID)
-				outputOrder = append(outputOrder, itemID)
-				onEvent(SseEvent{Type: "tool_start", Name: name, ID: callID})
+				call, _ := ensureCall(itemID)
+				updateCall(call, it)
+				emitCallStart(call, itemID)
 			} else if strings.HasSuffix(t, "_call") {
 				// §2.3-B OpenAI-hosted tool round (web_search_call, …). OpenAI
 				// runs it server-side; surface a live tool step to the UI.
-				itemID, _ := it["id"].(string)
 				h := ensureHosted(itemID, t)
 				if h == nil {
 					continue
 				}
-				outputOrder = append(outputOrder, itemID)
-				onEvent(SseEvent{Type: "tool_start", Name: h.Name, ID: itemID})
-			} else if itemID, _ := it["id"].(string); itemID != "" {
-				outputOrder = append(outputOrder, itemID)
+				if !hostedStarted[itemID] {
+					hostedStarted[itemID] = true
+					onEvent(SseEvent{Type: "tool_start", Name: h.Name, ID: itemID})
+				}
 			}
 		case "response.output_item.done":
 			sawEvent = true
@@ -1624,50 +2171,31 @@ responseLoop:
 				continue
 			}
 			itemID, _ := it["id"].(string)
+			itemType, _ := it["type"].(string)
 			captureHostedImage(it)
-			if itemID != "" {
-				outputByItem[itemID] = it
-				outputOrder = append(outputOrder, itemID)
+			if item := ensureOutput(itemID, itemType); item != nil {
+				item.merge(it, responsesOutputDone)
+				if _, hasStatus := it["status"]; !hasStatus && item.stringField("status") == "in_progress" {
+					item.setString("status", "completed")
+				}
+				rememberOutput(itemID, ev["output_index"])
+				outputDone[itemID] = true
 			}
-			if t, _ := it["type"].(string); t == "function_call" {
-				cb := callsByItem[itemID]
-				if cb == nil {
-					cb = &openAIResponseCallBuf{}
-					callsByItem[itemID] = cb
-					order = append(order, itemID)
-				}
-				if callID, _ := it["call_id"].(string); callID != "" {
-					cb.ID = callID
-				}
-				if name, _ := it["name"].(string); name != "" {
-					cb.Name = name
-				}
-				if args, _ := it["arguments"].(string); args != "" && cb.Args.Len() == 0 {
-					cb.Args.WriteString(args)
-				}
-			}
-			if h := hostedByItem[itemID]; h != nil {
-				status := "complete"
-				if s, _ := it["status"].(string); s != "" && s != "completed" {
-					status = "error"
-				}
-				// Harvest the sources the web_search consulted (include=
-				// web_search_call.action.sources) as citations.
-				if action, _ := it["action"].(map[string]any); action != nil {
-					if srcs, _ := action["sources"].([]any); srcs != nil {
-						for _, s := range srcs {
-							sm, _ := s.(map[string]any)
-							if sm == nil {
-								continue
-							}
-							url, _ := sm["url"].(string)
-							title, _ := sm["title"].(string)
-							addCitation(url, title, "")
-						}
+			if itemType == "function_call" {
+				call, _ := ensureCall(itemID)
+				updateCall(call, it)
+				if arguments, _ := it["arguments"].(string); arguments != "" {
+					call.setArguments(arguments)
+					if item := outputByItem[itemID]; item != nil {
+						item.setString("arguments", arguments)
 					}
 				}
-				onEvent(SseEvent{Type: "tool_result", Name: h.Name, ID: itemID, Status: status})
+				status, _ := it["status"].(string)
+				call.ItemDone = true
+				call.Complete = status == "" || status == "completed"
+				emitCallStart(call, itemID)
 			}
+			finishHosted(it)
 		case "response.image_generation_call.partial_image":
 			sawEvent = true
 			itemID, _ := ev["item_id"].(string)
@@ -1690,49 +2218,35 @@ responseLoop:
 		case "response.function_call_arguments.delta":
 			sawEvent = true
 			itemID, _ := ev["item_id"].(string)
-			cb := callsByItem[itemID]
-			if cb == nil {
+			call, _ := ensureCall(itemID)
+			if call == nil {
 				continue
 			}
-			if d, _ := ev["delta"].(string); d != "" {
-				cb.Args.WriteString(d)
-				onEvent(SseEvent{Type: "tool_input", ID: cb.ID, Name: cb.Name, PartialJson: d})
+			rememberOutput(itemID, ev["output_index"])
+			if delta, _ := ev["delta"].(string); delta != "" {
+				call.Args.WriteString(delta)
+				item := ensureOutput(itemID, "function_call")
+				item.setString("arguments", call.Args.String())
+				onEvent(SseEvent{Type: "tool_input", ID: call.ID, Name: call.Name, PartialJson: delta})
 			}
 		case "response.function_call_arguments.done":
 			sawEvent = true
 			itemID, _ := ev["item_id"].(string)
-			cb := callsByItem[itemID]
-			if cb == nil {
+			call, _ := ensureCall(itemID)
+			if call == nil {
 				continue
 			}
-			if a, _ := ev["arguments"].(string); a != "" && cb.Args.Len() == 0 {
-				cb.Args.WriteString(a)
+			rememberOutput(itemID, ev["output_index"])
+			if arguments, ok := ev["arguments"].(string); ok {
+				call.setArguments(arguments)
+				item := ensureOutput(itemID, "function_call")
+				item.setString("arguments", arguments)
 			}
 		case "response.completed":
 			sawEvent = true
 			terminal = true
-			r, _ := ev["response"].(map[string]any)
-			if r != nil {
-				if u, ok := r["usage"].(map[string]any); ok {
-					usage.InputTokens = intOf(u["input_tokens"])
-					usage.OutputTokens = intOf(u["output_tokens"])
-				}
-				if out, ok := r["output"].([]any); ok {
-					completedOutput = completedOutput[:0]
-					for _, raw := range out {
-						if item, _ := raw.(map[string]any); item != nil {
-							captureHostedImage(item)
-							itemID, _ := item["id"].(string)
-							if itemType, _ := item["type"].(string); itemType == "image_generation_call" {
-								if h := hostedByItem[itemID]; h != nil && h.Status == "" {
-									h.Status = "completed"
-								}
-							}
-							completedOutput = append(completedOutput, item)
-						}
-					}
-				}
-			}
+			response, _ := ev["response"].(map[string]any)
+			captureTerminalResponse(response, true)
 			// response.completed is terminal by protocol. Relays occasionally append
 			// a bogus response.failed/error while closing; it must not replay a
 			// completed (and potentially billable hosted-tool) request.
@@ -1742,21 +2256,23 @@ responseLoop:
 			if r != nil {
 				if errObj, ok := r["error"].(map[string]any); ok {
 					msg, _ := errObj["message"].(string)
-					calls, hosted, outputItems := finalizeOpenAIResponsesStream(callsByItem, order, hostedByItem, hostedOrder, outputByItem, outputOrder, completedOutput)
+					calls, hosted, outputItems := finalizeOpenAIResponsesStream(callsByItem, order, hostedByItem, hostedOrder, outputByItem, outputOrder, outputIndexByItem, outputDone, completedOutput, true)
 					return text.String(), reasoning.String(), calls, hosted, citations, usage, outputItems, fmt.Errorf("openai responses error: %s", msg)
 				}
 			}
-			calls, hosted, outputItems := finalizeOpenAIResponsesStream(callsByItem, order, hostedByItem, hostedOrder, outputByItem, outputOrder, completedOutput)
+			calls, hosted, outputItems := finalizeOpenAIResponsesStream(callsByItem, order, hostedByItem, hostedOrder, outputByItem, outputOrder, outputIndexByItem, outputDone, completedOutput, true)
 			return text.String(), reasoning.String(), calls, hosted, citations, usage, outputItems, fmt.Errorf("openai responses failed")
 		case "response.incomplete":
 			// Incomplete is a valid terminal response (for example a configured
 			// max-output limit), not a channel transport/protocol failure.
 			sawEvent = true
 			terminal = true
+			response, _ := ev["response"].(map[string]any)
+			captureTerminalResponse(response, false)
 			break responseLoop
 		}
 	}
-	calls, hosted, outputItems := finalizeOpenAIResponsesStream(callsByItem, order, hostedByItem, hostedOrder, outputByItem, outputOrder, completedOutput)
+	calls, hosted, outputItems := finalizeOpenAIResponsesStream(callsByItem, order, hostedByItem, hostedOrder, outputByItem, outputOrder, outputIndexByItem, outputDone, completedOutput, !terminal)
 	if err := scanner.Err(); err != nil && !terminal {
 		return text.String(), reasoning.String(), calls, hosted, citations, usage, outputItems, err
 	}
@@ -1769,43 +2285,184 @@ responseLoop:
 	return text.String(), reasoning.String(), calls, hosted, citations, usage, outputItems, nil
 }
 
+func responsesNonnegativeInteger(value any) (int, bool) {
+	maxInt := int64(^uint(0) >> 1)
+	switch number := value.(type) {
+	case int:
+		return number, number >= 0
+	case int32:
+		return int(number), number >= 0
+	case int64:
+		if number < 0 || number > maxInt {
+			return 0, false
+		}
+		return int(number), true
+	case float64:
+		if number < 0 || number > float64(maxInt) {
+			return 0, false
+		}
+		integer := int(number)
+		return integer, float64(integer) == number
+	default:
+		return 0, false
+	}
+}
+
+func orderedResponsesItemIDs(order []string, outputIndexByItem map[string]int) []string {
+	type positionedID struct {
+		id       string
+		first    int
+		index    int
+		hasIndex bool
+	}
+	seen := map[string]bool{}
+	positioned := make([]positionedID, 0, len(order))
+	for first, itemID := range order {
+		if itemID == "" || seen[itemID] {
+			continue
+		}
+		seen[itemID] = true
+		index, hasIndex := outputIndexByItem[itemID]
+		positioned = append(positioned, positionedID{id: itemID, first: first, index: index, hasIndex: hasIndex})
+	}
+	sort.SliceStable(positioned, func(i, j int) bool {
+		left, right := positioned[i], positioned[j]
+		if left.hasIndex && right.hasIndex && left.index != right.index {
+			return left.index < right.index
+		}
+		if left.hasIndex != right.hasIndex {
+			return left.hasIndex
+		}
+		return left.first < right.first
+	})
+	result := make([]string, 0, len(positioned))
+	for _, positionedItem := range positioned {
+		result = append(result, positionedItem.id)
+	}
+	return result
+}
+
+func responsesVisibleText(items []map[string]any) string {
+	var text strings.Builder
+	for _, item := range items {
+		if itemType, _ := item["type"].(string); itemType != "message" {
+			continue
+		}
+		parts, _ := jsonArrayItems(item["content"])
+		for _, rawPart := range parts {
+			part, _ := rawPart.(map[string]any)
+			switch partType, _ := part["type"].(string); partType {
+			case "output_text":
+				value, _ := part["text"].(string)
+				text.WriteString(value)
+			case "refusal":
+				value, _ := part["refusal"].(string)
+				text.WriteString(value)
+			}
+		}
+	}
+	return text.String()
+}
+
+func responsesReasoningText(items []map[string]any) string {
+	var text strings.Builder
+	for _, item := range items {
+		if itemType, _ := item["type"].(string); itemType != "reasoning" {
+			continue
+		}
+		before := text.Len()
+		content, _ := jsonArrayItems(item["content"])
+		for _, rawPart := range content {
+			part, _ := rawPart.(map[string]any)
+			if partType, _ := part["type"].(string); partType == "reasoning_text" {
+				value, _ := part["text"].(string)
+				text.WriteString(value)
+			}
+		}
+		if text.Len() != before {
+			continue
+		}
+		summary, _ := jsonArrayItems(item["summary"])
+		for _, rawPart := range summary {
+			part, _ := rawPart.(map[string]any)
+			if partType, _ := part["type"].(string); partType == "summary_text" {
+				value, _ := part["text"].(string)
+				text.WriteString(value)
+			}
+		}
+	}
+	return text.String()
+}
+
 func finalizeOpenAIResponsesStream(
 	callsByItem map[string]*openAIResponseCallBuf,
 	order []string,
 	hostedByItem map[string]*hostedToolCall,
 	hostedOrder []string,
-	outputByItem map[string]map[string]any,
+	outputByItem map[string]*responsesOutputItem,
 	outputOrder []string,
+	outputIndexByItem map[string]int,
+	outputDone map[string]bool,
 	completedOutput []map[string]any,
+	includeIncompleteCalls bool,
 ) ([]openAIToolCall, []hostedToolCall, []map[string]any) {
 	calls := []openAIToolCall{}
-	for _, itemID := range order {
-		cb := callsByItem[itemID]
-		if cb == nil {
+	for _, itemID := range orderedResponsesItemIDs(order, outputIndexByItem) {
+		call := callsByItem[itemID]
+		if call == nil || (!call.Complete && !includeIncompleteCalls) || call.ID == "" || call.Name == "" {
 			continue
 		}
-		args := strings.TrimSpace(cb.Args.String())
-		if args == "" {
-			args = "{}"
+		arguments := strings.TrimSpace(call.Args.String())
+		if arguments == "" {
+			arguments = "{}"
 		}
-		calls = append(calls, openAIToolCall{ID: cb.ID, Name: cb.Name, Input: json.RawMessage(args)})
+		calls = append(calls, openAIToolCall{ID: call.ID, Name: call.Name, Input: json.RawMessage(arguments)})
 	}
 	hosted := []hostedToolCall{}
+	seenHosted := map[string]bool{}
 	for _, itemID := range hostedOrder {
-		if h := hostedByItem[itemID]; h != nil {
-			hosted = append(hosted, *h)
+		if itemID == "" || seenHosted[itemID] {
+			continue
+		}
+		seenHosted[itemID] = true
+		if hostedCall := hostedByItem[itemID]; hostedCall != nil {
+			hosted = append(hosted, *hostedCall)
 		}
 	}
-	outputItems := completedOutput
-	if len(outputItems) == 0 {
-		seen := map[string]bool{}
-		for _, itemID := range outputOrder {
-			if itemID == "" || seen[itemID] {
+
+	orderedOutput := orderedResponsesItemIDs(outputOrder, outputIndexByItem)
+	outputItems := make([]map[string]any, 0, len(completedOutput)+len(orderedOutput))
+	if len(completedOutput) > 0 {
+		terminalByID := map[string]map[string]any{}
+		for _, item := range completedOutput {
+			if itemID, _ := item["id"].(string); itemID != "" {
+				terminalByID[itemID] = item
+			}
+		}
+		seenOutput := map[string]bool{}
+		for _, itemID := range orderedOutput {
+			if terminalItem := terminalByID[itemID]; terminalItem != nil {
+				outputItems = append(outputItems, terminalItem)
+				seenOutput[itemID] = true
 				continue
 			}
-			seen[itemID] = true
-			if item := outputByItem[itemID]; item != nil {
+			if outputDone[itemID] {
+				if item := outputByItem[itemID]; item != nil {
+					outputItems = append(outputItems, item.snapshot())
+					seenOutput[itemID] = true
+				}
+			}
+		}
+		for _, item := range completedOutput {
+			itemID, _ := item["id"].(string)
+			if itemID == "" || !seenOutput[itemID] {
 				outputItems = append(outputItems, item)
+			}
+		}
+	} else {
+		for _, itemID := range orderedOutput {
+			if item := outputByItem[itemID]; item != nil {
+				outputItems = append(outputItems, item.snapshot())
 			}
 		}
 	}
