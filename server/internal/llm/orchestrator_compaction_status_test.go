@@ -267,6 +267,38 @@ func TestAutomaticInlineCompactionEmitsLifecycleStatuses(t *testing.T) {
 	}
 }
 
+func TestAutomaticInlineCompactionTimeoutContinuesMainProvider(t *testing.T) {
+	orchestrator, provider, conv, model, db := automaticCompactionStatusFixture(t, 18, nil)
+	provider.blockSummary = true
+	var statuses []automaticCompactionStatus
+	orchestrator.SetCompactionStatusHandler(func(_, _, operationID, status string) {
+		statuses = append(statuses, automaticCompactionStatus{operationID: operationID, status: status})
+	})
+	previousTimeout := inlineCompactionTimeout
+	inlineCompactionTimeout = 25 * time.Millisecond
+	t.Cleanup(func() { inlineCompactionTimeout = previousTimeout })
+
+	startedAt := time.Now()
+	result := runAutomaticCompactionStatusTurn(t, orchestrator, conv, model)
+	if elapsed := time.Since(startedAt); elapsed > time.Second {
+		t.Fatalf("inline compaction fail-open elapsed=%s, want under 1s", elapsed)
+	}
+	if provider.summaryCalls == 0 || !provider.summarySawDeadline {
+		t.Fatalf("summary calls=%d saw deadline=%v", provider.summaryCalls, provider.summarySawDeadline)
+	}
+	if provider.mainCalls != 1 {
+		t.Fatalf("main provider calls=%d, want 1", provider.mainCalls)
+	}
+	assertCompactionStatusPair(t, statuses, "failed")
+	persisted, err := store.GetMessage(context.Background(), db, result.AssistantMessage.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != "complete" {
+		t.Fatalf("assistant status=%q, want complete", persisted.Status)
+	}
+}
+
 func TestInlineCompactionSettlesBeforeChatAdmissionRefusal(t *testing.T) {
 	// Exercise the real orchestrator ordering: the inline summary is generated
 	// before the main chat reservation. There must be no path where the summary

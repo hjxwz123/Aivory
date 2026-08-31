@@ -2294,6 +2294,9 @@ func ListChunksInScope(ctx context.Context, db *sql.DB, kbIDs []string, convID s
 	defer rows.Close()
 	out := []Chunk{}
 	for rows.Next() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		var ch Chunk
 		var meta string
 		if err := rows.Scan(&ch.ID, &ch.DocumentID, &ch.KBID, &ch.ConversationID, &ch.Seq, &ch.ParentID, &ch.ChunkType, &ch.Content, &ch.ImageRef, &meta, &ch.EmbeddingModel, &ch.Filename); err != nil {

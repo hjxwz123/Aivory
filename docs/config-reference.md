@@ -102,6 +102,7 @@
 | `AIVORY_LLM_INLINE_QUOTE_SOURCE_INJECTION_CAP` | `int` | `8000` | `llm/orchestrator.go:30` | Max runes of the source message text injected alongside a highlighted excerpt in an inline-quote sub-conversation before truncation. |
 | `AIVORY_LLM_ATTACHMENT_IMAGE_INLINE_BYTES` | `int64` | `20*1024*1024` | `llm/orchestrator.go` | Independent hard cap for one verified image attachment before it is base64-inlined into a provider request. The file is also bounded while reading, so stale size metadata cannot bypass it. |
 | `AIVORY_LLM_TOOL_ROUTE_TIMEOUT` | `duration` | `5*time.Second` | `llm/orchestrator.go` | End-to-end latency budget for the dedicated Auto tool-routing model; timeout fails open with tools enabled. |
+| `AIVORY_LLM_INLINE_COMPACTION_TIMEOUT` | `duration` | `30*time.Second` | `llm/orchestrator.go` | Maximum first-token delay allowed for synchronous long-context compaction. On timeout or failure, the chat continues with a deterministic recent-history window. |
 | `AIVORY_LLM_TOOL_ROUTE_SCHEMA_TOKEN_THRESHOLD` | `int` | `512` | `llm/orchestrator.go` | Tool-declaration size at or below which Auto skips the extra routing request and lets the main model decide natively. Set to 0 to always classify ambiguous turns. |
 | `AIVORY_LLM_SANDBOX_EXEC_TIMEOUT_CLAMP_RANGE_MAX` | `int` | `600` | `llm/orchestrator.go:39` | Upper bound (seconds) the admin sandbox_exec_timeout_sec is clamped to when sizing the python_execute call context. |
 | `AIVORY_LLM_SANDBOX_EXEC_TIMEOUT_CLAMP_RANGE_MIN` | `int` | `10` | `llm/orchestrator.go:40` | Lower bound (seconds) the admin sandbox_exec_timeout_sec is clamped to when sizing the python_execute call context. |
@@ -197,6 +198,7 @@
 | `AIVORY_RAG_SNIPPET_OF` | `int` | `240` | `rag/rag.go:70` | Default byte-length cap (rune-safe cut) for a result snippet when the caller supplies no explicit max. |
 | `AIVORY_RAG_SPLIT_PARAGRAPHS_AND_TABLES` | `int` | `800` | `rag/rag.go:71` | Byte-length threshold below which an image-markdown paragraph is kept as one atomic chunk instead of being sub-split. |
 | `AIVORY_RAG_ROUTER_CALL_TIMEOUT` | `duration` | `12*time.Second` | `rag/rag.go:72` | Deadline for the task-router JSON LLM call (task.router) on the first-token hot path before falling back to plain retrieval. |
+| `AIVORY_RAG_QUERY_TIMEOUT` | `duration` | `30*time.Second` | `llm/orchestrator.go` | End-to-end first-token budget for online RAG, including routing, fallback retrieval, embedding/vector search, and full-document summarisation. Timeout fails open and continues the main chat without incomplete evidence. |
 | `AIVORY_RAG_MAP_REDUCE_SUMMARISE` | `int` | `200` | `rag/rag.go:73` | Chinese-character cap (<=N zi) requested in the map-reduce per-group summarization prompt sent to the task model. |
 | `AIVORY_RAG_COLLECT_DOC_HINTS` | `int` | `120` | `rag/rag.go:74` | Leading bytes of each document's content kept in the router's doc-hint line for reference resolution. |
 | `AIVORY_RAG_COLLECT_DOC_HINTS_2` | `int` | `12` | `rag/rag.go:75` | Maximum number of per-document hint lines collected for the retrieval router. |
