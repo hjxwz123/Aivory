@@ -133,6 +133,8 @@ interface ApiOptions {
   headers?: Record<string, string>
   /** Background polling stays out of the administrator's foreground status. */
   activity?: RequestActivityMode
+  /** Allow a small request to finish while the page is navigating/reloading. */
+  keepalive?: boolean
 }
 
 export interface UploadProgress {
@@ -193,6 +195,7 @@ async function apiRequest<T>(path: string, opts: ApiOptions, retried: boolean): 
     headers,
     body: isForm ? (opts.body as FormData) : opts.body ? JSON.stringify(opts.body) : undefined,
     signal: opts.signal,
+    keepalive: opts.keepalive,
   })
   // The access token is short-lived (2h). When it expires an open tab would
   // start 401-ing "auth required" out of nowhere — silently refresh once via the

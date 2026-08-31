@@ -234,6 +234,17 @@ func TestHTTPGenerationScopedStopDoesNotCancelConcurrentEditedBranch(t *testing.
 	if stopResponse.StatusCode != http.StatusOK || !strings.Contains(string(stopBody), `"ok":true`) {
 		t.Fatalf("targeted stop status=%d body=%s", stopResponse.StatusCode, stopBody)
 	}
+	mappedSecondID, mapped := memoryCache.Get(generationMessageKey(user.ID, conversation.ID, generationStopSecondID))
+	if !mapped || mappedSecondID == "" {
+		t.Fatal("targeted generation was not mapped to its persisted assistant message")
+	}
+	stoppingSecond, err := store.GetMessage(ctx, db, mappedSecondID)
+	if err != nil {
+		t.Fatalf("load assistant immediately after stop response: %v", err)
+	}
+	if stoppingSecond.Status == "streaming" {
+		t.Fatal("stop response left assistant resumable as status=streaming")
+	}
 
 	secondFrames := branchHTTPReadSSE(t, secondResponse, nil)
 	branchHTTPAssertTerminal(t, "targeted edited branch", secondFrames, "stopped")

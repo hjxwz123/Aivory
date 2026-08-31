@@ -3100,7 +3100,7 @@ export function toLocalMessage(m: ApiMessage): Message {
     fast: m.fast === true,
     createdAt: m.created_at * 1000,
     streaming: m.status === 'streaming',
-    stopped: m.stop_reason === 'stopped' || m.status === 'stopped',
+    stopped: m.stop_reason === 'stopped' || m.status === 'stopping' || m.status === 'stopped',
     cost: m.cost > 0 ? m.cost : undefined,
     credits: m.credits && m.credits > 0 ? m.credits : undefined,
     genMs: m.gen_ms && m.gen_ms > 0 ? m.gen_ms : undefined,

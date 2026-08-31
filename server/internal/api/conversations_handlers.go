@@ -901,8 +901,8 @@ func userMessageResponse(d Deps, r *http.Request, msgs []store.Message) []enrich
 }
 
 func enrichWithSiblings(d Deps, r *http.Request, msgs []store.Message) []enrichedMessage {
-	// Resolve all sibling lists in a single batch (one query per unique parent
-	// slot) instead of issuing one query per message (N+1 pattern).
+	// Resolve all sibling lists in a single batch (one lightweight query per
+	// conversation) instead of issuing one query per message (N+1 pattern).
 	siblingMap, _ := store.BatchSiblingsOf(r.Context(), d.DB, msgs)
 	out := make([]enrichedMessage, 0, len(msgs))
 	for _, m := range msgs {
@@ -1414,6 +1414,13 @@ func stopHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		publishScopedStop(d, generationStopTopic(u.ID, id, body.GenerationID))
+		// Once message_start has assigned the persisted assistant id, make the
+		// stop intent visible in the database before replying. A page refresh then
+		// cannot mistake the detached generation for a resumable stream while it
+		// unwinds and saves any partial output.
+		if messageID, ok := d.Cache.Get(generationMessageKey(u.ID, id, body.GenerationID)); ok {
+			markMessageStopping(d, u.ID, id, messageID)
+		}
 		writeJSON(w, 200, map[string]bool{"ok": true})
 		return
 	}
@@ -1424,6 +1431,7 @@ func stopHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		publishScopedStop(d, messageStopTopic(u.ID, id, body.MessageID))
+		markMessageStopping(d, u.ID, id, body.MessageID)
 		writeJSON(w, 200, map[string]bool{"ok": true})
 		return
 	}

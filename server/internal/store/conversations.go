@@ -861,35 +861,103 @@ func ListMessages(ctx context.Context, db *sql.DB, convID, leafID string) ([]Mes
 			return nil, err
 		}
 	}
-	// Fetch the conversation's messages once, then walk the parent chain from the
-	// leaf in memory. (Previously this issued one GetMessage query per node — an
-	// N+1 that made a 200-message thread 200 round-trips.) Output is identical:
-	// the active path, root → leaf, chronological.
-	all, err := ListAllMessages(ctx, db, convID)
+	// Read only the tree edges first. Loading every branch's complete blocks/raw
+	// payload made branch switches scale with all uploaded context in a
+	// conversation, even though the response contains only one path.
+	rows, err := db.QueryContext(ctx,
+		`SELECT id, COALESCE(parent_id,'') FROM messages WHERE conversation_id=? ORDER BY created_at ASC`,
+		convID,
+	)
 	if err != nil {
 		return nil, err
 	}
-	byID := make(map[string]Message, len(all))
-	for _, m := range all {
-		byID[m.ID] = m
+	parents := map[string]string{}
+	newestID := ""
+	for rows.Next() {
+		var id, parentID string
+		if err := rows.Scan(&id, &parentID); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		parents[id] = parentID
+		newestID = id
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	// If active_leaf_id dangles (points at a since-deleted message) the walk would
 	// otherwise return an empty path and the conversation would render as blank.
 	// Fall back to the newest message, mirroring the empty-leaf branch above.
-	if _, ok := byID[leafID]; !ok && len(all) > 0 {
-		leafID = all[len(all)-1].ID // ListAllMessages is ORDER BY created_at ASC
+	if _, ok := parents[leafID]; !ok {
+		leafID = newestID
+	}
+	if leafID == "" {
+		return []Message{}, nil
 	}
 	current := leafID
-	seen := make(map[string]bool, len(all)) // cycle guard against corrupt parent links
-	out := []Message{}
+	seen := make(map[string]bool, len(parents)) // cycle guard against corrupt parent links
+	pathIDs := make([]string, 0, len(parents))
 	for current != "" && !seen[current] {
-		m, ok := byID[current]
+		parentID, ok := parents[current]
 		if !ok {
 			break
 		}
 		seen[current] = true
-		out = append([]Message{m}, out...)
-		current = m.ParentID
+		pathIDs = append(pathIDs, current)
+		current = parentID
+	}
+	for left, right := 0, len(pathIDs)-1; left < right; left, right = left+1, right-1 {
+		pathIDs[left], pathIDs[right] = pathIDs[right], pathIDs[left]
+	}
+
+	// SQLite commonly limits one statement to 999 bound variables. Long imported
+	// conversations can exceed that, so load the selected path in bounded batches
+	// while preserving root-to-leaf order through pathIDs.
+	const pathBatchSize = 400
+	byID := make(map[string]Message, len(pathIDs))
+	for start := 0; start < len(pathIDs); start += pathBatchSize {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		end := start + pathBatchSize
+		if end > len(pathIDs) {
+			end = len(pathIDs)
+		}
+		batch := pathIDs[start:end]
+		args := make([]any, 0, len(batch)+1)
+		args = append(args, convID)
+		for _, id := range batch {
+			args = append(args, id)
+		}
+		messageRows, err := db.QueryContext(ctx, `SELECT id, conversation_id, COALESCE(parent_id,''), role, provider, model_id, COALESCE(model_label,''), fast, blocks, COALESCE(raw,''), COALESCE(stop_reason,''), attachments, COALESCE(selected_user_skill_ids,'[]'), citations, input_tokens, context_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, currency, credits, status, error, COALESCE(feedback,''), created_at, gen_ms, COALESCE(verify,''), COALESCE(author_id,'') FROM messages WHERE conversation_id=? AND id IN (`+idPlaceholders(len(batch))+`)`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for messageRows.Next() {
+			m, scanErr := scanMessage(messageRows)
+			if scanErr != nil {
+				_ = messageRows.Close()
+				return nil, scanErr
+			}
+			byID[m.ID] = m
+		}
+		if err := messageRows.Err(); err != nil {
+			_ = messageRows.Close()
+			return nil, err
+		}
+		if err := messageRows.Close(); err != nil {
+			return nil, err
+		}
+	}
+	out := make([]Message, 0, len(pathIDs))
+	for _, id := range pathIDs {
+		if m, ok := byID[id]; ok {
+			out = append(out, m)
+		}
 	}
 	return out, nil
 }
@@ -1374,7 +1442,7 @@ func FinishMessageForUser(ctx context.Context, db *sql.DB, id, expectedConvID, u
 	if authorID != userID {
 		return ErrNotFound
 	}
-	if status != "streaming" {
+	if status != "streaming" && status != "stopping" {
 		return ErrConversationAccessRevoked
 	}
 	if workspaceID != "" {
@@ -1425,7 +1493,7 @@ func FinishMessageForUser(ctx context.Context, db *sql.DB, id, expectedConvID, u
 	}
 
 	res, err := execMessageFinish(ctx, tx, id, p,
-		` AND conversation_id=? AND role='assistant' AND COALESCE(author_id,'')=? AND status='streaming'`, expectedConvID, userID)
+		` AND conversation_id=? AND role='assistant' AND COALESCE(author_id,'')=? AND status IN ('streaming','stopping')`, expectedConvID, userID)
 	if err != nil {
 		return err
 	}
@@ -1435,6 +1503,28 @@ func FinishMessageForUser(ctx context.Context, db *sql.DB, id, expectedConvID, u
 		return ErrConversationAccessRevoked
 	}
 	return tx.Commit()
+}
+
+// MarkMessageStoppingForUser records the stop intent before the detached
+// generation has finished unwinding. Clients treat only status=streaming as
+// resumable, while FinishMessageForUser may still replace this transitional row
+// with the final partial blocks and usage accounting.
+func MarkMessageStoppingForUser(ctx context.Context, db *sql.DB, id, expectedConvID, userID string) (bool, error) {
+	if strings.TrimSpace(id) == "" || strings.TrimSpace(expectedConvID) == "" || strings.TrimSpace(userID) == "" {
+		return false, ErrNotFound
+	}
+	res, err := db.ExecContext(ctx,
+		`UPDATE messages
+		    SET status='stopping', stop_reason='stopped', error=''
+		  WHERE id=? AND conversation_id=? AND role='assistant'
+		    AND COALESCE(author_id,'')=? AND status='streaming'`,
+		id, expectedConvID, userID,
+	)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
 }
 
 // UpdateMessageContent is the unscoped maintenance/test primitive. User-facing
@@ -1687,65 +1777,46 @@ type SiblingGroup struct {
 }
 
 // BatchSiblingsOf resolves sibling lists for every message in msgs with a single
-// SQL query per conversation instead of one query per message. The returned map
-// is keyed by message id; every message in msgs has an entry.
+// lightweight SQL query per conversation. The returned map is keyed by message
+// id; every message in msgs has an entry.
 func BatchSiblingsOf(ctx context.Context, db *sql.DB, msgs []Message) (map[string][]string, error) {
 	result := make(map[string][]string, len(msgs))
 	if len(msgs) == 0 {
 		return result, nil
 	}
 
-	// Group messages by (conversationID, parentID, role) — sibling scope.
-	type groupEntry struct {
-		msgIDs []string // which input message IDs belong to this group
-		key    siblingKey
-	}
-	byKey := map[siblingKey]*groupEntry{}
+	conversationIDs := map[string]bool{}
 	for _, m := range msgs {
-		k := siblingKey{ConversationID: m.ConversationID, ParentID: m.ParentID, Role: m.Role}
-		if e, ok := byKey[k]; ok {
-			e.msgIDs = append(e.msgIDs, m.ID)
-		} else {
-			byKey[k] = &groupEntry{key: k, msgIDs: []string{m.ID}}
+		if m.ConversationID != "" {
+			conversationIDs[m.ConversationID] = true
 		}
 	}
 
-	// For each unique scope, fetch ordered sibling ids (one query per scope, but
-	// there are at most as many scopes as distinct (parent, role) pairs — typically
-	// far fewer than the number of messages).
 	siblingsByScope := map[siblingKey][]string{}
-	for k := range byKey {
-		var (
-			rows *sql.Rows
-			err  error
+	for conversationID := range conversationIDs {
+		rows, err := db.QueryContext(ctx,
+			`SELECT id, COALESCE(parent_id,''), role FROM messages WHERE conversation_id=? ORDER BY created_at ASC`,
+			conversationID,
 		)
-		if k.ParentID == "" {
-			rows, err = db.QueryContext(ctx,
-				`SELECT id FROM messages WHERE conversation_id=? AND parent_id IS NULL AND role=? ORDER BY created_at ASC`,
-				k.ConversationID, k.Role)
-		} else {
-			rows, err = db.QueryContext(ctx,
-				`SELECT id FROM messages WHERE conversation_id=? AND parent_id=? AND role=? ORDER BY created_at ASC`,
-				k.ConversationID, k.ParentID, k.Role)
-		}
 		if err != nil {
 			return nil, err
 		}
-		var ids []string
 		for rows.Next() {
-			var id string
-			if err := rows.Scan(&id); err != nil {
-				rows.Close()
+			var id, parentID, role string
+			if err := rows.Scan(&id, &parentID, &role); err != nil {
+				_ = rows.Close()
 				return nil, err
 			}
-			ids = append(ids, id)
+			key := siblingKey{ConversationID: conversationID, ParentID: parentID, Role: role}
+			siblingsByScope[key] = append(siblingsByScope[key], id)
 		}
 		if err := rows.Err(); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
-		rows.Close()
-		siblingsByScope[k] = ids
+		if err := rows.Close(); err != nil {
+			return nil, err
+		}
 	}
 
 	// Attach each input message's sibling list from the pre-fetched scope.
@@ -1760,27 +1831,45 @@ func BatchSiblingsOf(ctx context.Context, db *sql.DB, msgs []Message) (map[strin
 // from msgID — used by "switch to this sibling" to advance the active_leaf to
 // the bottom of the chosen branch.
 func LatestAssistantInSubtree(ctx context.Context, db *sql.DB, convID, msgID string) (string, error) {
-	var start string
-	err := db.QueryRowContext(ctx, `SELECT id FROM messages WHERE id=? AND conversation_id=?`, msgID, convID).Scan(&start)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrNotFound
-	}
+	rows, err := db.QueryContext(ctx,
+		`SELECT id, COALESCE(parent_id,'') FROM messages WHERE conversation_id=? ORDER BY created_at DESC`,
+		convID,
+	)
 	if err != nil {
 		return "", err
 	}
-
-	current := msgID
-	for {
-		var child string
-		err := db.QueryRowContext(ctx, `SELECT id FROM messages WHERE conversation_id=? AND parent_id=? ORDER BY created_at DESC LIMIT 1`, convID, current).Scan(&child)
-		if errors.Is(err, sql.ErrNoRows) {
-			return current, nil
-		}
-		if err != nil {
+	defer rows.Close()
+	exists := map[string]bool{}
+	latestChild := map[string]string{}
+	for rows.Next() {
+		var id, parentID string
+		if err := rows.Scan(&id, &parentID); err != nil {
 			return "", err
+		}
+		exists[id] = true
+		if parentID != "" {
+			if _, alreadySelected := latestChild[parentID]; !alreadySelected {
+				latestChild[parentID] = id
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	if !exists[msgID] {
+		return "", ErrNotFound
+	}
+	current := msgID
+	seen := map[string]bool{}
+	for !seen[current] {
+		seen[current] = true
+		child := latestChild[current]
+		if child == "" {
+			break
 		}
 		current = child
 	}
+	return current, nil
 }
 
 // DeleteRound removes one conversational round — a user message together with
