@@ -14,26 +14,12 @@ import {
   Users,
 } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
-import type { ApiUsageTotals } from '@/api/types'
+import type { ApiAdminOverview } from '@/api/types'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/hooks/use-toast'
 import { inputOutputTokens } from '@/lib/admin-analytics'
-import { getOverviewHealth } from '@/lib/admin-overview'
 import { useLanguage } from '@/store/language'
-
-interface OverviewData {
-  settings: Record<string, unknown>
-  channelCount: number
-  enabledChannelCount: number
-  modelIds: Set<string>
-  modelCount: number
-  groupCount: number
-  paymentChannelCount: number
-  paymentMethodCount: number
-  userCount: number
-  today: ApiUsageTotals | null
-}
 
 interface HealthCheck {
   key: string
@@ -46,7 +32,7 @@ interface HealthCheck {
 export default function AdminOverview() {
   const { t } = useTranslation(['admin', 'common'])
   const lang = useLanguage((state) => state.lang)
-  const [data, setData] = useState<OverviewData | null>(null)
+  const [data, setData] = useState<ApiAdminOverview | null>(null)
   const [loading, setLoading] = useState(true)
   const numberFormat = useMemo(() => new Intl.NumberFormat(lang, { maximumFractionDigits: 0 }), [lang])
   const compactNumberFormat = useMemo(
@@ -57,36 +43,7 @@ export default function AdminOverview() {
   async function load() {
     setLoading(true)
     try {
-      const [settings, channels, models, groups, paymentChannels, paymentMethods, usersPage] = await Promise.all([
-        adminApi.settings(),
-        adminApi.channels(),
-        adminApi.models(),
-        adminApi.userGroups(),
-        adminApi.paymentChannels(),
-        adminApi.paymentMethods(),
-        adminApi.users('', 1, 0),
-      ])
-      const enabledChannelIDs = new Set(channels.filter((channel) => channel.enabled).map((channel) => channel.id))
-      const overview: OverviewData = {
-        settings,
-        channelCount: channels.length,
-        enabledChannelCount: enabledChannelIDs.size,
-        modelIds: new Set(
-          models
-            .filter((model) => model.kind === 'chat' && model.enabled && enabledChannelIDs.has(model.channel_id))
-            .map((model) => model.id),
-        ),
-        modelCount: models.length,
-        groupCount: groups.length,
-        paymentChannelCount: paymentChannels.length,
-        paymentMethodCount: paymentMethods.length,
-        userCount: usersPage.total,
-        today: null,
-      }
-      const today = getOverviewHealth(overview).allReady
-        ? await adminApi.analytics({ days: 1 }).then((analytics) => analytics.totals).catch(() => null)
-        : null
-      setData({ ...overview, today })
+      setData(await adminApi.overview())
     } catch (error) {
       toast.error(error instanceof ApiError ? error.message : t('admin:common.failed'))
     } finally {
@@ -112,33 +69,33 @@ export default function AdminOverview() {
     )
   }
 
-  const health = getOverviewHealth(data)
+  const health = data.health
 
   const checks: HealthCheck[] = [
     {
       key: 'channel',
-      ok: health.channelReady,
+      ok: health.channel_ready,
       label: t('admin:overview.checks.channels', { defaultValue: 'Upstream channel' }),
-      detail: health.channelReady
-        ? t('admin:overview.checks.channelsReady', { defaultValue: '{{count}} channel(s) configured', count: data.enabledChannelCount })
+      detail: health.channel_ready
+        ? t('admin:overview.checks.channelsReady', { defaultValue: '{{count}} channel(s) configured', count: data.enabled_channel_count })
         : t('admin:overview.checks.channelsMissing', { defaultValue: 'Create a channel before adding usable models.' }),
       to: '/admin/channels',
     },
     {
       key: 'default-model',
-      ok: health.defaultModelReady,
+      ok: health.default_model_ready,
       label: t('admin:overview.checks.defaultModel', { defaultValue: 'Default chat model' }),
-      detail: health.defaultModelReady
+      detail: health.default_model_ready
         ? t('admin:overview.checks.configured', { defaultValue: 'Configured' })
         : t('admin:overview.checks.defaultModelMissing', { defaultValue: 'Chat cannot start until a valid default model is selected.' }),
       to: '/admin/settings/model-policy',
     },
     {
       key: 'task-model',
-      ok: health.taskModelReady,
+      ok: health.task_model_ready,
       label: t('admin:overview.checks.taskModel', { defaultValue: 'Internal task model' }),
-      detail: health.taskModelReady
-        ? health.taskModelInherited
+      detail: health.task_model_ready
+        ? health.task_model_inherited
           ? t('admin:overview.checks.currentConversationModel', { defaultValue: 'Uses the current conversation model' })
           : t('admin:overview.checks.configured', { defaultValue: 'Configured' })
         : t('admin:overview.checks.taskModelMissing', {
@@ -148,48 +105,48 @@ export default function AdminOverview() {
     },
     {
       key: 'mail',
-      ok: health.emailReady,
+      ok: health.email_ready,
       label: t('admin:overview.checks.email', { defaultValue: 'Email verification' }),
-      detail: !health.emailVerification
+      detail: !health.email_verification
         ? t('admin:overview.checks.notRequired', { defaultValue: 'Not required' })
-        : health.smtpReady
+        : health.smtp_ready
           ? t('admin:overview.checks.smtpReady', { defaultValue: 'SMTP is configured' })
           : t('admin:overview.checks.smtpMissing', { defaultValue: 'Verification is enabled but SMTP is incomplete.' }),
-      to: health.smtpReady ? '/admin/settings/registration' : '/admin/settings/email',
+      to: health.smtp_ready ? '/admin/settings/registration' : '/admin/settings/email',
     },
     {
       key: 'storage',
-      ok: health.storageReady,
+      ok: health.storage_ready,
       label: t('admin:overview.checks.storage', { defaultValue: 'Persistent storage' }),
-      detail: !health.storageProvider
+      detail: !health.storage_provider
         ? t('admin:overview.checks.storageMissing', {
             defaultValue: 'Archived workspaces and application objects are not persisted.',
           })
-        : health.storageProvider === 'local'
+        : health.storage_provider === 'local'
           ? t('admin:overview.checks.storageLocal', {
               defaultValue: 'Local storage selected; workspace persistence still requires the sandbox volume to be mounted.',
             })
-          : health.storageReady
+          : health.storage_ready
             ? t('admin:overview.checks.storageReady', {
                 defaultValue: 'Provider: {{provider}}',
-                provider: health.storageProvider,
+                provider: health.storage_provider,
               })
             : t('admin:overview.checks.storageIncomplete', {
                 defaultValue: '{{provider}} is selected but required storage fields are incomplete.',
-                provider: health.storageProvider,
+                provider: health.storage_provider,
               }),
       to: '/admin/storage',
     },
     {
       key: 'payments',
-      ok: health.paymentsReady,
+      ok: health.payments_ready,
       label: t('admin:overview.checks.payments', { defaultValue: 'Payment checkout' }),
-      detail: data.paymentChannelCount === 0
+      detail: data.payment_channel_count === 0
         ? t('admin:overview.checks.paymentsUnused', { defaultValue: 'No payment channel configured' })
-        : data.paymentMethodCount > 0
-          ? t('admin:overview.checks.paymentMethodsReady', { defaultValue: '{{count}} payment method(s) available', count: data.paymentMethodCount })
+        : data.payment_method_count > 0
+          ? t('admin:overview.checks.paymentMethodsReady', { defaultValue: '{{count}} payment method(s) available', count: data.payment_method_count })
           : t('admin:overview.checks.paymentMethodMissing', { defaultValue: 'A channel exists but no user-facing payment method is bound to it.' }),
-      to: data.paymentChannelCount === 0 ? '/admin/payment-channels' : '/admin/payment-methods',
+      to: data.payment_channel_count === 0 ? '/admin/payment-channels' : '/admin/payment-methods',
     },
   ]
 
@@ -198,28 +155,28 @@ export default function AdminOverview() {
       key: 'users',
       icon: Users,
       label: t('admin:overview.metrics.users', { defaultValue: 'Users' }),
-      value: data.userCount,
+      value: data.user_count,
       to: '/admin/users',
     },
     {
       key: 'models',
       icon: Cpu,
       label: t('admin:overview.metrics.models', { defaultValue: 'Models' }),
-      value: data.modelCount,
+      value: data.model_count,
       to: '/admin/models',
     },
     {
       key: 'channels',
       icon: Network,
       label: t('admin:overview.metrics.channels', { defaultValue: 'Channels' }),
-      value: data.channelCount,
+      value: data.channel_count,
       to: '/admin/channels',
     },
     {
       key: 'groups',
       icon: CircleDollarSign,
       label: t('admin:overview.metrics.plans', { defaultValue: 'Plans' }),
-      value: data.groupCount,
+      value: data.group_count,
       to: '/admin/user-groups',
     },
   ]
@@ -286,7 +243,7 @@ export default function AdminOverview() {
         ))}
       </div>
 
-      {health.allReady ? (
+      {health.all_ready ? (
         <section className="mt-9">
           <div className="flex items-end justify-between gap-4">
             <div>

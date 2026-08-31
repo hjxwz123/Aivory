@@ -18,7 +18,6 @@ import {
   Users,
 } from 'lucide-react'
 import { useAuth } from '@/store/auth'
-import { adminApi } from '@/api'
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { UserMenu } from '@/components/sidebar/sidebar'
@@ -37,6 +36,7 @@ import {
 } from '@/lib/admin-navigation'
 import { cn } from '@/lib/utils'
 import { useRequestActivity } from '@/lib/request-activity'
+import '@/i18n/admin-resources'
 
 const NAVIGATION_MIN_VISIBLE_MS = 180
 const NAVIGATION_WATCHDOG_MS = 10_000
@@ -179,19 +179,13 @@ export default function AdminLayout() {
         release()
         return
       }
-      void adminApi.onboarding().then((latest) => {
-        settled = true
-        if (cancelled || requestID !== onboardingStartupRequestRef.current || latest.status !== 'unseen') {
-          release()
-          return
-        }
-        setOnboardingSnapshot(latest)
-        onboardingStartupReleaseRef.current = release
-        presentOnboarding(requestID)
-      }).catch(() => {
-        settled = true
+      settled = true
+      if (cancelled || requestID !== onboardingStartupRequestRef.current) {
         release()
-      })
+        return
+      }
+      onboardingStartupReleaseRef.current = release
+      presentOnboarding(requestID)
     })
     return () => {
       cancelled = true
@@ -560,13 +554,20 @@ export default function AdminLayout() {
           </div>
         )}
       </main>
-      <AdminOnboardingTour
-        open={onboardingOpen}
-        onOpenChange={handleOnboardingOpenChange}
-        refreshKey={onboardingRefreshKey}
-        onSnapshot={handleOnboardingSnapshot}
-        onPresented={handleOnboardingPresented}
-      />
+      {(onboardingOpen || onboardingRefreshKey > 0 || (
+        onboardingAutoEligible &&
+        !['dismissed', 'completed'].includes(
+          String((user?.settings as Record<string, unknown> | undefined)?.admin_onboarding_v1 ?? ''),
+        )
+      )) ? (
+        <AdminOnboardingTour
+          open={onboardingOpen}
+          onOpenChange={handleOnboardingOpenChange}
+          refreshKey={onboardingRefreshKey}
+          onSnapshot={handleOnboardingSnapshot}
+          onPresented={handleOnboardingPresented}
+        />
+      ) : null}
     </div>
   )
 }
