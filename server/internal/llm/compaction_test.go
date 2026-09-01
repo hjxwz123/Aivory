@@ -199,7 +199,6 @@ func TestMaybeCompactTokenPressureTargetsIndependentLowWatermark(t *testing.T) {
 	}
 	mustSet(t, db, "keep_recent_rounds", "100")
 	mustSet(t, db, "compaction_token_target_percentage", "60")
-	mustSet(t, db, "summary_target_percent", "30")
 
 	history := buildHistory(60)
 	for i := range history {
@@ -528,26 +527,11 @@ func TestCJKFallbacksClipByTokens(t *testing.T) {
 	}
 }
 
-func TestCompactionSummaryTargetScalesWithSourceAndHonorsCap(t *testing.T) {
-	short := buildHistory(2)
-	if got := compactionSummaryTarget(short, 8192, 30); got != summaryTargetMinTokens {
-		t.Fatalf("short source target = %d, want floor %d", got, summaryTargetMinTokens)
-	}
-
-	fatBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: strings.Repeat("detail ", 6000)}})
-	fat := []store.Message{
-		{ID: "u1", Role: "user", Blocks: fatBlocks},
-		{ID: "a1", Role: "assistant", Blocks: fatBlocks},
-	}
-	got := compactionSummaryTarget(fat, 8192, 30)
-	if got <= summaryTargetMinTokens {
-		t.Fatalf("large source target = %d, want above floor %d", got, summaryTargetMinTokens)
-	}
-	if capped := compactionSummaryTarget(fat, 700, 30); capped != 700 {
-		t.Fatalf("large source target under admin cap = %d, want 700", capped)
-	}
-	if outputCap := compactionSummaryOutputCap(got, 8192); outputCap < got || outputCap > 8192 {
-		t.Fatalf("output cap = %d, want target<=cap<=8192 (target=%d)", outputCap, got)
+func TestCompactionSummaryUsesConfiguredOutputLimitDirectly(t *testing.T) {
+	for _, configured := range []int{256, 2048, 8192} {
+		if got := effectiveCompactionOutputCap(defaultCompactionRequestMaxTokens, configured); got != configured {
+			t.Fatalf("configured output limit %d became %d", configured, got)
+		}
 	}
 }
 
@@ -697,7 +681,7 @@ func TestOversizedRawToolRoundRemainsVerbatim(t *testing.T) {
 		t.Fatal("recognized Raw tool result was projected through the bounded UI preview")
 	}
 
-	if _, err := selectCompactionPrefix(nil, []store.Message{msg}, "", nil, 512, 30, minimumCompactionRequestMaxTokens); !errors.Is(err, ErrCompactionFailed) {
+	if _, err := selectCompactionPrefix(nil, []store.Message{msg}, "", nil, 512, minimumCompactionRequestMaxTokens); !errors.Is(err, ErrCompactionFailed) {
 		t.Fatalf("oversized complete round selection err=%v, want ErrCompactionFailed", err)
 	}
 }
@@ -968,14 +952,14 @@ func TestSelectCompactionPrefixRejectsOversizedCompleteRound(t *testing.T) {
 		t.Fatal(err)
 	}
 	msgs := []store.Message{{ID: "m1", Role: "user", Blocks: blocks, Attachments: json.RawMessage("[]"), Citations: json.RawMessage("[]")}}
-	if _, err := selectCompactionPrefix(nil, msgs, "", nil, 512, 30, minimumCompactionRequestMaxTokens); !errors.Is(err, ErrCompactionFailed) {
+	if _, err := selectCompactionPrefix(nil, msgs, "", nil, 512, minimumCompactionRequestMaxTokens); !errors.Is(err, ErrCompactionFailed) {
 		t.Fatalf("oversized round selection err=%v, want ErrCompactionFailed", err)
 	}
 }
 
 func TestSelectCompactionPrefixRejectsMalformedMessageJSON(t *testing.T) {
 	msgs := []store.Message{{ID: "bad", Role: "user", Blocks: json.RawMessage(`{"broken"`), Attachments: json.RawMessage("[]"), Citations: json.RawMessage("[]")}}
-	if _, err := selectCompactionPrefix(nil, msgs, "", nil, 512, 30, minimumCompactionRequestMaxTokens); err == nil {
+	if _, err := selectCompactionPrefix(nil, msgs, "", nil, 512, minimumCompactionRequestMaxTokens); err == nil {
 		t.Fatal("malformed message blocks were silently treated as summarized")
 	}
 }
@@ -1855,7 +1839,7 @@ func TestMaybeCompactSkipsWriteWhenParentChangesDuringSummary(t *testing.T) {
 	}
 }
 
-func TestMaybeCompactUsesAdaptiveTargetInPromptAndOutputCap(t *testing.T) {
+func TestMaybeCompactUsesConfiguredOutputLimitInPromptAndProviderCap(t *testing.T) {
 	db, err := store.Open(filepath.Join(t.TempDir(), "adaptive-summary.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -1887,7 +1871,6 @@ func TestMaybeCompactUsesAdaptiveTargetInPromptAndOutputCap(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	target := compactionSummaryTarget(hist[:4], 8192, 30)
 	_, blocks, err := MaybeCompact(context.Background(), db, task, conv, hist, 0, "u1")
 	if err != nil {
 		t.Fatal(err)
@@ -1895,11 +1878,11 @@ func TestMaybeCompactUsesAdaptiveTargetInPromptAndOutputCap(t *testing.T) {
 	if len(blocks) != 1 || blocks[0].Text != provider.text {
 		t.Fatalf("summary blocks = %+v", blocks)
 	}
-	if provider.req.MaxOutputTokens != compactionSummaryOutputCap(target, 8192) {
-		t.Fatalf("max output tokens = %d, want %d", provider.req.MaxOutputTokens, compactionSummaryOutputCap(target, 8192))
+	if provider.req.MaxOutputTokens != 8192 {
+		t.Fatalf("max output tokens = %d, want configured limit 8192", provider.req.MaxOutputTokens)
 	}
-	if !strings.Contains(provider.req.History[0].Blocks[0].Text, fmt.Sprintf("Aim for about %d tokens", target)) {
-		t.Fatalf("adaptive target missing from prompt: %s", provider.req.History[0].Blocks[0].Text)
+	if !strings.Contains(provider.req.History[0].Blocks[0].Text, "Use no more than 8192 tokens") {
+		t.Fatalf("configured output limit missing from prompt: %s", provider.req.History[0].Blocks[0].Text)
 	}
 }
 
@@ -1942,7 +1925,6 @@ func TestMaybeCompactMakesOneRequestForMateriallyShortSummary(t *testing.T) {
 		}
 	}
 
-	target := compactionSummaryTarget(hist[:4], 8192, 30)
 	_, blocks, err := MaybeCompact(context.Background(), db, task, conv, hist, 0, "u1")
 	if err != nil {
 		t.Fatal(err)
@@ -1954,8 +1936,8 @@ func TestMaybeCompactMakesOneRequestForMateriallyShortSummary(t *testing.T) {
 		t.Fatalf("summary blocks = %+v, want first draft", blocks)
 	}
 	for i, req := range provider.reqs {
-		if req.MaxOutputTokens <= 0 || req.MaxOutputTokens > compactionSummaryOutputCap(target, 8192) {
-			t.Fatalf("request %d max output tokens = %d, want in bounded range", i+1, req.MaxOutputTokens)
+		if req.MaxOutputTokens != 8192 {
+			t.Fatalf("request %d max output tokens = %d, want configured limit 8192", i+1, req.MaxOutputTokens)
 		}
 		if got := estimateRequestTokens(req) + req.MaxOutputTokens; got > defaultCompactionRequestMaxTokens {
 			t.Fatalf("request %d total estimate = %d, want <= %d", i+1, got, defaultCompactionRequestMaxTokens)
@@ -2142,17 +2124,7 @@ func TestReadSummaryRawAfterPersistenceIgnoresCanceledRequestContext(t *testing.
 	}
 }
 
-func TestCompactionRatioTunablesFailClosedOnInvalidDenominators(t *testing.T) {
-	previousHeadroomNum, previousHeadroomDen := summaryTargetHeadroomNum, summaryTargetHeadroomDen
-	t.Cleanup(func() {
-		summaryTargetHeadroomNum, summaryTargetHeadroomDen = previousHeadroomNum, previousHeadroomDen
-	})
-
-	summaryTargetHeadroomNum, summaryTargetHeadroomDen = 5, 0
-	if got := compactionSummaryOutputCap(400, 1000); got != 400 {
-		t.Fatalf("invalid headroom ratio output cap = %d, want conservative target 400", got)
-	}
-
+func TestCompactionOverflowStillQueuesAsync(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatal(err)
@@ -2195,8 +2167,6 @@ func TestCompactionLimitsFailClosedOnInvalidTunables(t *testing.T) {
 	previousClampFloor := summaryTokensClampFloor
 	previousMediaAllowance := imageDocumentFlatTokenAllowance
 	previousCacheBound := messageTokenMemoCacheBound
-	previousPerRound := summaryTargetPerRoundTokens
-	previousMinimum := summaryTargetMinTokens
 	t.Cleanup(func() {
 		compactionToolOutputTokens = previousToolTokens
 		compactionToolInputTokens = previousToolInputTokens
@@ -2205,8 +2175,6 @@ func TestCompactionLimitsFailClosedOnInvalidTunables(t *testing.T) {
 		summaryTokensClampFloor = previousClampFloor
 		imageDocumentFlatTokenAllowance = previousMediaAllowance
 		messageTokenMemoCacheBound = previousCacheBound
-		summaryTargetPerRoundTokens = previousPerRound
-		summaryTargetMinTokens = previousMinimum
 	})
 
 	compactionToolOutputTokens = -1
@@ -2261,17 +2229,10 @@ func TestCompactionLimitsFailClosedOnInvalidTunables(t *testing.T) {
 	store.InvalidateConfig()
 	t.Cleanup(store.InvalidateConfig)
 	mustSet(t, db, "summary_max_tokens", "0")
-	_, _, _, _, _, summaryMax, _ := compactionSettings(db)
+	_, _, _, _, _, summaryMax := compactionSettings(db)
 	if summaryMax != defaultSummaryMaxTokens {
 		t.Fatalf("invalid summary budget bypassed default: max=%d", summaryMax)
 	}
-
-	summaryTargetPerRoundTokens = -1
-	summaryTargetMinTokens = 0
-	if got := compactionSummaryTarget(buildHistory(2), 4096, 30); got < defaultSummaryTargetMinTokens {
-		t.Fatalf("invalid target tunables produced a %d-token target", got)
-	}
-
 }
 
 func TestMessagesStillCurrentRejectsNonPositiveChunkSize(t *testing.T) {

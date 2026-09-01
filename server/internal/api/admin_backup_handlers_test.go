@@ -1619,8 +1619,6 @@ func TestNormalizeSettingsArchiveValidatesAllContextCompactionSettings(t *testin
 		{key: "compaction_enabled", value: "true", want: "true"},
 		{key: "keep_recent_rounds", value: "1", want: "1"},
 		{key: "summary_max_tokens", value: "256", want: "256"},
-		{key: "summary_merge_max_tokens", value: "256", want: "256"},
-		{key: "summary_target_percent", value: "80", want: "80"},
 		{key: "compaction_retention_percentage", value: "10", want: "10"},
 		{key: "compaction_token_target_percentage", value: "25", want: "25"},
 		{key: "compaction_token_trigger", value: "0", want: "0"},
@@ -1642,9 +1640,6 @@ func TestNormalizeSettingsArchiveValidatesAllContextCompactionSettings(t *testin
 		{name: "enabled null", key: "compaction_enabled", value: "null"},
 		{name: "recent below minimum", key: "keep_recent_rounds", value: "0"},
 		{name: "summary below minimum", key: "summary_max_tokens", value: "255"},
-		{name: "merge below minimum", key: "summary_merge_max_tokens", value: "255"},
-		{name: "target below minimum", key: "summary_target_percent", value: "4"},
-		{name: "target above maximum", key: "summary_target_percent", value: "81"},
 		{name: "retention below minimum", key: "compaction_retention_percentage", value: "9"},
 		{name: "retention above maximum", key: "compaction_retention_percentage", value: "51"},
 		{name: "low watermark below minimum", key: "compaction_token_target_percentage", value: "24"},
@@ -1685,6 +1680,39 @@ func TestNormalizeSettingsArchiveValidatesAllContextCompactionSettings(t *testin
 				t.Fatalf("normalize %s error=%v, want %v", tc.name, err, errInvalidCompactionConfigArchive)
 			}
 		})
+	}
+}
+
+func TestNormalizeSettingsArchiveDropsRetiredCompactionSettings(t *testing.T) {
+	var input bytes.Buffer
+	enc := json.NewEncoder(&input)
+	for _, row := range []map[string]any{
+		{"key": "summary_target_percent", "value": "not-even-json", "updated_at": 1},
+		{"key": "summary_merge_max_tokens", "value": "-1", "updated_at": 2},
+		{"key": "summary_max_tokens", "value": "2048", "updated_at": 3},
+	} {
+		if err := enc.Encode(row); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	normalized, err := normalizeSettingsArchiveRows(&input)
+	if err != nil {
+		t.Fatalf("retired settings made an old archive invalid: %v", err)
+	}
+	var rows []map[string]json.RawMessage
+	dec := json.NewDecoder(normalized)
+	for {
+		var row map[string]json.RawMessage
+		if err := dec.Decode(&row); err == io.EOF {
+			break
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		rows = append(rows, row)
+	}
+	if len(rows) != 1 || string(rows[0]["key"]) != `"summary_max_tokens"` {
+		t.Fatalf("normalized rows = %s, want only summary_max_tokens", mustJSON(t, rows))
 	}
 }
 
@@ -1841,7 +1869,7 @@ func TestConfigImportValidatesContextCompactionFinalState(t *testing.T) {
 		archive := paymentConfigArchiveForTest(t, map[string][]map[string]any{
 			"settings": {
 				{"key": "site_title", "value": `"Changed"`, "updated_at": 2},
-				{"key": "summary_target_percent", "value": "81", "updated_at": 3},
+				{"key": "summary_max_tokens", "value": "255", "updated_at": 3},
 			},
 		})
 		rec := importPaymentConfigArchiveForTest(t, d, archive)

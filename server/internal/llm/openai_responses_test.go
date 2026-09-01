@@ -1217,6 +1217,92 @@ func TestOpenAIResponsesToolLoopReplaysStreamedReasoningText(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesToolLoopPromotesSummaryForStrictThinkingRelay(t *testing.T) {
+	var requests []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var captured map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		requests = append(requests, captured)
+		w.Header().Set("Content-Type", "text/event-stream")
+		if len(requests) == 1 {
+			_, _ = io.WriteString(w, strings.Join([]string{
+				`data: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning","status":"in_progress","summary":[]}}`,
+				`data: {"type":"response.reasoning_summary_text.delta","item_id":"rs_1","output_index":0,"summary_index":0,"delta":"load the document skill"}`,
+				`data: {"type":"response.reasoning_summary_text.done","item_id":"rs_1","output_index":0,"summary_index":0,"text":"load the document skill"}`,
+				`data: {"type":"response.output_item.done","output_index":0,"item":{"id":"rs_1","type":"reasoning","status":"completed","summary":[{"type":"summary_text","text":"load the document skill"}]}}`,
+				`data: {"type":"response.output_item.added","output_index":1,"item":{"id":"fc_1","type":"function_call","status":"in_progress","call_id":"call_1","name":"use_skill","arguments":""}}`,
+				`data: {"type":"response.function_call_arguments.done","item_id":"fc_1","output_index":1,"arguments":"{\"name\":\"document-generation\"}"}`,
+				`data: {"type":"response.output_item.done","output_index":1,"item":{"id":"fc_1","type":"function_call","status":"completed","call_id":"call_1","name":"use_skill","arguments":"{\"name\":\"document-generation\"}"}}`,
+				`data: {"type":"response.completed","response":{"output":[{"id":"rs_1","type":"reasoning","status":"completed","summary":[{"type":"summary_text","text":"load the document skill"}]},{"id":"fc_1","type":"function_call","status":"completed","call_id":"call_1","name":"use_skill","arguments":"{\"name\":\"document-generation\"}"}]}}`,
+				`data: [DONE]`,
+				``,
+			}, "\n\n"))
+			return
+		}
+
+		input, _ := captured["input"].([]any)
+		var reasoningText string
+		var hasCall, hasOutput bool
+		for _, raw := range input {
+			item, _ := raw.(map[string]any)
+			switch item["type"] {
+			case "reasoning":
+				content, _ := jsonArrayItems(item["content"])
+				if len(content) > 0 {
+					part, _ := content[0].(map[string]any)
+					if part["type"] == "reasoning_text" {
+						reasoningText, _ = part["text"].(string)
+					}
+				}
+			case "function_call":
+				hasCall = item["call_id"] == "call_1"
+			case "function_call_output":
+				hasOutput = item["call_id"] == "call_1"
+			}
+		}
+		if reasoningText != "load the document skill" || !hasCall || !hasOutput {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"error":{"message":"The reasoning_text in the thinking mode must be passed back to the API."}}`)
+			return
+		}
+		_, _ = io.WriteString(w, strings.Join([]string{
+			`data: {"type":"response.output_text.delta","delta":"READY"}`,
+			`data: {"type":"response.completed","response":{"output":[{"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"READY"}]}]}}`,
+			`data: [DONE]`,
+			``,
+		}, "\n\n"))
+	}))
+	defer srv.Close()
+
+	result, err := (&OpenAIProvider{}).Stream(context.Background(), UnifiedChatRequest{
+		Model:   ModelInfo{RequestID: "deepseek-test", BaseURL: srv.URL, APIKey: "k", APIFormat: "responses"},
+		History: []UnifiedMessage{{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "make a PPT"}}}},
+		Tools:   []ToolDef{{Name: "use_skill", Description: "Load a skill", InputSchema: json.RawMessage(`{"type":"object"}`)}},
+	}, staticToolRunner("document skill"), func(SseEvent) {})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	if len(requests) != 2 || result == nil || len(result.Blocks) == 0 || result.Blocks[len(result.Blocks)-1].Text != "READY" {
+		t.Fatalf("requests=%d result=%+v", len(requests), result)
+	}
+}
+
+func TestResponsesPortableReasoningReplayLeavesEncryptedContentUntouched(t *testing.T) {
+	original := map[string]any{
+		"id":                "rs_1",
+		"type":              "reasoning",
+		"summary":           []any{map[string]any{"type": "summary_text", "text": "summary"}},
+		"encrypted_content": "ciphertext",
+	}
+	prepared := prepareResponsesReplayItems([]map[string]any{original})
+	if len(prepared) != 1 || prepared[0]["content"] != nil || prepared[0]["encrypted_content"] != "ciphertext" {
+		t.Fatalf("encrypted reasoning was rewritten: %#v", prepared)
+	}
+}
+
 func TestOpenAIResponsesToolLoopReplaysAllInterleavedReasoningAndCallsInOrder(t *testing.T) {
 	var requests []map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

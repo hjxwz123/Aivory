@@ -28,6 +28,8 @@ func TestAdminSettingsKeysAreUniqueAndExcludeRetiredPurchasingSettings(t *testin
 		"permanent_credit_purchase_price_amount_minor",
 		"group_buy_url",
 		"credit_buy_url",
+		"summary_target_percent",
+		"summary_merge_max_tokens",
 	} {
 		if _, exists := seen[retired]; exists {
 			t.Fatalf("retired setting %q is still exposed by the admin settings API", retired)
@@ -338,7 +340,6 @@ func TestAdminSettingsRejectNegativeNumericValues(t *testing.T) {
 	for _, key := range []string{
 		"keep_recent_rounds",
 		"summary_max_tokens",
-		"summary_merge_max_tokens",
 		"compaction_request_max_tokens",
 		"compaction_token_trigger",
 		"compaction_token_cap",
@@ -370,7 +371,6 @@ func TestAdminSettingsRejectOutOfRangeCompactionPercentages(t *testing.T) {
 	d := Deps{DB: db}
 
 	for key, values := range map[string][]int{
-		"summary_target_percent":             {4, 81},
 		"compaction_retention_percentage":    {9, 51},
 		"compaction_token_target_percentage": {24, 81},
 	} {
@@ -394,7 +394,6 @@ func TestAdminSettingsRejectCompactionValuesThatRuntimeWouldReplace(t *testing.T
 	for key, values := range map[string][]int{
 		"keep_recent_rounds":            {0},
 		"summary_max_tokens":            {0, 255},
-		"summary_merge_max_tokens":      {0, 255},
 		"compaction_request_max_tokens": {0, 8191},
 	} {
 		for _, value := range values {
@@ -431,8 +430,6 @@ func TestAdminSettingsAcceptCompactionConfiguration(t *testing.T) {
 		"compaction_token_target_percentage":60,
 		"compaction_retention_percentage":40,
 		"summary_max_tokens":8192,
-		"summary_target_percent":35,
-		"summary_merge_max_tokens":8192,
 		"compaction_request_max_tokens":32768,
 		"context_compaction_prompt":"Preserve decisions and pending work."
 	}`))
@@ -447,8 +444,6 @@ func TestAdminSettingsAcceptCompactionConfiguration(t *testing.T) {
 		"compaction_token_cap":               "80000",
 		"compaction_token_target_percentage": "60",
 		"compaction_retention_percentage":    "40",
-		"summary_target_percent":             "35",
-		"summary_merge_max_tokens":           "8192",
 		"compaction_request_max_tokens":      "32768",
 	} {
 		var got string

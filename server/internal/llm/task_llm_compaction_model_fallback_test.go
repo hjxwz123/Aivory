@@ -161,12 +161,11 @@ func TestCompactionBudgetExtraParamsUsesLargestMergedRequest(t *testing.T) {
 
 	const requestMax = minimumCompactionRequestMaxTokens
 	const outputCap = 512
-	const target = 384
 	budget := compactionPayloadBudget(
-		requestMax, outputCap, "", compactionSummaryInstruction, target, selected,
+		requestMax, outputCap, "", compactionSummaryInstruction, selected,
 	)
 	for index, params := range []json.RawMessage{compact, large} {
-		base := compactionTaskInputTokens("", compactionSummaryInstruction, target, params)
+		base := compactionTaskInputTokens("", compactionSummaryInstruction, outputCap, params)
 		if total := base + budget + outputCap + compactionRequestSafetyTokens; total > requestMax {
 			t.Fatalf("candidate %d total budget = %d, want <= %d", index, total, requestMax)
 		}

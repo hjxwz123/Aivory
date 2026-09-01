@@ -160,7 +160,6 @@ func automaticCompactionStatusFixture(
 		"keep_recent_rounds":              1,
 		"compaction_retention_percentage": 10,
 		"summary_max_tokens":              512,
-		"summary_target_percent":          30,
 	} {
 		if err := store.SetSetting(db, key, value); err != nil {
 			t.Fatal(err)

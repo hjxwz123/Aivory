@@ -137,11 +137,15 @@ func ExportTable(ctx context.Context, q RowQuerier, table string, w io.Writer) (
 		// table in the schema-aware order but always export an empty stream.
 		return 0, nil
 	}
+	where := ""
+	if table == "settings" {
+		where = " WHERE key NOT IN ('summary_target_percent','summary_merge_max_tokens')"
+	}
 	order := ""
 	if table == "messages" {
 		order = " ORDER BY created_at, id"
 	}
-	rows, err := q.QueryContext(ctx, "SELECT * FROM "+table+order) //nolint:gosec // table is whitelisted above
+	rows, err := q.QueryContext(ctx, "SELECT * FROM "+table+where+order) //nolint:gosec // table is whitelisted above
 	if err != nil {
 		return 0, err
 	}
