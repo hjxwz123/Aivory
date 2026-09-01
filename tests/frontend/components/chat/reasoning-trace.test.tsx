@@ -15,6 +15,24 @@ vi.mock('react-i18next', () => ({
 }))
 
 describe('ReasoningTrace tool layout', () => {
+  it('removes a collapsed long trace from layout instead of clipping it in a zero-row grid', () => {
+    const reasoning: ReasoningItem[] = [
+      {
+        kind: 'thinking',
+        id: 'long-thought',
+        text: 'A long reasoning paragraph.\n\n'.repeat(200),
+      },
+    ]
+
+    const html = renderToStaticMarkup(
+      createElement(ReasoningTrace, { reasoning, streaming: false, settled: true }),
+    )
+
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).toMatch(/aria-controls="([^"]+)"[^>]*>[\s\S]*<div id="\1" hidden="">/)
+    expect(html).not.toContain('grid-rows-[0fr]')
+  })
+
   it('contains long tool descriptions inside a wrapping, width-bounded row', () => {
     const description =
       'Precisely edit the terminal screenshot and preserve every other detail while replacing several timestamps without changing the background or typography.'

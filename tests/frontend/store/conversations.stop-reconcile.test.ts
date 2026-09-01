@@ -9,6 +9,8 @@ const apiMocks = vi.hoisted(() => ({
   stop: vi.fn(),
   remove: vi.fn(),
   deleteMessage: vi.fn(),
+  messages: vi.fn(),
+  setActiveLeaf: vi.fn(),
   inlineThreads: vi.fn(),
   streamSSE: vi.fn(),
   streamSSEGet: vi.fn(),
@@ -35,6 +37,8 @@ vi.mock('@/api', () => {
       stop: apiMocks.stop,
       remove: apiMocks.remove,
       deleteMessage: apiMocks.deleteMessage,
+      messages: apiMocks.messages,
+      setActiveLeaf: apiMocks.setActiveLeaf,
       inlineThreads: apiMocks.inlineThreads,
     },
     streamSSE: apiMocks.streamSSE,
@@ -208,6 +212,7 @@ describe('stopped turn optimistic-id reconciliation', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     apiMocks.stop.mockResolvedValue({ ok: true })
+    apiMocks.messages.mockResolvedValue([])
     resetStore()
   })
 
@@ -240,11 +245,121 @@ describe('stopped turn optimistic-id reconciliation', () => {
 
     expect(apiMocks.stop).toHaveBeenCalledWith('conv_stop')
     expect(apiMocks.deleteMessage).not.toHaveBeenCalled()
+    expect(useConversations.getState().conversations[0]?.messages).toEqual([])
     acknowledgeStop()
     await deletion
 
     expect(apiMocks.deleteMessage).toHaveBeenCalledWith('conv_stop', 'msg_assistant')
     expect(useConversations.getState().conversations[0]?.messages).toEqual([])
+  })
+
+  it('immediately removes a middle round and reparents its visible continuation', async () => {
+    const firstUser: Message = { id: 'u1', role: 'user', content: 'first', createdAt: 1 }
+    const firstAnswer: Message = {
+      id: 'a1', role: 'assistant', content: 'first answer', createdAt: 2, parentId: firstUser.id,
+    }
+    const removedUser: Message = {
+      id: 'u2', role: 'user', content: 'remove me', createdAt: 3, parentId: firstAnswer.id,
+    }
+    const removedAnswer: Message = {
+      id: 'a2', role: 'assistant', content: 'remove me too', createdAt: 4, parentId: removedUser.id,
+    }
+    const survivingUser: Message = {
+      id: 'u3', role: 'user', content: 'keep me', createdAt: 5, parentId: removedAnswer.id,
+    }
+    const survivingAnswer: Message = {
+      id: 'a3', role: 'assistant', content: 'keep me too', createdAt: 6, parentId: survivingUser.id,
+    }
+    resetStore([firstUser, firstAnswer, removedUser, removedAnswer, survivingUser, survivingAnswer])
+
+    const serverFirstUser = apiMessage('u1', 'user', '', 'complete', 'first')
+    const serverFirstAnswer = apiMessage('a1', 'assistant', 'u1', 'complete', 'first answer')
+    const serverSurvivingUser = apiMessage('u3', 'user', 'a1', 'complete', 'keep me')
+    const serverSurvivingAnswer = apiMessage('a3', 'assistant', 'u3', 'complete', 'keep me too')
+    apiMocks.deleteMessage.mockResolvedValue({
+      ok: true,
+      active_leaf_id: 'a3',
+      messages: [serverFirstUser, serverFirstAnswer, serverSurvivingUser, serverSurvivingAnswer],
+    })
+
+    const deletion = useConversations.getState().deleteMessage('conv_stop', removedAnswer.id)
+
+    const optimistic = useConversations.getState().conversations[0]?.messages ?? []
+    expect(optimistic.map((message) => message.id)).toEqual(['u1', 'a1', 'u3', 'a3'])
+    expect(optimistic.find((message) => message.id === 'u3')?.parentId).toBe('a1')
+    await deletion
+  })
+
+  it('restores the previous path when message deletion fails', async () => {
+    const messages: Message[] = [
+      { id: 'u1', role: 'user', content: 'question', createdAt: 1 },
+      { id: 'a1', role: 'assistant', content: 'answer', createdAt: 2, parentId: 'u1' },
+    ]
+    resetStore(messages)
+    apiMocks.deleteMessage.mockRejectedValue(new Error('delete unavailable'))
+
+    const deletion = useConversations.getState().deleteMessage('conv_stop', 'a1')
+    expect(useConversations.getState().conversations[0]?.messages).toEqual([])
+    await deletion
+
+    expect(useConversations.getState().conversations[0]?.messages).toEqual(messages)
+    expect(apiMocks.toastError).toHaveBeenCalledWith('delete unavailable')
+  })
+
+  it('switches a prefetched branch locally before the persistence request resolves', async () => {
+    const question = apiMessage('msg_question', 'user', '', 'complete', 'question')
+    const firstAnswer = apiMessage('msg_answer_1', 'assistant', question.id, 'complete', 'first answer')
+    firstAnswer.branch_index = 0
+    firstAnswer.branch_count = 2
+    firstAnswer.siblings = ['msg_answer_1', 'msg_answer_2']
+    const firstFollowUp = apiMessage('msg_follow_1', 'user', firstAnswer.id, 'complete', 'first follow up')
+    const firstTail = apiMessage('msg_tail_1', 'assistant', firstFollowUp.id, 'complete', 'first tail')
+    const secondAnswer = apiMessage('msg_answer_2', 'assistant', question.id, 'complete', 'second answer')
+    secondAnswer.branch_index = 1
+    secondAnswer.branch_count = 2
+    secondAnswer.siblings = ['msg_answer_1', 'msg_answer_2']
+    const secondFollowUp = apiMessage('msg_follow_2', 'user', secondAnswer.id, 'complete', 'second follow up')
+    const secondTail = apiMessage('msg_tail_2', 'assistant', secondFollowUp.id, 'complete', 'second tail')
+
+    apiMocks.get.mockResolvedValue({
+      conversation: apiConversation(firstTail.id),
+      messages: [question, firstAnswer, firstFollowUp, firstTail],
+      has_more: false,
+    })
+    apiMocks.messages.mockResolvedValue([
+      question,
+      firstAnswer,
+      firstFollowUp,
+      firstTail,
+      secondAnswer,
+      secondFollowUp,
+      secondTail,
+    ])
+    await useConversations.getState().loadOne('conv_stop')
+    await vi.waitFor(() => expect(apiMocks.messages).toHaveBeenCalledWith('conv_stop', 'tree'))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    let persistSwitch!: () => void
+    apiMocks.setActiveLeaf.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          persistSwitch = () =>
+            resolve({
+              conversation: apiConversation(secondTail.id),
+              messages: [question, secondAnswer, secondFollowUp, secondTail],
+            })
+        }),
+    )
+    const switching = useConversations.getState().setActiveLeaf('conv_stop', secondAnswer.id)
+
+    expect(
+      useConversations.getState().conversations[0]?.messages.map((message) => message.id),
+    ).toEqual([question.id, secondAnswer.id, secondFollowUp.id, secondTail.id])
+    expect(apiMocks.setActiveLeaf).not.toHaveBeenCalled()
+
+    await vi.waitFor(() => expect(apiMocks.setActiveLeaf).toHaveBeenCalledWith('conv_stop', secondAnswer.id))
+    persistSwitch()
+    await switching
   })
 
   it('stops a streaming conversation before issuing its delete request', async () => {

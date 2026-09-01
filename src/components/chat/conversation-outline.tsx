@@ -351,7 +351,8 @@ export function ConversationOutline({ conversation, scrollContainerRef, onClose 
       scrollToMessage(msg.id)
       return
     }
-    void setActiveLeaf(convId, msg.id).then(() => window.setTimeout(() => scrollToMessage(msg.id), 120))
+    void setActiveLeaf(convId, msg.id)
+    requestAnimationFrame(() => scrollToMessage(msg.id))
   }
 
   useEffect(() => {

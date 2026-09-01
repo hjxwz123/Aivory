@@ -116,16 +116,10 @@ export function ReasoningTrace({ reasoning, thinkingMs, streaming = false, settl
         />
       </button>
 
-      {/* grid 0fr→1fr animates height without measuring; the global
-          prefers-reduced-motion rule neutralises the transition automatically. */}
-      <div
-        id={contentId}
-        className={cn(
-          'grid transition-[grid-template-rows] duration-300 ease-[var(--ease-out)]',
-          expanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
-        )}
-      >
-        <div className="min-h-0 min-w-0 max-w-full overflow-clip" aria-hidden={!expanded} inert={!expanded}>
+      {/* `hidden` removes a collapsed trace from layout completely. Keeping the
+          subtree mounted preserves expanded tool details between toggles. */}
+      <div id={contentId} hidden={!expanded}>
+        <div className="min-w-0 max-w-full">
           <div className="ml-[6px] mt-1.5 min-w-0 max-w-full space-y-2 border-l border-[var(--color-divider)] pl-3.5">
             {items.map((it) => {
               if (it.kind === 'thinking' || it.kind === 'narration') {

@@ -426,6 +426,173 @@ const generatedLocalMessageIds = new Set<string>()
 // that window must stay local and be replayed after the temp id is re-keyed.
 const optimisticConversationIds = new Set<string>()
 
+// Full message trees are prefetched only for conversations that expose branch
+// pickers. Keep them outside Zustand: switching can then rebuild the selected
+// path synchronously without making every streamed token notify tree consumers.
+const conversationTreeCache = new Map<string, Message[]>()
+const CONVERSATION_TREE_CACHE_LIMIT = 3
+const conversationTreeLoads = new Map<string, Promise<Message[] | undefined>>()
+const conversationTreeEpochs = new Map<string, number>()
+const branchSwitchTails = new Map<string, Promise<void>>()
+const branchSwitchRevisions = new Map<string, number>()
+const branchSwitchConfirmedPaths = new Map<string, ConversationPathSnapshot>()
+const messageDeleteTails = new Map<string, Promise<void>>()
+const messageDeleteRevisions = new Map<string, number>()
+const messageDeleteConfirmedPaths = new Map<string, ConversationPathSnapshot>()
+
+type ConversationPathSnapshot = Pick<Conversation, 'messages' | 'hasOlder' | 'olderCursor'>
+
+function hasBranches(messages: readonly Message[]): boolean {
+  return messages.some(
+    (message) => (message.branchCount ?? message.siblings?.length ?? 0) > 1,
+  )
+}
+
+function cachedConversationTree(conversationId: string): Message[] | undefined {
+  const messages = conversationTreeCache.get(conversationId)
+  if (!messages) return undefined
+  conversationTreeCache.delete(conversationId)
+  conversationTreeCache.set(conversationId, messages)
+  return messages
+}
+
+function rememberConversationTree(conversationId: string, messages: Message[]): void {
+  conversationTreeCache.delete(conversationId)
+  conversationTreeCache.set(conversationId, messages)
+  while (conversationTreeCache.size > CONVERSATION_TREE_CACHE_LIMIT) {
+    const oldest = conversationTreeCache.keys().next().value as string | undefined
+    if (!oldest) break
+    conversationTreeCache.delete(oldest)
+  }
+}
+
+function prefetchConversationTree(
+  conversationId: string,
+  force = false,
+): Promise<Message[] | undefined> {
+  if (!force) {
+    const cached = cachedConversationTree(conversationId)
+    if (cached) return Promise.resolve(cached)
+    const pending = conversationTreeLoads.get(conversationId)
+    if (pending) return pending
+  }
+
+  const epoch = (conversationTreeEpochs.get(conversationId) ?? 0) + 1
+  conversationTreeEpochs.set(conversationId, epoch)
+  const request = Promise.resolve()
+    .then(() => conversationsApi.messages(conversationId, 'tree'))
+    .then((rows) => {
+      const messages = rows.map(toLocalMessage)
+      if (conversationTreeEpochs.get(conversationId) === epoch) {
+        rememberConversationTree(conversationId, messages)
+      }
+      return messages
+    })
+    .catch(() => undefined)
+    .finally(() => {
+      if (conversationTreeLoads.get(conversationId) === request) {
+        conversationTreeLoads.delete(conversationId)
+      }
+    })
+  conversationTreeLoads.set(conversationId, request)
+  return request
+}
+
+function invalidateConversationTree(conversationId: string): void {
+  conversationTreeEpochs.set(
+    conversationId,
+    (conversationTreeEpochs.get(conversationId) ?? 0) + 1,
+  )
+  conversationTreeCache.delete(conversationId)
+  conversationTreeLoads.delete(conversationId)
+}
+
+// Mirrors store.LatestAssistantInSubtree: follow the newest child at each level,
+// then walk its parent chain back to the root. The tree endpoint is oldest-first,
+// so a reverse scan selects the same newest child without sorting large trees.
+function branchPathFromTree(
+  tree: readonly Message[],
+  selectedMessageId: string,
+  currentPath: readonly Message[],
+): Message[] | undefined {
+  const currentById = new Map(currentPath.map((message) => [message.id, message]))
+  const byId = new Map<string, Message>()
+  const latestChild = new Map<string, string>()
+  for (let index = tree.length - 1; index >= 0; index--) {
+    const cached = tree[index]
+    const message = currentById.get(cached.id) ?? cached
+    byId.set(message.id, message)
+    if (message.parentId && !latestChild.has(message.parentId)) {
+      latestChild.set(message.parentId, message.id)
+    }
+  }
+  if (!byId.has(selectedMessageId)) return undefined
+
+  let leafId = selectedMessageId
+  const descendants = new Set<string>()
+  while (!descendants.has(leafId)) {
+    descendants.add(leafId)
+    const childId = latestChild.get(leafId)
+    if (!childId) break
+    leafId = childId
+  }
+
+  const reversePath: Message[] = []
+  const ancestors = new Set<string>()
+  for (let currentId = leafId; currentId && !ancestors.has(currentId); ) {
+    ancestors.add(currentId)
+    const message = byId.get(currentId)
+    if (!message) return undefined
+    reversePath.push(message)
+    currentId = message.parentId ?? ''
+  }
+  return reversePath.reverse()
+}
+
+function pathAfterOptimisticRoundDelete(
+  messages: readonly Message[],
+  messageId: string,
+): Message[] {
+  const selectedIndex = messages.findIndex((message) => message.id === messageId)
+  if (selectedIndex < 0) return messages.slice()
+  const selected = messages[selectedIndex]
+  const siblingCount = selected.branchCount ?? selected.siblings?.length ?? 0
+
+  // Deleting one regenerated answer removes that answer's complete downstream
+  // branch while retaining its shared question and other answer variants.
+  if (selected.role === 'assistant' && siblingCount > 1) {
+    return messages.slice(0, selectedIndex)
+  }
+
+  let userIndex = selected.role === 'user' ? selectedIndex : -1
+  if (userIndex < 0 && selected.parentId) {
+    userIndex = messages.findIndex(
+      (message) => message.id === selected.parentId && message.role === 'user',
+    )
+  }
+  if (userIndex < 0 && selectedIndex > 0 && messages[selectedIndex - 1].role === 'user') {
+    userIndex = selectedIndex - 1
+  }
+  if (userIndex < 0) {
+    return messages.filter((message) => message.id !== messageId)
+  }
+
+  const user = messages[userIndex]
+  const deletedIds = new Set<string>([user.id])
+  for (const message of messages) {
+    if (message.role === 'assistant' && message.parentId === user.id) {
+      deletedIds.add(message.id)
+    }
+  }
+  return messages
+    .filter((message) => !deletedIds.has(message.id))
+    .map((message) =>
+      message.parentId && deletedIds.has(message.parentId)
+        ? { ...message, parentId: user.parentId }
+        : message,
+    )
+}
+
 // Exported for the composer: an optimistic new-chat temp id has NO server row
 // yet, so draft-file endpoints 404 for it. The draft restore must be skipped
 // while such a conversation is mounted (the real id is installed at send).
@@ -831,6 +998,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         }
       })
       if (!hadStreaming) get().resumeStreamingMessages(id)
+      if (hasBranches(conv.messages)) void prefetchConversationTree(id)
       return conv
     } catch {
       return undefined
@@ -858,6 +1026,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           }
         }),
       }))
+      if (hasBranches(older)) void prefetchConversationTree(id)
     } catch {
       /* non-fatal: older messages just stay unloaded */
     }
@@ -961,6 +1130,15 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     // background list sync that was already in flight (fetched pre-delete)
     // from resurrecting the rows when its stale response merges.
     const doomed = collectDoomedConversationIds(prevConversations, id)
+    for (const conversationId of doomed) {
+      invalidateConversationTree(conversationId)
+      branchSwitchTails.delete(conversationId)
+      branchSwitchRevisions.delete(conversationId)
+      branchSwitchConfirmedPaths.delete(conversationId)
+      messageDeleteTails.delete(conversationId)
+      messageDeleteRevisions.delete(conversationId)
+      messageDeleteConfirmedPaths.delete(conversationId)
+    }
     const stopRequests = prevConversations
       .filter((conversation) => doomed.has(conversation.id))
       .map((conversation) => stopConversationStreams(conversation.id, conversation.messages))
@@ -1120,35 +1298,174 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     // block ids explicitly marked local; an unloaded persisted sibling remains
     // valid even if its string happens to look like one of our generated ids.
     if (isKnownLocalMessageId(messages, leafId, generatedLocalMessageIds)) return
+    const current = get().conversations.find((conversation) => conversation.id === id)
+    if (!current) return
+    const previous = {
+      messages: current.messages,
+      hasOlder: current.hasOlder,
+      olderCursor: current.olderCursor,
+    }
+    const revision = (branchSwitchRevisions.get(id) ?? 0) + 1
+    branchSwitchRevisions.set(id, revision)
+    if (!branchSwitchTails.has(id)) branchSwitchConfirmedPaths.set(id, previous)
+    const localPath = branchPathFromTree(
+      cachedConversationTree(id) ?? [],
+      leafId,
+      current.messages,
+    )
+    if (localPath) {
+      set((state) => ({
+        conversations: state.conversations.map((conversation) =>
+          conversation.id === id
+            ? {
+                ...conversation,
+                messages: localPath,
+                hasOlder: false,
+                olderCursor: undefined,
+              }
+            : conversation,
+        ),
+      }))
+    } else if (hasBranches(current.messages)) {
+      // A cached tree can be stale after another tab creates a branch. Missing
+      // the selected persisted id is proof that this copy must be refreshed.
+      void prefetchConversationTree(id, true)
+    }
+
+    // Serialize persistence in click order. The UI has already switched from the
+    // local tree, while the queue guarantees the server's final leaf matches the
+    // user's latest click even when network responses complete out of order.
+    const previousTail = branchSwitchTails.get(id) ?? Promise.resolve()
+    const operation = previousTail
+      .catch(() => undefined)
+      .then(() => conversationsApi.setActiveLeaf(id, leafId))
+    const tail = operation.then(
+      () => undefined,
+      () => undefined,
+    )
+    branchSwitchTails.set(id, tail)
     try {
-      const resp = await conversationsApi.setActiveLeaf(id, leafId)
+      const resp = await operation
+      if (!branchSwitchRevisions.has(id)) return
+      const confirmedPath: ConversationPathSnapshot = {
+        messages: resp.messages.map(toLocalMessage),
+        hasOlder: false,
+        olderCursor: undefined,
+      }
+      branchSwitchConfirmedPaths.set(id, confirmedPath)
+      if (branchSwitchRevisions.get(id) !== revision) return
       const conv = toLocalConversation(resp.conversation)
-      conv.messages = resp.messages.map(toLocalMessage)
+      conv.messages = confirmedPath.messages
       set((s) => ({ conversations: replaceOrPrepend(s.conversations, conv) }))
       pruneGeneratedLocalMessageIds(get().conversations)
       get().resumeStreamingMessages(id, { replaceExisting: true })
     } catch (e) {
+      if (branchSwitchRevisions.get(id) !== revision) return
+      const confirmedPath = branchSwitchConfirmedPaths.get(id) ?? previous
+      set((state) => ({
+        conversations: state.conversations.map((conversation) =>
+          conversation.id === id
+            ? {
+                ...conversation,
+                ...confirmedPath,
+              }
+            : conversation,
+        ),
+      }))
       toast.error(errorMessage(e, 'Failed to switch branch'))
+    } finally {
+      if (branchSwitchTails.get(id) === tail) {
+        branchSwitchTails.delete(id)
+        branchSwitchRevisions.delete(id)
+        branchSwitchConfirmedPaths.delete(id)
+      }
     }
   },
 
   async deleteMessage(conversationId, messageId) {
     // Deleting under a live stream would race the writer — stop it first.
     const cur = get().conversations.find((c) => c.id === conversationId)
-    await stopConversationStreams(conversationId, cur?.messages ?? [])
+    if (!cur) return
+    const previous = {
+      messages: cur.messages,
+      hasOlder: cur.hasOlder,
+      olderCursor: cur.olderCursor,
+    }
+    const revision = (messageDeleteRevisions.get(conversationId) ?? 0) + 1
+    messageDeleteRevisions.set(conversationId, revision)
+    if (!messageDeleteTails.has(conversationId)) {
+      messageDeleteConfirmedPaths.set(conversationId, previous)
+    }
+    const optimisticMessages = pathAfterOptimisticRoundDelete(cur.messages, messageId)
+    set((state) => ({
+      conversations: state.conversations.map((conversation) =>
+        conversation.id === conversationId
+          ? { ...conversation, messages: optimisticMessages }
+          : conversation,
+      ),
+    }))
+    invalidateConversationTree(conversationId)
+
+    // Keep destructive mutations in click order. The transcript updates before
+    // this queue runs, while every server response includes all earlier committed
+    // deletes and can therefore authoritatively reconcile the latest local path.
+    const previousTail = messageDeleteTails.get(conversationId)
+    const executeDelete = async () => {
+      await stopConversationStreams(conversationId, cur.messages)
+      return conversationsApi.deleteMessage(conversationId, messageId)
+    }
+    const operation = previousTail
+      ? previousTail.catch(() => undefined).then(executeDelete)
+      : executeDelete()
+    const tail = operation.then(
+      () => undefined,
+      () => undefined,
+    )
+    messageDeleteTails.set(conversationId, tail)
     try {
-      const resp = await conversationsApi.deleteMessage(conversationId, messageId)
+      const resp = await operation
+      if (!messageDeleteRevisions.has(conversationId)) return
+      const confirmedPath: ConversationPathSnapshot = {
+        messages: resp.messages.map(toLocalMessage),
+        hasOlder: false,
+        olderCursor: undefined,
+      }
+      messageDeleteConfirmedPaths.set(conversationId, confirmedPath)
+      if (messageDeleteRevisions.get(conversationId) !== revision) return
       // The response carries the refreshed (full) active path; swap it in and
       // clear pagination state since everything is loaded.
       set((s) => ({
         conversations: s.conversations.map((c) =>
           c.id === conversationId
-            ? { ...c, messages: resp.messages.map(toLocalMessage), hasOlder: false, olderCursor: undefined }
+            ? { ...c, ...confirmedPath }
             : c,
         ),
       }))
+      if (hasBranches(confirmedPath.messages)) void prefetchConversationTree(conversationId, true)
     } catch (e) {
-      toast.error(errorMessage(e, 'Failed to delete message'))
+      if (messageDeleteRevisions.get(conversationId) === revision) {
+        const confirmedPath = messageDeleteConfirmedPaths.get(conversationId) ?? previous
+        set((state) => ({
+          conversations: state.conversations.map((conversation) =>
+            conversation.id === conversationId
+              ? {
+                  ...conversation,
+                  ...confirmedPath,
+                }
+              : conversation,
+            ),
+          }))
+        if (hasBranches(confirmedPath.messages)) {
+          void prefetchConversationTree(conversationId, true)
+        }
+        toast.error(errorMessage(e, 'Failed to delete message'))
+      }
+    } finally {
+      if (messageDeleteTails.get(conversationId) === tail) {
+        messageDeleteTails.delete(conversationId)
+        messageDeleteRevisions.delete(conversationId)
+        messageDeleteConfirmedPaths.delete(conversationId)
+      }
     }
   },
 
@@ -1227,6 +1544,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         ),
       }))
       pruneGeneratedLocalMessageIds(get().conversations)
+      if (hasBranches(messages)) void prefetchConversationTree(id, true)
     } catch {
       /* keep the optimistic copy if the reconcile fetch fails */
     }
@@ -2448,6 +2766,15 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       .find((c) => c.id === conversationId)
       ?.messages.find((m) => m.id === messageId)
     const previous = previousMessage?.content
+    const cachedTree = cachedConversationTree(conversationId)
+    if (cachedTree) {
+      rememberConversationTree(
+        conversationId,
+        cachedTree.map((message) =>
+          message.id === messageId ? { ...message, content: text } : message,
+        ),
+      )
+    }
     // Optimistic overwrite keeps the editor responsive; a failed request rolls
     // back so the visible transcript never claims an edit the server rejected.
     set((s) => ({
@@ -2493,6 +2820,17 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         }),
       }))
     } catch (error) {
+      const latestTree = cachedConversationTree(conversationId)
+      if (latestTree && previous !== undefined) {
+        rememberConversationTree(
+          conversationId,
+          latestTree.map((message) =>
+            message.id === messageId && message.content === text
+              ? { ...message, content: previous }
+              : message,
+          ),
+        )
+      }
       set((s) => ({
         conversations: s.conversations.map((c) =>
           c.id !== conversationId

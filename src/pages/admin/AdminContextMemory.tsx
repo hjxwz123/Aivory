@@ -21,8 +21,6 @@ const OWNED_KEYS = [
   'compaction_token_target_percentage',
   'compaction_retention_percentage',
   'summary_max_tokens',
-  'summary_target_percent',
-  'summary_merge_max_tokens',
   'compaction_request_max_tokens',
   'context_compaction_prompt',
   'compaction_enabled',
@@ -90,21 +88,16 @@ export default function AdminContextMemory() {
   async function save() {
     const retention = readNumber('compaction_retention_percentage', 40)
     const tokenTarget = readNumber('compaction_token_target_percentage', 60)
-    const target = readNumber('summary_target_percent', 30)
     const keepRounds = readNumber('keep_recent_rounds', 6)
     const summaryTokens = readNumber('summary_max_tokens', 8192)
-    const mergedSummaryTokens = readNumber('summary_merge_max_tokens', 8192)
     const requestTokens = readNumber('compaction_request_max_tokens', 32768)
     if (
       retention < 10 ||
       retention > 50 ||
       tokenTarget < 25 ||
       tokenTarget > 80 ||
-      target < 5 ||
-      target > 80 ||
       keepRounds < 1 ||
       summaryTokens < 256 ||
-      mergedSummaryTokens < 256 ||
       requestTokens < 8192
     ) {
       toast.error(t('admin:settings.fields.compactionRangeError'))
@@ -348,46 +341,6 @@ export default function AdminContextMemory() {
                   }
                 />
               </Field>
-              <Field
-                label={t('admin:settings.fields.summaryTargetPercent')}
-                htmlFor="summary-target-percent"
-                hint={t('admin:settings.fields.summaryTargetPercentHint')}
-              >
-                <Input
-                  id="summary-target-percent"
-                  type="number"
-                  min={5}
-                  max={80}
-                  step={1}
-                  value={String(readNumber('summary_target_percent', 30))}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      summary_target_percent: Math.floor(Number(event.target.value) || 0),
-                    }))
-                  }
-                />
-              </Field>
-              <Field
-                label={t('admin:settings.fields.summaryMergeTokens')}
-                htmlFor="summary-merge-max-tokens"
-                hint={t('admin:settings.fields.summaryMergeTokensHint')}
-              >
-                <Input
-                  id="summary-merge-max-tokens"
-                  type="number"
-                  min={256}
-                  step={1}
-                  value={String(readNumber('summary_merge_max_tokens', 8192))}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      summary_merge_max_tokens: Math.max(256, Math.floor(Number(event.target.value) || 256)),
-                    }))
-                  }
-                />
-              </Field>
-
               <Field
                 label={t('admin:settings.fields.compactionRequestTokens')}
                 htmlFor="compaction-request-max-tokens"
