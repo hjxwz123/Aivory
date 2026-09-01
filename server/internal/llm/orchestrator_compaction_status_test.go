@@ -228,183 +228,48 @@ func runAutomaticCompactionStatusTurn(t *testing.T, orchestrator *Orchestrator, 
 	return result
 }
 
-func TestAutomaticInlineCompactionEmitsLifecycleStatuses(t *testing.T) {
-	// Eighteen earlier messages plus this turn exceed both the batched round watermark
-	// and the inline backlog threshold, so no queue is involved.
+func TestAutomaticCompactionNeverRunsInlineWithoutQueue(t *testing.T) {
 	orchestrator, provider, conv, model, _ := automaticCompactionStatusFixture(t, 18, nil)
 	var statuses []automaticCompactionStatus
-	terminalObservedWithLeaseHeld := false
-	orchestrator.SetCompactionStatusHandler(func(userID, conversationID, operationID, status string) {
-		if userID != conv.UserID || conversationID != conv.ID {
-			t.Fatalf("status target = %q/%q, want %q/%q", userID, conversationID, conv.UserID, conv.ID)
-		}
+	orchestrator.SetCompactionStatusHandler(func(_, _, operationID, status string) {
 		statuses = append(statuses, automaticCompactionStatus{operationID: operationID, status: status})
-		if status != "started" {
-			probe, acquired := orchestrator.acquireCompactionLease(conv.ID)
-			if acquired {
-				probe.Release()
-			} else {
-				terminalObservedWithLeaseHeld = true
-			}
-		}
 	})
 
 	runAutomaticCompactionStatusTurn(t, orchestrator, conv, model)
-
-	if got, want := compactionStatusNames(statuses), "started,completed"; got != want {
-		history, historyErr := msgcache.ListMessages(context.Background(), orchestrator.cache, orchestrator.db, conv.ID, "")
-		updated, updatedErr := store.GetConversation(context.Background(), orchestrator.db, conv.ID, conv.UserID)
-		requestTokens := estimateRequestTokens(UnifiedChatRequest{History: storeToUnified(history, "openai", model.ID, false)})
-		_, _, action := PlanCompactionForRequest(orchestrator.db, updated, history, requestTokens, model.CompactionTokenThreshold)
-		t.Fatalf("inline statuses = %q, want %q; history=%d action=%d summaryCalls=%d updated=%+v getErr=%v histErr=%v", got, want, len(history), action, provider.summaryCalls, updated, updatedErr, historyErr)
-	}
-	assertCompactionStatusPair(t, statuses, "completed")
-	if !terminalObservedWithLeaseHeld {
-		t.Fatal("inline terminal notification was published after releasing the compaction lease")
-	}
-	if provider.summaryCalls == 0 {
-		t.Fatal("inline compaction never called the summary model")
+	if provider.summaryCalls != 0 || provider.mainCalls != 1 || len(statuses) != 0 {
+		t.Fatalf("summary/main/statuses=%d/%d/%v, want 0/1/none", provider.summaryCalls, provider.mainCalls, statuses)
 	}
 }
 
-func TestAutomaticInlineCompactionTimeoutContinuesMainProvider(t *testing.T) {
-	orchestrator, provider, conv, model, db := automaticCompactionStatusFixture(t, 18, nil)
+func TestAutomaticCompactionQueueDoesNotBlockMainProvider(t *testing.T) {
+	q := &compactionStatusQueue{}
+	orchestrator, provider, conv, model, db := automaticCompactionStatusFixture(t, 18, q)
 	provider.blockSummary = true
 	var statuses []automaticCompactionStatus
 	orchestrator.SetCompactionStatusHandler(func(_, _, operationID, status string) {
 		statuses = append(statuses, automaticCompactionStatus{operationID: operationID, status: status})
 	})
-	previousTimeout := inlineCompactionTimeout
-	inlineCompactionTimeout = 25 * time.Millisecond
-	t.Cleanup(func() { inlineCompactionTimeout = previousTimeout })
 
 	startedAt := time.Now()
 	result := runAutomaticCompactionStatusTurn(t, orchestrator, conv, model)
 	if elapsed := time.Since(startedAt); elapsed > time.Second {
-		t.Fatalf("inline compaction fail-open elapsed=%s, want under 1s", elapsed)
+		t.Fatalf("chat waited for background compaction: elapsed=%s", elapsed)
 	}
-	if provider.summaryCalls == 0 || !provider.summarySawDeadline {
-		t.Fatalf("summary calls=%d saw deadline=%v", provider.summaryCalls, provider.summarySawDeadline)
+	if len(q.jobs) != 1 {
+		t.Fatalf("queued jobs=%d, want one", len(q.jobs))
+	}
+	if provider.summaryCalls != 0 || len(statuses) != 0 {
+		t.Fatalf("summary ran before queued job: calls=%d statuses=%v", provider.summaryCalls, statuses)
 	}
 	if provider.mainCalls != 1 {
 		t.Fatalf("main provider calls=%d, want 1", provider.mainCalls)
 	}
-	assertCompactionStatusPair(t, statuses, "failed")
 	persisted, err := store.GetMessage(context.Background(), db, result.AssistantMessage.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if persisted.Status != "complete" {
 		t.Fatalf("assistant status=%q, want complete", persisted.Status)
-	}
-}
-
-func TestInlineCompactionSettlesBeforeChatAdmissionRefusal(t *testing.T) {
-	// Exercise the real orchestrator ordering: the inline summary is generated
-	// before the main chat reservation. There must be no path where the summary
-	// provider has consumed tokens but a later low-credit chat refusal leaves that
-	// cost attached to an un-settled assistant-message turn.
-	orchestrator, provider, conv, model, db := automaticCompactionStatusFixture(t, 18, nil)
-	ctx := context.Background()
-
-	// Remove both free quota rows so each call is credit-admitted independently.
-	// Keep the summary model inexpensive and make the chat model deliberately
-	// expensive enough that the small balance covers only the summary.
-	if err := store.SetModelQuotas(ctx, db, model.ID, nil); err != nil {
-		t.Fatal(err)
-	}
-	var taskModelID string
-	if err := db.QueryRow(`SELECT id FROM models WHERE request_id=?`, "compaction-status-task").Scan(&taskModelID); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.SetModelQuotas(ctx, db, taskModelID, nil); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`UPDATE models SET price_input=?, price_output=? WHERE id=?`, 1000.0, 1000.0, model.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`UPDATE models SET price_input=?, price_output=? WHERE id=?`, 1.0, 1.0, taskModelID); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.SetSetting(db, "credits_per_usd", 1.0); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.SetPermanentCredits(ctx, db, conv.UserID, 0.1); err != nil {
-		t.Fatal(err)
-	}
-	before, err := store.GetCreditBalance(ctx, db, conv.UserID)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	result, err := orchestrator.Run(ctx, RunRequest{
-		UserID: conv.UserID, ConversationID: conv.ID, ModelID: model.ID,
-		UserText: "Continue after compaction.", ToolMode: ToolModeDisabled,
-	}, func(SseEvent) {})
-	if err != nil {
-		t.Fatalf("inline low-credit run returned error: %v", err)
-	}
-	if result == nil || result.AssistantMessage == nil {
-		t.Fatalf("inline low-credit result = %+v", result)
-	}
-	if provider.summaryCalls == 0 {
-		t.Fatal("inline compaction did not call the summary provider")
-	}
-	if provider.mainCalls != 0 {
-		t.Fatalf("main provider calls = %d, want zero after admission refusal", provider.mainCalls)
-	}
-
-	assistant, err := store.GetMessage(ctx, db, result.AssistantMessage.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if assistant.StopReason != "insufficient_credits" || assistant.Status != "complete" {
-		t.Fatalf("assistant terminal state = status=%q stop_reason=%q, want complete/insufficient_credits", assistant.Status, assistant.StopReason)
-	}
-	var taskRows int
-	var taskCredits float64
-	var taskMessageID string
-	if err := db.QueryRow(`SELECT COUNT(1), COALESCE(SUM(credits),0), COALESCE(MAX(message_id),'')
-		FROM usage_logs WHERE purpose=?`, string(TaskCompact)).Scan(&taskRows, &taskCredits, &taskMessageID); err != nil {
-		t.Fatal(err)
-	}
-	if taskRows == 0 || taskCredits <= 0 || !strings.HasPrefix(taskMessageID, "cmp") {
-		t.Fatalf("compaction usage rows/credits/message = %d/%.9f/%q, want a positive independent cmp row", taskRows, taskCredits, taskMessageID)
-	}
-	if taskMessageID == result.AssistantMessage.ID {
-		t.Fatalf("compaction usage was attached to assistant message %q", taskMessageID)
-	}
-	var billingTaskRows, billingChatRows int
-	var billingTaskMessageID string
-	if err := db.QueryRow(`SELECT COUNT(1), COALESCE(MAX(message_id),'')
-		FROM billing_usage WHERE purpose=?`, string(TaskCompact)).Scan(&billingTaskRows, &billingTaskMessageID); err != nil {
-		t.Fatal(err)
-	}
-	if billingTaskRows == 0 || billingTaskMessageID != taskMessageID {
-		t.Fatalf("compaction billing rows/message = %d/%q, want the independent usage operation %q", billingTaskRows, billingTaskMessageID, taskMessageID)
-	}
-	if err := db.QueryRow(`SELECT COUNT(1) FROM billing_usage WHERE purpose='chat'`).Scan(&billingChatRows); err != nil {
-		t.Fatal(err)
-	}
-	if billingChatRows != 0 {
-		t.Fatalf("refused main chat wrote %d billing row(s), want zero", billingChatRows)
-	}
-	after, err := store.GetCreditBalance(ctx, db, conv.UserID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !(after.Available < before.Available) {
-		t.Fatalf("credit balance did not decrease after summary settlement: before=%.9f after=%.9f", before.Available, after.Available)
-	}
-	var reservedCredits, reservedQuota int
-	if err := db.QueryRow(`SELECT COUNT(1) FROM credit_reservations WHERE status='reserved'`).Scan(&reservedCredits); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.QueryRow(`SELECT COUNT(1) FROM quota_ledger WHERE status='reserved'`).Scan(&reservedQuota); err != nil {
-		t.Fatal(err)
-	}
-	if reservedCredits != 0 || reservedQuota != 0 {
-		t.Fatalf("billing reservations leaked: credits=%d quota=%d", reservedCredits, reservedQuota)
 	}
 }
 

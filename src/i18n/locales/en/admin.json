@@ -963,7 +963,7 @@
       "summaryMergeTokens": "Merged summary budget",
       "summaryMergeTokensHint": "Maximum accumulated summary size before older summary blocks are folded together. Minimum: 256.",
       "compactionRequestTokens": "Compaction request budget",
-      "compactionRequestTokensHint": "Maximum estimated input plus reserved output for each summary request. Larger histories are processed in bounded batches. Minimum: 8192.",
+      "compactionRequestTokensHint": "Maximum estimated input plus reserved output for one background summary request. Each pass compacts the largest prefix of complete older rounds that fits; remaining rounds stay verbatim for later passes. A single oversized round is never split. Minimum: 8192.",
       "compactionPrompt": "Custom summary instructions",
       "compactionPromptHint": "Optional instructions placed before Aivory's built-in continuation-summary prompt.",
       "compactionPromptPlaceholder": "Leave empty to use the built-in summary instructions.",

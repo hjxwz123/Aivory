@@ -335,8 +335,8 @@ func (t *compactionMessageTree) frontiersUnchanged(before, after []SummaryBlock)
 
 // mergeAndPersist folds over-budget path summaries into a coarser block when the
 // path's summary tokens exceed budget, with at most one fold pipeline: it reads
-// the current blocks, merges if needed, and CAS-writes. A pipeline may still use
-// bounded map-reduce or one short-output retry for oversized sources. On
+// the current blocks, merges if needed, and CAS-writes. The fold uses at most one
+// bounded summary-model request. On
 // contention it returns ok=false without starting a second fold.
 func mergeAndPersist(ctx context.Context, db *sql.DB, task *TaskLLM, conv *store.Conversation, payerID, conversationModelID string, history []store.Message, budget int) ([]SummaryBlock, bool, error) {
 	// Generate the optional coarse summary outside the write transaction, then
@@ -545,21 +545,21 @@ func mergeOldestBlocksWithModel(ctx context.Context, task *TaskLLM, conv *store.
 			maxLevel = b.Level
 		}
 	}
-	source := summaryInputsText(summaryBlocksToInputs(oldest))
+	source := summaryBlocksText(oldest)
 	text := ""
 	if task != nil {
 		requestMaxTokens := compactionRequestMaxTokens(task.db)
 		var taskErr error
 		text, taskErr = summarizeCompactionText(
 			ctx, task, conv, source, payerID, conversationModelID, compactionPrompt(task.db),
-			compactionReduceInstruction, target, configuredOutputCap, requestMaxTokens,
+			compactionMergeInstruction, target, configuredOutputCap, requestMaxTokens,
 		)
 		if terminalErr := terminalCompactionTaskError(ctx, taskErr); terminalErr != nil {
 			return blocks, terminalErr
 		}
 		if taskErr != nil {
 			// Folding is optional housekeeping. Preserve all immutable source blocks
-			// unless every bounded map/reduce request produced an acceptable summary.
+			// unless the bounded request produced a usable summary.
 			return blocks, nil
 		}
 	}

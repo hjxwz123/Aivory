@@ -66,19 +66,13 @@
 | `AIVORY_LLM_SUMMARY_TARGET_PER_ROUND_TOKENS` | `int` | `96` | `llm/compaction.go` | 每个用户轮次对自适应摘要目标的 token 贡献，避免大量简短决策被压成泛泛一段。 |
 | `AIVORY_LLM_SUMMARY_TARGET_HEADROOM_NUM` | `int` | `5` | `llm/compaction.go` | 自适应摘要目标上方输出余量比例的分子（默认 5/4）。 |
 | `AIVORY_LLM_SUMMARY_TARGET_HEADROOM_DEN` | `int` | `4` | `llm/compaction.go` | 自适应摘要目标上方输出余量比例的分母（默认 5/4）。 |
-| `AIVORY_LLM_SUMMARY_SHORT_RETRY_THRESHOLD_NUM` | `int` | `1` | `llm/compaction.go` | 摘要草稿被判定为明显过短并触发重试的长度比例分子（默认低于目标的 1/4）。 |
-| `AIVORY_LLM_SUMMARY_SHORT_RETRY_THRESHOLD_DEN` | `int` | `4` | `llm/compaction.go` | 摘要明显过短重试阈值的分母（默认目标的 1/4）。 |
-| `AIVORY_LLM_SUMMARY_SHORT_RETRY_SOURCE_FACTOR` | `int` | `2` | `llm/compaction.go` | 短摘要重试前要求的最小“源内容/目标”倍数，避免对本就稀疏的内容强行填充。 |
-| `AIVORY_LLM_BIG_TOKEN_OVERFLOW_NUM` | `int` | `5` | `llm/compaction.go:65` | 本轮触发内联摘要的 token 触发阈值倍数（num/den，默认 5/4 = 1.25 倍）的分子。 |
-| `AIVORY_LLM_BIG_TOKEN_OVERFLOW_DEN` | `int` | `4` | `llm/compaction.go:66` | 本轮触发内联摘要的 token 触发阈值倍数（num/den，默认 5/4 = 1.25 倍）的分母。 |
-| `AIVORY_LLM_INLINE_COMPACTION_BACKLOG_FACTOR` | `int` | `3` | `llm/compaction.go:67` | 未摘要尾部长度相对 keepRounds*2 的倍数，超过则本轮强制内联（而非异步）压缩；规划器还会在异步高水位之上额外保留一个批次的缓冲。 |
 | `AIVORY_LLM_ATTEMPT` | `int` | `4` | `llm/compaction.go:69` | 向会话 summary_blocks 追加新摘要块时的最大比较并交换（CAS）重试次数。 |
-| `AIVORY_LLM_TOOL_OUTPUT_TOKENS` | `int` | `2048` | `llm/compaction.go` | 当无法从提供商 Raw 恢复完整且可识别的原生工具结果时，规范化内部工具结果块使用的单项 token 上限。已识别并恢复的完整结果不再在此截断，而由无损压缩 map-reduce 分片限制每次模型请求大小；界面展示的短预览保持不变。 |
+| `AIVORY_LLM_TOOL_OUTPUT_TOKENS` | `int` | `2048` | `llm/compaction.go` | 当无法从提供商 Raw 恢复完整且可识别的原生工具结果时，规范化内部工具结果块使用的单项 token 上限。已识别并恢复的完整结果不在此截断；若其完整轮次超过压缩请求预算，该轮保持原文。界面展示的短预览保持不变。 |
 | `AIVORY_LLM_TOOL_INPUT_TOKENS` | `int` | `2048` | `llm/compaction.go` | 将工具调用参数渲染到压缩请求时，每个工具调用的输入 token 上限。 |
 | `AIVORY_LLM_COMPACTION_METADATA_TOKENS` | `int` | `512` | `llm/compaction.go` | 将附件、引用、文档和产物元数据渲染到压缩请求时，每项参考内容的 token 上限。 |
 | `AIVORY_LLM_COMPACTION_MEDIA_INLINE_BYTES` | `int64` | `20*1024*1024` | `llm/compaction_media.go` | 为视觉模型恢复压缩图片时的总字节预算；所有图片引用都会持久化，未恢复的引用会以元数据形式标明。 |
 | `AIVORY_LLM_CHUNK_SIZE` | `int` | `400` | `llm/compaction.go:810` | 重新校验已摘要消息是否仍存在时每条 SQL IN(...) 查询的消息 ID 批大小（用于规避驱动占位符上限分块）。 |
-| `AIVORY_LLM_COMPACTION_LEASE_TTL` | `duration` | `2*time.Hour` | `llm/orchestrator.go` | 数据库支持的每会话压缩租约有效期，防止内联、异步和手动摘要并发执行；即使多副本未配置 Redis 也会互斥。低于 `AIVORY_API_MAX_GEN_DURATION` 加最终落库余量的值会被自动抬高。 |
+| `AIVORY_LLM_COMPACTION_LEASE_TTL` | `duration` | `2*time.Hour` | `llm/orchestrator.go` | 数据库支持的每会话压缩租约有效期，防止后台和手动摘要并发执行；即使多副本未配置 Redis 也会互斥。低于 `AIVORY_API_MAX_GEN_DURATION` 加最终落库余量的值会被自动抬高。 |
 | `AIVORY_LLM_DR_MAX_ROUNDS` | `int` | `4` | `llm/deep_research.go:47` | 深度研究引擎运行的 搜索再验证 轮次数量的硬性上限。 |
 | `AIVORY_LLM_DR_QUERIES_PER_ROUND` | `int` | `6` | `llm/deep_research.go:48` | 每个深度研究轮次派发的最大搜索查询数。 |
 | `AIVORY_LLM_DR_FETCH_PER_ROUND` | `int` | `5` | `llm/deep_research.go:49` | 每个深度研究轮次挑选并读取的最大新来源候选数。 |
@@ -104,7 +98,6 @@
 | `AIVORY_LLM_INLINE_QUOTE_SOURCE_INJECTION_CAP` | `int` | `8000` | `llm/orchestrator.go:30` | 内联引用子对话中，随高亮摘录一并注入的来源消息文本在截断前的最大字符（rune）数。 |
 | `AIVORY_LLM_ATTACHMENT_IMAGE_INLINE_BYTES` | `int64` | `20*1024*1024` | `llm/orchestrator.go` | 单个已验证图片附件在以 base64 写入渠道请求前的独立硬上限；读取过程同样受限，旧的错误大小元数据无法绕过。 |
 | `AIVORY_LLM_TOOL_ROUTE_TIMEOUT` | `duration` | `5*time.Second` | `llm/orchestrator.go` | 自动工具模式等待专用路由模型的端到端时延预算；超时后按 fail-open 规则开启工具。 |
-| `AIVORY_LLM_INLINE_COMPACTION_TIMEOUT` | `duration` | `30*time.Second` | `llm/orchestrator.go` | 同步长上下文压缩允许占用的首 token 前最长时间；超时或失败后使用确定性的最近历史窗口继续对话。 |
 | `AIVORY_LLM_TOOL_ROUTE_SCHEMA_TOKEN_THRESHOLD` | `int` | `512` | `llm/orchestrator.go` | 工具声明不超过此估算 token 数时，自动模式跳过额外路由请求，直接交给主模型原生判断。设为 0 可让所有模糊请求都经过分类。 |
 | `AIVORY_LLM_SANDBOX_EXEC_TIMEOUT_CLAMP_RANGE_MAX` | `int` | `600` | `llm/orchestrator.go:39` | 为 python_execute 调用上下文计时时，管理员配置的 sandbox_exec_timeout_sec 被钳制的上限（秒）。 |
 | `AIVORY_LLM_SANDBOX_EXEC_TIMEOUT_CLAMP_RANGE_MIN` | `int` | `10` | `llm/orchestrator.go:40` | 为 python_execute 调用上下文计时时，管理员配置的 sandbox_exec_timeout_sec 被钳制的下限（秒）。 |

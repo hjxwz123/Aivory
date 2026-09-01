@@ -238,12 +238,12 @@ type RunOpts struct {
 	// EmptyRetryMaxOutputTokens bounds the one retry used when a reasoning model
 	// consumes its budget without emitting visible text. Zero keeps the generic
 	// task default; a negative value disables the retry. Callers with a strict
-	// output budget, such as context compaction, should set this explicitly so
-	// the retry cannot silently exceed their cap.
+	// output budget should set this explicitly. Context compaction disables the
+	// retry so one operation makes at most one provider request.
 	EmptyRetryMaxOutputTokens int
 	// MaxInputTokens rejects an oversized fully assembled task request before
 	// billing admission or provider I/O. Zero leaves the generic task behavior
-	// unchanged; context compaction sets it for every map/reduce call.
+	// unchanged; context compaction sets it for its single summary call.
 	MaxInputTokens int
 	// ModelID, when set, overrides the resolved task model — used to run a
 	// specific model (e.g. the dedicated moderation model) for this call.

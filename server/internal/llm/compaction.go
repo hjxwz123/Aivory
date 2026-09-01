@@ -54,8 +54,8 @@ const (
 	defaultCompactionTokenTargetPct = 60
 	defaultRetentionPct             = 40
 	// Total estimated tokens (system + user prompt + reserved output) allowed for
-	// any one TaskCompact request. The compactor map-reduces larger sources rather
-	// than relying on an unknown provider context window or truncating source text.
+	// the one TaskCompact request made by each compaction operation. Larger
+	// histories advance incrementally across later background operations.
 	defaultCompactionRequestMaxTokens = 32768
 	minimumCompactionRequestMaxTokens = 8192
 	compactionRequestSafetyTokens     = 128
@@ -63,8 +63,9 @@ const (
 	// Provider tool envelopes can be arbitrarily large and may include encrypted
 	// reasoning or binary payloads. Providers persist a canonical tool_output
 	// block clipped to this token budget for normal rendering. Compaction may
-	// recover a complete result only from a recognized Raw tool-result envelope;
-	// its request-size bound is then enforced by the lossless map/reduce splitter.
+	// recover a complete result only from a recognized Raw tool-result envelope.
+	// If one complete round is larger than the compaction request budget, that
+	// round remains verbatim until an operator raises the budget.
 	defaultCompactionToolOutputTokens = 2048
 	defaultCompactionToolInputTokens  = 2048
 	defaultCompactionMetadataTokens   = 512
@@ -74,8 +75,6 @@ const (
 	defaultSummaryTokensClampFloor    = 256
 	defaultSummaryTargetMinTokens     = 384
 	defaultSummaryTargetPerRound      = 96
-	defaultInlineBacklogFactor        = 3
-	defaultCompactionReduceIterCap    = 64
 	// Round-triggered compaction is maintenance, not an every-turn operation.
 	// Several complete rounds must accumulate between the low and high watermarks;
 	// token pressure can still bypass this cadence immediately.
@@ -128,23 +127,17 @@ var (
 // Note: AIVORY_LLM_MESSAGE_TOKEN_MEMO_CACHE_BOUND is a count (map length),
 // wired via envcfg.Int so it can be compared against len().
 var (
-	msgStructuralOverhead         = envcfg.Int("AIVORY_LLM_T", 4)
-	messageTokenMemoCacheBound    = envcfg.Int("AIVORY_LLM_MESSAGE_TOKEN_MEMO_CACHE_BOUND", 100000)
-	summaryTokensClampFloor       = envcfg.Int("AIVORY_LLM_SUMMARY_TOKENS_CLAMP_FLOOR", 256)
-	summaryTargetMinTokens        = envcfg.Int("AIVORY_LLM_SUMMARY_TARGET_MIN_TOKENS", 384)
-	summaryTargetPerRoundTokens   = envcfg.Int("AIVORY_LLM_SUMMARY_TARGET_PER_ROUND_TOKENS", 96)
-	summaryTargetHeadroomNum      = envcfg.Int("AIVORY_LLM_SUMMARY_TARGET_HEADROOM_NUM", 5)
-	summaryTargetHeadroomDen      = envcfg.Int("AIVORY_LLM_SUMMARY_TARGET_HEADROOM_DEN", 4)
-	summaryShortRetryThresholdNum = envcfg.Int("AIVORY_LLM_SUMMARY_SHORT_RETRY_THRESHOLD_NUM", 1)
-	summaryShortRetryThresholdDen = envcfg.Int("AIVORY_LLM_SUMMARY_SHORT_RETRY_THRESHOLD_DEN", 4)
-	summaryShortRetrySourceFactor = envcfg.Int("AIVORY_LLM_SUMMARY_SHORT_RETRY_SOURCE_FACTOR", 2)
-	bigTokenOverflowNum           = envcfg.Int("AIVORY_LLM_BIG_TOKEN_OVERFLOW_NUM", 5)
-	bigTokenOverflowDen           = envcfg.Int("AIVORY_LLM_BIG_TOKEN_OVERFLOW_DEN", 4)
-	inlineCompactionBacklogFactor = envcfg.Int("AIVORY_LLM_INLINE_COMPACTION_BACKLOG_FACTOR", 3)
-	summaryBlockCASAttempts       = envcfg.Int("AIVORY_LLM_ATTEMPT", 4)
-	compactionToolOutputTokens    = envcfg.Int("AIVORY_LLM_TOOL_OUTPUT_TOKENS", defaultCompactionToolOutputTokens)
-	compactionToolInputTokens     = envcfg.Int("AIVORY_LLM_TOOL_INPUT_TOKENS", defaultCompactionToolInputTokens)
-	compactionMetadataTokens      = envcfg.Int("AIVORY_LLM_COMPACTION_METADATA_TOKENS", defaultCompactionMetadataTokens)
+	msgStructuralOverhead       = envcfg.Int("AIVORY_LLM_T", 4)
+	messageTokenMemoCacheBound  = envcfg.Int("AIVORY_LLM_MESSAGE_TOKEN_MEMO_CACHE_BOUND", 100000)
+	summaryTokensClampFloor     = envcfg.Int("AIVORY_LLM_SUMMARY_TOKENS_CLAMP_FLOOR", 256)
+	summaryTargetMinTokens      = envcfg.Int("AIVORY_LLM_SUMMARY_TARGET_MIN_TOKENS", 384)
+	summaryTargetPerRoundTokens = envcfg.Int("AIVORY_LLM_SUMMARY_TARGET_PER_ROUND_TOKENS", 96)
+	summaryTargetHeadroomNum    = envcfg.Int("AIVORY_LLM_SUMMARY_TARGET_HEADROOM_NUM", 5)
+	summaryTargetHeadroomDen    = envcfg.Int("AIVORY_LLM_SUMMARY_TARGET_HEADROOM_DEN", 4)
+	summaryBlockCASAttempts     = envcfg.Int("AIVORY_LLM_ATTEMPT", 4)
+	compactionToolOutputTokens  = envcfg.Int("AIVORY_LLM_TOOL_OUTPUT_TOKENS", defaultCompactionToolOutputTokens)
+	compactionToolInputTokens   = envcfg.Int("AIVORY_LLM_TOOL_INPUT_TOKENS", defaultCompactionToolInputTokens)
+	compactionMetadataTokens    = envcfg.Int("AIVORY_LLM_COMPACTION_METADATA_TOKENS", defaultCompactionMetadataTokens)
 )
 
 // msgTokenMemo caches the per-message token estimate. Keyed by id + a digest of
@@ -339,20 +332,6 @@ func compactionSummaryOutputCap(target, summaryMaxTokens int) int {
 		cap = summaryMaxTokens
 	}
 	return cap
-}
-
-// compactionSummaryTooShort identifies a likely under-produced summary without
-// forcing sparse source material to expand into filler. The retry is deliberately
-// conservative: the source must contain at least twice the requested target and
-// the draft must use less than one quarter of that target.
-func compactionSummaryTooShort(text string, sourceTokens, targetTokens int) bool {
-	if sourceTokens <= 0 || targetTokens <= 0 || summaryShortRetryThresholdDen <= 0 || summaryShortRetrySourceFactor <= 0 {
-		return false
-	}
-	if sourceTokens < targetTokens*summaryShortRetrySourceFactor {
-		return false
-	}
-	return estimateTokens(strings.TrimSpace(text))*summaryShortRetryThresholdDen < targetTokens*summaryShortRetryThresholdNum
 }
 
 // terminalCompactionTaskError preserves errors that callers must be able to
@@ -746,10 +725,9 @@ func quotedCompactionMetadata(value string, maxTokens int) string {
 // appendCompactionSource renders a provider-neutral form of messages. Raw is
 // never replayed wholesale: it can contain encrypted reasoning, binary payloads,
 // and unrelated provider state. Recognized native tool-result envelopes are the
-// exception. Their complete result text is retained here and subsequently split
-// losslessly by splitCompactionSource, so evidence in the middle of a long result
-// remains visible to a map pass without exposing it through the canonical UI
-// tool_output block.
+// exception. Their complete result text is retained here. The compactor only
+// selects complete rounds that fit one request, so an oversized result remains
+// verbatim rather than being partially summarized or silently truncated.
 func appendCompactionSourceChecked(prompt *strings.Builder, msgs []store.Message) error {
 	toolOutputLimit := compactionToolOutputLimit()
 	toolInputLimit := compactionToolInputLimit()
@@ -831,8 +809,8 @@ func appendCompactionSourceChecked(prompt *strings.Builder, msgs []store.Message
 			}
 		}
 		// Legacy/provider-specific rows may have a native tool result in Raw but no
-		// canonical tool_output block. Preserve the complete recognized result; the
-		// lossless splitter below this renderer bounds each actual model request.
+		// canonical tool_output block. Preserve the complete recognized result. The
+		// prefix selector keeps each summary request within its configured budget.
 		for i, rawOutput := range rawToolOutputs {
 			if consumedRawToolOutputs[i] || strings.TrimSpace(rawOutput.Text) == "" {
 				continue
@@ -922,7 +900,7 @@ func LoadSummaryBlocks(raw json.RawMessage) []SummaryBlock {
 // loadSummaryBlocksForRequest rejects legacy/imported blocks that cannot fit
 // even as the only payload in a bounded compaction request. Such a block must
 // not hide its original messages behind a durable frontier: omitting it makes
-// those rows verbatim again, after which the normal bounded map/reduce path can
+// those rows verbatim again, after which incremental background compaction can
 // repair the prefix. A rejected block also creates a coverage gap, so
 // filterBlocksForPath/prefixConnectedBlocks hides every dependent later block.
 // Anchorless legacy blocks cannot be repaired from a message range; oversized
@@ -941,15 +919,15 @@ func loadSummaryBlocksForRequestWithExtraParams(db *sql.DB, raw, extraParams jso
 }
 
 // compactionSummaryBlockTokenLimit resolves every setting needed to decide
-// whether one persisted block can fit in a bounded reduce request. Callers that
+// whether one persisted block can fit in a bounded merge request. Callers that
 // will open a write transaction must take this snapshot first: GetSetting is
 // backed by a short-lived cache and may otherwise try to acquire *sql.DB's only
 // SQLite connection while that transaction already owns it.
 func compactionSummaryBlockTokenLimit(db *sql.DB, extraParams json.RawMessage) int {
 	requestMaxTokens := compactionRequestMaxTokens(db)
 	maxOutputTokens := effectiveCompactionOutputCap(requestMaxTokens, defaultSummaryMaxTokens)
-	return compactionPayloadBudgetForAttempts(
-		requestMaxTokens, maxOutputTokens, compactionPrompt(db), compactionReduceInstruction,
+	return compactionPayloadBudget(
+		requestMaxTokens, maxOutputTokens, compactionPrompt(db), compactionMergeInstruction,
 		min(defaultSummaryTargetMinTokens, maxOutputTokens), extraParams,
 	)
 }
@@ -1093,11 +1071,9 @@ func estimateHistoryTokens(msgs []store.Message) int {
 // after the summarised frontier (`kept`), the rendered summary blocks, and this
 // turn's freshly-injected content. It must NOT count rows already rolled into
 // summaries — a previous build estimated the FULL history, so on a long
-// conversation the estimate exceeded the real count forever (summaries never
-// shrink it), was returned as exact=true, and permanently forced the
-// bigTokenOverflow INLINE path: a task-model round-trip before first token on
-// every turn, defeating the async design. Frontier-aware, the estimate drops
-// back after each compaction and the inline path self-limits as intended.
+// conversation the estimate exceeded the real count forever because summaries
+// never shrank it. Frontier-aware, the estimate drops after each background
+// compaction and does not schedule redundant work forever.
 //
 // Fallback (first turn, or a freshly-imported history with no recorded usage):
 // the CJK-aware heuristic alone. Returns exact=false so callers know it's only
@@ -1361,20 +1337,17 @@ func deepestAutomaticCompactionCut(history []store.Message, frontier int) int {
 // Compaction action returned by PlanCompaction telling the caller how to advance
 // the summary for this turn.
 const (
-	compactNone   = iota // nothing to summarise yet
-	compactAsync         // summarise the overflow off the hot path (the default)
-	compactInline        // backlog too large (cold start) — summarise now to bound the prompt
+	compactNone  = iota // nothing to summarise yet
+	compactAsync        // always summarise off the chat request's hot path
 )
 
 // PlanCompaction is the SYNCHRONOUS hot-path planner (§4.7). It NEVER calls the
 // task model: it renders the summary blocks generated on PRIOR turns and keeps
 // everything after the summarised frontier verbatim. Generating summaries for
 // newly-overflowing rounds is the expensive part (a task-model round-trip) and is
-// done by MaybeCompact, which the orchestrator runs ASYNCHRONOUSLY after the turn
-// so it never stalls first token. Returns the verbatim tail, the path summary
-// blocks to render, and an action telling the caller whether to advance the
-// summary now (inline, on a large cold-start backlog OR a real context well past
-// the trigger) or in the background.
+// done by MaybeCompact, which the orchestrator always runs ASYNCHRONOUSLY so it
+// never stalls first token. Returns the verbatim tail, the path summary blocks to
+// render, and an action telling the caller whether to enqueue background work.
 func PlanCompaction(db *sql.DB, conv *store.Conversation, history []store.Message, requestEstimate int, options ...int) ([]store.Message, []SummaryBlock, int) {
 	enabled := true
 	if raw, err := store.GetSetting(db, "compaction_enabled"); err == nil {
@@ -1405,9 +1378,8 @@ func PlanCompaction(db *sql.DB, conv *store.Conversation, history []store.Messag
 	}
 	keep := history[frontier:]
 	tail := len(history) - frontier
-	ctxTok, exact, _ := contextTokens(keep, pathExisting, requestEstimate, requestEstimateComplete)
+	ctxTok, _, _ := contextTokens(keep, pathExisting, requestEstimate, requestEstimateComplete)
 	keepMsgs := compactionKeepCount(tail, keepRounds, retentionPct)
-	minimumKeepMsgs := min(keepRounds*2, tail)
 	tokenOverflow := tokenTrigger > 0 && ctxTok > tokenTrigger
 	if requestEstimateComplete && minimumRequestEstimate > tokenTrigger && tokenTrigger > 0 {
 		// Even replacing every safely summarizable historical round would leave the
@@ -1419,23 +1391,6 @@ func PlanCompaction(db *sql.DB, conv *store.Conversation, history []store.Messag
 	roundOverflow := compactionRoundOverflow(tail, keepMsgs)
 	summaryOverflow := len(pathExisting) > 1 && summaryTokens(pathExisting) > summaryMergeBudget
 	overflow := roundOverflow || tokenOverflow
-	// A token-heavy but message-LIGHT overflow (a few huge code/plot turns) is not
-	// caught by the message-count backlog gate below, so it would always defer to
-	// the async pass and make THIS turn pay the full un-summarised prompt — the
-	// "compaction ran (14770→268) but the very next turn was still 52k" report.
-	// When the REAL context blows well past the trigger (>1.25×), summarise inline
-	// so the SAME turn is bounded. Gated on `exact` (a real provider count) so we
-	// never add a task-model round-trip to first token on a shaky estimate; once a
-	// turn is trimmed its ctxTok drops back under the bar and later turns go async
-	// again, so this fires only on the actual spikes.
-	bigTokenOverflow := false
-	if tokenOverflow && exact && tokenTrigger > 0 && bigTokenOverflowNum > 0 && bigTokenOverflowDen > 0 {
-		bigTokenOverflow = ctxTok > tokenTrigger*bigTokenOverflowNum/bigTokenOverflowDen
-	}
-	inlineBacklogThreshold := max(
-		minimumKeepMsgs*effectiveInlineBacklogFactor(),
-		keepMsgs+defaultCompactionBatchRounds*4,
-	)
 	switch {
 	case !overflow && !summaryOverflow:
 		return keep, pathExisting, compactNone
@@ -1449,27 +1404,15 @@ func PlanCompaction(db *sql.DB, conv *store.Conversation, history []store.Messag
 		// inside the verbatim retention window or protected by an in-flight assistant
 		// row. Do not enqueue a no-op compaction or emit started/failed.
 		return keep, pathExisting, compactNone
-	case tail > inlineBacklogThreshold || bigTokenOverflow:
-		// Large un-summarised backlog (a freshly-imported long conversation) OR a
-		// real context well past the trigger: summarise inline this turn so the
-		// prompt stays bounded instead of paying one full-price spike first.
-		return keep, pathExisting, compactInline
 	default:
 		return keep, pathExisting, compactAsync
 	}
 }
 
-func effectiveInlineBacklogFactor() int {
-	if inlineCompactionBacklogFactor <= 0 {
-		return defaultInlineBacklogFactor
-	}
-	return inlineCompactionBacklogFactor
-}
-
 // PlanCompactionForRequest is the orchestration-facing planner. Unlike legacy
 // unit-test callers that pass only an overhead estimate, requestTokens is the
 // complete assembled upstream request size (system + tools + injected context +
-// history), so a large first-turn estimate may safely choose the inline path.
+// history), so a large request can enqueue compaction on its first turn.
 // minimumRequestTokens is that same request after the deepest safe history cut;
 // when it still exceeds the trigger, token compaction cannot cure the overflow.
 func PlanCompactionForRequest(db *sql.DB, conv *store.Conversation, history []store.Message, requestTokens, modelTokenThreshold int, minimumRequestTokens ...int) ([]store.Message, []SummaryBlock, int) {
@@ -1600,8 +1543,8 @@ func prefixConnectedBlocks(blocks []SummaryBlock, history []store.Message) []Sum
 // the token budget, takes the overflow rows, calls TaskLLM to produce a summary,
 // writes it to the conversation, and returns the rolled history + the summary
 // block list. It is the EXPENSIVE half of compaction (a task-model call) and is
-// run off the hot path by the orchestrator (async, or inline only on a large
-// cold-start backlog); PlanCompaction does the cheap per-turn rendering.
+// always run off the hot path by the orchestrator; PlanCompaction does the cheap
+// per-turn rendering.
 //
 // Failures fall back to a coherent persisted-summary view, or to the complete
 // original history without summaries when that state cannot be read. Compaction
@@ -1697,7 +1640,12 @@ func maybeCompact(
 	// snapshots are reused by every transactional reload below, avoiding nested
 	// DB queries on single-connection SQLite while keeping the safety estimate
 	// aligned with TaskLLM.Run.
-	compactionExtraParams, _ := resolvedCompactionExtraParams(ctx, db, conversationModelID)
+	compactionExtraParams, compactionParamsErr := resolvedCompactionExtraParams(ctx, db, conversationModelID)
+	if task == nil {
+		// Deterministic test/offline fallback has no provider candidate or model
+		// parameters to resolve, but it still follows the same prefix budget.
+		compactionExtraParams, compactionParamsErr = nil, nil
+	}
 	compactionBlockTokenLimit := compactionSummaryBlockTokenLimit(db, compactionExtraParams)
 	existing := loadSummaryBlocksForRequestWithTokenLimit(conv.SummaryBlocks, compactionBlockTokenLimit)
 	pathExisting := filterBlocksForPath(existing, history)
@@ -1918,7 +1866,7 @@ func maybeCompact(
 				// MORE: the frontier can sit inside the kept tail (keep_recent_rounds
 				// raised, branch switch). Return the tail from after the frontier, not
 				// from the cut, so rounds a rendered summary block already covers are
-				// never also sent verbatim (double context on the inline path).
+				// never also sent verbatim (double context).
 				keepFrom := frontier
 				if keepFrom > len(history) {
 					keepFrom = len(history)
@@ -1932,14 +1880,10 @@ func maybeCompact(
 		// Nothing new to summarise — the existing prefix already covers it.
 		return keep, pathExisting, nil
 	}
-	newer := older[highWater:]
-	if len(newer) == 0 {
+	desiredNewer := older[highWater:]
+	if len(desiredNewer) == 0 {
 		return keep, pathExisting, nil
 	}
-	planFinished = true
-	task.logCompactionStage(ctx, conv.ID, "history_plan", "completed", planStarted,
-		fmt.Sprintf(" frontier=%d cut=%d source_messages=%d kept_messages=%d context_tokens=%d token_trigger=%d token_source=%d",
-			frontier, cut, len(newer), len(keep), ctxTok, tokenTrigger, tokenSource))
 
 	// Cheap pre-check before the (expensive) task-model summary: if a concurrent
 	// turn already summarised a range covering where our new block would START,
@@ -1964,6 +1908,41 @@ func maybeCompact(
 		}
 	}
 
+	customPrompt := compactionPrompt(db)
+	requestMaxTokens := compactionRequestMaxTokens(db)
+	if compactionParamsErr != nil {
+		planFinished = true
+		task.logCompactionStage(ctx, conv.ID, "history_plan", "failed", planStarted,
+			fmt.Sprintf(" error_kind=%q", compactionErrorKind(compactionParamsErr)))
+		if manual {
+			return history, pathExisting, ErrCompactionFailed
+		}
+		fallbackKeep, fallbackBlocks := automaticFallback()
+		return fallbackKeep, fallbackBlocks, nil
+	}
+	selection, selectionErr := selectCompactionPrefix(
+		pathExisting, desiredNewer, customPrompt, compactionExtraParams,
+		summaryMaxTokens, summaryTargetPct, requestMaxTokens,
+	)
+	if selectionErr != nil {
+		planFinished = true
+		task.logCompactionStage(ctx, conv.ID, "history_plan", "failed", planStarted,
+			fmt.Sprintf(" reason=single_round_too_large desired_messages=%d request_max_tokens=%d error_kind=%q",
+				len(desiredNewer), requestMaxTokens, compactionErrorKind(selectionErr)))
+		if manual {
+			return history, pathExisting, ErrCompactionFailed
+		}
+		fallbackKeep, fallbackBlocks := automaticFallback()
+		return fallbackKeep, fallbackBlocks, nil
+	}
+	newer := selection.messages
+	cut = highWater + len(newer)
+	keep = history[cut:]
+	planFinished = true
+	task.logCompactionStage(ctx, conv.ID, "history_plan", "completed", planStarted,
+		fmt.Sprintf(" frontier=%d desired_cut=%d selected_cut=%d selected_messages=%d remaining_messages=%d kept_messages=%d context_tokens=%d token_trigger=%d token_source=%d",
+			frontier, len(older), cut, len(newer), len(desiredNewer)-len(newer), len(keep), ctxTok, tokenTrigger, tokenSource))
+
 	// Replace the current path's prior continuation state and the newly compacted
 	// events with one new state. Persisted ancestor blocks remain available to
 	// sibling branches, but filterBlocksForPath renders only this containing block
@@ -1972,31 +1951,15 @@ func maybeCompact(
 	sourceStarted := time.Now()
 	task.logCompactionStage(ctx, conv.ID, "source_render", "started", time.Time{},
 		fmt.Sprintf(" prior_blocks=%d source_messages=%d", len(pathExisting), len(newer)))
-	source, sourceErr := renderContinuationSummarySource(pathExisting, newer)
-	if sourceErr != nil {
-		task.logCompactionStage(ctx, conv.ID, "source_render", "failed", sourceStarted,
-			fmt.Sprintf(" error_kind=%q", compactionErrorKind(sourceErr)))
-		if manual {
-			return history, pathExisting, ErrCompactionFailed
-		}
-		fallbackKeep, fallbackBlocks := automaticFallback()
-		return fallbackKeep, fallbackBlocks, nil
-	}
+	source := selection.source
 	task.logCompactionStage(ctx, conv.ID, "source_render", "completed", sourceStarted,
-		fmt.Sprintf(" source_tokens=%d", estimateTokens(source)))
-	newRounds := 0
-	for _, message := range newer {
-		if message.Role == "user" {
-			newRounds++
-		}
-	}
-	targetTokens := continuationSummaryTarget(pathExisting, estimateCompactionSourceTokens(newer), newRounds, summaryMaxTokens, summaryTargetPct)
-	outputCap := compactionSummaryOutputCap(targetTokens, summaryMaxTokens)
-	requestMaxTokens := compactionRequestMaxTokens(db)
+		fmt.Sprintf(" source_tokens=%d", selection.sourceTokens))
+	targetTokens := selection.targetTokens
+	outputCap := selection.outputCap
 	task.logCompactionStage(ctx, conv.ID, "summary_config", "completed", time.Time{},
-		fmt.Sprintf(" source_tokens=%d source_rounds=%d target_tokens=%d max_output_tokens=%d request_max_tokens=%d",
-			estimateTokens(source), newRounds, targetTokens, outputCap, requestMaxTokens))
-	customPrompt := compactionPrompt(db)
+		fmt.Sprintf(" source_tokens=%d source_rounds=%d target_tokens=%d max_output_tokens=%d request_max_tokens=%d payload_budget=%d selected_messages=%d remaining_messages=%d",
+			selection.sourceTokens, selection.newRounds, targetTokens, outputCap, requestMaxTokens,
+			selection.payloadBudget, len(newer), len(desiredNewer)-len(newer)))
 	text := ""
 	var summaryErr error
 	if task == nil {
@@ -2237,8 +2200,8 @@ func maybeCompact(
 	if !appended {
 		// Never expose the generated block to the current request unless it was
 		// durably committed. A transaction/open/commit failure (or a disabled CAS
-		// retry budget) must leave the original history verbatim; otherwise inline
-		// and manual callers can report a successful frontier that disappears on
+		// retry budget) must leave the original history verbatim; otherwise callers
+		// can report a successful frontier that disappears on
 		// the next request because it exists only in this stack frame.
 		curRaw, err := readSummaryRaw(ctx, db, conv.ID)
 		if persistOutcomeUncertain {
