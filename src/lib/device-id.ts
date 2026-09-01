@@ -1,25 +1,48 @@
 /**
- * device-id — a per-PAGE-LOAD identifier (§23 realtime sync echo suppression).
+ * Stable browser-install and per-page identifiers.
  *
- * Sent as `X-Device-Id` on every API call; the server stamps it onto the
- * realtime events it broadcasts (`origin`), so the tab that caused a change can
- * ignore its own echo instead of re-fetching state it already updated
- * optimistically.
- *
- * Deliberately in-memory only — NOT sessionStorage: browsers copy
- * sessionStorage into duplicated/restored tabs, and two tabs sharing one id
- * would each treat the other's changes as their own echo and silently stop
- * live-syncing. Echo suppression only matters for requests issued during the
- * current page load anyway (a reloaded tab refetches everything), so a fresh
- * id per load loses nothing.
- *
- * No crypto APIs (the production origin is plain HTTP — no crypto.randomUUID);
- * uniqueness only needs to hold across one user's own open tabs.
+ * X-Device-Id is persisted locally and participates in authenticated request
+ * proofs, giving rate limits and audit signals a stable browser identifier.
+ * X-Client-Id is intentionally per page load and is used only to suppress a
+ * tab's own realtime event echo; duplicated tabs must not share that value.
  */
 
-let cached = ''
+const DEVICE_STORAGE_KEY = 'aivory-device-id-v1'
+
+let cachedDevice = ''
+let cachedClient = ''
+
+function randomID(prefix: string): string {
+  const bytes = new Uint8Array(16)
+  crypto.getRandomValues(bytes)
+  const value = btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '')
+  return `${prefix}-${value}`
+}
 
 export function getDeviceId(): string {
-  if (!cached) cached = 'd-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10)
-  return cached
+  if (cachedDevice) return cachedDevice
+  try {
+    const stored = localStorage.getItem(DEVICE_STORAGE_KEY)
+    if (stored && /^dv-[A-Za-z0-9_-]{22}$/.test(stored)) {
+      cachedDevice = stored
+      return cachedDevice
+    }
+  } catch {
+    // Storage can be unavailable in hardened/private browser contexts.
+  }
+  cachedDevice = randomID('dv')
+  try {
+    localStorage.setItem(DEVICE_STORAGE_KEY, cachedDevice)
+  } catch {
+    // Keep the in-memory identifier for this page load.
+  }
+  return cachedDevice
+}
+
+export function getClientInstanceId(): string {
+  if (!cachedClient) cachedClient = randomID('tab')
+  return cachedClient
 }

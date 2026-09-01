@@ -35,6 +35,9 @@ func TestSessionHandlerTreatsMissingRefreshCookieAsUnauthenticated(t *testing.T)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q, want no-store", got)
+	}
 	var got authSessionResp
 	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -73,7 +76,7 @@ func TestSessionHandlerRestoresValidRefreshSession(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if !got.Authenticated || got.User == nil || got.User.ID != user.ID || got.AccessToken == "" || got.ExpiresAt == 0 {
+	if !got.Authenticated || got.User == nil || got.User.ID != user.ID || got.AccessToken == "" || got.RequestSigningKey == "" || got.ExpiresAt == 0 {
 		t.Fatalf("session response = %+v, want authenticated user %q with access token", got, user.ID)
 	}
 	if got.AuthPolicy == nil || got.AuthPolicy.EntryMode != authEntryLoginPage {

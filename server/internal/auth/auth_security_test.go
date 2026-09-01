@@ -55,6 +55,39 @@ func TestIssueAccessRequiresSessionBinding(t *testing.T) {
 	}
 }
 
+func TestRequestSigningKeyIsSessionScopedAndSeparateFromBearer(t *testing.T) {
+	svc := New("request-proof-test-secret-at-least-32-bytes", time.Hour, 24*time.Hour, nil)
+	firstAccess, _, err := svc.IssueAccessForSession("u_test", "user", 1, "session-one")
+	if err != nil {
+		t.Fatalf("issue first access token: %v", err)
+	}
+	secondAccess, _, err := svc.IssueAccessForSession("u_test", "user", 1, "session-one")
+	if err != nil {
+		t.Fatalf("issue refreshed access token: %v", err)
+	}
+	firstKey, err := svc.RequestSigningKeyForAccess(firstAccess)
+	if err != nil {
+		t.Fatalf("derive first request key: %v", err)
+	}
+	secondKey, err := svc.RequestSigningKeyForAccess(secondAccess)
+	if err != nil {
+		t.Fatalf("derive refreshed request key: %v", err)
+	}
+	otherKey, err := svc.RequestSigningKey("session-two")
+	if err != nil {
+		t.Fatalf("derive other-session request key: %v", err)
+	}
+	if firstKey == "" || firstKey != secondKey {
+		t.Fatalf("same session keys differ: first=%q second=%q", firstKey, secondKey)
+	}
+	if firstKey == otherKey || firstKey == firstAccess || firstKey == secondAccess {
+		t.Fatal("request key was not separated from the session or bearer token")
+	}
+	if _, err := svc.RequestSigningKey(""); err == nil {
+		t.Fatal("empty request-proof session was accepted")
+	}
+}
+
 func TestParsersRejectLegacyTokensWithoutPurpose(t *testing.T) {
 	svc := New("legacy-test-secret-at-least-32-bytes", time.Hour, 24*time.Hour, nil)
 	now := time.Now()

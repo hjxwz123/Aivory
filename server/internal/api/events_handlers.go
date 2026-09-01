@@ -198,7 +198,7 @@ func (h *eventsHubT) deliver(userID, payload string) {
 }
 
 // publishUserEvent fans a realtime event out to every open /api/events stream
-// of this user on every instance. `origin` (the sender tab's X-Device-Id) lets
+// of this user on every instance. `origin` (the sender tab's X-Client-Id) lets
 // receivers suppress their own echo. Fire-and-forget: never fails the caller.
 func publishUserEvent(d Deps, r *http.Request, userID, eventType, conversationID string) {
 	publishUserEventWithOperationID(d, r, userID, eventType, conversationID, "")
@@ -221,7 +221,13 @@ func publishUserEventWithOperationID(d Deps, r *http.Request, userID, eventType,
 		ev["operation_id"] = operationID
 	}
 	if r != nil {
-		if origin := strings.TrimSpace(r.Header.Get("X-Device-Id")); origin != "" && len(origin) <= 64 {
+		origin := strings.TrimSpace(r.Header.Get("X-Client-Id"))
+		if origin == "" {
+			// Compatibility with clients deployed before X-Device-Id became a
+			// stable browser identifier and tab echo ids moved to X-Client-Id.
+			origin = strings.TrimSpace(r.Header.Get("X-Device-Id"))
+		}
+		if origin != "" && len(origin) <= 64 {
 			ev["origin"] = origin
 		}
 	}

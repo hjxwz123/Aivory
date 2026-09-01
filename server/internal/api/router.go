@@ -344,7 +344,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("PATCH", "/api/conversations/:id", requireAuth(d, updateConversationHandler))
 	mux.handle("DELETE", "/api/conversations/:id", requireAuth(d, deleteConversationHandler))
 	mux.handle("POST", "/api/conversations/:id/compact", requireAuth(d, compactConversationHandler))
-	mux.handle("GET", "/api/conversations/:id/messages", requireAuth(d, requireReqSig(listMessagesHandler)))
+	mux.handle("GET", "/api/conversations/:id/messages", requireAuth(d, listMessagesHandler))
 	mux.handle("POST", "/api/conversations/:id/messages", requireAuth(d, postMessageHandler))
 	mux.handle("GET", "/api/conversations/:id/messages/:msgId/stream", requireAuth(d, streamMessageHandler))
 	mux.handle("PATCH", "/api/conversations/:id/messages/:msgId", requireAuth(d, editMessageHandler))
@@ -686,10 +686,10 @@ func corsMiddleware(allowed []string, next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 			// Must list every custom request header the client actually sends, or
 			// a cross-origin preflight fails. The signed-request headers
-			// (x-req-ts/nonce/token, see verifyReqToken middleware) are on every
+			// (x-req-ts/nonce/token/content digest) are on every
 			// authenticated call — omitting them breaks all cross-origin API use
 			// (i.e. serving the app on a domain other than the API's origin).
-			w.Header().Set("Access-Control-Allow-Headers", "content-type, authorization, x-req-ts, x-req-nonce, x-req-token, x-device-id")
+			w.Header().Set("Access-Control-Allow-Headers", "content-type, authorization, x-req-ts, x-req-nonce, x-req-token, x-req-content-sha256, x-device-id, x-client-id")
 			w.Header().Set("Access-Control-Expose-Headers", "Retry-After")
 			w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PATCH,PUT,DELETE,OPTIONS")
 			w.Header().Set("Access-Control-Max-Age", strconv.Itoa(int(corsPreflightMaxAge.Seconds())))

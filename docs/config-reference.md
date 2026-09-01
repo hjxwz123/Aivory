@@ -280,6 +280,7 @@ SSE 心跳、流恢复窗口、生成时长上限、分页与搜索上限、消�
 | `AIVORY_API_STREAM_REPLAY_BATCH_SIZE` | `int` | `200` | `api/messages_handlers.go:36` | Number of buffered stream events read per batch when replaying/catching up a reconnecting SSE stream. |
 | `AIVORY_API_ONLINE_PRESENCE_TOUCH_THROTTLE` | `duration` | `time.Minute` | `api/middleware.go:23` | Throttle interval between online-presence 'seen' touches for a user; the cache TTL of the seen marker. |
 | `AIVORY_API_CONCURRENT_GEN_SLOT_SAFETY_TTL` | `duration` | `30*time.Minute` | `api/middleware.go:24` | Safety TTL on the per-user concurrent-generation slot counter so a dead slot self-expires. |
+| `AIVORY_REQUEST_SIGNATURES_REQUIRED` | `bool` | `true` | `config/config.go` | Enforce one-time v2 request proofs on authenticated JSON and mutation APIs. Disable only temporarily while rolling out a matching frontend; doing so reduces authenticated requests to bearer/cookie checks. |
 | `AIVORY_API_REQUEST_SIGNATURE_REPLAY_WINDOW_FUTURE` | `int64` | `300` | `api/middleware.go:25` | Signed-request replay guard: max seconds X-Req-Ts may lag behind server time before the signature is rejected as expired. |
 | `AIVORY_API_REQUEST_SIGNATURE_REPLAY_WINDOW_PAST` | `int64` | `60` | `api/middleware.go:26` | Signed-request replay guard: max seconds X-Req-Ts may run ahead of server time (clock-skew tolerance) before rejection. |
 | `AIVORY_API_CREDIT_MULTIPLIER` | `float` | `5.0` | `api/models_handlers.go:21` | Divisor turning a model's combined input+output price into the relative credit multiplier shown in the picker. |

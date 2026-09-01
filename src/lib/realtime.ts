@@ -11,7 +11,7 @@
  *   hello (connect / reconnect)                 → version check + compensation
  *
  * Safety rules ("不能错乱"):
- *   - events originating from THIS tab (matching X-Device-Id echo) skip the
+ *   - events originating from THIS tab (matching X-Client-Id echo) skip the
  *     transcript refetch — the tab already updated optimistically — but still
  *     schedule a throttled list sync, so a stale background merge that raced a
  *     local mutation (pin/rename/archive) always converges back to the server;
@@ -32,7 +32,7 @@ import { streamSSEGet } from '@/api/client'
 import { conversationsApi } from '@/api/endpoints'
 import { checkForUpdate } from '@/lib/app-update'
 import { invalidateAccessState } from '@/lib/access-events'
-import { getDeviceId } from '@/lib/device-id'
+import { getClientInstanceId } from '@/lib/device-id'
 import { isConversationTombstoned, markConversationsDeleted } from '@/lib/sync-guards'
 import { useAuth } from '@/store/auth'
 import {
@@ -184,7 +184,7 @@ function handleEvent(ev: RealtimeEvent): void {
   // fetched BEFORE this mutation but merged AFTER it may have clobbered the
   // optimistic row, and with the echo fully suppressed nothing would ever
   // re-correct it. The transcript refetch stays skipped.
-  if (ev.origin && ev.origin === getDeviceId()) {
+  if (ev.origin && ev.origin === getClientInstanceId()) {
     scheduleListSync(false)
     return
   }

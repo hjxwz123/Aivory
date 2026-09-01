@@ -14,7 +14,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -49,15 +48,8 @@ var audioStreamUpgrader = websocket.Upgrader{
 }
 
 func sameOriginWS(r *http.Request) bool {
-	origin := r.Header.Get("Origin")
-	if origin == "" {
-		return false
-	}
-	u, err := url.Parse(origin)
-	if err != nil {
-		return false
-	}
-	return strings.EqualFold(u.Host, r.Host)
+	origin := strings.TrimRight(strings.TrimSpace(r.Header.Get("Origin")), "/")
+	return origin != "" && sameRequestOrigin(origin, r)
 }
 
 // streamEvent is the browser-facing JSON frame (backend → browser).
