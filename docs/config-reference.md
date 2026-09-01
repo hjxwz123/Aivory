@@ -60,10 +60,6 @@
 | `AIVORY_LLM_T` | `int` | `4` | `llm/compaction.go:62` | Per-message structural token overhead (role markers, framing) added to every message's compaction token estimate. |
 | `AIVORY_LLM_MESSAGE_TOKEN_MEMO_CACHE_BOUND` | `int` | `100000` | `llm/compaction.go:63` | Max entries in the per-message token-estimate memo map before it is reset in place to bound memory. |
 | `AIVORY_LLM_SUMMARY_TOKENS_CLAMP_FLOOR` | `int` | `256` | `llm/compaction.go:64` | Floor for the admin summary_max_tokens setting; a smaller configured value is reset to the default summary budget. |
-| `AIVORY_LLM_SUMMARY_TARGET_MIN_TOKENS` | `int` | `384` | `llm/compaction.go` | Minimum detail target requested for a new compaction summary when the configured hard output ceiling permits it. |
-| `AIVORY_LLM_SUMMARY_TARGET_PER_ROUND_TOKENS` | `int` | `96` | `llm/compaction.go` | Per-user-round contribution to the adaptive summary target; prevents many short decision rounds from collapsing into a generic paragraph. |
-| `AIVORY_LLM_SUMMARY_TARGET_HEADROOM_NUM` | `int` | `5` | `llm/compaction.go` | Numerator of the output-cap headroom ratio applied above the adaptive summary target (default 5/4). |
-| `AIVORY_LLM_SUMMARY_TARGET_HEADROOM_DEN` | `int` | `4` | `llm/compaction.go` | Denominator of the output-cap headroom ratio applied above the adaptive summary target (default 5/4). |
 | `AIVORY_LLM_ATTEMPT` | `int` | `4` | `llm/compaction.go:69` | Max compare-and-swap retry attempts when appending a new summary block to the conversation's summary_blocks. |
 | `AIVORY_LLM_TOOL_OUTPUT_TOKENS` | `int` | `2048` | `llm/compaction.go` | Per-tool-result token cap for the canonical internal block used when no complete recognized native result is available. Recognized results recovered from provider Raw remain complete. If their complete round exceeds the compaction request budget, that round remains verbatim; the shorter visible tool preview is unchanged. |
 | `AIVORY_LLM_TOOL_INPUT_TOKENS` | `int` | `2048` | `llm/compaction.go` | Per-tool-call input token cap when rendering tool arguments into a compaction request. |

@@ -1369,7 +1369,7 @@ func analyticsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 
 var settingsKeys = []string{
 	"default_model_id", "task_model_id", "title_model_id", "file_route_model_id", "context_compaction_model_id", "tool_route_model_id", "tool_mode_default", "embedding_model_id",
-	"keep_recent_rounds", "summary_max_tokens", "summary_target_percent", "summary_merge_max_tokens", "compaction_request_max_tokens", "context_compaction_prompt", "compaction_enabled",
+	"keep_recent_rounds", "summary_max_tokens", "compaction_request_max_tokens", "context_compaction_prompt", "compaction_enabled",
 	"compaction_token_trigger", "compaction_token_cap", "compaction_token_target_percentage", "compaction_retention_percentage",
 	"memory_enabled", "daily_message_limit", "daily_image_limit", "signup_open",
 	"password_login_enabled", "auth_entry_mode", "auth_default_provider_id",
@@ -1645,18 +1645,14 @@ func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.R
 			if json.Unmarshal(v, &s) == nil && s == "••••••" {
 				continue
 			}
-			// §4.7 compaction knobs must be non-negative integers — a negative
-			// token_trigger inverts the early-exit guard and a zero/negative
-			// summary length makes the tiered merge churn the cache every turn.
+			// §4.7 numeric limits must be non-negative. Individual compaction
+			// settings below enforce their stricter runtime minimums as well.
 			switch k {
-			case "keep_recent_rounds", "summary_max_tokens", "summary_target_percent", "summary_merge_max_tokens", "compaction_request_max_tokens", "compaction_token_trigger", "compaction_token_cap", "compaction_token_target_percentage", "compaction_retention_percentage",
+			case "keep_recent_rounds", "summary_max_tokens", "compaction_request_max_tokens", "compaction_token_trigger", "compaction_token_cap", "compaction_token_target_percentage", "compaction_retention_percentage",
 				"daily_message_limit", "daily_image_limit", "daily_token_limit",
 				"max_concurrent_generations", "register_ip_daily_limit", "fallback_ttft_sec":
 				var n int
 				if json.Unmarshal(v, &n) != nil || n < 0 {
-					return 0, errInvalidInput
-				}
-				if k == "summary_target_percent" && (n < 5 || n > 80) {
 					return 0, errInvalidInput
 				}
 				if k == "compaction_retention_percentage" && (n < 10 || n > 50) {
@@ -1668,7 +1664,7 @@ func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.R
 				if k == "keep_recent_rounds" && n < 1 {
 					return 0, errInvalidInput
 				}
-				if (k == "summary_max_tokens" || k == "summary_merge_max_tokens") && n < 256 {
+				if k == "summary_max_tokens" && n < 256 {
 					return 0, errInvalidInput
 				}
 				if k == "compaction_request_max_tokens" && n < 8192 {

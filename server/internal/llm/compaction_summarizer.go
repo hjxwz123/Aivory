@@ -13,18 +13,18 @@ import (
 )
 
 const compactionSummaryInstruction = "Compress the conversation source below into one standalone continuation summary. " +
-	"Aim for about %d tokens when the source contains enough information; do not stop at a generic paragraph. " +
+	"Use no more than %d tokens; be concise without collapsing the source into a generic paragraph. " +
 	"Preserve concrete facts, requirements, user preferences, decisions and their rationale, names/IDs/paths, dates, numbers, code and configuration details, tool inputs and outcomes, errors, unresolved questions, and pending next steps. " +
 	"Record superseded facts as superseded rather than presenting them as current. Keep uncertainty and disagreements explicit. " +
 	"Use these headings in this order: Objective and success criteria; User constraints and corrections; Completed work and decisions; Artifacts and identifiers; Evidence and tool outcomes; Failures and exact errors; Active work; Next steps and open questions. " +
 	"Under each heading use compact bullets and write 'None' only when the section is genuinely empty. Do not invent information, repeat points, or include pleasantries. Reply with only the structured summary text.\n\n--- SOURCE (DATA) ---\n"
 
-func compactionTaskInputTokens(customPrompt, instruction string, targetTokens int, extraParams json.RawMessage) int {
+func compactionTaskInputTokens(customPrompt, instruction string, outputLimit int, extraParams json.RawMessage) int {
 	prefix := ""
 	if customPrompt != "" {
 		prefix = customPrompt + "\n\n"
 	}
-	userPrompt := prefix + fmt.Sprintf(instruction, targetTokens)
+	userPrompt := prefix + fmt.Sprintf(instruction, outputLimit)
 	return estimateRequestTokens(UnifiedChatRequest{
 		SystemPrompt: defaultSystem(TaskCompact, false),
 		History:      []UnifiedMessage{{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: userPrompt}}}},
@@ -32,8 +32,8 @@ func compactionTaskInputTokens(customPrompt, instruction string, targetTokens in
 	})
 }
 
-func compactionPayloadBudget(requestMaxTokens, outputCap int, customPrompt, instruction string, targetTokens int, extraParams json.RawMessage) int {
-	base := compactionTaskInputTokens(customPrompt, instruction, targetTokens, extraParams)
+func compactionPayloadBudget(requestMaxTokens, outputCap int, customPrompt, instruction string, extraParams json.RawMessage) int {
+	base := compactionTaskInputTokens(customPrompt, instruction, outputCap, extraParams)
 	budget := requestMaxTokens - outputCap - base - compactionRequestSafetyTokens
 	if budget < 1 {
 		return 0
@@ -45,7 +45,9 @@ func effectiveCompactionOutputCap(requestMaxTokens, configuredCap int) int {
 	if requestMaxTokens <= 0 || configuredCap <= 0 {
 		return 0
 	}
-	cap := (requestMaxTokens - compactionRequestSafetyTokens) / compactionOutputBudgetDivisor
+	// summary_max_tokens is the provider output ceiling. Keep enough of the total
+	// request budget for source text when the configured ceiling is too large.
+	cap := requestMaxTokens / compactionOutputBudgetDivisor
 	if cap <= 0 {
 		return 0
 	}
@@ -99,13 +101,13 @@ func resolvedCompactionExtraParams(ctx context.Context, db *sql.DB, conversation
 	return compactionBudgetExtraParams(params), nil
 }
 
-func buildCompactionPrompt(customPrompt, instruction, source string, targetTokens int) string {
+func buildCompactionPrompt(customPrompt, instruction, source string, outputLimit int) string {
 	var prompt strings.Builder
 	if customPrompt != "" {
 		prompt.WriteString(customPrompt)
 		prompt.WriteString("\n\n")
 	}
-	fmt.Fprintf(&prompt, instruction, targetTokens)
+	fmt.Fprintf(&prompt, instruction, outputLimit)
 	prompt.WriteString(source)
 	return prompt.String()
 }
@@ -162,15 +164,14 @@ func summarizeCompactionText(
 	task *TaskLLM,
 	conv *store.Conversation,
 	fullSource, payerID, conversationModelID, customPrompt, instruction string,
-	targetTokens, configuredOutputCap, requestMaxTokens int,
+	configuredOutputCap, requestMaxTokens int,
 ) (string, error) {
 	fullSource = strings.TrimSpace(fullSource)
 	if task == nil || fullSource == "" {
 		return "", ErrCompactionFailed
 	}
 	outputCap := effectiveCompactionOutputCap(requestMaxTokens, configuredOutputCap)
-	targetTokens = min(targetTokens, outputCap)
-	if outputCap < 1 || targetTokens < 1 {
+	if outputCap < 1 {
 		return "", ErrCompactionFailed
 	}
 	extraParams, err := compactionTaskExtraParams(ctx, task, conversationModelID)
@@ -180,10 +181,10 @@ func summarizeCompactionText(
 	sourceTokens := estimateTokens(fullSource)
 	planStarted := time.Now()
 	task.logCompactionStage(ctx, conv.ID, "summary_plan", "started", time.Time{},
-		fmt.Sprintf(" source_tokens=%d target_tokens=%d max_output_tokens=%d request_max_tokens=%d",
-			sourceTokens, targetTokens, outputCap, requestMaxTokens))
+		fmt.Sprintf(" source_tokens=%d max_output_tokens=%d request_max_tokens=%d",
+			sourceTokens, outputCap, requestMaxTokens))
 	payloadBudget := compactionPayloadBudget(
-		requestMaxTokens, outputCap, customPrompt, instruction, targetTokens, extraParams,
+		requestMaxTokens, outputCap, customPrompt, instruction, extraParams,
 	)
 	if payloadBudget <= 0 || sourceTokens > payloadBudget {
 		task.logCompactionStage(ctx, conv.ID, "summary_plan", "failed", planStarted,
@@ -192,35 +193,8 @@ func summarizeCompactionText(
 	}
 	task.logCompactionStage(ctx, conv.ID, "summary_plan", "completed", planStarted,
 		fmt.Sprintf(" strategy=direct payload_budget=%d selected_source_tokens=%d", payloadBudget, sourceTokens))
-	prompt := buildCompactionPrompt(customPrompt, instruction, fullSource, targetTokens)
+	prompt := buildCompactionPrompt(customPrompt, instruction, fullSource, outputCap)
 	return runCompactionTask(ctx, task, conv, payerID, conversationModelID, prompt, outputCap, requestMaxTokens)
-}
-
-func summarizeCompactionSource(
-	ctx context.Context,
-	task *TaskLLM,
-	conv *store.Conversation,
-	msgs []store.Message,
-	payerID, conversationModelID, customPrompt string,
-	targetTokens, outputCap, requestMaxTokens int,
-) (string, error) {
-	if task == nil {
-		return clipOlder(msgs, min(targetTokens, effectiveCompactionOutputCap(requestMaxTokens, outputCap))), nil
-	}
-	source, err := renderCompactionSource(msgs)
-	if err != nil {
-		return "", err
-	}
-	return summarizeCompactionText(
-		ctx, task, conv, source, payerID, conversationModelID, customPrompt,
-		compactionSummaryInstruction, targetTokens, outputCap, requestMaxTokens,
-	)
-}
-
-func continuationSummaryTarget(prior []SummaryBlock, newSourceTokens, newRounds, summaryMaxTokens, targetPercent int) int {
-	priorTokens := summaryTokens(prior)
-	target := compactionSummaryTargetForSize(priorTokens+newSourceTokens, newRounds, summaryMaxTokens, targetPercent)
-	return min(summaryMaxTokens, max(priorTokens, target))
 }
 
 func renderContinuationSummarySource(prior []SummaryBlock, newer []store.Message) (string, error) {
@@ -243,7 +217,6 @@ type compactionPrefixSelection struct {
 	messages      []store.Message
 	source        string
 	sourceTokens  int
-	targetTokens  int
 	outputCap     int
 	payloadBudget int
 	newRounds     int
@@ -257,10 +230,14 @@ func selectCompactionPrefix(
 	newer []store.Message,
 	customPrompt string,
 	extraParams json.RawMessage,
-	summaryMaxTokens, summaryTargetPct, requestMaxTokens int,
+	summaryMaxTokens, requestMaxTokens int,
 ) (compactionPrefixSelection, error) {
 	var selected compactionPrefixSelection
 	newRounds := 0
+	outputCap := effectiveCompactionOutputCap(requestMaxTokens, summaryMaxTokens)
+	if outputCap < 1 {
+		return compactionPrefixSelection{}, ErrCompactionFailed
+	}
 	for end := 1; end <= len(newer); end++ {
 		if newer[end-1].Role == "user" {
 			newRounds++
@@ -273,24 +250,17 @@ func selectCompactionPrefix(
 		if err != nil {
 			return compactionPrefixSelection{}, err
 		}
-		newSourceTokens := estimateCompactionSourceTokens(candidate)
-		target := continuationSummaryTarget(prior, newSourceTokens, newRounds, summaryMaxTokens, summaryTargetPct)
-		outputCap := effectiveCompactionOutputCap(
-			requestMaxTokens, compactionSummaryOutputCap(target, summaryMaxTokens),
-		)
-		target = min(target, outputCap)
 		payloadBudget := compactionPayloadBudget(
-			requestMaxTokens, outputCap, customPrompt, compactionSummaryInstruction, target, extraParams,
+			requestMaxTokens, outputCap, customPrompt, compactionSummaryInstruction, extraParams,
 		)
 		sourceTokens := estimateTokens(source)
-		if target < 1 || outputCap < 1 || payloadBudget < 1 || sourceTokens > payloadBudget {
+		if payloadBudget < 1 || sourceTokens > payloadBudget {
 			break
 		}
 		selected = compactionPrefixSelection{
 			messages:      candidate,
 			source:        source,
 			sourceTokens:  sourceTokens,
-			targetTokens:  target,
 			outputCap:     outputCap,
 			payloadBudget: payloadBudget,
 			newRounds:     newRounds,
@@ -302,8 +272,8 @@ func selectCompactionPrefix(
 	return selected, nil
 }
 
-func fallbackContinuationSummary(prior []SummaryBlock, newer []store.Message, targetTokens int) string {
-	if targetTokens <= 0 {
+func fallbackContinuationSummary(prior []SummaryBlock, newer []store.Message, outputLimit int) string {
+	if outputLimit <= 0 {
 		return ""
 	}
 	parts := make([]string, 0, len(prior))
@@ -314,14 +284,14 @@ func fallbackContinuationSummary(prior []SummaryBlock, newer []store.Message, ta
 	}
 	priorText := strings.Join(parts, "\n\n")
 	if priorText == "" {
-		return clipOlder(newer, targetTokens)
+		return clipOlder(newer, outputLimit)
 	}
-	priorBudget := min(estimateTokens(priorText), targetTokens*2/3)
+	priorBudget := min(estimateTokens(priorText), outputLimit*2/3)
 	if priorBudget < 1 {
 		priorBudget = 1
 	}
 	priorText = clipToTokens(priorText, priorBudget)
-	newBudget := targetTokens - estimateTokens(priorText)
+	newBudget := outputLimit - estimateTokens(priorText)
 	if newBudget < 1 {
 		return priorText
 	}

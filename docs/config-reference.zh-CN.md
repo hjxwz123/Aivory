@@ -62,10 +62,6 @@
 | `AIVORY_LLM_T` | `int` | `4` | `llm/compaction.go:62` | 在压缩 token 估算中为每条消息追加的结构性 token 开销（角色标记、外框）。 |
 | `AIVORY_LLM_MESSAGE_TOKEN_MEMO_CACHE_BOUND` | `int` | `100000` | `llm/compaction.go:63` | 每消息 token 估算记忆缓存 map 在被原地重置以限制内存前允许的最大条目数。 |
 | `AIVORY_LLM_SUMMARY_TOKENS_CLAMP_FLOOR` | `int` | `256` | `llm/compaction.go:64` | 管理端 summary_max_tokens 设置的下限；配置值小于该下限时重置为默认摘要预算。 |
-| `AIVORY_LLM_SUMMARY_TARGET_MIN_TOKENS` | `int` | `384` | `llm/compaction.go` | 在管理员配置的硬输出上限允许时，新压缩摘要请求的最小细节目标。 |
-| `AIVORY_LLM_SUMMARY_TARGET_PER_ROUND_TOKENS` | `int` | `96` | `llm/compaction.go` | 每个用户轮次对自适应摘要目标的 token 贡献，避免大量简短决策被压成泛泛一段。 |
-| `AIVORY_LLM_SUMMARY_TARGET_HEADROOM_NUM` | `int` | `5` | `llm/compaction.go` | 自适应摘要目标上方输出余量比例的分子（默认 5/4）。 |
-| `AIVORY_LLM_SUMMARY_TARGET_HEADROOM_DEN` | `int` | `4` | `llm/compaction.go` | 自适应摘要目标上方输出余量比例的分母（默认 5/4）。 |
 | `AIVORY_LLM_ATTEMPT` | `int` | `4` | `llm/compaction.go:69` | 向会话 summary_blocks 追加新摘要块时的最大比较并交换（CAS）重试次数。 |
 | `AIVORY_LLM_TOOL_OUTPUT_TOKENS` | `int` | `2048` | `llm/compaction.go` | 当无法从提供商 Raw 恢复完整且可识别的原生工具结果时，规范化内部工具结果块使用的单项 token 上限。已识别并恢复的完整结果不在此截断；若其完整轮次超过压缩请求预算，该轮保持原文。界面展示的短预览保持不变。 |
 | `AIVORY_LLM_TOOL_INPUT_TOKENS` | `int` | `2048` | `llm/compaction.go` | 将工具调用参数渲染到压缩请求时，每个工具调用的输入 token 上限。 |

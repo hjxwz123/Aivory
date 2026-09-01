@@ -124,7 +124,6 @@ func compactionBillingFixture(t *testing.T, provider Provider) (*Orchestrator, *
 		"context_compaction_model_id": model.ID,
 		"credits_per_usd":             1.0,
 		"summary_max_tokens":          128,
-		"summary_target_percent":      10,
 	} {
 		if err := store.SetSetting(db, key, value); err != nil {
 			t.Fatal(err)
@@ -422,9 +421,6 @@ func TestManualCompactionUsesOneReplacementPipeline(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`UPDATE conversations SET summary_blocks=? WHERE id=?`, string(encoded), conv.ID); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.SetSetting(db, "summary_merge_max_tokens", 256); err != nil {
 		t.Fatal(err)
 	}
 	store.InvalidateConfig()

@@ -86,7 +86,7 @@ func TestCompactionLogsSingleDirectSummaryPlan(t *testing.T) {
 	_, err = summarizeCompactionText(
 		ctx, task, &store.Conversation{ID: "conv_log_direct"},
 		"ordered source with a concrete decision and pending follow-up",
-		"", "", "", compactionSummaryInstruction, 512, 1024, minimumCompactionRequestMaxTokens,
+		"", "", "", compactionSummaryInstruction, 1024, minimumCompactionRequestMaxTokens,
 	)
 	if err != nil {
 		t.Fatalf("summarizeCompactionText: %v\nlogs:\n%s", err, logs.String())

@@ -751,6 +751,7 @@ func prepareResponsesReplayItems(items []map[string]any) []map[string]any {
 	}
 	prepared := make([]map[string]any, 0, len(items))
 	for _, item := range items {
+		item = responsesPortableReasoningReplayItem(item)
 		if responsesOutputMessageReplayable(item) {
 			prepared = append(prepared, responsesCompletedReplayItem(item))
 			continue
@@ -762,6 +763,47 @@ func prepareResponsesReplayItems(items []map[string]any) []map[string]any {
 		prepared = append(prepared, responsesCompletedReplayItem(item))
 	}
 	return prepared
+}
+
+// Some Responses-compatible channel pools return only a reasoning summary on
+// one backend, then route the tool continuation to a stricter backend that
+// requires the same thinking payload as reasoning_text. Official stateless
+// responses use encrypted_content, which remains authoritative and untouched.
+func responsesPortableReasoningReplayItem(item map[string]any) map[string]any {
+	itemType, _ := item["type"].(string)
+	if itemType != "reasoning" || !responsesJSONValueEmpty(item["encrypted_content"]) {
+		return item
+	}
+	if content, ok := jsonArrayItems(item["content"]); ok && len(content) > 0 {
+		return item
+	}
+
+	summary, ok := jsonArrayItems(item["summary"])
+	if !ok || len(summary) == 0 {
+		return item
+	}
+	content := make([]map[string]any, 0, len(summary))
+	for _, rawPart := range summary {
+		part, _ := rawPart.(map[string]any)
+		if partType, _ := part["type"].(string); partType != "summary_text" {
+			continue
+		}
+		text, _ := part["text"].(string)
+		if text == "" {
+			continue
+		}
+		content = append(content, map[string]any{"type": "reasoning_text", "text": text})
+	}
+	if len(content) == 0 {
+		return item
+	}
+
+	clone := make(map[string]any, len(item)+1)
+	for key, value := range item {
+		clone[key] = value
+	}
+	clone["content"] = content
+	return clone
 }
 
 type responsesOutputMergeStage uint8

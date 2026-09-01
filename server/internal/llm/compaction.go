@@ -34,16 +34,15 @@ import (
 // unseeded / partly-migrated DB behaves like a freshly-seeded one. A previous
 // build had summary_max_tokens default to 1500 in code but 2048 in the seed.
 //
-// summary_max_tokens (admin, §settings.fields.sumTokens "摘要 token 预算") is the
+// summary_max_tokens (admin, §settings.fields.sumTokens "摘要输出上限") is the
 // MaxOutputTokens cap for the actual TaskCompact summary-generation call — the
 // knob that controls how detailed/long a freshly-generated summary can be.
-// Summary blocks are replaced incrementally. The legacy
-// summary_merge_max_tokens setting remains in storage for older databases but
-// is no longer used by the compaction algorithm.
+// Summary blocks are replaced incrementally. summary_max_tokens is the single
+// summary-size control: it is the requested output ceiling, reduced only when
+// the request budget or the automatic compaction low watermark requires it.
 const (
 	defaultKeepRounds       = 6
 	defaultSummaryMaxTokens = 8192
-	defaultSummaryTargetPct = 30
 	defaultTokenTrigger     = 32000
 	// The trigger is the high watermark. Automatic token-pressure compaction aims
 	// materially below it so one ordinary follow-up turn cannot immediately cross
@@ -57,7 +56,10 @@ const (
 	defaultCompactionRequestMaxTokens = 32768
 	minimumCompactionRequestMaxTokens = 8192
 	compactionRequestSafetyTokens     = 128
-	compactionOutputBudgetDivisor     = 4
+	// A compaction request always needs room for the source. The output setting is
+	// a ceiling, so at most one quarter of the total request budget is reserved for
+	// generated text when the configured ceiling is larger than the request allows.
+	compactionOutputBudgetDivisor = 4
 	// Provider tool envelopes can be arbitrarily large and may include encrypted
 	// reasoning or binary payloads. Providers persist a canonical tool_output
 	// block clipped to this token budget for normal rendering. Compaction may
@@ -71,8 +73,6 @@ const (
 	defaultMessageTokenMemoCacheBound = 100000
 	defaultMessageStructuralOverhead  = 4
 	defaultSummaryTokensClampFloor    = 256
-	defaultSummaryTargetMinTokens     = 384
-	defaultSummaryTargetPerRound      = 96
 	// Round-triggered compaction is maintenance, not an every-turn operation.
 	// Several complete rounds must accumulate between the low and high watermarks;
 	// token pressure can still bypass this cadence immediately.
@@ -120,17 +120,13 @@ var (
 // Note: AIVORY_LLM_MESSAGE_TOKEN_MEMO_CACHE_BOUND is a count (map length),
 // wired via envcfg.Int so it can be compared against len().
 var (
-	msgStructuralOverhead       = envcfg.Int("AIVORY_LLM_T", 4)
-	messageTokenMemoCacheBound  = envcfg.Int("AIVORY_LLM_MESSAGE_TOKEN_MEMO_CACHE_BOUND", 100000)
-	summaryTokensClampFloor     = envcfg.Int("AIVORY_LLM_SUMMARY_TOKENS_CLAMP_FLOOR", 256)
-	summaryTargetMinTokens      = envcfg.Int("AIVORY_LLM_SUMMARY_TARGET_MIN_TOKENS", 384)
-	summaryTargetPerRoundTokens = envcfg.Int("AIVORY_LLM_SUMMARY_TARGET_PER_ROUND_TOKENS", 96)
-	summaryTargetHeadroomNum    = envcfg.Int("AIVORY_LLM_SUMMARY_TARGET_HEADROOM_NUM", 5)
-	summaryTargetHeadroomDen    = envcfg.Int("AIVORY_LLM_SUMMARY_TARGET_HEADROOM_DEN", 4)
-	summaryBlockCASAttempts     = envcfg.Int("AIVORY_LLM_ATTEMPT", 4)
-	compactionToolOutputTokens  = envcfg.Int("AIVORY_LLM_TOOL_OUTPUT_TOKENS", defaultCompactionToolOutputTokens)
-	compactionToolInputTokens   = envcfg.Int("AIVORY_LLM_TOOL_INPUT_TOKENS", defaultCompactionToolInputTokens)
-	compactionMetadataTokens    = envcfg.Int("AIVORY_LLM_COMPACTION_METADATA_TOKENS", defaultCompactionMetadataTokens)
+	msgStructuralOverhead      = envcfg.Int("AIVORY_LLM_T", 4)
+	messageTokenMemoCacheBound = envcfg.Int("AIVORY_LLM_MESSAGE_TOKEN_MEMO_CACHE_BOUND", 100000)
+	summaryTokensClampFloor    = envcfg.Int("AIVORY_LLM_SUMMARY_TOKENS_CLAMP_FLOOR", 256)
+	summaryBlockCASAttempts    = envcfg.Int("AIVORY_LLM_ATTEMPT", 4)
+	compactionToolOutputTokens = envcfg.Int("AIVORY_LLM_TOOL_OUTPUT_TOKENS", defaultCompactionToolOutputTokens)
+	compactionToolInputTokens  = envcfg.Int("AIVORY_LLM_TOOL_INPUT_TOKENS", defaultCompactionToolInputTokens)
+	compactionMetadataTokens   = envcfg.Int("AIVORY_LLM_COMPACTION_METADATA_TOKENS", defaultCompactionMetadataTokens)
 )
 
 // msgTokenMemo caches the per-message token estimate. Keyed by id + a digest of
@@ -252,79 +248,12 @@ func effectiveSummaryTokensClampFloor() int {
 	return summaryTokensClampFloor
 }
 
-// compactionSummaryTarget scales summary detail with the material being
-// replaced. summaryMaxTokens remains the administrator's hard ceiling; the
-// returned target is the amount of useful recap we ask the model to produce.
-// Both source size and round count matter: a few long code/tool turns need more
-// room than a fixed 300-token recap, while many terse decision rounds must not
-// collapse into a single vague paragraph merely because their byte count is low.
-func compactionSummaryTarget(msgs []store.Message, summaryMaxTokens, targetPercent int) int {
-	if summaryMaxTokens <= 0 {
-		return 0
-	}
-	inputTokens := estimateCompactionSourceTokens(msgs)
-	rounds := 0
-	for _, m := range msgs {
-		if m.Role == "user" {
-			rounds++
-		}
-	}
-	if rounds == 0 && len(msgs) > 0 {
-		rounds = (len(msgs) + 1) / 2
-	}
-	return compactionSummaryTargetForSize(inputTokens, rounds, summaryMaxTokens, targetPercent)
-}
-
-func compactionSummaryTargetForSize(inputTokens, rounds, summaryMaxTokens, targetPercent int) int {
-	if summaryMaxTokens <= 0 {
-		return 0
-	}
-	if targetPercent < 5 || targetPercent > 80 {
-		targetPercent = defaultSummaryTargetPct
-	}
-	byInput := inputTokens * targetPercent / 100
-	perRound := summaryTargetPerRoundTokens
-	if perRound <= 0 {
-		perRound = defaultSummaryTargetPerRound
-	}
-	minimum := summaryTargetMinTokens
-	if minimum <= 0 {
-		minimum = defaultSummaryTargetMinTokens
-	}
-	byRounds := rounds * perRound
-	target := max(minimum, byInput, byRounds)
-	if target > summaryMaxTokens {
-		return summaryMaxTokens
-	}
-	return target
-}
-
 func estimateCompactionSourceTokens(msgs []store.Message) int {
 	var source strings.Builder
 	if appendCompactionSourceChecked(&source, msgs) != nil {
 		return 0
 	}
 	return estimateTokens(source.String())
-}
-
-// compactionSummaryOutputCap gives the model modest headroom above the requested
-// target so it can finish the last fact cleanly. The admin setting is still the
-// absolute ceiling sent upstream.
-func compactionSummaryOutputCap(target, summaryMaxTokens int) int {
-	if target <= 0 || summaryMaxTokens <= 0 {
-		return 0
-	}
-	if summaryTargetHeadroomNum <= 0 || summaryTargetHeadroomDen <= 0 {
-		return min(target, summaryMaxTokens)
-	}
-	cap := target * summaryTargetHeadroomNum / summaryTargetHeadroomDen
-	if cap < target {
-		cap = target
-	}
-	if cap > summaryMaxTokens {
-		cap = summaryMaxTokens
-	}
-	return cap
 }
 
 // terminalCompactionTaskError preserves errors that callers must be able to
@@ -921,7 +850,7 @@ func compactionSummaryBlockTokenLimit(db *sql.DB, extraParams json.RawMessage) i
 	maxOutputTokens := effectiveCompactionOutputCap(requestMaxTokens, defaultSummaryMaxTokens)
 	return compactionPayloadBudget(
 		requestMaxTokens, maxOutputTokens, compactionPrompt(db), compactionSummaryInstruction,
-		min(defaultSummaryTargetMinTokens, maxOutputTokens), extraParams,
+		extraParams,
 	)
 }
 
@@ -1126,12 +1055,11 @@ func contextTokens(kept []store.Message, pathBlocks []SummaryBlock, requestEstim
 // are coerced to safe defaults.
 //
 // summaryMaxTokens is the MaxOutputTokens ceiling for the TaskCompact call that
-// generates a NEW summary block (§settings.fields.sumTokens "摘要 token 预算").
-func compactionSettings(db *sql.DB) (keepRounds, tokenTrigger, tokenCap, tokenTargetPct, retentionPct, summaryMaxTokens, summaryTargetPct int) {
+// generates a NEW summary block (§settings.fields.sumTokens "摘要输出上限").
+func compactionSettings(db *sql.DB) (keepRounds, tokenTrigger, tokenCap, tokenTargetPct, retentionPct, summaryMaxTokens int) {
 	clampFloor := effectiveSummaryTokensClampFloor()
 	keepRounds, tokenTrigger, summaryMaxTokens = defaultKeepRounds, defaultTokenTrigger, defaultSummaryMaxTokens
 	tokenTargetPct, retentionPct = defaultCompactionTokenTargetPct, defaultRetentionPct
-	summaryTargetPct = defaultSummaryTargetPct
 	if raw, err := store.GetSetting(db, "keep_recent_rounds"); err == nil {
 		_ = json.Unmarshal(raw, &keepRounds)
 	}
@@ -1167,12 +1095,6 @@ func compactionSettings(db *sql.DB) (keepRounds, tokenTrigger, tokenCap, tokenTa
 	}
 	if summaryMaxTokens < clampFloor { // keep the generated summary useful
 		summaryMaxTokens = defaultSummaryMaxTokens
-	}
-	if raw, err := store.GetSetting(db, "summary_target_percent"); err == nil {
-		_ = json.Unmarshal(raw, &summaryTargetPct)
-	}
-	if summaryTargetPct < 5 || summaryTargetPct > 80 {
-		summaryTargetPct = defaultSummaryTargetPct
 	}
 	return
 }
@@ -1343,7 +1265,7 @@ func PlanCompaction(db *sql.DB, conv *store.Conversation, history []store.Messag
 	if !enabled {
 		return history, nil, compactNone
 	}
-	keepRounds, globalTrigger, tokenCap, _, retentionPct, _, _ := compactionSettings(db)
+	keepRounds, globalTrigger, tokenCap, _, retentionPct, _ := compactionSettings(db)
 	modelTrigger := 0
 	requestEstimateComplete := false
 	minimumRequestEstimate := 0
@@ -1604,7 +1526,9 @@ func maybeCompact(
 	// clamped: negative/zero values are nonsensical and coerced to safe defaults
 	// so a fat-fingered admin setting can't invert a guard or produce a useless
 	// (near-empty) summary.
-	keepRounds, globalTrigger, tokenCap, tokenTargetPct, retentionPct, summaryMaxTokens, summaryTargetPct := compactionSettings(db)
+	keepRounds, globalTrigger, tokenCap, tokenTargetPct, retentionPct, summaryMaxTokens := compactionSettings(db)
+	requestMaxTokens := compactionRequestMaxTokens(db)
+	summaryOutputLimit := summaryMaxTokens
 	modelTrigger := 0
 	requestEstimateComplete := false
 	if len(options) > 0 {
@@ -1775,22 +1699,16 @@ func maybeCompact(
 		// counted neither the existing summaries nor the newly generated summary here.
 		targetContextTokens := effectiveCompactionTokenTarget(tokenTrigger, tokenTargetPct)
 		suffix := make([]int, len(history)+1)
-		userPrefix := make([]int, len(history)+1)
-		for i := range history {
-			userPrefix[i+1] = userPrefix[i]
-			if history[i].Role == "user" {
-				userPrefix[i+1]++
-			}
-		}
 		for i := len(history) - 1; i >= 0; i-- {
 			suffix[i] = suffix[i+1] + estimateMsgTokens(history[i])
 		}
-		maxSourceTokens := estimateCompactionSourceTokens(history[frontier:maxCut])
-		maxSourceRounds := max(0, userPrefix[maxCut]-userPrefix[frontier])
-		projectedStateTarget := continuationSummaryTarget(
-			pathExisting, maxSourceTokens, maxSourceRounds, summaryMaxTokens, summaryTargetPct,
-		)
-		projectedStateReserve := compactionSummaryOutputCap(projectedStateTarget, summaryMaxTokens)
+		// Give the summary the remaining low-watermark budget after the newest
+		// protected round. This is a physical ceiling for this pass, not a summary
+		// target ratio: summary_max_tokens remains the administrator's hard maximum.
+		availableForSummary := targetContextTokens - overhead - suffix[maxCut]
+		availableForSummary = max(effectiveSummaryTokensClampFloor(), availableForSummary)
+		summaryOutputLimit = min(summaryOutputLimit, availableForSummary)
+		projectedStateReserve := effectiveCompactionOutputCap(requestMaxTokens, summaryOutputLimit)
 		projectedTotal := func(candidate int) int {
 			return overhead + projectedStateReserve + suffix[candidate]
 		}
@@ -1880,7 +1798,6 @@ func maybeCompact(
 	}
 
 	customPrompt := compactionPrompt(db)
-	requestMaxTokens := compactionRequestMaxTokens(db)
 	if compactionParamsErr != nil {
 		planFinished = true
 		task.logCompactionStage(ctx, conv.ID, "history_plan", "failed", planStarted,
@@ -1893,7 +1810,7 @@ func maybeCompact(
 	}
 	selection, selectionErr := selectCompactionPrefix(
 		pathExisting, desiredNewer, customPrompt, compactionExtraParams,
-		summaryMaxTokens, summaryTargetPct, requestMaxTokens,
+		summaryOutputLimit, requestMaxTokens,
 	)
 	if selectionErr != nil {
 		planFinished = true
@@ -1925,20 +1842,19 @@ func maybeCompact(
 	source := selection.source
 	task.logCompactionStage(ctx, conv.ID, "source_render", "completed", sourceStarted,
 		fmt.Sprintf(" source_tokens=%d", selection.sourceTokens))
-	targetTokens := selection.targetTokens
 	outputCap := selection.outputCap
 	task.logCompactionStage(ctx, conv.ID, "summary_config", "completed", time.Time{},
-		fmt.Sprintf(" source_tokens=%d source_rounds=%d target_tokens=%d max_output_tokens=%d request_max_tokens=%d payload_budget=%d selected_messages=%d remaining_messages=%d",
-			selection.sourceTokens, selection.newRounds, targetTokens, outputCap, requestMaxTokens,
+		fmt.Sprintf(" source_tokens=%d source_rounds=%d max_output_tokens=%d request_max_tokens=%d payload_budget=%d selected_messages=%d remaining_messages=%d",
+			selection.sourceTokens, selection.newRounds, outputCap, requestMaxTokens,
 			selection.payloadBudget, len(newer), len(desiredNewer)-len(newer)))
 	text := ""
 	var summaryErr error
 	if task == nil {
-		text = fallbackContinuationSummary(pathExisting, newer, min(targetTokens, outputCap))
+		text = fallbackContinuationSummary(pathExisting, newer, outputCap)
 	} else {
 		text, summaryErr = summarizeCompactionText(
 			ctx, task, conv, source, payerID, conversationModelID, customPrompt,
-			compactionSummaryInstruction, targetTokens, outputCap, requestMaxTokens,
+			compactionSummaryInstruction, outputCap, requestMaxTokens,
 		)
 	}
 	if terminalErr := terminalCompactionTaskError(ctx, summaryErr); terminalErr != nil {

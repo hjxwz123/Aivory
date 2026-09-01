@@ -29,6 +29,18 @@ var schemaPGSQL string
 // matching schema. Set once at startup; the server opens a single database.
 var usePostgres bool
 
+var retiredSettingKeys = map[string]struct{}{
+	"summary_target_percent":   {},
+	"summary_merge_max_tokens": {},
+}
+
+// IsRetiredSettingKey lets backup import/export discard settings that no
+// current runtime understands. Migrate also removes them from live databases.
+func IsRetiredSettingKey(key string) bool {
+	_, retired := retiredSettingKeys[strings.TrimSpace(key)]
+	return retired
+}
+
 // Postgres connection-pool tunables.
 var (
 	setMaxOpenConns    = 20
@@ -453,6 +465,9 @@ func Migrate(db *sql.DB) error {
 	}
 	if _, err := db.Exec(schema); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
+	}
+	if _, err := db.Exec(`DELETE FROM settings WHERE key IN ('summary_target_percent','summary_merge_max_tokens')`); err != nil {
+		return fmt.Errorf("remove retired compaction settings: %w", err)
 	}
 	// Best-effort additive migrations for existing databases — CREATE TABLE
 	// IF NOT EXISTS won't add columns to a pre-existing table. On SQLite a
@@ -1134,8 +1149,6 @@ func Seed(db *sql.DB, cfg config.Config) error {
 		"credit_preflight_enabled":           `true`,
 		"keep_recent_rounds":                 `6`,
 		"summary_max_tokens":                 `8192`,
-		"summary_target_percent":             `30`,
-		"summary_merge_max_tokens":           `8192`,
 		"compaction_request_max_tokens":      `32768`,
 		"context_compaction_prompt":          `""`,
 		"compaction_token_trigger":           `32000`,
