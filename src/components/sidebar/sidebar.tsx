@@ -26,6 +26,7 @@ import {
   CircleHelp,
   FileText,
   UserRound,
+  Download,
 } from 'lucide-react'
 import { Logo, LogoMark } from '@/components/brand/logo'
 import { useWorkspaces } from '@/store/workspaces'
@@ -84,6 +85,7 @@ import { userCan } from '@/lib/user-permissions'
 import { workspaceCapabilitiesForScope } from '@/lib/workspace-permissions'
 import { type DateBucket, bucketFor, modKey, cn, truncate } from '@/lib/utils'
 import { toast } from '@/hooks/use-toast'
+import { exportConversation } from '@/lib/conversation-export'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import type { Conversation } from '@/types/chat'
@@ -999,6 +1001,7 @@ function ConversationItem({
   const user = useAuth((s) => s.user)
   const meId = user?.id
   const canShare = userCan(user, 'allow_sharing')
+  const canExportConversations = userCan(user, 'allow_conversation_export')
   const conversationWorkspace = useWorkspaces((s) =>
     conversation.workspaceId
       ? s.workspaces.find((workspace) => workspace.id === conversation.workspaceId)
@@ -1017,6 +1020,7 @@ function ConversationItem({
   const [renaming, setRenaming] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [confirm, setConfirm] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const displayTitle = `${conversation.starred ? '☆ ' : ''}${conversation.title || t('untitled')}`
   const streaming = isConversationStreaming(conversation)
 
@@ -1029,6 +1033,19 @@ function ConversationItem({
     }
     if (!canDeleteConversations) setConfirm(false)
   }, [canManageConversation, canDeleteConversations])
+
+  async function handleExport() {
+    if (exporting || !canExportConversations) return
+    setExporting(true)
+    try {
+      await exportConversation(conversation.id)
+      toast.success(t('sidebar.exported'))
+    } catch (error) {
+      toast.error(t('sidebar.exportFailed'), error instanceof Error ? error.message : undefined)
+    } finally {
+      setExporting(false)
+    }
+  }
 
   return (
     // data-conversation-id lets the sidebar scroll the active row into view when
@@ -1125,6 +1142,12 @@ function ConversationItem({
                 <DropdownMenuItem onClick={() => setShareOpen(true)}>
                   <Share2 size={13} aria-hidden />
                   {t('sidebar.share')}
+                </DropdownMenuItem>
+              ) : null}
+              {canExportConversations ? (
+                <DropdownMenuItem disabled={exporting} onClick={() => void handleExport()}>
+                  <Download size={13} aria-hidden />
+                  {exporting ? t('sidebar.exporting') : t('sidebar.export')}
                 </DropdownMenuItem>
               ) : null}
               {canManageConversation ? (
