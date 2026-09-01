@@ -766,13 +766,14 @@ func prepareResponsesReplayItems(items []map[string]any) []map[string]any {
 	return prepared
 }
 
-// Responses-compatible gateways do not all accept the full native output
-// metadata emitted by another gateway. Normalize only on the compatibility
-// retry path: the first request keeps native items intact for providers that
-// support them, while strict gateways get portable IDs and input-safe fields.
-func normalizeResponsesReplayItem(item map[string]any) map[string]any {
+// response output_text logprobs are observation metadata, not continuation
+// state. Some compatible gateways return them but reject the same field when
+// their output message is replayed as input, including later tool rounds in the
+// very first user turn. Strip them before every replay instead of spending an
+// upstream request on a predictable schema error.
+func stripResponsesReplayLogprobsItem(item map[string]any) (map[string]any, bool) {
 	if len(item) == 0 {
-		return item
+		return item, false
 	}
 	clone := item
 	changed := false
@@ -785,21 +786,6 @@ func normalizeResponsesReplayItem(item map[string]any) map[string]any {
 			clone[key] = value
 		}
 		changed = true
-	}
-
-	itemType, _ := item["type"].(string)
-	if prefix := responsesReplayIDPrefix(itemType); prefix != "" {
-		if id, _ := item["id"].(string); id != "" && !strings.HasPrefix(id, prefix) {
-			cloneForChange()
-			clone["id"] = prefix + id
-		}
-	}
-
-	// `phase` is useful response metadata, but several OpenAI-compatible
-	// gateways reject it when a prior output message is replayed as input.
-	if _, exists := item["phase"]; exists {
-		cloneForChange()
-		delete(clone, "phase")
 	}
 	if _, exists := item["logprobs"]; exists {
 		cloneForChange()
@@ -830,6 +816,58 @@ func normalizeResponsesReplayItem(item map[string]any) map[string]any {
 			cloneForChange()
 			clone["content"] = normalized
 		}
+	}
+	return clone, changed
+}
+
+func stripResponsesReplayLogprobsInput(input []map[string]any) ([]map[string]any, bool) {
+	if len(input) == 0 {
+		return input, false
+	}
+	stripped := make([]map[string]any, len(input))
+	changed := false
+	for i, item := range input {
+		var itemChanged bool
+		stripped[i], itemChanged = stripResponsesReplayLogprobsItem(item)
+		changed = changed || itemChanged
+	}
+	if !changed {
+		return input, false
+	}
+	return stripped, true
+}
+
+// Responses-compatible gateways do not all accept the full native output
+// metadata emitted by another gateway. Normalize only on the compatibility
+// retry path: successful native channels keep provider-specific IDs intact,
+// while strict gateways get portable IDs and input-safe fields.
+func normalizeResponsesReplayItem(item map[string]any) map[string]any {
+	clone, changed := stripResponsesReplayLogprobsItem(item)
+	cloneForChange := func() {
+		if changed {
+			return
+		}
+		copied := make(map[string]any, len(clone)+1)
+		for key, value := range clone {
+			copied[key] = value
+		}
+		clone = copied
+		changed = true
+	}
+
+	itemType, _ := clone["type"].(string)
+	if prefix := responsesReplayIDPrefix(itemType); prefix != "" {
+		if id, _ := clone["id"].(string); id != "" && !strings.HasPrefix(id, prefix) {
+			cloneForChange()
+			clone["id"] = prefix + id
+		}
+	}
+
+	// `phase` is useful response metadata, but several OpenAI-compatible
+	// gateways reject it when a prior output message is replayed as input.
+	if _, exists := clone["phase"]; exists {
+		cloneForChange()
+		delete(clone, "phase")
 	}
 	return clone
 }
@@ -1512,6 +1550,10 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 			roundModel.Fallback = nil
 		}
 		requestInput := input
+		if stripped, changed := stripResponsesReplayLogprobsInput(requestInput); changed {
+			requestInput = stripped
+			input = stripped
+		}
 		body := map[string]any{
 			"model": req.Model.RequestID,
 			"input": requestInput,
