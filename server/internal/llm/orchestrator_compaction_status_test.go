@@ -537,7 +537,7 @@ func TestAutomaticAsyncCompactionFailsIfActiveBranchChangesDuringSummary(t *test
 	}
 }
 
-func TestAutomaticAsyncCompactionSkipsAfterModelConfigChanges(t *testing.T) {
+func TestAutomaticAsyncCompactionUsesLatestModelConfig(t *testing.T) {
 	q := &compactionStatusQueue{}
 	orchestrator, provider, conv, model, db := automaticCompactionStatusFixture(t, 10, q)
 	var statuses []automaticCompactionStatus
@@ -550,28 +550,29 @@ func TestAutomaticAsyncCompactionSkipsAfterModelConfigChanges(t *testing.T) {
 	}
 
 	// Keep the same model and channel IDs but change the request contract while
-	// the job is waiting. The worker must discard its old projection before it
-	// calls the summary model or emits a misleading lifecycle event.
+	// the job is waiting. The worker resolves the current model at execution time
+	// and uses that configuration for the summary request.
 	if _, err := db.Exec(`UPDATE models SET extra_params=? WHERE id=?`,
 		`{"temperature":0.1}`, model.ID); err != nil {
 		t.Fatalf("change queued model config: %v", err)
 	}
 	if err := q.jobs[0](context.Background()); err != nil {
-		t.Fatalf("stale config job: %v", err)
+		t.Fatalf("latest config job: %v", err)
 	}
-	if len(statuses) != 0 || provider.summaryCalls != 0 {
-		t.Fatalf("stale config job notified/called summary: statuses=%v calls=%d", statuses, provider.summaryCalls)
+	assertCompactionStatusPair(t, statuses, "completed")
+	if provider.summaryCalls == 0 {
+		t.Fatal("latest config job did not call the summary model")
 	}
 	var raw string
 	if err := db.QueryRow(`SELECT COALESCE(summary_blocks,'[]') FROM conversations WHERE id=?`, conv.ID).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
-	if blocks := LoadSummaryBlocks(json.RawMessage(raw)); len(blocks) != 0 {
-		t.Fatalf("stale config job persisted summary blocks: %+v", blocks)
+	if blocks := LoadSummaryBlocks(json.RawMessage(raw)); len(blocks) == 0 {
+		t.Fatal("latest config job did not persist summary blocks")
 	}
 }
 
-func TestAutomaticAsyncCompactionSkipsAfterSummaryCandidateConfigChanges(t *testing.T) {
+func TestAutomaticAsyncCompactionUsesLatestSummaryCandidateConfig(t *testing.T) {
 	tests := []struct {
 		name   string
 		mutate func(t *testing.T, db *sql.DB, taskModelID string)
@@ -630,17 +631,18 @@ func TestAutomaticAsyncCompactionSkipsAfterSummaryCandidateConfigChanges(t *test
 			tt.mutate(t, db, taskModelID)
 
 			if err := q.jobs[0](context.Background()); err != nil {
-				t.Fatalf("stale summary candidate job: %v", err)
+				t.Fatalf("latest summary candidate job: %v", err)
 			}
-			if len(statuses) != 0 || provider.summaryCalls != 0 {
-				t.Fatalf("stale candidate job notified/called summary: statuses=%v calls=%d", statuses, provider.summaryCalls)
+			assertCompactionStatusPair(t, statuses, "completed")
+			if provider.summaryCalls == 0 {
+				t.Fatal("latest candidate job did not call the summary model")
 			}
 			var raw string
 			if err := db.QueryRow(`SELECT COALESCE(summary_blocks,'[]') FROM conversations WHERE id=?`, conv.ID).Scan(&raw); err != nil {
 				t.Fatal(err)
 			}
-			if blocks := LoadSummaryBlocks(json.RawMessage(raw)); len(blocks) != 0 {
-				t.Fatalf("stale candidate job persisted summary blocks: %+v", blocks)
+			if blocks := LoadSummaryBlocks(json.RawMessage(raw)); len(blocks) == 0 {
+				t.Fatal("latest candidate job did not persist summary blocks")
 			}
 		})
 	}
@@ -726,9 +728,6 @@ func TestAutomaticAsyncCompactionUsesPrimaryWhenSummaryFallbackIsMissing(t *test
 	if len(q.jobs) != 1 {
 		t.Fatalf("queued jobs = %d, want one asynchronous compaction", len(q.jobs))
 	}
-	if fingerprint := compactionRuntimeFingerprint(ctx, db, model.ID); fingerprint == "" {
-		t.Fatal("stale fallback made the compaction fingerprint unusable")
-	}
 	if err := q.jobs[0](ctx); err != nil {
 		t.Fatalf("stale fallback async compaction: %v", err)
 	}
@@ -738,7 +737,7 @@ func TestAutomaticAsyncCompactionUsesPrimaryWhenSummaryFallbackIsMissing(t *test
 	}
 }
 
-func TestAutomaticAsyncCompactionSkipsAfterMissingSummaryFallbackBindingChanges(t *testing.T) {
+func TestAutomaticAsyncCompactionUsesLatestMissingSummaryFallbackBinding(t *testing.T) {
 	q := &compactionStatusQueue{}
 	orchestrator, provider, conv, model, db := automaticCompactionStatusFixture(t, 10, q)
 	ctx := context.Background()
@@ -749,11 +748,6 @@ func TestAutomaticAsyncCompactionSkipsAfterMissingSummaryFallbackBindingChanges(
 	if _, err := db.Exec(`UPDATE models SET fallback_channel_id=? WHERE id=?`, "missing-fallback-a", taskModelID); err != nil {
 		t.Fatal(err)
 	}
-	queuedFingerprint := compactionRuntimeFingerprint(ctx, db, model.ID)
-	if queuedFingerprint == "" {
-		t.Fatal("initial missing summary fallback made the compaction fingerprint unusable")
-	}
-
 	var statuses []automaticCompactionStatus
 	orchestrator.SetCompactionStatusHandler(func(_, _, operationID, status string) {
 		statuses = append(statuses, automaticCompactionStatus{operationID: operationID, status: status})
@@ -765,26 +759,19 @@ func TestAutomaticAsyncCompactionSkipsAfterMissingSummaryFallbackBindingChanges(
 	if _, err := db.Exec(`UPDATE models SET fallback_channel_id=? WHERE id=?`, "missing-fallback-b", taskModelID); err != nil {
 		t.Fatal(err)
 	}
-	currentFingerprint := compactionRuntimeFingerprint(ctx, db, model.ID)
-	if currentFingerprint == "" {
-		t.Fatal("updated missing summary fallback made the compaction fingerprint unusable")
-	}
-	if currentFingerprint == queuedFingerprint {
-		t.Fatal("changing a missing fallback binding did not change the compaction fingerprint")
-	}
-
 	if err := q.jobs[0](ctx); err != nil {
-		t.Fatalf("stale missing-fallback job: %v", err)
+		t.Fatalf("latest missing-fallback job: %v", err)
 	}
-	if len(statuses) != 0 || provider.summaryCalls != 0 {
-		t.Fatalf("stale missing-fallback job notified/called summary: statuses=%v calls=%d", statuses, provider.summaryCalls)
+	assertCompactionStatusPair(t, statuses, "completed")
+	if provider.summaryCalls == 0 {
+		t.Fatal("latest missing-fallback job did not call the summary model")
 	}
 	var raw string
 	if err := db.QueryRow(`SELECT COALESCE(summary_blocks,'[]') FROM conversations WHERE id=?`, conv.ID).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
-	if blocks := LoadSummaryBlocks(json.RawMessage(raw)); len(blocks) != 0 {
-		t.Fatalf("stale missing-fallback job persisted summary blocks: %+v", blocks)
+	if blocks := LoadSummaryBlocks(json.RawMessage(raw)); len(blocks) == 0 {
+		t.Fatal("latest missing-fallback job did not persist summary blocks")
 	}
 }
 

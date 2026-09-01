@@ -4,8 +4,7 @@
 //   - Keep the configured recent rounds verbatim.
 //   - Replace each active branch's prior continuation state plus newly old events
 //     with one anchored continuation state.
-//   - Retain superseded state only when a sibling branch still needs it; fold
-//     legacy multi-block state in a separate maintenance operation.
+//   - Retain superseded state only when a sibling branch still needs it.
 //   - Change only what is sent to the model; the messages table retains the full
 //     original conversation.
 //   - Use distinct token high/low watermarks so normal follow-ups do not compact
@@ -38,15 +37,14 @@ import (
 // summary_max_tokens (admin, §settings.fields.sumTokens "摘要 token 预算") is the
 // MaxOutputTokens cap for the actual TaskCompact summary-generation call — the
 // knob that controls how detailed/long a freshly-generated summary can be.
-// defaultSummaryMergeBudget is a SEPARATE knob: the total accumulated-summary
-// threshold that decides when older blocks get folded together. Administrators
-// may override it with summary_merge_max_tokens.
+// Summary blocks are replaced incrementally. The legacy
+// summary_merge_max_tokens setting remains in storage for older databases but
+// is no longer used by the compaction algorithm.
 const (
-	defaultKeepRounds         = 6
-	defaultSummaryMaxTokens   = 8192
-	defaultSummaryMergeBudget = 8192
-	defaultSummaryTargetPct   = 30
-	defaultTokenTrigger       = 32000
+	defaultKeepRounds       = 6
+	defaultSummaryMaxTokens = 8192
+	defaultSummaryTargetPct = 30
+	defaultTokenTrigger     = 32000
 	// The trigger is the high watermark. Automatic token-pressure compaction aims
 	// materially below it so one ordinary follow-up turn cannot immediately cross
 	// the same threshold again. 60% of a trigger commonly configured near 80% of a
@@ -78,12 +76,7 @@ const (
 	// Round-triggered compaction is maintenance, not an every-turn operation.
 	// Several complete rounds must accumulate between the low and high watermarks;
 	// token pressure can still bypass this cadence immediately.
-	defaultCompactionBatchRounds = 4
-	// A summary fold must be materially smaller than the blocks it replaces.
-	// The old oldTokens-1 target allowed a 7k-token summary to become another
-	// 7k-token summary and then be folded repeatedly in one operation.
-	defaultSummaryMergeTargetPercent   = 50
-	defaultSummaryMergeMaxPercent      = 60
+	defaultCompactionBatchRounds       = 4
 	compactionPersistenceVerifyTimeout = 5 * time.Second
 	// The API permits one detached generation to run for 90 minutes by default.
 	// Keep compaction's streaming-row protection comfortably above that ceiling;
@@ -373,7 +366,7 @@ func compactionPrompt(db *sql.DB) string {
 	// Settings validation cannot protect databases restored from an older backup
 	// (or edited directly), which may still contain a multi-megabyte prompt.
 	// Every summary path calls this helper, so clipping here protects initial
-	// summaries, short-summary retries, and summary-block merges alike.
+	// initial summaries and incremental replacement summaries alike.
 	return clipToTokens(strings.TrimSpace(prompt), defaultCompactionPromptTokens)
 }
 
@@ -890,7 +883,7 @@ func LoadSummaryBlocks(raw json.RawMessage) []SummaryBlock {
 			block.Level = 1
 		}
 		// Tokens is derived data. Recalculate it so a legacy/imported row cannot
-		// bypass context and merge budgets with a forged tiny or negative value.
+		// bypass context budgets with a forged tiny or negative value.
 		block.Tokens = estimateTokens(block.Text)
 		normalized = append(normalized, block)
 	}
@@ -919,7 +912,7 @@ func loadSummaryBlocksForRequestWithExtraParams(db *sql.DB, raw, extraParams jso
 }
 
 // compactionSummaryBlockTokenLimit resolves every setting needed to decide
-// whether one persisted block can fit in a bounded merge request. Callers that
+// whether one persisted block can fit in a bounded summary request. Callers that
 // will open a write transaction must take this snapshot first: GetSetting is
 // backed by a short-lived cache and may otherwise try to acquire *sql.DB's only
 // SQLite connection while that transaction already owns it.
@@ -927,7 +920,7 @@ func compactionSummaryBlockTokenLimit(db *sql.DB, extraParams json.RawMessage) i
 	requestMaxTokens := compactionRequestMaxTokens(db)
 	maxOutputTokens := effectiveCompactionOutputCap(requestMaxTokens, defaultSummaryMaxTokens)
 	return compactionPayloadBudget(
-		requestMaxTokens, maxOutputTokens, compactionPrompt(db), compactionMergeInstruction,
+		requestMaxTokens, maxOutputTokens, compactionPrompt(db), compactionSummaryInstruction,
 		min(defaultSummaryTargetMinTokens, maxOutputTokens), extraParams,
 	)
 }
@@ -1133,14 +1126,12 @@ func contextTokens(kept []store.Message, pathBlocks []SummaryBlock, requestEstim
 // are coerced to safe defaults.
 //
 // summaryMaxTokens is the MaxOutputTokens ceiling for the TaskCompact call that
-// generates a NEW summary block (§settings.fields.sumTokens "摘要 token 预算") —
-// it does not affect the separate summaryMergeBudget that decides when
-// accumulated summary blocks get folded together.
-func compactionSettings(db *sql.DB) (keepRounds, tokenTrigger, tokenCap, tokenTargetPct, retentionPct, summaryMaxTokens, summaryTargetPct, summaryMergeBudget int) {
+// generates a NEW summary block (§settings.fields.sumTokens "摘要 token 预算").
+func compactionSettings(db *sql.DB) (keepRounds, tokenTrigger, tokenCap, tokenTargetPct, retentionPct, summaryMaxTokens, summaryTargetPct int) {
 	clampFloor := effectiveSummaryTokensClampFloor()
 	keepRounds, tokenTrigger, summaryMaxTokens = defaultKeepRounds, defaultTokenTrigger, defaultSummaryMaxTokens
 	tokenTargetPct, retentionPct = defaultCompactionTokenTargetPct, defaultRetentionPct
-	summaryTargetPct, summaryMergeBudget = defaultSummaryTargetPct, defaultSummaryMergeBudget
+	summaryTargetPct = defaultSummaryTargetPct
 	if raw, err := store.GetSetting(db, "keep_recent_rounds"); err == nil {
 		_ = json.Unmarshal(raw, &keepRounds)
 	}
@@ -1174,7 +1165,7 @@ func compactionSettings(db *sql.DB) (keepRounds, tokenTrigger, tokenCap, tokenTa
 	if raw, err := store.GetSetting(db, "summary_max_tokens"); err == nil {
 		_ = json.Unmarshal(raw, &summaryMaxTokens)
 	}
-	if summaryMaxTokens < clampFloor { // floor so the tiered-merge budget stays sane
+	if summaryMaxTokens < clampFloor { // keep the generated summary useful
 		summaryMaxTokens = defaultSummaryMaxTokens
 	}
 	if raw, err := store.GetSetting(db, "summary_target_percent"); err == nil {
@@ -1182,12 +1173,6 @@ func compactionSettings(db *sql.DB) (keepRounds, tokenTrigger, tokenCap, tokenTa
 	}
 	if summaryTargetPct < 5 || summaryTargetPct > 80 {
 		summaryTargetPct = defaultSummaryTargetPct
-	}
-	if raw, err := store.GetSetting(db, "summary_merge_max_tokens"); err == nil {
-		_ = json.Unmarshal(raw, &summaryMergeBudget)
-	}
-	if summaryMergeBudget < clampFloor {
-		summaryMergeBudget = max(defaultSummaryMergeBudget, summaryMaxTokens)
 	}
 	return
 }
@@ -1358,7 +1343,7 @@ func PlanCompaction(db *sql.DB, conv *store.Conversation, history []store.Messag
 	if !enabled {
 		return history, nil, compactNone
 	}
-	keepRounds, globalTrigger, tokenCap, _, retentionPct, _, _, summaryMergeBudget := compactionSettings(db)
+	keepRounds, globalTrigger, tokenCap, _, retentionPct, _, _ := compactionSettings(db)
 	modelTrigger := 0
 	requestEstimateComplete := false
 	minimumRequestEstimate := 0
@@ -1389,16 +1374,10 @@ func PlanCompaction(db *sql.DB, conv *store.Conversation, history []store.Messag
 		tokenOverflow = false
 	}
 	roundOverflow := compactionRoundOverflow(tail, keepMsgs)
-	summaryOverflow := len(pathExisting) > 1 && summaryTokens(pathExisting) > summaryMergeBudget
 	overflow := roundOverflow || tokenOverflow
 	switch {
-	case !overflow && !summaryOverflow:
+	case !overflow:
 		return keep, pathExisting, compactNone
-	case !overflow && summaryOverflow:
-		// Legacy/multi-branch state can leave several connected blocks over budget.
-		// Fold them in their own maintenance operation; a pass that also advances raw
-		// history always spends its single summary pipeline on the newer evidence.
-		return keep, pathExisting, compactAsync
 	case !automaticCompactionHasCandidate(history, frontier, keepMsgs, tokenOverflow):
 		// No safe historical prefix can advance the frontier: every round is still
 		// inside the verbatim retention window or protected by an in-flight assistant
@@ -1625,7 +1604,7 @@ func maybeCompact(
 	// clamped: negative/zero values are nonsensical and coerced to safe defaults
 	// so a fat-fingered admin setting can't invert a guard or produce a useless
 	// (near-empty) summary.
-	keepRounds, globalTrigger, tokenCap, tokenTargetPct, retentionPct, summaryMaxTokens, summaryTargetPct, summaryMergeBudget := compactionSettings(db)
+	keepRounds, globalTrigger, tokenCap, tokenTargetPct, retentionPct, summaryMaxTokens, summaryTargetPct := compactionSettings(db)
 	modelTrigger := 0
 	requestEstimateComplete := false
 	if len(options) > 0 {
@@ -1700,14 +1679,6 @@ func maybeCompact(
 	keepMsgs := keepTailMsgs
 	ctxTok, exact, tokenSource := contextTokens(history[frontier:], pathExisting, requestEstimate, requestEstimateComplete)
 	if !manual && tailCount <= keepTailMsgs && (tokenTrigger <= 0 || ctxTok <= tokenTrigger) {
-		if len(pathExisting) > 1 && summaryTokens(pathExisting) > summaryMergeBudget {
-			merged, _, mergeErr := mergeAndPersist(ctx, db, task, conv, payerID, conversationModelID, history, summaryMergeBudget)
-			if mergeErr != nil {
-				return initialKeep, pathExisting, mergeErr
-			}
-			mergedPath := filterBlocksForPath(merged, history)
-			return history[summarizedFrontier(mergedPath, history):], mergedPath, nil
-		}
 		// The existing summary still replaces its covered prefix even when this
 		// pass has nothing new to roll up. Returning the full history here would
 		// inject both the summary and its original messages on an inline caller.
@@ -1901,9 +1872,9 @@ func maybeCompact(
 			return history[keepFrom:], curPath, nil
 		}
 		if !reflect.DeepEqual(curPath, pathExisting) {
-			// Replacement summaries incorporate the prior continuation state. A fold or
-			// branch repair that rewrote that state without advancing the frontier makes
-			// this snapshot stale even though its message range is unchanged.
+			// Replacement summaries incorporate the prior continuation state. A branch
+			// repair that rewrote that state without advancing the frontier makes this
+			// snapshot stale even though its message range is unchanged.
 			return history[currentFrontier:], curPath, nil
 		}
 	}

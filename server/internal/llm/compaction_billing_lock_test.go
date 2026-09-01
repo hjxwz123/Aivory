@@ -26,13 +26,13 @@ type blockingCompactionProvider struct {
 	once    sync.Once
 }
 
-type appendThenCancelMergeProvider struct {
+type singleRequestCompactionProvider struct {
 	hits atomic.Int32
 }
 
-func (p *appendThenCancelMergeProvider) ID() string { return "openai" }
+func (p *singleRequestCompactionProvider) ID() string { return "openai" }
 
-func (p *appendThenCancelMergeProvider) Stream(
+func (p *singleRequestCompactionProvider) Stream(
 	_ context.Context,
 	_ UnifiedChatRequest,
 	_ ToolRunner,
@@ -404,7 +404,7 @@ func TestManualCompactionReportsPersistenceFailure(t *testing.T) {
 }
 
 func TestManualCompactionUsesOneReplacementPipeline(t *testing.T) {
-	provider := &appendThenCancelMergeProvider{}
+	provider := &singleRequestCompactionProvider{}
 	orchestrator, _, conv, db := compactionBillingFixture(t, provider)
 	history, err := store.ListMessages(context.Background(), db, conv.ID, conv.ActiveLeafID)
 	if err != nil {
@@ -432,7 +432,7 @@ func TestManualCompactionUsesOneReplacementPipeline(t *testing.T) {
 
 	result, err := orchestrator.CompactConversation(context.Background(), conv.UserID, conv.ID)
 	if err != nil {
-		t.Fatalf("optional merge reversed successful append: result=%+v err=%v", result, err)
+		t.Fatalf("replacement compaction failed: result=%+v err=%v", result, err)
 	}
 	if !result.Compacted || result.Reason != "compacted" || result.DroppedMessages != 2 {
 		t.Fatalf("manual compaction result=%+v, want successful two-message advance", result)

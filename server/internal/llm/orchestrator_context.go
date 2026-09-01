@@ -93,6 +93,27 @@ func storeToUnified(msgs []store.Message, currentProvider, currentModelID string
 	return out
 }
 
+// cloneUnifiedMessages makes a request-local copy before context injections
+// mutate message blocks. Compaction planning reuses cached history projections;
+// sharing their backing arrays with the final request would let RAG/summary
+// injection pollute the cached estimate and force another full reconstruction.
+func cloneUnifiedMessages(msgs []UnifiedMessage) []UnifiedMessage {
+	if len(msgs) == 0 {
+		return nil
+	}
+	out := make([]UnifiedMessage, len(msgs))
+	for i, message := range msgs {
+		out[i] = message
+		out[i].Blocks = make([]UnifiedBlock, len(message.Blocks))
+		for j, block := range message.Blocks {
+			out[i].Blocks[j] = cloneUnifiedBlock(block)
+		}
+		out[i].Attachments = append([]Attachment(nil), message.Attachments...)
+		out[i].Raw = append(json.RawMessage(nil), message.Raw...)
+	}
+	return out
+}
+
 const assistantFailureHistoryText = "[The previous assistant response failed before producing output.]"
 
 // ensureAssistantFailureBlocks preserves partial/provider output, but gives a
