@@ -150,6 +150,47 @@ func TestNormalizeResponsesReplayInputForStrictGateways(t *testing.T) {
 	}
 }
 
+func TestStripResponsesReplayLogprobsInputBeforeFirstRequest(t *testing.T) {
+	input := []map[string]any{
+		{
+			"id":     "message-uuid",
+			"type":   "message",
+			"role":   "assistant",
+			"status": "completed",
+			"content": []any{map[string]any{
+				"type": "output_text", "text": "answer", "annotations": []any{}, "logprobs": []any{},
+			}},
+		},
+		{
+			"id":                "reasoning-uuid",
+			"type":              "reasoning",
+			"content":           []any{map[string]any{"type": "reasoning_text", "text": "inspect"}},
+			"encrypted_content": "ciphertext",
+		},
+	}
+
+	stripped, changed := stripResponsesReplayLogprobsInput(input)
+	if !changed {
+		t.Fatal("logprobs stripping did not report a change")
+	}
+	content, _ := jsonArrayItems(stripped[0]["content"])
+	part, _ := content[0].(map[string]any)
+	if _, exists := part["logprobs"]; exists {
+		t.Fatalf("content logprobs survived stripping: %#v", part)
+	}
+	if stripped[0]["id"] != "message-uuid" {
+		t.Fatalf("proactive stripping changed provider item id: %#v", stripped[0])
+	}
+	if stripped[1]["encrypted_content"] != "ciphertext" {
+		t.Fatalf("proactive stripping changed reasoning state: %#v", stripped[1])
+	}
+	originalContent, _ := jsonArrayItems(input[0]["content"])
+	originalPart, _ := originalContent[0].(map[string]any)
+	if _, exists := originalPart["logprobs"]; !exists {
+		t.Fatalf("stripping mutated the captured provider output: %#v", originalPart)
+	}
+}
+
 func TestResponsesReplayCompatibilityError(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -180,6 +221,23 @@ func TestOpenAIResponsesRetriesWithNormalizedReplayInput(t *testing.T) {
 		}
 		requests = append(requests, captured)
 		if len(requests) == 1 {
+			input, _ := captured["input"].([]any)
+			if len(input) != 4 {
+				t.Errorf("initial input length = %d, want 4: %#v", len(input), captured["input"])
+			}
+			message, _ := input[2].(map[string]any)
+			if message["id"] != "message-uuid" {
+				t.Errorf("proactive stripping changed provider item id: %#v", message)
+			}
+			content, _ := jsonArrayItems(message["content"])
+			part, _ := content[0].(map[string]any)
+			if _, exists := part["logprobs"]; exists {
+				t.Errorf("initial outbound request retained output logprobs: %#v", part)
+			}
+			reasoning, _ := input[1].(map[string]any)
+			if reasoning["encrypted_content"] != "ciphertext" {
+				t.Errorf("initial outbound request changed reasoning state: %#v", reasoning)
+			}
 			w.Header().Set("content-type", "text/event-stream")
 			_, _ = io.WriteString(w, `data: {"code":"InvalidParameter","message":"Invalid 'id': message id must be a string starting with 'msg_', got 'message-uuid'."}`+"\n\n")
 			return
