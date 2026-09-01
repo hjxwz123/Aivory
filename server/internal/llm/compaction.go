@@ -1640,7 +1640,34 @@ func maybeCompact(
 	manual bool,
 	expectedActivePathMessageID string,
 	options ...int,
-) ([]store.Message, []SummaryBlock, error) {
+) (resultHistory []store.Message, resultBlocks []SummaryBlock, returnErr error) {
+	pipelineStarted := time.Now()
+	task.logCompactionStage(ctx, conv.ID, "pipeline", "started", time.Time{},
+		fmt.Sprintf(" manual=%t history_messages=%d request_tokens=%d", manual, len(history), requestEstimate))
+	defer func() {
+		status := "completed"
+		if returnErr != nil {
+			status = "failed"
+		}
+		task.logCompactionStage(context.WithoutCancel(ctx), conv.ID, "pipeline", status, pipelineStarted,
+			fmt.Sprintf(" manual=%t kept_messages=%d summary_blocks=%d summary_tokens=%d error_kind=%q",
+				manual, len(resultHistory), len(resultBlocks), summaryTokens(resultBlocks), compactionErrorKind(returnErr)))
+	}()
+	planStarted := time.Now()
+	planFinished := false
+	task.logCompactionStage(ctx, conv.ID, "history_plan", "started", time.Time{},
+		fmt.Sprintf(" manual=%t history_messages=%d", manual, len(history)))
+	defer func() {
+		if planFinished {
+			return
+		}
+		status := "skipped"
+		if returnErr != nil {
+			status = "failed"
+		}
+		task.logCompactionStage(context.WithoutCancel(ctx), conv.ID, "history_plan", status, planStarted,
+			fmt.Sprintf(" error_kind=%q", compactionErrorKind(returnErr)))
+	}()
 	// Read settings.
 	enabled := true
 	if raw, err := store.GetSetting(db, "compaction_enabled"); err == nil {
@@ -1909,6 +1936,10 @@ func maybeCompact(
 	if len(newer) == 0 {
 		return keep, pathExisting, nil
 	}
+	planFinished = true
+	task.logCompactionStage(ctx, conv.ID, "history_plan", "completed", planStarted,
+		fmt.Sprintf(" frontier=%d cut=%d source_messages=%d kept_messages=%d context_tokens=%d token_trigger=%d token_source=%d",
+			frontier, cut, len(newer), len(keep), ctxTok, tokenTrigger, tokenSource))
 
 	// Cheap pre-check before the (expensive) task-model summary: if a concurrent
 	// turn already summarised a range covering where our new block would START,
@@ -1938,14 +1969,21 @@ func maybeCompact(
 	// sibling branches, but filterBlocksForPath renders only this containing block
 	// on the active path. A normal compaction therefore needs one summary pipeline,
 	// not an append followed immediately by a second model-powered fold.
+	sourceStarted := time.Now()
+	task.logCompactionStage(ctx, conv.ID, "source_render", "started", time.Time{},
+		fmt.Sprintf(" prior_blocks=%d source_messages=%d", len(pathExisting), len(newer)))
 	source, sourceErr := renderContinuationSummarySource(pathExisting, newer)
 	if sourceErr != nil {
+		task.logCompactionStage(ctx, conv.ID, "source_render", "failed", sourceStarted,
+			fmt.Sprintf(" error_kind=%q", compactionErrorKind(sourceErr)))
 		if manual {
 			return history, pathExisting, ErrCompactionFailed
 		}
 		fallbackKeep, fallbackBlocks := automaticFallback()
 		return fallbackKeep, fallbackBlocks, nil
 	}
+	task.logCompactionStage(ctx, conv.ID, "source_render", "completed", sourceStarted,
+		fmt.Sprintf(" source_tokens=%d", estimateTokens(source)))
 	newRounds := 0
 	for _, message := range newer {
 		if message.Role == "user" {
@@ -1954,6 +1992,10 @@ func maybeCompact(
 	}
 	targetTokens := continuationSummaryTarget(pathExisting, estimateCompactionSourceTokens(newer), newRounds, summaryMaxTokens, summaryTargetPct)
 	outputCap := compactionSummaryOutputCap(targetTokens, summaryMaxTokens)
+	requestMaxTokens := compactionRequestMaxTokens(db)
+	task.logCompactionStage(ctx, conv.ID, "summary_config", "completed", time.Time{},
+		fmt.Sprintf(" source_tokens=%d source_rounds=%d target_tokens=%d max_output_tokens=%d request_max_tokens=%d",
+			estimateTokens(source), newRounds, targetTokens, outputCap, requestMaxTokens))
 	customPrompt := compactionPrompt(db)
 	text := ""
 	var summaryErr error
@@ -1962,7 +2004,7 @@ func maybeCompact(
 	} else {
 		text, summaryErr = summarizeCompactionText(
 			ctx, task, conv, source, payerID, conversationModelID, customPrompt,
-			compactionSummaryInstruction, targetTokens, outputCap, compactionRequestMaxTokens(db),
+			compactionSummaryInstruction, targetTokens, outputCap, requestMaxTokens,
 		)
 	}
 	if terminalErr := terminalCompactionTaskError(ctx, summaryErr); terminalErr != nil {
@@ -2034,6 +2076,25 @@ func maybeCompact(
 	persistErr := error(nil)
 	persistOutcomeUncertain := false
 	attempts := max(0, summaryBlockCASAttempts)
+	persistStarted := time.Now()
+	persistFinished := false
+	task.logCompactionStage(ctx, conv.ID, "persistence", "started", time.Time{},
+		fmt.Sprintf(" attempts=%d summary_tokens=%d", attempts, block.Tokens))
+	defer func() {
+		if persistFinished {
+			return
+		}
+		status := "skipped"
+		if returnErr != nil || persistErr != nil {
+			status = "failed"
+		}
+		errForKind := returnErr
+		if errForKind == nil {
+			errForKind = persistErr
+		}
+		task.logCompactionStage(context.WithoutCancel(ctx), conv.ID, "persistence", status, persistStarted,
+			fmt.Sprintf(" appended=%t uncertain=%t error_kind=%q", appended, persistOutcomeUncertain, compactionErrorKind(errForKind)))
+	}()
 	if attempts == 0 {
 		persistErr = compactionPersistError("was disabled by a zero attempt budget", nil)
 	}
@@ -2215,6 +2276,9 @@ func maybeCompact(
 		// suffix could omit that prefix if an edit pruned the summary meanwhile.
 		return history, nil, nil
 	}
+	persistFinished = true
+	task.logCompactionStage(ctx, conv.ID, "persistence", "completed", persistStarted,
+		fmt.Sprintf(" appended=true summary_blocks=%d summary_tokens=%d", len(finalBlocks), summaryTokens(finalBlocks)))
 	if keepFrom < 0 {
 		keepFrom = 0
 	}

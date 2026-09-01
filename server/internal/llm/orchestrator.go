@@ -1441,11 +1441,26 @@ func (o *Orchestrator) compactionLeafOnActivePath(ctx context.Context, conversat
 
 // CompactConversation explicitly advances the active branch's summary while
 // reusing the same model routing, persistence and race guards as auto-compaction.
-func (o *Orchestrator) CompactConversation(ctx context.Context, userID, conversationID string) (ManualCompactionResult, error) {
-	result := ManualCompactionResult{Reason: "nothing_to_compact"}
+func (o *Orchestrator) CompactConversation(ctx context.Context, userID, conversationID string) (result ManualCompactionResult, returnErr error) {
+	result = ManualCompactionResult{Reason: "nothing_to_compact"}
 	if o == nil || o.db == nil || o.task == nil {
 		return result, errors.New("context compaction is unavailable")
 	}
+	operationID := store.GenID("cmp")
+	ctx = withCompactionTrace(ctx, operationID, "manual")
+	traceCtx := context.WithoutCancel(ctx)
+	manualStarted := time.Now()
+	o.logCompactionStage(ctx, conversationID, "manual", "started", time.Time{}, "")
+	defer func() {
+		status := "completed"
+		if returnErr != nil {
+			status = "failed"
+		}
+		o.logCompactionStage(traceCtx, conversationID, "manual", status, manualStarted,
+			fmt.Sprintf(" compacted=%t reason=%s dropped_messages=%d kept_messages=%d summary_tokens=%d error_kind=%q",
+				result.Compacted, result.Reason, result.DroppedMessages, result.KeptMessages,
+				result.SummaryTokens, compactionErrorKind(returnErr)))
+	}()
 	// Bound explicit compaction by the same operator-controlled ceiling as a chat
 	// generation. The distributed lease is guaranteed to outlive this deadline,
 	// so a stalled provider cannot let another replica start a duplicate summary
@@ -1470,24 +1485,41 @@ func (o *Orchestrator) CompactConversation(ctx context.Context, userID, conversa
 		// Keep that conversation-wide mutation with its creator.
 		return result, store.ErrNotFound
 	}
+	leaseStarted := time.Now()
+	o.logCompactionStage(ctx, conv.ID, "lease_acquire", "started", time.Time{},
+		fmt.Sprintf(" ttl=%s", effectiveCompactionLeaseTTL()))
 	lease, acquired, leaseErr := o.tryAcquireCompactionLease(ctx, conv.ID)
 	if leaseErr != nil {
+		o.logCompactionStage(ctx, conv.ID, "lease_acquire", "failed", leaseStarted,
+			fmt.Sprintf(" acquired=%t error_kind=%q", acquired, compactionErrorKind(leaseErr)))
 		result.Reason = "compaction_failed"
 		return result, fmt.Errorf("acquire context compaction lease: %w", leaseErr)
 	}
 	if !acquired {
+		o.logCompactionStage(ctx, conv.ID, "lease_acquire", "rejected", leaseStarted, " acquired=false")
 		result.Reason = "generation_in_progress"
 		return result, ErrCompactionInFlight
 	}
-	defer lease.Release()
+	o.logCompactionStage(ctx, conv.ID, "lease_acquire", "completed", leaseStarted, " acquired=true")
+	defer func() {
+		releaseStarted := time.Now()
+		o.logCompactionStage(ctx, conv.ID, "lease_release", "started", time.Time{}, "")
+		lease.Release()
+		o.logCompactionStage(ctx, conv.ID, "lease_release", "completed", releaseStarted, "")
+	}()
+	preflightStarted := time.Now()
+	o.logCompactionStage(ctx, conv.ID, "preflight", "started", time.Time{}, "")
 	// Refresh mutable branch and summary state after acquiring the lease. A prior
 	// compaction or branch switch may have completed between authorization and the
 	// lease; attributing that change to this command would misreport success.
 	conv, err = store.GetConversation(ctx, o.db, conversationID, userID)
 	if err != nil {
+		o.logCompactionStage(ctx, conversationID, "preflight", "failed", preflightStarted,
+			fmt.Sprintf(" error_kind=%q", compactionErrorKind(err)))
 		return result, err
 	}
 	if conv.UserID != userID {
+		o.logCompactionStage(ctx, conv.ID, "preflight", "rejected", preflightStarted, " owner_match=false")
 		return result, store.ErrNotFound
 	}
 	var inFlight int
@@ -1497,23 +1529,35 @@ func (o *Orchestrator) CompactConversation(ctx context.Context, userID, conversa
 		  WHERE conversation_id=? AND role='assistant' AND status='streaming' AND created_at>?`,
 		conv.ID, streamingCutoff,
 	).Scan(&inFlight); err != nil {
+		o.logCompactionStage(ctx, conv.ID, "preflight", "failed", preflightStarted,
+			fmt.Sprintf(" error_kind=%q", compactionErrorKind(err)))
 		return result, err
 	}
 	if inFlight > 0 {
+		o.logCompactionStage(ctx, conv.ID, "preflight", "rejected", preflightStarted,
+			fmt.Sprintf(" streaming_messages=%d", inFlight))
 		result.Reason = "generation_in_progress"
 		return result, ErrCompactionInFlight
 	}
+	o.logCompactionStage(ctx, conv.ID, "preflight", "completed", preflightStarted, " streaming_messages=0")
+	historyStarted := time.Now()
+	o.logCompactionStage(ctx, conv.ID, "history_snapshot", "started", time.Time{}, "")
 	history, leafCurrent, err := o.compactionHistoryAtLeaf(ctx, conv.ID, conv.ActiveLeafID)
 	if err != nil {
+		o.logCompactionStage(ctx, conv.ID, "history_snapshot", "failed", historyStarted,
+			fmt.Sprintf(" error_kind=%q", compactionErrorKind(err)))
 		return result, err
 	}
 	if !leafCurrent {
+		o.logCompactionStage(ctx, conv.ID, "history_snapshot", "changed", historyStarted,
+			fmt.Sprintf(" history_messages=%d", len(history)))
 		result.Reason = "conversation_changed"
 		return result, ErrCompactionChanged
 	}
+	o.logCompactionStage(ctx, conv.ID, "history_snapshot", "completed", historyStarted,
+		fmt.Sprintf(" history_messages=%d", len(history)))
 	beforeBlocks := filterBlocksForPath(loadSummaryBlocksForModel(ctx, o.db, conv.SummaryBlocks, conv.ModelID), history)
 	beforeFrontier := summarizedFrontier(beforeBlocks, history)
-	operationID := store.GenID("cmp")
 	billingCtx := withStandaloneCompactionBilling(ctx, o, operationID)
 	keep, blocks, err := CompactConversationNow(billingCtx, o.db, o.task, conv, history, conv.ModelID, userID)
 	if err != nil {
@@ -3717,16 +3761,25 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	o.logGenerationStage(conv.ID, assistantMsg.ID, "compaction_plan", "completed", compactionPlanStarted,
 		fmt.Sprintf(" request_tokens=%d action=%d keep_messages=%d summary_blocks=%d", requestTokens, compactAction, len(keep), len(summaryBlocks)))
 	if compactAction == compactInline {
-		lease, acquired, leaseErr := o.tryAcquireCompactionLease(ctx, conv.ID)
+		operationID := store.GenID("cmp")
+		compactTraceCtx := withCompactionTrace(ctx, operationID, "inline")
+		leaseStarted := time.Now()
+		o.logCompactionStage(compactTraceCtx, conv.ID, "lease_acquire", "started", time.Time{},
+			fmt.Sprintf(" ttl=%s", effectiveCompactionLeaseTTL()))
+		lease, acquired, leaseErr := o.tryAcquireCompactionLease(compactTraceCtx, conv.ID)
 		if leaseErr != nil {
+			o.logCompactionStage(compactTraceCtx, conv.ID, "lease_acquire", "failed", leaseStarted,
+				fmt.Sprintf(" acquired=%t error_kind=%q", acquired, compactionErrorKind(leaseErr)))
 			// Automatic compaction is maintenance work. Keep the user-visible chat
 			// turn available if the database briefly cannot admit its lease; no model
 			// call or standalone billing is started in this case.
 			if o.logger != nil {
 				o.logger.Printf("compaction: skip inline pass after lease error (conv=%s): %v", conv.ID, leaseErr)
 			}
-		} else if acquired {
-			operationID := store.GenID("cmp")
+		} else if !acquired {
+			o.logCompactionStage(compactTraceCtx, conv.ID, "lease_acquire", "rejected", leaseStarted, " acquired=false")
+		} else {
+			o.logCompactionStage(compactTraceCtx, conv.ID, "lease_acquire", "completed", leaseStarted, " acquired=true")
 			// Inline compaction runs before the main chat admission below. Keep its
 			// provider usage on an independent operation so a later insufficient-credit
 			// refusal for the chat turn cannot strand or misattribute the summary cost
@@ -3734,13 +3787,18 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			inlineCompactionStarted := time.Now()
 			o.logGenerationStage(conv.ID, assistantMsg.ID, "compaction_inline", "started", time.Time{},
 				fmt.Sprintf(" timeout=%s history=%d", inlineCompactionTimeout, len(history)))
-			compactBaseCtx := withStandaloneCompactionBilling(ctx, o, operationID)
+			compactBaseCtx := withStandaloneCompactionBilling(compactTraceCtx, o, operationID)
 			compactCtx, cancelCompaction := context.WithTimeout(compactBaseCtx, inlineCompactionTimeout)
 			beforeFrontier := summarizedFrontier(summaryBlocks, history)
 			var cerr error
 			func() {
 				defer cancelCompaction()
-				defer lease.Release()
+				defer func() {
+					releaseStarted := time.Now()
+					o.logCompactionStage(compactTraceCtx, conv.ID, "lease_release", "started", time.Time{}, "")
+					lease.Release()
+					o.logCompactionStage(compactTraceCtx, conv.ID, "lease_release", "completed", releaseStarted, "")
+				}()
 				o.notifyAutomaticCompactionStatus(req.UserID, conv.ID, operationID, "started")
 				k, b, compactErr := MaybeCompactForRequest(
 					compactCtx, o.db, o.task, conv, history, requestTokens, renderedHistoryTokens,
@@ -3800,17 +3858,43 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			plannedBaseHistory, _ = compactHistoricalToolResults(plannedBaseHistory)
 		}
 		plannedRenderedHistoryTokens := estimateRequestTokens(UnifiedChatRequest{History: plannedBaseHistory}) + summaryTokens(summaryBlocks)
-		o.queue.Enqueue("compaction.advance", func(ctx context.Context) error {
+		asyncQueueCtx := withCompactionTrace(ctx, operationID, "async")
+		o.logCompactionStage(asyncQueueCtx, convID, "async_queue", "enqueued", time.Time{}, "")
+		o.queue.Enqueue("compaction.advance", func(ctx context.Context) (returnErr error) {
+			ctx = withCompactionTrace(ctx, operationID, "async")
 			ctx, cancel := context.WithTimeout(ctx, generationcfg.MaxDuration())
 			defer cancel()
+			traceCtx := context.WithoutCancel(ctx)
+			asyncStarted := time.Now()
+			o.logCompactionStage(ctx, convID, "async", "started", time.Time{}, "")
+			defer func() {
+				status := "completed"
+				if returnErr != nil {
+					status = "failed"
+				}
+				o.logCompactionStage(traceCtx, convID, "async", status, asyncStarted,
+					fmt.Sprintf(" error_kind=%q", compactionErrorKind(returnErr)))
+			}()
+			leaseStarted := time.Now()
+			o.logCompactionStage(ctx, convID, "lease_acquire", "started", time.Time{},
+				fmt.Sprintf(" ttl=%s", effectiveCompactionLeaseTTL()))
 			lease, acquired, leaseErr := o.tryAcquireCompactionLease(ctx, convID)
 			if leaseErr != nil {
+				o.logCompactionStage(ctx, convID, "lease_acquire", "failed", leaseStarted,
+					fmt.Sprintf(" acquired=%t error_kind=%q", acquired, compactionErrorKind(leaseErr)))
 				return fmt.Errorf("acquire context compaction lease: %w", leaseErr)
 			}
 			if !acquired {
+				o.logCompactionStage(ctx, convID, "lease_acquire", "rejected", leaseStarted, " acquired=false")
 				return nil
 			}
-			defer lease.Release()
+			o.logCompactionStage(ctx, convID, "lease_acquire", "completed", leaseStarted, " acquired=true")
+			defer func() {
+				releaseStarted := time.Now()
+				o.logCompactionStage(traceCtx, convID, "lease_release", "started", time.Time{}, "")
+				lease.Release()
+				o.logCompactionStage(traceCtx, convID, "lease_release", "completed", releaseStarted, "")
+			}()
 			// The queued job belongs to the path that triggered it, not merely to
 			// the conversation. ListMessages deliberately repairs dangling leaves
 			// to the newest path for normal rendering; using that fallback here

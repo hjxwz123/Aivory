@@ -345,9 +345,22 @@ func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts Ru
 // runOnce performs one concrete task-model attempt. Keeping this separate from
 // Run makes model fallback explicit and prevents a retry from accidentally
 // re-resolving a changed administrator setting halfway through one compaction.
-func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opts RunOpts) (string, error) {
+func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opts RunOpts) (responseText string, returnErr error) {
 	if t == nil || t.db == nil {
 		return "", errors.New("task llm not initialised")
+	}
+	prepareStarted := time.Now()
+	prepareFinished := kind != TaskCompact
+	if kind == TaskCompact {
+		t.logCompactionStage(ctx, opts.ConversationID, "provider_prepare", "started", time.Time{},
+			fmt.Sprintf(" requested_model=%q fallback_model=%q", opts.ModelID, opts.FallbackModelID))
+		defer func() {
+			if prepareFinished {
+				return
+			}
+			t.logCompactionStage(context.WithoutCancel(ctx), opts.ConversationID, "provider_prepare", "failed", prepareStarted,
+				fmt.Sprintf(" error_kind=%q", compactionErrorKind(returnErr)))
+		}()
 	}
 	if t.reg == nil {
 		return "", wrapCompactionModelAttempt(
@@ -461,9 +474,18 @@ func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opt
 			return "", fmt.Errorf("task input exceeds configured limit: estimated %d > %d tokens", inputTokens, opts.MaxInputTokens)
 		}
 	}
+	if kind == TaskCompact {
+		prepareFinished = true
+		t.logCompactionStage(ctx, opts.ConversationID, "provider_prepare", "completed", prepareStarted,
+			fmt.Sprintf(" model=%q provider=%q format=%q input_tokens=%d max_output_tokens=%d",
+				model.ID, channel.Type, channel.APIFormat, estimateRequestTokens(req), maxTok))
+	}
 	var standaloneAdmission *billingAdmission
 	standaloneBilling := standaloneCompactionBillingFromContext(ctx)
 	if kind == TaskCompact && standaloneBilling != nil {
+		admissionStarted := time.Now()
+		t.logCompactionStage(ctx, opts.ConversationID, "billing_admission", "started", time.Time{},
+			fmt.Sprintf(" model=%q", model.ID))
 		sourceID := fmt.Sprintf("%s:%d", standaloneBilling.operationID, standaloneBilling.sequence.Add(1))
 		// A short-summary retry is a separate provider call but belongs to the same
 		// logical compaction operation. Use a fresh reservation source for each call
@@ -474,31 +496,51 @@ func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opt
 			0, "context_compaction", sourceID,
 		)
 		if err != nil {
+			t.logCompactionStage(ctx, opts.ConversationID, "billing_admission", "failed", admissionStarted,
+				fmt.Sprintf(" error_kind=%q", compactionErrorKind(err)))
 			return "", err
 		}
 		if standaloneAdmission == nil {
+			t.logCompactionStage(ctx, opts.ConversationID, "billing_admission", "rejected", admissionStarted, " admitted=false")
 			if strings.TrimSpace(admissionMessage) == "" {
 				admissionMessage = "context compaction billing admission was rejected"
 			}
 			return "", fmt.Errorf("%w: %s", store.ErrInsufficientCredits, admissionMessage)
 		}
+		t.logCompactionStage(ctx, opts.ConversationID, "billing_admission", "completed", admissionStarted, " admitted=true")
 		defer func() {
 			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 			defer cancel()
 			_ = standaloneBilling.orchestrator.releaseUsageBilling(releaseCtx, standaloneAdmission)
 		}()
 	}
+	dailyQuotaStarted := time.Now()
+	if kind == TaskCompact {
+		t.logCompactionStage(ctx, opts.ConversationID, "daily_quota", "started", time.Time{},
+			fmt.Sprintf(" estimated_tokens=%d", estimateTurnTokens(req)))
+	}
 	dailyTokens, allowed, err := store.ReserveDailyTokenQuota(ctx, t.db, opts.UserID, estimateTurnTokens(req))
 	if err != nil {
+		if kind == TaskCompact {
+			t.logCompactionStage(ctx, opts.ConversationID, "daily_quota", "failed", dailyQuotaStarted,
+				fmt.Sprintf(" error_kind=%q", compactionErrorKind(err)))
+		}
 		return "", err
 	}
 	if !allowed {
+		if kind == TaskCompact {
+			t.logCompactionStage(ctx, opts.ConversationID, "daily_quota", "rejected", dailyQuotaStarted, " allowed=false")
+		}
 		if standaloneAdmission != nil {
 			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 			_ = standaloneBilling.orchestrator.releaseUsageBilling(releaseCtx, standaloneAdmission)
 			cancel()
 		}
 		return "", store.ErrDailyTokenQuotaExceeded
+	}
+	if kind == TaskCompact {
+		t.logCompactionStage(ctx, opts.ConversationID, "daily_quota", "completed", dailyQuotaStarted,
+			fmt.Sprintf(" allowed=true reserved=%t", dailyTokens != nil))
 	}
 	dailyFinalized := false
 	defer func() {
@@ -534,6 +576,14 @@ func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opt
 	streamCtx = contextWithProviderRequestRecorder(streamCtx, requestRecorder)
 	// We capture deltas but only really care about the final result.
 	captured := strings.Builder{}
+	providerStarted := time.Now()
+	providerCall := uint64(0)
+	if kind == TaskCompact {
+		providerCall = nextCompactionProviderCall(ctx)
+		t.logCompactionStage(ctx, opts.ConversationID, "provider", "started", time.Time{},
+			fmt.Sprintf(" call_index=%d model=%q provider=%q format=%q input_tokens=%d max_output_tokens=%d",
+				providerCall, model.ID, channel.Type, channel.APIFormat, estimateRequestTokens(req), maxTok))
+	}
 	result, err := provider.Stream(streamCtx, req, &noopToolRunner{}, func(ev SseEvent) {
 		if ev.Type == "text_delta" {
 			captured.WriteString(ev.Text)
@@ -541,6 +591,21 @@ func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opt
 	})
 	providerErr := err
 	usedFallback := fallbackFlag.Load()
+	if kind == TaskCompact {
+		status := "completed"
+		if providerErr != nil {
+			status = "failed"
+		}
+		providerUsage := Usage{}
+		if result != nil {
+			providerUsage = result.Usage
+		}
+		t.logCompactionStage(ctx, opts.ConversationID, "provider", status, providerStarted,
+			fmt.Sprintf(" call_index=%d model=%q provider=%q format=%q has_result=%t upstream_attempts=%d input_tokens=%d output_tokens=%d cache_read_tokens=%d cache_write_tokens=%d fallback=%t stop_reason=%q error_kind=%q",
+				providerCall, model.ID, channel.Type, channel.APIFormat, result != nil, len(requestRecorder.snapshots()),
+				providerUsage.InputTokens, providerUsage.OutputTokens, providerUsage.CacheReadTokens,
+				providerUsage.CacheWriteTokens, usedFallback, resultStopReason(result), compactionErrorKind(providerErr)))
+	}
 	servedChannelID := model.ChannelID
 	if usedFallback {
 		servedChannelID = fallbackChannelID
@@ -563,7 +628,12 @@ func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opt
 		// (0 tokens, purpose = the task kind) so the admin usage page surfaces it
 		// (filterable via the purpose dropdown / errors-only).
 		if t.logger != nil {
-			t.logger.Printf("task: %s call failed (model=%s user=%s conv=%s): %v", kind, model.ID, opts.UserID, opts.ConversationID, err)
+			if kind == TaskCompact {
+				t.logger.Printf("task: %s call failed (model=%s user=%s conv=%s error_kind=%q)",
+					kind, model.ID, opts.UserID, opts.ConversationID, compactionErrorKind(err))
+			} else {
+				t.logger.Printf("task: %s call failed (model=%s user=%s conv=%s): %v", kind, model.ID, opts.UserID, opts.ConversationID, err)
+			}
 		}
 	}
 	// Some providers emit deltas, others not; pick the longer.
@@ -582,6 +652,21 @@ func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opt
 	final = strings.TrimSpace(final)
 
 	// Record usage so we can split task cost on the report.
+	consumedUsage := Usage{}
+	settlementStarted := time.Now()
+	settlementFinished := kind != TaskCompact
+	if kind == TaskCompact {
+		t.logCompactionStage(ctx, opts.ConversationID, "usage_settlement", "started", time.Time{},
+			fmt.Sprintf(" has_result=%t provider_error_kind=%q", result != nil, compactionErrorKind(providerErr)))
+		defer func() {
+			if settlementFinished {
+				return
+			}
+			t.logCompactionStage(context.WithoutCancel(ctx), opts.ConversationID, "usage_settlement", "failed", settlementStarted,
+				fmt.Sprintf(" input_tokens=%d output_tokens=%d error_kind=%q",
+					consumedUsage.InputTokens, consumedUsage.OutputTokens, compactionErrorKind(returnErr)))
+		}()
+	}
 	billingParent := context.WithoutCancel(ctx)
 	if toolRoute {
 		// Keep the route call, including its quota settlement and usage row, inside
@@ -606,7 +691,6 @@ func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opt
 		// the overall task successful.
 		logProviderFailures(billingCtx)
 	}
-	consumedUsage := Usage{}
 	if result != nil {
 		consumedUsage = result.Usage
 	}
@@ -709,6 +793,13 @@ func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opt
 				return "", billingErr
 			}
 		}
+	}
+	if kind == TaskCompact {
+		settlementFinished = true
+		t.logCompactionStage(ctx, opts.ConversationID, "usage_settlement", "completed", settlementStarted,
+			fmt.Sprintf(" input_tokens=%d output_tokens=%d cache_read_tokens=%d cache_write_tokens=%d standalone=%t",
+				consumedUsage.InputTokens, consumedUsage.OutputTokens, consumedUsage.CacheReadTokens,
+				consumedUsage.CacheWriteTokens, standaloneAdmission != nil))
 	}
 	if providerErr != nil {
 		// A compaction model may be reachable at the database layer but fail at
