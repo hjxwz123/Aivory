@@ -61,6 +61,110 @@ func TestRetrieveDocumentsScopesCurrentTurnToAttachedDocument(t *testing.T) {
 	}
 }
 
+func TestRouteAndRetrieveDocumentScopePrioritizesCurrentTurnBeforeFullTextFastPath(t *testing.T) {
+	ctx := context.Background()
+	db := seedEmbeddedConversationDoc(t, ctx)
+	defer db.Close()
+	t.Cleanup(store.InvalidateConfig)
+	if err := store.SetSetting(db, "rag_full_text_threshold", 10000); err != nil {
+		t.Fatalf("set threshold: %v", err)
+	}
+	for _, query := range []string{
+		`INSERT INTO documents(id,conversation_id,filename,mime_type,size_bytes,status) VALUES('resume-doc','c1','Sample_Resume.pdf','application/pdf',100,'ready')`,
+		`INSERT INTO chunks(id,document_id,conversation_id,seq,chunk_type,content,embedding_model) VALUES('resume-chunk','resume-doc','c1',0,'text','current resume evidence','')`,
+	} {
+		if _, err := db.ExecContext(ctx, query); err != nil {
+			t.Fatalf("seed current attachment: %v", err)
+		}
+	}
+
+	svc := New(db, nil, log.New(io.Discard, "", 0))
+	got, decision, err := svc.RouteAndRetrieveDocumentScope(
+		ctx, "u1", "c1", nil, []string{"d1", "resume-doc"}, []string{"resume-doc"},
+		"summarize this file", nil, 8,
+	)
+	if err != nil {
+		t.Fatalf("route current attachment: %v", err)
+	}
+	if decision.Strategy != "full_text" || len(got) != 1 {
+		t.Fatalf("current attachment decision=%+v snippets=%+v", decision, got)
+	}
+	if got[0].URL != "doc://resume-doc" || got[0].Title != "Sample_Resume.pdf" {
+		t.Fatalf("historical document leaked into current attachment scope: %+v", got)
+	}
+}
+
+func TestRouteAndRetrieveDocumentScopeUsesUniqueFilenameReference(t *testing.T) {
+	ctx := context.Background()
+	db := seedEmbeddedConversationDoc(t, ctx)
+	defer db.Close()
+	t.Cleanup(store.InvalidateConfig)
+	if err := store.SetSetting(db, "rag_full_text_threshold", 10000); err != nil {
+		t.Fatalf("set threshold: %v", err)
+	}
+	for _, query := range []string{
+		`UPDATE documents SET filename='EMNLP26.pdf' WHERE id='d1'`,
+		`INSERT INTO documents(id,conversation_id,filename,mime_type,size_bytes,status) VALUES('resume-doc','c1','候选人_简历.pdf','application/pdf',100,'ready')`,
+		`INSERT INTO chunks(id,document_id,conversation_id,seq,chunk_type,content,embedding_model) VALUES('resume-chunk','resume-doc','c1',0,'text','简历中的项目经历','')`,
+	} {
+		if _, err := db.ExecContext(ctx, query); err != nil {
+			t.Fatalf("seed named attachment: %v", err)
+		}
+	}
+
+	svc := New(db, nil, log.New(io.Discard, "", 0))
+	got, decision, err := svc.RouteAndRetrieveDocumentScope(
+		ctx, "u1", "c1", nil, []string{"d1", "resume-doc"}, nil,
+		"请参考我的简历，给出修改建议", nil, 8,
+	)
+	if err != nil {
+		t.Fatalf("route named attachment: %v", err)
+	}
+	if decision.Strategy != "full_text" || len(got) != 1 {
+		t.Fatalf("named attachment decision=%+v snippets=%+v", decision, got)
+	}
+	if got[0].URL != "doc://resume-doc" || got[0].Title != "候选人_简历.pdf" {
+		t.Fatalf("filename reference selected the wrong document: %+v", got)
+	}
+}
+
+func TestRouteAndRetrieveDocumentScopeKeepsAllFilesWhenExplicitlyRequested(t *testing.T) {
+	ctx := context.Background()
+	db := seedEmbeddedConversationDoc(t, ctx)
+	defer db.Close()
+	t.Cleanup(store.InvalidateConfig)
+	if err := store.SetSetting(db, "rag_full_text_threshold", 10000); err != nil {
+		t.Fatalf("set threshold: %v", err)
+	}
+	for _, query := range []string{
+		`INSERT INTO documents(id,conversation_id,filename,mime_type,size_bytes,status) VALUES('resume-doc','c1','Sample_Resume.pdf','application/pdf',100,'ready')`,
+		`INSERT INTO chunks(id,document_id,conversation_id,seq,chunk_type,content,embedding_model) VALUES('resume-chunk','resume-doc','c1',0,'text','current resume evidence','')`,
+	} {
+		if _, err := db.ExecContext(ctx, query); err != nil {
+			t.Fatalf("seed all-document scope: %v", err)
+		}
+	}
+
+	svc := New(db, nil, log.New(io.Discard, "", 0))
+	got, decision, err := svc.RouteAndRetrieveDocumentScope(
+		ctx, "u1", "c1", nil, []string{"d1", "resume-doc"}, []string{"resume-doc"},
+		"比较所有文档", nil, 8,
+	)
+	if err != nil {
+		t.Fatalf("route all documents: %v", err)
+	}
+	if decision.Strategy != "full_text" || len(got) != 3 {
+		t.Fatalf("all-document decision=%+v snippets=%+v", decision, got)
+	}
+	seen := map[string]bool{}
+	for _, snippet := range got {
+		seen[snippet.URL] = true
+	}
+	if !seen["doc://d1"] || !seen["doc://resume-doc"] {
+		t.Fatalf("explicit all-document request lost scope: %+v", got)
+	}
+}
+
 func TestRetrieveDocumentsEmptyScopeDoesNotFallBackToConversation(t *testing.T) {
 	ctx := context.Background()
 	db := seedEmbeddedConversationDoc(t, ctx)

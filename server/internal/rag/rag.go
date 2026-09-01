@@ -2953,7 +2953,10 @@ func (s *Service) RouteAndRetrieveDocuments(ctx context.Context, userID, convID 
 }
 
 // RouteAndRetrieveDocumentScope separates the inherited branch scope from the
-// files attached on the latest turn, which are only a router disambiguation hint.
+// files attached on the latest turn. The latest files are both routing metadata
+// and the default conversation-document scope: an older upload must not win a
+// broad rewritten query over the file the user just attached. Explicit requests
+// for all historical files retain the complete inherited scope.
 func (s *Service) RouteAndRetrieveDocumentScope(ctx context.Context, userID, convID string, kbIDs, allowedDocumentIDs, currentDocumentIDs []string, userText string, history []string, topK int) ([]Snippet, RouteDecision, error) {
 	return s.routeAndRetrieve(ctx, userID, convID, kbIDs, userText, history, topK, retrieveOptions{
 		restrictDocuments: true,
@@ -2993,8 +2996,21 @@ func (s *Service) routeAndRetrieve(ctx context.Context, userID, convID string, k
 		return nil, decision, fmt.Errorf("rag: list retrieval scope: %w", scopeErr)
 	}
 	scope = filterChunksByDocuments(scope, retrieveOpts.documentIDs, retrieveOpts.restrictDocuments)
+	preferredDocumentIDs, documentPreference := preferredConversationDocumentIDs(
+		scope, retrieveOpts.currentDocumentIDs, userText,
+	)
+	if len(preferredDocumentIDs) > 0 {
+		// Knowledge-base evidence remains independent: filterChunksByDocuments only
+		// narrows conversation uploads. This prevents historical chat files from
+		// crowding out the latest/explicitly named file while preserving a KB the
+		// user deliberately selected for the turn.
+		retrieveOpts.restrictDocuments = true
+		retrieveOpts.documentIDs = preferredDocumentIDs
+		scope = filterChunksByDocuments(scope, preferredDocumentIDs, true)
+	}
 	s.logRetrievalStage(ctx, convID, "route_scope", "completed", routeScopeStarted,
-		fmt.Sprintf(" chunks=%d error_kind=%q", len(scope), retrievalStageErrorKind(scopeErr)))
+		fmt.Sprintf(" chunks=%d preferred_documents=%d document_preference=%q error_kind=%q",
+			len(scope), len(preferredDocumentIDs), documentPreference, retrievalStageErrorKind(scopeErr)))
 	pinned := []store.Chunk{}
 	embeddedTokens := 0
 	pinnedTokens := 0
@@ -3439,6 +3455,168 @@ func filterChunksByDocuments(chunks []store.Chunk, documentIDs []string, restric
 		}
 	}
 	return out
+}
+
+// preferredConversationDocumentIDs resolves the user's strongest file signal
+// before the task-model router runs. A current-turn attachment is authoritative;
+// an unambiguous filename mention (for example, "my resume" matching
+// "Li_Resume.pdf") is added so references to an older branch file do not depend
+// on semantic retrieval happening to rank the right document. Asking for all or
+// historical documents explicitly disables this narrowing.
+func preferredConversationDocumentIDs(scope []store.Chunk, currentDocumentIDs []string, userText string) ([]string, string) {
+	if requestsWholeConversationDocumentScope(userText) {
+		return nil, "all_documents"
+	}
+
+	allowed := make(map[string]bool)
+	order := make([]string, 0)
+	for _, chunk := range scope {
+		if chunk.ChunkType == "parent" || chunk.KBID != "" || chunk.ConversationID == "" || chunk.DocumentID == "" {
+			continue
+		}
+		if !allowed[chunk.DocumentID] {
+			allowed[chunk.DocumentID] = true
+			order = append(order, chunk.DocumentID)
+		}
+	}
+
+	selected := make(map[string]bool)
+	currentCount := 0
+	for _, id := range fixedDocumentScope(currentDocumentIDs) {
+		if allowed[id] && !selected[id] {
+			selected[id] = true
+			currentCount++
+		}
+	}
+
+	mentioned := mentionedConversationDocumentIDs(scope, userText)
+	// Without a current attachment, only a unique filename match is strong enough
+	// to narrow the scope. Several similarly named files remain a router decision.
+	if currentCount > 0 || len(mentioned) == 1 {
+		for _, id := range mentioned {
+			if allowed[id] {
+				selected[id] = true
+			}
+		}
+	}
+	if len(selected) == 0 {
+		return nil, ""
+	}
+
+	out := make([]string, 0, len(selected))
+	for _, id := range order {
+		if selected[id] {
+			out = append(out, id)
+		}
+	}
+	reason := "filename"
+	if currentCount > 0 {
+		reason = "current_turn"
+		if len(out) > currentCount {
+			reason = "current_turn+filename"
+		}
+	}
+	return out, reason
+}
+
+func mentionedConversationDocumentIDs(scope []store.Chunk, userText string) []string {
+	text := strings.ToLower(strings.TrimSpace(userText))
+	if text == "" {
+		return nil
+	}
+	filenames := make(map[string]string)
+	order := make([]string, 0)
+	for _, chunk := range scope {
+		if chunk.ChunkType == "parent" || chunk.KBID != "" || chunk.ConversationID == "" || chunk.DocumentID == "" {
+			continue
+		}
+		if _, exists := filenames[chunk.DocumentID]; exists {
+			continue
+		}
+		filenames[chunk.DocumentID] = chunk.Filename
+		order = append(order, chunk.DocumentID)
+	}
+	out := make([]string, 0)
+	for _, id := range order {
+		if filenameMentioned(text, filenames[id]) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+func filenameMentioned(lowerUserText, filename string) bool {
+	stem := strings.ToLower(strings.TrimSpace(filename))
+	for _, category := range []struct {
+		terms []string
+		name  []string
+	}{
+		{terms: []string{"简历", "resume", "cv"}, name: []string{"简历", "resume", "cv"}},
+		{terms: []string{"论文", "paper", "article"}, name: []string{"论文", "paper", "article"}},
+		{terms: []string{"合同", "contract"}, name: []string{"合同", "contract"}},
+	} {
+		if anySubstring(lowerUserText, category.terms) && anySubstring(stem, category.name) {
+			return true
+		}
+	}
+	if dot := strings.LastIndex(stem, "."); dot > 0 {
+		stem = stem[:dot]
+	}
+	if utf8.RuneCountInString(stem) >= 2 && strings.Contains(lowerUserText, stem) {
+		return true
+	}
+	parts := strings.FieldsFunc(stem, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	})
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if !significantFilenamePart(part) {
+			continue
+		}
+		if strings.Contains(lowerUserText, part) {
+			return true
+		}
+	}
+	return false
+}
+
+func anySubstring(text string, values []string) bool {
+	for _, value := range values {
+		if strings.Contains(text, value) {
+			return true
+		}
+	}
+	return false
+}
+
+func significantFilenamePart(part string) bool {
+	if part == "" {
+		return false
+	}
+	switch part {
+	case "pdf", "doc", "docx", "txt", "md", "file", "document", "paper", "文档", "文件", "附件", "论文", "材料", "资料":
+		return false
+	}
+	if hasCJK(part) {
+		return utf8.RuneCountInString(part) >= 2
+	}
+	return len(part) >= 3
+}
+
+func requestsWholeConversationDocumentScope(userText string) bool {
+	text := strings.ToLower(strings.TrimSpace(userText))
+	for _, phrase := range []string{
+		"所有文档", "全部文档", "所有文件", "全部文件", "所有附件", "全部附件",
+		"所有论文", "全部论文", "所有资料", "全部资料", "历史文档", "历史文件",
+		"之前的文档", "之前的文件", "此前的文档", "此前的文件",
+		"all documents", "all files", "all attachments", "all papers",
+		"previous documents", "previous files", "earlier documents", "earlier files",
+	} {
+		if strings.Contains(text, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 func scopeContentTokens(chunks []store.Chunk) int {

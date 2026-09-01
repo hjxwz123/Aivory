@@ -41,8 +41,9 @@ func TestConversationDocumentsShareCumulativePinnedBudget(t *testing.T) {
 	assertConversationPinnedTokensAtMost(t, ctx, db, "c1", 12)
 
 	// A+B exceeds the cumulative pin budget, so B is embedded at ingest time.
-	// That must not force a later B-only turn into retrieval: B itself still fits
-	// the full-text threshold when the router selects B for complete coverage.
+	// A later B-only turn must narrow to B before routing: B itself still fits the
+	// full-text threshold, so the deterministic full-text path should win without
+	// giving a broad router rewrite a chance to select historical document A.
 	router := &recordingRouter{decision: RouteDecision{Strategy: "full_doc", DocumentIDs: []string{second.ID}}}
 	svc.SetTaskLLM(router)
 	currentOnly, decision, err := svc.RouteAndRetrieveDocumentScope(
@@ -51,8 +52,11 @@ func TestConversationDocumentsShareCumulativePinnedBudget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("route current attachment: %v", err)
 	}
-	if decision.Strategy != "full_doc" || len(currentOnly) != 1 {
+	if decision.Strategy != "full_text" || len(currentOnly) != 1 {
 		t.Fatalf("current attachment decision=%+v snippets=%+v", decision, currentOnly)
+	}
+	if router.calls != 0 {
+		t.Fatalf("current attachment made %d router calls, want deterministic full-text scope", router.calls)
 	}
 	if currentOnly[0].URL != "doc://"+second.ID || !strings.Contains(currentOnly[0].Snippet, "bravo") || strings.Contains(currentOnly[0].Snippet, "alpha") {
 		t.Fatalf("current attachment injected the wrong document: %+v", currentOnly)
