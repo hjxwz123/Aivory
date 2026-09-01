@@ -2,7 +2,6 @@ package llm
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -105,147 +104,6 @@ func generationStageErrorKind(err error) string {
 		return ""
 	}
 	return fmt.Sprintf("%T", err)
-}
-
-// compactionConfigFingerprint identifies the provider request contract captured
-// when an asynchronous compaction job is queued. A model/channel ID alone is
-// insufficient: administrators can change request parameters, tool schemas,
-// endpoint credentials, or the compaction threshold in place while a job waits
-// in the queue. Reusing the old history projection after such a change can
-// replay an incompatible native exchange or apply an obsolete budget. The
-// fingerprint is an internal digest only; secrets are hashed and never logged.
-type compactionChannelFingerprint struct {
-	ID        string
-	Type      string
-	APIFormat string
-	BaseURL   string
-	APIKey    string
-	Enabled   bool
-	UpdatedAt int64
-}
-
-type compactionCandidateFingerprint struct {
-	ID       string
-	Model    store.Model
-	Primary  compactionChannelFingerprint
-	Fallback *compactionFallbackFingerprint
-}
-
-type compactionFallbackFingerprint struct {
-	ID      string
-	Exists  bool
-	Channel *compactionChannelFingerprint
-}
-
-type compactionFingerprintPayload struct {
-	Candidates []compactionCandidateFingerprint
-	Settings   map[string]string
-}
-
-func compactionChannelFingerprintFrom(channel *store.Channel) compactionChannelFingerprint {
-	if channel == nil {
-		return compactionChannelFingerprint{}
-	}
-	// API keys are part of the request contract, but must not be retained in the
-	// preimage even though the final value is a digest. This keeps accidental
-	// debug logging of the payload from disclosing credentials.
-	keyDigest := sha256.Sum256([]byte(channel.APIKey))
-	return compactionChannelFingerprint{
-		ID: channel.ID, Type: channel.Type, APIFormat: channel.APIFormat,
-		BaseURL: channel.BaseURL, APIKey: fmt.Sprintf("%x", keyDigest[:]),
-		Enabled: channel.Enabled, UpdatedAt: channel.UpdatedAt,
-	}
-}
-
-func compactionConfigFingerprint(candidates []compactionCandidateFingerprint, settings map[string]string) string {
-	if len(candidates) == 0 || settings == nil {
-		return ""
-	}
-	value := compactionFingerprintPayload{
-		Candidates: candidates,
-		Settings:   settings,
-	}
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return ""
-	}
-	digest := sha256.Sum256(encoded)
-	return fmt.Sprintf("%x", digest[:])
-}
-
-func compactionSettingsSnapshot(db *sql.DB) (map[string]string, error) {
-	keys := []string{
-		"compaction_enabled", "keep_recent_rounds", "compaction_token_trigger", "compaction_token_cap",
-		"compaction_token_target_percentage", "compaction_retention_percentage", "summary_max_tokens", "summary_target_percent",
-		"summary_merge_max_tokens", "compaction_request_max_tokens", "context_compaction_model_id",
-		"context_compaction_prompt", "task_model_id", "default_model_id",
-	}
-	settings := make(map[string]string, len(keys))
-	for _, key := range keys {
-		raw, err := store.GetSetting(db, key)
-		if err != nil {
-			// Older databases may legitimately lack a setting that has a code
-			// default. Preserve that absence as part of the contract so adding the
-			// row later still invalidates a queued job; only an actual read failure
-			// makes the fingerprint unusable.
-			if errors.Is(err, sql.ErrNoRows) {
-				settings[key] = "<missing>"
-				continue
-			}
-			return nil, fmt.Errorf("read compaction setting %q: %w", key, err)
-		}
-		settings[key] = string(raw)
-	}
-	return settings, nil
-}
-
-func compactionRuntimeFingerprint(ctx context.Context, db *sql.DB, conversationModelID string) string {
-	candidateIDs, err := resolveCompactionModelCandidates(ctx, db, conversationModelID)
-	if err != nil {
-		return ""
-	}
-	candidates := make([]compactionCandidateFingerprint, 0, len(candidateIDs))
-	for _, candidateID := range candidateIDs {
-		model, modelErr := store.GetModel(ctx, db, candidateID)
-		if modelErr != nil || model == nil {
-			return ""
-		}
-		primary, channelErr := store.GetChannel(ctx, db, model.ChannelID)
-		if channelErr != nil || primary == nil {
-			return ""
-		}
-		candidate := compactionCandidateFingerprint{
-			ID:      candidateID,
-			Model:   *model,
-			Primary: compactionChannelFingerprintFrom(primary),
-		}
-		fallbackID := strings.TrimSpace(model.FallbackChannelID)
-		if fallbackID != "" && fallbackID != model.ChannelID {
-			fallback, fallbackErr := store.GetChannel(ctx, db, fallbackID)
-			candidate.Fallback = &compactionFallbackFingerprint{ID: fallbackID}
-			if fallbackErr != nil {
-				if !errors.Is(fallbackErr, store.ErrNotFound) {
-					return ""
-				}
-				// The live request ignores a stale fallback_channel_id and continues on
-				// the primary channel. Preserve the missing binding as an explicit,
-				// stable state. If the channel later appears or the ID is changed, the
-				// fingerprint changes and invalidates the queued job.
-				fallback = nil
-			}
-			if fallback != nil {
-				fp := compactionChannelFingerprintFrom(fallback)
-				candidate.Fallback.Exists = true
-				candidate.Fallback.Channel = &fp
-			}
-		}
-		candidates = append(candidates, candidate)
-	}
-	settings, settingsErr := compactionSettingsSnapshot(db)
-	if settingsErr != nil {
-		return ""
-	}
-	return compactionConfigFingerprint(candidates, settings)
 }
 
 // ToolRefusalError marks a tool failure that is a policy/quota REFUSAL (content
@@ -3596,9 +3454,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	}
 	keep := history[frontier:]
 	allowedHistoryTools := unifiedToolNameSet(toolDefs, hostedToolNames, hostedToolRequests)
-	uHist := compactionHistoryForRequest(
+	baseHistory := compactionHistoryForRequest(
 		keep, channel.Type, model.ID, nativeToolReplay, allowedHistoryTools, fastMode, model.Vision,
 	)
+	uHist := cloneUnifiedMessages(baseHistory)
 	// Private skills are user-authored instructions and therefore belong in the
 	// message layer. Apply them to the LAST user entry before any provider-specific
 	// history conversion; every OpenAI/Anthropic/Gemini serializer sees the same
@@ -3725,38 +3584,65 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		fmt.Sprintf(" history=%d tools=%d", len(uHist), len(toolDefs)))
 	requestTokens := estimateRequestTokens(compactionEstimateReq)
 	toolHistoryCompacted := false
-	_, globalCompactionTrigger, compactionTokenCap, _, _, _, _, _ := compactionSettings(o.db)
+	_, globalCompactionTrigger, compactionTokenCap, _, _, _, _ := compactionSettings(o.db)
 	effectiveTrigger := effectiveCompactionTokenTrigger(globalCompactionTrigger, compactionTokenCap, model.CompactionTokenThreshold)
 	if effectiveTrigger > 0 && requestTokens > effectiveTrigger {
 		if projected, changed := compactHistoricalToolResults(uHist); changed {
 			uHist = projected
 			compactionEstimateReq.History = projected
 			requestTokens = estimateRequestTokens(compactionEstimateReq)
+			baseHistory, _ = compactHistoricalToolResults(baseHistory)
 			toolHistoryCompacted = true
 		}
 	}
-	renderedBaseHistory := compactionHistoryForRequest(
-		keep, channel.Type, model.ID, nativeToolReplay, allowedHistoryTools, fastMode, model.Vision,
-	)
-	if toolHistoryCompacted {
-		renderedBaseHistory, _ = compactHistoricalToolResults(renderedBaseHistory)
+	// The planner needs projections for the current and deepest safe cuts. Those
+	// cuts are often identical, and the final request may reuse one of them. Cache
+	// the provider-neutral history and its token estimate for this request so long
+	// Raw/tool/file payloads are parsed at most once per cut.
+	type projectionValue struct {
+		history []UnifiedMessage
+		tokens  int
 	}
-	renderedHistoryTokens := estimateRequestTokens(UnifiedChatRequest{History: renderedBaseHistory}) + summaryTokens(summaryBlocks)
+	projectionCache := make(map[int]projectionValue, 2)
+	projectionCache[frontier] = projectionValue{
+		history: baseHistory,
+		tokens:  estimateRequestTokens(UnifiedChatRequest{History: baseHistory}),
+	}
+	projectHistory := func(start int) projectionValue {
+		if start < 0 {
+			start = 0
+		}
+		if start > len(history) {
+			start = len(history)
+		}
+		if cached, ok := projectionCache[start]; ok {
+			return cached
+		}
+		projected := compactionHistoryForRequest(
+			history[start:], channel.Type, model.ID, nativeToolReplay, allowedHistoryTools, fastMode, model.Vision,
+		)
+		if toolHistoryCompacted {
+			projected, _ = compactHistoricalToolResults(projected)
+		}
+		cached := projectionValue{
+			history: projected,
+			tokens:  estimateRequestTokens(UnifiedChatRequest{History: projected}),
+		}
+		projectionCache[start] = cached
+		return cached
+	}
+	renderedBase := projectHistory(frontier)
+	renderedHistoryTokens := renderedBase.tokens + summaryTokens(summaryBlocks)
 	minimumCut := deepestAutomaticCompactionCut(history, frontier)
-	minimumRenderedHistory := compactionHistoryForRequest(
-		history[minimumCut:], channel.Type, model.ID, nativeToolReplay, allowedHistoryTools, fastMode, model.Vision,
-	)
-	if toolHistoryCompacted {
-		minimumRenderedHistory, _ = compactHistoricalToolResults(minimumRenderedHistory)
-	}
-	minimumRenderedHistoryTokens := estimateRequestTokens(UnifiedChatRequest{History: minimumRenderedHistory}) + summaryTokens(summaryBlocks)
+	minimumRendered := projectHistory(minimumCut)
+	minimumRenderedHistoryTokens := minimumRendered.tokens + summaryTokens(summaryBlocks)
 	minimumRequestTokens := RebasedCompactionRequestTokens(
 		requestTokens, renderedHistoryTokens, minimumRenderedHistoryTokens,
 	)
+	assembledSummaryBlocks := summaryBlocks
 	keep, summaryBlocks, compactAction := PlanCompactionForRequest(
 		o.db, &compactionConv, history, requestTokens, model.CompactionTokenThreshold, minimumRequestTokens,
 	)
-	plannedCompactionKeep := keep
 	if compactAction == compactAsync && effectiveTrigger > 0 && requestTokens > effectiveTrigger &&
 		minimumRequestTokens <= effectiveTrigger && minimumCut > frontier {
 		// Never wait for a summary-model request before starting the chat model. Use
@@ -3769,25 +3655,6 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if compactAction == compactAsync && o.queue != nil && o.task != nil {
 		convID, userID, leafID := conv.ID, req.UserID, userMsg.ID
 		operationID := store.GenID("cmp")
-		modelThreshold, compactionModelID := model.CompactionTokenThreshold, model.ID
-		modelChannelID := model.ChannelID
-		modelVision := model.Vision
-		channelType := channel.Type
-		currentModelID := model.ID
-		persistedModelID := model.ID
-		if fastMode {
-			persistedModelID = strings.TrimSpace(conv.ModelID)
-		}
-		configFingerprint := compactionRuntimeFingerprint(ctx, o.db, currentModelID)
-		vision := model.Vision
-		historyToolAllowlist := cloneBoolMap(allowedHistoryTools)
-		plannedBaseHistory := compactionHistoryForRequest(
-			plannedCompactionKeep, channelType, currentModelID, nativeToolReplay, historyToolAllowlist, fastMode, vision,
-		)
-		if toolHistoryCompacted {
-			plannedBaseHistory, _ = compactHistoricalToolResults(plannedBaseHistory)
-		}
-		plannedRenderedHistoryTokens := estimateRequestTokens(UnifiedChatRequest{History: plannedBaseHistory}) + summaryTokens(summaryBlocks)
 		asyncQueueCtx := withCompactionTrace(ctx, operationID, "async")
 		o.logCompactionStage(asyncQueueCtx, convID, "async_queue", "enqueued", time.Time{}, "")
 		o.queue.Enqueue("compaction.advance", func(ctx context.Context) (returnErr error) {
@@ -3843,36 +3710,6 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			if gerr != nil {
 				return gerr
 			}
-			// Keep the persisted picker state separate from the effective model that
-			// shaped this request. A fast turn deliberately does not overwrite
-			// conversations.model_id with the hidden fast model. Both the picker state
-			// and mode must still match the queued snapshot, and a fast job additionally
-			// verifies that the administrator's current fast model is unchanged.
-			if strings.TrimSpace(fresh.ModelID) != persistedModelID || fresh.Fast != fastMode {
-				return nil
-			}
-			if fastMode {
-				freshFastModel, fastErr := store.GetFastModel(ctx, o.db)
-				if fastErr != nil || freshFastModel == nil || freshFastModel.ID != currentModelID {
-					return nil
-				}
-			} else if fresh.ModelID != currentModelID {
-				return nil
-			}
-			freshModel, modelErr := store.GetModel(ctx, o.db, currentModelID)
-			if modelErr != nil || freshModel == nil || !freshModel.Enabled || freshModel.ChannelID != modelChannelID || freshModel.Vision != modelVision {
-				return nil
-			}
-			freshChannel, channelErr := store.GetChannel(ctx, o.db, freshModel.ChannelID)
-			if channelErr != nil || freshChannel == nil || !freshChannel.Enabled || !strings.EqualFold(strings.TrimSpace(freshChannel.Type), strings.TrimSpace(channelType)) {
-				return nil
-			}
-			if current := compactionRuntimeFingerprint(ctx, o.db, currentModelID); current == "" || current != configFingerprint {
-				// Any in-place model/channel/compaction-setting change invalidates the
-				// queued request contract. A subsequent turn will plan with the new
-				// threshold, prompt, parameters, and provider projection.
-				return nil
-			}
 			onActivePath, activePathErr := o.compactionLeafOnActivePath(ctx, convID, leafID)
 			if activePathErr != nil {
 				return activePathErr
@@ -3880,42 +3717,35 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			if !onActivePath {
 				return nil
 			}
-			// The strict branch snapshot above is rebased at execution time.
-			// requestTokens remains the authoritative complete-request snapshot that
-			// triggered this pass.
-			freshBlocks := filterBlocksForPath(loadSummaryBlocksForModel(ctx, o.db, fresh.SummaryBlocks, currentModelID), histNow)
+			// Compaction is maintenance work. Resolve the effective model at execution
+			// time instead of carrying the queued turn's model/channel/config snapshot.
+			// A model or settings change while this job waited is therefore handled by
+			// the same fresh planning path as the next user turn.
+			effectiveModelID := strings.TrimSpace(fresh.ModelID)
+			if fresh.Fast {
+				fastModel, fastErr := store.GetFastModel(ctx, o.db)
+				if fastErr != nil || fastModel == nil {
+					return nil
+				}
+				effectiveModelID = fastModel.ID
+			}
+			if effectiveModelID == "" {
+				return nil
+			}
+			freshModel, modelErr := store.GetModel(ctx, o.db, effectiveModelID)
+			if modelErr != nil || freshModel == nil || !freshModel.Enabled {
+				return nil
+			}
+			freshCompactionConv := *fresh
+			freshCompactionConv.ModelID = effectiveModelID
+			freshBlocks := filterBlocksForPath(loadSummaryBlocksForModel(ctx, o.db, fresh.SummaryBlocks, effectiveModelID), histNow)
 			freshFrontier := summarizedFrontier(freshBlocks, histNow)
 			if freshFrontier < 0 || freshFrontier > len(histNow) {
 				freshFrontier = 0
 			}
-			freshBaseHistory := compactionHistoryForRequest(
-				histNow[freshFrontier:], channelType, currentModelID, nativeToolReplay,
-				historyToolAllowlist, fastMode, vision,
-			)
-			if toolHistoryCompacted {
-				freshBaseHistory, _ = compactHistoricalToolResults(freshBaseHistory)
-			}
-			freshRenderedHistoryTokens := estimateRequestTokens(UnifiedChatRequest{History: freshBaseHistory}) + summaryTokens(freshBlocks)
-			freshRequestTokens := RebasedCompactionRequestTokens(
-				requestTokens, plannedRenderedHistoryTokens,
-				freshRenderedHistoryTokens,
-			)
-			freshMinimumCut := deepestAutomaticCompactionCut(histNow, freshFrontier)
-			freshMinimumHistory := compactionHistoryForRequest(
-				histNow[freshMinimumCut:], channelType, currentModelID, nativeToolReplay,
-				historyToolAllowlist, fastMode, vision,
-			)
-			if toolHistoryCompacted {
-				freshMinimumHistory, _ = compactHistoricalToolResults(freshMinimumHistory)
-			}
-			freshMinimumRenderedHistoryTokens := estimateRequestTokens(UnifiedChatRequest{History: freshMinimumHistory}) + summaryTokens(freshBlocks)
-			freshMinimumRequestTokens := RebasedCompactionRequestTokens(
-				freshRequestTokens, freshRenderedHistoryTokens, freshMinimumRenderedHistoryTokens,
-			)
-			freshCompactionConv := *fresh
-			freshCompactionConv.ModelID = currentModelID
+			freshRequestTokens := estimateHistoryTokens(histNow[freshFrontier:]) + summaryTokens(freshBlocks)
 			_, _, freshAction := PlanCompactionForRequest(
-				o.db, &freshCompactionConv, histNow, freshRequestTokens, modelThreshold, freshMinimumRequestTokens,
+				o.db, &freshCompactionConv, histNow, freshRequestTokens, freshModel.CompactionTokenThreshold,
 			)
 			if freshAction == compactNone {
 				return nil
@@ -3931,29 +3761,29 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 				}
 			}()
 			_, finalBlocks, cerr := MaybeCompactForRequest(
-				ctx, o.db, o.task, fresh, histNow, freshRequestTokens,
-				freshRenderedHistoryTokens,
-				modelThreshold, compactionModelID, userID, leafID,
+				ctx, o.db, o.task, &freshCompactionConv, histNow, freshRequestTokens,
+				freshRequestTokens,
+				freshModel.CompactionTokenThreshold, effectiveModelID, userID, leafID,
 			)
 			completed = cerr == nil && (summarizedFrontier(finalBlocks, histNow) > freshFrontier || !reflect.DeepEqual(finalBlocks, freshBlocks))
 			return cerr
 		})
 	}
-	// Rebuild only the history-dependent request copy after compaction. All other
-	// fields above are stable and already contributed to requestTokens.
-	uHist = compactionHistoryForRequest(
-		keep, channel.Type, model.ID, nativeToolReplay, allowedHistoryTools, fastMode, model.Vision,
-	)
-	if toolHistoryCompacted {
-		uHist, _ = compactHistoricalToolResults(uHist)
-	}
-	uHist = injectSelectedUserSkillsIntoHistory(uHist, selectedUserSkills)
-	uHist = injectSummaryIntoHistory(uHist, ApplySummaryBlocks(summaryBlocks))
-	uHist = injectRAGIntoHistory(uHist, ragContext)
-	o.injectCompactionMedia(ctx, req.UserID, conv.ID, uHist, summaryBlocks, model.Vision)
-	o.resolveAttachments(ctx, req.UserID, conv.ID, uHist, model, nil)
-	if hostedImageEnabled {
-		o.resolveImageArtifactBlocks(ctx, req.UserID, uHist)
+	// The common path keeps the already assembled request history. Rebuild only
+	// when token pressure advanced the cut or a concurrent settings refresh changed
+	// the rendered summary view; rebuilding re-runs file hydration and other local
+	// work that is expensive on long, attachment-heavy conversations.
+	finalCut := len(history) - len(keep)
+	if finalCut != frontier || !reflect.DeepEqual(summaryBlocks, assembledSummaryBlocks) {
+		uHist = cloneUnifiedMessages(projectHistory(finalCut).history)
+		uHist = injectSelectedUserSkillsIntoHistory(uHist, selectedUserSkills)
+		uHist = injectSummaryIntoHistory(uHist, ApplySummaryBlocks(summaryBlocks))
+		uHist = injectRAGIntoHistory(uHist, ragContext)
+		o.injectCompactionMedia(ctx, req.UserID, conv.ID, uHist, summaryBlocks, model.Vision)
+		o.resolveAttachments(ctx, req.UserID, conv.ID, uHist, model, nil)
+		if hostedImageEnabled {
+			o.resolveImageArtifactBlocks(ctx, req.UserID, uHist)
+		}
 	}
 
 	// 11. Title generation (§6.3) — fire-and-forget the first time. An image-only
