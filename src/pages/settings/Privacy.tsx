@@ -67,12 +67,24 @@ export default function Privacy() {
           }),
         )
       }
-      const res = await conversationsApi.importConversations({ conversations })
+      // Keep each request well below the server's import cap. This also keeps
+      // a large ZIP recoverable: completed batches remain imported if a later
+      // batch encounters a malformed conversation or a transient failure.
+      const IMPORT_BATCH_SIZE = 100
+      let imported = 0
+      let failed = 0
+      for (let start = 0; start < conversations.length; start += IMPORT_BATCH_SIZE) {
+        const res = await conversationsApi.importConversations({
+          conversations: conversations.slice(start, start + IMPORT_BATCH_SIZE),
+        })
+        imported += res.imported
+        failed += res.failed
+      }
       await reloadConvs()
       toast.success(
-        t('settings:privacy.importDone', { defaultValue: 'Imported {{count}} conversation(s)', count: res.imported }),
-        res.failed > 0
-          ? t('settings:privacy.importPartial', { defaultValue: '{{count}} could not be imported.', count: res.failed })
+        t('settings:privacy.importDone', { defaultValue: 'Imported {{count}} conversation(s)', count: imported }),
+        failed > 0
+          ? t('settings:privacy.importPartial', { defaultValue: '{{count}} could not be imported.', count: failed })
           : undefined,
       )
     } catch (e) {
