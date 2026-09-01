@@ -453,7 +453,7 @@
     "renameEmpty": "タイトルを空にすることはできません。",
     "renamed": "会話の名前を変更しました",
     "share": "共有",
-    "export": "JSON をエクスポート",
+    "export": "エクスポート",
     "exporting": "エクスポート中…",
     "exported": "会話をエクスポートしました",
     "exportFailed": "会話をエクスポートできませんでした",
@@ -544,7 +544,9 @@
     "notFoundBody": "削除されたか、リンクが誤っている可能性があります。",
     "goToChat": "チャットへ移動",
     "jumpToLatest": "最新へ移動",
-    "deleteUndone": "この操作は取り消せません。"
+    "deleteUndone": "この操作は取り消せません。",
+    "archivedTitle": "会話はアーカイブ済みです",
+    "archivedSendHint": "メッセージを送信する前にアーカイブを解除してください。"
   },
   "visibility": {
     "public": "公開",

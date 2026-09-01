@@ -1,5 +1,6 @@
 import type { ApiConversation, ApiMemory, ApiMessage } from '@/api/types'
 import { conversationsApi, memoriesApi } from '@/api'
+import JSZip from 'jszip'
 
 /** The import parser accepts this envelope and deliberately keeps only the
  * conversation tree. Non-text blocks are retained in the export so a user can
@@ -21,8 +22,7 @@ export interface ConversationExportEnvelope {
 
 export const CONVERSATION_EXPORT_BATCH_SIZE = 10
 
-function triggerJsonDownload(value: unknown, filename: string): void {
-  const blob = new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' })
+function triggerDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url
@@ -32,6 +32,10 @@ function triggerJsonDownload(value: unknown, filename: string): void {
   anchor.remove()
   // Let the browser start the download before releasing the object URL.
   window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+function triggerJsonDownload(value: unknown, filename: string): void {
+  triggerDownload(new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' }), filename)
 }
 
 export async function exportConversation(conversationID: string): Promise<void> {
@@ -97,34 +101,74 @@ export async function prepareConversationExport(includeMemories: boolean): Promi
   }
 }
 
-/** Downloads exactly one bounded batch. Keeping each click to one file avoids
- * browser multi-download blocking and keeps memory/network work predictable. */
-export async function downloadConversationExportBatch(plan: ConversationExportPlan, index: number): Promise<void> {
-  if (index < 1 || index > plan.total) throw new Error('Invalid export batch')
-  const { conversations, memories, total } = plan
-  const date = new Date().toISOString().slice(0, 10)
-  const start = (index - 1) * CONVERSATION_EXPORT_BATCH_SIZE
-  const batchConversations = conversations.slice(start, start + CONVERSATION_EXPORT_BATCH_SIZE)
-  const detailed = []
-  for (const conversation of batchConversations) {
-    // Fetch the full tree, including inactive branches. A failed fetch aborts
-    // the batch rather than silently producing an incomplete archive.
-    const messages = await conversationsApi.messages(conversation.id, 'tree')
-    detailed.push({
-      id: conversation.id,
-      title: conversation.title,
-      model_id: conversation.model_id || undefined,
-      active_leaf_id: conversation.active_leaf_id,
-      messages,
-    })
-  }
-  const envelope: ConversationExportEnvelope = {
-    format: 'aivory-conversations',
-    version: 2,
+/** Build one portable ZIP containing bounded JSON parts. The parts remain plain
+ * JSON so each can be imported independently after extracting the archive. */
+export async function exportAllConversationZip(includeMemories: boolean): Promise<{ batches: number; conversations: number }> {
+  const plan = await prepareConversationExport(includeMemories)
+  const zip = new JSZip()
+  zip.file('manifest.json', JSON.stringify({
+    format: 'aivory-conversations-archive',
+    version: 1,
     exported_at: new Date().toISOString(),
-    batch: { index, total },
-    conversations: detailed,
-    ...(index === 1 && memories ? { memories } : {}),
+    batch_size: CONVERSATION_EXPORT_BATCH_SIZE,
+    batches: plan.total,
+    conversations: plan.conversations.length,
+  }, null, 2))
+  const date = new Date().toISOString().slice(0, 10)
+  for (let index = 1; index <= plan.total; index += 1) {
+    const start = (index - 1) * CONVERSATION_EXPORT_BATCH_SIZE
+    const batchConversations = plan.conversations.slice(start, start + CONVERSATION_EXPORT_BATCH_SIZE)
+    const detailed = []
+    for (const conversation of batchConversations) {
+      const messages = await conversationsApi.messages(conversation.id, 'tree')
+      detailed.push({
+        id: conversation.id,
+        title: conversation.title,
+        model_id: conversation.model_id || undefined,
+        active_leaf_id: conversation.active_leaf_id,
+        messages,
+      })
+    }
+    const envelope: ConversationExportEnvelope = {
+      format: 'aivory-conversations',
+      version: 2,
+      exported_at: new Date().toISOString(),
+      batch: { index, total: plan.total },
+      conversations: detailed,
+      ...(index === 1 && plan.memories ? { memories: plan.memories } : {}),
+    }
+    zip.file(`conversations-${String(index).padStart(4, '0')}.json`, JSON.stringify(envelope, null, 2))
   }
-  triggerJsonDownload(envelope, `aivory-export-${date}-part-${index}-of-${total}.json`)
+  const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } })
+  triggerDownload(blob, `aivory-export-${date}.zip`)
+  return { batches: plan.total, conversations: plan.conversations.length }
+}
+
+const MAX_IMPORT_ZIP_ENTRIES = 1000
+const MAX_IMPORT_ZIP_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
+
+/** Reads a ZIP created by exportAllConversationZip and returns its JSON parts.
+ * Other JSON files are ignored, allowing harmless metadata files in archives. */
+export async function readConversationExportFile(file: File): Promise<unknown[]> {
+  if (!file.name.toLowerCase().endsWith('.zip') && file.type !== 'application/zip') {
+    return [JSON.parse(await file.text())]
+  }
+  const zip = await JSZip.loadAsync(await file.arrayBuffer(), { createFolders: false, checkCRC32: true })
+  const entries = Object.values(zip.files).filter((entry) => !entry.dir && entry.name.toLowerCase().endsWith('.json'))
+  if (entries.length === 0) throw new Error('The ZIP contains no JSON conversation files.')
+  if (entries.length > MAX_IMPORT_ZIP_ENTRIES) throw new Error('The ZIP contains too many files.')
+  let expanded = 0
+  const values: unknown[] = []
+  for (const entry of entries) {
+    const bytes = await entry.async('uint8array')
+    expanded += bytes.byteLength
+    if (expanded > MAX_IMPORT_ZIP_UNCOMPRESSED_BYTES) throw new Error('The ZIP is too large to import.')
+    const text = new TextDecoder().decode(bytes)
+    try {
+      values.push(JSON.parse(text))
+    } catch {
+      throw new Error(`Invalid JSON in ${entry.name}.`)
+    }
+  }
+  return values
 }

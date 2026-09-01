@@ -9,7 +9,8 @@
  *    null-parent roots = edit-branches of the first question, which our
  *    sibling model supports).
  *
- * 2. Aivory's own "Export all data" file (settings → privacy):
+ * 2. Aivory's own JSON export file (settings → privacy, or a JSON entry inside
+ *    the ZIP export):
  *    `{ conversations: [ { title, model_id, active_leaf_id, messages: [ { id,
  *    parent_id, role, blocks: [...] } ] } ], memories, exported_at }`
  *    (messages as an ARRAY of block-carrying objects). Only the text blocks

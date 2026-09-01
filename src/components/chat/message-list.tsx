@@ -39,6 +39,7 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
       : undefined,
   )
   const isWorkspaceGuest = conversationWorkspace?.role === 'guest'
+  const isReadOnlyConversation = isWorkspaceGuest || conversation.archived
   const canDeleteConversations =
     userCan(user, 'allow_conversation_deletion') &&
     (!conversation.workspaceId || conversationWorkspace?.can_delete_conversations !== false)
@@ -314,9 +315,9 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
         <MessageRow
           key={m.id}
           message={m}
-          onRegenerate={isWorkspaceGuest ? undefined : handleRegenerate}
-          onEdit={isWorkspaceGuest ? undefined : handleEdit}
-          onSaveEdit={isWorkspaceGuest ? undefined : handleSaveEdit}
+          onRegenerate={isReadOnlyConversation ? undefined : handleRegenerate}
+          onEdit={isReadOnlyConversation ? undefined : handleEdit}
+          onSaveEdit={isReadOnlyConversation ? undefined : handleSaveEdit}
           onFeedback={isWorkspaceGuest ? undefined : handleFeedback}
           onReport={isWorkspaceGuest ? undefined : handleReport}
           onBranchSwitch={isWorkspaceGuest ? undefined : handleBranchSwitch}
