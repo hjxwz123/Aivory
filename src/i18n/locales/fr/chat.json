@@ -453,7 +453,7 @@
     "renameEmpty": "Le titre ne peut pas être vide.",
     "renamed": "Conversation renommée",
     "share": "Partager",
-    "export": "Exporter JSON",
+    "export": "Exporter",
     "exporting": "Exportation…",
     "exported": "Conversation exportée",
     "exportFailed": "Impossible d'exporter la conversation",
@@ -544,7 +544,9 @@
     "notFoundBody": "Elle a peut-être été supprimée, ou le lien est incorrect.",
     "goToChat": "Aller à la discussion",
     "jumpToLatest": "Aller au plus récent",
-    "deleteUndone": "Cette action est irréversible."
+    "deleteUndone": "Cette action est irréversible.",
+    "archivedTitle": "Conversation archivée",
+    "archivedSendHint": "Désarchivez cette conversation avant d’envoyer un message."
   },
   "visibility": {
     "public": "Public",

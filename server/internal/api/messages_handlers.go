@@ -1182,6 +1182,10 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
+	if conv.Archived {
+		writeError(w, http.StatusConflict, errors.New("conversation_archived"))
+		return
+	}
 	var req postMessageReq
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, 400, errInvalidInput)
@@ -1780,6 +1784,10 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
+	if conv.Archived {
+		writeError(w, http.StatusConflict, errors.New("conversation_archived"))
+		return
+	}
 	permissionSnapshot, err := requestPermissionSnapshotFor(d, r)
 	if err != nil {
 		writeError(w, http.StatusForbidden, errPermissionDenied)
@@ -2265,8 +2273,13 @@ func editMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	convID := pathParam(r, "id")
 	msgID := pathParam(r, "msgId")
-	if _, err := store.GetConversation(r.Context(), d.DB, convID, u.ID); err != nil {
+	conv, err := store.GetConversation(r.Context(), d.DB, convID, u.ID)
+	if err != nil {
 		writeError(w, 404, errNotFound)
+		return
+	}
+	if conv.Archived {
+		writeError(w, http.StatusConflict, errors.New("conversation_archived"))
 		return
 	}
 	var body struct {

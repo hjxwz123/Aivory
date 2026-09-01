@@ -453,7 +453,7 @@
     "renameEmpty": "標題不能為空。",
     "renamed": "會話已重新命名",
     "share": "分享",
-    "export": "匯出 JSON",
+    "export": "匯出",
     "exporting": "正在匯出…",
     "exported": "會話已匯出",
     "exportFailed": "匯出會話失敗",
@@ -544,7 +544,9 @@
     "notFoundBody": "它可能已被刪除，或連結有誤。",
     "goToChat": "前往對話",
     "jumpToLatest": "跳到最新",
-    "deleteUndone": "此操作無法撤銷。"
+    "deleteUndone": "此操作無法撤銷。",
+    "archivedTitle": "會話已封存",
+    "archivedSendHint": "請先取消封存，再編輯或傳送訊息。"
   },
   "visibility": {
     "public": "公開",

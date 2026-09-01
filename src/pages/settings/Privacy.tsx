@@ -18,8 +18,8 @@ import { useConversations } from '@/store/conversations'
 import { useAuth } from '@/store/auth'
 import { userCan } from '@/lib/user-permissions'
 import {
-  downloadConversationExportBatch,
-  prepareConversationExport,
+  exportAllConversationZip,
+  readConversationExportFile,
 } from '@/lib/conversation-export'
 
 export default function Privacy() {
@@ -29,7 +29,6 @@ export default function Privacy() {
   const [confirmClear, setConfirmClear] = useState(false)
   const [clearing, setClearing] = useState(false)
   const [exporting, setExporting] = useState(false)
-  const [exportProgress, setExportProgress] = useState<{ index: number; total: number } | null>(null)
   const exportAttemptRef = useRef(0)
   const [importing, setImporting] = useState(false)
   const importRef = useRef<HTMLInputElement>(null)
@@ -47,23 +46,20 @@ export default function Privacy() {
     exportAttemptRef.current += 1
   }, [])
 
-  /** Import conversations from a JSON export — another platform's, or this
-   *  page's own "Export all data" file (parseConversationExport auto-detects
-   *  which). Only chat history + titles are kept — images/files/usage and
-   *  <details> blocks are stripped client-side by the parser. The branch tree
-   *  migrates to our message tree. */
+  /** Import conversations from JSON or a ZIP export. ZIP entries are parsed
+   *  independently so the archive can contain bounded conversation batches;
+   *  legacy third-party and Aivory JSON formats remain supported. */
   async function performImport(file: File) {
     if (importing) return
     setImporting(true)
     try {
-      const text = await file.text()
-      let json: unknown
+      let jsonValues: unknown[]
       try {
-        json = JSON.parse(text)
-      } catch {
-        throw new Error(t('settings:privacy.importBadJson', { defaultValue: 'That file is not valid JSON.' }))
+        jsonValues = await readConversationExportFile(file)
+      } catch (error) {
+        throw new Error(error instanceof Error ? error.message : t('settings:privacy.importBadJson', { defaultValue: 'That file is not valid JSON.' }))
       }
-      const conversations = parseConversationExport(json)
+      const conversations = jsonValues.flatMap((json) => parseConversationExport(json))
       if (conversations.length === 0) {
         throw new Error(
           t('settings:privacy.importEmpty', {
@@ -99,25 +95,19 @@ export default function Privacy() {
     const attempt = exportAttemptRef.current + 1
     exportAttemptRef.current = attempt
     setExporting(true)
-    setExportProgress(null)
     try {
-      const plan = await prepareConversationExport(canUseMemory)
+      const result = await exportAllConversationZip(canUseMemory)
       const latestUser = useAuth.getState().user
       if (
         exportAttemptRef.current !== attempt ||
         latestUser?.id !== userID ||
         !userCan(latestUser, 'allow_conversation_export')
       ) return
-      for (let index = 1; index <= plan.total; index += 1) {
-        if (exportAttemptRef.current !== attempt) return
-        setExportProgress({ index, total: plan.total })
-        await downloadConversationExportBatch(plan, index)
-      }
       toast.success(
         t('settings:privacy.exportDone', {
-          defaultValue: 'Export downloaded ({{count}} conversation(s) in {{batches}} file(s))',
-          count: plan.conversations.length,
-          batches: plan.total,
+          defaultValue: 'Export downloaded ({{count}} conversation(s) in one ZIP)',
+          count: result.conversations,
+          batches: result.batches,
         }),
       )
     } catch (e) {
@@ -127,7 +117,6 @@ export default function Privacy() {
     } finally {
       if (exportAttemptRef.current === attempt) {
         setExporting(false)
-        setExportProgress(null)
       }
     }
   }
@@ -189,7 +178,7 @@ export default function Privacy() {
           <input
             ref={importRef}
             type="file"
-            accept="application/json,.json"
+            accept="application/json,.json,application/zip,.zip"
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0]
@@ -217,13 +206,7 @@ export default function Privacy() {
               loading={exporting}
               onClick={() => void performExport()}
             >
-              {exportProgress
-                ? t('settings:privacy.exportProgress', {
-                    defaultValue: 'Exporting {{index}}/{{total}}…',
-                    index: exportProgress.index,
-                    total: exportProgress.total,
-                  })
-                : t('common:actions.export')}
+              {t('common:actions.export')}
             </Button>
           </SettingsRow>
         ) : null}

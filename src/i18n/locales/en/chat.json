@@ -458,7 +458,7 @@
     "renameEmpty": "Title cannot be empty.",
     "renamed": "Conversation renamed",
     "share": "Share",
-    "export": "Export JSON",
+    "export": "Export",
     "exporting": "Exporting…",
     "exported": "Conversation exported",
     "exportFailed": "Could not export conversation",
@@ -549,7 +549,9 @@
     "notFoundBody": "It may have been deleted, or the link is wrong.",
     "goToChat": "Go to chat",
     "jumpToLatest": "Jump to latest",
-    "deleteUndone": "This can't be undone."
+    "deleteUndone": "This can't be undone.",
+    "archivedTitle": "Conversation archived",
+    "archivedSendHint": "Please unarchive this conversation before sending a message."
   },
   "visibility": {
     "public": "Public",

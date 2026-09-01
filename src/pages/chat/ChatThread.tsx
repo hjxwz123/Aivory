@@ -347,6 +347,10 @@ export default function ChatThread() {
     },
   ) {
     if (!conversation) return
+    if (conversation.archived) {
+      toast.info(t('chat:thread.archivedSendHint', { defaultValue: 'Please unarchive this conversation before sending a message.' }))
+      return
+    }
     void sendMessage({
       conversationId: conversation.id,
       text,
@@ -750,6 +754,15 @@ export default function ChatThread() {
               </p>
               <p className="mt-1 text-[12px] leading-relaxed text-[var(--color-fg-muted)]">
                 {t('chat:workspace.readOnlyBody', { defaultValue: 'You are a guest in this workspace. You can read shared conversations but not send messages.' })}
+              </p>
+            </div>
+          ) : conversation.archived ? (
+            <div className="border-t border-[var(--color-divider)] py-4 text-center">
+              <p className="text-[13px] font-medium text-[var(--color-fg)]">
+                {t('chat:thread.archivedTitle', { defaultValue: 'Conversation archived' })}
+              </p>
+              <p className="mt-1 text-[12px] leading-relaxed text-[var(--color-fg-muted)]">
+                {t('chat:thread.archivedSendHint', { defaultValue: 'Please unarchive this conversation before sending a message.' })}
               </p>
             </div>
           ) : conversation.projectId && !canUseKnowledgeBases ? (

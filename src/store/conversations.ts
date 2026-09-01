@@ -1737,6 +1737,10 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     // normal appends serial on the visible branch; explicit branch edits retain
     // their independent stream behavior.
     const appendSnapshot = get().conversations.find((c) => c.id === input.conversationId)
+    if (appendSnapshot?.archived) {
+      toast.info(i18n.t('chat:thread.archivedSendHint', { defaultValue: 'Please unarchive this conversation before sending a message.' }))
+      return
+    }
     const currentUserId = useAuth.getState().user?.id
     const currentUserIsStreaming = appendSnapshot?.messages.some(
       (message) =>

@@ -453,7 +453,7 @@
     "renameEmpty": "标题不能为空。",
     "renamed": "会话已重命名",
     "share": "分享",
-    "export": "导出 JSON",
+    "export": "导出",
     "exporting": "正在导出…",
     "exported": "会话已导出",
     "exportFailed": "导出会话失败",
@@ -544,7 +544,9 @@
     "notFoundBody": "它可能已被删除，或链接有误。",
     "goToChat": "前往对话",
     "jumpToLatest": "跳到最新",
-    "deleteUndone": "此操作无法撤销。"
+    "deleteUndone": "此操作无法撤销。",
+    "archivedTitle": "对话已归档",
+    "archivedSendHint": "请先取消归档，再编辑或发送消息。"
   },
   "visibility": {
     "public": "公开",
