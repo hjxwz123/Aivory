@@ -3,6 +3,7 @@ package llm
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log"
 	"path/filepath"
 	"strings"
@@ -54,8 +55,20 @@ func TestCompactionProviderLogsPairWithoutRawError(t *testing.T) {
 	}
 }
 
-func TestCompactionMapReduceLogsPartAndBatchIndexes(t *testing.T) {
-	db, err := store.Open(filepath.Join(t.TempDir(), "compaction-map-reduce-logging.db"))
+func TestCompactionErrorKindNamesContextTermination(t *testing.T) {
+	if got := compactionErrorKind(context.Canceled); got != "context_canceled" {
+		t.Fatalf("context cancellation kind = %q", got)
+	}
+	if got := compactionErrorKind(context.DeadlineExceeded); got != "deadline_exceeded" {
+		t.Fatalf("context deadline kind = %q", got)
+	}
+	if got := compactionErrorKind(errors.Join(ErrCompactionFailed, context.Canceled)); got != "context_canceled" {
+		t.Fatalf("wrapped cancellation kind = %q", got)
+	}
+}
+
+func TestCompactionLogsSingleDirectSummaryPlan(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "compaction-direct-logging.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,34 +82,29 @@ func TestCompactionMapReduceLogsPartAndBatchIndexes(t *testing.T) {
 	task := newCompactionTask(t, db, provider)
 	var logs bytes.Buffer
 	task.logger = log.New(&logs, "", 0)
-	ctx := withCompactionTrace(context.Background(), "cmp_log_map_reduce", "manual")
-	parts := []compactionSourcePart{
-		{Text: "first ordered source part with a concrete decision"},
-		{Text: "second ordered source part with a concrete result"},
-		{Text: "third ordered source part with a pending follow-up"},
-	}
-
-	_, err = summarizeCompactionParts(
-		ctx, task, &store.Conversation{ID: "conv_log_map_reduce"}, parts,
-		"", "", "", compactionSummaryInstruction,
-		512, 1024, minimumCompactionRequestMaxTokens, nil,
+	ctx := withCompactionTrace(context.Background(), "cmp_log_direct", "manual")
+	_, err = summarizeCompactionText(
+		ctx, task, &store.Conversation{ID: "conv_log_direct"},
+		"ordered source with a concrete decision and pending follow-up",
+		"", "", "", compactionSummaryInstruction, 512, 1024, minimumCompactionRequestMaxTokens,
 	)
 	if err != nil {
-		t.Fatalf("summarizeCompactionParts: %v\nlogs:\n%s", err, logs.String())
+		t.Fatalf("summarizeCompactionText: %v\nlogs:\n%s", err, logs.String())
 	}
 	got := logs.String()
 	for _, want := range []string{
-		"stage=map_part status=started",
-		"part_index=1 part_count=3",
-		"stage=map_part status=completed",
-		"stage=reduce_batch status=started",
-		"iteration=1 batch_index=1 input_count=3",
-		"stage=reduce_batch status=completed",
-		"stage=map_reduce status=completed",
+		"stage=summary_plan status=started",
+		"stage=summary_plan status=completed",
+		"strategy=direct",
+		"stage=provider status=started",
+		"stage=provider status=completed",
 	} {
 		if !strings.Contains(got, want) {
-			t.Fatalf("map/reduce logs missing %q:\n%s", want, got)
+			t.Fatalf("direct compaction logs missing %q:\n%s", want, got)
 		}
+	}
+	if len(provider.reqs) != 1 || strings.Contains(got, "map_part") || strings.Contains(got, "reduce_batch") {
+		t.Fatalf("compaction was not single-request direct: requests=%d logs=\n%s", len(provider.reqs), got)
 	}
 }
 

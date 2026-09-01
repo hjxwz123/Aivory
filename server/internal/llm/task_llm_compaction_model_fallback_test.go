@@ -162,7 +162,7 @@ func TestCompactionBudgetExtraParamsUsesLargestMergedRequest(t *testing.T) {
 	const requestMax = minimumCompactionRequestMaxTokens
 	const outputCap = 512
 	const target = 384
-	budget := compactionPayloadBudgetForAttempts(
+	budget := compactionPayloadBudget(
 		requestMax, outputCap, "", compactionSummaryInstruction, target, selected,
 	)
 	for index, params := range []json.RawMessage{compact, large} {

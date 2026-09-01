@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -69,6 +70,22 @@ func nextCompactionProviderCall(ctx context.Context) uint64 {
 func compactionErrorKind(err error) string {
 	if err == nil {
 		return ""
+	}
+	switch {
+	case errors.Is(err, context.Canceled):
+		return "context_canceled"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline_exceeded"
+	case errors.Is(err, ErrCompactionDisabled):
+		return "compaction_disabled"
+	case errors.Is(err, ErrCompactionInFlight):
+		return "compaction_in_flight"
+	case errors.Is(err, ErrCompactionChanged):
+		return "compaction_changed"
+	case errors.Is(err, ErrCompactionPersist):
+		return "compaction_persist"
+	case errors.Is(err, ErrCompactionFailed):
+		return "compaction_failed"
 	}
 	return fmt.Sprintf("%T", err)
 }

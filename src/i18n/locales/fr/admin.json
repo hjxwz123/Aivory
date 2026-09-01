@@ -963,7 +963,7 @@
       "summaryMergeTokens": "Budget des résumés fusionnés",
       "summaryMergeTokensHint": "Taille cumulée maximale des résumés avant de fusionner les blocs les plus anciens. Minimum : 256.",
       "compactionRequestTokens": "Budget de requête de compactage",
-      "compactionRequestTokensHint": "Total estimé maximal de l'entrée et de la sortie réservée pour chaque requête de résumé. Les historiques plus longs sont traités par lots. Minimum : 8192.",
+      "compactionRequestTokensHint": "Total estimé maximal de l'entrée et de la sortie réservée pour une requête de résumé en arrière-plan. Chaque passage compacte le plus grand préfixe de tours anciens complets qui tient dans le budget ; le reste est conservé pour les passages suivants. Un tour trop volumineux n'est jamais découpé. Minimum : 8192.",
       "compactionPrompt": "Instructions de résumé personnalisées",
       "compactionPromptHint": "Instructions facultatives placées avant le prompt intégré de résumé de continuation d'Aivory.",
       "compactionPromptPlaceholder": "Laissez vide pour utiliser les instructions de résumé intégrées.",

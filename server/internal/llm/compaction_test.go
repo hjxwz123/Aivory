@@ -288,7 +288,7 @@ func TestMaybeCompactCutShrinkNoDuplicate(t *testing.T) {
 		if len(keep2) > 0 {
 			start = keep2[0].ID
 		}
-		t.Fatalf("inline tail starts at %s, want m8 (after existing summary anchor)", start)
+		t.Fatalf("returned tail starts at %s, want m8 (after existing summary anchor)", start)
 	}
 }
 
@@ -703,7 +703,7 @@ func TestCJKFallbacksClipByTokens(t *testing.T) {
 	}
 }
 
-func TestMergeOldestBlocksRetriesMateriallyShortSummary(t *testing.T) {
+func TestMergeOldestBlocksAcceptsShortNonEmptySummaryWithoutRetry(t *testing.T) {
 	db, err := store.Open(filepath.Join(t.TempDir(), "short-merge-retry.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -717,8 +717,8 @@ func TestMergeOldestBlocksRetriesMateriallyShortSummary(t *testing.T) {
 		strings.Repeat("Retained earlier requirement and outcome. ", 140),
 	}}
 	task := newCompactionTask(t, db, provider)
-	longA := strings.Repeat("alpha requirement decision path result ", 700)
-	longB := strings.Repeat("beta requirement decision path result ", 700)
+	longA := strings.Repeat("alpha requirement decision path result ", 150)
+	longB := strings.Repeat("beta requirement decision path result ", 150)
 	blocks := []SummaryBlock{
 		{Level: 1, FromMessageID: "m0", AnchorMessageID: "m1", Text: longA, Tokens: estimateTokens(longA)},
 		{Level: 2, FromMessageID: "m2", AnchorMessageID: "m3", Text: longB, Tokens: estimateTokens(longB)},
@@ -727,21 +727,21 @@ func TestMergeOldestBlocksRetriesMateriallyShortSummary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(provider.reqs) != 2 {
-		t.Fatalf("merge requests = %d, want 2", len(provider.reqs))
+	if len(provider.reqs) != 1 {
+		t.Fatalf("merge requests = %d, want exactly 1", len(provider.reqs))
 	}
-	if len(merged) != 1 || merged[0].Text != strings.TrimSpace(provider.texts[1]) {
-		t.Fatalf("merged blocks = %+v, want revised summary", merged)
+	if len(merged) != 1 || merged[0].Text != strings.TrimSpace(provider.texts[0]) {
+		t.Fatalf("merged blocks = %+v, want first non-empty summary", merged)
 	}
-	retryPrompt := provider.reqs[1].History[0].Blocks[0].Text
-	for _, want := range []string{"ORIGINAL CONVERSATION SOURCE", "[partial summary 1/2]", "alpha requirement", "beta requirement"} {
-		if !strings.Contains(retryPrompt, want) {
-			t.Fatalf("retry prompt omitted %q", want)
+	prompt := provider.reqs[0].History[0].Blocks[0].Text
+	for _, want := range []string{"CONTINUATION SUMMARIES", "[continuation summary 1/2]", "alpha requirement", "beta requirement"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("merge prompt omitted %q", want)
 		}
 	}
 }
 
-func TestMergeOldestBlocksMapReducesOversizedImportedSummaries(t *testing.T) {
+func TestMergeOldestBlocksPreservesOversizedImportedSummaries(t *testing.T) {
 	db, err := store.Open(filepath.Join(t.TempDir(), "bounded-imported-merge.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -763,17 +763,12 @@ func TestMergeOldestBlocksMapReducesOversizedImportedSummaries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(merged) != 1 || len(provider.reqs) < 3 {
-		t.Fatalf("merged=%+v requests=%d, want bounded multi-call fold", merged, len(provider.reqs))
-	}
-	for i, req := range provider.reqs {
-		if got := estimateRequestTokens(req) + req.MaxOutputTokens; got > minimumCompactionRequestMaxTokens {
-			t.Fatalf("merge request %d total=%d, want <=%d", i+1, got, minimumCompactionRequestMaxTokens)
-		}
+	if !reflect.DeepEqual(merged, blocks) || len(provider.reqs) != 0 {
+		t.Fatalf("oversized fold changed source blocks or called provider: changed=%t requests=%d", !reflect.DeepEqual(merged, blocks), len(provider.reqs))
 	}
 }
 
-func TestMergeOldestBlocksUnacceptableReducePreservesSourceBlocks(t *testing.T) {
+func TestMergeOldestBlocksOversizedSourcePreservesSourceBlocks(t *testing.T) {
 	db, err := store.Open(filepath.Join(t.TempDir(), "merge-short-fail-closed.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -782,6 +777,7 @@ func TestMergeOldestBlocksUnacceptableReducePreservesSourceBlocks(t *testing.T) 
 	if err := store.Migrate(db); err != nil {
 		t.Fatal(err)
 	}
+	_ = store.SetSetting(db, "compaction_request_max_tokens", minimumCompactionRequestMaxTokens)
 	provider := &compactionTestProvider{texts: []string{"brief", "still too brief"}}
 	task := newCompactionTask(t, db, provider)
 	longA := strings.Repeat("alpha requirement decision path result ", 700)
@@ -795,7 +791,10 @@ func TestMergeOldestBlocksUnacceptableReducePreservesSourceBlocks(t *testing.T) 
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(merged, blocks) {
-		t.Fatalf("unacceptable reduce replaced source blocks: got=%+v want=%+v", merged, blocks)
+		t.Fatalf("oversized merge replaced source blocks: got=%+v want=%+v", merged, blocks)
+	}
+	if len(provider.reqs) != 0 {
+		t.Fatalf("oversized merge made %d provider request(s), want zero", len(provider.reqs))
 	}
 }
 
@@ -858,7 +857,7 @@ func TestMergeIfOverMakesOneMaterialFoldPerOperation(t *testing.T) {
 	}
 }
 
-func TestMergeOldestBlocksPropagatesCancellationFromSuccessfulRetry(t *testing.T) {
+func TestMergeOldestBlocksPropagatesCancellationFromSingleRequest(t *testing.T) {
 	db, err := store.Open(filepath.Join(t.TempDir(), "canceled-short-merge-retry.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -873,11 +872,11 @@ func TestMergeOldestBlocksPropagatesCancellationFromSuccessfulRetry(t *testing.T
 			"Too brief.",
 			strings.Repeat("Retained earlier requirement and outcome. ", 140),
 		},
-		cancel: cancel, cancelOnCall: 2,
+		cancel: cancel, cancelOnCall: 1,
 	}
 	task := newCompactionTask(t, db, provider)
-	longA := strings.Repeat("alpha requirement decision path result ", 700)
-	longB := strings.Repeat("beta requirement decision path result ", 700)
+	longA := strings.Repeat("alpha requirement decision path result ", 150)
+	longB := strings.Repeat("beta requirement decision path result ", 150)
 	blocks := []SummaryBlock{
 		{Level: 1, FromMessageID: "m0", AnchorMessageID: "m1", Text: longA, Tokens: estimateTokens(longA)},
 		{Level: 2, FromMessageID: "m2", AnchorMessageID: "m3", Text: longB, Tokens: estimateTokens(longB)},
@@ -886,8 +885,8 @@ func TestMergeOldestBlocksPropagatesCancellationFromSuccessfulRetry(t *testing.T
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("successful retry after cancellation err=%v, want context.Canceled", err)
 	}
-	if len(provider.reqs) != 2 {
-		t.Fatalf("merge requests = %d, want 2", len(provider.reqs))
+	if len(provider.reqs) != 1 {
+		t.Fatalf("merge requests = %d, want 1", len(provider.reqs))
 	}
 	if !reflect.DeepEqual(merged, blocks) {
 		t.Fatalf("canceled retry replaced source blocks: got=%+v want=%+v", merged, blocks)
@@ -1027,14 +1026,14 @@ func TestAppendCompactionSourceRecoversRawToolOutputTail(t *testing.T) {
 	}
 }
 
-func TestSplitCompactionSourcePreservesRawToolOutputMiddleEvidence(t *testing.T) {
+func TestOversizedRawToolRoundRemainsVerbatim(t *testing.T) {
 	previous := compactionToolOutputTokens
 	compactionToolOutputTokens = 64
 	t.Cleanup(func() { compactionToolOutputTokens = previous })
 
 	const middleEvidence = "MIDDLE_EVIDENCE accession=PMC987654 decision=approved"
-	rawOutput := "tool result head " + strings.Repeat("prefix filler ", 800) +
-		middleEvidence + strings.Repeat(" suffix filler", 800) + " tool result tail"
+	rawOutput := "tool result head " + strings.Repeat("prefix filler ", 3000) +
+		middleEvidence + strings.Repeat(" suffix filler", 3000) + " tool result tail"
 	blocks, err := json.Marshal([]UnifiedBlock{{
 		Kind: "tool_output", ToolName: "paper_lookup", ToolID: "call-middle", Text: "short UI preview",
 	}})
@@ -1063,33 +1062,8 @@ func TestSplitCompactionSourcePreservesRawToolOutputMiddleEvidence(t *testing.T)
 		t.Fatal("recognized Raw tool result was projected through the bounded UI preview")
 	}
 
-	parts, err := splitCompactionSource([]store.Message{msg}, 256)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(parts) < 2 {
-		t.Fatalf("parts=%d, want the oversized Raw result to enter map/reduce splitting", len(parts))
-	}
-	var rebuilt strings.Builder
-	foundMiddle := false
-	for _, part := range parts {
-		if got := estimateTokens(part.Text); got > 256 {
-			t.Fatalf("part tokens=%d, want <=256", got)
-		}
-		if strings.Contains(part.Text, middleEvidence) {
-			foundMiddle = true
-		}
-		newline := strings.IndexByte(part.Text, '\n')
-		if newline < 0 {
-			t.Fatalf("missing oversized-source label: %q", part.Text)
-		}
-		rebuilt.WriteString(part.Text[newline+1:])
-	}
-	if !foundMiddle {
-		t.Fatal("no map/reduce source part contained the middle tool evidence")
-	}
-	if rebuilt.String() != rendered {
-		t.Fatalf("Raw tool result was not partitioned losslessly: got=%d bytes want=%d", rebuilt.Len(), len(rendered))
+	if _, err := selectCompactionPrefix(nil, []store.Message{msg}, "", nil, 512, 30, minimumCompactionRequestMaxTokens); !errors.Is(err, ErrCompactionFailed) {
+		t.Fatalf("oversized complete round selection err=%v, want ErrCompactionFailed", err)
 	}
 }
 
@@ -1237,8 +1211,8 @@ func TestAppendCompactionSourcePreservesMetadataAndReferenceCollections(t *testi
 	}
 
 	// Reference collections are not silently capped at an arbitrary item count.
-	// The per-field metadata cap and the lossless map/reduce request budget remain
-	// the boundaries for large collections.
+	// The per-field metadata cap and the single-request prefix budget remain the
+	// boundaries for large collections.
 	largeCount := 250
 	largeMessage := messageWithReferences(largeCount)
 	var prompt strings.Builder
@@ -1352,43 +1326,21 @@ func TestAppendCompactionSourceBoundsResearchState(t *testing.T) {
 	}
 }
 
-func TestSplitCompactionSourcePreservesAllOversizedText(t *testing.T) {
+func TestSelectCompactionPrefixRejectsOversizedCompleteRound(t *testing.T) {
 	text := strings.Repeat("alpha beta gamma delta ", 5000)
 	blocks, err := json.Marshal([]UnifiedBlock{{Kind: "text", Text: text}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	msgs := []store.Message{{ID: "m1", Role: "user", Blocks: blocks, Attachments: json.RawMessage("[]"), Citations: json.RawMessage("[]")}}
-	original, err := renderCompactionSource(msgs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	parts, err := splitCompactionSource(msgs, 512)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(parts) < 2 {
-		t.Fatalf("parts=%d, want oversized source split", len(parts))
-	}
-	var rebuilt strings.Builder
-	for _, part := range parts {
-		if got := estimateTokens(part.Text); got > 512 {
-			t.Fatalf("part tokens=%d, want <=512", got)
-		}
-		newline := strings.IndexByte(part.Text, '\n')
-		if newline < 0 {
-			t.Fatalf("missing part label: %q", part.Text)
-		}
-		rebuilt.WriteString(part.Text[newline+1:])
-	}
-	if rebuilt.String() != original {
-		t.Fatalf("oversized source was not partitioned losslessly: got=%d bytes want=%d", rebuilt.Len(), len(original))
+	if _, err := selectCompactionPrefix(nil, msgs, "", nil, 512, 30, minimumCompactionRequestMaxTokens); !errors.Is(err, ErrCompactionFailed) {
+		t.Fatalf("oversized round selection err=%v, want ErrCompactionFailed", err)
 	}
 }
 
-func TestSplitCompactionSourceRejectsMalformedMessageJSON(t *testing.T) {
+func TestSelectCompactionPrefixRejectsMalformedMessageJSON(t *testing.T) {
 	msgs := []store.Message{{ID: "bad", Role: "user", Blocks: json.RawMessage(`{"broken"`), Attachments: json.RawMessage("[]"), Citations: json.RawMessage("[]")}}
-	if _, err := splitCompactionSource(msgs, 512); err == nil {
+	if _, err := selectCompactionPrefix(nil, msgs, "", nil, 512, 30, minimumCompactionRequestMaxTokens); err == nil {
 		t.Fatal("malformed message blocks were silently treated as summarized")
 	}
 }
@@ -1449,8 +1401,8 @@ func TestLoadSummaryBlocksForRequestRejectsOversizedCoverageAndDependentSuffix(t
 	}
 }
 
-func TestMaybeCompactMapReduceBoundsEveryRequestAndCoversFullRange(t *testing.T) {
-	db, err := store.Open(filepath.Join(t.TempDir(), "bounded-map-reduce.db"))
+func TestMaybeCompactSingleRequestAdvancesFittingPrefix(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "bounded-incremental.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1478,7 +1430,7 @@ func TestMaybeCompactMapReduceBoundsEveryRequestAndCoversFullRange(t *testing.T)
 		t.Fatal(err)
 	}
 	history := buildHistory(8)
-	longBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: strings.Repeat("source fact decision path number ", 5000)}})
+	longBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: strings.Repeat("source fact decision path number ", 250)}})
 	for i := range history {
 		history[i].ConversationID = conv.ID
 		if i < 6 {
@@ -1488,20 +1440,36 @@ func TestMaybeCompactMapReduceBoundsEveryRequestAndCoversFullRange(t *testing.T)
 			t.Fatal(err)
 		}
 	}
-	_, blocks, err := MaybeCompact(context.Background(), db, task, conv, history, 0, "u1")
+	keep, blocks, err := MaybeCompact(context.Background(), db, task, conv, history, 0, "u1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(provider.reqs) < 3 {
-		t.Fatalf("requests=%d, want map-reduce calls", len(provider.reqs))
+	if len(provider.reqs) != 1 {
+		t.Fatalf("requests=%d, want exactly one direct summary call", len(provider.reqs))
 	}
 	for i, req := range provider.reqs {
 		if total := estimateRequestTokens(req) + req.MaxOutputTokens; total > minimumCompactionRequestMaxTokens {
 			t.Fatalf("request %d total estimate=%d, want <=%d", i+1, total, minimumCompactionRequestMaxTokens)
 		}
 	}
-	if len(blocks) != 1 || blocks[0].FromMessageID != "m0" || blocks[0].AnchorMessageID != "m5" {
-		t.Fatalf("blocks=%+v, want one block covering the complete replaced range", blocks)
+	if len(blocks) != 1 || blocks[0].FromMessageID != "m0" || blocks[0].AnchorMessageID == "m5" {
+		t.Fatalf("blocks=%+v, want one incrementally advancing prefix block", blocks)
+	}
+	if len(keep) <= 2 || keep[0].Role != "user" {
+		t.Fatalf("remaining verbatim history=%+v, want complete-round tail", keep)
+	}
+	firstAnchor := blocks[0].AnchorMessageID
+	encoded, _ := json.Marshal(blocks)
+	conv.SummaryBlocks = encoded
+	keep, blocks, err = MaybeCompact(context.Background(), db, task, conv, history, 0, "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.reqs) != 2 {
+		t.Fatalf("two compaction operations made %d requests, want one each", len(provider.reqs))
+	}
+	if len(blocks) != 1 || blocks[0].AnchorMessageID == firstAnchor || len(keep) >= len(history)-2 {
+		t.Fatalf("second operation did not advance monotonically: first=%s blocks=%+v keep=%d", firstAnchor, blocks, len(keep))
 	}
 }
 
@@ -1532,7 +1500,7 @@ func TestMaybeCompactBudgetIncludesResolvedModelExtraParams(t *testing.T) {
 	}
 	conv, _ := store.CreateConversation(context.Background(), db, store.Conversation{UserID: "u1", Title: "Extra params"})
 	history := buildHistory(8)
-	longBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: strings.Repeat("source fact decision ", 1800)}})
+	longBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: strings.Repeat("source fact decision ", 180)}})
 	for i := range history {
 		history[i].ConversationID = conv.ID
 		if i < 6 {
@@ -1546,8 +1514,8 @@ func TestMaybeCompactBudgetIncludesResolvedModelExtraParams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(blocks) != 1 || len(provider.reqs) < 2 {
-		t.Fatalf("blocks=%+v requests=%d, want bounded map/reduce", blocks, len(provider.reqs))
+	if len(blocks) != 1 || len(provider.reqs) != 1 {
+		t.Fatalf("blocks=%+v requests=%d, want one bounded direct call", blocks, len(provider.reqs))
 	}
 	for i, req := range provider.reqs {
 		if got := estimateRequestTokens(req) + req.MaxOutputTokens; got > minimumCompactionRequestMaxTokens {
@@ -1642,7 +1610,7 @@ func TestMaybeCompactClampsOutputToRequestBudget(t *testing.T) {
 	}
 }
 
-func TestMaybeCompactMapFailureDoesNotAdvanceFrontier(t *testing.T) {
+func TestMaybeCompactOversizedRoundDoesNotAdvanceFrontier(t *testing.T) {
 	db, err := store.Open(filepath.Join(t.TempDir(), "bounded-map-failure.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -1654,7 +1622,7 @@ func TestMaybeCompactMapFailureDoesNotAdvanceFrontier(t *testing.T) {
 	_ = store.SetSetting(db, "keep_recent_rounds", 1)
 	_ = store.SetSetting(db, "summary_max_tokens", 512)
 	_ = store.SetSetting(db, "compaction_request_max_tokens", minimumCompactionRequestMaxTokens)
-	provider := &compactionTestProvider{text: strings.Repeat("partial summary detail ", 80), failOnCall: 2}
+	provider := &compactionTestProvider{text: strings.Repeat("partial summary detail ", 80)}
 	task := newCompactionTask(t, db, provider)
 	if _, err := db.Exec(`INSERT INTO users(id,email,password_hash,role) VALUES('u1','failure@example.test','hash','admin')`); err != nil {
 		t.Fatal(err)
@@ -1679,14 +1647,17 @@ func TestMaybeCompactMapFailureDoesNotAdvanceFrontier(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(keep) != len(history) || len(blocks) != 0 {
-		t.Fatalf("failed map advanced context: keep=%d blocks=%+v", len(keep), blocks)
+		t.Fatalf("oversized round advanced context: keep=%d blocks=%+v", len(keep), blocks)
+	}
+	if len(provider.reqs) != 0 {
+		t.Fatalf("oversized round made %d provider request(s), want zero", len(provider.reqs))
 	}
 	var raw string
 	if err := db.QueryRow(`SELECT COALESCE(summary_blocks,'[]') FROM conversations WHERE id=?`, conv.ID).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
 	if got := LoadSummaryBlocks(json.RawMessage(raw)); len(got) != 0 {
-		t.Fatalf("failed map persisted summary blocks: %+v", got)
+		t.Fatalf("oversized round persisted summary blocks: %+v", got)
 	}
 }
 
@@ -1796,7 +1767,7 @@ func TestMaybeCompactNoCompactableRoundsKeepsExistingSummaryContextCoherent(t *t
 	}
 }
 
-func TestMaybeCompactShortRetryStillTooShortDoesNotAdvanceFrontier(t *testing.T) {
+func TestMaybeCompactAcceptsShortNonEmptySummaryWithoutRetry(t *testing.T) {
 	db, err := store.Open(filepath.Join(t.TempDir(), "short-retry-fail-closed.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -1817,7 +1788,7 @@ func TestMaybeCompactShortRetryStillTooShortDoesNotAdvanceFrontier(t *testing.T)
 		t.Fatal(err)
 	}
 	history := buildHistory(8)
-	longBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: strings.Repeat("source requirement decision path ", 600)}})
+	longBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: strings.Repeat("source requirement decision path ", 150)}})
 	for i := range history {
 		history[i].ConversationID = conv.ID
 		if i < 6 {
@@ -1831,15 +1802,15 @@ func TestMaybeCompactShortRetryStillTooShortDoesNotAdvanceFrontier(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(provider.reqs) != 2 {
-		t.Fatalf("requests=%d, want initial plus one retry", len(provider.reqs))
+	if len(provider.reqs) != 1 {
+		t.Fatalf("requests=%d, want exactly one", len(provider.reqs))
 	}
-	if len(keep) != len(history) || len(blocks) != 0 {
-		t.Fatalf("unacceptable retry advanced context: keep=%d blocks=%+v", len(keep), blocks)
+	if len(keep) >= len(history) || len(blocks) != 1 || blocks[0].Text != "brief" {
+		t.Fatalf("short non-empty summary was not persisted: keep=%d blocks=%+v", len(keep), blocks)
 	}
 }
 
-func TestMaybeCompactRetryFailureDoesNotUseRejectedDraft(t *testing.T) {
+func TestMaybeCompactDoesNotMakeObsoleteSecondRequest(t *testing.T) {
 	db, err := store.Open(filepath.Join(t.TempDir(), "short-retry-provider-failure.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -1857,7 +1828,7 @@ func TestMaybeCompactRetryFailureDoesNotUseRejectedDraft(t *testing.T) {
 	}
 	conv, _ := store.CreateConversation(context.Background(), db, store.Conversation{UserID: "u1", Title: "Retry failure"})
 	history := buildHistory(8)
-	longBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: strings.Repeat("source requirement decision path ", 600)}})
+	longBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: strings.Repeat("source requirement decision path ", 150)}})
 	for i := range history {
 		history[i].ConversationID = conv.ID
 		if i < 6 {
@@ -1871,8 +1842,8 @@ func TestMaybeCompactRetryFailureDoesNotUseRejectedDraft(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(keep) != len(history) || len(blocks) != 0 {
-		t.Fatalf("failed retry persisted rejected draft: keep=%d blocks=%+v", len(keep), blocks)
+	if len(provider.reqs) != 1 || len(keep) >= len(history) || len(blocks) != 1 || blocks[0].Text != "brief" {
+		t.Fatalf("single-request result: calls=%d keep=%d blocks=%+v", len(provider.reqs), len(keep), blocks)
 	}
 }
 
@@ -2297,7 +2268,7 @@ func TestMaybeCompactUsesAdaptiveTargetInPromptAndOutputCap(t *testing.T) {
 	}
 }
 
-func TestMaybeCompactRetriesMateriallyShortSummaryOnce(t *testing.T) {
+func TestMaybeCompactMakesOneRequestForMateriallyShortSummary(t *testing.T) {
 	db, err := store.Open(filepath.Join(t.TempDir(), "short-summary-retry.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -2325,7 +2296,7 @@ func TestMaybeCompactRetriesMateriallyShortSummaryOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	hist := buildHistory(16)
-	longSource, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: strings.Repeat("requirement decision path value ", 1800)}})
+	longSource, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: strings.Repeat("requirement decision path value ", 150)}})
 	for i := range hist {
 		hist[i].ConversationID = conv.ID
 		if i < 4 {
@@ -2341,11 +2312,11 @@ func TestMaybeCompactRetriesMateriallyShortSummaryOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(provider.reqs) < 2 {
-		t.Fatalf("compaction requests = %d, want at least one summary plus retry/reduce", len(provider.reqs))
+	if len(provider.reqs) != 1 {
+		t.Fatalf("compaction requests = %d, want exactly one", len(provider.reqs))
 	}
-	if len(blocks) != 1 || blocks[0].Text != strings.TrimSpace(revisedDraft) {
-		t.Fatalf("summary blocks = %+v, want revised draft", blocks)
+	if len(blocks) != 1 || blocks[0].Text != strings.TrimSpace(firstDraft) {
+		t.Fatalf("summary blocks = %+v, want first draft", blocks)
 	}
 	for i, req := range provider.reqs {
 		if req.MaxOutputTokens <= 0 || req.MaxOutputTokens > compactionSummaryOutputCap(target, 8192) {
@@ -2353,12 +2324,6 @@ func TestMaybeCompactRetriesMateriallyShortSummaryOnce(t *testing.T) {
 		}
 		if got := estimateRequestTokens(req) + req.MaxOutputTokens; got > defaultCompactionRequestMaxTokens {
 			t.Fatalf("request %d total estimate = %d, want <= %d", i+1, got, defaultCompactionRequestMaxTokens)
-		}
-	}
-	retryPrompt := provider.reqs[1].History[0].Blocks[0].Text
-	for _, want := range []string{"ORIGINAL CONVERSATION SOURCE", "about"} {
-		if !strings.Contains(retryPrompt, want) {
-			t.Fatalf("retry prompt omitted %q: %s", want, retryPrompt)
 		}
 	}
 }
@@ -2544,10 +2509,8 @@ func TestReadSummaryRawAfterPersistenceIgnoresCanceledRequestContext(t *testing.
 
 func TestCompactionRatioTunablesFailClosedOnInvalidDenominators(t *testing.T) {
 	previousHeadroomNum, previousHeadroomDen := summaryTargetHeadroomNum, summaryTargetHeadroomDen
-	previousOverflowNum, previousOverflowDen := bigTokenOverflowNum, bigTokenOverflowDen
 	t.Cleanup(func() {
 		summaryTargetHeadroomNum, summaryTargetHeadroomDen = previousHeadroomNum, previousHeadroomDen
-		bigTokenOverflowNum, bigTokenOverflowDen = previousOverflowNum, previousOverflowDen
 	})
 
 	summaryTargetHeadroomNum, summaryTargetHeadroomDen = 5, 0
@@ -2555,7 +2518,6 @@ func TestCompactionRatioTunablesFailClosedOnInvalidDenominators(t *testing.T) {
 		t.Fatalf("invalid headroom ratio output cap = %d, want conservative target 400", got)
 	}
 
-	bigTokenOverflowNum, bigTokenOverflowDen = 5, 0
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatal(err)
@@ -2566,9 +2528,7 @@ func TestCompactionRatioTunablesFailClosedOnInvalidDenominators(t *testing.T) {
 	}
 	store.InvalidateConfig()
 	t.Cleanup(store.InvalidateConfig)
-	// Keep one round so this case still has a real summary candidate. The test is
-	// about the invalid inline-overflow ratio falling back to async, not about a
-	// request-only overflow with no old messages to compact.
+	// Every reducible overflow is queued asynchronously.
 	mustSet(t, db, "keep_recent_rounds", "1")
 	mustSet(t, db, "compaction_token_trigger", "10")
 	_, _, action := PlanCompactionForRequest(db,
@@ -2596,7 +2556,6 @@ func TestCompactionLimitsFailClosedOnInvalidTunables(t *testing.T) {
 	previousToolTokens := compactionToolOutputTokens
 	previousToolInputTokens := compactionToolInputTokens
 	previousMetadataTokens := compactionMetadataTokens
-	previousBacklogFactor := inlineCompactionBacklogFactor
 	previousMsgOverhead := msgStructuralOverhead
 	previousClampFloor := summaryTokensClampFloor
 	previousMediaAllowance := imageDocumentFlatTokenAllowance
@@ -2607,7 +2566,6 @@ func TestCompactionLimitsFailClosedOnInvalidTunables(t *testing.T) {
 		compactionToolOutputTokens = previousToolTokens
 		compactionToolInputTokens = previousToolInputTokens
 		compactionMetadataTokens = previousMetadataTokens
-		inlineCompactionBacklogFactor = previousBacklogFactor
 		msgStructuralOverhead = previousMsgOverhead
 		summaryTokensClampFloor = previousClampFloor
 		imageDocumentFlatTokenAllowance = previousMediaAllowance
@@ -2633,11 +2591,6 @@ func TestCompactionLimitsFailClosedOnInvalidTunables(t *testing.T) {
 	block := canonicalToolOutputBlock("lookup", "call-1", longOutput, "complete")
 	if tokens := estimateTokens(block.Text); tokens > defaultCompactionToolOutputTokens+1 {
 		t.Fatalf("invalid env disabled tool-output clipping: got about %d tokens", tokens)
-	}
-
-	inlineCompactionBacklogFactor = 0
-	if got := effectiveInlineBacklogFactor(); got != defaultInlineBacklogFactor {
-		t.Fatalf("invalid inline factor = %d, want default %d", got, defaultInlineBacklogFactor)
 	}
 
 	msgStructuralOverhead = -1
@@ -2909,9 +2862,9 @@ func TestPlanCompactionHotPath(t *testing.T) {
 	if action2 != compactAsync || len(keep2) != 20 {
 		t.Fatalf("overflow conv: action=%d keep=%d, want async/20", action2, len(keep2))
 	}
-	// Large cold-start backlog (> 36) → summarise inline to bound the prompt.
-	if _, _, action3 := PlanCompaction(db, conv, buildHistory(40), 0); action3 != compactInline {
-		t.Fatalf("large backlog: action=%d, want inline", action3)
+	// Large cold-start backlogs also stay off the request hot path.
+	if _, _, action3 := PlanCompaction(db, conv, buildHistory(40), 0); action3 != compactAsync {
+		t.Fatalf("large backlog: action=%d, want async", action3)
 	}
 }
 
@@ -3020,8 +2973,8 @@ func TestPlanCompactionSkipsUnavoidablePerTurnOverflow(t *testing.T) {
 		0,
 		50,
 	)
-	if action != compactInline {
-		t.Fatalf("reducible request overflow action=%d, want inline", action)
+	if action != compactAsync {
+		t.Fatalf("reducible request overflow action=%d, want async", action)
 	}
 	_, _, action = PlanCompactionForRequest(
 		db,
@@ -3047,13 +3000,9 @@ func setLastAssistantInput(h []store.Message, n int) {
 	}
 }
 
-// TestPlanCompactionInlineOnBigTokenOverflow locks in the token-magnitude inline
-// path: a message-LIGHT history (tail ≤ keepRounds*2*3, so the backlog gate stays
-// quiet) whose last turn recorded a REAL prompt well past 1.25× the trigger is
-// summarised INLINE this turn — otherwise a few huge code/plot turns overflow on
-// tokens but not on message count and make the turn pay one full-price spike
-// before the async pass. Mild and estimate-only overflows still go async.
-func TestPlanCompactionInlineOnBigTokenOverflow(t *testing.T) {
+// Token pressure always schedules background compaction, regardless of its
+// magnitude or whether the count came from recorded provider usage.
+func TestPlanCompactionAlwaysAsyncOnTokenOverflow(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatal(err)
@@ -3073,25 +3022,22 @@ func TestPlanCompactionInlineOnBigTokenOverflow(t *testing.T) {
 	}
 	conv := &store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: json.RawMessage("[]")}
 
-	// Fourteen messages are below the 20-message round high watermark and below the
-	// inline backlog gate, so inline compaction must come only from token pressure.
+	// Fourteen messages are below the round high watermark, so this action comes
+	// only from token pressure.
 	big := buildHistory(14)
-	setLastAssistantInput(big, 50000) // real prompt 50000 > 1.25×32000 = 40000
-	if _, _, action := PlanCompaction(db, conv, big, 0); action != compactInline {
-		t.Fatalf("real ctx 50000 (>1.25×trigger), 14 msgs: action=%d, want inline", action)
+	setLastAssistantInput(big, 50000)
+	if _, _, action := PlanCompaction(db, conv, big, 0); action != compactAsync {
+		t.Fatalf("real ctx 50000, 14 msgs: action=%d, want async", action)
 	}
 
-	// Mild overflow: real prompt over the trigger but under the 1.25× inline bar →
-	// stay async so a task-model round-trip isn't added to first token every turn.
+	// Mild overflow follows the same background-only path.
 	mild := buildHistory(14)
 	setLastAssistantInput(mild, 33000) // 32000 < 33000 < 40000
 	if _, _, action := PlanCompaction(db, conv, mild, 0); action != compactAsync {
 		t.Fatalf("real ctx 33000 (<1.25×trigger): action=%d, want async", action)
 	}
 
-	// Estimate-only overflow (no recorded usage → exact=false) must NOT inline: we
-	// never stall first token on a shaky estimate. Twenty messages reach the round
-	// high watermark, so this stays asynchronous.
+	// Estimate-only overflow also stays asynchronous.
 	est := buildHistory(20) // no InputTokens anywhere → exact=false
 	if _, _, action := PlanCompaction(db, conv, est, 0); action != compactAsync {
 		t.Fatalf("estimate-only, no real count: action=%d, want async", action)
@@ -3290,7 +3236,7 @@ func TestContextTokensCountsInjectedOverhead(t *testing.T) {
 	// A prior assistant turn recorded only 1000 input tokens, but THIS turn injects
 	// 5000 estimated file tokens. The larger estimate must win so the trigger does
 	// not lag a turn behind the upload. It is no longer marked exact because only
-	// the newly assembled request estimate can safely drive the inline path.
+	// the newly assembled request estimate is still the safer trigger input.
 	hist2 := []store.Message{
 		{Role: "assistant", InputTokens: 1000},
 		{Role: "user", Blocks: json.RawMessage(`[{"kind":"text","text":"hi"}]`)},
@@ -3316,8 +3262,7 @@ func TestContextTokensCountsInjectedOverhead(t *testing.T) {
 // TestContextTokensFrontierAware locks in the exact-mislabeling fix: rows
 // already rolled into summary blocks must NOT inflate the estimate. A previous
 // build estimated the FULL history, so on a compacted conversation est exceeded
-// the provider's real count forever, was returned as exact=true, and forced the
-// bigTokenOverflow INLINE path (a task-model call before first token) on every
+// the provider's real count forever and scheduled redundant compaction on every
 // subsequent turn. Frontier-aware, the estimate is tail+summaries+injection and
 // the real count dominates again.
 func TestContextTokensFrontierAware(t *testing.T) {
@@ -3739,11 +3684,9 @@ func TestEstimateRequestTokensAddsUnifiedMessageStructure(t *testing.T) {
 	}
 }
 
-// TestPlanCompactionNoInlineOnSummarizedBulk is the end-to-end regression for
-// the permanent-inline bug: a LONG conversation whose bulk is already covered
-// by a summary block — so the real prompt is small — must NOT trip the
-// bigTokenOverflow inline path just because the raw history estimate is large.
-func TestPlanCompactionNoInlineOnSummarizedBulk(t *testing.T) {
+// A long raw history already covered by a summary does not schedule redundant
+// background work when its rendered request is under the threshold.
+func TestPlanCompactionNoRedundantWorkOnSummarizedBulk(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatal(err)
@@ -3780,8 +3723,8 @@ func TestPlanCompactionNoInlineOnSummarizedBulk(t *testing.T) {
 	conv := &store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: blocks}
 
 	keep, _, action := PlanCompaction(db, conv, hist, 0)
-	if action == compactInline {
-		t.Fatalf("summarised bulk must not force the inline path (real prompt is small); got compactInline")
+	if action != compactNone {
+		t.Fatalf("summarised bulk scheduled redundant compaction: action=%d", action)
 	}
 	// Sanity: the verbatim tail starts after the summarised frontier.
 	if len(keep) != 12 || keep[0].ID != "m28" {

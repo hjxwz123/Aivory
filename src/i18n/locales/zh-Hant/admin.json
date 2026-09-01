@@ -963,7 +963,7 @@
       "summaryMergeTokens": "合併摘要預算",
       "summaryMergeTokensHint": "舊摘要區塊開始合併前允許的摘要累計上限，最小為 256。",
       "compactionRequestTokens": "壓縮請求 token 預算",
-      "compactionRequestTokensHint": "每次摘要請求的估算輸入與預留輸出總上限。更長歷史會自動分批處理，最小為 8192。",
+      "compactionRequestTokensHint": "單次背景摘要請求的估算輸入與預留輸出總上限。每次只壓縮預算內最大的較早完整輪次前綴，剩餘輪次保留原文供後續背景壓縮；單個超大輪次不會拆分。最小為 8192。",
       "compactionPrompt": "自訂摘要指令",
       "compactionPromptHint": "選填，會放在 Aivory 內建的延續摘要提示詞之前。",
       "compactionPromptPlaceholder": "留空以使用內建摘要指令。",

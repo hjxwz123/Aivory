@@ -963,7 +963,7 @@
       "summaryMergeTokens": "統合要約の予算",
       "summaryMergeTokensHint": "古い要約ブロックを統合する前に許容する累積要約サイズの上限です。最小値は 256 です。",
       "compactionRequestTokens": "圧縮リクエストのトークン予算",
-      "compactionRequestTokensHint": "各要約リクエストの推定入力と予約出力の合計上限です。長い履歴は分割処理されます。最小値は 8192 です。",
+      "compactionRequestTokensHint": "1 回のバックグラウンド要約リクエストにおける推定入力と予約出力の合計上限です。各処理では予算内に収まる古い完全な会話ターンの最大プレフィックスだけを圧縮し、残りは後続処理まで原文のまま保持します。単独で大きすぎるターンは分割しません。最小値は 8192 です。",
       "compactionPrompt": "要約のカスタム指示",
       "compactionPromptHint": "Aivory の組み込み継続要約プロンプトの前に追加する任意の指示です。",
       "compactionPromptPlaceholder": "空欄の場合は組み込みの要約指示を使用します。",

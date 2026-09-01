@@ -46,11 +46,9 @@ var (
 	sandboxExecTimeoutClampRangeMin = envcfg.Int("AIVORY_LLM_SANDBOX_EXEC_TIMEOUT_CLAMP_RANGE_MIN", 10)
 	sandboxExecCtxSafetyMargin      = envcfg.Dur("AIVORY_LLM_SANDBOX_EXEC_CTX_SAFETY_MARGIN", 150*time.Second)
 	compactionLeaseTTL              = envcfg.Dur("AIVORY_LLM_COMPACTION_LEASE_TTL", 2*time.Hour)
-	// RAG and inline compaction run before the main provider request. Bound both
-	// independently so a slow embedding backend or task model cannot leave a
-	// persisted streaming placeholder spinning for the generation-wide timeout.
-	ragQueryTimeout         = envcfg.Dur("AIVORY_RAG_QUERY_TIMEOUT", 30*time.Second)
-	inlineCompactionTimeout = envcfg.Dur("AIVORY_LLM_INLINE_COMPACTION_TIMEOUT", 30*time.Second)
+	// RAG runs before the main provider request and remains independently bounded.
+	// Context compaction is always queued in the background.
+	ragQueryTimeout = envcfg.Dur("AIVORY_RAG_QUERY_TIMEOUT", 30*time.Second)
 )
 
 // Orchestrator coordinates the per-message flow described in §3.1: load
@@ -77,7 +75,7 @@ type Orchestrator struct {
 	onConversationUpdated func(userID, conversationID string)
 	// onCompactionStatus is a separate lifecycle bridge for AUTOMATIC context
 	// compaction. It intentionally does not cover explicit /compact requests:
-	// those already have a synchronous HTTP result, while background and inline
+	// those already have a synchronous HTTP result, while background
 	// automatic work otherwise gives open clients no indication that it is using
 	// the configured summarisation model.
 	onCompactionStatus func(userID, conversationID, operationID, status string)
@@ -3758,85 +3756,17 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	keep, summaryBlocks, compactAction := PlanCompactionForRequest(
 		o.db, &compactionConv, history, requestTokens, model.CompactionTokenThreshold, minimumRequestTokens,
 	)
+	plannedCompactionKeep := keep
+	if compactAction == compactAsync && effectiveTrigger > 0 && requestTokens > effectiveTrigger &&
+		minimumRequestTokens <= effectiveTrigger && minimumCut > frontier {
+		// Never wait for a summary-model request before starting the chat model. Use
+		// the deepest safe, round-aligned tail for this turn while the queued job
+		// advances durable continuation state for later turns.
+		keep = history[minimumCut:]
+	}
 	o.logGenerationStage(conv.ID, assistantMsg.ID, "compaction_plan", "completed", compactionPlanStarted,
 		fmt.Sprintf(" request_tokens=%d action=%d keep_messages=%d summary_blocks=%d", requestTokens, compactAction, len(keep), len(summaryBlocks)))
-	if compactAction == compactInline {
-		operationID := store.GenID("cmp")
-		compactTraceCtx := withCompactionTrace(ctx, operationID, "inline")
-		leaseStarted := time.Now()
-		o.logCompactionStage(compactTraceCtx, conv.ID, "lease_acquire", "started", time.Time{},
-			fmt.Sprintf(" ttl=%s", effectiveCompactionLeaseTTL()))
-		lease, acquired, leaseErr := o.tryAcquireCompactionLease(compactTraceCtx, conv.ID)
-		if leaseErr != nil {
-			o.logCompactionStage(compactTraceCtx, conv.ID, "lease_acquire", "failed", leaseStarted,
-				fmt.Sprintf(" acquired=%t error_kind=%q", acquired, compactionErrorKind(leaseErr)))
-			// Automatic compaction is maintenance work. Keep the user-visible chat
-			// turn available if the database briefly cannot admit its lease; no model
-			// call or standalone billing is started in this case.
-			if o.logger != nil {
-				o.logger.Printf("compaction: skip inline pass after lease error (conv=%s): %v", conv.ID, leaseErr)
-			}
-		} else if !acquired {
-			o.logCompactionStage(compactTraceCtx, conv.ID, "lease_acquire", "rejected", leaseStarted, " acquired=false")
-		} else {
-			o.logCompactionStage(compactTraceCtx, conv.ID, "lease_acquire", "completed", leaseStarted, " acquired=true")
-			// Inline compaction runs before the main chat admission below. Keep its
-			// provider usage on an independent operation so a later insufficient-credit
-			// refusal for the chat turn cannot strand or misattribute the summary cost
-			// on the assistant message.
-			inlineCompactionStarted := time.Now()
-			o.logGenerationStage(conv.ID, assistantMsg.ID, "compaction_inline", "started", time.Time{},
-				fmt.Sprintf(" timeout=%s history=%d", inlineCompactionTimeout, len(history)))
-			compactBaseCtx := withStandaloneCompactionBilling(compactTraceCtx, o, operationID)
-			compactCtx, cancelCompaction := context.WithTimeout(compactBaseCtx, inlineCompactionTimeout)
-			beforeFrontier := summarizedFrontier(summaryBlocks, history)
-			var cerr error
-			func() {
-				defer cancelCompaction()
-				defer func() {
-					releaseStarted := time.Now()
-					o.logCompactionStage(compactTraceCtx, conv.ID, "lease_release", "started", time.Time{}, "")
-					lease.Release()
-					o.logCompactionStage(compactTraceCtx, conv.ID, "lease_release", "completed", releaseStarted, "")
-				}()
-				o.notifyAutomaticCompactionStatus(req.UserID, conv.ID, operationID, "started")
-				k, b, compactErr := MaybeCompactForRequest(
-					compactCtx, o.db, o.task, conv, history, requestTokens, renderedHistoryTokens,
-					model.CompactionTokenThreshold, model.ID, req.UserID, userMsg.ID,
-				)
-				cerr = compactErr
-				if cerr == nil {
-					keep, summaryBlocks = k, b
-				}
-				status := "failed"
-				if cerr == nil && summarizedFrontier(summaryBlocks, history) > beforeFrontier {
-					status = "completed"
-				}
-				// Publish the terminal state before releasing the lease. A newer pass
-				// cannot start and publish its own status until this operation is fully
-				// identified as complete or failed.
-				o.notifyAutomaticCompactionStatus(req.UserID, conv.ID, operationID, status)
-			}()
-			if errors.Is(cerr, ErrTaskBillingRecord) {
-				return nil, cerr
-			}
-			if cerr != nil {
-				// The planner's minimum cut is a deterministic, round-aligned tail.
-				// It keeps the main request moving even when the summarisation model is
-				// unavailable; a later asynchronous pass can restore summarized context.
-				keep = history[minimumCut:]
-				if o.logger != nil {
-					o.logger.Printf("compaction: inline pass failed after at most %s (conv=%s); continuing with recent history: %v", inlineCompactionTimeout, conv.ID, cerr)
-				}
-			}
-			inlineStatus := "completed"
-			if cerr != nil {
-				inlineStatus = "failed"
-			}
-			o.logGenerationStage(conv.ID, assistantMsg.ID, "compaction_inline", inlineStatus, inlineCompactionStarted,
-				fmt.Sprintf(" error_kind=%q keep_messages=%d summary_blocks=%d", generationStageErrorKind(cerr), len(keep), len(summaryBlocks)))
-		}
-	} else if compactAction == compactAsync && o.queue != nil && o.task != nil {
+	if compactAction == compactAsync && o.queue != nil && o.task != nil {
 		convID, userID, leafID := conv.ID, req.UserID, userMsg.ID
 		operationID := store.GenID("cmp")
 		modelThreshold, compactionModelID := model.CompactionTokenThreshold, model.ID
@@ -3852,7 +3782,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		vision := model.Vision
 		historyToolAllowlist := cloneBoolMap(allowedHistoryTools)
 		plannedBaseHistory := compactionHistoryForRequest(
-			keep, channelType, currentModelID, nativeToolReplay, historyToolAllowlist, fastMode, vision,
+			plannedCompactionKeep, channelType, currentModelID, nativeToolReplay, historyToolAllowlist, fastMode, vision,
 		)
 		if toolHistoryCompacted {
 			plannedBaseHistory, _ = compactHistoricalToolResults(plannedBaseHistory)
