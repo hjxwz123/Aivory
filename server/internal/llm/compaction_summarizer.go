@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"aivory/server/internal/store"
@@ -157,7 +158,19 @@ func runCompactionTask(
 	conv *store.Conversation,
 	payerID, conversationModelID, prompt string,
 	outputCap, requestMaxTokens int,
-) (string, error) {
+) (resultText string, returnErr error) {
+	taskStarted := time.Now()
+	task.logCompactionStage(ctx, conv.ID, "task_call", "started", time.Time{},
+		fmt.Sprintf(" input_tokens=%d max_output_tokens=%d request_max_tokens=%d",
+			estimateTokens(prompt), outputCap, requestMaxTokens))
+	defer func() {
+		status := "completed"
+		if returnErr != nil {
+			status = "failed"
+		}
+		task.logCompactionStage(context.WithoutCancel(ctx), conv.ID, "task_call", status, taskStarted,
+			fmt.Sprintf(" output_tokens=%d error_kind=%q", estimateTokens(resultText), compactionErrorKind(returnErr)))
+	}()
 	maxInputTokens := requestMaxTokens - outputCap
 	if maxInputTokens <= 0 {
 		return "", ErrCompactionFailed
@@ -199,14 +212,26 @@ func runCheckedCompactionTask(
 	if !compactionSummaryTooShort(text, sourceTokens, targetTokens) {
 		return text, nil
 	}
+	retryStarted := time.Now()
+	task.logCompactionStage(ctx, conv.ID, "quality_retry", "started", time.Time{},
+		fmt.Sprintf(" source_tokens=%d first_output_tokens=%d target_tokens=%d max_output_tokens=%d",
+			sourceTokens, estimateTokens(text), targetTokens, outputCap))
 	retryPrompt := buildCompactionPrompt(customPrompt, compactionRetryInstruction, source, targetTokens)
 	revised, retryErr := runCompactionTask(ctx, task, conv, payerID, conversationModelID, retryPrompt, outputCap, requestMaxTokens)
 	if retryErr != nil {
+		task.logCompactionStage(ctx, conv.ID, "quality_retry", "failed", retryStarted,
+			fmt.Sprintf(" error_kind=%q", compactionErrorKind(retryErr)))
 		return "", retryErr
 	}
 	if estimateTokens(revised) <= estimateTokens(text) || compactionSummaryTooShort(revised, sourceTokens, targetTokens) {
+		task.logCompactionStage(ctx, conv.ID, "quality_retry", "failed", retryStarted,
+			fmt.Sprintf(" first_output_tokens=%d revised_output_tokens=%d error_kind=%q",
+				estimateTokens(text), estimateTokens(revised), compactionErrorKind(ErrCompactionFailed)))
 		return "", ErrCompactionFailed
 	}
+	task.logCompactionStage(ctx, conv.ID, "quality_retry", "completed", retryStarted,
+		fmt.Sprintf(" first_output_tokens=%d revised_output_tokens=%d",
+			estimateTokens(text), estimateTokens(revised)))
 	return revised, nil
 }
 
@@ -287,8 +312,14 @@ func summarizeCompactionSource(
 	if task == nil {
 		return clipOlder(msgs, min(targetTokens, effectiveCompactionOutputCap(requestMaxTokens, outputCap))), nil
 	}
+	planStarted := time.Now()
+	task.logCompactionStage(ctx, conv.ID, "summary_plan", "started", time.Time{},
+		fmt.Sprintf(" source_messages=%d source_tokens=%d target_tokens=%d max_output_tokens=%d request_max_tokens=%d",
+			len(msgs), estimateCompactionSourceTokens(msgs), targetTokens, outputCap, requestMaxTokens))
 	extraParams, err := compactionTaskExtraParams(ctx, task, conversationModelID)
 	if err != nil {
+		task.logCompactionStage(ctx, conv.ID, "summary_plan", "failed", planStarted,
+			fmt.Sprintf(" error_kind=%q", compactionErrorKind(err)))
 		return "", err
 	}
 	outputCap = effectiveCompactionOutputCap(requestMaxTokens, outputCap)
@@ -301,14 +332,20 @@ func summarizeCompactionSource(
 	)
 	parts, err := splitCompactionSource(msgs, maxPayloadBudget)
 	if err != nil {
+		task.logCompactionStage(ctx, conv.ID, "summary_plan", "failed", planStarted,
+			fmt.Sprintf(" error_kind=%q", compactionErrorKind(err)))
 		return "", err
 	}
 	if len(parts) == 1 {
+		task.logCompactionStage(ctx, conv.ID, "summary_plan", "completed", planStarted,
+			fmt.Sprintf(" strategy=direct parts=1 payload_budget=%d", maxPayloadBudget))
 		return runCheckedCompactionTask(
 			ctx, task, conv, payerID, conversationModelID, customPrompt, compactionSummaryInstruction, parts[0].Text,
 			targetTokens, outputCap, requestMaxTokens, estimateTokens(parts[0].Text),
 		)
 	}
+	task.logCompactionStage(ctx, conv.ID, "summary_plan", "completed", planStarted,
+		fmt.Sprintf(" strategy=map_reduce parts=%d payload_budget=%d", len(parts), maxPayloadBudget))
 	return summarizeCompactionParts(
 		ctx, task, conv, parts, payerID, conversationModelID, customPrompt,
 		compactionSummaryInstruction, targetTokens, outputCap, requestMaxTokens, extraParams,
@@ -339,10 +376,16 @@ func summarizeCompactionText(
 		return "", err
 	}
 	fullSourceTokens := estimateTokens(fullSource)
+	planStarted := time.Now()
+	task.logCompactionStage(ctx, conv.ID, "summary_plan", "started", time.Time{},
+		fmt.Sprintf(" source_tokens=%d target_tokens=%d max_output_tokens=%d request_max_tokens=%d",
+			fullSourceTokens, targetTokens, outputCap, requestMaxTokens))
 	directPayloadBudget := compactionPayloadBudgetForAttempts(
 		requestMaxTokens, outputCap, customPrompt, mapInstruction, targetTokens, extraParams,
 	)
 	if directPayloadBudget > 0 && fullSourceTokens <= directPayloadBudget {
+		task.logCompactionStage(ctx, conv.ID, "summary_plan", "completed", planStarted,
+			fmt.Sprintf(" strategy=direct parts=1 payload_budget=%d", directPayloadBudget))
 		return runCheckedCompactionTask(
 			ctx, task, conv, payerID, conversationModelID, customPrompt, mapInstruction, fullSource,
 			targetTokens, outputCap, requestMaxTokens, fullSourceTokens,
@@ -370,8 +413,13 @@ func summarizeCompactionText(
 	}
 	parts := splitRenderedCompactionSource(fullSource, mapPayloadBudget)
 	if len(parts) == 0 {
+		task.logCompactionStage(ctx, conv.ID, "summary_plan", "failed", planStarted,
+			fmt.Sprintf(" strategy=map_reduce error_kind=%q", compactionErrorKind(ErrCompactionFailed)))
 		return "", ErrCompactionFailed
 	}
+	task.logCompactionStage(ctx, conv.ID, "summary_plan", "completed", planStarted,
+		fmt.Sprintf(" strategy=map_reduce parts=%d map_payload_budget=%d map_output_tokens=%d",
+			len(parts), mapPayloadBudget, mapOutputCap))
 	return summarizeCompactionParts(
 		ctx, task, conv, parts, payerID, conversationModelID, customPrompt,
 		mapInstruction, targetTokens, outputCap, requestMaxTokens, extraParams,
@@ -386,7 +434,19 @@ func summarizeCompactionParts(
 	payerID, conversationModelID, customPrompt, mapInstruction string,
 	targetTokens, outputCap, requestMaxTokens int,
 	extraParams json.RawMessage,
-) (string, error) {
+) (resultText string, returnErr error) {
+	mapReduceStarted := time.Now()
+	task.logCompactionStage(ctx, conv.ID, "map_reduce", "started", time.Time{},
+		fmt.Sprintf(" initial_parts=%d target_tokens=%d max_output_tokens=%d request_max_tokens=%d",
+			len(parts), targetTokens, outputCap, requestMaxTokens))
+	defer func() {
+		status := "completed"
+		if returnErr != nil {
+			status = "failed"
+		}
+		task.logCompactionStage(context.WithoutCancel(ctx), conv.ID, "map_reduce", status, mapReduceStarted,
+			fmt.Sprintf(" output_tokens=%d error_kind=%q", estimateTokens(resultText), compactionErrorKind(returnErr)))
+	}()
 	finalReducePayload := compactionPayloadBudgetForAttempts(
 		requestMaxTokens, outputCap, customPrompt, compactionReduceInstruction, targetTokens, extraParams,
 	)
@@ -410,15 +470,25 @@ func summarizeCompactionParts(
 		return "", ErrCompactionFailed
 	}
 	inputs := make([]compactionSummaryInput, 0, len(mapParts))
-	for _, part := range mapParts {
+	for partIndex, part := range mapParts {
 		partTokens := estimateTokens(part.Text)
+		partStarted := time.Now()
+		task.logCompactionStage(ctx, conv.ID, "map_part", "started", time.Time{},
+			fmt.Sprintf(" part_index=%d part_count=%d source_tokens=%d target_tokens=%d max_output_tokens=%d",
+				partIndex+1, len(mapParts), partTokens, mapTarget, mapOutputCap))
 		text, runErr := runCheckedCompactionTask(
 			ctx, task, conv, payerID, conversationModelID, customPrompt, mapInstruction, part.Text,
 			mapTarget, mapOutputCap, requestMaxTokens, partTokens,
 		)
 		if runErr != nil {
+			task.logCompactionStage(ctx, conv.ID, "map_part", "failed", partStarted,
+				fmt.Sprintf(" part_index=%d part_count=%d source_tokens=%d error_kind=%q",
+					partIndex+1, len(mapParts), partTokens, compactionErrorKind(runErr)))
 			return "", runErr
 		}
+		task.logCompactionStage(ctx, conv.ID, "map_part", "completed", partStarted,
+			fmt.Sprintf(" part_index=%d part_count=%d source_tokens=%d output_tokens=%d",
+				partIndex+1, len(mapParts), partTokens, estimateTokens(text)))
 		inputs = append(inputs, compactionSummaryInput{Text: text, Tokens: estimateTokens(text)})
 	}
 	for iteration := 0; len(inputs) > 1; iteration++ {
@@ -438,6 +508,7 @@ func summarizeCompactionParts(
 			return "", ErrCompactionFailed
 		}
 		next := make([]compactionSummaryInput, 0, (len(inputs)+1)/2)
+		batchIndex := 0
 		for start := 0; start < len(inputs); {
 			end := start
 			for end < len(inputs) {
@@ -457,13 +528,24 @@ func summarizeCompactionParts(
 			}
 			source := summaryInputsText(inputs[start:end])
 			sourceTokens := estimateTokens(source)
+			batchIndex++
+			batchStarted := time.Now()
+			task.logCompactionStage(ctx, conv.ID, "reduce_batch", "started", time.Time{},
+				fmt.Sprintf(" iteration=%d batch_index=%d input_count=%d inputs_before=%d source_tokens=%d target_tokens=%d max_output_tokens=%d",
+					iteration+1, batchIndex, end-start, len(inputs), sourceTokens, reduceTarget, reduceOutputCap))
 			merged, runErr := runCheckedCompactionTask(
 				ctx, task, conv, payerID, conversationModelID, customPrompt, compactionReduceInstruction, source,
 				reduceTarget, reduceOutputCap, requestMaxTokens, sourceTokens,
 			)
 			if runErr != nil {
+				task.logCompactionStage(ctx, conv.ID, "reduce_batch", "failed", batchStarted,
+					fmt.Sprintf(" iteration=%d batch_index=%d input_count=%d source_tokens=%d error_kind=%q",
+						iteration+1, batchIndex, end-start, sourceTokens, compactionErrorKind(runErr)))
 				return "", runErr
 			}
+			task.logCompactionStage(ctx, conv.ID, "reduce_batch", "completed", batchStarted,
+				fmt.Sprintf(" iteration=%d batch_index=%d input_count=%d source_tokens=%d output_tokens=%d",
+					iteration+1, batchIndex, end-start, sourceTokens, estimateTokens(merged)))
 			next = append(next, compactionSummaryInput{Text: merged, Tokens: estimateTokens(merged)})
 			start = end
 		}
