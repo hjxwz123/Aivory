@@ -11,6 +11,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -765,6 +766,142 @@ func prepareResponsesReplayItems(items []map[string]any) []map[string]any {
 	return prepared
 }
 
+// Responses-compatible gateways do not all accept the full native output
+// metadata emitted by another gateway. Normalize only on the compatibility
+// retry path: the first request keeps native items intact for providers that
+// support them, while strict gateways get portable IDs and input-safe fields.
+func normalizeResponsesReplayItem(item map[string]any) map[string]any {
+	if len(item) == 0 {
+		return item
+	}
+	clone := item
+	changed := false
+	cloneForChange := func() {
+		if changed {
+			return
+		}
+		clone = make(map[string]any, len(item)+1)
+		for key, value := range item {
+			clone[key] = value
+		}
+		changed = true
+	}
+
+	itemType, _ := item["type"].(string)
+	if prefix := responsesReplayIDPrefix(itemType); prefix != "" {
+		if id, _ := item["id"].(string); id != "" && !strings.HasPrefix(id, prefix) {
+			cloneForChange()
+			clone["id"] = prefix + id
+		}
+	}
+
+	// `phase` is useful response metadata, but several OpenAI-compatible
+	// gateways reject it when a prior output message is replayed as input.
+	if _, exists := item["phase"]; exists {
+		cloneForChange()
+		delete(clone, "phase")
+	}
+	if _, exists := item["logprobs"]; exists {
+		cloneForChange()
+		delete(clone, "logprobs")
+	}
+
+	if content, ok := jsonArrayItems(item["content"]); ok {
+		normalized := make([]any, len(content))
+		contentChanged := false
+		for i, rawPart := range content {
+			normalized[i] = rawPart
+			part, ok := rawPart.(map[string]any)
+			if !ok || part == nil {
+				continue
+			}
+			if _, exists := part["logprobs"]; !exists {
+				continue
+			}
+			partClone := make(map[string]any, len(part))
+			for key, value := range part {
+				partClone[key] = value
+			}
+			delete(partClone, "logprobs")
+			normalized[i] = partClone
+			contentChanged = true
+		}
+		if contentChanged {
+			cloneForChange()
+			clone["content"] = normalized
+		}
+	}
+	return clone
+}
+
+func responsesReplayIDPrefix(itemType string) string {
+	switch itemType {
+	case "message":
+		return "msg_"
+	case "reasoning":
+		return "rs_"
+	case "function_call":
+		return "fc_"
+	case "web_search_call":
+		return "ws_"
+	case "file_search_call":
+		return "fs_"
+	case "code_interpreter_call":
+		return "ci_"
+	case "image_generation_call":
+		return "ig_"
+	case "computer_call":
+		return "cu_"
+	default:
+		return ""
+	}
+}
+
+func normalizeResponsesReplayInput(input []map[string]any) ([]map[string]any, bool) {
+	if len(input) == 0 {
+		return input, false
+	}
+	normalized := make([]map[string]any, len(input))
+	changed := false
+	for i, item := range input {
+		normalized[i] = normalizeResponsesReplayItem(item)
+		if !reflect.DeepEqual(normalized[i], item) {
+			changed = true
+		}
+	}
+	if !changed {
+		return input, false
+	}
+	return normalized, true
+}
+
+func responsesReplayCompatibilityError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(strings.ReplaceAll(err.Error(), `\"`, `"`))
+	if strings.Contains(message, "message id must be a string starting with 'msg_'") {
+		return true
+	}
+	return strings.Contains(message, "unknown field") &&
+		(strings.Contains(message, "phase") || strings.Contains(message, "logprobs"))
+}
+
+func openAIResponsesStreamError(event map[string]any) error {
+	if err := providerEventError("openai responses", event); err != nil {
+		return err
+	}
+	// Some compatible relays send an error as a 200 SSE frame with top-level
+	// `code`/`message`, rather than the Responses `error` or `type:error` shape.
+	// Treat it as terminal so the replay compatibility retry can inspect it.
+	code, _ := event["code"].(string)
+	message, _ := event["message"].(string)
+	if strings.TrimSpace(code) != "" && strings.TrimSpace(message) != "" {
+		return fmt.Errorf("openai responses stream error: %s", strings.TrimSpace(message))
+	}
+	return nil
+}
+
 // Some Responses-compatible channel pools return only a reasoning summary on
 // one backend, then route the tool continuation to a stricter backend that
 // requires the same thinking payload as reasoning_text. Official stateless
@@ -1374,9 +1511,10 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		if finalizing {
 			roundModel.Fallback = nil
 		}
+		requestInput := input
 		body := map[string]any{
 			"model": req.Model.RequestID,
-			"input": input,
+			"input": requestInput,
 			// §4.10-E hard rule: do NOT let OpenAI persist conversation state.
 			"store":  false,
 			"stream": true,
@@ -1405,7 +1543,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		// implementation replays response items locally and never mixes that state
 		// with an upstream conversation or previous_response_id.
 		body["model"] = req.Model.RequestID
-		body["input"] = input
+		body["input"] = requestInput
 		body["store"] = false
 		body["stream"] = true
 		delete(body, "conversation")
@@ -1477,6 +1615,23 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 			}, emitRound)
 		}
 		err := runRequest()
+		// A strict Responses gateway may reject native replay metadata after the
+		// request has already crossed a channel pool. No output was emitted for
+		// these schema errors, so retry the same round once with portable replay
+		// items; successful native channels keep their original metadata path.
+		if !finalizing && !roundEmitted && responsesReplayCompatibilityError(err) {
+			if normalized, changed := normalizeResponsesReplayInput(requestInput); changed {
+				if p.logger != nil {
+					p.logger.Printf("openai responses: retrying once with normalized replay metadata (model=%s)", req.Model.RequestID)
+				}
+				requestInput = normalized
+				input = normalized
+				body["input"] = requestInput
+				raw, _ = json.Marshal(body)
+				roundEmitted = false
+				err = runRequest()
+			}
+		}
 		if !finalizing && errors.Is(err, io.ErrUnexpectedEOF) && !roundEmitted && ctx.Err() == nil {
 			if p.logger != nil {
 				p.logger.Printf("openai responses: upstream stream ended with unexpected EOF before any event; retrying once (model=%s)", req.Model.RequestID)
@@ -2027,7 +2182,7 @@ responseLoop:
 				seenSequence[sequence] = true
 			}
 		}
-		if streamErr := providerEventError("openai responses", ev); streamErr != nil {
+		if streamErr := openAIResponsesStreamError(ev); streamErr != nil {
 			calls, hosted, outputItems := finalizeOpenAIResponsesStream(callsByItem, order, hostedByItem, hostedOrder, outputByItem, outputOrder, outputIndexByItem, outputDone, completedOutput, true)
 			return text.String(), reasoning.String(), calls, hosted, citations, usage, outputItems, streamErr
 		}

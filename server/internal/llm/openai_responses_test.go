@@ -87,6 +87,158 @@ func TestPrepareResponsesReplayItemsPreservesNativeAndRepairsLegacyItems(t *test
 	}
 }
 
+func TestNormalizeResponsesReplayInputForStrictGateways(t *testing.T) {
+	input := []map[string]any{
+		{
+			"id":     "message-uuid",
+			"type":   "message",
+			"role":   "assistant",
+			"status": "completed",
+			"phase":  "final_answer",
+			"content": []any{map[string]any{
+				"type": "output_text", "text": "answer", "annotations": []any{}, "logprobs": []any{},
+			}},
+		},
+		{
+			"id":                "reasoning-uuid",
+			"type":              "reasoning",
+			"content":           []any{map[string]any{"type": "reasoning_text", "text": "inspect"}},
+			"encrypted_content": "ciphertext",
+		},
+		{
+			"id":        "function-uuid",
+			"type":      "function_call",
+			"call_id":   "call_1",
+			"name":      "lookup",
+			"arguments": `{}`,
+		},
+	}
+
+	normalized, changed := normalizeResponsesReplayInput(input)
+	if !changed {
+		t.Fatal("normalization did not report a change")
+	}
+	if normalized[0]["id"] != "msg_message-uuid" {
+		t.Fatalf("message id = %v, want msg_ prefix", normalized[0]["id"])
+	}
+	if _, exists := normalized[0]["phase"]; exists {
+		t.Fatalf("message phase survived normalization: %#v", normalized[0])
+	}
+	content, _ := jsonArrayItems(normalized[0]["content"])
+	part, _ := content[0].(map[string]any)
+	if _, exists := part["logprobs"]; exists {
+		t.Fatalf("content logprobs survived normalization: %#v", part)
+	}
+	if normalized[1]["id"] != "rs_reasoning-uuid" || normalized[1]["encrypted_content"] != "ciphertext" {
+		t.Fatalf("reasoning replay changed incorrectly: %#v", normalized[1])
+	}
+	reasoningContent, _ := jsonArrayItems(normalized[1]["content"])
+	reasoningPart, _ := reasoningContent[0].(map[string]any)
+	if reasoningPart["type"] != "reasoning_text" || reasoningPart["text"] != "inspect" {
+		t.Fatalf("reasoning text changed: %#v", reasoningPart)
+	}
+	if normalized[2]["id"] != "fc_function-uuid" || normalized[2]["call_id"] != "call_1" {
+		t.Fatalf("function replay changed incorrectly: %#v", normalized[2])
+	}
+	if input[0]["id"] != "message-uuid" || input[0]["phase"] != "final_answer" {
+		t.Fatalf("normalization mutated original message: %#v", input[0])
+	}
+	originalContent, _ := jsonArrayItems(input[0]["content"])
+	originalPart, _ := originalContent[0].(map[string]any)
+	if _, exists := originalPart["logprobs"]; !exists {
+		t.Fatalf("normalization mutated original content: %#v", originalPart)
+	}
+}
+
+func TestResponsesReplayCompatibilityError(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "strict message ID", err: errors.New("Invalid 'id': message id must be a string starting with 'msg_'"), want: true},
+		{name: "HTTP 400 nested logprobs", err: errors.New(`openai responses 400: json: unknown field "logprobs"`), want: true},
+		{name: "HTTP 400 phase", err: errors.New(`openai responses 400: json: unknown field "phase"`), want: true},
+		{name: "unrelated schema error", err: errors.New(`openai responses 400: json: unknown field "metadata"`)},
+		{name: "nil"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := responsesReplayCompatibilityError(tc.err); got != tc.want {
+				t.Fatalf("responsesReplayCompatibilityError(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestOpenAIResponsesRetriesWithNormalizedReplayInput(t *testing.T) {
+	var requests []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var captured map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		requests = append(requests, captured)
+		if len(requests) == 1 {
+			w.Header().Set("content-type", "text/event-stream")
+			_, _ = io.WriteString(w, `data: {"code":"InvalidParameter","message":"Invalid 'id': message id must be a string starting with 'msg_', got 'message-uuid'."}`+"\n\n")
+			return
+		}
+
+		input, _ := captured["input"].([]any)
+		if len(input) != 4 {
+			t.Errorf("input length = %d, want 4: %#v", len(input), captured["input"])
+		}
+		reasoning, _ := input[1].(map[string]any)
+		if reasoning["id"] != "rs_reasoning-uuid" || reasoning["encrypted_content"] != "ciphertext" {
+			t.Errorf("reasoning replay = %#v", reasoning)
+		}
+		message, _ := input[2].(map[string]any)
+		if message["id"] != "msg_message-uuid" {
+			t.Errorf("message replay id = %v", message["id"])
+		}
+		if _, exists := message["phase"]; exists {
+			t.Errorf("message phase survived retry: %#v", message)
+		}
+		content, _ := jsonArrayItems(message["content"])
+		part, _ := content[0].(map[string]any)
+		if _, exists := part["logprobs"]; exists {
+			t.Errorf("message logprobs survived retry: %#v", part)
+		}
+
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = io.WriteString(w, strings.Join([]string{
+			`data: {"type":"response.output_text.delta","delta":"new answer"}`,
+			`data: {"type":"response.completed","response":{"output":[]}}`,
+			`data: [DONE]`,
+			``,
+		}, "\n\n"))
+	}))
+	defer srv.Close()
+
+	legacyRaw := json.RawMessage(`[
+		{"id":"reasoning-uuid","type":"reasoning","content":[{"type":"reasoning_text","text":"inspect"}],"encrypted_content":"ciphertext"},
+		{"id":"message-uuid","type":"message","role":"assistant","status":"completed","phase":"final_answer","content":[{"type":"output_text","text":"old answer","logprobs":[]}]}
+	]`)
+	result, err := (&OpenAIProvider{}).Stream(context.Background(), UnifiedChatRequest{
+		Model: ModelInfo{RequestID: "gpt-test", BaseURL: srv.URL, APIKey: "k", APIFormat: "responses"},
+		History: []UnifiedMessage{
+			{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "first question"}}},
+			{Role: "assistant", Blocks: []UnifiedBlock{{Kind: "text", Text: "old answer"}}, Raw: legacyRaw},
+			{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "follow up"}}},
+		},
+	}, nil, func(SseEvent) {})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("requests = %d, want initial request plus compatibility retry", len(requests))
+	}
+	if result == nil || result.Blocks == nil {
+		t.Fatalf("result = %+v, want completed response", result)
+	}
+}
+
 func TestOpenAIResponsesCanonicalAssistantHistoryUsesPortableString(t *testing.T) {
 	var captured map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
