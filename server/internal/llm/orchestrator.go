@@ -3043,6 +3043,12 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	}
 	o.logGenerationStage(conv.ID, assistantMsg.ID, "branch_documents", "completed", documentStageStarted,
 		fmt.Sprintf(" documents=%d", len(branchDocumentIDs)))
+	currentDocumentIDs := attachmentDocumentIDs(req.Attachments)
+	allowedDocumentIDs := mergeDocumentIDs(branchDocumentIDs, currentDocumentIDs)
+	if o.logger != nil {
+		o.logger.Printf("orchestrator: attachment document scope (conv=%s msg=%s attachments=%d current=%v allowed=%v)",
+			conv.ID, userMsg.ID, len(req.Attachments), currentDocumentIDs, allowedDocumentIDs)
+	}
 	// Resolve staged files before automatic tool routing. The route model receives
 	// only a presence bit; exact file names are used solely by deterministic local
 	// fast paths and never leave this process.
@@ -3235,8 +3241,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// what made the model fall back to python-side PDF parsing.
 	// §4.11-B: run inline RAG when a KB is bound OR the conversation itself has an
 	// ingested upload (chat-attached files are conversation-scoped, not in a KB).
-	ragScoped := len(kbIDs) > 0 || len(branchDocumentIDs) > 0
-	currentDocumentIDs := attachmentDocumentIDs(req.Attachments)
+	ragScoped := len(kbIDs) > 0 || len(allowedDocumentIDs) > 0
 	if o.rag != nil && ragScoped && req.Mode != ModeDeepResearch {
 		ragStageStarted := time.Now()
 		o.logGenerationStage(conv.ID, assistantMsg.ID, "rag", "started", time.Time{},
@@ -3263,7 +3268,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 				8,
 				rag.IterativeRetrievalOptions{
 					ForceRetrieve:      ragMode == "inject",
-					DocumentIDs:        branchDocumentIDs,
+					DocumentIDs:        allowedDocumentIDs,
 					RestrictDocuments:  true,
 					CurrentDocumentIDs: currentDocumentIDs,
 					OnProgress: func(progress rag.IterativeRetrievalProgress) {
@@ -3279,10 +3284,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			sourceCount := len(snippets)
 			onEvent(SseEvent{Type: "rag", Status: string(status), SourceCount: &sourceCount})
 		} else if ragMode == "inject" {
-			snippets, ragErr = o.rag.RetrieveDocuments(ragCtx, req.UserID, conv.ID, kbIDs, branchDocumentIDs, req.UserText, 8)
+			snippets, ragErr = o.rag.RetrieveDocuments(ragCtx, req.UserID, conv.ID, kbIDs, allowedDocumentIDs, req.UserText, 8)
 			decision = rag.RouteDecision{Strategy: "retrieve"}
 		} else {
-			snippets, decision, ragErr = o.rag.RouteAndRetrieveDocumentScope(ragCtx, req.UserID, conv.ID, kbIDs, branchDocumentIDs, currentDocumentIDs, req.UserText, nil, 8)
+			snippets, decision, ragErr = o.rag.RouteAndRetrieveDocumentScope(ragCtx, req.UserID, conv.ID, kbIDs, allowedDocumentIDs, currentDocumentIDs, req.UserText, nil, 8)
 		}
 		cancelRAG()
 		ragStatus := "completed"
@@ -3584,7 +3589,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		fmt.Sprintf(" history=%d tools=%d", len(uHist), len(toolDefs)))
 	requestTokens := estimateRequestTokens(compactionEstimateReq)
 	toolHistoryCompacted := false
-	_, globalCompactionTrigger, compactionTokenCap, _, _, _, _ := compactionSettings(o.db)
+	_, globalCompactionTrigger, compactionTokenCap, _, _, _ := compactionSettings(o.db)
 	effectiveTrigger := effectiveCompactionTokenTrigger(globalCompactionTrigger, compactionTokenCap, model.CompactionTokenThreshold)
 	if effectiveTrigger > 0 && requestTokens > effectiveTrigger {
 		if projected, changed := compactHistoricalToolResults(uHist); changed {
@@ -4627,4 +4632,20 @@ func attachmentDocumentIDs(attachments []Attachment) []string {
 		ids = append(ids, id)
 	}
 	return ids
+}
+
+func mergeDocumentIDs(groups ...[]string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, group := range groups {
+		for _, raw := range group {
+			id := strings.TrimSpace(raw)
+			if id == "" || seen[id] {
+				continue
+			}
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	return out
 }
