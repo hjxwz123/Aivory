@@ -17,6 +17,10 @@ import { conversationsApi, memoriesApi } from '@/api'
 import { useConversations } from '@/store/conversations'
 import { useAuth } from '@/store/auth'
 import { userCan } from '@/lib/user-permissions'
+import {
+  downloadConversationExportBatch,
+  prepareConversationExport,
+} from '@/lib/conversation-export'
 
 export default function Privacy() {
   const user = useAuth((s) => s.user)
@@ -25,6 +29,7 @@ export default function Privacy() {
   const [confirmClear, setConfirmClear] = useState(false)
   const [clearing, setClearing] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [exportProgress, setExportProgress] = useState<{ index: number; total: number } | null>(null)
   const exportAttemptRef = useRef(0)
   const [importing, setImporting] = useState(false)
   const importRef = useRef<HTMLInputElement>(null)
@@ -84,8 +89,9 @@ export default function Privacy() {
     }
   }
 
-  /** Export user data: fetch all conversations + messages + memories and
-   *  download as a JSON file. */
+  /** Export every active and archived conversation in bounded JSON batches.
+   * Each batch is independently importable, and full trees are fetched so
+   * inactive branches are not lost. */
   async function performExport() {
     if (exporting || !canExportConversations) return
     const userID = user?.id
@@ -93,47 +99,36 @@ export default function Privacy() {
     const attempt = exportAttemptRef.current + 1
     exportAttemptRef.current = attempt
     setExporting(true)
+    setExportProgress(null)
     try {
-      const [{ conversations: convs }, mems] = await Promise.all([
-        conversationsApi.list(),
-        canUseMemory ? memoriesApi.list() : Promise.resolve([]),
-      ])
-      // Fetch full messages for each conversation.
-      const detailed = await Promise.all(
-        convs.map(async (c) => {
-          try {
-            const detail = await conversationsApi.get(c.id)
-            return { ...c, messages: detail.messages }
-          } catch {
-            return { ...c, messages: [] }
-          }
-        }),
-      )
+      const plan = await prepareConversationExport(canUseMemory)
       const latestUser = useAuth.getState().user
       if (
         exportAttemptRef.current !== attempt ||
         latestUser?.id !== userID ||
         !userCan(latestUser, 'allow_conversation_export')
       ) return
-      const blob = new Blob(
-        [JSON.stringify({ conversations: detailed, memories: mems, exported_at: new Date().toISOString() }, null, 2)],
-        { type: 'application/json' },
+      for (let index = 1; index <= plan.total; index += 1) {
+        if (exportAttemptRef.current !== attempt) return
+        setExportProgress({ index, total: plan.total })
+        await downloadConversationExportBatch(plan, index)
+      }
+      toast.success(
+        t('settings:privacy.exportDone', {
+          defaultValue: 'Export downloaded ({{count}} conversation(s) in {{batches}} file(s))',
+          count: plan.conversations.length,
+          batches: plan.total,
+        }),
       )
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `aivory-export-${new Date().toISOString().slice(0, 10)}.json`
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      URL.revokeObjectURL(url)
-      toast.success(t('settings:privacy.exportDone', { defaultValue: 'Export downloaded' }))
     } catch (e) {
       if (exportAttemptRef.current === attempt) {
         toast.error(t('common:actions.failed', { defaultValue: 'Export failed' }), e instanceof Error ? e.message : undefined)
       }
     } finally {
-      if (exportAttemptRef.current === attempt) setExporting(false)
+      if (exportAttemptRef.current === attempt) {
+        setExporting(false)
+        setExportProgress(null)
+      }
     }
   }
 
@@ -222,7 +217,13 @@ export default function Privacy() {
               loading={exporting}
               onClick={() => void performExport()}
             >
-              {t('common:actions.export')}
+              {exportProgress
+                ? t('settings:privacy.exportProgress', {
+                    defaultValue: 'Exporting {{index}}/{{total}}…',
+                    index: exportProgress.index,
+                    total: exportProgress.total,
+                  })
+                : t('common:actions.export')}
             </Button>
           </SettingsRow>
         ) : null}
