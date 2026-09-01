@@ -2111,6 +2111,16 @@ func DeleteRound(ctx context.Context, db *sql.DB, convID, userID, msgID string) 
 	if _, err := tx.ExecContext(ctx, `UPDATE conversations SET active_leaf_id=NULLIF(?,''), updated_at=? WHERE id=?`, newLeaf, time.Now().Unix(), convID); err != nil {
 		return "", err
 	}
+	// A generation lease is keyed by the parent that existed before its user and
+	// assistant rows were created. Deleting that round can remove every database
+	// trace of the in-flight turn while leaving the parent-keyed lease behind,
+	// causing the next send on the now-current branch to return
+	// generation_in_progress. The conversation lock above serializes this cleanup
+	// with lease admission. Surviving streaming rows remain the authoritative guard
+	// for genuinely independent branches.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM conversation_generation_leases WHERE conversation_id=?`, convID); err != nil {
+		return "", err
+	}
 	if err := tx.Commit(); err != nil {
 		return "", err
 	}

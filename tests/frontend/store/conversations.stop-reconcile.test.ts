@@ -7,6 +7,8 @@ const apiMocks = vi.hoisted(() => ({
   get: vi.fn(),
   update: vi.fn(),
   stop: vi.fn(),
+  remove: vi.fn(),
+  deleteMessage: vi.fn(),
   inlineThreads: vi.fn(),
   streamSSE: vi.fn(),
   streamSSEGet: vi.fn(),
@@ -31,6 +33,8 @@ vi.mock('@/api', () => {
       get: apiMocks.get,
       update: apiMocks.update,
       stop: apiMocks.stop,
+      remove: apiMocks.remove,
+      deleteMessage: apiMocks.deleteMessage,
       inlineThreads: apiMocks.inlineThreads,
     },
     streamSSE: apiMocks.streamSSE,
@@ -205,6 +209,72 @@ describe('stopped turn optimistic-id reconciliation', () => {
     vi.clearAllMocks()
     apiMocks.stop.mockResolvedValue({ ok: true })
     resetStore()
+  })
+
+  it('waits for the stop acknowledgement before deleting a streaming round', async () => {
+    let acknowledgeStop!: () => void
+    apiMocks.stop.mockImplementation(
+      () =>
+        new Promise<{ ok: true }>((resolve) => {
+          acknowledgeStop = () => resolve({ ok: true })
+        }),
+    )
+    apiMocks.deleteMessage.mockResolvedValue({
+      ok: true,
+      active_leaf_id: '',
+      messages: [],
+    })
+    resetStore([
+      { id: 'msg_user', role: 'user', content: 'question', createdAt: 1 },
+      {
+        id: 'msg_assistant',
+        role: 'assistant',
+        content: 'partial',
+        createdAt: 2,
+        parentId: 'msg_user',
+        streaming: true,
+      },
+    ])
+
+    const deletion = useConversations.getState().deleteMessage('conv_stop', 'msg_assistant')
+
+    expect(apiMocks.stop).toHaveBeenCalledWith('conv_stop')
+    expect(apiMocks.deleteMessage).not.toHaveBeenCalled()
+    acknowledgeStop()
+    await deletion
+
+    expect(apiMocks.deleteMessage).toHaveBeenCalledWith('conv_stop', 'msg_assistant')
+    expect(useConversations.getState().conversations[0]?.messages).toEqual([])
+  })
+
+  it('stops a streaming conversation before issuing its delete request', async () => {
+    let acknowledgeStop!: () => void
+    apiMocks.stop.mockImplementation(
+      () =>
+        new Promise<{ ok: true }>((resolve) => {
+          acknowledgeStop = () => resolve({ ok: true })
+        }),
+    )
+    apiMocks.remove.mockResolvedValue({ ok: true })
+    resetStore([
+      {
+        id: 'msg_assistant',
+        role: 'assistant',
+        content: 'partial',
+        createdAt: 2,
+        streaming: true,
+      },
+    ])
+
+    const deletion = useConversations.getState().deleteConversation('conv_stop')
+
+    expect(useConversations.getState().conversations).toEqual([])
+    expect(apiMocks.stop).toHaveBeenCalledWith('conv_stop')
+    expect(apiMocks.remove).not.toHaveBeenCalled()
+    acknowledgeStop()
+    await deletion
+
+    expect(apiMocks.remove).toHaveBeenCalledWith('conv_stop')
   })
 
   it('reconciles a generated first-turn title when the realtime event is missed', async () => {

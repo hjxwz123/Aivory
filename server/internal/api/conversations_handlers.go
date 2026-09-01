@@ -760,6 +760,9 @@ func deleteConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
+	for _, cid := range deletion.ConversationIDs {
+		cancelConversationGenerations(d, cid)
+	}
 	// Conversation uploads cascade-delete (documents.conversation_id ON DELETE
 	// CASCADE); files are physically deleted by DeleteConversation. Drop vectors
 	// and storage objects for the conversation and every inline sub-conversation
