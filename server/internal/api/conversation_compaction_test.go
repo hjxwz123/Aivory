@@ -107,6 +107,48 @@ func TestCompactConversationHandlerRejectsStreamingConversation(t *testing.T) {
 	}
 }
 
+func TestCompactConversationHandlerAllowsCompactionAfterDeletingStreamingRound(t *testing.T) {
+	d, user, conv := compactionHandlerFixture(t, 2)
+	lease, _, acquired, err := store.TryAcquireConversationGenerationLease(
+		context.Background(), d.DB, conv.ID, conv.ActiveLeafID, user.ID, "deleting-generation", time.Minute,
+	)
+	if err != nil || !acquired || lease == nil {
+		t.Fatalf("acquire generation lease: acquired=%v lease=%#v err=%v", acquired, lease, err)
+	}
+	question, err := store.CreateMessage(context.Background(), d.DB, store.Message{
+		ConversationID: conv.ID, ParentID: conv.ActiveLeafID, Role: "user", AuthorID: user.ID,
+		Blocks:      json.RawMessage(`[{"kind":"text","text":"delete this live round"}]`),
+		Attachments: json.RawMessage("[]"), Citations: json.RawMessage("[]"), Status: "complete",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	streaming, err := store.CreateMessage(context.Background(), d.DB, store.Message{
+		ConversationID: conv.ID, ParentID: question.ID, Role: "assistant", AuthorID: user.ID,
+		Blocks:      json.RawMessage(`[{"kind":"text","text":"partial"}]`),
+		Attachments: json.RawMessage("[]"), Citations: json.RawMessage("[]"), Status: "streaming",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.DB.Exec(`UPDATE conversations SET active_leaf_id=? WHERE id=?`, streaming.ID, conv.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DeleteRound(context.Background(), d.DB, conv.ID, user.ID, streaming.ID); err != nil {
+		t.Fatalf("delete streaming round: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/conversations/"+conv.ID+"/compact", nil)
+	req = req.WithContext(context.WithValue(req.Context(), userCtxKey{}, user))
+	req = req.WithContext(context.WithValue(req.Context(), pathCtxKey{}, map[string]string{"id": conv.ID}))
+	rec := httptest.NewRecorder()
+	compactConversationHandler(d, rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("deleted streaming round still blocked compaction: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestCompactConversationHandlerIgnoresStaleStreamingConversation(t *testing.T) {
 	d, user, conv := compactionHandlerFixture(t, 2)
 	blocks := json.RawMessage(`[{"kind":"text","text":"abandoned partial"}]`)

@@ -661,14 +661,18 @@ function scheduleStoppedPathReconcile(
 // when the user abandons the current branch — editing a past turn into a new
 // branch, or switching to a different branch — so the old stream can't keep
 // running invisibly and its late completion can't clobber the new active leaf.
-function stopConversationStreams(convId: string, messages: Message[]): void {
+function stopConversationStreams(convId: string, messages: Message[]): Promise<void> {
   const live = messages.filter((m) => m.streaming)
-  if (live.length === 0) return
-  void conversationsApi.stop(convId).catch(() => {})
+  if (live.length === 0) return Promise.resolve()
+  const stopped = conversationsApi.stop(convId).then(
+    () => undefined,
+    () => undefined,
+  )
   for (const m of live) {
     streamControllers.get(m.id)?.abort()
     streamControllers.get(m.id + '-regen')?.abort()
   }
+  return stopped
 }
 
 export const useConversations = createWithEqualityFn<ConversationStore>((set, get) => ({
@@ -957,9 +961,16 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     // background list sync that was already in flight (fetched pre-delete)
     // from resurrecting the rows when its stale response merges.
     const doomed = collectDoomedConversationIds(prevConversations, id)
+    const stopRequests = prevConversations
+      .filter((conversation) => doomed.has(conversation.id))
+      .map((conversation) => stopConversationStreams(conversation.id, conversation.messages))
     markConversationsDeleted(doomed)
     set((s) => ({ conversations: s.conversations.filter((c) => !doomed.has(c.id)) }))
     try {
+      // Keep DELETE behind the stop acknowledgement. If both requests race, the
+      // stop endpoint can observe an already-deleted conversation and miss its
+      // detached generator, leaving the per-user slot occupied until timeout.
+      await Promise.all(stopRequests)
       await conversationsApi.remove(id)
     } catch (e) {
       unmarkConversationsDeleted(doomed)
@@ -1124,7 +1135,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
   async deleteMessage(conversationId, messageId) {
     // Deleting under a live stream would race the writer — stop it first.
     const cur = get().conversations.find((c) => c.id === conversationId)
-    stopConversationStreams(conversationId, cur?.messages ?? [])
+    await stopConversationStreams(conversationId, cur?.messages ?? [])
     try {
       const resp = await conversationsApi.deleteMessage(conversationId, messageId)
       // The response carries the refreshed (full) active path; swap it in and

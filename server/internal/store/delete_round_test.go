@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestDeleteRound covers the branch-safe semantics: deleting a round removes the
@@ -82,6 +83,40 @@ func TestDeleteRound(t *testing.T) {
 	assertGone(t, db, "U1")
 	assertGone(t, db, "A1")
 	assertParent(t, db, "U4", "") // re-anchored to root
+}
+
+func TestDeleteRoundReleasesGenerationLeaseForNextTurn(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "delete-live-round.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+	if err := Migrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	exec(t, db, `INSERT INTO users(id,email,password_hash,role) VALUES('u1','lease@example.test','h','user')`)
+	exec(t, db, `INSERT INTO conversations(id,user_id,title,active_leaf_id) VALUES('c1','u1','Live delete','A1')`)
+	insMsg(t, db, "U1", "", "user", 1000)
+	insMsg(t, db, "A1", "U1", "assistant", 1001)
+	exec(t, db, `UPDATE messages SET status='streaming' WHERE id='A1'`)
+	exec(t, db, `INSERT INTO conversation_generation_leases
+		(conversation_id,branch_key,principal_id,owner_token,expires_at)
+		VALUES('c1','root:','u1','old-generation',?)`, time.Now().Add(time.Hour).UnixNano())
+
+	if _, err := DeleteRound(ctx, db, "c1", "u1", "A1"); err != nil {
+		t.Fatalf("delete live round: %v", err)
+	}
+
+	lease, parentID, acquired, err := TryAcquireConversationGenerationLease(
+		ctx, db, "c1", "", "u1", "next-generation", time.Minute,
+	)
+	if err != nil {
+		t.Fatalf("acquire next generation: %v", err)
+	}
+	if !acquired || lease == nil {
+		t.Fatalf("next generation acquired=%v lease=%#v parent=%q, want a fresh root lease", acquired, lease, parentID)
+	}
 }
 
 // TestDeleteBranchKeepsSiblings locks in the §4.15 data-loss fix: deleting ONE

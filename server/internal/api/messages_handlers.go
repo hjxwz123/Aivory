@@ -203,6 +203,10 @@ func conversationGenerationRevocationTopic(conversationID string) string {
 	return "conversation:" + strings.TrimSpace(conversationID) + ":generation-revoked"
 }
 
+func conversationGenerationCancellationTopic(conversationID string) string {
+	return "conversation:" + strings.TrimSpace(conversationID) + ":generation-canceled"
+}
+
 func knowledgeBaseGenerationRevocationTopic(kbID string) string {
 	return "knowledge-base:" + strings.TrimSpace(kbID) + ":generation-revoked"
 }
@@ -368,6 +372,16 @@ func revokeConversationGenerations(d Deps, conversationID string) {
 		return
 	}
 	d.Cache.Publish(conversationGenerationRevocationTopic(conversationID), "1")
+}
+
+// cancelConversationGenerations is the destructive-mutation counterpart to an
+// access revocation. It stops all detached workers without classifying surviving
+// branches as access-revoked; their normal cancellation path persists "stopped".
+func cancelConversationGenerations(d Deps, conversationID string) {
+	if d.Cache == nil || strings.TrimSpace(conversationID) == "" {
+		return
+	}
+	d.Cache.Publish(conversationGenerationCancellationTopic(conversationID), "1")
 }
 
 type generationWorkspaceAccessSnapshot struct {
@@ -545,6 +559,12 @@ func newGenerationAccessRevocationWatcher(
 		d: d, ctx: ctx, cancel: cancel, workspaceUnsub: func() {}, knowledgeBases: knowledgeBases,
 		permissions: permissions, conversationID: strings.TrimSpace(conversationID), workspaceAccess: workspaceAccess,
 	}
+	// Destructive conversation/message mutations must cancel detached generators
+	// in personal and workspace conversations alike.
+	watcher.workspaceAccessUnsubs = append(watcher.workspaceAccessUnsubs,
+		subscribeAccessRevocationTopic(d, ctx, cancel,
+			conversationGenerationCancellationTopic(watcher.conversationID)),
+	)
 	if strings.TrimSpace(workspaceID) != "" {
 		key := workspaceGenerationRevocationKey(workspaceID)
 		watcher.workspaceUnsub = subscribePermanentRevocation(
@@ -2377,6 +2397,10 @@ func deleteMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
+	// DeleteRound also invalidates the parent-keyed generation leases. Cancel the
+	// corresponding detached workers so they release per-user concurrency slots
+	// and cannot race later mutations on a surviving branch.
+	cancelConversationGenerations(d, convID)
 	msgcache.Bump(d.Cache, convID)
 	msgs, err := msgcache.ListMessages(r.Context(), d.Cache, d.DB, convID, newLeaf)
 	if err != nil {

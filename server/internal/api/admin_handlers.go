@@ -1121,6 +1121,9 @@ func deleteConversationAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	if len(ids) == 0 {
 		ids = append([]string{id}, children...)
 	}
+	for _, cid := range ids {
+		cancelConversationGenerations(d, cid)
+	}
 	// Drop RAG vectors for the conversation and every inline sub-conversation
 	// removed alongside it.
 	for _, cid := range ids {
