@@ -30,27 +30,32 @@ type Config struct {
 	JWTSecretEphemeral bool
 	AccessTTL          time.Duration
 	RefreshTTL         time.Duration
-	AllowedOrigins     []string
-	StaticDir          string
-	UploadDir          string
-	LocalStorageDir    string
-	ArtifactDir        string
-	BackupDir          string
-	MaxUploadBytes     int64
-	MaxBackupBytes     int64
-	DailyMessages      int
-	DailyImages        int
-	SearchProvider     string
-	SearchAPIKey       string
-	SearchBaseURL      string
-	EmbeddingBaseURL   string
-	EmbeddingAPIKey    string
-	EmbeddingModel     string
-	EmbeddingDim       int
-	SandboxBaseURL     string
-	SandboxAPIKey      string
-	MinerUAPIURL       string
-	MinerUAPIKey       string
+	// RequestSignaturesRequired makes authenticated API requests prove possession
+	// of the access token and binds each proof to the complete request. Tests that
+	// construct Config literals leave this false unless they are exercising the
+	// proof boundary; Load enables it by default for every real server process.
+	RequestSignaturesRequired bool
+	AllowedOrigins            []string
+	StaticDir                 string
+	UploadDir                 string
+	LocalStorageDir           string
+	ArtifactDir               string
+	BackupDir                 string
+	MaxUploadBytes            int64
+	MaxBackupBytes            int64
+	DailyMessages             int
+	DailyImages               int
+	SearchProvider            string
+	SearchAPIKey              string
+	SearchBaseURL             string
+	EmbeddingBaseURL          string
+	EmbeddingAPIKey           string
+	EmbeddingModel            string
+	EmbeddingDim              int
+	SandboxBaseURL            string
+	SandboxAPIKey             string
+	MinerUAPIURL              string
+	MinerUAPIKey              string
 	// OAuthCallbackBaseURL pins the ONE scheme://host whose OAuth callback path is
 	// registered with the providers (domain A). When the site answers on several
 	// domains but the provider only accepts a single redirect_uri, set this so every
@@ -80,9 +85,10 @@ func Load() Config {
 		// the stolen token expires quickly even without explicit revocation.
 		// 30 minutes is the recommended ceiling; operators may lower it further
 		// via ACCESS_TTL without touching RefreshTTL (7–30 days is fine there).
-		AccessTTL:      getenvDuration("ACCESS_TTL", 30*time.Minute),
-		RefreshTTL:     getenvDuration("REFRESH_TTL", 30*24*time.Hour),
-		AllowedOrigins: getenvList("ALLOWED_ORIGINS", []string{"http://localhost:5173", "http://127.0.0.1:5173"}),
+		AccessTTL:                 getenvDuration("ACCESS_TTL", 30*time.Minute),
+		RefreshTTL:                getenvDuration("REFRESH_TTL", 30*24*time.Hour),
+		RequestSignaturesRequired: getenvBool("AIVORY_REQUEST_SIGNATURES_REQUIRED", true),
+		AllowedOrigins:            getenvList("ALLOWED_ORIGINS", []string{"http://localhost:5173", "http://127.0.0.1:5173"}),
 		// STATIC_DIR points at the built SPA (dist/). When set, the API process
 		// also serves the frontend from the SAME origin (single-container deploy),
 		// so there is no cross-origin and any domain the server is reached on just
@@ -247,6 +253,20 @@ func getenvInt64(k string, def int64) int64 {
 	if v := os.Getenv(k); v != "" {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
 			return n
+		}
+	}
+	return def
+}
+func getenvBool(k string, def bool) bool {
+	if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+		if parsed, err := strconv.ParseBool(v); err == nil {
+			return parsed
+		}
+		switch strings.ToLower(v) {
+		case "yes", "on":
+			return true
+		case "no", "off":
+			return false
 		}
 	}
 	return def

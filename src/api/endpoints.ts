@@ -3,7 +3,15 @@
  * backend returns, with a small typed helper signature. Group by feature so
  * the call sites stay readable.
  */
-import { api, apiUrl, getAccessToken, ApiError, apiUpload, assertNetworkOnline, type UploadProgress } from './client'
+import {
+  api,
+  apiUrl,
+  authenticatedRequestHeaders,
+  ApiError,
+  apiUpload,
+  assertNetworkOnline,
+  type UploadProgress,
+} from './client'
 import { withRequestActivity, type RequestActivityMode } from '@/lib/request-activity'
 import type {
   ApiAdminOverview,
@@ -231,10 +239,10 @@ export const authApi = {
     api<{ deleted: number }>('/me/files/delete', { method: 'POST', body: { items } }),
   myFileContentBlob: async (source: 'file' | 'document', id: string, signal?: AbortSignal): Promise<Blob> => {
     assertNetworkOnline()
-    const token = getAccessToken()
-    const res = await fetch(apiUrl(`/me/files/content?source=${source}&id=${encodeURIComponent(id)}`), {
+    const path = `/me/files/content?source=${source}&id=${encodeURIComponent(id)}`
+    const res = await fetch(apiUrl(path), {
       credentials: 'include',
-      headers: token ? { authorization: `Bearer ${token}` } : {},
+      headers: await authenticatedRequestHeaders(path),
       signal,
     })
     if (!res.ok) throw new ApiError(res.status, `preview failed (${res.status})`, null)
@@ -1377,10 +1385,10 @@ export const adminApi = {
   fileContentBlob: (source: 'file' | 'document', id: string, signal?: AbortSignal): Promise<Blob> =>
     withRequestActivity(async () => {
       assertNetworkOnline()
-      const token = getAccessToken()
-      const res = await fetch(apiUrl(`/admin/files/content?source=${source}&id=${encodeURIComponent(id)}`), {
+      const path = `/admin/files/content?source=${source}&id=${encodeURIComponent(id)}`
+      const res = await fetch(apiUrl(path), {
         credentials: 'include',
-        headers: token ? { authorization: `Bearer ${token}` } : {},
+        headers: await authenticatedRequestHeaders(path),
         signal,
       })
       if (!res.ok) throw new ApiError(res.status, `preview failed (${res.status})`, null)
@@ -1429,10 +1437,10 @@ export const adminApi = {
   userFeedbackScreenshotBlob: (id: string, signal?: AbortSignal): Promise<Blob> =>
     withRequestActivity(async () => {
       assertNetworkOnline()
-      const token = getAccessToken()
-      const res = await fetch(apiUrl(`/admin/user-feedback/${encodeURIComponent(id)}/screenshot`), {
+      const path = `/admin/user-feedback/${encodeURIComponent(id)}/screenshot`
+      const res = await fetch(apiUrl(path), {
         credentials: 'include',
-        headers: token ? { authorization: `Bearer ${token}` } : {},
+        headers: await authenticatedRequestHeaders(path),
         signal,
         cache: 'no-store',
       })
@@ -1461,10 +1469,10 @@ export const adminApi = {
   backupExport: (includeFiles: boolean): Promise<Blob> =>
     withRequestActivity(async () => {
       assertNetworkOnline()
-      const token = getAccessToken()
-      const res = await fetch(apiUrl(`/admin/backup/export${includeFiles ? '?files=1' : ''}`), {
+      const path = `/admin/backup/export${includeFiles ? '?files=1' : ''}`
+      const res = await fetch(apiUrl(path), {
         credentials: 'include',
-        headers: token ? { authorization: `Bearer ${token}` } : {},
+        headers: await authenticatedRequestHeaders(path),
       })
       if (!res.ok) {
         let msg = `export failed (${res.status})`
@@ -1488,10 +1496,10 @@ export const adminApi = {
   backupArchiveDownload: (name: string): Promise<Blob> =>
     withRequestActivity(async () => {
       assertNetworkOnline()
-      const token = getAccessToken()
-      const res = await fetch(apiUrl(`/admin/backup/archives/${encodeURIComponent(name)}`), {
+      const path = `/admin/backup/archives/${encodeURIComponent(name)}`
+      const res = await fetch(apiUrl(path), {
         credentials: 'include',
-        headers: token ? { authorization: `Bearer ${token}` } : {},
+        headers: await authenticatedRequestHeaders(path),
       })
       if (!res.ok) {
         let msg = `download failed (${res.status})`
@@ -1522,10 +1530,10 @@ export const adminApi = {
   configExport: (): Promise<Blob> =>
     withRequestActivity(async () => {
       assertNetworkOnline()
-      const token = getAccessToken()
-      const res = await fetch(apiUrl('/admin/config/export'), {
+      const path = '/admin/config/export'
+      const res = await fetch(apiUrl(path), {
         credentials: 'include',
-        headers: token ? { authorization: `Bearer ${token}` } : {},
+        headers: await authenticatedRequestHeaders(path),
       })
       if (!res.ok) {
         let msg = `export failed (${res.status})`

@@ -14,9 +14,9 @@
  */
 import type { ApiError as ApiErrorShape } from './types'
 import { toast as _sseToast } from '@/hooks/use-toast'
-import { getDeviceId } from '@/lib/device-id'
+import { getClientInstanceId, getDeviceId } from '@/lib/device-id'
 import { blockReload } from '@/lib/sync-guards'
-import { hmacSha256 } from '@/lib/hmac-sha256'
+import { hmacSha256, sha256 } from '@/lib/hmac-sha256'
 import {
   withRequestActivity,
   type RequestActivityMode,
@@ -25,40 +25,35 @@ import {
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api'
 
-// Per-request HMAC signing. The frontend derives an intermediate key from the
-// JWT + a slow-rotating epoch (changes every hour), then signs ts:nonce:path
-// with it. Every request produces a unique token; the path is bound into the
-// signature so a token captured from one endpoint is invalid on another.
+// Per-request HMAC proof. The server consumes every nonce once and binds the
+// proof to the HTTP method, complete request target, device id, and payload.
 //
 // `crypto.subtle` only exists in secure contexts (https / localhost). A
 // deployment reached over plain http on a LAN IP or domain has no SubtleCrypto
 // and would throw "Cannot read properties of undefined (reading 'importKey')"
 // on every authed request — fall back to the pure-JS HMAC (byte-identical
 // output) so those deployments keep working.
-async function _dk(jwt: string): Promise<CryptoKey> {
+const REQUEST_SIGNATURE_VERSION = 'v2'
+const UNSIGNED_PAYLOAD = 'UNSIGNED-PAYLOAD'
+
+async function _dk(jwt: string, ts: number): Promise<CryptoKey> {
   const raw = new TextEncoder().encode(jwt)
   const base = await crypto.subtle.importKey('raw', raw, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
-  const epoch = Math.floor(Date.now() / 1000 / 3600)
+  const epoch = Math.floor(ts / 3600)
   const derived = await crypto.subtle.sign('HMAC', base, new TextEncoder().encode(String(epoch)))
   return crypto.subtle.importKey('raw', derived, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
 }
 
-async function _sign(jwt: string, ts: number, nonce: string, path: string): Promise<string> {
-  // The server verifies over r.URL.Path — the path WITHOUT the query string
-  // (middleware.go). Strip any `?query` here or a request like `?mode=tree` signs
-  // a different message than the server checks and gets a 403 "invalid request
-  // signature" (this silently broke the conversation-tree / paginated fetches).
-  const signPath = path.split('?')[0]
-  const msgStr = `${ts}\x00${nonce}\x00${signPath}`
+async function _sign(jwt: string, ts: number, message: string): Promise<string> {
   if (typeof crypto.subtle === 'undefined') {
     const encoder = new TextEncoder()
-    const epoch = Math.floor(Date.now() / 1000 / 3600)
+    const epoch = Math.floor(ts / 3600)
     const derived = hmacSha256(encoder.encode(jwt), encoder.encode(String(epoch)))
-    const sig = hmacSha256(derived, encoder.encode(msgStr))
+    const sig = hmacSha256(derived, encoder.encode(message))
     return btoa(String.fromCharCode(...sig))
   }
-  const key = await _dk(jwt)
-  const msg = new TextEncoder().encode(msgStr)
+  const key = await _dk(jwt, ts)
+  const msg = new TextEncoder().encode(message)
   const sig = await crypto.subtle.sign('HMAC', key, msg)
   return btoa(String.fromCharCode(...new Uint8Array(sig)))
 }
@@ -69,16 +64,66 @@ function _nonce(): string {
   return btoa(String.fromCharCode(...b)).replace(/[+/=]/g, (c) => ({ '+': '-', '/': '_', '=': '' })[c]!)
 }
 
+function _sha256Hex(value: string): string {
+  const digest = sha256(new TextEncoder().encode(value))
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+function _canonicalTarget(path: string): string {
+  const parsed = new URL(path, 'http://aivory.invalid')
+  return parsed.pathname + parsed.search
+}
+
 let memoryToken: string | null = null
+let memoryRequestSigningKey: string | null = null
 
 /** Set or clear the in-memory access token. */
-export function setAccessToken(token: string | null): void {
+export function setAccessToken(token: string | null, requestSigningKey?: string): void {
   memoryToken = token
+  memoryRequestSigningKey = token && requestSigningKey ? requestSigningKey : null
 }
 
 /** Read the current access token (mostly for tests). */
 export function getAccessToken(): string | null {
   return memoryToken
+}
+
+/** Build the authorization and one-time proof headers for every transport. */
+export async function authenticatedRequestHeaders(
+  path: string,
+  method: string = 'GET',
+  serializedBody: string = '',
+  unsignedPayload = false,
+): Promise<Record<string, string>> {
+  const deviceId = getDeviceId()
+  const headers: Record<string, string> = {
+    'x-device-id': deviceId,
+    'x-client-id': getClientInstanceId(),
+  }
+  const jwt = memoryToken
+  if (!jwt) return headers
+  headers.authorization = `Bearer ${jwt}`
+  const requestSigningKey = memoryRequestSigningKey
+  if (!requestSigningKey) return headers
+
+  const ts = Math.floor(Date.now() / 1000)
+  const nonce = _nonce()
+  const payloadDigest = unsignedPayload ? UNSIGNED_PAYLOAD : _sha256Hex(serializedBody)
+  const message = [
+    REQUEST_SIGNATURE_VERSION,
+    String(ts),
+    nonce,
+    method.toUpperCase(),
+    _canonicalTarget(path),
+    deviceId,
+    payloadDigest,
+    _sha256Hex(jwt),
+  ].join('\x00')
+  headers['x-req-ts'] = String(ts)
+  headers['x-req-nonce'] = nonce
+  headers['x-req-content-sha256'] = payloadDigest
+  headers['x-req-token'] = await _sign(requestSigningKey, ts, message)
+  return headers
 }
 
 /** Reset one-shot auth failure guards after a deliberate new session starts. */
@@ -173,27 +218,20 @@ function isAuthPath(path: string): boolean {
 async function apiRequest<T>(path: string, opts: ApiOptions, retried: boolean): Promise<T> {
   assertNetworkOnline()
   const isForm = opts.body instanceof FormData
+  const method = opts.method ?? 'GET'
+  const serializedBody = isForm || !opts.body ? '' : JSON.stringify(opts.body)
+  const authHeaders = await authenticatedRequestHeaders(path, method, serializedBody, isForm)
   const headers: Record<string, string> = {
     accept: 'application/json',
     ...(isForm ? {} : { 'content-type': 'application/json' }),
-    ...(memoryToken ? { authorization: `Bearer ${memoryToken}` } : {}),
-    // §23 realtime sync: lets the server stamp broadcast events with their
-    // origin tab, so this tab can ignore its own echo.
-    'x-device-id': getDeviceId(),
     ...opts.headers,
-  }
-  if (memoryToken) {
-    const ts = Math.floor(Date.now() / 1000)
-    const nonce = _nonce()
-    headers['x-req-ts'] = String(ts)
-    headers['x-req-nonce'] = nonce
-    headers['x-req-token'] = await _sign(memoryToken, ts, nonce, path)
+    ...authHeaders,
   }
   const res = await fetch(API_BASE + path, {
-    method: opts.method ?? 'GET',
+    method,
     credentials: 'include',
     headers,
-    body: isForm ? (opts.body as FormData) : opts.body ? JSON.stringify(opts.body) : undefined,
+    body: isForm ? (opts.body as FormData) : serializedBody || undefined,
     signal: opts.signal,
     keepalive: opts.keepalive,
   })
@@ -257,18 +295,12 @@ async function xhrUpload(
   body: FormData,
   opts: UploadOptions,
 ): Promise<{ status: number; ok: boolean; parsed: unknown }> {
+  const method = opts.method ?? 'POST'
+  const authHeaders = await authenticatedRequestHeaders(path, method, '', true)
   const headers: Record<string, string> = {
     accept: 'application/json',
-    ...(memoryToken ? { authorization: `Bearer ${memoryToken}` } : {}),
-    'x-device-id': getDeviceId(),
     ...opts.headers,
-  }
-  if (memoryToken) {
-    const ts = Math.floor(Date.now() / 1000)
-    const nonce = _nonce()
-    headers['x-req-ts'] = String(ts)
-    headers['x-req-nonce'] = nonce
-    headers['x-req-token'] = await _sign(memoryToken, ts, nonce, path)
+    ...authHeaders,
   }
 
   // §23: an auto-reload (invisible upgrade) must never kill an upload mid-
@@ -296,7 +328,7 @@ async function xhrUpload(
     }
     if (opts.signal) opts.signal.addEventListener('abort', abort, { once: true })
 
-    xhr.open(opts.method ?? 'POST', API_BASE + path)
+    xhr.open(method, API_BASE + path)
     xhr.withCredentials = true
     for (const [key, value] of Object.entries(headers)) {
       xhr.setRequestHeader(key, value)
@@ -409,22 +441,19 @@ export async function* streamSSE(
   signal?: AbortSignal,
 ): AsyncGenerator<{ event: string; data: unknown; id?: string }> {
   assertNetworkOnline()
-  const sseTs = Math.floor(Date.now() / 1000)
-  const sseNonce = _nonce()
-  const sseSig = memoryToken ? await _sign(memoryToken, sseTs, sseNonce, path) : ''
-  const open = () => {
+  const serializedBody = JSON.stringify(body)
+  const open = async () => {
     assertNetworkOnline()
+    const authHeaders = await authenticatedRequestHeaders(path, 'POST', serializedBody)
     return fetch(API_BASE + path, {
       method: 'POST',
       credentials: 'include',
       headers: {
         accept: 'text/event-stream',
         'content-type': 'application/json',
-        ...(memoryToken ? { authorization: `Bearer ${memoryToken}` } : {}),
-        ...(memoryToken ? { 'x-req-ts': String(sseTs), 'x-req-nonce': sseNonce, 'x-req-token': sseSig } : {}),
-        'x-device-id': getDeviceId(),
+        ...authHeaders,
       },
-      body: JSON.stringify(body),
+      body: serializedBody,
       signal,
     })
   }
@@ -484,16 +513,16 @@ export async function* streamSSEGet(
   let currentLastId = lastEventId ?? ''
   let retryCount = 0
   let reconnectToastShown = false
-  const open = () => {
+  const open = async () => {
     assertNetworkOnline()
+    const authHeaders = await authenticatedRequestHeaders(path, 'GET')
     return fetch(API_BASE + path, {
       method: 'GET',
       credentials: 'include',
       headers: {
         accept: 'text/event-stream',
-        ...(memoryToken ? { authorization: `Bearer ${memoryToken}` } : {}),
         ...(currentLastId ? { 'Last-Event-ID': currentLastId } : {}),
-        'x-device-id': getDeviceId(),
+        ...authHeaders,
       },
       signal,
     })

@@ -74,6 +74,7 @@ describe('auth startup request coalescing', () => {
       authenticated: true,
       user,
       access_token: 'access-token',
+      request_signing_key: 'request-signing-key',
       expires_at: 2,
       auth_policy: policy,
     })
@@ -84,6 +85,7 @@ describe('auth startup request coalescing', () => {
     expect(apiMocks.authPolicy).not.toHaveBeenCalled()
     expect(apiMocks.signupOpen).not.toHaveBeenCalled()
     expect(apiMocks.needsSetup).not.toHaveBeenCalled()
+    expect(clientMocks.setAccessToken).toHaveBeenCalledWith('access-token', 'request-signing-key')
     expect(useAuth.getState()).toMatchObject({
       user,
       status: 'authenticated',

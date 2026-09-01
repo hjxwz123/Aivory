@@ -279,6 +279,7 @@ SSE 心跳、流恢复窗口、生成时长上限、分页与搜索上限、消�
 | `AIVORY_API_STREAM_REPLAY_BATCH_SIZE` | `int` | `200` | `api/messages_handlers.go:36` | 重连 SSE 流回放/追赶时每批读取的缓冲流事件数量。 |
 | `AIVORY_API_ONLINE_PRESENCE_TOUCH_THROTTLE` | `duration` | `time.Minute` | `api/middleware.go:23` | 用户在线状态 seen 触达之间的节流间隔，即 seen 缓存标记的 TTL。 |
 | `AIVORY_API_CONCURRENT_GEN_SLOT_SAFETY_TTL` | `duration` | `30*time.Minute` | `api/middleware.go:24` | 每用户并发生成槽计数器的安全 TTL，使失效的占用槽自动过期。 |
+| `AIVORY_REQUEST_SIGNATURES_REQUIRED` | `bool` | `true` | `config/config.go` | 对登录态 JSON 与写操作 API 强制校验一次性 v2 请求证明。仅在前后端滚动升级不兼容时临时关闭；关闭后登录态请求只剩 Bearer/Cookie 校验。 |
 | `AIVORY_API_REQUEST_SIGNATURE_REPLAY_WINDOW_FUTURE` | `int64` | `300` | `api/middleware.go:25` | 请求签名防重放：X-Req-Ts 时间戳落后服务器时间的最大秒数，超出则视为过期拒绝。 |
 | `AIVORY_API_REQUEST_SIGNATURE_REPLAY_WINDOW_PAST` | `int64` | `60` | `api/middleware.go:26` | 请求签名防重放：X-Req-Ts 时间戳领先服务器时间的最大秒数（时钟偏移容忍），超出则拒绝。 |
 | `AIVORY_API_CREDIT_MULTIPLIER` | `float` | `5.0` | `api/models_handlers.go:21` | 将模型输入+输出合计价格换算为选择器中相对积分倍率的除数。 |

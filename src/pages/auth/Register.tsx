@@ -148,7 +148,7 @@ export default function Register() {
     try {
       const resp = await authApi.verifyEmail(verifyEmail, value.trim())
       resetAuthFailureState()
-      setAccessToken(resp.access_token)
+      setAccessToken(resp.access_token, resp.request_signing_key)
       useAuth.getState().setUser(resp.user)
       useAuth.getState().clearPendingVerification()
       toast.success(t('register.welcome'), t('register.welcomeBody'))

@@ -23,6 +23,7 @@ describe('API request activity integration', () => {
     const request = api<{ ok: boolean }>('/admin/deferred')
     expect(getRequestActivitySnapshot()).toEqual({ pending: 1, active: true, slow: false })
 
+    await vi.waitFor(() => expect(resolveFetch).toBeTypeOf('function'))
     resolveFetch?.(new Response(JSON.stringify({ ok: true }), { status: 200 }))
     await expect(request).resolves.toEqual({ ok: true })
     expect(getRequestActivitySnapshot()).toEqual({ pending: 0, active: false, slow: false })
@@ -42,6 +43,7 @@ describe('API request activity integration', () => {
     const request = api('/admin/poll', { activity: 'background' })
     expect(getRequestActivitySnapshot()).toEqual({ pending: 0, active: false, slow: false })
 
+    await vi.waitFor(() => expect(resolveFetch).toBeTypeOf('function'))
     resolveFetch?.(new Response('{}', { status: 200 }))
     await request
   })

@@ -9,6 +9,7 @@ package auth
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"strings"
 	"time"
@@ -48,6 +49,7 @@ type RefreshClaims struct {
 type Service struct {
 	accessKey  []byte
 	refreshKey []byte
+	requestKey []byte
 	accessTTL  time.Duration
 	refreshTTL time.Duration
 	cache      cache.Cache
@@ -59,10 +61,37 @@ func New(secret string, accessTTL, refreshTTL time.Duration, c cache.Cache) *Ser
 	return &Service{
 		accessKey:  deriveSigningKey(master, accessTokenUse),
 		refreshKey: deriveSigningKey(master, refreshTokenUse),
+		requestKey: deriveSigningKey(master, "request-proof"),
 		accessTTL:  accessTTL,
 		refreshTTL: refreshTTL,
 		cache:      c,
 	}
+}
+
+// RequestSigningKey returns a session-scoped browser proof key. It is
+// cryptographically separate from JWT signing keys and never appears inside an
+// access token, so copying Authorization alone is insufficient to mint request
+// proofs. The key remains stable across refresh-token rotation within the same
+// session family and changes on a fresh login.
+func (s *Service) RequestSigningKey(sessionID string) (string, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return "", errors.New("missing request-proof session")
+	}
+	mac := hmac.New(sha256.New, s.requestKey)
+	_, _ = mac.Write([]byte("aivory/request-proof/session/" + sessionID))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
+}
+
+// RequestSigningKeyForAccess validates access and derives its session proof
+// key. Response handlers use this to keep token issuance and proof-key issuance
+// on the same parsed session claim.
+func (s *Service) RequestSigningKeyForAccess(access string) (string, error) {
+	claims, err := s.ParseAccess(access)
+	if err != nil {
+		return "", err
+	}
+	return s.RequestSigningKey(claims.SessionID)
 }
 
 // deriveSigningKey cryptographically separates access and refresh signatures

@@ -210,20 +210,28 @@ type registerReq struct {
 }
 
 type authResp struct {
-	User        *store.User `json:"user"`
-	AccessToken string      `json:"access_token"`
-	ExpiresAt   int64       `json:"expires_at"`
+	User              *store.User `json:"user"`
+	AccessToken       string      `json:"access_token"`
+	RequestSigningKey string      `json:"request_signing_key"`
+	ExpiresAt         int64       `json:"expires_at"`
 }
 
 // authSessionResp is used only for the browser's startup session probe. A
 // missing or expired refresh cookie is an expected state on the login screen,
 // so that probe reports it as a normal 200 response instead of an HTTP error.
 type authSessionResp struct {
-	Authenticated bool              `json:"authenticated"`
-	User          *store.User       `json:"user,omitempty"`
-	AccessToken   string            `json:"access_token,omitempty"`
-	ExpiresAt     int64             `json:"expires_at,omitempty"`
-	AuthPolicy    *publicAuthPolicy `json:"auth_policy,omitempty"`
+	Authenticated     bool              `json:"authenticated"`
+	User              *store.User       `json:"user,omitempty"`
+	AccessToken       string            `json:"access_token,omitempty"`
+	RequestSigningKey string            `json:"request_signing_key,omitempty"`
+	ExpiresAt         int64             `json:"expires_at,omitempty"`
+	AuthPolicy        *publicAuthPolicy `json:"auth_policy,omitempty"`
+}
+
+func writeSessionJSON(w http.ResponseWriter, status int, body any) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	writeJSON(w, status, body)
 }
 
 // registerHandler creates a new account (default role=user) and sets the
@@ -743,7 +751,7 @@ func writeRefreshedSession(d Deps, w http.ResponseWriter, r *http.Request, sessi
 	invalidateAuthUser(d, session.user.ID)
 	setSessionCookies(w, r, session.access, session.accessExp, session.refresh, session.refreshExp)
 	attachGroupInfo(d, r, session.user)
-	writeJSON(w, http.StatusOK, response)
+	writeSessionJSON(w, http.StatusOK, response)
 }
 
 // refreshHandler swaps a refresh token for a new access token. This endpoint
@@ -763,7 +771,14 @@ func refreshHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeRefreshedSession(d, w, r, session, authResp{User: session.user, AccessToken: session.access, ExpiresAt: session.accessExp.Unix()})
+	requestKey, err := d.Auth.RequestSigningKeyForAccess(session.access)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeRefreshedSession(d, w, r, session, authResp{
+		User: session.user, AccessToken: session.access, RequestSigningKey: requestKey, ExpiresAt: session.accessExp.Unix(),
+	})
 }
 
 // sessionHandler is the browser-only startup/renewal probe. It keeps a normal
@@ -787,18 +802,24 @@ func sessionHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		if errors.As(err, &authFailure) {
 			clearCookie(w, "auth_token")
 			clearCookie(w, "refresh_token")
-			writeJSON(w, http.StatusOK, authSessionResp{Authenticated: false, AuthPolicy: publicPolicy})
+			writeSessionJSON(w, http.StatusOK, authSessionResp{Authenticated: false, AuthPolicy: publicPolicy})
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	requestKey, err := d.Auth.RequestSigningKeyForAccess(session.access)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 	writeRefreshedSession(d, w, r, session, authSessionResp{
-		Authenticated: true,
-		User:          session.user,
-		AccessToken:   session.access,
-		ExpiresAt:     session.accessExp.Unix(),
-		AuthPolicy:    publicPolicy,
+		Authenticated:     true,
+		User:              session.user,
+		AccessToken:       session.access,
+		RequestSigningKey: requestKey,
+		ExpiresAt:         session.accessExp.Unix(),
+		AuthPolicy:        publicPolicy,
 	})
 }
 
@@ -867,7 +888,12 @@ func finaliseSessionResponseWithOAuthGuard(
 	// Carry the tier label + feature flags so the client renders the sidebar
 	// group name immediately after login, without waiting for the next /api/me.
 	attachGroupInfo(d, r, user)
-	writeJSON(w, 200, authResp{User: user, AccessToken: access, ExpiresAt: exp.Unix()})
+	requestKey, err := d.Auth.RequestSigningKeyForAccess(access)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeSessionJSON(w, 200, authResp{User: user, AccessToken: access, RequestSigningKey: requestKey, ExpiresAt: exp.Unix()})
 }
 
 // recordSuccessfulLogin is deliberately best-effort after the session has

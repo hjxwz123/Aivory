@@ -624,6 +624,7 @@ export interface ApiRedeemResult {
 export interface ApiAuthResponse {
   user: ApiUser
   access_token: string
+  request_signing_key: string
   expires_at: number
 }
 
@@ -632,6 +633,7 @@ export interface ApiAuthSessionResponse {
   authenticated: boolean
   user?: ApiUser
   access_token?: string
+  request_signing_key?: string
   expires_at?: number
   /** Coalesced startup policy. Optional for rolling upgrades from older servers. */
   auth_policy?: ApiAuthPolicy

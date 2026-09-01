@@ -196,10 +196,10 @@ export const useAuth = create<AuthState>((set, get) => ({
       authPolicyRequest = resp.auth_policy
         ? Promise.resolve(resp.auth_policy)
         : authApi.authPolicy().catch(() => DEFAULT_AUTH_POLICY)
-      if (resp.authenticated && resp.user && resp.access_token) {
+      if (resp.authenticated && resp.user && resp.access_token && resp.request_signing_key) {
         authenticatedSession = true
         resetAuthFailureState()
-        setAccessToken(resp.access_token)
+        setAccessToken(resp.access_token, resp.request_signing_key)
         // Authenticated ⇒ the deployment has users; resolve the setup probe
         // immediately so the gate can route without waiting on the sibling
         // /public/needs-setup call.
@@ -282,7 +282,7 @@ export const useAuth = create<AuthState>((set, get) => ({
       const resp = await authApi.setup(name, email, password)
       if (!isLatestAuthOp(seq)) return false
       resetAuthFailureState()
-      setAccessToken(resp.access_token)
+      setAccessToken(resp.access_token, resp.request_signing_key)
       set({ user: resp.user, status: 'authenticated', needsSetup: false, setupProbed: true, error: null })
       return true
     } catch (e) {
@@ -305,7 +305,7 @@ export const useAuth = create<AuthState>((set, get) => ({
         return '2fa'
       }
       resetAuthFailureState()
-      setAccessToken(resp.access_token)
+      setAccessToken(resp.access_token, resp.request_signing_key)
       set({ user: resp.user, status: 'authenticated', needsSetup: false, setupProbed: true, pendingTwoFactor: null, banned: false })
       return true
     } catch (e) {
@@ -337,7 +337,7 @@ export const useAuth = create<AuthState>((set, get) => ({
       const resp = await authApi.loginTwoFactor(pending.ticket, code)
       if (!isLatestAuthOp(seq)) return false
       resetAuthFailureState()
-      setAccessToken(resp.access_token)
+      setAccessToken(resp.access_token, resp.request_signing_key)
       set({ user: resp.user, status: 'authenticated', needsSetup: false, setupProbed: true, pendingTwoFactor: null })
       return true
     } catch (e) {
@@ -367,9 +367,9 @@ export const useAuth = create<AuthState>((set, get) => ({
         })
         return 'verify'
       }
-      const auth = resp as { user: ApiUser; access_token: string }
+      const auth = resp as { user: ApiUser; access_token: string; request_signing_key: string }
       resetAuthFailureState()
-      setAccessToken(auth.access_token)
+      setAccessToken(auth.access_token, auth.request_signing_key)
       set({ user: auth.user, status: 'authenticated', needsSetup: false, setupProbed: true })
       return true
     } catch (e) {
@@ -431,7 +431,7 @@ setRefreshHandler(async () => {
   const seq = currentAuthOp()
   try {
     const resp = await refreshBrowserSession()
-    if (!resp.authenticated || !resp.user || !resp.access_token) {
+    if (!resp.authenticated || !resp.user || !resp.access_token || !resp.request_signing_key) {
       if (isLatestAuthOp(seq)) {
         setAccessToken(null)
         useAuth.setState({ user: null, status: 'unauthenticated' })
@@ -440,7 +440,7 @@ setRefreshHandler(async () => {
     }
     if (isAuthRefreshSuppressed()) return false
     if (!isLatestAuthOp(seq)) return true
-    setAccessToken(resp.access_token)
+    setAccessToken(resp.access_token, resp.request_signing_key)
     const current = useAuth.getState()
     if (current.status !== 'authenticated' || current.user?.id !== resp.user.id) {
       useAuth.setState({ user: resp.user, status: 'authenticated', needsSetup: false, setupProbed: true })

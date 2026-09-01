@@ -67,3 +67,24 @@ func TestCSRFAllowsExplicitCrossOriginFrontend(t *testing.T) {
 		t.Fatal("configured frontend origin was rejected")
 	}
 }
+
+func TestWebSocketOriginRequiresMatchingSchemeHostAndPort(t *testing.T) {
+	request := func(target, origin string) *http.Request {
+		r := httptest.NewRequest(http.MethodGet, target, nil)
+		r.Header.Set("Origin", origin)
+		return r
+	}
+	if !sameOriginWS(request("https://app.example.test/api/audio/stream", "https://app.example.test")) {
+		t.Fatal("exact WebSocket origin was rejected")
+	}
+	for _, origin := range []string{
+		"http://app.example.test",
+		"https://app.example.test:8443",
+		"https://evil.example.test",
+		"https://app.example.test/path",
+	} {
+		if sameOriginWS(request("https://app.example.test/api/audio/stream", origin)) {
+			t.Errorf("mismatched WebSocket origin %q was accepted", origin)
+		}
+	}
+}

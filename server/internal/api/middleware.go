@@ -1,12 +1,16 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -23,9 +27,23 @@ import (
 var (
 	onlinePresenceTouchThrottle        = envcfg.Dur("AIVORY_API_ONLINE_PRESENCE_TOUCH_THROTTLE", time.Minute)
 	concurrentGenSlotSafetyTTL         = envcfg.Dur("AIVORY_API_CONCURRENT_GEN_SLOT_SAFETY_TTL", 30*time.Minute)
-	requestSignatureReplayWindowFuture = envcfg.Int64("AIVORY_API_REQUEST_SIGNATURE_REPLAY_WINDOW_FUTURE", 300)
-	requestSignatureReplayWindowPast   = envcfg.Int64("AIVORY_API_REQUEST_SIGNATURE_REPLAY_WINDOW_PAST", 60)
+	requestSignatureReplayWindowFuture = positiveSecuritySeconds("AIVORY_API_REQUEST_SIGNATURE_REPLAY_WINDOW_FUTURE", 300)
+	requestSignatureReplayWindowPast   = positiveSecuritySeconds("AIVORY_API_REQUEST_SIGNATURE_REPLAY_WINDOW_PAST", 60)
 )
+
+const (
+	requestSignatureVersion         = "v2"
+	requestSignatureUnsignedPayload = "UNSIGNED-PAYLOAD"
+	requestSignatureNonceTTLExtra   = time.Minute
+)
+
+func positiveSecuritySeconds(key string, fallback int64) int64 {
+	value := envcfg.Int64(key, fallback)
+	if value <= 0 {
+		return fallback
+	}
+	return value
+}
 
 type handler func(d Deps, w http.ResponseWriter, r *http.Request)
 
@@ -69,6 +87,17 @@ func requireAuth(d Deps, h handler) http.HandlerFunc {
 		if err != nil {
 			writeError(w, http.StatusUnauthorized, errAuthRequired)
 			return
+		}
+		if d.Config.RequestSignaturesRequired && !requestSignatureExempt(r) {
+			requestKey, keyErr := d.Auth.RequestSigningKey(claims.SessionID)
+			if keyErr != nil {
+				writeError(w, http.StatusForbidden, errors.New("invalid request signature"))
+				return
+			}
+			if err := verifyRequestSignature(d, token, requestKey, claims.UID, claims.SessionID, r); err != nil {
+				writeError(w, http.StatusForbidden, err)
+				return
+			}
 		}
 		state, err := store.GetUserAuthStateForSession(r.Context(), d.DB, claims.UID, claims.SessionID)
 		if err != nil {
@@ -415,56 +444,158 @@ func checkDailyTokenQuota(d Deps, userID string) bool {
 	return used < limit
 }
 
-// requireReqSig wraps a handler to validate the per-request HMAC signature.
-//
-// Scheme (mirrors client.ts):
-//  1. Derive an intermediate key: HMAC-SHA256(jwt, hourly_epoch)
-//  2. Sign the message ts\x00nonce\x00path with the derived key
-//  3. Compare base64(sig) with X-Req-Token
-//
-// The hourly epoch makes the derived key rotate every hour; binding the path
-// into the signed message means a token captured from one endpoint is invalid
-// on any other. X-Req-Ts must be within ±5 minutes to prevent replay.
-func requireReqSig(h handler) handler {
-	return func(d Deps, w http.ResponseWriter, r *http.Request) {
-		raw := readAccessToken(r)
-		ts := r.Header.Get("X-Req-Ts")
-		nonce := r.Header.Get("X-Req-Nonce")
-		token := r.Header.Get("X-Req-Token")
-		if raw == "" || ts == "" || nonce == "" || token == "" {
-			writeError(w, http.StatusForbidden, errors.New("missing request signature"))
-			return
-		}
-		tsInt, err := strconv.ParseInt(ts, 10, 64)
-		if err != nil {
-			writeError(w, http.StatusForbidden, errors.New("invalid request signature"))
-			return
-		}
-		diff := time.Now().Unix() - tsInt
-		if diff > requestSignatureReplayWindowFuture || diff < -requestSignatureReplayWindowPast {
-			writeError(w, http.StatusForbidden, errors.New("request signature expired"))
-			return
-		}
-		// Step 1: derive hourly key from jwt + epoch.
-		epoch := tsInt / 3600
-		base := hmac.New(sha256.New, []byte(raw))
-		base.Write([]byte(strconv.FormatInt(epoch, 10)))
-		derivedKey := base.Sum(nil)
-		// Step 2: sign ts\x00nonce\x00path with derived key. The client signs the
-		// LOGICAL path — its fetch prepends API_BASE ("/api") only after signing,
-		// and never includes the query string — so canonicalise r.URL.Path the
-		// same way: trim the mount prefix (a no-op when a reverse proxy already
-		// stripped it). Hashing the raw r.URL.Path was why this route answered
-		// 403 "invalid request signature" ever since it shipped.
-		path := strings.TrimPrefix(r.URL.Path, "/api")
-		msg := ts + "\x00" + nonce + "\x00" + path
-		mac := hmac.New(sha256.New, derivedKey)
-		mac.Write([]byte(msg))
-		expected := base64.StdEncoding.EncodeToString(mac.Sum(nil))
-		if !hmac.Equal([]byte(expected), []byte(token)) {
-			writeError(w, http.StatusForbidden, errors.New("invalid request signature"))
-			return
-		}
-		h(d, w, r)
+// verifyRequestSignature validates the v2 browser request proof. The proof is
+// bound to the access token, timestamp, nonce, HTTP method, complete logical
+// request target (including query), device id, and payload digest. A verified
+// nonce is then consumed atomically in the shared cache, making an otherwise
+// byte-identical request unusable a second time across replicas.
+func verifyRequestSignature(d Deps, rawToken, requestKey, userID, sessionID string, r *http.Request) error {
+	ts := strings.TrimSpace(r.Header.Get("X-Req-Ts"))
+	nonce := strings.TrimSpace(r.Header.Get("X-Req-Nonce"))
+	provided := strings.TrimSpace(r.Header.Get("X-Req-Token"))
+	deviceID := strings.TrimSpace(r.Header.Get("X-Device-Id"))
+	payloadDigest := strings.TrimSpace(r.Header.Get("X-Req-Content-SHA256"))
+	if rawToken == "" || requestKey == "" || ts == "" || nonce == "" || provided == "" || deviceID == "" || payloadDigest == "" {
+		return errors.New("missing request signature")
 	}
+	if !validRequestProofIdentifier(nonce, 20, 64) || !validRequestProofIdentifier(deviceID, 8, 128) {
+		return errors.New("invalid request signature")
+	}
+	providedMAC, err := base64.StdEncoding.Strict().DecodeString(provided)
+	if err != nil || len(providedMAC) != sha256.Size {
+		return errors.New("invalid request signature")
+	}
+	tsInt, err := strconv.ParseInt(ts, 10, 64)
+	if err != nil || tsInt <= 0 {
+		return errors.New("invalid request signature")
+	}
+	diff := time.Now().Unix() - tsInt
+	if diff > requestSignatureReplayWindowFuture || diff < -requestSignatureReplayWindowPast {
+		return errors.New("request signature expired")
+	}
+
+	payloadDigest, err = verifiedRequestPayloadDigest(r, payloadDigest)
+	if err != nil {
+		return err
+	}
+	target := canonicalRequestTarget(r)
+	message := strings.Join([]string{
+		requestSignatureVersion,
+		ts,
+		nonce,
+		strings.ToUpper(r.Method),
+		target,
+		deviceID,
+		payloadDigest,
+		requestAccessTokenDigest(rawToken),
+	}, "\x00")
+
+	base := hmac.New(sha256.New, []byte(requestKey))
+	_, _ = base.Write([]byte(strconv.FormatInt(tsInt/3600, 10)))
+	mac := hmac.New(sha256.New, base.Sum(nil))
+	_, _ = mac.Write([]byte(message))
+	if !hmac.Equal(mac.Sum(nil), providedMAC) {
+		return errors.New("invalid request signature")
+	}
+	if d.Cache == nil {
+		return errors.New("request signature verification unavailable")
+	}
+	nonceTTL := time.Duration(requestSignatureReplayWindowFuture+requestSignatureReplayWindowPast)*time.Second + requestSignatureNonceTTLExtra
+	nonceKey := fmt.Sprintf("reqnonce:%s:%s:%s", userID, sessionID, nonce)
+	if !d.Cache.SetNX(nonceKey, "1", nonceTTL) {
+		return errors.New("request signature replayed")
+	}
+	return nil
+}
+
+func requestAccessTokenDigest(rawToken string) string {
+	digest := sha256.Sum256([]byte(rawToken))
+	return hex.EncodeToString(digest[:])
+}
+
+func canonicalRequestTarget(r *http.Request) string {
+	p := r.URL.EscapedPath()
+	if p == "/api" {
+		p = "/"
+	} else if strings.HasPrefix(p, "/api/") {
+		p = strings.TrimPrefix(p, "/api")
+	}
+	if p == "" {
+		p = "/"
+	}
+	if r.URL.RawQuery != "" {
+		p += "?" + r.URL.RawQuery
+	}
+	return p
+}
+
+func verifiedRequestPayloadDigest(r *http.Request, claimed string) (string, error) {
+	if claimed == requestSignatureUnsignedPayload {
+		contentType := strings.ToLower(strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0]))
+		if contentType != "multipart/form-data" {
+			return "", errors.New("invalid request signature")
+		}
+		return claimed, nil
+	}
+	decoded, err := hex.DecodeString(claimed)
+	if err != nil || len(decoded) != sha256.Size || claimed != strings.ToLower(claimed) {
+		return "", errors.New("invalid request signature")
+	}
+	if r.Body == nil {
+		r.Body = http.NoBody
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, jsonRequestBodySizeCap+1))
+	if err != nil || int64(len(body)) > jsonRequestBodySizeCap {
+		return "", errors.New("invalid request signature payload")
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	actual := sha256.Sum256(body)
+	if !hmac.Equal(decoded, actual[:]) {
+		return "", errors.New("invalid request signature")
+	}
+	return claimed, nil
+}
+
+func validRequestProofIdentifier(value string, minLen, maxLen int) bool {
+	if len(value) < minLen || len(value) > maxLen {
+		return false
+	}
+	for _, c := range value {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+			(c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// A browser cannot attach custom headers to native subresource/download URLs
+// or to a WebSocket handshake. These GET-only endpoints keep their existing
+// cookie authentication and resource-level authorization. Every JSON API and
+// every state-changing endpoint remains proof-protected.
+func requestSignatureExempt(r *http.Request) bool {
+	if r.Method != http.MethodGet {
+		return false
+	}
+	p := strings.TrimPrefix(r.URL.Path, "/api")
+	if p == "/audio/stream" && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		return true
+	}
+	segments := strings.Split(strings.Trim(p, "/"), "/")
+	if len(segments) == 2 && (segments[0] == "files" || segments[0] == "artifacts") && segments[1] != "" {
+		return true
+	}
+	if len(segments) == 3 && segments[0] == "documents" && segments[1] != "" && segments[2] == "content" {
+		return true
+	}
+	if len(segments) == 4 && segments[0] == "conversations" && segments[1] != "" &&
+		segments[2] == "sandbox" && segments[3] == "file" {
+		return true
+	}
+	if len(segments) == 5 && segments[0] == "admin" && segments[1] == "conversations" &&
+		segments[2] != "" && segments[3] == "sandbox" && segments[4] == "file" {
+		return true
+	}
+	return p == "/me/files/content"
 }
