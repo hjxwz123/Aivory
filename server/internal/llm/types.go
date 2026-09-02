@@ -192,8 +192,8 @@ type ModelInfo struct {
 	BaseURL   string
 	APIKey    string
 	APIFormat string
-	// Fallback, when non-nil, is the backup endpoint retried when a complete
-	// primary round fails before user-visible output is committed (request
+	// Fallback, when non-nil, is the backup endpoint retried when one complete
+	// primary provider request fails before that request emits user-visible output (request
 	// construction, transport, non-200 status, SSE
 	// error, malformed protocol, empty body, or interrupted body). Same provider
 	// family + format as the primary — only URL and key differ (§fallback

@@ -89,6 +89,29 @@ describe('ReasoningTrace tool layout', () => {
     expect(html).toContain('grid-cols-[auto_auto_minmax(0,1fr)_auto]')
   })
 
+  it('uses a generic tool label when persisted data has no tool name', () => {
+    const reasoning: ReasoningItem[] = [
+      {
+        kind: 'tool',
+        id: 'step-missing-name',
+        tool: {
+          id: 'tool-missing-name',
+          name: undefined as unknown as string,
+          label: '',
+          status: 'error',
+          startedAt: Date.now(),
+        },
+      },
+    ]
+
+    const html = renderToStaticMarkup(
+      createElement(ReasoningTrace, { reasoning, streaming: false, settled: true }),
+    )
+
+    expect(html).toContain('>Tool<')
+    expect(html).not.toContain('tools.undefined')
+  })
+
   it('shows the persisted thought duration with a neutral lightbulb icon', () => {
     const reasoning: ReasoningItem[] = [{ kind: 'thinking', id: 'thought-1', text: 'I considered the options.' }]
 

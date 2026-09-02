@@ -480,6 +480,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 // call (no native tools, stop on </tool_call>) for §4.13 prompt-mode.
 func (p *OpenAIProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner {
 	return func(ctx context.Context, history []UnifiedMessage, system string) (PromptToolRound, error) {
+		ctx = contextWithoutProviderVisibleOutput(ctx)
 		roundModel := req.Model
 		if isToolBudgetFinalization(ctx) {
 			roundModel.Fallback = nil
@@ -566,6 +567,7 @@ func (p *OpenAIProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner 
 // only RunPromptToolLoop can dispatch them through the application registry.
 func (p *OpenAIProvider) promptResponsesRunOnce(req UnifiedChatRequest) PromptToolRunner {
 	return func(ctx context.Context, history []UnifiedMessage, system string) (PromptToolRound, error) {
+		ctx = contextWithoutProviderVisibleOutput(ctx)
 		round := req
 		round.SystemPrompt = system
 		round.History = history

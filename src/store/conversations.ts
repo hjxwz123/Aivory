@@ -2162,10 +2162,11 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
             // append into the ordered trace at the spot it occurred (§7.1-4).
             const tid = ev.id ?? uid('tc')
             if (toolCallsById.has(tid)) break
+            const toolName = safeToolName(ev.name)
             const tc: ToolCall = {
               id: tid,
-              name: ev.name,
-              label: prettyToolLabel(ev.name),
+              name: toolName,
+              label: prettyToolLabel(toolName),
               status: 'running',
               startedAt: Date.now(),
               input: (ev.input as Record<string, unknown>) ?? undefined,
@@ -2528,10 +2529,11 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           case 'tool_start': {
             const tid = ev.id ?? uid('tc')
             if (toolCallsById.has(tid)) break
+            const toolName = safeToolName(ev.name)
             const tc: ToolCall = {
               id: tid,
-              name: ev.name,
-              label: prettyToolLabel(ev.name),
+              name: toolName,
+              label: prettyToolLabel(toolName),
               status: 'running',
               startedAt: Date.now(),
               input: (ev.input as Record<string, unknown>) ?? undefined,
@@ -3078,10 +3080,11 @@ function applyReplayEvent(
     case 'tool_start': {
       const tid = ev.id ?? uid('tc')
       if (state.toolCallsById.has(tid)) break
+      const toolName = safeToolName(ev.name)
       const tc: ToolCall = {
         id: tid,
-        name: ev.name,
-        label: prettyToolLabel(ev.name),
+        name: toolName,
+        label: prettyToolLabel(toolName),
         status: 'running',
         startedAt: Date.now(),
         input: (ev.input as Record<string, unknown>) ?? undefined,
@@ -3663,6 +3666,10 @@ function safeDomain(u: string): string {
   }
 }
 
+function safeToolName(name: unknown): string {
+  return typeof name === 'string' && name.trim() ? name.trim() : 'tool'
+}
+
 function prettyToolLabel(name: string): string {
   switch (name) {
     case 'web_search':
@@ -3682,6 +3689,8 @@ function prettyToolLabel(name: string): string {
       return 'Loading a skill'
     case 'save_memory':
       return 'Saving memory'
+    case 'tool':
+      return 'Tool'
     default:
       return name
   }

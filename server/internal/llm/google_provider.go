@@ -147,7 +147,17 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 			// Preserve usage for this exact channel attempt before a transparent
 			// fallback resets the shared response variables.
 			attachProviderRequestUsage(ctx, u)
-			return readErr
+			if readErr != nil {
+				return readErr
+			}
+			if callErr := validateGeminiCalls(calls, req.Tools); callErr != nil {
+				// A malformed functionCall is an upstream protocol failure, not a
+				// local tool failure. Do not expose or persist it; keeping this attempt
+				// uncommitted lets doProviderParsedRequest try the fallback channel.
+				calls = nil
+				return callErr
+			}
+			return nil
 		}, onEvent)
 		if err != nil {
 			partialBlocks := append([]UnifiedBlock{}, allBlocks...)
@@ -157,9 +167,12 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 			if text != "" {
 				partialBlocks = append(partialBlocks, UnifiedBlock{Kind: "text", Text: text})
 			}
-			for _, call := range calls {
+			for j, call := range calls {
+				if strings.TrimSpace(call.Name) == "" || !geminiArgsAreObject(call.Args) {
+					continue
+				}
 				partialBlocks = append(partialBlocks, UnifiedBlock{
-					Kind: "tool_call", ToolName: call.Name, ToolID: call.Name, Input: call.Args,
+					Kind: "tool_call", ToolName: call.Name, ToolID: geminiToolCallID(i, j), Input: call.Args,
 				})
 			}
 			partialUsage := totalUsage
@@ -230,6 +243,10 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 			}, nil
 		}
 
+		for j := range calls {
+			calls[j].ID = geminiToolCallID(i, j)
+		}
+
 		// Append the model turn (text + any functionCall parts) to history.
 		contents = append(contents, map[string]any{"role": "model", "parts": modelParts})
 
@@ -247,7 +264,7 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 		// Execute the requested tools concurrently, then feed functionResponses.
 		specs := make([]toolCallSpec, len(calls))
 		for j, c := range calls {
-			specs[j] = toolCallSpec{ID: c.Name, Name: c.Name, Input: c.Args}
+			specs[j] = toolCallSpec{ID: c.ID, Name: c.Name, Input: c.Args}
 		}
 		results := runToolsConcurrent(ctx, tools, specs, onEvent)
 		batchFinalizationErr := toolFinalizationErrorFromResults(results)
@@ -260,15 +277,14 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 				status = "error"
 				out = publicToolErrorOutput(r.Err)
 			}
-			// §6.2 tool_result MUST include the upstream tool_use id so the UI
-			// can pair the result with the in-flight tool_call card. For Gemini
-			// the id is the function name (multiple calls to the same fn rare).
-			onEvent(SseEvent{Type: "tool_result", Name: c.Name, ID: c.Name, Summary: truncate(out, 240), Status: status})
+			// §6.2 tool_result MUST include the same unique id as tool_start so
+			// parallel or repeated calls to one Gemini function remain distinct.
+			onEvent(SseEvent{Type: "tool_result", Name: c.Name, ID: c.ID, Summary: truncate(out, 240), Status: status})
 			allBlocks = append(allBlocks, UnifiedBlock{
-				Kind: "tool_call", ToolName: c.Name, ToolID: c.Name,
+				Kind: "tool_call", ToolName: c.Name, ToolID: c.ID,
 				Input: c.Args, Summary: truncate(out, 240),
 			})
-			allBlocks = append(allBlocks, canonicalToolOutputBlock(c.Name, c.Name, out, status))
+			allBlocks = append(allBlocks, canonicalToolOutputBlock(c.Name, c.ID, out, status))
 			respParts = append(respParts, map[string]any{
 				"functionResponse": map[string]any{
 					"name":     c.Name,
@@ -441,8 +457,140 @@ func sanitizeGeminiRawTurns(turns []map[string]any) ([]map[string]any, bool) {
 
 // geminiCall is one Gemini functionCall request parsed from the stream.
 type geminiCall struct {
+	ID   string
 	Name string
 	Args json.RawMessage
+}
+
+type geminiStreamCallSlot struct {
+	callIndex      int
+	modelPartIndex int
+}
+
+func geminiToolCallID(round, index int) string {
+	return fmt.Sprintf("gemini_call_%d_%d", round+1, index+1)
+}
+
+func geminiCallFromFunctionCall(fc map[string]any) geminiCall {
+	name, _ := fc["name"].(string)
+	value, exists := fc["args"]
+	if !exists {
+		value = map[string]any{}
+	}
+	args, err := json.Marshal(value)
+	if err != nil || len(args) == 0 {
+		args = json.RawMessage("null")
+	}
+	return geminiCall{Name: strings.TrimSpace(name), Args: args}
+}
+
+func mergeGeminiCallFragment(call *geminiCall, fragment geminiCall) {
+	if fragment.Name != "" {
+		call.Name = fragment.Name
+	}
+	call.Args = mergeGeminiCallArgs(call.Args, fragment.Args)
+}
+
+func mergeGeminiCallArgs(current, fragment json.RawMessage) json.RawMessage {
+	var incoming any
+	if json.Unmarshal(fragment, &incoming) != nil {
+		return fragment
+	}
+	incomingObject, incomingIsObject := incoming.(map[string]any)
+	if !incomingIsObject {
+		return fragment
+	}
+
+	var existing map[string]any
+	if json.Unmarshal(current, &existing) != nil || existing == nil {
+		existing = map[string]any{}
+	}
+	mergeGeminiObject(existing, incomingObject)
+	merged, err := json.Marshal(existing)
+	if err != nil {
+		return fragment
+	}
+	return merged
+}
+
+func mergeGeminiObject(target, source map[string]any) {
+	for key, value := range source {
+		sourceObject, sourceIsObject := value.(map[string]any)
+		targetObject, targetIsObject := target[key].(map[string]any)
+		if sourceIsObject && targetIsObject {
+			mergeGeminiObject(targetObject, sourceObject)
+			continue
+		}
+		target[key] = value
+	}
+}
+
+func geminiFunctionCallMap(call geminiCall) map[string]any {
+	var args any
+	if json.Unmarshal(call.Args, &args) != nil {
+		args = nil
+	}
+	return map[string]any{"name": call.Name, "args": args}
+}
+
+func geminiArgsAreObject(args json.RawMessage) bool {
+	var object map[string]any
+	return json.Unmarshal(args, &object) == nil && object != nil
+}
+
+// validateGeminiCalls treats malformed model-generated function calls as a
+// provider protocol error. In particular, it prevents an empty args object from
+// reaching python_execute and surfacing the misleading local "code required"
+// error when the declared Gemini schema required code in the first place.
+func validateGeminiCalls(calls []geminiCall, tools []ToolDef) error {
+	declared := make(map[string]ToolDef, len(tools))
+	for _, tool := range tools {
+		declared[tool.Name] = tool
+	}
+	for i := range calls {
+		call := &calls[i]
+		call.Name = strings.TrimSpace(call.Name)
+		if call.Name == "" {
+			return invalidProviderStream("google", fmt.Sprintf("functionCall[%d] is missing name", i))
+		}
+		tool, ok := declared[call.Name]
+		if !ok {
+			return invalidProviderStream("google", fmt.Sprintf("functionCall[%d] requested undeclared function %q", i, call.Name))
+		}
+		var args map[string]any
+		if err := json.Unmarshal(call.Args, &args); err != nil || args == nil {
+			return invalidProviderStream("google", fmt.Sprintf("functionCall[%d] %q args must be a JSON object", i, call.Name))
+		}
+
+		var schema map[string]any
+		if len(tool.InputSchema) == 0 || json.Unmarshal(tool.InputSchema, &schema) != nil {
+			continue
+		}
+		required, _ := schema["required"].([]any)
+		for _, item := range required {
+			field, _ := item.(string)
+			field = strings.TrimSpace(field)
+			if field == "" {
+				continue
+			}
+			value, exists := args[field]
+			if !exists || value == nil {
+				return invalidProviderStream("google", fmt.Sprintf("functionCall[%d] %q args missing required field %q", i, call.Name, field))
+			}
+			properties, _ := schema["properties"].(map[string]any)
+			property, _ := properties[field].(map[string]any)
+			minimum, hasMinimum := property["minLength"].(float64)
+			if text, isString := value.(string); isString {
+				if hasMinimum && float64(len([]rune(text))) < minimum {
+					return invalidProviderStream("google", fmt.Sprintf("functionCall[%d] %q field %q is shorter than minLength", i, call.Name, field))
+				}
+				if call.Name == "python_execute" && field == "code" && strings.TrimSpace(text) == "" {
+					return invalidProviderStream("google", fmt.Sprintf("functionCall[%d] %q field %q must not be blank", i, call.Name, field))
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // geminiSkipSigSentinel is Google's documented placeholder thoughtSignature for
@@ -566,6 +714,7 @@ func readGeminiStream(body io.Reader, onEvent func(SseEvent)) (string, string, [
 	// thought part (or an earlier streaming chunk) instead of the functionCall
 	// part. We carry it forward so every replayed functionCall keeps a signature.
 	lastSig := ""
+	callSlots := map[string]geminiStreamCallSlot{}
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data:") {
@@ -604,8 +753,12 @@ func readGeminiStream(body io.Reader, onEvent func(SseEvent)) (string, string, [
 		if len(cs) > 0 {
 			sawEvent = true
 		}
-		for _, c := range cs {
+		for candidatePosition, c := range cs {
 			cm, _ := c.(map[string]any)
+			candidateIndex := candidatePosition
+			if index, ok := cm["index"].(float64); ok {
+				candidateIndex = int(index)
+			}
 			if grounding, _ := cm["groundingMetadata"].(map[string]any); grounding != nil {
 				addGroundingCitations(grounding)
 			}
@@ -614,7 +767,7 @@ func readGeminiStream(body io.Reader, onEvent func(SseEvent)) (string, string, [
 			}
 			content, _ := cm["content"].(map[string]any)
 			parts, _ := content["parts"].([]any)
-			for _, pr := range parts {
+			for partIndex, pr := range parts {
 				prm, _ := pr.(map[string]any)
 				handled := false
 				if sig := geminiPartSig(prm); sig != "" {
@@ -644,15 +797,24 @@ func readGeminiStream(body io.Reader, onEvent func(SseEvent)) (string, string, [
 				}
 				if fc, ok := prm["functionCall"].(map[string]any); ok {
 					handled = true
-					name, _ := fc["name"].(string)
-					args, _ := json.Marshal(fc["args"])
-					if len(args) == 0 || string(args) == "null" {
-						args = json.RawMessage("{}")
+					fragment := geminiCallFromFunctionCall(fc)
+					key := fmt.Sprintf("%d:%d", candidateIndex, partIndex)
+					slot, exists := callSlots[key]
+					if exists && fragment.Name != "" && calls[slot.callIndex].Name != "" && fragment.Name != calls[slot.callIndex].Name {
+						exists = false
 					}
-					calls = append(calls, geminiCall{Name: name, Args: args})
-					modelParts = append(modelParts, geminiFunctionCallPart(prm, fc, lastSig))
-					onEvent(SseEvent{Type: "tool_start", Name: name, ID: name})
-					onEvent(SseEvent{Type: "tool_input", Name: name, ID: name, PartialJson: string(args)})
+					if !exists {
+						calls = append(calls, fragment)
+						modelParts = append(modelParts, geminiFunctionCallPart(prm, geminiFunctionCallMap(fragment), lastSig))
+						callSlots[key] = geminiStreamCallSlot{
+							callIndex: len(calls) - 1, modelPartIndex: len(modelParts) - 1,
+						}
+					} else {
+						mergeGeminiCallFragment(&calls[slot.callIndex], fragment)
+						modelParts[slot.modelPartIndex] = geminiFunctionCallPart(
+							prm, geminiFunctionCallMap(calls[slot.callIndex]), lastSig,
+						)
+					}
 				}
 				// Provider-hosted Gemini tools use their own part types (for example
 				// executableCode/codeExecutionResult), never functionCall. Preserve
@@ -717,12 +879,7 @@ func parseGeminiCandidate(parsed map[string]any) (string, []geminiCall, []map[st
 			}
 			if fc, ok := prm["functionCall"].(map[string]any); ok {
 				handled = true
-				name, _ := fc["name"].(string)
-				args, _ := json.Marshal(fc["args"])
-				if len(args) == 0 || string(args) == "null" {
-					args = json.RawMessage("{}")
-				}
-				calls = append(calls, geminiCall{Name: name, Args: args})
+				calls = append(calls, geminiCallFromFunctionCall(fc))
 				modelParts = append(modelParts, geminiFunctionCallPart(prm, fc, candSig))
 			}
 			if !handled && len(prm) > 0 && geminiPartHasData(prm) {
@@ -740,6 +897,7 @@ func parseGeminiCandidate(parsed map[string]any) (string, []geminiCall, []map[st
 // (stop sequence on </tool_call>) for §4.13 prompt-mode.
 func (p *GoogleProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner {
 	return func(ctx context.Context, history []UnifiedMessage, system string) (PromptToolRound, error) {
+		ctx = contextWithoutProviderVisibleOutput(ctx)
 		finalizing := isToolBudgetFinalization(ctx)
 		roundModel := req.Model
 		if finalizing {

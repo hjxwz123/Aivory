@@ -569,6 +569,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 // (markup-stripped) portion itself.
 func (p *AnthropicProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner {
 	return func(ctx context.Context, history []UnifiedMessage, system string) (PromptToolRound, error) {
+		ctx = contextWithoutProviderVisibleOutput(ctx)
 		finalizing := isToolBudgetFinalization(ctx)
 		roundModel := req.Model
 		if finalizing {
