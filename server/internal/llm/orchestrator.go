@@ -3008,10 +3008,17 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			projectName = p.Name
 			projectInstructions = p.Instructions
 			if p.KBID != "" {
-				kbIDs = append(kbIDs, p.KBID)
 				docs, _ := store.ListDocuments(ctx, o.db, "kb", p.KBID)
-				for _, d := range docs {
-					projectFiles = append(projectFiles, ProjectFileSummary{Name: d.Filename, Kind: d.MimeType})
+				// A project gets its dedicated KB at creation time, before the
+				// first file is uploaded. Do not treat that empty placeholder as
+				// retrieval scope: otherwise an empty project still spends a file
+				// router/query-embedding round trip (and can invoke the evidence
+				// judge) even though there is no document to search.
+				if len(docs) > 0 {
+					kbIDs = append(kbIDs, p.KBID)
+					for _, d := range docs {
+						projectFiles = append(projectFiles, ProjectFileSummary{Name: d.Filename, Kind: d.MimeType})
+					}
 				}
 			}
 		}

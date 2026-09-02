@@ -296,6 +296,38 @@ func TestOrchestratorKnowledgeBaseScopeIsPerTurn(t *testing.T) {
 	}
 	assertRequestRAGMarker(t, provider.mainRequests, 4, projectMarker, true)
 	assertRequestRAGMarker(t, provider.mainRequests, 4, optionalMarker, false)
+
+	emptyProjectKB, err := store.CreateKB(ctx, db, store.KnowledgeBase{
+		ID:               "kb-empty-project-scope",
+		UserID:           "u1",
+		Name:             "Empty Project Scope",
+		EmbeddingModelID: embeddingModel.ID,
+		EmbeddingDim:     embeddingModel.Dim,
+	})
+	if err != nil {
+		t.Fatalf("create empty project KB: %v", err)
+	}
+	emptyProject, err := store.CreateProject(ctx, db, store.Project{
+		ID: "empty-project-kb-scope", UserID: "u1", Name: "Empty Project", KBID: emptyProjectKB.ID,
+	})
+	if err != nil {
+		t.Fatalf("create empty project: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE conversations SET project_id=? WHERE id=?`, emptyProject.ID, conv.ID); err != nil {
+		t.Fatalf("attach empty project: %v", err)
+	}
+	emptyEvents := []SseEvent{}
+	if _, err := orchestrator.Run(ctx, RunRequest{
+		UserID: "u1", ConversationID: conv.ID, ModelID: model.ID,
+		UserText: "Answer without project files.", ToolMode: ToolModeDisabled,
+		KnowledgeBaseSelectionConfigured: true, KnowledgeBaseIDs: []string{},
+	}, func(event SseEvent) { emptyEvents = append(emptyEvents, event) }); err != nil {
+		t.Fatalf("empty project turn: %v", err)
+	}
+	assertRAGEventPresence(t, emptyEvents, false)
+	if got := provider.mainRequests[len(provider.mainRequests)-1].RAGSnippets; len(got) != 0 {
+		t.Fatalf("empty project RAG snippets=%+v, want none", got)
+	}
 }
 
 func createScopeTestKBChunk(t *testing.T, ctx context.Context, db *sql.DB, kbID, embeddingModelID, marker string) {
