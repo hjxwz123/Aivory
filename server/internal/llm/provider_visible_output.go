@@ -5,9 +5,10 @@ import (
 	"sync/atomic"
 )
 
-// providerVisibleOutputKey stores the flag shared by every provider request in
-// one user turn. Once set, replaying on another channel would visibly duplicate
-// or mix an answer/tool trace.
+// providerVisibleOutputKey stores whether any output in one user turn has become
+// visible. Provider fallback separately tracks commitment for each upstream
+// request, so a completed tool round does not prevent retrying the later request
+// that submits its result back to the model.
 type (
 	providerVisibleOutputKey       struct{}
 	providerTextDeltaVisibilityKey struct{}

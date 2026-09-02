@@ -154,17 +154,18 @@ export function ReasoningTrace({ reasoning, thinkingMs, streaming = false, settl
 function ToolStep({ toolCall }: { toolCall: ToolCall }) {
   const { t } = useTranslation(['chat', 'common'])
   const { status, label, name, input, output } = toolCall
+  const safeName = typeof name === 'string' && name.trim() ? name.trim() : 'tool'
   const [expanded, setExpanded] = useState(false)
   const elapsed = useElapsed(toolCall)
   const timingKnown = elapsed !== null
-  const Icon = TOOL_ICON[name] ?? Sparkles
-  const displayName = label || t(`tools.${name}`, { defaultValue: name })
-  const subtitle = pickSubtitle(name, input)
+  const Icon = TOOL_ICON[safeName] ?? Sparkles
+  const displayName = label || t(`tools.${safeName}`, { defaultValue: safeName === 'tool' ? 'Tool' : safeName })
+  const subtitle = pickSubtitle(safeName, input)
   const code =
-    name === 'python_execute' && typeof (input as Record<string, unknown>)?.code === 'string'
+    safeName === 'python_execute' && typeof (input as Record<string, unknown>)?.code === 'string'
       ? ((input as Record<string, unknown>).code as string)
       : null
-  const isPython = name === 'python_execute'
+  const isPython = safeName === 'python_execute'
   const hasBody = Boolean(output || code)
 
   return (

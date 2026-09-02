@@ -739,7 +739,7 @@ func (r *countingFallbackToolRunner) Run(context.Context, string, []byte) (strin
 	return "tool result", nil, nil
 }
 
-func TestProviderDoesNotFallbackAfterVisibleToolRound(t *testing.T) {
+func TestProviderFallsBackAfterCompletedVisibleToolRound(t *testing.T) {
 	var primaryHits atomic.Int32
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		round := primaryHits.Add(1)
@@ -791,23 +791,23 @@ func TestProviderDoesNotFallbackAfterVisibleToolRound(t *testing.T) {
 		}},
 		FallbackUsed: flag,
 	}, runner, observeProviderVisibleOutput(func(SseEvent) {}, visible))
-	if err == nil || !strings.Contains(err.Error(), "second primary round failed") {
-		t.Fatalf("Stream error = %v, want second primary round failure", err)
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
 	}
-	if primaryHits.Load() != 2 || fallbackHits.Load() != 0 {
-		t.Fatalf("primary/fallback requests = %d/%d, want 2/0", primaryHits.Load(), fallbackHits.Load())
+	if primaryHits.Load() != 2 || fallbackHits.Load() != 1 {
+		t.Fatalf("primary/fallback requests = %d/%d, want 2/1", primaryHits.Load(), fallbackHits.Load())
 	}
 	if runner.calls.Load() != 1 {
 		t.Fatalf("tool executions = %d, want exactly 1", runner.calls.Load())
 	}
-	if flag.Load() {
-		t.Fatal("FallbackUsed was set after a visible tool round")
+	if !flag.Load() {
+		t.Fatal("FallbackUsed was not set for the failed post-tool provider round")
 	}
 	if !visible.Load() {
 		t.Fatal("tool events did not commit visible output")
 	}
-	if result == nil || len(result.Blocks) != 2 || result.Blocks[0].Kind != "tool_call" || result.Blocks[1].Kind != "tool_output" {
-		t.Fatalf("result blocks = %+v, want the completed tool round as partial output", result)
+	if result == nil || len(result.Blocks) != 3 || result.Blocks[0].Kind != "tool_call" || result.Blocks[1].Kind != "tool_output" || result.Blocks[2].Text != "fallback final answer" {
+		t.Fatalf("result blocks = %+v, want one completed tool round followed by the fallback answer", result)
 	}
 }
 

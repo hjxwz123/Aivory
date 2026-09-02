@@ -96,8 +96,8 @@ func TestGoogleProviderReturnsVisiblePartialResultOnStreamError(t *testing.T) {
 	if string(tool.Input) != `{"q":"docs"}` {
 		t.Fatalf("partial tool input = %s", tool.Input)
 	}
-	if !hasSSEEvent(events, "thinking_delta") || !hasSSEEvent(events, "text_delta") || !hasSSEEvent(events, "tool_start") {
-		t.Fatalf("streamed events = %+v, want visible thinking, text, and tool trace", events)
+	if !hasSSEEvent(events, "thinking_delta") || !hasSSEEvent(events, "text_delta") || hasSSEEvent(events, "tool_start") {
+		t.Fatalf("streamed events = %+v, want visible thinking/text without starting an unexecuted tool", events)
 	}
 }
 

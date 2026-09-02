@@ -202,18 +202,8 @@ func doProviderParsedRequest(
 	if m.Fallback == nil {
 		return consumeAttempt(primaryReq, false, onEvent)
 	}
-	// A prior round (or an earlier visible tool event in this turn) has already
-	// committed output. From this point on, switching channels would visibly mix
-	// two responses, so this primary attempt must stream live and fail in place.
-	if visibleOutput != nil && visibleOutput.Load() {
-		if err != nil {
-			recordProviderRequestBuildFailure(ctx, false, err)
-			return err
-		}
-		return consumeAttempt(primaryReq, false, onEvent)
-	}
-
 	buffered := make([]SseEvent, 0, 32)
+	primaryAttemptCommitted := false
 	flushBuffered := func() {
 		for _, ev := range buffered {
 			onEvent(ev)
@@ -227,7 +217,7 @@ func doProviderParsedRequest(
 			buffered = append(buffered, ev)
 			return
 		}
-		if visibleOutput.Load() {
+		if primaryAttemptCommitted {
 			flushBuffered()
 			onEvent(ev)
 			return
@@ -237,10 +227,12 @@ func doProviderParsedRequest(
 			return
 		}
 
-		// Release metadata immediately before the first visible event. The outer
-		// observer sets visibleOutput only when this callback really reaches the
-		// user; prompt-tool raw-token callbacks are no-ops and therefore stay
-		// uncommitted and eligible for transparent fallback.
+		// Release metadata immediately before the first visible event from THIS
+		// upstream attempt. Earlier tool rounds may already be visible, but replaying
+		// only a later failed provider request is safe: completed local tools remain
+		// in history and are not executed again. Once this attempt emits content,
+		// however, switching would duplicate or mix its partial response.
+		primaryAttemptCommitted = true
 		flushBuffered()
 		onEvent(ev)
 	}
@@ -259,7 +251,7 @@ func doProviderParsedRequest(
 		flushBuffered()
 		return primaryErr
 	}
-	if visibleOutput != nil && visibleOutput.Load() {
+	if primaryAttemptCommitted {
 		flushBuffered()
 		return primaryErr
 	}
