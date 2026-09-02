@@ -11,9 +11,9 @@ export default function Shortcuts() {
 
   return (
     <div className="mx-auto max-w-[60rem]">
-      <header className="mb-8">
+      <header className="mb-6">
         <h1 className="text-xl font-semibold tracking-normal text-[var(--color-fg)]">{t('shortcuts.title')}</h1>
-        <p className="mt-2.5 text-sm text-[var(--color-fg-muted)]">{t('shortcuts.subtitle')}</p>
+        <p className="mt-1.5 text-sm text-[var(--color-fg-muted)]">{t('shortcuts.subtitle')}</p>
       </header>
 
       {(['global', 'composer', 'sidebar'] as const).map(
@@ -21,7 +21,7 @@ export default function Shortcuts() {
           grouped[scope].length > 0 && (
             <SettingsSection key={scope} title={t(`shortcuts.groups.${scope}`)}>
               {grouped[scope].map((s) => (
-                <div key={s.id} className="px-5 sm:px-6 py-3.5 flex items-center gap-4">
+                <div key={s.id} className="flex items-center gap-4 px-4 py-3">
                   <span className="flex-1 text-sm text-[var(--color-fg)]">
                     {t(`shortcuts.items.${s.id}` as const, { defaultValue: s.name })}
                   </span>

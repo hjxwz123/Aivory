@@ -161,15 +161,15 @@ export default function Privacy() {
 
   return (
     <div className="mx-auto max-w-[60rem]">
-      <header className="mb-8">
+      <header className="mb-6">
         <h1 className="text-xl font-semibold tracking-normal text-[var(--color-fg)]">{t('settings:privacy.title')}</h1>
-        <p className="mt-2.5 text-sm text-[var(--color-fg-muted)]">
+        <p className="mt-1.5 text-sm text-[var(--color-fg-muted)]">
           {t('settings:privacy.subtitle')}
         </p>
       </header>
 
       <SettingsSection title={t('settings:privacy.dataStorage', { defaultValue: 'Data storage' })}>
-        <div className="px-5 sm:px-6 py-4">
+        <div className="px-4 py-3">
           <p className="text-sm text-[var(--color-fg-muted)] leading-relaxed">
             {t('settings:privacy.dataStorageBody', {
               defaultValue:

@@ -11,16 +11,21 @@
   },
   "about": {
     "title": "À propos",
-    "description": "Une plateforme de chat IA multi-modèles auto-hébergée et open source, avec appels d'outils, sandbox Python, bases de connaissances et panneau d'administration complet.",
+    "tagline": "Un espace de travail IA auto-hébergé et open source pour les particuliers et les équipes",
+    "description": "Aivory réunit le chat multi-modèles, l'analyse de fichiers, la recherche web, l'exécution de code, la génération d'images et la recherche documentaire dans un même flux de travail continu.",
+    "descriptionDetail": "Changez de modèle sans perdre le contexte, organisez le travail en projets et espaces partagés, et gérez les fournisseurs, les autorisations, l'usage, le stockage et la sécurité sur votre propre infrastructure.",
     "version": "Version",
     "license": "Licence",
+    "resources": "Ressources et assistance",
+    "documentation": "Documentation",
     "source": "Code source",
     "terms": "Conditions d’utilisation",
     "viewTerms": "Voir les conditions",
     "privacyPolicy": "Politique de confidentialité",
     "viewPrivacy": "Voir la politique",
     "contactEmail": "E-mail de contact",
-    "copyright": "© {{year}} hjxwz123 · Sous licence Apache 2.0"
+    "contactSupport": "Assistance",
+    "copyright": "© {{year}} hjxwz123"
   },
   "personalization": {
     "title": "Personnalisation",
@@ -247,7 +252,7 @@
     "imageModel": "Modèle d'image par défaut",
     "imageModelBody": "Utilisé lorsque vous demandez à l'assistant de générer ou de modifier une image.",
     "imagePick": "Sélectionner un modèle",
-    "imageNone": "Aucun modèle d'image disponible (demandez à un administrateur d'en configurer un)",
+    "imageNone": "Aucun modèle d'image disponible",
     "custom": "Instructions personnalisées",
     "customBody": "Aivory lit ceci au début de chaque conversation.",
     "customPlaceholder": "Que doit savoir Aivory à votre sujet ? Comment souhaitez-vous qu'elle réponde ? (Visible uniquement par vous.)",

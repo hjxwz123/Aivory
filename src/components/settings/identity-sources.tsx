@@ -190,24 +190,24 @@ export function IdentitySources() {
   if (!visibleLoading && visibleIdentities.length === 0 && providers.length === 0) return null
 
   return (
-    <section className="mb-12">
-      <div className="mb-5">
-        <h2 className="tracking-tight text-xl text-[var(--color-fg)]">
+    <section className="mb-8 last:mb-0">
+      <div className="mb-3">
+        <h2 className="text-lg font-medium tracking-normal text-[var(--color-fg)]">
           {t('settings:account.identities.title')}
         </h2>
         <p className="mt-1.5 text-sm text-[var(--color-fg-muted)]">{t('settings:account.identities.subtitle')}</p>
       </div>
 
-      <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] divide-y divide-[var(--color-divider)]">
+      <div className="divide-y divide-[var(--color-divider)] rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)]">
         {visibleLoading ? (
-          <div className="px-5 sm:px-6 py-8 text-sm text-[var(--color-fg-subtle)]">{t('common:common.loading')}</div>
+          <div className="px-4 py-5 text-sm text-[var(--color-fg-subtle)]">{t('common:common.loading')}</div>
         ) : (
           <>
             {visibleIdentities.map((it) => {
               const key = it.provider_id + ':' + it.subject
               const disableUnbind = unlinkWouldLockOut(it)
               return (
-                <div key={key} className="px-5 sm:px-6 py-4 flex items-center gap-4">
+                <div key={key} className="flex items-center gap-3 px-4 py-3">
                   <div className="shrink-0 size-9 inline-flex items-center justify-center rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
                     <OAuthBrandGlyph kind={it.provider_kind} icon={it.provider_icon} size={17} />
                   </div>
@@ -246,7 +246,7 @@ export function IdentitySources() {
             })}
 
             {available.map((p) => (
-              <div key={p.id} className="px-5 sm:px-6 py-4 flex items-center gap-4">
+              <div key={p.id} className="flex items-center gap-3 px-4 py-3">
                 <div className="shrink-0 size-9 inline-flex items-center justify-center rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
                   <OAuthBrandGlyph kind={p.kind} icon={p.icon} size={17} />
                 </div>
@@ -269,7 +269,7 @@ export function IdentitySources() {
             ))}
 
             {visibleIdentities.length === 0 && available.length === 0 ? (
-              <div className="px-5 sm:px-6 py-8 text-sm text-[var(--color-fg-subtle)]">
+              <div className="px-4 py-5 text-sm text-[var(--color-fg-subtle)]">
                 {t('settings:account.identities.empty')}
               </div>
             ) : null}

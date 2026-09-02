@@ -93,9 +93,9 @@ export default function Appearance() {
 
   return (
     <div className="mx-auto max-w-[60rem]">
-      <header className="mb-8">
+      <header className="mb-6">
         <h1 className="text-xl font-semibold tracking-normal text-[var(--color-fg)]">{t('appearance.title')}</h1>
-        <p className="mt-2.5 text-sm text-[var(--color-fg-muted)]">{t('appearance.subtitle')}</p>
+        <p className="mt-1.5 text-sm text-[var(--color-fg-muted)]">{t('appearance.subtitle')}</p>
       </header>
 
       <SettingsSection title={t('appearance.theme')} description={t('appearance.themeBody')}>

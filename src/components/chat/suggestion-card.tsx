@@ -22,7 +22,7 @@ export function SuggestionCard({ icon: Icon, title, prompt, onClick, className }
         className,
       )}
     >
-      <span className="inline-flex items-center justify-center size-7 rounded-[8px] bg-[var(--color-secondary-soft)] text-[var(--color-secondary)] mb-2.5 sm:mb-3">
+      <span className="mb-2.5 inline-flex size-7 items-center justify-center rounded-[8px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)] sm:mb-3">
         <Icon size={14} aria-hidden />
       </span>
       <div className="font-medium text-sm text-[var(--color-fg)] leading-tight">{title}</div>

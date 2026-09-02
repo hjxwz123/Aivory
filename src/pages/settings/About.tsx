@@ -1,22 +1,48 @@
 import { useTranslation } from 'react-i18next'
-import { Link } from 'react-router-dom'
-import { ExternalLink, Github, FileText, Mail, ShieldCheck, Tag } from 'lucide-react'
+import { ArrowUpRight, BookOpen, FileText, Github, Mail, Scale, ShieldCheck } from 'lucide-react'
 import { Logo } from '@/components/brand/logo'
 import { useLegalConfig } from '@/hooks/use-legal-config'
 
 const APP_VERSION = '2.4.6'
+const DOCS_URL = 'https://docs.aivorygo.com'
 const GITHUB_URL = 'https://github.com/hjxwz123/Aivory'
 const LICENSE_URL = 'https://github.com/hjxwz123/Aivory/blob/main/LICENSE'
 
-function InfoRow({ icon: Icon, label, children }: { icon: React.ElementType; label: string; children: React.ReactNode }) {
+function ResourceCard({
+  icon: Icon,
+  label,
+  value,
+  href,
+  external = false,
+}: {
+  icon: React.ElementType
+  label: string
+  value: string
+  href: string
+  external?: boolean
+}) {
   return (
-    <div className="flex items-center justify-between gap-4 px-5 py-4 sm:px-6">
-      <div className="flex min-w-0 items-center gap-3 text-sm text-[var(--color-fg-muted)]">
-        <Icon size={14} className="shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
-        <span>{label}</span>
+    <a
+      href={href}
+      target={external ? '_blank' : undefined}
+      rel={external ? 'noopener noreferrer' : undefined}
+      className="group flex min-w-0 items-center gap-3 rounded-[8px] bg-[var(--color-bg-muted)]/70 p-3 interactive hover:bg-[var(--color-surface-sunken)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+    >
+      <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-[7px] bg-[var(--color-surface)] text-[var(--color-fg-muted)] shadow-[var(--shadow-xs)]">
+        <Icon size={15} aria-hidden />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium text-[var(--color-fg)]">{label}</div>
+        <div className="mt-0.5 truncate text-xs text-[var(--color-fg-muted)]">{value}</div>
       </div>
-      <div className="min-w-0 text-right text-sm text-[var(--color-fg)]">{children}</div>
-    </div>
+      {external ? (
+        <ArrowUpRight
+          size={12}
+          aria-hidden
+          className="shrink-0 text-[var(--color-fg-faint)] transition-transform duration-150 group-hover:-translate-y-px group-hover:translate-x-px group-hover:text-[var(--color-fg-muted)]"
+        />
+      ) : null}
+    </a>
   )
 }
 
@@ -25,84 +51,80 @@ export default function About() {
   const legalConfig = useLegalConfig()
 
   return (
-    // pt matches the wrapper padding the settings pane moved into pinned page
-    // headers — About has no header, so it pads itself.
-    <div className="mx-auto max-w-[60rem] pt-6 sm:pt-8">
-      {/* Hero */}
-      <div className="mb-10 flex flex-col items-start gap-4">
-        <Logo size="lg" />
-        <p className="text-[var(--color-fg-muted)] text-sm leading-relaxed max-w-md">
-          {t('about.description')}
-        </p>
+    // About has no pinned page header, so it owns the equivalent top padding.
+    <div className="mx-auto flex min-h-full w-full max-w-[60rem] flex-col pt-5 sm:pt-6">
+      <div className="max-w-[42rem]">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <Logo size="lg" />
+          <span className="shrink-0 rounded-full bg-[var(--color-bg-muted)] px-2.5 py-1 font-mono text-[11px] tabular-nums text-[var(--color-fg-muted)]">
+            v{APP_VERSION}
+          </span>
+        </div>
+        <p className="mt-1 text-xs font-medium text-[var(--color-fg-subtle)]">{t('about.tagline')}</p>
+        <div className="mt-4 space-y-2.5 text-sm leading-relaxed text-[var(--color-fg-muted)]">
+          <p>{t('about.description')}</p>
+          <p className="text-[13px] text-[var(--color-fg-subtle)]">{t('about.descriptionDetail')}</p>
+        </div>
       </div>
 
-      {/* Info card */}
-      <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] divide-y divide-[var(--color-divider)]">
-        <InfoRow icon={Tag} label={t('about.version')}>
-          <span className="font-mono text-[13px] tabular-nums">{APP_VERSION}</span>
-        </InfoRow>
+      <section className="mt-7" aria-labelledby="about-resources-title">
+        <h2 id="about-resources-title" className="text-sm font-medium text-[var(--color-fg)]">
+          {t('about.resources')}
+        </h2>
 
-        <InfoRow icon={FileText} label={t('about.license')}>
+        <nav className="mt-3 grid gap-2.5 md:grid-cols-2" aria-label={t('about.resources')}>
+          <ResourceCard icon={BookOpen} label={t('about.documentation')} value="docs.aivorygo.com" href={DOCS_URL} external />
+          <ResourceCard icon={Github} label={t('about.source')} value="hjxwz123/Aivory" href={GITHUB_URL} external />
+        </nav>
+      </section>
+
+      <footer className="mt-auto pt-6 text-xs text-[var(--color-fg-subtle)]">
+        <div className="border-t border-[var(--color-divider)] pt-4">
+          <div className="flex flex-col gap-2.5 md:flex-row md:items-center md:justify-between">
+            <a
+              href={`mailto:${legalConfig.contactEmail}`}
+              className="inline-flex min-w-0 items-center gap-2 rounded-[4px] hover:text-[var(--color-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+            >
+              <Mail size={14} className="shrink-0" aria-hidden />
+              <span className="shrink-0">{t('about.contactSupport')}:</span>
+              <span className="truncate font-medium text-[var(--color-accent)]">{legalConfig.contactEmail}</span>
+            </a>
+            <nav className="flex flex-wrap items-center gap-x-4 gap-y-2" aria-label={t('about.resources')}>
+              <a
+                href="/terms"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-[4px] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+              >
+                <FileText size={12} aria-hidden />
+                {t('about.terms')}
+              </a>
+              <a
+                href="/privacy"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-[4px] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+              >
+                <ShieldCheck size={12} aria-hidden />
+                {t('about.privacyPolicy')}
+              </a>
+            </nav>
+          </div>
+          <div className="mt-2.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-[var(--color-fg-faint)] md:justify-end">
+            <span>{t('about.copyright', { year: new Date().getFullYear() })}</span>
+            <span aria-hidden>·</span>
           <a
             href={LICENSE_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-[var(--color-accent)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] rounded-[4px]"
+            className="inline-flex items-center gap-1 rounded-[4px] hover:text-[var(--color-fg-muted)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
           >
+            <Scale size={11} aria-hidden />
             Apache 2.0
-            <ExternalLink size={11} aria-hidden />
           </a>
-        </InfoRow>
-
-        <InfoRow icon={Github} label={t('about.source')}>
-          <a
-            href={GITHUB_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-[var(--color-accent)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] rounded-[4px]"
-          >
-            hjxwz123/Aivory
-            <ExternalLink size={11} aria-hidden />
-          </a>
-        </InfoRow>
-
-        <InfoRow icon={FileText} label={t('about.terms')}>
-          <Link
-            to="/terms"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 rounded-[4px] text-[var(--color-accent)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-          >
-            {t('about.viewTerms')}
-            <ExternalLink size={11} aria-hidden />
-          </Link>
-        </InfoRow>
-
-        <InfoRow icon={ShieldCheck} label={t('about.privacyPolicy')}>
-          <Link
-            to="/privacy"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 rounded-[4px] text-[var(--color-accent)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-          >
-            {t('about.viewPrivacy')}
-            <ExternalLink size={11} aria-hidden />
-          </Link>
-        </InfoRow>
-
-        <InfoRow icon={Mail} label={t('about.contactEmail')}>
-          <a
-            href={`mailto:${legalConfig.contactEmail}`}
-            className="break-all rounded-[4px] text-[var(--color-accent)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-          >
-            {legalConfig.contactEmail}
-          </a>
-        </InfoRow>
-      </div>
-
-      <p className="mt-6 text-[11px] text-[var(--color-fg-faint)] text-center">
-        {t('about.copyright', { year: new Date().getFullYear() })}
-      </p>
+          </div>
+        </div>
+      </footer>
     </div>
   )
 }

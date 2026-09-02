@@ -105,9 +105,9 @@ export default function Models() {
 
   return (
     <div className="mx-auto max-w-[60rem]">
-      <header className="mb-8">
+      <header className="mb-6">
         <h1 className="text-xl font-semibold tracking-normal text-[var(--color-fg)]">{t('settings:models.title')}</h1>
-        <p className="mt-2.5 text-sm text-[var(--color-fg-muted)]">
+        <p className="mt-1.5 text-sm text-[var(--color-fg-muted)]">
           {t('settings:models.subtitle')}
         </p>
       </header>
@@ -174,7 +174,7 @@ export default function Models() {
         title={t('settings:models.custom')}
         description={t('settings:models.customBody')}
       >
-        <div className="p-5 sm:p-6 space-y-4">
+        <div className="space-y-3 p-4">
           <Textarea
             value={models.customInstructions}
             onChange={(e) => setModels({ customInstructions: e.target.value })}
@@ -201,10 +201,10 @@ export default function Models() {
 
       <SettingsSection title={t('settings:models.available')}>
         {list.length === 0 ? (
-          <div className="px-5 sm:px-6 py-6 text-sm text-[var(--color-fg-muted)]">{t('common:common.loading')}</div>
+          <div className="px-4 py-5 text-sm text-[var(--color-fg-muted)]">{t('common:common.loading')}</div>
         ) : (
           list.map((m) => (
-            <div key={m.id} className="px-5 sm:px-6 py-4">
+            <div key={m.id} className="px-4 py-3">
               <div className="flex items-start gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
