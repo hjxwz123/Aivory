@@ -105,7 +105,7 @@ export default function SettingsDialog() {
             // Mobile: full-screen sheet. Desktop: centered panel.
             'inset-0 flex flex-col',
             'sm:inset-auto sm:left-1/2 sm:top-1/2 sm:[translate:-50%_-50%]',
-            'sm:w-[min(94vw,60rem)] sm:h-[min(44rem,calc(100dvh-2rem))] sm:max-h-[calc(100dvh-2rem)] sm:flex-row',
+            'sm:h-[min(36rem,calc(100dvh-3rem))] sm:w-[min(92vw,50rem)] sm:max-h-[calc(100dvh-3rem)] sm:flex-row',
             'sm:rounded-popup sm:border sm:border-[var(--color-border)] sm:shadow-[var(--shadow-xl)]',
             'data-[state=open]:animate-[pop-in_220ms_var(--ease-out)]',
             'data-[state=closed]:animate-[fade-out_140ms_var(--ease-in)]',
@@ -115,10 +115,10 @@ export default function SettingsDialog() {
           <div
             className={cn(
               'shrink-0 flex flex-col bg-[var(--color-bg-muted)]/50',
-              'sm:w-56',
+              'sm:w-48',
             )}
           >
-            <div className="flex items-center justify-between gap-2 px-4 sm:px-5 pt-4 sm:pt-5 pb-2 sm:pb-4">
+            <div className="flex items-center justify-between gap-2 px-4 pb-2 pt-4 sm:pb-3">
               <DialogTitle>{t('settings:title')}</DialogTitle>
               <DialogPrimitive.Close
                 aria-label={t('common:aria.close', { defaultValue: 'Close' })}
@@ -134,7 +134,7 @@ export default function SettingsDialog() {
             </div>
             <nav
               className={cn(
-                'flex gap-1 px-2 sm:px-3 pb-2 sm:pb-4',
+                'flex gap-1 px-2 pb-2 sm:pb-3',
                 'flex-row overflow-x-auto scrollbar-none',
                 'sm:flex-col sm:overflow-y-auto sm:flex-1',
               )}
@@ -149,8 +149,8 @@ export default function SettingsDialog() {
                     onClick={() => setTab(def.key)}
                     aria-current={active ? 'page' : undefined}
                     className={cn(
-                      'inline-flex items-center gap-2.5 rounded-[10px] whitespace-nowrap interactive',
-                      'px-3 py-2 text-sm font-medium',
+                      'inline-flex items-center gap-2 rounded-[8px] whitespace-nowrap interactive',
+                      'px-2.5 py-1.5 text-sm font-medium',
                       'sm:w-full',
                       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                       active
@@ -184,7 +184,7 @@ export default function SettingsDialog() {
               auto-scrolls land visible instead of underneath it. */}
           <div
             ref={paneRef}
-            className="relative min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin [scroll-padding-top:7.5rem]"
+            className="relative min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin [scroll-padding-top:6rem]"
           >
             <div
               className={cn(
@@ -192,21 +192,26 @@ export default function SettingsDialog() {
                 // With wrapper padding above it, the header would first travel
                 // that distance before sticking; owning the padding makes it
                 // pinned from the very first scrolled pixel.
-                'px-5 sm:px-8 pb-6 sm:pb-8',
+                'min-h-full px-5 pb-5 sm:px-6 sm:pb-6',
                 // Pin each settings page's <header> (title + lead) while the
                 // body scrolls under it. About has no header and pads itself.
                 '[&_header]:sticky [&_header]:top-0 [&_header]:z-10',
-                '[&_header]:pt-6 sm:[&_header]:pt-8',
-                '[&_header]:bg-[var(--color-surface)] [&_header]:pb-4',
+                '[&_header]:pt-5 sm:[&_header]:pt-6',
+                '[&_header]:bg-[var(--color-surface)] [&_header]:pb-3',
                 '[&_header]:border-b [&_header]:border-[var(--color-divider)]',
               )}
             >
-              <RouteFade dep={tab}>
+              <RouteFade dep={tab} className="min-h-full">
                 {Array.from(visitedTabsRef.current, (visitedTab) => {
                   const TabPage = tabPages[visitedTab]
                   const active = visitedTab === tab
                   return (
-                    <div key={visitedTab} hidden={!active} aria-hidden={!active || undefined}>
+                    <div
+                      key={visitedTab}
+                      hidden={!active}
+                      aria-hidden={!active || undefined}
+                      className={active ? 'min-h-full' : undefined}
+                    >
                       {/* Each first visit owns a fresh local boundary. Its chunk
                           is normally warm from preload; on a slow connection the
                           fallback replaces only this right pane. Visited pages
@@ -236,14 +241,14 @@ export function SettingsSection({
   children: React.ReactNode
 }) {
   return (
-    <section className="mb-12">
-      <div className="mb-5">
+    <section className="mb-8 last:mb-0">
+      <div className="mb-3">
         <h2 className="text-lg font-medium tracking-normal text-[var(--color-fg)]">{title}</h2>
         {description ? (
           <p className="mt-1.5 text-sm text-[var(--color-fg-muted)]">{description}</p>
         ) : null}
       </div>
-      <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] divide-y divide-[var(--color-divider)]">
+      <div className="divide-y divide-[var(--color-divider)] rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)]">
         {children}
       </div>
     </section>
@@ -260,11 +265,11 @@ export function SettingsRow({
   children?: React.ReactNode
 }) {
   return (
-    <div className="px-5 sm:px-6 py-4 sm:py-5 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-6">
+    <div className="flex flex-col gap-2.5 px-4 py-3 sm:flex-row sm:items-center sm:gap-4">
       <div className="flex-1 min-w-0">
         <div className="text-sm font-medium text-[var(--color-fg)]">{label}</div>
         {description ? (
-          <p className="mt-1 text-xs text-[var(--color-fg-muted)] leading-relaxed max-w-md">
+          <p className="mt-0.5 max-w-md text-xs leading-normal text-[var(--color-fg-muted)]">
             {description}
           </p>
         ) : null}

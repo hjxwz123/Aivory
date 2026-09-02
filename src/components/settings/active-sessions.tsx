@@ -152,10 +152,10 @@ export function ActiveSessions() {
   const hasOthers = visibleSessions.some((s) => s.id !== visibleCurrent)
 
   return (
-    <section className="mb-12">
-      <div className="mb-5 flex items-end justify-between gap-4">
+    <section className="mb-8 last:mb-0">
+      <div className="mb-3 flex items-end justify-between gap-4">
         <div>
-          <h2 className="tracking-tight text-xl text-[var(--color-fg)]">
+          <h2 className="text-lg font-medium tracking-normal text-[var(--color-fg)]">
             {t('settings:account.sessions.title')}
           </h2>
           <p className="mt-1.5 text-sm text-[var(--color-fg-muted)]">{t('settings:account.sessions.subtitle')}</p>
@@ -167,11 +167,11 @@ export function ActiveSessions() {
         ) : null}
       </div>
 
-      <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] divide-y divide-[var(--color-divider)]">
+      <div className="divide-y divide-[var(--color-divider)] rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)]">
         {visibleLoading ? (
-          <div className="px-5 sm:px-6 py-8 text-sm text-[var(--color-fg-subtle)]">{t('common:common.loading')}</div>
+          <div className="px-4 py-5 text-sm text-[var(--color-fg-subtle)]">{t('common:common.loading')}</div>
         ) : visibleSessions.length === 0 ? (
-          <div className="px-5 sm:px-6 py-8 text-sm text-[var(--color-fg-subtle)]">
+          <div className="px-4 py-5 text-sm text-[var(--color-fg-subtle)]">
             {t('settings:account.sessions.empty')}
           </div>
         ) : (
@@ -182,7 +182,7 @@ export function ActiveSessions() {
             const isCurrent = s.id === visibleCurrent
             const place = s.location || (isLocalIp(s.ip) ? t('settings:account.sessions.localNetwork') : '')
             return (
-              <div key={s.id} className="px-5 sm:px-6 py-4 flex items-center gap-4">
+              <div key={s.id} className="flex items-center gap-3 px-4 py-3">
                 <div className="shrink-0 size-9 inline-flex items-center justify-center rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
                   <Icon size={17} aria-hidden />
                 </div>

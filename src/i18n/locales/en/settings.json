@@ -11,16 +11,21 @@
   },
   "about": {
     "title": "About",
-    "description": "A self-hosted, open-source multi-model AI chat platform with tool calls, Python sandbox, knowledge bases, and full admin controls.",
+    "tagline": "A self-hosted, open-source AI workspace for individuals and teams",
+    "description": "Aivory brings multi-model chat, file analysis, web research, code execution, image generation, and knowledge retrieval into one continuous workflow.",
+    "descriptionDetail": "Switch models without losing context, organize work into projects and shared workspaces, and manage model providers, permissions, usage, storage, and security policies on your own infrastructure.",
     "version": "Version",
     "license": "License",
+    "resources": "Resources & support",
+    "documentation": "Documentation",
     "source": "Source code",
     "terms": "Terms of Service",
     "viewTerms": "View terms",
     "privacyPolicy": "Privacy Policy",
     "viewPrivacy": "View policy",
     "contactEmail": "Contact email",
-    "copyright": "© {{year}} hjxwz123 · Licensed under Apache 2.0"
+    "contactSupport": "Support",
+    "copyright": "© {{year}} hjxwz123"
   },
   "personalization": {
     "title": "Personalization",
@@ -247,7 +252,7 @@
     "imageModel": "Default image model",
     "imageModelBody": "Used when you ask the assistant to generate or edit an image.",
     "imagePick": "Select a model",
-    "imageNone": "No image models available (ask an admin to configure one)",
+    "imageNone": "No image models available",
     "custom": "Custom instructions",
     "customBody": "Aivory reads this at the start of every conversation.",
     "customPlaceholder": "What should Aivory know about you? How would you like it to respond? (Visible only to you.)",

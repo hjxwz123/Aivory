@@ -11,16 +11,21 @@
   },
   "about": {
     "title": "关于",
-    "description": "一款自托管、开源的多模型 AI 对话平台，支持工具调用、Python 沙盒、知识库及完整的管理后台。",
+    "tagline": "面向个人与团队的自托管开源 AI 工作空间",
+    "description": "Aivory 将多模型对话、文件分析、网页搜索、代码执行、图像生成和知识库检索集中在同一个持续的工作流中。",
+    "descriptionDetail": "支持在保留上下文的同时切换模型、组织项目与共享工作空间；部署者可在自建基础设施上统一管理模型渠道、权限、用量、存储与安全策略。",
     "version": "版本",
     "license": "许可证",
+    "resources": "资源与支持",
+    "documentation": "产品文档",
     "source": "开源地址",
     "terms": "用户协议",
     "viewTerms": "查看用户协议",
     "privacyPolicy": "隐私政策",
     "viewPrivacy": "查看隐私政策",
     "contactEmail": "联系邮箱",
-    "copyright": "© {{year}} hjxwz123 · 基于 Apache 2.0 协议开源"
+    "contactSupport": "联系支持",
+    "copyright": "© {{year}} hjxwz123"
   },
   "personalization": {
     "title": "个性化",
@@ -247,7 +252,7 @@
     "imageModel": "默认图片模型",
     "imageModelBody": "当你让助手生成或编辑图片时使用。",
     "imagePick": "选择模型",
-    "imageNone": "暂无可用图片模型（请联系管理员配置）",
+    "imageNone": "暂无可用图片模型",
     "custom": "自定义指令",
     "customBody": "Aivory 会在每段对话开始时读取这段内容。",
     "customPlaceholder": "你希望 Aivory 了解你哪些情况？希望它如何回应？（仅对你自己可见。）",

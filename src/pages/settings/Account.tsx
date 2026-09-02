@@ -201,9 +201,9 @@ export default function Account() {
 
   return (
     <div className="mx-auto max-w-[60rem]">
-      <header className="mb-8">
+      <header className="mb-6">
         <h1 className="text-xl font-semibold tracking-normal text-[var(--color-fg)]">{t('settings:account.title')}</h1>
-        <p className="mt-2.5 text-sm text-[var(--color-fg-muted)]">{t('settings:account.subtitle')}</p>
+        <p className="mt-1.5 text-sm text-[var(--color-fg-muted)]">{t('settings:account.subtitle')}</p>
       </header>
 
       <SettingsSection title={t('settings:account.profile')}>
@@ -258,7 +258,7 @@ export default function Account() {
             className="w-64"
           />
         </SettingsRow>
-        <div className="px-5 sm:px-6 py-4 flex items-center justify-end gap-2">
+        <div className="flex items-center justify-end gap-2 px-4 py-3">
           <Button variant="ghost" onClick={() => { setName(user?.name ?? ''); setEmail(user?.email ?? '') }}>
             {t('common:actions.reset')}
           </Button>

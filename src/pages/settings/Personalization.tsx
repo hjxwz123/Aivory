@@ -88,27 +88,27 @@ export default function Personalization() {
 
   return (
     <div className="mx-auto max-w-[60rem]">
-      <header className="mb-8">
+      <header className="mb-6">
         <h1 className="text-xl font-semibold tracking-normal text-[var(--color-fg)]">
           {t('settings:personalization.title')}
         </h1>
-        <p className="mt-2.5 text-sm text-[var(--color-fg-muted)]">{t('settings:personalization.subtitle')}</p>
+        <p className="mt-1.5 text-sm text-[var(--color-fg-muted)]">{t('settings:personalization.subtitle')}</p>
       </header>
 
       {/* Response style */}
-      <section className="mb-12">
-        <div className="mb-5">
+      <section className="mb-8 last:mb-0">
+        <div className="mb-3">
           <h2 className="text-lg font-medium tracking-normal text-[var(--color-fg)]">
             {t('settings:personalization.styleTitle')}
           </h2>
           <p className="mt-1.5 text-sm text-[var(--color-fg-muted)]">{t('settings:personalization.styleSubtitle')}</p>
         </div>
-        <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 sm:p-6 space-y-6">
+        <div className="space-y-4 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
           <div>
             <span className="text-sm font-medium text-[var(--color-fg)]">
               {t('settings:personalization.traitsLabel')}
             </span>
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-2 flex flex-wrap gap-2">
               {TRAITS.map((key) => {
                 const on = traits.includes(key)
                 return (
@@ -163,26 +163,26 @@ export default function Personalization() {
 
       {/* Memory — only shown when the global admin master switch allows it. */}
       {memoryAvailable && (
-        <section className="mb-12">
-          <div className="mb-5">
+        <section className="mb-8 last:mb-0">
+          <div className="mb-3">
             <h2 className="text-lg font-medium tracking-normal text-[var(--color-fg)]">
               {t('settings:personalization.memoryTitle')}
             </h2>
             <p className="mt-1.5 text-sm text-[var(--color-fg-muted)]">{t('settings:personalization.memorySubtitle')}</p>
           </div>
-          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]">
-            <div className="px-5 sm:px-6 py-4 sm:py-5 flex items-center justify-between gap-6 border-b border-[var(--color-divider)]">
+          <div className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)]">
+            <div className="flex items-center justify-between gap-4 border-b border-[var(--color-divider)] px-4 py-3">
               <div className="min-w-0">
                 <div className="text-sm font-medium text-[var(--color-fg)]">
                   {t('settings:personalization.memoryToggle')}
                 </div>
-                <p className="mt-1 text-xs text-[var(--color-fg-muted)] leading-relaxed max-w-md">
+                <p className="mt-0.5 max-w-md text-xs leading-normal text-[var(--color-fg-muted)]">
                   {t('settings:personalization.memoryToggleBody')}
                 </p>
               </div>
               <Switch checked={memoriesEnabled} onCheckedChange={(v) => void onToggleMemory(Boolean(v))} />
             </div>
-            <div className="px-5 sm:px-6 py-5">
+            <div className="p-4">
               {memoriesEnabled ? (
                 <MemoryManager />
               ) : (
