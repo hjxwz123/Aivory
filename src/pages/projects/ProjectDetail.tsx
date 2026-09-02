@@ -723,8 +723,8 @@ export default function ProjectDetail() {
                   workspaceId={workspaceId ?? null}
                   draftScope={toolModeDraftScope}
                   kbIds={selectedKnowledgeBaseIds}
-                  projectKBId={project.kbId}
-                  onKBChange={setSelectedKnowledgeBaseIds}
+                  projectKBId={project.files.length > 0 ? project.kbId : undefined}
+                  onKBChange={project.files.length > 0 ? setSelectedKnowledgeBaseIds : undefined}
                   ensureConversationId={ensureProjectConversation}
                   onAttachmentsDrained={discardDraftConversation}
                 />

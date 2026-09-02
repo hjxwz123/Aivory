@@ -78,6 +78,15 @@ export default function ChatThread() {
   const project = useProjects((s) =>
     conversation?.projectId ? s.projects.find((p) => p.id === conversation.projectId) : undefined,
   )
+  const loadProject = useProjects((s) => s.loadOne)
+
+  // Project list rows intentionally omit documents. Hydrate a project-backed
+  // thread before deciding whether its dedicated KB has anything to search.
+  useEffect(() => {
+    const projectID = conversation?.projectId
+    if (!projectID || !project || project.canUploadFiles !== undefined) return
+    void loadProject(projectID)
+  }, [conversation?.projectId, loadProject, project])
 
   const isDesktop = useMediaQuery('(min-width: 1024px)')
   const openNav = useUI((s) => s.setNavOpen)
@@ -795,8 +804,8 @@ export default function ChatThread() {
               workspaceId={conversation.workspaceId ?? null}
               commandsEnabled={conversation.creatorId === meId}
               kbIds={conversation.kbIds}
-              projectKBId={project?.kbId}
-              onKBChange={(ids) => void setKBs(conversation.id, ids)}
+              projectKBId={project?.files.length ? project.kbId : undefined}
+              onKBChange={project?.files.length ? (ids) => void setKBs(conversation.id, ids) : undefined}
               modelPickerInHeader
             />
           )}
