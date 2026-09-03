@@ -1,4 +1,6 @@
-# Aivory
+<p align="center">
+  <img src="docs/brand/trace.svg" alt="Aivory" width="320">
+</p>
 
 <p align="center">
   <img src="docs/screenshots/aivory-readme-cover.png" alt="Aivory — self-hosted AI workspace" width="100%">

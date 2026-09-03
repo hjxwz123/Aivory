@@ -54,7 +54,7 @@ export default function About() {
 
   return (
     // About has no pinned page header, so it owns the equivalent top padding.
-    <div className="mx-auto flex min-h-full w-full max-w-[60rem] flex-col pt-5 sm:pt-6">
+    <div className="mx-auto flex min-h-full w-full max-w-[60rem] flex-1 flex-col pt-5 sm:pt-6">
       <div className="max-w-[42rem]">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <TracedLogo size="lg" />
