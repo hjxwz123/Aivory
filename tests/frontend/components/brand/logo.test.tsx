@@ -21,7 +21,7 @@ describe('LogoMark', () => {
     expect(html).toContain(`d="${AIVORY_MARK_PATH}"`)
     expect(html).toContain('aivory-mark-lockup')
     expect(html).toContain('#466b78')
-    expect(html).toContain('trace-wordmark.svg')
+    expect(html).toContain('aivory-wordmark.svg')
     expect(html).toContain('<img')
     expect(html).not.toContain('>Aivory<')
   })

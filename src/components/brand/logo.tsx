@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils'
-import wordmarkUrl from '../../../docs/brand/trace-wordmark.svg'
+import wordmarkUrl from '@/assets/brand/aivory-wordmark.svg'
 
 interface LogoMarkProps {
   size?: number
