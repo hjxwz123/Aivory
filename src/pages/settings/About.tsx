@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { ArrowUpRight, BookOpen, FileText, Github, Mail, Scale, ShieldCheck } from 'lucide-react'
-import { Logo } from '@/components/brand/logo'
+import { TracedLogo } from '@/components/brand/logo'
 import { useLegalConfig } from '@/hooks/use-legal-config'
 
 const APP_VERSION = '2.4.6'
@@ -57,7 +57,7 @@ export default function About() {
     <div className="mx-auto flex min-h-full w-full max-w-[60rem] flex-col pt-5 sm:pt-6">
       <div className="max-w-[42rem]">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-          <Logo size="lg" />
+          <TracedLogo size="lg" />
           <span className="shrink-0 rounded-full bg-[var(--color-bg-muted)] px-2.5 py-1 font-mono text-[11px] tabular-nums text-[var(--color-fg-muted)]">
             v{APP_VERSION}
           </span>
