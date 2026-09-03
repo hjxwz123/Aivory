@@ -16,7 +16,7 @@ import {
   Lightbulb,
   type LucideIcon,
 } from 'lucide-react'
-import { Logo } from '@/components/brand/logo'
+import { TracedLogo } from '@/components/brand/logo'
 import { MembershipTiers } from '@/components/landing/membership-tiers'
 import { FlowField } from '@/components/landing/flow-field'
 import { LiveDemo } from '@/components/landing/live-demo'
@@ -245,7 +245,7 @@ export default function Landing() {
           />
           <div className="mx-auto max-w-[76rem] flex items-center justify-between px-5 sm:px-8 h-[64px]">
             <Link to="/" aria-label={t('common:aria.homeLink')}>
-              <Logo size="md" />
+              <TracedLogo size="md" />
             </Link>
             <nav className="hidden md:flex items-center gap-7 text-sm text-[var(--color-fg-muted)]">
               <a href="#capabilities" className="hover:text-[var(--color-fg)] interactive">{t('nav:capabilities')}</a>
@@ -717,7 +717,7 @@ export default function Landing() {
         <footer className="border-t border-[var(--color-divider)] py-14">
           <div className="mx-auto max-w-[76rem] px-5 sm:px-8 grid grid-cols-2 md:grid-cols-5 gap-10" data-reveal>
             <div className="col-span-2">
-              <Logo size="md" />
+              <TracedLogo size="md" />
               <p className="mt-3 max-w-xs text-sm leading-relaxed">
                 {/* The sign-off breathes the same slow sheen as the hero badge. */}
                 <ShinyText text={t('landing:footer.tagline')} speed={6} />

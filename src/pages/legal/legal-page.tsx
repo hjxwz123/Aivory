@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { ArrowLeft, ArrowRight, ChevronDown } from 'lucide-react'
-import { Logo, LogoMark } from '@/components/brand/logo'
+import { LogoMark, TracedLogo } from '@/components/brand/logo'
 import { LanguageToggle } from '@/components/ui/language-toggle'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
 import { Markdown } from '@/components/chat/markdown'
@@ -122,7 +122,7 @@ export function LegalPage({ doc }: { doc: 'privacy' | 'terms' }) {
         <div className="mx-auto flex h-16 max-w-[76rem] items-center justify-between gap-2 px-4 sm:gap-4 sm:px-8">
           <Link to="/" aria-label={t('common:appName')} className="shrink-0">
             <LogoMark size={22} className="sm:hidden" />
-            <Logo size="md" className="hidden sm:inline-flex" />
+            <TracedLogo size="md" className="hidden sm:inline-flex" />
           </Link>
           <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
             <LanguageToggle />

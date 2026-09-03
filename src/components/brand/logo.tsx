@@ -1,3 +1,4 @@
+import { useId } from 'react'
 import { cn } from '@/lib/utils'
 import wordmarkUrl from '@/assets/brand/aivory-wordmark.svg'
 
@@ -16,7 +17,8 @@ export const AIVORY_MARK_PATH =
  * to a point. Rendered as SVG with a scalable gradient fill.
  */
 export function LogoMark({ size = 24, className, tone = 'system' }: LogoMarkProps) {
-  const gradientId = tone === 'lockup' ? 'aivory-mark-lockup' : 'aivory-mark'
+  const instanceId = useId().replace(/:/g, '')
+  const gradientId = `${tone === 'lockup' ? 'aivory-mark-lockup' : 'aivory-mark'}-${instanceId}`
 
   return (
     <svg
@@ -47,29 +49,12 @@ export function LogoMark({ size = 24, className, tone = 'system' }: LogoMarkProp
   )
 }
 
-interface LogoProps {
+interface TracedLogoProps {
   size?: 'sm' | 'md' | 'lg'
   className?: string
 }
 
-export function Logo({ size = 'md', className }: LogoProps) {
-  return (
-    <span
-      className={cn(
-        'inline-flex items-center gap-2 font-serif tracking-tight text-[var(--color-fg)]',
-        size === 'sm' && 'text-[15px]',
-        size === 'md' && 'text-lg',
-        size === 'lg' && 'text-2xl',
-        className,
-      )}
-    >
-      <LogoMark size={size === 'sm' ? 18 : size === 'md' ? 22 : 30} />
-      <span className="leading-none">Aivory</span>
-    </span>
-  )
-}
-
-export function TracedLogo({ size = 'md', className }: LogoProps) {
+export function TracedLogo({ size = 'md', className }: TracedLogoProps) {
   return (
     <span className={cn('inline-flex items-center gap-2', className)}>
       <LogoMark size={size === 'sm' ? 18 : size === 'md' ? 22 : 30} tone="lockup" />

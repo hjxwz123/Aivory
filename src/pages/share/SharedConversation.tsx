@@ -9,7 +9,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { sharedApi, ApiError } from '@/api'
 import type { ApiAttachment, ApiBlock, ApiSharedConversation } from '@/api/types'
-import { Logo } from '@/components/brand/logo'
+import { TracedLogo } from '@/components/brand/logo'
 import { Markdown } from '@/components/chat/markdown'
 import { MathText } from '@/components/chat/math-text'
 import { hasMathContent } from '@/lib/math-content'
@@ -107,7 +107,7 @@ export default function SharedConversation() {
             aria-label="Aivory"
             className="inline-flex items-center rounded-[8px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
           >
-            <Logo size="sm" />
+            <TracedLogo size="sm" />
           </Link>
           <div className="flex min-w-0 items-center gap-2">
             {isAuthenticated ? (

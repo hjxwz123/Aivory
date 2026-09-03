@@ -24,6 +24,7 @@ import { ACCENT_PRESETS, type AccentPref, type ThemePref } from '@/types/setting
 import { apiUrl } from '@/api'
 import { oauthStartPath } from '@/lib/oauth'
 import { isChatShellPath } from '@/lib/app-paths'
+import { PanelFallback } from '@/components/ui/panel-fallback'
 
 const PUBLIC_PATHS = ['/welcome', '/login', '/register', '/forgot-password', '/share', '/setup', '/privacy', '/terms']
 
@@ -179,24 +180,20 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(timer)
   }, [loadModels, refreshProfile, status, user?.group_expires_at, user?.id])
 
-  // Loading shimmer (auth check + initial paint) — reused while the first-run
-  // probe is still pending so we never route on a not-yet-known needsSetup.
-  const shimmer = (
-    <div className="min-h-svh w-full flex items-center justify-center text-[var(--color-fg-subtle)] text-sm">
-      <span className="inline-block size-4 rounded-full border-2 border-[var(--color-fg-faint)] border-r-transparent animate-[spin_900ms_linear_infinite]" />
-    </div>
-  )
+  // Reused while authentication and the first-run probe are unresolved so the
+  // app never routes using incomplete state.
+  const loadingFallback = <PanelFallback scope="screen" />
   if (status === 'idle' || status === 'authenticating') {
     const policyRoute = ['/welcome', '/login', '/register', '/forgot-password'].includes(location.pathname)
     if (isPublic(location.pathname) && (!policyRoute || authPolicyLoaded)) return <>{children}</>
-    return shimmer
+    return loadingFallback
   }
   // First-run probe not resolved yet — deciding setup-vs-login on the default
   // (needsSetup=false) is exactly what flickered a fresh deploy /setup → /login.
   // Public pages render immediately; protected paths wait for the probe.
   if (!setupProbed) {
     if (isPublic(location.pathname)) return <>{children}</>
-    return shimmer
+    return loadingFallback
   }
 
   // First-run: a deployment with no users routes everything to the setup screen
@@ -209,11 +206,11 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }
 
   if (!user && !authPolicyLoaded) {
-    return shimmer
+    return loadingFallback
   }
 
   if (shouldAutoRedirect) {
-    return shimmer
+    return loadingFallback
   }
 
   if (!user) {

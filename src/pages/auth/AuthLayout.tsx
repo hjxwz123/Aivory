@@ -2,7 +2,7 @@ import { Outlet, Link, useLocation } from 'react-router-dom'
 import { useEffect, useRef } from 'react'
 import { gsap } from 'gsap'
 import { useGSAP } from '@gsap/react'
-import { Logo } from '@/components/brand/logo'
+import { TracedLogo } from '@/components/brand/logo'
 import { AuthHero } from '@/components/auth/auth-hero'
 import { ClickSpark } from '@/components/landing/fx/click-spark'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
@@ -56,7 +56,7 @@ export default function AuthLayout() {
 
         <header className="flex h-16 shrink-0 items-center justify-between px-5 sm:px-8">
           <Link to="/" aria-label={t('appName')} className="lg:invisible">
-            <Logo size="md" />
+            <TracedLogo size="md" />
           </Link>
           <div className="flex items-center gap-2">
             <LanguageToggle />
