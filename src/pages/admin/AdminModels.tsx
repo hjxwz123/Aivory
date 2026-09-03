@@ -11,11 +11,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Plus, Settings as SettingsIcon, Trash2, Tags as TagsIcon } from 'lucide-react'
+import { Plus, RefreshCw, Search, Settings as SettingsIcon, Trash2, Tags as TagsIcon } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
 import { embeddingGuardErrorText } from '@/lib/admin-embedding-errors'
-import type { ApiChannel, ApiModel } from '@/api/types'
+import type { ApiChannel, ApiChannelModelCandidate, ApiModel } from '@/api/types'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Field } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -48,6 +49,18 @@ type CreateDraft = {
   description: string
 }
 
+type PullModelsState = {
+  open: boolean
+  channelId: string
+  loading: boolean
+  fetched: boolean
+  error: boolean
+  candidates: ApiChannelModelCandidate[]
+  selected: Set<string>
+  skippedUnsupported: number
+  search: string
+}
+
 const emptyCreate: CreateDraft = {
   channel_id: '',
   kind: 'chat',
@@ -55,6 +68,18 @@ const emptyCreate: CreateDraft = {
   request_id: '',
   icon: '',
   description: '',
+}
+
+const emptyPullModels: PullModelsState = {
+  open: false,
+  channelId: '',
+  loading: false,
+  fetched: false,
+  error: false,
+  candidates: [],
+  selected: new Set(),
+  skippedUnsupported: 0,
+  search: '',
 }
 
 export default function AdminModels() {
@@ -70,6 +95,10 @@ export default function AdminModels() {
   })
   const [submitting, setSubmitting] = useState(false)
   const submittingRef = useRef(false)
+  const [pullModels, setPullModels] = useState<PullModelsState>(emptyPullModels)
+  const [addingPulledModels, setAddingPulledModels] = useState(false)
+  const addingPulledModelsRef = useRef(false)
+  const pullRequestRef = useRef(0)
   const [confirmDelete, setConfirmDelete] = useState<ApiModel | null>(null)
   const [deleting, setDeleting] = useState(false)
   const deletingRef = useRef(false)
@@ -103,6 +132,93 @@ export default function AdminModels() {
       open: true,
       draft: { ...emptyCreate, kind: createKind, channel_id: channels[0]?.id ?? '' },
     })
+  }
+
+  function openPullModels() {
+    setPullModels({
+      ...emptyPullModels,
+      open: true,
+      channelId: channels[0]?.id ?? '',
+      selected: new Set(),
+    })
+  }
+
+  function selectPullChannel(channelId: string) {
+    pullRequestRef.current++
+    setPullModels({
+      ...emptyPullModels,
+      open: true,
+      channelId,
+      selected: new Set(),
+    })
+  }
+
+  async function discoverSavedModels() {
+    if (!pullModels.channelId || pullModels.loading) return
+    const requestID = ++pullRequestRef.current
+    setPullModels((current) => ({
+      ...current,
+      loading: true,
+      fetched: false,
+      error: false,
+      candidates: [],
+      selected: new Set(),
+    }))
+    try {
+      const result = await adminApi.discoverSavedChannelModels(pullModels.channelId)
+      if (requestID !== pullRequestRef.current) return
+      setPullModels((current) => ({
+        ...current,
+        loading: false,
+        fetched: true,
+        candidates: result.models,
+        skippedUnsupported: result.skipped_unsupported,
+      }))
+    } catch {
+      if (requestID !== pullRequestRef.current) return
+      setPullModels((current) => ({
+        ...current,
+        loading: false,
+        fetched: false,
+        error: true,
+      }))
+    }
+  }
+
+  function togglePulledModel(requestID: string) {
+    const key = requestID.trim().toLowerCase()
+    setPullModels((current) => {
+      const selected = new Set(current.selected)
+      if (selected.has(key)) selected.delete(key)
+      else selected.add(key)
+      return { ...current, selected }
+    })
+  }
+
+  async function addPulledModels(candidates: ApiChannelModelCandidate[]) {
+    if (addingPulledModelsRef.current || !pullModels.channelId || candidates.length === 0) return
+    addingPulledModelsRef.current = true
+    setAddingPulledModels(true)
+    try {
+      const result = await adminApi.createChannelModelsBatch(pullModels.channelId, candidates)
+      await load()
+      setPullModels((current) => ({ ...current, selected: new Set() }))
+      const skipped = result.skipped_existing + result.skipped_duplicate
+      if (result.created > 0) {
+        toast.success(
+          skipped > 0
+            ? t('admin:models.pull.partial', { created: result.created, skipped })
+            : t('admin:models.pull.success', { count: result.created }),
+        )
+      } else {
+        toast.warning(t('admin:models.pull.noneAdded'))
+      }
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+    } finally {
+      addingPulledModelsRef.current = false
+      setAddingPulledModels(false)
+    }
   }
 
   async function submitCreate() {
@@ -195,6 +311,25 @@ export default function AdminModels() {
     }
   }
 
+  const pulledExistingKeys = new Set(
+    models
+      .filter((model) => model.channel_id === pullModels.channelId)
+      .map((model) => model.request_id.trim().toLowerCase()),
+  )
+  const pulledAvailable = pullModels.candidates.filter(
+    (candidate) => !pulledExistingKeys.has(candidate.request_id.trim().toLowerCase()),
+  )
+  const pulledExistingCount = pullModels.candidates.length - pulledAvailable.length
+  const pulledQuery = pullModels.search.trim().toLowerCase()
+  const pulledFiltered = pullModels.candidates.filter((candidate) =>
+    !pulledQuery
+    || candidate.request_id.toLowerCase().includes(pulledQuery)
+    || candidate.label.toLowerCase().includes(pulledQuery),
+  )
+  const pulledSelectedCandidates = pulledAvailable.filter((candidate) =>
+    pullModels.selected.has(candidate.request_id.trim().toLowerCase()),
+  )
+
   return (
     <div>
       <header className="flex flex-col items-start gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -202,16 +337,24 @@ export default function AdminModels() {
           <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">{t('admin:models.title')}</h1>
           <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('admin:models.lead')}</p>
         </div>
-        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:items-center">
+        <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:items-center sm:justify-end">
           <Button
             variant="secondary"
-            className="min-h-[var(--tap-min)] min-w-0 px-2 sm:min-h-0 sm:px-4"
+            className="min-h-[var(--tap-min)] flex-1 px-2 sm:min-h-0 sm:flex-none sm:px-4"
             leadingIcon={<TagsIcon size={15} aria-hidden />}
             onClick={() => navigate('/admin/model-tags')}
           >
             {t('admin:modelTags.manage', { defaultValue: 'Manage tags' })}
           </Button>
-          <Button data-admin-tour="models-create" className="min-h-[var(--tap-min)] min-w-0 px-2 sm:min-h-0 sm:px-4" leadingIcon={<Plus size={15} aria-hidden />} onClick={openNew}>
+          <Button
+            variant="secondary"
+            className="min-h-[var(--tap-min)] flex-1 px-2 sm:min-h-0 sm:flex-none sm:px-4"
+            leadingIcon={<RefreshCw size={15} aria-hidden />}
+            onClick={openPullModels}
+          >
+            {t('admin:models.pull.action')}
+          </Button>
+          <Button data-admin-tour="models-create" className="min-h-[var(--tap-min)] flex-1 px-2 sm:min-h-0 sm:flex-none sm:px-4" leadingIcon={<Plus size={15} aria-hidden />} onClick={openNew}>
             {t('admin:models.new')}
           </Button>
         </div>
@@ -295,6 +438,175 @@ export default function AdminModels() {
           />
         )}
       </section>
+
+      <Dialog
+        open={pullModels.open}
+        onOpenChange={(open) => {
+          if (addingPulledModelsRef.current) return
+          if (!open) pullRequestRef.current++
+          setPullModels((current) => ({ ...current, open }))
+        }}
+      >
+        <DialogContent size="lg" closeDisabled={addingPulledModels}>
+          <DialogHeader>
+            <DialogTitle>{t('admin:models.pull.title')}</DialogTitle>
+            <DialogDescription>{t('admin:models.pull.description')}</DialogDescription>
+          </DialogHeader>
+          <DialogBody>
+            {channels.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-[var(--color-border)] px-5 py-8 text-center text-sm text-[var(--color-fg-muted)]">
+                {t('admin:models.pull.noChannels')}
+              </div>
+            ) : (
+              <div className="grid gap-4">
+                <div className="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+                  <Field label={t('admin:models.pull.channel')} htmlFor="pull-model-channel">
+                    <Select value={pullModels.channelId} onValueChange={selectPullChannel} disabled={pullModels.loading || addingPulledModels}>
+                      <SelectTrigger id="pull-model-channel">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {channels.map((channel) => (
+                          <SelectItem key={channel.id} value={channel.id}>
+                            {channel.name} ({channel.type})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Button
+                    variant="secondary"
+                    className="min-h-[var(--tap-min)] sm:min-h-0"
+                    leadingIcon={<RefreshCw size={15} aria-hidden />}
+                    onClick={() => void discoverSavedModels()}
+                    loading={pullModels.loading}
+                    disabled={!pullModels.channelId || addingPulledModels}
+                  >
+                    {pullModels.loading ? t('admin:models.pull.fetching') : t('admin:models.pull.fetch')}
+                  </Button>
+                </div>
+
+                {pullModels.error ? (
+                  <div className="flex flex-col items-start gap-3 rounded-lg border border-[var(--color-danger)]/30 bg-[var(--color-danger)]/5 px-4 py-3 text-sm text-[var(--color-fg)] sm:flex-row sm:items-center sm:justify-between">
+                    <span>{t('admin:models.pull.failed')}</span>
+                    <Button variant="ghost" size="sm" onClick={() => void discoverSavedModels()}>
+                      {t('admin:models.pull.retry')}
+                    </Button>
+                  </div>
+                ) : null}
+
+                {pullModels.fetched ? (
+                  <>
+                      <div className="flex flex-col gap-3 border-y border-[var(--color-border)] py-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-sm text-[var(--color-fg-muted)]">
+                            {t('admin:models.pull.summary', {
+                              available: pulledAvailable.length,
+                              existing: pulledExistingCount,
+                              selected: pulledSelectedCandidates.length,
+                            })}
+                          </p>
+                          {pullModels.skippedUnsupported > 0 ? (
+                            <p className="mt-1 text-xs text-[var(--color-fg-subtle)]">
+                              {t('admin:models.pull.unsupportedHidden', { count: pullModels.skippedUnsupported })}
+                            </p>
+                          ) : null}
+                        </div>
+                        {pulledAvailable.length > 0 ? (
+                          <div className="flex shrink-0 gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setPullModels((current) => ({
+                                ...current,
+                                selected: new Set(pulledAvailable.map((candidate) => candidate.request_id.trim().toLowerCase())),
+                              }))}
+                            >
+                              {t('admin:models.pull.selectAll')}
+                            </Button>
+                            {pullModels.selected.size > 0 ? (
+                              <Button variant="ghost" size="sm" onClick={() => setPullModels((current) => ({ ...current, selected: new Set() }))}>
+                                {t('admin:models.pull.clearSelection')}
+                              </Button>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+
+                      {pullModels.candidates.length > 0 ? (
+                        <div className="relative">
+                          <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-fg-subtle)]" size={16} aria-hidden />
+                          <Input
+                            value={pullModels.search}
+                            onChange={(event) => setPullModels((current) => ({ ...current, search: event.target.value }))}
+                            className="pl-9"
+                            placeholder={t('admin:models.pull.search')}
+                            aria-label={t('admin:models.pull.search')}
+                          />
+                        </div>
+                      ) : null}
+
+                      {pullModels.candidates.length === 0 ? (
+                        <div className="py-8 text-center text-sm text-[var(--color-fg-muted)]">{t('admin:models.pull.empty')}</div>
+                      ) : pulledFiltered.length === 0 ? (
+                        <div className="py-8 text-center text-sm text-[var(--color-fg-muted)]">{t('admin:models.pull.noSearchResults')}</div>
+                      ) : (
+                        <div>
+                          {pulledAvailable.length === 0 ? (
+                            <p className="mb-3 text-sm text-[var(--color-fg-muted)]">{t('admin:models.pull.allAdded')}</p>
+                          ) : null}
+                          <div className="max-h-[min(42vh,24rem)] overflow-y-auto rounded-lg border border-[var(--color-border)]">
+                          {pulledFiltered.map((candidate) => {
+                            const key = candidate.request_id.trim().toLowerCase()
+                            const existing = pulledExistingKeys.has(key)
+                            return (
+                              <label
+                                key={key}
+                                className={`flex min-h-14 items-center gap-3 border-b border-[var(--color-border)] px-3 py-2.5 last:border-b-0 ${existing ? 'cursor-default bg-[var(--color-bg-muted)]/60' : 'cursor-pointer hover:bg-[var(--color-bg-muted)]'}`}
+                              >
+                                <Checkbox
+                                  checked={existing || pullModels.selected.has(key)}
+                                  disabled={existing || addingPulledModels}
+                                  onChange={() => togglePulledModel(candidate.request_id)}
+                                  aria-label={`${candidate.label}: ${existing ? t('admin:models.pull.alreadyAdded') : t('admin:models.pull.available')}`}
+                                />
+                                <span className="min-w-0 flex-1">
+                                  <span className="flex flex-wrap items-center gap-2">
+                                    <span className="truncate text-sm font-medium text-[var(--color-fg)]">{candidate.label}</span>
+                                    <Badge size="xs" variant="neutral">{candidate.kind}</Badge>
+                                  </span>
+                                  <span className="mt-0.5 block truncate font-mono text-xs text-[var(--color-fg-subtle)]">{candidate.request_id}</span>
+                                </span>
+                                <Badge size="xs" variant={existing ? 'neutral' : 'accent'}>
+                                  {existing ? t('admin:models.pull.alreadyAdded') : t('admin:models.pull.available')}
+                                </Badge>
+                              </label>
+                            )
+                          })}
+                          </div>
+                        </div>
+                      )}
+                  </>
+                ) : null}
+              </div>
+            )}
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setPullModels((current) => ({ ...current, open: false }))} disabled={addingPulledModels}>
+              {t('common:actions.cancel')}
+            </Button>
+            {pullModels.fetched ? (
+              <Button
+                onClick={() => void addPulledModels(pulledSelectedCandidates)}
+                loading={addingPulledModels}
+                disabled={pulledSelectedCandidates.length === 0}
+              >
+                {t('admin:models.pull.addSelected', { count: pulledSelectedCandidates.length })}
+              </Button>
+            ) : null}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Quick-create dialog — only the six fields needed to register a row.
           Everything else lives on /admin/models/:id. */}
