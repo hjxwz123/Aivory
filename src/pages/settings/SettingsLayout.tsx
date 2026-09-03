@@ -192,7 +192,7 @@ export default function SettingsDialog() {
                 // With wrapper padding above it, the header would first travel
                 // that distance before sticking; owning the padding makes it
                 // pinned from the very first scrolled pixel.
-                'min-h-full px-5 pb-5 sm:px-6 sm:pb-6',
+                'flex min-h-full flex-col px-5 pb-5 sm:px-6 sm:pb-6',
                 // Pin each settings page's <header> (title + lead) while the
                 // body scrolls under it. About has no header and pads itself.
                 '[&_header]:sticky [&_header]:top-0 [&_header]:z-10',
@@ -201,7 +201,7 @@ export default function SettingsDialog() {
                 '[&_header]:border-b [&_header]:border-[var(--color-divider)]',
               )}
             >
-              <RouteFade dep={tab} className="min-h-full">
+              <RouteFade dep={tab} className="flex min-h-full flex-1 flex-col">
                 {Array.from(visitedTabsRef.current, (visitedTab) => {
                   const TabPage = tabPages[visitedTab]
                   const active = visitedTab === tab
@@ -210,7 +210,7 @@ export default function SettingsDialog() {
                       key={visitedTab}
                       hidden={!active}
                       aria-hidden={!active || undefined}
-                      className={active ? 'min-h-full' : undefined}
+                      className={active ? 'flex min-h-full flex-1 flex-col' : undefined}
                     >
                       {/* Each first visit owns a fresh local boundary. Its chunk
                           is normally warm from preload; on a slow connection the
