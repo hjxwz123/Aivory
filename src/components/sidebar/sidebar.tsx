@@ -28,7 +28,7 @@ import {
   UserRound,
   Download,
 } from 'lucide-react'
-import { Logo, LogoMark } from '@/components/brand/logo'
+import { LogoMark, TracedLogo } from '@/components/brand/logo'
 import { useWorkspaces } from '@/store/workspaces'
 import {
   CreateWorkspaceDialog,
@@ -450,7 +450,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             className="page-enter inline-flex items-center"
             aria-label={tCommon('aria.homeLink')}
           >
-            <Logo size="sm" />
+            <TracedLogo size="sm" />
           </Link>
           )
         ) : (
