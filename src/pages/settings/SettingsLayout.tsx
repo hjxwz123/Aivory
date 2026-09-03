@@ -210,7 +210,10 @@ export default function SettingsDialog() {
                       key={visitedTab}
                       hidden={!active}
                       aria-hidden={!active || undefined}
-                      className={active ? 'flex min-h-full flex-1 flex-col' : undefined}
+                      // Tab pages use auto side margins with a max-width. Once
+                      // this wrapper became flex, those roots started
+                      // shrink-wrapping unless their width was explicit.
+                      className={active ? 'flex min-h-full flex-1 flex-col [&>*]:w-full' : undefined}
                     >
                       {/* Each first visit owns a fresh local boundary. Its chunk
                           is normally warm from preload; on a slow connection the
