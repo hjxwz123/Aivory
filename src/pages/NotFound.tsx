@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ArrowRight } from 'lucide-react'
-import { Logo } from '@/components/brand/logo'
+import { TracedLogo } from '@/components/brand/logo'
 import { Button } from '@/components/ui/button'
 import { useTheme } from '@/store/theme'
 
@@ -15,7 +15,7 @@ export default function NotFound() {
     <div className="relative min-h-svh bg-[var(--color-bg)] text-[var(--color-fg)] flex flex-col">
       <header className="px-5 sm:px-8 h-16 flex items-center">
         <Link to="/" aria-label={t('common:appName')}>
-          <Logo size="md" />
+          <TracedLogo size="md" />
         </Link>
       </header>
       <main className="flex-1 grid place-items-center px-5">

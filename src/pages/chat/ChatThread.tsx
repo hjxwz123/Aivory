@@ -11,6 +11,7 @@ import { RenameConversationDialog } from '@/components/chat/rename-conversation-
 import { ShareConversationDialog } from '@/components/chat/share-conversation-dialog'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Button } from '@/components/ui/button'
+import { PanelFallback } from '@/components/ui/panel-fallback'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -317,14 +318,7 @@ export default function ChatThread() {
     // cache before the settle-refire re-hydrates it — show the spinner, not a
     // premature "conversation not found".
     if (loadStatus !== 'done' || wsSwitching) {
-      return (
-        <div className="flex-1 grid place-items-center">
-          <div className="flex flex-col items-center gap-4 text-[var(--color-fg-muted)]">
-            <Loader2 size={24} className="animate-spin" aria-hidden />
-            <span className="text-sm">{t('common:common.loading')}</span>
-          </div>
-        </div>
-      )
+      return <PanelFallback scope="fill" />
     }
     return (
       <div className="flex-1 grid place-items-center">
@@ -715,10 +709,7 @@ export default function ChatThread() {
               show a spinner instead of a blank thread. Once any message is present
               (incl. optimistic/streaming) we hand off to MessageList. */}
           {conversation.messages.length === 0 && loadStatus === 'loading' ? (
-            <div className="flex h-full items-center justify-center text-[var(--color-fg-subtle)]">
-              <Loader2 size={22} className="animate-spin" aria-hidden />
-              <span className="sr-only">{t('common.loading', { ns: 'common', defaultValue: 'Loading…' })}</span>
-            </div>
+            <PanelFallback scope="fill" />
           ) : (
             <MessageList conversation={conversation} scrollToMessageId={jumpTo} jumpKey={jumpKey} />
           )}

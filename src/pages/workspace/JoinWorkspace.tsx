@@ -10,7 +10,7 @@ import { Briefcase, Users } from 'lucide-react'
 import { workspacesApi, ApiError } from '@/api'
 import { useAuth } from '@/store/auth'
 import { useWorkspaces } from '@/store/workspaces'
-import { Logo } from '@/components/brand/logo'
+import { TracedLogo } from '@/components/brand/logo'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Ghost } from 'lucide-react'
@@ -64,7 +64,7 @@ export default function JoinWorkspace() {
       <header className="border-b border-[var(--color-divider)]">
         <div className="mx-auto flex h-14 max-w-[40rem] items-center px-5">
           <Link to="/" aria-label="Aivory" className="inline-flex items-center">
-            <Logo />
+            <TracedLogo />
           </Link>
         </div>
       </header>

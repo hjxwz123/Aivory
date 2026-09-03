@@ -2,6 +2,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { AIVORY_MARK_PATH, LogoMark, TracedLogo } from '@/components/brand/logo'
+import * as brandLogo from '@/components/brand/logo'
 
 describe('LogoMark', () => {
   it('renders the centered compound mark as a non-selectable SVG', () => {
@@ -24,5 +25,9 @@ describe('LogoMark', () => {
     expect(html).toContain('aivory-wordmark.svg')
     expect(html).toContain('<img')
     expect(html).not.toContain('>Aivory<')
+  })
+
+  it('does not expose the retired plain-text lockup', () => {
+    expect(brandLogo).not.toHaveProperty('Logo')
   })
 })

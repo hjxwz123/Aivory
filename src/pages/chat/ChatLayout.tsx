@@ -21,7 +21,7 @@ import { AnnouncementBar } from '@/components/announcement/announcement-bar'
 import { AnnouncementPopup } from '@/components/announcement/announcement-popup'
 import { CreditAdjustmentNotice } from '@/components/credits/credit-adjustment-notice'
 import { useHotkeys } from '@/hooks/use-hotkeys'
-import { Logo } from '@/components/brand/logo'
+import { TracedLogo } from '@/components/brand/logo'
 import { RouteFade } from '@/components/ui/route-fade'
 import { chatRouteKeys } from '@/lib/chat-route'
 import { workspaceSwitchDestination } from '@/lib/workspace-navigation'
@@ -116,7 +116,7 @@ export default function ChatLayout() {
               >
                 <Menu size={18} aria-hidden />
               </button>
-              <Logo size="sm" />
+              <TracedLogo size="sm" />
               <div className="size-[var(--tap-min)]" />
             </div>
           )}
@@ -147,21 +147,24 @@ export default function ChatLayout() {
               isDesktop && collapsed && 'pl-11',
             )}
           >
-            {/* Content-scoped Suspense: switching section (chat/projects/kb/
-                settings/…) keeps the sidebar on screen and shows a panel loader
-                while the lazy page chunk loads, instead of blanking the whole app. */}
+            {/* Switching sections keeps the desktop shell visible with a panel
+                loader. On mobile the same canonical loader covers the screen,
+                preventing a transient brand top bar from stacking above it. */}
             {/* Reset for every destination, including detail routes. React
                 Router schedules navigations as transitions; a previously
                 revealed, unkeyed boundary otherwise keeps the OLD page visible
                 until the next lazy chunk resolves. The fresh boundary commits
                 the target location + sidebar state immediately and confines
                 loading feedback to this content pane. */}
-            <Suspense key={routeKeys.content} fallback={<PanelFallback />}>
+            <Suspense
+              key={routeKeys.content}
+              fallback={<PanelFallback scope={isDesktop ? 'panel' : 'screen'} />}
+            >
               {/* activeId changes before the new space-scoped stores finish
                   loading. Hide the old route during that interval so a stale
                   conversation, project, or knowledge base cannot be acted on
                   under the newly selected workspace. */}
-              {workspaceSwitching ? <PanelFallback /> : <Outlet />}
+              {workspaceSwitching ? <PanelFallback scope={isDesktop ? 'panel' : 'screen'} /> : <Outlet />}
             </Suspense>
           </RouteFade>
         </div>

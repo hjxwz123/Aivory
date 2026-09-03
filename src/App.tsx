@@ -1,6 +1,5 @@
 import { lazy, Suspense, useEffect, useRef } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { useTranslation } from 'react-i18next'
 import { useOpenSettings } from '@/hooks/use-open-settings'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/toaster'
@@ -19,6 +18,7 @@ import { useSettingsModal } from '@/store/settings-modal'
 import { initAppUpdate, maybeApplyUpdate } from '@/lib/app-update'
 import { initRealtime, setRealtimeEnabled } from '@/lib/realtime'
 import { isChatShellPath } from '@/lib/app-paths'
+import { PanelFallback } from '@/components/ui/panel-fallback'
 
 const Landing = lazy(() => import('@/pages/Landing'))
 const ChatLayout = lazy(() => import('@/pages/chat/ChatLayout'))
@@ -122,26 +122,6 @@ function GlobalShortcuts() {
   return null
 }
 
-function RouteFallback() {
-  const { t } = useTranslation('common')
-
-  return (
-    <div
-      className="min-h-svh w-full flex flex-col items-center justify-center gap-3 text-[var(--color-fg-subtle)] text-sm"
-      role="status"
-      aria-live="polite"
-      aria-busy="true"
-      aria-atomic="true"
-    >
-      <span
-        aria-hidden
-        className="inline-block size-4 rounded-full border-2 border-[var(--color-fg-faint)] border-r-transparent animate-[spin_900ms_linear_infinite]"
-      />
-      <span className="text-[13px]">{t('common.loading', { defaultValue: 'Loading…' })}</span>
-    </div>
-  )
-}
-
 function ScrollToTop() {
   const { pathname } = useLocation()
   useEffect(() => {
@@ -198,7 +178,7 @@ function SettingsRedirect() {
     openSettings(tab)
     navigate({ pathname: '/chat', search }, { replace: true })
   }, [tab, search, navigate, openSettings])
-  return <RouteFallback />
+  return <PanelFallback scope="screen" />
 }
 
 export default function App() {
@@ -229,7 +209,7 @@ export default function App() {
       <CloseSettingsOnNavigate />
       <AuthGate>
         <GlobalShortcuts />
-        <Suspense fallback={<RouteFallback />}>
+        <Suspense fallback={<PanelFallback scope="screen" />}>
           <Routes>
             <Route path="/welcome" element={<Landing />} />
             <Route path="/share/:token" element={<SharedConversation />} />

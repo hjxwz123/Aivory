@@ -10,7 +10,7 @@ import { useSettings } from '@/store/settings'
 import { toast } from '@/hooks/use-toast'
 import { SUPPORTED_LANGUAGES, type LanguageCode } from '@/i18n'
 import { ACCENT_PRESETS, type AccentPref, type ChatWidthPref, type ThemePref } from '@/types/settings'
-import { Logo } from '@/components/brand/logo'
+import { TracedLogo } from '@/components/brand/logo'
 import { Aurora } from '@/components/landing/fx/aurora'
 import { BlurText } from '@/components/landing/fx/blur-text'
 import { GradientText } from '@/components/landing/fx/gradient-text'
@@ -322,7 +322,7 @@ export function WelcomeCard() {
             </div>
 
             <div className="relative z-10">
-              <Logo size="lg" />
+              <TracedLogo size="lg" />
             </div>
             <div className="relative z-10">
               <div className="text-[12px] uppercase tracking-[0.1em]">
@@ -430,7 +430,7 @@ export function WelcomeCard() {
           style={{ background: 'radial-gradient(60% 80% at 50% 0%, var(--color-accent), transparent 70%)' }}
         />
         <div className="relative flex flex-col items-center gap-4 px-6 pt-8 pb-6 sm:px-8">
-          <Logo size="lg" />
+          <TracedLogo size="lg" />
           <div>
             <DialogTitle>
               {/* One warm clay glint pans through the celebration line. */}
