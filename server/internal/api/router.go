@@ -412,6 +412,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/admin/channels", requireAdmin(d, listChannelsAdmin))
 	mux.handle("POST", "/api/admin/channels/models/discover", requireAdmin(d, discoverDraftChannelModelsAdmin))
 	mux.handle("POST", "/api/admin/channels", requireAdmin(d, createChannelAdmin))
+	mux.handle("POST", "/api/admin/channels/:id/models/discover", requireAdmin(d, discoverSavedChannelModelsAdmin))
 	mux.handle("POST", "/api/admin/channels/:id/models/import", requireAdmin(d, importChannelModelsAdmin))
 	mux.handle("POST", "/api/admin/channels/:id/models/batch", requireAdmin(d, createChannelModelsBatchAdmin))
 	mux.handle("PATCH", "/api/admin/channels/reorder", requireAdmin(d, reorderChannelsAdmin))
