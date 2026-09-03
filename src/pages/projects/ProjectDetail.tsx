@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
   Lock,
+  MessageSquare,
   MoreHorizontal,
   Pencil,
   Pin,
@@ -743,80 +744,89 @@ export default function ProjectDetail() {
             </section>
           )}
 
-          {/* Instructions, files, and chats are separate full-width bands. This
-              keeps the reading order stable at every viewport width. */}
+          {/* Keep the instructions in one vertical reading flow: context and
+              actions first, followed by the full-width content surface. */}
           <section className="mt-14 border-t border-[var(--color-divider)] pt-8 sm:mt-16 sm:pt-10">
-            <SectionHeader
-              title={t('projects:detail.instructionsSection')}
-              action={
-                !editingInstructions && project.instructions ? (
-                  <button
-                    type="button"
-                    onClick={startInstructionsEdit}
-                    className="inline-flex min-h-8 items-center gap-1.5 rounded-[6px] px-2 text-[12px] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:min-h-[var(--tap-min)]"
-                  >
-                    <Pencil size={12} aria-hidden />
-                    {t('projects:detail.instructionsEdit')}
-                  </button>
-                ) : null
-              }
-            />
+            <div className="min-w-0">
+              <SectionHeader
+                title={t('projects:detail.instructionsSection')}
+                action={
+                  !editingInstructions && project.instructions ? (
+                    <button
+                      type="button"
+                      onClick={startInstructionsEdit}
+                      className="inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-[6px] px-2 text-[12px] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:min-h-[var(--tap-min)]"
+                    >
+                      <Pencil size={12} aria-hidden />
+                      {t('projects:detail.instructionsEdit')}
+                    </button>
+                  ) : null
+                }
+              />
+              <p className="mt-2 max-w-[34rem] text-[13px] leading-relaxed text-[var(--color-fg-subtle)]">
+                {t('projects:detail.instructionsHint')}
+              </p>
+            </div>
 
-            {editingInstructions ? (
-              <div className="mt-4 flex flex-col gap-3">
-                <Textarea
-                  value={instructionsDraft}
-                  onChange={(e) => setInstructionsDraft(e.target.value)}
-                  aria-label={t('projects:detail.instructionsSection')}
-                  placeholder={t('projects:detail.instructionsPlaceholder')}
-                  rows={9}
-                  className="text-[15px] leading-relaxed"
-                />
-                <div className="flex items-center justify-end gap-2">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    leadingIcon={<X size={13} aria-hidden />}
-                    onClick={() => setEditingInstructions(false)}
-                    className="max-sm:min-h-[var(--tap-min)]"
-                  >
-                    {t('common:actions.cancel')}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    leadingIcon={<Save size={13} aria-hidden />}
-                    onClick={() => void saveInstructions()}
-                    loading={savingInstructions}
-                    disabled={savingInstructions}
-                    className="max-sm:min-h-[var(--tap-min)]"
-                  >
-                    {t('projects:detail.instructionsSave')}
-                  </Button>
+            <div className="mt-5 min-w-0 sm:mt-6">
+              {editingInstructions ? (
+                <div className="flex flex-col gap-3">
+                  <Textarea
+                    value={instructionsDraft}
+                    onChange={(e) => setInstructionsDraft(e.target.value)}
+                    aria-label={t('projects:detail.instructionsSection')}
+                    placeholder={t('projects:detail.instructionsPlaceholder')}
+                    rows={9}
+                    className="text-[15px] leading-relaxed"
+                  />
+                  <div className="flex items-center justify-end gap-2">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      leadingIcon={<X size={13} aria-hidden />}
+                      onClick={() => setEditingInstructions(false)}
+                      className="max-sm:min-h-[var(--tap-min)]"
+                    >
+                      {t('common:actions.cancel')}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      leadingIcon={<Save size={13} aria-hidden />}
+                      onClick={() => void saveInstructions()}
+                      loading={savingInstructions}
+                      disabled={savingInstructions}
+                      className="max-sm:min-h-[var(--tap-min)]"
+                    >
+                      {t('projects:detail.instructionsSave')}
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            ) : project.instructions ? (
-              <div className="mt-4 max-w-[62ch] whitespace-pre-wrap text-[15px] leading-[1.7] text-[var(--color-fg)]">
-                {project.instructions}
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={startInstructionsEdit}
-                className={cn(
-                  'mt-4 w-full text-left rounded-[12px] border border-dashed border-[var(--color-border)] p-5',
-                  'text-[13.5px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg-muted)] interactive',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                )}
-              >
-                <span className="block text-[var(--color-fg-muted)] mb-1.5 max-w-[60ch]">
-                  {t('projects:detail.instructionsEmpty')}
-                </span>
-                <span className="inline-flex items-center gap-1 text-[12px] text-[var(--color-accent)]">
-                  <Plus size={12} aria-hidden /> {t('projects:detail.instructionsAddCta')}
-                </span>
-              </button>
-            )}
+              ) : project.instructions ? (
+                <div className="min-h-28 rounded-[10px] bg-[var(--color-surface-sunken)] px-4 py-4 sm:px-5">
+                  <div className="max-w-[78ch] whitespace-pre-wrap text-[15px] leading-[1.7] text-[var(--color-fg)]">
+                    {project.instructions}
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={startInstructionsEdit}
+                  className={cn(
+                    'min-h-28 w-full rounded-[10px] border border-dashed border-[var(--color-border)] p-5 text-left',
+                    'text-[13.5px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg-muted)] interactive',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                  )}
+                >
+                  <span className="mb-1.5 block max-w-[60ch] text-[var(--color-fg-muted)]">
+                    {t('projects:detail.instructionsEmpty')}
+                  </span>
+                  <span className="inline-flex items-center gap-1 text-[12px] text-[var(--color-accent)]">
+                    <Plus size={12} aria-hidden /> {t('projects:detail.instructionsAddCta')}
+                  </span>
+                </button>
+              )}
+            </div>
           </section>
 
           {canUseKnowledgeBases ? (
@@ -859,9 +869,9 @@ export default function ProjectDetail() {
                 </span>
               </button>
               ) : (
-                <p className="mt-4 max-w-[60ch] text-[13.5px] leading-relaxed text-[var(--color-fg-subtle)]">
+                <CompactEmptyState icon={<Lock size={15} aria-hidden />}>
                   {t('kb:fileUploadPermissionRequired')}
-                </p>
+                </CompactEmptyState>
               )
             ) : (
               <ul className="mt-3 flex flex-col divide-y divide-[var(--color-divider)] border-t border-[var(--color-divider)]">
@@ -961,9 +971,9 @@ export default function ProjectDetail() {
                 <Skeleton className="ml-auto h-3 w-20" />
               </div>
             ) : projectChats.length === 0 ? (
-              <p className="mt-4 max-w-[60ch] text-[13.5px] leading-relaxed text-[var(--color-fg-subtle)]">
+              <CompactEmptyState icon={<MessageSquare size={15} aria-hidden />}>
                 {t('projects:detail.chatsEmptyBody')}
-              </p>
+              </CompactEmptyState>
             ) : (
               <ul className="mt-3 flex flex-col divide-y divide-[var(--color-divider)] border-t border-[var(--color-divider)]">
                 {projectChats.map((c) => (
@@ -1294,6 +1304,25 @@ function SectionHeader({
         </span>
       ) : null}
       {action ? <div className="ml-auto shrink-0">{action}</div> : null}
+    </div>
+  )
+}
+
+function CompactEmptyState({
+  icon,
+  children,
+}: {
+  icon: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <div className="mt-4 flex min-h-20 w-full items-start gap-3 rounded-[10px] bg-[var(--color-surface-sunken)] px-4 py-4 sm:items-center sm:px-5">
+      <span className="mt-0.5 inline-flex size-8 shrink-0 items-center justify-center rounded-[8px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)] sm:mt-0">
+        {icon}
+      </span>
+      <p className="max-w-[70ch] text-[13.5px] leading-relaxed text-[var(--color-fg-muted)]">
+        {children}
+      </p>
     </div>
   )
 }
