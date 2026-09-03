@@ -25,10 +25,70 @@ func newChannelModelImportFixture(t *testing.T) *channelAdminFixture {
 	fx.mux.handle(http.MethodPost, "/api/admin/channels/models/discover", func(w http.ResponseWriter, r *http.Request) {
 		discoverDraftChannelModelsAdmin(d, w, r)
 	})
+	fx.mux.handle(http.MethodPost, "/api/admin/channels/:id/models/discover", func(w http.ResponseWriter, r *http.Request) {
+		discoverSavedChannelModelsAdmin(d, w, r)
+	})
 	fx.mux.handle(http.MethodPost, "/api/admin/channels/:id/models/batch", func(w http.ResponseWriter, r *http.Request) {
 		createChannelModelsBatchAdmin(d, w, r)
 	})
 	return &fx
+}
+
+func TestDiscoverSavedChannelModelsUsesStoredCredentialsWithoutPersistingModels(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/models" {
+			t.Errorf("request = %s %s", r.Method, r.URL.String())
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer stored-secret" {
+			t.Errorf("authorization = %q", got)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"data": []map[string]string{
+			{"id": "gpt-existing"},
+			{"id": "gpt-new"},
+		}})
+	}))
+	defer server.Close()
+
+	fx := newChannelModelImportFixture(t)
+	channel, err := store.CreateChannel(t.Context(), fx.db, "Saved", "openai", "chat", server.URL+"/v1", "stored-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateModel(t.Context(), fx.db, store.Model{
+		ChannelID: channel.ID, RequestID: "gpt-existing", Label: "Existing", Kind: "chat", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := fx.request(t, http.MethodPost, "/api/admin/channels/"+channel.ID+"/models/discover", "")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var result channelModelDiscovery
+	if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Discovered != 2 || len(result.Models) != 2 || result.Models[1].RequestID != "gpt-new" {
+		t.Fatalf("discovery=%+v", result)
+	}
+	if strings.Contains(recorder.Body.String(), "stored-secret") {
+		t.Fatalf("API key leaked in response: %s", recorder.Body.String())
+	}
+	models, err := store.ListModels(t.Context(), fx.db, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 {
+		t.Fatalf("discovery persisted models: %+v", models)
+	}
+}
+
+func TestDiscoverSavedChannelModelsReturnsNotFound(t *testing.T) {
+	fx := newChannelModelImportFixture(t)
+	recorder := fx.request(t, http.MethodPost, "/api/admin/channels/missing/models/discover", "")
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
 }
 
 func importChannelModelsRequest(t *testing.T, fx *channelAdminFixture, channelID string) (*httptest.ResponseRecorder, channelModelImportResponse) {
