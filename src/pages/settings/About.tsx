@@ -6,6 +6,8 @@ import { useLegalConfig } from '@/hooks/use-legal-config'
 const APP_VERSION = '2.4.6'
 const DOCS_URL = 'https://docs.aivorygo.com'
 const GITHUB_URL = 'https://github.com/hjxwz123/Aivory'
+const TERMS_URL = '/terms'
+const PRIVACY_URL = '/privacy'
 const LICENSE_URL = 'https://github.com/hjxwz123/Aivory/blob/main/LICENSE'
 
 function ResourceCard({
@@ -75,6 +77,8 @@ export default function About() {
         <nav className="mt-3 grid gap-2.5 md:grid-cols-2" aria-label={t('about.resources')}>
           <ResourceCard icon={BookOpen} label={t('about.documentation')} value="docs.aivorygo.com" href={DOCS_URL} external />
           <ResourceCard icon={Github} label={t('about.source')} value="hjxwz123/Aivory" href={GITHUB_URL} external />
+          <ResourceCard icon={FileText} label={t('about.terms')} value={t('about.viewTerms')} href={TERMS_URL} />
+          <ResourceCard icon={ShieldCheck} label={t('about.privacyPolicy')} value={t('about.viewPrivacy')} href={PRIVACY_URL} />
         </nav>
       </section>
 
@@ -89,39 +93,19 @@ export default function About() {
               <span className="shrink-0">{t('about.contactSupport')}:</span>
               <span className="truncate font-medium text-[var(--color-accent)]">{legalConfig.contactEmail}</span>
             </a>
-            <nav className="flex flex-wrap items-center gap-x-4 gap-y-2" aria-label={t('about.resources')}>
+            <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-[var(--color-fg-faint)]">
+              <span>{t('about.copyright', { year: new Date().getFullYear() })}</span>
+              <span aria-hidden>·</span>
               <a
-                href="/terms"
+                href={LICENSE_URL}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-[4px] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                className="inline-flex items-center gap-1 rounded-[4px] hover:text-[var(--color-fg-muted)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
               >
-                <FileText size={12} aria-hidden />
-                {t('about.terms')}
+                <Scale size={11} aria-hidden />
+                Apache 2.0
               </a>
-              <a
-                href="/privacy"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-[4px] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-              >
-                <ShieldCheck size={12} aria-hidden />
-                {t('about.privacyPolicy')}
-              </a>
-            </nav>
-          </div>
-          <div className="mt-2.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-[var(--color-fg-faint)] md:justify-end">
-            <span>{t('about.copyright', { year: new Date().getFullYear() })}</span>
-            <span aria-hidden>·</span>
-          <a
-            href={LICENSE_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 rounded-[4px] hover:text-[var(--color-fg-muted)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-          >
-            <Scale size={11} aria-hidden />
-            Apache 2.0
-          </a>
+            </span>
           </div>
         </div>
       </footer>

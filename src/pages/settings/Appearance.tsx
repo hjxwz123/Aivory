@@ -206,8 +206,14 @@ export default function Appearance() {
             </Segment>
           </div>
         </SettingsRow>
-        <SettingsRow label={t('appearance.font.title')} description={t('appearance.font.subtitle')}>
-          <div className="flex flex-wrap gap-2 sm:justify-end">
+        <div className="px-4 py-3">
+          <div>
+            <div className="text-sm font-medium text-[var(--color-fg)]">{t('appearance.font.title')}</div>
+            <p className="mt-0.5 text-xs leading-normal text-[var(--color-fg-muted)]">
+              {t('appearance.font.subtitle')}
+            </p>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
             {FONT_PRESETS.map((opt) => {
               const active = appearance.font === opt
               return (
@@ -218,7 +224,7 @@ export default function Appearance() {
                   onClick={() => onChangeFont(opt)}
                   style={{ fontFamily: FONT_PREVIEW[opt] }}
                   className={cn(
-                    'flex min-w-[7.25rem] flex-col items-start gap-1 rounded-[10px] border px-3 py-2.5 text-left interactive',
+                    'flex min-w-0 flex-col items-start gap-1 rounded-[10px] border px-3 py-2.5 text-left interactive',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                     active
                       ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)]'
@@ -233,7 +239,7 @@ export default function Appearance() {
               )
             })}
           </div>
-        </SettingsRow>
+        </div>
       </SettingsSection>
     </div>
   )
