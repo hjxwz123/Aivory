@@ -35,6 +35,28 @@ describe('administrator channel model import API', () => {
     expect(JSON.parse(String(options?.body))).toEqual(body)
   })
 
+  it('discovers models from an encoded saved channel without sending credentials', async () => {
+    const response = {
+      models: [{ request_id: 'gpt-5.1', label: 'GPT-5.1', description: '', kind: 'chat' }],
+      discovered: 1,
+      skipped_unsupported: 0,
+    }
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify(response), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(adminApi.discoverSavedChannelModels('channel / one')).resolves.toEqual(response)
+
+    const [url, options] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/admin/channels/channel%20%2F%20one/models/discover')
+    expect(options).toMatchObject({ method: 'POST', credentials: 'include' })
+    expect(options?.body).toBeUndefined()
+  })
+
   it('creates a selected model batch under the encoded channel', async () => {
     const response = { requested: 2, created: 2, skipped_existing: 0, skipped_duplicate: 0 }
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>

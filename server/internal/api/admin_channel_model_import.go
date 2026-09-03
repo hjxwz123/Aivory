@@ -132,6 +132,33 @@ func discoverDraftChannelModelsAdmin(d Deps, w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, discovery)
 }
 
+// discoverSavedChannelModelsAdmin previews the current upstream model list for
+// an existing channel. Credentials are loaded server-side and are never sent
+// back to the browser.
+func discoverSavedChannelModelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
+	channel, err := store.GetChannel(r.Context(), d.DB, pathParam(r, "id"))
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, errNotFound)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), channelModelDiscoveryTimeout)
+	defer cancel()
+	discovery, err := discoverChannelModels(ctx, channel)
+	if err != nil {
+		if d.Logger != nil {
+			d.Logger.Printf("admin: saved channel model discovery failed (channel=%s type=%s): %v", channel.ID, channel.Type, err)
+		}
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": errChannelModelDiscoveryFailed.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, discovery)
+}
+
 func importChannelModelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	channel, err := store.GetChannel(r.Context(), d.DB, pathParam(r, "id"))
 	if err != nil {
