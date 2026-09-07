@@ -19,8 +19,9 @@ const moderationModelSystemPrompt = "You are a strict content-safety classifier 
 
 const defaultModerationMessage = "Your message was blocked by content moderation. Please rephrase and try again."
 
-// moderationVerdictMaxOutputTokens caps the one-word ALLOW/BLOCK verdict output.
-var moderationVerdictMaxOutputTokens = 8
+// moderationVerdictMaxOutputTokens leaves enough headroom for reasoning models
+// while still keeping the one-word ALLOW/BLOCK classification tightly bounded.
+var moderationVerdictMaxOutputTokens = 256
 
 // moderatePrompt screens a single user prompt (no history) before generation.
 // Returns (blocked, message). It honours the model's per-model toggle + mode:
