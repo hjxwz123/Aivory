@@ -132,6 +132,18 @@ Default per-turn ceiling:
 | `python_execute` | 16 |
 | **All tools combined** | **48** |
 
+### MCP services
+
+Aivory integrates the **Model Context Protocol (Streamable HTTP transport)** — the open standard that lets assistants call external tools by capability:
+
+- **Admin-managed catalog**: register a central MCP service once under **Admin → Capabilities & integrations → MCP services**. Name, icon, and description are public; the service URL and optional request headers (which can carry credentials such as `Authorization: Bearer …`) stay server-side and are masked after saving.
+- **Per-model defaults**: a model record may pre-tick its own MCP tools (from the whole catalog). Users can still adjust tools per conversation.
+- **User-managed MCP**: individual users can also add their own Streamable HTTP MCP endpoints under personal resources, independent of the admin catalog.
+- **Confidence checks**: each service is tested and synchronized up front; discovered tools land in a snapshot that the model registry consumes. A service marked unavailable stays discoverable in the picker but cannot be selected — same rule as restricted internal tools.
+- **Safety boundary**: MCP tool output is treated as untrusted data (never as instructions); the same cap and scoping rules that guard tool calls across the conversation apply.
+
+For the full registration flow, transport requirements, and the auth/header rules, see [Tools, MCP, and sandbox](docs-site/docs/admin/tools-sandbox.mdx).
+
 ---
 
 ## RAG & knowledge bases
@@ -173,6 +185,7 @@ Payment checkout is optional and operator-configured. Aivory supports multiple p
 | Providers & models | Channel URLs and keys, model availability, pricing, context windows, model controls, tags, fallbacks, and tool capability policies |
 | Tools & knowledge | Built-in and official tools, RAG settings, document libraries, embedding state, image styles, skills, and prompt templates |
 | Users & workspaces | Roles, user groups, quotas, login history, moderation, memories, files, shared workspaces, and read-only conversation inspection |
+| Sign-in & SSO | Email/password on/off, registration policy, captcha, **OAuth/OIDC** (Google · GitHub · Apple · generic OIDC/OAuth2 — Azure AD/Okta/Keycloak via generic OIDC), TOTP 2FA, session revocation |
 | Subscriptions & payments | Public plans, timed and permanent credits, model quotas, credit packages, redeem codes, payment channels and methods, order audit, and reconciliation |
 | Usage & operations | Per-user/model/purpose analytics, cost reports, announcements, email, OAuth, registration, legal content, logging, and model feedback |
 | Infrastructure | Sandbox, object storage, SearXNG, MinerU, upload policy, backup and migration, and live system settings |
@@ -191,6 +204,21 @@ Most runtime configuration takes effect on the next request, without editing env
 | Image generation | Generate or edit images with model-specific controls, curated styles, usage metering, and a personal gallery |
 | Projects, skills & prompts | Group conversations and files under project instructions; install administrator resources or create personal reusable skills and prompts |
 | Experience & security | Streaming reasoning, long-context compaction, sharing, PWA, five languages, responsive themes, backend-only keys, HMAC signing, upload validation, and rate limits |
+| MCP tool integration | Open, standard tool access via Streamable HTTP MCP — admin catalog + per-model defaults + user-managed endpoints |
+| Enterprise SSO | Google · GitHub · Apple · generic OIDC / OAuth2 (Azure AD, Okta, Keycloak, …), auto-provisioning, TOTP 2FA, session revocation |
+
+---
+
+## Enterprise sign-in (SSO)
+
+Bring your own identity provider and keep password logins behind it. Aivory authenticates enterprise users through standards-based OAuth/OIDC instead of storing corporate passwords:
+
+- **Five provider modes**: Google, GitHub, Apple, **generic OAuth 2.0** (UserInfo), and **generic OpenID Connect** (ID-token signature validation via JWKS). Any IdP that speaks OIDC or OAuth 2 — Azure AD / Entra ID, Okta, Keycloak, Auth0, GitLab, Feishu/Lark, or a self-hosted IdP — connects through the generic kinds by entering its authorize, token, userinfo/issuer and JWKS endpoints.
+- **Enterprise SSO posture**: disable email/password registration and site password sign-in, keep only the OIDC/OAuth2 sources, and set the unauthenticated entry point to auto-redirect to the default provider. Identity link (binding) is hardened with subject-keying so re-login matches the provider's immutable subject, never the user-supplied email; a state nonce + PKCE keeps the callback from being replayable.
+- **Provisioning & lifecycle**: third-party sign-in may auto-provision accounts; the initial-password policy can still require a first password for OAuth-created users. Administrators can bind/unbind identities, rotate credentials, and revoke sessions centrally.
+- **Security defaults**: OAuth client secrets and Apple `.p8` keys stay server-side; token exchange has a bounded timeout with clear egress diagnostics; per-IP rate limits cover the OAuth endpoints; access-token expiry, TOTP 2FA, and login audit rows apply to SSO sessions just like password sessions.
+
+LDAP / AD directory sync is **not** yet offered — SSO at this layer is delegated to your IdP through OIDC/OAuth 2. The full provider matrix, safe-launch checklist, and the enterprise lockdown recipe live in [Login methods & SSO](docs-site/docs/admin/access-auth.mdx).
 
 ---
 
