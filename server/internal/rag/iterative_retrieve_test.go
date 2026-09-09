@@ -10,6 +10,7 @@ import (
 	"log"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"unicode/utf8"
 
@@ -699,6 +700,7 @@ func (r *scriptedTaskRouter) RunJSON(_ context.Context, kind, prompt string, out
 }
 
 type iterativeVectorStore struct {
+	mu                 sync.Mutex
 	enabled            bool
 	statuses           map[string]vector.ChunkVectorStatus
 	keywordHitsByQuery map[string][]vector.Hit
@@ -713,6 +715,8 @@ func (v *iterativeVectorStore) Upsert(context.Context, int, []vector.Point) erro
 	return nil
 }
 func (v *iterativeVectorStore) Search(_ context.Context, _ int, _ []float32, scope vector.Scope, _ int) ([]vector.Hit, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
 	v.searchCalls++
 	v.scopes = append(v.scopes, cloneVectorScope(scope))
 	if err := v.searchErrorsAt[v.searchCalls]; err != nil {
@@ -721,6 +725,8 @@ func (v *iterativeVectorStore) Search(_ context.Context, _ int, _ []float32, sco
 	return nil, nil
 }
 func (v *iterativeVectorStore) SearchKeyword(_ context.Context, _ int, query string, scope vector.Scope, _ int) ([]vector.Hit, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
 	v.queryLog = append(v.queryLog, query)
 	v.scopes = append(v.scopes, cloneVectorScope(scope))
 	return v.keywordHitsByQuery[query], nil

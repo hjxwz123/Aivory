@@ -156,3 +156,41 @@ describe('MessageRow deleted attachments', () => {
     expect(html).not.toContain('data-attachment-deleted="true"')
   })
 })
+
+
+describe('MessageRow attachment retrieval progress', () => {
+  function attachmentMessage(strategy: string, content = '', streaming = true): Message {
+    return {
+      id: 'attachment-progress', role: 'assistant', content, streaming, createdAt: 1,
+      ragInjection: { strategy, summary: '', at: 1 },
+    }
+  }
+
+  it('renders live searching and ready states without a second loading logo', () => {
+    for (const [strategy, label] of [
+      ['document_searching', 'message.ragDocumentSearching'],
+      ['document_found', 'message.ragDocumentFound'],
+    ]) {
+      const html = renderRow(attachmentMessage(strategy))
+      expect(html).toContain(label)
+      expect(html).toContain('role="status"')
+      expect(html).toContain('aria-live="polite"')
+      expect(html).not.toContain('animate-[core-breathe_2400ms_ease-in-out_infinite]')
+    }
+  })
+
+  it('removes progress when answer text arrives or generation stops', () => {
+    expect(renderRow(attachmentMessage('document_found', 'Answer begins'))).not.toContain('message.ragDocumentFound')
+    expect(renderRow(attachmentMessage('document_searching', '', false))).not.toContain('message.ragDocumentSearching')
+    expect(renderRow(attachmentMessage('document_skipped'))).not.toContain('message.ragDocumentSearching')
+  })
+
+  it('distinguishes no result from failure and retains the failure notice', () => {
+    const noHit = renderRow(attachmentMessage('document_no_hit'))
+    expect(noHit).toContain('message.ragDocumentNoHit')
+    expect(noHit).not.toContain('message.ragDocumentFound')
+    const failed = renderRow(attachmentMessage('document_error', 'Partial answer', false))
+    expect(failed).toContain('message.ragDocumentError')
+    expect(failed).toContain('role="alert"')
+  })
+})

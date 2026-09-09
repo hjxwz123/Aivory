@@ -3,9 +3,13 @@ package llm
 import (
 	"bytes"
 	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -46,7 +50,8 @@ func (provider *ragTimeoutProvider) Stream(
 	}, nil
 }
 
-func TestOrchestratorOnlineRAGTimeoutFailsOpenToMainProvider(t *testing.T) {
+func setupDocumentRAGProgress(t *testing.T, router rag.TaskRouter) (*Orchestrator, RunRequest, *ragTimeoutProvider, *bytes.Buffer, *sql.DB) {
+	t.Helper()
 	ctx := context.Background()
 	db, err := store.Open(filepath.Join(t.TempDir(), "online-rag-timeout.db"))
 	if err != nil {
@@ -95,21 +100,39 @@ func TestOrchestratorOnlineRAGTimeoutFailsOpenToMainProvider(t *testing.T) {
 	var logs bytes.Buffer
 	logger := log.New(io.MultiWriter(&logs), "", 0)
 	ragService := rag.New(db, nil, logger)
-	router := &blockingOnlineRAGRouter{}
 	ragService.SetTaskLLM(router)
 	registry := NewRegistry(logger)
 	provider := &ragTimeoutProvider{}
 	registry.Register(provider)
 	orchestrator := NewOrchestrator(db, registry, generationInterruptedTools{}, ragService, nil, nil, nil, nil, logger)
 
+	return orchestrator, RunRequest{
+		UserID: "u1", ConversationID: conversation.ID, ModelID: model.ID,
+		UserText: "one word", ToolMode: ToolModeDisabled,
+	}, provider, &logs, db
+}
+
+func TestOrchestratorOnlineRAGTimeoutFailsOpenToMainProvider(t *testing.T) {
+	ctx := context.Background()
+	router := &blockingOnlineRAGRouter{}
+	orchestrator, request, provider, logs, db := setupDocumentRAGProgress(t, router)
+
 	previousTimeout := ragQueryTimeout
 	ragQueryTimeout = 25 * time.Millisecond
 	t.Cleanup(func() { ragQueryTimeout = previousTimeout })
 	started := time.Now()
-	result, err := orchestrator.Run(ctx, RunRequest{
-		UserID: "u1", ConversationID: conversation.ID, ModelID: model.ID,
-		UserText: "one word", ToolMode: ToolModeDisabled,
-	}, func(SseEvent) {})
+	var statuses []string
+	result, err := orchestrator.Run(ctx, request, func(event SseEvent) {
+		if event.Type == "rag" {
+			if event.Status == "document_searching" && router.calls.Load() != 0 {
+				t.Error("searching event arrived after the router started")
+			}
+			statuses = append(statuses, event.Status)
+		}
+		if event.Type == "text_delta" && !reflect.DeepEqual(statuses, []string{"document_searching", "document_error"}) {
+			t.Errorf("text arrived before retrieval failure notice: %v", statuses)
+		}
+	})
 	elapsed := time.Since(started)
 	if err != nil {
 		t.Fatalf("run after RAG timeout: %v", err)
@@ -135,5 +158,72 @@ func TestOrchestratorOnlineRAGTimeoutFailsOpenToMainProvider(t *testing.T) {
 	}
 	if persisted.Status != "complete" {
 		t.Fatalf("assistant status=%q, want complete", persisted.Status)
+	}
+}
+
+type documentProgressRouter struct {
+	response string
+	onCall   func()
+}
+
+func (r *documentProgressRouter) RunJSON(ctx context.Context, _ string, _ string, out any, _ rag.RouterOpts) error {
+	if r.onCall != nil {
+		r.onCall()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return json.Unmarshal([]byte(r.response), out)
+}
+
+func TestOrchestratorDocumentRAGProgressBeforeAnswer(t *testing.T) {
+	for _, tc := range []struct {
+		name, response, terminal string
+	}{
+		{"found", `{"strategy":"retrieve","queries":["large document"]}`, "document_found"},
+		{"skipped", `{"strategy":"none","queries":[]}`, "document_skipped"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var statuses []string
+			router := &documentProgressRouter{response: tc.response, onCall: func() {
+				if !reflect.DeepEqual(statuses, []string{"document_searching"}) {
+					t.Errorf("router started without progress: %v", statuses)
+				}
+			}}
+			o, request, provider, _, _ := setupDocumentRAGProgress(t, router)
+			_, err := o.Run(context.Background(), request, func(event SseEvent) {
+				if event.Type == "rag" {
+					statuses = append(statuses, event.Status)
+					if event.Status == "document_found" && (event.SourceCount == nil || *event.SourceCount < 1) {
+						t.Error("reported found without evidence")
+					}
+				}
+				if event.Type == "text_delta" && !reflect.DeepEqual(statuses, []string{"document_searching", tc.terminal}) {
+					t.Errorf("text arrived before final retrieval status: %v", statuses)
+				}
+			})
+			if err != nil || provider.calls.Load() != 1 || !reflect.DeepEqual(statuses, []string{"document_searching", tc.terminal}) {
+				t.Fatalf("err=%v provider=%d statuses=%v", err, provider.calls.Load(), statuses)
+			}
+		})
+	}
+}
+
+func TestOrchestratorDocumentRAGStopDoesNotStartMainModel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	router := &documentProgressRouter{onCall: cancel}
+	o, request, provider, _, _ := setupDocumentRAGProgress(t, router)
+	var statuses []string
+	_, err := o.Run(ctx, request, func(event SseEvent) {
+		if event.Type == "rag" {
+			statuses = append(statuses, event.Status)
+		}
+	})
+	if err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	if provider.calls.Load() != 0 || !reflect.DeepEqual(statuses, []string{"document_searching"}) {
+		t.Fatalf("provider=%d statuses=%v, stopped retrieval must not start generation or report success/error", provider.calls.Load(), statuses)
 	}
 }

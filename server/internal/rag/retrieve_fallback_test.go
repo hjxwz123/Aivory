@@ -7,8 +7,10 @@ import (
 	"io"
 	"log"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"aivory/server/internal/store"
@@ -566,11 +568,14 @@ func TestRouteAndRetrieveConversationRouterQueriesRemainUnbounded(t *testing.T) 
 	if err != nil {
 		t.Fatalf("route retrieve: %v", err)
 	}
-	if !equalStrings(decision.Queries, routerQueries) {
-		t.Fatalf("conversation router queries=%q, want unchanged %q", decision.Queries, routerQueries)
+	wantQueries := []string{strings.TrimSpace(longQuery), "second", "third", "fourth"}
+	if !equalStrings(decision.Queries, wantQueries) {
+		t.Fatalf("conversation router queries=%q, want untruncated %q", decision.Queries, wantQueries)
 	}
-	if !equalStrings(queries, routerQueries) {
-		t.Fatalf("executed conversation queries=%q, want all unchanged %q", queries, routerQueries)
+	slices.Sort(queries)
+	slices.Sort(wantQueries)
+	if !equalStrings(queries, wantQueries) {
+		t.Fatalf("executed conversation queries=%q, want all queries %q", queries, wantQueries)
 	}
 }
 
@@ -774,8 +779,8 @@ func TestRouteAndRetrieveRunsAllRewrittenQueriesBeforeTopKCap(t *testing.T) {
 	if got[0].ID == "ch3" || got[1].ID != "ch3" {
 		t.Fatalf("round-robin merge should retain the later exact-query hit: %+v", got)
 	}
-	if len(queries) != 2 || queries[0] != "full chunk" || queries[1] != "exact reference query" {
-		t.Fatalf("retrieval queries = %v, want all rewritten queries in order", queries)
+	if len(queries) != 2 || !slices.Contains(queries, "full chunk") || !slices.Contains(queries, "exact reference query") {
+		t.Fatalf("retrieval queries = %v, want all rewritten queries", queries)
 	}
 }
 
@@ -816,14 +821,14 @@ func TestRouteAndRetrievePrioritizesExactUserQueryForTopKOne(t *testing.T) {
 		queryLog: &queries,
 	})
 
-	got, _, err := svc.RouteAndRetrieve(ctx, "u1", "c1", nil, "甲乙5", nil, 8)
+	got, decision, err := svc.RouteAndRetrieve(ctx, "u1", "c1", nil, "甲乙5", nil, 8)
 	if err != nil {
 		t.Fatalf("route retrieve: %v", err)
 	}
 	if len(got) != 1 || got[0].ID != "ch2" {
 		t.Fatalf("topK=1 lost exact user query: %+v", got)
 	}
-	if len(queries) == 0 || queries[0] != "甲乙5" {
+	if len(decision.Queries) == 0 || decision.Queries[0] != "甲乙5" || !slices.Contains(queries, "甲乙5") {
 		t.Fatalf("exact user query was not prioritized: %v", queries)
 	}
 }
@@ -901,6 +906,8 @@ func (r *recordingRouter) RunJSON(_ context.Context, kind string, _ string, out 
 	return nil
 }
 
+var testVectorQueryLogMu sync.Mutex
+
 type testVectorStore struct {
 	hits               []vector.Hit
 	keywordHits        []vector.Hit
@@ -919,7 +926,9 @@ func (v testVectorStore) Search(context.Context, int, []float32, vector.Scope, i
 }
 func (v testVectorStore) SearchKeyword(_ context.Context, _ int, query string, _ vector.Scope, _ int) ([]vector.Hit, error) {
 	if v.queryLog != nil {
+		testVectorQueryLogMu.Lock()
 		*v.queryLog = append(*v.queryLog, query)
+		testVectorQueryLogMu.Unlock()
 	}
 	if v.keywordHitsByQuery != nil {
 		return v.keywordHitsByQuery[query], nil

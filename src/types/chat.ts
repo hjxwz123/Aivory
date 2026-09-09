@@ -91,6 +91,11 @@ export interface Citation {
  * knowledge-base multi-round path. The string escape hatch preserves forward
  * compatibility with newer servers while keeping known states discoverable. */
 export type RagInjectionStrategy =
+  | 'document_searching'
+  | 'document_found'
+  | 'document_no_hit'
+  | 'document_error'
+  | 'document_skipped'
   | 'retrieve'
   | 'full_text'
   | 'full_doc'
