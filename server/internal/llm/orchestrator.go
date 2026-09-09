@@ -3263,6 +3263,9 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		// tight top-5 even when correctly ranked; 8 parent sections stay well within
 		// the context budget while improving recall on specific-reference questions.
 		var ragErr error
+		if !hasAttachedKnowledgeBase {
+			onEvent(SseEvent{Type: "rag", Status: "document_searching"})
+		}
 		if hasAttachedKnowledgeBase {
 			onEvent(SseEvent{Type: "rag", Status: "searching"})
 			iterative, iterativeErr := o.rag.RouteAndRetrieveIterative(
@@ -3313,6 +3316,19 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 				o.logger.Printf("rag: online query timed out after %s (conv=%s, kbs=%v); answering without knowledge context", ragQueryTimeout, conv.ID, kbIDs)
 			}
 		}
+		if !hasAttachedKnowledgeBase && ctx.Err() == nil {
+			status := "document_no_hit"
+			switch {
+			case ragErr != nil:
+				status = "document_error"
+			case len(snippets) > 0:
+				status = "document_found"
+			case decision.Strategy == "none":
+				status = "document_skipped"
+			}
+			sourceCount := len(snippets)
+			onEvent(SseEvent{Type: "rag", Status: status, SourceCount: &sourceCount})
+		}
 		// Never SILENTLY swallow a retrieval failure (e.g. mixed embedding
 		// models/dims, embedder down). We still answer without RAG context — the
 		// turn shouldn't hard-fail — but the reason is now logged instead of
@@ -3324,9 +3340,6 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			if !ragTimedOut && o.logger != nil {
 				o.logger.Printf("rag: retrieval failed for conv %s (kbs=%v): %v — answering without knowledge context", conv.ID, kbIDs, ragErr)
 			}
-		}
-		if !hasAttachedKnowledgeBase && decision.Strategy != "none" {
-			onEvent(SseEvent{Type: "rag", Status: decision.Strategy, Summary: fmt.Sprintf("%d sources", len(snippets))})
 		}
 		for _, s := range snippets {
 			c := Citation{ID: s.ID, Index: s.Index, Title: s.Title, URL: s.URL, Snippet: s.Snippet, Source: s.Source}

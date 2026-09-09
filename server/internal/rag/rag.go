@@ -1142,61 +1142,18 @@ type Snippet struct {
 // at different dims) — the orchestrator should split the call instead. With
 // no KBs in scope (pure conversation upload), we fall back to the global
 // resolver since conversation uploads are ephemeral and not locked.
-// §2.4 query-vector cache: identical RAG queries (retries, common questions,
-// the same question across users on a shared KB) reuse the embedding instead of
-// re-calling the embedding API. Keyed by embedder name + query so different
-// models/dims never collide. Process-local, short TTL, bounded size.
-var (
-	queryEmbedTTL = 10 * time.Minute
-	queryEmbedMax = 4096
-)
-
-type queryEmbedEntry struct {
-	vec []float32
-	exp int64
-}
-
-var (
-	queryEmbedMu    sync.Mutex
-	queryEmbedStore = map[string]queryEmbedEntry{}
-)
-
 var errVectorBackendUnavailable = errors.New("rag: vector backend unavailable")
 
 func (s *Service) embedQueryCached(ctx context.Context, em Embedder, emName, query string) (vec []float32, cached bool, err error) {
-	h := fnv.New64a()
-	_, _ = h.Write([]byte(emName))
-	_, _ = h.Write([]byte{0})
-	_, _ = h.Write([]byte(query))
-	key := fmt.Sprintf("%x", h.Sum64())
-
-	now := time.Now().UnixNano()
-	queryEmbedMu.Lock()
-	if e, ok := queryEmbedStore[key]; ok && now < e.exp {
-		v := e.vec
-		queryEmbedMu.Unlock()
-		return v, true, nil
+	results, err := embedQueriesCached(ctx, em, emName, []string{query})
+	if result, ok := results[query]; ok {
+		return result.vec, result.cached, nil
 	}
-	queryEmbedMu.Unlock()
-
-	vecs, err := em.Embed(ctx, []string{query})
-	if err != nil {
-		return nil, false, err
-	}
-	if len(vecs) == 0 {
-		return nil, false, fmt.Errorf("rag: embedder returned no vector")
-	}
-	v := vecs[0]
-	queryEmbedMu.Lock()
-	if len(queryEmbedStore) >= queryEmbedMax {
-		queryEmbedStore = map[string]queryEmbedEntry{} // crude cap; cheap to rebuild
-	}
-	queryEmbedStore[key] = queryEmbedEntry{vec: v, exp: time.Now().Add(queryEmbedTTL).UnixNano()}
-	queryEmbedMu.Unlock()
-	return v, false, nil
+	return nil, false, err
 }
 
 type retrieveOptions struct {
+	queryEmbeddings    *queryEmbeddingBatch
 	strict             bool
 	restrictDocuments  bool
 	documentIDs        []string
@@ -1334,7 +1291,7 @@ func (s *Service) retrieve(ctx context.Context, userID, convID string, kbIDs []s
 			// Two model groups: KBs under the KB model, conversation docs under the
 			// global model — each with its own query embedding + per-dim collection.
 			kbScope := vector.Scope{KBIDs: kbIDs}
-			kbCands, err := s.searchScope(ctx, userID, convID, kbEm, kbName, kbDim, kbScope, query, terms)
+			kbCands, err := s.searchScope(ctx, userID, convID, kbEm, kbName, kbDim, kbScope, query, terms, opts.queryEmbeddings)
 			if err != nil {
 				if errors.Is(err, errVectorBackendUnavailable) {
 					if opts.strict {
@@ -1350,7 +1307,7 @@ func (s *Service) retrieve(ctx context.Context, userID, convID string, kbIDs []s
 			cands = kbCands
 			if conversationEnabled {
 				convScope := vector.Scope{ConversationID: convID, DocumentIDs: opts.documentIDs}
-				if convCands, cerr := s.searchScope(ctx, userID, convID, gEm, gName, gDim, convScope, query, terms); cerr == nil {
+				if convCands, cerr := s.searchScope(ctx, userID, convID, gEm, gName, gDim, convScope, query, terms, opts.queryEmbeddings); cerr == nil {
 					if !opts.strict && len(convCands) == 0 && s.vectorScopeHasEmbeddedChunks(ctx, convScope) {
 						return fullContext()
 					}
@@ -1377,7 +1334,7 @@ func (s *Service) retrieve(ctx context.Context, userID, convID string, kbIDs []s
 				conversationScopeID = convID
 			}
 			scope := vector.Scope{KBIDs: kbIDs, ConversationID: conversationScopeID, DocumentIDs: opts.documentIDs}
-			cands, err = s.searchScope(ctx, userID, convID, kbEm, kbName, kbDim, scope, query, terms)
+			cands, err = s.searchScope(ctx, userID, convID, kbEm, kbName, kbDim, scope, query, terms, opts.queryEmbeddings)
 			if err != nil {
 				if errors.Is(err, errVectorBackendUnavailable) {
 					if opts.strict {
@@ -1398,7 +1355,7 @@ func (s *Service) retrieve(ctx context.Context, userID, convID string, kbIDs []s
 		gEm, gName, gDim := s.resolveEmbedder(ctx)
 		var err error
 		scope := vector.Scope{ConversationID: convID, DocumentIDs: opts.documentIDs}
-		cands, err = s.searchScope(ctx, userID, convID, gEm, gName, gDim, scope, query, terms)
+		cands, err = s.searchScope(ctx, userID, convID, gEm, gName, gDim, scope, query, terms, opts.queryEmbeddings)
 		if err != nil {
 			if errors.Is(err, errVectorBackendUnavailable) {
 				if opts.strict {
@@ -1723,7 +1680,7 @@ func (s *Service) vectorScopeHasEmbeddedChunks(ctx context.Context, scope vector
 // each with its OWN query vector — never scoring one model's vectors against
 // another's, nor missing a doc whose vectors sit in a different per-dim
 // collection. (§4.11 model split)
-func (s *Service) searchScope(ctx context.Context, userID, convID string, em Embedder, emName string, dim int, scope vector.Scope, query string, terms []string) ([]retrievalCandidate, error) {
+func (s *Service) searchScope(ctx context.Context, userID, convID string, em Embedder, emName string, dim int, scope vector.Scope, query string, terms []string, batch *queryEmbeddingBatch) ([]retrievalCandidate, error) {
 	if !s.vec.Enabled() {
 		return nil, errVectorBackendUnavailable
 	}
@@ -1734,7 +1691,14 @@ func (s *Service) searchScope(ctx context.Context, userID, convID string, em Emb
 	embedStarted := time.Now()
 	s.logRetrievalStage(ctx, convID, "query_embedding", "started", time.Time{},
 		fmt.Sprintf(" embedding_model=%s dimension=%d", emName, dim))
-	qVec, cached, err := s.embedQueryCached(ctx, em, emName, query)
+	var qVec []float32
+	var cached bool
+	var err error
+	if batch != nil {
+		qVec, cached, err = batch.embed(ctx, em, emName, query)
+	} else {
+		qVec, cached, err = s.embedQueryCached(ctx, em, emName, query)
+	}
 	if err != nil {
 		s.logRetrievalStage(ctx, convID, "query_embedding", "failed", embedStarted,
 			fmt.Sprintf(" embedding_model=%s error_kind=%q", emName, retrievalStageErrorKind(err)))
@@ -1749,7 +1713,7 @@ func (s *Service) searchScope(ctx context.Context, userID, convID string, em Emb
 	}
 	// Query embedding is billable (§8.3) — but only when we actually called the API
 	// (no call on a query-vector cache hit, or for the local embedder).
-	if !cached && !strings.HasPrefix(emName, "aivory-local") && userID != "" {
+	if batch == nil && !cached && !strings.HasPrefix(emName, "aivory-local") && userID != "" {
 		if err := s.logEmbeddingUsage(ctx, "", convID, emName, estimateTokens(query)); err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrBillingRecord, err)
 		}
@@ -3196,28 +3160,9 @@ func (s *Service) routeAndRetrieve(ctx context.Context, userID, convID string, k
 				queries = []string{initialQuery}
 			}
 		}
+		queries = uniqueRetrievalQueries(queries)
 		decision.Queries = queries
-		subsets := make([][]Snippet, 0, len(queries))
-		var firstErr error
-		for queryIndex, q := range queries {
-			queryStarted := time.Now()
-			s.logRetrievalStage(ctx, convID, "fallback_query", "started", time.Time{},
-				fmt.Sprintf(" query_index=%d query_count=%d", queryIndex+1, len(queries)))
-			subset, err := s.retrieve(ctx, userID, convID, kbIDs, q, cfg.TopK, allScopeOpts)
-			queryStatus := "completed"
-			if err != nil {
-				queryStatus = "failed"
-			}
-			s.logRetrievalStage(ctx, convID, "fallback_query", queryStatus, queryStarted,
-				fmt.Sprintf(" query_index=%d sources=%d error_kind=%q", queryIndex+1, len(subset), retrievalStageErrorKind(err)))
-			if err != nil {
-				if firstErr == nil {
-					firstErr = err
-				}
-				continue
-			}
-			subsets = append(subsets, subset)
-		}
+		subsets, firstErr := s.retrieveQueries(ctx, userID, convID, kbIDs, queries, cfg.TopK, allScopeOpts)
 		// Run every rewritten query before applying the fixed-K cap. A broad first
 		// rewrite can fill TopK with weak or adjacent sections; round-robin merging
 		// reserves room for a later exact rewrite instead of letting the first query

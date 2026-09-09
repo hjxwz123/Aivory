@@ -29,6 +29,7 @@ import {
   Square,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import { visibleRagInjection } from '@/lib/rag-injection'
 import {
   FEEDBACK_REASON_VALUES,
   GENERATION_INTERRUPTED_ERROR_CODE,
@@ -119,8 +120,13 @@ function ThinkingLogo() {
 
 function RagInjectionStatus({ injection }: { injection: NonNullable<Message['ragInjection']> }) {
   const { t } = useTranslation('chat')
-  const active = injection.strategy === 'searching' || injection.strategy === 'expanding'
-  const failed = injection.strategy === 'error'
+  const documentLifecycle = injection.strategy.startsWith('document_')
+  const active =
+    injection.strategy === 'searching' ||
+    injection.strategy === 'expanding' ||
+    injection.strategy === 'document_searching' ||
+    injection.strategy === 'document_found'
+  const failed = injection.strategy === 'error' || injection.strategy === 'document_error'
   const kbSettled =
     injection.strategy === 'found' ||
     injection.strategy === 'partial' ||
@@ -128,6 +134,14 @@ function RagInjectionStatus({ injection }: { injection: NonNullable<Message['rag
   const knowledgeBaseLifecycle = active || failed || kbSettled
   const label = (() => {
     switch (injection.strategy) {
+      case 'document_searching':
+        return t('message.ragDocumentSearching')
+      case 'document_found':
+        return t('message.ragDocumentFound')
+      case 'document_no_hit':
+        return t('message.ragDocumentNoHit')
+      case 'document_error':
+        return t('message.ragDocumentError')
       case 'indexing':
         return t('message.ragIndexing')
       case 'indexing_done':
@@ -160,7 +174,7 @@ function RagInjectionStatus({ injection }: { injection: NonNullable<Message['rag
 
   return (
     <div
-      role={failed ? 'alert' : active || kbSettled ? 'status' : undefined}
+      role={failed ? 'alert' : active || kbSettled || documentLifecycle ? 'status' : undefined}
       aria-live={active ? 'polite' : undefined}
       className={cn(
         'mb-2.5 inline-flex max-w-full items-center gap-1.5 text-[11.5px] text-[var(--color-fg-subtle)]',
@@ -173,18 +187,18 @@ function RagInjectionStatus({ injection }: { injection: NonNullable<Message['rag
         aria-hidden
         className={cn(
           'shrink-0',
-          active ? 'animate-spin text-[var(--color-secondary)]' : failed ? 'text-[var(--color-danger)]' : 'text-[var(--color-secondary)]',
+          active ? 'animate-spin motion-reduce:animate-none text-[var(--color-secondary)]' : failed ? 'text-[var(--color-danger)]' : 'text-[var(--color-secondary)]',
         )}
       />
       <span
         className={cn(
           failed ? 'text-[var(--color-danger)]' : 'text-[var(--color-fg-muted)]',
-          knowledgeBaseLifecycle ? 'min-w-0 truncate' : 'shrink-0',
+          documentLifecycle ? 'min-w-0' : knowledgeBaseLifecycle ? 'min-w-0 truncate' : 'shrink-0',
         )}
       >
         {label}
       </span>
-      {knowledgeBaseLifecycle && injection.sourceCount !== undefined ? (
+      {!documentLifecycle && knowledgeBaseLifecycle && injection.sourceCount !== undefined ? (
         <span
           className={cn(
             'shrink-0 whitespace-nowrap',
@@ -194,7 +208,7 @@ function RagInjectionStatus({ injection }: { injection: NonNullable<Message['rag
           · {t('message.ragSourceCount', { count: injection.sourceCount })}
         </span>
       ) : null}
-      {!knowledgeBaseLifecycle && injection.summary ? (
+      {!documentLifecycle && !knowledgeBaseLifecycle && injection.summary ? (
         <span className="min-w-0 truncate text-[var(--color-fg-faint)]">
           · {injection.summary}
         </span>
@@ -260,6 +274,7 @@ function formatCredits(credits: number): string {
 }
 
 function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, onFeedback, onBranchSwitch, onFork, onDelete, onReport, readOnly = false, userMessageMarkdown = false }: MessageRowProps) {
+  const ragInjection = visibleRagInjection(message)
   const isUser = message.role === 'user'
   const userHasMath = useMemo(() => isUser && hasMathContent(message.content), [isUser, message.content])
   // §workspaces: in a shared conversation "own" = authored by ME — other
@@ -919,7 +934,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
               settled={Boolean(message.content)}
             />
 
-            {message.ragInjection ? <RagInjectionStatus injection={message.ragInjection} /> : null}
+            {ragInjection ? <RagInjectionStatus injection={ragInjection} /> : null}
 
             {/* §4.20 image mode: dedicated drawing surface (distinct from the
                 chat thinking/tool-call trace) while no image artifact exists yet. */}
@@ -927,9 +942,11 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
               <ImageGenerating phase={message.imageStatus} />
             ) : /* Streaming placeholder while empty — the brand thinking mark */
             message.streaming && !message.content && (!message.reasoning || message.reasoning.length === 0) ? (
-              <div className="py-1">
-                <ThinkingLogo />
-              </div>
+              ragInjection?.strategy === 'document_searching' || ragInjection?.strategy === 'document_found' ? null : (
+                <div className="py-1">
+                  <ThinkingLogo />
+                </div>
+              )
             ) : emptyStopped ? (
               <div role="status" className="my-1 inline-flex items-center gap-2 text-sm text-[var(--color-fg-muted)]">
                 <Square size={11} className="shrink-0 fill-current" aria-hidden />

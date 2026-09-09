@@ -18,3 +18,12 @@ export function ragInjectionFromEvent(
     at,
   }
 }
+
+/** Attachment progress is transient; keep failures visible with the answer. */
+export function visibleRagInjection(message: Pick<Message, 'ragInjection' | 'streaming' | 'content'>): Message['ragInjection'] {
+  const injection = message.ragInjection
+  if (!injection || !injection.strategy.startsWith('document_')) return injection
+  if (injection.strategy === 'document_error') return injection
+  if (injection.strategy === 'document_skipped' || !message.streaming || message.content) return undefined
+  return injection
+}
