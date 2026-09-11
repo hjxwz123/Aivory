@@ -346,6 +346,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("POST", "/api/conversations/:id/compact", requireAuth(d, compactConversationHandler))
 	mux.handle("GET", "/api/conversations/:id/messages", requireAuth(d, listMessagesHandler))
 	mux.handle("POST", "/api/conversations/:id/messages", requireAuth(d, postMessageHandler))
+	mux.handle("POST", "/api/private-chat", rateLimitedIP(d, "private-chat", 30, time.Minute, requireAuth(d, privateChatHandler)))
 	mux.handle("GET", "/api/conversations/:id/messages/:msgId/stream", requireAuth(d, streamMessageHandler))
 	mux.handle("PATCH", "/api/conversations/:id/messages/:msgId", requireAuth(d, editMessageHandler))
 	mux.handle("DELETE", "/api/conversations/:id/messages/:msgId", requireAuth(d, deleteMessageHandler))

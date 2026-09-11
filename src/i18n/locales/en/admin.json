@@ -666,6 +666,7 @@
     }
   },
   "usage": {
+    "anonymousConversation": "Anonymous chat",
     "title": "Usage",
     "lead": "Per-call usage, costed by model price.",
     "range": {

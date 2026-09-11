@@ -666,6 +666,7 @@
     }
   },
   "usage": {
+    "anonymousConversation": "匿名チャット",
     "title": "使用状況",
     "lead": "呼び出しごとの使用量(モデル価格で課金)。",
     "range": {

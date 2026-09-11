@@ -666,6 +666,7 @@
     }
   },
   "usage": {
+    "anonymousConversation": "匿名對話",
     "title": "用量",
     "lead": "依模型計費的呼叫用量彙總。",
     "range": {

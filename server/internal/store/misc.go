@@ -1040,6 +1040,15 @@ func LogUsage(ctx context.Context, db *sql.DB, u UsageLog) error {
 // fields are mirrored into usage_stats by a database trigger). It is used when a
 // caller must durably record provider cost before a later credit settlement.
 func LogUsageAnalytics(ctx context.Context, db *sql.DB, u UsageLog) error {
+	if strings.HasPrefix(u.MessageID, "private_") {
+		u.ConversationID = ""
+		u.RequestMethod, u.RequestURL, u.RequestHeaders, u.RequestBody = "", "", "", ""
+		switch u.Error {
+		case "", "provider_request_failed", "request_canceled", "billing_settlement_failed", "moderation_blocked":
+		default:
+			u.Error = "provider_request_failed"
+		}
+	}
 	// usage_logs predates system-owned task calls and requires a concrete user
 	// foreign key. The durable billing ledger accepts a NULL owner, so preserve
 	// those provider costs there without manufacturing a fake user solely for
@@ -1201,7 +1210,7 @@ func AdminUsageRecords(ctx context.Context, db *sql.DB, f UsageFilter, limit, of
 	where, args := f.where()
 	// CASE → 1/0 keeps the deleted-conversation flag portable across SQLite and
 	// Postgres (a bare boolean expression scans differently between them).
-	q := `SELECT u.id, u.user_id, COALESCE(usr.name,''), COALESCE(usr.email,''), COALESCE(u.conversation_id,''), COALESCE(c.title,''),
+	q := `SELECT u.id, u.user_id, COALESCE(usr.name,''), COALESCE(usr.email,''), COALESCE(u.conversation_id,''), CASE WHEN substr(u.message_id,1,8)='private_' THEN '匿名对话' ELSE COALESCE(c.title,'') END,
 	             CASE WHEN u.conversation_id IS NOT NULL AND u.conversation_id <> '' AND c.id IS NULL THEN 1 ELSE 0 END,
 	             u.model_id, u.purpose, u.input_tokens, u.output_tokens, u.cost, u.currency, u.created_at,
 	             COALESCE(u.workspace_id,''), COALESCE(w.name,''),

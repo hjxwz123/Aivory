@@ -919,5 +919,39 @@
       }
     }
   },
-  "attachmentDeleted": "文件已删除"
+  "attachmentDeleted": "文件已删除",
+  "private": {
+    "enter": "开启隐私对话",
+    "title": "隐私对话",
+    "exit": "退出并销毁对话",
+    "clear": "清空对话",
+    "footer": "仅当前标签页可见 · 不保存历史 · 刷新即销毁",
+    "you": "你",
+    "assistant": "助手",
+    "image": "图片 {{index}}",
+    "removeImage": "移除图片 {{index}}",
+    "reasoning": "思考过程",
+    "placeholder": "对话只保存在当前标签页，刷新、离开或清空即销毁。",
+    "model": "选择模型",
+    "loadingModels": "正在加载模型…",
+    "noModels": "暂无可用模型",
+    "addImage": "添加图片（仅保留在内存中）",
+    "stop": "停止生成",
+    "send": "发送消息",
+    "responding": "正在回复…",
+    "errors": {
+      "private_model_unavailable": "暂无可用的对话模型，请联系管理员启用。",
+      "private_invalid_request": "暂时无法发送此消息，请清空对话后重试。",
+      "private_history_limit": "当前隐私对话内容过大，请清空后重新开始。",
+      "private_image_limit": "单张图片最大 5 MB，每段对话最多 16 张；部署配置可能设置更低的限制。",
+      "private_image_invalid": "请选择有效的 PNG、JPEG、WebP 或 GIF 图片。",
+      "private_images_not_supported": "此模型不支持图片，请选择支持识图的模型，或清空对话。",
+      "private_quota_exceeded": "当前使用额度或积分不足。",
+      "private_billing_error": "用量记录失败，请联系管理员。",
+      "private_provider_error": "模型请求失败，请重试。",
+      "private_moderation_blocked": "此消息未通过内容审核。",
+      "private_stream_interrupted": "响应已中断，已显示的部分内容仅保留在此标签页。",
+      "private_stopped": "已停止生成，已显示的部分内容仅保留在此标签页。"
+    }
+  }
 }

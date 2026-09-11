@@ -6,6 +6,8 @@ describe('chatRouteKeys', () => {
     expect(chatRouteKeys('/').section).toBe('chat')
     expect(chatRouteKeys('/chat').section).toBe('chat')
     expect(chatRouteKeys('/chat/c_123').section).toBe('chat')
+    expect(chatRouteKeys('/private-chat').section).toBe('chat')
+    expect(chatRouteKeys('/private-chat').content).toBe('/private-chat')
   })
 
   it('gives list and detail destinations distinct content identities', () => {

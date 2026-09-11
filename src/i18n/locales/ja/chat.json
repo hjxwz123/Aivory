@@ -919,5 +919,39 @@
       }
     }
   },
-  "attachmentDeleted": "ファイルは削除されました"
+  "attachmentDeleted": "ファイルは削除されました",
+  "private": {
+    "enter": "プライベートチャットを開始",
+    "title": "プライベートチャット",
+    "exit": "退出して会話を破棄",
+    "clear": "会話を消去",
+    "footer": "このタブのみ · 履歴保存なし · 再読み込みで消去",
+    "you": "あなた",
+    "assistant": "アシスタント",
+    "image": "画像 {{index}}",
+    "removeImage": "画像 {{index}} を削除",
+    "reasoning": "思考過程",
+    "placeholder": "会話はこのタブ内にのみ保持され、再読み込み、ページ移動、またはクリアで破棄されます。",
+    "model": "モデルを選択",
+    "loadingModels": "モデルを読み込み中…",
+    "noModels": "モデルがありません",
+    "addImage": "画像を追加（メモリのみ）",
+    "stop": "生成を停止",
+    "send": "送信",
+    "responding": "応答中…",
+    "errors": {
+      "private_model_unavailable": "利用できるチャットモデルがありません。管理者にお問い合わせください。",
+      "private_invalid_request": "送信できません。会話を消去して再試行してください。",
+      "private_history_limit": "会話のサイズが上限に達しました。消去して新しく開始してください。",
+      "private_image_limit": "画像は1枚5 MB、会話全体で16枚までです。管理者の設定で制限がさらに低い場合があります。",
+      "private_image_invalid": "有効なPNG、JPEG、WebP、GIF画像を選択してください。",
+      "private_images_not_supported": "画像対応モデルを選択するか、会話を消去してください。",
+      "private_quota_exceeded": "利用枠またはクレジットが不足しています。",
+      "private_billing_error": "使用量を記録できませんでした。管理者にお問い合わせください。",
+      "private_provider_error": "モデルへのリクエストが失敗しました。再試行してください。",
+      "private_moderation_blocked": "コンテンツ審査によりブロックされました。",
+      "private_stream_interrupted": "応答が中断されました。表示済みの内容はこのタブにのみ残ります。",
+      "private_stopped": "生成を停止しました。表示済みの内容はこのタブにのみ残ります。"
+    }
+  }
 }

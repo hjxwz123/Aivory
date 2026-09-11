@@ -335,6 +335,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 			}
 			applyAnthropicThinkingSettings(body, req.Model.RequestID, &maxTok, req.StrictMaxOutputTokens)
 			_, hasThinking := body["thinking"]
+			enforcePrivateRequest(body, req, "anthropic")
 			buf, _ := json.Marshal(body)
 			return buf, hasThinking
 		}
@@ -464,6 +465,9 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 		totalUsage.OutputTokens += usage.OutputTokens
 		totalUsage.CacheReadTokens += usage.CacheReadTokens
 		totalUsage.CacheWriteTokens += usage.CacheWriteTokens
+		if req.Private && (len(toolCalls) > 0 || len(hostedCalls) > 0 || stopReason == "tool_use" || stopReason == "pause_turn") {
+			return &UnifiedResult{Blocks: allBlocks, Usage: totalUsage}, ErrPrivateTools
+		}
 		if finalizing {
 			assistantTurn := buildAssistantTurn(text, thinkingBlocks, nil, nil)
 			if content, ok := assistantTurn["content"].([]map[string]any); ok && len(content) > 0 {
@@ -621,6 +625,7 @@ func (p *AnthropicProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunn
 			body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
 		}
 		applyAnthropicThinkingSettings(body, req.Model.RequestID, &maxTok, req.StrictMaxOutputTokens)
+		enforcePrivateRequest(body, req, "anthropic")
 		buf, _ := json.Marshal(body)
 		var (
 			text  string

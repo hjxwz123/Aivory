@@ -670,6 +670,7 @@
     }
   },
   "usage": {
+    "anonymousConversation": "匿名对话",
     "title": "用量",
     "lead": "按模型计费的调用用量聚合。",
     "range": {

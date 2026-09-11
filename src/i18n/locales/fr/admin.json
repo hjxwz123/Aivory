@@ -666,6 +666,7 @@
     }
   },
   "usage": {
+    "anonymousConversation": "Discussion anonyme",
     "title": "Utilisation",
     "lead": "Usage par appel, facturé au prix du modèle.",
     "range": {
