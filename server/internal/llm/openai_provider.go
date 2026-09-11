@@ -303,6 +303,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 			body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
 		}
 		enforceOpenAIOutputTokenCap(body, req, false)
+		enforcePrivateRequest(body, req, "openai")
 		raw, _ := json.Marshal(body)
 		var (
 			text      string
@@ -377,6 +378,9 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 		}
 		usage.InputTokens += u.InputTokens
 		usage.OutputTokens += u.OutputTokens
+		if req.Private && len(calls) > 0 {
+			return &UnifiedResult{Blocks: allBlocks, Usage: usage}, ErrPrivateTools
+		}
 		if finalizing {
 			assistant := map[string]any{"role": "assistant", "content": text}
 			if reasoning.Text != "" {
@@ -534,6 +538,7 @@ func (p *OpenAIProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner 
 			body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
 		}
 		enforceOpenAIOutputTokenCap(body, req, false)
+		enforcePrivateRequest(body, req, "openai")
 		raw, _ := json.Marshal(body)
 		var (
 			text string
@@ -1606,6 +1611,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 			includes = append(includes, "reasoning.encrypted_content")
 		}
 		appendResponsesInclude(body, includes...)
+		enforcePrivateRequest(body, req, "openai")
 		raw, _ := json.Marshal(body)
 		var (
 			text        string
@@ -1671,6 +1677,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 				requestInput = normalized
 				input = normalized
 				body["input"] = requestInput
+				enforcePrivateRequest(body, req, "openai")
 				raw, _ = json.Marshal(body)
 				roundEmitted = false
 				err = runRequest()
@@ -1803,6 +1810,9 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 			}, nil
 		}
 
+		if req.Private {
+			return &UnifiedResult{Blocks: allBlocks, Usage: usage}, ErrPrivateTools
+		}
 		// Insert the function_call items the model emitted (echo them back
 		// alongside their outputs — required by the Responses protocol). Official
 		// OpenAI responses include those items in response.output; keep this manual

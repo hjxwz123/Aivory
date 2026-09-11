@@ -348,7 +348,7 @@ export default function AdminUsage() {
                             {r.conversation_title || r.conversation_id}
                           </Link>
                         ) : (
-                          <span className="text-[var(--color-fg-faint)]">—</span>
+                          <span className="text-[var(--color-fg-muted)]">{r.conversation_title ? t('usage.anonymousConversation') : '—'}</span>
                         )}
                         {r.workspace_name || r.workspace_id ? (
                           <span
@@ -531,7 +531,7 @@ export default function AdminUsage() {
                           {r.conversation_title || r.conversation_id}
                         </Link>
                       ) : (
-                        <span className="text-[var(--color-fg-faint)]">—</span>
+                        <span className="text-[var(--color-fg-muted)]">{r.conversation_title ? t('usage.anonymousConversation') : '—'}</span>
                       )}
                     </dd>
                   </div>

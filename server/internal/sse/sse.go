@@ -28,7 +28,9 @@ func New(w http.ResponseWriter) *Writer {
 		return nil
 	}
 	w.Header().Set("content-type", "text/event-stream")
-	w.Header().Set("cache-control", "no-cache, no-transform")
+	if w.Header().Get("cache-control") == "" {
+		w.Header().Set("cache-control", "no-cache, no-transform")
+	}
 	w.Header().Set("connection", "keep-alive")
 	w.Header().Set("x-accel-buffering", "no")
 	w.WriteHeader(http.StatusOK)

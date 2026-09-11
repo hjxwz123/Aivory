@@ -924,5 +924,39 @@
       }
     }
   },
-  "attachmentDeleted": "File deleted"
+  "attachmentDeleted": "File deleted",
+  "private": {
+    "enter": "Start private chat",
+    "title": "Private chat",
+    "exit": "Exit and discard conversation",
+    "clear": "Clear chat",
+    "footer": "Only in this tab · No saved history · Cleared on refresh",
+    "you": "You",
+    "assistant": "Assistant",
+    "image": "Image {{index}}",
+    "removeImage": "Remove image {{index}}",
+    "reasoning": "Reasoning",
+    "placeholder": "This conversation stays in this tab only and is destroyed when you refresh, leave, or clear it.",
+    "model": "Choose model",
+    "loadingModels": "Loading models…",
+    "noModels": "No models available",
+    "addImage": "Add images (memory only)",
+    "stop": "Stop response",
+    "send": "Send message",
+    "responding": "Responding…",
+    "errors": {
+      "private_model_unavailable": "No available chat model. Ask your administrator to enable one.",
+      "private_invalid_request": "This message cannot be sent. Clear the conversation and try again.",
+      "private_history_limit": "This private conversation is too large. Clear it to start again.",
+      "private_image_limit": "Use images up to 5 MB each, with at most 16 images per conversation. Your deployment may set a lower limit.",
+      "private_image_invalid": "Choose a valid PNG, JPEG, WebP, or GIF image.",
+      "private_images_not_supported": "This model does not support images. Choose a vision-enabled model or clear the conversation.",
+      "private_quota_exceeded": "Your usage allowance or credits are insufficient.",
+      "private_billing_error": "Usage could not be recorded. Please contact your administrator.",
+      "private_provider_error": "The model request failed. Please try again.",
+      "private_moderation_blocked": "This message was blocked by content moderation.",
+      "private_stream_interrupted": "The response was interrupted. Any visible partial text is kept only in this tab.",
+      "private_stopped": "Response stopped. Any visible partial text is kept only in this tab."
+    }
+  }
 }

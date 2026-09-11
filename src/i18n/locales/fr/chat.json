@@ -919,5 +919,39 @@
       }
     }
   },
-  "attachmentDeleted": "Fichier supprimé"
+  "attachmentDeleted": "Fichier supprimé",
+  "private": {
+    "enter": "Démarrer une discussion privée",
+    "title": "Discussion privée",
+    "exit": "Quitter et effacer la conversation",
+    "clear": "Effacer",
+    "footer": "Cet onglet uniquement · Aucun historique · Effacé à l’actualisation",
+    "you": "Vous",
+    "assistant": "Assistant",
+    "image": "Image {{index}}",
+    "removeImage": "Supprimer l’image {{index}}",
+    "reasoning": "Raisonnement",
+    "placeholder": "La conversation reste dans cet onglet et disparaît si vous actualisez, quittez ou effacez la page.",
+    "model": "Choisir le modèle",
+    "loadingModels": "Chargement des modèles…",
+    "noModels": "Aucun modèle disponible",
+    "addImage": "Ajouter des images (en mémoire uniquement)",
+    "stop": "Arrêter la réponse",
+    "send": "Envoyer",
+    "responding": "Réponse en cours…",
+    "errors": {
+      "private_model_unavailable": "Aucun modèle de discussion disponible. Contactez votre administrateur.",
+      "private_invalid_request": "Impossible d’envoyer ce message. Effacez la conversation et réessayez.",
+      "private_history_limit": "Cette conversation est trop volumineuse. Effacez-la pour recommencer.",
+      "private_image_limit": "Maximum 5 Mo par image et 16 images par conversation. Votre déploiement peut imposer une limite inférieure.",
+      "private_image_invalid": "Choisissez une image PNG, JPEG, WebP ou GIF valide.",
+      "private_images_not_supported": "Choisissez un modèle avec vision ou effacez la conversation.",
+      "private_quota_exceeded": "Votre quota ou vos crédits sont insuffisants.",
+      "private_billing_error": "Impossible d’enregistrer l’utilisation. Contactez votre administrateur.",
+      "private_provider_error": "La requête au modèle a échoué. Réessayez.",
+      "private_moderation_blocked": "Ce message a été bloqué par la modération.",
+      "private_stream_interrupted": "Réponse interrompue. Le texte déjà affiché reste uniquement dans cet onglet.",
+      "private_stopped": "Génération arrêtée. Le texte déjà affiché reste uniquement dans cet onglet."
+    }
+  }
 }

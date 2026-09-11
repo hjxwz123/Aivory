@@ -544,8 +544,12 @@ func verifiedRequestPayloadDigest(r *http.Request, claimed string) (string, erro
 	if r.Body == nil {
 		r.Body = http.NoBody
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, jsonRequestBodySizeCap+1))
-	if err != nil || int64(len(body)) > jsonRequestBodySizeCap {
+	bodyLimit := jsonRequestBodySizeCap
+	if r.Method == http.MethodPost && r.URL.Path == "/api/private-chat" {
+		bodyLimit = privateChatBodyLimit
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, bodyLimit+1))
+	if err != nil || int64(len(body)) > bodyLimit {
 		return "", errors.New("invalid request signature payload")
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))

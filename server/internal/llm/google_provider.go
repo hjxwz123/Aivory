@@ -113,6 +113,7 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 			body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
 		}
 		stripGoogleEndpointParams(body)
+		enforcePrivateRequest(body, req, "google")
 		raw, _ := json.Marshal(body)
 		// §4.10-G stream: streamGenerateContent returns SSE-style JSON-array
 		// chunks; we use alt=sse to get one event per line.
@@ -149,6 +150,9 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 			attachProviderRequestUsage(ctx, u)
 			if readErr != nil {
 				return readErr
+			}
+			if req.Private && len(calls) > 0 {
+				return ErrPrivateTools
 			}
 			if callErr := validateGeminiCalls(calls, req.Tools); callErr != nil {
 				// A malformed functionCall is an upstream protocol failure, not a
@@ -972,6 +976,7 @@ func (p *GoogleProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner 
 			body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
 		}
 		stripGoogleEndpointParams(body)
+		enforcePrivateRequest(body, req, "google")
 		raw, _ := json.Marshal(body)
 		var (
 			text  string

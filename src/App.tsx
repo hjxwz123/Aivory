@@ -23,6 +23,7 @@ import { PanelFallback } from '@/components/ui/panel-fallback'
 const Landing = lazy(() => import('@/pages/Landing'))
 const ChatLayout = lazy(() => import('@/pages/chat/ChatLayout'))
 const ChatRoute = lazy(() => import('@/pages/chat/ChatRoute'))
+const PrivateChat = lazy(() => import('@/pages/chat/PrivateChat'))
 const ProjectsList = lazy(() => import('@/pages/projects/ProjectsList'))
 const ProjectDetail = lazy(() => import('@/pages/projects/ProjectDetail'))
 const KnowledgeBasesList = lazy(() => import('@/pages/kb/KnowledgeBasesList'))
@@ -216,6 +217,7 @@ export default function App() {
             <Route path="/workspace/join/:token" element={<JoinWorkspace />} />
             <Route path="/" element={<ChatLayout />}>
               <Route index element={<ChatRoute page="home" />} />
+              <Route path="private-chat" element={<PrivateChat />} />
               <Route path="chat/:id" element={<ChatRoute page="thread" />} />
             </Route>
             <Route path="/chat" element={<ChatLayout />}>

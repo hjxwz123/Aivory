@@ -44,6 +44,7 @@ export default function ChatLayout() {
   // conversations within a section doesn't re-fade — only section-to-section
   // navigation (the abrupt jumps) animates.
   const { pathname } = useLocation()
+  const privateChat = pathname === '/private-chat'
   // Home ('/') and the chat thread ('/chat', '/chat/:id') are one section so
   // creating a conversation (/ → /chat/:id) doesn't flash a transition.
   const routeKeys = chatRouteKeys(pathname)
@@ -85,7 +86,7 @@ export default function ChatLayout() {
         'pl-[var(--safe-left)] pr-[var(--safe-right)]',
       )}
     >
-      <QueuedTurnDispatcher />
+      {!privateChat && <QueuedTurnDispatcher />}
       <AnnouncementPopup />
       <CreditAdjustmentNotice />
       <div className="flex flex-1 min-h-0 w-full">
@@ -106,7 +107,7 @@ export default function ChatLayout() {
           <AnnouncementBar />
           {/* Mobile top bar — suppressed when the page renders its own combined
               header (e.g. a chat thread) so the two don't stack into two rows. */}
-          {!isDesktop && !pageOwnsTopBar && (
+          {!isDesktop && !pageOwnsTopBar && !privateChat && (
             <div className="flex items-center justify-between h-[var(--layout-topbar-h-mobile)] px-2 bg-[var(--color-bg)]/85 backdrop-blur-sm">
               <button
                 type="button"
@@ -170,10 +171,12 @@ export default function ChatLayout() {
         </div>
 
         {/* Right-edge drawers — mutually exclusive (see store coordination). */}
-        <HtmlPreviewPanel />
-        <InlineThreadPanel />
-        <SandboxFilesPanel />
-        <ConversationFilesPanel />
+        {!privateChat && <>
+          <HtmlPreviewPanel />
+          <InlineThreadPanel />
+          <SandboxFilesPanel />
+          <ConversationFilesPanel />
+        </>}
       </main>
       </div>
     </div>

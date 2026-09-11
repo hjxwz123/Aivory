@@ -72,6 +72,7 @@ type SystemPart struct {
 
 // UnifiedChatRequest is what the orchestrator hands to a Provider.
 type UnifiedChatRequest struct {
+	Private        bool
 	UserID         string
 	ConversationID string
 	// MessageID is the assistant message being filled.

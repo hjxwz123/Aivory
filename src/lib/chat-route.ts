@@ -12,7 +12,7 @@ export interface ChatRouteKeys {
  * the next lazy module resolves, which makes a completed Link click look inert.
  */
 export function chatRouteKeys(pathname: string): ChatRouteKeys {
-  const section = pathname === '/' || pathname.startsWith('/chat')
+  const section = pathname === '/' || pathname === '/private-chat' || pathname.startsWith('/chat')
     ? 'chat'
     : pathname.split('/')[1] || 'chat'
 
