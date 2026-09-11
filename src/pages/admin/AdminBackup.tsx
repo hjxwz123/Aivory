@@ -12,10 +12,10 @@
  * users/conversations/user uploads/logs alone, so it needs only a single confirm
  * dialog.
  */
-import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
-import { CheckCircle2, Download, Upload, TriangleAlert, FileArchive, FileJson, Braces, Clock3, XCircle, Database, Wrench, Trash2 } from 'lucide-react'
+import { CheckCircle2, Download, Upload, TriangleAlert, FileArchive, Clock3, XCircle, Database, Wrench, Trash2 } from 'lucide-react'
 import {
   adminApi,
   ApiError,
@@ -113,6 +113,33 @@ function normalizeVectorState(state: VectorMaintenanceState | null | undefined):
       .map(normalizeVectorJob)
       .filter((job): job is VectorMaintenanceJob => Boolean(job)),
   }
+}
+
+function BackupSection({
+  id,
+  title,
+  description,
+  actions,
+  children,
+}: {
+  id: string
+  title: string
+  description: string
+  actions?: ReactNode
+  children?: ReactNode
+}) {
+  return (
+    <section aria-labelledby={id} className="border-b border-[var(--color-divider)] pb-8 last:border-b-0 last:pb-0">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between lg:gap-6">
+        <div className="min-w-0 max-w-2xl">
+          <h2 id={id} className="text-base font-semibold text-[var(--color-fg)]">{title}</h2>
+          <p className="mt-1.5 text-sm leading-relaxed text-[var(--color-fg-muted)]">{description}</p>
+        </div>
+        {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
+      </div>
+      {children && <div className="mt-5 space-y-5">{children}</div>}
+    </section>
+  )
 }
 
 export default function AdminBackup() {
@@ -382,147 +409,415 @@ export default function AdminBackup() {
   const failedVectorJob = !runningVector && latestVectorJob?.status === 'failed' ? latestVectorJob : null
 
   return (
-    <div className="mx-auto max-w-[80rem]">
-      <header className="max-w-3xl">
-        <h1 className="text-balance font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">
+    <div className="mx-auto max-w-[76rem]">
+      <header>
+        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">
           {t('admin:backup.title')}
         </h1>
-        <p className="mt-2 max-w-[70ch] text-pretty text-sm leading-relaxed text-[var(--color-fg-muted)]">
+        <p className="mt-2 max-w-2xl text-sm text-[var(--color-fg-muted)]">
           {t('admin:backup.lead')}
         </p>
       </header>
 
-      <section
-        className="mt-8 overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]"
-        aria-labelledby="backup-export-title backup-import-title"
-      >
-        <div className="grid min-w-0 lg:grid-cols-[minmax(0,1.55fr)_minmax(20rem,0.8fr)]">
-          {/* Export -------------------------------------------------------- */}
-          <div className="min-w-0 p-5 sm:p-6 lg:p-7">
-            <div className="flex items-start gap-3">
-              <span className="flex size-9 shrink-0 items-center justify-center rounded-[9px] bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
-                <Download size={17} aria-hidden />
+      <div className="mt-8 flex flex-col gap-8">
+        <BackupSection
+          id="backup-export-title"
+          title={t('admin:backup.export.title')}
+          description={t('admin:backup.export.lead')}
+          actions={
+            <Button
+              onClick={onExport}
+              loading={exporting || Boolean(runningExport)}
+              disabled={fullBackupBusy}
+              leadingIcon={<Download size={14} aria-hidden />}
+            >
+              {runningExport ? t('admin:backup.export.runningAction') : t('admin:backup.export.action')}
+            </Button>
+          }
+        >
+          <label htmlFor="backup-include-files" className="flex items-center justify-between gap-4 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
+            <span className="min-w-0">
+              <span className="block text-sm text-[var(--color-fg)]">{t('admin:backup.export.includeFiles')}</span>
+              <span id="backup-include-files-hint" className="mt-1 block text-xs leading-relaxed text-[var(--color-fg-muted)]">
+                {t('admin:backup.export.includeFilesHint')}
               </span>
-              <div className="min-w-0">
-                <h2 id="backup-export-title" className="text-balance font-serif text-lg text-[var(--color-fg)]">
-                  {t('admin:backup.export.title')}
-                </h2>
-                <p className="mt-1 max-w-[65ch] text-pretty text-xs leading-relaxed text-[var(--color-fg-muted)]">
-                  {t('admin:backup.export.lead')}
-                </p>
+            </span>
+            <Switch
+              id="backup-include-files"
+              checked={includeFiles}
+              onCheckedChange={setIncludeFiles}
+              disabled={fullBackupBusy}
+              aria-describedby="backup-include-files-hint"
+            />
+          </label>
+          {runningExport && (
+            <div className="mt-5 rounded-[10px] bg-[var(--color-bg-muted)] p-4" role="status" aria-live="polite">
+              <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-fg)]">
+                <Clock3 size={15} className="text-[var(--color-accent)]" aria-hidden />
+                {t('admin:backup.export.running')}
               </div>
-            </div>
-
-            <div className="mt-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <label className="flex min-w-0 flex-1 items-center justify-between gap-5 rounded-[10px] bg-[var(--color-bg-muted)] px-4 py-3.5">
-                <span className="min-w-0">
-                  <span className="block text-sm font-medium text-[var(--color-fg)]">
-                    {t('admin:backup.export.includeFiles')}
-                  </span>
-                  <span className="mt-0.5 block text-pretty text-xs leading-relaxed text-[var(--color-fg-muted)]">
-                    {t('admin:backup.export.includeFilesHint')}
-                  </span>
-                </span>
-                <Switch
-                  checked={includeFiles}
-                  onCheckedChange={setIncludeFiles}
-                  disabled={fullBackupBusy}
-                  aria-label={t('admin:backup.export.includeFiles')}
-                />
-              </label>
-              <Button
-                className="w-full sm:w-auto"
-                onClick={onExport}
-                loading={exporting || Boolean(runningExport)}
-                disabled={fullBackupBusy}
-                leadingIcon={<Download size={14} aria-hidden />}
+              <p className="mt-1 text-xs leading-relaxed text-[var(--color-fg-muted)]">
+                {t('admin:backup.export.runningHint', {
+                  progress: t(`admin:backup.export.progress.${runningExport.progress}`, {
+                    defaultValue: runningExport.progress,
+                  }),
+                })}
+              </p>
+              <div
+                className="mt-3 h-1.5 overflow-hidden rounded-full bg-[var(--color-border)]"
+                role="progressbar"
+                aria-label={t('admin:backup.export.running')}
               >
-                {runningExport ? t('admin:backup.export.runningAction') : t('admin:backup.export.action')}
-              </Button>
-            </div>
-
-            {runningExport && (
-              <div className="mt-5 rounded-[10px] bg-[var(--color-bg-muted)] p-4" role="status" aria-live="polite">
-                <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-fg)]">
-                  <Clock3 size={15} className="text-[var(--color-accent)]" aria-hidden />
-                  {t('admin:backup.export.running')}
-                </div>
-                <p className="mt-1 text-xs leading-relaxed text-[var(--color-fg-muted)]">
-                  {t('admin:backup.export.runningHint', {
-                    progress: t(`admin:backup.export.progress.${runningExport.progress}`, {
-                      defaultValue: runningExport.progress,
-                    }),
-                  })}
-                </p>
-                <div
-                  className="mt-3 h-1.5 overflow-hidden rounded-full bg-[var(--color-border)]"
-                  role="progressbar"
-                  aria-label={t('admin:backup.export.running')}
-                >
-                  <div className="h-full w-1/2 animate-[pulse_1.2s_ease-in-out_infinite] rounded-full bg-[var(--color-accent)]" />
-                </div>
-              </div>
-            )}
-
-            {!runningExport && failedExport && (
-              <div className="mt-5 flex items-start gap-2.5 rounded-[10px] bg-[var(--color-danger-soft)] p-3.5" role="alert">
-                <XCircle size={15} className="mt-0.5 shrink-0 text-[var(--color-danger)]" aria-hidden />
-                <p className="text-xs leading-relaxed text-[var(--color-fg-muted)]">
-                  {t('admin:backup.export.failed', { error: failedExport.error || t('admin:common.failed') })}
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* Import -------------------------------------------------------- */}
-          <aside className="min-w-0 border-t border-[var(--color-border)] bg-[var(--color-bg-muted)] p-5 sm:p-6 lg:border-l lg:border-t-0 lg:p-7">
-            <div className="flex items-start gap-3">
-              <span className="flex size-9 shrink-0 items-center justify-center rounded-[9px] bg-[var(--color-danger-soft)] text-[var(--color-danger)]">
-                <Upload size={17} aria-hidden />
-              </span>
-              <div className="min-w-0">
-                <h2 id="backup-import-title" className="text-balance font-serif text-lg text-[var(--color-fg)]">
-                  {t('admin:backup.import.title')}
-                </h2>
-                <p className="mt-1 text-pretty text-xs leading-relaxed text-[var(--color-fg-muted)]">
-                  {t('admin:backup.import.lead')}
-                </p>
+                <div className="h-full w-1/2 animate-[pulse_1.2s_ease-in-out_infinite] rounded-full bg-[var(--color-accent)] motion-reduce:animate-none" />
               </div>
             </div>
+          )}
 
-            <div className="mt-5 flex items-start gap-2.5 rounded-[10px] bg-[var(--color-danger-soft)] p-3.5">
-              <TriangleAlert size={15} className="mt-0.5 shrink-0 text-[var(--color-danger)]" aria-hidden />
-              <p className="text-pretty text-xs leading-relaxed text-[var(--color-fg-muted)]">
-                {t('admin:backup.import.warning')}
+          {!runningExport && failedExport && (
+            <div className="mt-5 flex items-start gap-2.5 rounded-[10px] bg-[var(--color-danger-soft)] p-3.5" role="alert">
+              <XCircle size={15} className="mt-0.5 shrink-0 text-[var(--color-danger)]" aria-hidden />
+              <p className="text-xs leading-relaxed text-[var(--color-fg-muted)]">
+                {t('admin:backup.export.failed', { error: failedExport.error || t('admin:common.failed') })}
               </p>
             </div>
+          )}
+          <div>
+            <div className="mb-3 flex items-center gap-2">
+              <h3 className="text-sm font-medium text-[var(--color-fg)]">{t('admin:backup.export.archivesTitle')}</h3>
+              {!loadingExports && (
+                <span className="text-xs tabular-nums text-[var(--color-fg-muted)]">({archives.length})</span>
+              )}
+            </div>
+            <div className="overflow-hidden rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] [&>div:first-child]:border-t-0">
+              {loadingExports ? (
+                <div
+                  className="border-t border-[var(--color-border-subtle)] px-4 py-5"
+                  role="status"
+                  aria-live="polite"
+                  aria-label={t('admin:backup.export.loading')}
+                >
+                  <span className="sr-only">{t('admin:backup.export.loading')}</span>
+                  <div className="flex items-center gap-3">
+                    <Skeleton shape="circle" className="size-4 shrink-0" />
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <Skeleton shape="line" className="h-3.5 w-2/5 max-w-56" />
+                      <Skeleton shape="line" className="h-2.5 w-1/4 max-w-32" />
+                    </div>
+                    <Skeleton className="size-9 shrink-0 rounded-[8px]" />
+                  </div>
+                </div>
+              ) : archives.length === 0 ? (
+                <div className="flex flex-col items-center border-t border-[var(--color-border-subtle)] px-4 py-8 text-center">
+                  <p className="max-w-[42ch] text-pretty text-xs leading-relaxed text-[var(--color-fg-muted)]">{t('admin:backup.export.noArchives')}</p>
+                </div>
+              ) : (
+                <div
+                  className="divide-y divide-[var(--color-border-subtle)] border-t border-[var(--color-border-subtle)]"
+                  role="list"
+                  aria-label={t('admin:backup.export.archivesTitle')}
+                >
+                  {archives.map((archive) => (
+                    <div
+                      key={archive.name}
+                      className="flex min-w-0 items-center gap-3 px-4 py-3 transition-colors duration-150 hover:bg-[var(--color-bg-muted)]"
+                      role="listitem"
+                    >
+                      <CheckCircle2 size={15} className="shrink-0 text-[var(--color-success)]" aria-hidden />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-mono text-xs font-medium text-[var(--color-fg)]" title={archive.name}>
+                          {archive.name}
+                        </p>
+                        <p className="mt-1 text-xs tabular-nums text-[var(--color-fg-muted)]">
+                          {formatBytes(archive.size_bytes)} · {formatDate(archive.created_at)}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <Tooltip content={t('admin:backup.export.download')}>
+                          <Button
+                            size="icon-lg"
+                            variant="ghost"
+                            loading={downloadingArchive === archive.name}
+                            disabled={deletingArchive === archive.name}
+                            onClick={() => void onDownloadArchive(archive)}
+                            aria-label={`${t('admin:backup.export.download')} ${archive.name}`}
+                          >
+                            {downloadingArchive === archive.name ? (
+                              <span className="sr-only">{t('admin:backup.export.download')}</span>
+                            ) : (
+                              <Download size={16} aria-hidden />
+                            )}
+                          </Button>
+                        </Tooltip>
+                        <Tooltip content={t('common:actions.delete')}>
+                          <Button
+                            size="icon-lg"
+                            variant="ghost"
+                            className="text-[var(--color-danger)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]"
+                            disabled={downloadingArchive === archive.name || deletingArchive === archive.name}
+                            onClick={() => setDeleteTarget(archive)}
+                            aria-label={`${t('common:actions.delete')} ${archive.name}`}
+                          >
+                            <Trash2 size={16} aria-hidden />
+                          </Button>
+                        </Tooltip>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </BackupSection>
 
+        <BackupSection
+          id="backup-vectors-title"
+          title={t('admin:backup.vectors.title')}
+          description={t('admin:backup.vectors.lead')}
+          actions={
+            <>
+              <Button
+                variant="secondary"
+                onClick={onVectorCheck}
+                loading={startingVectorJob === 'check' || runningVector?.type === 'check'}
+                disabled={exportBusy || vectorBusy}
+                leadingIcon={<Database size={14} aria-hidden />}
+              >
+                {t('admin:backup.vectors.checkAction')}
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={onVectorRebuild}
+                loading={startingVectorJob === 'rebuild' || runningVector?.type === 'rebuild'}
+                disabled={exportBusy || vectorBusy || vectorMissing === 0}
+                leadingIcon={<Wrench size={14} aria-hidden />}
+              >
+                {t('admin:backup.vectors.rebuildAction')}
+              </Button>
+            </>
+          }
+        >
+          {runningVector && (
+            <div className="rounded-[8px] bg-[var(--color-bg-muted)] p-4" role="status" aria-live="polite">
+              <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-fg)]">
+                <Clock3 size={15} className="text-[var(--color-accent)]" aria-hidden />
+                {runningVector.type === 'rebuild'
+                  ? t('admin:backup.vectors.rebuilding')
+                  : t('admin:backup.vectors.checking')}
+              </div>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--color-fg-muted)]">
+                {t('admin:backup.vectors.runningHint', {
+                  progress: t(`admin:backup.vectors.progress.${runningVector.progress}`, {
+                    defaultValue: runningVector.progress,
+                  }),
+                  rebuilt: runningVector.rebuilt ?? 0,
+                  failed: runningVector.failed ?? 0,
+                })}
+              </p>
+              <div
+                className="mt-3 h-1.5 overflow-hidden rounded-full bg-[var(--color-border)]"
+                role="progressbar"
+                aria-label={
+                  runningVector.type === 'rebuild'
+                    ? t('admin:backup.vectors.rebuilding')
+                    : t('admin:backup.vectors.checking')
+                }
+              >
+                <div className="h-full w-1/2 animate-[pulse_1.2s_ease-in-out_infinite] rounded-full bg-[var(--color-accent)] motion-reduce:animate-none" />
+              </div>
+            </div>
+          )}
+
+          {failedVectorJob && (
+            <div className="flex items-start gap-2.5 rounded-[8px] bg-[var(--color-danger-soft)] p-3.5" role="alert">
+              <XCircle size={15} className="mt-0.5 shrink-0 text-[var(--color-danger)]" aria-hidden />
+              <p className="text-xs leading-relaxed text-[var(--color-fg-muted)]">
+                {t('admin:backup.vectors.failed', { error: failedVectorJob.error || t('admin:common.failed') })}
+              </p>
+            </div>
+          )}
+
+          {loadingVectors ? (
+            <div
+              className="overflow-hidden rounded-[8px] border border-[var(--color-border)]"
+              role="status"
+              aria-live="polite"
+              aria-label={t('admin:backup.vectors.loading')}
+            >
+              <span className="sr-only">{t('admin:backup.vectors.loading')}</span>
+              <div className="grid grid-cols-2 gap-px bg-[var(--color-border-subtle)] sm:grid-cols-5">
+                {[0, 1, 2, 3, 4].map((item) => (
+                  <div key={item} className="min-w-0 bg-[var(--color-surface)] px-4 py-3.5 first:col-span-2 sm:first:col-span-1">
+                    <Skeleton shape="line" className="h-2.5 w-16" />
+                    <Skeleton shape="line" className="mt-2 h-5 w-10" />
+                  </div>
+                ))}
+              </div>
+              <div className="divide-y divide-[var(--color-border-subtle)] border-t border-[var(--color-border-subtle)]">
+                {[0, 1].map((item) => (
+                  <div key={item} className="flex min-w-0 items-center justify-between gap-4 px-4 py-3">
+                    <Skeleton shape="line" className="h-3 w-2/5 max-w-56" />
+                    <Skeleton shape="line" className="h-2.5 w-1/3 max-w-40" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : vectorReport ? (
+            <div className="overflow-hidden rounded-[8px] border border-[var(--color-border)]">
+              <div className="grid grid-cols-2 gap-px bg-[var(--color-border-subtle)] sm:grid-cols-5">
+                {[
+                  ['total', vectorReport.total],
+                  ['present', vectorReport.present],
+                  ['missing', vectorReport.missing],
+                  ['empty', vectorReport.empty],
+                  ['skipped', vectorReport.skipped],
+                ].map(([key, value]) => (
+                  <div key={key} className="min-w-0 bg-[var(--color-surface)] px-4 py-3.5 first:col-span-2 sm:first:col-span-1">
+                    <p className="text-xs text-[var(--color-fg-muted)]">{t(`admin:backup.vectors.stats.${key}`)}</p>
+                    <p className={`mt-1 text-xl font-semibold tabular-nums ${
+                      (key === 'missing' || key === 'empty') && Number(value) > 0
+                        ? 'text-[var(--color-danger)]'
+                        : 'text-[var(--color-fg)]'
+                    }`}>{value}</p>
+                  </div>
+                ))}
+              </div>
+              {latestVectorJob?.type === 'rebuild' && latestVectorJob.status === 'completed' && (
+                <p className="border-t border-[var(--color-border-subtle)] px-4 py-3 text-xs leading-relaxed text-[var(--color-fg-muted)]">
+                  {t('admin:backup.vectors.rebuildSummary', {
+                    rebuilt: latestVectorJob.rebuilt ?? 0,
+                    failed: latestVectorJob.failed ?? 0,
+                  })}
+                </p>
+              )}
+              {vectorReport.models.length > 0 && (
+                <div className="divide-y divide-[var(--color-border-subtle)] border-t border-[var(--color-border-subtle)]">
+                  {vectorReport.models.slice(0, 6).map((m) => (
+                    <div
+                      key={`${m.embedding_model}:${m.dim}`}
+                      className="flex min-w-0 flex-col gap-1 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+                    >
+                      <p className="truncate text-xs font-medium text-[var(--color-fg)]">
+                        {m.embedding_model} · {m.dim || '—'}d
+                      </p>
+                      <p className="text-xs leading-relaxed text-[var(--color-fg-muted)] sm:text-right">
+                        {t('admin:backup.vectors.modelSummary', {
+                          total: m.total,
+                          present: m.present,
+                          missing: m.missing,
+                          empty: m.empty,
+                          skipped: m.skipped,
+                        })}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {vectorReport.issues.length > 0 && (
+                <div className="border-t border-[var(--color-border-subtle)]">
+                  <p className="px-4 py-3 text-xs font-medium text-[var(--color-fg)]">
+                    {t('admin:backup.vectors.issueSamples')}
+                  </p>
+                  <div className="divide-y divide-[var(--color-border-subtle)] border-t border-[var(--color-border-subtle)]">
+                    {vectorReport.issues.slice(0, 5).map((issue) => (
+                      <div key={`${issue.chunk_id}:${issue.reason}`} className="min-w-0 px-4 py-3">
+                        <p className="truncate text-xs font-medium text-[var(--color-fg)]">
+                          {issue.filename || issue.document_id}
+                        </p>
+                        <p className="mt-0.5 truncate text-[11px] text-[var(--color-fg-muted)]">
+                          {issue.reason} · {issue.embedding_model} · {issue.dim || '—'}d · {issue.chunk_id}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-8 text-center">
+              <p className="text-sm text-[var(--color-fg-muted)]">{t('admin:backup.vectors.empty')}</p>
+            </div>
+          )}
+        </BackupSection>
+
+        <BackupSection
+          id="backup-config-export-title"
+          title={t('admin:backup.config.export.title')}
+          description={t('admin:backup.config.export.lead')}
+          actions={
+            <Button
+              variant="secondary"
+              onClick={onExportConfig}
+              loading={exportingConfig}
+              disabled={exportBusy}
+              leadingIcon={<Download size={14} aria-hidden />}
+            >
+              {t('admin:backup.config.export.action')}
+            </Button>
+          }
+        />
+
+        <BackupSection
+          id="backup-config-import-title"
+          title={t('admin:backup.config.import.title')}
+          description={t('admin:backup.config.import.lead')}
+          actions={
+            <>
+              <input
+                ref={cfgFileRef}
+                type="file"
+                accept=".zip,application/zip"
+                className="hidden"
+                aria-label={t('admin:backup.config.import.action')}
+                onChange={onPickConfig}
+              />
+              <Button
+                variant="secondary"
+                onClick={() => cfgFileRef.current?.click()}
+                disabled={exportBusy}
+                leadingIcon={<Upload size={14} aria-hidden />}
+              >
+                {t('admin:backup.config.import.action')}
+              </Button>
+            </>
+          }
+        />
+
+        <BackupSection
+          id="backup-import-title"
+          title={t('admin:backup.import.title')}
+          description={t('admin:backup.import.lead')}
+        >
+          <div className="flex items-start gap-2.5 rounded-[8px] bg-[var(--color-danger-soft)] px-3 py-3">
+            <TriangleAlert size={16} className="mt-0.5 shrink-0 text-[var(--color-danger)]" aria-hidden />
+            <p className="text-sm leading-relaxed text-[var(--color-fg)]">{t('admin:backup.import.warning')}</p>
+          </div>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
             <input
               ref={fileRef}
               type="file"
               accept=".zip,application/zip"
-              className="sr-only"
+              className="hidden"
+              aria-label={t('admin:backup.import.choose')}
               onChange={onPick}
             />
-            <div className="mt-5 min-w-0">
-              <Button
-                className="w-full"
-                variant="secondary"
-                onClick={() => fileRef.current?.click()}
-                disabled={fullBackupBusy}
-                leadingIcon={<FileArchive size={14} aria-hidden />}
-              >
-                {t('admin:backup.import.choose')}
-              </Button>
+            <Button
+              variant="secondary"
+              onClick={() => fileRef.current?.click()}
+              disabled={fullBackupBusy}
+              leadingIcon={<FileArchive size={14} aria-hidden />}
+              aria-describedby={picked ? 'backup-picked-file' : undefined}
+            >
+              {t('admin:backup.import.choose')}
+            </Button>
+            <div className="min-w-0 flex-1" role="status">
               {picked && (
-                <p className="mt-2 truncate text-center text-xs text-[var(--color-fg-muted)]" title={picked.name}>
-                  {picked.name}
+                <p id="backup-picked-file" className="flex min-w-0 items-center gap-2 text-xs text-[var(--color-fg-muted)]">
+                  <span className="truncate font-medium text-[var(--color-fg)]" title={picked.name}>{picked.name}</span>
+                  <span className="shrink-0 tabular-nums">{formatBytes(picked.size)}</span>
                 </p>
               )}
             </div>
-
             <Button
-              className="mt-3 w-full"
               variant="destructive"
               disabled={!picked || fullBackupBusy}
               onClick={() => {
@@ -533,128 +828,34 @@ export default function AdminBackup() {
             >
               {t('admin:backup.import.action')}
             </Button>
-
-            {result && (
-              <div className="mt-5 rounded-[10px] bg-[var(--color-success-soft)] p-4" role="status" aria-live="polite">
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 size={15} className="shrink-0 text-[var(--color-success)]" aria-hidden />
-                  <p className="text-sm font-medium text-[var(--color-fg)]">{t('admin:backup.import.successTitle')}</p>
-                </div>
-                <p className="mt-2 text-xs leading-relaxed text-[var(--color-fg-muted)]">
-                  {t('admin:backup.import.successSummary', { rows: totalRows, files: result.files_restored })}
-                </p>
-                {typeof result.qdrant_restored === 'number' && (
-                  <p className="mt-1 text-xs leading-relaxed text-[var(--color-fg-muted)]">
-                    {t('admin:backup.import.successQdrant', { points: result.qdrant_restored })}
-                  </p>
-                )}
-                {result.qdrant_error && (
-                  <p className="mt-2 text-xs leading-relaxed text-[var(--color-danger)]">
-                    {t('admin:backup.import.qdrantWarning', { error: result.qdrant_error })}
-                  </p>
-                )}
-                <p className="mt-2 text-xs leading-relaxed text-[var(--color-accent)]">
-                  {t('admin:backup.import.reloginNote')}
-                </p>
-              </div>
-            )}
-          </aside>
-        </div>
-
-        {/* Generated archives --------------------------------------------- */}
-        <div className="border-t border-[var(--color-border)]">
-          <div className="flex items-center gap-2 px-5 py-4 sm:px-6 lg:px-7">
-            <FileArchive size={15} className="text-[var(--color-fg-muted)]" aria-hidden />
-            <h3 className="text-sm font-medium text-[var(--color-fg)]">
-              {t('admin:backup.export.archivesTitle')}
-            </h3>
-            {!loadingExports && archives.length > 0 && (
-              <span className="ml-auto rounded-full bg-[var(--color-bg-muted)] px-2 py-0.5 text-xs tabular-nums text-[var(--color-fg-muted)]">
-                {archives.length}
-              </span>
-            )}
           </div>
-          {loadingExports ? (
-            <div
-              className="border-t border-[var(--color-border-subtle)] px-5 py-5 sm:px-6 lg:px-7"
-              role="status"
-              aria-live="polite"
-              aria-label={t('admin:backup.export.loading')}
-            >
-              <span className="sr-only">{t('admin:backup.export.loading')}</span>
-              <div className="flex items-center gap-3">
-                <Skeleton shape="circle" className="size-4 shrink-0" />
-                <div className="min-w-0 flex-1 space-y-2">
-                  <Skeleton shape="line" className="h-3.5 w-2/5 max-w-56" />
-                  <Skeleton shape="line" className="h-2.5 w-1/4 max-w-32" />
-                </div>
-                <Skeleton className="size-9 shrink-0 rounded-[8px]" />
+          {result && (
+            <div className="mt-5 rounded-[10px] bg-[var(--color-success-soft)] p-4" role="status" aria-live="polite">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 size={15} className="shrink-0 text-[var(--color-success)]" aria-hidden />
+                <p className="text-sm font-medium text-[var(--color-fg)]">{t('admin:backup.import.successTitle')}</p>
               </div>
-            </div>
-          ) : archives.length === 0 ? (
-            <div className="border-t border-[var(--color-border-subtle)] px-5 py-9 text-center sm:px-6 lg:px-7">
-              <FileArchive size={20} className="mx-auto text-[var(--color-fg-faint)]" aria-hidden />
-              <p className="mt-2 text-xs text-[var(--color-fg-muted)]">{t('admin:backup.export.noArchives')}</p>
-            </div>
-          ) : (
-            <div
-              className="divide-y divide-[var(--color-border-subtle)] border-t border-[var(--color-border-subtle)]"
-              role="list"
-              aria-label={t('admin:backup.export.archivesTitle')}
-            >
-              {archives.map((archive) => (
-                <div
-                  key={archive.name}
-                  className="flex min-w-0 items-center gap-3 px-5 py-3 transition-colors duration-150 hover:bg-[var(--color-bg-muted)] sm:px-6 lg:px-7"
-                  role="listitem"
-                >
-                  <CheckCircle2 size={15} className="shrink-0 text-[var(--color-success)]" aria-hidden />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-[var(--color-fg)]" title={archive.name}>
-                      {archive.name}
-                    </p>
-                    <p className="mt-0.5 text-xs text-[var(--color-fg-muted)]">
-                      {formatBytes(archive.size_bytes)} · {formatDate(archive.created_at)}
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <Tooltip content={t('admin:backup.export.download')}>
-                      <Button
-                        size="icon-lg"
-                        variant="ghost"
-                        loading={downloadingArchive === archive.name}
-                        disabled={deletingArchive === archive.name}
-                        onClick={() => void onDownloadArchive(archive)}
-                        aria-label={`${t('admin:backup.export.download')} ${archive.name}`}
-                      >
-                        {downloadingArchive === archive.name ? (
-                          <span className="sr-only">{t('admin:backup.export.download')}</span>
-                        ) : (
-                          <Download size={16} aria-hidden />
-                        )}
-                      </Button>
-                    </Tooltip>
-                    <Tooltip content={t('common:actions.delete')}>
-                      <Button
-                        size="icon-lg"
-                        variant="ghost"
-                        className="text-[var(--color-danger)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]"
-                        disabled={downloadingArchive === archive.name || deletingArchive === archive.name}
-                        onClick={() => setDeleteTarget(archive)}
-                        aria-label={`${t('common:actions.delete')} ${archive.name}`}
-                      >
-                        <Trash2 size={16} aria-hidden />
-                      </Button>
-                    </Tooltip>
-                  </div>
-                </div>
-              ))}
+              <p className="mt-2 text-xs leading-relaxed text-[var(--color-fg-muted)]">
+                {t('admin:backup.import.successSummary', { rows: totalRows, files: result.files_restored })}
+              </p>
+              {typeof result.qdrant_restored === 'number' && (
+                <p className="mt-1 text-xs leading-relaxed text-[var(--color-fg-muted)]">
+                  {t('admin:backup.import.successQdrant', { points: result.qdrant_restored })}
+                </p>
+              )}
+              {result.qdrant_error && (
+                <p className="mt-2 text-xs leading-relaxed text-[var(--color-danger)]">
+                  {t('admin:backup.import.qdrantWarning', { error: result.qdrant_error })}
+                </p>
+              )}
+              <p className="mt-2 text-xs leading-relaxed text-[var(--color-accent)]">
+                {t('admin:backup.import.reloginNote')}
+              </p>
             </div>
           )}
-        </div>
-      </section>
+        </BackupSection>
+      </div>
 
-      {/* Generated archive delete confirm ----------------------------------- */}
       <Dialog
         open={Boolean(deleteTarget)}
         onOpenChange={(open) => !open && !deletingArchive && setDeleteTarget(null)}
@@ -682,262 +883,6 @@ export default function AdminBackup() {
         </DialogContent>
       </Dialog>
 
-      {/* Vector index maintenance ----------------------------------------- */}
-      <section
-        className="mt-12 border-t border-[var(--color-border)] pt-8 sm:mt-14 sm:pt-10"
-        aria-labelledby="backup-vectors-title"
-      >
-        <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-          <div className="flex max-w-3xl items-start gap-3">
-            <span className="flex size-9 shrink-0 items-center justify-center rounded-[9px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
-              <Database size={17} aria-hidden />
-            </span>
-            <div className="min-w-0">
-              <h2 id="backup-vectors-title" className="text-balance font-serif text-lg text-[var(--color-fg)]">
-                {t('admin:backup.vectors.title')}
-              </h2>
-              <p className="mt-1 max-w-[70ch] text-pretty text-xs leading-relaxed text-[var(--color-fg-muted)]">
-                {t('admin:backup.vectors.lead')}
-              </p>
-            </div>
-          </div>
-          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-            <Button
-              className="w-full sm:w-auto"
-              variant="secondary"
-              onClick={onVectorCheck}
-              loading={startingVectorJob === 'check' || runningVector?.type === 'check'}
-              disabled={exportBusy || vectorBusy}
-              leadingIcon={<Database size={14} aria-hidden />}
-            >
-              {t('admin:backup.vectors.checkAction')}
-            </Button>
-            <Button
-              className="w-full sm:w-auto"
-              variant="secondary"
-              onClick={onVectorRebuild}
-              loading={startingVectorJob === 'rebuild' || runningVector?.type === 'rebuild'}
-              disabled={exportBusy || vectorBusy || vectorMissing === 0}
-              leadingIcon={<Wrench size={14} aria-hidden />}
-            >
-              {t('admin:backup.vectors.rebuildAction')}
-            </Button>
-          </div>
-        </div>
-
-        {runningVector && (
-          <div className="mt-5 rounded-[10px] bg-[var(--color-bg-muted)] p-4" role="status" aria-live="polite">
-            <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-fg)]">
-              <Clock3 size={15} className="text-[var(--color-accent)]" aria-hidden />
-              {runningVector.type === 'rebuild'
-                ? t('admin:backup.vectors.rebuilding')
-                : t('admin:backup.vectors.checking')}
-            </div>
-            <p className="mt-1 text-xs leading-relaxed text-[var(--color-fg-muted)]">
-              {t('admin:backup.vectors.runningHint', {
-                progress: t(`admin:backup.vectors.progress.${runningVector.progress}`, {
-                  defaultValue: runningVector.progress,
-                }),
-                rebuilt: runningVector.rebuilt ?? 0,
-                failed: runningVector.failed ?? 0,
-              })}
-            </p>
-            <div
-              className="mt-3 h-1.5 overflow-hidden rounded-full bg-[var(--color-border)]"
-              role="progressbar"
-              aria-label={
-                runningVector.type === 'rebuild'
-                  ? t('admin:backup.vectors.rebuilding')
-                  : t('admin:backup.vectors.checking')
-              }
-            >
-              <div className="h-full w-1/2 animate-[pulse_1.2s_ease-in-out_infinite] rounded-full bg-[var(--color-accent)]" />
-            </div>
-          </div>
-        )}
-
-        {failedVectorJob && (
-          <div className="mt-5 flex items-start gap-2.5 rounded-[10px] bg-[var(--color-danger-soft)] p-3.5" role="alert">
-            <XCircle size={15} className="mt-0.5 shrink-0 text-[var(--color-danger)]" aria-hidden />
-            <p className="text-xs leading-relaxed text-[var(--color-fg-muted)]">
-              {t('admin:backup.vectors.failed', { error: failedVectorJob.error || t('admin:common.failed') })}
-            </p>
-          </div>
-        )}
-
-        {loadingVectors ? (
-          <div
-            className="mt-5 overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]"
-            role="status"
-            aria-live="polite"
-            aria-label={t('admin:backup.vectors.loading')}
-          >
-            <span className="sr-only">{t('admin:backup.vectors.loading')}</span>
-            <div className="grid grid-cols-2 gap-px bg-[var(--color-border-subtle)] sm:grid-cols-5">
-              {[0, 1, 2, 3, 4].map((item) => (
-                <div key={item} className="min-w-0 bg-[var(--color-surface)] px-4 py-3.5">
-                  <Skeleton shape="line" className="h-2.5 w-16" />
-                  <Skeleton shape="line" className="mt-2 h-5 w-10" />
-                </div>
-              ))}
-            </div>
-            <div className="divide-y divide-[var(--color-border-subtle)] border-t border-[var(--color-border-subtle)]">
-              {[0, 1].map((item) => (
-                <div key={item} className="flex min-w-0 items-center justify-between gap-4 px-4 py-3">
-                  <Skeleton shape="line" className="h-3 w-2/5 max-w-56" />
-                  <Skeleton shape="line" className="h-2.5 w-1/3 max-w-40" />
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : vectorReport ? (
-          <div className="mt-5 overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-            <div className="grid grid-cols-2 gap-px bg-[var(--color-border-subtle)] sm:grid-cols-5">
-              {[
-                ['total', vectorReport.total],
-                ['present', vectorReport.present],
-                ['missing', vectorReport.missing],
-                ['empty', vectorReport.empty],
-                ['skipped', vectorReport.skipped],
-              ].map(([key, value]) => (
-                <div key={key} className="min-w-0 bg-[var(--color-surface)] px-4 py-3.5">
-                  <p className="text-xs text-[var(--color-fg-muted)]">{t(`admin:backup.vectors.stats.${key}`)}</p>
-                  <p className="mt-1 text-lg font-semibold tabular-nums text-[var(--color-fg)]">{value}</p>
-                </div>
-              ))}
-            </div>
-            {latestVectorJob?.type === 'rebuild' && latestVectorJob.status === 'completed' && (
-              <p className="border-t border-[var(--color-border-subtle)] px-4 py-3 text-xs leading-relaxed text-[var(--color-fg-muted)]">
-                {t('admin:backup.vectors.rebuildSummary', {
-                  rebuilt: latestVectorJob.rebuilt ?? 0,
-                  failed: latestVectorJob.failed ?? 0,
-                })}
-              </p>
-            )}
-            {vectorReport.models.length > 0 && (
-              <div className="divide-y divide-[var(--color-border-subtle)] border-t border-[var(--color-border-subtle)]">
-                {vectorReport.models.slice(0, 6).map((m) => (
-                  <div
-                    key={`${m.embedding_model}:${m.dim}`}
-                    className="flex min-w-0 flex-col gap-1 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
-                  >
-                    <p className="truncate text-xs font-medium text-[var(--color-fg)]">
-                      {m.embedding_model} · {m.dim || '—'}d
-                    </p>
-                    <p className="text-xs leading-relaxed text-[var(--color-fg-muted)] sm:text-right">
-                      {t('admin:backup.vectors.modelSummary', {
-                        total: m.total,
-                        present: m.present,
-                        missing: m.missing,
-                        empty: m.empty,
-                        skipped: m.skipped,
-                      })}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
-            {vectorReport.issues.length > 0 && (
-              <div className="border-t border-[var(--color-border-subtle)]">
-                <p className="px-4 py-3 text-xs font-medium text-[var(--color-fg)]">
-                  {t('admin:backup.vectors.issueSamples')}
-                </p>
-                <div className="divide-y divide-[var(--color-border-subtle)] border-t border-[var(--color-border-subtle)]">
-                  {vectorReport.issues.slice(0, 5).map((issue) => (
-                    <div key={`${issue.chunk_id}:${issue.reason}`} className="min-w-0 px-4 py-3">
-                      <p className="truncate text-xs font-medium text-[var(--color-fg)]">
-                        {issue.filename || issue.document_id}
-                      </p>
-                      <p className="mt-0.5 truncate text-[11px] text-[var(--color-fg-muted)]">
-                        {issue.reason} · {issue.embedding_model} · {issue.dim || '—'}d · {issue.chunk_id}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="mt-5 border-y border-[var(--color-border-subtle)] py-9 text-center">
-            <Database size={20} className="mx-auto text-[var(--color-fg-faint)]" aria-hidden />
-            <p className="mt-2 text-xs text-[var(--color-fg-muted)]">{t('admin:backup.vectors.empty')}</p>
-          </div>
-        )}
-      </section>
-
-      {/* Configuration archive — config-only, non-destructive. Muted section
-          icons + secondary buttons keep the single clay accent on the DB
-          backup above (§2.4 one accent per screen). */}
-      <section
-        className="mt-12 border-t border-[var(--color-border)] pt-8 sm:mt-14 sm:pt-10"
-        aria-labelledby="backup-config-export-title backup-config-import-title"
-      >
-        <div className="grid overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] md:grid-cols-2">
-        {/* Config export --------------------------------------------------- */}
-          <div className="min-w-0 p-5 sm:p-6">
-            <div className="flex items-start gap-3">
-              <span className="flex size-9 shrink-0 items-center justify-center rounded-[9px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
-                <FileJson size={17} aria-hidden />
-              </span>
-              <div className="min-w-0">
-                <h2 id="backup-config-export-title" className="text-balance font-serif text-lg text-[var(--color-fg)]">
-                  {t('admin:backup.config.export.title')}
-                </h2>
-                <p className="mt-1 max-w-[65ch] text-pretty text-xs leading-relaxed text-[var(--color-fg-muted)]">
-                  {t('admin:backup.config.export.lead')}
-                </p>
-              </div>
-            </div>
-
-            <Button
-              className="mt-5 w-full sm:w-auto"
-              variant="secondary"
-              onClick={onExportConfig}
-              loading={exportingConfig}
-              disabled={exportBusy}
-              leadingIcon={<Download size={14} aria-hidden />}
-            >
-              {t('admin:backup.config.export.action')}
-            </Button>
-          </div>
-
-        {/* Config import --------------------------------------------------- */}
-          <div className="min-w-0 border-t border-[var(--color-border)] p-5 sm:p-6 md:border-l md:border-t-0">
-            <div className="flex items-start gap-3">
-              <span className="flex size-9 shrink-0 items-center justify-center rounded-[9px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
-                <Braces size={17} aria-hidden />
-              </span>
-              <div className="min-w-0">
-                <h2 id="backup-config-import-title" className="text-balance font-serif text-lg text-[var(--color-fg)]">
-                  {t('admin:backup.config.import.title')}
-                </h2>
-                <p className="mt-1 max-w-[65ch] text-pretty text-xs leading-relaxed text-[var(--color-fg-muted)]">
-                  {t('admin:backup.config.import.lead')}
-                </p>
-              </div>
-            </div>
-
-            <input
-              ref={cfgFileRef}
-              type="file"
-              accept=".zip,application/zip"
-              className="sr-only"
-              onChange={onPickConfig}
-            />
-            <Button
-              className="mt-5 w-full sm:w-auto"
-              variant="secondary"
-              onClick={() => cfgFileRef.current?.click()}
-              disabled={exportBusy}
-              leadingIcon={<Upload size={14} aria-hidden />}
-            >
-              {t('admin:backup.config.import.action')}
-            </Button>
-          </div>
-        </div>
-      </section>
-
-      {/* Config import confirm ---------------------------------------------- */}
       <Dialog open={cfgConfirmOpen} onOpenChange={(o) => !importingConfig && setCfgConfirmOpen(o)}>
         <DialogContent size="sm">
           <DialogHeader>
@@ -962,7 +907,6 @@ export default function AdminBackup() {
         </DialogContent>
       </Dialog>
 
-      {/* Typed confirmation -------------------------------------------------- */}
       <Dialog open={confirmOpen} onOpenChange={(o) => !importing && setConfirmOpen(o)}>
         <DialogContent size="sm">
           <DialogHeader>
