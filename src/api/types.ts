@@ -645,12 +645,25 @@ export type OAuthInitialPasswordPolicy = 'required' | 'optional' | 'disabled'
 /** Public authentication policy used before a session exists. */
 export interface ApiAuthPolicy {
   password_login_enabled: boolean
+  /** Admin toggle for passkey (WebAuthn) login. Absent on older servers ⇒ on. */
+  passkey_login_enabled?: boolean
   entry_mode: AuthEntryMode
   default_provider: ApiPublicOAuthProvider | null
   oauth_initial_password_policy: OAuthInitialPasswordPolicy
   oauth_auto_provision_enabled: boolean
   providers: ApiPublicOAuthProvider[]
 }
+
+/** A registered passkey device. Raw credential material never leaves the server. */
+export interface ApiPasskey {
+  id: string
+  name: string
+  created_at: number
+  last_used_at: number
+}
+
+/** WebAuthn option/response documents travel as opaque JSON (see lib/passkey). */
+export type PasskeyJson = Record<string, unknown>
 
 export type OAuthKind = 'google' | 'github' | 'apple' | 'oauth2' | 'oidc'
 

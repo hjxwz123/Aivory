@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { motion } from 'framer-motion'
-import { Mail, Lock, ArrowRight, Eye, EyeOff, ShieldCheck, ArrowLeft } from 'lucide-react'
+import { Mail, Lock, ArrowRight, Eye, EyeOff, ShieldCheck, ArrowLeft, KeyRound } from 'lucide-react'
 import { BlurText } from '@/components/landing/fx/blur-text'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -14,6 +14,7 @@ import { useAuth } from '@/store/auth'
 import { OAuthButtons } from '@/components/auth/oauth-buttons'
 import { PuzzleCaptchaDialog } from '@/components/auth/puzzle-captcha-dialog'
 import { authErrorText } from '@/lib/auth-errors'
+import { isPasskeyAvailable } from '@/lib/passkey'
 import {
   loadRememberedPassword,
   rememberPasswordPreference,
@@ -44,6 +45,7 @@ export default function Login() {
   const login = useAuth((s) => s.login)
   const banned = useAuth((s) => s.banned)
   const loginTwoFactor = useAuth((s) => s.loginTwoFactor)
+  const loginWithPasskey = useAuth((s) => s.loginWithPasskey)
   const pendingTwoFactor = useAuth((s) => s.pendingTwoFactor)
   const clearPendingTwoFactor = useAuth((s) => s.clearPendingTwoFactor)
   const startTwoFactor = useAuth((s) => s.startTwoFactor)
@@ -60,9 +62,13 @@ export default function Login() {
   const [loading, setLoading] = useState(false)
   const [errors, setErrors] = useState<{ email?: string; pw?: string; general?: string }>({})
   const [code, setCode] = useState('')
+  const [passkeyBusy, setPasskeyBusy] = useState(false)
   const show2fa = Boolean(pendingTwoFactor)
   const showPasswordLogin = authPolicy.entry_mode === 'login_page' && authPolicy.password_login_enabled
-  const providerRequired = !showPasswordLogin
+  // Admin policy + browser capability gate the passkey button; an absent
+  // policy field (older server) means enabled.
+  const showPasskey = authPolicy.passkey_login_enabled !== false && isPasskeyAvailable()
+  const providerRequired = !showPasswordLogin && !showPasskey
 
   // Slider-puzzle captcha (only when the admin requires it on sign-in) — same
   // modal + single-use pass token flow as the register form (§ anti
@@ -173,6 +179,21 @@ export default function Login() {
     void finishLogin(token)
   }
 
+  async function passkeyLogin() {
+    setPasskeyBusy(true)
+    const ok = await loginWithPasskey()
+    setPasskeyBusy(false)
+    if (!ok) {
+      // A dismissed biometric prompt leaves error null — stay quiet.
+      const err = useAuth.getState().error
+      if (err) setErrors({ general: authErrorText(t, err, t('login.passkeyFailed')) })
+      return
+    }
+    toast.success(t('login.welcome'), t('login.signingIn'))
+    const from = safeRedirect((location.state as { from?: string } | null)?.from)
+    navigate(from, { replace: true })
+  }
+
   async function submitCode(e: React.FormEvent) {
     e.preventDefault()
     if (code.trim().length < 6) {
@@ -277,7 +298,7 @@ export default function Login() {
             <OAuthButtons providers={providers} captchaRequired={registrationCaptchaRequired} />
           </motion.div>
 
-          {showPasswordLogin ? (
+          {showPasskey || showPasswordLogin ? (
             <motion.div
               variants={fadeUp}
               className="my-6 flex items-center gap-3 text-[11px] uppercase tracking-wider text-[var(--color-fg-subtle)]"
@@ -297,6 +318,35 @@ export default function Login() {
           className="mt-7 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3.5 py-3 text-sm text-[var(--color-fg-muted)]"
         >
           {t('login.noProviders')}
+        </motion.div>
+      ) : null}
+
+      {/* Passkey (WebAuthn) login — fingerprint / face / device PIN, no
+          password. Optional surface next to password + OAuth. */}
+      {showPasskey ? (
+        <motion.div variants={fadeUp} className={providers.length > 0 ? 'flex flex-col gap-2' : 'mt-4 flex flex-col gap-2'}>
+          <Button
+            type="button"
+            variant={showPasswordLogin ? 'secondary' : 'primary'}
+            size="lg"
+            loading={passkeyBusy}
+            onClick={() => void passkeyLogin()}
+            className="w-full"
+            leadingIcon={<KeyRound size={15} aria-hidden />}
+          >
+            {t('login.passkey')}
+          </Button>
+        </motion.div>
+      ) : null}
+
+      {showPasskey && showPasswordLogin ? (
+        <motion.div
+          variants={fadeUp}
+          className="my-6 flex items-center gap-3 text-[11px] uppercase tracking-wider text-[var(--color-fg-subtle)]"
+        >
+          <Separator className="flex-1" />
+          <span>{t('login.or')}</span>
+          <Separator className="flex-1" />
         </motion.div>
       ) : null}
 

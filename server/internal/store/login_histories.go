@@ -13,6 +13,7 @@ const (
 	LoginMethodPassword2FA  = "password_2fa"
 	LoginMethodOAuth        = "oauth"
 	LoginMethodOAuth2FA     = "oauth_2fa"
+	LoginMethodPasskey      = "passkey"
 	loginHistoryDefaultPage = 50
 	loginHistoryMaxPage     = 200
 )
@@ -37,7 +38,7 @@ func RecordLoginHistory(ctx context.Context, db *sql.DB, userID, method string, 
 		return nil, errors.New("login history user id required")
 	}
 	switch method {
-	case LoginMethodPassword, LoginMethodPassword2FA, LoginMethodOAuth, LoginMethodOAuth2FA:
+	case LoginMethodPassword, LoginMethodPassword2FA, LoginMethodOAuth, LoginMethodOAuth2FA, LoginMethodPasskey:
 	default:
 		return nil, errors.New("invalid login method")
 	}

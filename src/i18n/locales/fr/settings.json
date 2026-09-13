@@ -180,6 +180,32 @@
       "linkFailed": "Impossible de lier ce compte",
       "unlinkFailed": "Impossible de retirer cette identité",
       "lastMethod": "C'est votre seule méthode de connexion — définissez d'abord un mot de passe."
+    },
+    "passkey": {
+      "label": "Clés d'accès",
+      "body": "Connectez-vous avec l'empreinte, le visage ou le code PIN de votre appareil — sans mot de passe.",
+      "unsupported": "Les clés d'accès nécessitent HTTPS (ou localhost) et un navigateur compatible WebAuthn.",
+      "add": "Ajouter une clé d'accès",
+      "addTitle": "Ajouter une clé d'accès",
+      "addLead": "Votre navigateur demandera une vérification Touch ID, Windows Hello ou code PIN de l'appareil.",
+      "nameLabel": "Nom de l'appareil",
+      "namePlaceholder": "ex. MacBook Pro, iPhone",
+      "added": "Clé d'accès ajoutée.",
+      "deleted": "Clé d'accès supprimée.",
+      "delete": "Supprimer",
+      "deleteTitle": "Supprimer cette clé d'accès ?",
+      "deleteLead": "Les appareils connectés avec elle auront besoin de votre mot de passe ou d'une autre clé.",
+      "failed": "Échec de l'opération sur la clé d'accès.",
+      "unnamed": "Appareil sans nom",
+      "lastUsed": "Dernière utilisation {{date}}",
+      "neverUsed": "Jamais utilisée",
+      "errors": {
+        "passkey_login_disabled": "La connexion par clé d'accès est désactivée par l'administrateur.",
+        "passkey_limit": "Vous avez atteint le nombre maximum de clés d'accès.",
+        "passkey_setup_expired": "L'étape d'enregistrement a expiré. Recommencez.",
+        "passkey_registration_failed": "Impossible d'enregistrer cette clé d'accès. Réessayez.",
+        "passkey_unavailable": "Ce navigateur ou cet appareil ne prend pas en charge les clés d'accès."
+      }
     }
   },
   "appearance": {

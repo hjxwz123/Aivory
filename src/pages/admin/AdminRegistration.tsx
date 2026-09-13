@@ -23,6 +23,7 @@ const OWNED_KEYS = [
   'email_verification_required',
   'email_domain_whitelist',
   'password_login_enabled',
+  'passkey_login_enabled',
   'auth_entry_mode',
   'auth_default_provider_id',
   'oauth_initial_password_policy',
@@ -125,6 +126,7 @@ export default function AdminRegistration() {
   const loginCaptchaRequired = readBool('login_captcha_required')
   const emailVerificationRequired = readBool('email_verification_required')
   const passwordLoginEnabled = readBool('password_login_enabled', true)
+  const passkeyLoginEnabled = readBool('passkey_login_enabled', true)
   const authEntryMode = (readString('auth_entry_mode') || 'login_page') as AuthEntryMode
   const oauthPasswordPolicy = (readString('oauth_initial_password_policy') || 'required') as OAuthInitialPasswordPolicy
   const enabledProviders = providers.filter((provider) => provider.enabled)
@@ -166,6 +168,17 @@ export default function AdminRegistration() {
                   setDraft((current) => ({
                     ...current,
                     password_login_enabled: value,
+                  }))
+                }
+              />
+
+              <ToggleRow
+                label={t('admin:settings.authPolicy.passkeyLogin', { defaultValue: 'Passkey login' })}
+                checked={passkeyLoginEnabled}
+                onChange={(value) =>
+                  setDraft((current) => ({
+                    ...current,
+                    passkey_login_enabled: value,
                   }))
                 }
               />

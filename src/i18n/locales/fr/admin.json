@@ -944,7 +944,8 @@
       "conflict": "Un mot de passe local ne peut pas être obligatoire lorsque sa connexion est désactivée.",
       "providerRequired": "Cette politique exige au moins un fournisseur actif et entièrement configuré.",
       "defaultProviderRequired": "Sélectionnez le fournisseur utilisé pour la redirection automatique.",
-      "adminIdentityRequired": "L’administrateur actuel n’est pas lié au fournisseur requis. La politique n’a pas été enregistrée afin d’éviter un verrouillage."
+      "adminIdentityRequired": "L’administrateur actuel n’est pas lié au fournisseur requis. La politique n’a pas été enregistrée afin d’éviter un verrouillage.",
+      "passkeyLogin": "Connexion par clé d'accès (sans mot de passe)"
     },
     "modelPolicy": {
       "unavailable": "Choisissez un modèle de chat actif dont le canal est également actif.",

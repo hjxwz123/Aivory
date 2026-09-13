@@ -966,6 +966,21 @@ CREATE TABLE IF NOT EXISTS oauth_identities (
 );
 CREATE INDEX IF NOT EXISTS idx_oauth_identities_user ON oauth_identities(user_id);
 
+-- Passkeys (WebAuthn): one row per registered device credential. public_key is
+-- the CBOR-encoded credential public key; credential_id is the raw authenticator
+-- identifier (unique across all users — assertion lookups key on it directly).
+CREATE TABLE IF NOT EXISTS passkeys (
+  id            TEXT PRIMARY KEY,
+  user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  credential_id BLOB NOT NULL UNIQUE,
+  public_key    BLOB NOT NULL,
+  sign_count    INTEGER NOT NULL DEFAULT 0,
+  name          TEXT NOT NULL DEFAULT '',
+  created_at    INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  last_used_at  INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_passkeys_user ON passkeys(user_id);
+
 -- §4.20 Image Generation Studio. Admin-managed styles carry a hidden prompt
 -- composed server-side and NEVER returned to non-admin users.
 CREATE TABLE IF NOT EXISTS image_styles (

@@ -944,7 +944,8 @@
       "conflict": "關閉密碼登入時，不能要求第三方帳號必須設定本站密碼。",
       "providerRequired": "此登入政策至少需要一個已啟用且設定完整的身分來源。",
       "defaultProviderRequired": "請選擇自動跳轉使用的預設身分來源。",
-      "adminIdentityRequired": "目前管理員尚未綁定所需身分來源，為避免鎖定後台，未儲存此政策。"
+      "adminIdentityRequired": "目前管理員尚未綁定所需身分來源，為避免鎖定後台，未儲存此政策。",
+      "passkeyLogin": "通行金鑰登入（免密碼）"
     },
     "modelPolicy": {
       "unavailable": "請選擇已啟用且所屬渠道也已啟用的聊天模型。",

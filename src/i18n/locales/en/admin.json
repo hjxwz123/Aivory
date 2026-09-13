@@ -944,7 +944,8 @@
       "conflict": "A local password cannot be required when password sign-in is disabled.",
       "providerRequired": "This sign-in policy requires at least one enabled and fully configured provider.",
       "defaultProviderRequired": "Select the default provider used for automatic redirect.",
-      "adminIdentityRequired": "The current administrator is not linked to the required provider. The policy was not saved to prevent a lockout."
+      "adminIdentityRequired": "The current administrator is not linked to the required provider. The policy was not saved to prevent a lockout.",
+      "passkeyLogin": "Passkey login (no password)"
     },
     "modelPolicy": {
       "unavailable": "Choose an enabled chat model whose channel is also enabled.",

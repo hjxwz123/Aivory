@@ -900,6 +900,19 @@ CREATE TABLE IF NOT EXISTS oauth_identities (
 );
 CREATE INDEX IF NOT EXISTS idx_oauth_identities_user ON oauth_identities(user_id);
 
+-- Passkeys (WebAuthn) — see schema.sql for notes (Postgres dialect).
+CREATE TABLE IF NOT EXISTS passkeys (
+  id            TEXT PRIMARY KEY,
+  user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  credential_id BYTEA NOT NULL UNIQUE,
+  public_key    BYTEA NOT NULL,
+  sign_count    BIGINT NOT NULL DEFAULT 0,
+  name          TEXT NOT NULL DEFAULT '',
+  created_at    BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint),
+  last_used_at  BIGINT NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_passkeys_user ON passkeys(user_id);
+
 -- §4.20 Image Generation Studio (Postgres dialect — see schema.sql for notes).
 CREATE TABLE IF NOT EXISTS image_styles (
   id                TEXT PRIMARY KEY,

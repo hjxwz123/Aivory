@@ -197,6 +197,7 @@ func main() {
 		RAG:          ragSvc,
 		Orchestrator: orchestrator,
 		Logger:       logger,
+		Passkeys:     api.NewPasskeyService("Aivory"),
 	})
 
 	srv := &http.Server{

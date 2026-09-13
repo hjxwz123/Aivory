@@ -8,6 +8,7 @@
  */
 import { create } from 'zustand'
 import { authApi, ApiError, resetAuthFailureState, setAccessToken } from '@/api'
+import { PasskeyError, requestPasskeyAssertion } from '@/lib/passkey'
 import {
   isAuthRefreshSuppressed,
   setAuthLostHandler,
@@ -19,6 +20,7 @@ import type { ApiAuthPolicy, ApiUser } from '@/api/types'
 
 export const DEFAULT_AUTH_POLICY: ApiAuthPolicy = {
   password_login_enabled: true,
+  passkey_login_enabled: true,
   entry_mode: 'login_page',
   default_provider: null,
   oauth_initial_password_policy: 'required',
@@ -103,6 +105,9 @@ interface AuthState {
   refreshProfile: () => Promise<ApiUser | null>
   login: (email: string, password: string, captchaToken?: string) => Promise<boolean | '2fa'>
   loginTwoFactor: (code: string) => Promise<boolean>
+  /** Passwordless login via a registered device passkey (WebAuthn). Returns
+   *  false (silently) when the user dismisses the biometric prompt. */
+  loginWithPasskey: () => Promise<boolean>
   register: (
     email: string,
     password: string,
@@ -348,6 +353,32 @@ export const useAuth = create<AuthState>((set, get) => ({
         set({ error: msg, status: 'unauthenticated', pendingTwoFactor: null })
         return false
       }
+      set({ error: msg, status: 'unauthenticated' })
+      return false
+    }
+  },
+
+  async loginWithPasskey() {
+    const seq = beginAuthOp()
+    set({ status: 'authenticating', error: null })
+    try {
+      const begin = await authApi.beginPasskeyLogin()
+      const response = await requestPasskeyAssertion(begin.options)
+      const resp = await authApi.verifyPasskeyLogin(begin.ticket, response)
+      if (!isLatestAuthOp(seq)) return false
+      resetAuthFailureState()
+      setAccessToken(resp.access_token, resp.request_signing_key)
+      set({ user: resp.user, status: 'authenticated', needsSetup: false, setupProbed: true, pendingTwoFactor: null, banned: false })
+      return true
+    } catch (e) {
+      if (!isLatestAuthOp(seq)) return false
+      // A dismissed biometric prompt is not a failed login — return quietly so
+      // the user can retry or fall back to their password.
+      if (e instanceof PasskeyError && e.code === 'passkey_cancelled') {
+        set({ status: 'unauthenticated' })
+        return false
+      }
+      const msg = e instanceof ApiError ? e.message : e instanceof PasskeyError ? e.code : 'passkey_login_failed'
       set({ error: msg, status: 'unauthenticated' })
       return false
     }

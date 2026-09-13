@@ -1787,6 +1787,12 @@ type LoginSessionAuthMode int
 const (
 	LoginSessionWithout2FA LoginSessionAuthMode = iota
 	LoginSessionWithVerified2FA
+	// LoginSessionWithPasskey marks a session whose proof was a WebAuthn
+	// assertion. A passkey is a full authentication factor, so — like the
+	// verified-2FA mode — it bypasses the TOTP gate, but instead of the TOTP
+	// secret it is coupled to the user still having at least one registered
+	// credential at session-insert time.
+	LoginSessionWithPasskey
 )
 
 // SaveRefreshToken records a non-revoked refresh token for the user along with
@@ -1899,6 +1905,18 @@ func lockLoginSessionUser(
 			 WHERE id=? AND status='active' AND token_ver=?
 			   AND totp_enabled=1 AND totp_secret=?`,
 			userID, expectedTokenVer, expectedTotpSecret)
+	case LoginSessionWithPasskey:
+		if expectedTotpSecret != "" {
+			return ErrLoginStateChanged
+		}
+		// The assertion was verified against a stored credential; still require
+		// the user to own ≥1 passkey at insert time so a mid-flow "delete all"
+		// (or admin reset) revokes the login like a password/TOTP change would.
+		locked, err = tx.ExecContext(ctx,
+			`UPDATE users SET token_ver=token_ver
+			 WHERE id=? AND status='active' AND token_ver=?
+			   AND EXISTS (SELECT 1 FROM passkeys pk WHERE pk.user_id=users.id)`,
+			userID, expectedTokenVer)
 	default:
 		return ErrLoginStateChanged
 	}

@@ -835,6 +835,9 @@ func finaliseLoginSession(d Deps, w http.ResponseWriter, r *http.Request, user *
 	if method == store.LoginMethodPassword2FA {
 		authMode = store.LoginSessionWithVerified2FA
 	}
+	if method == store.LoginMethodPasskey {
+		authMode = store.LoginSessionWithPasskey
+	}
 	finaliseSessionResponseWithOAuthGuard(
 		d, w, r, user, 0, method, nil, authMode,
 	)

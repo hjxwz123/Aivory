@@ -180,6 +180,32 @@
       "linkFailed": "アカウントを連携できませんでした",
       "unlinkFailed": "認証元を解除できませんでした",
       "lastMethod": "これは唯一のログイン方法です。先にパスワードを設定してください。"
+    },
+    "passkey": {
+      "label": "パスキー",
+      "body": "デバイスの指紋、顔、またはデバイス PIN でサインイン — パスワード不要。",
+      "unsupported": "パスキーには HTTPS（または localhost）と WebAuthn 対応ブラウザが必要です。",
+      "add": "パスキーを追加",
+      "addTitle": "パスキーを追加",
+      "addLead": "ブラウザで Touch ID、Windows Hello、またはデバイス PIN による確認を求められます。",
+      "nameLabel": "デバイス名",
+      "namePlaceholder": "例：MacBook Pro、iPhone",
+      "added": "パスキーを追加しました。",
+      "deleted": "パスキーを削除しました。",
+      "delete": "削除",
+      "deleteTitle": "このパスキーを削除しますか？",
+      "deleteLead": "それでサインインしていたデバイスは、パスワードまたは別のパスキーが必要になります。",
+      "failed": "パスキー操作に失敗しました。",
+      "unnamed": "名前のないデバイス",
+      "lastUsed": "最終利用 {{date}}",
+      "neverUsed": "未使用",
+      "errors": {
+        "passkey_login_disabled": "管理者によりパスキーサインインが無効です。",
+        "passkey_limit": "パスキーの数が上限に達しました。",
+        "passkey_setup_expired": "登録手順の有効期限が切れました。再度開始してください。",
+        "passkey_registration_failed": "パスキーの登録に失敗しました。もう一度お試しください。",
+        "passkey_unavailable": "このブラウザまたはデバイスではパスキーを利用できません。"
+      }
     }
   },
   "appearance": {

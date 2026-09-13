@@ -948,7 +948,8 @@
       "conflict": "关闭密码登录时，不能要求第三方账号必须设置本站密码。",
       "providerRequired": "该登录策略至少需要一个已启用且配置完整的身份源。",
       "defaultProviderRequired": "请选择自动跳转使用的默认身份源。",
-      "adminIdentityRequired": "当前管理员尚未绑定所需身份源，无法保存以免锁定后台。"
+      "adminIdentityRequired": "当前管理员尚未绑定所需身份源，无法保存以免锁定后台。",
+      "passkeyLogin": "通行密钥登录（免密码）"
     },
     "modelPolicy": {
       "unavailable": "请选择已启用且所属渠道也已启用的聊天模型。",

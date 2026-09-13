@@ -180,6 +180,32 @@
       "linkFailed": "綁定失敗",
       "unlinkFailed": "移除失敗",
       "lastMethod": "這是你唯一的登入方式，請先設定密碼。"
+    },
+    "passkey": {
+      "label": "通行金鑰",
+      "body": "使用裝置指紋、臉部或裝置 PIN 登入，免密碼。",
+      "unsupported": "通行金鑰需要 HTTPS（或 localhost）及支援 WebAuthn 的瀏覽器。",
+      "add": "新增通行金鑰",
+      "addTitle": "新增通行金鑰",
+      "addLead": "瀏覽器將請求以 Touch ID、Windows Hello 或裝置 PIN 驗證。",
+      "nameLabel": "裝置名稱",
+      "namePlaceholder": "例如 MacBook Pro、iPhone",
+      "added": "通行金鑰已新增。",
+      "deleted": "通行金鑰已刪除。",
+      "delete": "刪除",
+      "deleteTitle": "刪除此通行金鑰？",
+      "deleteLead": "使用該金鑰登入過的裝置將需改用密碼或其他通行金鑰。",
+      "failed": "通行金鑰操作失敗。",
+      "unnamed": "未命名裝置",
+      "lastUsed": "最近使用 {{date}}",
+      "neverUsed": "從未使用",
+      "errors": {
+        "passkey_login_disabled": "管理員已停用通行金鑰登入。",
+        "passkey_limit": "通行金鑰數量已達上限。",
+        "passkey_setup_expired": "註冊步驟已過期，請重新開始。",
+        "passkey_registration_failed": "通行金鑰註冊失敗，請重試。",
+        "passkey_unavailable": "目前瀏覽器或裝置不支援通行金鑰。"
+      }
     }
   },
   "appearance": {

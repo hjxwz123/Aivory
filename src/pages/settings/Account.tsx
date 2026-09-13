@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Mail, User, Lock, AlertTriangle, ShieldCheck, Copy, Upload } from 'lucide-react'
+import { Mail, User, Lock, AlertTriangle, ShieldCheck, Copy, Upload, KeyRound, Trash2 } from 'lucide-react'
 import { SettingsRow, SettingsSection } from './SettingsLayout'
 import { ActiveSessions } from '@/components/settings/active-sessions'
 import { IdentitySources } from '@/components/settings/identity-sources'
@@ -11,6 +11,8 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { initials } from '@/components/ui/avatar.utils'
 import { useAuth } from '@/store/auth'
 import { authApi, ApiError } from '@/api'
+import type { ApiPasskey } from '@/api/types'
+import { PasskeyError, createPasskeyCredential, isPasskeyAvailable } from '@/lib/passkey'
 import { resizeImageForUpload } from '@/lib/resize-image'
 import { formatAbsoluteDate } from '@/lib/utils'
 import { toast } from '@/hooks/use-toast'
@@ -59,6 +61,63 @@ export default function Account() {
   const [disableOpen, setDisableOpen] = useState(false)
   const [code, setCode] = useState('')
   const [twoFaBusy, setTwoFaBusy] = useState(false)
+
+  // Passkey (WebAuthn) device state — an optional login surface alongside
+  // password + 2FA; users add/remove their own device credentials here.
+  const passkeySupported = isPasskeyAvailable()
+  const [passkeys, setPasskeys] = useState<ApiPasskey[]>([])
+  const [passkeyAddOpen, setPasskeyAddOpen] = useState(false)
+  const [passkeyName, setPasskeyName] = useState('')
+  const [passkeyBusy, setPasskeyBusy] = useState(false)
+  const [passkeyDeleteId, setPasskeyDeleteId] = useState<string | null>(null)
+
+  async function reloadPasskeys() {
+    try {
+      setPasskeys(await authApi.passkeys())
+    } catch {
+      /* the list refreshes on the next open */
+    }
+  }
+
+  useEffect(() => {
+    void reloadPasskeys()
+  }, [])
+
+  async function confirmAddPasskey() {
+    setPasskeyBusy(true)
+    try {
+      const options = await authApi.beginPasskeyRegistration(passkeyName.trim())
+      const response = await createPasskeyCredential(options)
+      await authApi.finishPasskeyRegistration(response)
+      await reloadPasskeys()
+      setPasskeyAddOpen(false)
+      setPasskeyName('')
+      toast.success(t('settings:account.passkey.added'))
+    } catch (e) {
+      const code = e instanceof PasskeyError ? e.code : e instanceof ApiError ? e.message : 'passkey_registration_failed'
+      // A dismissed biometric prompt is not an error worth a toast.
+      if (code !== 'passkey_cancelled') {
+        toast.error(t(`settings:account.passkey.errors.${code}`, { defaultValue: t('settings:account.passkey.failed') }))
+      }
+    } finally {
+      setPasskeyBusy(false)
+    }
+  }
+
+  async function confirmDeletePasskey() {
+    if (!passkeyDeleteId) return
+    setPasskeyBusy(true)
+    try {
+      await authApi.deletePasskey(passkeyDeleteId)
+      await reloadPasskeys()
+      toast.success(t('settings:account.passkey.deleted'))
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : t('settings:account.passkey.failed'))
+    } finally {
+      setPasskeyBusy(false)
+      setPasskeyDeleteId(null)
+    }
+  }
 
   async function refreshUser() {
     try {
@@ -304,6 +363,50 @@ export default function Account() {
             </Button>
           )}
         </SettingsRow>
+        <SettingsRow
+          label={t('settings:account.passkey.label')}
+          description={passkeySupported ? t('settings:account.passkey.body') : t('settings:account.passkey.unsupported')}
+        >
+          <div className="flex min-w-0 flex-col items-end gap-2">
+            {passkeys.length > 0 ? (
+              <ul className="grid w-full max-w-[24rem] gap-1.5">
+                {passkeys.map((passkey) => (
+                  <li
+                    key={passkey.id}
+                    className="flex items-center gap-2 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2"
+                  >
+                    <KeyRound size={14} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden />
+                    <div className="grid min-w-0 flex-1 gap-0.5 text-left">
+                      <span className="truncate text-[13px] font-medium">
+                        {passkey.name || t('settings:account.passkey.unnamed')}
+                      </span>
+                      <span className="truncate text-[11px] text-[var(--color-fg-subtle)]">
+                        {passkey.last_used_at
+                          ? t('settings:account.passkey.lastUsed', { date: formatAbsoluteDate(passkey.last_used_at * 1000) })
+                          : t('settings:account.passkey.neverUsed')}
+                        {' · '}
+                        {formatAbsoluteDate(passkey.created_at * 1000)}
+                      </span>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={t('settings:account.passkey.delete')}
+                      onClick={() => setPasskeyDeleteId(passkey.id)}
+                    >
+                      <Trash2 size={13} aria-hidden />
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {passkeySupported ? (
+              <Button variant="secondary" onClick={() => { setPasskeyName(''); setPasskeyAddOpen(true) }}>
+                <KeyRound size={13} aria-hidden /> {t('settings:account.passkey.add')}
+              </Button>
+            ) : null}
+          </div>
+        </SettingsRow>
       </SettingsSection>
 
       <IdentitySources />
@@ -451,6 +554,54 @@ export default function Account() {
             <Button variant="ghost" onClick={() => setDisableOpen(false)}>{t('common:actions.cancel')}</Button>
             <Button variant="destructive" loading={twoFaBusy} onClick={() => void confirmDisable()}>
               {t('settings:account.twofa.disable')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add passkey — name the device, then the browser runs the WebAuthn
+          ceremony (fingerprint / face / PIN). */}
+      <Dialog open={passkeyAddOpen} onOpenChange={setPasskeyAddOpen}>
+        <DialogContent size="sm">
+          <DialogHeader>
+            <DialogTitle>{t('settings:account.passkey.addTitle')}</DialogTitle>
+            <DialogDescription>{t('settings:account.passkey.addLead')}</DialogDescription>
+          </DialogHeader>
+          <DialogBody>
+            <Field label={t('settings:account.passkey.nameLabel')} htmlFor="passkey-name">
+              <Input
+                id="passkey-name"
+                value={passkeyName}
+                maxLength={64}
+                onChange={(e) => setPasskeyName(e.target.value)}
+                placeholder={t('settings:account.passkey.namePlaceholder')}
+                autoComplete="off"
+              />
+            </Field>
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setPasskeyAddOpen(false)} disabled={passkeyBusy}>
+              {t('common:actions.cancel')}
+            </Button>
+            <Button loading={passkeyBusy} onClick={() => void confirmAddPasskey()}>
+              {t('settings:account.passkey.add')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={passkeyDeleteId !== null} onOpenChange={(o) => { if (!o) setPasskeyDeleteId(null) }}>
+        <DialogContent size="sm">
+          <DialogHeader>
+            <DialogTitle>{t('settings:account.passkey.deleteTitle')}</DialogTitle>
+            <DialogDescription>{t('settings:account.passkey.deleteLead')}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setPasskeyDeleteId(null)} disabled={passkeyBusy}>
+              {t('common:actions.cancel')}
+            </Button>
+            <Button variant="destructive" loading={passkeyBusy} onClick={() => void confirmDeletePasskey()}>
+              {t('settings:account.passkey.delete')}
             </Button>
           </DialogFooter>
         </DialogContent>

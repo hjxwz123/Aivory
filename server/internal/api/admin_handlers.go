@@ -1372,7 +1372,7 @@ var settingsKeys = []string{
 	"keep_recent_rounds", "summary_max_tokens", "compaction_request_max_tokens", "context_compaction_prompt", "compaction_enabled",
 	"compaction_token_trigger", "compaction_token_cap", "compaction_token_target_percentage", "compaction_retention_percentage",
 	"memory_enabled", "daily_message_limit", "daily_image_limit", "signup_open",
-	"password_login_enabled", "auth_entry_mode", "auth_default_provider_id",
+	"password_login_enabled", "passkey_login_enabled", "auth_entry_mode", "auth_default_provider_id",
 	"oauth_initial_password_policy", "oauth_auto_provision_enabled",
 	"email_verification_required", "daily_token_limit", "max_concurrent_generations",
 	// Anti-abuse registration controls. register_ip_daily_limit: max accounts one
@@ -1782,7 +1782,7 @@ func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.R
 					return 0, errInvalidInput
 				}
 				v, _ = json.Marshal(enabled)
-			case "password_login_enabled", "oauth_auto_provision_enabled":
+			case "password_login_enabled", "passkey_login_enabled", "oauth_auto_provision_enabled":
 				var enabled bool
 				if json.Unmarshal(v, &enabled) != nil {
 					return 0, errInvalidInput

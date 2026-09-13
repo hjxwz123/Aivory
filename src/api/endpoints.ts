@@ -68,6 +68,8 @@ import type {
   ApiImageStyle,
   ApiAdminImage,
   ApiOAuthProvider,
+  ApiPasskey,
+  PasskeyJson,
   ApiProject,
   ApiRedeemCode,
   ApiRedeemRedemption,
@@ -265,6 +267,20 @@ export const authApi = {
   setup2fa: () => api<{ secret: string; otpauth_url: string }>('/me/2fa/setup', { method: 'POST' }),
   enable2fa: (code: string) => api<{ ok: true }>('/me/2fa/enable', { method: 'POST', body: { code } }),
   disable2fa: (code: string) => api<{ ok: true }>('/me/2fa/disable', { method: 'POST', body: { code } }),
+  /** Passkey (WebAuthn) device self-management — mirrors the 2FA trio. */
+  passkeys: () => api<ApiPasskey[]>('/me/passkeys'),
+  beginPasskeyRegistration: (name: string) =>
+    api<PasskeyJson>('/me/passkeys/begin', { method: 'POST', body: { name } }),
+  finishPasskeyRegistration: (response: PasskeyJson) =>
+    api<{ ok: true }>('/me/passkeys/finish', { method: 'POST', body: response }),
+  deletePasskey: (id: string) =>
+    api<{ ok: true }>(`/me/passkeys/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  /** Usernameless passkey login half 1: assertion options + one-shot ticket. */
+  beginPasskeyLogin: () =>
+    api<{ ticket: string; options: PasskeyJson }>('/auth/passkey/begin', { method: 'POST', body: {} }),
+  /** Passkey login half 2: verify the assertion, receive the session. */
+  verifyPasskeyLogin: (ticket: string, response: PasskeyJson) =>
+    api<ApiAuthResponse>('/auth/passkey/verify', { method: 'POST', body: { ticket, response } }),
   register: (email: string, password: string, name: string, captchaToken?: string) =>
     api<ApiAuthResponse | { verification_required: boolean; email: string; retry_after: number }>('/auth/register', {
       method: 'POST',

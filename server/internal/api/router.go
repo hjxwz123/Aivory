@@ -42,6 +42,9 @@ type Deps struct {
 	RAG          *rag.Service
 	Orchestrator *llm.Orchestrator
 	Logger       *log.Logger
+	// Passkeys is the WebAuthn ceremony service; nil fails passkey routes with
+	// 503 (tests inject a fake, production wires NewPasskeyService).
+	Passkeys PasskeyService
 	// UserMCPHTTPClient is an optional test injection. Production leaves it nil
 	// and user MCP handlers construct the dial-time restricted netsafe client.
 	UserMCPHTTPClient *http.Client
@@ -60,6 +63,11 @@ var (
 
 	rlLogin2faMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_LOGIN_2FA_MAX", 10)
 	rlLogin2faWindow = envcfg.Dur("AIVORY_API_RATE_LIMIT_LOGIN_2FA_WINDOW", 60*time.Second)
+
+	// Passkey login attempts — same budget as 2FA verification (the assertion
+	// is cryptographic, so brute-force pressure is even less feasible here).
+	rlPasskeyMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_PASSKEY_MAX", 10)
+	rlPasskeyWindow = envcfg.Dur("AIVORY_API_RATE_LIMIT_PASSKEY_WINDOW", 60*time.Second)
 
 	rlLogoutMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_LOGOUT_MAX", 30)
 	rlLogoutWindow = envcfg.Dur("AIVORY_API_RATE_LIMIT_LOGOUT_WINDOW", 60*time.Second)
@@ -155,6 +163,9 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("POST", "/api/auth/register", rateLimitedIP(d, "auth", rlRegisterMax, rlRegisterWindow, wrap(d, registerHandler)))
 	mux.handle("POST", "/api/auth/login", rateLimitedIP(d, "auth", rlLoginMax, rlLoginWindow, wrap(d, loginHandler)))
 	mux.handle("POST", "/api/auth/login/2fa", rateLimitedIP(d, "auth", rlLogin2faMax, rlLogin2faWindow, wrap(d, login2faHandler)))
+	// Passkey (WebAuthn) passwordless login — public half of the ceremony.
+	mux.handle("POST", "/api/auth/passkey/begin", rateLimitedIP(d, "auth", rlPasskeyMax, rlPasskeyWindow, wrap(d, passkeyLoginBeginHandler)))
+	mux.handle("POST", "/api/auth/passkey/verify", rateLimitedIP(d, "auth", rlPasskeyMax, rlPasskeyWindow, wrap(d, passkeyLoginVerifyHandler)))
 	mux.handle("POST", "/api/auth/logout", rateLimitedIP(d, "auth", rlLogoutMax, rlLogoutWindow, wrap(d, logoutHandler)))
 	mux.handle("POST", "/api/auth/refresh", rateLimitedIP(d, "auth", rlRefreshMax, rlRefreshWindow, wrap(d, refreshHandler)))
 	mux.handle("POST", "/api/auth/session", rateLimitedIP(d, "auth", rlRefreshMax, rlRefreshWindow, wrap(d, sessionHandler)))
@@ -241,6 +252,11 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("POST", "/api/me/2fa/setup", rateLimitedIP(d, "2fa", rl2faSetupMax, rl2faSetupWindow, requireAuth(d, twofaSetupHandler)))
 	mux.handle("POST", "/api/me/2fa/enable", rateLimitedIP(d, "2fa", rl2faSetupMax, rl2faSetupWindow, requireAuth(d, twofaEnableHandler)))
 	mux.handle("POST", "/api/me/2fa/disable", rateLimitedIP(d, "2fa", rl2faSetupMax, rl2faSetupWindow, requireAuth(d, twofaDisableHandler)))
+	// Passkey device self-management (mirrors the 2FA setup/enable/disable trio).
+	mux.handle("GET", "/api/me/passkeys", requireAuth(d, passkeyListHandler))
+	mux.handle("POST", "/api/me/passkeys/begin", rateLimitedIP(d, "2fa", rl2faSetupMax, rl2faSetupWindow, requireAuth(d, passkeyRegisterBeginHandler)))
+	mux.handle("POST", "/api/me/passkeys/finish", rateLimitedIP(d, "2fa", rl2faSetupMax, rl2faSetupWindow, requireAuth(d, passkeyRegisterFinishHandler)))
+	mux.handle("DELETE", "/api/me/passkeys/:id", rateLimitedIP(d, "2fa", rl2faSetupMax, rl2faSetupWindow, requireAuth(d, passkeyDeleteHandler)))
 	mux.handle("GET", "/api/me/memories", requireAuth(d, requireMemoryHandler(listMemoriesHandler)))
 	mux.handle("POST", "/api/me/memories", requireAuth(d, requireMemoryHandler(createMemoryHandler)))
 	mux.handle("PATCH", "/api/me/memories/:id", requireAuth(d, requireMemoryHandler(updateMemoryHandler)))

@@ -39,6 +39,7 @@ func initialPasswordSetupRequest(r *http.Request) bool {
 
 type authPolicy struct {
 	PasswordLoginEnabled       bool
+	PasskeyLoginEnabled        bool
 	EntryMode                  string
 	DefaultProviderID          string
 	OAuthInitialPasswordPolicy string
@@ -47,6 +48,7 @@ type authPolicy struct {
 
 type publicAuthPolicy struct {
 	PasswordLoginEnabled       bool                  `json:"password_login_enabled"`
+	PasskeyLoginEnabled        bool                  `json:"passkey_login_enabled"`
 	EntryMode                  string                `json:"entry_mode"`
 	DefaultProvider            *publicOAuthProvider  `json:"default_provider"`
 	OAuthInitialPasswordPolicy string                `json:"oauth_initial_password_policy"`
@@ -57,6 +59,7 @@ type publicAuthPolicy struct {
 func defaultAuthPolicy() authPolicy {
 	return authPolicy{
 		PasswordLoginEnabled:       true,
+		PasskeyLoginEnabled:        true,
 		EntryMode:                  authEntryLoginPage,
 		OAuthInitialPasswordPolicy: oauthPasswordRequired,
 		OAuthAutoProvisionEnabled:  true,
@@ -84,6 +87,7 @@ func loadAuthPolicyWith(get func(string) (json.RawMessage, error)) (authPolicy, 
 		dst any
 	}{
 		{"password_login_enabled", &policy.PasswordLoginEnabled},
+		{"passkey_login_enabled", &policy.PasskeyLoginEnabled},
 		{"auth_entry_mode", &policy.EntryMode},
 		{"auth_default_provider_id", &policy.DefaultProviderID},
 		{"oauth_initial_password_policy", &policy.OAuthInitialPasswordPolicy},
@@ -153,6 +157,7 @@ func resolvePublicAuthPolicy(ctx context.Context, d Deps) (publicAuthPolicy, err
 	}
 	response := publicAuthPolicy{
 		PasswordLoginEnabled:       policy.PasswordLoginEnabled,
+		PasskeyLoginEnabled:        policy.PasskeyLoginEnabled,
 		EntryMode:                  policy.EntryMode,
 		OAuthInitialPasswordPolicy: policy.OAuthInitialPasswordPolicy,
 		OAuthAutoProvisionEnabled:  policy.OAuthAutoProvisionEnabled,
@@ -195,6 +200,27 @@ func passwordLoginEnabled(d Deps) (bool, error) {
 		return false, err
 	}
 	return policy.PasswordLoginEnabled, nil
+}
+
+func passkeyLoginEnabled(d Deps) (bool, error) {
+	policy, err := loadAuthPolicy(d)
+	if err != nil {
+		return false, err
+	}
+	return policy.PasskeyLoginEnabled, nil
+}
+
+func requirePasskeyLoginEnabled(d Deps, w http.ResponseWriter) bool {
+	enabled, err := passkeyLoginEnabled(d)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return false
+	}
+	if !enabled {
+		writeError(w, http.StatusForbidden, errPasskeyLoginDisabled)
+		return false
+	}
+	return true
 }
 
 func requirePasswordLoginEnabled(d Deps, w http.ResponseWriter) bool {

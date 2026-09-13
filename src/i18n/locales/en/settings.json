@@ -180,6 +180,32 @@
       "linkFailed": "Couldn't link that account",
       "unlinkFailed": "Couldn't remove that identity",
       "lastMethod": "This is your only sign-in method — set a password first."
+    },
+    "passkey": {
+      "label": "Passkeys",
+      "body": "Sign in with your device fingerprint, face, or device PIN — no password.",
+      "unsupported": "Passkeys need HTTPS (or localhost) and a browser with WebAuthn support.",
+      "add": "Add passkey",
+      "addTitle": "Add a passkey",
+      "addLead": "Your browser will ask you to verify with Touch ID, Windows Hello, or your device PIN.",
+      "nameLabel": "Device name",
+      "namePlaceholder": "e.g. MacBook Pro, iPhone",
+      "added": "Passkey added.",
+      "deleted": "Passkey removed.",
+      "delete": "Remove",
+      "deleteTitle": "Remove this passkey?",
+      "deleteLead": "Devices that signed in with it will need your password or another passkey.",
+      "failed": "Passkey operation failed.",
+      "unnamed": "Unnamed device",
+      "lastUsed": "Last used {{date}}",
+      "neverUsed": "Never used",
+      "errors": {
+        "passkey_login_disabled": "Passkey sign-in is disabled by the administrator.",
+        "passkey_limit": "You've reached the maximum number of passkeys.",
+        "passkey_setup_expired": "The setup step expired. Start again.",
+        "passkey_registration_failed": "Couldn't register this passkey. Try again.",
+        "passkey_unavailable": "This browser or device can't use passkeys."
+      }
     }
   },
   "appearance": {
