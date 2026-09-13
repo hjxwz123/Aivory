@@ -804,7 +804,7 @@ export default function ProjectDetail() {
                 </div>
               ) : project.instructions ? (
                 <div className="min-h-28 rounded-[10px] bg-[var(--color-surface-sunken)] px-4 py-4 sm:px-5">
-                  <div className="max-w-[78ch] whitespace-pre-wrap text-[15px] leading-[1.7] text-[var(--color-fg)]">
+                  <div className="whitespace-pre-wrap text-[15px] leading-[1.7] text-[var(--color-fg)]">
                     {project.instructions}
                   </div>
                 </div>
