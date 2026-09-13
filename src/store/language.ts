@@ -1,20 +1,8 @@
 import { create } from 'zustand'
-import i18n, { SUPPORTED_LANGUAGES, type LanguageCode } from '@/i18n'
+import i18n, { SUPPORTED_LANGUAGES, normalizeLanguage, type LanguageCode } from '@/i18n'
 import { persistUserSettings } from '@/lib/user-settings'
 
 const STORAGE_KEY = 'aivory.lang'
-
-function normalizeLanguage(code: unknown): LanguageCode | null {
-  if (typeof code !== 'string' || !code) return null
-  const codes = SUPPORTED_LANGUAGES.map((l) => l.code) as readonly string[]
-  if (codes.includes(code)) return code as LanguageCode
-  const lower = code.toLowerCase().replace('_', '-')
-  if (lower === 'zh-tw' || lower === 'zh-hk' || lower === 'zh-mo' || lower === 'zh-hant') return 'zh-Hant'
-  if (lower === 'zh-cn' || lower === 'zh-sg' || lower === 'zh-hans') return 'zh'
-  const base = lower.split('-')[0]
-  const found = codes.find((c) => c.toLowerCase().split('-')[0] === base)
-  return (found as LanguageCode) ?? null
-}
 
 function detect(): LanguageCode {
   if (typeof window === 'undefined') return 'en'

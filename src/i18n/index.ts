@@ -92,6 +92,23 @@ export const SUPPORTED_LANGUAGES = [
 
 export type LanguageCode = (typeof SUPPORTED_LANGUAGES)[number]['code']
 
+/**
+ * Map any browser/persisted tag (zh-CN, zh_Hant_TW, en-US…) onto a supported
+ * code, or null when unsupported. Shared with the language store so the
+ * detector and the UI agree on the exact same normalization.
+ */
+export function normalizeLanguage(code: unknown): LanguageCode | null {
+  if (typeof code !== 'string' || !code) return null
+  const codes = SUPPORTED_LANGUAGES.map((l) => l.code) as readonly string[]
+  if (codes.includes(code)) return code as LanguageCode
+  const lower = code.toLowerCase().replace('_', '-')
+  if (lower === 'zh-tw' || lower === 'zh-hk' || lower === 'zh-mo' || lower === 'zh-hant') return 'zh-Hant'
+  if (lower === 'zh-cn' || lower === 'zh-sg' || lower === 'zh-hans') return 'zh'
+  const base = lower.split('-')[0]
+  const found = codes.find((c) => c.toLowerCase().split('-')[0] === base)
+  return (found as LanguageCode) ?? null
+}
+
 export const DEFAULT_NS = 'common'
 export const NAMESPACES = ['common', 'nav', 'landing', 'chat', 'auth', 'settings', 'errors', 'projects', 'admin', 'kb', 'files', 'memory', 'subscription', 'welcome', 'library'] as const
 
@@ -189,8 +206,13 @@ void i18n
     defaultNS: DEFAULT_NS,
     interpolation: { escapeValue: false }, // React already escapes
     detection: {
+      // First visit inherits the browser language; a later explicit choice
+      // (localStorage) wins. convertDetectedLanguage matters: without it a
+      // 'zh-CN' browser tag misses the exact-match supportedLngs list and
+      // i18next silently falls back to 'en' on the very first render.
       order: ['localStorage', 'navigator'],
       lookupLocalStorage: 'aivory.lang',
+      convertDetectedLanguage: (language: string) => normalizeLanguage(language) ?? language,
       caches: [],
     },
     returnNull: false,
