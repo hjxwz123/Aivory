@@ -315,3 +315,57 @@ func TestPrivateProvidersNeverExecuteUnsolicitedTools(t *testing.T) {
 		})
 	}
 }
+
+func TestPrivateAnthropicAndGoogleSendBoundedOutputCap(t *testing.T) {
+	replies := map[string]string{
+		"anthropic": "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":11}}}\n\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"private reply\"}}\n\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":7}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+		"google":    "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"private reply\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":11,\"candidatesTokenCount\":7}}\n\n",
+	}
+	for _, test := range []struct {
+		provider    string
+		extraParams string
+		wantCap     float64
+	}{
+		{"anthropic", "", privateMaxTokenFallback},
+		{"google", "", privateMaxTokenFallback},
+		{"anthropic", `{"max_tokens":4096}`, 4096},
+		{"google", `{"generationConfig":{"maxOutputTokens":4096}}`, 4096},
+	} {
+		t.Run(test.provider+"/"+test.extraParams, func(t *testing.T) {
+			db := privateTestDB(t)
+			capSeen := make(chan float64, 1)
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var payload map[string]any
+				body, _ := io.ReadAll(r.Body)
+				if json.Unmarshal(body, &payload) != nil {
+					t.Errorf("unparseable upstream body")
+				}
+				var value any = payload["max_tokens"]
+				if config, ok := payload["generationConfig"].(map[string]any); ok {
+					value = config["maxOutputTokens"]
+				}
+				number, _ := value.(float64)
+				capSeen <- number
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, replies[test.provider])
+			}))
+			defer upstream.Close()
+			channel, err := store.CreateChannel(context.Background(), db, "Private", test.provider, "", upstream.URL, "key")
+			if err != nil {
+				t.Fatal(err)
+			}
+			model, err := store.CreateModel(context.Background(), db, store.Model{ChannelID: channel.ID, Kind: "chat", RequestID: "private-model", Label: "Private model", Enabled: true, Stream: true, PriceInput: 1, PriceOutput: 2, Currency: "USD", ExtraParams: json.RawMessage(test.extraParams)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			orchestrator := &Orchestrator{db: db, reg: NewRegistry(nil), logger: nil}
+			if err := orchestrator.RunPrivate(context.Background(), "private-user", model, []UnifiedMessage{{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "private prompt"}}}}, func(SseEvent) {}); err != nil {
+				t.Fatal(err)
+			}
+			if got := <-capSeen; got != test.wantCap {
+				t.Fatalf("output cap=%v want %v (uncapped providers send the 64000 env default and real endpoints reject it)", got, test.wantCap)
+			}
+			assertPrivateStorage(t, db, 1)
+		})
+	}
+}

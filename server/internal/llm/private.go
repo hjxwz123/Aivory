@@ -62,6 +62,82 @@ func privateProvider(registry *Registry, channelType string) (Provider, error) {
 	}
 }
 
+// privateMaxTokenFallback bounds the output for Anthropic/Google private calls
+// when the model declares no cap of its own. A zero would fall through to the
+// providers' 64000 envcfg default, which most current Claude/Gemini models
+// reject outright; 8192 is accepted by every model family in both lineups.
+const privateMaxTokenFallback = 8192
+
+var privateMaxTokenKeys = map[string]bool{
+	"max_tokens": true, "max_completion_tokens": true, "max_output_tokens": true, "maxOutputTokens": true,
+}
+
+// privateMaxTokens resolves the admin-configured output cap for a private
+// call: first from the model's extra_params, then from the default selection
+// of its param_controls, finally falling back to a conservative constant. It
+// keeps private requests structurally identical to what the composer's default
+// picks produce in a normal turn for the same model.
+func privateMaxTokens(model *store.Model) int {
+	var extra map[string]any
+	if json.Unmarshal(model.ExtraParams, &extra) == nil {
+		if cap := findPrivateMaxTokens(extra); cap > 0 {
+			return cap
+		}
+	}
+	var defs []paramControl
+	if json.Unmarshal(model.ParamControls, &defs) == nil {
+		for _, control := range defs {
+			if control.Default == nil {
+				continue
+			}
+			key := paramControlPickKey(control.Default)
+			if key == "" {
+				continue
+			}
+			if cap := findPrivateMaxTokens(control.Map[key]); cap > 0 {
+				return cap
+			}
+		}
+	}
+	return privateMaxTokenFallback
+}
+
+// paramControlPickKey mirrors MergeParamControls' value→map-key stringification.
+func paramControlPickKey(value any) string {
+	switch v := value.(type) {
+	case bool:
+		if v {
+			return "on"
+		}
+		return "off"
+	case string:
+		return v
+	default:
+		raw, err := json.Marshal(v)
+		if err != nil {
+			return ""
+		}
+		return strings.Trim(string(raw), `"`)
+	}
+}
+
+func findPrivateMaxTokens(body map[string]any) int {
+	for key, value := range body {
+		if privateMaxTokenKeys[key] {
+			if number, ok := value.(float64); ok && number > 0 && number <= 1<<24 {
+				return int(number)
+			}
+			continue
+		}
+		if nested, ok := value.(map[string]any); ok {
+			if cap := findPrivateMaxTokens(nested); cap > 0 {
+				return cap
+			}
+		}
+	}
+	return 0
+}
+
 func (o *Orchestrator) RunPrivate(ctx context.Context, userID string, model *store.Model, history []UnifiedMessage, emit func(SseEvent)) error {
 	if len(history) == 0 || model == nil || !model.Enabled || model.Kind != "chat" || model.Fast {
 		return errors.New("private_model_unavailable")
@@ -152,10 +228,21 @@ func (o *Orchestrator) privateCall(ctx context.Context, userID string, model *st
 	if err != nil {
 		return nil, 0, errors.New("private_model_unavailable")
 	}
+	// Anthropic and Google always send an explicit output cap; a zero here
+	// falls through to their envcfg default (64000), which real Claude/Gemini
+	// endpoints reject with 400 for most models. Private chat has no composer
+	// param overrides, so the admin-configured cap is the only model-specific
+	// limit available. OpenAI keeps 0 (max_tokens omitted → provider default),
+	// preserving its working behavior.
+	cappedMaxTokens := maxTokens
+	if cappedMaxTokens <= 0 && (channel.Type == "anthropic" || channel.Type == "google") {
+		cappedMaxTokens = privateMaxTokens(model)
+	}
 	req := UnifiedChatRequest{
 		Private: true, History: history, SystemPrompt: system, Stream: model.Stream,
 		Model:       ModelInfo{ID: model.ID, RequestID: model.RequestID, Provider: channel.Type, Vision: model.Vision, BaseURL: channel.BaseURL, APIKey: channel.APIKey, APIFormat: channel.APIFormat},
-		ExtraParams: model.ExtraParams, MaxOutputTokens: maxTokens, StrictMaxOutputTokens: maxTokens > 0,
+		ExtraParams: model.ExtraParams, MaxOutputTokens: cappedMaxTokens, StrictMaxOutputTokens: cappedMaxTokens > 0,
+		ParamControls: model.ParamControls,
 	}
 	operationID := "private_" + uuid.NewString()
 	admission, message, err := o.reserveUsageBilling(ctx, userID, model, store.QuotaScopeModelChat, 1, estimateTurnUSD(*model, req), estimateTurnTokens(req), "private_chat", operationID)
