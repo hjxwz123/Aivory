@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"aivory/server/internal/store"
@@ -263,6 +264,46 @@ func TestPasskeyLoginDisabledByPolicyAndFailureBurn(t *testing.T) {
 	rec = doRequest(passkeyLoginVerifyHandler, d, "/api/auth/passkey/verify", string(body), nil)
 	if rec.Code != 401 {
 		t.Fatalf("ticket not burned: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPasskeyRegistrationRealServiceOriginHandling(t *testing.T) {
+	d, _ := newPasskeyDeps(t)
+	// Swap in the REAL go-webauthn service to exercise the origin gate that a
+	// TLS-terminating reverse proxy used to turn into a bare 500.
+	d.Passkeys = NewPasskeyService("Aivory")
+	user := insertTestUser(t, d, "pk-real", "real@example.test", false)
+
+	// HTTPS page whose backend sees plain http (proxy) — the Origin header is
+	// authoritative and the ceremony begins.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/me/passkeys/begin", bytes.NewReader([]byte(`{"name":"iPhone"}`)))
+	req.Host = "app.example.test"
+	req.Header.Set("Origin", "https://app.example.test")
+	req = req.WithContext(context.WithValue(req.Context(), userCtxKey{}, user))
+	passkeyRegisterBeginHandler(d, rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("https origin: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "\"challenge\"") || !strings.Contains(body, "app.example.test") {
+		t.Fatalf("creation options malformed: %s", body)
+	}
+
+	// No Origin header and the backend derives http:// from a plain connection
+	// → explicit 400 passkey_insecure_origin (was: internal server error).
+	rec = doRequest(passkeyRegisterBeginHandler, d, "/api/me/passkeys/begin", `{}`, user)
+	if rec.Code != 400 || !bytes.Contains(rec.Body.Bytes(), []byte("passkey_insecure_origin")) {
+		t.Fatalf("insecure origin: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	// IP host is not a valid relying party ID → explicit 400 passkey_unavailable.
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/me/passkeys/begin", bytes.NewReader([]byte(`{}`)))
+	req.Header.Set("Origin", "https://192.168.1.5")
+	req = req.WithContext(context.WithValue(req.Context(), userCtxKey{}, user))
+	passkeyRegisterBeginHandler(d, rec, req)
+	if rec.Code != 400 || !bytes.Contains(rec.Body.Bytes(), []byte("passkey_unavailable")) {
+		t.Fatalf("ip origin: code=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
 

@@ -33,6 +33,7 @@ describe('passkey translations', () => {
         'passkey_limit',
         'passkey_setup_expired',
         'passkey_not_found',
+        'passkey_insecure_origin',
       ] as const) {
         expect(messages.errorCodes[code], `${locale}: errorCodes.${code}`).toBeTruthy()
       }
@@ -68,6 +69,7 @@ describe('passkey translations', () => {
         'passkey_setup_expired',
         'passkey_registration_failed',
         'passkey_unavailable',
+        'passkey_insecure_origin',
       ] as const) {
         expect(passkey.errors[code], `${locale}: account.passkey.errors.${code}`).toBeTruthy()
       }

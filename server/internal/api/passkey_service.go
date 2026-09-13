@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -76,21 +77,33 @@ func NewPasskeyService(displayName string) PasskeyService {
 	return &webauthnPasskeyService{displayName: displayName}
 }
 
+// Sentinel origin problems surfaced as explicit 400s (never a bare 500):
+// the browser refuses WebAuthn outside a secure context, and go-webauthn
+// refuses IP-address RP IDs entirely (localhost is the one exception).
+var (
+	ErrPasskeyInsecureOrigin  = errors.New("passkey_insecure_origin")
+	ErrPasskeyHostUnsupported = errors.New("passkey_host_unsupported")
+)
+
 // rp constructs a per-request verifier bound to the external origin. With the
 // single-container same-origin deployment this makes the RP ID the hostname
 // the browser actually visits (dev: localhost via the Vite proxy; prod: the
 // configured public host), so WebAuthn origin checks match the real client.
 func (s *webauthnPasskeyService) rp(origin string) (*webauthn.WebAuthn, error) {
-	parsed, err := url.Parse(strings.TrimSpace(origin))
+	parsed, err := url.Parse(strings.TrimRight(strings.TrimSpace(origin), "/"))
 	if err != nil || parsed.Host == "" {
-		return nil, fmt.Errorf("invalid relying party origin %q", origin)
+		return nil, fmt.Errorf("%w: invalid relying party origin %q", ErrPasskeyHostUnsupported, origin)
 	}
-	if parsed.Scheme != "https" && parsed.Hostname() != "localhost" && parsed.Hostname() != "127.0.0.1" {
-		return nil, fmt.Errorf("insecure relying party origin %q", origin)
+	host := strings.ToLower(parsed.Hostname())
+	if net.ParseIP(host) != nil {
+		return nil, fmt.Errorf("%w: %q is an IP address; passkeys require a domain name (http://localhost is supported)", ErrPasskeyHostUnsupported, host)
+	}
+	if parsed.Scheme != "https" && host != "localhost" {
+		return nil, fmt.Errorf("%w: passkeys require HTTPS or http://localhost, got origin %q", ErrPasskeyInsecureOrigin, origin)
 	}
 	return webauthn.New(&webauthn.Config{
 		RPDisplayName: s.displayName,
-		RPID:          strings.ToLower(parsed.Hostname()),
+		RPID:          host,
 		RPOrigins:     []string{fmt.Sprintf("%s://%s", parsed.Scheme, parsed.Host)},
 	})
 }

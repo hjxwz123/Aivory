@@ -204,7 +204,8 @@
         "passkey_limit": "通行金鑰數量已達上限。",
         "passkey_setup_expired": "註冊步驟已過期，請重新開始。",
         "passkey_registration_failed": "通行金鑰註冊失敗，請重試。",
-        "passkey_unavailable": "目前瀏覽器或裝置不支援通行金鑰。"
+        "passkey_unavailable": "目前瀏覽器或裝置不支援通行金鑰。",
+        "passkey_insecure_origin": "通行金鑰需要 HTTPS（或 localhost）存取，請使用安全連線開啟本網站。"
       }
     }
   },

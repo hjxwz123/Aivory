@@ -204,7 +204,8 @@
         "passkey_limit": "Vous avez atteint le nombre maximum de clés d'accès.",
         "passkey_setup_expired": "L'étape d'enregistrement a expiré. Recommencez.",
         "passkey_registration_failed": "Impossible d'enregistrer cette clé d'accès. Réessayez.",
-        "passkey_unavailable": "Ce navigateur ou cet appareil ne prend pas en charge les clés d'accès."
+        "passkey_unavailable": "Ce navigateur ou cet appareil ne prend pas en charge les clés d'accès.",
+        "passkey_insecure_origin": "Les clés d'accès nécessitent une connexion HTTPS (ou localhost). Ouvrez ce site en connexion sécurisée."
       }
     }
   },

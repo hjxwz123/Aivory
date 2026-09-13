@@ -204,7 +204,8 @@
         "passkey_limit": "You've reached the maximum number of passkeys.",
         "passkey_setup_expired": "The setup step expired. Start again.",
         "passkey_registration_failed": "Couldn't register this passkey. Try again.",
-        "passkey_unavailable": "This browser or device can't use passkeys."
+        "passkey_unavailable": "This browser or device can't use passkeys.",
+        "passkey_insecure_origin": "Passkeys require HTTPS (or localhost). Open this site over a secure connection."
       }
     }
   },

@@ -204,7 +204,8 @@
         "passkey_limit": "パスキーの数が上限に達しました。",
         "passkey_setup_expired": "登録手順の有効期限が切れました。再度開始してください。",
         "passkey_registration_failed": "パスキーの登録に失敗しました。もう一度お試しください。",
-        "passkey_unavailable": "このブラウザまたはデバイスではパスキーを利用できません。"
+        "passkey_unavailable": "このブラウザまたはデバイスではパスキーを利用できません。",
+        "passkey_insecure_origin": "パスキーには HTTPS（または localhost）での接続が必要です。安全な接続でサイトを開いてください。"
       }
     }
   },
