@@ -37,7 +37,7 @@ COPY public ./public
 RUN npm run build
 
 # ---- Stage 2: build the Go API ---------------------------------------------
-FROM golang:1.24-bookworm AS build
+FROM golang:1.26-bookworm AS build
 WORKDIR /src
 ENV CGO_ENABLED=1
 COPY server/go.mod server/go.sum ./
