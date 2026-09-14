@@ -118,8 +118,12 @@ func passkeyAccountUser(r *http.Request, d Deps, userID, email, displayName stri
 }
 
 func passkeyListHandler(d Deps, w http.ResponseWriter, r *http.Request) {
-	rows, err := store.ListPasskeys(r.Context(), d.DB, authUser(r).ID)
+	userID := authUser(r).ID
+	rows, err := store.ListPasskeys(r.Context(), d.DB, userID)
 	if err != nil {
+		if d.Logger != nil {
+			d.Logger.Printf("[passkey] list failed user=%s err=%v", userID, err)
+		}
 		writeError(w, 500, err)
 		return
 	}
@@ -137,6 +141,9 @@ func passkeyRegisterBeginHandler(d Deps, w http.ResponseWriter, r *http.Request)
 	u := authUser(r)
 	count, err := store.CountPasskeys(r.Context(), d.DB, u.ID)
 	if err != nil {
+		if d.Logger != nil {
+			d.Logger.Printf("[passkey] registration begin: count failed user=%s err=%v", u.ID, err)
+		}
 		writeError(w, 500, err)
 		return
 	}
@@ -148,6 +155,9 @@ func passkeyRegisterBeginHandler(d Deps, w http.ResponseWriter, r *http.Request)
 	_ = decodeJSON(r, &req) // optional body — a bare begin is fine
 	user, err := passkeyAccountUser(r, d, u.ID, u.Email, u.Name)
 	if err != nil {
+		if d.Logger != nil {
+			d.Logger.Printf("[passkey] registration begin: load credentials failed user=%s err=%v", u.ID, err)
+		}
 		writeError(w, 500, err)
 		return
 	}
@@ -194,6 +204,9 @@ func passkeyRegisterFinishHandler(d Deps, w http.ResponseWriter, r *http.Request
 	}
 	user, err := passkeyAccountUser(r, d, u.ID, u.Email, u.Name)
 	if err != nil {
+		if d.Logger != nil {
+			d.Logger.Printf("[passkey] registration finish: load credentials failed user=%s err=%v", u.ID, err)
+		}
 		writeError(w, 500, err)
 		return
 	}
@@ -211,6 +224,9 @@ func passkeyRegisterFinishHandler(d Deps, w http.ResponseWriter, r *http.Request
 		UserID: u.ID, CredentialID: credential.CredentialID, PublicKey: credential.PublicKey,
 		SignCount: credential.SignCount, Name: ticket.Name,
 	}); err != nil {
+		if d.Logger != nil {
+			d.Logger.Printf("[passkey] registration finish: store credential failed user=%s err=%v", u.ID, err)
+		}
 		writeError(w, 500, err)
 		return
 	}
