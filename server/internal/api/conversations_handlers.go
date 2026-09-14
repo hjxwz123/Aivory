@@ -760,6 +760,55 @@ func deleteConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
+	finishConversationDeletion(r.Context(), d, r, u.ID, id, deletion)
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+const personalConversationDeletionBatchSize = 100
+
+// clearAllConversationsHandler deletes every root conversation in the current
+// user's personal space, including archived rows. Shared workspace
+// conversations are intentionally excluded: they have separate membership and
+// ownership rules and are not part of the privacy page's personal history.
+func clearAllConversationsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	permissions, permissionErr := requestPermissions(d, r)
+	if permissionErr != nil || !permissions.AllowConversationDeletion {
+		writeError(w, http.StatusForbidden, errForbidden)
+		return
+	}
+
+	deleted := 0
+	for {
+		ids, err := store.PersonalConversationIDsForDeletion(r.Context(), d.DB, u.ID, personalConversationDeletionBatchSize)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if len(ids) == 0 {
+			break
+		}
+		for _, id := range ids {
+			deletion, err := store.DeleteConversationWithState(r.Context(), d.DB, id, u.ID)
+			if errors.Is(err, store.ErrNotFound) {
+				// A concurrent deletion already completed this id. It no longer
+				// belongs to the history being cleared, so continue with the batch.
+				continue
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+			finishConversationDeletion(r.Context(), d, r, u.ID, id, deletion)
+			deleted++
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"deleted_conversations": deleted})
+}
+
+// finishConversationDeletion performs the non-transactional cleanup required
+// after DeleteConversationWithState has committed its database changes.
+func finishConversationDeletion(ctx context.Context, d Deps, r *http.Request, userID, rootID string, deletion *store.ConversationDeletionState) {
 	for _, cid := range deletion.ConversationIDs {
 		cancelConversationGenerations(d, cid)
 	}
@@ -769,11 +818,10 @@ func deleteConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// that was removed with it.
 	for _, cid := range deletion.ConversationIDs {
 		msgcache.Bump(d.Cache, cid)
-		cleanupRAGConversation(r.Context(), d, cid, "delete conversation "+id)
+		cleanupRAGConversation(ctx, d, cid, "delete conversation "+rootID)
 	}
-	cleanupStoragePaths(r.Context(), d, deletion.StoragePaths, "delete conversation "+id)
-	publishUserEvent(d, r, u.ID, "conversation.deleted", id)
-	writeJSON(w, 200, map[string]bool{"ok": true})
+	cleanupStoragePaths(ctx, d, deletion.StoragePaths, "delete conversation "+rootID)
+	publishUserEvent(d, r, userID, "conversation.deleted", rootID)
 }
 
 // listMessagesHandler returns either the active path or the full tree.

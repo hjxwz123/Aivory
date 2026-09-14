@@ -13,7 +13,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { toast } from '@/hooks/use-toast'
-import { conversationsApi, memoriesApi } from '@/api'
+import { conversationsApi } from '@/api'
 import { useConversations } from '@/store/conversations'
 import { useAuth } from '@/store/auth'
 import { userCan } from '@/lib/user-permissions'
@@ -133,22 +133,13 @@ export default function Privacy() {
     }
   }
 
-  /** Permanent clear: deletes every conversation + every memory of the
-   *  logged-in user. Each row goes through the existing ownership-checked
-   *  endpoints — we don't add a bulk DELETE because the API surface stays
-   *  small + auditable that way. Reloads the local cache when done. */
+  /** Permanently clear every active and archived conversation in the user's
+   * personal space. Memories remain untouched, as stated in the UI. */
   async function performClearAll() {
     if (clearing) return
     setClearing(true)
     try {
-      const [{ conversations: convs }, mems] = await Promise.all([
-        conversationsApi.list(),
-        canUseMemory ? memoriesApi.list() : Promise.resolve([]),
-      ])
-      await Promise.allSettled([
-        ...convs.map((c) => conversationsApi.remove(c.id)),
-        ...mems.map((m) => memoriesApi.remove(m.id)),
-      ])
+      await conversationsApi.clearAll()
       await reloadConvs()
       toast.success(t('settings:privacy.cleared'))
     } catch (e) {

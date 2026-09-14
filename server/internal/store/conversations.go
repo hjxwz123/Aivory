@@ -99,6 +99,36 @@ func ListConversations(ctx context.Context, db *sql.DB, userID, projectID, archi
 	return out, rows.Err()
 }
 
+// PersonalConversationIDsForDeletion returns a bounded batch of root
+// conversations in the user's personal space. Archived conversations are
+// deliberately included. Workspace conversations are managed in their own
+// shared-space context and must never be removed by the privacy-page action.
+func PersonalConversationIDsForDeletion(ctx context.Context, db *sql.DB, userID string, limit int) ([]string, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := db.QueryContext(ctx, `SELECT id
+		FROM conversations
+		WHERE user_id=?
+		  AND COALESCE(inline_source_conv,'')=''
+		  AND COALESCE(workspace_id,'')=''
+		ORDER BY id
+		LIMIT ?`, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := make([]string, 0, limit)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // ListWorkspaceConversations is the unscoped administrator/maintenance view.
 // User-facing callers must use ListWorkspaceConversationsForUser.
 func ListWorkspaceConversations(ctx context.Context, db *sql.DB, workspaceID, projectID, archivedFilter string, limit, offset int) ([]Conversation, error) {

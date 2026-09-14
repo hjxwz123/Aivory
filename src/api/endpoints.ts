@@ -760,6 +760,8 @@ export const conversationsApi = {
   update: (id: string, patch: Partial<ApiConversation>) =>
     api<ApiConversation>(`/conversations/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch }),
   remove: (id: string) => api<{ ok: true }>(`/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  clearAll: () =>
+    api<{ deleted_conversations: number }>('/conversations', { method: 'DELETE' }),
   messages: (id: string, mode: 'path' | 'tree' = 'path') =>
     api<ApiMessage[]>(
       `/conversations/${encodeURIComponent(id)}/messages${mode === 'tree' ? '?mode=tree' : ''}`,
