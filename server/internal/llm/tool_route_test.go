@@ -184,10 +184,10 @@ func runToolRouteTurn(t *testing.T, orchestrator *Orchestrator, model, conversat
 
 func TestAutoToolRouteYesNoAndFailOpen(t *testing.T) {
 	cases := []struct {
-		name        string
-		response    string
-		routeErr    error
-		wantTools   bool
+		name      string
+		response  string
+		routeErr  error
+		wantTools bool
 	}{
 		{name: "yes", response: "1", wantTools: true},
 		{name: "no", response: "0", wantTools: false},

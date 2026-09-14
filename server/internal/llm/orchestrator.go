@@ -80,7 +80,6 @@ type Orchestrator struct {
 	onCompactionStatus func(userID, conversationID, operationID, status string)
 }
 
-
 // ToolRefusalError marks a tool failure that is a policy/quota REFUSAL (content
 // moderation, daily image limit, per-model image quota) rather than a transient
 // provider error. The image branch (runImageTurn) renders it as a refusal with
