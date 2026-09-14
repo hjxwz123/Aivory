@@ -1,5 +1,6 @@
 {
   "imageEdit": {
+    "showSelection": "顯示選區",
     "edit": "編輯",
     "title": "編輯圖片",
     "brush": "畫筆",
@@ -698,6 +699,8 @@
     "body": "這會從對話中移除這則提問及其回答。之前和之後的訊息都會保留。"
   },
   "image": {
+    "preparing": "正在準備繪製…",
+    "elapsed": "已等待 {{duration}}",
     "optimizing": "正在最佳化提示詞…",
     "generating": "正在繪製圖片…"
   },

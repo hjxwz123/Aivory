@@ -1,5 +1,6 @@
 {
   "imageEdit": {
+    "showSelection": "選択範囲を表示",
     "edit": "編集",
     "title": "画像を編集",
     "brush": "ブラシ",
@@ -698,6 +699,8 @@
     "body": "この質問とその回答を会話から削除します。前後のメッセージは保持されます。"
   },
   "image": {
+    "preparing": "描画を準備中…",
+    "elapsed": "経過時間 {{duration}}",
     "optimizing": "プロンプトを調整中…",
     "generating": "画像を描画中…"
   },

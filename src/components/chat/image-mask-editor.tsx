@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState, useId, type PointerEvent, type KeyboardEvent } from 'react'
-import { Brush, Eraser, Undo2, Redo2, Trash2, Send, RefreshCw } from 'lucide-react'
+import { Brush, Eraser, Undo2, Redo2, Trash2, Send, RefreshCw, Eye, EyeOff, ImageIcon, Scan, X, CircleAlert } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip } from '@/components/ui/tooltip'
+import { cn } from '@/lib/utils'
 import { imageApi } from '@/api/endpoints'
 import { drawMaskStroke, exportImageMask, maskPoint, validMaskDimensions, type MaskPoint, type MaskStroke } from '@/lib/image-mask'
 import type { ArtifactRef } from '@/types/chat'
+import styles from './image-mask-editor.module.css'
 
 interface Props {
   image: ArtifactRef
@@ -31,6 +33,7 @@ export function ImageMaskEditor({ image, modelLabel, onClose, onSubmit }: Props)
   const [error, setError] = useState('')
   const [brush, setBrush] = useState(32)
   const [erase, setErase] = useState(false)
+  const [showSelection, setShowSelection] = useState(true)
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
@@ -62,8 +65,9 @@ export function ImageMaskEditor({ image, modelLabel, onClose, onSubmit }: Props)
     if (!source || !stageRef.current) return
     const stage = stageRef.current
     const resize = () => {
-      const width = Math.max(1, stage.clientWidth - 24)
-      const height = Math.max(1, stage.clientHeight - 24)
+      const padding = getComputedStyle(stage)
+      const width = Math.max(1, stage.clientWidth - parseFloat(padding.paddingLeft) - parseFloat(padding.paddingRight))
+      const height = Math.max(1, stage.clientHeight - parseFloat(padding.paddingTop) - parseFloat(padding.paddingBottom))
       const scale = Math.min(width / source.width, height / source.height)
       setDisplay({ width: source.width * scale, height: source.height * scale })
     }
@@ -98,7 +102,7 @@ export function ImageMaskEditor({ image, modelLabel, onClose, onSubmit }: Props)
     return maskPoint(event.clientX, event.clientY, rect, canvas.width, canvas.height)
   }
   function pointerDown(event: PointerEvent<HTMLCanvasElement>) {
-    if (busyRef.current || active.current || event.button !== 0) return
+    if (busyRef.current || !showSelection || active.current || event.button !== 0) return
     event.preventDefault()
     event.currentTarget.focus()
     event.currentTarget.setPointerCapture(event.pointerId)
@@ -116,7 +120,7 @@ export function ImageMaskEditor({ image, modelLabel, onClose, onSubmit }: Props)
     drawMaskStroke(event.currentTarget.getContext('2d')!, { ...stroke, points: [previous, point] })
   }
   function keyboardDraw(event: KeyboardEvent<HTMLCanvasElement>) {
-    if (busyRef.current) return
+    if (busyRef.current || !showSelection) return
     const canvas = event.currentTarget
     const rect = canvas.getBoundingClientRect()
     const point = keyboardPoint.current
@@ -155,54 +159,78 @@ export function ImageMaskEditor({ image, modelLabel, onClose, onSubmit }: Props)
 
   const tool = (label: string, icon: React.ReactNode, action: () => void, disabled = false, pressed?: boolean) => (
     <Tooltip content={label}>
-      <Button size="icon-lg" variant={pressed ? 'secondary' : 'ghost'} aria-label={label} aria-pressed={pressed} disabled={disabled || busy} onClick={action}>{icon}</Button>
+      <Button size="icon-lg" variant="ghost" className={styles.tool} aria-label={label} aria-pressed={pressed} disabled={disabled || busy} onClick={action}>{icon}</Button>
     </Tooltip>
   )
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !busyRef.current) onClose() }}>
-      <DialogContent size="full" closeDisabled={busy} aria-describedby={undefined} className="h-[min(90dvh,760px)] overflow-hidden rounded-lg" onInteractOutside={(event) => event.preventDefault()}>
-        <DialogHeader className="pr-12">
-          <DialogTitle>{t('imageEdit.title')}</DialogTitle>
-          <p className="mt-1 truncate text-xs text-[var(--color-fg-muted)]">{modelLabel}</p>
+      <DialogContent size="full" showClose={false} aria-describedby={undefined} className={styles.dialog} onInteractOutside={(event) => event.preventDefault()}>
+        <DialogHeader className={styles.header}>
+          <ImageIcon size={21} className={styles.headerIcon} aria-hidden />
+          <div className={styles.heading}>
+            <DialogTitle>{t('imageEdit.title')}</DialogTitle>
+            <p className={styles.filename} title={image.filename}>{image.filename}</p>
+          </div>
+          <Button size="icon-lg" variant="ghost" className={styles.close} aria-label={t('aria.close', { ns: 'common' })} disabled={busy} onClick={onClose}><X size={18} /></Button>
         </DialogHeader>
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto border-t border-[var(--color-divider)] md:flex-row">
-          <div className="flex min-w-0 shrink-0 flex-col bg-[var(--color-bg-subtle)] md:min-h-0 md:flex-1">
-            <div className="flex flex-wrap items-center gap-0.5 border-b border-[var(--color-divider)] px-2 py-1">
-              {tool(t('imageEdit.brush'), <Brush size={18} />, () => setErase(false), !source, !erase)}
-              {tool(t('imageEdit.eraser'), <Eraser size={18} />, () => setErase(true), !source, erase)}
-              {tool(t('imageEdit.undo'), <Undo2 size={18} />, () => { const last = strokes.current.pop(); if (last) redo.current.push(last); redraw() }, !history.undo)}
-              {tool(t('imageEdit.redo'), <Redo2 size={18} />, () => { const last = redo.current.pop(); if (last) strokes.current.push(last); redraw() }, !history.redo)}
-              {tool(t('imageEdit.clear'), <Trash2 size={18} />, () => { strokes.current = []; redo.current = []; redraw() }, !history.undo)}
-              <label className="ml-auto flex items-center gap-2 px-2 text-xs text-[var(--color-fg-muted)]">
-                <span className="sr-only">{t('imageEdit.brushSize')}</span>
-                <input type="range" min="4" max="120" value={brush} onChange={(event) => setBrush(Number(event.target.value))} disabled={busy} className="h-10 w-24 accent-[var(--color-accent)]" />
-                <output className="w-10 tabular-nums">{brush} px</output>
-              </label>
+        <div className={styles.body}>
+          <div className={styles.workspace}>
+            <div className={styles.toolbar}>
+              <div role="group" aria-label={t('imageEdit.selection')} className={styles.modes}>
+                {tool(t('imageEdit.brush'), <Brush size={18} />, () => { setErase(false); setShowSelection(true) }, !source, !erase)}
+                {tool(t('imageEdit.eraser'), <Eraser size={18} />, () => { setErase(true); setShowSelection(true) }, !source, erase)}
+              </div>
+              <span className={styles.separator} aria-hidden />
+              <div className={styles.history}>
+                {tool(t('imageEdit.undo'), <Undo2 size={18} />, () => { const last = strokes.current.pop(); if (last) redo.current.push(last); redraw() }, !history.undo)}
+                {tool(t('imageEdit.redo'), <Redo2 size={18} />, () => { const last = redo.current.pop(); if (last) strokes.current.push(last); redraw() }, !history.redo)}
+                {tool(t('imageEdit.clear'), <Trash2 size={18} />, () => { strokes.current = []; redo.current = []; redraw() }, !history.undo)}
+              </div>
+              <div className={styles.viewControl}>
+                {tool(t('imageEdit.showSelection'), showSelection ? <Eye size={18} /> : <EyeOff size={18} />, () => { finishStroke(); setShowSelection((value) => !value); setCursor(null) }, !source, showSelection)}
+              </div>
             </div>
-            <div ref={stageRef} className="flex h-[42dvh] min-h-[200px] items-center justify-center overflow-hidden p-3 md:h-auto md:min-h-0 md:flex-1" aria-busy={!source && !loadError}>
+            <div ref={stageRef} className={styles.stage} aria-busy={!source && !loadError}>
               {source ? (
-                <div className="relative shrink-0 overflow-hidden" style={display}>
-                  <img src={source.url} alt={image.filename} className="block h-full w-full object-contain" draggable={false} />
-                  <canvas ref={canvasRef} width={source.width} height={source.height} tabIndex={0} aria-label={t('imageEdit.selection')} aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Space Enter" onKeyDown={keyboardDraw}
+                <div className={styles.image} style={display}>
+                  <img src={source.url} alt={image.filename} draggable={false} />
+                  <canvas ref={canvasRef} width={source.width} height={source.height} tabIndex={busy || !showSelection ? -1 : 0} aria-disabled={busy || !showSelection} aria-label={t('imageEdit.selection')} aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Space Enter" onKeyDown={keyboardDraw}
                     onFocus={(event) => { const rect = event.currentTarget.getBoundingClientRect(); keyboardPoint.current = { x: rect.width / 2, y: rect.height / 2 }; setCursor({ ...keyboardPoint.current }) }}
                     onBlur={() => setCursor(null)}
                     onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={finishStroke} onPointerCancel={finishStroke} onLostPointerCapture={finishStroke} onPointerLeave={() => setCursor(null)}
-                    className="absolute inset-0 h-full w-full touch-none opacity-50 outline-offset-[-2px] focus-visible:outline-2 focus-visible:outline-[var(--color-ring)]" style={{ cursor: busy ? 'wait' : 'crosshair' }} />
-                  {cursor && !busy ? <div aria-hidden className="pointer-events-none absolute rounded-full border-2 border-white bg-black/10 shadow-[0_0_0_1px_black]" style={{ width: brush, height: brush, left: cursor.x - brush / 2, top: cursor.y - brush / 2 }} /> : null}
+                    className={styles.canvas} style={{ opacity: showSelection ? 0.5 : 0, cursor: busy ? 'wait' : showSelection ? 'none' : 'default' }} />
+                  {cursor && !busy && showSelection ? <div aria-hidden className={cn(styles.cursor, erase && styles.eraserCursor)} style={{ width: brush, height: brush, left: cursor.x - brush / 2, top: cursor.y - brush / 2 }} /> : null}
                 </div>
-              ) : loadError ? <div role="alert" className="flex flex-col items-center gap-3 p-4 text-sm text-[var(--color-danger)]"><span>{loadError}</span><Button variant="secondary" size="sm" leadingIcon={<RefreshCw size={16} />} onClick={() => setLoadAttempt((value) => value + 1)}>{t('imageEdit.retry')}</Button></div> : <div className="h-48 w-full animate-pulse rounded bg-[var(--color-bg-muted)] motion-reduce:animate-none" />}
+              ) : loadError ? <div role="alert" className={styles.loadError}><CircleAlert size={24} aria-hidden /><span>{loadError}</span><Button variant="secondary" size="sm" leadingIcon={<RefreshCw size={16} />} onClick={() => setLoadAttempt((value) => value + 1)}>{t('imageEdit.retry')}</Button></div> : <div className={cn(styles.skeleton, 'animate-pulse motion-reduce:animate-none')}><ImageIcon size={32} aria-hidden /></div>}
+            </div>
+            <div className={styles.imageInfo}>
+              <Scan size={14} aria-hidden />
+              <span>{source ? `${source.width} \u00d7 ${source.height} px` : '\u2014'}</span>
             </div>
           </div>
-          <div className="flex shrink-0 flex-col gap-2 border-t border-[var(--color-divider)] p-4 md:w-72 md:border-t-0 md:border-l">
-            <label htmlFor={fieldId} className="text-sm font-medium text-[var(--color-fg)]">{t('imageEdit.prompt')}</label>
-            <Textarea id={fieldId} value={prompt} onChange={(event) => setPrompt(event.target.value)} disabled={busy} maxLength={32000} className="min-h-24 resize-none md:flex-1" />
-            {error ? <p role="alert" className="text-sm text-[var(--color-danger)]">{error}</p> : null}
+          <div className={styles.inspector}>
+            <div className={styles.brushControl}>
+              <div className={styles.controlHeading}>
+                <label htmlFor={`${fieldId}-brush`}>{t('imageEdit.brushSize')}</label>
+                <output htmlFor={`${fieldId}-brush`} className={styles.brushValue}>{brush}<span>px</span></output>
+              </div>
+              <div className={styles.brushSlider}>
+                <span className={styles.brushPreview} aria-hidden><span style={{ width: 4 + brush / 6, height: 4 + brush / 6 }} /></span>
+                <input id={`${fieldId}-brush`} type="range" min="4" max="120" value={brush} onChange={(event) => setBrush(Number(event.target.value))} disabled={busy || !source} />
+              </div>
+            </div>
+            <div className={styles.promptControl}>
+              <label htmlFor={fieldId}>{t('imageEdit.prompt')}</label>
+              <Textarea id={fieldId} value={prompt} onChange={(event) => setPrompt(event.target.value)} disabled={busy} maxLength={32000} className={styles.prompt} aria-describedby={error ? `${fieldId}-error` : undefined} />
+              {error ? <p id={`${fieldId}-error`} role="alert" className={styles.error}><CircleAlert size={16} aria-hidden /><span>{error}</span></p> : null}
+            </div>
           </div>
         </div>
-        <DialogFooter>
-          <Button variant="ghost" disabled={busy} onClick={onClose}>{t('imageEdit.cancel')}</Button>
-          <Button loading={busy} leadingIcon={<Send size={15} />} disabled={!source || !prompt.trim() || !history.undo} onClick={() => void submit()}>{t('imageEdit.submit')}</Button>
+        <DialogFooter className={styles.footer}>
+          <div className={styles.model} title={modelLabel}><ImageIcon size={15} aria-hidden /><span>{modelLabel}</span></div>
+          <Button variant="ghost" className={styles.cancel} disabled={busy} onClick={onClose}>{t('imageEdit.cancel')}</Button>
+          <Button loading={busy} leadingIcon={<Send size={16} />} className={styles.submit} disabled={!source || !prompt.trim() || !history.undo} onClick={() => void submit()}>{t('imageEdit.submit')}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

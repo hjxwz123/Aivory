@@ -9,6 +9,7 @@
     "clear": "清空选区",
     "brushSize": "笔刷大小",
     "selection": "编辑选区",
+    "showSelection": "显示选区",
     "prompt": "修改指令",
     "cancel": "取消",
     "submit": "提交编辑",
@@ -698,6 +699,8 @@
     "body": "这会从对话中移除这条提问及其回答。之前和之后的消息都会保留。"
   },
   "image": {
+    "preparing": "正在准备绘制…",
+    "elapsed": "已等待 {{duration}}",
     "optimizing": "正在优化提示词…",
     "generating": "正在绘制图片…"
   },

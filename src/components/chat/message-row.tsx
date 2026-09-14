@@ -630,6 +630,11 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
   const otherAttachments = attachments.filter(
     (attachment) => attachment.kind !== 'image' || !attachment.previewUrl || attachment.deleted || brokenAtts.has(attachment.id),
   )
+  // The local image-model placeholder appears before the first image_status
+  // event. Terminal states and delivered artifacts always take precedence.
+  const imagePhase = message.streaming && !message.stopped && !message.error && !message.quotaExceeded && !message.moderation && !message.refused && !message.artifacts?.length
+    ? message.imageStatus ?? (!message.fast && model?.kind === 'image' && !message.content && !message.reasoning?.length ? 'preparing' : undefined)
+    : undefined
 
   return (
     <div
@@ -694,7 +699,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
             >
               {turnTime.label}
             </time>
-            {message.streaming ? (
+            {message.streaming && !imagePhase && (message.fast || model?.kind !== 'image') ? (
               <span className="thinking-shimmer ml-1 text-[11px] font-medium tracking-[0.04em]">
                 {t('thinking')}…
               </span>
@@ -944,10 +949,10 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
 
             {/* §4.20 image mode: dedicated drawing surface (distinct from the
                 chat thinking/tool-call trace) while no image artifact exists yet. */}
-            {message.imageStatus && (!message.artifacts || message.artifacts.length === 0) ? (
-              <ImageGenerating phase={message.imageStatus} />
+            {imagePhase ? (
+              <ImageGenerating phase={imagePhase} startedAt={message.createdAt} />
             ) : /* Streaming placeholder while empty — the brand thinking mark */
-            message.streaming && !message.content && (!message.reasoning || message.reasoning.length === 0) ? (
+            message.streaming && !message.content && !message.artifacts?.length && (!message.reasoning || message.reasoning.length === 0) ? (
               ragInjection?.strategy === 'document_searching' || ragInjection?.strategy === 'document_found' ? null : (
                 <div className="py-1">
                   <ThinkingLogo />
@@ -1005,7 +1010,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
                     className="prose-full"
                   />
                 </div>
-                {message.streaming ? (
+                {message.streaming && (message.content || !message.artifacts?.length) ? (
                   <span
                     aria-hidden
                     className="inline-block align-text-bottom w-[2px] h-[1.05em] bg-[var(--color-accent)] ml-0.5 animate-[fade-in_400ms_ease-in-out_infinite_alternate]"

@@ -9,6 +9,7 @@
     "clear": "Clear selection",
     "brushSize": "Brush size",
     "selection": "Edit region",
+    "showSelection": "Show selection",
     "prompt": "Edit instruction",
     "cancel": "Cancel",
     "submit": "Apply edit",
@@ -703,6 +704,8 @@
     "body": "This removes this question and its answer from the conversation. Earlier and later messages are kept."
   },
   "image": {
+    "preparing": "Preparing your image…",
+    "elapsed": "Elapsed time {{duration}}",
     "optimizing": "Refining your prompt…",
     "generating": "Painting your image…"
   },

@@ -1,5 +1,6 @@
 {
   "imageEdit": {
+    "showSelection": "Afficher la sélection",
     "edit": "Modifier",
     "title": "Modifier l'image",
     "brush": "Pinceau",
@@ -698,6 +699,8 @@
     "body": "Cela retire cette question et sa réponse de la conversation. Les messages précédents et suivants sont conservés."
   },
   "image": {
+    "preparing": "Préparation de l'image…",
+    "elapsed": "Temps écoulé {{duration}}",
     "optimizing": "Affinage du prompt…",
     "generating": "Création de l'image…"
   },
