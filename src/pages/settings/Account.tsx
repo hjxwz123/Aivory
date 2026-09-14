@@ -97,6 +97,10 @@ export default function Account() {
       const code = e instanceof PasskeyError ? e.code : e instanceof ApiError ? e.message : 'passkey_registration_failed'
       // A dismissed biometric prompt is not an error worth a toast.
       if (code !== 'passkey_cancelled') {
+        // Codes without a translation (deployment/proxy errors, stale clients)
+        // fall back to the generic toast — keep the raw cause in the console so
+        // support can tell what actually failed.
+        console.error('[passkey] registration failed', { code, error: e })
         toast.error(t(`settings:account.passkey.errors.${code}`, { defaultValue: t('settings:account.passkey.failed') }))
       }
     } finally {
