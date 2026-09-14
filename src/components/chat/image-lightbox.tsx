@@ -8,11 +8,12 @@
  * external-link and download affordances for the original bytes. Source URL +
  * alt are the only required inputs.
  */
-import { Download, ExternalLink, X } from 'lucide-react'
+import { Download, ExternalLink, Pencil, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Dialog, DialogClose, DialogOverlay, DialogPortal } from '@/components/ui/dialog'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { cn } from '@/lib/utils'
+import { Tooltip } from '@/components/ui/tooltip'
 
 interface ImageLightboxProps {
   open: boolean
@@ -22,9 +23,10 @@ interface ImageLightboxProps {
   /** Optional download/original URL (when src is a thumbnail). Defaults to src. */
   downloadUrl?: string
   filename?: string
+  onEdit?: () => void
 }
 
-export function ImageLightbox({ open, onOpenChange, src, alt, downloadUrl, filename }: ImageLightboxProps) {
+export function ImageLightbox({ open, onOpenChange, src, alt, downloadUrl, filename, onEdit }: ImageLightboxProps) {
   const { t } = useTranslation('common')
   const href = downloadUrl ?? src
   return (
@@ -50,6 +52,9 @@ export function ImageLightbox({ open, onOpenChange, src, alt, downloadUrl, filen
           />
           {/* Top-right control cluster */}
           <div className="absolute top-3 right-3 sm:top-5 sm:right-5 flex items-center gap-1.5">
+            {onEdit ? <Tooltip content={t('imageEdit.title', { ns: 'chat' })}>
+              <button type="button" onClick={onEdit} aria-label={t('imageEdit.title', { ns: 'chat' })} className="inline-flex size-11 items-center justify-center rounded-full bg-[var(--color-surface)] text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"><Pencil size={17} aria-hidden /></button>
+            </Tooltip> : null}
             <a
               href={href}
               download={filename ?? ''}

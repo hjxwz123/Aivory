@@ -169,6 +169,7 @@ type ToolContext struct {
 	// image edits. The chat model may elaborate a generation prompt, but it must
 	// not translate or paraphrase source text the user asked to change literally.
 	ImageUserPrompt string
+	ImageEdit       *ImageEditRequest
 	// SkipImageQuota tells image_generate NOT to meter the image model at all
 	// (§4.20): set on the drawing-mode path, where the orchestrator already ran the
 	// credit-aware checkImageQuota AND charges in runImageTurn, so the tool must not
@@ -1612,6 +1613,7 @@ type RunRequest struct {
 	// OptimizeImagePrompt controls the task-model rewrite for direct image-model
 	// turns. Nil preserves the historical default (enabled).
 	OptimizeImagePrompt *bool
+	ImageEdit           *ImageEditRequest
 	// Locale is the user's UI language code (e.g. "en", "zh", "zh-Hant", "ja").
 	// It anchors the reply-language instruction so an English question gets an
 	// English answer even from a language-biased model (§ reply language).
@@ -2628,6 +2630,27 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if !channel.Enabled {
 		return nil, errors.New("channel is disabled")
 	}
+	if req.ReuseExistingUserMessage {
+		if existing, loadErr := store.GetMessage(ctx, o.db, req.ParentID); loadErr == nil && existing.ConversationID == conv.ID {
+			req.ImageEdit, err = ImageEditFromBlocks(existing.Blocks)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	if req.ImageEdit != nil {
+		if req.Fast || req.Mode == ModeDeepResearch || !currentPermissions.AllowFileUpload ||
+			(workspacePolicy != nil && !workspacePolicy.AllowFileUpload) {
+			return nil, ErrImageMaskEdit
+		}
+		leafID := req.ParentID
+		if leafID == "" {
+			leafID = conv.ActiveLeafID
+		}
+		if err := ValidateImageEditRequest(ctx, o.db, conv.ID, req.UserID, leafID, model, req.ImageEdit); err != nil {
+			return nil, err
+		}
+	}
 	provider, err := o.reg.Get(channel.Type)
 	if err != nil {
 		return nil, err
@@ -2739,6 +2762,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		userBlocksList := []UnifiedBlock{}
 		if strings.TrimSpace(req.UserText) != "" {
 			userBlocksList = append(userBlocksList, UnifiedBlock{Kind: "text", Text: req.UserText})
+		}
+		if req.ImageEdit != nil {
+			editInput, _ := json.Marshal(req.ImageEdit)
+			userBlocksList = append(userBlocksList, UnifiedBlock{Kind: "image_edit", Input: editInput})
 		}
 		userBlocks, _ := json.Marshal(userBlocksList)
 		created, err := store.CreateMessageForUser(ctx, o.db, store.Message{
@@ -3881,7 +3908,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 				artMu.Lock()
 				producedArtifacts = append(producedArtifacts, a)
 				artMu.Unlock()
-				onEvent(SseEvent{Type: "artifact", ID: a.ID, URL: a.URL, Title: a.Filename, Summary: a.MimeType})
+				onEvent(SseEvent{Type: "artifact", ID: a.ID, URL: a.URL, Title: a.Filename, Summary: a.MimeType, Source: a.Source})
 			},
 		},
 	}

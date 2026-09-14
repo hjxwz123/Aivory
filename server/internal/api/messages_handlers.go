@@ -153,7 +153,8 @@ type postMessageReq struct {
 	// OptimizeImagePrompt defaults to true when omitted for compatibility with
 	// older clients. False skips the task-model rewrite and sends the user's text
 	// directly, while still applying an explicitly selected style directive.
-	OptimizeImagePrompt *bool `json:"optimize_image_prompt"`
+	OptimizeImagePrompt *bool                 `json:"optimize_image_prompt"`
+	ImageEdit           *llm.ImageEditRequest `json:"image_edit,omitempty"`
 	// Locale is the user's current UI language (i18next code, e.g. "en", "zh");
 	// drives the reply-language instruction (§ reply language).
 	Locale string `json:"locale"`
@@ -1288,6 +1289,14 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, err)
 		return
 	}
+	if req.ImageEdit != nil {
+		model, modelErr := resolveEffectiveConversationModel(r.Context(), d.DB, conv, req.ModelID, req.Fast)
+		if modelErr != nil || req.Fast || req.Mode == llm.ModeDeepResearch || len(req.Attachments) > 0 || !permissions.AllowFileUpload ||
+			llm.ValidateImageEditRequest(r.Context(), d.DB, id, u.ID, attachmentLeafID, model, req.ImageEdit) != nil {
+			writeError(w, http.StatusBadRequest, llm.ErrImageMaskEdit)
+			return
+		}
+	}
 	if !permissions.AllowDrawing {
 		model, modelErr := resolveEffectiveConversationModel(r.Context(), d.DB, conv, req.ModelID, req.Fast)
 		if modelErr != nil {
@@ -1576,6 +1585,7 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		ParamOverrides:                   req.ParamOverrides,
 		ImageStyleID:                     req.ImageStyleID,
 		OptimizeImagePrompt:              req.OptimizeImagePrompt,
+		ImageEdit:                        req.ImageEdit,
 		Locale:                           req.Locale,
 		KnowledgeBaseIDs:                 turnKBIDs,
 		KnowledgeBaseSelectionConfigured: turnKBSelectionConfigured,

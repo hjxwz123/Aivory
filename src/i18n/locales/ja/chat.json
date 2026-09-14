@@ -1,4 +1,23 @@
 {
+  "imageEdit": {
+    "edit": "編集",
+    "title": "画像を編集",
+    "brush": "ブラシ",
+    "eraser": "消しゴム",
+    "undo": "元に戻す",
+    "redo": "やり直す",
+    "clear": "選択をクリア",
+    "brushSize": "ブラシサイズ",
+    "selection": "編集範囲",
+    "prompt": "変更内容",
+    "cancel": "キャンセル",
+    "submit": "編集を適用",
+    "retry": "再試行",
+    "tooLarge": "画像が編集上限（各辺8192ピクセル、1600万画素）を超えています。",
+    "loadFailed": "元の画像を読み込めませんでした。",
+    "selectionRequired": "編集する範囲を選択してください。",
+    "submitFailed": "送信できませんでした。選択範囲は保存されています。もう一度お試しください。"
+  },
   "greeting": {
     "morning": "おはようございます",
     "afternoon": "こんにちは",

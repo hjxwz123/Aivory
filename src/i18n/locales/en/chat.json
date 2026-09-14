@@ -1,4 +1,23 @@
 {
+  "imageEdit": {
+    "edit": "Edit",
+    "title": "Edit image",
+    "brush": "Brush",
+    "eraser": "Eraser",
+    "undo": "Undo",
+    "redo": "Redo",
+    "clear": "Clear selection",
+    "brushSize": "Brush size",
+    "selection": "Edit region",
+    "prompt": "Edit instruction",
+    "cancel": "Cancel",
+    "submit": "Apply edit",
+    "retry": "Retry",
+    "tooLarge": "This image exceeds the editing limit (8192 px per edge, 16 megapixels).",
+    "loadFailed": "The original image could not be loaded.",
+    "selectionRequired": "Select an area before submitting.",
+    "submitFailed": "The edit could not be submitted. Your selection is preserved; please try again."
+  },
   "greeting": {
     "morning": "Good morning",
     "afternoon": "Good afternoon",

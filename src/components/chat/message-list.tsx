@@ -4,6 +4,10 @@ import { useTranslation } from 'react-i18next'
 import { Loader2 } from 'lucide-react'
 import { MessageRow } from './message-row'
 import { IssueFeedbackDialog } from './issue-feedback-dialog'
+import { ImageMaskEditor } from './image-mask-editor'
+import { useModels } from '@/store/models'
+import { apiUpload } from '@/api/client'
+import { conversationsApi } from '@/api/endpoints'
 import { useAuth } from '@/store/auth'
 import { useConversations, MSG_PAGE, resolveArmedTurnFlags } from '@/store/conversations'
 import { useSettings } from '@/store/settings'
@@ -12,7 +16,7 @@ import { toast } from '@/hooks/use-toast'
 import { protectedFirstRoundMessageIds } from '@/lib/message-state'
 import { userCan } from '@/lib/user-permissions'
 
-import type { Attachment, Conversation, MessageFeedbackInput } from '@/types/chat'
+import type { ArtifactRef, Attachment, Conversation, MessageFeedbackInput } from '@/types/chat'
 
 interface MessageListProps {
   conversation: Conversation
@@ -64,10 +68,62 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
   const convId = conversation.id
   const [visible, setVisible] = useState(() => Math.min(INITIAL_WINDOW, total))
   const [reportMessageId, setReportMessageId] = useState('')
+  const [imageEdit, setImageEdit] = useState<{ image: ArtifactRef; modelId: string; modelLabel: string; leafId?: string } | null>(null)
+  const imageModels = useModels((state) => state.imageModels)
+  const workspacePolicy = useWorkspaces((state) => conversation.workspaceId ? state.policies[conversation.workspaceId] : undefined)
+  const canMaskEdit = !isReadOnlyConversation && userCan(user, 'allow_drawing') && userCan(user, 'allow_file_upload') &&
+    (!conversation.workspaceId || (workspacePolicy?.AllowFileUpload !== false && workspacePolicy?.AllowDrawing !== false)) && imageModels.some((model) => model.mask_edit)
+  const handleImageEdit = useCallback((image: ArtifactRef, messageId: string) => {
+    const current = useConversations.getState().conversations.find((item) => item.id === convId)
+    if (!current || current.messages.some((message) => message.streaming)) {
+      toast.info(t('composer.generationInProgress'))
+      return
+    }
+    const models = useModels.getState().imageModels.filter((model) => model.enabled && model.mask_edit)
+    const sourceModelId = current.messages.find((message) => message.id === messageId)?.modelId
+    const selected = models.find((model) => model.id === sourceModelId) ?? models.find((model) => model.id === current.modelId) ?? models[0]
+    if (!selected) return
+    setImageEdit({ image, modelId: selected.id, modelLabel: selected.label, leafId: current.messages.at(-1)?.id })
+  }, [convId, t])
+  async function submitImageEdit(prompt: string, mask: Blob) {
+    if (!imageEdit || !canMaskEdit) throw new Error('image edit unavailable')
+    const target = imageEdit
+    const current = () => useConversations.getState().conversations.find((item) => item.id === convId)
+    const validate = () => {
+      const latest = current()
+      if (!latest || latest.archived || latest.messages.some((message) => message.streaming) || latest.messages.at(-1)?.id !== target.leafId ||
+        !userCan(useAuth.getState().user, 'allow_drawing') || !userCan(useAuth.getState().user, 'allow_file_upload') ||
+        !useModels.getState().imageModels.some((model) => model.id === target.modelId && model.mask_edit)) throw new Error('conversation changed')
+    }
+    validate()
+    const form = new FormData()
+    form.append('file', new File([mask], 'edit-mask.png', { type: 'image/png' }))
+    const query = new URLSearchParams({ conversation_id: convId, model_id: target.modelId, fast: '0' })
+    const uploaded = await apiUpload<{ id: string }>(`/files?${query}`, form)
+    try { validate() } catch (error) {
+      void conversationsApi.removeFile(convId, uploaded.id).catch(() => {})
+      throw error
+    }
+    try { await new Promise<void>((resolve, reject) => {
+      let started = false
+      void sendMessage({
+        conversationId: convId, text: prompt, modelId: target.modelId, fast: false,
+        optimizeImagePrompt: false,
+        imageEdit: { base_artifact_id: target.image.id, mask_file_id: uploaded.id },
+        onAccepted: () => { started = true; resolve() },
+      }).then(() => { if (!started) reject(new Error('image edit not accepted')) }, reject)
+    }) } catch (error) {
+      // A refused preflight can leave a local-only placeholder. Refresh before
+      // retrying so the editor's captured branch still points at server state.
+      await useConversations.getState().reloadActivePath(convId)
+      throw error
+    }
+  }
   // Reset the window whenever we switch conversations.
   useEffect(() => {
     setVisible(Math.min(INITIAL_WINDOW, conversation.messages.length))
     setReportMessageId('')
+    setImageEdit(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversation.id])
   // Grow the window if new messages arrive at the tail (so streaming/regenerate
@@ -206,19 +262,20 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
       void sendMessage({
         conversationId: convId,
         text: newContent,
-        modelId,
+        modelId: edited?.imageEdit ? edited.modelId : modelId,
         parentId,
         attachments: carryAtts,
         branch: true,
         // §fast-mode: a fast conversation forces the other features off and keeps
         // its existing fixed enabled tool behavior, skipping auto classification.
-        mode: fastMode ? undefined : armed.mode,
-        verify: fastMode ? undefined : armed.verify,
+        mode: fastMode || edited?.imageEdit ? undefined : armed.mode,
+        verify: fastMode || edited?.imageEdit ? undefined : armed.verify,
         toolMode: fastMode ? 'enabled' : armed.toolMode,
         webSearch: fastMode ? undefined : armed.webSearch,
         selectedToolIds: armed.selectedToolIds,
         optimizeImagePrompt: armed.optimizeImagePrompt,
-        fast: fastMode,
+        imageEdit: edited?.imageEdit,
+        fast: edited?.imageEdit ? false : fastMode,
       })
     },
     [convId, modelId, fastMode, sendMessage],
@@ -317,6 +374,7 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
           message={m}
           onRegenerate={isReadOnlyConversation ? undefined : handleRegenerate}
           onEdit={isReadOnlyConversation ? undefined : handleEdit}
+          onImageEdit={canMaskEdit ? handleImageEdit : undefined}
           onSaveEdit={isReadOnlyConversation ? undefined : handleSaveEdit}
           onFeedback={isWorkspaceGuest ? undefined : handleFeedback}
           onReport={isWorkspaceGuest ? undefined : handleReport}
@@ -345,6 +403,7 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
           if (!open) setReportMessageId('')
         }}
       />
+      {imageEdit ? <ImageMaskEditor key={imageEdit.image.id} image={imageEdit.image} modelLabel={imageEdit.modelLabel} onClose={() => setImageEdit(null)} onSubmit={submitImageEdit} /> : null}
     </div>
   )
 }

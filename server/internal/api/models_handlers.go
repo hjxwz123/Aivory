@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"aivory/server/internal/envcfg"
+	"aivory/server/internal/llm"
 	"aivory/server/internal/store"
 )
 
@@ -242,6 +243,7 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 		Kind            string `json:"kind"`
 		Enabled         bool   `json:"enabled"`
 		Vision          bool   `json:"vision"`
+		MaskEdit        bool   `json:"mask_edit"`
 		Stream          bool   `json:"stream"`
 		ResearchEnabled bool   `json:"research_enabled"`
 		ToolMode        string `json:"tool_mode"`
@@ -379,7 +381,13 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 	}
 
 	items := []item{}
+	maskChannels := map[string]*store.Channel{}
 	for _, m := range models {
+		if m.Kind == "image" {
+			if _, loaded := maskChannels[m.ChannelID]; !loaded {
+				maskChannels[m.ChannelID], _ = store.GetChannel(r.Context(), d.DB, m.ChannelID)
+			}
+		}
 		tags := m.Tags
 		if tags == nil {
 			tags = json.RawMessage("[]")
@@ -414,6 +422,7 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 		items = append(items, item{
 			ID: m.ID, Label: m.Label, Description: m.Description, Icon: m.Icon,
 			Kind: m.Kind, Enabled: m.Enabled, Vision: m.Vision, Stream: m.Stream, ResearchEnabled: m.ResearchEnabled, ToolMode: m.ToolMode,
+			MaskEdit:       llm.SupportsImageMaskEdit(&m, maskChannels[m.ChannelID]),
 			BuiltinTools:   builtinDefaults,
 			ToolsAvailable: m.ToolMode != "none" && (len(availableBuiltinTools) > 0 || hostedToolsAvailable || mcpToolsAvailable),
 			ParamControls:  m.ParamControls, ChannelID: m.ChannelID, SortOrder: m.SortOrder,

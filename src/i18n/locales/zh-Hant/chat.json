@@ -1,4 +1,23 @@
 {
+  "imageEdit": {
+    "edit": "編輯",
+    "title": "編輯圖片",
+    "brush": "畫筆",
+    "eraser": "橡皮擦",
+    "undo": "復原",
+    "redo": "重做",
+    "clear": "清空選取範圍",
+    "brushSize": "筆刷大小",
+    "selection": "編輯選取範圍",
+    "prompt": "修改指令",
+    "cancel": "取消",
+    "submit": "提交編輯",
+    "retry": "重試",
+    "tooLarge": "圖片超過編輯上限（單邊 8192 像素，總計 1600 萬像素）。",
+    "loadFailed": "無法載入原圖。",
+    "selectionRequired": "請先選取需要修改的區域。",
+    "submitFailed": "編輯提交失敗，選取範圍已保留，請重試。"
+  },
   "greeting": {
     "morning": "早上好",
     "afternoon": "下午好",

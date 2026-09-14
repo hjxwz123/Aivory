@@ -254,6 +254,7 @@ type MCPToolDef struct {
 
 // SseEvent is the on-the-wire shape per §6.2. Always lowercase, snake_case.
 type SseEvent struct {
+	Source    string `json:"source,omitempty"`
 	Type      string `json:"type"`
 	MessageID string `json:"message_id,omitempty"`
 	Text      string `json:"text,omitempty"`
@@ -303,6 +304,7 @@ type VerifyFinding struct {
 // ArtifactRef is a file a tool produced (sandbox output, generated image). The
 // orchestrator persists it (artifacts table) and streams an "artifact" event.
 type ArtifactRef struct {
+	Source   string `json:"source,omitempty"`
 	ID       string `json:"id"`
 	Filename string `json:"filename"`
 	URL      string `json:"url"`

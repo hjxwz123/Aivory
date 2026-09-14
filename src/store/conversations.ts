@@ -350,6 +350,9 @@ interface ConversationStore {
     imageStyleId?: string
     /** Direct image-model turns only: whether to run the prompt optimizer. */
     optimizeImagePrompt?: boolean
+    imageEdit?: import('@/types/chat').ImageEditRequest
+    /** Fires only after the server accepts the turn and sends message_start. */
+    onAccepted?: () => void
     /** §verify: enable Verify mode for this turn (a second model audits the answer). */
     verify?: boolean
     /** Per-turn tool policy. Missing legacy/internal callers normalize to auto;
@@ -1804,6 +1807,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       content: input.text,
       createdAt: Date.now(),
       attachments: input.attachments,
+      imageEdit: input.imageEdit,
       // §workspaces: attribute the optimistic turn to the sender so the shared
       // bubble renders own-right with the right name before the reconcile.
       authorId: useAuth.getState().user?.id,
@@ -2051,6 +2055,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           params: input.params,
           image_style_id: input.imageStyleId,
           optimize_image_prompt: input.optimizeImagePrompt,
+          image_edit: input.imageEdit,
           // UI language → backend anchors the reply language to it (§ reply language).
           locale: currentLocale(),
         },
@@ -2060,6 +2065,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         switch (ev.type) {
           case 'message_start':
             assistantStarted = true
+            input.onAccepted?.()
             serverAssistantId = ev.message_id ?? assistantId
             // Replace local id with backend id so future actions (regenerate,
             // active-leaf) use the right id.
@@ -2120,6 +2126,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
                   filename: ev.title ?? 'file',
                   url: ev.url ?? '',
                   mimeType: ev.summary ?? '',
+                  source: ev.source,
                 },
               ],
             }))
@@ -2414,6 +2421,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     // sibling behind the `< n/m >` picker.
     const oldAssistant = conv?.messages.find((m) => m.id === assistantId)
     const userParentId = oldAssistant?.parentId
+    const maskEdit = conv?.messages.find((message) => message.id === userParentId)?.imageEdit
     // Carry the original turn's mode so regenerating a deep-research reply
     // re-runs the research engine (and shows the panel) instead of downgrading.
     const mode = oldAssistant?.mode
@@ -2427,12 +2435,12 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     // toggles (a retry should reflect what's armed now). `mode` is the EXCEPTION
     // — it stays the original turn's mode (below), so regenerating a deep-research
     // reply re-runs research rather than adopting whatever mode is toggled now.
-    const regenerateModelId = modelId ?? conv?.modelId
+    const regenerateModelId = maskEdit ? oldAssistant?.modelId : modelId ?? conv?.modelId
     const armed = resolveArmedTurnFlags(regenerateModelId, conversationId)
     // §fast-mode: regenerate honours the conversation's CURRENT 快速/进阶 selection
     // (like verify/tool-policy above) — a fast conversation re-runs fast; switching to
     // 进阶 first makes the retry use the real model.
-    const fast = conv?.fast === true
+    const fast = !maskEdit && conv?.fast === true
     const verify = fast ? false : armed.verify
     const { toolMode, webSearch } = resolveToolRequestFlags(armed.toolMode, {
       fast,
@@ -2481,7 +2489,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         content: '',
         createdAt: Date.now(),
         streaming: true,
-        modelId: fast ? undefined : modelId ?? conv?.modelId,
+        modelId: fast ? undefined : regenerateModelId,
         fast: fast || undefined,
         mode,
         verify: verify ? { status: 'running', findings: [] } : undefined,
@@ -2509,7 +2517,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           assistant_id: assistantId,
           generation_id: generationId,
           kb_ids: turnKnowledgeBaseIds,
-          model_id: fast ? undefined : modelId,
+          model_id: fast ? undefined : maskEdit ? regenerateModelId : modelId,
           mode,
           verify,
           tool_mode: toolMode,
@@ -2665,7 +2673,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
               imageStatus: undefined,
               artifacts: [
                 ...(m.artifacts ?? []),
-                { id: ev.id ?? uid('art'), filename: ev.title ?? 'file', url: ev.url ?? '', mimeType: ev.summary ?? '' },
+                { id: ev.id ?? uid('art'), filename: ev.title ?? 'file', url: ev.url ?? '', mimeType: ev.summary ?? '', source: ev.source },
               ],
             }))
             break
@@ -3049,7 +3057,7 @@ function applyReplayEvent(
         imageStatus: undefined,
         artifacts: [
           ...(m.artifacts ?? []),
-          { id: ev.id ?? uid('art'), filename: ev.title ?? 'file', url: ev.url ?? '', mimeType: ev.summary ?? '' },
+          { id: ev.id ?? uid('art'), filename: ev.title ?? 'file', url: ev.url ?? '', mimeType: ev.summary ?? '', source: ev.source },
         ],
       }))
       break
@@ -3396,6 +3404,7 @@ export function toLocalMessage(m: ApiMessage): Message {
         // block's `summary` field at finalize (it's already on the SSE event),
         // so picking it up here closes the reload gap.
         mimeType: b.summary ?? '',
+        source: b.artifacts?.find((artifact) => artifact.id === b.file_ref)?.source,
       })
     } else if (b.kind === 'tool_call') {
       // Flush any narration that preceded this tool into the trace.
@@ -3440,6 +3449,7 @@ export function toLocalMessage(m: ApiMessage): Message {
   const content = pendingText
   return {
     id: m.id,
+    imageEdit: (m.blocks ?? []).find((block) => block.kind === 'image_edit')?.input as import('@/types/chat').ImageEditRequest | undefined,
     parentId: m.parent_id || undefined,
     authorId: m.author_id || undefined,
     authorName: m.author_name || undefined,

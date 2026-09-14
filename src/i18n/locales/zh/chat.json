@@ -1,4 +1,23 @@
 {
+  "imageEdit": {
+    "edit": "编辑",
+    "title": "编辑图片",
+    "brush": "画笔",
+    "eraser": "橡皮擦",
+    "undo": "撤销",
+    "redo": "重做",
+    "clear": "清空选区",
+    "brushSize": "笔刷大小",
+    "selection": "编辑选区",
+    "prompt": "修改指令",
+    "cancel": "取消",
+    "submit": "提交编辑",
+    "retry": "重试",
+    "tooLarge": "图片超过编辑上限（单边 8192 像素，总计 1600 万像素）。",
+    "loadFailed": "无法加载原图。",
+    "selectionRequired": "请先选择需要修改的区域。",
+    "submitFailed": "编辑提交失败，选区已保留，请重试。"
+  },
   "greeting": {
     "morning": "早上好",
     "afternoon": "下午好",

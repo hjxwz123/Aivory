@@ -1339,7 +1339,8 @@ func saveArtifact(ctx context.Context, tc *llm.ToolContext, artifactDir, name, m
 	}
 	if tc.OnArtifact != nil {
 		tc.OnArtifact(llm.ArtifactRef{
-			ID: art.ID, Filename: safe, URL: "/api/artifacts/" + art.ID,
+			Source: source,
+			ID:     art.ID, Filename: safe, URL: "/api/artifacts/" + art.ID,
 			MimeType: mime, Size: int64(len(data)),
 		})
 	}
@@ -1489,14 +1490,15 @@ func (t *imageGenerateTool) InputSchema() json.RawMessage {
 }
 
 type imgInput struct {
-	Prompt         string   `json:"prompt"`
-	UserPrompt     string   `json:"-"`
-	Action         string   `json:"action"`
-	BaseImage      string   `json:"base_image"`
-	BaseImageIndex int      `json:"base_image_index"`
-	N              int      `json:"n"`
-	Size           string   `json:"size"`
-	InputImages    []string `json:"input_images"`
+	Mask           *imageBytes `json:"-"`
+	Prompt         string      `json:"prompt"`
+	UserPrompt     string      `json:"-"`
+	Action         string      `json:"action"`
+	BaseImage      string      `json:"base_image"`
+	BaseImageIndex int         `json:"base_image_index"`
+	N              int         `json:"n"`
+	Size           string      `json:"size"`
+	InputImages    []string    `json:"input_images"`
 }
 
 func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.ToolContext) (string, []llm.Citation, error) {
@@ -1585,6 +1587,11 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	if err != nil {
 		return "", nil, err
 	}
+	if tc != nil && tc.ImageEdit != nil {
+		if in.Action != "edit" || llm.ValidateImageEditRequest(ctx, t.db, tc.ConvID, tc.UserID, tc.MessageID, model, tc.ImageEdit) != nil {
+			return "", nil, &llm.ToolUserError{Message: llm.ErrImageMaskEdit.Error()}
+		}
+	}
 	if channel.APIKey == "" {
 		return "No API key on the image channel — ask an admin to configure it.", nil, nil
 	}
@@ -1643,6 +1650,17 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	inputImgs, err := t.resolveImageOperationInputs(ctx, tc, in, inputLimit)
 	if err != nil {
 		return "", nil, err
+	}
+	if tc != nil && tc.ImageEdit != nil {
+		masks, _ := t.loadInputImages(ctx, tc, []string{tc.ImageEdit.MaskFileID}, 1)
+		if len(inputImgs) != 1 || len(masks) != 1 {
+			return "", nil, &llm.ToolUserError{Message: "image_edit_input_unavailable"}
+		}
+		base, mask, maskErr := prepareImageMask(inputImgs[0], masks[0])
+		if maskErr != nil {
+			return "", nil, &llm.ToolUserError{Message: maskErr.Error()}
+		}
+		inputImgs[0], in.Mask = base, &mask
 	}
 	// The exact user instruction is authoritative whenever this request becomes an
 	// edit, including explicit previous-generation selection with no new attachment. A chat
@@ -2120,6 +2138,13 @@ func (t *imageGenerateTool) resolveImageOperationInputs(ctx context.Context, tc 
 	}
 
 	currentIDs := mergeImageInputIDs(tc.ImageInputIDs, in.InputImages)
+	if tc.ImageEdit != nil {
+		images, _ := t.loadInputImages(ctx, tc, []string{tc.ImageEdit.BaseArtifactID}, 1)
+		if len(images) != 1 {
+			return nil, &llm.ToolUserError{Message: "image_edit_input_unavailable"}
+		}
+		return images, nil
+	}
 	var base imageBytes
 	referenceIDs := currentIDs
 	switch in.BaseImage {
@@ -2363,6 +2388,9 @@ func geminiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 // via the multipart /v1/images/edits endpoint.
 func openaiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string, in imgInput, inputImgs []imageBytes, requestParams map[string]any, requestObservers ...func(*http.Request)) ([]imageBytes, error) {
 	base := llm.OpenAIBaseURL(baseURL)
+	if in.Mask != nil && len(inputImgs) == 0 {
+		return nil, errors.New("mask requires a source image")
+	}
 
 	// gpt-image-1 returns b64_json natively and REJECTS the response_format
 	// param; only the DALL·E models accept it. Send it only for dall-e and parse
@@ -2445,6 +2473,15 @@ func openaiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 				return nil, err
 			}
 			if _, err := fw.Write(inputImg.data); err != nil {
+				return nil, err
+			}
+		}
+		if in.Mask != nil {
+			fw, err := mw.CreateFormFile("mask", "mask.png")
+			if err != nil {
+				return nil, err
+			}
+			if _, err := fw.Write(in.Mask.data); err != nil {
 				return nil, err
 			}
 		}

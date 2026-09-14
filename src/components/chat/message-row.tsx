@@ -34,6 +34,7 @@ import {
   FEEDBACK_REASON_VALUES,
   GENERATION_INTERRUPTED_ERROR_CODE,
   type Attachment,
+  type ArtifactRef,
   type Citation,
   type FeedbackReason,
   type Message,
@@ -218,6 +219,7 @@ function RagInjectionStatus({ injection }: { injection: NonNullable<Message['rag
 }
 
 interface MessageRowProps {
+  onImageEdit?: (image: ArtifactRef, messageId: string) => void
   message: Message
   userName?: string
   onRegenerate?: (id: string) => void
@@ -273,7 +275,7 @@ function formatCredits(credits: number): string {
   return credits.toLocaleString(undefined, { maximumFractionDigits: 2 })
 }
 
-function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, onFeedback, onBranchSwitch, onFork, onDelete, onReport, readOnly = false, userMessageMarkdown = false }: MessageRowProps) {
+function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, onSaveEdit, onFeedback, onBranchSwitch, onFork, onDelete, onReport, readOnly = false, userMessageMarkdown = false }: MessageRowProps) {
   const ragInjection = visibleRagInjection(message)
   const isUser = message.role === 'user'
   const userHasMath = useMemo(() => isUser && hasMathContent(message.content), [isUser, message.content])
@@ -320,12 +322,16 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
   // Lightbox: which image is being previewed (null = closed). Driven from the
   // attachment id so the Dialog re-mounts cleanly on each preview.
   const [lightbox, setLightbox] = useState<{
+    artifact?: ArtifactRef
     attachmentId?: string
     src: string
     alt?: string
     downloadUrl?: string
     filename?: string
   } | null>(null)
+  const canEditImage = (artifact: ArtifactRef) => !readOnly && !message.streaming && !!onImageEdit &&
+    (artifact.source === 'image_generate' || artifact.source === 'image_generation' ||
+      (!artifact.source && (model?.kind === 'image' || message.reasoning?.some((item) => item.kind === 'tool' && item.tool.name === 'image_generate'))))
   // Non-image attachment preview (pdf / docx / text / fallback) — opens a modal
   // instead of letting the click download the file.
   const [filePreview, setFilePreview] = useState<{
@@ -1069,10 +1075,11 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                           )
                         }
                         return (
+                          <div key={a.id} className="flex max-w-full flex-col items-start gap-1">
                           <button
-                            key={a.id}
                             type="button"
                             onClick={() => setLightbox({
+                              artifact: a,
                               src: href,
                               alt: a.filename,
                               downloadUrl: href,
@@ -1084,9 +1091,11 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                             <img
                               src={href}
                               alt={a.filename}
-                              className="max-h-64 rounded-lg border border-[var(--color-border)] transition-opacity hover:opacity-90"
+                              className="max-h-64 max-w-full rounded-lg border border-[var(--color-border)] object-contain transition-opacity hover:opacity-90"
                             />
                           </button>
+                          {canEditImage(a) ? <Button variant="ghost" size="sm" leadingIcon={<Pencil size={14} />} onClick={() => onImageEdit?.(a, message.id)}>{t('imageEdit.edit')}</Button> : null}
+                          </div>
                         )
                       }
                       return (
@@ -1415,6 +1424,10 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
         alt={lightbox?.alt}
         downloadUrl={lightbox?.downloadUrl}
         filename={lightbox?.filename}
+        onEdit={lightbox?.artifact && canEditImage(lightbox.artifact) ? () => {
+          onImageEdit?.(lightbox.artifact!, message.id)
+          setLightbox(null)
+        } : undefined}
       />
       {/* Non-image attachment preview modal. */}
       <FilePreview

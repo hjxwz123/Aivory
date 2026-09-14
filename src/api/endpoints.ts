@@ -399,6 +399,16 @@ export const toolsApi = {
 // ----- Image generation (§4.20) --------------------------------------------
 
 export const imageApi = {
+  artifactBlob: async (id: string, signal?: AbortSignal): Promise<Blob> => {
+    const path = `/artifacts/${encodeURIComponent(id)}`
+    const response = await fetch(apiUrl(path), {
+      credentials: 'include',
+      headers: await authenticatedRequestHeaders(path),
+      signal,
+    })
+    if (!response.ok) throw new ApiError(response.status, 'Image unavailable', null)
+    return response.blob()
+  },
   /** Enabled styles for the composer style picker (hidden prompt stripped). */
   styles: (workspaceId?: string) =>
     api<ApiImageStyle[]>(`/image/styles${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`),

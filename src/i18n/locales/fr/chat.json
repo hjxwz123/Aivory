@@ -1,4 +1,23 @@
 {
+  "imageEdit": {
+    "edit": "Modifier",
+    "title": "Modifier l'image",
+    "brush": "Pinceau",
+    "eraser": "Gomme",
+    "undo": "Annuler le trait",
+    "redo": "Rétablir",
+    "clear": "Effacer la sélection",
+    "brushSize": "Taille du pinceau",
+    "selection": "Zone à modifier",
+    "prompt": "Modification souhaitée",
+    "cancel": "Annuler",
+    "submit": "Appliquer",
+    "retry": "Réessayer",
+    "tooLarge": "Cette image dépasse la limite (8192 px par côté, 16 mégapixels).",
+    "loadFailed": "Impossible de charger l'image d'origine.",
+    "selectionRequired": "Sélectionnez une zone à modifier.",
+    "submitFailed": "L'envoi a échoué. Votre sélection est conservée. Réessayez."
+  },
   "greeting": {
     "morning": "Bonjour",
     "afternoon": "Bon après-midi",

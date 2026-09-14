@@ -41,10 +41,10 @@ func (o *Orchestrator) runImageTurn(
 		}
 		emitEvent(event)
 	}
-	optimizePrompt := req.OptimizeImagePrompt == nil || *req.OptimizeImagePrompt
+	optimizePrompt := req.ImageEdit == nil && (req.OptimizeImagePrompt == nil || *req.OptimizeImagePrompt)
 	inputImageIDs := imageAttachmentIDs(req.Attachments)
 	hasPreviousImage := nearestBranchGeneratedImageExists(ctx, o.db, assistantMsg.ID, conv.ID)
-	needsImageIntentPlan := len(inputImageIDs) > 0 || hasPreviousImage
+	needsImageIntentPlan := req.ImageEdit == nil && (len(inputImageIDs) > 0 || hasPreviousImage)
 	if optimizePrompt || (needsImageIntentPlan && o.task != nil) {
 		onEvent(SseEvent{Type: "image_status", MessageID: assistantMsg.ID, Status: "optimizing"})
 	}
@@ -65,7 +65,11 @@ func (o *Orchestrator) runImageTurn(
 		}
 	}
 	imagePlan := fallbackDirectImageTurnPlan(req.UserText, styleHidden, len(inputImageIDs), hasPreviousImage)
-	if needsImageIntentPlan {
+	if req.ImageEdit != nil {
+		imagePlan.Prompt = req.UserText
+		imagePlan.Action = "edit"
+		imagePlan.BaseImage = "previous_generation"
+	} else if needsImageIntentPlan {
 		var planErr error
 		imagePlan, planErr = o.planDirectImageTurn(
 			ctx, req.UserID, conv.ID, assistantMsg.ID, req.UserText, styleHidden,
@@ -114,6 +118,7 @@ func (o *Orchestrator) runImageTurn(
 		ImageRequestParams:   imageRequestParams,
 		ImageInputIDs:        inputImageIDs,
 		ImageUserPrompt:      req.UserText,
+		ImageEdit:            req.ImageEdit,
 		WorkspaceAccessCheck: req.WorkspaceAccessCheck,
 		DB:                   o.db,
 		// The orchestrator already ran the credit-aware checkImageQuota above, so
@@ -123,7 +128,7 @@ func (o *Orchestrator) runImageTurn(
 			mu.Lock()
 			artifacts = append(artifacts, a)
 			mu.Unlock()
-			onEvent(SseEvent{Type: "artifact", ID: a.ID, URL: a.URL, Title: a.Filename, Summary: a.MimeType})
+			onEvent(SseEvent{Type: "artifact", ID: a.ID, URL: a.URL, Title: a.Filename, Summary: a.MimeType, Source: a.Source})
 		},
 		counts: map[string]int{},
 	}

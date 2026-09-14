@@ -911,6 +911,8 @@ export interface ApiBuiltinTool {
 }
 
 export interface ApiModel {
+	/** Supports the OpenAI Images API mask-edit workflow. */
+	mask_edit?: boolean
   id: string
   channel_id: string
   kind: 'chat' | 'image' | 'embedding'
@@ -1419,6 +1421,7 @@ export interface ApiConversation {
 }
 
 export type ApiBlockKind =
+  | 'image_edit'
   | 'text'
   | 'thinking'
   | 'tool_call'
@@ -1431,6 +1434,7 @@ export type ApiBlockKind =
   | 'error'
 
 export interface ApiBlock {
+  artifacts?: Array<{ id: string; source?: string }>
   kind: ApiBlockKind
   text?: string
   /** Total observable reasoning time, stored only on the first thinking block. */
@@ -1670,7 +1674,7 @@ export type ApiSseEvent =
   | { type: 'tool_input'; name?: string; id?: string; partial_json?: string; input?: unknown }
   | { type: 'tool_result'; name: string; id?: string; summary: string; status?: 'complete' | 'error' }
   | { type: 'citation'; citation: ApiCitation }
-  | { type: 'artifact'; id?: string; url?: string; title?: string; summary?: string }
+  | { type: 'artifact'; id?: string; url?: string; title?: string; summary?: string; source?: string }
   // §4.20 image mode: drawing-phase status ('optimizing' | 'generating') driving
   // the dedicated generating UI.
   | { type: 'image_status'; message_id?: string; status?: string }

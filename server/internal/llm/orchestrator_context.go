@@ -79,6 +79,13 @@ func storeToUnified(msgs []store.Message, currentProvider, currentModelID string
 		}
 		var blocks []UnifiedBlock
 		_ = json.Unmarshal(m.Blocks, &blocks)
+		visibleBlocks := blocks[:0]
+		for _, block := range blocks {
+			if block.Kind != "image_edit" {
+				visibleBlocks = append(visibleBlocks, block)
+			}
+		}
+		blocks = visibleBlocks
 		um := UnifiedMessage{Role: m.Role, Blocks: blocks}
 		var atts []Attachment
 		if len(m.Attachments) > 2 {

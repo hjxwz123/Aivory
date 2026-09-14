@@ -172,13 +172,20 @@ export interface Attachment {
 
 /** A file a tool produced (sandbox output, generated image), §4.5/§4.12. */
 export interface ArtifactRef {
+  source?: string
   id: string
   filename: string
   url: string
   mimeType: string
 }
 
+export interface ImageEditRequest {
+  base_artifact_id: string
+  mask_file_id: string
+}
+
 export interface Message {
+  imageEdit?: ImageEditRequest
   id: string
   /** Client-only optimistic row whose id has not been assigned by the server.
    *  Such ids must never be sent back as message references (for example,
