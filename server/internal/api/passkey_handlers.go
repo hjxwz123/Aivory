@@ -284,9 +284,14 @@ func passkeyLoginVerifyHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	failKey := "pkauth:fail:" + req.Ticket
-	if d.Cache.Incr(failKey, passkeyTicketTTL) >= passkeyTicketBurnThreshold {
-		d.Cache.Delete("pkauth:" + req.Ticket)
-		d.Cache.Delete(failKey)
+	// Burn only after repeated FAILURES (same posture as the 2FA ticket): a
+	// captured ticket cannot be brute-forced for its full TTL, while a single
+	// retry after a misread prompt stays possible.
+	burnTicket := func() {
+		if d.Cache.Incr(failKey, passkeyTicketTTL) >= passkeyTicketBurnThreshold {
+			d.Cache.Delete("pkauth:" + req.Ticket)
+			d.Cache.Delete(failKey)
+		}
 	}
 	cached, ok := d.Cache.Get("pkauth:" + req.Ticket)
 	if !ok {
@@ -325,8 +330,12 @@ func passkeyLoginVerifyHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// but log the cause so a misconfigured origin is diagnosable server-side.
 	credential, err := d.Passkeys.FinishLogin(passkeyRPOrigin(r), ticket.Session, req.Response, lookup)
 	if err != nil || verifiedUser == nil {
-		d.Cache.Incr(failKey, passkeyTicketTTL)
-		d.Logger.Printf("[passkey] assertion rejected origin=%q err=%v", passkeyRPOrigin(r), err)
+		burnTicket()
+		if d.Logger != nil {
+			// The single most useful line when a device's assertion is refused:
+			// names the origin and the library's verification failure.
+			d.Logger.Printf("[passkey] assertion rejected origin=%q err=%v", passkeyRPOrigin(r), err)
+		}
 		writeError(w, 401, errPasskeyLoginFailed)
 		return
 	}
@@ -337,7 +346,7 @@ func passkeyLoginVerifyHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.Cache.Delete(failKey)
-	if err := store.TouchPasskey(r.Context(), d.DB, verifiedRowID, credential.SignCount); err != nil {
+	if err := store.TouchPasskey(r.Context(), d.DB, verifiedRowID, credential.SignCount); err != nil && d.Logger != nil {
 		d.Logger.Printf("[passkey] touch failed row=%s err=%v", verifiedRowID, err)
 	}
 	finaliseLoginSession(d, w, r, verifiedUser, store.LoginMethodPasskey)

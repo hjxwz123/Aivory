@@ -143,7 +143,6 @@ func (a *softwareAuthenticator) assertionResponse(t *testing.T, challenge, userH
 	return raw
 }
 
-
 func TestPasskeyEndToEndRegistrationAndLogin(t *testing.T) {
 	d, _ := newPasskeyDeps(t)
 	d.Passkeys = NewPasskeyService("Aivory")
