@@ -2322,7 +2322,17 @@ func editMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		blocks, _ = json.Marshal([]llm.UnifiedBlock{{Kind: "text", Text: body.Text}})
+		imageEdit, err := llm.ImageEditFromBlocks(msg.Blocks)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		userBlocks := []llm.UnifiedBlock{{Kind: "text", Text: body.Text}}
+		if imageEdit != nil {
+			input, _ := json.Marshal(imageEdit)
+			userBlocks = append(userBlocks, llm.UnifiedBlock{Kind: "image_edit", Input: input})
+		}
+		blocks, _ = json.Marshal(userBlocks)
 	}
 	if err := store.UpdateMessageContentForUser(r.Context(), d.DB, convID, u.ID, msgID, blocks); err != nil {
 		if errors.Is(err, store.ErrNotFound) {

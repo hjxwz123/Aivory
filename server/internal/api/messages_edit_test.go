@@ -61,7 +61,7 @@ func TestEditMessageHandlerAllowsWorkspaceAssistantButProtectsUserAuthorship(t *
 	}
 	question, err := store.CreateMessage(t.Context(), db, store.Message{
 		ID: "edit-question", ConversationID: conversation.ID, Role: "user", AuthorID: "owner",
-		Blocks: json.RawMessage(`[{"kind":"text","text":"owner question"}]`),
+		Blocks: json.RawMessage(`[{"kind":"text","text":"owner question"},{"kind":"image_edit","input":{"base_artifact_id":"chosen-image","mask_file_id":"selected-mask"}}]`),
 	})
 	if err != nil {
 		t.Fatalf("create question: %v", err)
@@ -111,5 +111,16 @@ func TestEditMessageHandlerAllowsWorkspaceAssistantButProtectsUserAuthorship(t *
 	}
 	if rec := request("owner", question.ID, "owner edit"); rec.Code != http.StatusOK {
 		t.Fatalf("owner editing own question status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	updatedQuestion, err := store.GetMessage(t.Context(), db, question.ID)
+	if err != nil {
+		t.Fatalf("get edited question: %v", err)
+	}
+	edit, err := llm.ImageEditFromBlocks(updatedQuestion.Blocks)
+	if err != nil || edit == nil || edit.BaseArtifactID != "chosen-image" || edit.MaskFileID != "selected-mask" {
+		t.Fatalf("edited question lost mask metadata: edit=%+v err=%v", edit, err)
+	}
+	if err := json.Unmarshal(updatedQuestion.Blocks, &blocks); err != nil || len(blocks) != 2 || blocks[0].Text != "owner edit" {
+		t.Fatalf("edited question blocks=%s err=%v", updatedQuestion.Blocks, err)
 	}
 }

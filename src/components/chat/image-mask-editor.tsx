@@ -76,7 +76,7 @@ export function ImageMaskEditor({ image, modelLabel, onClose, onSubmit }: Props)
   function updateHistory() { setHistory({ undo: strokes.current.length, redo: redo.current.length }) }
   function redraw() {
     const canvas = canvasRef.current
-    const context = canvas?.getContext('2d')
+    const context = canvas?.getContext('2d', { willReadFrequently: true })
     if (!canvas || !context) return
     context.clearRect(0, 0, canvas.width, canvas.height)
     for (const stroke of strokes.current) drawMaskStroke(context, stroke)
@@ -104,7 +104,7 @@ export function ImageMaskEditor({ image, modelLabel, onClose, onSubmit }: Props)
     event.currentTarget.setPointerCapture(event.pointerId)
     const stroke: MaskStroke = { points: [pointAt(event)], radius: brush * event.currentTarget.width / event.currentTarget.getBoundingClientRect().width / 2, erase }
     active.current = { id: event.pointerId, stroke }
-    drawMaskStroke(event.currentTarget.getContext('2d')!, stroke)
+    drawMaskStroke(event.currentTarget.getContext('2d', { willReadFrequently: true })!, stroke)
     setError('')
   }
   function pointerMove(event: PointerEvent<HTMLCanvasElement>) {
