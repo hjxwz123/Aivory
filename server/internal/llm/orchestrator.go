@@ -80,31 +80,6 @@ type Orchestrator struct {
 	onCompactionStatus func(userID, conversationID, operationID, status string)
 }
 
-// logGenerationStage makes the otherwise-silent path between message_start and
-// the main provider request observable. Details must contain only structural
-// metadata (counts, modes and identifiers), never prompt or file content.
-func (o *Orchestrator) logGenerationStage(convID, messageID, stage, status string, started time.Time, details string) {
-	if o == nil || o.logger == nil {
-		return
-	}
-	duration := time.Duration(0)
-	if !started.IsZero() {
-		duration = time.Since(started).Round(time.Millisecond)
-	}
-	stats := o.db.Stats()
-	o.logger.Printf(
-		"orchestrator: generation stage (conv=%s msg=%s stage=%s status=%s duration=%s db_open=%d db_in_use=%d db_idle=%d db_wait_count=%d db_wait_ms=%d%s)",
-		convID, messageID, stage, status, duration,
-		stats.OpenConnections, stats.InUse, stats.Idle, stats.WaitCount, stats.WaitDuration.Milliseconds(), details,
-	)
-}
-
-func generationStageErrorKind(err error) string {
-	if err == nil {
-		return ""
-	}
-	return fmt.Sprintf("%T", err)
-}
 
 // ToolRefusalError marks a tool failure that is a policy/quota REFUSAL (content
 // moderation, daily image limit, per-model image quota) rather than a transient
@@ -2797,8 +2772,6 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	}
 	msgcache.Bump(o.cache, conv.ID)
 	onEvent(SseEvent{Type: "message_start", MessageID: assistantMsg.ID})
-	o.logGenerationStage(conv.ID, assistantMsg.ID, "pre_provider", "started", turnStart,
-		fmt.Sprintf(" model=%s provider=%s", model.ID, channel.Type))
 	var generationAccessRevoked atomic.Bool
 	emitEvent := onEvent
 	onEvent = func(event SseEvent) {
@@ -3030,40 +3003,20 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	kbIDs = append(kbIDs, turnKBIDs...)
 
 	// 4. Load full path history (the RAG router + compaction both need it).
-	historyStageStarted := time.Now()
-	o.logGenerationStage(conv.ID, assistantMsg.ID, "history_load", "started", time.Time{}, "")
 	history, err := msgcache.ListMessages(ctx, o.cache, o.db, conv.ID, userMsg.ID)
 	if err != nil {
-		o.logGenerationStage(conv.ID, assistantMsg.ID, "history_load", "failed", historyStageStarted,
-			fmt.Sprintf(" error_kind=%q", generationStageErrorKind(err)))
 		return nil, err
 	}
-	o.logGenerationStage(conv.ID, assistantMsg.ID, "history_load", "completed", historyStageStarted,
-		fmt.Sprintf(" messages=%d", len(history)))
-	documentStageStarted := time.Now()
-	o.logGenerationStage(conv.ID, assistantMsg.ID, "branch_documents", "started", time.Time{}, "")
 	branchDocumentIDs, err := store.ConversationDocumentIDsForBranch(ctx, o.db, conv.ID, req.UserID, userMsg.ID)
 	if err != nil {
-		o.logGenerationStage(conv.ID, assistantMsg.ID, "branch_documents", "failed", documentStageStarted,
-			fmt.Sprintf(" error_kind=%q", generationStageErrorKind(err)))
 		return nil, err
 	}
-	o.logGenerationStage(conv.ID, assistantMsg.ID, "branch_documents", "completed", documentStageStarted,
-		fmt.Sprintf(" documents=%d", len(branchDocumentIDs)))
 	currentDocumentIDs := attachmentDocumentIDs(req.Attachments)
 	allowedDocumentIDs := mergeDocumentIDs(branchDocumentIDs, currentDocumentIDs)
-	if o.logger != nil {
-		o.logger.Printf("orchestrator: attachment document scope (conv=%s msg=%s attachments=%d current=%v allowed=%v)",
-			conv.ID, userMsg.ID, len(req.Attachments), currentDocumentIDs, allowedDocumentIDs)
-	}
 	// Resolve staged files before automatic tool routing. The route model receives
 	// only a presence bit; exact file names are used solely by deterministic local
 	// fast paths and never leave this process.
-	sandboxStageStarted := time.Now()
-	o.logGenerationStage(conv.ID, assistantMsg.ID, "sandbox_files", "started", time.Time{}, "")
 	sandboxFiles := listSandboxFiles(ctx, o.db, conv.ID, req.UserID, userMsg.ID, o.uploadDir, o.artifactDir)
-	o.logGenerationStage(conv.ID, assistantMsg.ID, "sandbox_files", "completed", sandboxStageStarted,
-		fmt.Sprintf(" files=%d", len(sandboxFiles)))
 	builtinTools := modelBuiltinToolSet(model.BuiltinTools)
 	mcpServers := modelMCPServerIDSet(model.MCPServerIDs)
 	globalDisabledTools := o.disabledToolSet()
@@ -3250,10 +3203,6 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// ingested upload (chat-attached files are conversation-scoped, not in a KB).
 	ragScoped := len(kbIDs) > 0 || len(allowedDocumentIDs) > 0
 	if o.rag != nil && ragScoped && req.Mode != ModeDeepResearch {
-		ragStageStarted := time.Now()
-		o.logGenerationStage(conv.ID, assistantMsg.ID, "rag", "started", time.Time{},
-			fmt.Sprintf(" mode=%s knowledge_bases=%d branch_documents=%d current_documents=%d timeout=%s",
-				ragMode, len(kbIDs), len(branchDocumentIDs), len(currentDocumentIDs), ragQueryTimeout))
 		ragBaseCtx := rag.WithBillingMessageID(ctx, assistantMsg.ID)
 		ragBaseCtx = rag.WithBillingWorkspaceID(ragBaseCtx, conv.WorkspaceID)
 		ragCtx, cancelRAG := context.WithTimeout(ragBaseCtx, ragQueryTimeout)
@@ -3300,12 +3249,6 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			snippets, decision, ragErr = o.rag.RouteAndRetrieveDocumentScope(ragCtx, req.UserID, conv.ID, kbIDs, allowedDocumentIDs, currentDocumentIDs, req.UserText, nil, 8)
 		}
 		cancelRAG()
-		ragStatus := "completed"
-		if ragErr != nil {
-			ragStatus = "failed"
-		}
-		o.logGenerationStage(conv.ID, assistantMsg.ID, "rag", ragStatus, ragStageStarted,
-			fmt.Sprintf(" strategy=%s sources=%d error_kind=%q", decision.Strategy, len(snippets), generationStageErrorKind(ragErr)))
 		ragTimedOut := errors.Is(ragErr, context.DeadlineExceeded) && ctx.Err() == nil
 		if ragTimedOut {
 			// Partial retrieval output can represent an arbitrary subset of a large
@@ -3360,9 +3303,6 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		onEvent(SseEvent{Type: "done", MessageID: assistantMsg.ID, StopReason: "stopped"})
 		return &RunResult{UserMessage: userMsg, AssistantMessage: assistantMsg}, nil
 	}
-	postRAGSetupStarted := time.Now()
-	o.logGenerationStage(conv.ID, assistantMsg.ID, "post_rag_setup", "started", time.Time{},
-		fmt.Sprintf(" rag_sources=%d history=%d", len(ragSnippets), len(history)))
 	deferredKBCitationsEmitted := false
 	emitDeferredKBCitations := func(blocks []UnifiedBlock) {
 		if !hasAttachedKnowledgeBase || deferredKBCitationsEmitted {
@@ -3488,19 +3428,12 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// history conversion; every OpenAI/Anthropic/Gemini serializer sees the same
 	// authority-preserving UnifiedMessage sequence.
 	uHist = injectSelectedUserSkillsIntoHistory(uHist, selectedUserSkills)
-	o.logGenerationStage(conv.ID, assistantMsg.ID, "post_rag_setup", "completed", postRAGSetupStarted,
-		fmt.Sprintf(" rag_sources=%d history=%d memories=%d", len(ragSnippets), len(uHist), len(activeMemories)))
 
 	// 9b. Inject the summary + RAG context into the MESSAGE layer (§4.8/§4.9),
 	//     not the system prompt — keeps the system prefix stable + cacheable.
-	contextAssemblyStarted := time.Now()
-	o.logGenerationStage(conv.ID, assistantMsg.ID, "context_assembly", "started", time.Time{},
-		fmt.Sprintf(" history=%d rag_sources=%d summary_blocks=%d", len(uHist), len(ragSnippets), len(summaryBlocks)))
 	uHist = injectSummaryIntoHistory(uHist, ApplySummaryBlocks(summaryBlocks))
 	uHist = injectRAGIntoHistory(uHist, ragContext)
 	o.injectCompactionMedia(ctx, req.UserID, conv.ID, uHist, summaryBlocks, model.Vision)
-	o.logGenerationStage(conv.ID, assistantMsg.ID, "context_assembly", "completed", contextAssemblyStarted,
-		fmt.Sprintf(" history=%d", len(uHist)))
 
 	// 9c. Resolve file attachments into provider-ready blocks (§4.6): images
 	//     become base64 image blocks on their message (vision models see them
@@ -3511,15 +3444,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	//     §4.6 vision gating: strip legacy image blocks/attachments before any
 	//     provider resolution. This changes only the request copy; stored history
 	//     remains available if the user later switches back to a vision model.
-	attachmentStageStarted := time.Now()
-	o.logGenerationStage(conv.ID, assistantMsg.ID, "attachments", "started", time.Time{},
-		fmt.Sprintf(" history=%d vision=%t", len(uHist), model.Vision))
 	o.resolveAttachments(ctx, req.UserID, conv.ID, uHist, model, onEvent)
 	if hostedImageEnabled {
 		o.resolveImageArtifactBlocks(ctx, req.UserID, uHist)
 	}
-	o.logGenerationStage(conv.ID, assistantMsg.ID, "attachments", "completed", attachmentStageStarted,
-		fmt.Sprintf(" history=%d hosted_image=%t", len(uHist), hostedImageEnabled))
 
 	// 9d. Conversation-scoped files staged into the sandbox (/workspace/uploads)
 	//     were resolved above (`sandboxFiles`, before the forced-read fallback).
@@ -3604,9 +3532,6 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		ParamControls:        model.ParamControls,
 		ExtraParams:          model.ExtraParams,
 	}
-	compactionPlanStarted := time.Now()
-	o.logGenerationStage(conv.ID, assistantMsg.ID, "compaction_plan", "started", time.Time{},
-		fmt.Sprintf(" history=%d tools=%d", len(uHist), len(toolDefs)))
 	requestTokens := estimateRequestTokens(compactionEstimateReq)
 	toolHistoryCompacted := false
 	_, globalCompactionTrigger, compactionTokenCap, _, _, _ := compactionSettings(o.db)
@@ -3675,8 +3600,6 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		// advances durable continuation state for later turns.
 		keep = history[minimumCut:]
 	}
-	o.logGenerationStage(conv.ID, assistantMsg.ID, "compaction_plan", "completed", compactionPlanStarted,
-		fmt.Sprintf(" request_tokens=%d action=%d keep_messages=%d summary_blocks=%d", requestTokens, compactAction, len(keep), len(summaryBlocks)))
 	if compactAction == compactAsync && o.queue != nil && o.task != nil {
 		convID, userID, leafID := conv.ID, req.UserID, userMsg.ID
 		operationID := store.GenID("cmp")
@@ -4006,10 +3929,6 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// models mid-turn, so every usage row for the turn can be marked "timeout
 	// fallback" in admin (distinct from the same-model backup-channel `fallback`).
 	var ttftFallbackModel string
-	providerStageStarted := time.Now()
-	o.logGenerationStage(conv.ID, assistantMsg.ID, "main_provider", "started", time.Time{},
-		fmt.Sprintf(" model=%s provider=%s format=%s history=%d tools=%d input_estimate=%d pre_provider_ms=%d",
-			model.ID, channel.Type, channel.APIFormat, len(provReq.History), len(provReq.Tools), requestTokens, time.Since(turnStart).Milliseconds()))
 	if req.Mode == ModeDeepResearch {
 		// Deep Research: plan → multi-round web search + source reading → verify
 		// → comprehensive cited report. Returns the same UnifiedResult shape, so
@@ -4018,12 +3937,6 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	} else {
 		result, err = o.streamWithFallback(providerCtx, provReq, providerRunner, provider, model.ID, providerEvents, &ttftFallbackModel)
 	}
-	providerStatus := "completed"
-	if err != nil {
-		providerStatus = "failed"
-	}
-	o.logGenerationStage(conv.ID, assistantMsg.ID, "main_provider", providerStatus, providerStageStarted,
-		fmt.Sprintf(" error_kind=%q has_result=%t", generationStageErrorKind(err), result != nil))
 	if result != nil && runner.ctx.citationIndexes != nil {
 		for i := range result.Citations {
 			result.Citations[i] = runner.ctx.citationIndexes.normalize(result.Citations[i])

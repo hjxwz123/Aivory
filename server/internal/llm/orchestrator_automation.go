@@ -86,9 +86,6 @@ func (o *Orchestrator) autoTurnNeedsTools(
 	}
 
 	if o.task == nil {
-		if o.logger != nil {
-			o.logger.Printf("tool route: dedicated model unavailable, enabling tools (conv=%s)", req.ConversationID)
-		}
 		return true
 	}
 
@@ -103,17 +100,11 @@ func (o *Orchestrator) autoTurnNeedsTools(
 		MaxOutputTokens: toolRouteMaxOutputTokens,
 	})
 	if err != nil {
-		if o.logger != nil {
-			o.logger.Printf("tool route: decision failed, enabling tools (conv=%s): %v", req.ConversationID, err)
-		}
 		return true
 	}
 	decision = strings.TrimSpace(decision)
 	if strings.HasPrefix(decision, "0") {
 		return false
-	}
-	if !strings.HasPrefix(decision, "1") && o.logger != nil {
-		o.logger.Printf("tool route: invalid decision %q, enabling tools (conv=%s)", truncate(decision, 80), req.ConversationID)
 	}
 	return true
 }

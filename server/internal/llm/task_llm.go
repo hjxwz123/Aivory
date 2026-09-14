@@ -627,7 +627,9 @@ func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opt
 		// only symptom is degraded quality. Log + record a status=error usage row
 		// (0 tokens, purpose = the task kind) so the admin usage page surfaces it
 		// (filterable via the purpose dropdown / errors-only).
-		if t.logger != nil {
+		// Route models (tool/file route) run on every conversation; their
+		// failures stay visible via the status=error usage row only.
+		if t.logger != nil && kind != TaskToolRoute && kind != TaskRouter {
 			if kind == TaskCompact {
 				t.logger.Printf("task: %s call failed (model=%s user=%s conv=%s error_kind=%q)",
 					kind, model.ID, opts.UserID, opts.ConversationID, compactionErrorKind(err))
@@ -823,7 +825,7 @@ func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opt
 		canIncreaseBudget := retryMaxTok > maxTok
 		canRepeatExplicitBudget := retryAtSameBudget && retryMaxTok == maxTok
 		if !toolRoute && !opts.emptyRetryAttempted && retryMaxTok > 0 && (canIncreaseBudget || canRepeatExplicitBudget) {
-			if t.logger != nil {
+			if t.logger != nil && kind != TaskRouter {
 				t.logger.Printf("task: %s returned no visible text; retrying with max_output_tokens=%d (model=%s stop_reason=%s output_tokens=%d)",
 					kind, retryMaxTok, model.ID, resultStopReason(result), resultOutputTokens(result))
 			}

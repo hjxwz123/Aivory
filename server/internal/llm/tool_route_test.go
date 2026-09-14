@@ -188,17 +188,16 @@ func TestAutoToolRouteYesNoAndFailOpen(t *testing.T) {
 		response    string
 		routeErr    error
 		wantTools   bool
-		wantFailLog bool
 	}{
 		{name: "yes", response: "1", wantTools: true},
 		{name: "no", response: "0", wantTools: false},
-		{name: "legacy json fails open", response: `{"use_tools":false}`, wantTools: true, wantFailLog: true},
-		{name: "invalid text fails open", response: `not-a-verdict`, wantTools: true, wantFailLog: true},
-		{name: "provider failure fails open", routeErr: errors.New("task backend unavailable"), wantTools: true, wantFailLog: true},
+		{name: "legacy json fails open", response: `{"use_tools":false}`, wantTools: true},
+		{name: "invalid text fails open", response: `not-a-verdict`, wantTools: true},
+		{name: "provider failure fails open", routeErr: errors.New("task backend unavailable"), wantTools: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			orchestrator, provider, model, conv, logs, db := setupToolRouteTest(t)
+			orchestrator, provider, model, conv, _, db := setupToolRouteTest(t)
 			if _, err := db.Exec(`UPDATE models SET official_tools='[{"name":"hosted_search","icon":"search","request":{"tools":[{"type":"hosted-search"}]}}]' WHERE id=?`, model.ID); err != nil {
 				t.Fatalf("configure hosted tool: %v", err)
 			}
@@ -221,9 +220,6 @@ func TestAutoToolRouteYesNoAndFailOpen(t *testing.T) {
 			}
 			if len(provider.taskRequests) != 1 || !strings.Contains(renderBlocksAsText(provider.taskRequests[0].History[0].Blocks), "CAP=web,code,file,skill") {
 				t.Fatalf("automatic classifier did not receive compact capability flags: %+v", provider.taskRequests)
-			}
-			if tc.wantFailLog && !strings.Contains(logs.String(), "enabling tools") {
-				t.Fatalf("missing fail-open log: %s", logs.String())
 			}
 		})
 	}
@@ -249,7 +245,7 @@ func TestAutoSmallToolDeclarationSkipsClassifier(t *testing.T) {
 }
 
 func TestAutoWithoutDedicatedRouteModelUsesConversationModel(t *testing.T) {
-	orchestrator, provider, model, conv, logs, db := setupToolRouteTest(t)
+	orchestrator, provider, model, conv, _, db := setupToolRouteTest(t)
 	if err := store.SetSetting(db, "tool_route_model_id", ""); err != nil {
 		t.Fatalf("clear tool route model: %v", err)
 	}
@@ -266,9 +262,6 @@ func TestAutoWithoutDedicatedRouteModelUsesConversationModel(t *testing.T) {
 	}
 	if len(provider.mainRequests) != 1 || provider.mainRequests[0].ToolsEnabled {
 		t.Fatalf("conversation route verdict was not applied: %+v", provider.mainRequests)
-	}
-	if strings.Contains(logs.String(), "enabling tools") {
-		t.Fatalf("conversation-model route unexpectedly failed open: %s", logs.String())
 	}
 }
 
@@ -403,7 +396,7 @@ func TestDisabledDedicatedTaskModelFallsBackToConversationModel(t *testing.T) {
 }
 
 func TestDisabledToolRouteChannelFallsBackToConversationModel(t *testing.T) {
-	orchestrator, provider, model, conv, logs, db := setupToolRouteTest(t)
+	orchestrator, provider, model, conv, _, db := setupToolRouteTest(t)
 	ctx := context.Background()
 	var taskModelID string
 	if err := db.QueryRow(`SELECT id FROM models WHERE request_id='task-route-test'`).Scan(&taskModelID); err != nil {
@@ -434,9 +427,6 @@ func TestDisabledToolRouteChannelFallsBackToConversationModel(t *testing.T) {
 	}
 	if len(provider.mainRequests) != 1 || provider.mainRequests[0].ToolsEnabled {
 		t.Fatalf("conversation-model route verdict was not applied: %+v", provider.mainRequests)
-	}
-	if strings.Contains(logs.String(), "enabling tools") {
-		t.Fatalf("available conversation fallback unexpectedly failed open: %s", logs.String())
 	}
 }
 
