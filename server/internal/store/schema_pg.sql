@@ -907,6 +907,9 @@ CREATE TABLE IF NOT EXISTS passkeys (
   credential_id BYTEA NOT NULL UNIQUE,
   public_key    BYTEA NOT NULL,
   sign_count    BIGINT NOT NULL DEFAULT 0,
+  -- NULL identifies credentials created before authenticator flags were stored;
+  -- the first fully verified assertion backfills the signed flag byte.
+  authenticator_flags INTEGER,
   name          TEXT NOT NULL DEFAULT '',
   created_at    BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint),
   last_used_at  BIGINT NOT NULL DEFAULT 0

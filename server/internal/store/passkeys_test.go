@@ -17,7 +17,10 @@ func TestPasskeyStoreCRUDAndCascade(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pk := &Passkey{UserID: "pk-user", CredentialID: []byte{0x01, 0x02, 0x03}, PublicKey: []byte{0xAA, 0xBB}, SignCount: 7, Name: "  MacBook Pro  "}
+	pk := &Passkey{
+		UserID: "pk-user", CredentialID: []byte{0x01, 0x02, 0x03}, PublicKey: []byte{0xAA, 0xBB},
+		SignCount: 7, AuthenticatorFlags: 0x0D, FlagsKnown: true, Name: "  MacBook Pro  ",
+	}
 	if err := CreatePasskey(ctx, db, pk); err != nil {
 		t.Fatal(err)
 	}
@@ -41,18 +44,19 @@ func TestPasskeyStoreCRUDAndCascade(t *testing.T) {
 	}
 
 	byCred, err := GetPasskeyByCredentialID(ctx, db, []byte{0x01, 0x02, 0x03})
-	if err != nil || byCred.ID != pk.ID || byCred.UserID != "pk-user" || byCred.SignCount != 7 {
+	if err != nil || byCred.ID != pk.ID || byCred.UserID != "pk-user" || byCred.SignCount != 7 ||
+		!byCred.FlagsKnown || byCred.AuthenticatorFlags != 0x0D {
 		t.Fatalf("byCred=%+v err=%v", byCred, err)
 	}
 	if _, err := GetPasskeyByCredentialID(ctx, db, []byte{0xFF}); !errors.Is(err, ErrPasskeyNotFound) {
 		t.Fatalf("unknown credential err=%v", err)
 	}
 
-	if err := TouchPasskey(ctx, db, pk.ID, 12); err != nil {
+	if err := TouchPasskey(ctx, db, pk.ID, 12, 0x1D); err != nil {
 		t.Fatal(err)
 	}
 	byCred, err = GetPasskeyByCredentialID(ctx, db, []byte{0x01, 0x02, 0x03})
-	if err != nil || byCred.SignCount != 12 || byCred.LastUsedAt == 0 {
+	if err != nil || byCred.SignCount != 12 || byCred.AuthenticatorFlags != 0x1D || byCred.LastUsedAt == 0 {
 		t.Fatalf("touch not persisted: %+v err=%v", byCred, err)
 	}
 
@@ -77,6 +81,31 @@ func TestPasskeyStoreCRUDAndCascade(t *testing.T) {
 	}
 	if err := SaveRefreshTokenForLogin(ctx, db, "jti-secret", "pk-user", 0, LoginSessionWithPasskey, "SECRET", time.Now().Add(time.Hour), meta); !errors.Is(err, ErrLoginStateChanged) {
 		t.Fatalf("totp-coupled err=%v", err)
+	}
+}
+
+func TestPasskeyFlagsMigrationPreservesLegacyUnknownState(t *testing.T) {
+	db := openAuthSecurityDB(t, "passkeys-flags-migration.db")
+	if _, err := db.Exec(`ALTER TABLE passkeys DROP COLUMN authenticator_flags`); err != nil {
+		t.Fatalf("make legacy schema: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO users(id,email,password_hash,role) VALUES('pk-legacy','legacy@example.test','hash','user')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO passkeys(id,user_id,credential_id,public_key,sign_count,name,created_at,last_used_at)
+		VALUES('pk-old','pk-legacy',X'0102',X'0304',0,'old device',1,0)`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Migrate(db); err != nil {
+		t.Fatalf("migrate legacy passkeys: %v", err)
+	}
+	row, err := GetPasskeyByCredentialID(context.Background(), db, []byte{0x01, 0x02})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.FlagsKnown {
+		t.Fatalf("legacy credential flags must remain unknown, got %+v", row)
 	}
 }
 

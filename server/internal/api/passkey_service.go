@@ -56,13 +56,19 @@ func (u *PasskeyUser) WebAuthnCredentials() []webauthn.Credential {
 
 // PasskeyCredential is the persistable result of a ceremony.
 type PasskeyCredential struct {
-	CredentialID []byte
-	PublicKey    []byte
-	SignCount    uint32
+	CredentialID       []byte
+	PublicKey          []byte
+	SignCount          uint32
+	AuthenticatorFlags uint8
+	FlagsKnown         bool
 }
 
 func (c *PasskeyCredential) toWebAuthn() webauthn.Credential {
-	return webauthn.Credential{ID: c.CredentialID, PublicKey: c.PublicKey, Authenticator: webauthn.Authenticator{SignCount: c.SignCount}}
+	credential := webauthn.Credential{ID: c.CredentialID, PublicKey: c.PublicKey, Authenticator: webauthn.Authenticator{SignCount: c.SignCount}}
+	if c.FlagsKnown {
+		credential.Flags = webauthn.NewCredentialFlags(protocol.AuthenticatorFlags(c.AuthenticatorFlags))
+	}
+	return credential
 }
 
 type webauthnPasskeyService struct {
@@ -153,7 +159,7 @@ func (s *webauthnPasskeyService) FinishRegistration(origin string, user *Passkey
 	if credential == nil || len(credential.ID) == 0 || len(credential.PublicKey) == 0 {
 		return nil, errors.New("empty credential")
 	}
-	return &PasskeyCredential{CredentialID: append([]byte(nil), credential.ID...), PublicKey: append([]byte(nil), credential.PublicKey...), SignCount: credential.Authenticator.SignCount}, nil
+	return passkeyCredentialFromWebAuthn(credential), nil
 }
 
 func (s *webauthnPasskeyService) BeginLogin(origin string) ([]byte, []byte, error) {
@@ -180,16 +186,51 @@ func (s *webauthnPasskeyService) FinishLogin(origin string, sessionJSON, respons
 	if lookup == nil {
 		return nil, errors.New("passkey lookup required")
 	}
-	_, credential, err := w.FinishPasskeyLogin(func(rawID, userHandle []byte) (webauthn.User, error) {
-		return lookup(rawID, userHandle)
-	}, *session, jsonAssertionRequest(responseJSON))
+	parsed, err := protocol.ParseCredentialRequestResponseBytes(responseJSON)
+	if err != nil {
+		return nil, err
+	}
+	_, credential, err := w.ValidatePasskeyLogin(func(rawID, userHandle []byte) (webauthn.User, error) {
+		user, lookupErr := lookup(rawID, userHandle)
+		if lookupErr != nil || user == nil {
+			return user, lookupErr
+		}
+		// Releases before authenticator_flags was persisted have no trustworthy
+		// stored BE value. Bootstrap only the credential used by this assertion
+		// from its signed authenticator data; ValidatePasskeyLogin still verifies
+		// the signature, challenge, origin, RP ID and user handle before callers
+		// persist the value. Known credentials always retain the immutable BE
+		// comparison enforced by go-webauthn.
+		for i := range user.Credentials {
+			candidate := &user.Credentials[i]
+			if !candidate.FlagsKnown && bytes.Equal(candidate.CredentialID, rawID) {
+				candidate.AuthenticatorFlags = uint8(parsed.Response.AuthenticatorData.Flags)
+				candidate.FlagsKnown = true
+				break
+			}
+		}
+		return user, nil
+	}, *session, parsed)
 	if err != nil {
 		return nil, err
 	}
 	if credential == nil || len(credential.ID) == 0 {
 		return nil, errors.New("empty credential")
 	}
-	return &PasskeyCredential{CredentialID: append([]byte(nil), credential.ID...), PublicKey: append([]byte(nil), credential.PublicKey...), SignCount: credential.Authenticator.SignCount}, nil
+	return passkeyCredentialFromWebAuthn(credential), nil
+}
+
+func passkeyCredentialFromWebAuthn(credential *webauthn.Credential) *PasskeyCredential {
+	if credential == nil {
+		return nil
+	}
+	return &PasskeyCredential{
+		CredentialID:       append([]byte(nil), credential.ID...),
+		PublicKey:          append([]byte(nil), credential.PublicKey...),
+		SignCount:          credential.Authenticator.SignCount,
+		AuthenticatorFlags: uint8(credential.Flags.ProtocolValue()),
+		FlagsKnown:         true,
+	}
 }
 
 func decodePasskeySession(raw []byte) (*webauthn.SessionData, error) {

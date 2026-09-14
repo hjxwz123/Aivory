@@ -112,7 +112,13 @@ func passkeyAccountUser(r *http.Request, d Deps, userID, email, displayName stri
 	}
 	user := &PasskeyUser{ID: userID, Email: email, DisplayName: displayName}
 	for _, row := range rows {
-		user.Credentials = append(user.Credentials, PasskeyCredential{CredentialID: row.CredentialID, PublicKey: row.PublicKey, SignCount: row.SignCount})
+		user.Credentials = append(user.Credentials, PasskeyCredential{
+			CredentialID:       row.CredentialID,
+			PublicKey:          row.PublicKey,
+			SignCount:          row.SignCount,
+			AuthenticatorFlags: row.AuthenticatorFlags,
+			FlagsKnown:         row.FlagsKnown,
+		})
 	}
 	return user, nil
 }
@@ -222,7 +228,8 @@ func passkeyRegisterFinishHandler(d Deps, w http.ResponseWriter, r *http.Request
 	}
 	if err := store.CreatePasskey(r.Context(), d.DB, &store.Passkey{
 		UserID: u.ID, CredentialID: credential.CredentialID, PublicKey: credential.PublicKey,
-		SignCount: credential.SignCount, Name: ticket.Name,
+		SignCount: credential.SignCount, AuthenticatorFlags: credential.AuthenticatorFlags,
+		FlagsKnown: credential.FlagsKnown, Name: ticket.Name,
 	}); err != nil {
 		if d.Logger != nil {
 			d.Logger.Printf("[passkey] registration finish: store credential failed user=%s err=%v", u.ID, err)
@@ -346,7 +353,7 @@ func passkeyLoginVerifyHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.Cache.Delete(failKey)
-	if err := store.TouchPasskey(r.Context(), d.DB, verifiedRowID, credential.SignCount); err != nil && d.Logger != nil {
+	if err := store.TouchPasskey(r.Context(), d.DB, verifiedRowID, credential.SignCount, credential.AuthenticatorFlags); err != nil && d.Logger != nil {
 		d.Logger.Printf("[passkey] touch failed row=%s err=%v", verifiedRowID, err)
 	}
 	finaliseLoginSession(d, w, r, verifiedUser, store.LoginMethodPasskey)

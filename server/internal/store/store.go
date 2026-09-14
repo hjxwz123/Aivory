@@ -331,6 +331,9 @@ func Migrate(db *sql.DB) error {
 	addOAuthIssuerURL := `ALTER TABLE oauth_providers ADD COLUMN issuer_url TEXT NOT NULL DEFAULT ''`
 	addOAuthJWKSURL := `ALTER TABLE oauth_providers ADD COLUMN jwks_url TEXT NOT NULL DEFAULT ''`
 	addOAuthSubjectNamespace := `ALTER TABLE oauth_providers ADD COLUMN subject_namespace TEXT NOT NULL DEFAULT ''`
+	// NULL distinguishes credentials registered before WebAuthn authenticator
+	// flags were persisted. Their first verified assertion safely backfills it.
+	addPasskeyAuthenticatorFlags := `ALTER TABLE passkeys ADD COLUMN authenticator_flags INTEGER`
 	if usePostgres {
 		schema = schemaPGSQL
 		addImageRef = `ALTER TABLE chunks ADD COLUMN IF NOT EXISTS image_ref TEXT`
@@ -456,6 +459,7 @@ func Migrate(db *sql.DB) error {
 		addOAuthIssuerURL = `ALTER TABLE oauth_providers ADD COLUMN IF NOT EXISTS issuer_url TEXT NOT NULL DEFAULT ''`
 		addOAuthJWKSURL = `ALTER TABLE oauth_providers ADD COLUMN IF NOT EXISTS jwks_url TEXT NOT NULL DEFAULT ''`
 		addOAuthSubjectNamespace = `ALTER TABLE oauth_providers ADD COLUMN IF NOT EXISTS subject_namespace TEXT NOT NULL DEFAULT ''`
+		addPasskeyAuthenticatorFlags = `ALTER TABLE passkeys ADD COLUMN IF NOT EXISTS authenticator_flags INTEGER`
 	}
 	if err := dedupeSkillNames(db); err != nil {
 		return fmt.Errorf("dedupe skill names: %w", err)
@@ -502,6 +506,7 @@ func Migrate(db *sql.DB) error {
 		addPaymentChannelEnvironment, addPaymentOrderEnvironment,
 		addPaymentProviderPaymentID, addPaymentCheckoutSessionID, addPaymentCheckoutURL, addPaymentCheckoutExpiresAt, addPaymentLastReconciledAt, addPaymentReconcileError,
 		addOAuthIssuerURL, addOAuthJWKSURL, addOAuthSubjectNamespace,
+		addPasskeyAuthenticatorFlags,
 	} {
 		_, _ = db.Exec(ddl)
 	}
@@ -663,6 +668,7 @@ func Migrate(db *sql.DB) error {
 		"payment_channels":                {"environment"},
 		"payment_orders":                  {"paid_amount_minor", "tax_amount_minor", "provider_amount_minor", "provider_currency", "conversion_rate", "environment", "provider_payment_id", "checkout_session_id", "checkout_url", "checkout_expires_at", "last_reconciled_at", "reconcile_error"},
 		"oauth_providers":                 {"issuer_url", "jwks_url", "subject_namespace"},
+		"passkeys":                        {"authenticator_flags"},
 	}
 	for table, cols := range columnChecks {
 		if _, err := db.Exec(fmt.Sprintf(`SELECT %s FROM %s WHERE 1=0`, strings.Join(cols, ", "), table)); err != nil {

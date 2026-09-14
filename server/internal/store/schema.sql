@@ -975,6 +975,9 @@ CREATE TABLE IF NOT EXISTS passkeys (
   credential_id BLOB NOT NULL UNIQUE,
   public_key    BLOB NOT NULL,
   sign_count    INTEGER NOT NULL DEFAULT 0,
+  -- NULL identifies credentials created before authenticator flags were stored;
+  -- the first fully verified assertion backfills the signed flag byte.
+  authenticator_flags INTEGER,
   name          TEXT NOT NULL DEFAULT '',
   created_at    INTEGER NOT NULL DEFAULT (strftime('%s','now')),
   last_used_at  INTEGER NOT NULL DEFAULT 0

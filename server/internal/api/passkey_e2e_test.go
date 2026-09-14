@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/fxamacker/cbor/v2"
+	"github.com/go-webauthn/webauthn/protocol"
 
 	"aivory/server/internal/store"
 )
@@ -28,9 +29,11 @@ const e2eOrigin = "https://app.example.test"
 const e2eRPID = "app.example.test"
 
 type softwareAuthenticator struct {
-	key        *ecdsa.PrivateKey
-	credential []byte
-	signCount  uint32
+	key            *ecdsa.PrivateKey
+	credential     []byte
+	signCount      uint32
+	backupEligible bool
+	backupState    bool
 }
 
 func newSoftwareAuthenticator(t *testing.T) *softwareAuthenticator {
@@ -61,6 +64,12 @@ func (a *softwareAuthenticator) coseKey(t *testing.T) []byte {
 
 func (a *softwareAuthenticator) authData(t *testing.T, flags byte, includeAttested bool) []byte {
 	t.Helper()
+	if a.backupEligible {
+		flags |= byte(protocol.FlagBackupEligible)
+	}
+	if a.backupState {
+		flags |= byte(protocol.FlagBackupState)
+	}
 	rpHash := sha256.Sum256([]byte(e2eRPID))
 	out := append([]byte{}, rpHash[:]...)
 	out = append(out, flags)
@@ -144,6 +153,24 @@ func (a *softwareAuthenticator) assertionResponse(t *testing.T, challenge, userH
 }
 
 func TestPasskeyEndToEndRegistrationAndLogin(t *testing.T) {
+	tests := []struct {
+		name          string
+		legacyFlags   bool
+		forceMismatch bool
+		wantStatus    int
+	}{
+		{name: "persisted synced credential", wantStatus: http.StatusOK},
+		{name: "legacy synced credential self heals", legacyFlags: true, wantStatus: http.StatusOK},
+		{name: "known backup eligibility mismatch is rejected", forceMismatch: true, wantStatus: http.StatusUnauthorized},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			testPasskeyEndToEndRegistrationAndLogin(t, tt.legacyFlags, tt.forceMismatch, tt.wantStatus)
+		})
+	}
+}
+
+func testPasskeyEndToEndRegistrationAndLogin(t *testing.T, legacyFlags, forceMismatch bool, wantStatus int) {
 	d, _ := newPasskeyDeps(t)
 	d.Passkeys = NewPasskeyService("Aivory")
 	user := insertTestUser(t, d, "pk-e2e", "e2e@example.test", false)
@@ -173,6 +200,8 @@ func TestPasskeyEndToEndRegistrationAndLogin(t *testing.T) {
 	}
 
 	authenticator := newSoftwareAuthenticator(t)
+	authenticator.backupEligible = true
+	authenticator.backupState = true
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPost, "/api/me/passkeys/finish",
 		bytes.NewReader(authenticator.registrationResponse(t, creation.PublicKey.Challenge)))
@@ -186,6 +215,21 @@ func TestPasskeyEndToEndRegistrationAndLogin(t *testing.T) {
 	rows, err := store.ListPasskeys(context.Background(), d.DB, "pk-e2e")
 	if err != nil || len(rows) != 1 || rows[0].Name != "e2e device" {
 		t.Fatalf("stored passkeys=%+v err=%v", rows, err)
+	}
+	stored, err := store.GetPasskeyByCredentialID(context.Background(), d.DB, authenticator.credential)
+	if err != nil || !stored.FlagsKnown || stored.AuthenticatorFlags&uint8(protocol.FlagBackupEligible) == 0 {
+		t.Fatalf("registration flags not persisted: passkey=%+v err=%v", stored, err)
+	}
+	if legacyFlags {
+		if _, err := d.DB.Exec(`UPDATE passkeys SET authenticator_flags=NULL WHERE id=?`, stored.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if forceMismatch {
+		flagsWithoutBE := stored.AuthenticatorFlags &^ uint8(protocol.FlagBackupEligible|protocol.FlagBackupState)
+		if _, err := d.DB.Exec(`UPDATE passkeys SET authenticator_flags=? WHERE id=?`, flagsWithoutBE, stored.ID); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	// Login: discoverable assertion from the same software authenticator.
@@ -218,11 +262,23 @@ func TestPasskeyEndToEndRegistrationAndLogin(t *testing.T) {
 	req.Host = e2eRPID
 	req.Header.Set("Origin", e2eOrigin)
 	passkeyLoginVerifyHandler(d, rec, req)
-	if rec.Code != 200 {
-		t.Fatalf("verify: code=%d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != wantStatus {
+		t.Fatalf("verify: code=%d want=%d body=%s", rec.Code, wantStatus, rec.Body.String())
+	}
+	if wantStatus != http.StatusOK {
+		stored, err = store.GetPasskeyByCredentialID(context.Background(), d.DB, authenticator.credential)
+		if err != nil || !stored.FlagsKnown || stored.AuthenticatorFlags&uint8(protocol.FlagBackupEligible) != 0 {
+			t.Fatalf("rejected assertion changed known flags: passkey=%+v err=%v", stored, err)
+		}
+		return
 	}
 	var resp authResp
 	if json.Unmarshal(rec.Body.Bytes(), &resp) != nil || resp.AccessToken == "" || resp.User == nil || resp.User.ID != "pk-e2e" {
 		t.Fatalf("session response: %s", rec.Body.String())
+	}
+	stored, err = store.GetPasskeyByCredentialID(context.Background(), d.DB, authenticator.credential)
+	wantBackupFlags := uint8(protocol.FlagBackupEligible | protocol.FlagBackupState)
+	if err != nil || !stored.FlagsKnown || stored.AuthenticatorFlags&wantBackupFlags != wantBackupFlags {
+		t.Fatalf("login flags not persisted: passkey=%+v err=%v", stored, err)
 	}
 }
