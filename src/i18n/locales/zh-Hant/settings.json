@@ -199,6 +199,8 @@
       "unnamed": "未命名裝置",
       "lastUsed": "最近使用 {{date}}",
       "neverUsed": "從未使用",
+      "empty": "尚未新增通行金鑰，可為目前裝置新增一個。",
+      "addHint": "為目前裝置新增一個通行金鑰。",
       "errors": {
         "passkey_login_disabled": "管理員已停用通行金鑰登入。",
         "passkey_limit": "通行金鑰數量已達上限。",

@@ -199,6 +199,8 @@
       "unnamed": "名前のないデバイス",
       "lastUsed": "最終利用 {{date}}",
       "neverUsed": "未使用",
+      "empty": "パスキーはまだありません。このデバイス用に追加できます。",
+      "addHint": "このデバイス用のパスキーを追加します。",
       "errors": {
         "passkey_login_disabled": "管理者によりパスキーサインインが無効です。",
         "passkey_limit": "パスキーの数が上限に達しました。",

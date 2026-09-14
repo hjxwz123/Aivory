@@ -60,6 +60,8 @@ describe('passkey translations', () => {
         'unnamed',
         'lastUsed',
         'neverUsed',
+        'empty',
+        'addHint',
       ] as const) {
         expect(passkey[key], `${locale}: account.passkey.${key}`).toBeTruthy()
       }

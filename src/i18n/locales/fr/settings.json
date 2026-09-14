@@ -199,6 +199,8 @@
       "unnamed": "Appareil sans nom",
       "lastUsed": "Dernière utilisation {{date}}",
       "neverUsed": "Jamais utilisée",
+      "empty": "Aucune clé d'accès pour l'instant — ajoutez-en une pour cet appareil.",
+      "addHint": "Ajoutez une clé d'accès pour cet appareil.",
       "errors": {
         "passkey_login_disabled": "La connexion par clé d'accès est désactivée par l'administrateur.",
         "passkey_limit": "Vous avez atteint le nombre maximum de clés d'accès.",

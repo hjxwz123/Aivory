@@ -199,6 +199,8 @@
       "unnamed": "Unnamed device",
       "lastUsed": "Last used {{date}}",
       "neverUsed": "Never used",
+      "empty": "No passkey yet — add one for this device.",
+      "addHint": "Add a passkey for this device.",
       "errors": {
         "passkey_login_disabled": "Passkey sign-in is disabled by the administrator.",
         "passkey_limit": "You've reached the maximum number of passkeys.",
