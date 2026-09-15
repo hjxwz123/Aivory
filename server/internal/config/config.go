@@ -67,6 +67,12 @@ type Config struct {
 	// domains: A, B, C…). It is the open-redirect guard for the cross-domain
 	// hand-off — only an exact match here may be a redirect target.
 	OAuthReturnOrigins []string
+	// SystemUpdaterURL is an internal-only sidecar endpoint. Its bearer token is
+	// read from SystemUpdaterTokenFile on every request so the sidecar can create
+	// it on first boot without putting a shared secret in Compose source.
+	SystemUpdaterURL       string
+	SystemUpdaterTokenFile string
+	ReleaseAPIURL          string
 }
 
 // Load reads environment variables, applying production-safe defaults so the
@@ -93,27 +99,30 @@ func Load() Config {
 		// also serves the frontend from the SAME origin (single-container deploy),
 		// so there is no cross-origin and any domain the server is reached on just
 		// works. Empty = API-only (dev with the Vite proxy, or a separate web tier).
-		StaticDir:            getenv("STATIC_DIR", ""),
-		UploadDir:            getenv("UPLOAD_DIR", "./data/uploads"),
-		ArtifactDir:          getenv("ARTIFACT_DIR", "./data/artifacts"),
-		BackupDir:            getenv("BACKUP_DIR", "./data/backups"),
-		MaxUploadBytes:       getenvInt64("MAX_UPLOAD_BYTES", 50*1024*1024),
-		MaxBackupBytes:       getenvInt64("MAX_BACKUP_BYTES", 20*1024*1024*1024),
-		DailyMessages:        getenvInt("DAILY_MESSAGE_LIMIT", 200),
-		DailyImages:          getenvInt("IMAGE_DAILY_LIMIT", 30),
-		SearchProvider:       getenv("SEARCH_PROVIDER", ""),
-		SearchAPIKey:         getenv("SEARCH_API_KEY", ""),
-		SearchBaseURL:        getenv("SEARCH_BASE_URL", ""),
-		EmbeddingBaseURL:     getenv("EMBEDDING_BASE_URL", ""),
-		EmbeddingAPIKey:      getenv("EMBEDDING_API_KEY", ""),
-		EmbeddingModel:       getenv("EMBEDDING_MODEL", "text-embedding-3-small"),
-		EmbeddingDim:         getenvInt("EMBEDDING_DIM", 1536),
-		SandboxBaseURL:       getenv("SANDBOX_BASE_URL", ""),
-		SandboxAPIKey:        getenv("SANDBOX_API_KEY", ""),
-		MinerUAPIURL:         getenv("MINERU_API_URL", ""),
-		MinerUAPIKey:         getenv("MINERU_API_KEY", ""),
-		OAuthCallbackBaseURL: strings.TrimRight(getenv("OAUTH_CALLBACK_BASE_URL", ""), "/"),
-		OAuthReturnOrigins:   getenvList("OAUTH_RETURN_ORIGINS", nil),
+		StaticDir:              getenv("STATIC_DIR", ""),
+		UploadDir:              getenv("UPLOAD_DIR", "./data/uploads"),
+		ArtifactDir:            getenv("ARTIFACT_DIR", "./data/artifacts"),
+		BackupDir:              getenv("BACKUP_DIR", "./data/backups"),
+		MaxUploadBytes:         getenvInt64("MAX_UPLOAD_BYTES", 50*1024*1024),
+		MaxBackupBytes:         getenvInt64("MAX_BACKUP_BYTES", 20*1024*1024*1024),
+		DailyMessages:          getenvInt("DAILY_MESSAGE_LIMIT", 200),
+		DailyImages:            getenvInt("IMAGE_DAILY_LIMIT", 30),
+		SearchProvider:         getenv("SEARCH_PROVIDER", ""),
+		SearchAPIKey:           getenv("SEARCH_API_KEY", ""),
+		SearchBaseURL:          getenv("SEARCH_BASE_URL", ""),
+		EmbeddingBaseURL:       getenv("EMBEDDING_BASE_URL", ""),
+		EmbeddingAPIKey:        getenv("EMBEDDING_API_KEY", ""),
+		EmbeddingModel:         getenv("EMBEDDING_MODEL", "text-embedding-3-small"),
+		EmbeddingDim:           getenvInt("EMBEDDING_DIM", 1536),
+		SandboxBaseURL:         getenv("SANDBOX_BASE_URL", ""),
+		SandboxAPIKey:          getenv("SANDBOX_API_KEY", ""),
+		MinerUAPIURL:           getenv("MINERU_API_URL", ""),
+		MinerUAPIKey:           getenv("MINERU_API_KEY", ""),
+		OAuthCallbackBaseURL:   strings.TrimRight(getenv("OAUTH_CALLBACK_BASE_URL", ""), "/"),
+		OAuthReturnOrigins:     getenvList("OAUTH_RETURN_ORIGINS", nil),
+		SystemUpdaterURL:       strings.TrimRight(getenv("AIVORY_UPDATER_URL", ""), "/"),
+		SystemUpdaterTokenFile: getenv("AIVORY_UPDATER_TOKEN_FILE", "/app/data/.aivory-update-token"),
+		ReleaseAPIURL:          getenv("AIVORY_RELEASE_API_URL", "https://api.github.com/repos/hjxwz123/Aivory/releases/latest"),
 	}
 	cfg.LocalStorageDir = strings.TrimSpace(os.Getenv("AIVORY_LOCAL_STORAGE_DIR"))
 	if cfg.LocalStorageDir == "" {

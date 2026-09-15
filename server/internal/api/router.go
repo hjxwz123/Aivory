@@ -45,6 +45,11 @@ type Deps struct {
 	// Passkeys is the WebAuthn ceremony service; nil fails passkey routes with
 	// 503 (tests inject a fake, production wires NewPasskeyService).
 	Passkeys PasskeyService
+	// AppVersion is embedded by the container build and shown in the admin
+	// update control. Development/test callers may leave it blank.
+	AppVersion string
+	// SystemUpdateHTTPClient is injectable for release/updater protocol tests.
+	SystemUpdateHTTPClient *http.Client
 	// UserMCPHTTPClient is an optional test injection. Production leaves it nil
 	// and user MCP handlers construct the dial-time restricted netsafe client.
 	UserMCPHTTPClient *http.Client
@@ -582,6 +587,9 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/admin/backup/export", requireAdmin(d, exportBackupAdmin))
 	mux.handle("POST", "/api/admin/backup/export-jobs", requireAdmin(d, startBackupExportAdmin))
 	mux.handle("GET", "/api/admin/backup/export-jobs", requireAdmin(d, listBackupExportsAdmin))
+	mux.handle("GET", "/api/admin/system-update", requireAdmin(d, getSystemUpdateAdmin))
+	mux.handle("POST", "/api/admin/system-update/check", requireAdmin(d, checkSystemUpdateAdmin))
+	mux.handle("POST", "/api/admin/system-update/start", requireAdmin(d, startSystemUpdateAdmin))
 	mux.handle("GET", "/api/admin/backup/archives/:name", requireAdmin(d, downloadBackupArchiveAdmin))
 	mux.handle("DELETE", "/api/admin/backup/archives/:name", requireAdmin(d, deleteBackupArchiveAdmin))
 	mux.handle("POST", "/api/admin/backup/import", requireAdmin(d, importBackupAdmin))

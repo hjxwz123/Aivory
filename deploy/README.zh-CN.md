@@ -151,6 +151,40 @@ ghcr.io/hjxwz123/aivory-sandbox-sidecar:3.0.0
 
 请在三张发布镜像全部生成后再部署。如果某次发布未完成，`pull` 会直接失败，不会静默混用不同版本。回滚方式相同：选择一个完整发布过的旧版本，再重新执行 `pull` 和 `up`。
 
+## 管理后台一键更新
+
+新版 Compose 会额外启动一个仅在 `internal` 网络可见的 `updater` 服务。管理员登录后，
+可在主侧边栏的「管理后台」下方看到当前版本标签；有新版时标签会高亮。点击标签可查看
+当前版本、GitHub 最新正式版本和完整更新日志，并直接更新 `app` 容器。
+
+从不含更新器的旧部署升级时，需要最后手动执行一次：
+
+```bash
+cd deploy
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
+```
+
+个人版把文件名和环境文件替换为：
+
+```bash
+docker compose --env-file .env.personal -f docker-compose.personal.yml pull
+docker compose --env-file .env.personal -f docker-compose.personal.yml up -d
+```
+
+此后日常应用升级可直接在后台完成。更新器会先拉取精确的语义版本镜像，保持旧应用在线；
+拉取成功后把 `APP_IMAGE_TAG` 原子写入实际环境文件，只重建 `app`，并等待健康检查通过。
+如果重建或健康检查失败，它会恢复更新前的环境值并尝试重新启动旧版本。任务状态保存在
+`update-state` 卷中，即使 `app` 正在被替换也不会丢失。
+
+更新器不会自动移动沙箱镜像；`IMAGE_TAG` / `SANDBOX_IMAGE_TAG` 仍控制沙箱版本。需要配套
+沙箱变更的版本会在发布日志中注明，届时仍应按上面的 Compose 命令更新整个栈。
+
+`updater` 为控制宿主机 Docker 而挂载了 `/var/run/docker.sock`，该权限等同宿主机 root。
+因此它不发布任何端口，只能由 `app` 经内部网络访问；双方凭据由更新器首次启动时随机
+生成到 `DATA_DIR/.aivory-update-token`，无需手工填写共享密钥。不要把 updater 端口映射
+到公网，也不要向不受信任的容器开放 Docker Socket。
+
 `2.2.6` 等历史版本早于沙箱语义版本镜像。部署这类旧版本时，使用可选兼容覆盖：
 
 ```dotenv

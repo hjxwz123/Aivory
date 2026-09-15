@@ -177,6 +177,46 @@ failed or incomplete release will then fail during `pull` instead of silently
 mixing versions. Rollback is the same operation: select an older complete tag,
 then repeat `pull` and `up`.
 
+## One-click updates from the admin UI
+
+The current Compose files start an `updater` service that is reachable only on the
+private `internal` network. Administrators see the current-version badge directly
+below Admin in the main sidebar. The badge becomes prominent when a newer stable
+GitHub Release exists; clicking it shows both versions, the complete release notes,
+update progress, and the update action.
+
+An older installation needs one final manual Compose refresh to install the updater:
+
+```bash
+cd deploy
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
+```
+
+For the personal stack use:
+
+```bash
+docker compose --env-file .env.personal -f docker-compose.personal.yml pull
+docker compose --env-file .env.personal -f docker-compose.personal.yml up -d
+```
+
+After that, routine application releases can be installed in the UI. The updater
+pulls an exact semantic app tag while the old app remains online, atomically writes
+`APP_IMAGE_TAG` to the active environment file, recreates only `app`, and waits for
+its health check. A failed restart or health check restores the previous environment
+value and attempts to bring the old app back. Job state lives in the `update-state`
+volume, independently of the app being replaced.
+
+Sandbox images are not moved automatically. `IMAGE_TAG` / `SANDBOX_IMAGE_TAG` still
+control them; a release that requires matching sandbox changes will say so in its
+upgrade notes and should be installed with the full Compose commands above.
+
+The updater mounts `/var/run/docker.sock`, which is equivalent to host root access.
+It therefore publishes no host port, accepts only fixed app-update operations, and
+authenticates app requests with a random token generated at
+`DATA_DIR/.aivory-update-token`. Never expose the updater port publicly or share the
+Docker Socket with untrusted containers.
+
 Historical releases such as `2.2.6` predate matching sandbox semver images. To
 deploy one, use the optional compatibility override:
 

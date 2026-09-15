@@ -652,7 +652,45 @@
     "language": "Langue",
     "help": "Aide",
     "terms": "Conditions d’utilisation",
-    "privacyPolicy": "Politique de confidentialité"
+    "privacyPolicy": "Politique de confidentialité",
+    "systemUpdate": {
+      "version": "Version actuelle",
+      "title": "Mise à jour du système",
+      "description": "Rechercher et installer les versions publiées d’Aivory.",
+      "current": "Version actuelle",
+      "latest": "Dernière version",
+      "unknown": "Inconnue",
+      "available": "Mise à jour disponible",
+      "check": "Rechercher les mises à jour",
+      "updateNow": "Mettre à jour",
+      "updating": "Mise à jour",
+      "upToDate": "À jour",
+      "viewNotes": "Voir les notes de version",
+      "releaseNotes": "Notes de version",
+      "noNotes": "Aucune note n’a été fournie pour cette version.",
+      "openRelease": "Ouvrir la publication",
+      "close": "Fermer",
+      "loadFailed": "Impossible de charger l’état de la mise à jour",
+      "checkFailed": "Impossible de rechercher les mises à jour",
+      "startFailed": "Impossible de démarrer la mise à jour",
+      "started": "Mise à jour du système démarrée",
+      "keepOpen": "Le service redémarre brièvement après le téléchargement de l’image. Cette page se reconnecte automatiquement.",
+      "reconnect": "L’application peut être brièvement déconnectée pendant son redémarrage. Cette vue se reconnecte et récupère automatiquement le résultat final.",
+      "success": "La mise à jour est installée et le service d’application est opérationnel.",
+      "failedDetail": "Échec de la mise à jour : {{error}}",
+      "unknownError": "Erreur inconnue",
+      "releaseUnavailable": "Les informations de publication GitHub sont temporairement indisponibles. Réessayez plus tard.",
+      "updaterUnavailable": "Le service de mise à jour est indisponible. Vérifiez que le conteneur updater fonctionne.",
+      "notConfigured": "Le service de mise à jour n’est pas activé. Démarrez updater avec le fichier Compose actuel.",
+      "progress": {
+        "preparing": "Préparation de la mise à jour…",
+        "pulling": "Téléchargement de la nouvelle image…",
+        "restarting": "Remplacement du conteneur de l’application…",
+        "checkingHealth": "L’application a démarré, vérification de son état…",
+        "completed": "Mise à jour terminée",
+        "failed": "Échec de la mise à jour"
+      }
+    }
   },
   "suggestions": {
     "outline-essay": {

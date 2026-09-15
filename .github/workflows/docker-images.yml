@@ -1,11 +1,12 @@
 name: Build & push app image
 
-# Builds the single application image and pushes it to GitHub Container
+# Builds the application and updater images and pushes them to GitHub Container
 # Registry (ghcr.io) on every push to main and on semver tags. The sandbox
 # images have their own workflow (sandbox-image.yml).
 #
 # Image produced:
 #   ghcr.io/<owner>/aivory-app:latest   ← Go API serving the built SPA (one container)
+#   ghcr.io/<owner>/aivory-updater:latest ← internal Docker update controller
 #
 # Tagging strategy (handled by docker/metadata-action):
 #   - push to main          → :latest        + :sha-<short>
@@ -56,6 +57,9 @@ jobs:
           - name: aivory-app
             dockerfile: deploy/Dockerfile.app
             context: .
+          - name: aivory-updater
+            dockerfile: updater/Dockerfile
+            context: .
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -69,7 +73,15 @@ jobs:
       # ghcr image paths must be lowercase; the owner may contain capitals.
       - name: Compute lowercase owner
         id: vars
-        run: echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+        shell: bash
+        run: |
+          echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            version="$(node -p "require('./package.json').version")"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Log in to GHCR
         # Skip login on PRs — they can't push anyway and forks have no
@@ -110,5 +122,6 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: APP_VERSION=${{ steps.vars.outputs.version }}
           no-cache: true
           cache-to: type=gha,mode=min,scope=${{ matrix.name }}

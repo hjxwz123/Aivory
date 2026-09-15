@@ -37,6 +37,7 @@ import (
 )
 
 var (
+	buildVersion              = "dev"
 	archiveGcBootSettleDelay  = envcfg.Dur("AIVORY_CMD_ARCHIVE_GC_BOOT_SETTLE_DELAY", 2*time.Minute)
 	runPruneCtxTimeout        = envcfg.Dur("AIVORY_CMD_RUN_PRUNE", 5*time.Minute)
 	archiveGcSweepInterval    = envcfg.Dur("AIVORY_CMD_ARCHIVE_GC_SWEEP_INTERVAL", 6*time.Hour)
@@ -198,6 +199,7 @@ func main() {
 		Orchestrator: orchestrator,
 		Logger:       logger,
 		Passkeys:     api.NewPasskeyService("Aivory"),
+		AppVersion:   buildVersion,
 	})
 
 	srv := &http.Server{

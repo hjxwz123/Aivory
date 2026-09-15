@@ -13,8 +13,23 @@
 name: aivory-personal
 
 services:
+  updater:
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-hjxwz123}/aivory-updater:${UPDATER_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      AIVORY_UPDATER_COMPOSE_FILE: /deployment/docker-compose.personal.yml
+      AIVORY_UPDATER_ENV_FILE: /deployment/.env.personal
+      AIVORY_UPDATER_IMAGE_REGISTRY: ${IMAGE_REGISTRY:-ghcr.io}
+      AIVORY_UPDATER_IMAGE_OWNER: ${IMAGE_OWNER:-hjxwz123}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/deployment
+      - ${DATA_DIR:-./data-personal}:/shared
+      - update-state:/var/lib/aivory-updater
+    networks: [internal]
+
   app:
-    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-hjxwz123}/aivory-app:${IMAGE_TAG:-latest}
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-hjxwz123}/aivory-app:${APP_IMAGE_TAG:-${IMAGE_TAG:-latest}}
     restart: unless-stopped
     ports:
       - "80:8787"
@@ -34,6 +49,8 @@ services:
       BACKUP_DIR: ${BACKUP_DIR:-/app/data/backups}
       MAX_BACKUP_BYTES: ${MAX_BACKUP_BYTES:-21474836480}
       ENABLE_MOCK_PROVIDER: ${ENABLE_MOCK_PROVIDER:-false}
+      AIVORY_UPDATER_URL: http://updater:8790
+      AIVORY_UPDATER_TOKEN_FILE: /app/data/.aivory-update-token
       SEARCH_PROVIDER: ${SEARCH_PROVIDER:-}
       SEARCH_API_KEY: ${SEARCH_API_KEY:-}
       SEARCH_BASE_URL: ${SEARCH_BASE_URL:-}
@@ -101,6 +118,7 @@ services:
 
 volumes:
   sandbox-archives:
+  update-state:
 
 networks:
   internal:

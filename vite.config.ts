@@ -7,7 +7,7 @@ import path from 'node:path'
 // compare the two and reload themselves at a safe moment after a deploy
 // (src/lib/app-update.ts). CI can pin a stable id via GIT_SHA/GITHUB_SHA;
 // otherwise the build timestamp is used (every build = a new version).
-const appVersion = process.env.GIT_SHA || process.env.GITHUB_SHA || `build-${Date.now().toString(36)}`
+const appVersion = process.env.APP_VERSION || process.env.GIT_SHA || process.env.GITHUB_SHA || `build-${Date.now().toString(36)}`
 
 // https://vitejs.dev/config/
 export default defineConfig({

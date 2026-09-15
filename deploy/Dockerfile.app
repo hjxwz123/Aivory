@@ -23,6 +23,8 @@
 # The Go stage below still builds for the target arch. ($BUILDPLATFORM is a
 # BuildKit-provided build arg; this Dockerfile already opts into BuildKit above.)
 FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS web
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
 WORKDIR /web
 COPY package.json package-lock.json ./
 # --no-audit/--no-fund trim work + network chatter; the cache mount lets a retry
@@ -38,12 +40,13 @@ RUN npm run build
 
 # ---- Stage 2: build the Go API ---------------------------------------------
 FROM golang:1.26-bookworm AS build
+ARG APP_VERSION=dev
 WORKDIR /src
 ENV CGO_ENABLED=1
 COPY server/go.mod server/go.sum ./
 RUN go mod download
 COPY server/ ./
-RUN go build -trimpath -ldflags="-s -w" -o /out/aivory-api ./cmd/api
+RUN go build -trimpath -ldflags="-s -w -X main.buildVersion=${APP_VERSION}" -o /out/aivory-api ./cmd/api
 
 # ---- Stage 3: runtime -------------------------------------------------------
 FROM debian:bookworm-slim AS runtime

@@ -27,6 +27,7 @@ import {
   FileText,
   UserRound,
   Download,
+  PackageCheck,
 } from 'lucide-react'
 import { LogoMark, TracedLogo } from '@/components/brand/logo'
 import { useWorkspaces } from '@/store/workspaces'
@@ -63,6 +64,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { SystemUpdateDialog, type SystemUpdateSummary } from '@/components/admin/system-update-dialog'
 import { NewProjectDialog } from '@/components/projects/new-project-dialog'
 import { MoveToProjectSub } from '@/components/projects/move-to-project-menu'
 import { ProjectActionsMenu } from '@/components/projects/project-actions-menu'
@@ -1327,6 +1330,12 @@ export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuP
   const [archivedOpen, setArchivedOpen] = useState(false)
   const [wsMembersOpen, setWsMembersOpen] = useState(false)
   const [wsCreateOpen, setWsCreateOpen] = useState(false)
+  const [systemUpdateOpen, setSystemUpdateOpen] = useState(false)
+  const [systemUpdateSummary, setSystemUpdateSummary] = useState<SystemUpdateSummary>({
+    currentVersion: typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev',
+    updateAvailable: false,
+    updating: false,
+  })
   const inHeader = placement === 'header'
   return (
     <>
@@ -1383,10 +1392,25 @@ export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuP
           {t('chat:sidebar.archivedTitle')}
         </DropdownMenuItem>
         {isAdmin && (
-          <DropdownMenuItem onClick={() => navigate('/admin')}>
-            <ShieldCheck size={13} aria-hidden />
-            {t('chat:userMenu.admin', { defaultValue: 'Admin' })}
-          </DropdownMenuItem>
+          <>
+            <DropdownMenuItem onClick={() => navigate('/admin')}>
+              <ShieldCheck size={13} aria-hidden />
+              {t('chat:userMenu.admin', { defaultValue: 'Admin' })}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setSystemUpdateOpen(true)}>
+              <PackageCheck size={13} aria-hidden />
+              <span className="flex-1">{t('chat:userMenu.systemUpdate.version')}</span>
+              <Badge
+                size="xs"
+                variant={systemUpdateSummary.updateAvailable ? 'warning' : systemUpdateSummary.updating ? 'info' : 'neutral'}
+                className={systemUpdateSummary.updateAvailable ? 'font-semibold shadow-[0_0_0_2px_var(--color-warning-soft)]' : undefined}
+              >
+                {systemUpdateSummary.updating
+                  ? t('chat:userMenu.systemUpdate.updating')
+                  : `v${systemUpdateSummary.currentVersion}`}
+              </Badge>
+            </DropdownMenuItem>
+          </>
         )}
         <WorkspaceMenuItems onManage={() => setWsMembersOpen(true)} onCreate={() => setWsCreateOpen(true)} />
         <DropdownMenuSeparator />
@@ -1438,6 +1462,13 @@ export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuP
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+    {isAdmin && (
+      <SystemUpdateDialog
+        open={systemUpdateOpen}
+        onOpenChange={setSystemUpdateOpen}
+        onSummaryChange={setSystemUpdateSummary}
+      />
+    )}
     <WorkspaceMembersDialog open={wsMembersOpen} onOpenChange={setWsMembersOpen} />
     <CreateWorkspaceDialog open={wsCreateOpen} onOpenChange={setWsCreateOpen} />
     <ArchivedDialog open={archivedOpen} onOpenChange={setArchivedOpen} />

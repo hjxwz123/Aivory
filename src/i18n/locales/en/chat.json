@@ -657,7 +657,45 @@
     "language": "Language",
     "help": "Help",
     "terms": "Terms of Service",
-    "privacyPolicy": "Privacy Policy"
+    "privacyPolicy": "Privacy Policy",
+    "systemUpdate": {
+      "version": "Current version",
+      "title": "System update",
+      "description": "Check for and install published Aivory releases.",
+      "current": "Current version",
+      "latest": "Latest version",
+      "unknown": "Unknown",
+      "available": "Update available",
+      "check": "Check for updates",
+      "updateNow": "Update now",
+      "updating": "Updating",
+      "upToDate": "Up to date",
+      "viewNotes": "View release notes",
+      "releaseNotes": "Release notes",
+      "noNotes": "No release notes were provided for this version.",
+      "openRelease": "Open release",
+      "close": "Close",
+      "loadFailed": "Could not load the system update status",
+      "checkFailed": "Could not check for updates",
+      "startFailed": "Could not start the system update",
+      "started": "System update started",
+      "keepOpen": "The service briefly restarts after pulling the image. This page reconnects automatically.",
+      "reconnect": "The app may briefly disconnect while it restarts. This view reconnects and reads the final result automatically.",
+      "success": "The update is installed and the application service is healthy.",
+      "failedDetail": "Update failed: {{error}}",
+      "unknownError": "Unknown error",
+      "releaseUnavailable": "GitHub release information is temporarily unavailable. Try again shortly.",
+      "updaterUnavailable": "The updater is unavailable. Confirm that the updater container is running.",
+      "notConfigured": "This deployment has not enabled the updater. Start the updater service with the current Compose file first.",
+      "progress": {
+        "preparing": "Preparing the update…",
+        "pulling": "Pulling the new image…",
+        "restarting": "Replacing the application container…",
+        "checkingHealth": "The app has started; checking its health…",
+        "completed": "Update complete",
+        "failed": "Update failed"
+      }
+    }
   },
   "suggestions": {
     "outline-essay": {

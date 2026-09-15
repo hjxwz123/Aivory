@@ -652,7 +652,45 @@
     "language": "言語",
     "help": "ヘルプ",
     "terms": "利用規約",
-    "privacyPolicy": "プライバシーポリシー"
+    "privacyPolicy": "プライバシーポリシー",
+    "systemUpdate": {
+      "version": "現在のバージョン",
+      "title": "システム更新",
+      "description": "公開済みの Aivory リリースを確認してインストールします。",
+      "current": "現在のバージョン",
+      "latest": "最新バージョン",
+      "unknown": "不明",
+      "available": "更新あり",
+      "check": "更新を確認",
+      "updateNow": "今すぐ更新",
+      "updating": "更新中",
+      "upToDate": "最新版です",
+      "viewNotes": "更新履歴を見る",
+      "releaseNotes": "リリースノート",
+      "noNotes": "このバージョンにはリリースノートがありません。",
+      "openRelease": "リリースページを開く",
+      "close": "閉じる",
+      "loadFailed": "システム更新の状態を取得できませんでした",
+      "checkFailed": "更新を確認できませんでした",
+      "startFailed": "システム更新を開始できませんでした",
+      "started": "システム更新を開始しました",
+      "keepOpen": "イメージ取得後にサービスが一時的に再起動します。このページは自動的に再接続します。",
+      "reconnect": "アプリの再起動中は一時的に切断される場合があります。自動的に再接続して最終結果を取得します。",
+      "success": "更新がインストールされ、アプリケーションサービスは正常です。",
+      "failedDetail": "更新に失敗しました：{{error}}",
+      "unknownError": "不明なエラー",
+      "releaseUnavailable": "GitHub のリリース情報を一時的に取得できません。しばらくしてから再試行してください。",
+      "updaterUnavailable": "アップデーターを利用できません。updater コンテナが起動しているか確認してください。",
+      "notConfigured": "この環境ではアップデーターが有効になっていません。新しい Compose で updater サービスを起動してください。",
+      "progress": {
+        "preparing": "更新を準備しています…",
+        "pulling": "新しいイメージを取得しています…",
+        "restarting": "アプリケーションコンテナを置き換えています…",
+        "checkingHealth": "アプリが起動しました。正常性を確認しています…",
+        "completed": "更新完了",
+        "failed": "更新失敗"
+      }
+    }
   },
   "suggestions": {
     "outline-essay": {
