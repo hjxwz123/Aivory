@@ -98,6 +98,8 @@
     "deleteFailed": "Failed to delete project",
     "deleteTitle": "Delete this project?",
     "deleteBody": "The project, its instructions, and its files will be removed. Chats started inside it will move back to your regular history.",
+    "deleteBodyWithConversations": "The project, its instructions, files, and every conversation inside it will be permanently deleted. This cannot be undone.",
+    "deleteConversations": "Permanently delete all conversations too",
     "deleted": "Project deleted",
     "notFoundTitle": "That project isn't here.",
     "notFoundBody": "It may have been deleted, or the link is wrong.",

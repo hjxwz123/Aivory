@@ -238,6 +238,60 @@ func TestDeleteProjectCleansDedicatedLibrariesAndReferencedStorage(t *testing.T)
 	}
 }
 
+func TestDeleteProjectWithConversationsRemovesCompleteConversationTrees(t *testing.T) {
+	db := openKBPermissionTestDB(t)
+	ctx := context.Background()
+	exec(t, db, `INSERT INTO projects(id,user_id,name,workspace_id)
+		VALUES('delete-project','creator','Delete project','')`)
+	exec(t, db, `UPDATE conversations SET project_id='delete-project'
+		WHERE id='personal-conversation'`)
+	exec(t, db, `INSERT INTO conversations(id,user_id,project_id,title,workspace_id) VALUES
+		('second-project-conversation','creator','delete-project','Second project conversation',''),
+		('cross-user-project-reference','member','delete-project','Malformed cross-user reference',''),
+		('ordinary-conversation','creator',NULL,'Ordinary conversation','')`)
+	exec(t, db, `INSERT INTO conversations(id,user_id,title,inline_source_conv,workspace_id)
+		VALUES('project-inline-conversation','creator','Inline conversation','personal-conversation','')`)
+
+	deletion, err := DeleteProjectWithOptions(
+		ctx,
+		db,
+		"delete-project",
+		"creator",
+		DeleteProjectOptions{DeleteConversations: true},
+	)
+	if err != nil {
+		t.Fatalf("DeleteProjectWithOptions: %v", err)
+	}
+	deletedIDs := make(map[string]bool, len(deletion.ConversationIDs))
+	for _, id := range deletion.ConversationIDs {
+		deletedIDs[id] = true
+	}
+	for _, id := range []string{
+		"personal-conversation",
+		"second-project-conversation",
+		"project-inline-conversation",
+	} {
+		if !deletedIDs[id] {
+			t.Fatalf("deletion conversation ids=%v, missing %q", deletion.ConversationIDs, id)
+		}
+		assertStoreRowPresence(t, db, "conversations", id, false)
+	}
+	if len(deletedIDs) != 3 {
+		t.Fatalf("deletion conversation ids=%v, want exactly three project-tree rows", deletion.ConversationIDs)
+	}
+	assertStoreRowPresence(t, db, "projects", "delete-project", false)
+	assertStoreRowPresence(t, db, "conversations", "ordinary-conversation", true)
+	var crossUserProjectID sql.NullString
+	if err := db.QueryRowContext(ctx,
+		`SELECT project_id FROM conversations WHERE id='cross-user-project-reference'`,
+	).Scan(&crossUserProjectID); err != nil {
+		t.Fatalf("read protected cross-user conversation: %v", err)
+	}
+	if crossUserProjectID.Valid {
+		t.Fatalf("cross-user conversation project_id=%q, want NULL", crossUserProjectID.String)
+	}
+}
+
 func TestDeleteProjectRollsBackWhenConversationKBReferencesCannotBeCleaned(t *testing.T) {
 	db := openKBPermissionTestDB(t)
 	exec(t, db, `INSERT INTO knowledge_bases(id,user_id,name,embedding_model_id,embedding_dim,project_id,workspace_id)

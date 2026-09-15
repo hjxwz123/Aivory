@@ -7,17 +7,13 @@ import {
   MoreHorizontal,
   Pencil,
   Pin,
-  PinOff,
   Plus,
-  Sparkles,
-  Unlock,
   Trash2,
   Save,
   Upload,
   X,
 } from 'lucide-react'
 import type { Attachment, Conversation } from '@/types/chat'
-import type { ProjectAccent } from '@/types/project'
 import type { ToolMode } from '@/lib/tool-mode'
 import { useProjects } from '@/store/projects'
 import { useConversations, sameConvListShape } from '@/store/conversations'
@@ -26,17 +22,15 @@ import { useAuth } from '@/store/auth'
 import { useSettings } from '@/store/settings'
 import { useComposerPrefs } from '@/store/composer-prefs'
 import { useWorkspaces } from '@/store/workspaces'
-import { accentClasses, fileKindIcon, formatFileSize, PROJECT_ACCENT_OPTIONS } from '@/lib/project-helpers'
+import { fileKindIcon, formatFileSize } from '@/lib/project-helpers'
 import { Composer } from '@/components/chat/composer'
 import { ContentHeader } from '@/components/layout/content-header'
 import { MoveToProjectSub } from '@/components/projects/move-to-project-menu'
+import { ProjectActionsMenu } from '@/components/projects/project-actions-menu'
 import { Button } from '@/components/ui/button'
 import { ProgressRing } from '@/components/ui/progress-ring'
 import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
-import { Field } from '@/components/ui/label'
-import { Tooltip } from '@/components/ui/tooltip'
-import { Switch } from '@/components/ui/switch'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
@@ -88,10 +82,6 @@ export default function ProjectDetail() {
   const project = useProjects((s) => s.projects.find((p) => p.id === id))
   const loadOne = useProjects((s) => s.loadOne)
   const updateProject = useProjects((s) => s.updateProject)
-  const renameProject = useProjects((s) => s.renameProject)
-  const togglePin = useProjects((s) => s.togglePin)
-  const deleteProject = useProjects((s) => s.deleteProject)
-  const setProjectVisibility = useProjects((s) => s.setVisibility)
   const uploadFile = useProjects((s) => s.uploadFile)
   const removeFile = useProjects((s) => s.removeFile)
   const renameFile = useProjects((s) => s.renameFile)
@@ -210,23 +200,8 @@ export default function ProjectDetail() {
   const [instructionsDraft, setInstructionsDraft] = useState('')
   const [savingInstructions, setSavingInstructions] = useState(false)
 
-  const [renameOpen, setRenameOpen] = useState(false)
-  const [renameDraft, setRenameDraft] = useState('')
-  const [editOpen, setEditOpen] = useState(false)
-  const [editDraft, setEditDraft] = useState<{
-    name: string
-    description: string
-    accent: ProjectAccent
-    emoji: string
-    autoAddUploads: boolean
-  }>({ name: '', description: '', accent: 'violet', emoji: '', autoAddUploads: false })
-  const [confirmDelete, setConfirmDelete] = useState(false)
-  const deletingRef = useRef(false)
-  const [deleting, setDeleting] = useState(false)
   const [addFileOpen, setAddFileOpen] = useState(false)
   const [renameFileState, setRenameFileState] = useState<{ id: string; draft: string } | null>(null)
-  const [renaming, setRenaming] = useState(false)
-  const [savingDetails, setSavingDetails] = useState(false)
   const [fileMutationID, setFileMutationID] = useState<string | null>(null)
   const pendingConvRef = useRef<ApiConversation | null>(null)
   const pendingCreateRef = useRef<Promise<string | undefined> | null>(null)
@@ -250,25 +225,18 @@ export default function ProjectDetail() {
 
   const canUploadProjectFiles = canUseKnowledgeBases && project?.canUploadFiles === true
   const canDeleteProjectContent = canUseKnowledgeBases && project?.canDeleteContent === true
-  const canDeleteProject = project?.canDelete === true
-  // §workspace RBAC: the project creator or a workspace admin may flip the
-  // private/shared scope; personal projects have no scope.
-  const workspaceRole = useWorkspaces((s) => (project?.workspaceId ? s.workspaces.find((w) => w.id === project.workspaceId)?.role : undefined))
-  const canChangeProjectVisibility = Boolean(
-    project?.workspaceId && (project.userId === userId || workspaceRole === 'admin'),
+  const projectWorkspace = useWorkspaces((s) => (
+    project?.workspaceId
+      ? s.workspaces.find((workspace) => workspace.id === project.workspaceId)
+      : undefined
+  ))
+  const projectWorkspaceRole = projectWorkspace?.role
+  const inferredProjectManager = project?.userId === userId || projectWorkspaceRole === 'admin'
+  const canManageProject = Boolean(project && (project.canDelete ?? inferredProjectManager))
+  const canChangeProjectVisibility = Boolean(project?.workspaceId && inferredProjectManager)
+  const canDeleteProjectConversations = userCan(user, 'allow_conversation_deletion') && (
+    !project?.workspaceId || projectWorkspace?.can_delete_conversations === true
   )
-  const [visibilityBusy, setVisibilityBusy] = useState(false)
-  async function toggleProjectVisibility() {
-    if (!project || !canUseKnowledgeBasesRef.current || visibilityBusy) return
-    setVisibilityBusy(true)
-    const ok = await setProjectVisibility(project.id, !project.isPublic)
-    setVisibilityBusy(false)
-    if (ok) {
-      toast.success(project.isPublic
-        ? t('projects:detail.visibilityPrivate', { defaultValue: 'Project is now private to you and workspace admins.' })
-        : t('projects:detail.visibilityShared', { defaultValue: 'Project is now shared with the workspace.' }))
-    }
-  }
   const canUploadProjectFilesRef = useRef(canUploadProjectFiles)
   canUploadProjectFilesRef.current = canUploadProjectFiles
 
@@ -283,21 +251,13 @@ export default function ProjectDetail() {
   }, [canDeleteProjectContent])
 
   useEffect(() => {
-    if (canDeleteProject) return
-    setConfirmDelete(false)
-  }, [canDeleteProject])
-
-  useEffect(() => {
     if (canUseKnowledgeBases) return
     // Close every mutation surface when the workspace policy changes while
     // this page is open. The backend remains authoritative, but keeping stale
     // dialogs mounted would invite a request that is guaranteed to be denied.
-    setRenameOpen(false)
-    setEditOpen(false)
     setEditingInstructions(false)
     setAddFileOpen(false)
     setRenameFileState(null)
-    setConfirmDelete(false)
   }, [canUseKnowledgeBases])
 
   useEffect(
@@ -315,7 +275,6 @@ export default function ProjectDetail() {
         }))
         setAddFileOpen(false)
         setRenameFileState(null)
-        setConfirmDelete(false)
         void loadOne(id)
       }),
     [id, loadOne],
@@ -481,85 +440,6 @@ export default function ProjectDetail() {
     }
   }
 
-  function openRename() {
-    if (!project) return
-    setRenameDraft(project.name)
-    setRenameOpen(true)
-  }
-  async function submitRename() {
-    if (!project || !canUseKnowledgeBasesRef.current || renaming || !renameDraft.trim()) return
-    setRenaming(true)
-    try {
-      if (await renameProject(project.id, renameDraft)) {
-        setRenameOpen(false)
-        toast.success(t('projects:detail.renamed'))
-      }
-    } finally {
-      setRenaming(false)
-    }
-  }
-
-  function openEdit() {
-    if (!project) return
-    setEditDraft({
-      name: project.name,
-      description: project.description ?? '',
-      accent: project.accent,
-      emoji: project.emoji ?? '',
-      autoAddUploads: project.autoAddUploads ?? false,
-    })
-    setEditOpen(true)
-  }
-  async function submitEdit() {
-    if (!project || !canUseKnowledgeBasesRef.current || savingDetails) return
-    // Send empty strings (not undefined) so clearing the description/marker is
-    // actually transmitted — JSON.stringify drops undefined fields, which would
-    // silently keep the old value on the backend.
-    const patch: Parameters<typeof updateProject>[1] = {
-      name: editDraft.name.trim() || project.name,
-      description: editDraft.description.trim(),
-      accent: editDraft.accent,
-      emoji: editDraft.emoji.trim().slice(0, 2),
-    }
-    if (canUploadProjectFiles) {
-      patch.autoAddUploads = editDraft.autoAddUploads
-    }
-    setSavingDetails(true)
-    try {
-      if (await updateProject(project.id, patch)) {
-        setEditOpen(false)
-        toast.success(t('projects:detail.edited'))
-      }
-    } finally {
-      setSavingDetails(false)
-    }
-  }
-
-  async function submitDelete() {
-    if (!project || !canUseKnowledgeBasesRef.current || !canDeleteProject) return
-    if (deletingRef.current) return
-    deletingRef.current = true
-    setDeleting(true)
-    try {
-      if (!(await deleteProject(project.id))) return
-      // The backend atomically detaches conversations while deleting. Mirror
-      // that committed result locally without issuing pre-delete mutations.
-      useConversations.setState((state) => ({
-        conversations: state.conversations.map((conversation) =>
-          conversation.projectId === project.id
-            ? { ...conversation, projectId: undefined }
-            : conversation,
-        ),
-      }))
-      setConfirmDelete(false)
-      toast.success(t('projects:detail.deleted'))
-      navigate('/projects')
-    } finally {
-      deletingRef.current = false
-      setDeleting(false)
-    }
-  }
-
   async function startProjectChat(
     text: string,
     attachments: Attachment[],
@@ -626,55 +506,15 @@ export default function ProjectDetail() {
         title={project.name}
         backTo="/projects"
         backLabel={t('projects:detail.back')}
-        actions={
-          <DropdownMenu>
-            <Tooltip content={t('chat:actions.more')}>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  aria-label={t('chat:actions.more')}
-                  className="inline-flex size-9 items-center justify-center rounded-[10px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-lg:size-[var(--tap-min)]"
-                >
-                  <MoreHorizontal size={15} aria-hidden />
-                </button>
-              </DropdownMenuTrigger>
-            </Tooltip>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={openRename}>
-                <Pencil size={13} aria-hidden />
-                {t('projects:detail.menu.rename')}
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={openEdit}>
-                <Sparkles size={13} aria-hidden />
-                {t('projects:detail.menu.edit')}
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => togglePin(project.id)}>
-                {project.pinned ? <PinOff size={13} aria-hidden /> : <Pin size={13} aria-hidden />}
-                {project.pinned ? t('projects:detail.menu.unpin') : t('projects:detail.menu.pin')}
-              </DropdownMenuItem>
-              {canChangeProjectVisibility ? (
-                <DropdownMenuItem
-                  disabled={visibilityBusy}
-                  onSelect={() => void toggleProjectVisibility()}
-                >
-                  {project.isPublic ? <Lock size={13} aria-hidden /> : <Unlock size={13} aria-hidden />}
-                  {project.isPublic
-                    ? t('projects:detail.menu.makePrivate', { defaultValue: 'Make private' })
-                    : t('projects:detail.menu.makeShared', { defaultValue: 'Share with workspace' })}
-                </DropdownMenuItem>
-              ) : null}
-              {canDeleteProject ? (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem destructive onSelect={() => setConfirmDelete(true)}>
-                    <Trash2 size={13} aria-hidden />
-                    {t('projects:detail.menu.delete')}
-                  </DropdownMenuItem>
-                </>
-              ) : null}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        }
+        actions={(
+          <ProjectActionsMenu
+            project={project}
+            canUseKnowledgeBases={canUseKnowledgeBases}
+            canManageProject={canManageProject}
+            canChangeProjectVisibility={canChangeProjectVisibility}
+            canDeleteConversations={canDeleteProjectConversations}
+          />
+        )}
       />
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="mx-auto w-full max-w-[var(--layout-content-max-w)] px-5 sm:px-8 py-8 pb-24">
@@ -1028,148 +868,6 @@ export default function ProjectDetail() {
           </section>
         </div>
       </div>
-
-      {/* Rename dialog */}
-      <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
-        <DialogContent size="sm">
-          <DialogHeader>
-            <DialogTitle>{t('projects:detail.renameTitle')}</DialogTitle>
-          </DialogHeader>
-          <DialogBody>
-            <Input
-              autoFocus
-              value={renameDraft}
-              onChange={(e) => setRenameDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
-                  e.preventDefault()
-                  void submitRename()
-                }
-              }}
-            />
-          </DialogBody>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setRenameOpen(false)}>
-              {t('common:actions.cancel')}
-            </Button>
-            <Button onClick={() => void submitRename()} loading={renaming} disabled={!renameDraft.trim()}>
-              {t('projects:detail.renameSave')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit dialog */}
-      <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent size="lg">
-          <DialogHeader>
-            <DialogTitle>{t('projects:detail.editTitle')}</DialogTitle>
-            <DialogDescription>{t('projects:detail.editDescription')}</DialogDescription>
-          </DialogHeader>
-          <DialogBody className="flex flex-col gap-4">
-            <Field label={t('projects:detail.editNameLabel')} htmlFor="ep-name">
-              <Input
-                id="ep-name"
-                value={editDraft.name}
-                onChange={(e) => setEditDraft((d) => ({ ...d, name: e.target.value }))}
-                autoFocus
-              />
-            </Field>
-            <Field label={t('projects:detail.editDescLabel')} htmlFor="ep-desc">
-              <Input
-                id="ep-desc"
-                value={editDraft.description}
-                onChange={(e) => setEditDraft((d) => ({ ...d, description: e.target.value }))}
-                placeholder={t('projects:detail.editDescPlaceholder')}
-              />
-            </Field>
-            <div className="grid grid-cols-1 sm:grid-cols-[1fr_120px] gap-4">
-              <Field label={t('projects:detail.editAccentLabel')}>
-                <div className="flex flex-wrap gap-2">
-                  {PROJECT_ACCENT_OPTIONS.map((a) => {
-                    const cls = accentClasses(a)
-                    const selected = editDraft.accent === a
-                    return (
-                      <button
-                        type="button"
-                        key={a}
-                        onClick={() => setEditDraft((d) => ({ ...d, accent: a }))}
-                        aria-pressed={selected}
-                        aria-label={t(`projects:accent.${a}`)}
-                        className={cn(
-                          'inline-flex items-center gap-2 rounded-[10px] px-2.5 py-1.5 text-xs interactive border',
-                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                          selected
-                            ? 'border-[var(--color-border-strong)] bg-[var(--color-bg-muted)] text-[var(--color-fg)]'
-                            : 'border-[var(--color-border)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-                        )}
-                      >
-                        <span className={cn('inline-block size-3 rounded-full', cls.bar)} aria-hidden />
-                        {t(`projects:accent.${a}`)}
-                      </button>
-                    )
-                  })}
-                </div>
-              </Field>
-              <Field label={t('projects:detail.editEmojiLabel')} htmlFor="ep-emoji">
-                <Input
-                  id="ep-emoji"
-                  value={editDraft.emoji}
-                  onChange={(e) => setEditDraft((d) => ({ ...d, emoji: e.target.value }))}
-                  placeholder={t('projects:detail.editEmojiPlaceholder')}
-                  maxLength={2}
-                />
-              </Field>
-            </div>
-            {canUploadProjectFiles ? (
-              <label
-                htmlFor="ep-auto-add"
-                className="flex items-start justify-between gap-4 rounded-[12px] border border-[var(--color-border)] p-3.5"
-              >
-                <span className="min-w-0">
-                  <span className="block text-[13.5px] font-medium text-[var(--color-fg)]">
-                    {t('projects:detail.editAutoAddLabel')}
-                  </span>
-                  <span className="mt-0.5 block text-[12px] text-[var(--color-fg-subtle)] leading-relaxed">
-                    {t('projects:detail.editAutoAddHint')}
-                  </span>
-                </span>
-                <Switch
-                  id="ep-auto-add"
-                  checked={editDraft.autoAddUploads}
-                  onCheckedChange={(v) => setEditDraft((d) => ({ ...d, autoAddUploads: v }))}
-                />
-              </label>
-            ) : null}
-          </DialogBody>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setEditOpen(false)}>
-              {t('common:actions.cancel')}
-            </Button>
-            <Button onClick={() => void submitEdit()} loading={savingDetails}>
-              {t('projects:detail.editSave')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Confirm delete */}
-      <Dialog open={confirmDelete && canDeleteProject} onOpenChange={setConfirmDelete}>
-        <DialogContent size="sm">
-          <DialogHeader>
-            <DialogTitle>{t('projects:detail.deleteTitle')}</DialogTitle>
-            <DialogDescription>{t('projects:detail.deleteBody')}</DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setConfirmDelete(false)} disabled={deleting}>
-              {t('common:actions.cancel')}
-            </Button>
-            <Button variant="destructive" onClick={submitDelete} loading={deleting}>
-              {t('common:actions.delete')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Add file */}
       {canUploadProjectFiles ? (

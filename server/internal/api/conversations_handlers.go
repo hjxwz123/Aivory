@@ -701,6 +701,23 @@ func updateConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, conv)
 }
 
+// archiveAllConversationsHandler archives all active conversations in the
+// caller's personal space. The operation is reversible and does not touch
+// memories or workspace conversations.
+func archiveAllConversationsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	ids, err := store.ArchiveAllPersonalConversations(r.Context(), d.DB, u.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	for _, id := range ids {
+		msgcache.Bump(d.Cache, id)
+		publishUserEvent(d, r, u.ID, "conversation.updated", id)
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"archived_conversations": len(ids)})
+}
+
 func rawStringArrayHasValue(raw json.RawMessage) bool {
 	if len(raw) == 0 {
 		return false

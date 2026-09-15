@@ -98,6 +98,8 @@
     "deleteFailed": "Échec de la suppression du projet",
     "deleteTitle": "Supprimer ce projet ?",
     "deleteBody": "Le projet, ses instructions et ses fichiers seront supprimés. Les discussions démarrées à l'intérieur reviendront dans votre historique habituel.",
+    "deleteBodyWithConversations": "Le projet, ses instructions, ses fichiers et toutes ses conversations seront définitivement supprimés. Cette action est irréversible.",
+    "deleteConversations": "Supprimer aussi définitivement toutes les conversations",
     "deleted": "Projet supprimé",
     "notFoundTitle": "Ce projet est introuvable.",
     "notFoundBody": "Il a peut-être été supprimé, ou le lien est incorrect.",

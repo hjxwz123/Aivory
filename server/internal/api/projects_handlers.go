@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"aivory/server/internal/envcfg"
+	"aivory/server/internal/msgcache"
 	"aivory/server/internal/store"
 )
 
@@ -389,6 +390,14 @@ func updateProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 func deleteProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	id := pathParam(r, "id")
+	deleteConversations := r.URL.Query().Get("delete_conversations") == "true"
+	if deleteConversations {
+		permissions, permissionErr := requestPermissions(d, r)
+		if permissionErr != nil || !permissions.AllowConversationDeletion {
+			writeError(w, http.StatusForbidden, errForbidden)
+			return
+		}
+	}
 	project, projectErr := store.GetProject(r.Context(), d.DB, id, u.ID)
 	if projectErr != nil {
 		writeError(w, 404, errNotFound)
@@ -410,7 +419,15 @@ func deleteProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		}
 		revokeKnowledgeBaseGenerations(d, project.KBID)
 	}
-	deletion, err := store.DeleteProjectWithState(r.Context(), d.DB, id, u.ID, d.Config.UploadDir, d.Config.ArtifactDir)
+	deletion, err := store.DeleteProjectWithOptions(
+		r.Context(),
+		d.DB,
+		id,
+		u.ID,
+		store.DeleteProjectOptions{DeleteConversations: deleteConversations},
+		d.Config.UploadDir,
+		d.Config.ArtifactDir,
+	)
 	if err != nil {
 		if project.KBID != "" && d.Cache != nil {
 			d.Cache.Delete(knowledgeBaseGenerationRevocationKey(project.KBID))
@@ -429,10 +446,21 @@ func deleteProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		}
 		cleanupRAGKB(r.Context(), d, kbID, "delete project "+id)
 	}
+	for _, conversationID := range deletion.ConversationIDs {
+		cancelConversationGenerations(d, conversationID)
+		msgcache.Bump(d.Cache, conversationID)
+		cleanupRAGConversation(r.Context(), d, conversationID, "delete project "+id)
+	}
 	cleanupStoragePaths(r.Context(), d, deletion.StoragePaths, "delete project "+id)
-	// §23: conversations silently lost their project grouping — a generic
-	// (id-less) event makes other devices re-sync their sidebar list.
-	publishUserEvent(d, r, u.ID, "conversation.updated", "")
+	// Conversations either lost their project grouping or were deleted. A
+	// generic event makes every affected user's devices re-sync their sidebar.
+	for _, userID := range deletion.AffectedUserIDs {
+		if userID == u.ID {
+			publishUserEvent(d, r, userID, "conversation.updated", "")
+		} else {
+			publishUserEvent(d, nil, userID, "conversation.updated", "")
+		}
+	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 

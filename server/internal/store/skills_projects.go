@@ -803,7 +803,16 @@ func UpdateProject(ctx context.Context, db *sql.DB, id, userID string, patch Pro
 // project_id markers and the legacy projects.kb_id reverse relationship.
 type ProjectDeletionState struct {
 	KnowledgeBaseIDs []string
+	ConversationIDs  []string
+	AffectedUserIDs  []string
 	StoragePaths     []string
+}
+
+// DeleteProjectOptions controls whether project conversations are detached or
+// permanently removed with the project. Detaching remains the default so older
+// callers preserve their historical behavior.
+type DeleteProjectOptions struct {
+	DeleteConversations bool
 }
 
 // DeleteProject preserves the historical store API for callers that do not
@@ -822,6 +831,15 @@ func DeleteProject(ctx context.Context, db *sql.DB, id, userID string, storageRo
 // cleanup is skipped when they are omitted; API handlers should pass the
 // configured upload and artifact roots explicitly.
 func DeleteProjectWithState(ctx context.Context, db *sql.DB, id, userID string, storageRoots ...string) (*ProjectDeletionState, error) {
+	return DeleteProjectWithOptions(ctx, db, id, userID, DeleteProjectOptions{}, storageRoots...)
+}
+
+// DeleteProjectWithOptions removes a project and optionally every conversation
+// rooted in it. The optional conversation deletion is part of the same
+// transaction as the project deletion; otherwise the project foreign key keeps
+// its historical ON DELETE SET NULL behavior and the conversations survive as
+// ordinary history.
+func DeleteProjectWithOptions(ctx context.Context, db *sql.DB, id, userID string, options DeleteProjectOptions, storageRoots ...string) (*ProjectDeletionState, error) {
 	workspaceID, err := projectWorkspaceID(ctx, db, id)
 	if err != nil {
 		return nil, err
@@ -854,6 +872,72 @@ func DeleteProjectWithState(ctx context.Context, db *sql.DB, id, userID string, 
 		return nil, ErrNotFound
 	}
 	if err != nil {
+		return nil, err
+	}
+	lockResult, err := tx.ExecContext(ctx, `UPDATE projects SET id=id WHERE id=?`, id)
+	if err != nil {
+		return nil, err
+	}
+	if n, rowsErr := lockResult.RowsAffected(); rowsErr != nil {
+		return nil, rowsErr
+	} else if n != 1 {
+		return nil, ErrNotFound
+	}
+	if options.DeleteConversations && authoritativeWorkspaceID != "" {
+		capabilityArgs := []any{authoritativeWorkspaceID}
+		capabilityArgs = append(capabilityArgs, workspaceMemberCapabilityArgs(userID)...)
+		var allowed bool
+		if err := tx.QueryRowContext(ctx,
+			`SELECT EXISTS (SELECT 1 FROM workspaces deletion_workspace
+			  WHERE deletion_workspace.id=? AND `+workspaceMemberCapabilityPredicate("deletion_workspace", "can_delete_conversations")+`)`,
+			capabilityArgs...,
+		).Scan(&allowed); err != nil {
+			return nil, err
+		}
+		if !allowed {
+			return nil, ErrNotFound
+		}
+	}
+
+	var conversationIDs []string
+	affectedUserSet := make(map[string]struct{})
+	conversationRows, err := tx.QueryContext(ctx, `WITH RECURSIVE project_conversation_tree(id) AS (
+			SELECT id FROM conversations
+			 WHERE project_id=?
+			   AND COALESCE(workspace_id,'')=?
+			   AND (?<>'' OR user_id=?)
+			UNION
+			SELECT child.id FROM conversations child
+			 JOIN project_conversation_tree parent ON child.inline_source_conv=parent.id
+			 WHERE COALESCE(child.workspace_id,'')=?
+			   AND (?<>'' OR child.user_id=?)
+		)
+		SELECT tree.id, conversation.user_id
+		  FROM project_conversation_tree tree
+		  JOIN conversations conversation ON conversation.id=tree.id
+		 ORDER BY tree.id`,
+		id, authoritativeWorkspaceID, authoritativeWorkspaceID, projectUserID,
+		authoritativeWorkspaceID, authoritativeWorkspaceID, projectUserID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	for conversationRows.Next() {
+		var conversationID, conversationUserID string
+		if err := conversationRows.Scan(&conversationID, &conversationUserID); err != nil {
+			_ = conversationRows.Close()
+			return nil, err
+		}
+		if options.DeleteConversations {
+			conversationIDs = append(conversationIDs, conversationID)
+		}
+		affectedUserSet[conversationUserID] = struct{}{}
+	}
+	if err := conversationRows.Err(); err != nil {
+		_ = conversationRows.Close()
+		return nil, err
+	}
+	if err := conversationRows.Close(); err != nil {
 		return nil, err
 	}
 
@@ -890,6 +974,16 @@ func DeleteProjectWithState(ctx context.Context, db *sql.DB, id, userID string, 
 	// Collect local paths before the cascading delete. Database cleanup remains
 	// strict and atomic; physical storage cleanup is best-effort after commit.
 	diskPathSet := make(map[string]struct{})
+	for start := 0; start < len(conversationIDs); start += 200 {
+		end := min(start+200, len(conversationIDs))
+		paths, err := storagePathsForConversationIDs(ctx, tx, conversationIDs[start:end])
+		if err != nil {
+			return nil, err
+		}
+		for _, path := range paths {
+			diskPathSet[path] = struct{}{}
+		}
+	}
 	if len(kbIDs) > 0 {
 		pathRows, err := tx.QueryContext(ctx,
 			`SELECT storage_path FROM documents WHERE kb_id IN (`+idPlaceholders(len(kbIDs))+`) AND storage_path<>''`,
@@ -914,6 +1008,29 @@ func DeleteProjectWithState(ctx context.Context, db *sql.DB, id, userID string, 
 		}
 		if err := pathRows.Close(); err != nil {
 			return nil, err
+		}
+	}
+
+	for start := 0; start < len(conversationIDs); start += 200 {
+		end := min(start+200, len(conversationIDs))
+		batch := conversationIDs[start:end]
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM files WHERE conversation_id IN (`+idPlaceholders(len(batch))+`)`,
+			anySlice(batch)...,
+		); err != nil {
+			return nil, err
+		}
+		res, err := tx.ExecContext(ctx,
+			`DELETE FROM conversations WHERE id IN (`+idPlaceholders(len(batch))+`)`,
+			anySlice(batch)...,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if n, rowsErr := res.RowsAffected(); rowsErr != nil {
+			return nil, rowsErr
+		} else if n != int64(len(batch)) {
+			return nil, ErrNotFound
 		}
 	}
 
@@ -999,7 +1116,12 @@ func DeleteProjectWithState(ctx context.Context, db *sql.DB, id, userID string, 
 			log.Printf("delete project %s: remove file %q: %v", id, path, removeErr)
 		}
 	}
-	return &ProjectDeletionState{KnowledgeBaseIDs: kbIDs, StoragePaths: diskPaths}, nil
+	return &ProjectDeletionState{
+		KnowledgeBaseIDs: kbIDs,
+		ConversationIDs:  conversationIDs,
+		AffectedUserIDs:  keys(affectedUserSet),
+		StoragePaths:     diskPaths,
+	}, nil
 }
 
 func projectWorkspaceID(ctx context.Context, db *sql.DB, id string) (string, error) {

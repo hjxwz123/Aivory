@@ -98,6 +98,8 @@
     "deleteFailed": "刪除專案失敗",
     "deleteTitle": "確認刪除該專案？",
     "deleteBody": "專案本身、其指令與檔案都會被移除。專案內已開啟的對話會回到普通曆史記錄中。",
+    "deleteBodyWithConversations": "專案本身、其指令、檔案以及專案內的全部對話都會被永久刪除。此操作無法復原。",
+    "deleteConversations": "同時永久刪除全部對話",
     "deleted": "專案已刪除",
     "notFoundTitle": "找不到該專案。",
     "notFoundBody": "可能已被刪除，或連結有誤。",

@@ -29,7 +29,7 @@ interface ProjectStore {
   /** §workspace RBAC: flip a workspace project between shared and private. */
   setVisibility: (id: string, isPublic: boolean) => Promise<boolean>
   togglePin: (id: string) => Promise<void>
-  deleteProject: (id: string) => Promise<boolean>
+  deleteProject: (id: string, deleteConversations?: boolean) => Promise<boolean>
 
   addFile: (id: string, file: Omit<ProjectFile, 'id' | 'addedAt'> & { content?: string }) => Promise<ProjectFile | null>
   /** Upload a real file (multipart) into the project library. */
@@ -183,9 +183,9 @@ export const useProjects = create<ProjectStore>((set, get) => ({
     }
   },
 
-  async deleteProject(id) {
+  async deleteProject(id, deleteConversations = false) {
     try {
-      await projectsApi.remove(id)
+      await projectsApi.remove(id, deleteConversations)
       projectDetailEpoch.set(id, (projectDetailEpoch.get(id) ?? 0) + 1)
       set((s) => ({ projects: s.projects.filter((p) => p.id !== id) }))
       return true

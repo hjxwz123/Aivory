@@ -129,6 +129,66 @@ func PersonalConversationIDsForDeletion(ctx context.Context, db *sql.DB, userID 
 	return ids, rows.Err()
 }
 
+// ArchiveAllPersonalConversations archives every active root conversation in
+// the user's personal space and returns the ids changed by this call. Workspace
+// conversations deliberately have no archive view and inline threads follow
+// the visibility of their root conversation.
+func ArchiveAllPersonalConversations(ctx context.Context, db *sql.DB, userID string) ([]string, error) {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	rows, err := tx.QueryContext(ctx, `SELECT id
+		FROM conversations
+		WHERE user_id=?
+		  AND archived=0
+		  AND COALESCE(inline_source_conv,'')=''
+		  AND COALESCE(workspace_id,'')=''
+		ORDER BY id`, userID)
+	if err != nil {
+		return nil, err
+	}
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return ids, nil
+	}
+
+	args := []any{time.Now().Unix()}
+	args = append(args, anySlice(ids)...)
+	result, err := tx.ExecContext(ctx,
+		`UPDATE conversations SET archived=1, updated_at=? WHERE id IN (`+idPlaceholders(len(ids))+`) AND user_id=?`,
+		append(args, userID)...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if changed, rowsErr := result.RowsAffected(); rowsErr != nil {
+		return nil, rowsErr
+	} else if changed != int64(len(ids)) {
+		return nil, ErrNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
 // ListWorkspaceConversations is the unscoped administrator/maintenance view.
 // User-facing callers must use ListWorkspaceConversationsForUser.
 func ListWorkspaceConversations(ctx context.Context, db *sql.DB, workspaceID, projectID, archivedFilter string, limit, offset int) ([]Conversation, error) {

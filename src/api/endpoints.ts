@@ -557,7 +557,11 @@ export const projectsApi = {
   create: (body: Partial<ApiProject>) => api<ApiProject>('/projects', { method: 'POST', body }),
   update: (id: string, patch: Partial<ApiProject>) =>
     api<ApiProject>(`/projects/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch }),
-  remove: (id: string) => api<{ ok: true }>(`/projects/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  remove: (id: string, deleteConversations = false) =>
+    api<{ ok: true }>(
+      `/projects/${encodeURIComponent(id)}${deleteConversations ? '?delete_conversations=true' : ''}`,
+      { method: 'DELETE' },
+    ),
   listDocs: (id: string) => api<ApiDocument[]>(`/projects/${encodeURIComponent(id)}/documents`),
   addDoc: (id: string, body: { filename: string; content: string; mime_type?: string }) =>
     api<ApiDocument>(`/projects/${encodeURIComponent(id)}/documents`, { method: 'POST', body }),
@@ -762,6 +766,8 @@ export const conversationsApi = {
   remove: (id: string) => api<{ ok: true }>(`/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   clearAll: () =>
     api<{ deleted_conversations: number }>('/conversations', { method: 'DELETE' }),
+  archiveAll: () =>
+    api<{ archived_conversations: number }>('/conversations/archive-all', { method: 'POST' }),
   messages: (id: string, mode: 'path' | 'tree' = 'path') =>
     api<ApiMessage[]>(
       `/conversations/${encodeURIComponent(id)}/messages${mode === 'tree' ? '?mode=tree' : ''}`,

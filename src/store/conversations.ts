@@ -1269,8 +1269,16 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
 
   async loadArchived() {
     try {
-      const { conversations: rows } = await conversationsApi.listArchived()
-      return rows.map(toLocalConversation)
+      const pageSize = 200
+      const archived: ApiConversation[] = []
+      let offset = 0
+      for (;;) {
+        const page = await conversationsApi.listArchived(pageSize, offset)
+        archived.push(...page.conversations)
+        if (!page.has_more || page.conversations.length === 0) break
+        offset += page.conversations.length
+      }
+      return archived.map(toLocalConversation)
     } catch {
       return []
     }

@@ -3,6 +3,7 @@ import type { ApiConversation } from '@/api/types'
 
 const apiMocks = vi.hoisted(() => ({
   list: vi.fn(),
+  listArchived: vi.fn(),
 }))
 
 vi.mock('@/api', () => {
@@ -19,6 +20,7 @@ vi.mock('@/api', () => {
     ApiError,
     conversationsApi: {
       list: apiMocks.list,
+      listArchived: apiMocks.listArchived,
     },
     streamSSE: vi.fn(),
     streamSSEGet: vi.fn(),
@@ -63,6 +65,7 @@ function conversation(id: string, updatedAt: number): ApiConversation {
 describe('conversation sidebar pagination', () => {
   beforeEach(() => {
     apiMocks.list.mockReset()
+    apiMocks.listArchived.mockReset()
     useWorkspaces.setState({ activeId: null })
     useConversations.setState({
       conversations: [],
@@ -103,5 +106,26 @@ describe('conversation sidebar pagination', () => {
       hasMore: false,
     })
     expect(useConversations.getState().conversations).toHaveLength(23)
+  })
+
+  it('loads every archived page for the archived conversations dialog', async () => {
+    const firstPage = Array.from({ length: 200 }, (_, index) => ({
+      ...conversation(`archived-${index + 1}`, 300 - index),
+      archived: true,
+    }))
+    const secondPage = Array.from({ length: 3 }, (_, index) => ({
+      ...conversation(`archived-${index + 201}`, 100 - index),
+      archived: true,
+    }))
+    apiMocks.listArchived
+      .mockResolvedValueOnce({ conversations: firstPage, limit: 200, offset: 0, has_more: true })
+      .mockResolvedValueOnce({ conversations: secondPage, limit: 200, offset: 200, has_more: false })
+
+    const archived = await useConversations.getState().loadArchived()
+
+    expect(apiMocks.listArchived).toHaveBeenNthCalledWith(1, 200, 0)
+    expect(apiMocks.listArchived).toHaveBeenNthCalledWith(2, 200, 200)
+    expect(archived).toHaveLength(203)
+    expect(archived.every((item) => item.archived)).toBe(true)
   })
 })

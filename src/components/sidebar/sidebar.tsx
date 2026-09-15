@@ -65,6 +65,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { NewProjectDialog } from '@/components/projects/new-project-dialog'
 import { MoveToProjectSub } from '@/components/projects/move-to-project-menu'
+import { ProjectActionsMenu } from '@/components/projects/project-actions-menu'
 import { RenameConversationDialog } from '@/components/chat/rename-conversation-dialog'
 import { ShareConversationDialog } from '@/components/chat/share-conversation-dialog'
 import { useConversations, sameConvListShape } from '@/store/conversations'
@@ -735,12 +736,23 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
                             <span className={cn('min-w-0 flex-1 truncate', projectActive && 'font-medium text-[var(--color-fg)]')}>
                               {truncate(project.name, 30)}
                             </span>
-                            {projectConversations.length > 0 ? (
-                              <span className="shrink-0 text-[10.5px] tabular-nums text-[var(--color-fg-subtle)]">
-                                {projectConversations.length}
-                              </span>
-                            ) : null}
                           </Link>
+                          <ProjectActionsMenu
+                            project={project}
+                            canUseKnowledgeBases={canUseKnowledgeBases}
+                            canManageProject={project.canDelete ?? (
+                              project.userId === user?.id || activeWorkspace?.role === 'admin'
+                            )}
+                            canChangeProjectVisibility={Boolean(
+                              project.workspaceId && (
+                                project.userId === user?.id || activeWorkspace?.role === 'admin'
+                              ),
+                            )}
+                            canDeleteConversations={userCan(user, 'allow_conversation_deletion') && (
+                              !project.workspaceId || activeWorkspace?.can_delete_conversations === true
+                            )}
+                            placement="sidebar"
+                          />
                         </div>
                         <ProjectConversationDisclosure
                           id={childListId}
@@ -1459,12 +1471,12 @@ function ArchivedDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="md">
+      <DialogContent size="md" className="max-h-[calc(100dvh-1rem)] sm:max-h-[min(42rem,calc(100dvh-2rem))]">
         <DialogHeader>
           <DialogTitle>{t('chat:sidebar.archivedTitle')}</DialogTitle>
           <DialogDescription>{t('chat:sidebar.archivedBody')}</DialogDescription>
         </DialogHeader>
-        <DialogBody>
+        <DialogBody className="overscroll-contain px-4 sm:px-6">
           {loading ? (
             <p className="py-4 text-sm text-[var(--color-fg-subtle)]">{t('common:common.loading')}</p>
           ) : rows.length === 0 ? (
@@ -1472,20 +1484,21 @@ function ArchivedDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
           ) : (
             <ul className="flex flex-col divide-y divide-[var(--color-divider)]">
               {rows.map((c) => (
-                <li key={c.id} className="flex items-center gap-2 py-2">
+                <li key={c.id} className="flex min-w-0 flex-wrap items-center gap-2 py-2 sm:flex-nowrap">
                   <button
                     type="button"
                     onClick={() => {
                       navigate(`/chat/${c.id}`)
                       onOpenChange(false)
                     }}
-                    className="min-w-0 flex-1 truncate rounded-[6px] text-left text-sm text-[var(--color-fg)] interactive hover:text-[var(--color-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                    className="min-w-0 basis-[12rem] flex-1 truncate rounded-[6px] text-left text-sm text-[var(--color-fg)] interactive hover:text-[var(--color-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                   >
                     {truncate(c.title, 60)}
                   </button>
                   <Button
                     variant="ghost"
                     size="sm"
+                    className="ml-auto shrink-0"
                     onClick={() => {
                       void unarchive(c.id)
                       setRows((r) => r.filter((x) => x.id !== c.id))

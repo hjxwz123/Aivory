@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { SettingsRow, SettingsSection } from './SettingsLayout'
 import { Button } from '@/components/ui/button'
-import { Download, Trash2, Upload } from 'lucide-react'
+import { Archive, Download, Trash2, Upload } from 'lucide-react'
 import { parseConversationExport } from '@/lib/conversation-import'
 import {
   Dialog,
@@ -28,6 +28,8 @@ export default function Privacy() {
   const canUseMemory = userCan(user, 'allow_memory') && user?.memory_available !== false
   const [confirmClear, setConfirmClear] = useState(false)
   const [clearing, setClearing] = useState(false)
+  const [confirmArchive, setConfirmArchive] = useState(false)
+  const [archiving, setArchiving] = useState(false)
   const [exporting, setExporting] = useState(false)
   const exportAttemptRef = useRef(0)
   const [importing, setImporting] = useState(false)
@@ -150,6 +152,21 @@ export default function Privacy() {
     }
   }
 
+  async function performArchiveAll() {
+    if (archiving) return
+    setArchiving(true)
+    try {
+      const result = await conversationsApi.archiveAll()
+      await reloadConvs()
+      toast.success(t('settings:privacy.archivedAll', { count: result.archived_conversations }))
+    } catch (e) {
+      toast.error(t('settings:privacy.archiveAllFailed'), e instanceof Error ? e.message : undefined)
+    } finally {
+      setArchiving(false)
+      setConfirmArchive(false)
+    }
+  }
+
   return (
     <div className="mx-auto max-w-[60rem]">
       <header className="mb-6">
@@ -214,6 +231,18 @@ export default function Privacy() {
           </SettingsRow>
         ) : null}
         <SettingsRow
+          label={t('settings:privacy.archiveAll')}
+          description={t('settings:privacy.archiveAllBody')}
+        >
+          <Button
+            variant="secondary"
+            leadingIcon={<Archive size={13} aria-hidden />}
+            onClick={() => setConfirmArchive(true)}
+          >
+            {t('settings:privacy.archiveAllAction')}
+          </Button>
+        </SettingsRow>
+        <SettingsRow
           label={t('settings:privacy.clearAll')}
           description={t('settings:privacy.clearAllBody')}
         >
@@ -226,6 +255,25 @@ export default function Privacy() {
           </Button>
         </SettingsRow>
       </SettingsSection>
+
+      <Dialog open={confirmArchive} onOpenChange={(open) => !archiving && setConfirmArchive(open)}>
+        <DialogContent size="sm" closeDisabled={archiving}>
+          <DialogHeader>
+            <DialogTitle>{t('settings:privacy.archiveAllConfirm')}</DialogTitle>
+            <DialogDescription>
+              {t('settings:privacy.archiveAllConfirmBody')}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setConfirmArchive(false)} disabled={archiving}>
+              {t('common:actions.cancel')}
+            </Button>
+            <Button onClick={() => void performArchiveAll()} loading={archiving}>
+              {t('settings:privacy.archiveAllConfirmAction')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={confirmClear} onOpenChange={setConfirmClear}>
         <DialogContent size="sm">
