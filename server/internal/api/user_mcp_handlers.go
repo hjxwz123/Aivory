@@ -17,7 +17,7 @@ import (
 // MCP surface: header values are write-only (responses carry the visual mask),
 // metadata validation is shared with admin_mcp_handlers.go, and discovery
 // failures are redacted so an echoed credential can never reach the client.
-// Selection enforcement and the owner exemption live in toolPolicyAllowsID
+// Selection enforcement lives in toolPolicyAllowsID
 // (permissions.go); the tool catalog row is emitted by
 // listSelectableToolsHandler with the "usermcp:" namespace.
 
@@ -141,6 +141,8 @@ func mcpDiscoveredToolsPresent(discoveredTools json.RawMessage) bool {
 
 func writeUserMCPServerError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, errPermissionDenied):
+		writeError(w, http.StatusForbidden, errPermissionDenied)
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, errNotFound)
 	case errors.Is(err, store.ErrUserMCPNameExists), errors.Is(err, store.ErrMCPDiscoveryStateChanged):
@@ -196,8 +198,13 @@ func listMyMCPServersHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response := make([]userMCPServerResponse, 0, len(servers))
+	permissions, err := requestPermissions(d, r)
+	if err != nil {
+		writeError(w, http.StatusForbidden, errPermissionDenied)
+		return
+	}
 	for _, server := range servers {
-		response = append(response, userMCPServerListJSON(server, canUse))
+		response = append(response, userMCPServerListJSON(server, canUse && toolPolicyAllowsID(permissions, userMCPToolIDPrefix+server.ID)))
 	}
 	writeJSON(w, http.StatusOK, response)
 }
@@ -255,19 +262,21 @@ func createMyMCPServerHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// discovery pass inline; a failure is recorded as last_error, not as a
 	// rejected request, so the editor can retry via the sync endpoint.
 	final := created
-	canUse := true
+	permissions, permissionErr := requestPermissions(d, r)
+	canUse := permissionErr == nil && toolPolicyAllowsID(permissions, userMCPToolIDPrefix+created.ID)
 	if server.WorkspaceID != "" {
 		// Creation and use are independent member capabilities. A creator who is
 		// intentionally barred from using MCP may still save metadata, but this
 		// endpoint must not make a remote request on their behalf.
-		canUse, _ = workspaceLibraryUseEnabled(d, r, server.WorkspaceID, libraryCapabilityMCP)
+		workspaceCanUse, _ := workspaceLibraryUseEnabled(d, r, server.WorkspaceID, libraryCapabilityMCP)
+		canUse = canUse && workspaceCanUse
 	}
 	if canUse && created.Enabled {
 		if synced, _ := runUserMCPDiscovery(d, r.Context(), *created, authUser(r).ID, true); synced != nil {
 			final = synced
 		}
 	}
-	writeJSON(w, http.StatusCreated, userMCPServerJSON(*final))
+	writeJSON(w, http.StatusCreated, userMCPServerListJSON(*final, canUse))
 }
 
 func updateMyMCPServerHandler(d Deps, w http.ResponseWriter, r *http.Request) {
@@ -390,6 +399,11 @@ func testMyMCPServerHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if !authorizeLibraryWorkspaceUse(d, w, r, server.WorkspaceID, libraryCapabilityMCP) {
 		return
 	}
+	if !requireUserCapability(d, w, r, func(p store.UserGroupPermissions) bool {
+		return toolPolicyAllowsID(p, userMCPToolIDPrefix+server.ID)
+	}) {
+		return
+	}
 	if !server.Enabled {
 		writeError(w, http.StatusConflict, errors.New("MCP service is disabled"))
 		return
@@ -436,6 +450,11 @@ func syncMyMCPServerHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if !authorizeLibraryWorkspaceUse(d, w, r, server.WorkspaceID, libraryCapabilityMCP) {
 		return
 	}
+	if !requireUserCapability(d, w, r, func(p store.UserGroupPermissions) bool {
+		return toolPolicyAllowsID(p, userMCPToolIDPrefix+server.ID)
+	}) {
+		return
+	}
 	if !server.Enabled {
 		writeError(w, http.StatusConflict, errors.New("MCP service is disabled"))
 		return
@@ -474,6 +493,10 @@ func runUserMCPDiscovery(
 		// personal rows still require their owner and workspace rows are best
 		// handled by the authenticated HTTP paths above.
 		actorID = server.UserID
+	}
+	permissions, permissionErr := store.UserGroupPermissionsForUser(ctx, d.DB, actorID)
+	if permissionErr != nil || !toolPolicyAllowsID(permissions, userMCPToolIDPrefix+server.ID) {
+		return nil, errPermissionDenied
 	}
 	client, err := newUserMCPClient(d, server)
 	if err != nil {

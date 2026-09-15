@@ -51,14 +51,14 @@ func (r *selectedToolsRegistry) ListMCP(modelID string, userID string, workspace
 				Name: "mcp_private_notes_123abc", Description: "Search personal notes", InputSchema: largeSchema,
 			},
 			ServerID: "personal", DisplayName: "Personal notes", DisplayDescription: "Search private notes", Icon: "Notebook",
-			UserOwned: true, OwnerExempt: true,
+			UserOwned: true, CreatedByUser: true,
 		},
 		{
 			ToolDef: ToolDef{
 				Name: "mcp_team_docs_456def", Description: "Search team docs", InputSchema: largeSchema,
 			},
 			ServerID: "team", DisplayName: "Team docs", DisplayDescription: "Search shared docs", Icon: "Users",
-			UserOwned: true, OwnerExempt: false,
+			UserOwned: true, CreatedByUser: false,
 		},
 	}
 }
@@ -150,7 +150,7 @@ func TestSelectedToolIDsOmittedUsesModelDefaultsAndExplicitEmptyMeansNone(t *tes
 	})
 }
 
-func TestUserMCPSelectionUsesScopedNamespaceAndOwnerExemption(t *testing.T) {
+func TestUserMCPSelectionUsesScopedNamespaceAndGroupCeiling(t *testing.T) {
 	orchestrator, provider, model, conversation, _, _ := setupToolRouteTest(t)
 	registry := &selectedToolsRegistry{}
 	orchestrator.tools = registry
@@ -161,8 +161,8 @@ func TestUserMCPSelectionUsesScopedNamespaceAndOwnerExemption(t *testing.T) {
 	})
 
 	request := provider.mainRequests[0]
-	if !requestHasTool(request, "mcp_private_notes_123abc") {
-		t.Fatalf("owner-exempt user MCP was not declared: %+v", request.Tools)
+	if requestHasTool(request, "mcp_private_notes_123abc") {
+		t.Fatalf("own user MCP bypassed group policy: %+v", request.Tools)
 	}
 	if requestHasTool(request, "mcp_team_docs_456def") {
 		t.Fatalf("teammate user MCP bypassed group policy: %+v", request.Tools)
@@ -237,7 +237,7 @@ func TestFallbackRebuildPreservesUserMCPSelectionAndWorkspaceScope(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(request.Tools) != 1 || request.Tools[0].Name != "mcp_private_notes_123abc" {
+	if len(request.Tools) != 0 {
 		t.Fatalf("fallback user MCP tools=%+v", request.Tools)
 	}
 	if len(registry.mcpListCalls) == 0 {

@@ -62,6 +62,20 @@ const (
 	libraryCapabilityMCP    = "mcp"
 )
 
+// Group feature switches apply to personal and workspace libraries alike.
+// Catalog policies remain separate source filters, and MCP metadata management
+// stays independent of permission to connect to a remote service.
+func requireLibraryGroupCapability(d Deps, w http.ResponseWriter, r *http.Request, capability string) bool {
+	switch capability {
+	case libraryCapabilitySkill:
+		return requireUserCapabilityError(d, w, r, errSkillGroupPermission, func(p store.UserGroupPermissions) bool { return p.AllowSkills })
+	case libraryCapabilityPrompt:
+		return requireUserCapabilityError(d, w, r, errPromptGroupPermission, func(p store.UserGroupPermissions) bool { return p.AllowPrompts })
+	default:
+		return true
+	}
+}
+
 func workspaceLibraryCapabilityAllowed(policy store.WorkspacePolicy, capability string) bool {
 	switch strings.ToLower(strings.TrimSpace(capability)) {
 	case libraryCapabilitySkill:
@@ -124,7 +138,9 @@ func workspaceLibraryUseEnabled(d Deps, r *http.Request, workspaceID, capability
 	if err != nil {
 		return false, err
 	}
-	return workspaceLibraryCapabilityAllowed(policy, capability) && workspaceMemberLibraryCapabilityAllowed(workspace, capability, false), nil
+	return workspaceLibraryCapabilityAllowed(policy, capability) &&
+		(capability != libraryCapabilityMCP || policy.AllowToolCalling) &&
+		workspaceMemberLibraryCapabilityAllowed(workspace, capability, false), nil
 }
 
 // authorizeLibraryWorkspaceCapability applies the workspace-wide capability
@@ -138,6 +154,9 @@ func authorizeLibraryWorkspaceCapability(
 	workspaceID, capability string,
 	write bool,
 ) bool {
+	if !requireLibraryGroupCapability(d, w, r, capability) {
+		return false
+	}
 	workspaceID = strings.TrimSpace(workspaceID)
 	if workspaceID == "" {
 		return true
@@ -177,6 +196,9 @@ func authorizeLibraryWorkspaceUse(
 	r *http.Request,
 	workspaceID, capability string,
 ) bool {
+	if !requireLibraryGroupCapability(d, w, r, capability) {
+		return false
+	}
 	workspaceID = strings.TrimSpace(workspaceID)
 	if workspaceID == "" {
 		return true
@@ -317,7 +339,7 @@ func listLibraryCatalogHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		if workspace != nil && (!workspacePolicy.AllowSkills || !workspace.CanUseSkills) {
 			continue
 		}
-		if !store.ResourcePolicyAllows(permissions.Skills, skill.ID) {
+		if !permissions.AllowSkills || !store.ResourcePolicyAllows(permissions.Skills, skill.ID) {
 			continue
 		}
 		displayDescription := strings.TrimSpace(skill.DisplayDescription)
@@ -331,7 +353,7 @@ func listLibraryCatalogHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		if workspace != nil && (!workspacePolicy.AllowPrompts || !workspace.CanUsePrompts) {
 			continue
 		}
-		if !store.ResourcePolicyAllows(permissions.Prompts, prompt.ID) {
+		if !permissions.AllowPrompts || !store.ResourcePolicyAllows(permissions.Prompts, prompt.ID) {
 			continue
 		}
 		safePrompts = append(safePrompts, catalogPrompt{

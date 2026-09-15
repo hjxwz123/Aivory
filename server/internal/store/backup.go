@@ -40,7 +40,7 @@ var backupTableOrder = []string{
 	"model_skills", "knowledge_bases", "knowledge_base_shares", "workspace_kb_member_permissions", "projects", "conversations", "conversation_compaction_leases", "conversation_generation_leases", "messages", "message_feedback", "user_feedback",
 	"conversation_shares", "files", "documents", "chunks", "vector_points", "memories",
 	"usage_stats", "usage_logs", "artifacts", "refresh_tokens", "oauth_identities", "passkeys",
-	"workspace_invites", "workspace_policies", "workspace_audit_logs",
+	"workspace_invites", "workspace_policies", "workspace_announcements", "workspace_audit_logs",
 	"pending_storage_cleanup",
 }
 

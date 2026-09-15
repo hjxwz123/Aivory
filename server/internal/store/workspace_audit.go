@@ -31,6 +31,7 @@ const (
 	AuditInviteRevoked             = "invite.revoked"
 	AuditResourceVisibilityChanged = "resource.visibility_changed"
 	AuditPolicyUpdated             = "policy.updated"
+	AuditAnnouncementUpdated       = "announcement.updated"
 )
 
 // auditExecer is satisfied by both *sql.DB and *sql.Tx, letting mutations log

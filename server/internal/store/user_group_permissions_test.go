@@ -17,6 +17,9 @@ func TestNormalizeUserGroupPermissionsDefaultsNewCapabilitiesForLegacyJSON(t *te
 	if legacy.AllowSharing {
 		t.Fatal("explicit allow_sharing=false was not preserved")
 	}
+	if !legacy.AllowPrompts || !legacy.AllowSkills || !legacy.AllowWorkspaceDeletion {
+		t.Fatalf("new capability defaults changed legacy access: %+v", legacy)
+	}
 	if !legacy.AllowKnowledgeBases || !legacy.AllowKnowledgeBaseSharing || !legacy.AllowConversationDeletion || !legacy.AllowDrawing || !legacy.AllowPrivateChat {
 		t.Fatalf("missing legacy fields did not retain permissive defaults: %+v", legacy)
 	}

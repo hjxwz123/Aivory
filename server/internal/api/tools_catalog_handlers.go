@@ -56,7 +56,7 @@ func listSelectableToolsHandler(d Deps, w http.ResponseWriter, r *http.Request) 
 	// Resolve the workspace capability once for the whole catalog request. The
 	// group policy below controls whether a row is selectable; workspace policy
 	// controls whether a capability is exposed at all. Keeping the two checks
-	// separate is important for the owner exemption on user MCP rows.
+	// separate lets the catalog distinguish hidden capabilities from denied rows.
 	var workspacePolicy *store.WorkspacePolicy
 	var workspaceMember *store.Workspace
 	workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id"))
@@ -198,15 +198,13 @@ func listSelectableToolsHandler(d Deps, w http.ResponseWriter, r *http.Request) 
 	// otherwise create ghost selections. Workspace capability checks happen here
 	// as well as in the runtime registry, so a member denied MCP never sees a
 	// selectable row. The requesting user's personal and active-workspace rows
-	// are the only ones the store scoping returns; group Tools policy still
-	// applies to servers owned by teammates, while the requester's own servers
-	// are exempt via the toolPolicyScope below.
+	// are the only ones the store scoping returns. Group Tools policy applies
+	// equally to the requester's own servers and those owned by teammates.
 	if user := authUser(r); user != nil {
 		readScopes := []string{""}
 		if workspaceID != "" {
 			readScopes = append(readScopes, workspaceID)
 		}
-		scope := toolPolicyScope{ctx: r.Context(), db: d.DB, userID: user.ID, workspaceID: workspaceID}
 		for _, scopeID := range readScopes {
 			userServers, serversErr := store.ListUserMCPServersScoped(r.Context(), d.DB, user.ID, scopeID)
 			if serversErr != nil {
@@ -223,7 +221,7 @@ func listSelectableToolsHandler(d Deps, w http.ResponseWriter, r *http.Request) 
 				}
 				items = append(items, selectableToolResponse{
 					ID: id, Name: server.Name, Description: server.Description, Icon: server.Icon,
-					Allowed: toolPolicyAllowsID(permissions, id, scope), DefaultSelected: false,
+					Allowed: toolPolicyAllowsID(permissions, id), DefaultSelected: false,
 				})
 			}
 		}
@@ -245,7 +243,7 @@ func listSelectableToolsHandler(d Deps, w http.ResponseWriter, r *http.Request) 
 // stale selections and repeatedly attempt a forbidden operation. User MCP
 // ids skip the administrator MCP allowlist (`AllowedMCPServerIDs`): those rows
 // are governed by the explicit workspace MCP switch and the member capability
-// and receive their group-level owner exemption separately.
+// in addition to the group tool policy.
 func workspaceCatalogToolAllowed(
 	id string,
 	policy *store.WorkspacePolicy,

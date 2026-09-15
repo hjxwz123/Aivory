@@ -39,6 +39,10 @@ func domainRequestAllowed(d Deps, r *http.Request, workspaceID string) bool {
 		return false
 	}
 	switch path {
+	case "/api/private-chat":
+		// The strict private-chat decoder validates body scope and inherits the
+		// locked workspace for legacy clients; never copy image payloads here.
+		return r.Method == http.MethodPost
 	case "/api/me", "/api/events", "/api/announcement", "/api/me/settings", "/api/me/avatar",
 		"/api/me/password", "/api/me/password/set", "/api/me/usage", "/api/me/credits",
 		"/api/me/credit-adjustments/claim", "/api/me/upload-policy", "/api/user-feedback",

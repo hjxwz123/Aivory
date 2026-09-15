@@ -1342,11 +1342,9 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	// The user-MCP owner exemption resolves "usermcp:<id>" ids against the
-	// requester's personal library and the conversation's active workspace.
+	// Apply the group ceiling to every selected tool, including owned MCPs.
 	selectedToolIDs, selectedToolsConfigured = applyTurnToolPermissions(
 		permissions, selectedToolIDs, selectedToolsConfigured,
-		toolPolicyScope{ctx: r.Context(), db: d.DB, userID: u.ID, workspaceID: conv.WorkspaceID},
 	)
 	if !toolPolicyAllowsID(permissions, "builtin:aivory_web_search") {
 		req.WebSearch = false
@@ -1863,11 +1861,9 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	// The user-MCP owner exemption resolves "usermcp:<id>" ids against the
-	// requester's personal library and the conversation's active workspace.
+	// Regeneration applies the same group ceiling, including owned MCPs.
 	selectedToolIDs, selectedToolsConfigured = applyTurnToolPermissions(
 		permissions, selectedToolIDs, selectedToolsConfigured,
-		toolPolicyScope{ctx: r.Context(), db: d.DB, userID: u.ID, workspaceID: conv.WorkspaceID},
 	)
 	if !toolPolicyAllowsID(permissions, "builtin:aivory_web_search") {
 		body.WebSearch = false

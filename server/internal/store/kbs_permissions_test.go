@@ -421,9 +421,16 @@ func TestCreatedWorkspaceKnowledgeBaseReturnsEffectiveCapabilities(t *testing.T)
 	}
 }
 
-func TestWorkspaceKnowledgeBaseCreatorKeepsManagementCapabilities(t *testing.T) {
+func TestWorkspaceKnowledgeBaseCreatorObeysContentRestrictions(t *testing.T) {
 	db := openKBPermissionTestDB(t)
 	ctx := context.Background()
+	created, err := CreateDocumentForUser(ctx, db, Document{
+		ID: "creator-upload-before-revoke", KBID: "workspace-kb",
+		Filename: "creator-upload.txt", MimeType: "text/plain",
+	}, "creator")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	permissions := fullWorkspaceMemberPermissions()
 	permissions.CanAddKBFiles = false
@@ -433,17 +440,17 @@ func TestWorkspaceKnowledgeBaseCreatorKeepsManagementCapabilities(t *testing.T) 
 	}
 
 	kb, err := GetKB(ctx, db, "workspace-kb", "creator")
-	if err != nil || !kb.CanUpload || !kb.CanDeleteContent || !kb.CanDelete || !kb.CanManageMembers {
-		t.Fatalf("creator capabilities=%+v err=%v, want full library management", kb, err)
+	if err != nil || kb.CanUpload || kb.CanDeleteContent || !kb.CanDelete || !kb.CanManageMembers {
+		t.Fatalf("creator capabilities=%+v err=%v, want content restrictions with metadata management", kb, err)
 	}
-	created, err := CreateDocumentForUser(ctx, db, Document{
+	_, err = CreateDocumentForUser(ctx, db, Document{
 		ID: "creator-upload-after-total-revoke", KBID: "workspace-kb",
 		Filename: "creator-upload.txt", MimeType: "text/plain",
 	}, "creator")
-	if err != nil || !created.CanDelete {
-		t.Fatalf("creator upload=%+v err=%v", created, err)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("creator upload after revoke err=%v", err)
 	}
-	if err := DeleteDocumentForUser(ctx, db, created.ID, "kb", "workspace-kb", "creator"); err != nil {
+	if err := DeleteDocumentForUser(ctx, db, created.ID, "kb", "workspace-kb", "creator"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("creator delete content after total revoke: %v", err)
 	}
 	if err := DeleteKB(ctx, db, "workspace-kb", "creator"); err != nil {

@@ -1263,6 +1263,9 @@ func promoteDocumentHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errors.New("project has no knowledge base"))
 		return
 	}
+	if !requireKnowledgeBaseAccess(d, w, r, p.KBID, true) {
+		return
+	}
 	doc, err := store.GetDocumentForUser(r.Context(), d.DB, docID, u.ID)
 	if err != nil || doc.ConversationID != conv.ID {
 		writeError(w, 404, errNotFound)

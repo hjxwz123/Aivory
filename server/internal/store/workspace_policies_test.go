@@ -9,6 +9,24 @@ import (
 
 // §workspace RBAC phase 4 — workspace capability policy store semantics.
 
+func TestWorkspacePrivateChatMigrationDefaultsExistingPolicies(t *testing.T) {
+	fx := newRBACFixture(t)
+	disabled := false
+	if _, err := UpdateWorkspacePolicy(t.Context(), fx.db, fx.workspaceID, "owner", WorkspacePolicyPatch{AllowDrawing: &disabled}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fx.db.Exec(`ALTER TABLE workspace_policies DROP COLUMN allow_private_chat`); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(fx.db); err != nil {
+		t.Fatal(err)
+	}
+	policy, err := GetWorkspacePolicy(t.Context(), fx.db, fx.workspaceID)
+	if err != nil || !policy.AllowPrivateChat || policy.AllowDrawing {
+		t.Fatalf("migration changed existing policy: %+v %v", policy, err)
+	}
+}
+
 func TestWorkspacePolicyStoreSemantics(t *testing.T) {
 	ctx := context.Background()
 	fx := newRBACFixture(t)
@@ -19,7 +37,7 @@ func TestWorkspacePolicyStoreSemantics(t *testing.T) {
 		t.Fatalf("default policy: %v", err)
 	}
 	if !policy.AllowSandbox || !policy.AllowImageGeneration || !policy.AllowKnowledgeBases ||
-		!policy.AllowFileUpload || len(policy.AllowedModelIDs) != 0 || policy.MemberMonthlyCreditLimit != 0 {
+		!policy.AllowPrivateChat || !policy.AllowFileUpload || len(policy.AllowedModelIDs) != 0 || policy.MemberMonthlyCreditLimit != 0 {
 		t.Fatalf("default policy not permissive: %+v", policy)
 	}
 
@@ -31,8 +49,9 @@ func TestWorkspacePolicyStoreSemantics(t *testing.T) {
 	models := []string{"m1"}
 	noUpload := false
 	updated, err := UpdateWorkspacePolicy(ctx, fx.db, fx.workspaceID, "admin", WorkspacePolicyPatch{
-		AllowedModelIDs: &models,
-		AllowFileUpload: &noUpload,
+		AllowedModelIDs:  &models,
+		AllowFileUpload:  &noUpload,
+		AllowPrivateChat: &noUpload,
 	})
 	if err != nil || updated.AllowFileUpload {
 		t.Fatalf("admin policy update: %+v err=%v", updated, err)
@@ -43,6 +62,10 @@ func TestWorkspacePolicyStoreSemantics(t *testing.T) {
 	if updated.UpdatedBy != "admin" || updated.UpdatedAt == 0 {
 		t.Fatalf("policy audit fields: %+v", updated)
 	}
+	persisted, err := GetWorkspacePolicy(ctx, fx.db, fx.workspaceID)
+	if err != nil || persisted.AllowPrivateChat {
+		t.Fatalf("private chat denial did not persist: %+v %v", persisted, err)
+	}
 
 	// Legacy fields remain writable for rolling clients, but they must not
 	// change the new capability switches. The retired sandbox switch alone no
@@ -52,7 +75,7 @@ func TestWorkspacePolicyStoreSemantics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("owner policy update: %v", err)
 	}
-	if updated.AllowSandbox || !updated.AllowToolCalling || updated.AllowFileUpload || len(updated.AllowedModelIDs) != 1 {
+	if updated.AllowSandbox || !updated.AllowToolCalling || updated.AllowFileUpload || updated.AllowPrivateChat || len(updated.AllowedModelIDs) != 1 {
 		t.Fatalf("patch clobbered other fields: %+v", updated)
 	}
 

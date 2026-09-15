@@ -16,7 +16,8 @@ const (
 
 var ErrInvalidUserGroupPermissions = errors.New("invalid user group permissions")
 
-// ResourceAccessPolicy controls access to an administrator-managed catalog.
+// ResourceAccessPolicy selects resources from a catalog. Tool policies also
+// apply to user-owned MCP services, regardless of ownership.
 // In selected mode only IDs is allowed. All and none intentionally ignore IDs.
 type ResourceAccessPolicy struct {
 	Mode string   `json:"mode"`
@@ -30,6 +31,9 @@ type UserGroupPermissions struct {
 	Prompts                   ResourceAccessPolicy `json:"prompts"`
 	Skills                    ResourceAccessPolicy `json:"skills"`
 	Tools                     ResourceAccessPolicy `json:"tools"`
+	AllowPrompts              bool                 `json:"allow_prompts"`
+	AllowSkills               bool                 `json:"allow_skills"`
+	AllowWorkspaceDeletion    bool                 `json:"allow_workspace_deletion"`
 	AllowSharing              bool                 `json:"allow_sharing"`
 	AllowKnowledgeBases       bool                 `json:"allow_knowledge_bases"`
 	AllowKnowledgeBaseSharing bool                 `json:"allow_knowledge_base_sharing"`
@@ -56,6 +60,9 @@ func DefaultUserGroupPermissions() UserGroupPermissions {
 		Prompts:                   ResourceAccessPolicy{Mode: ResourceAccessAll, IDs: []string{}},
 		Skills:                    ResourceAccessPolicy{Mode: ResourceAccessAll, IDs: []string{}},
 		Tools:                     ResourceAccessPolicy{Mode: ResourceAccessAll, IDs: []string{}},
+		AllowPrompts:              true,
+		AllowSkills:               true,
+		AllowWorkspaceDeletion:    true,
 		AllowSharing:              true,
 		AllowKnowledgeBases:       true,
 		AllowKnowledgeBaseSharing: true,
@@ -122,6 +129,9 @@ func NormalizeUserGroupPermissions(raw json.RawMessage) (UserGroupPermissions, e
 		return UserGroupPermissions{}, ErrInvalidUserGroupPermissions
 	}
 	for key, target := range map[string]*bool{
+		"allow_prompts":                &permissions.AllowPrompts,
+		"allow_skills":                 &permissions.AllowSkills,
+		"allow_workspace_deletion":     &permissions.AllowWorkspaceDeletion,
 		"allow_sharing":                &permissions.AllowSharing,
 		"allow_knowledge_bases":        &permissions.AllowKnowledgeBases,
 		"allow_knowledge_base_sharing": &permissions.AllowKnowledgeBaseSharing,
@@ -208,12 +218,14 @@ func UserGroupPermissionStateForUser(ctx context.Context, db *sql.DB, userID str
 }
 
 func ResourcePolicyAllows(policy ResourceAccessPolicy, id string) bool {
+	// usermcp:* is the administrator-selectable family for dynamic user MCP
+	// services. It grants no resource ownership or cross-workspace access.
 	switch policy.Mode {
 	case ResourceAccessNone:
 		return false
 	case ResourceAccessSelected:
 		for _, allowed := range policy.IDs {
-			if allowed == id {
+			if allowed == id || (allowed == "usermcp:*" && strings.HasPrefix(id, "usermcp:") && len(id) > len("usermcp:")) {
 				return true
 			}
 		}
@@ -229,6 +241,9 @@ func UserGroupPermissionsEqual(a, b UserGroupPermissions) bool {
 	return resourceAccessPoliciesEqual(a.Prompts, b.Prompts) &&
 		resourceAccessPoliciesEqual(a.Skills, b.Skills) &&
 		resourceAccessPoliciesEqual(a.Tools, b.Tools) &&
+		a.AllowPrompts == b.AllowPrompts &&
+		a.AllowSkills == b.AllowSkills &&
+		a.AllowWorkspaceDeletion == b.AllowWorkspaceDeletion &&
 		a.AllowSharing == b.AllowSharing &&
 		a.AllowKnowledgeBases == b.AllowKnowledgeBases &&
 		a.AllowKnowledgeBaseSharing == b.AllowKnowledgeBaseSharing &&

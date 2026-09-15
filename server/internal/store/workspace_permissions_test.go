@@ -444,7 +444,7 @@ func TestWorkspaceKnowledgeBasePermissionsUseBothLayers(t *testing.T) {
 	for _, item := range items {
 		byUser[item.UserID] = item
 	}
-	if !byUser["owner"].Locked || !byUser["creator"].Locked || byUser["member"].Locked {
+	if !byUser["owner"].Locked || byUser["creator"].Locked || byUser["member"].Locked {
 		t.Fatalf("locked principals=%+v", byUser)
 	}
 	if _, err := ListWorkspaceKnowledgeBaseMemberPermissions(ctx, db, "workspace-kb", "member"); !errors.Is(err, ErrNotFound) {
@@ -486,7 +486,7 @@ func TestWorkspaceKnowledgeBasePermissionsUseBothLayers(t *testing.T) {
 	}
 }
 
-func TestWorkspaceKnowledgeBaseCreatorIsNotCappedByMemberTotals(t *testing.T) {
+func TestWorkspaceKnowledgeBaseCreatorIsCappedByMemberTotals(t *testing.T) {
 	db := openKBPermissionTestDB(t)
 	ctx := context.Background()
 
@@ -504,9 +504,9 @@ func TestWorkspaceKnowledgeBaseCreatorIsNotCappedByMemberTotals(t *testing.T) {
 		if item.UserID != "creator" {
 			continue
 		}
-		if !item.Locked || !item.CanAddFiles || !item.CanDeleteContent ||
-			!item.TotalCanAddKBFiles || !item.TotalCanDeleteKBContent {
-			t.Fatalf("creator permission row=%+v, want uncapped locked principal", item)
+		if item.Locked || !item.CanAddFiles || !item.CanDeleteContent ||
+			item.TotalCanAddKBFiles || item.TotalCanDeleteKBContent {
+			t.Fatalf("creator permission row=%+v, want member ceiling to apply", item)
 		}
 		return
 	}

@@ -33,6 +33,84 @@ func TestWorkspaceUserSkillsBypassPersonalCatalogPolicy(t *testing.T) {
 	}
 }
 
+func TestSkillFeatureRevocationBlocksSelectionRegenerationAndFallback(t *testing.T) {
+	for _, scope := range []string{"personal", "workspace"} {
+		t.Run(scope, func(t *testing.T) {
+			o, provider, model, conversation, _, db := setupToolRouteTest(t)
+			if _, err := db.Exec(`INSERT INTO user_groups(id,name,permissions) VALUES('skill-intersection','Skill intersection','{}');
+				UPDATE users SET role='user',group_id='skill-intersection' WHERE id='u1'`); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.SetModelQuotas(t.Context(), db, model.ID, []store.ModelGroupQuota{{
+				GroupID: "skill-intersection", LimitType: "count", LimitValue: 0,
+			}}); err != nil {
+				t.Fatal(err)
+			}
+			workspaceID := ""
+			if scope == "workspace" {
+				ws, err := store.CreateWorkspace(t.Context(), db, "u1", "Skill revocation")
+				if err != nil {
+					t.Fatal(err)
+				}
+				workspaceID = ws.ID
+				if _, err := db.Exec(`UPDATE conversations SET workspace_id=? WHERE id=?`, ws.ID, conversation.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			skill, err := store.CreateUserSkill(t.Context(), db, store.UserSkill{
+				UserID: "u1", WorkspaceID: workspaceID, Name: "revocation-test", Description: "Test", Instructions: "REVOKED_SKILL_CONTENT",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := o.Run(t.Context(), RunRequest{
+				UserID: "u1", ConversationID: conversation.ID, ModelID: model.ID,
+				UserText: "Hello", ToolMode: ToolModeDisabled, SelectedUserSkillIDs: []string{skill.ID},
+			}, func(SseEvent) {})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(provider.mainRequests) != 1 {
+				t.Fatalf("provider requests=%d", len(provider.mainRequests))
+			}
+			primary := provider.mainRequests[0]
+			if len(primary.SelectedUserSkillIDs) != 1 || primary.SelectedUserSkillIDs[0] != skill.ID {
+				t.Fatal("fallback lost selected skill identity")
+			}
+			p := store.DefaultUserGroupPermissions()
+			p.AllowSkills = false
+			raw, err := json.Marshal(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec(`UPDATE user_groups SET permissions=? WHERE id=(SELECT group_id FROM users WHERE id='u1')`, string(raw)); err != nil {
+				t.Fatal(err)
+			}
+			for _, req := range []RunRequest{
+				{UserID: "u1", ConversationID: conversation.ID, ModelID: model.ID, UserText: "New selection", SelectedUserSkillIDs: []string{skill.ID}},
+				{UserID: "u1", ConversationID: conversation.ID, ModelID: model.ID, UserText: "Hello", ParentID: result.UserMessage.ID, ReuseExistingUserMessage: true},
+			} {
+				// A stale caller explicitly allows everything; the current database policy wins.
+				req.ToolAccessPolicy = groupToolAccessPolicy(store.DefaultUserGroupPermissions())
+				if _, err := o.Run(t.Context(), req, func(SseEvent) {}); !errors.Is(err, store.ErrInvalidUserSkillSelection) {
+					t.Fatalf("revoked skill request error=%v", err)
+				}
+			}
+			if _, _, _, err := o.buildFallbackRequest(t.Context(), primary, model.ID); !errors.Is(err, store.ErrInvalidUserSkillSelection) {
+				t.Fatalf("fallback accepted revoked skill: %v", err)
+			}
+			if len(provider.mainRequests) != 1 {
+				t.Fatal("revoked skill reached provider")
+			}
+			if _, err := o.Run(t.Context(), RunRequest{
+				UserID: "u1", ConversationID: conversation.ID, ModelID: model.ID, UserText: "Ordinary message", ToolMode: ToolModeDisabled,
+			}, func(SseEvent) {}); err != nil {
+				t.Fatalf("ordinary chat blocked by skill denial: %v", err)
+			}
+		})
+	}
+}
+
 func TestSelectedUserSkillsPersistInjectAtUserAuthorityAndRegenerate(t *testing.T) {
 	orchestrator, provider, model, conversation, _, db := setupToolRouteTest(t)
 	skill, err := store.CreateUserSkill(t.Context(), db, store.UserSkill{

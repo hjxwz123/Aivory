@@ -74,9 +74,8 @@ func UpdateWorkspaceKnowledgeBaseMemberPermission(
 		return nil, err
 	}
 
-	// The workspace owner, admins and the KB creator are fixed principals and
-	// always retain effective access while the creator remains a workspace
-	// member; per-library overlays only constrain ordinary members and guests.
+	// Only workspace owners/admins bypass content overlays. A library creator
+	// retains management rights, but content permissions obey the member ceiling.
 	res, err := tx.ExecContext(ctx, `INSERT INTO workspace_kb_member_permissions(
 		kb_id,user_id,can_add_files,can_delete_content,updated_at
 	)
@@ -84,7 +83,7 @@ func UpdateWorkspaceKnowledgeBaseMemberPermission(
 	  FROM knowledge_bases k
 	  JOIN workspaces w ON w.id=k.workspace_id
 	  JOIN workspace_members m ON m.workspace_id=w.id AND m.user_id=?
-	 WHERE k.id=? AND m.user_id<>w.owner_id AND m.user_id<>k.user_id
+	 WHERE k.id=? AND m.user_id<>w.owner_id
 	   AND COALESCE(m.role,'') NOT IN ('admin','owner')
 	ON CONFLICT(kb_id,user_id) DO UPDATE SET
 	  can_add_files=excluded.can_add_files,
@@ -134,11 +133,11 @@ func workspaceKnowledgeBaseMemberPermissionsQuery() string {
 		CASE WHEN w.owner_id=m.user_id THEN 'admin' ELSE ` + normalizeWorkspaceRoleSQL("m.role") + ` END,
 		CASE WHEN w.owner_id=m.user_id THEN 1 ELSE 0 END,
 		COALESCE(u.name,''),COALESCE(u.email,''),COALESCE(u.settings,''),
-		CASE WHEN w.owner_id=m.user_id OR ` + isAdminRoleSQL("m.role") + ` OR k.user_id=m.user_id THEN 1 ELSE COALESCE(p.can_add_files,1) END,
-		CASE WHEN w.owner_id=m.user_id OR ` + isAdminRoleSQL("m.role") + ` OR k.user_id=m.user_id THEN 1 ELSE COALESCE(p.can_delete_content,1) END,
-		CASE WHEN w.owner_id=m.user_id OR ` + isAdminRoleSQL("m.role") + ` OR k.user_id=m.user_id THEN 1 ELSE m.can_add_kb_files END,
-		CASE WHEN w.owner_id=m.user_id OR ` + isAdminRoleSQL("m.role") + ` OR k.user_id=m.user_id THEN 1 ELSE m.can_delete_kb_content END,
-		CASE WHEN w.owner_id=m.user_id OR ` + isAdminRoleSQL("m.role") + ` OR k.user_id=m.user_id THEN 1 ELSE 0 END
+		CASE WHEN w.owner_id=m.user_id OR ` + isAdminRoleSQL("m.role") + ` THEN 1 ELSE COALESCE(p.can_add_files,1) END,
+		CASE WHEN w.owner_id=m.user_id OR ` + isAdminRoleSQL("m.role") + ` THEN 1 ELSE COALESCE(p.can_delete_content,1) END,
+		CASE WHEN w.owner_id=m.user_id OR ` + isAdminRoleSQL("m.role") + ` THEN 1 WHEN m.role='guest' THEN 0 ELSE m.can_add_kb_files END,
+		CASE WHEN w.owner_id=m.user_id OR ` + isAdminRoleSQL("m.role") + ` THEN 1 WHEN m.role='guest' THEN 0 ELSE m.can_delete_kb_content END,
+		CASE WHEN w.owner_id=m.user_id OR ` + isAdminRoleSQL("m.role") + ` THEN 1 ELSE 0 END
 	FROM knowledge_bases k
 	JOIN workspaces w ON w.id=k.workspace_id
 	JOIN workspace_members m ON m.workspace_id=w.id

@@ -103,6 +103,9 @@ type UnifiedChatRequest struct {
 	// selection.
 	SelectedToolIDs         []string
 	SelectedToolsConfigured bool
+	// Retain selected skill identities so fallback can revalidate instructions
+	// already injected into History before contacting another provider.
+	SelectedUserSkillIDs []string
 	// ToolAccessPolicy is the current user's server-authoritative group ceiling.
 	// It is carried into transparent model fallback so a fallback cannot broaden
 	// access even when its own default tool set is larger.
@@ -165,8 +168,7 @@ type ToolAccessPolicy struct {
 	// user-facing field; new policy constructors must set it to true.
 	ToolCallingConfigured bool
 	// AllowMCP is the workspace-wide MCP capability. It is checked in addition
-	// to the normal tool allowlist so user-owned MCP servers cannot use the
-	// owner exemption to bypass a workspace shutdown.
+	// to the normal tool allowlist for system and user-owned MCP servers alike.
 	AllowMCP bool
 	// MCPConfigured has the same backwards-compatibility role as
 	// ToolCallingConfigured for AllowMCP.
@@ -174,6 +176,9 @@ type ToolAccessPolicy struct {
 	AllowDrawing  bool
 	AllowMemory   bool
 	AllowSkills   bool
+	// DenyUserSkills disables selected user/workspace skills independently of
+	// administrator catalog access. A missing legacy value remains permissive.
+	DenyUserSkills bool
 	// SkillMode and SkillIDs independently cap administrator-managed skills.
 	// A group may allow use_skill as a tool while exposing only selected skills.
 	SkillMode string
@@ -239,9 +244,9 @@ type ToolDef struct {
 // single service-level item presented in the user tool picker. UserOwned marks
 // a user-scoped "usermcp:" server so the orchestrator can keep private
 // servers out of models.mcp_server_ids defaults and the filters can route the
-// selection through the right catalog namespace. OwnerExempt is true only when
-// the scoped row was created by the current caller; teammate-owned workspace
-// rows remain subject to the user's group tool policy.
+// selection through the right catalog namespace. CreatedByUser is true only when
+// the scoped row was created by the current caller. It is metadata only:
+// all rows remain subject to the user's group tool policy.
 type MCPToolDef struct {
 	ToolDef
 	ServerID           string
@@ -249,7 +254,7 @@ type MCPToolDef struct {
 	DisplayDescription string
 	Icon               string
 	UserOwned          bool
-	OwnerExempt        bool
+	CreatedByUser      bool
 }
 
 // SseEvent is the on-the-wire shape per §6.2. Always lowercase, snake_case.

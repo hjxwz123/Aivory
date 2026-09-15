@@ -84,8 +84,13 @@ func userProjectWithLibraryPermissions(
 	if err != nil {
 		return projectResponse{}, err
 	}
-	canUpload := permissions.AllowKnowledgeBases && permissions.AllowFileUpload && kb.CanUpload
-	canDelete := permissions.AllowKnowledgeBases && kb.CanDeleteContent
+	policy, err := store.GetWorkspacePolicy(ctx, db, p.WorkspaceID)
+	if err != nil {
+		return projectResponse{}, err
+	}
+	contentAllowed := permissions.AllowKnowledgeBases && policy.AllowKnowledgeBases
+	canUpload := contentAllowed && permissions.AllowFileUpload && policy.AllowFileUpload && kb.CanUpload
+	canDelete := contentAllowed && kb.CanDeleteContent
 	response.CanUploadFiles = &canUpload
 	response.CanDeleteContent = &canDelete
 	return response, nil
@@ -280,7 +285,7 @@ func getProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	docs := []store.Document{}
-	if permissions.AllowKnowledgeBases && p.KBID != "" {
+	if permissions.AllowKnowledgeBases && p.KBID != "" && knowledgeBaseAccessPolicy(d, r, p.KBID, false) == nil {
 		docs, _ = store.ListDocumentsForUser(r.Context(), d.DB, "kb", p.KBID, u.ID)
 	}
 	convs, _ := store.ListConversations(r.Context(), d.DB, u.ID, p.ID, "active", projectDetailConversationsPageSize, 0)
@@ -312,6 +317,9 @@ func updateProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		project, err := store.GetProject(r.Context(), d.DB, id, u.ID)
 		if err != nil || strings.TrimSpace(project.KBID) == "" {
 			writeError(w, http.StatusNotFound, errNotFound)
+			return
+		}
+		if !requireKnowledgeBaseAccess(d, w, r, project.KBID, true) {
 			return
 		}
 		kb, err := store.GetKB(r.Context(), d.DB, project.KBID, u.ID)
@@ -473,6 +481,9 @@ func listProjectDocsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
+	if !requireKnowledgeBaseAccess(d, w, r, p.KBID, false) {
+		return
+	}
 	docs, _ := store.ListDocumentsForUser(r.Context(), d.DB, "kb", p.KBID, u.ID)
 	writeJSON(w, 200, userDocuments(docs))
 }
@@ -488,6 +499,9 @@ func uploadProjectDocHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	p, err := store.GetProject(r.Context(), d.DB, id, u.ID)
 	if err != nil || p.KBID == "" {
 		writeError(w, 404, errNotFound)
+		return
+	}
+	if !requireKnowledgeBaseAccess(d, w, r, p.KBID, true) {
 		return
 	}
 	// §workspace RBAC phase 4: project uploads re-check the KB switch.
@@ -527,6 +541,9 @@ func deleteProjectDocHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
+	if !requireKnowledgeBaseAccess(d, w, r, p.KBID, false) {
+		return
+	}
 	doc, err := store.GetDocumentForUser(r.Context(), d.DB, docID, u.ID)
 	if err != nil || doc.KBID != p.KBID {
 		writeError(w, 404, errNotFound)
@@ -549,6 +566,9 @@ func renameProjectDocHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	p, err := store.GetProject(r.Context(), d.DB, id, u.ID)
 	if err != nil || p.KBID == "" {
 		writeError(w, 404, errNotFound)
+		return
+	}
+	if !requireKnowledgeBaseAccess(d, w, r, p.KBID, false) {
 		return
 	}
 	doc, err := store.GetDocumentForUser(r.Context(), d.DB, docID, u.ID)

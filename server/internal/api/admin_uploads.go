@@ -170,21 +170,8 @@ func uploadIconAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, err)
 		return
 	}
-
-	// 6. Random 12-byte filename. Hex-encoded → 24 chars + extension.
-	id, err := randomHex(12)
+	filename, err := saveUploadedIcon(d, data, ext)
 	if err != nil {
-		writeError(w, 500, err)
-		return
-	}
-	dir := filepath.Join(d.Config.UploadDir, "icons")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		writeError(w, 500, err)
-		return
-	}
-	filename := id + "." + ext
-	path := filepath.Join(dir, filename)
-	if err := os.WriteFile(path, data, 0o644); err != nil {
 		writeError(w, 500, err)
 		return
 	}
@@ -193,6 +180,24 @@ func uploadIconAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		"url":      "/api/icons/" + filename,
 		"filename": filename,
 	})
+}
+
+// saveUploadedIcon stores a validated image under a random name. It is shared
+// by global admin assets and workspace announcement uploads.
+func saveUploadedIcon(d Deps, data []byte, ext string) (string, error) {
+	id, err := randomHex(12)
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(d.Config.UploadDir, "icons")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	filename := id + "." + ext
+	if err := os.WriteFile(filepath.Join(dir, filename), data, 0o644); err != nil {
+		return "", err
+	}
+	return filename, nil
 }
 
 // serveIcon — GET /api/icons/:filename. Any authenticated user can fetch an

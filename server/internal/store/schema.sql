@@ -1084,6 +1084,7 @@ CREATE TABLE IF NOT EXISTS workspace_policies (
   allow_mcp                   INTEGER NOT NULL DEFAULT 1,
   allow_skills                INTEGER NOT NULL DEFAULT 1,
   allow_prompts               INTEGER NOT NULL DEFAULT 1,
+  allow_private_chat          INTEGER NOT NULL DEFAULT 1,
   allow_knowledge_bases       INTEGER NOT NULL DEFAULT 1,
   allow_file_upload           INTEGER NOT NULL DEFAULT 1,
   member_monthly_credit_limit REAL NOT NULL DEFAULT 0,
@@ -1106,6 +1107,16 @@ CREATE TABLE IF NOT EXISTS workspace_audit_logs (
 );
 CREATE INDEX IF NOT EXISTS idx_ws_audit_workspace ON workspace_audit_logs(workspace_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ws_kb_permissions_user ON workspace_kb_member_permissions(user_id);
+
+-- Workspace-scoped announcement configuration. The JSON shape mirrors the
+-- global announcement setting, but is isolated by workspace and cascades when
+-- the workspace is removed.
+CREATE TABLE IF NOT EXISTS workspace_announcements (
+  workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
+  config       TEXT NOT NULL DEFAULT '{}',
+  updated_by   TEXT NOT NULL DEFAULT '',
+  updated_at   INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
 
 -- Email-domain enrollment. Bindings survive email edits; only admins release them.
 CREATE TABLE IF NOT EXISTS registration_domains (

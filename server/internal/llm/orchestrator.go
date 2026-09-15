@@ -479,7 +479,7 @@ func toolAccessPolicyAllows(policy *ToolAccessPolicy, id string) bool {
 	case store.ResourceAccessSelected:
 		allowed := false
 		for _, candidate := range policy.IDs {
-			if candidate == id {
+			if store.ResourcePolicyAllows(store.ResourceAccessPolicy{Mode: store.ResourceAccessSelected, IDs: []string{candidate}}, id) {
 				allowed = true
 				break
 			}
@@ -497,11 +497,8 @@ func toolAccessPolicyAllows(policy *ToolAccessPolicy, id string) bool {
 	return true
 }
 
-// toolAccessPolicyHardAllows contains restrictions that no resource owner is
-// allowed to bypass. In particular, workspace capability switches are
-// intentionally separate from Mode/IDs: an owner exemption may ignore a
-// member's selected tool list, but it can never turn tools or MCP back on after
-// a workspace administrator has disabled them.
+// toolAccessPolicyHardAllows applies capability switches and explicit denies
+// in addition to the catalog Mode/IDs policy.
 func toolAccessPolicyHardAllows(policy *ToolAccessPolicy, id string) bool {
 	if policy == nil {
 		return true
@@ -550,7 +547,8 @@ func groupToolAccessPolicy(permissions store.UserGroupPermissions) *ToolAccessPo
 		MCPConfigured:         true,
 		AllowDrawing:          permissions.AllowDrawing,
 		AllowMemory:           permissions.AllowMemory,
-		AllowSkills:           allowSkills,
+		AllowSkills:           permissions.AllowSkills && allowSkills,
+		DenyUserSkills:        !permissions.AllowSkills,
 		SkillMode:             permissions.Skills.Mode,
 		SkillIDs:              append([]string(nil), permissions.Skills.IDs...),
 	}
@@ -579,6 +577,7 @@ func workspaceToolAccessPolicy(policy store.WorkspacePolicy) *ToolAccessPolicy {
 		AllowDrawing:          policy.AllowDrawing,
 		AllowMemory:           true,
 		AllowSkills:           policy.AllowSkills,
+		DenyUserSkills:        !policy.AllowSkills,
 		SkillMode:             store.ResourceAccessAll,
 	}
 	if !policy.AllowSkills {
@@ -608,14 +607,16 @@ func intersectResourceAccess(
 	if rightMode == store.ResourceAccessAll {
 		return leftMode, append([]string(nil), leftIDs...)
 	}
-	rightSet := make(map[string]bool, len(rightIDs))
-	for _, id := range rightIDs {
-		rightSet[id] = true
-	}
 	intersection := make([]string, 0, len(leftIDs))
-	for _, id := range leftIDs {
-		if rightSet[id] {
+	seen := make(map[string]bool)
+	left := store.ResourceAccessPolicy{Mode: leftMode, IDs: leftIDs}
+	right := store.ResourceAccessPolicy{Mode: rightMode, IDs: rightIDs}
+	// Enumerate both sides so a user-MCP family grant intersected with an
+	// individual service grant retains only that service, in either order.
+	for _, id := range append(append([]string(nil), leftIDs...), rightIDs...) {
+		if !seen[id] && store.ResourcePolicyAllows(left, id) && store.ResourcePolicyAllows(right, id) {
 			intersection = append(intersection, id)
+			seen[id] = true
 		}
 	}
 	if len(intersection) == 0 {
@@ -656,6 +657,7 @@ func intersectToolAccessPolicies(requested, current *ToolAccessPolicy) *ToolAcce
 		AllowDrawing:          requested.AllowDrawing && current.AllowDrawing,
 		AllowMemory:           requested.AllowMemory && current.AllowMemory,
 		AllowSkills:           requested.AllowSkills && current.AllowSkills && skillMode != store.ResourceAccessNone,
+		DenyUserSkills:        requested.DenyUserSkills || current.DenyUserSkills,
 		SkillMode:             skillMode,
 		SkillIDs:              skillIDs,
 		DenyIDs:               denyIDs,
@@ -665,6 +667,9 @@ func intersectToolAccessPolicies(requested, current *ToolAccessPolicy) *ToolAcce
 func skillAccessPolicyAllows(policy *ToolAccessPolicy, id string) bool {
 	if policy == nil {
 		return true
+	}
+	if !policy.AllowSkills {
+		return false
 	}
 	switch policy.SkillMode {
 	case store.ResourceAccessNone:
@@ -682,6 +687,9 @@ func skillAccessPolicyAllows(policy *ToolAccessPolicy, id string) bool {
 }
 
 func adminSkillIDSet(policy *ToolAccessPolicy) map[string]bool {
+	if policy != nil && !policy.AllowSkills {
+		return map[string]bool{}
+	}
 	if policy == nil || policy.SkillMode == "" || policy.SkillMode == store.ResourceAccessAll {
 		return nil
 	}
@@ -695,6 +703,9 @@ func adminSkillIDSet(policy *ToolAccessPolicy) map[string]bool {
 }
 
 func userSkillAccessPolicyAllows(policy *ToolAccessPolicy, skill store.UserSkill) bool {
+	if policy != nil && policy.DenyUserSkills {
+		return false
+	}
 	// Shared workspace skills are checked against the workspace policy and
 	// member capability before selection is resolved. They must not be treated
 	// as personal catalog copies here: a personal selected/none policy is an
@@ -782,11 +793,8 @@ func filterMCPToolsByAccess(defs []MCPToolDef, policy *ToolAccessPolicy) []MCPTo
 		if definition.UserOwned {
 			id = "usermcp:" + definition.ServerID
 		}
-		// OwnerExempt only bypasses the member/group Mode/IDs selection. Hard
-		// workspace denies (DenyIDs, AllowToolCalling, AllowMCP) are checked first
-		// and always win.
-		if toolAccessPolicyHardAllows(policy, id) &&
-			(definition.OwnerExempt || toolAccessPolicyAllows(policy, id)) {
+		// Ownership grants resource access, never an exception to group policy.
+		if toolAccessPolicyAllows(policy, id) {
 			out = append(out, definition)
 		}
 	}
@@ -1838,6 +1846,18 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 		fallbackAccessPolicy = intersectToolAccessPolicies(
 			fallbackAccessPolicy, workspaceToolAccessPolicy(policy),
 		)
+	}
+	if len(base.SelectedUserSkillIDs) > 0 {
+		if err := validateWorkspaceUserSkillAccess(ctx, o.db, base.WorkspaceID, base.UserID, base.SelectedUserSkillIDs); err != nil {
+			return base, nil, "", err
+		}
+		skills, _, err := store.ResolveUserSkillSelectionScoped(ctx, o.db, base.UserID, base.WorkspaceID, base.SelectedUserSkillIDs, true)
+		if err != nil {
+			return base, nil, "", err
+		}
+		if err := validateUserSkillAccessPolicy(fallbackAccessPolicy, skills); err != nil {
+			return base, nil, "", err
+		}
 	}
 	ch, err := store.GetChannel(ctx, o.db, m.ChannelID)
 	if err != nil {
@@ -3274,15 +3294,22 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		} else {
 			snippets, decision, ragErr = o.rag.RouteAndRetrieveDocumentScope(ragCtx, req.UserID, conv.ID, kbIDs, allowedDocumentIDs, currentDocumentIDs, req.UserText, nil, 8)
 		}
-		cancelRAG()
 		ragTimedOut := errors.Is(ragErr, context.DeadlineExceeded) && ctx.Err() == nil
+		// Inspect the RAG context before canceling it: a child task deadline is
+		// not evidence that the overall online-query budget was exhausted.
+		ragBudgetExceeded := errors.Is(ragCtx.Err(), context.DeadlineExceeded)
+		cancelRAG()
 		if ragTimedOut {
 			// Partial retrieval output can represent an arbitrary subset of a large
 			// document scope. Do not inject it as if it were complete; continue the
 			// chat without RAG context and make the degradation explicit in logs.
 			snippets = nil
 			if o.logger != nil {
-				o.logger.Printf("rag: online query timed out after %s (conv=%s, kbs=%v); answering without knowledge context", ragQueryTimeout, conv.ID, kbIDs)
+				if ragBudgetExceeded {
+					o.logger.Printf("rag: online query timed out after %s (conv=%s, kbs=%v); answering without knowledge context", ragQueryTimeout, conv.ID, kbIDs)
+				} else {
+					o.logger.Printf("rag: retrieval stage timed out (conv=%s, kbs=%v): %v; answering without knowledge context", conv.ID, kbIDs, ragErr)
+				}
 			}
 		}
 		if !hasAttachedKnowledgeBase && ctx.Err() == nil {
@@ -3813,6 +3840,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		SelectedToolIDs:         append([]string(nil), req.SelectedToolIDs...),
 		SelectedToolsConfigured: req.SelectedToolsConfigured,
 		ToolAccessPolicy:        req.ToolAccessPolicy,
+		SelectedUserSkillIDs:    append([]string(nil), normalizedSelectedUserSkillIDs...),
 		WorkspaceID:             conv.WorkspaceID,
 		ToolsEnabled:            toolsEnabled,
 		Fast:                    fastMode,

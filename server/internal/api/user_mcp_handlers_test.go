@@ -386,7 +386,7 @@ func TestUserMCPTestRedactsCredentialEchoedInToolName(t *testing.T) {
 	}
 }
 
-func TestSelectableToolsCatalogUserMCPSegmentAndOwnerExemption(t *testing.T) {
+func TestSelectableToolsCatalogUserMCPOwnershipCannotBypassGroupPolicy(t *testing.T) {
 	db := openMigrated(t, filepath.Join(t.TempDir(), "tools-catalog-user-mcp.db"))
 	t.Cleanup(func() { _ = db.Close() })
 	ctx := context.Background()
@@ -462,8 +462,8 @@ func TestSelectableToolsCatalogUserMCPSegmentAndOwnerExemption(t *testing.T) {
 
 	own := listFor("u1", "")
 	row, ok := own["usermcp:"+ownSynced]
-	if !ok || !row.Allowed || row.DefaultSelected || row.Icon != "Blocks" {
-		t.Fatalf("owner row under mode=selected must be visible, allowed and not default-selected: %+v (ok=%v)", row, ok)
+	if !ok || row.Allowed || row.DefaultSelected || row.Icon != "Blocks" {
+		t.Fatalf("excluded owner row must be visible but unavailable: %+v (ok=%v)", row, ok)
 	}
 	for _, hidden := range []string{
 		"usermcp:" + teammatePersonal, "usermcp:" + ownDisabled, "usermcp:" + ownNeverSynced,
@@ -484,22 +484,22 @@ func TestSelectableToolsCatalogUserMCPSegmentAndOwnerExemption(t *testing.T) {
 		t.Fatalf("non-owner member bypassed the selected Tools policy: %+v", shared)
 	}
 	teammateView := listFor("u2", "&workspace_id=ws1")
-	if row, ok := teammateView["usermcp:"+teammatePersonal]; !ok || !row.Allowed {
-		t.Fatalf("owner's personal server not exempt for u2: %+v (ok=%v)", row, ok)
+	if row, ok := teammateView["usermcp:"+teammatePersonal]; !ok || row.Allowed {
+		t.Fatalf("owner's personal server bypassed group policy: %+v (ok=%v)", row, ok)
 	}
-	if row, ok := teammateView["usermcp:"+sharedOwnedByTeammate]; !ok || !row.Allowed {
-		t.Fatalf("owner's workspace server not exempt for u2: %+v (ok=%v)", row, ok)
+	if row, ok := teammateView["usermcp:"+sharedOwnedByTeammate]; !ok || row.Allowed {
+		t.Fatalf("owner's workspace server bypassed group policy: %+v (ok=%v)", row, ok)
 	}
 	if _, exists := teammateView["usermcp:"+ownSynced]; exists {
 		t.Fatalf("u2 saw u1's personal server")
 	}
 
-	// The same exemption must survive turn selection filtering.
+	// Turn selection applies the same group ceiling to all user MCP servers.
 	kept, configured := applyTurnToolPermissions(permissions, []string{
 		"usermcp:" + ownSynced, "usermcp:" + sharedOwnedByTeammate, "usermcp:" + teammatePersonal,
-	}, true, toolPolicyScope{ctx: ctx, db: db, userID: "u1", workspaceID: "ws1"})
-	if !configured || len(kept) != 1 || kept[0] != "usermcp:"+ownSynced {
-		t.Fatalf("applyTurnToolPermissions kept=%v want only the owner-exempt id", kept)
+	}, true)
+	if !configured || len(kept) != 0 {
+		t.Fatalf("applyTurnToolPermissions kept=%v want no excluded ids", kept)
 	}
 
 	// An official workspace allowlist must remain independent from the user's

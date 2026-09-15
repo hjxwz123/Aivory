@@ -139,6 +139,21 @@ func findPrivateMaxTokens(body map[string]any) int {
 }
 
 func (o *Orchestrator) RunPrivate(ctx context.Context, userID string, model *store.Model, history []UnifiedMessage, emit func(SseEvent)) error {
+	return o.RunPrivateInWorkspace(ctx, userID, "", model, history, emit)
+}
+
+type privateWorkspaceScopeKey struct{}
+
+func privateWorkspaceScope(ctx context.Context) string {
+	id, _ := ctx.Value(privateWorkspaceScopeKey{}).(string)
+	return id
+}
+
+// RunPrivateInWorkspace records only the usage scope so workspace credit
+// limits remain effective. The API authorizes scope before calling; message
+// bodies and conversation records are never persisted by this path.
+func (o *Orchestrator) RunPrivateInWorkspace(ctx context.Context, userID, workspaceID string, model *store.Model, history []UnifiedMessage, emit func(SseEvent)) error {
+	ctx = context.WithValue(ctx, privateWorkspaceScopeKey{}, workspaceID)
 	if len(history) == 0 || model == nil || !model.Enabled || model.Kind != "chat" || model.Fast {
 		return errors.New("private_model_unavailable")
 	}
@@ -161,7 +176,7 @@ func (o *Orchestrator) RunPrivate(ctx context.Context, userID string, model *sto
 		if blocked {
 			logCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			defer cancel()
-			if err := store.LogUsageAnalytics(logCtx, o.db, store.UsageLog{UserID: userID, MessageID: "private_" + uuid.NewString(), ModelID: model.ID, ChannelID: model.ChannelID, Purpose: "chat", Status: "error", Error: "moderation_blocked"}); err != nil {
+			if err := store.LogUsageAnalytics(logCtx, o.db, store.UsageLog{UserID: userID, WorkspaceID: privateWorkspaceScope(ctx), MessageID: "private_" + uuid.NewString(), ModelID: model.ID, ChannelID: model.ChannelID, Purpose: "chat", Status: "error", Error: "moderation_blocked"}); err != nil {
 				return errors.New("private_billing_error")
 			}
 			return errors.New("private_moderation_blocked")
@@ -288,7 +303,8 @@ func (o *Orchestrator) privateCall(ctx context.Context, userID string, model *st
 	logCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 	defer cancel()
 	usage := store.UsageLog{
-		UserID: userID, MessageID: operationID, ModelID: model.ID, ChannelID: model.ChannelID, Purpose: purpose,
+		WorkspaceID: privateWorkspaceScope(ctx),
+		UserID:      userID, MessageID: operationID, ModelID: model.ID, ChannelID: model.ChannelID, Purpose: purpose,
 		InputTokens: result.Usage.InputTokens, OutputTokens: result.Usage.OutputTokens,
 		CacheReadTokens: result.Usage.CacheReadTokens, CacheWriteTokens: result.Usage.CacheWriteTokens,
 		Cost: computeCost(*model, result.Usage), Currency: model.Currency,

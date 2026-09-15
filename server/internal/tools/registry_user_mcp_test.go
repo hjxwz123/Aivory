@@ -50,7 +50,7 @@ func TestRegistryListMCPKeepsOfficialAndUserSourcesWithSameID(t *testing.T) {
 	if !seenSources[false].UserOwned && seenSources[false].Name == "" {
 		t.Fatalf("official definition missing: %+v", definitions)
 	}
-	if !seenSources[true].UserOwned || !seenSources[true].OwnerExempt {
+	if !seenSources[true].UserOwned || !seenSources[true].CreatedByUser {
 		t.Fatalf("user-owned definition metadata=%+v", seenSources[true])
 	}
 	if seenSources[false].Name == seenSources[true].Name {
@@ -471,7 +471,7 @@ func TestRegistryRunUserMCPHonorsWorkspaceCapabilitiesBeforeDial(t *testing.T) {
 
 	// AllowedMCPServerIDs is the administrator-owned MCP allowlist. It must not
 	// silently turn into a denylist for user-owned workspace servers. Exercise a
-	// teammate (OwnerExempt=false), so success here comes from ordinary group-all
+	// teammate (CreatedByUser=false), so success here comes from ordinary group-all
 	// permission rather than the creator exemption.
 	officialOnly := []string{"mcp:official-only"}
 	if _, err := store.UpdateWorkspacePolicy(context.Background(), db, "ws1", "u1", store.WorkspacePolicyPatch{
@@ -483,7 +483,7 @@ func TestRegistryRunUserMCPHonorsWorkspaceCapabilitiesBeforeDial(t *testing.T) {
 	teammateFunction := ""
 	for _, definition := range teammateDefinitions {
 		if definition.ServerID == server.ID {
-			if !definition.UserOwned || definition.OwnerExempt {
+			if !definition.UserOwned || definition.CreatedByUser {
 				t.Fatalf("teammate definition identity=%+v", definition)
 			}
 			teammateFunction = definition.Name
@@ -562,7 +562,7 @@ func TestRegistryRunUserMCPHonorsWorkspaceCapabilitiesBeforeDial(t *testing.T) {
 	}
 }
 
-func TestRegistryUserMCPOwnerExemptionCannotBypassWorkspaceOrMemberDenies(t *testing.T) {
+func TestRegistryUserMCPOwnershipCannotBypassGroupWorkspaceOrMemberDenies(t *testing.T) {
 	var requests atomic.Int64
 	bridge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
@@ -600,9 +600,7 @@ func TestRegistryUserMCPOwnerExemptionCannotBypassWorkspaceOrMemberDenies(t *tes
 		DiscoveredTools: registryUserMCPSnapshot("owner/search"),
 	})
 
-	// Force the user's group tool list to none. The successful first call proves
-	// this test is exercising the resource-owner exemption, not ordinary group
-	// access; all workspace/member switches remain hard ceilings above it.
+	// Group denial must stop even the creator before any network request.
 	permissions := store.DefaultUserGroupPermissions()
 	permissions.Tools = store.ResourceAccessPolicy{Mode: store.ResourceAccessNone}
 	raw, err := json.Marshal(permissions)
@@ -620,7 +618,7 @@ func TestRegistryUserMCPOwnerExemptionCannotBypassWorkspaceOrMemberDenies(t *tes
 	functionName := ""
 	for _, definition := range definitions {
 		if definition.ServerID == server.ID {
-			if !definition.UserOwned || !definition.OwnerExempt {
+			if !definition.UserOwned || !definition.CreatedByUser {
 				t.Fatalf("owner definition identity=%+v", definition)
 			}
 			functionName = definition.Name
@@ -636,11 +634,23 @@ func TestRegistryUserMCPOwnerExemptionCannotBypassWorkspaceOrMemberDenies(t *tes
 	}
 	before := requests.Load()
 	text, _, err := registry.Run(ctx, functionName, nil, toolContext)
-	if err != nil || text != "owner result" {
-		t.Fatalf("owner exemption did not bypass group-none list: text=%q err=%v", text, err)
+	if err == nil || text != "" {
+		t.Fatalf("owner bypassed group-none list: text=%q err=%v", text, err)
 	}
-	if requests.Load() != before+2 {
-		t.Fatalf("owner execution request count=%d want=%d", requests.Load(), before+2)
+	if requests.Load() != before {
+		t.Fatalf("denied owner reached endpoint: requests=%d", requests.Load())
+	}
+	permissions.Tools = store.ResourceAccessPolicy{Mode: store.ResourceAccessSelected, IDs: []string{"usermcp:" + server.ID}}
+	raw, err = json.Marshal(permissions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE user_groups SET permissions=? WHERE id='owner-exempt-none'`, string(raw)); err != nil {
+		t.Fatal(err)
+	}
+	text, _, err = registry.Run(ctx, functionName, nil, toolContext)
+	if err != nil || text != "owner result" || requests.Load() != before+2 {
+		t.Fatalf("explicitly allowed owner call: text=%q err=%v requests=%d", text, err, requests.Load())
 	}
 
 	assertDeniedBeforeDial := func(wantError string) {
@@ -853,7 +863,7 @@ func assertScopedUserMCPDefinition(t *testing.T, definitions []llm.MCPToolDef, s
 		if definition.ServerID != serverID {
 			continue
 		}
-		if !definition.UserOwned || definition.OwnerExempt != ownerExempt {
+		if !definition.UserOwned || definition.CreatedByUser != ownerExempt {
 			t.Fatalf("definition for %s=%+v want user_owned=true owner_exempt=%v", serverID, definition, ownerExempt)
 		}
 		return

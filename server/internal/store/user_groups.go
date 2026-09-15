@@ -196,6 +196,7 @@ func isZeroUserGroupPermissions(p UserGroupPermissions) bool {
 	return p.Prompts.Mode == "" && len(p.Prompts.IDs) == 0 &&
 		p.Skills.Mode == "" && len(p.Skills.IDs) == 0 &&
 		p.Tools.Mode == "" && len(p.Tools.IDs) == 0 &&
+		!p.AllowPrompts && !p.AllowSkills && !p.AllowWorkspaceDeletion &&
 		!p.AllowSharing && !p.AllowKnowledgeBases && !p.AllowKnowledgeBaseSharing && !p.AllowFileUpload &&
 		!p.AllowConversationExport && !p.AllowConversationDeletion && !p.AllowVoiceTranscription &&
 		!p.AllowMemory && !p.AllowDrawing && !p.AllowPrivateChat

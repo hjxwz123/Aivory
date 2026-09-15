@@ -82,7 +82,8 @@ func TestDomainLockHTTPBoundaryAndLiveUnlock(t *testing.T) {
 		{"POST", "/api/conversations", fmt.Sprintf(`{"title":"Shared","workspace_id":%q}`, ws.ID), 204},
 		{"POST", "/api/conversations/archive-all?workspace_id=" + ws.ID, "{}", 403},
 		{"DELETE", "/api/conversations?workspace_id=" + ws.ID, "", 403},
-		{"POST", "/api/private-chat?workspace_id=" + ws.ID, "{}", 403},
+		// The private handler now validates the assigned scope and policy itself.
+		{"POST", "/api/private-chat?workspace_id=" + ws.ID, "{}", 204},
 		{"POST", "/api/workspaces", "{}", 403},
 		{"POST", "/api/workspaces/" + ws.ID + "/leave", "{}", 403},
 		{"POST", "/api/workspaces/join/token", "{}", 403},

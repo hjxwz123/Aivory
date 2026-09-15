@@ -188,7 +188,7 @@ type mcpServerSnapshot struct {
 	LastSyncedAt    int64
 	URL             string
 	UserOwned       bool
-	OwnerExempt     bool
+	CreatedByUser   bool
 }
 
 type mcpBindingSource struct {
@@ -283,7 +283,7 @@ func (r *Registry) ListMCP(_ string, userID string, workspaceID string) []llm.MC
 					URL: server.URL, Headers: server.Headers,
 					Enabled: server.Enabled, DiscoveredTools: server.DiscoveredTools,
 					ProtocolVersion: server.ProtocolVersion, LastSyncedAt: server.LastSyncedAt,
-					UserOwned: true, OwnerExempt: server.UserID == userID,
+					UserOwned: true, CreatedByUser: server.UserID == userID,
 				})
 			}
 		}
@@ -378,7 +378,7 @@ func (r *Registry) mergeMCPDefinitions(servers []mcpServerSnapshot) []llm.MCPToo
 				},
 				ServerID: server.ID, DisplayName: server.Name,
 				DisplayDescription: server.Description, Icon: server.Icon,
-				UserOwned: server.UserOwned, OwnerExempt: server.OwnerExempt,
+				UserOwned: server.UserOwned, CreatedByUser: server.CreatedByUser,
 			})
 			r.mcpBindings[functionName] = mcpBinding{
 				ServerID: server.ID, RemoteName: remote.Name, UserOwned: server.UserOwned,
@@ -603,17 +603,15 @@ func (r *Registry) checkCurrentToolAccess(
 	if r.db == nil {
 		return nil
 	}
-	// Workspace capability switches are checked for both local and MCP tools
-	// before any owner exemption is considered. runMCP repeats this check after
+	// Workspace capability switches are checked for both local and MCP tools.
+	// runMCP repeats this check after
 	// loading the authoritative row to close a policy-change race.
 	if err := r.checkWorkspaceToolAccess(ctx, name, binding, isMCP, tc); err != nil {
 		return err
 	}
 	if isMCP {
-		// The scoped server row is needed to determine whether this caller created
-		// the service. loadRuntimeMCPServer applies the group policy after it reads
-		// that row, so a teammate-owned workspace MCP cannot inherit the owner's
-		// exemption.
+		// loadRuntimeMCPServer applies the group policy after resolving the
+		// authoritative row and its system/user catalog namespace.
 		return nil
 	}
 	if strings.TrimSpace(tc.UserID) == "" {
@@ -632,10 +630,7 @@ func (r *Registry) checkCurrentToolAccess(
 	// drawing capability is still checked below (and workspace policy is checked
 	// by checkWorkspaceToolAccess).
 	directDrawing := !isMCP && name == "image_generate" && tc.DirectImageTurn
-	// MCP calls have a separate group-policy check below because the requester
-	// may be the owner of a user MCP service. Keep the owner exemption in one
-	// place; applying the generic `mcp:` check here first would reject an
-	// owner's `usermcp:` call before checkMCPGroupAccess can grant it.
+	// MCP calls are checked using their own catalog namespace in runMCP.
 	toolID := "builtin:" + name
 	if !isMCP && !directDrawing && !store.ResourcePolicyAllows(permissions.Tools, toolID) {
 		return errors.New("tool is no longer allowed for this user: " + name)
@@ -664,7 +659,7 @@ func (r *Registry) checkCurrentToolAccess(
 			return errors.New("memory is disabled")
 		}
 	case "use_skill":
-		if permissions.Skills.Mode == store.ResourceAccessNone {
+		if !permissions.AllowSkills || permissions.Skills.Mode == store.ResourceAccessNone {
 			return errors.New("skills are no longer allowed for this user")
 		}
 	}
@@ -674,7 +669,7 @@ func (r *Registry) checkCurrentToolAccess(
 // checkWorkspaceToolAccess is the workspace-wide execution gate. It is kept in
 // the tools package so direct registry callers receive the same protection as
 // HTTP turns, and it deliberately knows nothing about the member's group tool
-// selection or the user-MCP owner exemption.
+// selection.
 func (r *Registry) checkWorkspaceToolAccess(
 	ctx context.Context,
 	name string,
@@ -732,13 +727,10 @@ func (r *Registry) checkWorkspaceToolAccess(
 }
 
 // checkMCPGroupAccess applies the member's group tool policy after the
-// authoritative MCP row has been loaded. A creator may use their own user MCP
-// even when the group selected/none list excludes it, but this exemption is
-// intentionally limited to that group list and never reaches workspace gates.
+// authoritative MCP row has been loaded. Ownership never overrides a denial.
 func (r *Registry) checkMCPGroupAccess(
 	ctx context.Context,
 	binding mcpBinding,
-	ownerID string,
 	tc *llm.ToolContext,
 ) error {
 	if r == nil || r.db == nil || tc == nil || strings.TrimSpace(tc.UserID) == "" {
@@ -747,9 +739,6 @@ func (r *Registry) checkMCPGroupAccess(
 	permissions, err := store.UserGroupPermissionsForUser(ctx, r.db, tc.UserID)
 	if err != nil {
 		return fmt.Errorf("resolve current user MCP permission: %w", err)
-	}
-	if binding.UserOwned && strings.TrimSpace(ownerID) == strings.TrimSpace(tc.UserID) {
-		return nil
 	}
 	id := "mcp:" + binding.ServerID
 	if binding.UserOwned {
@@ -927,7 +916,7 @@ func (r *Registry) loadRuntimeMCPServer(
 		if err := r.checkWorkspaceToolAccess(ctx, "", binding, true, tc); err != nil {
 			return nil, "", err
 		}
-		if err := r.checkMCPGroupAccess(ctx, binding, "", tc); err != nil {
+		if err := r.checkMCPGroupAccess(ctx, binding, tc); err != nil {
 			return nil, "", err
 		}
 		return server, "", nil
@@ -966,7 +955,7 @@ func (r *Registry) loadRuntimeMCPServer(
 	if err := r.checkWorkspaceToolAccess(ctx, "", binding, true, tc); err != nil {
 		return nil, "", err
 	}
-	if err := r.checkMCPGroupAccess(ctx, binding, scoped.UserID, tc); err != nil {
+	if err := r.checkMCPGroupAccess(ctx, binding, tc); err != nil {
 		return nil, "", err
 	}
 	runtimeServer := &store.MCPServer{

@@ -115,6 +115,10 @@ func listKBsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			writeError(w, 404, errNotFound)
 			return
 		}
+		if err := enforceWorkspaceKnowledgeBasePolicy(r.Context(), d.DB, wsID); err != nil {
+			writeError(w, workspacePolicyErrorStatus(err), err)
+			return
+		}
 		rows, err = store.ListWorkspaceKBsForUser(r.Context(), d.DB, wsID, u.ID)
 	} else {
 		rows, err = store.ListKBs(r.Context(), d.DB, u.ID)
@@ -130,6 +134,9 @@ func listKBsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 // authorization. It deliberately does not depend on the client's active
 // workspace, so direct links keep working across sidebar scope changes.
 func getKBHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	if !requireKnowledgeBaseAccess(d, w, r, pathParam(r, "id"), false) {
+		return
+	}
 	u := authUser(r)
 	kb, err := store.GetStandaloneKB(r.Context(), d.DB, pathParam(r, "id"), u.ID)
 	if err != nil {
@@ -243,6 +250,9 @@ func createKBHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 // workspace-shared (§workspace RBAC phase 2). Creator or admin only; the store
 // re-authorizes inside the workspace-membership transaction.
 func updateKBHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	if !requireKnowledgeBaseAccess(d, w, r, pathParam(r, "id"), false) {
+		return
+	}
 	u := authUser(r)
 	id := pathParam(r, "id")
 	var req struct {
@@ -312,6 +322,9 @@ func updateKBHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 
 // deleteKBHandler removes the KB and cascades to docs and chunks.
 func deleteKBHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	if !requireKnowledgeBaseAccess(d, w, r, pathParam(r, "id"), false) {
+		return
+	}
 	u := authUser(r)
 	id := pathParam(r, "id")
 	kb, kbErr := store.GetStandaloneKB(r.Context(), d.DB, id, u.ID)
@@ -352,6 +365,9 @@ func deleteKBHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 
 // uploadKBDocHandler accepts a document into the KB and enqueues parsing.
 func uploadKBDocHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	if !requireKnowledgeBaseAccess(d, w, r, pathParam(r, "id"), true) {
+		return
+	}
 	u := authUser(r)
 	id := pathParam(r, "id")
 	kb, err := store.GetStandaloneKB(r.Context(), d.DB, id, u.ID)
@@ -395,6 +411,9 @@ func uploadKBDocHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 
 // listKBDocsHandler returns documents within a KB.
 func listKBDocsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	if !requireKnowledgeBaseAccess(d, w, r, pathParam(r, "id"), false) {
+		return
+	}
 	u := authUser(r)
 	id := pathParam(r, "id")
 	if _, err := store.GetStandaloneKB(r.Context(), d.DB, id, u.ID); err != nil {
@@ -413,6 +432,9 @@ func listKBDocsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 }
 
 func listKBDocumentUploadersHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	if !requireKnowledgeBaseAccess(d, w, r, pathParam(r, "id"), false) {
+		return
+	}
 	u := authUser(r)
 	if _, err := store.GetStandaloneKB(r.Context(), d.DB, pathParam(r, "id"), u.ID); err != nil {
 		writeError(w, http.StatusNotFound, errNotFound)
@@ -431,6 +453,9 @@ func listKBDocumentUploadersHandler(d Deps, w http.ResponseWriter, r *http.Reque
 }
 
 func listKBShareCandidatesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	if !requireKnowledgeBaseAccess(d, w, r, pathParam(r, "id"), false) {
+		return
+	}
 	u := authUser(r)
 	if !requireUserCapabilityError(d, w, r, errKnowledgeBaseSharingGroupPermission, func(p store.UserGroupPermissions) bool { return p.AllowKnowledgeBaseSharing }) {
 		return
@@ -450,6 +475,9 @@ func listKBShareCandidatesHandler(d Deps, w http.ResponseWriter, r *http.Request
 }
 
 func listKBSharesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	if !requireKnowledgeBaseAccess(d, w, r, pathParam(r, "id"), false) {
+		return
+	}
 	u := authUser(r)
 	if !requireUserCapabilityError(d, w, r, errKnowledgeBaseSharingGroupPermission, func(p store.UserGroupPermissions) bool { return p.AllowKnowledgeBaseSharing }) {
 		return
@@ -490,6 +518,9 @@ func publishKnowledgeBaseAccessEvent(d Deps, r *http.Request, kbID string, extra
 }
 
 func upsertKBShareHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	if !requireKnowledgeBaseAccess(d, w, r, pathParam(r, "id"), false) {
+		return
+	}
 	u := authUser(r)
 	if !requireUserCapabilityError(d, w, r, errKnowledgeBaseSharingGroupPermission, func(p store.UserGroupPermissions) bool { return p.AllowKnowledgeBaseSharing }) {
 		return
@@ -519,6 +550,9 @@ func upsertKBShareHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 }
 
 func deleteKBShareHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	if !requireKnowledgeBaseAccess(d, w, r, pathParam(r, "id"), false) {
+		return
+	}
 	u := authUser(r)
 	if !requireUserCapabilityError(d, w, r, errKnowledgeBaseSharingGroupPermission, func(p store.UserGroupPermissions) bool { return p.AllowKnowledgeBaseSharing }) {
 		return
@@ -549,6 +583,9 @@ func deleteKBShareHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 }
 
 func listWorkspaceKBMembersHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	if !requireKnowledgeBaseAccess(d, w, r, pathParam(r, "id"), false) {
+		return
+	}
 	u := authUser(r)
 	rows, err := store.ListWorkspaceKnowledgeBaseMemberPermissions(
 		r.Context(), d.DB, pathParam(r, "id"), u.ID,
@@ -561,10 +598,40 @@ func listWorkspaceKBMembersHandler(d Deps, w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	for i := range rows {
+		if err := applyWorkspaceKBMemberCeilings(d, r, &rows[i]); err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+	}
 	writeJSON(w, http.StatusOK, rows)
 }
 
+// The permission dialog displays the same group/workspace ceiling enforced
+// by the document endpoints, including for administrators and KB creators.
+func applyWorkspaceKBMemberCeilings(d Deps, r *http.Request, member *store.WorkspaceKnowledgeBaseMemberPermission) error {
+	kb, err := store.GetKB(r.Context(), d.DB, member.KBID, authUser(r).ID)
+	if err != nil {
+		return err
+	}
+	policy, err := store.GetWorkspacePolicy(r.Context(), d.DB, kb.WorkspaceID)
+	if err != nil {
+		return err
+	}
+	permissions, err := store.UserGroupPermissionsForUser(r.Context(), d.DB, member.UserID)
+	if err != nil {
+		return err
+	}
+	canUse := policy.AllowKnowledgeBases && permissions.AllowKnowledgeBases
+	member.TotalCanAddKBFiles = member.TotalCanAddKBFiles && canUse && policy.AllowFileUpload && permissions.AllowFileUpload
+	member.TotalCanDeleteKBContent = member.TotalCanDeleteKBContent && canUse
+	return nil
+}
+
 func updateWorkspaceKBMemberHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	if !requireKnowledgeBaseAccess(d, w, r, pathParam(r, "id"), false) {
+		return
+	}
 	u := authUser(r)
 	var body struct {
 		CanAddFiles      bool `json:"can_add_files"`
@@ -587,12 +654,19 @@ func updateWorkspaceKBMemberHandler(d Deps, w http.ResponseWriter, r *http.Reque
 		return
 	}
 	publishKnowledgeBaseAccessEvent(d, r, pathParam(r, "id"), u.ID, pathParam(r, "uid"))
+	if err := applyWorkspaceKBMemberCeilings(d, r, member); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, member)
 }
 
 // retryKBDocHandler requeues a failed knowledge-base document in the existing
 // ingest pipeline. It does not create a second parser or duplicate the upload.
 func retryKBDocHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	if !requireKnowledgeBaseAccess(d, w, r, pathParam(r, "id"), false) {
+		return
+	}
 	u := authUser(r)
 	kbID := pathParam(r, "id")
 	docID := pathParam(r, "docId")
@@ -634,6 +708,9 @@ func retryKBDocHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 // update to the caller's current document-mutation permission, so a personal
 // write collaborator may rename only files they uploaded themselves.
 func renameKBDocHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	if !requireKnowledgeBaseAccess(d, w, r, pathParam(r, "id"), false) {
+		return
+	}
 	u := authUser(r)
 	if _, err := store.GetStandaloneKB(r.Context(), d.DB, pathParam(r, "id"), u.ID); err != nil {
 		writeError(w, http.StatusNotFound, errNotFound)
@@ -680,6 +757,9 @@ func normalizeDocumentFilename(raw string) (string, bool) {
 
 // deleteKBDocHandler removes a single document.
 func deleteKBDocHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	if !requireKnowledgeBaseAccess(d, w, r, pathParam(r, "id"), false) {
+		return
+	}
 	u := authUser(r)
 	id := pathParam(r, "id")
 	docID := pathParam(r, "docId")

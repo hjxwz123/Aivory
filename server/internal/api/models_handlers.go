@@ -220,7 +220,7 @@ func listSkillsPublicHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]publicSkill, 0, len(skills))
 	for _, skill := range skills {
-		if !store.ResourcePolicyAllows(permissions.Skills, skill.ID) {
+		if !permissions.AllowSkills || !store.ResourcePolicyAllows(permissions.Skills, skill.ID) {
 			continue
 		}
 		items = append(items, publicSkill{
@@ -364,7 +364,6 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 	mcpToolsAvailable := false
 	if workspaceToolCallingAllowed && workspaceMCPAllowed && d.Tools != nil {
 		workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id"))
-		mcpScope := toolPolicyScope{ctx: r.Context(), db: d.DB, userID: userID, workspaceID: workspaceID}
 		for _, definition := range d.Tools.ListMCP("", userID, workspaceID) {
 			id := "mcp:" + definition.ServerID
 			if definition.UserOwned {
@@ -373,7 +372,7 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 			if workspacePolicy != nil && !workspaceCatalogToolAllowed(id, workspacePolicy, workspaceMember) {
 				continue
 			}
-			if toolPolicyAllowsID(permissions, id, mcpScope) {
+			if toolPolicyAllowsID(permissions, id) {
 				mcpToolsAvailable = true
 				break
 			}

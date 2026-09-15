@@ -334,6 +334,12 @@ func resolvePermittedUserSkillSelection(
 	strict bool,
 	policy store.ResourceAccessPolicy,
 ) ([]store.UserSkill, []string, error) {
+	if hasNonEmptyIDs(ids) {
+		permissions, err := store.UserGroupPermissionsForUser(ctx, db, userID)
+		if err != nil || !permissions.AllowSkills {
+			return nil, nil, errSkillGroupPermission
+		}
+	}
 	if strings.TrimSpace(workspaceID) != "" && hasNonEmptyIDs(ids) {
 		workspace, workspaceErr := store.GetWorkspaceForMember(ctx, db, workspaceID, userID)
 		if workspaceErr != nil {
@@ -367,29 +373,17 @@ func resolvePermittedUserSkillSelection(
 	return skills, normalized, nil
 }
 
-// toolPolicyScope carries the requester context needed by the user-MCP owner
-// exemption (§ user MCP RBAC). It is optional on purpose: ids that do not use
-// the "usermcp:" namespace never consult it, so every existing call site
-// keeps working unchanged.
-type toolPolicyScope struct {
-	ctx         context.Context
-	db          *sql.DB
-	userID      string
-	workspaceID string
-}
-
 func applyTurnToolPermissions(
 	permissions store.UserGroupPermissions,
 	ids []string,
 	configured bool,
-	scope ...toolPolicyScope,
 ) ([]string, bool) {
 	if !configured {
 		return ids, false
 	}
 	filtered := make([]string, 0, len(ids))
 	for _, id := range ids {
-		if toolPolicyAllowsID(permissions, id, scope...) {
+		if toolPolicyAllowsID(permissions, id) {
 			filtered = append(filtered, id)
 		}
 	}
@@ -406,7 +400,8 @@ func runToolAccessPolicy(permissions store.UserGroupPermissions) *llm.ToolAccess
 		MCPConfigured:         true,
 		AllowDrawing:          permissions.AllowDrawing,
 		AllowMemory:           permissions.AllowMemory,
-		AllowSkills:           skillPolicyHasResources(permissions.Skills),
+		AllowSkills:           permissions.AllowSkills && skillPolicyHasResources(permissions.Skills),
+		DenyUserSkills:        !permissions.AllowSkills,
 		SkillMode:             permissions.Skills.Mode,
 		SkillIDs:              append([]string(nil), permissions.Skills.IDs...),
 	}
@@ -425,8 +420,8 @@ func skillPolicyHasResources(policy store.ResourceAccessPolicy) bool {
 		(policy.Mode == store.ResourceAccessSelected && len(policy.IDs) > 0)
 }
 
-func toolPolicyAllowsID(permissions store.UserGroupPermissions, id string, scope ...toolPolicyScope) bool {
-	if !store.ResourcePolicyAllows(permissions.Tools, id) && !userMCPOwnerExemptsID(id, scope) {
+func toolPolicyAllowsID(permissions store.UserGroupPermissions, id string) bool {
+	if !store.ResourcePolicyAllows(permissions.Tools, id) {
 		return false
 	}
 	if !permissions.AllowDrawing && (id == "builtin:image_generate" || id == "hosted:image_generation") {
@@ -435,59 +430,10 @@ func toolPolicyAllowsID(permissions store.UserGroupPermissions, id string, scope
 	if !permissions.AllowMemory && id == "builtin:save_memory" {
 		return false
 	}
-	if !skillPolicyHasResources(permissions.Skills) && id == "builtin:use_skill" {
+	if (!permissions.AllowSkills || !skillPolicyHasResources(permissions.Skills)) && id == "builtin:use_skill" {
 		return false
 	}
 	return true
 }
 
 const userMCPToolIDPrefix = "usermcp:"
-
-// userMCPOwnerExemptsID implements the § user MCP RBAC owner exemption: a
-// group Tools mode of selected/none never blocks the requester's own
-// "usermcp:<serverID>" server (personal row, or one they created in the
-// active workspace). Servers shared into the workspace by teammates remain
-// subject to the group policy. Without a requester scope the exemption never
-// applies, keeping the pure group-policy check authoritative.
-func userMCPOwnerExemptsID(id string, scope []toolPolicyScope) bool {
-	if len(scope) == 0 || !strings.HasPrefix(id, userMCPToolIDPrefix) {
-		return false
-	}
-	candidate := scope[0]
-	if candidate.db == nil || candidate.ctx == nil || candidate.userID == "" {
-		return false
-	}
-	serverID := strings.TrimPrefix(id, userMCPToolIDPrefix)
-	if serverID == "" || strings.Contains(serverID, ":") {
-		return false
-	}
-	scopes := []string{""}
-	if candidate.workspaceID != "" {
-		scopes = append(scopes, candidate.workspaceID)
-	}
-	for _, workspaceID := range scopes {
-		// User MCP ids are normally generated uniquely, but restores/imports and
-		// older callers can legally reuse an id across rows. In a workspace the
-		// catalog wire id intentionally stays compact (`usermcp:<id>`), so an
-		// owner-only lookup is ambiguous if a teammate has a row with the same id.
-		// Refuse the exemption for that id rather than accidentally treating the
-		// teammate's endpoint as the requester's own service. Runtime scope checks
-		// still provide the final boundary; this check only decides whether the
-		// group allowlist may be bypassed.
-		if workspaceID != "" {
-			var foreignRows int
-			if err := candidate.db.QueryRowContext(candidate.ctx,
-				`SELECT COUNT(*) FROM user_mcp_servers
-				  WHERE id=? AND workspace_id=? AND user_id<>?`,
-				serverID, workspaceID, candidate.userID,
-			).Scan(&foreignRows); err != nil || foreignRows > 0 {
-				return false
-			}
-		}
-		server, err := store.GetUserMCPServerScoped(candidate.ctx, candidate.db, serverID, candidate.userID, workspaceID)
-		if err == nil && server.UserID == candidate.userID {
-			return true
-		}
-	}
-	return false
-}

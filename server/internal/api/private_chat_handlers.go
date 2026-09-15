@@ -32,8 +32,9 @@ type privateChatMessage struct {
 }
 
 type privateChatRequest struct {
-	ModelID  string               `json:"model_id"`
-	Messages []privateChatMessage `json:"messages"`
+	WorkspaceID string               `json:"workspace_id,omitempty"`
+	ModelID     string               `json:"model_id"`
+	Messages    []privateChatMessage `json:"messages"`
 }
 
 func privateChatHistory(body privateChatRequest, model *store.Model, imageLimit int64) ([]llm.UnifiedMessage, error) {
@@ -84,7 +85,8 @@ func privateChatHistory(body privateChatRequest, model *store.Model, imageLimit 
 func privateChatHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store, no-transform")
 	w.Header().Set("Pragma", "no-cache")
-	permissions, permissionErr := requestPermissions(d, r)
+	permissionSnapshot, permissionErr := requestPermissionSnapshotFor(d, r)
+	permissions := permissionSnapshot.Permissions
 	if permissionErr != nil || !permissions.AllowPrivateChat {
 		writeError(w, http.StatusForbidden, errForbidden)
 		return
@@ -93,6 +95,11 @@ func privateChatHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "private_model_unavailable"})
 		return
 	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
+	defer cancel()
+	r = r.WithContext(ctx)
+	permissionWatcher := newGenerationAccessRevocationWatcher(d, ctx, cancel, "", "", &permissionSnapshot, nil, nil)
+	defer permissionWatcher.close()
 	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, privateChatBodyLimit))
 	defer r.Body.Close()
 	if err != nil || !utf8.Valid(data) {
@@ -106,9 +113,57 @@ func privateChatHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "private_invalid_request"})
 		return
 	}
+	// A domain-locked account cannot omit or forge the scope to escape its
+	// workspace ceiling. Older clients inherit the assigned workspace.
+	body.WorkspaceID = strings.TrimSpace(body.WorkspaceID)
+	access, err := store.GetDomainAccess(r.Context(), d.DB, authUser(r).ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if access != nil && access.Locked {
+		if body.WorkspaceID != "" && body.WorkspaceID != access.WorkspaceID {
+			writeError(w, http.StatusForbidden, errDomainSpaceLocked)
+			return
+		}
+		body.WorkspaceID = access.WorkspaceID
+	}
+	if body.WorkspaceID != "" {
+		// Subscribe before reading policy so a concurrent shutdown either
+		// cancels this request or is observed by the checks below.
+		for _, topic := range []string{
+			workspaceGenerationRevocationTopic(body.WorkspaceID),
+			workspacePolicyGenerationRevocationTopic(body.WorkspaceID),
+			workspaceMemberGenerationRevocationTopic(body.WorkspaceID, authUser(r).ID),
+		} {
+			defer subscribeAccessRevocationTopic(d, ctx, cancel, topic)()
+		}
+		workspace, err := store.GetWorkspaceForMember(r.Context(), d.DB, body.WorkspaceID, authUser(r).ID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, errNotFound)
+			return
+		}
+		policy, err := store.GetWorkspacePolicy(r.Context(), d.DB, body.WorkspaceID)
+		if err != nil || !policy.AllowPrivateChat || workspace.Role == "guest" {
+			writeError(w, http.StatusForbidden, errForbidden)
+			return
+		}
+	}
 	model, err := store.GetModel(r.Context(), d.DB, body.ModelID)
 	if err != nil || !model.Enabled || model.Kind != "chat" || model.Fast {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "private_model_unavailable"})
+		return
+	}
+	imageCount := 0
+	for _, message := range body.Messages {
+		imageCount += len(message.Images)
+	}
+	if imageCount > 0 && !permissions.AllowFileUpload {
+		writeError(w, http.StatusForbidden, errFileUploadGroupPermission)
+		return
+	}
+	if err := enforceWorkspaceTurnPolicy(r.Context(), d.DB, &store.Conversation{WorkspaceID: body.WorkspaceID}, authUser(r).ID, model, imageCount, false); err != nil {
+		writeError(w, workspacePolicyErrorStatus(err), err)
 		return
 	}
 	imageLimit := int64(privateChatImageLimit)
@@ -124,8 +179,6 @@ func privateChatHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if stream == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
-	defer cancel()
 	heartbeatDone := make(chan struct{})
 	go func() {
 		defer close(heartbeatDone)
@@ -145,6 +198,9 @@ func privateChatHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		<-heartbeatDone
 	}()
 	emit := func(event llm.SseEvent) {
+		if ctx.Err() != nil {
+			return
+		}
 		if err := stream.Send(event, event.Type); err != nil {
 			cancel()
 		}
@@ -154,7 +210,7 @@ func privateChatHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			emit(llm.SseEvent{Type: "error", Code: "private_provider_error", Message: "private_provider_error"})
 		}
 	}()
-	if err := d.Orchestrator.RunPrivate(ctx, authUser(r).ID, model, history, emit); err != nil {
+	if err := d.Orchestrator.RunPrivateInWorkspace(ctx, authUser(r).ID, body.WorkspaceID, model, history, emit); err != nil {
 		emit(llm.SseEvent{Type: "error", Code: err.Error(), Message: err.Error()})
 	}
 }

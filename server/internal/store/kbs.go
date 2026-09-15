@@ -36,8 +36,8 @@ func knowledgeBaseAccessArgs(userID string) []any {
 
 // knowledgeBaseWritePredicate admits personal owners/collaborators, workspace
 // admins (canonical owner plus admin-role members) and current workspace KB
-// creators. Other non-guest members must pass both the member-level and
-// per-library add-file permissions. Guests can never upload.
+// creators. Every non-admin, including the creator, must pass both the
+// member-level and per-library add-file permissions. Guests can never upload.
 func knowledgeBaseWritePredicate(alias string) string {
 	prefix := ""
 	if alias != "" {
@@ -53,10 +53,7 @@ func knowledgeBaseWritePredicate(alias string) string {
 		`SELECT 1 FROM workspace_members kb_write_admin ` +
 		`WHERE kb_write_admin.workspace_id=kb_write_workspace.id AND kb_write_admin.user_id=? ` +
 		`AND ` + isAdminRoleSQL("kb_write_admin.role") + ` ` +
-		`) OR (` + prefix + `user_id=? AND EXISTS (` +
-		`SELECT 1 FROM workspace_members kb_write_creator ` +
-		`WHERE kb_write_creator.workspace_id=kb_write_workspace.id AND kb_write_creator.user_id=?` +
-		`)) OR EXISTS (` +
+		`) OR EXISTS (` +
 		`SELECT 1 FROM workspace_members kb_write_member ` +
 		`WHERE kb_write_member.workspace_id=kb_write_workspace.id AND kb_write_member.user_id=? ` +
 		`AND ` + isCollaboratorRoleSQL("kb_write_member.role") + ` ` +
@@ -70,13 +67,14 @@ func knowledgeBaseWritePredicate(alias string) string {
 }
 
 func knowledgeBaseWriteArgs(userID string) []any {
-	return []any{userID, userID, userID, userID, userID, userID, userID, userID}
+	return []any{userID, userID, userID, userID, userID, userID}
 }
 
 // workspaceKnowledgeBaseContentDeletePredicate is the manage-any-content
 // boundary of a workspace knowledge base: workspace admins (canonical owner
-// plus admin-role members) and the library's current creator may delete or
-// retry ANY document. Ordinary members delete only their own uploads (see
+// plus admin-role members) may delete or retry ANY document. The current
+// creator may do so only while their member-level and per-library content
+// permissions allow it. Other members delete only their own uploads (see
 // knowledgeBaseDocumentMutationPredicate).
 func workspaceKnowledgeBaseContentDeletePredicate(alias string) string {
 	prefix := alias + "."
@@ -93,6 +91,12 @@ func workspaceKnowledgeBaseContentDeletePredicate(alias string) string {
 		       SELECT 1 FROM workspace_members kb_delete_creator
 		        WHERE kb_delete_creator.workspace_id=kb_delete_workspace.id
 		          AND kb_delete_creator.user_id=?
+		          AND ` + isCollaboratorRoleSQL("kb_delete_creator.role") + `
+		          AND kb_delete_creator.can_delete_kb_content=1
+		          AND COALESCE((SELECT permission.can_delete_content
+		            FROM workspace_kb_member_permissions permission
+		            WHERE permission.kb_id=` + prefix + `id
+		              AND permission.user_id=kb_delete_creator.user_id),1)=1
 		     )
 		   )
 		 )
@@ -131,7 +135,7 @@ func knowledgeBaseDeleteArgs(userID string) []any {
 }
 
 // knowledgeBaseDocumentMutationPredicate protects document-level mutations.
-// Workspace content: admins and the library creator manage every document;
+// Workspace content: admins and permitted library creators manage every document;
 // ordinary non-guest members may only mutate documents they uploaded
 // themselves, and only while their member-level and per-library delete
 // permissions allow it. Personal owners manage every document while write

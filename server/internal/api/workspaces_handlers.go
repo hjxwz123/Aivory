@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"aivory/server/internal/envcfg"
 	"aivory/server/internal/store"
@@ -554,6 +555,7 @@ func updateWorkspacePolicyHandler(d Deps, w http.ResponseWriter, r *http.Request
 		AllowMCP                 *bool     `json:"allow_mcp"`
 		AllowSkills              *bool     `json:"allow_skills"`
 		AllowPrompts             *bool     `json:"allow_prompts"`
+		AllowPrivateChat         *bool     `json:"allow_private_chat"`
 		AllowSandbox             *bool     `json:"allow_sandbox"`
 		AllowImageGeneration     *bool     `json:"allow_image_generation"`
 		AllowKnowledgeBases      *bool     `json:"allow_knowledge_bases"`
@@ -580,6 +582,7 @@ func updateWorkspacePolicyHandler(d Deps, w http.ResponseWriter, r *http.Request
 		AllowMCP:                 req.AllowMCP,
 		AllowSkills:              req.AllowSkills,
 		AllowPrompts:             req.AllowPrompts,
+		AllowPrivateChat:         req.AllowPrivateChat,
 		AllowSandbox:             req.AllowSandbox,
 		AllowImageGeneration:     req.AllowImageGeneration,
 		AllowKnowledgeBases:      req.AllowKnowledgeBases,
@@ -622,13 +625,54 @@ func workspaceUsageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	days, _ := strconv.Atoi(r.URL.Query().Get("days"))
 	if days <= 0 {
 		days = 30
+	} else if days > 365 {
+		days = 365
+	}
+	periodEnd := time.Now().Unix() + 1
+	window := int64(days) * 86400
+	periodStart := periodEnd - window
+	previousStart := periodStart - window
+	bucket := store.UsageBucketWidth(days)
+	filter := store.UsageAnalyticsFilter{WorkspaceID: &workspaceID}
+	totals, err := store.AdminUsageTotalsBetween(r.Context(), d.DB, periodStart, periodEnd, filter)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	previousTotals, err := store.AdminUsageTotalsBetween(r.Context(), d.DB, previousStart, periodStart, filter)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	trend, err := store.AdminUsageTrendBetween(r.Context(), d.DB, periodStart, periodEnd, bucket, filter)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	previousTrend, err := store.AdminUsageTrendBetween(r.Context(), d.DB, previousStart, periodStart, bucket, filter)
+	if err != nil {
+		writeError(w, 500, err)
+		return
 	}
 	rows, err := store.SumWorkspaceUsageByMember(r.Context(), d.DB, workspaceID, days)
 	if err != nil {
 		writeError(w, 500, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"days": days, "usage": rows})
+	writeJSON(w, 200, map[string]any{
+		"days":                  days,
+		"bucket":                bucket,
+		"generated_at":          periodEnd - 1,
+		"period_start":          periodStart,
+		"period_end":            periodEnd,
+		"previous_period_start": previousStart,
+		"previous_period_end":   periodStart,
+		"totals":                totals,
+		"previous_totals":       previousTotals,
+		"trend":                 trend,
+		"previous_trend":        previousTrend,
+		"usage":                 rows,
+	})
 }
 
 // deleteWorkspaceHandler tears down the whole space — OWNER ONLY (§workspaces:
@@ -641,6 +685,11 @@ func deleteWorkspaceHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	ws, err := store.GetWorkspaceForMember(r.Context(), d.DB, id, u.ID)
 	if err != nil || ws.OwnerID != u.ID {
 		writeError(w, 404, errNotFound)
+		return
+	}
+	if !requireUserCapability(d, w, r, func(p store.UserGroupPermissions) bool {
+		return p.AllowWorkspaceDeletion
+	}) {
 		return
 	}
 	members, err := store.ListWorkspaceMembers(r.Context(), d.DB, id)

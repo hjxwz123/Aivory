@@ -3211,6 +3211,9 @@ func (t *useSkillTool) Execute(ctx context.Context, input []byte, tc *llm.ToolCo
 			return "", nil, err
 		}
 		currentSkillPolicy = &permissions.Skills
+		if !permissions.AllowSkills {
+			return "", nil, errors.New("skills are disabled for this user")
+		}
 	}
 	// Only load a skill bound to the current model (model_skills, §4.17) — the same
 	// set advertised in the system-prompt index. Without a model in context, fall

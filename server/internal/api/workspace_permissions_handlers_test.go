@@ -219,16 +219,20 @@ func TestHTTPWorkspaceKnowledgeBaseManagersUpdateOnlyLibraryLayer(t *testing.T) 
 		t.Fatalf("creator changed locked owner: status=%d body=%s", updated.Code, updated.Body.String())
 	}
 
-	// The workspace owner may manage the KB too, but the KB creator remains a
-	// locked principal at the library layer.
+	// The workspace owner can restrict the creator's content permissions while
+	// preserving the creator's resource-management rights.
 	lockedCreator := httptest.NewRecorder()
 	updateWorkspaceKBMemberHandler(deps, lockedCreator, workspacePermissionRequest(
 		t, http.MethodPatch, "/api/kbs/x/workspace-members/y", owner,
 		map[string]string{"id": kbID, "uid": member.ID},
 		map[string]bool{"can_add_files": false, "can_delete_content": false},
 	))
-	if lockedCreator.Code != http.StatusNotFound {
-		t.Fatalf("owner changed locked creator: status=%d body=%s", lockedCreator.Code, lockedCreator.Body.String())
+	if lockedCreator.Code != http.StatusOK {
+		t.Fatalf("owner could not restrict creator: status=%d body=%s", lockedCreator.Code, lockedCreator.Body.String())
+	}
+	kb, err := store.GetKB(t.Context(), deps.DB, kbID, member.ID)
+	if err != nil || kb.CanUpload || kb.CanDeleteContent || !kb.CanManageMembers {
+		t.Fatalf("creator effective rights=%+v err=%v", kb, err)
 	}
 }
 
@@ -362,7 +366,7 @@ func TestHTTPProjectDetailReturnsEffectiveWorkspaceLibraryPermissions(t *testing
 	); err != nil {
 		t.Fatal(err)
 	}
-	assertCapabilities(t, member, true, true, true)
+	assertCapabilities(t, member, false, false, true)
 
 	other := &store.User{ID: "permission-other", Role: "user", Status: "active", GroupID: store.DefaultGroupID}
 	mustExec(t, deps.DB, `INSERT INTO users(id,email,name,password_hash,role,status) VALUES

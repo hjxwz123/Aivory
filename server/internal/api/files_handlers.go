@@ -489,7 +489,7 @@ func uploadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if scopeConv != nil && isDocKind(f.Kind) {
 		if c := scopeConv; c.ProjectID != "" {
 			permissions, permissionErr := requestPermissions(d, r)
-			if p, err := store.GetProject(r.Context(), d.DB, c.ProjectID, u.ID); permissionErr == nil && permissions.AllowKnowledgeBases && err == nil && p.AutoAddUploads && p.KBID != "" {
+			if p, err := store.GetProject(r.Context(), d.DB, c.ProjectID, u.ID); permissionErr == nil && permissions.AllowKnowledgeBases && err == nil && p.AutoAddUploads && p.KBID != "" && knowledgeBaseAccessPolicy(d, r, p.KBID, true) == nil {
 				if doc, derr := store.CreateDocumentForUser(r.Context(), d.DB, store.Document{
 					KBID: p.KBID, Filename: f.Filename, MimeType: f.MimeType,
 					SizeBytes: f.SizeBytes, Status: "pending", StoragePath: f.StoragePath,
@@ -835,7 +835,7 @@ func documentContentHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, errNotFound)
 		return
 	}
-	if doc.KBID != "" && !requireKnowledgeBasePermission(d, w, r) {
+	if doc.KBID != "" && !requireKnowledgeBaseAccess(d, w, r, doc.KBID, false) {
 		return
 	}
 	// Knowledge-base access can be revoked independently of the document. Do

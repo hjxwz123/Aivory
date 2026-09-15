@@ -91,7 +91,7 @@ func enforceWorkspaceConversationModelPolicy(
 	return nil
 }
 
-// enforceWorkspaceKnowledgeBasePolicy rejects KB-scoped mutations when the
+// enforceWorkspaceKnowledgeBasePolicy rejects KB-scoped access when the
 // workspace has knowledge bases disabled. Fail closed on lookup errors.
 func enforceWorkspaceKnowledgeBasePolicy(ctx context.Context, db *sql.DB, workspaceID string) error {
 	if workspaceID == "" {
@@ -122,6 +122,42 @@ func enforceWorkspaceFileUploadPolicy(ctx context.Context, db *sql.DB, workspace
 		return errWorkspaceFileUploadDisabled
 	}
 	return nil
+}
+
+// knowledgeBaseAccessPolicy resolves the resource's real workspace, never the
+// client's active workspace. Group and workspace ceilings also apply to owners.
+func knowledgeBaseAccessPolicy(d Deps, r *http.Request, kbID string, writeContent bool) error {
+	if err := currentKnowledgeBasePermission(d, r); err != nil {
+		return err
+	}
+	kb, err := store.GetKB(r.Context(), d.DB, kbID, authUser(r).ID)
+	if err != nil {
+		return err
+	}
+	if err := enforceWorkspaceKnowledgeBasePolicy(r.Context(), d.DB, kb.WorkspaceID); err != nil {
+		return err
+	}
+	if writeContent {
+		if err := currentFileUploadPermission(d, r); err != nil {
+			return err
+		}
+		return enforceWorkspaceFileUploadPolicy(r.Context(), d.DB, kb.WorkspaceID)
+	}
+	return nil
+}
+
+func requireKnowledgeBaseAccess(d Deps, w http.ResponseWriter, r *http.Request, kbID string, writeContent bool) bool {
+	if err := knowledgeBaseAccessPolicy(d, r, kbID, writeContent); err != nil {
+		status := workspacePolicyErrorStatus(err)
+		if errors.Is(err, store.ErrNotFound) {
+			status = http.StatusNotFound
+		} else if errors.Is(err, errKnowledgeBaseGroupPermission) || errors.Is(err, errFileUploadGroupPermission) {
+			status = http.StatusForbidden
+		}
+		writeError(w, status, err)
+		return false
+	}
+	return true
 }
 
 // workspacePolicyErrorStatus maps the policy errors onto HTTP statuses.
