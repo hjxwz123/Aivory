@@ -38,13 +38,19 @@ function bumpPolicyRequest(workspaceID: string): number {
 
 function readStoredActive(): string | null {
   try {
-    return localStorage.getItem(ACTIVE_KEY) || null
+    const stored = localStorage.getItem(ACTIVE_KEY)
+    return stored === 'personal' ? null : stored || null
   } catch {
     return null
   }
 }
 
+function hasStoredSelection(): boolean {
+  try { return localStorage.getItem(ACTIVE_KEY) !== null } catch { return false }
+}
+
 interface WorkspacesState {
+  lockedWorkspaceId: string | null
   workspaces: ApiWorkspace[]
   /** Effective workspace-wide capability policies keyed by workspace id. */
   policies: Record<string, ApiWorkspacePolicy>
@@ -84,6 +90,7 @@ async function reloadSpaceData() {
 }
 
 export const useWorkspaces = create<WorkspacesState>((set, get) => ({
+  lockedWorkspaceId: null,
   workspaces: [],
   policies: {},
   policyLoading: {},
@@ -95,17 +102,27 @@ export const useWorkspaces = create<WorkspacesState>((set, get) => ({
   async load() {
     const loadToken = ++loadSeq
     try {
-      const { workspaces } = await workspacesApi.list()
+      const { workspaces, domain_access } = await workspacesApi.list()
       if (loadToken !== loadSeq) return
       const activeId = get().activeId
       // A stale persisted id (kicked / deleted space) falls back to personal.
       const valid = activeId != null && workspaces.some((w) => w.id === activeId)
-      set({ workspaces, loaded: true })
+      const lockedWorkspaceId = domain_access?.locked ? domain_access.workspace_id : null
+      set({ workspaces, loaded: true, lockedWorkspaceId })
+      if (lockedWorkspaceId && activeId !== lockedWorkspaceId) {
+        await get().switchTo(lockedWorkspaceId)
+        return
+      }
+      // First visit after enrollment opens the assigned space even when unlocked.
+      if (!activeId && domain_access && !hasStoredSelection() && !get().switching) {
+        await get().switchTo(domain_access.workspace_id)
+        return
+      }
       // Refresh the active policy in the background. Policy reads are kept
       // separate from the membership list so a transient policy outage cannot
       // make a valid workspace disappear from the switcher.
       if (activeId != null && valid) void get().loadPolicy(activeId)
-      if (activeId != null && !valid) await get().switchTo(null)
+      if (!lockedWorkspaceId && activeId != null && !valid) await get().switchTo(null)
     } catch {
       if (loadToken !== loadSeq) return
       set({ loaded: true })
@@ -178,6 +195,7 @@ export const useWorkspaces = create<WorkspacesState>((set, get) => ({
   },
 
   async switchTo(id) {
+    if (get().lockedWorkspaceId && id !== get().lockedWorkspaceId) return
     if (id === get().activeId) return
     // Explicit tool subsets are tied to the catalog in the current space.
     // Clear them before flipping `activeId`, so a fast submit during the
@@ -190,7 +208,7 @@ export const useWorkspaces = create<WorkspacesState>((set, get) => ({
     set({ activeId: id, switching: true })
     try {
       if (id) localStorage.setItem(ACTIVE_KEY, id)
-      else localStorage.removeItem(ACTIVE_KEY)
+      else localStorage.setItem(ACTIVE_KEY, 'personal')
     } catch {
       /* ignore */
     }

@@ -180,6 +180,13 @@ func AuthorizeWorkspace(
 	db *sql.DB,
 	req WorkspaceAuthorizationRequest,
 ) (WorkspaceAuthorizationDecision, error) {
+	access, err := GetDomainAccess(ctx, db, req.UserID)
+	if err != nil {
+		return WorkspaceAuthorizationDecision{Reason: "domain access lookup failed"}, err
+	}
+	if access != nil && access.Locked && access.WorkspaceID != req.WorkspaceID {
+		return WorkspaceAuthorizationDecision{Reason: "domain workspace restriction"}, nil
+	}
 	actx, err := loadWorkspaceAuthorizationContext(ctx, db, req)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

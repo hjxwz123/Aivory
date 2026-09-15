@@ -838,6 +838,14 @@ func resolveOAuthUser(ctx context.Context, d Deps, p *store.OAuthProvider, info 
 		}
 	}
 
+	domainEnrollment, domainErr := store.EmailHasRegistrationDomain(ctx, d.DB, email)
+	if domainErr != nil {
+		return nil, domainErr
+	}
+	if domainEnrollment && (!info.EmailVerified || p.Kind == "oauth2") {
+		return nil, errOAuthExplicitLinkRequired
+	}
+
 	// §OAuth auto-provision gate: everything above this point either logs in an
 	// existing identity/account or falls through here because NO account
 	// matched — i.e. every remaining path is a genuine new-account signup.

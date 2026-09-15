@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ApiWorkspacePolicy } from '@/api/types'
 
 const apiMocks = vi.hoisted(() => ({
@@ -56,12 +56,14 @@ const policy: ApiWorkspacePolicy = {
 }
 
 describe('workspace switch tool selection isolation', () => {
+  afterEach(async () => { await vi.dynamicImportSettled() })
   beforeEach(() => {
     vi.clearAllMocks()
     useComposerPrefs.setState({
       selectedToolIdsByModel: { model_1: ['usermcp:old-server'] },
     })
     useWorkspaces.setState({
+      lockedWorkspaceId: null,
       workspaces: [],
       activeId: 'workspace-current',
       switching: false,
@@ -79,6 +81,39 @@ describe('workspace switch tool selection isolation', () => {
     })
     loadMocks.projects.mockResolvedValue(undefined)
     loadMocks.models.mockResolvedValue(undefined)
+  })
+
+  it('forces the assigned workspace and rejects personal and foreign switches until an admin unlocks it', async () => {
+    apiMocks.getPolicy.mockRejectedValue(new Error('policy temporarily unavailable'))
+    apiMocks.list.mockResolvedValue({
+      workspaces: [{ id: 'workspace-next' }],
+      domain_access: { domain: 'company.example', workspace_id: 'workspace-next', locked: true },
+    })
+    await useWorkspaces.getState().load()
+    expect(useWorkspaces.getState().activeId).toBe('workspace-next')
+    expect(useWorkspaces.getState().lockedWorkspaceId).toBe('workspace-next')
+    const reloads = loadMocks.conversations.mock.calls.length
+    await useWorkspaces.getState().switchTo(null)
+    await useWorkspaces.getState().switchTo('workspace-foreign')
+    expect(useWorkspaces.getState().activeId).toBe('workspace-next')
+    expect(loadMocks.conversations).toHaveBeenCalledTimes(reloads)
+
+    apiMocks.list.mockResolvedValue({ workspaces: [{ id: 'workspace-next' }], domain_access: null })
+    await useWorkspaces.getState().load()
+    expect(useWorkspaces.getState().lockedWorkspaceId).toBeNull()
+    await useWorkspaces.getState().switchTo(null)
+    expect(useWorkspaces.getState().activeId).toBeNull()
+  })
+
+  it('does not fall back to personal when a locked workspace membership is missing', async () => {
+    apiMocks.list.mockResolvedValue({
+      workspaces: [],
+      domain_access: { domain: 'company.example', workspace_id: 'workspace-current', locked: true },
+    })
+    await useWorkspaces.getState().load()
+    expect(useWorkspaces.getState().activeId).toBe('workspace-current')
+    expect(useWorkspaces.getState().lockedWorkspaceId).toBe('workspace-current')
+    expect(loadMocks.conversations).not.toHaveBeenCalled()
   })
 
   it('drops the previous space selections before reloading the next space', async () => {

@@ -939,7 +939,8 @@
         "resource.visibility_changed": "リソース公開範囲変更",
         "policy.updated": "機能ポリシー変更"
       }
-    }
+    },
+    "domainLocked": "管理者により個人スペースがロックされています"
   },
   "attachmentDeleted": "ファイルは削除されました",
   "private": {

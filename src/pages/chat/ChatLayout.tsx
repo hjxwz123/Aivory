@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useRef } from 'react'
-import { Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { PanelLeftOpen, Menu } from 'lucide-react'
 import { Sidebar } from '@/components/sidebar/sidebar'
@@ -35,6 +35,7 @@ export default function ChatLayout() {
   const drawerOpen = useUI((s) => s.navOpen)
   const setDrawerOpen = useUI((s) => s.setNavOpen)
   const pageOwnsTopBar = useUI((s) => s.pageOwnsTopBar)
+  const domainLocked = useWorkspaces((s) => !!s.lockedWorkspaceId)
   const activeWsId = useWorkspaces((s) => s.activeId)
   const workspaceSwitching = useWorkspaces((s) => s.switching)
   const navigate = useNavigate()
@@ -74,6 +75,8 @@ export default function ChatLayout() {
       },
     },
   ])
+
+  if (domainLocked && (pathname === '/private-chat' || pathname === '/files')) return <Navigate to="/" replace />
 
   return (
     <div

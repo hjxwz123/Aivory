@@ -234,8 +234,16 @@ func CreateUserWithRole(ctx context.Context, db *sql.DB, email, name, pwHash, ro
 // statement. Registration and OAuth callers use this to create pending and/or
 // password-less accounts without a fail-open active-account window.
 func CreateUserWithState(ctx context.Context, db *sql.DB, email, name, pwHash, role, status string, passwordSet bool) (*User, error) {
-	id, err := createUserWithState(ctx, db, email, name, pwHash, role, status, passwordSet)
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	id, err := createUserWithState(ctx, tx, email, name, pwHash, role, status, passwordSet)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return FindUserByID(ctx, db, id)
@@ -276,6 +284,11 @@ func createUserWithState(ctx context.Context, ex RowExecer, email, name, pwHash,
 		id, email, pwHash, name, role, status, passwordSetInt, now, now, sortOrder)
 	if err != nil {
 		return "", err
+	}
+	if role != "admin" {
+		if err := enrollDomainUser(ctx, ex, id, email); err != nil {
+			return "", err
+		}
 	}
 	return id, nil
 }

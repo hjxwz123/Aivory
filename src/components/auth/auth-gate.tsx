@@ -141,8 +141,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
       .then(() => {
         void loadConversations()
         void loadProjects()
+        void loadModels()
       })
-    void loadModels()
   }, [
     authPolicy.oauth_initial_password_policy,
     location.pathname,

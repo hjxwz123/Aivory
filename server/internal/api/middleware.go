@@ -147,6 +147,9 @@ func requireAuth(d Deps, h handler) http.HandlerFunc {
 				go store.TouchLastSeen(context.Background(), d.DB, uid, time.Now().Unix())
 			}
 		}
+		if enforceDomainAccess(d, w, r, user.ID) {
+			return
+		}
 		ctx := context.WithValue(r.Context(), userCtxKey{}, user)
 		h(d, w, r.WithContext(ctx))
 	}

@@ -85,6 +85,7 @@ export const ADMIN_NAV_GROUPS: readonly AdminNavGroup[] = [
       },
       { to: '/admin/oauth', labelKey: 'admin:oauth.title', defaultLabel: 'Login providers' },
       { to: '/admin/workspaces', labelKey: 'admin:workspaces.title', defaultLabel: 'Workspaces' },
+      { to: '/admin/domains', labelKey: 'admin:domains.title', defaultLabel: 'Email domains' },
     ],
   },
   {

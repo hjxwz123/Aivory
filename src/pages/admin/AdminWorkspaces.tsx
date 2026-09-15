@@ -40,6 +40,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
+import { WorkspaceAdminControls } from './workspace-admin-controls'
 
 function fmtDate(unix: number): string {
   return new Date(unix * 1000).toLocaleDateString()
@@ -90,8 +91,8 @@ export default function AdminWorkspaces() {
       setRows((r) => r.filter((w) => w.id !== id))
       setSelected(null)
       toast.success(t('workspaces.deleted', { defaultValue: 'Workspace deleted.' }))
-    } catch {
-      toast.error(t('workspaces.deleteFailed', { defaultValue: 'Could not delete the workspace.' }))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('workspaces.deleteFailed', { defaultValue: 'Could not delete the workspace.' }))
     } finally {
       deletingRef.current = false
       setDeleting(false)
@@ -99,7 +100,7 @@ export default function AdminWorkspaces() {
   }
 
   if (selected) {
-    return <WorkspaceDetail id={selected} onBack={() => setSelected(null)} onDelete={(id) => setConfirmDelete(id)} confirm={confirmDelete} onConfirmChange={setConfirmDelete} doDelete={remove} deleting={deleting} />
+    return <WorkspaceDetail id={selected} onBack={() => { setSelected(null); void load() }} onDelete={(id) => setConfirmDelete(id)} confirm={confirmDelete} onConfirmChange={setConfirmDelete} doDelete={remove} deleting={deleting} />
   }
 
   return (
@@ -110,6 +111,7 @@ export default function AdminWorkspaces() {
       <p className="mt-1 text-sm text-[var(--color-fg-muted)]">
         {t('workspaces.subtitle', { defaultValue: 'Every collaborative space, its owner and member count.' })}
       </p>
+      <div className="mt-4"><WorkspaceAdminControls onSaved={() => void load()} /></div>
       {loading ? (
         <PanelFallback />
       ) : rows.length === 0 ? (
@@ -294,6 +296,9 @@ function WorkspaceDetail({
         </Button>
       </div>
 
+      <div className="mt-4"><WorkspaceAdminControls workspaceId={id} ownerId={workspace.owner_id} members={members} onSaved={() => {
+        workspacesApi.adminDetail(id).then(setData).catch((e) => toast.error(e instanceof Error ? e.message : t('domains.loadFailed')))
+      }} /></div>
       <div className="mt-5 grid gap-3 sm:mt-6 sm:gap-6 lg:grid-cols-2">
         <Panel title={t('workspaces.members', { defaultValue: 'Members' })}>
           {members.map((m) => (

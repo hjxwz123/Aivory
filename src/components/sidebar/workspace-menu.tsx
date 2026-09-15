@@ -5,7 +5,7 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { AlertTriangle, ArrowLeftRight, Briefcase, Check, Copy, FileClock, Home, KeyRound, LogOut, Plus, RefreshCw, Settings2, ShieldCheck, SlidersHorizontal, Trash2, UserPlus, UserX, Users } from 'lucide-react'
+import { AlertTriangle, ArrowLeftRight, Briefcase, Check, Copy, FileClock, Home, LockKeyhole, KeyRound, LogOut, Plus, RefreshCw, Settings2, ShieldCheck, SlidersHorizontal, Trash2, UserPlus, UserX, Users } from 'lucide-react'
 import { workspacesApi } from '@/api'
 import type {
   ApiModel,
@@ -75,6 +75,7 @@ export function SpaceSwitcherButton() {
   const workspaces = useWorkspaces((s) => s.workspaces)
   const activeId = useWorkspaces((s) => s.activeId)
   const switchTo = useWorkspaces((s) => s.switchTo)
+  const locked = useWorkspaces((s) => !!s.lockedWorkspaceId)
 
   if (workspaces.length === 0) return null
 
@@ -92,14 +93,15 @@ export function SpaceSwitcherButton() {
         </DropdownMenuTrigger>
       </Tooltip>
       <DropdownMenuContent align="end" side="top" className="min-w-[220px]">
-        <DropdownMenuLabel>{t('workspace.switchSpace', { defaultValue: 'Switch space' })}</DropdownMenuLabel>
-        <DropdownMenuItem onClick={() => void switchTo(null)}>
+        <DropdownMenuLabel>{locked ? t('workspace.domainLocked') : t('workspace.switchSpace', { defaultValue: 'Switch space' })}</DropdownMenuLabel>
+        <DropdownMenuItem disabled={locked} onClick={() => void switchTo(null)}>
           {activeId === null ? <Check size={13} aria-hidden /> : <Home size={13} aria-hidden className="text-[var(--color-fg-subtle)]" />}
           {t('workspace.personal', { defaultValue: 'Personal space' })}
+          {locked && <LockKeyhole size={13} aria-label={t('workspace.domainLocked')} />}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         {workspaces.map((w) => (
-          <DropdownMenuItem key={w.id} onClick={() => void switchTo(w.id)}>
+          <DropdownMenuItem key={w.id} disabled={locked && w.id !== activeId} onClick={() => void switchTo(w.id)}>
             {activeId === w.id ? <Check size={13} aria-hidden /> : <Briefcase size={13} aria-hidden className="text-[var(--color-fg-subtle)]" />}
             <span className="truncate">{w.name}</span>
           </DropdownMenuItem>
@@ -121,7 +123,8 @@ export function WorkspaceMenuItems({
   const workspaces = useWorkspaces((s) => s.workspaces)
   const activeId = useWorkspaces((s) => s.activeId)
   const switchTo = useWorkspaces((s) => s.switchTo)
-  const mayCreate = canCreateWorkspaces()
+  const locked = useWorkspaces((s) => !!s.lockedWorkspaceId)
+  const mayCreate = !locked && canCreateWorkspaces()
 
   // Spec: users with no workspaces (and no way to make one) see nothing here.
   if (workspaces.length === 0 && !mayCreate) return null
@@ -136,12 +139,13 @@ export function WorkspaceMenuItems({
             {t('workspace.menu', { defaultValue: 'Workspaces' })}
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent>
-            <DropdownMenuItem onClick={() => void switchTo(null)}>
+            <DropdownMenuItem disabled={locked} onClick={() => void switchTo(null)}>
               {activeId === null ? <Check size={13} aria-hidden /> : <span className="w-[13px]" aria-hidden />}
               {t('workspace.personal', { defaultValue: 'Personal space' })}
+              {locked && <LockKeyhole size={13} aria-label={t('workspace.domainLocked')} />}
             </DropdownMenuItem>
             {workspaces.map((w) => (
-              <DropdownMenuItem key={w.id} onClick={() => void switchTo(w.id)}>
+              <DropdownMenuItem key={w.id} disabled={locked && w.id !== activeId} onClick={() => void switchTo(w.id)}>
                 {activeId === w.id ? <Check size={13} aria-hidden /> : <span className="w-[13px]" aria-hidden />}
                 <span className="truncate">{w.name}</span>
               </DropdownMenuItem>
@@ -176,13 +180,14 @@ export function CreateWorkspaceDialog({ open, onOpenChange }: { open: boolean; o
   const { t } = useTranslation('chat')
   const createWs = useWorkspaces((s) => s.create)
   const switchTo = useWorkspaces((s) => s.switchTo)
+  const locked = useWorkspaces((s) => !!s.lockedWorkspaceId)
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
 
   async function submit() {
     const n = name.trim()
-    if (!n || busyRef.current) return
+    if (!n || busyRef.current || locked) return
     busyRef.current = true
     setBusy(true)
     try {
@@ -237,7 +242,7 @@ export function CreateWorkspaceDialog({ open, onOpenChange }: { open: boolean; o
           <Button variant="ghost" disabled={busy} onClick={() => onOpenChange(false)}>
             {t('common.cancel', { ns: 'common', defaultValue: 'Cancel' })}
           </Button>
-          <Button onClick={() => void submit()} disabled={!name.trim() || busy}>
+          <Button onClick={() => void submit()} disabled={!name.trim() || busy || locked}>
             {t('workspace.create', { defaultValue: 'Create workspace' })}
           </Button>
         </DialogFooter>
@@ -253,6 +258,7 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
   const ws = useWorkspaces((s) => (s.activeId ? s.workspaces.find((w) => w.id === s.activeId) : undefined))
   const removeWs = useWorkspaces((s) => s.remove)
   const leaveWs = useWorkspaces((s) => s.leave)
+  const domainLocked = useWorkspaces((s) => !!s.lockedWorkspaceId)
   const [members, setMembers] = useState<ApiWorkspaceMember[]>([])
   // Distinguish "still fetching" from "loaded, empty": without it the dialog
   // opens claiming "0 members" and the list pops in a beat later.
@@ -840,6 +846,8 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
               <Button
                 variant="destructive"
                 loading={actioning}
+                disabled={domainLocked}
+                title={domainLocked ? t('workspace.domainLocked') : undefined}
                 onClick={() => void runFooterAction(
                   leaveWs,
                   t('workspace.leaveFailed', { defaultValue: 'Could not leave the workspace.' }),

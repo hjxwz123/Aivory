@@ -939,7 +939,8 @@
         "resource.visibility_changed": "Visibilité modifiée",
         "policy.updated": "Stratégie modifiée"
       }
-    }
+    },
+    "domainLocked": "Espace personnel verrouillé par l’administrateur"
   },
   "attachmentDeleted": "Fichier supprimé",
   "private": {

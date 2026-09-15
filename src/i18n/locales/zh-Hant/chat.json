@@ -939,7 +939,8 @@
         "resource.visibility_changed": "資源可見範圍變更",
         "policy.updated": "能力策略變更"
       }
-    }
+    },
+    "domainLocked": "個人空間已由管理員鎖定"
   },
   "attachmentDeleted": "檔案已刪除",
   "private": {

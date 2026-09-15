@@ -1031,3 +1031,18 @@ CREATE TABLE IF NOT EXISTS workspace_audit_logs (
   created_at    BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
 CREATE INDEX IF NOT EXISTS idx_ws_audit_workspace ON workspace_audit_logs(workspace_id, created_at DESC);
+
+-- Email-domain enrollment. Bindings survive email edits; only admins release them.
+CREATE TABLE IF NOT EXISTS registration_domains (
+  domain TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE RESTRICT,
+  lock_personal INTEGER NOT NULL DEFAULT 0 CHECK(lock_personal IN (0,1)),
+  enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1))
+);
+CREATE INDEX IF NOT EXISTS idx_registration_domains_workspace ON registration_domains(workspace_id);
+CREATE TABLE IF NOT EXISTS domain_users (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  domain TEXT NOT NULL REFERENCES registration_domains(domain) ON DELETE CASCADE,
+  lock_override INTEGER CHECK(lock_override IN (0,1))
+);
+CREATE INDEX IF NOT EXISTS idx_domain_users_domain ON domain_users(domain);

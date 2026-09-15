@@ -70,7 +70,21 @@ func listWorkspacesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"workspaces": list})
+	access, err := store.GetDomainAccess(r.Context(), d.DB, u.ID)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	if access != nil && access.Locked {
+		filtered := make([]store.Workspace, 0, 1)
+		for _, ws := range list {
+			if ws.ID == access.WorkspaceID {
+				filtered = append(filtered, ws)
+			}
+		}
+		list = filtered
+	}
+	writeJSON(w, 200, map[string]any{"workspaces": list, "domain_access": access})
 }
 
 // workspaceMembersHandler lists members — visible to every current member.
@@ -635,6 +649,10 @@ func deleteWorkspaceHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := teardownWorkspace(d, r, ws); err != nil {
+		if errors.Is(err, store.ErrWorkspaceDomainBound) {
+			writeError(w, 409, err)
+			return
+		}
 		writeError(w, 500, err)
 		return
 	}
@@ -812,6 +830,10 @@ func adminDeleteWorkspaceHandler(d Deps, w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err := teardownWorkspace(d, r, ws); err != nil {
+		if errors.Is(err, store.ErrWorkspaceDomainBound) {
+			writeError(w, 409, err)
+			return
+		}
 		writeError(w, 500, err)
 		return
 	}

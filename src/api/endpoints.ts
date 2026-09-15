@@ -600,7 +600,9 @@ export interface SearchHit {
 // ----- Workspaces (§workspaces) ---------------------------------------------
 
 export const workspacesApi = {
-  list: () => api<{ workspaces: ApiWorkspace[] }>('/workspaces'),
+  adminCreate: (name: string, ownerId: string) => api<ApiWorkspace>('/admin/workspaces', { method: 'POST', body: { name, owner_id: ownerId } }),
+  adminTransfer: (id: string, userId: string) => api<ApiWorkspace>(`/admin/workspaces/${encodeURIComponent(id)}/transfer`, { method: 'POST', body: { user_id: userId } }),
+  list: () => api<{ workspaces: ApiWorkspace[]; domain_access?: import('./domains').DomainAccess | null }>('/workspaces'),
   create: (name: string) => api<ApiWorkspace>('/workspaces', { method: 'POST', body: { name } }),
   remove: (id: string) => api<{ ok: true }>(`/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   members: (id: string) => api<{ members: ApiWorkspaceMember[] }>(`/workspaces/${encodeURIComponent(id)}/members`),

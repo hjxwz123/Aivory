@@ -411,7 +411,15 @@ func RotateWorkspaceInvite(ctx context.Context, db *sql.DB, workspaceID, actorID
 // member role flip in one transaction under the membership lock, so owner-
 // exclusive authority switches atomically.
 func TransferWorkspaceOwnership(ctx context.Context, db *sql.DB, workspaceID, actorID, newOwnerID string) (*Workspace, error) {
-	if actorID == newOwnerID {
+	return transferWorkspaceOwnership(ctx, db, workspaceID, actorID, newOwnerID, false)
+}
+
+func AdminTransferWorkspaceOwnership(ctx context.Context, db *sql.DB, workspaceID, actorID, newOwnerID string) (*Workspace, error) {
+	return transferWorkspaceOwnership(ctx, db, workspaceID, actorID, newOwnerID, true)
+}
+
+func transferWorkspaceOwnership(ctx context.Context, db *sql.DB, workspaceID, actorID, newOwnerID string, platformAdmin bool) (*Workspace, error) {
+	if actorID == newOwnerID && !platformAdmin {
 		return nil, ErrForbidden
 	}
 	tx, err := beginWorkspaceMutationTx(ctx, db, workspaceID)
@@ -429,7 +437,15 @@ func TransferWorkspaceOwnership(ctx context.Context, db *sql.DB, workspaceID, ac
 		}
 		return nil, err
 	}
-	if currentOwnerID != actorID {
+	if platformAdmin {
+		var role string
+		if err := tx.QueryRowContext(ctx, `SELECT role FROM users WHERE id=? AND status='active'`, actorID).Scan(&role); err != nil || role != "admin" {
+			return nil, ErrForbidden
+		}
+	} else if currentOwnerID != actorID {
+		return nil, ErrForbidden
+	}
+	if currentOwnerID == newOwnerID {
 		return nil, ErrForbidden
 	}
 	res, err := tx.ExecContext(ctx,
@@ -445,6 +461,11 @@ func TransferWorkspaceOwnership(ctx context.Context, db *sql.DB, workspaceID, ac
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE workspaces SET owner_id=? WHERE id=?`, newOwnerID, workspaceID); err != nil {
 		return nil, err
+	}
+	if platformAdmin {
+		if _, err := tx.ExecContext(ctx, `UPDATE workspace_members SET role='member' WHERE workspace_id=? AND user_id=?`, workspaceID, currentOwnerID); err != nil {
+			return nil, err
+		}
 	}
 	res, err = tx.ExecContext(ctx,
 		`UPDATE workspace_invites SET revoked_at=?

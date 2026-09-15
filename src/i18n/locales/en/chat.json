@@ -944,7 +944,8 @@
         "resource.visibility_changed": "Resource visibility changed",
         "policy.updated": "Capability policy changed"
       }
-    }
+    },
+    "domainLocked": "Personal space locked by your administrator"
   },
   "attachmentDeleted": "File deleted",
   "private": {

@@ -1089,6 +1089,13 @@ func joinWorkspaceTx(ctx context.Context, tx *sql.Tx, workspaceID, userID string
 // reports whether a new membership was created (an existing member re-joining
 // is a no-op that grants nothing).
 func joinWorkspaceWithRoleTx(ctx context.Context, tx *sql.Tx, workspaceID, userID, role string) (bool, error) {
+	access, err := GetDomainAccess(ctx, tx, userID)
+	if err != nil {
+		return false, err
+	}
+	if access != nil && access.Locked && access.WorkspaceID != workspaceID {
+		return false, ErrForbidden
+	}
 	if !ValidWorkspaceMemberRole(role) {
 		return false, errors.New("invalid role")
 	}
@@ -1138,6 +1145,14 @@ func LeaveWorkspaceWithRevokedGenerations(ctx context.Context, db *sql.DB, works
 	if err := lockWorkspaceMembershipTx(ctx, tx, workspaceID); err != nil {
 		return nil, err
 	}
+	access, accessErr := GetDomainAccess(ctx, tx, userID)
+	if accessErr != nil {
+		return nil, accessErr
+	}
+	if access != nil && access.Locked && access.WorkspaceID == workspaceID {
+		return nil, ErrForbidden
+	}
+
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM conversation_shares
 		  WHERE user_id=? AND EXISTS (
@@ -1198,6 +1213,14 @@ func RemoveWorkspaceMemberWithRevokedGenerations(ctx context.Context, db *sql.DB
 	if err := lockWorkspaceMembershipTx(ctx, tx, workspaceID); err != nil {
 		return nil, err
 	}
+	access, accessErr := GetDomainAccess(ctx, tx, memberID)
+	if accessErr != nil {
+		return nil, accessErr
+	}
+	if access != nil && access.Locked && access.WorkspaceID == workspaceID {
+		return nil, ErrForbidden
+	}
+
 	var workspaceOwnerID string
 	var actorRole string
 	if err := tx.QueryRowContext(ctx,
@@ -1393,6 +1416,13 @@ func MarkWorkspaceDeleting(ctx context.Context, db *sql.DB, workspaceID, expecte
 		return err
 	}
 	defer tx.Rollback() //nolint:errcheck
+	var domains int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM registration_domains WHERE workspace_id=?`, workspaceID).Scan(&domains); err != nil {
+		return err
+	}
+	if domains > 0 {
+		return ErrWorkspaceDomainBound
+	}
 	res, err := tx.ExecContext(ctx,
 		`UPDATE workspaces SET deleting=1 WHERE id=? AND owner_id=? AND COALESCE(deleting,0)=0`,
 		workspaceID, expectedOwnerID,
