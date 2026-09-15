@@ -3271,6 +3271,19 @@ func (s *Service) RouteAndRetrieveIterative(
 			ctx, fixedUserID, fixedConvID, userText, queriesUsed, result.Snippets,
 		)
 		if judgeErr != nil {
+			// A judge timeout does not invalidate completed retrieval. Preserve the
+			// candidates as partial evidence while the overall request is still live.
+			// Cancellation, exhausted query budgets and billing failures stay errors.
+			if len(result.Snippets) > 0 && ctx.Err() == nil &&
+				errors.Is(judgeErr, context.DeadlineExceeded) &&
+				!errors.Is(judgeErr, context.Canceled) && !errors.Is(judgeErr, ErrBillingRecord) {
+				result.Status = IterativeRetrievalPartial
+				if s.logger != nil {
+					s.logger.Printf("rag: evidence judgement timed out (conv=%s msg=%s round=%d sources=%d); keeping partial evidence",
+						fixedConvID, billingMessageID(ctx), result.Rounds, len(result.Snippets))
+				}
+				return result, nil
+			}
 			result.Status = IterativeRetrievalError
 			return result, fmt.Errorf("rag: evidence judgement failed after round %d: %w", result.Rounds, judgeErr)
 		}

@@ -1,6 +1,7 @@
 package rag
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -12,11 +13,90 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"aivory/server/internal/store"
 	"aivory/server/internal/vector"
 )
+
+type evidenceTimeoutTaskRouter struct {
+	err  error
+	call func(context.Context)
+}
+
+func (r evidenceTimeoutTaskRouter) RunJSON(ctx context.Context, _ string, _ string, _ any, _ RouterOpts) error {
+	if r.call != nil {
+		r.call(ctx)
+	}
+	return r.err
+}
+
+func TestRouteAndRetrieveIterativeJudgeTimeoutPreservesCompletedEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		judgeErr      error
+		noEvidence    bool
+		cancelRequest bool
+		expireRequest bool
+		wantPartial   bool
+	}{
+		{name: "judge timeout", judgeErr: context.DeadlineExceeded, wantPartial: true},
+		{name: "wrapped timeout", judgeErr: fmt.Errorf("provider: %w", context.DeadlineExceeded), wantPartial: true},
+		{name: "no evidence", judgeErr: context.DeadlineExceeded, noEvidence: true},
+		{name: "billing failure", judgeErr: errors.Join(context.DeadlineExceeded, ErrBillingRecord)},
+		{name: "provider cancellation", judgeErr: context.Canceled},
+		{name: "request cancellation", judgeErr: context.DeadlineExceeded, cancelRequest: true},
+		{name: "overall timeout", judgeErr: context.DeadlineExceeded, expireRequest: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, statuses := seedIterativeKB(t, context.Background(), "initial evidence")
+			defer db.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			vec := &iterativeVectorStore{
+				enabled: true, statuses: statuses,
+				keywordHitsByQuery: map[string][]vector.Hit{
+					"initial": {iterativeHit("kbch1", 2)},
+				},
+			}
+			query := "initial"
+			if tc.noEvidence {
+				vec.keywordHitsByQuery = nil
+				query = "unrelated"
+			}
+			var logs bytes.Buffer
+			svc := New(db, nil, log.New(&logs, "", 0))
+			svc.SetVectorStore(vec)
+			svc.SetTaskLLM(evidenceTimeoutTaskRouter{err: tc.judgeErr, call: func(context.Context) {
+				if tc.cancelRequest {
+					cancel()
+				}
+				if tc.expireRequest {
+					<-ctx.Done()
+				}
+			}})
+			result, err := svc.RouteAndRetrieveIterative(
+				ctx, "u1", "", []string{"kb1"}, query, nil, 8,
+				IterativeRetrievalOptions{ForceRetrieve: true},
+			)
+			if tc.wantPartial {
+				if err != nil || result.Status != IterativeRetrievalPartial ||
+					len(result.Snippets) != 1 || result.Snippets[0].ID != "kbch1" {
+					t.Fatalf("completed evidence lost: result=%+v err=%v", result, err)
+				}
+				if !strings.Contains(logs.String(), "keeping partial evidence") {
+					t.Fatalf("missing degradation log: %s", logs.String())
+				}
+			} else if err == nil || result.Status != IterativeRetrievalError || !errors.Is(err, tc.judgeErr) {
+				t.Fatalf("failure was swallowed: result=%+v err=%v", result, err)
+			}
+			if result.Rounds != 1 || len(vec.queryLog) != 1 {
+				t.Fatalf("retrieval continued after timeout: result=%+v queries=%v", result, vec.queryLog)
+			}
+		})
+	}
+}
 
 func TestRouteAndRetrieveIterativeContinuesUntilModelSufficient(t *testing.T) {
 	ctx := WithBillingWorkspaceID(context.Background(), "ws1")
