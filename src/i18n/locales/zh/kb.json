@@ -112,12 +112,12 @@
   "workspaceMembers": {
     "action": "成员权限",
     "title": "知识库成员权限",
-    "description": "这些设置仅适用于当前知识库，工作空间成员总权限仍是上限。",
+    "description": "这些设置仅适用于当前知识库，不能超出系统用户组、工作空间功能开关与成员总权限。",
     "member": "成员",
     "addFiles": "添加文件",
     "deleteContent": "删除内容",
-    "manager": "工作空间所有者、管理员或知识库创建者",
-    "disabledByWorkspace": "成员总权限已关闭",
+    "manager": "工作空间所有者或管理员",
+    "disabledByWorkspace": "系统用户组、工作空间或成员权限已限制",
     "loadFailed": "无法加载工作空间成员。",
     "empty": "工作空间暂无成员。"
   },

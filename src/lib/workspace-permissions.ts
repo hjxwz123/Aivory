@@ -27,6 +27,7 @@ export interface WorkspaceCapabilityState {
   prompts: boolean
   knowledgeBases: boolean
   fileUpload: boolean
+  privateChat: boolean
 }
 
 export interface WorkspacePolicyResolutionOptions {
@@ -53,6 +54,7 @@ export function unavailableWorkspaceCapabilities(): WorkspaceCapabilityState {
     prompts: false,
     knowledgeBases: false,
     fileUpload: false,
+    privateChat: false,
   }
 }
 
@@ -78,6 +80,7 @@ export function workspaceCapabilities(policy?: Partial<ApiWorkspacePolicy> | nul
     prompts: policy?.AllowPrompts ?? true,
     knowledgeBases: policy?.AllowKnowledgeBases ?? true,
     fileUpload: policy?.AllowFileUpload ?? true,
+    privateChat: policy?.AllowPrivateChat ?? true,
   }
 }
 

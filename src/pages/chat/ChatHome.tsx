@@ -33,6 +33,7 @@ import { resolveNewConversationFastMode } from '@/lib/chat-defaults'
 import { isModelCatalogReadyForScope } from '@/lib/model-selection'
 import { userCan } from '@/lib/user-permissions'
 import { workspaceCapabilitiesForScope, workspaceModelPolicyKey } from '@/lib/workspace-permissions'
+import { usePrivateChatPermission } from '@/hooks/use-private-chat-permission'
 import { enterOptimisticConversation } from '@/lib/optimistic-conversation-start'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { mediaQuery } from '@/lib/design-tokens'
@@ -210,7 +211,7 @@ export default function ChatHome() {
   const modelsLoadedPolicyKey = useModels((s) => s.loadedPolicyKey)
   const modelsLoading = useModels((s) => s.loading)
   const user = useAuth((s) => s.user)
-  const canUsePrivateChat = userCan(user, 'allow_private_chat')
+  const { allowed: canUsePrivateChat } = usePrivateChatPermission()
   const workspaceId = useWorkspaces((s) => s.activeId ?? undefined)
   const workspacesLoaded = useWorkspaces((s) => s.loaded)
   const workspacePolicyLoading = useWorkspaces((s) =>

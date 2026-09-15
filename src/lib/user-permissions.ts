@@ -4,6 +4,9 @@ export const DEFAULT_USER_PERMISSIONS: ApiUserGroupPermissions = {
   prompts: { mode: 'all', ids: [] },
   skills: { mode: 'all', ids: [] },
   tools: { mode: 'all', ids: [] },
+  allow_prompts: true,
+  allow_skills: true,
+  allow_workspace_deletion: true,
   allow_sharing: true,
   allow_knowledge_bases: true,
   allow_knowledge_base_sharing: true,
@@ -19,6 +22,9 @@ export const DEFAULT_USER_PERMISSIONS: ApiUserGroupPermissions = {
 export type UserCapability = keyof Pick<
   ApiUserGroupPermissions,
   | 'allow_sharing'
+  | 'allow_prompts'
+  | 'allow_skills'
+  | 'allow_workspace_deletion'
   | 'allow_knowledge_bases'
   | 'allow_knowledge_base_sharing'
   | 'allow_file_upload'
@@ -51,4 +57,17 @@ export function userCan(
   capability: UserCapability,
 ): boolean {
   return userPermissions(user)[capability]
+}
+
+/** Group permission for a user-created MCP service. Workspace and resource
+ * permissions are independent ceilings applied by the caller. */
+export function userCanUseMCPServer(
+  user: Pick<ApiUser, 'role' | 'permissions'> | null | undefined,
+  serverId: string,
+): boolean {
+  if (!serverId) return false
+  const policy = userPermissions(user).tools
+  return policy.mode === 'all' || (policy.mode === 'selected' && (
+    policy.ids.includes('usermcp:*') || policy.ids.includes(`usermcp:${serverId}`)
+  ))
 }

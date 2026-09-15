@@ -732,9 +732,9 @@ export function Composer({
   // Resource-library read access is intentionally broader than use access,
   // but the composer must never suggest or submit a resource a member cannot
   // use. During workspace hydration, fail closed until the member row arrives.
-  const canUseWorkspacePrompts = (!workspaceId || workspaceCaps.prompts) &&
+  const canUseWorkspacePrompts = userCan(user, 'allow_prompts') && (!workspaceId || workspaceCaps.prompts) &&
     (!workspaceId || workspaceMemberCanUse(activeWorkspace, 'prompt'))
-  const canUseWorkspaceSkills = (!workspaceId || workspaceCaps.skills) &&
+  const canUseWorkspaceSkills = userCan(user, 'allow_skills') && (!workspaceId || workspaceCaps.skills) &&
     (!workspaceId || workspaceMemberCanUse(activeWorkspace, 'skill'))
   const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases') && workspaceCaps.knowledgeBases
   const canUploadFiles = userCan(user, 'allow_file_upload') && workspaceCaps.fileUpload

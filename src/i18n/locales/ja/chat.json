@@ -749,6 +749,8 @@
     "loadFailed": "読み込みに失敗しました"
   },
   "workspace": {
+    "groupPermissionCeiling": "各メンバーのサイトグループ制限も適用されます。どちらかで禁止されると作成者も操作できません。ワークスペース管理者はメンバー単位の制限を受けませんが、グループと空間全体の制限には従います。",
+    "deleteGroupDenied": "所属グループではワークスペースの削除が許可されていません。",
     "menu": "ワークスペース",
     "personal": "個人スペース",
     "create": "ワークスペースを作成",
@@ -871,6 +873,9 @@
     "tabMembers": "メンバー",
     "tabInvites": "招待",
     "tabPolicy": "機能",
+    "tabAnnouncement": "お知らせ",
+    "announcementTitle": "ワークスペースのお知らせ",
+    "announcementLead": "このワークスペースのメンバーだけに表示されます。",
     "transfer": "所有権を移転",
     "transferBody": "受け取り側がワークスペースのオーナー兼管理者になります。あなたは管理者のまま、オーナー専用操作は失われます。",
     "transferConfirmHint": "確認のためワークスペース名「{{name}}」を入力してください。",
@@ -930,6 +935,10 @@
         "label": "描画",
         "description": "専用の描画モードと画像モデルを許可します。"
       },
+      "AllowPrivateChat": {
+        "label": "プライベートチャット",
+        "description": "履歴に保存しない一時的なチャットを許可します。システムのユーザーグループでも許可が必要です。ワークスペース管理者にも適用されます。"
+      },
       "AllowMCP": {
         "label": "MCP サービス",
         "description": "MCP サービスを表示し、ツール呼び出しが有効な場合にそのツールを許可します。"
@@ -958,6 +967,32 @@
       "creditLimitHint": "0 は無制限。上限に達したメンバーはこのワークスペースで新しいターンを開始できません。"
     },
     "tabAudit": "監査",
+    "tabStatistics": "統計",
+    "statisticsTitle": "ワークスペースの利用状況",
+    "statisticsLead": "このワークスペースの会話とツールの利用状況です。",
+    "statsRange": "期間",
+    "statsRange1": "今日",
+    "statsRange7": "過去 7 日間",
+    "statsRange30": "過去 30 日間",
+    "statsRange90": "過去 90 日間",
+    "statsRange365": "過去 1 年間",
+    "statsTurns": "会話ターン",
+    "statsCalls": "回の呼び出し",
+    "statsTokens": "合計トークン",
+    "statsUsers": "アクティブメンバー",
+    "statsConversations": "件の会話",
+    "statsCredits": "Credits",
+    "statsCost": "コスト",
+    "statsNoCost": "プロバイダーのコスト情報はありません",
+    "statsTrend": "トークン推移",
+    "statsTokensUsed": "使用トークン",
+    "statsPreviousPeriod": "前の期間",
+    "statsMemberUsage": "メンバー別利用状況",
+    "statsMember": "メンバー",
+    "statsInput": "入力トークン",
+    "statsOutput": "出力トークン",
+    "statsNoData": "この期間の利用データはありません。",
+    "statsLoadFailed": "ワークスペース統計を読み込めませんでした。",
     "audit": {
       "loadFailed": "監査ログを読み込めませんでした。",
       "empty": "監査記録はまだありません。",
@@ -975,7 +1010,8 @@
         "invite.used": "招待使用",
         "invite.revoked": "招待失効",
         "resource.visibility_changed": "リソース公開範囲変更",
-        "policy.updated": "機能ポリシー変更"
+        "policy.updated": "機能ポリシー変更",
+        "announcement.updated": "お知らせを更新"
       }
     },
     "domainLocked": "管理者により個人スペースがロックされています"

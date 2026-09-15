@@ -1521,7 +1521,7 @@ function WorkspaceKnowledgeBaseMembersDialog({
                     <div className="truncate text-[13px] font-medium text-[var(--color-fg)]">{member.name || member.email}</div>
                     <div className="truncate text-[11.5px] text-[var(--color-fg-subtle)]">
                       {member.locked
-                        ? t('kb:workspaceMembers.manager', { defaultValue: 'Owner or library creator' })
+                        ? t('kb:workspaceMembers.manager', { defaultValue: 'Workspace owner or admin' })
                         : member.email}
                     </div>
                   </div>

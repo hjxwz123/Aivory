@@ -3,10 +3,11 @@
  * workspaces plus the members/invite management dialog. Users with no
  * workspaces AND no create-capability see nothing (per spec: 左下角不显示).
  */
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { AlertTriangle, ArrowLeftRight, Briefcase, Check, Copy, FileClock, Home, LockKeyhole, KeyRound, LogOut, Plus, RefreshCw, Settings2, ShieldCheck, SlidersHorizontal, Trash2, UserPlus, UserX, Users } from 'lucide-react'
+import { AlertTriangle, ArrowLeftRight, BarChart3, Briefcase, Check, Copy, FileClock, Home, LockKeyhole, KeyRound, LogOut, Megaphone, Plus, RefreshCw, Settings2, ShieldCheck, SlidersHorizontal, Trash2, UserPlus, UserX, Users } from 'lucide-react'
 import { workspacesApi } from '@/api'
+import type { ApiAnnouncement } from '@/api/endpoints'
 import type {
   ApiModel,
   ApiWorkspaceAuditLog,
@@ -15,6 +16,7 @@ import type {
   ApiWorkspaceMemberPermissions,
   ApiWorkspacePolicy,
   ApiWorkspaceRole,
+  ApiWorkspaceUsageAnalytics,
 } from '@/api/types'
 import { useAuth } from '@/store/auth'
 import { useWorkspaces } from '@/store/workspaces'
@@ -38,6 +40,8 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { subscribeAccessInvalidation } from '@/lib/access-events'
+import { userCan } from '@/lib/user-permissions'
+import { AnnouncementEditor } from '@/components/announcement/announcement-editor'
 import {
   canEditWorkspaceMemberPermissions,
   memberCanCreate,
@@ -273,6 +277,7 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
   // §workspace RBAC: role authority comes from is_owner + role, never from a
   // third "owner" role value (the backend always reports the owner as admin).
   const isOwner = ws?.is_owner ?? false
+  const user = useAuth((state) => state.user)
   const isAdmin = ws?.role === 'admin'
   const canManage = isOwner || isAdmin
   // In-flight guards so slow-backend mutations can't be double-fired.
@@ -294,7 +299,7 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
   const operationEpochRef = useRef(0)
   // §workspace RBAC phases 3/4: managers switch between members, invites and
   // the capability policy; non-managers only ever see the member list.
-  const [tab, setTab] = useState<'members' | 'invites' | 'policy' | 'audit'>('members')
+  const [tab, setTab] = useState<'members' | 'invites' | 'policy' | 'announcement' | 'audit' | 'statistics'>('members')
   const [transferOpen, setTransferOpen] = useState(false)
 
   function roleLabel(role: ApiWorkspaceRole | undefined): string {
@@ -554,9 +559,9 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
       }}
     >
       <DialogContent
-        size="md"
+        size="full"
         closeDisabled={actioning || savingPermissions || busyUid !== null}
-        className="max-sm:h-[calc(100dvh-1rem)] max-sm:max-h-[calc(100dvh-1rem)]"
+        className="max-w-[min(96vw,80rem)] max-sm:h-[calc(100dvh-1rem)] max-sm:max-h-[calc(100dvh-1rem)]"
       >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -572,7 +577,7 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
           </DialogDescription>
         </DialogHeader>
 
-        <DialogBody className="space-y-4">
+        <DialogBody className="min-h-0 max-h-[min(78dvh,52rem)] space-y-4 overflow-y-auto px-5 pb-5 sm:px-6">
           {/* §workspace RBAC: manager tabs — members / invites / capability policy. */}
           {canManage ? (
             <div
@@ -585,7 +590,9 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
               ['members', <Users key="i" size={13} aria-hidden />, t('workspace.tabMembers', { defaultValue: 'Members' })],
               ['invites', <KeyRound key="i" size={13} aria-hidden />, t('workspace.tabInvites', { defaultValue: 'Invites' })],
               ['policy', <SlidersHorizontal key="i" size={13} aria-hidden />, t('workspace.tabPolicy', { defaultValue: 'Capabilities' })],
+              ['announcement', <Megaphone key="i" size={13} aria-hidden />, t('workspace.tabAnnouncement', { defaultValue: 'Announcement' })],
               ['audit', <FileClock key="i" size={13} aria-hidden />, t('workspace.tabAudit', { defaultValue: 'Audit' })],
+              ['statistics', <BarChart3 key="i" size={13} aria-hidden />, t('workspace.tabStatistics', { defaultValue: 'Statistics' })],
             ] as const).map(([key, icon, label]) => (
               <button
                 key={key}
@@ -805,6 +812,17 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
             <WorkspacePolicyPanel key={activeId} workspaceID={activeId} />
           </div>
         ) : null}
+        {tab === 'announcement' && canManage && activeId ? (
+          <div
+            id="workspace-management-panel-announcement"
+            role="tabpanel"
+            aria-labelledby="workspace-management-tab-announcement"
+            tabIndex={0}
+            className="outline-none"
+          >
+            <WorkspaceAnnouncementPanel workspaceID={activeId} />
+          </div>
+        ) : null}
         {tab === 'audit' && canManage && activeId ? (
           <div
             id="workspace-management-panel-audit"
@@ -814,6 +832,17 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
             className="outline-none"
           >
             <WorkspaceAuditPanel workspaceID={activeId} />
+          </div>
+        ) : null}
+        {tab === 'statistics' && canManage && activeId ? (
+          <div
+            id="workspace-management-panel-statistics"
+            role="tabpanel"
+            aria-labelledby="workspace-management-tab-statistics"
+            tabIndex={0}
+            className="outline-none"
+          >
+            <WorkspaceUsagePanel workspaceID={activeId} />
           </div>
         ) : null}
         </DialogBody>
@@ -834,6 +863,8 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
               <Button
                 variant="destructive"
                 loading={actioning}
+                disabled={!userCan(user, 'allow_workspace_deletion')}
+                title={!userCan(user, 'allow_workspace_deletion') ? t('workspace.deleteGroupDenied') : undefined}
                 onClick={() => void runFooterAction(
                   removeWs,
                   t('workspace.deleteFailed', { defaultValue: 'Could not delete the workspace.' }),
@@ -890,6 +921,9 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="min-h-0 max-h-[min(70dvh,38rem)] overflow-y-auto py-0">
+            <p className="py-3 text-[12.5px] leading-5 text-[var(--color-fg-muted)]">
+              {t('workspace.groupPermissionCeiling')}
+            </p>
             {permissionDraft && editingMember?.role === 'guest' ? (
               <p className="py-4 text-[12.5px] leading-5 text-[var(--color-fg-muted)]">
                 {t('workspace.readOnlyAccess', { defaultValue: 'Read-only access' })}
@@ -1039,6 +1073,103 @@ const WORKSPACE_PERMISSION_GROUPS: WorkspaceMemberPermissionGroup[] = [
     ],
   },
 ]
+
+const WORKSPACE_USAGE_RANGES = ['1', '7', '30', '90', '365'] as const
+
+function WorkspaceUsagePanel({ workspaceID }: { workspaceID: string }) {
+  const { t } = useTranslation('chat')
+  const [days, setDays] = useState('30')
+  const [data, setData] = useState<ApiWorkspaceUsageAnalytics | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [failed, setFailed] = useState(false)
+  const [attempt, setAttempt] = useState(0)
+
+  useEffect(() => {
+    let current = true
+    setLoading(true)
+    setFailed(false)
+    workspacesApi.usage(workspaceID, Number(days))
+      .then((next) => { if (current) setData(next) })
+      .catch(() => { if (current) { setData(null); setFailed(true) } })
+      .finally(() => { if (current) setLoading(false) })
+    return () => { current = false }
+  }, [attempt, days, workspaceID])
+
+  const number = (value: number) => new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(value || 0)
+  const decimal = (value: number) => new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value || 0)
+  const totals = data?.totals
+  const previous = data?.previous_totals
+  const trend = data?.trend ?? []
+  const maxTrend = Math.max(1, ...trend.map((point) => point.input_tokens + point.output_tokens))
+  const totalTokens = (totals?.input_tokens ?? 0) + (totals?.output_tokens ?? 0)
+  const previousTokens = (previous?.input_tokens ?? 0) + (previous?.output_tokens ?? 0)
+  const metrics = [
+    { label: t('workspace.statsTurns', { defaultValue: 'Conversation turns' }), value: number(totals?.turns ?? 0), hint: `${number(totals?.calls ?? 0)} ${t('workspace.statsCalls', { defaultValue: 'calls' })}` },
+    { label: t('workspace.statsTokens', { defaultValue: 'Total tokens' }), value: number(totalTokens), hint: `${number(totals?.input_tokens ?? 0)} in · ${number(totals?.output_tokens ?? 0)} out` },
+    { label: t('workspace.statsUsers', { defaultValue: 'Active members' }), value: number(totals?.users ?? 0), hint: `${number(totals?.conversations ?? 0)} ${t('workspace.statsConversations', { defaultValue: 'conversations' })}` },
+    { label: t('workspace.statsCredits', { defaultValue: 'Credits' }), value: decimal(totals?.credits ?? 0), hint: totals?.cost ? `${decimal(totals.cost)} USD ${t('workspace.statsCost', { defaultValue: 'cost' })}` : t('workspace.statsNoCost', { defaultValue: 'Provider cost unavailable' }) },
+  ]
+
+  if (loading) {
+    return <div className="space-y-5" aria-busy="true">
+      <div className="flex items-center justify-between gap-3"><div><Skeleton className="h-5 w-36" /><Skeleton className="mt-2 h-3 w-64" /></div><Skeleton className="h-9 w-32" /></div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{[0, 1, 2, 3].map((key) => <Skeleton key={key} className="h-24 rounded-[10px]" />)}</div>
+      <Skeleton className="h-56 rounded-[10px]" />
+    </div>
+  }
+  if (failed || !data) {
+    return <div role="alert" className="flex min-h-56 flex-col items-center justify-center rounded-[12px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-5 text-center">
+      <AlertTriangle size={20} aria-hidden className="text-[var(--color-danger)]" />
+      <p className="mt-2 text-[13px] font-medium text-[var(--color-fg)]">{t('workspace.statsLoadFailed', { defaultValue: 'Could not load workspace statistics.' })}</p>
+      <Button size="sm" variant="secondary" className="mt-3" leadingIcon={<RefreshCw size={13} aria-hidden />} onClick={() => setAttempt((value) => value + 1)}>{t('actions.tryAgain', { ns: 'common', defaultValue: 'Try again' })}</Button>
+    </div>
+  }
+
+  return <div className="space-y-5">
+    <div className="flex flex-col gap-3 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <h3 className="text-[15px] font-semibold text-[var(--color-fg)]">{t('workspace.statisticsTitle', { defaultValue: 'Workspace usage' })}</h3>
+        <p className="mt-1 text-[12px] leading-5 text-[var(--color-fg-muted)]">{t('workspace.statisticsLead', { defaultValue: 'Usage from conversations and tools in this workspace.' })}</p>
+      </div>
+      <Select value={days} onValueChange={setDays}>
+        <SelectTrigger className="w-full sm:w-36" aria-label={t('workspace.statsRange', { defaultValue: 'Time range' })}><SelectValue /></SelectTrigger>
+        <SelectContent>{WORKSPACE_USAGE_RANGES.map((range) => <SelectItem key={range} value={range}>{t(`workspace.statsRange${range}`, { defaultValue: `${range} days` })}</SelectItem>)}</SelectContent>
+      </Select>
+    </div>
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      {metrics.map((metric) => <div key={metric.label} className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg)] p-4">
+        <div className="text-[11px] font-medium text-[var(--color-fg-subtle)]">{metric.label}</div>
+        <div className="mt-2 text-[22px] font-semibold tracking-tight text-[var(--color-fg)]">{metric.value}</div>
+        <div className="mt-1 truncate text-[11px] text-[var(--color-fg-muted)]">{metric.hint}</div>
+      </div>)}
+    </div>
+    <section className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-bg)] p-4" aria-labelledby="workspace-statistics-trend">
+      <div className="flex items-baseline justify-between gap-3"><div><h3 id="workspace-statistics-trend" className="text-[13px] font-semibold text-[var(--color-fg)]">{t('workspace.statsTrend', { defaultValue: 'Token trend' })}</h3><p className="mt-1 text-[11px] text-[var(--color-fg-subtle)]">{number(totalTokens)} {t('workspace.statsTokensUsed', { defaultValue: 'tokens used' })} · {number(previousTokens)} {t('workspace.statsPreviousPeriod', { defaultValue: 'previous period' })}</p></div><BarChart3 size={16} aria-hidden className="text-[var(--color-fg-subtle)]" /></div>
+      {trend.length > 0 ? <div className="mt-5 flex h-36 items-end gap-1.5 overflow-hidden" aria-label={t('workspace.statsTrend', { defaultValue: 'Token trend' })}>{trend.map((point) => { const value = point.input_tokens + point.output_tokens; const height = Math.max(4, Math.round((value / maxTrend) * 100)); return <div key={point.bucket_start} className="group flex min-w-0 flex-1 flex-col items-center justify-end gap-1" title={`${number(value)} tokens`}><div className="w-full max-w-8 rounded-t-[5px] bg-[var(--color-accent)]/75 transition-[height] duration-300 group-hover:bg-[var(--color-accent)]" style={{ height: `${height}%` }} /><span className="sr-only">{number(value)} tokens</span></div> })}</div> : <p className="mt-8 text-center text-[12px] text-[var(--color-fg-subtle)]">{t('workspace.statsNoData', { defaultValue: 'No usage in this period.' })}</p>}
+    </section>
+    <section className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-bg)]" aria-labelledby="workspace-statistics-members">
+      <div className="border-b border-[var(--color-divider)] px-4 py-3"><h3 id="workspace-statistics-members" className="text-[13px] font-semibold text-[var(--color-fg)]">{t('workspace.statsMemberUsage', { defaultValue: 'Member usage' })}</h3></div>
+      <div className="overflow-x-auto"><table className="w-full min-w-[620px] text-left text-[12px]"><thead className="text-[11px] text-[var(--color-fg-subtle)]"><tr><th className="px-4 py-2.5 font-medium">{t('workspace.statsMember', { defaultValue: 'Member' })}</th><th className="px-3 py-2.5 font-medium">{t('workspace.statsTurns', { defaultValue: 'Turns' })}</th><th className="px-3 py-2.5 font-medium">{t('workspace.statsInput', { defaultValue: 'Input tokens' })}</th><th className="px-3 py-2.5 font-medium">{t('workspace.statsOutput', { defaultValue: 'Output tokens' })}</th><th className="px-3 py-2.5 font-medium">{t('workspace.statsCredits', { defaultValue: 'Credits' })}</th></tr></thead><tbody className="divide-y divide-[var(--color-divider)]">{data.usage.length > 0 ? data.usage.map((member) => <tr key={member.user_id} className="text-[var(--color-fg-muted)]"><td className="max-w-[240px] truncate px-4 py-3 font-medium text-[var(--color-fg)]">{member.name || member.email}</td><td className="px-3 py-3">{number(member.messages)}</td><td className="px-3 py-3">{number(member.input_tokens)}</td><td className="px-3 py-3">{number(member.output_tokens)}</td><td className="px-3 py-3">{decimal(member.credits)}</td></tr>) : <tr><td colSpan={5} className="px-4 py-10 text-center text-[12px] text-[var(--color-fg-subtle)]">{t('workspace.statsNoData', { defaultValue: 'No usage in this period.' })}</td></tr>}</tbody></table></div>
+    </section>
+  </div>
+}
+
+function WorkspaceAnnouncementPanel({ workspaceID }: { workspaceID: string }) {
+  const { t } = useTranslation('chat')
+  const load = useCallback(() => workspacesApi.announcement(workspaceID), [workspaceID])
+  const save = useCallback((payload: ApiAnnouncement) => workspacesApi.updateAnnouncement(workspaceID, payload), [workspaceID])
+  const uploadImage = useCallback((file: File) => workspacesApi.uploadAnnouncementImage(workspaceID, file), [workspaceID])
+  return (
+    <AnnouncementEditor
+      load={load}
+      save={save}
+      uploadImage={uploadImage}
+      compact
+      title={t('workspace.announcementTitle', { defaultValue: 'Workspace announcement' })}
+      lead={t('workspace.announcementLead', { defaultValue: 'Only members of this workspace will see this announcement.' })}
+    />
+  )
+}
 
 /** §workspace RBAC phase 3 — invite records: create, copy link, revoke. */
 function WorkspaceInvitesPanel({ workspaceID, isOwner }: { workspaceID: string; isOwner: boolean }) {
@@ -1350,7 +1481,7 @@ function WorkspacePolicyPanel({ workspaceID }: { workspaceID: string }) {
 
   const allModelsAllowed = policy.AllowedModelIDs.length === 0
   const capabilities = workspaceCapabilities(policy)
-  type CapabilityKey = 'AllowToolCalling' | 'AllowDrawing' | 'AllowMCP' | 'AllowSkills' | 'AllowPrompts' | 'AllowKnowledgeBases' | 'AllowFileUpload'
+  type CapabilityKey = 'AllowToolCalling' | 'AllowDrawing' | 'AllowPrivateChat' | 'AllowMCP' | 'AllowSkills' | 'AllowPrompts' | 'AllowKnowledgeBases' | 'AllowFileUpload'
   const capabilityGroups: Array<{
     id: 'core' | 'resources' | 'content'
     label: string
@@ -1364,6 +1495,7 @@ function WorkspacePolicyPanel({ workspaceID }: { workspaceID: string }) {
       rows: [
         { key: 'AllowToolCalling', label: 'Tool calling', description: 'Allow model tool calls, including built-in tools and MCP services.' },
         { key: 'AllowDrawing', label: 'Drawing', description: 'Allow the dedicated drawing mode and image models.' },
+        { key: 'AllowPrivateChat', label: 'Private chat', description: 'Allow temporary chats when the system user group also permits them. Applies to workspace admins too.' },
       ],
     },
     {
@@ -1401,6 +1533,7 @@ function WorkspacePolicyPanel({ workspaceID }: { workspaceID: string }) {
         AllowMCP: capabilities.mcp,
         AllowSkills: capabilities.skills,
         AllowPrompts: capabilities.prompts,
+        AllowPrivateChat: capabilities.privateChat,
         AllowKnowledgeBases: capabilities.knowledgeBases,
         AllowFileUpload: capabilities.fileUpload,
         MemberMonthlyCreditLimit: Math.max(0, Number(limitDraft) || 0),
@@ -1444,6 +1577,9 @@ function WorkspacePolicyPanel({ workspaceID }: { workspaceID: string }) {
         </div>
       ) : null}
       <div className="space-y-4">
+        <p className="text-[12.5px] leading-5 text-[var(--color-fg-muted)]">
+          {t('workspace.groupPermissionCeiling')}
+        </p>
         {capabilityGroups.map((group) => (
           <section key={group.id} className="rounded-[10px] border border-[var(--color-border)] px-3">
             <div className="border-b border-[var(--color-divider)] py-3">
@@ -1462,9 +1598,11 @@ function WorkspacePolicyPanel({ workspaceID }: { workspaceID: string }) {
                         ? capabilities.skills
                         : row.key === 'AllowPrompts'
                           ? capabilities.prompts
-                          : row.key === 'AllowKnowledgeBases'
-                            ? capabilities.knowledgeBases
-                            : capabilities.fileUpload
+                          : row.key === 'AllowPrivateChat'
+                            ? capabilities.privateChat
+                            : row.key === 'AllowKnowledgeBases'
+                              ? capabilities.knowledgeBases
+                              : capabilities.fileUpload
                 return (
                   <label key={row.key} className="flex min-h-14 cursor-pointer items-center gap-4 py-3">
                     <span className="min-w-0 flex-1">
@@ -1487,6 +1625,7 @@ function WorkspacePolicyPanel({ workspaceID }: { workspaceID: string }) {
                           if (row.key === 'AllowMCP') return { ...current, AllowMCP: checked }
                           if (row.key === 'AllowSkills') return { ...current, AllowSkills: checked }
                           if (row.key === 'AllowPrompts') return { ...current, AllowPrompts: checked }
+                          if (row.key === 'AllowPrivateChat') return { ...current, AllowPrivateChat: checked }
                           if (row.key === 'AllowKnowledgeBases') return { ...current, AllowKnowledgeBases: checked }
                           return { ...current, AllowFileUpload: checked }
                         })

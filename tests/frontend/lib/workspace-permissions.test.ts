@@ -69,6 +69,7 @@ describe('workspace member permission semantics', () => {
       prompts: false,
       knowledgeBases: false,
       fileUpload: false,
+      privateChat: false,
     })
     expect(workspaceCapabilitiesForScope('workspace-1', null, { policyLoading: false })).toEqual({
       toolCalling: false,
@@ -78,6 +79,7 @@ describe('workspace member permission semantics', () => {
       prompts: false,
       knowledgeBases: false,
       fileUpload: false,
+      privateChat: false,
     })
   })
 
@@ -94,6 +96,7 @@ describe('workspace member permission semantics', () => {
       prompts: false,
       knowledgeBases: false,
       fileUpload: false,
+      privateChat: false,
     })
   })
 
@@ -107,6 +110,7 @@ describe('workspace member permission semantics', () => {
       prompts: false,
       knowledgeBases: false,
       fileUpload: false,
+      privateChat: false,
     }
     expect(workspaceCapabilitiesForScope('workspace-1', enabled, {
       workspacesLoaded: false,
@@ -137,6 +141,7 @@ describe('workspace member permission semantics', () => {
       AllowPrompts: false,
       AllowKnowledgeBases: true,
       AllowFileUpload: false,
+      AllowPrivateChat: false,
     })).toEqual({
       toolCalling: false,
       drawing: true,
@@ -145,6 +150,7 @@ describe('workspace member permission semantics', () => {
       prompts: false,
       knowledgeBases: true,
       fileUpload: false,
+      privateChat: false,
     })
   })
 

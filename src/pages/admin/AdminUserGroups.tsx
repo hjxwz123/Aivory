@@ -83,6 +83,9 @@ const DEFAULT_PERMISSIONS: ApiUserGroupPermissions = {
   prompts: { mode: 'all', ids: [] },
   skills: { mode: 'all', ids: [] },
   tools: { mode: 'all', ids: [] },
+  allow_prompts: true,
+  allow_skills: true,
+  allow_workspace_deletion: true,
   allow_sharing: true,
   allow_knowledge_bases: true,
   allow_knowledge_base_sharing: true,
@@ -435,6 +438,7 @@ export default function AdminUserGroups() {
             description: skill.display_description || skill.description,
           })),
           tools: [
+            { id: 'usermcp:*', name: t('admin:groups.permissions.userMCP'), description: t('admin:groups.permissions.userMCPHint') },
             ...builtins.filter((tool) => tool.globally_enabled !== false).map((tool) => ({
               id: `builtin:${tool.name}`,
               name: t(`chat:tools.${tool.name}`, { defaultValue: tool.name }),
@@ -858,6 +862,9 @@ export default function AdminUserGroups() {
               </TabsContent>
 
               <TabsContent value="permissions" className="mt-0 min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+                <p className="mb-5 text-sm leading-6 text-[var(--color-fg-muted)]">
+                  {t('admin:groups.permissions.hierarchyHint')}
+                </p>
                 {catalogLoadFailed ? (
                   <div
                     role="alert"
@@ -908,6 +915,9 @@ export default function AdminUserGroups() {
                     {t('admin:groups.permissions.capabilities', { defaultValue: 'Capabilities' })}
                   </h3>
                   <div className="mt-2">
+                    <CapabilityToggle label={t('admin:groups.permissions.usePrompts')} description={t('admin:groups.permissions.usePromptsHint')} checked={normalizePermissions(editor.draft.permissions).allow_prompts} onCheckedChange={(allow_prompts) => setPermissions({ allow_prompts })} />
+                    <CapabilityToggle label={t('admin:groups.permissions.useSkills')} description={t('admin:groups.permissions.useSkillsHint')} checked={normalizePermissions(editor.draft.permissions).allow_skills} onCheckedChange={(allow_skills) => setPermissions({ allow_skills })} />
+                    <CapabilityToggle label={t('admin:groups.permissions.deleteWorkspaces')} description={t('admin:groups.permissions.deleteWorkspacesHint')} checked={normalizePermissions(editor.draft.permissions).allow_workspace_deletion} onCheckedChange={(allow_workspace_deletion) => setPermissions({ allow_workspace_deletion })} />
                     <CapabilityToggle label={t('admin:groups.permissions.sharing', { defaultValue: 'Share conversations' })} description={t('admin:groups.permissions.sharingHint', { defaultValue: 'Create and manage public conversation links.' })} checked={normalizePermissions(editor.draft.permissions).allow_sharing} onCheckedChange={(allow_sharing) => setPermissions({ allow_sharing })} />
                     <CapabilityToggle label={t('admin:groups.permissions.knowledgeBases', { defaultValue: 'Use knowledge bases' })} description={t('admin:groups.permissions.knowledgeBasesHint', { defaultValue: 'Access personal, workspace, project, and shared knowledge bases.' })} checked={normalizePermissions(editor.draft.permissions).allow_knowledge_bases} onCheckedChange={(allow_knowledge_bases) => setPermissions({ allow_knowledge_bases, ...(!allow_knowledge_bases ? { allow_knowledge_base_sharing: false } : {}) })} />
                     <CapabilityToggle label={t('admin:groups.permissions.knowledgeBaseSharing', { defaultValue: 'Share knowledge bases' })} description={t('admin:groups.permissions.knowledgeBaseSharingHint', { defaultValue: 'Share owned personal knowledge bases as read-only or upload-enabled.' })} checked={normalizePermissions(editor.draft.permissions).allow_knowledge_base_sharing} disabled={!normalizePermissions(editor.draft.permissions).allow_knowledge_bases} onCheckedChange={(allow_knowledge_base_sharing) => setPermissions({ allow_knowledge_base_sharing })} />

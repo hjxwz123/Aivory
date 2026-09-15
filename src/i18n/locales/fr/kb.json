@@ -112,12 +112,12 @@
   "workspaceMembers": {
     "action": "Permissions des membres",
     "title": "Permissions des membres pour cette base",
-    "description": "Ces réglages s'appliquent uniquement à cette base. Les permissions générales du membre dans l'espace restent la limite supérieure.",
+    "description": "Ces réglages concernent uniquement cette base, dans les limites du groupe système, des réglages de l’espace et des droits du membre.",
     "member": "Membre",
     "addFiles": "Ajouter des fichiers",
     "deleteContent": "Supprimer du contenu",
-    "manager": "Propriétaire, administrateur de l'espace ou créateur de la base",
-    "disabledByWorkspace": "Désactivé pour ce membre",
+    "manager": "Propriétaire ou administrateur de l’espace",
+    "disabledByWorkspace": "Limité par le groupe, l’espace ou les droits du membre",
     "loadFailed": "Impossible de charger les membres de l'espace.",
     "empty": "Aucun membre dans l'espace."
   },

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Globe, LockKeyhole, Plus, Users } from 'lucide-react'
+import { AlertTriangle, Globe, LockKeyhole, Plus, Users } from 'lucide-react'
 import { adminApi, workspacesApi } from '@/api'
 import { domainsApi, type DomainUser, type RegistrationDomain } from '@/api/domains'
 import type { ApiUserGroup, ApiWorkspace } from '@/api/types'
@@ -160,6 +160,14 @@ function DomainEditor({ rule, workspaces, groups, onClose, onSaved }: { rule: Re
         <DialogHeader><DialogTitle>{t(isNew ? 'domains.add' : 'domains.edit')}</DialogTitle><DialogDescription>{t('domains.editorHint')}</DialogDescription></DialogHeader>
         <form className="flex min-h-0 flex-1 flex-col overflow-hidden" onSubmit={(e) => { e.preventDefault(); void save() }}>
           <DialogBody className="space-y-5">
+            <aside aria-labelledby="domain-permissions-title" className="flex items-start gap-3 rounded-xl border border-[var(--color-warning)]/40 bg-[var(--color-warning)]/10 p-4">
+              <AlertTriangle size={20} aria-hidden className="mt-0.5 shrink-0 text-[var(--color-warning)]" />
+              <div className="min-w-0 space-y-1.5 text-sm leading-6">
+                <p id="domain-permissions-title" className="font-semibold text-[var(--color-fg)]">{t('domains.permissionsNoticeTitle')}</p>
+                <p className="text-[var(--color-fg)]">{t('domains.permissionsNotice')}</p>
+                <Link to="/admin/user-groups" className="inline-flex font-medium text-[var(--color-fg)] underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4">{t('domains.configureGroups')}</Link>
+              </div>
+            </aside>
             <div className="space-y-2"><label htmlFor="domain-name" className="text-sm font-medium">{t('domains.domain')}</label><Input id="domain-name" autoFocus disabled={!isNew || busy} value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="example.com" maxLength={253} required /></div>
             <div className="space-y-2"><label id="domain-workspace-label" className="text-sm font-medium">{t('domains.workspace')}</label>
               <Select value={workspace} onValueChange={setWorkspace} disabled={!isNew || busy}><SelectTrigger aria-labelledby="domain-workspace-label"><SelectValue placeholder={t('domains.chooseWorkspace')} /></SelectTrigger><SelectContent>{workspaces.map((w) => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent></Select>

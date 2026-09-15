@@ -113,12 +113,12 @@
   "workspaceMembers": {
     "action": "Member permissions",
     "title": "Knowledge-base member permissions",
-    "description": "These settings apply only to this knowledge base. Workspace member permissions remain the upper limit.",
+    "description": "These settings apply only to this library, within the limits of the system user group, workspace switches and member permissions.",
     "member": "Member",
     "addFiles": "Add files",
     "deleteContent": "Delete content",
-    "manager": "Workspace owner, admin or library creator",
-    "disabledByWorkspace": "Disabled for member",
+    "manager": "Workspace owner or admin",
+    "disabledByWorkspace": "Restricted by group, workspace or member permissions",
     "loadFailed": "Could not load workspace members.",
     "empty": "No workspace members."
   },

@@ -10,7 +10,6 @@ import { SandboxFilesPanel } from '@/components/chat/sandbox-files-panel'
 import { QueuedTurnDispatcher } from '@/components/chat/queued-turn-dispatcher'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useSettings } from '@/store/settings'
-import { useAuth } from '@/store/auth'
 import { useUI } from '@/store/ui'
 import { useWorkspaces } from '@/store/workspaces'
 import { useMediaQuery } from '@/hooks/use-media-query'
@@ -20,6 +19,7 @@ import { Tooltip } from '@/components/ui/tooltip'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { AnnouncementBar } from '@/components/announcement/announcement-bar'
 import { AnnouncementPopup } from '@/components/announcement/announcement-popup'
+import { WorkspaceAnnouncementBar, WorkspaceAnnouncementPopup } from '@/components/announcement/workspace-announcement'
 import { CreditAdjustmentNotice } from '@/components/credits/credit-adjustment-notice'
 import { useHotkeys } from '@/hooks/use-hotkeys'
 import { TracedLogo } from '@/components/brand/logo'
@@ -27,7 +27,7 @@ import { RouteFade } from '@/components/ui/route-fade'
 import { chatRouteAccessRedirect, chatRouteKeys } from '@/lib/chat-route'
 import { workspaceSwitchDestination } from '@/lib/workspace-navigation'
 import { cn } from '@/lib/utils'
-import { userCan } from '@/lib/user-permissions'
+import { usePrivateChatPermission } from '@/hooks/use-private-chat-permission'
 
 export default function ChatLayout() {
   const isDesktop = useMediaQuery(mediaQuery.desktop)
@@ -37,8 +37,7 @@ export default function ChatLayout() {
   const drawerOpen = useUI((s) => s.navOpen)
   const setDrawerOpen = useUI((s) => s.setNavOpen)
   const pageOwnsTopBar = useUI((s) => s.pageOwnsTopBar)
-  const user = useAuth((s) => s.user)
-  const canUsePrivateChat = userCan(user, 'allow_private_chat')
+  const { allowed: canUsePrivateChat, resolved: privateChatPermissionResolved, canRender: canRenderPrivateChat } = usePrivateChatPermission()
   const domainLocked = useWorkspaces((s) => !!s.lockedWorkspaceId)
   const activeWsId = useWorkspaces((s) => s.activeId)
   const workspaceSwitching = useWorkspaces((s) => s.switching)
@@ -81,7 +80,8 @@ export default function ChatLayout() {
     },
   ])
 
-  if (accessRedirect) return <Navigate to={accessRedirect} replace />
+  if (privateChat && !privateChatPermissionResolved && !canRenderPrivateChat) return <PanelFallback />
+  if (accessRedirect && (!privateChat || privateChatPermissionResolved)) return <Navigate to={accessRedirect} replace />
 
   return (
     <div
@@ -96,6 +96,7 @@ export default function ChatLayout() {
     >
       {!privateChat && <QueuedTurnDispatcher />}
       <AnnouncementPopup />
+      <WorkspaceAnnouncementPopup />
       <CreditAdjustmentNotice />
       <div className="flex flex-1 min-h-0 w-full">
       {isDesktop ? (
@@ -113,6 +114,7 @@ export default function ChatLayout() {
           {/* Pinned announcement bar — spans only the chat/content column (NOT the
               sidebar), pinned to the top of the content area; null when inactive. */}
           <AnnouncementBar />
+          <WorkspaceAnnouncementBar />
           {/* Mobile top bar — suppressed when the page renders its own combined
               header (e.g. a chat thread) so the two don't stack into two rows. */}
           {!isDesktop && !pageOwnsTopBar && !privateChat && (

@@ -112,12 +112,12 @@
   "workspaceMembers": {
     "action": "成員權限",
     "title": "知識庫成員權限",
-    "description": "這些設定僅適用於目前知識庫，工作空間成員總權限仍是上限。",
+    "description": "這些設定僅適用於目前知識庫，不得超出系統使用者群組、工作空間功能開關及成員總權限。",
     "member": "成員",
     "addFiles": "新增檔案",
     "deleteContent": "刪除內容",
-    "manager": "工作空間擁有者、管理員或知識庫建立者",
-    "disabledByWorkspace": "成員總權限已關閉",
+    "manager": "工作空間擁有者或管理員",
+    "disabledByWorkspace": "系統使用者群組、工作空間或成員權限已限制",
     "loadFailed": "無法載入工作空間成員。",
     "empty": "工作空間目前沒有成員。"
   },

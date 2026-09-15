@@ -749,6 +749,8 @@
     "loadFailed": "加载失败"
   },
   "workspace": {
+    "groupPermissionCeiling": "这里设置工作空间权限，仍受成员所属全站用户组限制。任一层禁用，对应操作都不可用，资源创建者也须遵守。工作空间管理员不受成员级开关限制，但仍受用户组与空间总开关限制。",
+    "deleteGroupDenied": "所属用户组不允许删除工作空间。",
     "menu": "工作空间",
     "personal": "个人空间",
     "create": "创建工作空间",
@@ -871,6 +873,9 @@
     "tabMembers": "成员",
     "tabInvites": "邀请",
     "tabPolicy": "能力",
+    "tabAnnouncement": "公告",
+    "announcementTitle": "工作空间公告",
+    "announcementLead": "仅此工作空间的成员可以看到此公告。",
     "transfer": "转移所有权",
     "transferBody": "接收者将成为工作空间所有者和管理员。你保留管理员角色，但失去所有者专属操作。",
     "transferConfirmHint": "输入工作空间名称“{{name}}”以确认。",
@@ -930,6 +935,10 @@
         "label": "绘图",
         "description": "允许使用独立绘图模式和绘图模型。"
       },
+      "AllowPrivateChat": {
+        "label": "隐私对话",
+        "description": "允许使用不保存到历史的临时对话。还须系统用户组允许；工作空间管理员同样受此开关限制。"
+      },
       "AllowMCP": {
         "label": "MCP 服务",
         "description": "显示 MCP 服务，并在启用工具调用时允许使用其工具。"
@@ -958,6 +967,32 @@
       "creditLimitHint": "0 表示不限。达到额度的成员不能再在该工作空间发起新对话轮次。"
     },
     "tabAudit": "审计",
+    "tabStatistics": "统计",
+    "statisticsTitle": "工作空间使用情况",
+    "statisticsLead": "查看此工作空间中的对话和工具使用情况。",
+    "statsRange": "时间范围",
+    "statsRange1": "今天",
+    "statsRange7": "最近 7 天",
+    "statsRange30": "最近 30 天",
+    "statsRange90": "最近 90 天",
+    "statsRange365": "最近一年",
+    "statsTurns": "对话轮数",
+    "statsCalls": "次调用",
+    "statsTokens": "Token 总量",
+    "statsUsers": "活跃成员",
+    "statsConversations": "个对话",
+    "statsCredits": "Credits",
+    "statsCost": "成本",
+    "statsNoCost": "暂无供应商成本数据",
+    "statsTrend": "Token 趋势",
+    "statsTokensUsed": "Token 已使用",
+    "statsPreviousPeriod": "上一周期",
+    "statsMemberUsage": "成员使用情况",
+    "statsMember": "成员",
+    "statsInput": "输入 Token",
+    "statsOutput": "输出 Token",
+    "statsNoData": "此时间范围内暂无使用数据。",
+    "statsLoadFailed": "无法加载工作空间统计数据。",
     "audit": {
       "loadFailed": "审计日志加载失败。",
       "empty": "还没有审计记录。",
@@ -975,7 +1010,8 @@
         "invite.used": "使用邀请",
         "invite.revoked": "撤销邀请",
         "resource.visibility_changed": "资源可见范围变更",
-        "policy.updated": "能力策略变更"
+        "policy.updated": "能力策略变更",
+        "announcement.updated": "公告更新"
       }
     },
     "domainLocked": "个人空间已由管理员锁定"

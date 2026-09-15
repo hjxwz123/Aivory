@@ -754,6 +754,8 @@
     "loadFailed": "Failed to load"
   },
   "workspace": {
+    "groupPermissionCeiling": "These workspace permissions remain subject to each member’s site user group. A denial at either layer blocks the operation, including for resource creators. Workspace admins bypass member switches but still obey group and workspace-wide restrictions.",
+    "deleteGroupDenied": "Your user group does not allow deleting workspaces.",
     "menu": "Workspaces",
     "personal": "Personal space",
     "create": "Create workspace",
@@ -876,6 +878,9 @@
     "tabMembers": "Members",
     "tabInvites": "Invites",
     "tabPolicy": "Capabilities",
+    "tabAnnouncement": "Announcement",
+    "announcementTitle": "Workspace announcement",
+    "announcementLead": "Only members of this workspace can see this announcement.",
     "transfer": "Transfer ownership",
     "transferBody": "The receiver becomes the workspace owner and an admin. You keep the admin role but lose owner-exclusive operations.",
     "transferConfirmHint": "Type the workspace name \"{{name}}\" to confirm.",
@@ -935,6 +940,10 @@
         "label": "Drawing",
         "description": "Allow the dedicated drawing mode and image models."
       },
+      "AllowPrivateChat": {
+        "label": "Private chat",
+        "description": "Allow temporary chats that are not saved to history. The system user group must also allow them; workspace admins follow this switch too."
+      },
       "AllowMCP": {
         "label": "MCP services",
         "description": "Show MCP services and allow their tools when tool calling is enabled."
@@ -963,6 +972,32 @@
       "creditLimitHint": "0 = unlimited. Members hitting the limit cannot start new turns in this workspace."
     },
     "tabAudit": "Audit",
+    "tabStatistics": "Statistics",
+    "statisticsTitle": "Workspace usage",
+    "statisticsLead": "Usage from conversations and tools in this workspace.",
+    "statsRange": "Time range",
+    "statsRange1": "Today",
+    "statsRange7": "Last 7 days",
+    "statsRange30": "Last 30 days",
+    "statsRange90": "Last 90 days",
+    "statsRange365": "Last year",
+    "statsTurns": "Conversation turns",
+    "statsCalls": "calls",
+    "statsTokens": "Total tokens",
+    "statsUsers": "Active members",
+    "statsConversations": "conversations",
+    "statsCredits": "Credits",
+    "statsCost": "cost",
+    "statsNoCost": "Provider cost unavailable",
+    "statsTrend": "Token trend",
+    "statsTokensUsed": "tokens used",
+    "statsPreviousPeriod": "previous period",
+    "statsMemberUsage": "Member usage",
+    "statsMember": "Member",
+    "statsInput": "Input tokens",
+    "statsOutput": "Output tokens",
+    "statsNoData": "No usage in this period.",
+    "statsLoadFailed": "Could not load workspace statistics.",
     "audit": {
       "loadFailed": "Could not load the audit log.",
       "empty": "No audit entries yet.",
@@ -980,7 +1015,8 @@
         "invite.used": "Invite used",
         "invite.revoked": "Invite revoked",
         "resource.visibility_changed": "Resource visibility changed",
-        "policy.updated": "Capability policy changed"
+        "policy.updated": "Capability policy changed",
+        "announcement.updated": "Announcement updated"
       }
     },
     "domainLocked": "Personal space locked by your administrator"

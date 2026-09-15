@@ -749,6 +749,8 @@
     "loadFailed": "Échec du chargement"
   },
   "workspace": {
+    "groupPermissionCeiling": "Ces droits restent soumis au groupe de chaque membre sur le site. Un refus bloque l’opération, même pour le créateur. Les administrateurs d’espace ignorent les restrictions individuelles, mais respectent celles du groupe et de l’espace.",
+    "deleteGroupDenied": "Votre groupe n’autorise pas la suppression d’espaces.",
     "menu": "Espaces de travail",
     "personal": "Espace personnel",
     "create": "Créer un espace de travail",
@@ -871,6 +873,9 @@
     "tabMembers": "Membres",
     "tabInvites": "Invitations",
     "tabPolicy": "Capacités",
+    "tabAnnouncement": "Annonce",
+    "announcementTitle": "Annonce de l’espace de travail",
+    "announcementLead": "Cette annonce est visible uniquement par les membres de cet espace.",
     "transfer": "Transférer la propriété",
     "transferBody": "Le destinataire devient propriétaire et administrateur. Vous restez administrateur mais perdez les opérations réservées au propriétaire.",
     "transferConfirmHint": "Saisissez le nom de l'espace « {{name}} » pour confirmer.",
@@ -930,6 +935,10 @@
         "label": "Dessin",
         "description": "Autoriser le mode dessin dédié et les modèles d'image."
       },
+      "AllowPrivateChat": {
+        "label": "Conversation privée",
+        "description": "Autoriser les conversations temporaires sans historique. Le groupe système doit aussi les autoriser ; ce réglage s’applique également aux administrateurs de l’espace."
+      },
       "AllowMCP": {
         "label": "Services MCP",
         "description": "Afficher les services MCP et autoriser leurs outils si l'appel d'outils est activé."
@@ -958,6 +967,32 @@
       "creditLimitHint": "0 = illimité. Les membres ayant atteint le plafond ne peuvent plus démarrer de tours dans cet espace."
     },
     "tabAudit": "Audit",
+    "tabStatistics": "Statistiques",
+    "statisticsTitle": "Utilisation de l’espace de travail",
+    "statisticsLead": "Utilisation des conversations et outils de cet espace.",
+    "statsRange": "Période",
+    "statsRange1": "Aujourd’hui",
+    "statsRange7": "7 derniers jours",
+    "statsRange30": "30 derniers jours",
+    "statsRange90": "90 derniers jours",
+    "statsRange365": "Dernière année",
+    "statsTurns": "Tours de conversation",
+    "statsCalls": "appels",
+    "statsTokens": "Total des tokens",
+    "statsUsers": "Membres actifs",
+    "statsConversations": "conversations",
+    "statsCredits": "Crédits",
+    "statsCost": "coût",
+    "statsNoCost": "Coût fournisseur indisponible",
+    "statsTrend": "Évolution des tokens",
+    "statsTokensUsed": "tokens utilisés",
+    "statsPreviousPeriod": "période précédente",
+    "statsMemberUsage": "Utilisation par membre",
+    "statsMember": "Membre",
+    "statsInput": "Tokens entrants",
+    "statsOutput": "Tokens sortants",
+    "statsNoData": "Aucune utilisation sur cette période.",
+    "statsLoadFailed": "Impossible de charger les statistiques de l’espace.",
     "audit": {
       "loadFailed": "Impossible de charger le journal d'audit.",
       "empty": "Aucune entrée d'audit.",
@@ -975,7 +1010,8 @@
         "invite.used": "Invitation utilisée",
         "invite.revoked": "Invitation révoquée",
         "resource.visibility_changed": "Visibilité modifiée",
-        "policy.updated": "Stratégie modifiée"
+        "policy.updated": "Stratégie modifiée",
+        "announcement.updated": "Annonce modifiée"
       }
     },
     "domainLocked": "Espace personnel verrouillé par l’administrateur"

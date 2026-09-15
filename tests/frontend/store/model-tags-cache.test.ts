@@ -29,6 +29,7 @@ const workspacePolicy: ApiWorkspacePolicy = {
   AllowMCP: true,
   AllowSkills: true,
   AllowPrompts: true,
+  AllowPrivateChat: true,
   AllowKnowledgeBases: true,
   AllowFileUpload: true,
   MemberMonthlyCreditLimit: 0,

@@ -35,7 +35,7 @@ import type {
   ApiWorkspaceRole,
   ApiWorkspaceInvite,
   ApiWorkspacePolicy,
-  ApiWorkspaceUsageRow,
+  ApiWorkspaceUsageAnalytics,
   ApiWorkspaceAuditLog,
   ApiAnalytics,
   ApiAuthPolicy,
@@ -644,6 +644,7 @@ export const workspacesApi = {
       AllowMCP: 'allow_mcp',
       AllowSkills: 'allow_skills',
       AllowPrompts: 'allow_prompts',
+      AllowPrivateChat: 'allow_private_chat',
       AllowSandbox: 'allow_sandbox',
       AllowImageGeneration: 'allow_image_generation',
       AllowKnowledgeBases: 'allow_knowledge_bases',
@@ -657,13 +658,25 @@ export const workspacesApi = {
     return api<ApiWorkspacePolicy>(`/workspaces/${encodeURIComponent(id)}/policy`, { method: 'PATCH', body: payload })
   },
   usage: (id: string, days = 30) =>
-    api<{ days: number; usage: ApiWorkspaceUsageRow[] }>(
+    api<ApiWorkspaceUsageAnalytics>(
       `/workspaces/${encodeURIComponent(id)}/usage?days=${days}`,
     ),
   audit: (id: string, limit = 100, offset = 0) =>
     api<{ logs: ApiWorkspaceAuditLog[] }>(
       `/workspaces/${encodeURIComponent(id)}/audit?limit=${limit}&offset=${offset}`,
     ),
+  announcement: (id: string) =>
+    api<ApiAnnouncement>(`/workspaces/${encodeURIComponent(id)}/announcement`),
+  updateAnnouncement: (id: string, body: ApiAnnouncement) =>
+    api<ApiAnnouncement>(`/workspaces/${encodeURIComponent(id)}/announcement`, { method: 'PATCH', body }),
+  uploadAnnouncementImage: (id: string, file: File) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return apiUpload<{ url: string; filename: string }>(
+      `/workspaces/${encodeURIComponent(id)}/announcement/image`,
+      fd,
+    )
+  },
   kick: (id: string, userId: string) =>
     api<{ ok: true }>(`/workspaces/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`, { method: 'DELETE' }),
   leave: (id: string) => api<{ ok: true }>(`/workspaces/${encodeURIComponent(id)}/leave`, { method: 'POST' }),

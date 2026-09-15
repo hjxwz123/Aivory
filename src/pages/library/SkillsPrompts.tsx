@@ -54,6 +54,8 @@ import { skillDisplayDescription } from '@/lib/skill-description'
 import { isValidSkillName, parseSkillDocument } from '@/lib/skill-document'
 import { cn } from '@/lib/utils'
 import { useWorkspaces } from '@/store/workspaces'
+import { useAuth } from '@/store/auth'
+import { userCanUseMCPServer, userPermissions } from '@/lib/user-permissions'
 import {
   memberCanCreate,
   memberCanUse,
@@ -148,6 +150,8 @@ function mcpDraftFromRow(server: ApiUserMCP): MCPDraft {
 }
 
 export default function SkillsPrompts() {
+  const user = useAuth((state) => state.user)
+  const groupPermissions = userPermissions(user)
   // 'admin' is subscribed only for the header-row reveal/remove a11y labels in
   // the MCP editor (library.json has no show/hide/remove verbs; the strings are
   // shipped in all five locales and match the AdminMCP editor being mirrored).
@@ -209,8 +213,8 @@ export default function SkillsPrompts() {
     switching: workspaceSwitching,
     policyError: workspacePolicyError,
   })
-  const skillResourceEnabled = !workspaceId || workspaceCaps.skills
-  const promptResourceEnabled = !workspaceId || workspaceCaps.prompts
+  const skillResourceEnabled = groupPermissions.allow_skills && (!workspaceId || workspaceCaps.skills)
+  const promptResourceEnabled = groupPermissions.allow_prompts && (!workspaceId || workspaceCaps.prompts)
   const mcpResourceEnabled = !workspaceId || workspaceCaps.mcp
   const resourceEnabled = useMemo(
     () => ({
@@ -225,12 +229,13 @@ export default function SkillsPrompts() {
   // until the server-backed role is known. This prevents a guest from seeing a
   // write control for one render during workspace hydration.
   const workspaceAdmin = !workspaceId || activeWorkspace?.is_owner === true || activeWorkspace?.role === 'admin'
-  const canCreateSkill = workspaceAdmin || (Boolean(activeWorkspace) && memberCanCreate(activeWorkspace!, 'skill'))
-  const canCreatePrompt = workspaceAdmin || (Boolean(activeWorkspace) && memberCanCreate(activeWorkspace!, 'prompt'))
+  const canCreateSkill = skillResourceEnabled && (workspaceId ? workspaceAdmin || (Boolean(activeWorkspace) && memberCanCreate(activeWorkspace!, 'skill')) : groupPermissions.skills.mode === 'all')
+  const canCreatePrompt = promptResourceEnabled && (workspaceId ? workspaceAdmin || (Boolean(activeWorkspace) && memberCanCreate(activeWorkspace!, 'prompt')) : groupPermissions.prompts.mode === 'all')
   const canCreateMCP = workspaceAdmin || (Boolean(activeWorkspace) && memberCanCreate(activeWorkspace!, 'mcp'))
   const canUseMCP =
-    (!workspaceId || workspaceCaps.mcp) &&
+    (!workspaceId || (workspaceCaps.mcp && workspaceCaps.toolCalling)) &&
     (!workspaceId || (Boolean(activeWorkspace) && memberCanUse(activeWorkspace!, 'mcp')))
+  const canUseMCPServer = (id: string) => canUseMCP && userCanUseMCPServer(user, id)
   const canWrite =
     (resourceEnabled.skill && canCreateSkill) ||
     (resourceEnabled.prompt && canCreatePrompt) ||
@@ -284,7 +289,7 @@ export default function SkillsPrompts() {
     libraryLoadRequestRef.current += 1
     void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId, workspaceCaps.mcp, workspaceCaps.prompts, workspaceCaps.skills])
+  }, [workspaceId, mcpResourceEnabled, promptResourceEnabled, skillResourceEnabled, groupPermissions.skills, groupPermissions.prompts, groupPermissions.tools])
 
   useEffect(() => {
     // Resource editors and destructive confirmations are scoped to the active
@@ -621,7 +626,7 @@ export default function SkillsPrompts() {
       )
       return
     }
-    if (!canUseMCP) {
+    if (!canUseMCPServer(item.id)) {
       toast.error(
         t('library:permissions.useMcp', {
           defaultValue: 'You cannot use MCP services in this workspace.',
@@ -1034,8 +1039,8 @@ export default function SkillsPrompts() {
                               )
                             }
                             onEdit={() => editMCP(item)}
-                            onTest={canManageMCP && canUseMCP ? () => void runMCPRowAction(item, 'test') : undefined}
-                            onSync={canManageMCP && canUseMCP ? () => void runMCPRowAction(item, 'sync') : undefined}
+                            onTest={canManageMCP && canUseMCPServer(item.id) ? () => void runMCPRowAction(item, 'test') : undefined}
+                            onSync={canManageMCP && canUseMCPServer(item.id) ? () => void runMCPRowAction(item, 'sync') : undefined}
                             testing={busyMCPAction === `test:${item.id}`}
                             syncing={busyMCPAction === `sync:${item.id}`}
                             actionDisabled={Boolean(busyMCPAction)}

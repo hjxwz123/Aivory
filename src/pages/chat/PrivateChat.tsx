@@ -13,6 +13,7 @@ import { PRIVATE_IMAGE_TYPES, privateImageURL, readPrivateImage, validatePrivate
 import { blockReload } from '@/lib/sync-guards'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { useUI } from '@/store/ui'
+import { usePrivateChatPermission } from '@/hooks/use-private-chat-permission'
 
 /**
  * Wire history derived from the visible transcript: strictly alternating
@@ -40,6 +41,7 @@ function historyFor(display: PrivateDisplayMessage[]): PrivateMessage[] {
 export default function PrivateChat() {
   const { t } = useTranslation('chat')
   const navigate = useNavigate()
+  const { workspaceId, allowed, canUpload } = usePrivateChatPermission()
   const isDesktop = useMediaQuery('(min-width: 1024px)')
   const [models, setModels] = useState<ApiModel[]>([])
   const [modelId, setModelId] = useState('')
@@ -76,7 +78,10 @@ export default function PrivateChat() {
 
   useEffect(() => {
     let alive = true
-    void modelsApi.list().then((response) => {
+    setLoadingModels(true)
+    setModels([])
+    setModelId('')
+    void modelsApi.list(workspaceId ?? undefined).then((response) => {
       if (!alive) return
       const available = response.models.filter((item) => item.kind === 'chat' && item.enabled && !item.fast)
       setModels(available)
@@ -97,7 +102,7 @@ export default function PrivateChat() {
       window.removeEventListener('pagehide', clear)
       window.removeEventListener('pageshow', onPageShow)
     }
-  }, [clear])
+  }, [clear, workspaceId])
 
   useEffect(() => {
     const element = scrollRef.current
@@ -111,7 +116,7 @@ export default function PrivateChat() {
   async function pickImages(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? [])
     event.target.value = ''
-    if (!model?.vision || controllerRef.current || imageReadRef.current || files.length === 0) return
+    if (!allowed || !canUpload || !model?.vision || controllerRef.current || imageReadRef.current || files.length === 0) return
     const imageCount = messages.reduce((count, message) => count + (message.images?.length ?? 0), images.length + files.length)
     if (imageCount > 16) {
       setError('private_image_limit')
@@ -137,6 +142,7 @@ export default function PrivateChat() {
   /** Shared streaming core: validates nothing (callers do), owns the row
    *  lifecycle, epoch guards, and the stop/error/stopped transitions. */
   async function runStream(activeModel: ApiModel, requestHistory: PrivateMessage[], display: PrivateDisplayMessage[]) {
+    if (!allowed) return
     const epoch = epochRef.current
     const controller = new AbortController()
     controllerRef.current = controller
@@ -150,7 +156,7 @@ export default function PrivateChat() {
     )))
     let done = false
     try {
-      for await (const frame of streamSSE('/private-chat', { model_id: activeModel.id, messages: requestHistory }, controller.signal)) {
+      for await (const frame of streamSSE('/private-chat', { model_id: activeModel.id, messages: requestHistory, ...(workspaceId ? { workspace_id: workspaceId } : {}) }, controller.signal)) {
         if (epoch !== epochRef.current) return
         const payload = frame.data as { type?: string; text?: string; url?: string; code?: string }
         const type = payload.type ?? frame.event
@@ -181,7 +187,7 @@ export default function PrivateChat() {
 
   async function send(event: FormEvent) {
     event.preventDefault()
-    if (controllerRef.current || imageReadRef.current || !model || (!draft.trim() && !images.length)) return
+    if (!allowed || controllerRef.current || imageReadRef.current || !model || (!draft.trim() && !images.length)) return
     const text = draft.trim()
     const userRow: PrivateDisplayMessage = { id: ++sequenceRef.current, role: 'user', text, images: images.length ? [...images] : undefined, createdAt: Date.now() }
     const requestHistory: PrivateMessage[] = [...historyFor(messages), { role: 'user', text, ...(userRow.images?.length ? { images: userRow.images } : {}) }]
@@ -198,7 +204,7 @@ export default function PrivateChat() {
 
   /** Re-stream the newest answer: drop its reply row and reuse the question. */
   async function regenerate(id: number) {
-    if (controllerRef.current || imageReadRef.current || !model) return
+    if (!allowed || controllerRef.current || imageReadRef.current || !model) return
     const index = messages.findIndex((message) => message.id === id)
     if (index < 1 || messages[index].role !== 'assistant') return
     const display = messages.slice(0, index)
@@ -214,7 +220,7 @@ export default function PrivateChat() {
 
   /** Replace a past question and re-answer: truncate in-memory history there. */
   async function editAndResend(id: number, text: string) {
-    if (controllerRef.current || imageReadRef.current || !model) return
+    if (!allowed || controllerRef.current || imageReadRef.current || !model) return
     const index = messages.findIndex((message) => message.id === id)
     const original = messages[index]
     if (index < 0 || original.role !== 'user') return
@@ -257,12 +263,12 @@ export default function PrivateChat() {
             <SelectContent>{models.map((item) => <SelectItem key={item.id} value={item.id} disabled={hasImageHistory && !item.vision}>{item.label}</SelectItem>)}</SelectContent>
           </Select>
         </div>
-        {model?.vision && <>
+        {model?.vision && canUpload && <>
           <input ref={fileRef} type="file" accept={PRIVATE_IMAGE_TYPES.join(',')} multiple className="hidden" onChange={(event) => void pickImages(event)} aria-label={t('private.addImage')} />
           <Tooltip content={t('private.addImage')}><Button variant="ghost" size="icon" loading={readingImages} disabled={streaming || readingImages} aria-label={t('private.addImage')} onClick={() => fileRef.current?.click()}><ImagePlus size={18} aria-hidden /></Button></Tooltip>
         </>}
         <div className="ml-auto">
-          {streaming ? <Button size="icon" variant="secondary" aria-label={t('private.stop')} onClick={() => controllerRef.current?.abort()}><Square size={14} fill="currentColor" aria-hidden /></Button> : <Button type="submit" size="icon" className="rounded-full" aria-label={t('private.send')} disabled={!model || readingImages || (!draft.trim() && !images.length)}><ArrowUp size={18} aria-hidden /></Button>}
+          {streaming ? <Button size="icon" variant="secondary" aria-label={t('private.stop')} onClick={() => controllerRef.current?.abort()}><Square size={14} fill="currentColor" aria-hidden /></Button> : <Button type="submit" size="icon" className="rounded-full" aria-label={t('private.send')} disabled={!allowed || !model || readingImages || (!draft.trim() && !images.length)}><ArrowUp size={18} aria-hidden /></Button>}
         </div>
       </div>
     </form>

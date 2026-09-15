@@ -401,6 +401,7 @@ export interface ApiWorkspacePolicy {
   AllowMCP: boolean
   AllowSkills: boolean
   AllowPrompts: boolean
+  AllowPrivateChat: boolean
   /** Deprecated fields retained for older deployments. */
   AllowSandbox?: boolean
   AllowImageGeneration?: boolean
@@ -419,6 +420,22 @@ export interface ApiWorkspaceUsageRow {
   input_tokens: number
   output_tokens: number
   credits: number
+}
+
+/** Usage analytics scoped to one workspace (workspace manager only). */
+export interface ApiWorkspaceUsageAnalytics {
+  days: number
+  bucket: number
+  generated_at: number
+  period_start: number
+  period_end: number
+  previous_period_start: number
+  previous_period_end: number
+  totals: ApiUsageTotals
+  previous_totals: ApiUsageTotals
+  trend: ApiUsageTrendPoint[]
+  previous_trend: ApiUsageTrendPoint[]
+  usage: ApiWorkspaceUsageRow[]
 }
 
 /** §workspace RBAC phase 5 — audit trail row (admin-only surface). */
@@ -476,6 +493,9 @@ export interface ApiUserGroupPermissions {
   prompts: ApiResourceAccessPolicy
   skills: ApiResourceAccessPolicy
   tools: ApiResourceAccessPolicy
+  allow_prompts: boolean
+  allow_skills: boolean
+  allow_workspace_deletion: boolean
   allow_sharing: boolean
   allow_knowledge_bases: boolean
   allow_knowledge_base_sharing: boolean

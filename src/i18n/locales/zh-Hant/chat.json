@@ -749,6 +749,8 @@
     "loadFailed": "載入失敗"
   },
   "workspace": {
+    "groupPermissionCeiling": "此處設定工作空間權限，仍受成員所屬全站群組限制。任一層停用，對應操作都無法使用，建立者也須遵守。工作空間管理員不受成員級開關限制，但仍受群組及空間總開關限制。",
+    "deleteGroupDenied": "所屬群組不允許刪除工作空間。",
     "menu": "工作空間",
     "personal": "個人空間",
     "create": "建立工作空間",
@@ -871,6 +873,9 @@
     "tabMembers": "成員",
     "tabInvites": "邀請",
     "tabPolicy": "能力",
+    "tabAnnouncement": "公告",
+    "announcementTitle": "工作空間公告",
+    "announcementLead": "只有此工作空間的成員可以看到這則公告。",
     "transfer": "轉移擁有權",
     "transferBody": "接收者將成為工作空間擁有者和管理員。你保留管理員角色，但失去擁有者專屬操作。",
     "transferConfirmHint": "輸入工作空間名稱「{{name}}」以確認。",
@@ -930,6 +935,10 @@
         "label": "繪圖",
         "description": "允許使用獨立繪圖模式與繪圖模型。"
       },
+      "AllowPrivateChat": {
+        "label": "隱私對話",
+        "description": "允許使用不儲存至歷史的臨時對話。還須系統使用者群組允許；工作空間管理員同樣受此開關限制。"
+      },
       "AllowMCP": {
         "label": "MCP 服務",
         "description": "顯示 MCP 服務，並在啟用工具呼叫時允許使用其工具。"
@@ -958,6 +967,32 @@
       "creditLimitHint": "0 表示不限。達到額度的成員不能再在該工作空間發起新對話輪次。"
     },
     "tabAudit": "稽核",
+    "tabStatistics": "統計",
+    "statisticsTitle": "工作空間使用情況",
+    "statisticsLead": "查看此工作空間中的對話和工具使用情況。",
+    "statsRange": "時間範圍",
+    "statsRange1": "今天",
+    "statsRange7": "最近 7 天",
+    "statsRange30": "最近 30 天",
+    "statsRange90": "最近 90 天",
+    "statsRange365": "最近一年",
+    "statsTurns": "對話輪數",
+    "statsCalls": "次呼叫",
+    "statsTokens": "Token 總量",
+    "statsUsers": "活躍成員",
+    "statsConversations": "個對話",
+    "statsCredits": "Credits",
+    "statsCost": "成本",
+    "statsNoCost": "暫無供應商成本資料",
+    "statsTrend": "Token 趨勢",
+    "statsTokensUsed": "Token 已使用",
+    "statsPreviousPeriod": "上一週期",
+    "statsMemberUsage": "成員使用情況",
+    "statsMember": "成員",
+    "statsInput": "輸入 Token",
+    "statsOutput": "輸出 Token",
+    "statsNoData": "此時間範圍內暫無使用資料。",
+    "statsLoadFailed": "無法載入工作空間統計資料。",
     "audit": {
       "loadFailed": "稽核日誌載入失敗。",
       "empty": "還沒有稽核記錄。",
@@ -975,7 +1010,8 @@
         "invite.used": "使用邀請",
         "invite.revoked": "撤銷邀請",
         "resource.visibility_changed": "資源可見範圍變更",
-        "policy.updated": "能力策略變更"
+        "policy.updated": "能力策略變更",
+        "announcement.updated": "公告更新"
       }
     },
     "domainLocked": "個人空間已由管理員鎖定"
