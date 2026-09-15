@@ -10,6 +10,9 @@ export interface RegistrationDomain {
   workspace_id: string
   workspace_name: string
   lock_personal: boolean
+  email_verification_required: boolean
+  initial_group_id: string
+  initial_group_name: string
   enabled: boolean
   member_count: number
 }
@@ -22,7 +25,7 @@ export interface DomainUser {
 }
 export const domainsApi = {
   list: () => api<{ domains: RegistrationDomain[] }>('/admin/domains'),
-  create: (body: Pick<RegistrationDomain, 'domain' | 'workspace_id' | 'lock_personal' | 'enabled'>) =>
+  create: (body: Pick<RegistrationDomain, 'domain' | 'workspace_id' | 'lock_personal' | 'email_verification_required' | 'initial_group_id' | 'enabled'>) =>
     api('/admin/domains', { method: 'POST', body }),
   update: (body: RegistrationDomain) =>
     api(`/admin/domains/${encodeURIComponent(body.domain)}`, { method: 'PATCH', body }),

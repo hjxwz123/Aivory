@@ -838,14 +838,6 @@ func resolveOAuthUser(ctx context.Context, d Deps, p *store.OAuthProvider, info 
 		}
 	}
 
-	domainEnrollment, domainErr := store.EmailHasRegistrationDomain(ctx, d.DB, email)
-	if domainErr != nil {
-		return nil, domainErr
-	}
-	if domainEnrollment && (!info.EmailVerified || p.Kind == "oauth2") {
-		return nil, errOAuthExplicitLinkRequired
-	}
-
 	// §OAuth auto-provision gate: everything above this point either logs in an
 	// existing identity/account or falls through here because NO account
 	// matched — i.e. every remaining path is a genuine new-account signup.
@@ -911,29 +903,13 @@ func resolveOAuthUser(ctx context.Context, d Deps, p *store.OAuthProvider, info 
 		}
 	}
 
-	verifyRequired, err := oauthBoolSetting(d, "email_verification_required")
-	if err != nil {
-		releaseQuota()
-		return nil, err
-	}
-	// A placeholder address cannot receive the required code. Fail before
-	// creating an account that could never complete activation.
-	if verifyRequired && strings.TrimSpace(info.Email) == "" {
-		releaseQuota()
-		return nil, errInvalidEmail
-	}
-	status := "active"
-	if verifyRequired {
-		status = "pending"
-	}
-
 	var u *store.User
 	if signup.ProviderGuard != nil {
 		u, err = store.CreateOAuthUserForCallback(
-			ctx, d.DB, *signup.ProviderGuard, p.ID, info.Subject, email, info.Name, status,
+			ctx, d.DB, *signup.ProviderGuard, p.ID, info.Subject, email, info.Name, "active",
 		)
 	} else {
-		u, err = store.CreateOAuthUser(ctx, d.DB, p.ID, info.Subject, email, info.Name, status)
+		u, err = store.CreateOAuthUser(ctx, d.DB, p.ID, info.Subject, email, info.Name, "active")
 	}
 	if err != nil {
 		releaseQuota()
@@ -943,20 +919,6 @@ func resolveOAuthUser(ctx context.Context, d Deps, p *store.OAuthProvider, info 
 		return nil, err
 	}
 	adoptOAuthAvatar(ctx, d, u, info.AvatarURL)
-	if verifyRequired {
-		_, allowed := reserveEmailSend(d, email, "verify")
-		if allowed {
-			code := genCode6()
-			d.Cache.Set("verify:"+email, code, emailVerificationCodeTTL)
-			if d.Mailer != nil {
-				go func() {
-					if err := d.Mailer.SendCode(email, code, "verify"); err != nil && d.Logger != nil {
-						d.Logger.Printf("[mail] failed to send verification to %s: %v", email, err)
-					}
-				}()
-			}
-		}
-	}
 	return u, nil
 }
 

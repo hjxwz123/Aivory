@@ -11,12 +11,15 @@ var ErrWorkspaceDomainBound = errors.New("workspace is assigned to an email doma
 var ErrInvalidDomain = errors.New("invalid email domain")
 
 type RegistrationDomain struct {
-	Domain        string `json:"domain"`
-	WorkspaceID   string `json:"workspace_id"`
-	WorkspaceName string `json:"workspace_name"`
-	LockPersonal  bool   `json:"lock_personal"`
-	Enabled       bool   `json:"enabled"`
-	MemberCount   int    `json:"member_count"`
+	Domain                    string `json:"domain"`
+	WorkspaceID               string `json:"workspace_id"`
+	WorkspaceName             string `json:"workspace_name"`
+	LockPersonal              bool   `json:"lock_personal"`
+	EmailVerificationRequired bool   `json:"email_verification_required"`
+	InitialGroupID            string `json:"initial_group_id"`
+	InitialGroupName          string `json:"initial_group_name"`
+	Enabled                   bool   `json:"enabled"`
+	MemberCount               int    `json:"member_count"`
 }
 type DomainUser struct {
 	UserID       string `json:"user_id"`
@@ -56,9 +59,10 @@ func emailDomain(email string) string {
 	domain, _ := NormalizeRegistrationDomain(email[i+1:])
 	return domain
 }
-func EmailHasRegistrationDomain(ctx context.Context, db *sql.DB, email string) (bool, error) {
+func registrationDomainEmailVerificationRequired(ctx context.Context, ex RowExecer, email string) (bool, error) {
 	var n int
-	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM registration_domains WHERE domain=? AND enabled=1`, emailDomain(email)).Scan(&n)
+	err := ex.QueryRowContext(ctx, `SELECT COUNT(*) FROM registration_domains
+		WHERE domain=? AND enabled=1 AND email_verification_required=1`, emailDomain(email)).Scan(&n)
 	return n > 0, err
 }
 
@@ -66,7 +70,8 @@ func EmailHasRegistrationDomain(ctx context.Context, db *sql.DB, email string) (
 func enrollDomainUser(ctx context.Context, ex RowExecer, userID, email string) error {
 	domain := emailDomain(email)
 	var workspaceID string
-	err := ex.QueryRowContext(ctx, `SELECT workspace_id FROM registration_domains WHERE domain=? AND enabled=1`, domain).Scan(&workspaceID)
+	var initialGroupID sql.NullString
+	err := ex.QueryRowContext(ctx, `SELECT workspace_id,initial_group_id FROM registration_domains WHERE domain=? AND enabled=1`, domain).Scan(&workspaceID, &initialGroupID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -94,7 +99,12 @@ func enrollDomainUser(ctx context.Context, ex RowExecer, userID, email string) e
 	if err != nil || n == 0 {
 		return err
 	}
-	_, err = ex.ExecContext(ctx, `INSERT INTO workspace_members(workspace_id,user_id,role) VALUES(?,?,'member') ON CONFLICT(workspace_id,user_id) DO NOTHING`, workspaceID, userID)
+	if _, err = ex.ExecContext(ctx, `INSERT INTO workspace_members(workspace_id,user_id,role) VALUES(?,?,'member') ON CONFLICT(workspace_id,user_id) DO NOTHING`, workspaceID, userID); err != nil {
+		return err
+	}
+	if initialGroupID.Valid && strings.TrimSpace(initialGroupID.String) != "" {
+		_, err = ex.ExecContext(ctx, `UPDATE users SET group_id=?,group_expires_at=0,previous_group_id='' WHERE id=?`, initialGroupID.String, userID)
+	}
 	return err
 }
 func GetDomainAccess(ctx context.Context, ex RowExecer, userID string) (*DomainAccess, error) {
@@ -107,8 +117,11 @@ func GetDomainAccess(ctx context.Context, ex RowExecer, userID string) (*DomainA
 	return &a, err
 }
 func ListRegistrationDomains(ctx context.Context, db *sql.DB) ([]RegistrationDomain, error) {
-	rows, err := db.QueryContext(ctx, `SELECT d.domain,d.workspace_id,w.name,d.lock_personal,d.enabled,
- (SELECT COUNT(*) FROM domain_users du WHERE du.domain=d.domain) FROM registration_domains d JOIN workspaces w ON w.id=d.workspace_id ORDER BY d.domain`)
+	rows, err := db.QueryContext(ctx, `SELECT d.domain,d.workspace_id,w.name,d.lock_personal,d.email_verification_required,
+	 COALESCE(d.initial_group_id,''),COALESCE(g.name,''),d.enabled,
+	 (SELECT COUNT(*) FROM domain_users du WHERE du.domain=d.domain)
+	 FROM registration_domains d JOIN workspaces w ON w.id=d.workspace_id
+	 LEFT JOIN user_groups g ON g.id=d.initial_group_id ORDER BY d.domain`)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +129,7 @@ func ListRegistrationDomains(ctx context.Context, db *sql.DB) ([]RegistrationDom
 	out := []RegistrationDomain{}
 	for rows.Next() {
 		var d RegistrationDomain
-		if err := rows.Scan(&d.Domain, &d.WorkspaceID, &d.WorkspaceName, &d.LockPersonal, &d.Enabled, &d.MemberCount); err != nil {
+		if err := rows.Scan(&d.Domain, &d.WorkspaceID, &d.WorkspaceName, &d.LockPersonal, &d.EmailVerificationRequired, &d.InitialGroupID, &d.InitialGroupName, &d.Enabled, &d.MemberCount); err != nil {
 			return nil, err
 		}
 		out = append(out, d)
@@ -143,11 +156,23 @@ func SaveRegistrationDomain(ctx context.Context, db *sql.DB, d RegistrationDomai
 	if deleting != 0 {
 		return ErrNotFound
 	}
+	var initialGroupID any
+	d.InitialGroupID = strings.TrimSpace(d.InitialGroupID)
+	if d.InitialGroupID != "" {
+		var exists int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM user_groups WHERE id=?`, d.InitialGroupID).Scan(&exists); err != nil {
+			return err
+		}
+		if exists != 1 {
+			return ErrNotFound
+		}
+		initialGroupID = d.InitialGroupID
+	}
 	if create {
-		_, err = tx.ExecContext(ctx, `INSERT INTO registration_domains(domain,workspace_id,lock_personal,enabled) VALUES(?,?,?,?)`, domain, d.WorkspaceID, boolInt(d.LockPersonal), boolInt(d.Enabled))
+		_, err = tx.ExecContext(ctx, `INSERT INTO registration_domains(domain,workspace_id,lock_personal,email_verification_required,initial_group_id,enabled) VALUES(?,?,?,?,?,?)`, domain, d.WorkspaceID, boolInt(d.LockPersonal), boolInt(d.EmailVerificationRequired), initialGroupID, boolInt(d.Enabled))
 	} else {
 		var res sql.Result
-		res, err = tx.ExecContext(ctx, `UPDATE registration_domains SET lock_personal=?,enabled=? WHERE domain=? AND workspace_id=?`, boolInt(d.LockPersonal), boolInt(d.Enabled), domain, d.WorkspaceID)
+		res, err = tx.ExecContext(ctx, `UPDATE registration_domains SET lock_personal=?,email_verification_required=?,initial_group_id=?,enabled=? WHERE domain=? AND workspace_id=?`, boolInt(d.LockPersonal), boolInt(d.EmailVerificationRequired), initialGroupID, boolInt(d.Enabled), domain, d.WorkspaceID)
 		if err == nil {
 			if n, _ := res.RowsAffected(); n != 1 {
 				return ErrNotFound
@@ -235,27 +260,27 @@ func DeleteRegistrationDomain(ctx context.Context, db *sql.DB, domain string) er
 	return nil
 }
 
-// Password signup must not activate a domain-bound account until its mailbox
-// is verified. Inspect the actual enrollment in the same transaction to close
-// the race with an administrator enabling a domain while registration runs.
+// Domain enrollment stays in the account-creation transaction. The caller's
+// status reflects the global policy; the matched rule is checked again here so
+// its verification policy and enrollment are resolved within one transaction.
 func CreateRegisteredUser(ctx context.Context, db *sql.DB, email, name, hash, status string) (*User, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
+	if status == "active" {
+		domainVerificationRequired, err := registrationDomainEmailVerificationRequired(ctx, tx, email)
+		if err != nil {
+			return nil, err
+		}
+		if domainVerificationRequired {
+			status = "pending"
+		}
+	}
 	id, err := createUserWithState(ctx, tx, email, name, hash, "user", status, true)
 	if err != nil {
 		return nil, err
-	}
-	access, err := GetDomainAccess(ctx, tx, id)
-	if err != nil {
-		return nil, err
-	}
-	if access != nil {
-		if _, err := tx.ExecContext(ctx, `UPDATE users SET status='pending' WHERE id=?`, id); err != nil {
-			return nil, err
-		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err

@@ -123,7 +123,7 @@ func TestDomainLockHTTPBoundaryAndLiveUnlock(t *testing.T) {
 	}
 }
 
-func TestDomainRegistrationRequiresVerificationAndAdminCreate(t *testing.T) {
+func TestDomainRegistrationVerificationPolicyAndAdminCreate(t *testing.T) {
 	d := newAuthSecurityDeps(t, "domain-signup.db")
 	ctx := t.Context()
 	owner, err := store.CreateUserWithRole(ctx, d.DB, "admin@outside.example", "Admin", "hash", "admin")
@@ -148,27 +148,69 @@ func TestDomainRegistrationRequiresVerificationAndAdminCreate(t *testing.T) {
 	if ws.OwnerID != assignee.ID {
 		t.Fatal("wrong assigned owner")
 	}
-	if err := store.SaveRegistrationDomain(ctx, d.DB, store.RegistrationDomain{Domain: "company.example", WorkspaceID: ws.ID, Enabled: true, LockPersonal: true}, true); err != nil {
+	initialGroup, err := store.CreateUserGroup(ctx, d.DB, store.UserGroup{Name: "Company Members"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := store.RegistrationDomain{Domain: "company.example", WorkspaceID: ws.ID, Enabled: true, LockPersonal: true, EmailVerificationRequired: false, InitialGroupID: initialGroup.ID}
+	if err := store.SaveRegistrationDomain(ctx, d.DB, rule, true); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.SetSetting(d.DB, "email_verification_required", false); err != nil {
 		t.Fatal(err)
 	}
 	store.InvalidateConfig()
-	rec = runAuthJSONHandler(t, d, registerHandler, "/api/auth/register", `{"email":"new@company.example","password":"password123","name":"New"}`)
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"verification_required":true`) {
-		t.Fatalf("register=%d %s", rec.Code, rec.Body.String())
+
+	register := func(email string) (*httptest.ResponseRecorder, *store.User) {
+		t.Helper()
+		result := runAuthJSONHandler(t, d, registerHandler, "/api/auth/register", fmt.Sprintf(`{"email":%q,"password":"password123","name":"New"}`, email))
+		user, findErr := store.FindUserByEmail(ctx, d.DB, email)
+		if findErr != nil {
+			t.Fatalf("find %s: %v", email, findErr)
+		}
+		return result, user
 	}
-	user, err := store.FindUserByEmail(ctx, d.DB, "new@company.example")
-	if err != nil || user.Status != "pending" {
-		t.Fatalf("user=%+v err=%v", user, err)
+
+	// Both switches off: password registration is activated immediately while
+	// domain enrollment still happens atomically.
+	rec, user := register("direct@company.example")
+	if rec.Code != 200 || user.Status != "active" || user.GroupID != initialGroup.ID || responseCookie(rec, "auth_token") == nil {
+		t.Fatalf("direct signup response=%d body=%s user=%+v", rec.Code, rec.Body.String(), user)
 	}
-	if _, err := store.IsWorkspaceMember(ctx, d.DB, ws.ID, user.ID); err != nil {
+	if role, err := store.IsWorkspaceMember(ctx, d.DB, ws.ID, user.ID); err != nil || role != "member" {
+		t.Fatalf("direct signup membership=%q err=%v", role, err)
+	}
+
+	// A domain rule may require verification independently of the global switch.
+	rule.EmailVerificationRequired = true
+	if err := store.SaveRegistrationDomain(ctx, d.DB, rule, false); err != nil {
 		t.Fatal(err)
 	}
-	for _, cookie := range rec.Result().Cookies() {
-		if cookie.Name == "auth_token" {
-			t.Fatal("unverified signup issued session")
-		}
+	rec, user = register("domain-verify@company.example")
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"verification_required":true`) || user.Status != "pending" || user.GroupID != initialGroup.ID || responseCookie(rec, "auth_token") != nil {
+		t.Fatalf("domain verification response=%d body=%s user=%+v", rec.Code, rec.Body.String(), user)
+	}
+
+	// The global requirement remains a ceiling even when this domain opts out.
+	rule.EmailVerificationRequired = false
+	if err := store.SaveRegistrationDomain(ctx, d.DB, rule, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetSetting(d.DB, "email_verification_required", true); err != nil {
+		t.Fatal(err)
+	}
+	store.InvalidateConfig()
+	rec, user = register("global-verify@company.example")
+	if rec.Code != 200 || user.Status != "pending" || responseCookie(rec, "auth_token") != nil {
+		t.Fatalf("global verification response=%d body=%s user=%+v", rec.Code, rec.Body.String(), user)
+	}
+
+	if err := store.SetSetting(d.DB, "email_verification_required", false); err != nil {
+		t.Fatal(err)
+	}
+	store.InvalidateConfig()
+	rec, user = register("ordinary@outside.example")
+	if rec.Code != 200 || user.Status != "active" || user.GroupID != store.DefaultGroupID || responseCookie(rec, "auth_token") == nil {
+		t.Fatalf("ordinary signup response=%d body=%s user=%+v", rec.Code, rec.Body.String(), user)
 	}
 }

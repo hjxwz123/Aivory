@@ -313,7 +313,7 @@ func TestResolveOAuthUserAppliesDomainCaptchaAndIPPoliciesOnlyToNewAccounts(t *t
 	}
 }
 
-func TestResolveOAuthUserCreatesPendingAccountWhenEmailVerificationRequired(t *testing.T) {
+func TestResolveOAuthUserBypassesAivoryEmailVerification(t *testing.T) {
 	d := newOAuthGateTestDeps(t)
 	mailer := &oauthGateMail{sent: make(chan string, 1)}
 	d.Mailer = mailer
@@ -321,40 +321,96 @@ func TestResolveOAuthUserCreatesPendingAccountWhenEmailVerificationRequired(t *t
 	if err := store.SetSetting(d.DB, "email_verification_required", true); err != nil {
 		t.Fatal(err)
 	}
-	info := oauth.UserInfo{Subject: "pending-subject", Email: "pending@example.test", EmailVerified: true}
+	info := oauth.UserInfo{Subject: "direct-subject", Email: "direct@example.test", EmailVerified: true}
 	u, err := resolveOAuthUser(context.Background(), d, p, info, oauthSignupContext{})
 	if err != nil {
-		t.Fatalf("pending OAuth signup: %v", err)
+		t.Fatalf("direct OAuth signup: %v", err)
 	}
-	if u.Status != "pending" || u.HasPassword {
+	if u.Status != "active" || u.HasPassword {
 		t.Fatalf("OAuth user state = status %q has_password=%v", u.Status, u.HasPassword)
 	}
-	if _, ok := d.Cache.Get("verify:pending@example.test"); !ok {
-		t.Fatal("verification code was not stored")
+	if _, ok := d.Cache.Get("verify:direct@example.test"); ok {
+		t.Fatal("OAuth signup stored an Aivory verification code")
 	}
 	select {
 	case got := <-mailer.sent:
-		if got != "verify:pending@example.test" {
-			t.Fatalf("mail delivery = %q", got)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("verification email was not sent")
+		t.Fatalf("OAuth signup sent unexpected verification mail %q", got)
+	default:
 	}
-	stored, err := store.FindUserByEmail(context.Background(), d.DB, "pending@example.test")
-	if err != nil || stored.Status != "pending" || stored.HasPassword {
+	stored, err := store.FindUserByEmail(context.Background(), d.DB, "direct@example.test")
+	if err != nil || stored.Status != "active" || stored.HasPassword {
 		t.Fatalf("persisted OAuth user = %+v err=%v", stored, err)
 	}
 }
 
-func TestResolveOAuthUserRejectsUnreachableVerificationAddress(t *testing.T) {
+func TestResolveOAuthUserAllowsProviderWithoutEmail(t *testing.T) {
 	d := newOAuthGateTestDeps(t)
 	p := namespacedOAuthProviderForTest(&store.OAuthProvider{ID: "apple", Kind: "apple", Name: "Apple"})
 	if err := store.SetSetting(d.DB, "email_verification_required", true); err != nil {
 		t.Fatal(err)
 	}
 	info := oauth.UserInfo{Subject: "no-email", Email: "", EmailVerified: false}
-	if _, err := resolveOAuthUser(context.Background(), d, p, info, oauthSignupContext{}); !errors.Is(err, errInvalidEmail) {
-		t.Fatalf("missing-email policy error = %v, want %v", err, errInvalidEmail)
+	u, err := resolveOAuthUser(context.Background(), d, p, info, oauthSignupContext{})
+	if err != nil || u == nil || u.Status != "active" || !strings.HasSuffix(u.Email, "@oauth.local") {
+		t.Fatalf("provider without email user=%+v err=%v", u, err)
+	}
+}
+
+func TestResolveOAuthUserAppliesDomainRuleToAllProviderKinds(t *testing.T) {
+	d := newOAuthGateTestDeps(t)
+	ctx := context.Background()
+	admin, err := store.FindUserByEmail(ctx, d.DB, "admin@example.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := store.CreateWorkspace(ctx, d.DB, admin.ID, "Company")
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialGroup, err := store.CreateUserGroup(ctx, d.DB, store.UserGroup{Name: "Company Members"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveRegistrationDomain(ctx, d.DB, store.RegistrationDomain{
+		Domain: "company.test", WorkspaceID: workspace.ID, Enabled: true, EmailVerificationRequired: true, InitialGroupID: initialGroup.ID,
+	}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetSetting(d.DB, "email_verification_required", true); err != nil {
+		t.Fatal(err)
+	}
+
+	trustedProvider := namespacedOAuthProviderForTest(&store.OAuthProvider{ID: "github", Kind: "github", Name: "GitHub"})
+	trusted, err := resolveOAuthUser(ctx, d, trustedProvider, oauth.UserInfo{
+		Subject: "trusted-domain", Email: "trusted@company.test", EmailVerified: true,
+	}, oauthSignupContext{})
+	if err != nil || trusted == nil || trusted.Status != "active" || trusted.GroupID != initialGroup.ID {
+		t.Fatalf("trusted OAuth signup user=%+v err=%v", trusted, err)
+	}
+	if role, err := store.IsWorkspaceMember(ctx, d.DB, workspace.ID, trusted.ID); err != nil || role != "member" {
+		t.Fatalf("trusted domain membership=%q err=%v", role, err)
+	}
+
+	genericProvider := namespacedOAuthProviderForTest(&store.OAuthProvider{ID: "generic", Kind: "oauth2", Name: "Generic"})
+	ordinary, err := resolveOAuthUser(ctx, d, genericProvider, oauth.UserInfo{
+		Subject: "untrusted-domain", Email: "untrusted@company.test", EmailVerified: true,
+	}, oauthSignupContext{})
+	if err != nil || ordinary == nil || ordinary.Status != "active" {
+		t.Fatalf("generic OAuth signup user=%+v err=%v", ordinary, err)
+	}
+	if role, err := store.IsWorkspaceMember(ctx, d.DB, workspace.ID, ordinary.ID); err != nil || role != "member" || ordinary.GroupID != initialGroup.ID {
+		t.Fatalf("generic OAuth domain rule role=%q group=%q err=%v", role, ordinary.GroupID, err)
+	}
+
+	unverifiedProvider := namespacedOAuthProviderForTest(&store.OAuthProvider{ID: "google-unverified", Kind: "google", Name: "Google"})
+	unverified, err := resolveOAuthUser(ctx, d, unverifiedProvider, oauth.UserInfo{
+		Subject: "unverified-domain", Email: "unverified@company.test", EmailVerified: false,
+	}, oauthSignupContext{})
+	if err != nil || unverified == nil || unverified.Status != "active" {
+		t.Fatalf("unverified OAuth signup user=%+v err=%v", unverified, err)
+	}
+	if role, err := store.IsWorkspaceMember(ctx, d.DB, workspace.ID, unverified.ID); err != nil || role != "member" || unverified.GroupID != initialGroup.ID {
+		t.Fatalf("unverified OAuth domain rule role=%q group=%q err=%v", role, unverified.GroupID, err)
 	}
 }
 
@@ -364,7 +420,6 @@ func TestResolveOAuthUserFailsClosedOnMalformedRegistrationSettings(t *testing.T
 		"email_domain_whitelist",
 		"register_captcha_required",
 		"register_ip_daily_limit",
-		"email_verification_required",
 	} {
 		t.Run(key, func(t *testing.T) {
 			d := newOAuthGateTestDeps(t)

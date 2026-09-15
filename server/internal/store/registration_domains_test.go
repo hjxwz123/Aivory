@@ -2,8 +2,41 @@ package store
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 )
+
+func TestRegistrationDomainMigrationPreservesExistingVerificationPolicy(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "legacy-domains.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.Exec(`CREATE TABLE registration_domains (
+		domain TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL,
+		lock_personal INTEGER NOT NULL DEFAULT 0,
+		enabled INTEGER NOT NULL DEFAULT 1
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO registration_domains(domain,workspace_id,lock_personal,enabled)
+		VALUES('legacy.example','legacy-workspace',1,1)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	var verificationRequired int
+	var initialGroup any
+	if err := db.QueryRow(`SELECT email_verification_required,initial_group_id
+		FROM registration_domains WHERE domain='legacy.example'`).Scan(&verificationRequired, &initialGroup); err != nil {
+		t.Fatal(err)
+	}
+	if verificationRequired != 1 || initialGroup != nil {
+		t.Fatalf("migrated policy verification=%d initial_group=%v", verificationRequired, initialGroup)
+	}
+}
 
 func TestRegistrationDomainEnrollmentAndPermissions(t *testing.T) {
 	fx := newRBACFixture(t)
@@ -16,8 +49,8 @@ func TestRegistrationDomainEnrollmentAndPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if user.Status != "pending" {
-		t.Fatal("domain registration must await mailbox verification")
+	if user.Status != "active" {
+		t.Fatal("explicit registration status must remain authoritative when domain verification is disabled")
 	}
 	if role, err := IsWorkspaceMember(ctx, fx.db, fx.workspaceID, user.ID); err != nil || role != "member" {
 		t.Fatalf("membership=%s err=%v", role, err)
@@ -124,7 +157,11 @@ func TestRegistrationDomainValidationAndAtomicity(t *testing.T) {
 			t.Errorf("accepted domain %q", domain)
 		}
 	}
-	rule := RegistrationDomain{Domain: "company.example", WorkspaceID: fx.workspaceID, Enabled: true}
+	rule := RegistrationDomain{Domain: "company.example", WorkspaceID: fx.workspaceID, Enabled: true, InitialGroupID: "missing-group"}
+	if err := SaveRegistrationDomain(ctx, fx.db, rule, true); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing initial group accepted: %v", err)
+	}
+	rule.InitialGroupID = ""
 	if err := SaveRegistrationDomain(ctx, fx.db, rule, true); err != nil {
 		t.Fatal(err)
 	}
@@ -138,6 +175,32 @@ func TestRegistrationDomainValidationAndAtomicity(t *testing.T) {
 	}
 	if _, err := FindUserByEmail(ctx, fx.db, "rollback@company.example"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("orphan registration survived: %v", err)
+	}
+}
+
+func TestRegistrationDomainInitialGroupClearsWhenGroupIsDeleted(t *testing.T) {
+	fx := newRBACFixture(t)
+	ctx := t.Context()
+	group, err := CreateUserGroup(ctx, fx.db, UserGroup{Name: "Company Members"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := RegistrationDomain{
+		Domain: "company.example", WorkspaceID: fx.workspaceID, Enabled: true, InitialGroupID: group.ID,
+	}
+	if err := SaveRegistrationDomain(ctx, fx.db, rule, true); err != nil {
+		t.Fatal(err)
+	}
+	user, err := CreateRegisteredUser(ctx, fx.db, "member@company.example", "Member", "hash", "active")
+	if err != nil || user.GroupID != group.ID {
+		t.Fatalf("initial group user=%+v err=%v", user, err)
+	}
+	if err := DeleteUserGroup(ctx, fx.db, group.ID); err != nil {
+		t.Fatal(err)
+	}
+	rules, err := ListRegistrationDomains(ctx, fx.db)
+	if err != nil || len(rules) != 1 || rules[0].InitialGroupID != "" || rules[0].InitialGroupName != "" {
+		t.Fatalf("rule after group deletion=%+v err=%v", rules, err)
 	}
 }
 

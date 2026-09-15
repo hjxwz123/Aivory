@@ -298,13 +298,6 @@ func registerHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	domainEnrollment, err := store.EmailHasRegistrationDomain(r.Context(), d.DB, req.Email)
-	if err != nil {
-		writeError(w, 500, err)
-		return
-	}
-	verifyRequired = verifyRequired || domainEnrollment
-
 	// Slider-captcha gate. The client solves the puzzle via /captcha/verify, which
 	// returns a single-use pass token; we consume it here (single-use whether or
 	// not it was valid, so a guessed token can't be hammered).

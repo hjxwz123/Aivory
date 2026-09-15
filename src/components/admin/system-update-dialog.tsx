@@ -222,14 +222,16 @@ export function SystemUpdateDialog({ open, onOpenChange, onSummaryChange }: Prop
       </Dialog>
 
       <Dialog open={notesOpen} onOpenChange={setNotesOpen}>
-        <DialogContent size="lg">
+        <DialogContent size="lg" className="h-[min(46rem,calc(100dvh-2rem))] overflow-hidden">
           <DialogHeader>
             <DialogTitle>{state?.release_name || t('userMenu.systemUpdate.releaseNotes')}</DialogTitle>
             <DialogDescription>{state?.latest_version ? `v${state.latest_version}${published ? ` · ${published}` : ''}` : ''}</DialogDescription>
           </DialogHeader>
-          <DialogBody>
+          <DialogBody className="overscroll-contain">
             {state?.release_notes ? (
-              <Markdown content={state.release_notes} className="prose-full text-sm" />
+              <div className="mx-auto w-full max-w-[72ch]">
+                <Markdown content={state.release_notes} className="prose-full text-sm" />
+              </div>
             ) : (
               <p className="py-8 text-center text-sm text-[var(--color-fg-muted)]">{t('userMenu.systemUpdate.noNotes')}</p>
             )}

@@ -1037,6 +1037,8 @@ CREATE TABLE IF NOT EXISTS registration_domains (
   domain TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE RESTRICT,
   lock_personal INTEGER NOT NULL DEFAULT 0 CHECK(lock_personal IN (0,1)),
+  email_verification_required INTEGER NOT NULL DEFAULT 1 CHECK(email_verification_required IN (0,1)),
+  initial_group_id TEXT REFERENCES user_groups(id) ON DELETE SET NULL,
   enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1))
 );
 CREATE INDEX IF NOT EXISTS idx_registration_domains_workspace ON registration_domains(workspace_id);

@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Globe, LockKeyhole, Plus, Users } from 'lucide-react'
-import { workspacesApi } from '@/api'
+import { adminApi, workspacesApi } from '@/api'
 import { domainsApi, type DomainUser, type RegistrationDomain } from '@/api/domains'
-import type { ApiWorkspace } from '@/api/types'
+import type { ApiUserGroup, ApiWorkspace } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
@@ -18,6 +18,7 @@ export default function AdminDomains() {
   const { t } = useTranslation('admin')
   const [rows, setRows] = useState<RegistrationDomain[]>([])
   const [workspaces, setWorkspaces] = useState<ApiWorkspace[]>([])
+  const [groups, setGroups] = useState<ApiUserGroup[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [editor, setEditor] = useState<RegistrationDomain | 'new' | null>(null)
@@ -30,9 +31,10 @@ export default function AdminDomains() {
     setLoading(true)
     setError('')
     try {
-      const [domains, spaces] = await Promise.all([domainsApi.list(), workspacesApi.adminList()])
+      const [domains, spaces, userGroups] = await Promise.all([domainsApi.list(), workspacesApi.adminList(), adminApi.userGroups()])
       setRows(domains.domains)
       setWorkspaces(spaces.workspaces)
+      setGroups(userGroups)
     } catch (e) { setError(e instanceof Error ? e.message : t('domains.loadFailed')) }
     finally { setLoading(false) }
   }
@@ -82,7 +84,11 @@ export default function AdminDomains() {
                 <tr key={row.domain} className="border-b border-[var(--color-divider)] last:border-0">
                   <td className="px-4 py-3 font-medium">{row.domain}</td>
                   <td className="max-w-56 break-words px-4 py-3">{row.workspace_name}</td>
-                  <td className="px-4 py-3"><Badge variant={row.enabled ? 'success' : 'neutral'}>{t(row.enabled ? 'domains.enabled' : 'domains.paused')}</Badge></td>
+                  <td className="px-4 py-3"><div className="flex flex-col items-start gap-1.5">
+                    <Badge variant={row.enabled ? 'success' : 'neutral'}>{t(row.enabled ? 'domains.enabled' : 'domains.paused')}</Badge>
+                    <span className="text-xs text-[var(--color-fg-muted)]">{t(row.email_verification_required ? 'domains.verificationRequired' : 'domains.verificationOptional')}</span>
+                    <span className="text-xs text-[var(--color-fg-muted)]">{t('domains.initialGroupSummary', { group: row.initial_group_name || t('domains.systemDefaultGroup') })}</span>
+                  </div></td>
                   <td className="px-4 py-3"><span className="inline-flex items-center gap-1.5">{row.lock_personal && <LockKeyhole size={14} aria-hidden />}{t(row.lock_personal ? 'domains.locked' : 'domains.unlocked')}</span></td>
                   <td className="px-4 py-3 tabular-nums">{row.member_count}</td>
                   <td className="px-4 py-3"><div className="flex gap-1">
@@ -102,7 +108,7 @@ export default function AdminDomains() {
                 <div className="min-w-0"><p className="break-all text-sm font-medium">{row.domain}</p><p className="mt-1 break-words text-sm text-[var(--color-fg-muted)]">{row.workspace_name}</p></div>
                 <Badge className="shrink-0" variant={row.enabled ? 'success' : 'neutral'}>{t(row.enabled ? 'domains.enabled' : 'domains.paused')}</Badge>
               </div>
-              <p className="mt-3 flex items-center gap-1.5 text-sm text-[var(--color-fg-muted)]">{row.lock_personal && <LockKeyhole size={14} aria-hidden />}{t(row.lock_personal ? 'domains.locked' : 'domains.unlocked')} · {row.member_count} {t('domains.members')}</p>
+              <p className="mt-3 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-[var(--color-fg-muted)]">{row.lock_personal && <LockKeyhole size={14} aria-hidden />}{t(row.lock_personal ? 'domains.locked' : 'domains.unlocked')} · {t(row.email_verification_required ? 'domains.verificationRequired' : 'domains.verificationOptional')} · {t('domains.initialGroupSummary', { group: row.initial_group_name || t('domains.systemDefaultGroup') })} · {row.member_count} {t('domains.members')}</p>
               <div className="mt-3 flex flex-wrap gap-1">
                 <Button size="sm" variant="secondary" onClick={() => setMembers(row)} aria-label={`${t('domains.members')}: ${row.domain}`}><Users size={14} aria-hidden />{t('domains.members')}</Button>
                 <Button size="sm" variant="ghost" onClick={() => setEditor(row)}>{t('domains.edit')}</Button>
@@ -113,7 +119,7 @@ export default function AdminDomains() {
         </ul>
         </>
       )}
-      {editor && <DomainEditor key={typeof editor === 'string' ? 'new' : editor.domain} rule={editor} workspaces={workspaces} onClose={() => setEditor(null)} onSaved={() => { setEditor(null); void load() }} />}
+      {editor && <DomainEditor key={typeof editor === 'string' ? 'new' : editor.domain} rule={editor} workspaces={workspaces} groups={groups} onClose={() => setEditor(null)} onSaved={() => { setEditor(null); void load() }} />}
       {members && <DomainMembers rule={members} onClose={() => setMembers(null)} />}
       <Dialog open={!!removing} onOpenChange={(open) => { if (!open && !busy) setRemoving(null) }}>
         <DialogContent className="max-w-md">
@@ -125,12 +131,14 @@ export default function AdminDomains() {
   )
 }
 
-function DomainEditor({ rule, workspaces, onClose, onSaved }: { rule: RegistrationDomain | 'new'; workspaces: ApiWorkspace[]; onClose: () => void; onSaved: () => void }) {
+function DomainEditor({ rule, workspaces, groups, onClose, onSaved }: { rule: RegistrationDomain | 'new'; workspaces: ApiWorkspace[]; groups: ApiUserGroup[]; onClose: () => void; onSaved: () => void }) {
   const { t } = useTranslation('admin')
   const isNew = rule === 'new'
   const [domain, setDomain] = useState(isNew ? '' : rule.domain)
   const [workspace, setWorkspace] = useState(isNew ? '' : rule.workspace_id)
   const [locked, setLocked] = useState(isNew ? false : rule.lock_personal)
+  const [verifyEmail, setVerifyEmail] = useState(isNew ? true : rule.email_verification_required)
+  const [initialGroup, setInitialGroup] = useState(isNew ? '' : rule.initial_group_id)
   const [enabled, setEnabled] = useState(isNew ? true : rule.enabled)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -139,7 +147,7 @@ function DomainEditor({ rule, workspaces, onClose, onSaved }: { rule: Registrati
     if (mutation.current || !domain.trim() || !workspace) return
     mutation.current = true; setBusy(true); setError('')
     try {
-      const body = { domain: domain.trim().toLowerCase(), workspace_id: workspace, lock_personal: locked, enabled }
+      const body = { domain: domain.trim().toLowerCase(), workspace_id: workspace, lock_personal: locked, email_verification_required: verifyEmail, initial_group_id: initialGroup, enabled }
       if (isNew) await domainsApi.create(body)
       else await domainsApi.update({ ...rule, ...body })
       toast.success(t('domains.saved')); onSaved()
@@ -150,13 +158,17 @@ function DomainEditor({ rule, workspaces, onClose, onSaved }: { rule: Registrati
     <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose() }}>
       <DialogContent className="max-w-lg">
         <DialogHeader><DialogTitle>{t(isNew ? 'domains.add' : 'domains.edit')}</DialogTitle><DialogDescription>{t('domains.editorHint')}</DialogDescription></DialogHeader>
-        <form onSubmit={(e) => { e.preventDefault(); void save() }}>
+        <form className="flex min-h-0 flex-1 flex-col overflow-hidden" onSubmit={(e) => { e.preventDefault(); void save() }}>
           <DialogBody className="space-y-5">
             <div className="space-y-2"><label htmlFor="domain-name" className="text-sm font-medium">{t('domains.domain')}</label><Input id="domain-name" autoFocus disabled={!isNew || busy} value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="example.com" maxLength={253} required /></div>
             <div className="space-y-2"><label id="domain-workspace-label" className="text-sm font-medium">{t('domains.workspace')}</label>
               <Select value={workspace} onValueChange={setWorkspace} disabled={!isNew || busy}><SelectTrigger aria-labelledby="domain-workspace-label"><SelectValue placeholder={t('domains.chooseWorkspace')} /></SelectTrigger><SelectContent>{workspaces.map((w) => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent></Select>
             </div>
             <div className="flex items-start justify-between gap-4"><div><label htmlFor="domain-enabled" className="text-sm font-medium">{t('domains.autoJoin')}</label><p className="mt-1 text-sm text-[var(--color-fg-muted)]">{t('domains.pauseHint')}</p></div><Switch id="domain-enabled" checked={enabled} onCheckedChange={setEnabled} disabled={busy} /></div>
+            <div className="flex items-start justify-between gap-4"><div><label htmlFor="domain-verification" className="text-sm font-medium">{t('domains.verifyEmailLabel')}</label><p className="mt-1 text-sm text-[var(--color-fg-muted)]">{t('domains.verifyEmailHint')}</p></div><Switch id="domain-verification" checked={verifyEmail} onCheckedChange={setVerifyEmail} disabled={busy} /></div>
+            <div className="space-y-2"><label id="domain-group-label" className="text-sm font-medium">{t('domains.initialGroupLabel')}</label><p className="text-sm text-[var(--color-fg-muted)]">{t('domains.initialGroupHint')}</p>
+              <Select value={initialGroup || '__system_default__'} onValueChange={(value) => setInitialGroup(value === '__system_default__' ? '' : value)} disabled={busy}><SelectTrigger aria-labelledby="domain-group-label"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__system_default__">{t('domains.systemDefaultGroup')}</SelectItem>{groups.filter((group) => !group.is_default || group.id === initialGroup).map((group) => <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>)}</SelectContent></Select>
+            </div>
             <div className="flex items-start justify-between gap-4"><div><label htmlFor="domain-lock" className="text-sm font-medium">{t('domains.lockLabel')}</label><p className="mt-1 text-sm text-[var(--color-fg-muted)]">{t('domains.lockHint')}</p></div><Switch id="domain-lock" checked={locked} onCheckedChange={setLocked} disabled={busy} /></div>
             {error && <p role="alert" className="text-sm text-[var(--color-danger)]">{error}</p>}
           </DialogBody>

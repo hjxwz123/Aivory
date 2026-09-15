@@ -331,6 +331,10 @@ func Migrate(db *sql.DB) error {
 	addOAuthIssuerURL := `ALTER TABLE oauth_providers ADD COLUMN issuer_url TEXT NOT NULL DEFAULT ''`
 	addOAuthJWKSURL := `ALTER TABLE oauth_providers ADD COLUMN jwks_url TEXT NOT NULL DEFAULT ''`
 	addOAuthSubjectNamespace := `ALTER TABLE oauth_providers ADD COLUMN subject_namespace TEXT NOT NULL DEFAULT ''`
+	// Existing enterprise-domain rules keep their historical verification
+	// requirement. Administrators may explicitly relax each rule after upgrade.
+	addRegistrationDomainEmailVerification := `ALTER TABLE registration_domains ADD COLUMN email_verification_required INTEGER NOT NULL DEFAULT 1`
+	addRegistrationDomainInitialGroup := `ALTER TABLE registration_domains ADD COLUMN initial_group_id TEXT REFERENCES user_groups(id) ON DELETE SET NULL`
 	// NULL distinguishes credentials registered before WebAuthn authenticator
 	// flags were persisted. Their first verified assertion safely backfills it.
 	addPasskeyAuthenticatorFlags := `ALTER TABLE passkeys ADD COLUMN authenticator_flags INTEGER`
@@ -459,6 +463,8 @@ func Migrate(db *sql.DB) error {
 		addOAuthIssuerURL = `ALTER TABLE oauth_providers ADD COLUMN IF NOT EXISTS issuer_url TEXT NOT NULL DEFAULT ''`
 		addOAuthJWKSURL = `ALTER TABLE oauth_providers ADD COLUMN IF NOT EXISTS jwks_url TEXT NOT NULL DEFAULT ''`
 		addOAuthSubjectNamespace = `ALTER TABLE oauth_providers ADD COLUMN IF NOT EXISTS subject_namespace TEXT NOT NULL DEFAULT ''`
+		addRegistrationDomainEmailVerification = `ALTER TABLE registration_domains ADD COLUMN IF NOT EXISTS email_verification_required INTEGER NOT NULL DEFAULT 1`
+		addRegistrationDomainInitialGroup = `ALTER TABLE registration_domains ADD COLUMN IF NOT EXISTS initial_group_id TEXT REFERENCES user_groups(id) ON DELETE SET NULL`
 		addPasskeyAuthenticatorFlags = `ALTER TABLE passkeys ADD COLUMN IF NOT EXISTS authenticator_flags INTEGER`
 	}
 	if err := dedupeSkillNames(db); err != nil {
@@ -506,6 +512,7 @@ func Migrate(db *sql.DB) error {
 		addPaymentChannelEnvironment, addPaymentOrderEnvironment,
 		addPaymentProviderPaymentID, addPaymentCheckoutSessionID, addPaymentCheckoutURL, addPaymentCheckoutExpiresAt, addPaymentLastReconciledAt, addPaymentReconcileError,
 		addOAuthIssuerURL, addOAuthJWKSURL, addOAuthSubjectNamespace,
+		addRegistrationDomainEmailVerification, addRegistrationDomainInitialGroup,
 		addPasskeyAuthenticatorFlags,
 	} {
 		_, _ = db.Exec(ddl)
@@ -668,6 +675,7 @@ func Migrate(db *sql.DB) error {
 		"payment_channels":                {"environment"},
 		"payment_orders":                  {"paid_amount_minor", "tax_amount_minor", "provider_amount_minor", "provider_currency", "conversion_rate", "environment", "provider_payment_id", "checkout_session_id", "checkout_url", "checkout_expires_at", "last_reconciled_at", "reconcile_error"},
 		"oauth_providers":                 {"issuer_url", "jwks_url", "subject_namespace"},
+		"registration_domains":            {"email_verification_required", "initial_group_id"},
 		"passkeys":                        {"authenticator_flags"},
 	}
 	for table, cols := range columnChecks {
