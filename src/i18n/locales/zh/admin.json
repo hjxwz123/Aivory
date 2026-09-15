@@ -1188,7 +1188,9 @@
       "memory": "使用记忆",
       "memoryHint": "使用和管理长期个人记忆。",
       "drawing": "绘图",
-      "drawingHint": "使用绘图模型、图片风格和图片生成工具。"
+      "drawingHint": "使用绘图模型、图片风格和图片生成工具。",
+      "privateChat": "隐私对话",
+      "privateChatHint": "允许使用仅保存在当前浏览器中、不写入对话历史的隐私对话。"
     },
     "users": {
       "saveFirst": "保存该套餐后即可查看用户",

@@ -10,6 +10,7 @@ import { SandboxFilesPanel } from '@/components/chat/sandbox-files-panel'
 import { QueuedTurnDispatcher } from '@/components/chat/queued-turn-dispatcher'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useSettings } from '@/store/settings'
+import { useAuth } from '@/store/auth'
 import { useUI } from '@/store/ui'
 import { useWorkspaces } from '@/store/workspaces'
 import { useMediaQuery } from '@/hooks/use-media-query'
@@ -23,9 +24,10 @@ import { CreditAdjustmentNotice } from '@/components/credits/credit-adjustment-n
 import { useHotkeys } from '@/hooks/use-hotkeys'
 import { TracedLogo } from '@/components/brand/logo'
 import { RouteFade } from '@/components/ui/route-fade'
-import { chatRouteKeys } from '@/lib/chat-route'
+import { chatRouteAccessRedirect, chatRouteKeys } from '@/lib/chat-route'
 import { workspaceSwitchDestination } from '@/lib/workspace-navigation'
 import { cn } from '@/lib/utils'
+import { userCan } from '@/lib/user-permissions'
 
 export default function ChatLayout() {
   const isDesktop = useMediaQuery(mediaQuery.desktop)
@@ -35,6 +37,8 @@ export default function ChatLayout() {
   const drawerOpen = useUI((s) => s.navOpen)
   const setDrawerOpen = useUI((s) => s.setNavOpen)
   const pageOwnsTopBar = useUI((s) => s.pageOwnsTopBar)
+  const user = useAuth((s) => s.user)
+  const canUsePrivateChat = userCan(user, 'allow_private_chat')
   const domainLocked = useWorkspaces((s) => !!s.lockedWorkspaceId)
   const activeWsId = useWorkspaces((s) => s.activeId)
   const workspaceSwitching = useWorkspaces((s) => s.switching)
@@ -49,6 +53,7 @@ export default function ChatLayout() {
   // Home ('/') and the chat thread ('/chat', '/chat/:id') are one section so
   // creating a conversation (/ → /chat/:id) doesn't flash a transition.
   const routeKeys = chatRouteKeys(pathname)
+  const accessRedirect = chatRouteAccessRedirect(pathname, { domainLocked, canUsePrivateChat })
 
   useEffect(() => syncSystem(), [syncSystem])
 
@@ -76,7 +81,7 @@ export default function ChatLayout() {
     },
   ])
 
-  if (domainLocked && (pathname === '/private-chat' || pathname === '/files')) return <Navigate to="/" replace />
+  if (accessRedirect) return <Navigate to={accessRedirect} replace />
 
   return (
     <div

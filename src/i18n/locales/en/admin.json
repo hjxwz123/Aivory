@@ -1184,7 +1184,9 @@
       "memory": "Use memory",
       "memoryHint": "Use and manage long-term personal memory.",
       "drawing": "Drawing",
-      "drawingHint": "Use image models, image styles, and image generation tools."
+      "drawingHint": "Use image models, image styles, and image generation tools.",
+      "privateChat": "Private chat",
+      "privateChatHint": "Use ephemeral chats that remain only in the browser and are not saved to conversation history."
     },
     "users": {
       "saveFirst": "Save this plan to view its users",

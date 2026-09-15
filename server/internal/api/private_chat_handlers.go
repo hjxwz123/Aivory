@@ -84,6 +84,11 @@ func privateChatHistory(body privateChatRequest, model *store.Model, imageLimit 
 func privateChatHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store, no-transform")
 	w.Header().Set("Pragma", "no-cache")
+	permissions, permissionErr := requestPermissions(d, r)
+	if permissionErr != nil || !permissions.AllowPrivateChat {
+		writeError(w, http.StatusForbidden, errForbidden)
+		return
+	}
 	if d.Orchestrator == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "private_model_unavailable"})
 		return

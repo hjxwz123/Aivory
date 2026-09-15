@@ -198,7 +198,7 @@ func isZeroUserGroupPermissions(p UserGroupPermissions) bool {
 		p.Tools.Mode == "" && len(p.Tools.IDs) == 0 &&
 		!p.AllowSharing && !p.AllowKnowledgeBases && !p.AllowKnowledgeBaseSharing && !p.AllowFileUpload &&
 		!p.AllowConversationExport && !p.AllowConversationDeletion && !p.AllowVoiceTranscription &&
-		!p.AllowMemory && !p.AllowDrawing
+		!p.AllowMemory && !p.AllowDrawing && !p.AllowPrivateChat
 }
 
 // ReorderUserGroups assigns sort_order = position for each id in one

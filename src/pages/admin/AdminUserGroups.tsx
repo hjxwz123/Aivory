@@ -92,6 +92,7 @@ const DEFAULT_PERMISSIONS: ApiUserGroupPermissions = {
   allow_voice_transcription: true,
   allow_memory: true,
   allow_drawing: true,
+  allow_private_chat: true,
 }
 
 function normalizePermissions(value?: Partial<ApiUserGroupPermissions>): ApiUserGroupPermissions {
@@ -916,6 +917,7 @@ export default function AdminUserGroups() {
                     <CapabilityToggle label={t('admin:groups.permissions.voice', { defaultValue: 'Voice recognition' })} description={t('admin:groups.permissions.voiceHint', { defaultValue: 'Use streaming or recorded speech transcription.' })} checked={normalizePermissions(editor.draft.permissions).allow_voice_transcription} onCheckedChange={(allow_voice_transcription) => setPermissions({ allow_voice_transcription })} />
                     <CapabilityToggle label={t('admin:groups.permissions.memory', { defaultValue: 'Use memory' })} description={t('admin:groups.permissions.memoryHint', { defaultValue: 'Use and manage long-term personal memory.' })} checked={normalizePermissions(editor.draft.permissions).allow_memory} onCheckedChange={(allow_memory) => setPermissions({ allow_memory })} />
                     <CapabilityToggle label={t('admin:groups.permissions.drawing', { defaultValue: 'Drawing' })} description={t('admin:groups.permissions.drawingHint', { defaultValue: 'Use image models, image styles, and image generation tools.' })} checked={normalizePermissions(editor.draft.permissions).allow_drawing} onCheckedChange={(allow_drawing) => setPermissions({ allow_drawing })} />
+                    <CapabilityToggle label={t('admin:groups.permissions.privateChat', { defaultValue: 'Private chat' })} description={t('admin:groups.permissions.privateChatHint', { defaultValue: 'Use ephemeral chats that remain only in the browser and are not saved to conversation history.' })} checked={normalizePermissions(editor.draft.permissions).allow_private_chat} onCheckedChange={(allow_private_chat) => setPermissions({ allow_private_chat })} />
                   </div>
                 </section>
               </TabsContent>

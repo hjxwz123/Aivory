@@ -13,6 +13,7 @@ export const DEFAULT_USER_PERMISSIONS: ApiUserGroupPermissions = {
   allow_voice_transcription: true,
   allow_memory: true,
   allow_drawing: true,
+  allow_private_chat: true,
 }
 
 export type UserCapability = keyof Pick<
@@ -26,6 +27,7 @@ export type UserCapability = keyof Pick<
   | 'allow_voice_transcription'
   | 'allow_memory'
   | 'allow_drawing'
+  | 'allow_private_chat'
 >
 
 /**

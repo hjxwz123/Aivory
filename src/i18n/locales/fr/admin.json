@@ -1184,7 +1184,9 @@
       "memory": "Utiliser la mémoire",
       "memoryHint": "Utiliser et gérer la mémoire personnelle à long terme.",
       "drawing": "Génération d'images",
-      "drawingHint": "Utiliser les modèles d'image, les styles et les outils de génération d'images."
+      "drawingHint": "Utiliser les modèles d'image, les styles et les outils de génération d'images.",
+      "privateChat": "Conversation privée",
+      "privateChatHint": "Utiliser des conversations éphémères conservées uniquement dans le navigateur et non enregistrées dans l'historique."
     },
     "users": {
       "saveFirst": "Enregistrez ce forfait pour voir ses utilisateurs",

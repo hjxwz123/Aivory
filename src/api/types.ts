@@ -485,6 +485,7 @@ export interface ApiUserGroupPermissions {
   allow_voice_transcription: boolean
   allow_memory: boolean
   allow_drawing: boolean
+  allow_private_chat: boolean
 }
 
 export interface ApiKnowledgeBaseShare {

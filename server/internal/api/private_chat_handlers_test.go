@@ -114,6 +114,41 @@ func TestPrivateHandlerStrictSchemaNoStoreAndNoFiles(t *testing.T) {
 	}
 }
 
+func TestPrivateHandlerRejectsUsersWithoutGroupPermission(t *testing.T) {
+	fixture := seedImageCapabilityFixture(t)
+	provider := &privateAPIProvider{}
+	registry := llm.NewRegistry(nil)
+	registry.Register(provider)
+	fixture.deps.Orchestrator = llm.NewOrchestrator(fixture.deps.DB, registry, nil, nil, nil, nil, nil, nil, nil)
+
+	permissions := store.DefaultUserGroupPermissions()
+	permissions.AllowPrivateChat = false
+	raw, err := json.Marshal(permissions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, fixture.deps.DB, `INSERT INTO user_groups(id,name,permissions) VALUES('private-chat-disabled','Private chat disabled',?)`, string(raw))
+	mustExec(t, fixture.deps.DB, `UPDATE users SET role='user', group_id='private-chat-disabled' WHERE id=?`, fixture.user.ID)
+	fixture.user.Role = "user"
+
+	request := httptest.NewRequest(http.MethodPost, "/api/private-chat", strings.NewReader(
+		`{"model_id":"m_plain","messages":[{"role":"user","text":"private prompt"}]}`,
+	))
+	request = request.WithContext(context.WithValue(request.Context(), userCtxKey{}, fixture.user))
+	response := httptest.NewRecorder()
+	privateChatHandler(fixture.deps, response, request)
+
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("status=%d body=%s, want 403", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Header().Get("Cache-Control"), "no-store") {
+		t.Fatalf("cache control=%q, want no-store", response.Header().Get("Cache-Control"))
+	}
+	if provider.calls != 0 {
+		t.Fatalf("upstream calls=%d, want 0", provider.calls)
+	}
+}
+
 func TestPrivateSignedPayloadKeepsLargerImagesInMemory(t *testing.T) {
 	body, err := json.Marshal(privateChatRequest{ModelID: "model", Messages: []privateChatMessage{{Role: "user", Images: []privateChatImage{{MimeType: "image/png", Data: strings.Repeat("a", int(jsonRequestBodySizeCap)+64)}}}}})
 	if err != nil {

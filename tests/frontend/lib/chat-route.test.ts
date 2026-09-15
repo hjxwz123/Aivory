@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { chatRouteKeys } from '@/lib/chat-route'
+import { chatRouteAccessRedirect, chatRouteKeys } from '@/lib/chat-route'
 
 describe('chatRouteKeys', () => {
   it('keeps home and chat threads in one animation section', () => {
@@ -22,5 +22,28 @@ describe('chatRouteKeys', () => {
 
     expect(chatRouteKeys(drawLocation.pathname).content).toBe('/')
     expect(chatRouteKeys(messageJumpLocation.pathname).content).toBe('/chat/c_123')
+  })
+})
+
+describe('chatRouteAccessRedirect', () => {
+  it('does not block private chat solely because an enterprise domain locks personal space', () => {
+    expect(chatRouteAccessRedirect('/private-chat', {
+      domainLocked: true,
+      canUsePrivateChat: true,
+    })).toBeNull()
+  })
+
+  it('blocks private chat when the user group capability is disabled', () => {
+    expect(chatRouteAccessRedirect('/private-chat', {
+      domainLocked: false,
+      canUsePrivateChat: false,
+    })).toBe('/')
+  })
+
+  it('continues blocking personal files for domain-locked users', () => {
+    expect(chatRouteAccessRedirect('/files', {
+      domainLocked: true,
+      canUsePrivateChat: true,
+    })).toBe('/')
   })
 })

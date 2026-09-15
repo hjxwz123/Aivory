@@ -17,8 +17,16 @@ func TestNormalizeUserGroupPermissionsDefaultsNewCapabilitiesForLegacyJSON(t *te
 	if legacy.AllowSharing {
 		t.Fatal("explicit allow_sharing=false was not preserved")
 	}
-	if !legacy.AllowKnowledgeBases || !legacy.AllowKnowledgeBaseSharing || !legacy.AllowConversationDeletion || !legacy.AllowDrawing {
+	if !legacy.AllowKnowledgeBases || !legacy.AllowKnowledgeBaseSharing || !legacy.AllowConversationDeletion || !legacy.AllowDrawing || !legacy.AllowPrivateChat {
 		t.Fatalf("missing legacy fields did not retain permissive defaults: %+v", legacy)
+	}
+
+	privateChatRestricted, err := NormalizeUserGroupPermissions(json.RawMessage(`{"allow_private_chat":false}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if privateChatRestricted.AllowPrivateChat {
+		t.Fatal("explicit allow_private_chat=false was not preserved")
 	}
 
 	restricted, err := NormalizeUserGroupPermissions(json.RawMessage(`{"allow_knowledge_bases":false}`))
@@ -41,6 +49,15 @@ func TestNormalizeUserGroupPermissionsDefaultsNewCapabilitiesForLegacyJSON(t *te
 	}
 	if contradictory.AllowKnowledgeBaseSharing {
 		t.Fatal("contradictory sharing policy was not normalized closed")
+	}
+}
+
+func TestUserGroupPermissionsEqualDetectsPrivateChatChanges(t *testing.T) {
+	allowed := DefaultUserGroupPermissions()
+	restricted := allowed
+	restricted.AllowPrivateChat = false
+	if UserGroupPermissionsEqual(allowed, restricted) {
+		t.Fatal("private chat capability change was treated as equal")
 	}
 }
 

@@ -200,7 +200,6 @@ function greetingKey(): 'morning' | 'afternoon' | 'evening' | 'stillUp' {
 
 export default function ChatHome() {
   const navigate = useNavigate()
-  const domainLocked = useWorkspaces((s) => !!s.lockedWorkspaceId)
   const { t } = useTranslation('chat')
   const beginOptimisticConversation = useConversations((s) => s.beginOptimisticConversation)
   const sendMessage = useConversations((s) => s.sendMessage)
@@ -211,6 +210,7 @@ export default function ChatHome() {
   const modelsLoadedPolicyKey = useModels((s) => s.loadedPolicyKey)
   const modelsLoading = useModels((s) => s.loading)
   const user = useAuth((s) => s.user)
+  const canUsePrivateChat = userCan(user, 'allow_private_chat')
   const workspaceId = useWorkspaces((s) => s.activeId ?? undefined)
   const workspacesLoaded = useWorkspaces((s) => s.loaded)
   const workspacePolicyLoading = useWorkspaces((s) =>
@@ -633,11 +633,13 @@ export default function ChatHome() {
           sidebar footer's avatar does (placement="header" adapts the trigger +
           popup direction for a top-right corner). */}
       <div className="absolute right-3 top-3 z-20 flex items-center gap-2 max-sm:right-2 max-sm:top-2">
-        {!domainLocked && <Tooltip content={t('private.enter')}>
-          <Button variant="ghost" size="icon-lg" aria-label={t('private.enter')} onClick={() => navigate('/private-chat')}>
-            <ShieldOff size={19} aria-hidden />
-          </Button>
-        </Tooltip>}
+        {canUsePrivateChat && (
+          <Tooltip content={t('private.enter')}>
+            <Button variant="ghost" size="icon-lg" aria-label={t('private.enter')} onClick={() => navigate('/private-chat')}>
+              <ShieldOff size={19} aria-hidden />
+            </Button>
+          </Tooltip>
+        )}
         <div className="lg:hidden"><UserMenu placement="header" /></div>
       </div>
       {/* Desktop-only ambient depth; the phone layout stays deliberately direct. */}

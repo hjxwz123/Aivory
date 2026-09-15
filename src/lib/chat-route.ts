@@ -5,6 +5,18 @@ export interface ChatRouteKeys {
   content: string
 }
 
+export interface ChatRouteAccess {
+  domainLocked: boolean
+  canUsePrivateChat: boolean
+}
+
+/** Resolve chat-shell restrictions without coupling private chat to the domain lock. */
+export function chatRouteAccessRedirect(pathname: string, access: ChatRouteAccess): '/' | null {
+  if (access.domainLocked && pathname === '/files') return '/'
+  if (!access.canUsePrivateChat && pathname === '/private-chat') return '/'
+  return null
+}
+
 /**
  * Keep chat-thread navigation visually quiet while still giving every target
  * route its own Suspense boundary. A fresh boundary is important with React

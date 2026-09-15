@@ -1184,7 +1184,9 @@
       "memory": "使用記憶",
       "memoryHint": "使用和管理長期個人記憶。",
       "drawing": "繪圖",
-      "drawingHint": "使用繪圖模型、圖片樣式和圖片生成工具。"
+      "drawingHint": "使用繪圖模型、圖片樣式和圖片生成工具。",
+      "privateChat": "隱私對話",
+      "privateChatHint": "允許使用僅保存在目前瀏覽器中、不寫入對話記錄的隱私對話。"
     },
     "users": {
       "saveFirst": "儲存此方案後即可查看使用者",
