@@ -38,12 +38,18 @@ type PasskeyService interface {
 // go-webauthn types.
 type PasskeyUser struct {
 	ID          string
+	UserHandle  []byte // credential's original WebAuthn identity when an account id was remapped
 	Email       string
 	DisplayName string
 	Credentials []PasskeyCredential
 }
 
-func (u *PasskeyUser) WebAuthnID() []byte          { return []byte(u.ID) }
+func (u *PasskeyUser) WebAuthnID() []byte {
+	if len(u.UserHandle) != 0 {
+		return u.UserHandle
+	}
+	return []byte(u.ID)
+}
 func (u *PasskeyUser) WebAuthnName() string        { return u.Email }
 func (u *PasskeyUser) WebAuthnDisplayName() string { return firstNonEmpty(u.DisplayName, u.Email) }
 func (u *PasskeyUser) WebAuthnCredentials() []webauthn.Credential {

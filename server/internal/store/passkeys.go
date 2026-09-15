@@ -17,12 +17,23 @@ type Passkey struct {
 	UserID             string `json:"user_id"`
 	CredentialID       []byte `json:"-"`
 	PublicKey          []byte `json:"-"`
+	UserHandle         []byte `json:"-"` // original WebAuthn user.id, stable across restore account remapping
 	SignCount          uint32 `json:"-"`
 	AuthenticatorFlags uint8  `json:"-"`
 	FlagsKnown         bool   `json:"-"`
 	Name               string `json:"name"`
 	CreatedAt          int64  `json:"created_at"`
 	LastUsedAt         int64  `json:"last_used_at"`
+}
+
+// WebAuthnUserHandle falls back to the account id for credentials registered
+// before user_handle was persisted. Restores must store this value before
+// assigning the credential to a different database account id.
+func (p Passkey) WebAuthnUserHandle() []byte {
+	if len(p.UserHandle) != 0 {
+		return p.UserHandle
+	}
+	return []byte(p.UserID)
 }
 
 // ErrPasskeyNotFound is returned by DeletePasskey/GetPasskey when no row
@@ -42,13 +53,14 @@ func CreatePasskey(ctx context.Context, db *sql.DB, p *Passkey) error {
 		p.CreatedAt = time.Now().Unix()
 	}
 	p.Name = truncateLoginHistoryText(strings.TrimSpace(p.Name), 64)
+	p.UserHandle = p.WebAuthnUserHandle()
 	var authenticatorFlags any
 	if p.FlagsKnown {
 		authenticatorFlags = p.AuthenticatorFlags
 	}
 	_, err := db.ExecContext(ctx,
-		`INSERT INTO passkeys(id,user_id,credential_id,public_key,sign_count,authenticator_flags,name,created_at,last_used_at) VALUES(?,?,?,?,?,?,?,?,?)`,
-		p.ID, p.UserID, p.CredentialID, p.PublicKey, p.SignCount, authenticatorFlags, p.Name, p.CreatedAt, p.LastUsedAt,
+		`INSERT INTO passkeys(id,user_id,credential_id,public_key,user_handle,sign_count,authenticator_flags,name,created_at,last_used_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+		p.ID, p.UserID, p.CredentialID, p.PublicKey, p.UserHandle, p.SignCount, authenticatorFlags, p.Name, p.CreatedAt, p.LastUsedAt,
 	)
 	return err
 }
@@ -78,9 +90,9 @@ func ListPasskeys(ctx context.Context, db *sql.DB, userID string) ([]Passkey, er
 
 // ListPasskeyCredentials returns full credential rows (raw ID + public key
 // included) for WebAuthn verification — never for API serialization.
-func ListPasskeyCredentials(ctx context.Context, db *sql.DB, userID string) ([]Passkey, error) {
+func ListPasskeyCredentials(ctx context.Context, db RowQuerier, userID string) ([]Passkey, error) {
 	rows, err := db.QueryContext(ctx,
-		`SELECT id,user_id,credential_id,public_key,sign_count,authenticator_flags,name,created_at,last_used_at FROM passkeys WHERE user_id=? ORDER BY created_at DESC, id DESC`,
+		`SELECT id,user_id,credential_id,public_key,user_handle,sign_count,authenticator_flags,name,created_at,last_used_at FROM passkeys WHERE user_id=? ORDER BY created_at DESC, id DESC`,
 		userID)
 	if err != nil {
 		return nil, err
@@ -90,7 +102,7 @@ func ListPasskeyCredentials(ctx context.Context, db *sql.DB, userID string) ([]P
 	for rows.Next() {
 		var p Passkey
 		var authenticatorFlags sql.NullInt64
-		if err := rows.Scan(&p.ID, &p.UserID, &p.CredentialID, &p.PublicKey, &p.SignCount, &authenticatorFlags, &p.Name, &p.CreatedAt, &p.LastUsedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.UserID, &p.CredentialID, &p.PublicKey, &p.UserHandle, &p.SignCount, &authenticatorFlags, &p.Name, &p.CreatedAt, &p.LastUsedAt); err != nil {
 			return nil, err
 		}
 		if err := setPasskeyFlags(&p, authenticatorFlags); err != nil {
@@ -112,7 +124,7 @@ func CountPasskeys(ctx context.Context, db *sql.DB, userID string) (int, error) 
 // with. Returns sql.ErrNoRows when unknown.
 func GetPasskeyByCredentialID(ctx context.Context, db *sql.DB, credentialID []byte) (*Passkey, error) {
 	row := db.QueryRowContext(ctx,
-		`SELECT id,user_id,credential_id,public_key,sign_count,authenticator_flags,name,created_at,last_used_at FROM passkeys WHERE credential_id=?`,
+		`SELECT id,user_id,credential_id,public_key,user_handle,sign_count,authenticator_flags,name,created_at,last_used_at FROM passkeys WHERE credential_id=?`,
 		credentialID)
 	return scanPasskey(row)
 }
@@ -120,7 +132,7 @@ func GetPasskeyByCredentialID(ctx context.Context, db *sql.DB, credentialID []by
 func scanPasskey(row *sql.Row) (*Passkey, error) {
 	var p Passkey
 	var authenticatorFlags sql.NullInt64
-	err := row.Scan(&p.ID, &p.UserID, &p.CredentialID, &p.PublicKey, &p.SignCount, &authenticatorFlags, &p.Name, &p.CreatedAt, &p.LastUsedAt)
+	err := row.Scan(&p.ID, &p.UserID, &p.CredentialID, &p.PublicKey, &p.UserHandle, &p.SignCount, &authenticatorFlags, &p.Name, &p.CreatedAt, &p.LastUsedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrPasskeyNotFound
 	}

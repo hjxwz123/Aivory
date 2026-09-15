@@ -338,6 +338,7 @@ func Migrate(db *sql.DB) error {
 	// NULL distinguishes credentials registered before WebAuthn authenticator
 	// flags were persisted. Their first verified assertion safely backfills it.
 	addPasskeyAuthenticatorFlags := `ALTER TABLE passkeys ADD COLUMN authenticator_flags INTEGER`
+	addPasskeyUserHandle := `ALTER TABLE passkeys ADD COLUMN user_handle BLOB`
 	if usePostgres {
 		schema = schemaPGSQL
 		addImageRef = `ALTER TABLE chunks ADD COLUMN IF NOT EXISTS image_ref TEXT`
@@ -466,6 +467,7 @@ func Migrate(db *sql.DB) error {
 		addRegistrationDomainEmailVerification = `ALTER TABLE registration_domains ADD COLUMN IF NOT EXISTS email_verification_required INTEGER NOT NULL DEFAULT 1`
 		addRegistrationDomainInitialGroup = `ALTER TABLE registration_domains ADD COLUMN IF NOT EXISTS initial_group_id TEXT REFERENCES user_groups(id) ON DELETE SET NULL`
 		addPasskeyAuthenticatorFlags = `ALTER TABLE passkeys ADD COLUMN IF NOT EXISTS authenticator_flags INTEGER`
+		addPasskeyUserHandle = `ALTER TABLE passkeys ADD COLUMN IF NOT EXISTS user_handle BYTEA`
 	}
 	if err := dedupeSkillNames(db); err != nil {
 		return fmt.Errorf("dedupe skill names: %w", err)
@@ -513,7 +515,7 @@ func Migrate(db *sql.DB) error {
 		addPaymentProviderPaymentID, addPaymentCheckoutSessionID, addPaymentCheckoutURL, addPaymentCheckoutExpiresAt, addPaymentLastReconciledAt, addPaymentReconcileError,
 		addOAuthIssuerURL, addOAuthJWKSURL, addOAuthSubjectNamespace,
 		addRegistrationDomainEmailVerification, addRegistrationDomainInitialGroup,
-		addPasskeyAuthenticatorFlags,
+		addPasskeyAuthenticatorFlags, addPasskeyUserHandle,
 	} {
 		_, _ = db.Exec(ddl)
 	}
@@ -676,7 +678,7 @@ func Migrate(db *sql.DB) error {
 		"payment_orders":                  {"paid_amount_minor", "tax_amount_minor", "provider_amount_minor", "provider_currency", "conversion_rate", "environment", "provider_payment_id", "checkout_session_id", "checkout_url", "checkout_expires_at", "last_reconciled_at", "reconcile_error"},
 		"oauth_providers":                 {"issuer_url", "jwks_url", "subject_namespace"},
 		"registration_domains":            {"email_verification_required", "initial_group_id"},
-		"passkeys":                        {"authenticator_flags"},
+		"passkeys":                        {"authenticator_flags", "user_handle"},
 	}
 	for table, cols := range columnChecks {
 		if _, err := db.Exec(fmt.Sprintf(`SELECT %s FROM %s WHERE 1=0`, strings.Join(cols, ", "), table)); err != nil {

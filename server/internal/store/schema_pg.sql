@@ -906,6 +906,9 @@ CREATE TABLE IF NOT EXISTS passkeys (
   user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   credential_id BYTEA NOT NULL UNIQUE,
   public_key    BYTEA NOT NULL,
+  -- Device-side WebAuthn user.id survives account-id remapping on restore.
+  -- NULL falls back to user_id for credentials from older backups.
+  user_handle   BYTEA,
   sign_count    BIGINT NOT NULL DEFAULT 0,
   -- NULL identifies credentials created before authenticator flags were stored;
   -- the first fully verified assertion backfills the signed flag byte.

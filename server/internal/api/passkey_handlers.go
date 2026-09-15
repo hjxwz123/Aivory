@@ -325,13 +325,20 @@ func passkeyLoginVerifyHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		if err != nil || user.Status != "active" {
 			return nil, errPasskeyLoginFailed
 		}
-		// The credential must vouch for exactly the account it belongs to.
-		if len(userHandle) > 0 && !bytes.Equal(userHandle, []byte(user.ID)) {
+		// Compare against this credential's device-side identity, which a backup
+		// restore preserves even if the owning database account id changed.
+		expectedHandle := row.WebAuthnUserHandle()
+		if len(userHandle) > 0 && !bytes.Equal(userHandle, expectedHandle) {
 			return nil, errPasskeyLoginFailed
 		}
+		account, err := passkeyAccountUser(r, d, user.ID, user.Email, user.Name)
+		if err != nil {
+			return nil, err
+		}
+		account.UserHandle = expectedHandle
 		verifiedUser = user
 		verifiedRowID = row.ID
-		return passkeyAccountUser(r, d, user.ID, user.Email, user.Name)
+		return account, nil
 	}
 	// Keep the client-side answer generic (no account/config enumeration),
 	// but log the cause so a misconfigured origin is diagnosable server-side.

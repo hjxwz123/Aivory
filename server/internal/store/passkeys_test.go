@@ -45,7 +45,7 @@ func TestPasskeyStoreCRUDAndCascade(t *testing.T) {
 
 	byCred, err := GetPasskeyByCredentialID(ctx, db, []byte{0x01, 0x02, 0x03})
 	if err != nil || byCred.ID != pk.ID || byCred.UserID != "pk-user" || byCred.SignCount != 7 ||
-		!byCred.FlagsKnown || byCred.AuthenticatorFlags != 0x0D {
+		!byCred.FlagsKnown || byCred.AuthenticatorFlags != 0x0D || string(byCred.UserHandle) != "pk-user" {
 		t.Fatalf("byCred=%+v err=%v", byCred, err)
 	}
 	if _, err := GetPasskeyByCredentialID(ctx, db, []byte{0xFF}); !errors.Is(err, ErrPasskeyNotFound) {
@@ -84,10 +84,13 @@ func TestPasskeyStoreCRUDAndCascade(t *testing.T) {
 	}
 }
 
-func TestPasskeyFlagsMigrationPreservesLegacyUnknownState(t *testing.T) {
+func TestPasskeyMigrationPreservesLegacyCredentials(t *testing.T) {
 	db := openAuthSecurityDB(t, "passkeys-flags-migration.db")
 	if _, err := db.Exec(`ALTER TABLE passkeys DROP COLUMN authenticator_flags`); err != nil {
 		t.Fatalf("make legacy schema: %v", err)
+	}
+	if _, err := db.Exec(`ALTER TABLE passkeys DROP COLUMN user_handle`); err != nil {
+		t.Fatalf("make legacy user handle schema: %v", err)
 	}
 	if _, err := db.Exec(`INSERT INTO users(id,email,password_hash,role) VALUES('pk-legacy','legacy@example.test','hash','user')`); err != nil {
 		t.Fatal(err)
@@ -106,6 +109,19 @@ func TestPasskeyFlagsMigrationPreservesLegacyUnknownState(t *testing.T) {
 	}
 	if row.FlagsKnown {
 		t.Fatalf("legacy credential flags must remain unknown, got %+v", row)
+	}
+	if row.UserHandle != nil || string(row.WebAuthnUserHandle()) != "pk-legacy" {
+		t.Fatal("legacy credential must fall back to its original user id")
+	}
+	if _, err := db.Exec(`UPDATE passkeys SET user_handle=? WHERE id='pk-old'`, []byte("original-handle")); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	row, err = GetPasskeyByCredentialID(context.Background(), db, []byte{0x01, 0x02})
+	if err != nil || string(row.WebAuthnUserHandle()) != "original-handle" {
+		t.Fatalf("repeat migration changed stored user handle: %v", err)
 	}
 }
 

@@ -114,6 +114,7 @@ type backupImportAdminSnapshot struct {
 	CreatedAt         int64
 	Identities        []backupImportOAuthIdentity
 	Providers         map[string]store.OAuthProvider
+	Passkeys          []store.Passkey
 }
 
 // configManifest describes the lighter admin-configuration archive. It carries
@@ -929,10 +930,13 @@ func restoreInto(ctx context.Context, ex store.RowExecer, zr *zip.Reader, man ba
 			return nil, err
 		}
 		// The reconciliation may have retained the verified admin in addition to
-		// rows from the archive, so report the committed user count accurately.
-		var n int64
-		if err := ex.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&n); err == nil {
-			counts["users"] = n
+		// rows from the archive, so report committed user/credential counts.
+		for _, table := range []string{"users", "passkeys"} {
+			var n int64
+			if err := ex.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table).Scan(&n); err != nil { //nolint:gosec // literal tables
+				return nil, err
+			}
+			counts[table] = n
 		}
 	}
 	tx, ok := ex.(*sql.Tx)
@@ -1025,6 +1029,13 @@ func loadBackupImportAdmin(ctx context.Context, ex store.RowExecer, userID strin
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	s.Passkeys, err = store.ListPasskeyCredentials(ctx, ex, userID)
+	if err != nil {
+		return nil, fmt.Errorf("snapshot administrator passkeys: %w", err)
+	}
 
 	usablePassword := s.PasswordSet != 0 && strings.TrimSpace(s.PasswordHash) != ""
 	usableOAuth := false
@@ -1037,10 +1048,9 @@ func loadBackupImportAdmin(ctx context.Context, ex store.RowExecer, userID strin
 			break
 		}
 	}
-	if !usablePassword && !usableOAuth {
-		// Do this before WipeAll. A password-less administrator with no surviving
-		// enabled provider would otherwise make a successful restore permanently
-		// un-loginable.
+	if !usablePassword && !usableOAuth && len(s.Passkeys) == 0 {
+		// Reject before WipeAll if none of the administrator's login credentials
+		// can survive the restore. Final configuration is checked after merging.
 		return nil, fmt.Errorf("%w: importing administrator has no usable login identity", errBackupImportAdminUnauthorized)
 	}
 	return s, nil
@@ -1292,13 +1302,48 @@ func reconcileBackupImportAdmin(ctx context.Context, ex store.RowExecer, snap *b
 	if activeAdmins < 1 {
 		return fmt.Errorf("%w: restore produced no active administrator", errBackupImportAdminUnauthorized)
 	}
-	if snap.PasswordSet == 0 {
-		var usable int
-		if err := ex.QueryRowContext(ctx, `SELECT COUNT(*) FROM oauth_identities i JOIN oauth_providers p ON p.id=i.provider_id WHERE i.user_id=? AND p.enabled=1`, chosenID).Scan(&usable); err != nil {
+	// As with OAuth identities, never attach archive credentials to the
+	// administrator being elevated. Only keep their verified local snapshot.
+	if _, err := ex.ExecContext(ctx, `DELETE FROM passkeys WHERE user_id=?`, chosenID); err != nil {
+		return err
+	}
+	for _, p := range snap.Passkeys {
+		var conflicts int
+		if err := ex.QueryRowContext(ctx, `SELECT COUNT(*) FROM passkeys WHERE id=? OR credential_id=?`, p.ID, p.CredentialID).Scan(&conflicts); err != nil {
 			return err
 		}
-		if usable == 0 {
-			return fmt.Errorf("%w: restored administrator has no enabled OAuth identity", errBackupImportAdminUnauthorized)
+		if conflicts != 0 {
+			return fmt.Errorf("%w: administrator passkey conflicts with another imported user", errBackupImportAdminUnauthorized)
+		}
+		var flags any
+		if p.FlagsKnown {
+			flags = p.AuthenticatorFlags
+		}
+		// The device still sends the original WebAuthn user.id, even if the
+		// administrator has a different database id in the imported instance.
+		if _, err := ex.ExecContext(ctx, `INSERT INTO passkeys(
+			id,user_id,credential_id,public_key,user_handle,sign_count,authenticator_flags,name,created_at,last_used_at)
+			VALUES(?,?,?,?,?,?,?,?,?,?)`, p.ID, chosenID, p.CredentialID, p.PublicKey, p.WebAuthnUserHandle(), p.SignCount, flags, p.Name, p.CreatedAt, p.LastUsedAt); err != nil {
+			return err
+		}
+	}
+	if snap.PasswordSet == 0 {
+		var usableOAuth int
+		if err := ex.QueryRowContext(ctx, `SELECT COUNT(*) FROM oauth_identities i JOIN oauth_providers p ON p.id=i.provider_id WHERE i.user_id=? AND p.enabled=1`, chosenID).Scan(&usableOAuth); err != nil {
+			return err
+		}
+		if usableOAuth == 0 {
+			policy, err := loadAuthPolicyWith(func(key string) (json.RawMessage, error) {
+				var raw string
+				err := ex.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`, key).Scan(&raw)
+				return json.RawMessage(raw), err
+			})
+			if err != nil {
+				return err
+			}
+			if !policy.PasskeyLoginEnabled || len(snap.Passkeys) == 0 {
+				return fmt.Errorf("%w: restored administrator has no usable login identity", errBackupImportAdminUnauthorized)
+			}
 		}
 	}
 	return nil
@@ -1506,6 +1551,13 @@ func mergeConfigArchive(ctx context.Context, d Deps, zr *zip.Reader, man configM
 			}
 			return nil, err
 		}
+		if t == "skills" {
+			reader, err = normalizeConfigSkillAssets(reader, man, d)
+			if err != nil {
+				_ = rc.Close()
+				return nil, err
+			}
+		}
 		n, err := store.UpsertTable(ctx, tx, t, reader)
 		_ = rc.Close()
 		if err != nil {
@@ -1531,9 +1583,6 @@ func mergeConfigArchive(ctx context.Context, d Deps, zr *zip.Reader, man configM
 	}
 	if err := validateCurrentAuthPolicyTx(ctx, tx, importingAdminID); err != nil {
 		return nil, fmt.Errorf("%w: enterprise authentication policy: %v", errInvalidOAuthConfigArchive, err)
-	}
-	if err := rewriteConfigSkillAssetPaths(ctx, tx, man, d); err != nil {
-		return nil, err
 	}
 	if err := runImportBeforeCommit(beforeCommit); err != nil {
 		return nil, err
@@ -2715,62 +2764,51 @@ func validateBillingConfiguration(ctx context.Context, ex store.RowExecer) error
 	return rows.Err()
 }
 
-func rewriteConfigSkillAssetPaths(ctx context.Context, ex store.RowExecer, man configManifest, d Deps) error {
-	rows, err := ex.QueryContext(ctx, `SELECT id, assets FROM skills`)
-	if err != nil {
-		return err
-	}
-	type upd struct{ id, assets string }
-	var ups []upd
-	for rows.Next() {
-		var id, raw string
-		if err := rows.Scan(&id, &raw); err != nil {
-			_ = rows.Close()
-			return err
+// normalizeConfigSkillAssets remaps only assets supplied by this archive,
+// before UPSERT. Target-only skills and partial rows without an assets field
+// retain their existing local paths.
+func normalizeConfigSkillAssets(r io.Reader, man configManifest, d Deps) (io.Reader, error) {
+	var out bytes.Buffer
+	dec := json.NewDecoder(r)
+	enc := json.NewEncoder(&out)
+	for {
+		var row map[string]json.RawMessage
+		if err := dec.Decode(&row); err == io.EOF {
+			return bytes.NewReader(out.Bytes()), nil
+		} else if err != nil {
+			return nil, fmt.Errorf("decode config skills: %w", err)
 		}
-		if strings.TrimSpace(raw) == "" || strings.TrimSpace(raw) == "null" || strings.TrimSpace(raw) == "[]" {
-			continue
-		}
-		var assets []skillAssetRow
-		if err := json.Unmarshal([]byte(raw), &assets); err != nil {
-			_ = rows.Close()
-			return fmt.Errorf("rewrite skill assets %s: %w", id, err)
-		}
-		changed := false
-		for i := range assets {
-			if strings.TrimSpace(assets[i].StoragePath) == "" {
-				continue
+		if value, present := row["assets"]; present {
+			var raw string
+			if err := json.Unmarshal(value, &raw); err != nil {
+				return nil, fmt.Errorf("%w: config skills.assets: %v", errInvalidBackupStoragePath, err)
 			}
-			next, err := remapConfigSkillAssetPath(assets[i].StoragePath, man.SourceUploadDir, d.Config.UploadDir)
-			if err != nil {
-				_ = rows.Close()
-				return fmt.Errorf("%w: config skills.%s.assets[%d]: %v", errInvalidBackupStoragePath, id, i, err)
-			}
-			if next != assets[i].StoragePath {
-				assets[i].StoragePath = next
-				changed = true
+			if strings.TrimSpace(raw) != "" && strings.TrimSpace(raw) != "null" {
+				var assets []skillAssetRow
+				if err := json.Unmarshal([]byte(raw), &assets); err != nil {
+					return nil, fmt.Errorf("%w: config skills.assets: %v", errInvalidBackupStoragePath, err)
+				}
+				for i := range assets {
+					next, err := remapConfigSkillAssetPath(assets[i].StoragePath, man.SourceUploadDir, d.Config.UploadDir)
+					if err != nil {
+						return nil, fmt.Errorf("%w: config skills.assets[%d]: %v", errInvalidBackupStoragePath, i, err)
+					}
+					assets[i].StoragePath = next
+				}
+				encoded, err := json.Marshal(assets)
+				if err != nil {
+					return nil, err
+				}
+				row["assets"], err = json.Marshal(string(encoded))
+				if err != nil {
+					return nil, err
+				}
 			}
 		}
-		if changed {
-			b, err := json.Marshal(assets)
-			if err != nil {
-				_ = rows.Close()
-				return err
-			}
-			ups = append(ups, upd{id: id, assets: string(b)})
-		}
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return err
-	}
-	_ = rows.Close()
-	for _, u := range ups {
-		if _, err := ex.ExecContext(ctx, `UPDATE skills SET assets=? WHERE id=?`, u.assets, u.id); err != nil {
-			return err
+		if err := enc.Encode(row); err != nil {
+			return nil, err
 		}
 	}
-	return nil
 }
 
 func remapConfigSkillAssetPath(path, sourceUploadDir, targetUploadDir string) (string, error) {

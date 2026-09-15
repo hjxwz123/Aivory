@@ -169,6 +169,21 @@ func (w *trackedEntryWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
+// Every original v3 exporter (starting with 290cf94) included these tables.
+// Keep this baseline fixed: later additions are optional in historical v3
+// archives, but deleting an original table must never turn a damaged full
+// backup into an accepted partial restore.
+var backupV3RequiredTables = []string{
+	"settings", "users", "credit_adjustment_notifications", "login_histories", "workspaces", "workspace_members", "user_groups", "credit_ledger", "credit_reservations", "quota_ledger", "billing_usage", "credit_packages",
+	"payment_channels", "payment_methods", "payment_orders", "payment_order_attempts", "payment_events",
+	"channels", "mcp_servers", "skills", "prompts", "user_skills", "user_prompts", "oauth_providers",
+	"models", "model_group_quotas", "model_tags", "image_styles", "redeem_codes", "redeem_redemptions",
+	"model_skills", "knowledge_bases", "knowledge_base_shares", "workspace_kb_member_permissions", "projects", "conversations", "conversation_compaction_leases", "messages", "message_feedback", "user_feedback",
+	"conversation_shares", "files", "documents", "chunks", "vector_points", "memories",
+	"usage_stats", "usage_logs", "artifacts", "refresh_tokens", "oauth_identities",
+	"workspace_invites", "workspace_policies", "workspace_audit_logs", "pending_storage_cleanup",
+}
+
 func validateBackupArchive(zr *zip.Reader, man backupManifest) error {
 	// v1/v2 predate per-entry digests. They remain importable for disaster
 	// recovery compatibility, but referenced file completeness is still required.
@@ -176,17 +191,34 @@ func validateBackupArchive(zr *zip.Reader, man backupManifest) error {
 		return validateArchivedStorageReferences(zr, man)
 	}
 
-	tables := store.BackupTableOrder()
-	if len(man.Tables) != len(tables) {
-		return fmt.Errorf("manifest tables=%d, want %d", len(man.Tables), len(tables))
+	// v3 archives existed before the latest tables were added and some
+	// historical builds used a different FK-safe order. Keep the archive's
+	// declared subset/order valid, while restoreInto supplies migration defaults
+	// for tables absent from an older archive.
+	allowedTables := make(map[string]bool, len(store.BackupTableOrder()))
+	for _, table := range store.BackupTableOrder() {
+		allowedTables[table] = true
 	}
-	for i, table := range tables {
-		if man.Tables[i] != table {
-			return fmt.Errorf("manifest table %d=%q, want %q", i, man.Tables[i], table)
+	seenTables := make(map[string]bool, len(man.Tables))
+	for _, table := range man.Tables {
+		if !allowedTables[table] {
+			return fmt.Errorf("manifest contains unknown table %q", table)
 		}
+		if seenTables[table] {
+			return fmt.Errorf("manifest contains duplicate table %q", table)
+		}
+		seenTables[table] = true
 		if _, ok := man.Counts[table]; !ok || man.Counts[table] < 0 {
 			return fmt.Errorf("manifest has no valid row count for %s", table)
 		}
+	}
+	for _, table := range backupV3RequiredTables {
+		if !seenTables[table] {
+			return fmt.Errorf("manifest is missing required v3 table %q", table)
+		}
+	}
+	if len(man.Counts) != len(seenTables) {
+		return fmt.Errorf("manifest row counts do not match declared tables")
 	}
 	if len(man.Entries) == 0 {
 		return fmt.Errorf("manifest has no entry integrity metadata")
@@ -212,9 +244,15 @@ func validateBackupArchive(zr *zip.Reader, man backupManifest) error {
 		if _, ok := man.Entries[name]; !ok {
 			return fmt.Errorf("ZIP entry %q is not declared by manifest", name)
 		}
+		if strings.HasPrefix(name, "db/") {
+			table := strings.TrimSuffix(strings.TrimPrefix(name, "db/"), ".jsonl")
+			if !seenTables[table] || name != "db/"+table+".jsonl" {
+				return fmt.Errorf("database entry %q is not in manifest tables", name)
+			}
+		}
 	}
 
-	for _, table := range tables {
+	for _, table := range man.Tables {
 		name := "db/" + table + ".jsonl"
 		entry := actual[name]
 		if entry == nil {
