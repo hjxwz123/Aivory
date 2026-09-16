@@ -153,11 +153,12 @@ func TestImageCommonOperationsUseExpectedMockedRequests(t *testing.T) {
 		wantCount        int
 	}{
 		{
-			name: "generate ignores a stale base index plus old and uploaded images", withPrevious: true,
+			name: "generate uses current references and ignores stale base index and prior images", withPrevious: true,
 			inputIDs:   []string{"common_landscape"},
 			toolInput:  `{"prompt":"生成一个全新的简洁产品图","action":"generate","base_image":"none","base_image_index":1}`,
-			userPrompt: "生成一个全新的简洁产品图", wantPath: "/v1/images/generations",
-			wantPrompt: "生成一个全新的简洁产品图", wantSize: "2048x2048", wantCount: 1,
+			userPrompt: "生成一个全新的简洁产品图", wantPath: "/v1/images/edits",
+			wantPrompt: "生成一个全新的简洁产品图", wantSize: "2048x1152", wantCount: 1,
+			wantImageSources: []string{"common_landscape"},
 		},
 		{
 			name:       "generate a landscape image with requested resolution",

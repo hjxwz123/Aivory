@@ -1481,7 +1481,7 @@ type imageGenerateTool struct {
 
 func (t *imageGenerateTool) Name() string { return "image_generate" }
 func (t *imageGenerateTool) Description() string {
-	return "Generate a new image or faithfully edit one existing image. You must explicitly choose action=generate or action=edit from the user's intent. Generate never sends conversation images to the image API. For edit, select exactly one authoritative base_image: previous_generation for the nearest generated image on the active branch, or current_attachment plus its 1-based base_image_index for an image uploaded this turn. Other current-turn images become edit references. Do not invent file ids."
+	return "Generate a new image using any current-turn image attachments as visual references, or faithfully edit one existing image. You must explicitly choose action=generate or action=edit from the user's intent. Generate uses base_image=none and includes current attachments as references; it does not automatically include prior conversation images. For edit, select exactly one authoritative base_image: previous_generation for the nearest generated image on the active branch, or current_attachment plus its 1-based base_image_index for an image uploaded this turn. Other current-turn images become edit references. Do not invent file ids."
 }
 func (t *imageGenerateTool) InputSchema() json.RawMessage {
 	// Image ids stay server-side. The chat model selects a semantic source and a
@@ -1643,9 +1643,8 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		}
 	}
 
-	// Image bytes are resolved only after the caller explicitly chooses edit and
-	// its authoritative base. Merely having current attachments or an older image
-	// on the branch must never turn a generation request into an edit request.
+	// Current attachments are visual references for new compositions too. Only
+	// an explicit edit selects a base canvas or loads a prior branch image.
 	inputLimit := imageInputImageLimit(channel.Type, model.RequestID)
 	inputImgs, err := t.resolveImageOperationInputs(ctx, tc, in, inputLimit)
 	if err != nil {
@@ -1662,9 +1661,9 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		}
 		inputImgs[0], in.Mask = base, &mask
 	}
-	// The exact user instruction is authoritative whenever this request becomes an
-	// edit, including explicit previous-generation selection with no new attachment. A chat
-	// or prompt-optimization model must not broaden a literal edit into a restyle.
+	// The exact user instruction is authoritative for both edits and reference
+	// generation. A text-only optimizer cannot see the images and must not invent
+	// visual details that override the supplied references.
 	if len(inputImgs) > 0 && tc != nil && strings.TrimSpace(tc.ImageUserPrompt) != "" {
 		in.Prompt = strings.TrimSpace(tc.ImageUserPrompt)
 	}
@@ -1674,7 +1673,11 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	}
 	providerInput := in
 	if len(inputImgs) > 0 {
-		providerInput.Prompt = faithfulImageEditPrompt(in.Prompt)
+		if in.Action == "edit" {
+			providerInput.Prompt = faithfulImageEditPrompt(in.Prompt)
+		} else {
+			providerInput.Prompt = referenceImageGenerationPrompt(in.Prompt)
+		}
 	}
 
 	// §4.20 per-model image timeout: cap this single generation/edit request when
@@ -2130,14 +2133,29 @@ func validateImageOperation(in imgInput) error {
 }
 
 func (t *imageGenerateTool) resolveImageOperationInputs(ctx context.Context, tc *llm.ToolContext, in imgInput, limit int) ([]imageBytes, error) {
+	currentIDs := in.InputImages
+	if tc != nil {
+		currentIDs = mergeImageInputIDs(tc.ImageInputIDs, currentIDs)
+	} else {
+		currentIDs = mergeImageInputIDs(nil, currentIDs)
+	}
 	if in.Action == "generate" {
-		return nil, nil
+		// A new image can still be conditioned on uploaded references. The
+		// provider transport chooses its image-input endpoint from these bytes,
+		// independently of the user's generate-versus-edit intent.
+		if limit > 0 && len(currentIDs) > limit {
+			return nil, &llm.ToolUserError{Message: fmt.Sprintf("the selected image model accepts at most %d input image(s)", limit)}
+		}
+		images, _ := t.loadInputImages(ctx, tc, currentIDs, limit)
+		if len(images) != len(currentIDs) {
+			return nil, &llm.ToolUserError{Message: "a current-turn reference image is unavailable or invalid; please upload it again"}
+		}
+		return images, nil
 	}
 	if tc == nil || tc.DB == nil {
 		return nil, &llm.ToolUserError{Message: "image editing requires an active conversation"}
 	}
 
-	currentIDs := mergeImageInputIDs(tc.ImageInputIDs, in.InputImages)
 	if tc.ImageEdit != nil {
 		images, _ := t.loadInputImages(ctx, tc, []string{tc.ImageEdit.BaseArtifactID}, 1)
 		if len(images) != 1 {
@@ -2183,6 +2201,14 @@ func (t *imageGenerateTool) resolveImageOperationInputs(ctx context.Context, tc 
 		return nil, &llm.ToolUserError{Message: fmt.Sprintf("the selected image model accepts at most %d input image(s)", limit)}
 	}
 	return inputs, nil
+}
+
+func referenceImageGenerationPrompt(instruction string) string {
+	return `Generate a new image using the supplied images as visual references according to the instruction below.
+Follow the user's requested relationship to the references. When asked to imitate or match a reference, closely follow its layout, composition, colors, borders, and typography while applying the requested content changes. When a reference is only for a subject or a particular detail, use it for that purpose. Preserve the requested literal text. Do not invent a different visual style that conflicts with the requested reference.
+
+Exact user instruction:
+` + strings.TrimSpace(instruction)
 }
 
 func faithfulImageEditPrompt(instruction string) string {

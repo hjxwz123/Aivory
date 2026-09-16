@@ -233,8 +233,8 @@ func TestOpenAIImageEditCanSelectPriorCanvasBeforeCurrentReferences(t *testing.T
 	}
 }
 
-func TestOpenAIImageGenerateIgnoresPriorAndCurrentImages(t *testing.T) {
-	tool, convID, _, referenceIDs, _ := seedImageBaseSelectionWorkflow(t)
+func TestOpenAIImageGenerateWithoutAttachmentsIgnoresPriorImages(t *testing.T) {
+	tool, convID, _, _, _ := seedImageBaseSelectionWorkflow(t)
 	responseImage := sizedPNG(t, 32, 32)
 	useImageTestHTTPClient(t, func(req *http.Request) (*http.Response, error) {
 		if req.URL.Path != "/v1/images/generations" {
@@ -256,7 +256,7 @@ func TestOpenAIImageGenerateIgnoresPriorAndCurrentImages(t *testing.T) {
 
 	if _, _, err := tool.Execute(context.Background(), []byte(`{"prompt":"create a completely new poster","action":"generate","base_image":"none"}`), &llm.ToolContext{
 		UserID: "u_flow", ConvID: convID, MessageID: "a_edit", ImageModelID: "m_flow", DB: tool.db,
-		ImageInputIDs: referenceIDs, ImageUserPrompt: "ignore the old poster and create a new one in 16:9 at 4K",
+		ImageUserPrompt: "ignore the old poster and create a new one in 16:9 at 4K",
 	}); err != nil {
 		t.Fatalf("generation with image context: %v", err)
 	}

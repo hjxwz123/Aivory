@@ -13,10 +13,16 @@ func TestFallbackDirectImageTurnPlanUsesIntentAndExplicitSource(t *testing.T) {
 		wantBaseIndex int
 	}{
 		{
-			name:          "new generation ignores available images",
+			name:          "reference generation does not select an edit canvas",
 			prompt:        "参考这些图片生成一张全新的产品海报",
 			currentImages: 2, hasPrevious: true,
 			wantAction: "generate", wantBase: "none",
+		},
+		{
+			name:          "certificate imitation remains reference generation",
+			prompt:        "请根据上面内容，模仿下面的图片生成一个证书",
+			currentImages: 1,
+			wantAction:    "generate", wantBase: "none",
 		},
 		{
 			name:          "screenshot scenario edits prior result",
