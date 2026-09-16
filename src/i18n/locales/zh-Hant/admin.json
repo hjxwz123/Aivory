@@ -2323,6 +2323,31 @@
       "actions": "操作"
     }
   },
+  "htmlPreviews": {
+    "title": "HTML 預覽連結",
+    "lead": "檢視並撤銷使用者從已完成的 AI HTML 回覆中建立的公開預覽連結。",
+    "total": "共 {{count}} 個公開連結",
+    "searchPlaceholder": "搜尋連結、姓名或電子郵件",
+    "loadFailed": "無法載入公開 HTML 預覽連結。",
+    "empty": "尚無公開 HTML 預覽連結",
+    "emptyFiltered": "沒有符合搜尋條件的連結",
+    "emptyLead": "使用者從 HTML 回覆複製公開預覽連結後，連結會顯示於此。",
+    "open": "開啟預覽",
+    "copyLabel": "複製公開預覽連結",
+    "deleteLabel": "刪除公開預覽連結",
+    "copied": "已複製公開預覽連結",
+    "copyFailed": "無法複製公開預覽連結。",
+    "deleted": "公開預覽連結已刪除",
+    "deleteFailed": "無法刪除公開預覽連結。",
+    "deleteTitle": "刪除這個公開預覽連結?",
+    "deleteDescription": "刪除後，任何人都會立即無法透過此連結存取預覽。此操作無法復原。",
+    "table": {
+      "link": "公開連結",
+      "creator": "建立者",
+      "created": "建立時間",
+      "actions": "操作"
+    }
+  },
   "domains": {
     "permissionsNoticeTitle": "建議預設使用者群組開啟全部權限",
     "permissionsNotice": "由於工作空間與系統使用者群組權限共同生效，建議預設使用者群組開啟全部權限，再由工作空間管理員按需限制。最終權限取兩者交集：群組關閉的權限，工作空間無法重新開啟。此提示不會自動修改現有權限。",

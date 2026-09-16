@@ -1575,6 +1575,22 @@ export interface ApiAdminFile {
   kb_name: string
 }
 
+/** Metadata-only administrator inventory row for a public HTML preview link. */
+export interface ApiAdminHTMLPreviewShare {
+  id: string
+  user_id: string
+  user_email: string
+  user_name: string
+  created_at: number
+}
+
+export interface ApiAdminHTMLPreviewSharePage {
+  items: ApiAdminHTMLPreviewShare[]
+  total: number
+  limit: number
+  offset: number
+}
+
 /** A user-submitted product issue report. Screenshot bytes are fetched lazily. */
 export interface ApiAdminUserFeedback {
   id: string

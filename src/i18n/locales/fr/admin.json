@@ -2323,6 +2323,31 @@
       "actions": "Actions"
     }
   },
+  "htmlPreviews": {
+    "title": "Aperçus HTML",
+    "lead": "Consultez et révoquez les liens publics créés depuis les réponses HTML terminées de l’IA.",
+    "total": "{{count}} lien(s) public(s)",
+    "searchPlaceholder": "Rechercher un lien, nom ou e-mail",
+    "loadFailed": "Impossible de charger les liens d’aperçu HTML publics.",
+    "empty": "Aucun lien d’aperçu HTML public",
+    "emptyFiltered": "Aucun lien ne correspond à cette recherche",
+    "emptyLead": "Les liens apparaissent ici lorsqu’un utilisateur copie un lien d’aperçu public depuis une réponse HTML.",
+    "open": "Ouvrir l’aperçu",
+    "copyLabel": "Copier le lien d’aperçu public",
+    "deleteLabel": "Supprimer le lien d’aperçu public",
+    "copied": "Lien d’aperçu public copié",
+    "copyFailed": "Impossible de copier le lien d’aperçu public.",
+    "deleted": "Lien d’aperçu public supprimé",
+    "deleteFailed": "Impossible de supprimer le lien d’aperçu public.",
+    "deleteTitle": "Supprimer ce lien d’aperçu public ?",
+    "deleteDescription": "Toute personne utilisant ce lien perdra immédiatement l’accès. Cette action est irréversible.",
+    "table": {
+      "link": "Lien public",
+      "creator": "Créateur",
+      "created": "Créé",
+      "actions": "Actions"
+    }
+  },
   "domains": {
     "permissionsNoticeTitle": "Activez tous les droits du groupe par défaut",
     "permissionsNotice": "Les droits de l’espace et du groupe système s’appliquent ensemble. Nous recommandons d’activer tous les droits du groupe par défaut, puis de laisser les administrateurs de l’espace les restreindre. Les droits effectifs sont leur intersection : l’espace ne peut pas réactiver un droit refusé par le groupe. Cet avis ne modifie pas les droits existants.",

@@ -88,3 +88,71 @@ func TestHTMLPreviewShareFollowsCurrentSharingPermission(t *testing.T) {
 		t.Fatalf("status=%d body=%s, want not found after permission revocation", rec.Code, rec.Body.String())
 	}
 }
+
+func TestAdminCanListSearchAndDeleteHTMLPreviewShares(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "html-preview-admin.db"))
+	defer db.Close()
+	mustExec(t, db, `INSERT INTO users(id,email,name,password_hash,role,status) VALUES
+		('preview-a','alpha@example.test','Alpha','h','user','active'),
+		('preview-b','beta@example.test','Beta','h','user','active')`)
+	mustExec(t, db, `INSERT INTO html_preview_shares(id,user_id,html,created_at) VALUES
+		('hp_alpha','preview-a','<h1>Alpha</h1>',100),
+		('hp_beta','preview-b','<h1>Beta</h1>',200)`)
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/admin/html-previews?q=beta&limit=10&offset=0", nil)
+	listRec := httptest.NewRecorder()
+	listHTMLPreviewSharesAdmin(Deps{DB: db}, listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", listRec.Code, listRec.Body.String())
+	}
+	var page struct {
+		Items []store.AdminHTMLPreviewShare `json:"items"`
+		Total int                           `json:"total"`
+		Limit int                           `json:"limit"`
+	}
+	if err := json.Unmarshal(listRec.Body.Bytes(), &page); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if page.Total != 1 || page.Limit != 10 || len(page.Items) != 1 || page.Items[0].ID != "hp_beta" {
+		t.Fatalf("unexpected page: %+v", page)
+	}
+	if page.Items[0].UserEmail != "beta@example.test" || page.Items[0].UserName != "Beta" {
+		t.Fatalf("missing owner metadata: %+v", page.Items[0])
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/admin/html-previews/hp_beta", nil)
+	deleteReq = deleteReq.WithContext(context.WithValue(deleteReq.Context(), pathCtxKey{}, map[string]string{"id": "hp_beta"}))
+	deleteRec := httptest.NewRecorder()
+	deleteHTMLPreviewShareAdmin(Deps{DB: db}, deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("delete status=%d body=%s", deleteRec.Code, deleteRec.Body.String())
+	}
+
+	publicReq := httptest.NewRequest(http.MethodGet, "/api/public/html-previews/hp_beta", nil)
+	publicReq = publicReq.WithContext(context.WithValue(publicReq.Context(), pathCtxKey{}, map[string]string{"token": "hp_beta"}))
+	publicRec := httptest.NewRecorder()
+	publicHTMLPreviewShareHandler(Deps{DB: db}, publicRec, publicReq)
+	if publicRec.Code != http.StatusNotFound {
+		t.Fatalf("deleted public preview status=%d body=%s", publicRec.Code, publicRec.Body.String())
+	}
+}
+
+func TestHTMLPreviewAdminRoutesRequireAuthentication(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "html-preview-admin-auth.db"))
+	defer db.Close()
+	router := NewRouter(Deps{DB: db})
+
+	for _, test := range []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodGet, path: "/api/admin/html-previews"},
+		{method: http.MethodDelete, path: "/api/admin/html-previews/hp_test"},
+	} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(test.method, test.path, nil))
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("%s %s status=%d body=%s", test.method, test.path, rec.Code, rec.Body.String())
+		}
+	}
+}

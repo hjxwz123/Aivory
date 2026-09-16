@@ -587,6 +587,8 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/admin/files", requireAdmin(d, listFilesAdmin))
 	mux.handle("POST", "/api/admin/files/delete", requireAdmin(d, deleteFilesAdmin))
 	mux.handle("GET", "/api/admin/files/content", requireAdmin(d, adminFileContentHandler))
+	mux.handle("GET", "/api/admin/html-previews", requireAdmin(d, listHTMLPreviewSharesAdmin))
+	mux.handle("DELETE", "/api/admin/html-previews/:id", requireAdmin(d, deleteHTMLPreviewShareAdmin))
 	mux.handle("GET", "/api/admin/oauth-providers", requireAdmin(d, listOAuthProvidersAdmin))
 	mux.handle("POST", "/api/admin/oauth-providers/prepare", requireAdmin(d, prepareOAuthProviderAdmin))
 	mux.handle("POST", "/api/admin/oauth-providers", requireAdmin(d, createOAuthProviderAdmin))

@@ -2323,6 +2323,31 @@
       "actions": "Actions"
     }
   },
+  "htmlPreviews": {
+    "title": "HTML previews",
+    "lead": "Review and revoke public HTML preview links created from completed assistant responses.",
+    "total": "{{count}} public link(s)",
+    "searchPlaceholder": "Search link, name, or email",
+    "loadFailed": "Could not load public HTML preview links.",
+    "empty": "No public HTML preview links yet",
+    "emptyFiltered": "No links match this search",
+    "emptyLead": "Links appear here after a user copies a public preview link from an HTML response.",
+    "open": "Open preview",
+    "copyLabel": "Copy public preview link",
+    "deleteLabel": "Delete public preview link",
+    "copied": "Public preview link copied",
+    "copyFailed": "Could not copy the public preview link.",
+    "deleted": "Public preview link deleted",
+    "deleteFailed": "Could not delete the public preview link.",
+    "deleteTitle": "Delete this public preview link?",
+    "deleteDescription": "Anyone using this link will immediately lose access. This action cannot be undone.",
+    "table": {
+      "link": "Public link",
+      "creator": "Creator",
+      "created": "Created",
+      "actions": "Actions"
+    }
+  },
   "domains": {
     "permissionsNoticeTitle": "Enable all permissions in the default user group",
     "permissionsNotice": "Workspace and system user-group permissions both apply. We recommend enabling all permissions in the default group, then letting workspace admins apply restrictions. Effective permissions are the intersection: a workspace cannot re-enable a permission denied by the group. This notice does not change existing permissions.",

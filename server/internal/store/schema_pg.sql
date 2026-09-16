@@ -698,6 +698,7 @@ CREATE TABLE IF NOT EXISTS html_preview_shares (
   created_at BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
 CREATE INDEX IF NOT EXISTS idx_html_preview_shares_user ON html_preview_shares(user_id);
+CREATE INDEX IF NOT EXISTS idx_html_preview_shares_created ON html_preview_shares(created_at DESC, id DESC);
 
 CREATE TABLE IF NOT EXISTS files (
   id              TEXT PRIMARY KEY,

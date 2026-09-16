@@ -21,6 +21,7 @@ import type {
   ApiAdminFile,
   ApiAdminGeneratedImagePage,
   ApiAdminGeneratedImageResource,
+  ApiAdminHTMLPreviewSharePage,
   ApiAdminKnowledgeBaseResource,
   ApiAdminKnowledgeBaseResourceDetail,
   ApiAdminLoginHistoryPage,
@@ -1431,6 +1432,17 @@ export const adminApi = {
   },
   deleteFiles: (items: Array<{ source: 'file' | 'document'; id: string }>) =>
     api<{ deleted: number }>('/admin/files/delete', { method: 'POST', body: { items } }),
+  htmlPreviewShares: (params: { q?: string; limit?: number; offset?: number } = {}) => {
+    const qs = new URLSearchParams()
+    if (params.q) qs.set('q', params.q)
+    if (params.limit) qs.set('limit', String(params.limit))
+    if (params.offset) qs.set('offset', String(params.offset))
+    return api<ApiAdminHTMLPreviewSharePage>(
+      `/admin/html-previews${qs.toString() ? `?${qs}` : ''}`,
+    )
+  },
+  removeHTMLPreviewShare: (id: string) =>
+    api<{ ok: true }>(`/admin/html-previews/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   // Raw bytes for the preview dialog. The object URL created by the caller
   // cannot carry an auth header, so the authenticated fetch happens first.
   fileContentBlob: (source: 'file' | 'document', id: string, signal?: AbortSignal): Promise<Blob> =>

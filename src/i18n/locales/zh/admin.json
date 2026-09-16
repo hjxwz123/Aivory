@@ -2327,6 +2327,31 @@
       "actions": "操作"
     }
   },
+  "htmlPreviews": {
+    "title": "HTML 预览链接",
+    "lead": "查看并撤销用户从已完成的 AI HTML 回复中创建的公开预览链接。",
+    "total": "共 {{count}} 个公开链接",
+    "searchPlaceholder": "搜索链接、姓名或邮箱",
+    "loadFailed": "无法加载公开 HTML 预览链接。",
+    "empty": "还没有公开 HTML 预览链接",
+    "emptyFiltered": "没有符合搜索条件的链接",
+    "emptyLead": "用户从 HTML 回复中复制公开预览链接后，链接会显示在这里。",
+    "open": "打开预览",
+    "copyLabel": "复制公开预览链接",
+    "deleteLabel": "删除公开预览链接",
+    "copied": "已复制公开预览链接",
+    "copyFailed": "无法复制公开预览链接。",
+    "deleted": "公开预览链接已删除",
+    "deleteFailed": "无法删除公开预览链接。",
+    "deleteTitle": "删除这个公开预览链接?",
+    "deleteDescription": "删除后，任何人都将立即无法通过此链接访问预览。此操作无法撤销。",
+    "table": {
+      "link": "公开链接",
+      "creator": "创建者",
+      "created": "创建时间",
+      "actions": "操作"
+    }
+  },
   "domains": {
     "permissionsNoticeTitle": "建议默认用户组开启全部权限",
     "permissionsNotice": "由于工作空间和系统用户组权限共同生效，建议默认用户组开启全部权限，再由工作空间管理员按需限制。最终权限取两者交集：用户组关闭的权限，工作空间无法重新开启。此提示不会自动修改现有权限。",

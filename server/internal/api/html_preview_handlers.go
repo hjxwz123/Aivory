@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -11,6 +12,8 @@ import (
 )
 
 const maxHTMLPreviewShareBytes = 1 << 20
+
+const adminHTMLPreviewSharePageSize = 50
 
 func createHTMLPreviewShareHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	var input struct {
@@ -59,4 +62,48 @@ func publicHTMLPreviewShareHandler(d Deps, w http.ResponseWriter, r *http.Reques
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(share.HTML))
+}
+
+func listHTMLPreviewSharesAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	if limit <= 0 {
+		limit = adminHTMLPreviewSharePageSize
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	search := r.URL.Query().Get("q")
+	total, err := store.CountAdminHTMLPreviewShares(r.Context(), d.DB, search)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	items, err := store.ListAdminHTMLPreviewShares(r.Context(), d.DB, search, limit, offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": items, "total": total, "limit": limit, "offset": offset,
+	})
+}
+
+func deleteHTMLPreviewShareAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(pathParam(r, "id"))
+	if id == "" {
+		writeError(w, http.StatusBadRequest, errInvalidInput)
+		return
+	}
+	if err := store.DeleteAdminHTMLPreviewShare(r.Context(), d.DB, id); errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, errNotFound)
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

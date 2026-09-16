@@ -120,6 +120,7 @@ export const ADMIN_NAV_GROUPS: readonly AdminNavGroup[] = [
       { to: '/admin/usage', labelKey: 'admin:usage.title', defaultLabel: 'Usage records' },
       { to: '/admin/resources', labelKey: 'admin:resources.title', defaultLabel: 'Content resources' },
       { to: '/admin/files', labelKey: 'admin:files.title', defaultLabel: 'Files' },
+      { to: '/admin/html-previews', labelKey: 'admin:htmlPreviews.title', defaultLabel: 'HTML previews' },
       { to: '/admin/feedback', labelKey: 'admin:menu.userFeedback', defaultLabel: 'User feedback' },
     ],
   },
