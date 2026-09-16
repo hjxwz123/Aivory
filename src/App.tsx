@@ -19,6 +19,7 @@ import { initAppUpdate, maybeApplyUpdate } from '@/lib/app-update'
 import { initRealtime, setRealtimeEnabled } from '@/lib/realtime'
 import { isChatShellPath } from '@/lib/app-paths'
 import { PanelFallback } from '@/components/ui/panel-fallback'
+import { DomainDataDialog } from '@/components/domain/domain-data-dialog'
 
 const Landing = lazy(() => import('@/pages/Landing'))
 const ChatLayout = lazy(() => import('@/pages/chat/ChatLayout'))
@@ -211,6 +212,7 @@ export default function App() {
       <CloseSettingsOnNavigate />
       <AuthGate>
         <GlobalShortcuts />
+        <DomainDataDialog />
         <Suspense fallback={<PanelFallback scope="screen" />}>
           <Routes>
             <Route path="/welcome" element={<Landing />} />

@@ -336,6 +336,8 @@ func Migrate(db *sql.DB) error {
 	// requirement. Administrators may explicitly relax each rule after upgrade.
 	addRegistrationDomainEmailVerification := `ALTER TABLE registration_domains ADD COLUMN email_verification_required INTEGER NOT NULL DEFAULT 1`
 	addRegistrationDomainInitialGroup := `ALTER TABLE registration_domains ADD COLUMN initial_group_id TEXT REFERENCES user_groups(id) ON DELETE SET NULL`
+	addDomainUserPersonalDataPromptDismissed := `ALTER TABLE domain_users ADD COLUMN personal_data_prompt_dismissed INTEGER NOT NULL DEFAULT 0`
+	addDomainUserWorkspaceMembershipCreated := `ALTER TABLE domain_users ADD COLUMN workspace_membership_created INTEGER NOT NULL DEFAULT 0`
 	// NULL distinguishes credentials registered before WebAuthn authenticator
 	// flags were persisted. Their first verified assertion safely backfills it.
 	addPasskeyAuthenticatorFlags := `ALTER TABLE passkeys ADD COLUMN authenticator_flags INTEGER`
@@ -468,6 +470,8 @@ func Migrate(db *sql.DB) error {
 		addOAuthSubjectNamespace = `ALTER TABLE oauth_providers ADD COLUMN IF NOT EXISTS subject_namespace TEXT NOT NULL DEFAULT ''`
 		addRegistrationDomainEmailVerification = `ALTER TABLE registration_domains ADD COLUMN IF NOT EXISTS email_verification_required INTEGER NOT NULL DEFAULT 1`
 		addRegistrationDomainInitialGroup = `ALTER TABLE registration_domains ADD COLUMN IF NOT EXISTS initial_group_id TEXT REFERENCES user_groups(id) ON DELETE SET NULL`
+		addDomainUserPersonalDataPromptDismissed = `ALTER TABLE domain_users ADD COLUMN IF NOT EXISTS personal_data_prompt_dismissed INTEGER NOT NULL DEFAULT 0`
+		addDomainUserWorkspaceMembershipCreated = `ALTER TABLE domain_users ADD COLUMN IF NOT EXISTS workspace_membership_created INTEGER NOT NULL DEFAULT 0`
 		addPasskeyAuthenticatorFlags = `ALTER TABLE passkeys ADD COLUMN IF NOT EXISTS authenticator_flags INTEGER`
 		addPasskeyUserHandle = `ALTER TABLE passkeys ADD COLUMN IF NOT EXISTS user_handle BYTEA`
 	}
@@ -517,10 +521,13 @@ func Migrate(db *sql.DB) error {
 		addPaymentChannelEnvironment, addPaymentOrderEnvironment,
 		addPaymentProviderPaymentID, addPaymentCheckoutSessionID, addPaymentCheckoutURL, addPaymentCheckoutExpiresAt, addPaymentLastReconciledAt, addPaymentReconcileError,
 		addOAuthIssuerURL, addOAuthJWKSURL, addOAuthSubjectNamespace,
-		addRegistrationDomainEmailVerification, addRegistrationDomainInitialGroup,
+		addRegistrationDomainEmailVerification, addRegistrationDomainInitialGroup, addDomainUserPersonalDataPromptDismissed, addDomainUserWorkspaceMembershipCreated,
 		addPasskeyAuthenticatorFlags, addPasskeyUserHandle,
 	} {
 		_, _ = db.Exec(ddl)
+	}
+	if err := BackfillRegistrationDomainMatches(context.Background(), db); err != nil {
+		return fmt.Errorf("backfill registration domain matches: %w", err)
 	}
 	if err := migrateWorkspaceInviteCreatorReference(db); err != nil {
 		return fmt.Errorf("migrate workspace invite creator reference: %w", err)
@@ -673,6 +680,7 @@ func Migrate(db *sql.DB) error {
 		"workspace_members":               {"workspace_id", "user_id", "role", "can_create_projects", "can_private_conversations", "can_create_skills_prompts", "can_create_prompts", "can_create_skills", "can_create_mcp", "can_use_prompts", "can_use_skills", "can_use_mcp", "can_create_kb", "can_add_kb_files", "can_delete_kb_content", "can_delete_conversations", "joined_at"},
 		"workspace_policies":              {"workspace_id", "allowed_model_ids", "allowed_tool_ids", "allowed_mcp_server_ids", "allow_sandbox", "allow_image_generation", "allow_tool_calling", "allow_drawing", "allow_mcp", "allow_skills", "allow_prompts", "allow_private_chat", "allow_knowledge_bases", "allow_file_upload", "member_monthly_credit_limit", "updated_by", "updated_at"},
 		"workspace_announcements":         {"workspace_id", "config", "updated_by", "updated_at"},
+		"domain_users":                    {"user_id", "domain", "lock_override", "personal_data_prompt_dismissed", "workspace_membership_created"},
 		"workspace_invites":               {"id", "workspace_id", "token", "email", "role", "expires_at", "max_uses", "used_count", "created_by", "purpose", "revoked_at", "created_at"},
 		"workspaces":                      {"id", "name", "owner_id", "invite_token", "deleting", "created_at"},
 		"workspace_kb_member_permissions": {"kb_id", "user_id", "can_add_files", "can_delete_content", "updated_at"},
@@ -682,6 +690,7 @@ func Migrate(db *sql.DB) error {
 		"payment_orders":                  {"paid_amount_minor", "tax_amount_minor", "provider_amount_minor", "provider_currency", "conversion_rate", "environment", "provider_payment_id", "checkout_session_id", "checkout_url", "checkout_expires_at", "last_reconciled_at", "reconcile_error"},
 		"oauth_providers":                 {"issuer_url", "jwks_url", "subject_namespace"},
 		"registration_domains":            {"email_verification_required", "initial_group_id"},
+		"registration_domain_matches":     {"domain", "rule_domain"},
 		"passkeys":                        {"authenticator_flags", "user_handle"},
 	}
 	for table, cols := range columnChecks {

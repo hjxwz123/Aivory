@@ -1,5 +1,6 @@
 import type { ApiConversation, ApiMemory, ApiMessage } from '@/api/types'
 import { conversationsApi, memoriesApi } from '@/api'
+import { domainDataApi } from '@/api/domains'
 import JSZip from 'jszip'
 
 /** The import parser accepts this envelope and deliberately keeps only the
@@ -14,6 +15,12 @@ export interface ConversationExportEnvelope {
     title: string
     model_id?: string
     active_leaf_id: string
+    inline_source_conv?: string
+    inline_parent_id?: string
+    inline_quote?: string
+    pinned?: boolean
+    archived?: boolean
+    starred?: boolean
     messages: ApiMessage[]
   }>
   memories?: ApiMemory[]
@@ -142,6 +149,68 @@ export async function exportAllConversationZip(includeMemories: boolean): Promis
   const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } })
   triggerDownload(blob, `aivory-export-${date}.zip`)
   return { batches: plan.total, conversations: plan.conversations.length }
+}
+
+/** Export the personal conversations retained behind a domain workspace lock.
+ * The dedicated API remains available while normal personal-space routes are
+ * denied, and deliberately excludes unrelated memories. */
+export async function exportDomainPersonalConversationZip(): Promise<number> {
+  const conversations: ApiConversation[] = []
+  let offset = 0
+  for (;;) {
+    const page = await domainDataApi.conversations(100, offset)
+    conversations.push(...page.conversations)
+    if (!page.has_more || page.conversations.length === 0) break
+    offset += page.conversations.length
+  }
+  const zip = new JSZip()
+  const rootConversationCount = conversations.filter((conversation) => !conversation.inline_source_conv).length
+  const inlineConversationCount = conversations.length - rootConversationCount
+  const total = Math.max(1, Math.ceil(conversations.length / CONVERSATION_EXPORT_BATCH_SIZE))
+  const exportedAt = new Date().toISOString()
+  zip.file('manifest.json', JSON.stringify({
+    format: 'aivory-conversations-archive',
+    version: 1,
+    exported_at: exportedAt,
+    batch_size: CONVERSATION_EXPORT_BATCH_SIZE,
+    batches: total,
+    conversations: conversations.length,
+    root_conversations: rootConversationCount,
+    inline_conversations: inlineConversationCount,
+    source: 'domain-personal-data',
+  }, null, 2))
+  for (let index = 1; index <= total; index += 1) {
+    const start = (index - 1) * CONVERSATION_EXPORT_BATCH_SIZE
+    const batch = conversations.slice(start, start + CONVERSATION_EXPORT_BATCH_SIZE)
+    const detailed = []
+    for (const conversation of batch) {
+      detailed.push({
+        id: conversation.id,
+        title: conversation.title,
+        model_id: conversation.model_id || undefined,
+        active_leaf_id: conversation.active_leaf_id,
+        inline_source_conv: conversation.inline_source_conv || undefined,
+        inline_parent_id: conversation.inline_parent_id || undefined,
+        inline_quote: conversation.inline_quote || undefined,
+        pinned: conversation.pinned,
+        archived: conversation.archived,
+        starred: conversation.starred,
+        messages: await domainDataApi.messages(conversation.id),
+      })
+    }
+    const envelope: ConversationExportEnvelope = {
+      format: 'aivory-conversations',
+      version: 2,
+      exported_at: exportedAt,
+      batch: { index, total },
+      conversations: detailed,
+    }
+    zip.file(`conversations-${String(index).padStart(4, '0')}.json`, JSON.stringify(envelope, null, 2))
+  }
+  const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } })
+  const date = new Date().toISOString().slice(0, 10)
+  triggerDownload(blob, `aivory-personal-conversations-${date}.zip`)
+  return rootConversationCount
 }
 
 const MAX_IMPORT_ZIP_ENTRIES = 1000

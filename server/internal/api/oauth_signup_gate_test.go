@@ -372,7 +372,7 @@ func TestResolveOAuthUserAppliesDomainRuleToAllProviderKinds(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := store.SaveRegistrationDomain(ctx, d.DB, store.RegistrationDomain{
-		Domain: "company.test", WorkspaceID: workspace.ID, Enabled: true, EmailVerificationRequired: true, InitialGroupID: initialGroup.ID,
+		Domain: "company.test", Domains: []string{"company.test", "affiliate.test"}, WorkspaceID: workspace.ID, Enabled: true, EmailVerificationRequired: true, InitialGroupID: initialGroup.ID,
 	}, true); err != nil {
 		t.Fatal(err)
 	}
@@ -393,7 +393,7 @@ func TestResolveOAuthUserAppliesDomainRuleToAllProviderKinds(t *testing.T) {
 
 	genericProvider := namespacedOAuthProviderForTest(&store.OAuthProvider{ID: "generic", Kind: "oauth2", Name: "Generic"})
 	ordinary, err := resolveOAuthUser(ctx, d, genericProvider, oauth.UserInfo{
-		Subject: "untrusted-domain", Email: "untrusted@company.test", EmailVerified: true,
+		Subject: "untrusted-domain", Email: "untrusted@affiliate.test", EmailVerified: true,
 	}, oauthSignupContext{})
 	if err != nil || ordinary == nil || ordinary.Status != "active" {
 		t.Fatalf("generic OAuth signup user=%+v err=%v", ordinary, err)

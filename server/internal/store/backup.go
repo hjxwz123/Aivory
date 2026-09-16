@@ -32,7 +32,7 @@ const BackupVersion = 3
 // (messages.parent_id) is satisfied by exporting messages in creation order —
 // a reply is always created after the message it answers.
 var backupTableOrder = []string{
-	"settings", "users", "credit_adjustment_notifications", "login_histories", "user_groups", "workspaces", "workspace_members", "registration_domains", "domain_users", "credit_ledger", "credit_reservations", "quota_ledger", "billing_usage", "credit_packages",
+	"settings", "users", "credit_adjustment_notifications", "login_histories", "user_groups", "workspaces", "workspace_members", "registration_domains", "registration_domain_matches", "domain_users", "credit_ledger", "credit_reservations", "quota_ledger", "billing_usage", "credit_packages",
 	"payment_channels", "payment_methods", "payment_orders", "payment_order_attempts", "payment_events",
 	"channels", "mcp_servers", "skills", "prompts", "user_skills", "user_prompts", "user_mcp_servers", "oauth_providers",
 	"models", "model_group_quotas", "model_tags", "image_styles",
@@ -381,8 +381,9 @@ var tablePrimaryKeys = map[string][]string{
 	"login_histories":                 {"id"},
 	"workspaces":                      {"id"},
 	"workspace_members":               {"workspace_id", "user_id"},
-	"registration_domains": {"domain"},
-	"domain_users": {"user_id"},
+	"registration_domains":            {"domain"},
+	"registration_domain_matches":     {"domain"},
+	"domain_users":                    {"user_id"},
 	"workspace_kb_member_permissions": {"kb_id", "user_id"},
 	"user_groups":                     {"id"},
 	"credit_ledger":                   {"id"},

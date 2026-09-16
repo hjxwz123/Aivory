@@ -91,6 +91,7 @@ import { type DateBucket, bucketFor, modKey, cn, truncate } from '@/lib/utils'
 import { toast } from '@/hooks/use-toast'
 import { exportConversation } from '@/lib/conversation-export'
 import { useTranslation } from 'react-i18next'
+import { useDomainData } from '@/store/domain-data'
 import type { TFunction } from 'i18next'
 import type { Conversation } from '@/types/chat'
 
@@ -1322,6 +1323,8 @@ export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuP
   const { t } = useTranslation(['chat', 'common', 'settings'])
   const user = useAuth((s) => s.user)
   const logout = useAuth((s) => s.logout)
+  const domainDataStatus = useDomainData((s) => s.status)
+  const showDomainData = useDomainData((s) => s.show)
   const displayName = user?.name || user?.email?.split('@')[0] || 'Aivory'
   const avatarUrl = (user?.settings as Record<string, unknown> | undefined)?.avatar_url as string | undefined
   const isAdmin = user?.role === 'admin'
@@ -1391,6 +1394,12 @@ export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuP
           <Archive size={13} aria-hidden />
           {t('chat:sidebar.archivedTitle')}
         </DropdownMenuItem>
+        {domainDataStatus?.needs_action ? (
+          <DropdownMenuItem onClick={showDomainData}>
+            <Database size={13} aria-hidden />
+            {t('chat:userMenu.dataManagement')}
+          </DropdownMenuItem>
+        ) : null}
         {isAdmin && (
           <>
             <DropdownMenuItem onClick={() => navigate('/admin')}>

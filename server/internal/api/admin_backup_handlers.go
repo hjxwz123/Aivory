@@ -878,6 +878,12 @@ func restoreInto(ctx context.Context, ex store.RowExecer, zr *zip.Reader, man ba
 		}
 		counts[t] = n
 	}
+	// Archives produced before multi-domain rules do not contain the match
+	// table. Recreate each legacy rule's original one-domain match in the same
+	// restore transaction.
+	if err := store.BackfillRegistrationDomainMatches(ctx, ex); err != nil {
+		return nil, fmt.Errorf("backfill registration domain matches: %w", err)
+	}
 	if err := validateImportedContextCompactionModel(ctx, ex); err != nil {
 		return nil, err
 	}

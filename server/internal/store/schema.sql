@@ -1128,9 +1128,16 @@ CREATE TABLE IF NOT EXISTS registration_domains (
   enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1))
 );
 CREATE INDEX IF NOT EXISTS idx_registration_domains_workspace ON registration_domains(workspace_id);
+CREATE TABLE IF NOT EXISTS registration_domain_matches (
+  domain TEXT PRIMARY KEY,
+  rule_domain TEXT NOT NULL REFERENCES registration_domains(domain) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_registration_domain_matches_rule ON registration_domain_matches(rule_domain);
 CREATE TABLE IF NOT EXISTS domain_users (
   user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   domain TEXT NOT NULL REFERENCES registration_domains(domain) ON DELETE CASCADE,
-  lock_override INTEGER CHECK(lock_override IN (0,1))
+  lock_override INTEGER CHECK(lock_override IN (0,1)),
+  personal_data_prompt_dismissed INTEGER NOT NULL DEFAULT 0 CHECK(personal_data_prompt_dismissed IN (0,1)),
+  workspace_membership_created INTEGER NOT NULL DEFAULT 0 CHECK(workspace_membership_created IN (0,1))
 );
 CREATE INDEX IF NOT EXISTS idx_domain_users_domain ON domain_users(domain);

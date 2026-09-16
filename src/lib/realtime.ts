@@ -46,6 +46,7 @@ import {
 } from '@/store/conversations'
 import { activeWorkspaceId, useWorkspaces } from '@/store/workspaces'
 import { useModels } from '@/store/models'
+import { useDomainData } from '@/store/domain-data'
 import { envNum } from '@/lib/env-config'
 import type { Conversation } from '@/types/chat'
 import type { KnowledgeBaseSelectionRequestGuard } from '@/store/conversations'
@@ -250,6 +251,7 @@ function reconcileAccessState(kind: 'account' | 'workspace'): Promise<void> {
         // (and account changes always do) — reload without waiting for a
         // re-login.
         refreshAccount || refreshWorkspace ? useModels.getState().load() : Promise.resolve(),
+        refreshAccount || refreshWorkspace ? useDomainData.getState().load(uid, true) : Promise.resolve(),
       ])
       if (useAuth.getState().user?.id !== uid) return
       invalidateAccessState({ kind: refreshAccount ? 'account' : 'workspace' })

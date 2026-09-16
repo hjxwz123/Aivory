@@ -20,6 +20,13 @@ func TestRegistrationDomainMigrationPreservesExistingVerificationPolicy(t *testi
 	)`); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := db.Exec(`CREATE TABLE domain_users (
+		user_id TEXT PRIMARY KEY,
+		domain TEXT NOT NULL,
+		lock_override INTEGER
+	)`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.Exec(`INSERT INTO registration_domains(domain,workspace_id,lock_personal,enabled)
 		VALUES('legacy.example','legacy-workspace',1,1)`); err != nil {
 		t.Fatal(err)
@@ -36,14 +43,97 @@ func TestRegistrationDomainMigrationPreservesExistingVerificationPolicy(t *testi
 	if verificationRequired != 1 || initialGroup != nil {
 		t.Fatalf("migrated policy verification=%d initial_group=%v", verificationRequired, initialGroup)
 	}
+	var ruleDomain string
+	if err := db.QueryRow(`SELECT rule_domain FROM registration_domain_matches WHERE domain='legacy.example'`).Scan(&ruleDomain); err != nil || ruleDomain != "legacy.example" {
+		t.Fatalf("legacy domain match rule=%q err=%v", ruleDomain, err)
+	}
+	if _, err := db.Exec(`INSERT INTO domain_users(user_id,domain) VALUES('legacy-user','legacy.example')`); err != nil {
+		t.Fatal(err)
+	}
+	var dismissed, membershipCreated int
+	if err := db.QueryRow(`SELECT personal_data_prompt_dismissed,workspace_membership_created FROM domain_users WHERE user_id='legacy-user'`).Scan(&dismissed, &membershipCreated); err != nil || dismissed != 0 || membershipCreated != 0 {
+		t.Fatalf("migrated domain user defaults dismissed=%d membership_created=%d err=%v", dismissed, membershipCreated, err)
+	}
+}
+
+func TestRegistrationDomainMultipleMatchesAndAtomicReplacement(t *testing.T) {
+	fx := newRBACFixture(t)
+	ctx := t.Context()
+	rule := RegistrationDomain{
+		Domain: "company.example", Domains: []string{" Company.Example ", "affiliate.example"},
+		WorkspaceID: fx.workspaceID, Enabled: true, EmailVerificationRequired: true,
+	}
+	if err := SaveRegistrationDomain(ctx, fx.db, rule, true); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := ListRegistrationDomains(ctx, fx.db)
+	if err != nil || len(listed) != 1 || len(listed[0].Domains) != 2 || listed[0].Domains[0] != "affiliate.example" || listed[0].Domains[1] != "company.example" {
+		t.Fatalf("listed multi-domain rule=%+v err=%v", listed, err)
+	}
+	for _, email := range []string{"first@company.example", "second@affiliate.example"} {
+		required, err := registrationDomainEmailVerificationRequired(ctx, fx.db, email)
+		if err != nil || !required {
+			t.Fatalf("verification for %s required=%v err=%v", email, required, err)
+		}
+		user, err := CreateRegisteredUser(ctx, fx.db, email, email, "hash", "active")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if access, err := GetDomainAccess(ctx, fx.db, user.ID); err != nil || access == nil || access.Domain != rule.Domain {
+			t.Fatalf("multi-domain enrollment for %s access=%+v err=%v", email, access, err)
+		}
+	}
+
+	rule.Domains = []string{"affiliate.example", "new.example"}
+	if err := SaveRegistrationDomain(ctx, fx.db, rule, false); err != nil {
+		t.Fatal(err)
+	}
+	removedMatch, err := CreateRegisteredUser(ctx, fx.db, "later@company.example", "Removed match", "hash", "active")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if access, err := GetDomainAccess(ctx, fx.db, removedMatch.ID); err != nil || access != nil {
+		t.Fatalf("removed match still enrolled: access=%+v err=%v", access, err)
+	}
+	newMatch, err := CreateRegisteredUser(ctx, fx.db, "later@new.example", "New match", "hash", "active")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if access, err := GetDomainAccess(ctx, fx.db, newMatch.ID); err != nil || access == nil {
+		t.Fatalf("new match not enrolled: access=%+v err=%v", access, err)
+	}
+
+	conflicting := RegistrationDomain{Domain: "other.example", Domains: []string{"other.example"}, WorkspaceID: fx.workspaceID}
+	if err := SaveRegistrationDomain(ctx, fx.db, conflicting, true); err != nil {
+		t.Fatal(err)
+	}
+	conflicting.Domains = []string{"affiliate.example"}
+	if err := SaveRegistrationDomain(ctx, fx.db, conflicting, false); err == nil {
+		t.Fatal("duplicate matched domain update was accepted")
+	}
+	listed, err = ListRegistrationDomains(ctx, fx.db)
+	if err != nil || len(listed) != 2 {
+		t.Fatalf("conflicting update changed rule set: rules=%+v err=%v", listed, err)
+	}
+	for _, listedRule := range listed {
+		if listedRule.Domain == conflicting.Domain && (len(listedRule.Domains) != 1 || listedRule.Domains[0] != "other.example") {
+			t.Fatalf("conflicting update replaced previous matches: %+v", listedRule)
+		}
+	}
 }
 
 func TestRegistrationDomainEnrollmentAndPermissions(t *testing.T) {
 	fx := newRBACFixture(t)
 	ctx := t.Context()
-	rule := RegistrationDomain{Domain: " Company.Example ", WorkspaceID: fx.workspaceID, Enabled: true, LockPersonal: true}
+	// Creation must enable the rule even if an old or direct client submits
+	// enabled=false. Only a later administrator update may stop enrollment.
+	rule := RegistrationDomain{Domain: " Company.Example ", WorkspaceID: fx.workspaceID, Enabled: false, LockPersonal: true}
 	if err := SaveRegistrationDomain(ctx, fx.db, rule, true); err != nil {
 		t.Fatal(err)
+	}
+	rules, err := ListRegistrationDomains(ctx, fx.db)
+	if err != nil || len(rules) != 1 || !rules[0].Enabled {
+		t.Fatalf("new rule was not enabled: rules=%+v err=%v", rules, err)
 	}
 	user, err := CreateRegisteredUser(ctx, fx.db, "New@Company.Example", "New", "hash", "active")
 	if err != nil {

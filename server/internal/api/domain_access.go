@@ -52,6 +52,9 @@ func domainRequestAllowed(d Deps, r *http.Request, workspaceID string) bool {
 	case "/api/workspaces":
 		return r.Method == http.MethodGet
 	}
+	if path == "/api/me/domain-data" || strings.HasPrefix(path, "/api/me/domain-data/") {
+		return true
+	}
 	for _, prefix := range []string{"/api/auth/sessions", "/api/me/2fa/", "/api/me/passkeys", "/api/me/identities", "/api/payments/"} {
 		if path == strings.TrimSuffix(prefix, "/") || strings.HasPrefix(path, strings.TrimSuffix(prefix, "/")+"/") {
 			return true

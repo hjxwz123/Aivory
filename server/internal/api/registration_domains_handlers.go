@@ -75,6 +75,48 @@ func adminDomainUsersHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{"users": users})
 }
+func adminDomainUserCandidatesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	users, err := store.ListDomainUserCandidates(r.Context(), d.DB, pathParam(r, "domain"), r.URL.Query().Get("q"))
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, store.ErrInvalidDomain) {
+			status = http.StatusBadRequest
+		} else if errors.Is(err, store.ErrNotFound) {
+			status = http.StatusNotFound
+		}
+		writeError(w, status, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"users": users})
+}
+func adminEnrollDomainUsersHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		UserIDs []string `json:"user_ids"`
+	}
+	if err := decodeJSON(r, &req); err != nil || len(req.UserIDs) == 0 || len(req.UserIDs) > store.MaxDomainUserEnrollmentBatch {
+		writeError(w, http.StatusBadRequest, errInvalidInput)
+		return
+	}
+	added, err := store.EnrollExistingDomainUsers(r.Context(), d.DB, pathParam(r, "domain"), req.UserIDs)
+	if err != nil {
+		status := http.StatusInternalServerError
+		switch {
+		case errors.Is(err, store.ErrInvalidDomain):
+			status = http.StatusBadRequest
+		case errors.Is(err, store.ErrNotFound):
+			status = http.StatusNotFound
+		case errors.Is(err, store.ErrForbidden):
+			status = http.StatusConflict
+		}
+		writeError(w, status, err)
+		return
+	}
+	for _, userID := range added {
+		revokeUserPermissionSnapshots(d, userID)
+		publishUserEvent(d, r, userID, "workspace.membership_updated", "")
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"added": len(added), "user_ids": added})
+}
 func adminDomainUserAccessHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		LockOverride *bool `json:"lock_override"`
@@ -91,6 +133,33 @@ func adminDomainUserAccessHandler(d Deps, w http.ResponseWriter, r *http.Request
 	revokeUserPermissionSnapshots(d, uid)
 	publishUserEvent(d, r, uid, "workspace.membership_updated", "")
 	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+func adminRemoveDomainUserHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	uid := pathParam(r, "uid")
+	result, err := store.RemoveDomainUser(r.Context(), d.DB, pathParam(r, "domain"), uid)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, store.ErrInvalidDomain) {
+			status = http.StatusBadRequest
+		} else if errors.Is(err, store.ErrNotFound) {
+			status = http.StatusNotFound
+		}
+		writeError(w, status, err)
+		return
+	}
+	if err := revokeMessageGenerationStreams(d, result.RevokedMessageIDs); err != nil {
+		writeError(w, http.StatusServiceUnavailable, err)
+		return
+	}
+	if result.WorkspaceMembershipRemoved {
+		revokeWorkspaceMemberGenerations(d, result.WorkspaceID, uid)
+	}
+	revokeUserPermissionSnapshots(d, uid)
+	publishWorkspaceAccessEvent(d, r, result.WorkspaceID, "workspace.membership_updated", uid)
+	writeJSON(w, http.StatusOK, map[string]bool{
+		"ok":                           true,
+		"workspace_membership_removed": result.WorkspaceMembershipRemoved,
+	})
 }
 func adminCreateWorkspaceHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	var req struct {
