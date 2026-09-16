@@ -156,10 +156,10 @@ function DomainEditor({ rule, workspaces, groups, onClose, onSaved }: { rule: Re
   }
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose() }}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="h-[min(48rem,calc(100dvh-2rem))] overflow-hidden">
         <DialogHeader><DialogTitle>{t(isNew ? 'domains.add' : 'domains.edit')}</DialogTitle><DialogDescription>{t('domains.editorHint')}</DialogDescription></DialogHeader>
         <form className="flex min-h-0 flex-1 flex-col overflow-hidden" onSubmit={(e) => { e.preventDefault(); void save() }}>
-          <DialogBody className="space-y-5">
+          <DialogBody className="space-y-5 overscroll-contain">
             <aside aria-labelledby="domain-permissions-title" className="flex items-start gap-3 rounded-xl border border-[var(--color-warning)]/40 bg-[var(--color-warning)]/10 p-4">
               <AlertTriangle size={20} aria-hidden className="mt-0.5 shrink-0 text-[var(--color-warning)]" />
               <div className="min-w-0 space-y-1.5 text-sm leading-6">

@@ -419,6 +419,9 @@ func TestHTTPProjectDetailGroupPermissionsCapLibraryCapabilities(t *testing.T) {
 
 func TestHTTPProjectAutoAddRequiresEffectiveLibraryWritePermission(t *testing.T) {
 	owner, _, deps, workspaceID, kbID := openWorkspacePermissionHTTPTest(t)
+	// The upload-denied member must be able to read the library. CreateKB
+	// defaults to private; an unreadable library is correctly hidden with 404.
+	mustExec(t, deps.DB, `UPDATE knowledge_bases SET is_public=1 WHERE id=?`, kbID)
 	mustExec(t, deps.DB, `INSERT INTO projects(id,user_id,name,kb_id,workspace_id)
 		VALUES('auto-add-project',?,'Auto add project',?,?)`, owner.ID, kbID, workspaceID)
 	mustExec(t, deps.DB, `INSERT INTO users(id,email,name,password_hash,role,status) VALUES

@@ -22,6 +22,7 @@ import { useAuth } from '@/store/auth'
 import { useWorkspaces } from '@/store/workspaces'
 import { toast } from '@/hooks/use-toast'
 import { useCopy } from '@/hooks/use-clipboard'
+import { useMediaQuery } from '@/hooks/use-media-query'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { initials } from '@/components/ui/avatar.utils'
 import { Button } from '@/components/ui/button'
@@ -59,6 +60,15 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+
+const WORKSPACE_MANAGEMENT_TABS = [
+  { key: 'members', icon: Users, label: 'workspace.tabMembers' },
+  { key: 'invites', icon: KeyRound, label: 'workspace.tabInvites' },
+  { key: 'policy', icon: SlidersHorizontal, label: 'workspace.tabPolicy' },
+  { key: 'announcement', icon: Megaphone, label: 'workspace.tabAnnouncement' },
+  { key: 'audit', icon: FileClock, label: 'workspace.tabAudit' },
+  { key: 'statistics', icon: BarChart3, label: 'workspace.tabStatistics' },
+] as const
 
 /** Whether the current user may create workspaces (group feature / admin). */
 function canCreateWorkspaces(): boolean {
@@ -300,7 +310,13 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
   // §workspace RBAC phases 3/4: managers switch between members, invites and
   // the capability policy; non-managers only ever see the member list.
   const [tab, setTab] = useState<'members' | 'invites' | 'policy' | 'announcement' | 'audit' | 'statistics'>('members')
+  const desktopNavigation = useMediaQuery('(min-width: 640px)')
+  const paneRef = useRef<HTMLDivElement>(null)
   const [transferOpen, setTransferOpen] = useState(false)
+
+  useEffect(() => {
+    paneRef.current?.scrollTo({ top: 0 })
+  }, [tab, activeId, open, canManage])
 
   function roleLabel(role: ApiWorkspaceRole | undefined): string {
     switch (role) {
@@ -561,12 +577,13 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
       <DialogContent
         size="full"
         closeDisabled={actioning || savingPermissions || busyUid !== null}
-        className="max-w-[min(96vw,80rem)] max-sm:h-[calc(100dvh-1rem)] max-sm:max-h-[calc(100dvh-1rem)]"
+        className="h-[min(44rem,calc(100dvh-3rem))] max-w-[68rem] overflow-hidden sm:w-[min(94vw,68rem)] sm:flex-row max-sm:h-dvh max-sm:max-h-dvh max-sm:w-full max-sm:rounded-none max-sm:border-0"
       >
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Briefcase size={15} aria-hidden />
-            {ws.name}
+        <div className="flex min-h-0 shrink-0 flex-col bg-[var(--color-bg-muted)]/50 sm:w-48">
+        <DialogHeader className="px-4 pb-3 pt-5 max-sm:pr-12">
+          <DialogTitle className="flex min-w-0 items-center gap-2">
+            <Briefcase size={15} aria-hidden className="shrink-0" />
+            <span className="truncate" title={ws.name}>{ws.name}</span>
           </DialogTitle>
           <DialogDescription>
             {membersLoading
@@ -577,23 +594,14 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
           </DialogDescription>
         </DialogHeader>
 
-        <DialogBody className="min-h-0 max-h-[min(78dvh,52rem)] space-y-4 overflow-y-auto px-5 pb-5 sm:px-6">
-          {/* §workspace RBAC: manager tabs — members / invites / capability policy. */}
           {canManage ? (
             <div
               role="tablist"
-              aria-orientation="horizontal"
+              aria-orientation={desktopNavigation ? 'vertical' : 'horizontal'}
               aria-label={t('workspace.manageTabs', { defaultValue: 'Workspace management' })}
-              className="flex min-w-0 gap-1 overflow-x-auto overscroll-x-contain rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-1 scrollbar-thin"
+              className="flex min-h-0 min-w-0 gap-1 overflow-x-auto overscroll-contain px-2 pb-3 scrollbar-none sm:flex-1 sm:flex-col sm:overflow-x-hidden sm:overflow-y-auto"
             >
-            {([
-              ['members', <Users key="i" size={13} aria-hidden />, t('workspace.tabMembers', { defaultValue: 'Members' })],
-              ['invites', <KeyRound key="i" size={13} aria-hidden />, t('workspace.tabInvites', { defaultValue: 'Invites' })],
-              ['policy', <SlidersHorizontal key="i" size={13} aria-hidden />, t('workspace.tabPolicy', { defaultValue: 'Capabilities' })],
-              ['announcement', <Megaphone key="i" size={13} aria-hidden />, t('workspace.tabAnnouncement', { defaultValue: 'Announcement' })],
-              ['audit', <FileClock key="i" size={13} aria-hidden />, t('workspace.tabAudit', { defaultValue: 'Audit' })],
-              ['statistics', <BarChart3 key="i" size={13} aria-hidden />, t('workspace.tabStatistics', { defaultValue: 'Statistics' })],
-            ] as const).map(([key, icon, label]) => (
+            {WORKSPACE_MANAGEMENT_TABS.map(({ key, icon: Icon, label }) => (
               <button
                 key={key}
                 type="button"
@@ -604,7 +612,9 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
                 tabIndex={tab === key ? 0 : -1}
                 onClick={() => setTab(key)}
                 onKeyDown={(event) => {
-                  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+                  const previousKey = desktopNavigation ? 'ArrowUp' : 'ArrowLeft'
+                  const nextKey = desktopNavigation ? 'ArrowDown' : 'ArrowRight'
+                  if (![previousKey, nextKey, 'Home', 'End'].includes(event.key)) return
                   const tabs = Array.from(
                     event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [],
                   )
@@ -614,23 +624,32 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
                     ? 0
                     : event.key === 'End'
                       ? tabs.length - 1
-                      : (current + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length
+                      : (current + (event.key === nextKey ? 1 : -1) + tabs.length) % tabs.length
                   event.preventDefault()
                   tabs[next]?.focus()
                   tabs[next]?.click()
                 }}
-                className={`flex min-h-[var(--tap-min)] shrink-0 items-center justify-center gap-1.5 rounded-[7px] px-2.5 text-[12px] font-medium interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] sm:min-h-0 sm:min-w-0 sm:flex-1 sm:px-1.5 sm:py-1.5 ${
+                className={`inline-flex min-h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-[8px] px-2.5 py-1.5 text-sm font-medium interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] sm:min-h-9 sm:w-full ${
                   tab === key
-                    ? 'bg-[var(--color-bg)] text-[var(--color-fg)] shadow-sm'
-                    : 'text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)]'
+                    ? 'bg-[var(--color-surface)] text-[var(--color-fg)] ring-1 ring-inset ring-[var(--color-accent)] sm:bg-[var(--color-bg-muted)]'
+                    : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)]/60 hover:text-[var(--color-fg)]'
                 }`}
               >
-                <span className="shrink-0">{icon}</span>
-                <span className="whitespace-nowrap">{label}</span>
+                <Icon size={15} aria-hidden className="shrink-0" />
+                <span>{t(label)}</span>
               </button>
             ))}
             </div>
           ) : null}
+        </div>
+
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className="shrink-0 border-b border-[var(--color-divider)] px-5 py-4 sm:px-6 sm:pr-14 sm:pt-5">
+            <h2 className="text-lg font-medium text-[var(--color-fg)]">
+              {t(WORKSPACE_MANAGEMENT_TABS.find((item) => item.key === (canManage ? tab : 'members'))!.label)}
+            </h2>
+          </div>
+          <div ref={paneRef} data-workspace-management-scroll className="min-h-0 min-w-0 flex-1 space-y-4 overflow-x-hidden overflow-y-auto overscroll-contain px-5 py-5 scrollbar-thin sm:px-6">
 
         {tab !== 'members' && canManage ? null : (
         <div
@@ -674,7 +693,7 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
 
         {/* Member list — skeleton rows while the fetch is in flight so the
             dialog never opens claiming "0 members" before data lands. */}
-        <ul className="max-h-64 space-y-1 overflow-y-auto scrollbar-thin">
+        <ul className="space-y-1">
           {membersLoading
             ? [0, 1, 2].map((i) => (
                 <li key={`sk-${i}`} className="flex items-center gap-2.5 rounded-[8px] px-1.5 py-1.5" aria-hidden>
@@ -845,9 +864,9 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
             <WorkspaceUsagePanel workspaceID={activeId} />
           </div>
         ) : null}
-        </DialogBody>
+          </div>
 
-        <DialogFooter className="justify-between">
+        <DialogFooter className="flex-wrap justify-between gap-y-2">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             {isOwner && tab === 'members' ? (
               <Button
@@ -893,6 +912,7 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
             {t('common.close', { ns: 'common', defaultValue: 'Close' })}
           </Button>
         </DialogFooter>
+        </div>
       </DialogContent>
 
       <WorkspaceTransferDialog
@@ -1335,7 +1355,7 @@ function WorkspaceInvitesPanel({ workspaceID, isOwner }: { workspaceID: string; 
           {t('workspace.invitesEmpty', { defaultValue: 'No invites yet.' })}
         </p>
       ) : (
-        <ul className="max-h-64 space-y-1 overflow-y-auto scrollbar-thin">
+        <ul className="space-y-1">
           {invites.map((invite) => {
             const status = inviteStatus(invite)
             const url = `${window.location.origin}/workspace/join/${invite.token}`
@@ -1897,7 +1917,7 @@ function WorkspaceAuditPanel({ workspaceID }: { workspaceID: string }) {
           {t('workspace.audit.empty', { defaultValue: 'No audit entries yet.' })}
         </p>
       ) : (
-        <ul className="max-h-72 space-y-1 overflow-y-auto scrollbar-thin">
+        <ul className="space-y-1">
           {logs.map((log) => (
             <li key={log.id} className="rounded-[8px] px-2 py-2 hover:bg-[var(--color-bg-muted)]">
               <div className="flex items-baseline justify-between gap-2">
