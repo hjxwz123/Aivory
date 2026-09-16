@@ -623,6 +623,8 @@ type systemPromptOpts struct {
 	Locale              string
 	ToolMode            string   // native | prompt | none
 	ToolNames           []string // names of the tools actually enabled for this model
+	SearchOnly          bool
+	ForceWebSearch      bool
 	ProjectName         string
 	ProjectInstructions string
 	Skills              []SkillIndex
@@ -838,7 +840,15 @@ func composeSystemPrompt(o systemPromptOpts) string {
 		has[n] = true
 	}
 	if o.ToolMode != "none" && len(o.ToolNames) > 0 {
-		if o.ToolMode == "native" {
+		if o.SearchOnly {
+			b.WriteString("\n\n")
+			b.WriteString(l.toolHeader)
+			b.WriteString(l.toolSearchOnly)
+			b.WriteString(l.toolCite)
+			if o.ForceWebSearch {
+				b.WriteString(l.toolSearchRequired)
+			}
+		} else if o.ToolMode == "native" {
 			// Native function-calling: each enabled tool already ships its NAME +
 			// DESCRIPTION + input schema in the request's `tools` array (the
 			// descriptions are in fact more detailed than a one-line hint), so

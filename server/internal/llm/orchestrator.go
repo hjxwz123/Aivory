@@ -1608,11 +1608,8 @@ type RunRequest struct {
 	// the existing no-tool fallbacks later in Run. ToolMode takes precedence when
 	// it is non-empty.
 	NoTools bool
-	// ForceWebSearch runs a NON-tool web search before generation: a task model
-	// derives search queries from the conversation, the searcher runs them, and
-	// the results are injected into the prompt as <web-search-result> context
-	// (§4.4-B). Only meaningful with NoTools (it replaces the tool the model can
-	// no longer call); ignored otherwise.
+	// ForceWebSearch requests a search in the search-only mode. The main model
+	// forms the query; no separate query-generation task is needed.
 	ForceWebSearch bool
 	// ImageStyleID selects an admin-managed image style (§4.20) for an image-mode
 	// turn (conversation model kind=image). Its hidden prompt is composed
@@ -1639,9 +1636,9 @@ const (
 	// ModeDeepResearch is the RunRequest.Mode value that triggers the Deep
 	// Research engine (plan → multi-round web search + source reading → verify).
 	ModeDeepResearch = "deep-research"
-	// ToolModeAuto asks the configured task model whether this turn needs tools.
+	// ToolModeAuto chooses search-only or full tools using the existing router.
 	ToolModeAuto = "auto"
-	// ToolModeDisabled exposes no tools and activates the server-side fallbacks.
+	// ToolModeDisabled exposes only permitted Aivory search, with one tool batch.
 	ToolModeDisabled = "disabled"
 	// ToolModeEnabled exposes the resolved model's complete administrator-
 	// configured tool collection (local Functions and provider-hosted tools).
@@ -1937,6 +1934,12 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 				req.OfficialToolNames, req.OfficialToolRequests, selectedTools,
 			)
 		}
+		if req.SearchOnly {
+			req.Tools = searchOnlyToolDefs(builtinDefs)
+			req.SystemTools = toolDefNameSet(req.Tools)
+			req.OfficialToolNames = nil
+			req.OfficialToolRequests = nil
+		}
 		req.ToolModePrompt = fallbackToolMode == "prompt" && len(req.Tools) > 0
 	}
 	// The primary history may contain calls that the fallback model does not
@@ -1998,7 +2001,7 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 		fallbackOpts.Skills = nil
 		fallbackOpts.SkillsFull = nil
 		selectedTools := selectedToolIDSet(base.SelectedToolIDs, base.SelectedToolsConfigured)
-		fallbackAllowsSkills := toolAccessPolicyAllows(fallbackAccessPolicy, "builtin:use_skill")
+		fallbackAllowsSkills := !req.SearchOnly && toolAccessPolicyAllows(fallbackAccessPolicy, "builtin:use_skill")
 		if base.SelectedToolsConfigured {
 			fallbackAllowsSkills = fallbackAllowsSkills && selectedTools["builtin:use_skill"]
 		} else {
@@ -2629,8 +2632,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		// planner/writer task models would still run and the research engine could
 		// emit a misleading research panel despite having no permitted tools.
 		req.Mode = ""
-		// ForceWebSearch is the no-tools fallback and executes the search registry
-		// directly. It must not become a back door around the workspace switch.
+		// A forced search must not bypass the workspace capability switch.
 		req.ForceWebSearch = false
 	}
 	req.ToolMode = turnToolMode
@@ -2639,8 +2641,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	req.OfficialToolNames = nil
 	req.NoTools = turnToolMode == ToolModeDisabled
 	if !req.NoTools {
-		// Forced web search is the explicit-disabled fallback, not an additional
-		// behavior for enabled or automatically routed turns.
+		// The explicit search preference belongs to the disabled/search-only mode.
 		req.ForceWebSearch = false
 	}
 	channel, err := store.GetChannel(ctx, o.db, model.ChannelID)
@@ -3140,23 +3141,31 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		systemToolDefs = append(systemToolDefs, builtinDefs...)
 		toolDefs = append(builtinDefs, flattenMCPToolDefs(mcpDefs)...)
 	}
+	searchOnly := req.ToolMode == ToolModeDisabled
 	if req.ToolMode == ToolModeAuto {
 		// An effective deny-all policy has nothing the classifier could enable.
 		// Enter the same no-tools pipeline immediately and avoid a wasted task-model
 		// round trip.
 		if len(toolDefs) == 0 && len(hostedToolRequests) == 0 {
-			req.NoTools = true
+			searchOnly = true
 		} else {
-			req.NoTools = !o.autoTurnNeedsTools(
+			searchOnly = !o.autoTurnNeedsTools(
 				ctx, req, history, toolDefs, hostedToolNames, hostedToolRequests,
 				sandboxFiles, availableSkillIdx, len(selectedUserSkills) > 0,
 				conv.WorkspaceID, assistantMsg.ID,
 			)
 		}
 	}
-	// The explicit disabled policy and an auto=false verdict share exactly the
-	// same no-tools behavior: no provider/hosted declarations, no tool guidance,
-	// no skills, and server-side RAG/search/spreadsheet fallbacks below.
+	// User-level "off" retains only the permitted local search definition.
+	// Filter the built-in collection, never an MCP tool with a matching name.
+	// Model/workspace/global/selection restrictions have already been applied.
+	if searchOnly {
+		toolDefs = searchOnlyToolDefs(systemToolDefs)
+		systemToolDefs = toolDefs
+		hostedToolNames = nil
+		hostedToolRequests = nil
+	}
+	req.NoTools = toolMode == "none" || (searchOnly && len(toolDefs) == 0)
 	if req.NoTools {
 		toolMode = "none"
 		hostedToolNames = nil
@@ -3392,13 +3401,11 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// 8. Skills for this model (§4.17). Native models get the slim index plus
 	//    the use_skill tool (progressive disclosure); prompt/none models can't
 	//    call a tool, so the full instructions are injected inline.
-	//    §4.13-B: a "disable tools" turn uses NO skills at all — neither the
-	//    use_skill tool (already dropped with tool_mode=none) nor the inline
-	//    full-instruction injection prompt/none models would otherwise get — so
-	//    the turn stays a plain, tool-and-skill-free answer as the user asked.
+	//    Search-only turns do not load administrator skill instructions or
+	//    advertise use_skill; RAG and spreadsheet previews remain available.
 	skillIdx := []SkillIndex{}
 	skillFull := []SkillFull{}
-	if !req.NoTools {
+	if !req.NoTools && !searchOnly {
 		skillIdx = availableSkillIdx
 		skillFull = availableSkillFull
 	}
@@ -3408,25 +3415,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	//    ready, so its trigger can reuse the complete UnifiedChatRequest estimate
 	//    instead of maintaining a smaller, drifting accounting path.
 	ragContext := formatRAGContext(ragSnippets, req.Locale)
-	// §4.4-B forced non-tool web search (a no-tools turn with web search on):
-	// server-run search, results injected as a <web-search-result> block that
-	// rides the same message-layer injection as RAG. Citations join the turn's
-	// source list. Kept OUT of formatRAGContext so they aren't double-wrapped as
-	// KB context.
-	if req.NoTools && req.ForceWebSearch &&
-		(toolAccessPolicyAllows(req.ToolAccessPolicy, "builtin:"+toolnames.AivoryWebSearch)) &&
-		(builtinTools == nil || builtinTools[toolnames.AivoryWebSearch]) {
-		// Offset the search citations past any KB snippets already collected this
-		// turn so the two source sets don't both start at [1].
-		searchCtx := withTaskBillingMessageID(ctx, assistantMsg.ID)
-		if searchText, searchCites := o.forcedWebSearch(searchCtx, req, conv, history, len(ragSnippets), builtinTools, onEvent); searchText != "" {
-			if ragContext != "" {
-				ragContext += "\n\n"
-			}
-			ragContext += searchText
-			ragSnippets = append(ragSnippets, searchCites...)
-		}
-	}
+	// Search-only turns use the ordinary tool protocol, so query generation,
+	// citations, progress, and persistence need no extra task-model request.
 	// Conversation-uploaded data files staged in the sandbox (§4.5) were resolved
 	// before automatic tool routing. The no-Python forced read below uses that same
 	// authoritative list, and its injected preview counts toward compaction.
@@ -3550,6 +3540,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		ModelLabel:          promptModelLabel,
 		Locale:              req.Locale,
 		ToolMode:            toolMode,
+		SearchOnly:          searchOnly,
+		ForceWebSearch:      searchOnly && req.ForceWebSearch,
 		ToolNames:           toolNames,
 		ProjectName:         projectName,
 		ProjectInstructions: projectInstructions,
@@ -3562,7 +3554,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		InlineQuote:         conv.InlineQuote,
 		InlineSource:        inlineSource,
 		SkillToolAvailable:  skillToolAvailable,
-		SkillsAllowed:       skillsAllowed && !req.NoTools,
+		SkillsAllowed:       skillsAllowed && !req.NoTools && !searchOnly,
 		SkillMode: func() string {
 			if req.ToolAccessPolicy == nil {
 				return ""
@@ -3843,6 +3835,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		SelectedUserSkillIDs:    append([]string(nil), normalizedSelectedUserSkillIDs...),
 		WorkspaceID:             conv.WorkspaceID,
 		ToolsEnabled:            toolsEnabled,
+		SearchOnly:              searchOnly,
 		Fast:                    fastMode,
 		ToolModePrompt:          toolMode == "prompt" && len(toolDefs) > 0,
 		ProjectFiles:            projectFiles,

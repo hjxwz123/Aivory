@@ -42,7 +42,34 @@ const (
 	toolBudgetFinalInstruction = "The tool execution budget is exhausted. Do not call or request any tools. Based only on the conversation and tool results already available, provide the best possible final answer now. Do not discuss the tool budget unless it prevents you from answering."
 	toolNoProgressOutput       = "This tool request was skipped because it duplicates an earlier request, repeats a failed path, or would add no new evidence. Do not repeat this request. Use the other results already available, and call a different tool only if decisive information is still missing."
 	toolNoProgressInstruction  = "Further tool calls would not add new evidence. Do not call or request any tools. Based only on the conversation and tool results already available, provide the best possible final answer now. Do not discuss this internal stopping condition unless it prevents you from answering."
+	searchOnlyFinalInstruction = "The search round is complete. Do not call or request any tools. Answer the user's question directly using the available search snippets and conversation; cite sources for supported claims. If results failed or do not establish a fact, say what could not be verified instead of guessing. Do not mention internal routing, tool modes, or round limits."
 )
+
+var errSearchRoundComplete = errors.New("search round complete")
+
+type searchOnlyContextKey struct{}
+
+func contextWithSearchOnly(ctx context.Context, enabled bool) context.Context {
+	return context.WithValue(ctx, searchOnlyContextKey{}, enabled)
+}
+
+func isSearchOnly(ctx context.Context) bool {
+	enabled, _ := ctx.Value(searchOnlyContextKey{}).(bool)
+	return enabled
+}
+
+// Search-only mode completes after one batch, including empty/failed searches.
+// Keep actual result payloads and statuses intact; this is normal completion,
+// not a fabricated tool error or an extra model decision round.
+func toolBatchFinalization(ctx context.Context, results []toolCallResult) error {
+	if signal := toolFinalizationErrorFromResults(results); signal != nil {
+		return signal
+	}
+	if isSearchOnly(ctx) && len(results) > 0 {
+		return errSearchRoundComplete
+	}
+	return nil
+}
 
 // ErrToolBudgetExceeded is the control-flow signal raised when a turn can no
 // longer execute tools. Kind is deliberately open-ended: call-count limits use
@@ -162,6 +189,9 @@ func toolFinalizationErrorFromResults(results []toolCallResult) error {
 }
 
 func toolFinalizationSignal(err error) error {
+	if errors.Is(err, errSearchRoundComplete) {
+		return errSearchRoundComplete
+	}
 	var budgetErr *ErrToolBudgetExceeded
 	if errors.As(err, &budgetErr) {
 		return budgetErr
@@ -187,6 +217,9 @@ func toolBudgetFinalizationError(budgetErr *ErrToolBudgetExceeded, cause error) 
 }
 
 func toolFinalizationError(signal error, cause error) error {
+	if errors.Is(signal, errSearchRoundComplete) {
+		return fmt.Errorf("search answer failed: %w", cause)
+	}
 	var budgetErr *ErrToolBudgetExceeded
 	if errors.As(signal, &budgetErr) {
 		return toolBudgetFinalizationError(budgetErr, cause)
@@ -204,6 +237,9 @@ func toolFinalizationError(signal error, cause error) error {
 }
 
 func toolFinalizationInstruction(signal error) string {
+	if errors.Is(signal, errSearchRoundComplete) {
+		return searchOnlyFinalInstruction
+	}
 	if IsToolNoProgress(signal) {
 		return toolNoProgressInstruction
 	}
@@ -211,6 +247,9 @@ func toolFinalizationInstruction(signal error) string {
 }
 
 func toolFinalizationStopReason(signal error) string {
+	if errors.Is(signal, errSearchRoundComplete) {
+		return "stop"
+	}
 	if IsToolNoProgress(signal) {
 		return "tool_no_progress"
 	}

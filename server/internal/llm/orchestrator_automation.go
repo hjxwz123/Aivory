@@ -49,7 +49,8 @@ func configuredOfficialToolRequests(raw json.RawMessage) ([]string, []json.RawMe
 	return names, requests
 }
 
-// autoTurnNeedsTools resolves cheap, deterministic positive signals first. If
+// autoTurnNeedsTools selects full tools over the lightweight search-only mode.
+// It resolves cheap, deterministic positive signals first. If
 // the real provider declarations are small, sending them directly to the main
 // model is cheaper and faster than adding another network round trip. Only the
 // remaining ambiguous turns reach the dedicated route model, with no history,
@@ -107,6 +108,15 @@ func (o *Orchestrator) autoTurnNeedsTools(
 		return false
 	}
 	return true
+}
+
+func searchOnlyToolDefs(defs []ToolDef) []ToolDef {
+	for _, def := range defs {
+		if def.Name == toolnames.AivoryWebSearch {
+			return []ToolDef{def}
+		}
+	}
+	return nil
 }
 
 func estimateToolDeclarationTokens(localTools []ToolDef, hostedRequests []json.RawMessage) int {

@@ -393,7 +393,7 @@ func RunPromptToolLoopWithRaw(
 		)
 		for retries = 0; retries <= promptMaxRetry; retries++ {
 			output, cites, runErr = toolRunner.Run(ctx, call.Name, call.Arguments)
-			if runErr == nil || !promptToolErrorRetryable(runErr) {
+			if runErr == nil || isSearchOnly(ctx) || !promptToolErrorRetryable(runErr) {
 				break
 			}
 		}
@@ -427,7 +427,7 @@ func RunPromptToolLoopWithRaw(
 			Role:   "user",
 			Blocks: []UnifiedBlock{{Kind: "text", Text: PromptToolResultText(call.Name, output, isError)}},
 		})
-		if signal := toolFinalizationSignal(runErr); signal != nil {
+		if signal := toolBatchFinalization(ctx, []toolCallResult{{Output: output, Citations: cites, Err: runErr}}); signal != nil {
 			finalizationPending = signal
 		} else if i+1 >= promptMaxIter {
 			finalizationPending = &ErrToolBudgetExceeded{Kind: "iterations", Limit: promptMaxIter}

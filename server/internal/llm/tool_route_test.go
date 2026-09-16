@@ -210,9 +210,12 @@ func TestAutoToolRouteYesNoAndFailOpen(t *testing.T) {
 			if len(provider.mainRequests) != 1 {
 				t.Fatalf("main requests = %d, want 1", len(provider.mainRequests))
 			}
-			gotTools := len(provider.mainRequests[0].Tools) > 0
+			gotTools := !provider.mainRequests[0].SearchOnly
 			if gotTools != tc.wantTools {
-				t.Fatalf("main tools present = %v, want %v", gotTools, tc.wantTools)
+				t.Fatalf("full tools enabled = %v, want %v", gotTools, tc.wantTools)
+			}
+			if !tc.wantTools && (len(provider.mainRequests[0].Tools) != 1 || !requestHasTool(provider.mainRequests[0], "aivory_web_search")) {
+				t.Fatal("simple route must retain only Aivory search")
 			}
 			gotHostedTools := len(provider.mainRequests[0].OfficialToolRequests) > 0
 			if gotHostedTools != tc.wantTools {
@@ -260,7 +263,7 @@ func TestAutoWithoutDedicatedRouteModelUsesConversationModel(t *testing.T) {
 	if provider.taskRequests[0].Model.ID != model.ID {
 		t.Fatalf("route model = %q, want current conversation model %q", provider.taskRequests[0].Model.ID, model.ID)
 	}
-	if len(provider.mainRequests) != 1 || provider.mainRequests[0].ToolsEnabled {
+	if len(provider.mainRequests) != 1 || !provider.mainRequests[0].SearchOnly || len(provider.mainRequests[0].Tools) != 1 {
 		t.Fatalf("conversation route verdict was not applied: %+v", provider.mainRequests)
 	}
 }
@@ -425,7 +428,7 @@ func TestDisabledToolRouteChannelFallsBackToConversationModel(t *testing.T) {
 	if provider.taskRequests[0].Model.ID != model.ID {
 		t.Fatalf("route model=%q, want conversation model %q", provider.taskRequests[0].Model.ID, model.ID)
 	}
-	if len(provider.mainRequests) != 1 || provider.mainRequests[0].ToolsEnabled {
+	if len(provider.mainRequests) != 1 || !provider.mainRequests[0].SearchOnly || len(provider.mainRequests[0].Tools) != 1 {
 		t.Fatalf("conversation-model route verdict was not applied: %+v", provider.mainRequests)
 	}
 }
@@ -507,7 +510,7 @@ func TestExplicitToolModesSkipTaskClassifier(t *testing.T) {
 		mode      string
 		wantTools bool
 	}{
-		{mode: ToolModeDisabled, wantTools: false},
+		{mode: ToolModeDisabled, wantTools: true},
 		{mode: ToolModeEnabled, wantTools: true},
 	} {
 		t.Run(tc.mode, func(t *testing.T) {
@@ -519,6 +522,9 @@ func TestExplicitToolModesSkipTaskClassifier(t *testing.T) {
 			gotTools := len(provider.mainRequests[0].Tools) > 0
 			if gotTools != tc.wantTools {
 				t.Fatalf("main tools present = %v, want %v", gotTools, tc.wantTools)
+			}
+			if tc.mode == ToolModeDisabled && (!provider.mainRequests[0].SearchOnly || len(provider.mainRequests[0].Tools) != 1 || !requestHasTool(provider.mainRequests[0], "aivory_web_search")) {
+				t.Fatal("disabled mode must expose only Aivory search")
 			}
 		})
 	}
@@ -604,7 +610,7 @@ func TestUnifiedToolModeCannotOverrideModelNonePolicy(t *testing.T) {
 	}
 }
 
-func TestAutoFalseUsesUnifiedNoToolsPipelineForBothToolCategories(t *testing.T) {
+func TestAutoFalseUsesSearchOnlyPipelineAndPreservesRAG(t *testing.T) {
 	ctx := context.Background()
 	orchestrator, provider, model, conv, _, db := setupToolRouteTest(t)
 	if _, err := db.Exec(`UPDATE models SET official_tools=? WHERE id=?`, `[
@@ -680,13 +686,13 @@ func TestAutoFalseUsesUnifiedNoToolsPipelineForBothToolCategories(t *testing.T) 
 		t.Fatalf("main requests = %d, want 1", len(provider.mainRequests))
 	}
 	request := provider.mainRequests[0]
-	if request.ToolsEnabled || request.ToolModePrompt || len(request.Tools) != 0 ||
+	if !request.ToolsEnabled || !request.SearchOnly || request.ToolModePrompt || len(request.Tools) != 1 || !requestHasTool(request, "aivory_web_search") ||
 		len(request.OfficialToolNames) != 0 || len(request.OfficialToolRequests) != 0 {
-		t.Fatalf("auto=false exposed tools: enabled=%v prompt=%v local=%+v names=%v requests=%s",
+		t.Fatalf("auto=false did not restrict tools: enabled=%v prompt=%v local=%+v names=%v requests=%s",
 			request.ToolsEnabled, request.ToolModePrompt, request.Tools, request.OfficialToolNames, request.OfficialToolRequests)
 	}
-	if request.SystemPromptOptions == nil || request.SystemPromptOptions.ToolMode != "none" || request.SystemPromptOptions.SkillsAllowed {
-		t.Fatalf("auto=false did not use no-tools prompt options: %+v", request.SystemPromptOptions)
+	if request.SystemPromptOptions == nil || !request.SystemPromptOptions.SearchOnly || request.SystemPromptOptions.SkillsAllowed {
+		t.Fatalf("auto=false did not use search-only prompt options: %+v", request.SystemPromptOptions)
 	}
 	for _, forbidden := range []string{"official-empty-secret-skill", "official-empty-secret-instructions"} {
 		if strings.Contains(request.SystemPrompt, forbidden) {

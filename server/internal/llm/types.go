@@ -119,6 +119,9 @@ type UnifiedChatRequest struct {
 	// primary model happens to configure any tools. TTFT fallback uses it to rebuild
 	// the fallback model's complete administrator-configured tool collection.
 	ToolsEnabled bool
+	// SearchOnly limits this turn to one batch of Aivory search results, followed
+	// by a tool-free answer. It survives transparent model/provider fallback.
+	SearchOnly bool
 	// Fast preserves the fixed fast-mode safety restrictions when rebuilding a
 	// request for a TTFT fallback model.
 	Fast bool

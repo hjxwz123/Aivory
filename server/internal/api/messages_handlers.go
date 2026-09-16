@@ -1160,8 +1160,8 @@ func generationKnowledgeBaseIDs(
 }
 
 // normalizeTurnFlags enforces feature mutual exclusion server-side. Deep
-// Research always needs tools; forced web search is the explicit-disabled
-// fallback and cannot be combined with auto/enabled policies.
+// Research always needs tools; the explicit search preference belongs to the
+// disabled/search-only mode and cannot be combined with auto/enabled policies.
 func normalizeTurnFlags(mode, toolMode string, webSearch bool) (string, bool) {
 	if mode == "deep-research" {
 		return llm.ToolModeEnabled, false

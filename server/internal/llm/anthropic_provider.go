@@ -245,6 +245,7 @@ func intFromJSONNumber(v any) (int, bool) {
 
 // Stream runs the Anthropic chat turn (with up to 12 tool iterations).
 func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, tools ToolRunner, onEvent func(SseEvent)) (*UnifiedResult, error) {
+	ctx = contextWithSearchOnly(ctx, req.SearchOnly)
 	if req.Model.APIKey == "" && req.Model.Fallback == nil {
 		return nil, errors.New("this channel has no API key configured")
 	}
@@ -528,7 +529,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 			specs[i] = toolCallSpec{ID: tc.ID, Name: tc.Name, Input: tc.Input}
 		}
 		results := runToolsConcurrent(ctx, tools, specs, onEvent)
-		batchFinalizationErr := toolFinalizationErrorFromResults(results)
+		batchFinalizationErr := toolBatchFinalization(ctx, results)
 		resultBlocks := []map[string]any{}
 		for i, tc := range toolCalls {
 			r := results[i]

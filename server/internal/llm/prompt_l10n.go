@@ -33,6 +33,8 @@ type promptL10n struct {
 	toolImage          string
 	toolSaveMemory     string
 	toolMultiRound     string
+	toolSearchOnly     string
+	toolSearchRequired string
 	toolCite           string // native mode only: cite web results inline
 	sandboxHeader      string
 	sandboxBody        string
@@ -112,7 +114,9 @@ var promptL10nTable = map[string]promptL10n{
 		toolImage:          "- Use image_generate to produce or edit images. Choose generate versus edit from the user's intent; for edits explicitly select the previous generated image or a 1-based current attachment as the base.\n",
 		toolCite:           "- Cite your sources: when you use an aivory_web_search result, place its [n] marker inline right after the claim it supports.\n",
 		toolSaveMemory:     "- Use save_memory only when the user explicitly says \"remember\".\n",
-		toolMultiRound:     "- You may call tools multiple times in one turn. If a tool result is empty, irrelevant, or weak, adjust the input and run it again before answering rather than giving up or guessing.\n",
+		toolMultiRound:     "- For simple tasks, use the smallest sufficient tool batch and answer as soon as the results suffice. Batch independent searches in queries. You may call tools multiple times for multi-step tasks, missing decisive facts, or execution errors; do not broaden the task just to collect more sources.\n",
+		toolSearchOnly:     "- Answer directly when search is unnecessary. Otherwise use aivory_web_search once, batching independent queries in queries when needed. Prefer a focused query and relevant snippets; do not expand the scope just to collect more sources. After this search batch, answer from the available results without further tools. State any uncertainty instead of inventing missing facts.\n",
+		toolSearchRequired: "- The user requested web search: run the search before answering.\n",
 		sandboxHeader:      "\n## Files uploaded to this conversation (sandbox: /workspace/uploads/)\n",
 		sandboxBody:        "These persist across turns in this conversation's sandbox session. Uploaded images and prior image-generation outputs can be edited with python_execute — use Pillow for images and pandas.read_csv()/read_excel() for spreadsheets. Images downloaded with fetch_image are under /workspace/downloads/. Inspect first, then edit or compute over as many calls as needed. Write edited images and other results to /workspace/outputs/ to return them.\n",
 		skillsAvailHeader:  "\n## Skills available\n",
@@ -143,7 +147,9 @@ var promptL10nTable = map[string]promptL10n{
 		toolImage:          "- 使用 image_generate 生成或编辑图片。先按用户意图明确选择生成或编辑；编辑时必须明确选择上一轮生成图或本轮第几张附件作为底图。\n",
 		toolCite:           "- 标注来源：使用 aivory_web_search 的结果时，在其支撑的说法紧后放置该结果的 [n] 标记进行行内引用。\n",
 		toolSaveMemory:     "- 仅当用户明确说“记住”时才使用 save_memory。\n",
-		toolMultiRound:     "- 你可以在一轮中多次调用工具。如果某次工具结果为空、无关或质量差，请调整输入再试一次，而不是放弃或猜测。\n",
+		toolMultiRound:     "- 简单任务使用最少必要的一批工具，结果足够就直接回答；独立搜索合并到 queries 中。多步骤任务、缺少关键事实或执行出错时可继续调用工具，不要仅为增加来源数量扩大任务范围。\n",
+		toolSearchOnly:     "- 无需搜索时直接回答；需要时仅调用一次 aivory_web_search，多个独立查询可合并到 queries 中批量搜索。优先使用精确查询和相关摘要，不要为增加来源数量扩大范围。这批搜索结束后依据已有结果直接回答，不再调用工具；缺少依据时说明不确定性，不要编造。\n",
+		toolSearchRequired: "- 用户要求联网搜索，请先搜索再回答。\n",
 		sandboxHeader:      "\n## 上传到本对话的文件（沙箱：/workspace/uploads/）\n",
 		sandboxBody:        "这些文件在本对话的沙箱会话中跨轮次保留。上传图片和上一轮生成的图片都可以用 python_execute 编辑——图片使用 Pillow，电子表格使用 pandas.read_csv()/read_excel()；fetch_image 下载的图片位于 /workspace/downloads/。先检查，再按需多次编辑或计算；把编辑后的图片和其他结果写入 /workspace/outputs/ 以返回。\n",
 		skillsAvailHeader:  "\n## 可用技能\n",
@@ -174,7 +180,9 @@ var promptL10nTable = map[string]promptL10n{
 		toolImage:          "- 使用 image_generate 產生或編輯圖片。先依使用者意圖明確選擇產生或編輯；編輯時必須明確選擇上一輪產生圖或本輪第幾張附件作為底圖。\n",
 		toolCite:           "- 標註來源：使用 aivory_web_search 的結果時，在其支撐的說法緊後放置該結果的 [n] 標記進行行內引用。\n",
 		toolSaveMemory:     "- 僅當使用者明確說「記住」時才使用 save_memory。\n",
-		toolMultiRound:     "- 你可以在一輪中多次呼叫工具。如果某次工具結果為空、無關或品質差，請調整輸入再試一次，而不是放棄或猜測。\n",
+		toolMultiRound:     "- 簡單任務使用最少必要的一批工具，結果足夠就直接回答；獨立搜尋合併到 queries 中。多步驟任務、缺少關鍵事實或執行出錯時可繼續呼叫工具，不要僅為增加來源數量擴大任務範圍。\n",
+		toolSearchOnly:     "- 無需搜尋時直接回答；需要時僅呼叫一次 aivory_web_search，多個獨立查詢可合併到 queries 中批次搜尋。優先使用精確查詢與相關摘要，不要為增加來源數量擴大範圍。這批搜尋結束後依據已有結果直接回答，不再呼叫工具；缺少依據時說明不確定性，不要編造。\n",
+		toolSearchRequired: "- 使用者要求網路搜尋，請先搜尋再回答。\n",
 		sandboxHeader:      "\n## 上傳到本對話的檔案（沙箱：/workspace/uploads/）\n",
 		sandboxBody:        "這些檔案在本對話的沙箱工作階段中跨輪次保留。上傳圖片和上一輪產生的圖片都可以用 python_execute 編輯——圖片使用 Pillow，試算表使用 pandas.read_csv()/read_excel()；fetch_image 下載的圖片位於 /workspace/downloads/。先檢查，再按需多次編輯或計算；把編輯後的圖片和其他結果寫入 /workspace/outputs/ 以回傳。\n",
 		skillsAvailHeader:  "\n## 可用技能\n",
@@ -205,7 +213,9 @@ var promptL10nTable = map[string]promptL10n{
 		toolImage:          "- 画像の生成や編集には image_generate を使ってください。ユーザーの意図から生成か編集かを明示し、編集時は前回の生成画像または今回の何番目の添付画像をベースにするか選んでください。\n",
 		toolCite:           "- 出典を示す：aivory_web_search の結果を使うときは、その主張の直後に結果の [n] マーカーをインラインで置いてください。\n",
 		toolSaveMemory:     "- save_memory は、ユーザーが明確に「覚えて」と言ったときだけ使ってください。\n",
-		toolMultiRound:     "- 1 ターン内でツールを複数回呼び出せます。ツールの結果が空・無関係・不十分なときは、あきらめたり推測したりせず、入力を調整してもう一度実行してから回答してください。\n",
+		toolMultiRound:     "- 単純な依頼は必要最小限のツール実行で対応し、十分な結果が得られたら回答してください。独立した検索は queries にまとめてください。複数段階の作業、重要な情報の不足、実行エラーには追加のツールを使えますが、出典数を増やすためだけに範囲を広げないでください。\n",
+		toolSearchOnly:     "- 検索が不要なら直接回答してください。必要なら aivory_web_search を一度だけ使い、独立した検索語は queries にまとめてください。関連する要約を優先し、出典数を増やすために範囲を広げないでください。検索後は追加のツールを使わず回答し、確認できない事実は推測せず不確実性を伝えてください。\n",
+		toolSearchRequired: "- ユーザーがウェブ検索を指定しています。回答前に検索してください。\n",
 		sandboxHeader:      "\n## この会話にアップロードされたファイル（サンドボックス：/workspace/uploads/）\n",
 		sandboxBody:        "これらはこの会話のサンドボックスセッションでターンをまたいで保持されます。アップロード画像と前のターンで生成した画像は python_execute で編集できます——画像には Pillow、表計算には pandas.read_csv()/read_excel() を使います。fetch_image で取得した画像は /workspace/downloads/ にあります。まず確認し、必要なだけ編集または計算してください。編集画像などの結果は /workspace/outputs/ に書き出して返してください。\n",
 		skillsAvailHeader:  "\n## 利用可能なスキル\n",
@@ -236,7 +246,9 @@ var promptL10nTable = map[string]promptL10n{
 		toolImage:          "- Utilise image_generate pour produire ou modifier des images. Choisis explicitement génération ou modification selon l'intention ; pour une modification, sélectionne l'image générée précédente ou le numéro de la pièce jointe actuelle comme base.\n",
 		toolCite:           "- Cite tes sources : quand tu utilises un résultat de aivory_web_search, place son marqueur [n] en ligne juste après l'affirmation qu'il appuie.\n",
 		toolSaveMemory:     "- N'utilise save_memory que lorsque l'utilisateur dit explicitement « retiens ».\n",
-		toolMultiRound:     "- Tu peux appeler des outils plusieurs fois dans un même tour. Si un résultat d'outil est vide, hors sujet ou faible, ajuste l'entrée et relance-le avant de répondre, plutôt que d'abandonner ou de deviner.\n",
+		toolMultiRound:     "- Pour une tâche simple, utilise le minimum d'outils nécessaire et réponds dès que les résultats suffisent. Regroupe les recherches indépendantes dans queries. Réserve les appels supplémentaires aux tâches à plusieurs étapes, aux faits essentiels manquants ou aux erreurs, sans élargir le sujet pour multiplier les sources.\n",
+		toolSearchOnly:     "- Réponds directement si aucune recherche n'est nécessaire. Sinon, appelle aivory_web_search une seule fois et regroupe les requêtes indépendantes dans queries. Privilégie les extraits pertinents sans élargir le sujet pour multiplier les sources. Après cette recherche, réponds sans autre outil et signale les faits non vérifiés au lieu de les inventer.\n",
+		toolSearchRequired: "- L'utilisateur demande une recherche web : effectue-la avant de répondre.\n",
 		sandboxHeader:      "\n## Fichiers téléversés dans cette conversation (bac à sable : /workspace/uploads/)\n",
 		sandboxBody:        "Ils persistent d'un tour à l'autre dans la session bac à sable de cette conversation. Les images téléversées et générées au tour précédent peuvent être modifiées avec python_execute — Pillow pour les images et pandas.read_csv()/read_excel() pour les tableurs. Les images récupérées par fetch_image se trouvent dans /workspace/downloads/. Inspecte d'abord, puis modifie ou calcule en autant d'appels que nécessaire. Écris les images modifiées et les autres résultats dans /workspace/outputs/ pour les renvoyer.\n",
 		skillsAvailHeader:  "\n## Compétences disponibles\n",

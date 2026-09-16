@@ -30,6 +30,7 @@ func (p *GoogleProvider) ID() string { return "google" }
 // compatible with Vertex AI, OpenAI-compatible gateways, and the official
 // API. Tool calls are surfaced through the unified events.)
 func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, tools ToolRunner, onEvent func(SseEvent)) (*UnifiedResult, error) {
+	ctx = contextWithSearchOnly(ctx, req.SearchOnly)
 	if req.Model.APIKey == "" && req.Model.Fallback == nil {
 		return nil, errors.New("this channel has no API key configured")
 	}
@@ -271,10 +272,11 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 			specs[j] = toolCallSpec{ID: c.ID, Name: c.Name, Input: c.Args}
 		}
 		results := runToolsConcurrent(ctx, tools, specs, onEvent)
-		batchFinalizationErr := toolFinalizationErrorFromResults(results)
+		batchFinalizationErr := toolBatchFinalization(ctx, results)
 		respParts := []map[string]any{}
 		for j, c := range calls {
 			r := results[j]
+			allCitations = append(allCitations, r.Citations...)
 			out := r.Output
 			status := "complete"
 			if r.Err != nil {

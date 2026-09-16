@@ -71,6 +71,7 @@ func enforceOpenAIOutputTokenCap(body map[string]any, req UnifiedChatRequest, re
 
 // Stream runs one model turn against either OpenAI format.
 func (p *OpenAIProvider) Stream(ctx context.Context, req UnifiedChatRequest, tools ToolRunner, onEvent func(SseEvent)) (*UnifiedResult, error) {
+	ctx = contextWithSearchOnly(ctx, req.SearchOnly)
 	if req.Model.APIKey == "" && req.Model.Fallback == nil {
 		return nil, errors.New("this channel has no API key configured")
 	}
@@ -442,7 +443,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 			specs[i] = toolCallSpec{ID: tc.ID, Name: tc.Name, Input: tc.Input}
 		}
 		results := runToolsConcurrent(ctx, tools, specs, onEvent)
-		batchFinalizationErr := toolFinalizationErrorFromResults(results)
+		batchFinalizationErr := toolBatchFinalization(ctx, results)
 		for i, tc := range calls {
 			r := results[i]
 			out := r.Output
@@ -1840,7 +1841,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 			specs[j] = toolCallSpec{ID: c.ID, Name: c.Name, Input: c.Input}
 		}
 		results := runToolsConcurrent(ctx, tools, specs, onEvent)
-		batchFinalizationErr := toolFinalizationErrorFromResults(results)
+		batchFinalizationErr := toolBatchFinalization(ctx, results)
 		for j, c := range calls {
 			r := results[j]
 			out := r.Output
