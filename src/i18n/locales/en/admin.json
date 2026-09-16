@@ -81,7 +81,7 @@
       },
       "toolRouteModel": {
         "title": "Query routing model (optional)",
-        "tour": "Quickly decides whether a user query needs tools. If unset, the current conversation model decides. Prefer a low-latency, non-reasoning model."
+        "tour": "Chooses lightweight search or full tools for complex tasks. If unset, the current conversation model decides. Prefer a low-latency, non-reasoning model."
       },
       "embedding": {
         "title": "Add an embedding model",
@@ -708,7 +708,7 @@
       "task_downgrade": "Cross-provider history conversion",
       "task_image_prompt": "Image prompt optimization",
       "task_image_intent": "Image routing (generate or edit)",
-      "task_tool_route": "Query routing (decide whether to use tools)",
+      "task_tool_route": "Query routing (search only or full tools)",
       "task_search_queries": "Web search query generation",
       "task_research_plan": "Deep Research planning",
       "task_research_verify": "Deep Research coverage check",
@@ -963,7 +963,7 @@
       "titleModel": "Title generation model",
       "titleModelHint": "Generates short conversation-list titles. Prefer a low-latency, non-reasoning model. If unset, the other internal task model and then the current conversation model are used.",
       "queryRouteModel": "Query routing model",
-      "queryRouteModelHint": "Decides whether a user query needs tools in Auto mode. Prefer a low-latency, non-reasoning model. If unset, the current conversation model is used.",
+      "queryRouteModelHint": "Chooses lightweight search or full tools in Auto mode, keeping multiple rounds for complex tasks. Prefer a low-latency, non-reasoning model. If unset, the current conversation model is used.",
       "fileRouteModel": "File routing model",
       "fileRouteModelHint": "Chooses no file context, targeted retrieval, or full-document coverage and resolves current-file references. Prefer a low-latency, non-reasoning model with reliable JSON output. If unset, the other internal task model and then the current conversation model are used.",
       "taskModel": "Other internal task model",

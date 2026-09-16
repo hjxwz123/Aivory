@@ -14,7 +14,6 @@ import {
   Dialog,
   DialogBody,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -284,11 +283,6 @@ export function ToolSelectionDialog({
       <DialogContent size="md" className="max-sm:h-[calc(100dvh-1rem)] max-sm:max-h-[calc(100dvh-1rem)] max-sm:w-[calc(100vw-1rem)]">
         <DialogHeader className="pr-14">
           <DialogTitle>{t('composer.toolSelection.title', { defaultValue: 'Choose tools' })}</DialogTitle>
-          <DialogDescription>
-            {t('composer.toolSelection.description', {
-              defaultValue: 'The model will only use tools selected here.',
-            })}
-          </DialogDescription>
         </DialogHeader>
 
         <DialogBody className="flex min-h-0 flex-col overflow-hidden px-4 pb-3 sm:px-6">

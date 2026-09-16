@@ -81,7 +81,7 @@
       },
       "toolRouteModel": {
         "title": "查询路由模型（可选）",
-        "tour": "用于快速判断用户查询是否需要调用工具；未配置时由当前对话模型判断。建议使用低延迟、非思考模型。"
+        "tour": "用于选择轻量搜索或完整工具：简单查询按需搜索，复杂任务开启完整工具。未配置时由当前对话模型判断，建议使用低延迟、非思考模型。"
       },
       "embedding": {
         "title": "添加嵌入模型",
@@ -712,7 +712,7 @@
       "task_downgrade": "跨模型历史转换",
       "task_image_prompt": "图片提示词优化",
       "task_image_intent": "图片任务路由（新建或编辑）",
-      "task_tool_route": "查询路由（判断是否调用工具）",
+      "task_tool_route": "查询路由（轻量搜索或完整工具）",
       "task_search_queries": "网页搜索词生成",
       "task_research_plan": "深度研究规划",
       "task_research_verify": "深度研究覆盖核验",
@@ -967,7 +967,7 @@
       "titleModel": "标题生成模型",
       "titleModelHint": "生成对话列表中的简短标题。建议使用低延迟、非思考模型；未设置时依次使用其他内部任务模型和当前对话模型。",
       "queryRouteModel": "查询路由模型",
-      "queryRouteModelHint": "在自动工具模式下判断用户查询是否需要调用工具。建议使用低延迟、非思考模型；未设置时使用当前对话模型。",
+      "queryRouteModelHint": "自动选择轻量搜索或完整工具，复杂任务保留多轮执行。建议使用低延迟、非思考模型；未设置时使用当前对话模型。",
       "fileRouteModel": "文件路由模型",
       "fileRouteModelHint": "在组装文件上下文前选择跳过、片段检索或全文读取，并解析当前文件指代。建议使用能稳定输出 JSON 的低延迟、非思考模型；未设置时依次使用其他内部任务模型和当前对话模型。",
       "taskModel": "其他内部任务模型",

@@ -146,7 +146,7 @@ interface ComposerProps {
       verify?: boolean
       /** Three-state tool policy, always sent explicitly. */
       toolMode: ToolMode
-      /** §4.4-B: forced non-tool web search (only in disabled mode). */
+      /** Ask the model to search before answering in search-only mode. */
       webSearch?: boolean
       /** User-owned skills explicitly selected for this turn. */
       selectedUserSkillIds?: string[]
@@ -435,7 +435,6 @@ interface ToolModeAction {
   mode: ToolMode
   icon: ReactNode
   label: string
-  description: string
   selected: boolean
   onSelect: () => void
 }
@@ -479,9 +478,6 @@ function ToolModeRow({ item }: { item: ToolModeAction }) {
         <span className="block truncate text-[13px] font-medium text-[var(--color-fg)]">
           {item.label}
         </span>
-        <span className="mt-0.5 block text-[11.5px] leading-snug text-[var(--color-fg-subtle)]">
-          {item.description}
-        </span>
       </span>
       <span className="mt-0.5 inline-flex size-4 shrink-0 items-center justify-center" aria-hidden>
         {item.selected ? (
@@ -496,7 +492,6 @@ function ToolModeRow({ item }: { item: ToolModeAction }) {
 function ToolUseSelector({
   rootLabel,
   label,
-  description,
   modeSummary,
   active,
   menuOpen,
@@ -509,7 +504,6 @@ function ToolUseSelector({
 }: {
   rootLabel: string
   label: string
-  description: string
   modeSummary: string
   active: boolean
   menuOpen: boolean
@@ -590,9 +584,6 @@ function ToolUseSelector({
                 {modeSummary}
               </span>
             </span>
-            <span className="mt-0.5 block max-w-full break-words [overflow-wrap:anywhere] text-[11.5px] leading-snug text-[var(--color-fg-subtle)]">
-              {description}
-            </span>
           </span>
           <ChevronRight size={14} className="mt-1 shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
         </button>
@@ -605,7 +596,6 @@ function ToolUseSelector({
       className="px-1 py-1"
       role="group"
       aria-label={label}
-      aria-description={description}
       onKeyDown={(event) => {
         if (event.key !== 'ArrowLeft') return
         event.preventDefault()
@@ -1528,8 +1518,9 @@ export function Composer({
     : effectiveFast || isImageMode || effectiveMode === 'deep-research'
       ? 'enabled'
       : availableToolMode
-  const effectiveWebSearch = workspaceCaps.toolCalling &&
-    effectiveToolMode === 'disabled' && supportsWebSearch && forceWebSearch
+  const searchAvailableForTurn = workspaceCaps.toolCalling &&
+    (selectedToolIds === undefined ? supportsWebSearch : selectedToolIds.includes('builtin:aivory_web_search'))
+  const effectiveWebSearch = effectiveToolMode === 'disabled' && searchAvailableForTurn && forceWebSearch
 
   // A conversation override can outlive a model switch. Concrete modes
   // unavailable on the new model fall back to automatic instead of silently
@@ -1549,8 +1540,7 @@ export function Composer({
   ])
 
   useEffect(() => {
-    // Forced web search is a tool-backed escape hatch for the normal
-    // "disabled" mode. A workspace tool ban must revoke that persisted flag as
+    // A workspace tool ban must revoke the persisted search preference as
     // well, otherwise a stale preference could be sent on the next turn.
     if (workspaceToolCallingExplicitlyDisabled && forceWebSearch) {
       setForceWebSearch(toolModeScope, false)
@@ -2382,14 +2372,6 @@ export function Composer({
       label: t(`composer.features.toolMode${modeKey}`, {
         defaultValue: itemMode === 'auto' ? 'Automatic' : itemMode === 'enabled' ? 'On' : 'Off',
       }),
-      description: t(`composer.features.toolMode${modeKey}Desc`, {
-        defaultValue:
-          itemMode === 'auto'
-            ? 'Automatically decide whether tool calls are needed.'
-            : itemMode === 'enabled'
-              ? 'Turn on tool calling.'
-              : 'Answer directly without making tools available.',
-      }),
       selected: availableToolMode === itemMode,
       onSelect: () => {
         if (workspaceId && !workspacePolicyResolved) return
@@ -2403,11 +2385,11 @@ export function Composer({
   const toolUseConfigured = hasCustomToolSelection || (!researchActive && hasToolModeOverride)
 
   const webSearchItem: FeatureItem | undefined =
-    showToolUseSelector && workspaceCaps.toolCalling && supportsWebSearch && availableToolMode === 'disabled'
+    showToolUseSelector && searchAvailableForTurn && availableToolMode === 'disabled'
       ? {
           key: 'web-search',
           icon: <Globe size={16} aria-hidden />,
-          label: t('composer.features.webSearch', { defaultValue: 'Web search' }),
+          label: t('composer.features.webSearch', { defaultValue: 'Search before answering' }),
           active: forceWebSearch,
           enter: true,
           toggle: () => {
@@ -2431,9 +2413,6 @@ export function Composer({
           icon: <Wrench size={16} aria-hidden />,
           label: toolModeLabel,
           chipText: hasCustomToolSelection ? String(selectedToolIds.length) : undefined,
-          desc: t('composer.features.toolModeDesc', {
-            defaultValue: 'Configure the tools available for this turn.',
-          }),
           active: true,
           clearLabel: t('composer.toolSelection.resetToolUse', { defaultValue: 'Reset tool use' }),
           toggle: () => {
@@ -2450,9 +2429,6 @@ export function Composer({
         <ToolUseSelector
           rootLabel={toolsLabel}
           label={toolModeLabel}
-          description={t('composer.features.toolModeDesc', {
-            defaultValue: 'Configure the tools available for this turn.',
-          })}
           modeSummary={toolModeSummary}
           active={toolUseConfigured}
           menuOpen={isMobile ? moreOpen : featuresOpen}

@@ -81,7 +81,7 @@
       },
       "toolRouteModel": {
         "title": "Modèle de routage des requêtes (facultatif)",
-        "tour": "Décide rapidement si une requête utilisateur nécessite des outils. S'il est vide, le modèle de la conversation décide. Préférez un modèle rapide sans raisonnement."
+        "tour": "Choisit une recherche légère ou les outils complets pour les tâches complexes. S'il est vide, le modèle de la conversation décide. Préférez un modèle rapide sans raisonnement."
       },
       "embedding": {
         "title": "Ajouter un modèle d’embedding",
@@ -708,7 +708,7 @@
       "task_downgrade": "Conversion de l’historique entre fournisseurs",
       "task_image_prompt": "Optimisation du prompt d’image",
       "task_image_intent": "Routage d’image (génération ou modification)",
-      "task_tool_route": "Routage de requête (décider d’utiliser des outils)",
+      "task_tool_route": "Routage de requête (recherche seule ou outils complets)",
       "task_search_queries": "Génération de requêtes de recherche web",
       "task_research_plan": "Planification de recherche approfondie",
       "task_research_verify": "Vérification de la couverture de recherche",
@@ -963,7 +963,7 @@
       "titleModel": "Modèle de génération des titres",
       "titleModelHint": "Génère les titres courts de la liste des conversations. Préférez un modèle rapide sans raisonnement. S'il est vide, le modèle des autres tâches internes puis celui de la conversation sont utilisés.",
       "queryRouteModel": "Modèle de routage des requêtes",
-      "queryRouteModelHint": "Décide si une requête utilisateur nécessite des outils en mode Auto. Préférez un modèle rapide sans raisonnement. S'il est vide, le modèle de la conversation est utilisé.",
+      "queryRouteModelHint": "Choisit une recherche légère ou les outils complets en mode Auto, avec plusieurs étapes pour les tâches complexes. Préférez un modèle rapide sans raisonnement. S'il est vide, le modèle de la conversation est utilisé.",
       "fileRouteModel": "Modèle de routage des fichiers",
       "fileRouteModelHint": "Choisit de ne pas utiliser de fichier, d'effectuer une recherche ciblée ou de couvrir le document entier, et résout les références au fichier courant. Préférez un modèle rapide sans raisonnement produisant du JSON fiable. S'il est vide, le modèle des autres tâches internes puis celui de la conversation sont utilisés.",
       "taskModel": "Modèle des autres tâches internes",

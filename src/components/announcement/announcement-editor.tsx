@@ -20,6 +20,8 @@ interface AnnouncementEditorProps {
   title?: string
   lead?: string
   compact?: boolean
+  translationNamespace?: 'admin' | 'chat'
+  translationPrefix?: 'announcement' | 'workspace.announcement'
 }
 
 const emptyAnnouncement: ApiAnnouncement = {
@@ -35,9 +37,18 @@ const emptyAnnouncement: ApiAnnouncement = {
   bar_updated_at: 0,
 }
 
-/** The same announcement controls used by the global admin page. */
-export function AnnouncementEditor({ load, save, uploadImage, title, lead, compact = false }: AnnouncementEditorProps) {
-  const { t } = useTranslation(['admin', 'common'])
+/** Shared controls for global and workspace announcements. */
+export function AnnouncementEditor({
+  load,
+  save,
+  uploadImage,
+  title,
+  lead,
+  compact = false,
+  translationNamespace = 'admin',
+  translationPrefix = 'announcement',
+}: AnnouncementEditorProps) {
+  const { t } = useTranslation([translationNamespace, 'common'])
   const [value, setValue] = useState<ApiAnnouncement>(emptyAnnouncement)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -71,7 +82,7 @@ export function AnnouncementEditor({ load, save, uploadImage, title, lead, compa
       const result = await uploadImage(await resizeImageForUpload(file))
       update('image_url', result.url)
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('admin:announcement.uploadFailed'))
+      toast.error(e instanceof ApiError ? e.message : t(`${translationNamespace}:${translationPrefix}.uploadFailed`))
     } finally {
       setUploading(false)
       if (fileRef.current) fileRef.current.value = ''
@@ -97,7 +108,7 @@ export function AnnouncementEditor({ load, save, uploadImage, title, lead, compa
       const saved = { ...payload, ...(result ?? {}) }
       setValue(saved)
       loadedBar.current = { enabled: saved.bar_enabled, html: saved.bar_html, updatedAt: saved.bar_updated_at }
-      toast.success(t('admin:announcement.saved'))
+      toast.success(t(`${translationNamespace}:${translationPrefix}.saved`))
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('common:failed', { defaultValue: 'Operation failed' }))
     } finally {
@@ -106,7 +117,7 @@ export function AnnouncementEditor({ load, save, uploadImage, title, lead, compa
   }
 
   const label = (key: string, fallback: string, options?: Record<string, unknown>) =>
-    t(`admin:announcement.${key}`, { defaultValue: fallback, ...options })
+    t(`${translationNamespace}:${translationPrefix}.${key}`, { defaultValue: fallback, ...options })
 
   if (loading) return <PanelFallback />
   return (

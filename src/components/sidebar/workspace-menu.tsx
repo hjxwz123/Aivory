@@ -1187,6 +1187,8 @@ function WorkspaceAnnouncementPanel({ workspaceID }: { workspaceID: string }) {
       compact
       title={t('workspace.announcementTitle', { defaultValue: 'Workspace announcement' })}
       lead={t('workspace.announcementLead', { defaultValue: 'Only members of this workspace will see this announcement.' })}
+      translationNamespace="chat"
+      translationPrefix="workspace.announcement"
     />
   )
 }
