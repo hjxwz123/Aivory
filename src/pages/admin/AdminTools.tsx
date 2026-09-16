@@ -1,6 +1,6 @@
 /**
  * AdminTools — outbound services the assistant invokes during a conversation:
- * web search (SearXNG / Serper / Brave) and the code sandbox sidecar.
+ * web search (SearXNG / Serper / Brave / Tavily) and the code sandbox sidecar.
  *
  * Shares the global `/admin/settings` endpoint with other admin pages; PATCH
  * is scoped to the keys this page owns so concurrent edits don't clobber
@@ -382,6 +382,7 @@ export default function AdminTools() {
                     <SelectItem value="searxng">{t('admin:settings.fields.searchSearxng')}</SelectItem>
                     <SelectItem value="serper">{t('admin:settings.fields.searchSerper')}</SelectItem>
                     <SelectItem value="brave">{t('admin:settings.fields.searchBrave')}</SelectItem>
+                    <SelectItem value="tavily">{t('admin:settings.fields.searchTavily')}</SelectItem>
                   </SelectContent>
                 </Select>
               </Field>
@@ -418,7 +419,7 @@ export default function AdminTools() {
                 </div>
               )}
 
-              {(searchProvider === 'serper' || searchProvider === 'brave') && (
+              {(searchProvider === 'serper' || searchProvider === 'brave' || searchProvider === 'tavily') && (
                 <div className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-4">
                   <Field
                     label={t('admin:settings.fields.searchApiKey')}

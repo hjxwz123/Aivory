@@ -14,14 +14,14 @@ import (
 )
 
 // Searcher is the pluggable web-search backend abstraction (§4.4). Swap Serper
-// for Brave/Bing/SearXNG by providing another implementation — the tool code
-// is backend-agnostic.
+// for Brave/Tavily/Bing/SearXNG by providing another implementation — the tool
+// code is backend-agnostic.
 type Searcher interface {
 	Search(ctx context.Context, query string, topK int) (text string, citations []llm.Citation, err error)
 }
 
 // newSearcher builds the configured searcher. SearXNG can run unauthenticated
-// (apiKey is empty), but Serper/Brave require a key.
+// (apiKey is empty), but Serper/Brave/Tavily require a key.
 func newSearcher(provider, apiKey, baseURL string, selectedEngines ...[]string) Searcher {
 	switch strings.ToLower(provider) {
 	case "serper":
@@ -34,6 +34,11 @@ func newSearcher(provider, apiKey, baseURL string, selectedEngines ...[]string) 
 			return nil
 		}
 		return &braveSearcher{apiKey: apiKey}
+	case "tavily":
+		if apiKey == "" {
+			return nil
+		}
+		return &tavilySearcher{apiKey: apiKey}
 	case "searxng":
 		if baseURL == "" {
 			return nil
@@ -136,6 +141,62 @@ func (b *braveSearcher) Search(ctx context.Context, query string, topK int) (str
 		fmt.Fprintf(&out, "[%d] %s\n%s\n%s\n", i+1, r.Title, r.URL, snippet)
 		if r.PageAge != "" {
 			fmt.Fprintf(&out, "(date: %s)\n", r.PageAge)
+		}
+		out.WriteString("\n")
+	}
+	return out.String(), citations, nil
+}
+
+// tavilySearcher hits https://api.tavily.com/search.
+type tavilySearcher struct{ apiKey string }
+
+func (t *tavilySearcher) Search(ctx context.Context, query string, topK int) (string, []llm.Citation, error) {
+	body, _ := json.Marshal(map[string]any{
+		"query":          query,
+		"max_results":    topK,
+		"search_depth":   "basic",
+		"include_answer": false,
+		"topic":          "general",
+	})
+	req, _ := http.NewRequestWithContext(ctx, "POST", "https://api.tavily.com/search", strings.NewReader(string(body)))
+	req.Header.Set("Authorization", "Bearer "+t.apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	resp, err := toolHTTPClient.Do(req)
+	if err != nil {
+		return "", nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		bd, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return "", nil, fmt.Errorf("tavily: HTTP %d: %s", resp.StatusCode, string(bd))
+	}
+	var parsed struct {
+		Results []struct {
+			Title         string  `json:"title"`
+			URL           string  `json:"url"`
+			Content       string  `json:"content"`
+			Score         float64 `json:"score"`
+			PublishedDate string  `json:"published_date"`
+		} `json:"results"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return "", nil, err
+	}
+	if len(parsed.Results) == 0 {
+		return "No web results found for this query.", nil, nil
+	}
+	citations := []llm.Citation{}
+	out := strings.Builder{}
+	for i, r := range parsed.Results {
+		snippet := cleanSnippet(r.Content)
+		citations = append(citations, llm.Citation{
+			ID: fmt.Sprintf("w_%d", i+1), Index: i + 1,
+			Title: r.Title, URL: r.URL, Snippet: snippet, Source: "web",
+		})
+		fmt.Fprintf(&out, "[%d] %s\n%s\n%s\n", i+1, r.Title, r.URL, snippet)
+		if r.PublishedDate != "" {
+			fmt.Fprintf(&out, "(date: %s)\n", r.PublishedDate)
 		}
 		out.WriteString("\n")
 	}

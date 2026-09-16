@@ -331,7 +331,7 @@ func onboardingSettingString(db *sql.DB, key string) (string, error) {
 }
 
 // onboardingSearchReady mirrors the provider requirements in settingsSearcher:
-// Serper and Brave need a key; SearXNG needs an endpoint; auto can use either.
+// Serper, Brave, and Tavily need a key; SearXNG needs an endpoint; auto can use either.
 // A present admin setting deliberately overrides its environment fallback,
 // including an empty value, just as the live tool resolver does.
 func onboardingSearchReady(d Deps) (bool, error) {
@@ -348,7 +348,7 @@ func onboardingSearchReady(d Deps) (bool, error) {
 		return false, err
 	}
 	switch strings.ToLower(provider) {
-	case "serper", "brave":
+	case "serper", "brave", "tavily":
 		return apiKey != "", nil
 	case "searxng":
 		return baseURL != "", nil

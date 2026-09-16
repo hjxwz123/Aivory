@@ -1447,8 +1447,8 @@ var settingsKeys = []string{
 	"volcano_asr_ws_url", "volcano_asr_model_name",
 	"volcano_asr_enable_itn", "volcano_asr_enable_punc", "volcano_asr_enable_ddc",
 	// §4.4 web search backend — admin-configurable, live-reloaded each call.
-	// Provider ∈ {"", "serper", "brave", "searxng", "auto"}. SearXNG is the
-	// self-hosted option and only needs base_url (no api_key). Empty provider
+	// Provider ∈ {"", "serper", "brave", "tavily", "searxng", "auto"}. SearXNG is
+	// the self-hosted option and only needs base_url (no api_key). Empty provider
 	// falls back to the env values and finally to the no-op placeholder.
 	// search_engines is a comma/space-separated list of SearXNG engine names or
 	// shortcuts. Empty means that SearXNG chooses its enabled defaults.
