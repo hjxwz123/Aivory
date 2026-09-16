@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,23 +37,34 @@ type systemUpdateRelease struct {
 	Prerelease  bool   `json:"prerelease"`
 }
 
+type systemUpdateReleaseState struct {
+	Version     string `json:"version"`
+	Name        string `json:"name,omitempty"`
+	Notes       string `json:"notes,omitempty"`
+	URL         string `json:"url,omitempty"`
+	PublishedAt string `json:"published_at,omitempty"`
+	Prerelease  bool   `json:"prerelease"`
+	Installable bool   `json:"installable"`
+}
+
 type systemUpdateState struct {
-	CurrentVersion  string           `json:"current_version"`
-	LatestVersion   string           `json:"latest_version,omitempty"`
-	UpdateAvailable bool             `json:"update_available"`
-	Configured      bool             `json:"configured"`
-	ReleaseName     string           `json:"release_name,omitempty"`
-	ReleaseNotes    string           `json:"release_notes,omitempty"`
-	ReleaseURL      string           `json:"release_url,omitempty"`
-	PublishedAt     string           `json:"published_at,omitempty"`
-	CheckError      string           `json:"check_error,omitempty"`
-	UpdaterError    string           `json:"updater_error,omitempty"`
-	Job             *systemUpdateJob `json:"job,omitempty"`
+	CurrentVersion  string                     `json:"current_version"`
+	LatestVersion   string                     `json:"latest_version,omitempty"`
+	UpdateAvailable bool                       `json:"update_available"`
+	Configured      bool                       `json:"configured"`
+	ReleaseName     string                     `json:"release_name,omitempty"`
+	ReleaseNotes    string                     `json:"release_notes,omitempty"`
+	ReleaseURL      string                     `json:"release_url,omitempty"`
+	PublishedAt     string                     `json:"published_at,omitempty"`
+	Releases        []systemUpdateReleaseState `json:"releases,omitempty"`
+	CheckError      string                     `json:"check_error,omitempty"`
+	UpdaterError    string                     `json:"updater_error,omitempty"`
+	Job             *systemUpdateJob           `json:"job,omitempty"`
 }
 
 var systemUpdateReleases = struct {
 	sync.Mutex
-	release   systemUpdateRelease
+	releases  []systemUpdateRelease
 	fetchedAt time.Time
 	err       error
 }{}
@@ -71,17 +83,30 @@ func buildSystemUpdateState(d Deps, force bool) systemUpdateState {
 		current = "dev"
 	}
 	state := systemUpdateState{CurrentVersion: current}
-	release, err := latestSystemUpdateRelease(d, force)
+	releases, err := systemUpdateReleaseCatalog(d, force)
 	if err != nil {
 		state.CheckError = "release_check_failed"
 	} else {
-		latest := normalizeSystemUpdateVersion(release.TagName)
-		state.LatestVersion = latest
-		state.ReleaseName = release.Name
-		state.ReleaseNotes = release.Body
-		state.ReleaseURL = release.HTMLURL
-		state.PublishedAt = release.PublishedAt
-		state.UpdateAvailable = compareSystemVersions(latest, normalizeSystemUpdateVersion(current)) > 0
+		currentVersion := normalizeSystemUpdateVersion(current)
+		for _, release := range releases {
+			version := normalizeSystemUpdateVersion(release.TagName)
+			installable := compareSystemVersions(version, currentVersion) > 0
+			state.Releases = append(state.Releases, systemUpdateReleaseState{
+				Version: version, Name: release.Name, Notes: release.Body,
+				URL: release.HTMLURL, PublishedAt: release.PublishedAt,
+				Prerelease: release.Prerelease, Installable: installable,
+			})
+			// The sidebar consumes update_available. Keep these compatibility
+			// fields stable-only so test releases never light the global badge.
+			if !release.Prerelease && state.LatestVersion == "" {
+				state.LatestVersion = version
+				state.ReleaseName = release.Name
+				state.ReleaseNotes = release.Body
+				state.ReleaseURL = release.HTMLURL
+				state.PublishedAt = release.PublishedAt
+				state.UpdateAvailable = installable
+			}
+		}
 	}
 
 	job, configured, updaterErr := systemUpdaterStatus(d)
@@ -106,21 +131,27 @@ func startSystemUpdateAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("invalid update version"))
 		return
 	}
-	release, err := latestSystemUpdateRelease(d, true)
+	releases, err := systemUpdateReleaseCatalog(d, true)
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "release_check_failed"})
 		return
 	}
-	latest := normalizeSystemUpdateVersion(release.TagName)
-	if requested != latest || !validSystemUpdateVersion(latest) {
-		writeError(w, http.StatusConflict, errors.New("requested version is no longer the latest release"))
+	found := false
+	for _, release := range releases {
+		if requested == normalizeSystemUpdateVersion(release.TagName) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		writeError(w, http.StatusConflict, errors.New("requested version is no longer a published release"))
 		return
 	}
-	if compareSystemVersions(latest, normalizeSystemUpdateVersion(d.AppVersion)) <= 0 {
+	if compareSystemVersions(requested, normalizeSystemUpdateVersion(d.AppVersion)) <= 0 {
 		writeError(w, http.StatusConflict, errors.New("application is already up to date"))
 		return
 	}
-	payload, _ := json.Marshal(map[string]string{"version": latest})
+	payload, _ := json.Marshal(map[string]string{"version": requested})
 	status, response, configured, err := callSystemUpdater(d, http.MethodPost, "/v1/update", payload)
 	if !configured {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "updater_not_configured"})
@@ -144,19 +175,19 @@ func startSystemUpdateAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, status, map[string]any{"job": result.Job})
 }
 
-func latestSystemUpdateRelease(d Deps, force bool) (systemUpdateRelease, error) {
+func systemUpdateReleaseCatalog(d Deps, force bool) ([]systemUpdateRelease, error) {
 	systemUpdateReleases.Lock()
 	defer systemUpdateReleases.Unlock()
 	if !force && !systemUpdateReleases.fetchedAt.IsZero() && time.Since(systemUpdateReleases.fetchedAt) < 5*time.Minute {
-		return systemUpdateReleases.release, systemUpdateReleases.err
+		return append([]systemUpdateRelease(nil), systemUpdateReleases.releases...), systemUpdateReleases.err
 	}
 	apiURL := strings.TrimSpace(d.Config.ReleaseAPIURL)
 	if apiURL == "" {
-		return systemUpdateRelease{}, errors.New("release API is not configured")
+		return nil, errors.New("release API is not configured")
 	}
 	request, err := http.NewRequest(http.MethodGet, apiURL, nil)
 	if err != nil {
-		return systemUpdateRelease{}, err
+		return nil, err
 	}
 	request.Header.Set("Accept", "application/vnd.github+json")
 	request.Header.Set("User-Agent", "Aivory-System-Updater")
@@ -170,27 +201,67 @@ func latestSystemUpdateRelease(d Deps, force bool) (systemUpdateRelease, error) 
 		if response.StatusCode != http.StatusOK {
 			err = fmt.Errorf("release API returned %s", response.Status)
 		} else {
-			var release systemUpdateRelease
 			reader := io.LimitReader(response.Body, systemUpdateResponseLimit+1)
-			var body []byte
-			body, err = io.ReadAll(reader)
+			body, readErr := io.ReadAll(reader)
+			err = readErr
 			if err == nil && len(body) > systemUpdateResponseLimit {
 				err = errors.New("release response is too large")
 			}
+			var fetched []systemUpdateRelease
 			if err == nil {
-				err = json.Unmarshal(body, &release)
-			}
-			if err == nil && (release.Draft || release.Prerelease || !validSystemUpdateVersion(normalizeSystemUpdateVersion(release.TagName))) {
-				err = errors.New("latest release is not a stable semantic version")
+				trimmed := bytes.TrimSpace(body)
+				if len(trimmed) > 0 && trimmed[0] == '[' {
+					err = json.Unmarshal(trimmed, &fetched)
+				} else {
+					var release systemUpdateRelease
+					err = json.Unmarshal(trimmed, &release)
+					if err == nil {
+						fetched = []systemUpdateRelease{release}
+					}
+				}
 			}
 			if err == nil {
-				systemUpdateReleases.release = release
+				fetched = selectSystemUpdateReleases(fetched)
+				if len(fetched) == 0 {
+					err = errors.New("release API returned no valid published semantic versions")
+				} else {
+					systemUpdateReleases.releases = fetched
+				}
 			}
 		}
 	}
 	systemUpdateReleases.err = err
 	systemUpdateReleases.fetchedAt = time.Now()
-	return systemUpdateReleases.release, err
+	return append([]systemUpdateRelease(nil), systemUpdateReleases.releases...), err
+}
+
+// selectSystemUpdateReleases keeps the newest stable release and newest test
+// release. Drafts and malformed tags never become installable.
+func selectSystemUpdateReleases(releases []systemUpdateRelease) []systemUpdateRelease {
+	var stable, prerelease *systemUpdateRelease
+	for i := range releases {
+		release := releases[i]
+		version := normalizeSystemUpdateVersion(release.TagName)
+		if release.Draft || !validSystemUpdateVersion(version) {
+			continue
+		}
+		target := &stable
+		if release.Prerelease {
+			target = &prerelease
+		}
+		if *target == nil || compareSystemVersions(version, normalizeSystemUpdateVersion((*target).TagName)) > 0 {
+			copy := release
+			*target = &copy
+		}
+	}
+	selected := make([]systemUpdateRelease, 0, 2)
+	if stable != nil {
+		selected = append(selected, *stable)
+	}
+	if prerelease != nil {
+		selected = append(selected, *prerelease)
+	}
+	return selected
 }
 
 func systemUpdaterStatus(d Deps) (*systemUpdateJob, bool, error) {
@@ -251,37 +322,101 @@ func normalizeSystemUpdateVersion(version string) string {
 	return strings.TrimPrefix(strings.TrimSpace(version), "v")
 }
 
+var systemUpdateVersionPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$`)
+
 func validSystemUpdateVersion(version string) bool {
-	parts := strings.Split(version, ".")
-	if len(parts) != 3 {
+	match := systemUpdateVersionPattern.FindStringSubmatch(version)
+	if match == nil {
 		return false
 	}
-	for _, part := range parts {
-		if part == "" || (len(part) > 1 && part[0] == '0') {
-			return false
-		}
-		if _, err := strconv.ParseUint(part, 10, 32); err != nil {
-			return false
+	for _, identifier := range strings.Split(match[4], ".") {
+		if len(identifier) > 1 && identifier[0] == '0' {
+			if _, err := strconv.ParseUint(identifier, 10, 64); err == nil {
+				return false
+			}
 		}
 	}
 	return true
 }
 
-func compareSystemVersions(a, b string) int {
-	if !validSystemUpdateVersion(a) || !validSystemUpdateVersion(b) {
-		return 0
+type systemUpdateSemver struct {
+	core       [3]uint64
+	prerelease []string
+}
+
+func parseSystemUpdateVersion(version string) (systemUpdateSemver, bool) {
+	match := systemUpdateVersionPattern.FindStringSubmatch(version)
+	if match == nil || !validSystemUpdateVersion(version) {
+		return systemUpdateSemver{}, false
 	}
-	ap := strings.Split(a, ".")
-	bp := strings.Split(b, ".")
+	var parsed systemUpdateSemver
 	for i := 0; i < 3; i++ {
-		av, _ := strconv.ParseUint(ap[i], 10, 32)
-		bv, _ := strconv.ParseUint(bp[i], 10, 32)
+		value, err := strconv.ParseUint(match[i+1], 10, 64)
+		if err != nil {
+			return systemUpdateSemver{}, false
+		}
+		parsed.core[i] = value
+	}
+	if match[4] != "" {
+		parsed.prerelease = strings.Split(match[4], ".")
+	}
+	return parsed, true
+}
+
+func comparePrereleaseIdentifiers(a, b string) int {
+	av, aErr := strconv.ParseUint(a, 10, 64)
+	bv, bErr := strconv.ParseUint(b, 10, 64)
+	switch {
+	case aErr == nil && bErr == nil:
 		if av < bv {
 			return -1
 		}
 		if av > bv {
 			return 1
 		}
+	case aErr == nil:
+		return -1
+	case bErr == nil:
+		return 1
+	default:
+		return strings.Compare(a, b)
+	}
+	return 0
+}
+
+func compareSystemVersions(a, b string) int {
+	av, aOK := parseSystemUpdateVersion(a)
+	bv, bOK := parseSystemUpdateVersion(b)
+	if !aOK || !bOK {
+		return 0
+	}
+	for i := 0; i < 3; i++ {
+		if av.core[i] < bv.core[i] {
+			return -1
+		}
+		if av.core[i] > bv.core[i] {
+			return 1
+		}
+	}
+	if len(av.prerelease) == 0 && len(bv.prerelease) == 0 {
+		return 0
+	}
+	if len(av.prerelease) == 0 {
+		return 1
+	}
+	if len(bv.prerelease) == 0 {
+		return -1
+	}
+	for i := 0; i < len(av.prerelease) && i < len(bv.prerelease); i++ {
+		if compared := comparePrereleaseIdentifiers(av.prerelease[i], bv.prerelease[i]); compared != 0 {
+			return compared
+		}
+	}
+	if len(av.prerelease) < len(bv.prerelease) {
+		return -1
+	}
+	if len(av.prerelease) > len(bv.prerelease) {
+		return 1
 	}
 	return 0
 }

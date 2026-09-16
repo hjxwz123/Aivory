@@ -122,7 +122,7 @@ func Load() Config {
 		OAuthReturnOrigins:     getenvList("OAUTH_RETURN_ORIGINS", nil),
 		SystemUpdaterURL:       strings.TrimRight(getenv("AIVORY_UPDATER_URL", ""), "/"),
 		SystemUpdaterTokenFile: getenv("AIVORY_UPDATER_TOKEN_FILE", "/app/data/.aivory-update-token"),
-		ReleaseAPIURL:          getenv("AIVORY_RELEASE_API_URL", "https://api.github.com/repos/hjxwz123/Aivory/releases/latest"),
+		ReleaseAPIURL:          getenv("AIVORY_RELEASE_API_URL", "https://api.github.com/repos/hjxwz123/Aivory/releases?per_page=20"),
 	}
 	cfg.LocalStorageDir = strings.TrimSpace(os.Getenv("AIVORY_LOCAL_STORAGE_DIR"))
 	if cfg.LocalStorageDir == "" {

@@ -440,6 +440,10 @@
     "previewFullscreen": "全螢幕",
     "previewExitFullscreen": "退出全螢幕",
     "previewClose": "關閉預覽",
+    "copyPreviewLink": "複製公開預覽連結",
+    "previewLinkCopied": "公開預覽連結已複製",
+    "previewLinkCreatedCopyFailed": "公開連結已建立，但複製失敗",
+    "previewLinkFailed": "無法建立公開預覽連結",
     "mermaidFailed": "無法渲染該圖表，已顯示原始碼。"
   },
   "diagram": {
@@ -676,7 +680,11 @@
       "title": "系統更新",
       "description": "檢查並安裝已發布的 Aivory 版本。",
       "current": "目前版本",
+      "selected": "已選版本",
       "latest": "最新版本",
+      "releaseChannel": "版本通道",
+      "stableRelease": "穩定版",
+      "testRelease": "測試版",
       "unknown": "未知",
       "available": "可更新",
       "check": "檢查更新",

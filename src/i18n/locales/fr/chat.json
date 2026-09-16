@@ -440,6 +440,10 @@
     "previewFullscreen": "Plein écran",
     "previewExitFullscreen": "Quitter le plein écran",
     "previewClose": "Fermer l'aperçu",
+    "copyPreviewLink": "Copier le lien d’aperçu public",
+    "previewLinkCopied": "Lien d’aperçu public copié",
+    "previewLinkCreatedCopyFailed": "Le lien public a été créé, mais n’a pas pu être copié",
+    "previewLinkFailed": "Impossible de créer le lien d’aperçu public",
     "mermaidFailed": "Impossible d'afficher ce diagramme — affichage de la source."
   },
   "diagram": {
@@ -676,7 +680,11 @@
       "title": "Mise à jour du système",
       "description": "Rechercher et installer les versions publiées d’Aivory.",
       "current": "Version actuelle",
+      "selected": "Version sélectionnée",
       "latest": "Dernière version",
+      "releaseChannel": "Canal de publication",
+      "stableRelease": "Stable",
+      "testRelease": "Test",
       "unknown": "Inconnue",
       "available": "Mise à jour disponible",
       "check": "Rechercher les mises à jour",

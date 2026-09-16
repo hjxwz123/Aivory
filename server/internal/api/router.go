@@ -208,6 +208,7 @@ func NewRouter(d Deps) http.Handler {
 	// Public read-only conversation share (token in the path; no auth). Rate
 	// limited (§D1) so the token space can't be swept even though it's now 192-bit.
 	mux.handle("GET", "/api/public/shared/:token", rateLimitedIP(d, "share", rlPublicSharedConversationMax, rlPublicSharedConversationWindow, wrap(d, publicSharedHandler)))
+	mux.handle("GET", "/api/public/html-previews/:token", rateLimitedIP(d, "html_preview", rlPublicSharedConversationMax, rlPublicSharedConversationWindow, wrap(d, publicHTMLPreviewShareHandler)))
 	// Share-scoped assets: uploaded attachments + generated artifacts referenced
 	// by the snapshot (the private /api/files|artifacts routes need the owner's
 	// session, which share viewers don't have). Membership in the snapshot is the
@@ -283,6 +284,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("POST", "/api/auth/sessions/:jti/revoke", requireAuth(d, revokeSessionHandler))
 
 	mux.handle("GET", "/api/models", requireAuth(d, listModelsHandler))
+	mux.handle("POST", "/api/html-previews", requireAuth(d, createHTMLPreviewShareHandler))
 	mux.handle("GET", "/api/tools", requireAuth(d, listSelectableToolsHandler))
 	mux.handle("GET", "/api/image-models", requireAuth(d, listImageModelsHandler))
 	mux.handle("GET", "/api/skills", requireAuth(d, listSkillsPublicHandler))

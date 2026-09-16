@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildHtmlPreviewDocument } from '@/lib/html-preview-document'
+import { buildHtmlPreviewDocument, buildPublicHtmlPreviewDocument } from '@/lib/html-preview-document'
 
 describe('buildHtmlPreviewDocument', () => {
   it('loads the bundled Tailwind runtime for generated utility-class fragments', () => {
@@ -76,5 +76,15 @@ describe('buildHtmlPreviewDocument', () => {
 
   it('keeps an empty preview empty', () => {
     expect(buildHtmlPreviewDocument('')).toBe('')
+  })
+
+  it('uses a stable runtime URL for durable public previews', () => {
+    const document = buildPublicHtmlPreviewDocument(
+      '<main class="grid gap-4 rounded-lg p-4">Public preview</main>',
+    )
+
+    expect(document).toContain('data-aivory-tailwind')
+    expect(document).toContain('src="/tailwind-browser.js"')
+    expect(document).toContain('upgrade-insecure-requests')
   })
 })

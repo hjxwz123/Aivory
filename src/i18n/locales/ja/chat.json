@@ -440,6 +440,10 @@
     "previewFullscreen": "全画面",
     "previewExitFullscreen": "全画面を終了",
     "previewClose": "プレビューを閉じる",
+    "copyPreviewLink": "公開プレビューリンクをコピー",
+    "previewLinkCopied": "公開プレビューリンクをコピーしました",
+    "previewLinkCreatedCopyFailed": "公開リンクは作成されましたが、コピーできませんでした",
+    "previewLinkFailed": "公開プレビューリンクを作成できませんでした",
     "mermaidFailed": "この図をレンダリングできませんでした — ソースを表示しています。"
   },
   "diagram": {
@@ -676,7 +680,11 @@
       "title": "システム更新",
       "description": "公開済みの Aivory リリースを確認してインストールします。",
       "current": "現在のバージョン",
+      "selected": "選択したバージョン",
       "latest": "最新バージョン",
+      "releaseChannel": "リリースチャンネル",
+      "stableRelease": "安定版",
+      "testRelease": "テスト版",
       "unknown": "不明",
       "available": "更新あり",
       "check": "更新を確認",

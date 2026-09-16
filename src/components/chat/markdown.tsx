@@ -28,6 +28,8 @@ interface MarkdownProps {
   live?: boolean
   /** Stable prefix (message id) so code blocks keep their identity across remounts. */
   blockKeyPrefix?: string
+  /** Allow completed assistant HTML blocks to create anonymous preview links. */
+  allowHtmlShare?: boolean
   /** Citations for this turn — inline `[n]` markers become source links. */
   citations?: Citation[]
   /** Artifacts owned by this message, used to resolve sandbox output links. */
@@ -65,6 +67,7 @@ interface MarkdownBlockViewProps {
   index: number
   live: boolean
   blockKeyPrefix?: string
+  allowHtmlShare: boolean
   cites: CiteRef[]
   breaks: boolean
   mathCopyLabels: MathCopyLabels
@@ -83,6 +86,7 @@ const MarkdownBlockView = memo(
     index,
     live,
     blockKeyPrefix,
+    allowHtmlShare,
     cites,
     breaks,
     mathCopyLabels,
@@ -134,6 +138,7 @@ const MarkdownBlockView = memo(
             live={live}
             className={blockAnim}
             previewKey={blockKeyPrefix ? `${blockKeyPrefix}#${index}` : undefined}
+            allowPublicShare={allowHtmlShare}
           />
         )
       case 'blockquote':
@@ -189,6 +194,7 @@ const MarkdownBlockView = memo(
     prev.index === next.index &&
     prev.live === next.live &&
     prev.blockKeyPrefix === next.blockKeyPrefix &&
+    prev.allowHtmlShare === next.allowHtmlShare &&
     prev.cites === next.cites &&
     prev.breaks === next.breaks &&
     prev.mathCopyLabels === next.mathCopyLabels &&
@@ -223,6 +229,7 @@ export const Markdown = memo(function Markdown({
   className,
   live = false,
   blockKeyPrefix,
+  allowHtmlShare = false,
   citations,
   artifacts,
   onOpenDocumentCitation,
@@ -286,6 +293,7 @@ export const Markdown = memo(function Markdown({
           index={index}
           live={live}
           blockKeyPrefix={blockKeyPrefix}
+          allowHtmlShare={allowHtmlShare}
           cites={cites}
           breaks={breaks}
           mathCopyLabels={mathCopyLabels}

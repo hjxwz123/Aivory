@@ -1,8 +1,9 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Copy, Check, Play, Square, AppWindow, CodeXml } from 'lucide-react'
+import { Copy, Check, Play, Square, AppWindow, CodeXml, Link2, LoaderCircle } from 'lucide-react'
 import { Tooltip } from '@/components/ui/tooltip'
 import { useCopy } from '@/hooks/use-clipboard'
+import { useHTMLPreviewShare } from '@/hooks/use-html-preview-share'
 import { useCodeHighlight } from '@/lib/syntax/use-code-highlight'
 import {
   runPython,
@@ -27,6 +28,8 @@ interface CodeBlockProps {
    * HTML preview panel ownership; falls back to useId when absent.
    */
   previewKey?: string
+  /** Public preview links are only offered for completed assistant output. */
+  allowPublicShare?: boolean
 }
 
 const PYTHON_LANGS = new Set(['python', 'py', 'python3'])
@@ -65,7 +68,7 @@ function isHtmlSnippet(code: string, lang?: string): boolean {
  * result well underneath; HTML blocks gain a Preview button and, while the
  * message streams, drive the live preview drawer automatically.
  */
-export function CodeBlock({ code, lang, className, live = false, previewKey }: CodeBlockProps) {
+export function CodeBlock({ code, lang, className, live = false, previewKey, allowPublicShare = false }: CodeBlockProps) {
   const { t } = useTranslation('chat')
   const { copied, copy } = useCopy()
   const theme = useTheme((s) => s.resolved)
@@ -75,6 +78,7 @@ export function CodeBlock({ code, lang, className, live = false, previewKey }: C
   const blockKey = previewKey ?? fallbackKey
   const isPython = PYTHON_LANGS.has((lang ?? '').toLowerCase())
   const isHtml = isHtmlSnippet(code, lang)
+  const previewShare = useHTMLPreviewShare(code)
 
   // ---- Python execution -------------------------------------------------
   const [running, setRunning] = useState(false)
@@ -112,9 +116,9 @@ export function CodeBlock({ code, lang, className, live = false, previewKey }: C
       // Streaming HTML pops the drawer once, then keeps it in sync.
       autoOpenPreview(blockKey, code)
     } else if (ownsPreview) {
-      useHtmlPreview.getState().syncHtml(blockKey, code)
+      useHtmlPreview.getState().syncHtml(blockKey, code, allowPublicShare && !live)
     }
-  }, [isHtml, live, code, blockKey, ownsPreview])
+  }, [isHtml, live, code, blockKey, ownsPreview, allowPublicShare])
 
   return (
     <div
@@ -155,10 +159,25 @@ export function CodeBlock({ code, lang, className, live = false, previewKey }: C
           ) : null}
           {isHtml ? (
             <IconAction
-              onClick={() => useHtmlPreview.getState().openPreview(blockKey, code)}
+              onClick={() => useHtmlPreview.getState().openPreview(blockKey, code, allowPublicShare && !live)}
               label={t('code.preview')}
             >
               <AppWindow size={13} aria-hidden />
+            </IconAction>
+          ) : null}
+          {isHtml && allowPublicShare && !live ? (
+            <IconAction
+              onClick={() => void previewShare.copyLink()}
+              label={previewShare.copied ? t('code.previewLinkCopied') : t('code.copyPreviewLink')}
+              disabled={previewShare.sharing}
+            >
+              {previewShare.sharing ? (
+                <LoaderCircle className="animate-spin" size={13} aria-hidden />
+              ) : previewShare.copied ? (
+                <Check size={13} aria-hidden />
+              ) : (
+                <Link2 size={13} aria-hidden />
+              )}
             </IconAction>
           ) : null}
           <IconAction onClick={() => void copy(code)} label={copied ? t('actions.copied') : t('actions.copy')}>
@@ -189,22 +208,24 @@ interface IconActionProps {
   onClick: () => void
   label: string
   children: ReactNode
+  disabled?: boolean
 }
 
 // Icon-only header action (Run / Preview / Copy). The label rides in a tooltip
 // + aria-label so the header stays minimal while keeping the action discoverable.
-function IconAction({ onClick, label, children }: IconActionProps) {
+function IconAction({ onClick, label, children, disabled = false }: IconActionProps) {
   return (
     <Tooltip content={label}>
       <button
         type="button"
         onClick={onClick}
+        disabled={disabled}
         aria-label={label}
         className={cn(
           'inline-flex items-center justify-center size-7 max-sm:size-[var(--tap-min)] rounded-[7px]',
           'text-[var(--color-fg-subtle)] interactive',
           'hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:pointer-events-none disabled:opacity-50',
         )}
       >
         {children}

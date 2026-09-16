@@ -439,6 +439,7 @@ func TestConfigTableOrderExcludesUserDataTables(t *testing.T) {
 		"conversations",
 		"messages",
 		"conversation_shares",
+		"html_preview_shares",
 		"files",
 		"documents",
 		"chunks",

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertTriangle, CheckCircle2, Download, ExternalLink, FileText, RefreshCw, ServerCog } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { systemUpdateApi, type SystemUpdateState } from '@/api/system-update'
+import { systemUpdateApi, type SystemUpdateRelease, type SystemUpdateState } from '@/api/system-update'
 import { Markdown } from '@/components/chat/markdown'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -48,12 +48,18 @@ export function SystemUpdateDialog({ open, onOpenChange, onSummaryChange }: Prop
   const [checking, setChecking] = useState(false)
   const [starting, setStarting] = useState(false)
   const [notesOpen, setNotesOpen] = useState(false)
+  const [selectedVersion, setSelectedVersion] = useState('')
   const mounted = useRef(true)
 
   const applyState = useCallback((next: SystemUpdateState) => {
     if (!mounted.current) return
     setState(next)
     setLoading(false)
+    setSelectedVersion((current) => {
+      const releases = next.releases ?? []
+      if (releases.some((release) => release.version === current)) return current
+      return releases.find((release) => release.installable)?.version ?? releases[0]?.version ?? ''
+    })
     onSummaryChange({
       currentVersion: next.current_version || 'dev',
       updateAvailable: next.update_available,
@@ -102,7 +108,7 @@ export function SystemUpdateDialog({ open, onOpenChange, onSummaryChange }: Prop
   }
 
   async function startUpdate() {
-    const version = state?.latest_version
+    const version = selectedVersion
     if (!version) return
     setStarting(true)
     try {
@@ -116,12 +122,13 @@ export function SystemUpdateDialog({ open, onOpenChange, onSummaryChange }: Prop
     }
   }
 
-  const published = state?.published_at
-    ? new Intl.DateTimeFormat(i18n.language, { dateStyle: 'medium' }).format(new Date(state.published_at))
+  const selectedRelease = state?.releases?.find((release) => release.version === selectedVersion)
+  const published = selectedRelease?.published_at
+    ? new Intl.DateTimeFormat(i18n.language, { dateStyle: 'medium' }).format(new Date(selectedRelease.published_at))
     : null
   const jobFailed = state?.job?.status === 'failed'
   const jobCompleted = state?.job?.status === 'completed'
-  const canUpdate = Boolean(state?.configured && state.update_available && state.latest_version && !active)
+  const canUpdate = Boolean(state?.configured && selectedRelease?.installable && !active)
 
   function openNotes() {
     onOpenChange(false)
@@ -156,15 +163,37 @@ export function SystemUpdateDialog({ open, onOpenChange, onSummaryChange }: Prop
                     <div className="mt-1 font-mono text-sm font-semibold text-[var(--color-fg)]">v{state?.current_version ?? 'dev'}</div>
                   </div>
                   <div className="bg-[var(--color-surface)] p-3.5">
-                    <div className="text-xs text-[var(--color-fg-subtle)]">{t('userMenu.systemUpdate.latest')}</div>
+                    <div className="text-xs text-[var(--color-fg-subtle)]">{t('userMenu.systemUpdate.selected')}</div>
                     <div className="mt-1 flex items-center gap-2">
                       <span className="font-mono text-sm font-semibold text-[var(--color-fg)]">
-                        {state?.latest_version ? `v${state.latest_version}` : t('userMenu.systemUpdate.unknown')}
+                        {selectedRelease ? `v${selectedRelease.version}` : t('userMenu.systemUpdate.unknown')}
                       </span>
-                      {state?.update_available && <Badge size="xs" variant="warning">{t('userMenu.systemUpdate.available')}</Badge>}
+                      {selectedRelease?.prerelease ? (
+                        <Badge size="xs" variant="info">{t('userMenu.systemUpdate.testRelease')}</Badge>
+                      ) : state?.update_available && selectedRelease?.version === state.latest_version ? (
+                        <Badge size="xs" variant="warning">{t('userMenu.systemUpdate.available')}</Badge>
+                      ) : null}
                     </div>
                   </div>
                 </div>
+
+                {(state?.releases?.length ?? 0) > 0 && (
+                  <div>
+                    <div className="mb-2 text-xs font-medium text-[var(--color-fg-muted)]">{t('userMenu.systemUpdate.releaseChannel')}</div>
+                    <div className="flex gap-1 rounded-[8px] bg-[var(--color-bg-muted)] p-1" role="radiogroup" aria-label={t('userMenu.systemUpdate.releaseChannel')}>
+                      {state?.releases?.map((release) => (
+                        <ReleaseChoice
+                          key={release.version}
+                          release={release}
+                          selected={release.version === selectedVersion}
+                          onSelect={() => setSelectedVersion(release.version)}
+                          stableLabel={t('userMenu.systemUpdate.stableRelease')}
+                          testLabel={t('userMenu.systemUpdate.testRelease')}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {active && (
                   <div className="rounded-[8px] border border-[var(--color-info)]/20 bg-[var(--color-info-soft)] p-3.5">
@@ -196,10 +225,10 @@ export function SystemUpdateDialog({ open, onOpenChange, onSummaryChange }: Prop
                   </div>
                 )}
 
-                {state?.latest_version && (
+                {selectedRelease && (
                   <div className="flex items-center justify-between gap-3 border-t border-[var(--color-divider)] pt-3">
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-[var(--color-fg)]">{state.release_name || `v${state.latest_version}`}</div>
+                      <div className="truncate text-sm font-medium text-[var(--color-fg)]">{selectedRelease.name || `v${selectedRelease.version}`}</div>
                       {published && <div className="mt-0.5 text-xs text-[var(--color-fg-subtle)]">{published}</div>}
                     </div>
                     <Button variant="ghost" size="sm" leadingIcon={<FileText size={14} />} onClick={openNotes}>
@@ -215,7 +244,7 @@ export function SystemUpdateDialog({ open, onOpenChange, onSummaryChange }: Prop
               {t('userMenu.systemUpdate.check')}
             </Button>
             <Button leadingIcon={<Download size={15} />} loading={starting || active} disabled={!canUpdate} onClick={startUpdate}>
-              {active ? t('userMenu.systemUpdate.updating') : state?.update_available ? t('userMenu.systemUpdate.updateNow') : t('userMenu.systemUpdate.upToDate')}
+              {active ? t('userMenu.systemUpdate.updating') : selectedRelease?.installable ? t('userMenu.systemUpdate.updateNow') : t('userMenu.systemUpdate.upToDate')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -224,22 +253,22 @@ export function SystemUpdateDialog({ open, onOpenChange, onSummaryChange }: Prop
       <Dialog open={notesOpen} onOpenChange={setNotesOpen}>
         <DialogContent size="lg" className="h-[min(46rem,calc(100dvh-2rem))] overflow-hidden">
           <DialogHeader>
-            <DialogTitle>{state?.release_name || t('userMenu.systemUpdate.releaseNotes')}</DialogTitle>
-            <DialogDescription>{state?.latest_version ? `v${state.latest_version}${published ? ` · ${published}` : ''}` : ''}</DialogDescription>
+            <DialogTitle>{selectedRelease?.name || t('userMenu.systemUpdate.releaseNotes')}</DialogTitle>
+            <DialogDescription>{selectedRelease ? `v${selectedRelease.version}${published ? ` · ${published}` : ''}` : ''}</DialogDescription>
           </DialogHeader>
           <DialogBody className="overscroll-contain">
-            {state?.release_notes ? (
+            {selectedRelease?.notes ? (
               <div className="mx-auto w-full max-w-[72ch]">
-                <Markdown content={state.release_notes} className="prose-full text-sm" />
+                <Markdown content={selectedRelease.notes} className="prose-full text-sm" />
               </div>
             ) : (
               <p className="py-8 text-center text-sm text-[var(--color-fg-muted)]">{t('userMenu.systemUpdate.noNotes')}</p>
             )}
           </DialogBody>
           <DialogFooter>
-            {state?.release_url && (
+            {selectedRelease?.url && (
               <Button asChild variant="secondary" leadingIcon={<ExternalLink size={14} />}>
-                <a href={state.release_url} target="_blank" rel="noreferrer">{t('userMenu.systemUpdate.openRelease')}</a>
+                <a href={selectedRelease.url} target="_blank" rel="noreferrer">{t('userMenu.systemUpdate.openRelease')}</a>
               </Button>
             )}
             <Button onClick={() => setNotesOpen(false)}>{t('userMenu.systemUpdate.close')}</Button>
@@ -247,5 +276,36 @@ export function SystemUpdateDialog({ open, onOpenChange, onSummaryChange }: Prop
         </DialogContent>
       </Dialog>
     </>
+  )
+}
+
+function ReleaseChoice({
+  release,
+  selected,
+  onSelect,
+  stableLabel,
+  testLabel,
+}: {
+  release: SystemUpdateRelease
+  selected: boolean
+  onSelect: () => void
+  stableLabel: string
+  testLabel: string
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      onClick={onSelect}
+      className={`min-w-0 flex-1 rounded-[6px] px-3 py-2 text-left interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] ${
+        selected
+          ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]'
+          : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
+      }`}
+    >
+      <span className="block truncate text-xs font-medium">{release.prerelease ? testLabel : stableLabel}</span>
+      <span className="mt-0.5 block truncate font-mono text-xs">v{release.version}</span>
+    </button>
   )
 }

@@ -445,6 +445,10 @@
     "previewFullscreen": "Fullscreen",
     "previewExitFullscreen": "Exit fullscreen",
     "previewClose": "Close preview",
+    "copyPreviewLink": "Copy public preview link",
+    "previewLinkCopied": "Public preview link copied",
+    "previewLinkCreatedCopyFailed": "The public link was created, but it could not be copied",
+    "previewLinkFailed": "Could not create the public preview link",
     "mermaidFailed": "Could not render this diagram — showing source."
   },
   "diagram": {
@@ -681,7 +685,11 @@
       "title": "System update",
       "description": "Check for and install published Aivory releases.",
       "current": "Current version",
+      "selected": "Selected version",
       "latest": "Latest version",
+      "releaseChannel": "Release channel",
+      "stableRelease": "Stable",
+      "testRelease": "Test",
       "unknown": "Unknown",
       "available": "Update available",
       "check": "Check for updates",

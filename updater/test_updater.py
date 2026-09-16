@@ -34,9 +34,17 @@ class UpdateManagerTest(unittest.TestCase):
     def test_rejects_non_semantic_or_injected_version(self):
         temp, manager, _ = self.make_manager()
         self.addCleanup(temp.cleanup)
-        for version in ("latest", "v2.4.8", "2.4.8-rc1", "2.04.8", "2.4.8;id", "2.4"):
+        for version in ("latest", "v2.4.8", "2.4.8+build", "2.4.8-rc.01", "2.04.8", "2.4.8;id", "2.4"):
             with self.assertRaises(ValueError):
                 manager.start(version)
+
+    def test_accepts_prerelease_version(self):
+        temp, manager, _ = self.make_manager()
+        self.addCleanup(temp.cleanup)
+        with patch.object(manager, "_run", return_value=None):
+            job, started = manager.start("2.4.9-beta.2")
+        self.assertTrue(started)
+        self.assertEqual(job["version"], "2.4.9-beta.2")
 
     def test_env_update_preserves_other_values(self):
         temp, manager, env = self.make_manager()

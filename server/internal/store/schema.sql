@@ -739,6 +739,17 @@ CREATE TABLE IF NOT EXISTS conversation_shares (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_conv_shares_conv ON conversation_shares(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_conv_shares_user ON conversation_shares(user_id);
 
+-- Public, capability-addressed HTML previews created from assistant replies.
+-- The public handler serves html verbatim under a CSP sandbox so executable
+-- previews cannot inherit the Aivory application's origin privileges.
+CREATE TABLE IF NOT EXISTS html_preview_shares (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  html       TEXT NOT NULL,
+  created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_html_preview_shares_user ON html_preview_shares(user_id);
+
 CREATE TABLE IF NOT EXISTS files (
   id              TEXT PRIMARY KEY,
   user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

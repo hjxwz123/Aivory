@@ -14,9 +14,10 @@ interface HtmlPreviewStore {
   /** Identity of the code block currently driving the panel. */
   sourceKey: string | null
   html: string
-  openPreview: (key: string, html: string) => void
+  shareable: boolean
+  openPreview: (key: string, html: string, shareable?: boolean) => void
   /** Update markup without stealing ownership — no-op unless `key` owns the panel. */
-  syncHtml: (key: string, html: string) => void
+  syncHtml: (key: string, html: string, shareable?: boolean) => void
   close: () => void
 }
 
@@ -24,16 +25,17 @@ export const useHtmlPreview = create<HtmlPreviewStore>((set, get) => ({
   open: false,
   sourceKey: null,
   html: '',
-  openPreview(key, html) {
+  shareable: false,
+  openPreview(key, html, shareable = false) {
     // Mutual exclusion: only one right-edge drawer at a time.
     useInlineThreadDrawer.getState().close()
     useConversationFiles.getState().close()
     useSandboxFiles.getState().close()
-    set({ open: true, sourceKey: key, html })
+    set({ open: true, sourceKey: key, html, shareable })
   },
-  syncHtml(key, html) {
+  syncHtml(key, html, shareable = false) {
     const s = get()
-    if (s.sourceKey === key && s.html !== html) set({ html })
+    if (s.sourceKey === key && (s.html !== html || s.shareable !== shareable)) set({ html, shareable })
   },
   close() {
     set({ open: false })
@@ -49,9 +51,9 @@ const autoOpened = new Set<string>()
 
 export function autoOpenPreview(key: string, html: string): void {
   if (autoOpened.has(key)) {
-    useHtmlPreview.getState().syncHtml(key, html)
+    useHtmlPreview.getState().syncHtml(key, html, false)
     return
   }
   autoOpened.add(key)
-  useHtmlPreview.getState().openPreview(key, html)
+  useHtmlPreview.getState().openPreview(key, html, false)
 }

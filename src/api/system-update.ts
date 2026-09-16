@@ -12,6 +12,16 @@ export interface SystemUpdateJob {
   completed_at?: number
 }
 
+export interface SystemUpdateRelease {
+  version: string
+  name?: string
+  notes?: string
+  url?: string
+  published_at?: string
+  prerelease: boolean
+  installable: boolean
+}
+
 export interface SystemUpdateState {
   current_version: string
   latest_version?: string
@@ -21,6 +31,7 @@ export interface SystemUpdateState {
   release_notes?: string
   release_url?: string
   published_at?: string
+  releases?: SystemUpdateRelease[]
   check_error?: string
   updater_error?: string
   job?: SystemUpdateJob

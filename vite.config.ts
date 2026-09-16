@@ -1,6 +1,11 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'node:path'
+import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+
+const require = createRequire(import.meta.url)
+const tailwindBrowserRuntime = readFileSync(require.resolve('@tailwindcss/browser'), 'utf8')
 
 // §23 version probe: every production build gets a unique version id, baked
 // into the bundle (__APP_VERSION__) AND emitted as dist/version.json. Open tabs
@@ -24,6 +29,24 @@ export default defineConfig({
           type: 'asset',
           fileName: 'version.json',
           source: JSON.stringify({ version: appVersion }),
+        })
+      },
+    },
+    {
+      name: 'aivory-stable-tailwind-browser-runtime',
+      configureServer(server) {
+        server.middlewares.use('/tailwind-browser.js', (_req, res) => {
+          res.statusCode = 200
+          res.setHeader('Content-Type', 'text/javascript; charset=utf-8')
+          res.setHeader('Cache-Control', 'no-cache')
+          res.end(tailwindBrowserRuntime)
+        })
+      },
+      generateBundle() {
+        this.emitFile({
+          type: 'asset',
+          fileName: 'tailwind-browser.js',
+          source: tailwindBrowserRuntime,
         })
       },
     },

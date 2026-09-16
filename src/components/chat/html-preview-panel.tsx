@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Maximize2, Minimize2, RotateCw } from 'lucide-react'
+import { Check, Link2, LoaderCircle, Maximize2, Minimize2, RotateCw } from 'lucide-react'
 import { ChatSidePanel, ChatSidePanelHeader } from '@/components/chat/chat-side-panel'
 import { Tooltip } from '@/components/ui/tooltip'
 import { buildHtmlPreviewDocument } from '@/lib/html-preview-document'
 import { useHtmlPreview } from '@/store/html-preview'
+import { useHTMLPreviewShare } from '@/hooks/use-html-preview-share'
 
 /**
  * HtmlPreviewPanel — renders assistant-produced HTML in a sandboxed iframe.
@@ -36,6 +37,7 @@ import { useHtmlPreview } from '@/store/html-preview'
 export function HtmlPreviewPanel() {
   const open = useHtmlPreview((s) => s.open)
   const html = useHtmlPreview((s) => s.html)
+  const shareable = useHtmlPreview((s) => s.shareable)
   const close = useHtmlPreview((s) => s.close)
   const { t } = useTranslation('chat')
   const { pathname } = useLocation()
@@ -65,6 +67,7 @@ export function HtmlPreviewPanel() {
     <ChatSidePanel open={open} title={t('code.previewTitle')} onClose={close}>
       <PreviewBody
         doc={doc}
+        shareable={shareable && doc === html}
         reloadKey={reloadKey}
         onRefresh={() => setReloadKey((k) => k + 1)}
         onClose={close}
@@ -75,15 +78,17 @@ export function HtmlPreviewPanel() {
 
 interface PreviewBodyProps {
   doc: string
+  shareable: boolean
   reloadKey: number
   onRefresh: () => void
   onClose: () => void
 }
 
-function PreviewBody({ doc, reloadKey, onRefresh, onClose }: PreviewBodyProps) {
+function PreviewBody({ doc, shareable, reloadKey, onRefresh, onClose }: PreviewBodyProps) {
   const { t } = useTranslation('chat')
   const rootRef = useRef<HTMLDivElement>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const previewShare = useHTMLPreviewShare(doc)
 
   // Keep local state in sync with the native fullscreen lifecycle (Esc exits).
   useEffect(() => {
@@ -108,6 +113,19 @@ function PreviewBody({ doc, reloadKey, onRefresh, onClose }: PreviewBodyProps) {
         closeLabel={t('code.previewClose')}
         onClose={onClose}
       >
+        {shareable ? (
+          <Tooltip content={previewShare.copied ? t('code.previewLinkCopied') : t('code.copyPreviewLink')}>
+            <button
+              type="button"
+              onClick={() => void previewShare.copyLink()}
+              disabled={previewShare.sharing}
+              aria-label={previewShare.copied ? t('code.previewLinkCopied') : t('code.copyPreviewLink')}
+              className="inline-flex items-center justify-center size-8 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:pointer-events-none disabled:opacity-50"
+            >
+              {previewShare.sharing ? <LoaderCircle className="animate-spin" size={14} aria-hidden /> : previewShare.copied ? <Check size={14} aria-hidden /> : <Link2 size={14} aria-hidden />}
+            </button>
+          </Tooltip>
+        ) : null}
         <Tooltip content={t(isFullscreen ? 'code.previewExitFullscreen' : 'code.previewFullscreen', { defaultValue: isFullscreen ? 'Exit fullscreen' : 'Fullscreen' })}>
           <button
             type="button"

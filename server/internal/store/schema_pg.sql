@@ -689,6 +689,16 @@ CREATE TABLE IF NOT EXISTS conversation_shares (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_conv_shares_conv ON conversation_shares(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_conv_shares_user ON conversation_shares(user_id);
 
+-- Public HTML previews. Response-level CSP sandboxing gives each document an
+-- opaque origin even though it is served by the application host.
+CREATE TABLE IF NOT EXISTS html_preview_shares (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  html       TEXT NOT NULL,
+  created_at BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
+);
+CREATE INDEX IF NOT EXISTS idx_html_preview_shares_user ON html_preview_shares(user_id);
+
 CREATE TABLE IF NOT EXISTS files (
   id              TEXT PRIMARY KEY,
   user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

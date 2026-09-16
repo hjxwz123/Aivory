@@ -1004,6 +1004,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
                     content={message.content}
                     live={Boolean(message.streaming)}
                     blockKeyPrefix={message.id}
+                    allowHtmlShare={!readOnly && !message.streaming}
                     citations={message.citations}
                     artifacts={message.artifacts}
                     onOpenDocumentCitation={readOnly ? undefined : openDocumentCitation}

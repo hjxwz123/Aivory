@@ -5,6 +5,7 @@ const PREVIEW_RESOURCE_HEAD =
   '<base target="_blank" rel="noopener noreferrer">'
 
 const TAILWIND_RUNTIME = `<script data-aivory-tailwind src="${tailwindBrowserUrl}"></script>`
+const PUBLIC_TAILWIND_RUNTIME = '<script data-aivory-tailwind src="/tailwind-browser.js"></script>'
 const GOOGLE_FONTS_STYLESHEET_HOST = /(?:https?:)?\/\/fonts\.googleapis\.com(?=\/)/gi
 const GOOGLE_FONTS_FILE_HOST = /(?:https?:)?\/\/fonts\.gstatic\.com(?=\/)/gi
 
@@ -48,12 +49,11 @@ function rewriteRestrictedResources(html: string): string {
     .replace(GOOGLE_FONTS_FILE_HOST, 'https://gstatic.loli.net')
 }
 
-/** Build an isolated preview document and support generated Tailwind fragments. */
-export function buildHtmlPreviewDocument(html: string): string {
+function buildPreviewDocument(html: string, tailwindRuntime: string): string {
   if (!html) return html
 
   const previewHtml = rewriteRestrictedResources(html)
-  const previewHead = PREVIEW_RESOURCE_HEAD + (usesTailwindUtilities(previewHtml) ? TAILWIND_RUNTIME : '')
+  const previewHead = PREVIEW_RESOURCE_HEAD + (usesTailwindUtilities(previewHtml) ? tailwindRuntime : '')
   const headOpen = /<head[^>]*>/i
   if (headOpen.test(previewHtml)) return previewHtml.replace(headOpen, (match) => match + previewHead)
 
@@ -61,4 +61,14 @@ export function buildHtmlPreviewDocument(html: string): string {
   if (htmlOpen.test(previewHtml)) return previewHtml.replace(htmlOpen, (match) => `${match}<head>${previewHead}</head>`)
 
   return previewHead + previewHtml
+}
+
+/** Build the in-app iframe document using Vite's current hashed runtime asset. */
+export function buildHtmlPreviewDocument(html: string): string {
+  return buildPreviewDocument(html, TAILWIND_RUNTIME)
+}
+
+/** Build a durable public document whose runtime URL survives app upgrades. */
+export function buildPublicHtmlPreviewDocument(html: string): string {
+  return buildPreviewDocument(html, PUBLIC_TAILWIND_RUNTIME)
 }

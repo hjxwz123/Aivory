@@ -440,6 +440,10 @@
     "previewFullscreen": "全屏",
     "previewExitFullscreen": "退出全屏",
     "previewClose": "关闭预览",
+    "copyPreviewLink": "复制公开预览链接",
+    "previewLinkCopied": "公开预览链接已复制",
+    "previewLinkCreatedCopyFailed": "公开链接已创建，但复制失败",
+    "previewLinkFailed": "无法创建公开预览链接",
     "mermaidFailed": "无法渲染该图表，已显示源代码。"
   },
   "diagram": {
@@ -676,7 +680,11 @@
       "title": "系统更新",
       "description": "检查并安装已发布的 Aivory 版本。",
       "current": "当前版本",
+      "selected": "已选版本",
       "latest": "最新版本",
+      "releaseChannel": "版本通道",
+      "stableRelease": "稳定版",
+      "testRelease": "测试版",
       "unknown": "未知",
       "available": "可更新",
       "check": "检查更新",

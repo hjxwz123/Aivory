@@ -19,7 +19,10 @@ from pathlib import Path
 from typing import Any
 
 
-VERSION_RE = re.compile(r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$")
+VERSION_RE = re.compile(
+    r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    r"(?:-(?:[0-9A-Za-z-]+)(?:\.[0-9A-Za-z-]+)*)?$"
+)
 ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -92,7 +95,11 @@ class UpdateManager:
             return dict(self.state)
 
     def start(self, version: str) -> tuple[dict[str, Any], bool]:
-        if not VERSION_RE.fullmatch(version):
+        if not VERSION_RE.fullmatch(version) or any(
+            len(identifier) > 1 and identifier.startswith("0")
+            for identifier in version.partition("-")[2].split(".")
+            if identifier.isdigit()
+        ):
             raise ValueError("version must be a semantic image tag")
         with self.lock:
             if self.state.get("status") in {"pulling", "restarting", "checking"}:
