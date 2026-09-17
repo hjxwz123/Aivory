@@ -84,6 +84,88 @@ func TestOpenAIChatToolLoopReplaysReasoningContent(t *testing.T) {
 	}
 }
 
+func TestOpenAIChatDedupesIdenticalDualFieldReasoning(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		// DeepSeek-compatible gateways often mirror the same reasoning payload
+		// into both `reasoning_content` and `reasoning` on every chunk.
+		_, _ = w.Write([]byte(strings.Join([]string{
+			`data: {"choices":[{"delta":{"reasoning_content":"The user","reasoning":"The user"}}]}`,
+			`data: {"choices":[{"delta":{"reasoning_content":" asks","reasoning":" asks"}}]}`,
+			`data: {"choices":[{"delta":{"reasoning_content":"","reasoning":" only-reasoning"}}]}`,
+			`data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}`,
+			`data: [DONE]`,
+			``,
+		}, "\n\n")))
+	}))
+	defer server.Close()
+
+	var thinkingDeltas []string
+	result, err := (&OpenAIProvider{}).Stream(context.Background(), UnifiedChatRequest{
+		Model: ModelInfo{RequestID: "deepseek-v4.1", BaseURL: server.URL, APIKey: "key", APIFormat: "chat"},
+		History: []UnifiedMessage{{
+			Role:   "user",
+			Blocks: []UnifiedBlock{{Kind: "text", Text: "hello"}},
+		}},
+	}, nil, func(ev SseEvent) {
+		if ev.Type == "thinking_delta" {
+			thinkingDeltas = append(thinkingDeltas, ev.Text)
+		}
+	})
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+
+	joined := strings.Join(thinkingDeltas, "")
+	if joined != "The user asks only-reasoning" {
+		t.Fatalf("thinking deltas = %#v joined %q, want single-pass text", thinkingDeltas, joined)
+	}
+	if len(result.Blocks) == 0 {
+		t.Fatal("expected result blocks")
+	}
+	var persistedThinking string
+	for _, b := range result.Blocks {
+		if b.Kind == "thinking" {
+			persistedThinking += b.Text
+		}
+	}
+	if persistedThinking != "The user asks only-reasoning" {
+		t.Fatalf("persisted thinking = %q, want single-pass text", persistedThinking)
+	}
+}
+
+func TestOpenAIChatKeepsDistinctDualFieldReasoning(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(strings.Join([]string{
+			`data: {"choices":[{"delta":{"reasoning_content":"from-content","reasoning":"from-reasoning"}}]}`,
+			`data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}`,
+			`data: [DONE]`,
+			``,
+		}, "\n\n")))
+	}))
+	defer server.Close()
+
+	var thinkingDeltas []string
+	_, err := (&OpenAIProvider{}).Stream(context.Background(), UnifiedChatRequest{
+		Model: ModelInfo{RequestID: "dual-distinct", BaseURL: server.URL, APIKey: "key", APIFormat: "chat"},
+		History: []UnifiedMessage{{
+			Role:   "user",
+			Blocks: []UnifiedBlock{{Kind: "text", Text: "hello"}},
+		}},
+	}, nil, func(ev SseEvent) {
+		if ev.Type == "thinking_delta" {
+			thinkingDeltas = append(thinkingDeltas, ev.Text)
+		}
+	})
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	if joined := strings.Join(thinkingDeltas, ""); joined != "from-contentfrom-reasoning" {
+		t.Fatalf("thinking deltas = %#v joined %q, want both distinct fields", thinkingDeltas, joined)
+	}
+}
+
 func TestOpenAIChatRepairsReasoningMissingFromLegacyRaw(t *testing.T) {
 	var captured map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

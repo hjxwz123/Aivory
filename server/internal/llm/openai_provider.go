@@ -1367,10 +1367,15 @@ func readOpenAIChatStream(body io.Reader, onEvent func(SseEvent)) (string, openA
 			// Reasoning models on the Chat Completions wire (OpenAI o-series via
 			// compatible gateways, DeepSeek-R1, etc.) stream chain-of-thought as
 			// `reasoning_content` or `reasoning` deltas — surface them as thinking.
-			if s, _ := delta["reasoning_content"].(string); s != "" {
-				appendReasoning("reasoning_content", s)
-			}
-			if s, _ := delta["reasoning"].(string); s != "" {
+			// Some DeepSeek-compatible gateways put the SAME text in both fields
+			// on every chunk; appending both would double every token in the UI.
+			if rc, _ := delta["reasoning_content"].(string); rc != "" {
+				rg, _ := delta["reasoning"].(string)
+				appendReasoning("reasoning_content", rc)
+				if rg != "" && rg != rc {
+					appendReasoning("reasoning", rg)
+				}
+			} else if s, _ := delta["reasoning"].(string); s != "" {
 				appendReasoning("reasoning", s)
 			}
 			if s, _ := delta["content"].(string); s != "" {
