@@ -1004,6 +1004,7 @@ func loadBackupImportAdmin(ctx context.Context, ex store.RowExecer, userID strin
 	rows, err := ex.QueryContext(ctx, `
 		SELECT i.provider_id, i.subject, i.email, i.created_at,
 		       p.id, p.kind, p.name, p.icon, p.client_id, p.client_secret,
+		       p.agent_id,
 		       p.issuer_url, p.jwks_url, p.auth_url, p.token_url, p.userinfo_url,
 		       p.scopes, p.team_id, p.key_id, p.subject_namespace, p.enabled,
 		       p.sort_order, p.updated_at
@@ -1021,6 +1022,7 @@ func loadBackupImportAdmin(ctx context.Context, ex store.RowExecer, userID strin
 		if err := rows.Scan(
 			&identity.ProviderID, &identity.Subject, &identity.Email, &identity.CreatedAt,
 			&provider.ID, &provider.Kind, &provider.Name, &provider.Icon, &provider.ClientID, &provider.ClientSecret,
+			&provider.AgentID,
 			&provider.IssuerURL, &provider.JWKSURL, &provider.AuthURL, &provider.TokenURL, &provider.UserInfoURL,
 			&provider.Scopes, &provider.TeamID, &provider.KeyID, &provider.SubjectNamespace,
 			&enabled, &provider.SortOrder, &provider.UpdatedAt,
@@ -1259,18 +1261,20 @@ func reconcileBackupImportAdmin(ctx context.Context, ex store.RowExecer, snap *b
 			return fmt.Errorf("%w: OAuth provider name conflicts with importing administrator identity", errBackupImportAdminUnauthorized)
 		}
 		if _, err := ex.ExecContext(ctx, `INSERT INTO oauth_providers(
-			id, kind, name, icon, client_id, client_secret, issuer_url, jwks_url,
+			id, kind, name, icon, client_id, client_secret, agent_id, issuer_url, jwks_url,
 			auth_url, token_url, userinfo_url, scopes, team_id, key_id, subject_namespace,
 			enabled, sort_order, updated_at)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 			ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, name=excluded.name,
 			icon=excluded.icon, client_id=excluded.client_id, client_secret=excluded.client_secret,
+			agent_id=excluded.agent_id,
 			issuer_url=excluded.issuer_url, jwks_url=excluded.jwks_url, auth_url=excluded.auth_url,
 			token_url=excluded.token_url, userinfo_url=excluded.userinfo_url, scopes=excluded.scopes,
 			team_id=excluded.team_id, key_id=excluded.key_id, subject_namespace=excluded.subject_namespace,
 			enabled=excluded.enabled,
 			sort_order=excluded.sort_order, updated_at=excluded.updated_at`,
 			provider.ID, provider.Kind, provider.Name, provider.Icon, provider.ClientID, provider.ClientSecret,
+			provider.AgentID,
 			provider.IssuerURL, provider.JWKSURL, provider.AuthURL, provider.TokenURL, provider.UserInfoURL,
 			provider.Scopes, provider.TeamID, provider.KeyID, provider.SubjectNamespace,
 			boolToInt(provider.Enabled), provider.SortOrder, time.Now().Unix()); err != nil {
@@ -1683,7 +1687,7 @@ func normalizeConfigOAuthProviderRows(ctx context.Context, tx *sql.Tx, r io.Read
 			dst  *string
 		}{
 			{"kind", &final.Kind}, {"name", &final.Name}, {"icon", &final.Icon},
-			{"client_id", &final.ClientID}, {"issuer_url", &final.IssuerURL},
+			{"client_id", &final.ClientID}, {"agent_id", &final.AgentID}, {"issuer_url", &final.IssuerURL},
 			{"jwks_url", &final.JWKSURL}, {"auth_url", &final.AuthURL},
 			{"token_url", &final.TokenURL}, {"userinfo_url", &final.UserInfoURL},
 			{"scopes", &final.Scopes}, {"team_id", &final.TeamID}, {"key_id", &final.KeyID},
@@ -1740,6 +1744,7 @@ func normalizeConfigOAuthProviderRows(ctx context.Context, tx *sql.Tx, r io.Read
 		setConfigArchiveString(row, "icon", final.Icon)
 		setConfigArchiveString(row, "client_id", final.ClientID)
 		setConfigArchiveString(row, "client_secret", final.ClientSecret)
+		setConfigArchiveString(row, "agent_id", final.AgentID)
 		setConfigArchiveString(row, "issuer_url", final.IssuerURL)
 		setConfigArchiveString(row, "jwks_url", final.JWKSURL)
 		setConfigArchiveString(row, "auth_url", final.AuthURL)

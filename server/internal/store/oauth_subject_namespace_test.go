@@ -34,12 +34,12 @@ func TestMigrateReclassifiesOnlyLegacyUserInfoOIDCProviders(t *testing.T) {
 		t.Fatal(err)
 	}
 	for id, wantKind := range map[string]string{"oa_legacy": "oauth2", "oa_draft": "oidc"} {
-		var kind, marker, scopes string
-		if err := db.QueryRow(`SELECT kind,subject_namespace,scopes FROM oauth_providers WHERE id=?`, id).Scan(&kind, &marker, &scopes); err != nil {
+		var kind, marker, scopes, agentID string
+		if err := db.QueryRow(`SELECT kind,subject_namespace,scopes,agent_id FROM oauth_providers WHERE id=?`, id).Scan(&kind, &marker, &scopes, &agentID); err != nil {
 			t.Fatal(err)
 		}
-		if kind != wantKind || marker != "" {
-			t.Fatalf("provider %s kind=%q marker=%q, want kind=%q empty marker", id, kind, marker, wantKind)
+		if kind != wantKind || marker != "" || agentID != "" {
+			t.Fatalf("provider %s kind=%q marker=%q agent_id=%q, want kind=%q empty marker/agent_id", id, kind, marker, agentID, wantKind)
 		}
 		if id == "oa_legacy" && scopes != "openid email profile" {
 			t.Fatalf("legacy UserInfo scopes=%q, want materialized previous default", scopes)
@@ -97,6 +97,7 @@ func TestInitializeOAuthProviderSubjectNamespaceRejectsEveryStaleTrustField(t *t
 		{"kind", "kind", "github"},
 		{"client id", "client_id", "changed-client"},
 		{"client secret", "client_secret", "changed-secret"},
+		{"WeCom agent", "agent_id", "1000009"},
 		{"issuer", "issuer_url", "https://issuer.example.test"},
 		{"jwks", "jwks_url", "https://issuer.example.test/keys"},
 		{"authorization endpoint", "auth_url", "https://issuer.example.test/authorize"},

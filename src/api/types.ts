@@ -686,7 +686,7 @@ export interface ApiPasskey {
 /** WebAuthn option/response documents travel as opaque JSON (see lib/passkey). */
 export type PasskeyJson = Record<string, unknown>
 
-export type OAuthKind = 'google' | 'github' | 'apple' | 'oauth2' | 'oidc'
+export type OAuthKind = 'google' | 'github' | 'apple' | 'wecom' | 'oauth2' | 'oidc'
 
 /** Full provider record (admin view). client_secret is never returned. */
 export interface ApiOAuthProvider {
@@ -696,6 +696,7 @@ export interface ApiOAuthProvider {
   icon: string
   client_id: string
   has_secret: boolean
+  agent_id: string
   issuer_url: string
   jwks_url: string
   auth_url: string

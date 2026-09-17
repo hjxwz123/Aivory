@@ -249,12 +249,13 @@ func ValidateModelBilling(m *Model) error {
 // the admin UI whether a secret is on file without leaking it.
 type OAuthProvider struct {
 	ID           string `json:"id"`
-	Kind         string `json:"kind"` // google | github | apple | oidc | oauth2
+	Kind         string `json:"kind"` // google | github | apple | wecom | oidc | oauth2
 	Name         string `json:"name"`
 	Icon         string `json:"icon"`
 	ClientID     string `json:"client_id"`
 	ClientSecret string `json:"-"`
 	HasSecret    bool   `json:"has_secret"`
+	AgentID      string `json:"agent_id"`
 	IssuerURL    string `json:"issuer_url"`
 	JWKSURL      string `json:"jwks_url"`
 	AuthURL      string `json:"auth_url"`

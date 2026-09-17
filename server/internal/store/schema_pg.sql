@@ -876,6 +876,7 @@ CREATE TABLE IF NOT EXISTS oauth_providers (
   icon          TEXT NOT NULL DEFAULT '',
   client_id     TEXT NOT NULL DEFAULT '',
   client_secret TEXT NOT NULL DEFAULT '',
+  agent_id      TEXT NOT NULL DEFAULT '',
   issuer_url    TEXT NOT NULL DEFAULT '',
   jwks_url      TEXT NOT NULL DEFAULT '',
   auth_url      TEXT NOT NULL DEFAULT '',

@@ -192,6 +192,7 @@ export default function AdminOAuth() {
   const kind = editor.draft.kind ?? 'google'
   const {
     usesAppleCredentials: isApple,
+    usesWeComCredentials: isWeCom,
     usesCustomIcon,
     showsCustomEndpoints,
     showsOidcMetadata,
@@ -382,17 +383,32 @@ export default function AdminOAuth() {
                 </Field>
               )}
 
-              <Field label={t('admin:oauth.fields.clientId')} htmlFor="oa-cid">
+              <Field label={isWeCom ? t('admin:oauth.fields.corpId') : t('admin:oauth.fields.clientId')} htmlFor="oa-cid">
                 <Input
                   id="oa-cid"
                   value={editor.draft.client_id ?? ''}
                   onChange={(e) => setDraft({ client_id: e.target.value })}
-                  placeholder={isApple ? 'com.example.app (Services ID)' : '…'}
+                  placeholder={isApple ? 'com.example.app (Services ID)' : isWeCom ? 'ww0000000000000000' : '…'}
                 />
               </Field>
 
+              {isWeCom ? (
+                <Field label={t('admin:oauth.fields.agentId')} htmlFor="oa-agent-id">
+                  <Input
+                    id="oa-agent-id"
+                    value={editor.draft.agent_id ?? ''}
+                    onChange={(e) => setDraft({ agent_id: e.target.value })}
+                    placeholder="1000001"
+                  />
+                </Field>
+              ) : null}
+
               <Field
-                label={isApple ? t('admin:oauth.fields.clientSecretApple') : t('admin:oauth.fields.clientSecret')}
+                label={isApple
+                  ? t('admin:oauth.fields.clientSecretApple')
+                  : isWeCom
+                    ? t('admin:oauth.fields.wecomSecret')
+                    : t('admin:oauth.fields.clientSecret')}
                 htmlFor="oa-secret"
                 hint={editor.row ? t('admin:oauth.fields.clientSecretHintEdit') : undefined}
               >

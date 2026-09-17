@@ -458,6 +458,7 @@
       "google": "Google",
       "github": "GitHub",
       "apple": "Apple",
+      "wecom": "WeCom（企業微信）",
       "oauth2": "汎用 OAuth 2.0",
       "oidc": "汎用 OIDC"
     },
@@ -468,7 +469,10 @@
       "iconBuiltin": "組み込みのブランドアイコンを使用します。",
       "iconPlaceholder": "🔑 / https://… / —",
       "clientId": "Client ID",
+      "corpId": "企業 ID（CorpID）",
+      "agentId": "アプリ AgentID",
       "clientSecret": "Client secret",
+      "wecomSecret": "アプリ Secret",
       "clientSecretApple": "秘密鍵（.p8）",
       "clientSecretHintEdit": "空欄にすると保存済みのシークレットを保持します。",
       "issuerUrl": "Issuer URL",
@@ -489,6 +493,7 @@
       "google": "Google Cloud → 認証情報 で OAuth クライアントを作成。",
       "github": "GitHub → 開発者設定 → OAuth Apps で作成。",
       "apple": "Apple Developer で Services ID と AuthKey(.p8)を作成。",
+      "wecom": "WeCom 管理画面でカスタムアプリを作成し、WeCom 認証ログインを有効化して、上記リダイレクト URI のドメインを信頼済みドメインに登録します。",
       "oauth2": "プロバイダーの認可、トークン、UserInfo エンドポイントを使用します。",
       "oidc": "検証済み ID Token と Issuer / JWKS メタデータを使用します。"
     },

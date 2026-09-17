@@ -263,6 +263,91 @@ func TestBuiltInOAuthProviderAdminUsesPinnedOfficialEndpoints(t *testing.T) {
 	}
 }
 
+func TestWeComProviderRequiresCredentialsAndUsesPinnedOfficialEndpoints(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		body map[string]any
+	}{
+		{name: "missing CorpID", body: map[string]any{"agent_id": "1000002", "client_secret": "secret"}},
+		{name: "missing AgentID", body: map[string]any{"client_id": "ww-corp", "client_secret": "secret"}},
+		{name: "missing Secret", body: map[string]any{"client_id": "ww-corp", "agent_id": "1000002"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fx := newOAuthAdminFixture(t, "")
+			test.body["kind"] = "wecom"
+			test.body["name"] = test.name
+			test.body["enabled"] = true
+			rec := fx.request(t, http.MethodPost, "/api/admin/oauth-providers", test.body)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+
+	fx := newOAuthAdminFixture(t, "")
+	created := decodeOAuthAdminResponse[adminOAuthProviderResponse](t,
+		fx.request(t, http.MethodPost, "/api/admin/oauth-providers", map[string]any{
+			"kind": "wecom", "name": "企业微信", "client_id": "ww-corp", "agent_id": "1000002",
+			"client_secret": "wecom-secret", "enabled": true,
+			"auth_url": "https://attacker.example/authorize", "token_url": "https://attacker.example/token",
+			"userinfo_url": "https://attacker.example/userinfo",
+		}), http.StatusCreated)
+	if created.Kind != "wecom" || created.ClientID != "ww-corp" || created.AgentID != "1000002" || !created.HasSecret ||
+		!oauthProviderReady(created.OAuthProvider) ||
+		created.AuthURL != "https://login.work.weixin.qq.com/wwlogin/sso/login" ||
+		created.TokenURL != "https://qyapi.weixin.qq.com/cgi-bin/gettoken" ||
+		created.UserInfoURL != "https://qyapi.weixin.qq.com/cgi-bin/auth/getuserinfo" {
+		t.Fatalf("created WeCom provider = %+v", created.OAuthProvider)
+	}
+	if created.ClientSecret != "" || strings.Contains(created.RedirectURI, "wecom-secret") {
+		t.Fatalf("create response leaked WeCom secret: %+v", created)
+	}
+	stored, err := store.GetOAuthProvider(t.Context(), fx.db, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.ClientSecret != "wecom-secret" || !oauthProviderReady(*stored) {
+		t.Fatalf("stored WeCom provider = %+v", stored)
+	}
+
+	rejected := fx.request(t, http.MethodPatch, "/api/admin/oauth-providers/"+created.ID, map[string]any{
+		"agent_id": "1000003",
+	})
+	if rejected.Code != http.StatusBadRequest || !strings.Contains(rejected.Body.String(), errOAuthClientSecretReentryRequired.Error()) {
+		t.Fatalf("AgentID update without secret status=%d body=%s", rejected.Code, rejected.Body.String())
+	}
+	updated := decodeOAuthAdminResponse[adminOAuthProviderResponse](t,
+		fx.request(t, http.MethodPatch, "/api/admin/oauth-providers/"+created.ID, map[string]any{
+			"agent_id": "1000003", "client_secret": "replacement-secret",
+		}), http.StatusOK)
+	if updated.AgentID != "1000003" || !updated.HasSecret || updated.ClientSecret != "" {
+		t.Fatalf("updated WeCom provider = %+v", updated.OAuthProvider)
+	}
+	stored, err = store.GetOAuthProvider(t.Context(), fx.db, created.ID)
+	if err != nil || stored.ClientSecret != "replacement-secret" || stored.AgentID != "1000003" {
+		t.Fatalf("stored updated WeCom provider=%+v err=%v", stored, err)
+	}
+}
+
+func TestWeComDraftCanBeCompletedAndEnabledAtomically(t *testing.T) {
+	fx := newOAuthAdminFixture(t, "")
+	draft := decodeOAuthAdminResponse[adminOAuthProviderResponse](t,
+		fx.request(t, http.MethodPost, "/api/admin/oauth-providers", map[string]any{
+			"kind": "wecom", "name": "WeCom draft", "enabled": false,
+		}), http.StatusCreated)
+	if oauthProviderReady(draft.OAuthProvider) {
+		t.Fatalf("incomplete WeCom draft is ready: %+v", draft.OAuthProvider)
+	}
+
+	enabled := decodeOAuthAdminResponse[adminOAuthProviderResponse](t,
+		fx.request(t, http.MethodPatch, "/api/admin/oauth-providers/"+draft.ID, map[string]any{
+			"client_id": "ww-corp", "agent_id": "1000002", "client_secret": "app-secret", "enabled": true,
+		}), http.StatusOK)
+	if !enabled.Enabled || !enabled.HasSecret || !oauthProviderReady(enabled.OAuthProvider) {
+		t.Fatalf("completed WeCom provider = %+v", enabled.OAuthProvider)
+	}
+}
+
 func TestGenericOAuth2ProviderPreservesCustomEndpointsAndBecomesReady(t *testing.T) {
 	fx := newOAuthAdminFixture(t, "")
 	created := decodeOAuthAdminResponse[adminOAuthProviderResponse](t,

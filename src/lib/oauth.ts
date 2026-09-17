@@ -1,12 +1,13 @@
 import type { OAuthKind } from '@/api/types'
 
-export const OAUTH_PROVIDER_KINDS = ['google', 'github', 'apple', 'oauth2', 'oidc'] as const satisfies readonly OAuthKind[]
+export const OAUTH_PROVIDER_KINDS = ['google', 'github', 'apple', 'wecom', 'oauth2', 'oidc'] as const satisfies readonly OAuthKind[]
 
 export function getOAuthProviderFormCapabilities(kind: OAuthKind) {
   const isGeneric = kind === 'oauth2' || kind === 'oidc'
 
   return {
     usesAppleCredentials: kind === 'apple',
+    usesWeComCredentials: kind === 'wecom',
     usesCustomIcon: isGeneric,
     showsCustomEndpoints: isGeneric,
     showsOidcMetadata: kind === 'oidc',

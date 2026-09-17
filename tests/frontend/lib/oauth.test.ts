@@ -26,8 +26,8 @@ describe('oauthStartPath', () => {
 })
 
 describe('OAuth provider form capabilities', () => {
-  it('offers generic OAuth 2.0 as a distinct provider type', () => {
-    expect(OAUTH_PROVIDER_KINDS).toEqual(['google', 'github', 'apple', 'oauth2', 'oidc'])
+  it('offers WeCom and generic OAuth 2.0 as distinct provider types', () => {
+    expect(OAUTH_PROVIDER_KINDS).toEqual(['google', 'github', 'apple', 'wecom', 'oauth2', 'oidc'])
   })
 
   it('maps stable admin API errors to localized messages', () => {
@@ -44,6 +44,7 @@ describe('OAuth provider form capabilities', () => {
   it('shows UserInfo endpoints but not OIDC verification metadata for OAuth 2.0', () => {
     expect(getOAuthProviderFormCapabilities('oauth2')).toEqual({
       usesAppleCredentials: false,
+      usesWeComCredentials: false,
       usesCustomIcon: true,
       showsCustomEndpoints: true,
       showsOidcMetadata: false,
@@ -54,6 +55,7 @@ describe('OAuth provider form capabilities', () => {
   it('keeps issuer and JWKS fields exclusive to generic OIDC', () => {
     expect(getOAuthProviderFormCapabilities('oidc')).toEqual({
       usesAppleCredentials: false,
+      usesWeComCredentials: false,
       usesCustomIcon: true,
       showsCustomEndpoints: true,
       showsOidcMetadata: true,
@@ -61,14 +63,27 @@ describe('OAuth provider form capabilities', () => {
     })
 
     expect(getOAuthProviderFormCapabilities('github').showsCustomEndpoints).toBe(false)
+    expect(getOAuthProviderFormCapabilities('wecom')).toEqual({
+      usesAppleCredentials: false,
+      usesWeComCredentials: true,
+      usesCustomIcon: false,
+      showsCustomEndpoints: false,
+      showsOidcMetadata: false,
+      showsUserInfoEndpoint: false,
+    })
   })
 
   it('labels and explains both generic protocols in every admin locale', () => {
     for (const [locale, messages] of Object.entries(adminLocales)) {
       expect(messages.oauth.kinds.oauth2, `${locale} OAuth 2.0 label`).toBeTruthy()
       expect(messages.oauth.kinds.oidc, `${locale} OIDC label`).toBeTruthy()
+      expect(messages.oauth.kinds.wecom, `${locale} WeCom label`).toBeTruthy()
       expect(messages.oauth.hints.oauth2, `${locale} OAuth 2.0 hint`).toBeTruthy()
       expect(messages.oauth.hints.oidc, `${locale} OIDC hint`).toBeTruthy()
+      expect(messages.oauth.hints.wecom, `${locale} WeCom hint`).toBeTruthy()
+      expect(messages.oauth.fields.corpId, `${locale} CorpID label`).toBeTruthy()
+      expect(messages.oauth.fields.agentId, `${locale} AgentID label`).toBeTruthy()
+      expect(messages.oauth.fields.wecomSecret, `${locale} WeCom secret label`).toBeTruthy()
       expect(messages.oauth.fields.scopesHintOauth2, `${locale} OAuth 2.0 scopes hint`).toBeTruthy()
       expect(messages.oauth.fields.scopesHintOidc, `${locale} OIDC scopes hint`).toContain('openid email profile')
       expect(messages.oauth.fields.scopesHintOauth2).not.toBe(messages.oauth.fields.scopesHintOidc)

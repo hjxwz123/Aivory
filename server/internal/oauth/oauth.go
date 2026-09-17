@@ -1,6 +1,6 @@
 // Package oauth implements the provider-agnostic Authorization Code flow used
-// by the social-login handlers. It special-cases the three built-in providers
-// (Google, GitHub, Apple), a generic OIDC provider, and a generic OAuth 2.0
+// by the social-login handlers. It special-cases the built-in providers
+// (Google, GitHub, Apple, WeCom), a generic OIDC provider, and a generic OAuth 2.0
 // provider whose endpoints are supplied by the admin.
 //
 // ID tokens are authenticated independently of the token endpoint connection:
@@ -27,6 +27,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -41,6 +42,7 @@ type Config struct {
 	Kind         string
 	ClientID     string
 	ClientSecret string // Apple: the AuthKey .p8 private key (PEM)
+	AgentID      string // WeCom application AgentID
 	IssuerURL    string
 	JWKSURL      string
 	AuthURL      string
@@ -53,8 +55,9 @@ type Config struct {
 
 // Tokens is the relevant slice of a token-endpoint response.
 type Tokens struct {
-	AccessToken string
-	IDToken     string
+	AccessToken       string
+	IDToken           string
+	AuthorizationCode string // WeCom resolves the member after obtaining an app token.
 }
 
 // tokenEndpointError preserves only the protocol fields needed to classify a
@@ -86,6 +89,16 @@ type UserInfo struct {
 
 var httpClientTimeout = 15 * time.Second
 var httpClient = &http.Client{Timeout: httpClientTimeout}
+
+type weComCachedToken struct {
+	AccessToken string
+	ExpiresAt   time.Time
+}
+
+var weComTokenCache = struct {
+	sync.Mutex
+	entries map[[sha256.Size]byte]weComCachedToken
+}{entries: make(map[[sha256.Size]byte]weComCachedToken)}
 
 // A token request can fail before the provider processes the authorization
 // code (for example, a stalled route while awaiting response headers). One
@@ -145,6 +158,13 @@ func Resolve(c Config) Config {
 		c.TokenURL = "https://appleid.apple.com/auth/token"
 		c.UserInfoURL = ""
 		c.Scopes = orStr(c.Scopes, "name email")
+	case "wecom":
+		c.IssuerURL = ""
+		c.JWKSURL = ""
+		c.AuthURL = "https://login.work.weixin.qq.com/wwlogin/sso/login"
+		c.TokenURL = "https://qyapi.weixin.qq.com/cgi-bin/gettoken"
+		c.UserInfoURL = "https://qyapi.weixin.qq.com/cgi-bin/auth/getuserinfo"
+		c.Scopes = ""
 	case "oidc": // Generic OIDC relies on the admin-supplied endpoints.
 		c.Scopes = orStr(c.Scopes, "openid email profile")
 	case "oauth2":
@@ -190,6 +210,15 @@ func UsesIDToken(kind string) bool {
 
 // AuthCodeURL builds the provider authorize URL the browser is redirected to.
 func (c Config) AuthCodeURL(redirectURI, state, codeChallenge, nonce string) string {
+	if c.Kind == "wecom" {
+		q := url.Values{}
+		q.Set("login_type", "CorpApp")
+		q.Set("appid", c.ClientID)
+		q.Set("agentid", c.AgentID)
+		q.Set("redirect_uri", redirectURI)
+		q.Set("state", state)
+		return c.AuthURL + "?" + q.Encode()
+	}
 	q := url.Values{}
 	q.Set("client_id", c.ClientID)
 	q.Set("redirect_uri", redirectURI)
@@ -227,6 +256,13 @@ func (c Config) AuthCodeURL(redirectURI, state, codeChallenge, nonce string) str
 // with an auth error. A failed client-auth request does not consume the
 // single-use code, so the retry is safe.
 func (c Config) Exchange(ctx context.Context, redirectURI, code, codeVerifier string) (Tokens, error) {
+	if c.Kind == "wecom" {
+		accessToken, err := c.weComAccessToken(ctx, false)
+		if err != nil {
+			return Tokens{}, err
+		}
+		return Tokens{AccessToken: accessToken, AuthorizationCode: code}, nil
+	}
 	secret := c.ClientSecret
 	if c.Kind == "apple" {
 		s, err := appleClientSecret(c)
@@ -430,6 +466,8 @@ func (c Config) FetchUserInfo(ctx context.Context, tk Tokens, expectedNonce stri
 	switch c.Kind {
 	case "github":
 		return c.githubUser(ctx, tk.AccessToken)
+	case "wecom":
+		return c.weComUser(ctx, tk)
 	case "oauth2":
 		if strings.TrimSpace(tk.AccessToken) == "" {
 			return UserInfo{}, errors.New("token endpoint returned no access_token")
@@ -511,7 +549,7 @@ func (c Config) SubjectNamespace() string {
 		c.IssuerURL = ""
 		c.JWKSURL = ""
 	}
-	trust, _ := json.Marshal([]string{
+	trustFields := []string{
 		"oauth-subject-namespace-v1",
 		strings.TrimSpace(c.Kind),
 		strings.TrimSpace(c.ClientID),
@@ -520,7 +558,11 @@ func (c Config) SubjectNamespace() string {
 		strings.TrimSpace(c.AuthURL),
 		strings.TrimSpace(c.TokenURL),
 		strings.TrimSpace(c.UserInfoURL),
-	})
+	}
+	if c.Kind == "wecom" {
+		trustFields = append(trustFields, strings.TrimSpace(c.AgentID))
+	}
+	trust, _ := json.Marshal(trustFields)
 	digest := sha256.Sum256(trust)
 	return "oauth:v1:" + base64.RawURLEncoding.EncodeToString(digest[:]) + ":"
 }
@@ -550,6 +592,173 @@ func ValidateHTTPSProviderEndpoint(raw string) error {
 		return errors.New("must not target a private or reserved IP address")
 	}
 	return nil
+}
+
+type weComAPIError struct {
+	Code int
+}
+
+func (e *weComAPIError) Error() string {
+	return fmt.Sprintf("wecom api error %d", e.Code)
+}
+
+func (c Config) weComAccessToken(ctx context.Context, forceRefresh bool) (string, error) {
+	cacheKey := sha256.Sum256([]byte(strings.TrimSpace(c.ClientID) + "\x00" + c.ClientSecret))
+	now := time.Now()
+	weComTokenCache.Lock()
+	if !forceRefresh {
+		if cached, ok := weComTokenCache.entries[cacheKey]; ok && cached.AccessToken != "" && now.Before(cached.ExpiresAt) {
+			weComTokenCache.Unlock()
+			return cached.AccessToken, nil
+		}
+	}
+	delete(weComTokenCache.entries, cacheKey)
+	weComTokenCache.Unlock()
+
+	q := url.Values{}
+	q.Set("corpid", c.ClientID)
+	q.Set("corpsecret", c.ClientSecret)
+	var response struct {
+		ErrCode     int    `json:"errcode"`
+		AccessToken string `json:"access_token"`
+		ExpiresIn   int    `json:"expires_in"`
+	}
+	if err := weComGET(ctx, c.TokenURL, q, &response); err != nil {
+		return "", err
+	}
+	if response.ErrCode != 0 {
+		return "", &weComAPIError{Code: response.ErrCode}
+	}
+	if strings.TrimSpace(response.AccessToken) == "" {
+		return "", errors.New("wecom token response missing access_token")
+	}
+	ttl := time.Duration(response.ExpiresIn) * time.Second
+	if ttl <= 0 {
+		ttl = 2 * time.Hour
+	}
+	refreshBefore := 5 * time.Minute
+	if ttl <= 2*refreshBefore {
+		refreshBefore = ttl / 4
+	}
+	entry := weComCachedToken{AccessToken: response.AccessToken, ExpiresAt: now.Add(ttl - refreshBefore)}
+	weComTokenCache.Lock()
+	weComTokenCache.entries[cacheKey] = entry
+	weComTokenCache.Unlock()
+	return response.AccessToken, nil
+}
+
+func (c Config) weComUser(ctx context.Context, tk Tokens) (UserInfo, error) {
+	if strings.TrimSpace(tk.AccessToken) == "" || strings.TrimSpace(tk.AuthorizationCode) == "" {
+		return UserInfo{}, errors.New("wecom login response missing token or authorization code")
+	}
+	identity, err := c.weComIdentity(ctx, tk.AccessToken, tk.AuthorizationCode)
+	if isWeComExpiredToken(err) {
+		accessToken, refreshErr := c.weComAccessToken(ctx, true)
+		if refreshErr != nil {
+			return UserInfo{}, refreshErr
+		}
+		tk.AccessToken = accessToken
+		identity, err = c.weComIdentity(ctx, tk.AccessToken, tk.AuthorizationCode)
+	}
+	if err != nil {
+		return UserInfo{}, err
+	}
+	if strings.TrimSpace(identity.UserID) == "" {
+		return UserInfo{}, errors.New("wecom login is not an enterprise member")
+	}
+
+	info := UserInfo{Subject: identity.UserID, Name: identity.UserID}
+	profile, err := c.weComMemberProfile(ctx, tk.AccessToken, identity.UserID)
+	if err != nil {
+		// A member outside the application's visible range still has a valid,
+		// stable userid from auth/getuserinfo and may sign in without profile data.
+		return info, nil
+	}
+	info.Name = orStr(strings.TrimSpace(profile.Name), identity.UserID)
+	info.AvatarURL = strings.TrimSpace(orStr(profile.Avatar, profile.ThumbAvatar))
+	info.Email = strings.TrimSpace(orStr(profile.BizMail, profile.Email))
+	info.EmailVerified = info.Email != ""
+	return info, nil
+}
+
+type weComIdentityResponse struct {
+	ErrCode int    `json:"errcode"`
+	UserID  string `json:"userid"`
+	OpenID  string `json:"openid"`
+}
+
+func (c Config) weComIdentity(ctx context.Context, accessToken, code string) (weComIdentityResponse, error) {
+	q := url.Values{}
+	q.Set("access_token", accessToken)
+	q.Set("code", code)
+	var response weComIdentityResponse
+	if err := weComGET(ctx, c.UserInfoURL, q, &response); err != nil {
+		return response, err
+	}
+	if response.ErrCode != 0 {
+		return response, &weComAPIError{Code: response.ErrCode}
+	}
+	return response, nil
+}
+
+type weComMemberResponse struct {
+	ErrCode     int    `json:"errcode"`
+	Name        string `json:"name"`
+	Email       string `json:"email"`
+	BizMail     string `json:"biz_mail"`
+	Avatar      string `json:"avatar"`
+	ThumbAvatar string `json:"thumb_avatar"`
+}
+
+func (c Config) weComMemberProfile(ctx context.Context, accessToken, userID string) (weComMemberResponse, error) {
+	q := url.Values{}
+	q.Set("access_token", accessToken)
+	q.Set("userid", userID)
+	var response weComMemberResponse
+	if err := weComGET(ctx, "https://qyapi.weixin.qq.com/cgi-bin/user/get", q, &response); err != nil {
+		return response, err
+	}
+	if response.ErrCode != 0 {
+		return response, &weComAPIError{Code: response.ErrCode}
+	}
+	return response, nil
+}
+
+func weComGET(ctx context.Context, endpoint string, query url.Values, out any) error {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return errors.New("invalid wecom api endpoint")
+	}
+	u.RawQuery = query.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, oauthProviderResponseBodyCap))
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("wecom api returned HTTP %d", resp.StatusCode)
+	}
+	if err := json.Unmarshal(body, out); err != nil {
+		return errors.New("decode wecom api response")
+	}
+	return nil
+}
+
+func isWeComExpiredToken(err error) bool {
+	var apiErr *weComAPIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	return apiErr.Code == 40014 || apiErr.Code == 42001
 }
 
 func (c Config) githubUser(ctx context.Context, accessToken string) (UserInfo, error) {

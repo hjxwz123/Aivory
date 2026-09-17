@@ -458,6 +458,7 @@
       "google": "Google",
       "github": "GitHub",
       "apple": "Apple",
+      "wecom": "WeCom",
       "oauth2": "Generic OAuth 2.0",
       "oidc": "Generic OIDC"
     },
@@ -468,7 +469,10 @@
       "iconBuiltin": "Uses the built-in brand icon.",
       "iconPlaceholder": "🔑 / https://… / —",
       "clientId": "Client ID",
+      "corpId": "Enterprise ID (CorpID)",
+      "agentId": "Application AgentID",
       "clientSecret": "Client secret",
+      "wecomSecret": "Application Secret",
       "clientSecretApple": "Private key (.p8)",
       "clientSecretHintEdit": "Leave blank to keep the saved secret.",
       "issuerUrl": "Issuer URL",
@@ -489,6 +493,7 @@
       "google": "Create an OAuth client in Google Cloud → Credentials.",
       "github": "Create one in GitHub → Developer settings → OAuth Apps.",
       "apple": "Create a Services ID + AuthKey (.p8) in Apple Developer.",
+      "wecom": "Create a custom app in WeCom Admin, enable WeCom authorization login, and add the redirect URI domain as a trusted domain.",
       "oauth2": "Uses the provider's authorize, token, and UserInfo endpoints.",
       "oidc": "Uses a verified ID token with issuer and JWKS metadata."
     },

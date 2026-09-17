@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-const oauthCols = `id, kind, name, icon, client_id, client_secret, issuer_url, jwks_url, auth_url, token_url, userinfo_url, scopes, team_id, key_id, subject_namespace, enabled, sort_order, updated_at`
+const oauthCols = `id, kind, name, icon, client_id, client_secret, agent_id, issuer_url, jwks_url, auth_url, token_url, userinfo_url, scopes, team_id, key_id, subject_namespace, enabled, sort_order, updated_at`
 
 // LockAuthConfigurationTx serializes every transaction that can change the
 // effective enterprise sign-in policy. The no-op row update is portable across
@@ -63,7 +63,7 @@ func NewOAuthProviderCallbackGuard(p OAuthProvider) OAuthProviderCallbackGuard {
 func oauthProviderCallbackSnapshot(p OAuthProvider) string {
 	h := sha256.New()
 	for _, field := range []string{
-		p.ID, p.Kind, p.ClientID, p.ClientSecret, p.IssuerURL, p.JWKSURL,
+		p.ID, p.Kind, p.ClientID, p.ClientSecret, p.AgentID, p.IssuerURL, p.JWKSURL,
 		p.AuthURL, p.TokenURL, p.UserInfoURL, p.Scopes, p.TeamID, p.KeyID,
 		p.SubjectNamespace,
 	} {
@@ -80,7 +80,7 @@ func oauthProviderCallbackSnapshot(p OAuthProvider) string {
 // configured userinfo endpoint.
 func ValidOAuthProviderKind(kind string) bool {
 	switch kind {
-	case "google", "github", "apple", "oidc", "oauth2":
+	case "google", "github", "apple", "wecom", "oidc", "oauth2":
 		return true
 	default:
 		return false
@@ -104,7 +104,7 @@ func scanOAuthProvider(s scanner) (OAuthProvider, error) {
 	var p OAuthProvider
 	var en int
 	if err := s.Scan(&p.ID, &p.Kind, &p.Name, &p.Icon, &p.ClientID, &p.ClientSecret,
-		&p.IssuerURL, &p.JWKSURL, &p.AuthURL, &p.TokenURL, &p.UserInfoURL, &p.Scopes, &p.TeamID, &p.KeyID,
+		&p.AgentID, &p.IssuerURL, &p.JWKSURL, &p.AuthURL, &p.TokenURL, &p.UserInfoURL, &p.Scopes, &p.TeamID, &p.KeyID,
 		&p.SubjectNamespace, &en, &p.SortOrder, &p.UpdatedAt); err != nil {
 		return p, err
 	}
@@ -202,6 +202,7 @@ func CreateOAuthProvider(ctx context.Context, db *sql.DB, p OAuthProvider) (*OAu
 	p.Name = strings.TrimSpace(p.Name)
 	p.Icon = strings.TrimSpace(p.Icon)
 	p.ClientID = strings.TrimSpace(p.ClientID)
+	p.AgentID = strings.TrimSpace(p.AgentID)
 	p.IssuerURL = strings.TrimSpace(p.IssuerURL)
 	p.JWKSURL = strings.TrimSpace(p.JWKSURL)
 	p.AuthURL = strings.TrimSpace(p.AuthURL)
@@ -211,9 +212,9 @@ func CreateOAuthProvider(ctx context.Context, db *sql.DB, p OAuthProvider) (*OAu
 	p.TeamID = strings.TrimSpace(p.TeamID)
 	p.KeyID = strings.TrimSpace(p.KeyID)
 	if _, err := db.ExecContext(ctx, `INSERT INTO oauth_providers(`+oauthCols+`)
-		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ID, p.Kind, p.Name, p.Icon, p.ClientID, p.ClientSecret,
-		p.IssuerURL, p.JWKSURL, p.AuthURL, p.TokenURL, p.UserInfoURL, p.Scopes, p.TeamID, p.KeyID,
+		p.AgentID, p.IssuerURL, p.JWKSURL, p.AuthURL, p.TokenURL, p.UserInfoURL, p.Scopes, p.TeamID, p.KeyID,
 		p.SubjectNamespace, boolInt(p.Enabled), p.SortOrder, time.Now().Unix()); err != nil {
 		if isUniqueIndexErr(err, "idx_oauth_providers_name_unique", "oauth_providers.name") {
 			return nil, ErrOAuthProviderNameExists
@@ -239,6 +240,7 @@ type OAuthProviderPatch struct {
 	Icon         *string `json:"icon"`
 	ClientID     *string `json:"client_id"`
 	ClientSecret *string `json:"client_secret"`
+	AgentID      *string `json:"agent_id"`
 	IssuerURL    *string `json:"issuer_url"`
 	JWKSURL      *string `json:"jwks_url"`
 	AuthURL      *string `json:"auth_url"`
@@ -285,7 +287,7 @@ func UpdateOAuthProvider(ctx context.Context, db *sql.DB, id string, patch OAuth
 }
 
 func oauthProviderTrustPatch(patch OAuthProviderPatch) bool {
-	return patch.Kind != nil || patch.ClientID != nil || patch.ClientSecret != nil ||
+	return patch.Kind != nil || patch.ClientID != nil || patch.ClientSecret != nil || patch.AgentID != nil ||
 		patch.IssuerURL != nil || patch.JWKSURL != nil || patch.AuthURL != nil ||
 		patch.TokenURL != nil || patch.UserInfoURL != nil
 }
@@ -308,6 +310,9 @@ func oauthProviderPatchSQL(patch OAuthProviderPatch) ([]string, []any) {
 	}
 	if patch.ClientSecret != nil && *patch.ClientSecret != "" {
 		set("client_secret", *patch.ClientSecret)
+	}
+	if patch.AgentID != nil {
+		set("agent_id", strings.TrimSpace(*patch.AgentID))
 	}
 	if patch.IssuerURL != nil {
 		set("issuer_url", strings.TrimSpace(*patch.IssuerURL))
@@ -595,6 +600,7 @@ func sameOAuthProviderTrustState(a, b OAuthProvider) bool {
 	return a.Kind == b.Kind &&
 		a.ClientID == b.ClientID &&
 		a.ClientSecret == b.ClientSecret &&
+		a.AgentID == b.AgentID &&
 		a.IssuerURL == b.IssuerURL &&
 		a.JWKSURL == b.JWKSURL &&
 		a.AuthURL == b.AuthURL &&

@@ -38,3 +38,24 @@ func TestOAuthProviderStoreAllowsGenericOAuth2AndRejectsUnknownKinds(t *testing.
 		t.Fatalf("invalid kind patch changed stored kind to %q", reloaded.Kind)
 	}
 }
+
+func TestOAuthProviderStorePersistsWeComAgentID(t *testing.T) {
+	db := setupOAuthDB(t)
+	created, err := CreateOAuthProvider(t.Context(), db, OAuthProvider{
+		Kind: "wecom", Name: "WeCom", ClientID: "ww-corp", ClientSecret: "secret",
+		AgentID: "1000002", Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateOAuthProvider(wecom): %v", err)
+	}
+	if created.Kind != "wecom" || created.AgentID != "1000002" || !created.HasSecret || created.ClientSecret != "" {
+		t.Fatalf("created WeCom provider = %+v", created)
+	}
+	stored, err := GetOAuthProvider(t.Context(), db, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.AgentID != "1000002" || stored.ClientSecret != "secret" {
+		t.Fatalf("stored WeCom provider = %+v", stored)
+	}
+}

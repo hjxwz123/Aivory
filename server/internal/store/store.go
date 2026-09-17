@@ -331,6 +331,7 @@ func Migrate(db *sql.DB) error {
 	addPaymentReconcileError := `ALTER TABLE payment_orders ADD COLUMN reconcile_error TEXT NOT NULL DEFAULT ''`
 	addOAuthIssuerURL := `ALTER TABLE oauth_providers ADD COLUMN issuer_url TEXT NOT NULL DEFAULT ''`
 	addOAuthJWKSURL := `ALTER TABLE oauth_providers ADD COLUMN jwks_url TEXT NOT NULL DEFAULT ''`
+	addOAuthAgentID := `ALTER TABLE oauth_providers ADD COLUMN agent_id TEXT NOT NULL DEFAULT ''`
 	addOAuthSubjectNamespace := `ALTER TABLE oauth_providers ADD COLUMN subject_namespace TEXT NOT NULL DEFAULT ''`
 	// Existing enterprise-domain rules keep their historical verification
 	// requirement. Administrators may explicitly relax each rule after upgrade.
@@ -467,6 +468,7 @@ func Migrate(db *sql.DB) error {
 		addPaymentReconcileError = `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS reconcile_error TEXT NOT NULL DEFAULT ''`
 		addOAuthIssuerURL = `ALTER TABLE oauth_providers ADD COLUMN IF NOT EXISTS issuer_url TEXT NOT NULL DEFAULT ''`
 		addOAuthJWKSURL = `ALTER TABLE oauth_providers ADD COLUMN IF NOT EXISTS jwks_url TEXT NOT NULL DEFAULT ''`
+		addOAuthAgentID = `ALTER TABLE oauth_providers ADD COLUMN IF NOT EXISTS agent_id TEXT NOT NULL DEFAULT ''`
 		addOAuthSubjectNamespace = `ALTER TABLE oauth_providers ADD COLUMN IF NOT EXISTS subject_namespace TEXT NOT NULL DEFAULT ''`
 		addRegistrationDomainEmailVerification = `ALTER TABLE registration_domains ADD COLUMN IF NOT EXISTS email_verification_required INTEGER NOT NULL DEFAULT 1`
 		addRegistrationDomainInitialGroup = `ALTER TABLE registration_domains ADD COLUMN IF NOT EXISTS initial_group_id TEXT REFERENCES user_groups(id) ON DELETE SET NULL`
@@ -520,7 +522,7 @@ func Migrate(db *sql.DB) error {
 		addPaymentPaidAmount, addPaymentTaxAmount, addPaymentProviderAmount, addPaymentProviderCurrency, addPaymentConversionRate,
 		addPaymentChannelEnvironment, addPaymentOrderEnvironment,
 		addPaymentProviderPaymentID, addPaymentCheckoutSessionID, addPaymentCheckoutURL, addPaymentCheckoutExpiresAt, addPaymentLastReconciledAt, addPaymentReconcileError,
-		addOAuthIssuerURL, addOAuthJWKSURL, addOAuthSubjectNamespace,
+		addOAuthIssuerURL, addOAuthJWKSURL, addOAuthAgentID, addOAuthSubjectNamespace,
 		addRegistrationDomainEmailVerification, addRegistrationDomainInitialGroup, addDomainUserPersonalDataPromptDismissed, addDomainUserWorkspaceMembershipCreated,
 		addPasskeyAuthenticatorFlags, addPasskeyUserHandle,
 	} {
@@ -688,7 +690,7 @@ func Migrate(db *sql.DB) error {
 		"redeem_redemptions":              {"credits"},
 		"payment_channels":                {"environment"},
 		"payment_orders":                  {"paid_amount_minor", "tax_amount_minor", "provider_amount_minor", "provider_currency", "conversion_rate", "environment", "provider_payment_id", "checkout_session_id", "checkout_url", "checkout_expires_at", "last_reconciled_at", "reconcile_error"},
-		"oauth_providers":                 {"issuer_url", "jwks_url", "subject_namespace"},
+		"oauth_providers":                 {"issuer_url", "jwks_url", "agent_id", "subject_namespace"},
 		"registration_domains":            {"email_verification_required", "initial_group_id"},
 		"registration_domain_matches":     {"domain", "rule_domain"},
 		"passkeys":                        {"authenticator_flags", "user_handle"},

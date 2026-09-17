@@ -458,6 +458,7 @@
       "google": "Google",
       "github": "GitHub",
       "apple": "Apple",
+      "wecom": "企業微信",
       "oauth2": "通用 OAuth 2.0",
       "oidc": "通用 OIDC"
     },
@@ -468,7 +469,10 @@
       "iconBuiltin": "使用內建品牌圖示。",
       "iconPlaceholder": "🔑 / https://… / —",
       "clientId": "Client ID",
+      "corpId": "企業 ID（CorpID）",
+      "agentId": "應用程式 AgentID",
       "clientSecret": "Client Secret",
+      "wecomSecret": "應用程式 Secret",
       "clientSecretApple": "私鑰(.p8)",
       "clientSecretHintEdit": "留空保留原金鑰。",
       "issuerUrl": "簽發者地址(Issuer URL)",
@@ -489,6 +493,7 @@
       "google": "在 Google Cloud → 憑證 建立 OAuth 用戶端。",
       "github": "在 GitHub → 開發者設定 → OAuth Apps 建立。",
       "apple": "在 Apple Developer 建立 Services ID 與 AuthKey(.p8)。",
+      "wecom": "在企業微信管理後台建立自建應用程式，開啟「企業微信授權登入」，並將上方回呼網址的網域設定為可信網域。",
       "oauth2": "使用平台提供的授權、權杖與使用者資訊端點。",
       "oidc": "使用經驗證的 ID Token，並驗證 Issuer 與 JWKS。"
     },

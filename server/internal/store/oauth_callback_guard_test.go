@@ -25,6 +25,9 @@ func TestOAuthProviderCallbackGuardRejectsEveryStaleSecurityField(t *testing.T) 
 		{"client secret", func(t testing.TB, ex RowExecer) {
 			execTB(t, ex, `UPDATE oauth_providers SET client_secret='next-secret' WHERE id='oa_google'`)
 		}},
+		{"WeCom agent", func(t testing.TB, ex RowExecer) {
+			execTB(t, ex, `UPDATE oauth_providers SET agent_id='1000009' WHERE id='oa_google'`)
+		}},
 		{"issuer", func(t testing.TB, ex RowExecer) {
 			execTB(t, ex, `UPDATE oauth_providers SET issuer_url='https://next.example.test' WHERE id='oa_google'`)
 		}},

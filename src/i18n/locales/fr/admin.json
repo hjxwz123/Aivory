@@ -458,6 +458,7 @@
       "google": "Google",
       "github": "GitHub",
       "apple": "Apple",
+      "wecom": "WeCom",
       "oauth2": "OAuth 2.0 générique",
       "oidc": "OIDC générique"
     },
@@ -468,7 +469,10 @@
       "iconBuiltin": "Utilise l'icône de marque intégrée.",
       "iconPlaceholder": "🔑 / https://… / —",
       "clientId": "Client ID",
+      "corpId": "ID d’entreprise (CorpID)",
+      "agentId": "AgentID de l’application",
       "clientSecret": "Secret client",
+      "wecomSecret": "Secret de l’application",
       "clientSecretApple": "Clé privée (.p8)",
       "clientSecretHintEdit": "Laissez vide pour conserver le secret enregistré.",
       "issuerUrl": "URL de l’émetteur",
@@ -489,6 +493,7 @@
       "google": "Créez un client OAuth dans Google Cloud → Identifiants.",
       "github": "Créez-en un dans GitHub → Developer settings → OAuth Apps.",
       "apple": "Créez un Services ID + AuthKey (.p8) dans Apple Developer.",
+      "wecom": "Créez une application personnalisée dans l’administration WeCom, activez la connexion autorisée WeCom et ajoutez le domaine de l’URI de redirection aux domaines de confiance.",
       "oauth2": "Utilise les endpoints d'autorisation, de token et UserInfo du fournisseur.",
       "oidc": "Utilise un ID Token vérifié avec les métadonnées émetteur et JWKS."
     },

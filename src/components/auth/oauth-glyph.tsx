@@ -1,12 +1,12 @@
 /**
- * OAuthBrandGlyph — the icon for a login method. Google / GitHub / Apple use
- * built-in brand glyphs (no upload needed); generic OAuth2/OIDC providers render
+ * OAuthBrandGlyph — the icon for a login method. Built-in providers use local
+ * glyphs (no upload needed); generic OAuth2/OIDC providers render
  * their admin-set icon (uploaded URL or emoji), falling back to a neutral glyph.
  *
  * Shared by the login buttons and the admin "Login methods" page so both render
  * the same mark.
  */
-import { LogIn } from 'lucide-react'
+import { Building2, LogIn } from 'lucide-react'
 import type { OAuthKind } from '@/api/types'
 
 export function OAuthBrandGlyph({
@@ -21,6 +21,7 @@ export function OAuthBrandGlyph({
   if (kind === 'google') return <GoogleGlyph size={size} />
   if (kind === 'github') return <GithubGlyph size={size} />
   if (kind === 'apple') return <AppleGlyph size={size} />
+  if (kind === 'wecom') return <Building2 size={size} aria-hidden />
   if (icon) {
     if (icon.startsWith('http') || icon.startsWith('/')) {
       return <img src={icon} alt="" width={size} height={size} className="rounded-[3px] object-cover" />

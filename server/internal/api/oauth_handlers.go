@@ -960,6 +960,7 @@ func toOAuthConfig(p *store.OAuthProvider) oauth.Config {
 		Kind:         p.Kind,
 		ClientID:     p.ClientID,
 		ClientSecret: p.ClientSecret,
+		AgentID:      p.AgentID,
 		IssuerURL:    p.IssuerURL,
 		JWKSURL:      p.JWKSURL,
 		AuthURL:      p.AuthURL,
@@ -983,10 +984,17 @@ func oauthSubjectForProvider(p *store.OAuthProvider, raw string) (string, error)
 }
 
 func oauthProviderReady(p store.OAuthProvider) bool {
-	return oauthConfigReady(oauth.Resolve(toOAuthConfig(&p)))
+	cfg := oauth.Resolve(toOAuthConfig(&p))
+	if cfg.Kind == "wecom" && cfg.ClientSecret == "" && p.HasSecret {
+		cfg.ClientSecret = "configured"
+	}
+	return oauthConfigReady(cfg)
 }
 
 func effectiveOAuthProvider(p store.OAuthProvider) store.OAuthProvider {
+	if p.Kind != "wecom" {
+		p.AgentID = ""
+	}
 	if p.Kind == "oauth2" {
 		// OAuth 2.0 UserInfo has no issuer/JWKS trust relationship. Clear stale
 		// OIDC fields when a provider is converted instead of leaving misleading
@@ -1035,6 +1043,10 @@ func oauthConfigReady(cfg oauth.Config) bool {
 			if oauth.ValidateHTTPSProviderEndpoint(endpoint) != nil {
 				return false
 			}
+		}
+	case "wecom":
+		if strings.TrimSpace(cfg.AgentID) == "" || strings.TrimSpace(cfg.ClientSecret) == "" {
+			return false
 		}
 	}
 	return true
@@ -1218,6 +1230,12 @@ func updateOAuthProviderAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	if patch.ClientID != nil {
 		effective.ClientID = *patch.ClientID
 	}
+	if patch.ClientSecret != nil && strings.TrimSpace(*patch.ClientSecret) != "" {
+		effective.ClientSecret = *patch.ClientSecret
+	}
+	if patch.AgentID != nil {
+		effective.AgentID = *patch.AgentID
+	}
 	if patch.IssuerURL != nil {
 		effective.IssuerURL = *patch.IssuerURL
 	}
@@ -1260,6 +1278,10 @@ func updateOAuthProviderAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		authURL, tokenURL, userinfoURL := effective.AuthURL, effective.TokenURL, effective.UserInfoURL
 		patch.IssuerURL, patch.JWKSURL = &issuerURL, &jwksURL
 		patch.AuthURL, patch.TokenURL, patch.UserInfoURL = &authURL, &tokenURL, &userinfoURL
+	}
+	if effective.Kind != "wecom" {
+		agentID := ""
+		patch.AgentID = &agentID
 	}
 	if patch.Name != nil {
 		name := strings.TrimSpace(*patch.Name)
@@ -1383,7 +1405,7 @@ func validateOAuthKind(kind string) error {
 	if store.ValidOAuthProviderKind(kind) {
 		return nil
 	}
-	return errors.New("kind must be one of google, github, apple, oidc, oauth2")
+	return errors.New("kind must be one of google, github, apple, wecom, oidc, oauth2")
 }
 
 func oauthClientSecretReentryRequired(current, next store.OAuthProvider, submitted *string) bool {
@@ -1392,6 +1414,7 @@ func oauthClientSecretReentryRequired(current, next store.OAuthProvider, submitt
 	}
 	return current.Kind != next.Kind ||
 		strings.TrimSpace(current.ClientID) != strings.TrimSpace(next.ClientID) ||
+		strings.TrimSpace(current.AgentID) != strings.TrimSpace(next.AgentID) ||
 		oauthTokenOrigin(current.TokenURL) != oauthTokenOrigin(next.TokenURL)
 }
 
@@ -1421,6 +1444,10 @@ func validateOAuthProviderTrust(p store.OAuthProvider) error {
 	}
 	required := map[string]string{}
 	switch p.Kind {
+	case "wecom":
+		required = map[string]string{
+			"client_id": p.ClientID, "agent_id": p.AgentID, "client_secret": p.ClientSecret,
+		}
 	case "oidc":
 		required = map[string]string{
 			"client_id": p.ClientID, "issuer_url": p.IssuerURL, "jwks_url": p.JWKSURL,
@@ -1438,7 +1465,7 @@ func validateOAuthProviderTrust(p store.OAuthProvider) error {
 		if strings.TrimSpace(raw) == "" {
 			return fmt.Errorf("enabled %s providers require %s", strings.ToUpper(p.Kind), name)
 		}
-		if name == "client_id" {
+		if name == "client_id" || name == "agent_id" || name == "client_secret" {
 			continue
 		}
 		if err := oauth.ValidateHTTPSProviderEndpoint(raw); err != nil {

@@ -928,18 +928,19 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
 CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id);
 
 -- OAuth / social login providers, configured by the admin. Built-in kinds
--- (google | github | apple) fill their endpoints from code defaults; kind=oidc
+-- (google | github | apple | wecom) fill their endpoints from code defaults; kind=oidc
 -- is generic OpenID Connect and kind=oauth2 is generic OAuth 2.0 UserInfo. Their
 -- endpoints come from the row. client_secret is plaintext like channel api_key;
 -- for Apple it holds the
 -- AuthKey .p8 private key used to mint the client-secret JWT.
 CREATE TABLE IF NOT EXISTS oauth_providers (
   id            TEXT PRIMARY KEY,                -- "oa_<hex>"
-  kind          TEXT NOT NULL,                   -- google | github | apple | oidc | oauth2
+  kind          TEXT NOT NULL,                   -- google | github | apple | wecom | oidc | oauth2
   name          TEXT NOT NULL,                   -- label shown on the login button
   icon          TEXT NOT NULL DEFAULT '',        -- emoji / uploaded URL (custom providers)
   client_id     TEXT NOT NULL DEFAULT '',
   client_secret TEXT NOT NULL DEFAULT '',        -- apple: the .p8 private key
+  agent_id      TEXT NOT NULL DEFAULT '',        -- wecom application AgentID
   issuer_url    TEXT NOT NULL DEFAULT '',        -- expected OIDC iss (generic providers)
   jwks_url      TEXT NOT NULL DEFAULT '',        -- trusted signing-key set URL
   auth_url      TEXT NOT NULL DEFAULT '',        -- oidc/oauth2 only (built-ins use defaults)
