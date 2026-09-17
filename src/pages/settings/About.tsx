@@ -3,7 +3,7 @@ import { ArrowUpRight, BookOpen, FileText, Github, Mail, Scale, ShieldCheck } fr
 import { TracedLogo } from '@/components/brand/logo'
 import { useLegalConfig } from '@/hooks/use-legal-config'
 
-const APP_VERSION = '2.4.9-beta.2'
+const APP_VERSION = '2.4.9-beta.3'
 const DOCS_URL = 'https://docs.aivorygo.com'
 const GITHUB_URL = 'https://github.com/hjxwz123/Aivory'
 const TERMS_URL = '/terms'
