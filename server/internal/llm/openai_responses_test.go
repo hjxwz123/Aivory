@@ -881,6 +881,81 @@ func TestResponsesStreamCapturesIncompleteTerminalSnapshot(t *testing.T) {
 	}
 }
 
+func TestResponsesStreamRoutesCommentaryToThinking(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"id":"msg_commentary","type":"message","role":"assistant","status":"in_progress","phase":"commentary","content":[]}}`,
+		`data: {"type":"response.output_text.delta","item_id":"msg_commentary","output_index":0,"content_index":0,"delta":"Still checking."}`,
+		`data: {"type":"response.output_text.done","item_id":"msg_commentary","output_index":0,"content_index":0,"text":"Still checking."}`,
+		`data: {"type":"response.output_item.done","output_index":0,"item":{"id":"msg_commentary","type":"message","role":"assistant","status":"completed","phase":"commentary","content":[{"type":"output_text","text":"Still checking."}]}}`,
+		`data: {"type":"response.output_item.added","output_index":1,"item":{"id":"msg_final","type":"message","role":"assistant","status":"in_progress","phase":"final_answer","content":[]}}`,
+		`data: {"type":"response.output_text.delta","item_id":"msg_final","output_index":1,"content_index":0,"delta":"Final answer."}`,
+		`data: {"type":"response.output_text.done","item_id":"msg_final","output_index":1,"content_index":0,"text":"Final answer."}`,
+		`data: {"type":"response.output_item.done","output_index":1,"item":{"id":"msg_final","type":"message","role":"assistant","status":"completed","phase":"final_answer","content":[{"type":"output_text","text":"Final answer."}]}}`,
+		`data: {"type":"response.completed","response":{"output":[{"id":"msg_commentary","type":"message","role":"assistant","status":"completed","phase":"commentary","content":[{"type":"output_text","text":"Still checking."}]},{"id":"msg_final","type":"message","role":"assistant","status":"completed","phase":"final_answer","content":[{"type":"output_text","text":"Final answer."}]}]}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n\n")
+
+	var thinkingDeltas, textDeltas strings.Builder
+	text, thinking, _, _, _, _, outputItems, err := readOpenAIResponsesStream(strings.NewReader(stream), func(event SseEvent) {
+		switch event.Type {
+		case "thinking_delta":
+			thinkingDeltas.WriteString(event.Text)
+		case "text_delta":
+			textDeltas.WriteString(event.Text)
+		}
+	})
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	if text != "Final answer." || textDeltas.String() != text {
+		t.Fatalf("visible text/deltas = %q/%q, want final answer only", text, textDeltas.String())
+	}
+	if thinking != "Still checking." || thinkingDeltas.String() != thinking {
+		t.Fatalf("thinking/deltas = %q/%q, want commentary only", thinking, thinkingDeltas.String())
+	}
+	if len(outputItems) != 2 || outputItems[0]["phase"] != "commentary" || outputItems[1]["phase"] != "final_answer" {
+		t.Fatalf("native output phases were not preserved: %#v", outputItems)
+	}
+}
+
+func TestOpenAIResponsesIncompleteCommentaryPersistsOnlyThinking(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, strings.Join([]string{
+			`data: {"type":"response.incomplete","response":{"incomplete_details":{"reason":"max_output_tokens"},"usage":{"input_tokens":9,"output_tokens":64},"output":[{"id":"msg_commentary","type":"message","role":"assistant","status":"incomplete","phase":"commentary","content":[{"type":"output_text","text":"Last internal thought."}]}]}}`,
+			`data: [DONE]`,
+			``,
+		}, "\n\n"))
+	}))
+	defer server.Close()
+
+	var thinkingDeltas, textDeltas strings.Builder
+	result, err := (&OpenAIProvider{}).Stream(context.Background(), UnifiedChatRequest{
+		Model:   ModelInfo{RequestID: "gpt-test", BaseURL: server.URL, APIKey: "key", APIFormat: "responses"},
+		History: []UnifiedMessage{{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "Think carefully."}}}},
+	}, nil, func(event SseEvent) {
+		switch event.Type {
+		case "thinking_delta":
+			thinkingDeltas.WriteString(event.Text)
+		case "text_delta":
+			textDeltas.WriteString(event.Text)
+		}
+	})
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	if textDeltas.Len() != 0 || thinkingDeltas.String() != "Last internal thought." {
+		t.Fatalf("streamed text/thinking = %q/%q", textDeltas.String(), thinkingDeltas.String())
+	}
+	if result == nil || len(result.Blocks) != 1 || result.Blocks[0].Kind != "thinking" || result.Blocks[0].Text != "Last internal thought." {
+		t.Fatalf("result blocks = %+v, want one thinking block", result)
+	}
+	if !bytes.Contains(result.Raw, []byte(`"phase":"commentary"`)) {
+		t.Fatalf("native commentary item was not retained for replay: %s", result.Raw)
+	}
+}
+
 func TestResponsesStreamReassemblesMultipleReasoningTextParts(t *testing.T) {
 	stream := strings.Join([]string{
 		`data: {"type":"response.output_item.added","item":{"id":"rs_1","type":"reasoning","status":"in_progress","content":[]}}`,

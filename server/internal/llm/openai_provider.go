@@ -1926,7 +1926,8 @@ func decodeHostedGeneratedImages(hosted []hostedToolCall) ([]hostedToolCall, []G
 
 // readOpenAIResponsesStream consumes the Responses SSE event stream. The event
 // taxonomy is:
-//   - response.output_text.delta — visible text delta (forward as text_delta)
+//   - response.output_text.delta — final-answer text, or commentary when its
+//     parent message carries phase=commentary
 //   - response.reasoning_summary_text.delta — reasoning summary delta (forward
 //     as thinking_delta so the collapsed pane updates live)
 //   - response.output_item.added (type=function_call) — start of a tool call
@@ -2074,7 +2075,7 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 		}
 		streamedParts[partKey(kind, itemID, index)] = true
 		switch kind {
-		case "reasoning", "summary":
+		case "reasoning", "summary", "commentary":
 			reasoning.WriteString(value)
 			onEvent(SseEvent{Type: "thinking_delta", Text: value})
 		default:
@@ -2088,6 +2089,12 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 			return
 		}
 		emitPartDelta(kind, itemID, index, value)
+	}
+	outputTextKind := func(itemID string) string {
+		if item := outputByItem[itemID]; item != nil && responsesPhaseIsCommentary(item.stringField("phase")) {
+			return "commentary"
+		}
+		return "output"
 	}
 	hostedResultEmitted := map[string]bool{}
 	finishHosted := func(item map[string]any) {
@@ -2209,7 +2216,7 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 			completedOutput = append(completedOutput, item.snapshot())
 		}
 		appendTerminalText(&text, responsesVisibleText(completedOutput), "text_delta")
-		appendTerminalText(&reasoning, responsesReasoningText(completedOutput), "thinking_delta")
+		appendTerminalText(&reasoning, responsesThinkingText(completedOutput), "thinking_delta")
 	}
 	sawEvent := false
 	terminal := false
@@ -2263,13 +2270,17 @@ responseLoop:
 				if item.stringField("role") == "" {
 					item.setString("role", "assistant")
 				}
+				if phase, _ := ev["phase"].(string); phase != "" && item.stringField("phase") == "" {
+					item.setString("phase", phase)
+				}
 				item.mergePart("content", index, map[string]any{"type": "output_text"}, "text", value, appendText)
 				rememberOutput(itemID, ev["output_index"])
 			}
+			kind := outputTextKind(itemID)
 			if appendText {
-				emitPartDelta("output", itemID, index, value)
+				emitPartDelta(kind, itemID, index, value)
 			} else {
-				emitPartDoneFallback("output", itemID, index, value)
+				emitPartDoneFallback(kind, itemID, index, value)
 			}
 		case "response.refusal.delta", "response.refusal.done":
 			sawEvent = true
@@ -2599,22 +2610,53 @@ func orderedResponsesItemIDs(order []string, outputIndexByItem map[string]int) [
 	return result
 }
 
+func responsesPhaseIsCommentary(phase string) bool {
+	return strings.EqualFold(strings.TrimSpace(phase), "commentary")
+}
+
+func responsesMessageText(item map[string]any) string {
+	var text strings.Builder
+	parts, _ := jsonArrayItems(item["content"])
+	for _, rawPart := range parts {
+		part, _ := rawPart.(map[string]any)
+		switch partType, _ := part["type"].(string); partType {
+		case "output_text":
+			value, _ := part["text"].(string)
+			text.WriteString(value)
+		case "refusal":
+			value, _ := part["refusal"].(string)
+			text.WriteString(value)
+		}
+	}
+	return text.String()
+}
+
 func responsesVisibleText(items []map[string]any) string {
 	var text strings.Builder
 	for _, item := range items {
 		if itemType, _ := item["type"].(string); itemType != "message" {
 			continue
 		}
-		parts, _ := jsonArrayItems(item["content"])
-		for _, rawPart := range parts {
-			part, _ := rawPart.(map[string]any)
-			switch partType, _ := part["type"].(string); partType {
-			case "output_text":
-				value, _ := part["text"].(string)
-				text.WriteString(value)
-			case "refusal":
-				value, _ := part["refusal"].(string)
-				text.WriteString(value)
+		phase, _ := item["phase"].(string)
+		if responsesPhaseIsCommentary(phase) {
+			continue
+		}
+		text.WriteString(responsesMessageText(item))
+	}
+	return text.String()
+}
+
+func responsesThinkingText(items []map[string]any) string {
+	var text strings.Builder
+	for _, item := range items {
+		itemType, _ := item["type"].(string)
+		switch itemType {
+		case "reasoning":
+			text.WriteString(responsesReasoningText([]map[string]any{item}))
+		case "message":
+			phase, _ := item["phase"].(string)
+			if responsesPhaseIsCommentary(phase) {
+				text.WriteString(responsesMessageText(item))
 			}
 		}
 	}
