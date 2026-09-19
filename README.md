@@ -1,61 +1,197 @@
-<p align="center">
-  <img src="docs/brand/trace.svg" alt="Aivory" width="320">
+<p align="right">
+  <strong>English</strong> · <a href="./README.zh-CN.md">简体中文</a>
 </p>
 
-<p align="center">
-  <img src="docs/screenshots/aivory-readme-cover.png" alt="Aivory — self-hosted AI workspace" width="100%">
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/brand/readme-header-compact.svg">
+  <img src="docs/brand/readme-header.svg" alt="Aivory — Self-hosted AI workspace" width="100%">
+</picture>
+
+### Your models. Your knowledge. Your workspace.
+
+Bring multi-model chat, research, code execution, and team collaboration together in one self-hosted platform. From a first conversation to a fully managed workspace, Aivory keeps your tools and data in one place.
+
+<p>
+  <a href="https://demo.aivorygo.com"><strong>Try the demo ↗</strong></a> &nbsp; · &nbsp;
+  <a href="#quick-start"><strong>Deploy Aivory</strong></a> &nbsp; · &nbsp;
+  <a href="https://docs.aivorygo.com">Documentation</a>
 </p>
 
-<p align="center">
-  <strong>A production-ready, self-hosted multi-model AI platform for individuals and teams.</strong><br>
-  Interleaved tool calls · RAG & knowledge bases · Persistent sandbox · Team workspaces · Subscriptions · Full admin backend.
+<p>
+  <a href="./LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/License-Apache_2.0-42675d?style=flat-square&amp;labelColor=243c3a"></a>
+  <a href="https://github.com/hjxwz123/Aivory/pkgs/container/aivory-app"><img alt="Docker images: amd64 and arm64" src="https://img.shields.io/badge/Docker-amd64_%2F_arm64-42675d?style=flat-square&amp;logo=docker&amp;logoColor=white&amp;labelColor=243c3a"></a>
 </p>
 
-<p align="center">
-  <a href="./README.md"><strong>English</strong></a> ·
-  <a href="./README.zh-CN.md">简体中文</a>
-</p>
-
-<p align="center">
-  <a href="https://docs.aivorygo.com"><strong>Documentation</strong></a> ·
-  <a href="https://demo.aivorygo.com"><strong>Live demo</strong></a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/hjxwz123/Aivory/pkgs/container/aivory-app"><img alt="App image" src="https://img.shields.io/badge/ghcr.io-aivory--app-blue?logo=docker"></a>
-  <img alt="Go 1.22" src="https://img.shields.io/badge/Go-1.22-00ADD8?logo=go">
-  <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?logo=react">
-  <img alt="TypeScript 5" src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript">
-  <a href="./LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-blue"></a>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/aivory-architecture-poster.png" alt="Aivory coordinates models, tools, knowledge, sandbox execution, and data in one workspace" width="100%">
-</p>
-
----
-
-## A complete AI workspace
-
-Most self-hosted AI frontends stop at forwarding messages to a model. Aivory combines multi-model chat, autonomous tool execution, document intelligence, isolated computation, team collaboration, subscriptions, and day-to-day operations in one deployable platform.
-
-<p align="center">
-  <img src="docs/screenshots/hero.png" alt="Aivory multi-model AI chat workspace" width="100%">
-</p>
+[Capabilities](#core-capabilities) · [Screenshots](#product-tour) · [Quick start](#quick-start) · [Architecture](#technical-architecture) · [Configuration](#configuration) · [Contributing](#contributing)
 
 ## Core capabilities
 
-| | Feature | What you get |
-|---|---|---|
-| 🔀 | **Multi-model AI chat** | Claude, GPT, Gemini, image models, and any OpenAI-compatible endpoint behind one consistent UI, with per-message model attribution and admin-defined model controls |
-| 🛠 | **Interleaved tool calls** | Up to **48 tool calls across 12 provider cycles in one turn**; search, fetch, Python, files, memory, and image tools can form one autonomous workflow |
-| 📚 | **RAG & knowledge bases** | Managed document libraries, query routing, structure-aware chunking, hybrid retrieval with RRF, dynamic top-K, full-document fallback, and cited answers |
-| 🐍 | **Persistent Python sandbox** | Isolated, per-conversation workspaces for data analysis and file generation; eligible uploads are staged in and generated artifacts stream back to the chat |
-| 👥 | **Team workspaces** | Isolated shared conversations, projects, files, and knowledge bases with invite links, member attribution, owner controls, and admin oversight |
-| 💳 | **Subscriptions & quotas** | User tiers, timed allowances, permanent credits, per-model limits, redeem codes, credit packages, and optional payment checkout |
-| 🛡 | **Full admin backend** | Operate providers, models, tools, users, workspaces, knowledge, subscriptions, payments, storage, usage, security, backups, and system settings without editing config files |
+| Capability | What you can do |
+| :--- | :--- |
+| **Multi-model chat** | Use Claude, GPT, Gemini, image models, and OpenAI-compatible endpoints in one interface. |
+| **Tools that work together** | Chain search, web fetching, Python, and file generation — up to **48 tool calls across 12 model cycles** per turn. |
+| **Knowledge & documents** | Organize knowledge bases, retrieve relevant passages, and get answers with source citations. |
+| **Persistent sandbox** | Analyze data and create charts, spreadsheets, and presentations in an isolated workspace for each conversation. |
+| **Team workspaces** | Share conversations, projects, files, and knowledge with your team, separate from personal data. |
+| **Platform administration** | Manage providers, users, subscriptions, credits, quotas, and storage from the admin UI. |
 
----
+## Product tour
+
+<details>
+<summary><strong>Explore the interface</strong> — chat, workspace overview, and administration</summary>
+
+### A workspace for everyday AI work
+
+![Multi-model chat with conversation history, model selection, and inline responses](docs/screenshots/hero.png)
+
+### From conversation to completed work
+
+![Aivory overview: multi-model chat, tool workflows, sandbox, teams, and subscriptions](docs/screenshots/aivory-readme-cover.png)
+
+### Everything in one admin console
+
+![Aivory admin backend with model, user, usage, storage, and system controls](docs/screenshots/admin.jpg)
+
+</details>
+
+## Quick start
+
+Requires Docker 24+ with the Compose plugin.
+
+| Deployment | Best for | Default services |
+| :--- | :--- | :--- |
+| [Personal](#personal-deployment) | Individual use, a smaller footprint | App + SQLite; optional sandbox |
+| [Full](#full-deployment) | Teams and full infrastructure | App + PostgreSQL + Redis + Qdrant + sandbox |
+
+See the [documentation](https://docs.aivorygo.com) for guided deployment,
+upgrades, and configuration references. To explore Aivory before self-hosting,
+open the [live demo](https://demo.aivorygo.com).
+
+> **Required for domain deployments:** When using a domain or HTTPS reverse proxy, set
+> `ALLOWED_ORIGINS=https://chat.example.com` in `.env` or `.env.personal`. Otherwise,
+> cookie-authenticated requests may return `cross-site request blocked`. Same-origin IP/HTTP testing may leave it unset.
+
+### Personal deployment
+
+The personal profile keeps semantic vector retrieval but removes Postgres,
+Redis, Qdrant, and the bundled sandbox containers. Business data and normalized
+vectors live in one SQLite file, while cache and background work stay
+in-process. Python execution remains disabled until an administrator configures
+an external sandbox URL under **Admin → Tools**.
+
+```bash
+git clone https://github.com/hjxwz123/Aivory.git
+cd Aivory/deploy
+cp .env.personal.example .env.personal
+$EDITOR .env.personal  # set JWT_SECRET; optionally configure embeddings
+docker compose --env-file .env.personal -f docker-compose.personal.yml pull
+docker compose --env-file .env.personal -f docker-compose.personal.yml up -d
+```
+
+The profile starts only the `app` container by default. Its bind mount defaults
+to `deploy/data-personal`; the SQLite database, embedded vectors, uploads,
+artifacts, and admin backups are all under that directory. It is a
+single-app-instance profile and must not be horizontally scaled.
+
+<details>
+<summary>Optional: enable the Python sandbox for a personal deployment</summary>
+
+To add the bundled Python sandbox, uncomment these matching values in
+`.env.personal`:
+
+```dotenv
+SANDBOX_BASE_URL=http://sandbox:8000
+SANDBOX_API_KEY=aivory-personal-sandbox
+```
+
+Then start the optional profile instead. It adds the sandbox sidecar and a
+runtime-image keepalive container, and mounts the host Docker socket only into
+the sidecar:
+
+```bash
+docker compose --env-file .env.personal -f docker-compose.personal.yml --profile sandbox pull
+docker compose --env-file .env.personal -f docker-compose.personal.yml --profile sandbox up -d
+```
+
+</details>
+
+### Full deployment
+
+```bash
+# 1. Clone
+git clone https://github.com/hjxwz123/Aivory.git
+cd Aivory/deploy
+
+# 2. Fill in secrets
+cp .env.example .env
+$EDITOR .env   # set POSTGRES_PASSWORD, REDIS_PASSWORD, JWT_SECRET
+
+# 3. Pull prebuilt images and start
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
+```
+
+For a versioned deployment, edit the real `deploy/.env`, for example
+`IMAGE_TAG=3.0.0` (image tags omit the Git tag's leading `v`). The app and both
+sandbox images use that version automatically. Historical releases such as
+`2.2.6` need the compatibility override `SANDBOX_IMAGE_TAG=latest`. Run
+`docker compose --env-file .env -f docker-compose.prod.yml config --images`
+before `pull` and `up -d --no-build`; see [the deployment guide](deploy/README.md#deploy-or-roll-back-by-version).
+
+Open `http://localhost`. The setup screen appears on first launch — the first account you create becomes the administrator. Go to `/admin/channels` to add a provider key and create a model.
+
+The full deployment starts five application services:
+
+| Container | Image | Role |
+|-----------|-------|------|
+| `postgres` | `postgres:16-alpine` | Users, conversations, KBs, settings, usage |
+| `redis` | `redis:7-alpine` | Cache, rate limits, kill-signal pub/sub |
+| `qdrant` | `qdrant/qdrant:v1.12.4` | Vector search for RAG |
+| `sandbox` | `ghcr.io/hjxwz123/aivory-sandbox-sidecar:latest` | Bundled code-execution sandbox (internal-only) |
+| `app` | `ghcr.io/hjxwz123/aivory-app:latest` | One container: Go HTTP + SSE server **and** the built SPA, same origin |
+
+<details>
+<summary>Platform support and ARM64 installation notes</summary>
+
+### x86_64 and ARM64 installation
+
+Check the server architecture before deploying:
+
+| `uname -m` output | Image platform | Support |
+|---|---|---|
+| `x86_64` / `amd64` | `linux/amd64` | Supported |
+| `aarch64` / `arm64` | `linux/arm64` | Supported; requires a 64-bit Linux OS |
+| `armv7l` / other 32-bit ARM | `linux/arm/v7` | Not supported |
+
+All three Aivory images (`app`, sandbox runtime, and sandbox sidecar) publish
+both supported platforms under the same tag. Compose selects the matching
+variant automatically, so do not add a `platform:` override.
+
+Existing x86_64 installations keep their current `.env`, Compose file, image
+tags, volumes, and data. Upgrade with the same commands as before:
+
+```bash
+cd Aivory/deploy
+docker compose --env-file .env -f docker-compose.prod.yml pull
+docker compose --env-file .env -f docker-compose.prod.yml up -d --no-build
+```
+
+For a new ARM64 installation, use the normal installation commands; no ARM-only
+configuration is needed:
+
+```bash
+uname -m  # must print aarch64 or arm64
+git clone https://github.com/hjxwz123/Aivory.git
+cd Aivory/deploy
+cp .env.example .env
+$EDITOR .env
+docker compose --env-file .env -f docker-compose.prod.yml pull
+docker compose --env-file .env -f docker-compose.prod.yml up -d
+```
+
+</details>
+
+Postgres / Redis / Qdrant use named volumes (`pgdata`, `redisdata`, `qdrantdata`). Uploads, generated artifacts, and API-owned local objects such as avatars are bind-mounted from `DATA_DIR` (default `./data`) — files land directly on the host, no container access needed. Local objects default to `UPLOAD_DIR/object-storage`; override that path with `AIVORY_LOCAL_STORAGE_DIR` when needed. The admin backup page can also generate an async full migration ZIP that includes DB rows, files, and Qdrant vectors; completed archives live under `BACKUP_DIR` (default `DATA_DIR/backups`).
 
 ## Interleaved tools & Python sandbox
 
@@ -65,9 +201,14 @@ Auto tool mode first handles explicit URLs, data attachments, named files/skills
 
 ### Multi-step pipeline in one turn
 
+<details>
+<summary>View the tool execution pipeline</summary>
+
 <p align="center">
   <img src="docs/screenshots/tool-calls-1.jpg" alt="Tool-call pipeline: skill load, web searches, World Bank API fetch, then Python data-crunching and PowerPoint generation — all from one user message" width="100%">
 </p>
+
+</details>
 
 One prompt — *"Retrieve global GDP data for 2025 and generate a PowerPoint presentation"* — triggers the complete pipeline:
 
@@ -77,9 +218,14 @@ One prompt — *"Retrieve global GDP data for 2025 and generate a PowerPoint pre
 4. `python_execute` → clean the data and compute regional shares & growth
 5. `python_execute` → render the charts and build a polished slide deck with python-pptx
 
+<details>
+<summary>View generated artifacts and downloads</summary>
+
 <p align="center">
   <img src="docs/screenshots/tool-calls-2.jpg" alt="Result: an 8-slide PowerPoint ready to download, four charts rendered inline, 20 sources cited" width="100%">
 </p>
+
+</details>
 
 The result is an 8-slide deck and supporting workbook, returned as download cards alongside four charts and 20 cited sources. The model drives the workflow end to end.
 
@@ -144,8 +290,6 @@ Aivory integrates the **Model Context Protocol (Streamable HTTP transport)** —
 
 For the full registration flow, transport requirements, and the auth/header rules, see [Tools, MCP, and sandbox](docs-site/docs/admin/tools-sandbox.mdx).
 
----
-
 ## RAG & knowledge bases
 
 Knowledge bases turn uploaded files into reusable context for conversations and team workspaces. Users can organize multiple libraries, track each document from parsing through embedding, attach the right library to a chat, and let the query router choose full-document context, retrieval, or no retrieval.
@@ -156,15 +300,11 @@ Knowledge bases turn uploaded files into reusable context for conversations and 
 - **File routing**: a dedicated file-routing model selects the relevant uploaded files and chooses `retrieve`, `full_doc`, or `none` before context is assembled; when unset, it falls back to the general internal-task model
 - **Document operations**: file status, preview, filtering, replacement, deletion, and storage through local files or S3-compatible object storage
 
----
-
 ## Team workspaces
 
 Create an isolated workspace and invite members with a link. Conversations, projects, files, and knowledge bases are shared inside the workspace while remaining separate from every member's personal data. Messages retain author identity, each sender consumes their own allowance, and workspace owners manage membership and invitation links.
 
 Administrators can inspect workspace membership and resources, review shared conversations, and manage the platform without joining the workspace as an ordinary member.
-
----
 
 ## Subscriptions, credits & quotas
 
@@ -172,13 +312,7 @@ Administrators define user tiers with visible plan descriptions, feature access,
 
 Payment checkout is optional and operator-configured. Aivory supports multiple payment channels and methods, auditable payment orders, webhook processing, and reconciliation without coupling the rest of the platform to a payment provider.
 
----
-
 ## Full admin backend
-
-<p align="center">
-  <img src="docs/screenshots/admin.jpg" alt="Aivory admin backend with model, user, usage, storage, and system controls" width="100%">
-</p>
 
 | Area | What administrators manage |
 |------|----------------------------|
@@ -191,8 +325,6 @@ Payment checkout is optional and operator-configured. Aivory supports multiple p
 | Infrastructure | Sandbox, object storage, SearXNG, MinerU, upload policy, backup and migration, and live system settings |
 
 Most runtime configuration takes effect on the next request, without editing environment files or restarting the application.
-
----
 
 ## Additional capabilities
 
@@ -207,8 +339,6 @@ Most runtime configuration takes effect on the next request, without editing env
 | MCP tool integration | Open, standard tool access via Streamable HTTP MCP — admin catalog + per-model defaults + user-managed endpoints |
 | Enterprise SSO | Google · GitHub · Apple · generic OIDC / OAuth2 (Azure AD, Okta, Keycloak, …), auto-provisioning, TOTP 2FA, session revocation |
 
----
-
 ## Enterprise sign-in (SSO)
 
 Bring your own identity provider and keep password logins behind it. Aivory authenticates enterprise users through standards-based OAuth/OIDC instead of storing corporate passwords:
@@ -219,134 +349,6 @@ Bring your own identity provider and keep password logins behind it. Aivory auth
 - **Security defaults**: OAuth client secrets and Apple `.p8` keys stay server-side; token exchange has a bounded timeout with clear egress diagnostics; per-IP rate limits cover the OAuth endpoints; access-token expiry, TOTP 2FA, and login audit rows apply to SSO sessions just like password sessions.
 
 LDAP / AD directory sync is **not** yet offered — SSO at this layer is delegated to your IdP through OIDC/OAuth 2. The full provider matrix, safe-launch checklist, and the enterprise lockdown recipe live in [Login methods & SSO](docs-site/docs/admin/access-auth.mdx).
-
----
-
-## Quick start
-
-> **Required for domain deployments:** When using a domain or HTTPS reverse proxy, set
-> `ALLOWED_ORIGINS=https://chat.example.com` in `.env` or `.env.personal`. Otherwise,
-> cookie-authenticated requests may return `cross-site request blocked`. Same-origin IP/HTTP testing may leave it unset.
-
-Requires Docker 24+ with the Compose plugin.
-
-See the [documentation](https://docs.aivorygo.com) for guided deployment,
-upgrades, and configuration references. To explore Aivory before self-hosting,
-open the [live demo](https://demo.aivorygo.com).
-
-### Personal deployment
-
-The personal profile keeps semantic vector retrieval but removes Postgres,
-Redis, Qdrant, and the bundled sandbox containers. Business data and normalized
-vectors live in one SQLite file, while cache and background work stay
-in-process. Python execution remains disabled until an administrator configures
-an external sandbox URL under **Admin → Tools**.
-
-```bash
-git clone https://github.com/hjxwz123/Aivory.git
-cd Aivory/deploy
-cp .env.personal.example .env.personal
-$EDITOR .env.personal  # set JWT_SECRET; optionally configure embeddings
-docker compose --env-file .env.personal -f docker-compose.personal.yml pull
-docker compose --env-file .env.personal -f docker-compose.personal.yml up -d
-```
-
-The profile starts only the `app` container by default. Its bind mount defaults
-to `deploy/data-personal`; the SQLite database, embedded vectors, uploads,
-artifacts, and admin backups are all under that directory. It is a
-single-app-instance profile and must not be horizontally scaled.
-
-To add the bundled Python sandbox, uncomment these matching values in
-`.env.personal`:
-
-```dotenv
-SANDBOX_BASE_URL=http://sandbox:8000
-SANDBOX_API_KEY=aivory-personal-sandbox
-```
-
-Then start the optional profile instead. It adds the sandbox sidecar and a
-runtime-image keepalive container, and mounts the host Docker socket only into
-the sidecar:
-
-```bash
-docker compose --env-file .env.personal -f docker-compose.personal.yml --profile sandbox pull
-docker compose --env-file .env.personal -f docker-compose.personal.yml --profile sandbox up -d
-```
-
-### Full deployment
-
-```bash
-# 1. Clone
-git clone https://github.com/hjxwz123/Aivory.git
-cd Aivory/deploy
-
-# 2. Fill in secrets
-cp .env.example .env
-$EDITOR .env   # set POSTGRES_PASSWORD, REDIS_PASSWORD, JWT_SECRET
-
-# 3. Pull prebuilt images and start
-docker compose -f docker-compose.prod.yml pull
-docker compose -f docker-compose.prod.yml up -d
-```
-
-For a versioned deployment, edit the real `deploy/.env`, for example
-`IMAGE_TAG=3.0.0` (image tags omit the Git tag's leading `v`). The app and both
-sandbox images use that version automatically. Historical releases such as
-`2.2.6` need the compatibility override `SANDBOX_IMAGE_TAG=latest`. Run
-`docker compose --env-file .env -f docker-compose.prod.yml config --images`
-before `pull` and `up -d --no-build`; see [the deployment guide](deploy/README.md#deploy-or-roll-back-by-version).
-
-Open `http://localhost`. The setup screen appears on first launch — the first account you create becomes the administrator. Go to `/admin/channels` to add a provider key and create a model.
-
-The full deployment starts five application services:
-
-| Container | Image | Role |
-|-----------|-------|------|
-| `postgres` | `postgres:16-alpine` | Users, conversations, KBs, settings, usage |
-| `redis` | `redis:7-alpine` | Cache, rate limits, kill-signal pub/sub |
-| `qdrant` | `qdrant/qdrant:v1.12.4` | Vector search for RAG |
-| `sandbox` | `ghcr.io/hjxwz123/aivory-sandbox-sidecar:latest` | Bundled code-execution sandbox (internal-only) |
-| `app` | `ghcr.io/hjxwz123/aivory-app:latest` | One container: Go HTTP + SSE server **and** the built SPA, same origin |
-
-### x86_64 and ARM64 installation
-
-Check the server architecture before deploying:
-
-| `uname -m` output | Image platform | Support |
-|---|---|---|
-| `x86_64` / `amd64` | `linux/amd64` | Supported |
-| `aarch64` / `arm64` | `linux/arm64` | Supported; requires a 64-bit Linux OS |
-| `armv7l` / other 32-bit ARM | `linux/arm/v7` | Not supported |
-
-All three Aivory images (`app`, sandbox runtime, and sandbox sidecar) publish
-both supported platforms under the same tag. Compose selects the matching
-variant automatically, so do not add a `platform:` override.
-
-Existing x86_64 installations keep their current `.env`, Compose file, image
-tags, volumes, and data. Upgrade with the same commands as before:
-
-```bash
-cd Aivory/deploy
-docker compose --env-file .env -f docker-compose.prod.yml pull
-docker compose --env-file .env -f docker-compose.prod.yml up -d --no-build
-```
-
-For a new ARM64 installation, use the normal installation commands; no ARM-only
-configuration is needed:
-
-```bash
-uname -m  # must print aarch64 or arm64
-git clone https://github.com/hjxwz123/Aivory.git
-cd Aivory/deploy
-cp .env.example .env
-$EDITOR .env
-docker compose --env-file .env -f docker-compose.prod.yml pull
-docker compose --env-file .env -f docker-compose.prod.yml up -d
-```
-
-Postgres / Redis / Qdrant use named volumes (`pgdata`, `redisdata`, `qdrantdata`). Uploads, generated artifacts, and API-owned local objects such as avatars are bind-mounted from `DATA_DIR` (default `./data`) — files land directly on the host, no container access needed. Local objects default to `UPLOAD_DIR/object-storage`; override that path with `AIVORY_LOCAL_STORAGE_DIR` when needed. The admin backup page can also generate an async full migration ZIP that includes DB rows, files, and Qdrant vectors; completed archives live under `BACKUP_DIR` (default `DATA_DIR/backups`).
-
----
 
 ## Compile and run locally (development)
 
@@ -370,9 +372,14 @@ a random key at each start, so existing login sessions expire after a restart.
 Data defaults to `server/data/`; the first account created on an empty database
 becomes the administrator.
 
----
-
 ## Technical architecture
+
+<details>
+<summary>View the architecture overview poster</summary>
+
+![Aivory architecture overview](docs/screenshots/aivory-architecture-poster.png)
+
+</details>
 
 ```mermaid
 graph TB
@@ -407,9 +414,6 @@ graph TB
 
 > Everything admin-configurable hot-reloads — providers, models, tools, RAG, storage — no restarts.
 
-
----
-
 ## Configuration
 
 Most of Aivory is configured from the admin UI at runtime — provider keys, MinerU token, S3 credentials, SearXNG URL, upload allowlist, disabled tools, compaction settings. All apply on the next request, no restart needed.
@@ -437,19 +441,15 @@ These are intentionally **not** listed in `.env.example` — leave it alone unle
 - `VITE_*` frontend vars are inlined at **build time** — set them before `npm run build` / the frontend Docker build, not at container runtime.
 - `SANDBOX_*` vars belong to the `sandbox-service` process and take effect on its restart.
 
----
-
 ## Tech stack
 
-- **Frontend**: React 19, TypeScript 5, Vite 5, Tailwind 4, Radix UI, Zustand, i18next, lucide-react
+- **Frontend**: React 19, TypeScript 5, Vite 6, Tailwind 4, Radix UI, Zustand, i18next, lucide-react
 - **Backend**: Go 1.22, standard `net/http`, hand-rolled typed queries
 - **Storage**: PostgreSQL 16 (full deployment) / SQLite (personal and local)
 - **Cache & coordination**: Redis 7
 - **Vector search**: Qdrant 1.12 (full deployment) / embedded SQLite exact cosine search (personal)
 - **Document parsing**: MinerU cloud API (PDF / DOCX / PPTX / images via OCR)
 - **Internationalization**: 5 locales — English, Simplified Chinese, Traditional Chinese, Japanese, French
-
----
 
 ## Project layout
 
@@ -479,8 +479,6 @@ These are intentionally **not** listed in `.env.example` — leave it alone unle
 └── docs/screenshots/         Screenshots referenced in this README
 ```
 
----
-
 ## Contributing
 
 Open an issue first for non-trivial changes. Before submitting a PR:
@@ -493,13 +491,9 @@ npm run lint && npm run typecheck && npm run build
 cd server && go vet ./... && go build ./...
 ```
 
----
-
 ## License
 
 [Apache 2.0](./LICENSE) — you may use, modify, and distribute this software, including in proprietary/closed-source products, provided you retain the original copyright notice, include a copy of this license, and note any modifications you make.
-
----
 
 ## Acknowledgements
 

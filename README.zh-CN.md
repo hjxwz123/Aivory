@@ -1,58 +1,186 @@
-<p align="center">
-  <img src="docs/brand/trace.svg" alt="Aivory" width="320">
+<p align="right">
+  <a href="./README.md">English</a> · <strong>简体中文</strong>
 </p>
 
-<p align="center">
-  <img src="docs/screenshots/aivory-readme-cover.png" alt="Aivory——自部署 AI 工作空间" width="100%">
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/brand/readme-header-compact.svg">
+  <img src="docs/brand/readme-header.svg" alt="Aivory — 自部署 AI 工作空间" width="100%">
+</picture>
+
+### 你的模型，你的知识，你的 AI 工作空间。
+
+将多模型对话、资料研究、代码执行与团队协作整合到一个自部署平台。从日常提问到团队运营，Aivory 让工具、知识与数据在同一处协同工作。
+
+<p>
+  <a href="https://demo.aivorygo.com"><strong>在线体验 ↗</strong></a> &nbsp; · &nbsp;
+  <a href="#快速开始推荐docker"><strong>部署 Aivory</strong></a> &nbsp; · &nbsp;
+  <a href="https://docs.aivorygo.com">使用文档</a>
 </p>
 
-> 面向个人与团队的生产级自部署多模型 AI 平台：多轮工具调用、RAG 与知识库、持久沙箱、团队工作空间、订阅体系和完整管理后台，一套系统即可运行。
-
-<p align="center">
-  <a href="./README.md">English</a> ·
-  <a href="./README.zh-CN.md"><strong>简体中文</strong></a>
+<p>
+  <a href="./LICENSE"><img alt="开源协议：Apache 2.0" src="https://img.shields.io/badge/License-Apache_2.0-42675d?style=flat-square&amp;labelColor=243c3a"></a>
+  <a href="https://github.com/hjxwz123/Aivory/pkgs/container/aivory-app"><img alt="Docker 镜像：amd64 与 arm64" src="https://img.shields.io/badge/Docker-amd64_%2F_arm64-42675d?style=flat-square&amp;logo=docker&amp;logoColor=white&amp;labelColor=243c3a"></a>
 </p>
 
-<p align="center">
-  <a href="https://docs.aivorygo.com"><strong>使用文档</strong></a> ·
-  <a href="https://demo.aivorygo.com"><strong>在线体验</strong></a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/hjxwz123/Aivory/pkgs/container/aivory-app"><img alt="镜像" src="https://img.shields.io/badge/ghcr.io-aivory--app-blue?logo=docker"></a>
-  <img alt="Go" src="https://img.shields.io/badge/Go-1.22-00ADD8?logo=go">
-  <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react">
-  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript">
-  <a href="./LICENSE"><img alt="开源协议" src="https://img.shields.io/badge/license-Apache%202.0-blue"></a>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/aivory-architecture-poster.png" alt="Aivory 在一个工作空间中统一编排模型、工具、知识、沙箱和数据服务" width="100%">
-</p>
-
----
-
-## 一套完整的 AI 工作空间
-
-大多数自部署 AI 前端只负责把消息转发给模型。Aivory 将多模型对话、自主工具执行、文档智能、隔离计算、团队协作、订阅体系和日常运营整合为一个可直接部署的平台。
-
-<p align="center">
-  <img src="docs/screenshots/hero.png" alt="Aivory 多模型 AI 对话工作空间" width="100%">
-</p>
+[核心能力](#核心能力) · [界面预览](#界面预览) · [快速开始](#快速开始推荐docker) · [技术架构](#技术架构) · [配置说明](#配置) · [参与贡献](#参与贡献)
 
 ## 核心能力
 
-| | 功能 | 你能得到什么 |
-|---|---|---|
-| 🔀 | **多模型 AI 对话** | 在同一套 UI 中使用 Claude、GPT、Gemini、图片模型和任意 OpenAI 兼容端点，按消息记录模型，并由管理员配置模型控件和能力 |
-| 🛠 | **多轮工具调用** | 单轮最多 **48 次工具调用、12 个模型循环**；搜索、抓取、Python、文件、记忆和图片工具可组成一条自主工作流 |
-| 📚 | **RAG 与知识库** | 文档库管理、查询路由、结构感知分块、混合检索与 RRF、动态 Top-K、全文兜底和带引用回答 |
-| 🐍 | **持久 Python 沙箱** | 每个对话拥有隔离的持久工作区，可分析数据、生成文件、暂存合规输入，并将图表和文档等产物流式返回对话 |
-| 👥 | **团队工作空间** | 隔离共享对话、项目、文件和知识库，支持邀请链接、成员署名、空间所有者管理和管理员审查 |
-| 💳 | **订阅与配额** | 用户层级、定时额度、永久积分、按模型限制、兑换码、积分套餐和可选支付结算 |
-| 🛡 | **完整管理后台** | 集中管理渠道、模型、工具、用户、工作空间、知识库、订阅、支付、存储、用量、安全、备份和系统设置 |
+| 能力 | 你可以做什么 |
+| :--- | :--- |
+| **多模型对话** | 在同一界面使用 Claude、GPT、Gemini、图片模型和任意 OpenAI 兼容端点。 |
+| **自主工具协作** | 串联搜索、网页抓取、Python 与文件生成，单轮最多 **48 次工具调用、12 个模型循环**。 |
+| **知识与文档** | 管理知识库、检索相关段落，让回答附带可追溯的来源引用。 |
+| **持久沙箱** | 在每个对话独立的工作区中分析数据，生成图表、表格与演示文稿。 |
+| **团队工作空间** | 共享对话、项目、文件与知识库，同时与个人数据保持隔离。 |
+| **平台运营管理** | 通过管理后台统一配置渠道、用户、订阅、积分、配额与存储。 |
 
----
+## 界面预览
+
+<details>
+<summary><strong>展开产品截图</strong> — 对话界面、工作空间概览与管理后台</summary>
+
+### 日常 AI 工作，从这里开始
+
+![多模型对话界面：历史记录、模型选择与流式回复](docs/screenshots/hero.png)
+
+### 从一次提问到完成任务
+
+![Aivory 概览：多模型对话、工具工作流、沙箱、团队与订阅](docs/screenshots/aivory-readme-cover.png)
+
+### 一处管理整个平台
+
+![Aivory 管理后台：模型、用户、用量、存储与系统配置](docs/screenshots/admin.jpg)
+
+</details>
+
+## 快速开始（推荐：Docker）
+
+需要 Docker 24+ 与 Compose 插件。
+
+| 部署方式 | 适用场景 | 默认服务 |
+| :--- | :--- | :--- |
+| [个人版](#个人版) | 个人使用、轻量部署 | App + SQLite，沙箱按需启用 |
+| [完整版](#完整版) | 团队协作、完整基础设施 | App + PostgreSQL + Redis + Qdrant + 沙箱 |
+
+部署、升级和配置参考请查看[使用文档](https://docs.aivorygo.com)。希望先了解产品再
+自行部署，可直接打开[在线体验](https://demo.aivorygo.com)。
+
+> **域名部署必填：** 使用域名或 HTTPS 反向代理时，请在 `.env` 或 `.env.personal` 中设置
+> `ALLOWED_ORIGINS=https://chat.example.com`，否则登录会话、积分领取和备份导入等请求可能返回
+> `cross-site request blocked`。纯 IP 同源 HTTP 测试可不设置。
+
+### 个人版
+
+个人版保留语义向量检索，但不启动 PostgreSQL、Redis、Qdrant 和两个沙箱容器。业务
+数据与归一化向量都写入同一个 SQLite 文件，缓存与后台任务使用进程内实现。Python
+执行默认关闭；需要时由管理员在「管理后台 → 工具」中配置外部沙箱地址。
+
+```bash
+git clone https://github.com/hjxwz123/Aivory.git
+cd Aivory/deploy
+cp .env.personal.example .env.personal
+$EDITOR .env.personal  # 设置 JWT_SECRET；按需配置 embedding
+docker compose --env-file .env.personal -f docker-compose.personal.yml pull
+docker compose --env-file .env.personal -f docker-compose.personal.yml up -d
+```
+
+个人版默认只启动 `app` 一个容器。宿主机数据目录默认是 `deploy/data-personal`，SQLite
+数据库、内嵌向量、上传文件、生成产物和后台备份都在该目录中。个人版只支持单个 app
+实例，不要横向扩容。
+
+<details>
+<summary>可选：为个人版启用 Python 沙箱</summary>
+
+需要部署内置 Python 沙箱时，在 `.env.personal` 中取消注释并保持以下两项配对：
+
+```dotenv
+SANDBOX_BASE_URL=http://sandbox:8000
+SANDBOX_API_KEY=aivory-personal-sandbox
+```
+
+再使用可选 profile 启动。它会额外启动沙箱 sidecar 和运行时镜像保活容器，且仅 sidecar
+会挂载宿主机 Docker socket：
+
+```bash
+docker compose --env-file .env.personal -f docker-compose.personal.yml --profile sandbox pull
+docker compose --env-file .env.personal -f docker-compose.personal.yml --profile sandbox up -d
+```
+
+</details>
+
+### 完整版
+
+```bash
+# 1. 克隆（只需要 deploy/ 子目录）
+git clone https://github.com/hjxwz123/Aivory.git
+cd Aivory/deploy
+
+# 2. 填密钥
+cp .env.example .env
+$EDITOR .env             # 至少改 POSTGRES_PASSWORD、REDIS_PASSWORD、JWT_SECRET
+
+# 3. 拉镜像 + 启动
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
+```
+
+按版本部署时，修改实际的 `deploy/.env`，例如 `IMAGE_TAG=3.0.0`（镜像标签不带 Git tag 的 `v` 前缀）；应用和两张沙箱镜像会自动使用同一版本。`2.2.6` 等缺少沙箱版本镜像的历史版本需要额外设置 `SANDBOX_IMAGE_TAG=latest`。先运行 `docker compose --env-file .env -f docker-compose.prod.yml config --images` 核对最终镜像，再执行 `pull` 和 `up -d --no-build`。完整说明见 [`deploy/README.zh-CN.md`](deploy/README.zh-CN.md#按版本号部署或回滚)。
+
+<details>
+<summary>平台兼容性与 ARM64 安装说明</summary>
+
+### x86_64 与 ARM64 安装
+
+部署前先检查服务器架构：
+
+| `uname -m` 输出 | 镜像平台 | 支持情况 |
+|---|---|---|
+| `x86_64` / `amd64` | `linux/amd64` | 支持 |
+| `aarch64` / `arm64` | `linux/arm64` | 支持，必须使用 64 位 Linux 系统 |
+| `armv7l` / 其他 32 位 ARM | `linux/arm/v7` | 不支持 |
+
+应用、沙箱运行时和沙箱 sidecar 的同一标签会同时包含两种受支持的平台。
+Docker Compose 会自动拉取匹配宿主机的版本，不要额外设置 `platform:`。
+
+已有 x86_64 部署无需修改 `.env`、Compose、镜像标签、数据卷或现有数据，仍按
+原方式更新：
+
+```bash
+cd Aivory/deploy
+docker compose --env-file .env -f docker-compose.prod.yml pull
+docker compose --env-file .env -f docker-compose.prod.yml up -d --no-build
+```
+
+全新 ARM64 部署也使用标准安装命令，不需要 ARM 专用配置：
+
+```bash
+uname -m  # 必须输出 aarch64 或 arm64
+git clone https://github.com/hjxwz123/Aivory.git
+cd Aivory/deploy
+cp .env.example .env
+$EDITOR .env  # 设置 POSTGRES_PASSWORD、REDIS_PASSWORD、JWT_SECRET
+docker compose --env-file .env -f docker-compose.prod.yml pull
+docker compose --env-file .env -f docker-compose.prod.yml up -d
+```
+
+</details>
+
+完成后访问 `http://localhost`（默认映射主机 80 端口；如被占用，修改 `docker-compose.prod.yml` 里的 `"80:8787"` 映射）。使用域名或 HTTPS 反向代理时，必须在 `.env` 中将 `ALLOWED_ORIGINS` 设置为浏览器实际访问的 Origin。
+
+**首次启动**：进入初始化页面，填写昵称、邮箱和密码，该账号成为管理员。随后去 `/admin/channels` 添加第一个 Provider key，并创建模型。
+
+完整版包含五个应用服务：
+
+| 容器 | 镜像 | 作用 |
+|------|------|------|
+| `postgres` | `postgres:16-alpine` | 用户、对话、知识库、设置、用量记录 |
+| `redis` | `redis:7-alpine` | 缓存、限频计数器、kill-signal pub/sub |
+| `qdrant` | `qdrant/qdrant:v1.12.4` | RAG 向量检索 |
+| `sandbox` | `ghcr.io/hjxwz123/aivory-sandbox-sidecar:latest` | 内置代码执行沙箱（仅内网） |
+| `app` | `ghcr.io/hjxwz123/aivory-app:latest` | 单容器：Go HTTP + SSE 服务 **同时**托管前端 SPA，同源 |
+
+**数据持久化**：Postgres / Redis / Qdrant 数据落在命名卷（`pgdata` / `redisdata` / `qdrantdata`）。上传文件、生成产物以及头像等 API 本地对象绑定挂载到**宿主机**目录（`DATA_DIR`，默认 `./data`），文件直接落在宿主机文件系统，不进容器，方便查看与备份。本地对象默认保存在 `UPLOAD_DIR/object-storage`，需要时可通过 `AIVORY_LOCAL_STORAGE_DIR` 覆盖。备份时把命名卷和 `DATA_DIR` 一起打包，保证数据库行、向量和磁盘文件三者一致。管理员后台也可以异步生成全量迁移 ZIP，包含数据库行、文件和 Qdrant 向量；生成后的归档位于 `BACKUP_DIR`（默认 `DATA_DIR/backups`）。
 
 ## 多轮工具调用与 Python 沙箱
 
@@ -62,9 +190,14 @@
 
 ### 单次提问完成完整任务
 
+<details>
+<summary>查看工具执行过程</summary>
+
 <p align="center">
   <img src="docs/screenshots/tool-calls-1.jpg" alt="一次提问依次加载技能、搜索资料、抓取数据，再使用 Python 分析并生成 PowerPoint" width="100%">
 </p>
+
+</details>
 
 例如，一条“检索 2025 年全球 GDP 数据并制作 PowerPoint”的消息可以自动完成：
 
@@ -74,9 +207,14 @@
 4. `python_execute`：清洗数据并计算指标
 5. `python_execute`：绘制图表并生成演示文稿
 
+<details>
+<summary>查看生成结果与下载文件</summary>
+
 <p align="center">
   <img src="docs/screenshots/tool-calls-2.jpg" alt="工具链返回可下载的 PowerPoint、数据表、图表和引用来源" width="100%">
 </p>
+
+</details>
 
 最终得到可下载的演示文稿与数据表、内联图表和引用来源，整条流程由模型端到端驱动。
 
@@ -123,8 +261,6 @@ Aivory 支持开放标准的 **Model Context Protocol（Streamable HTTP 传输�
 
 完整的注册流程、传输要求与认证/请求头规则见 [工具、MCP 与沙箱](docs-site/docs/admin/tools-sandbox.mdx)。
 
----
-
 ## RAG 与知识库
 
 知识库将上传文件转化为可以在个人对话和团队工作空间中重复使用的上下文。用户可以创建多个文档库、跟踪解析与嵌入状态、为对话挂载知识库，并由查询路由自动选择全文、检索或跳过 RAG。
@@ -135,15 +271,11 @@ Aivory 支持开放标准的 **Model Context Protocol（Streamable HTTP 传输�
 - **文件路由**：专用文件路由模型在拼装上下文前选择相关上传文件，并决定 `retrieve`、`full_doc` 或 `none`；未配置时回退到其他内部任务模型
 - **完整文档管理**：状态跟踪、预览、筛选、替换、删除，以及本地文件或 S3 兼容对象存储
 
----
-
 ## 团队工作空间
 
 创建隔离工作空间并通过链接邀请成员。空间内共享对话、项目、文件和知识库，同时与每个成员的个人数据完全分离。消息保留发送者身份，各成员使用自己的额度，空间所有者负责成员和邀请链接管理。
 
 管理员可以查看工作空间成员与资源、只读审查共享对话，并从全局层面完成平台治理。
-
----
 
 ## 订阅、积分与配额
 
@@ -151,13 +283,7 @@ Aivory 支持开放标准的 **Model Context Protocol（Streamable HTTP 传输�
 
 支付结算是可选能力，由管理员按需配置。系统支持多个支付渠道和用户支付方式、支付订单审计、Webhook 处理与订单对账，但不会让支付实现侵入其他核心功能。
 
----
-
 ## 完整管理后台
-
-<p align="center">
-  <img src="docs/screenshots/admin.jpg" alt="Aivory 管理后台集中管理模型、用户、用量、存储和系统设置" width="100%">
-</p>
 
 | 管理领域 | 管理内容 |
 |----------|----------|
@@ -170,8 +296,6 @@ Aivory 支持开放标准的 **Model Context Protocol（Streamable HTTP 传输�
 | 基础设施 | 沙箱、对象存储、SearXNG、MinerU、上传策略、备份迁移和实时系统设置 |
 
 绝大多数运行时配置会在下一次请求直接生效，无需修改环境文件或重启应用。
-
----
 
 ## 其他能力
 
@@ -186,8 +310,6 @@ Aivory 支持开放标准的 **Model Context Protocol（Streamable HTTP 传输�
 | 企业 SSO | Google · GitHub · Apple · 通用 OIDC / OAuth2（Azure AD、Okta、Keycloak 等），自动开户、TOTP 双因子、会话撤销 |
 | 体验与安全 | 流式思考、长上下文压缩、分享、PWA、五种语言、响应式主题、后端密钥、HMAC 签名、上传校验和全面限速 |
 
----
-
 ## 企业登录（SSO）
 
 自带身份提供商，把密码登录收到 SSO 之后。Aivory 通过标准 OAuth/OIDC 认证企业用户，不在本地存储企业密码：
@@ -199,124 +321,14 @@ Aivory 支持开放标准的 **Model Context Protocol（Streamable HTTP 传输�
 
 LDAP / AD 目录同步暂未提供——该层的 SSO 通过 OIDC/OAuth 2 委托给你的 IdP。完整服务商矩阵、安全上线清单与企业锁定配方见 [登录方式与 SSO](docs-site/docs/admin/access-auth.mdx)。
 
----
-
-## 快速开始（推荐：Docker）
-
-> **域名部署必填：** 使用域名或 HTTPS 反向代理时，请在 `.env` 或 `.env.personal` 中设置
-> `ALLOWED_ORIGINS=https://chat.example.com`，否则登录会话、积分领取和备份导入等请求可能返回
-> `cross-site request blocked`。纯 IP 同源 HTTP 测试可不设置。
-
-需要 Docker 24+ 与 Compose 插件。
-
-部署、升级和配置参考请查看[使用文档](https://docs.aivorygo.com)。希望先了解产品再
-自行部署，可直接打开[在线体验](https://demo.aivorygo.com)。
-
-### 个人版
-
-个人版保留语义向量检索，但不启动 PostgreSQL、Redis、Qdrant 和两个沙箱容器。业务
-数据与归一化向量都写入同一个 SQLite 文件，缓存与后台任务使用进程内实现。Python
-执行默认关闭；需要时由管理员在「管理后台 → 工具」中配置外部沙箱地址。
-
-```bash
-git clone https://github.com/hjxwz123/Aivory.git
-cd Aivory/deploy
-cp .env.personal.example .env.personal
-$EDITOR .env.personal  # 设置 JWT_SECRET；按需配置 embedding
-docker compose --env-file .env.personal -f docker-compose.personal.yml pull
-docker compose --env-file .env.personal -f docker-compose.personal.yml up -d
-```
-
-个人版默认只启动 `app` 一个容器。宿主机数据目录默认是 `deploy/data-personal`，SQLite
-数据库、内嵌向量、上传文件、生成产物和后台备份都在该目录中。个人版只支持单个 app
-实例，不要横向扩容。
-
-需要部署内置 Python 沙箱时，在 `.env.personal` 中取消注释并保持以下两项配对：
-
-```dotenv
-SANDBOX_BASE_URL=http://sandbox:8000
-SANDBOX_API_KEY=aivory-personal-sandbox
-```
-
-再使用可选 profile 启动。它会额外启动沙箱 sidecar 和运行时镜像保活容器，且仅 sidecar
-会挂载宿主机 Docker socket：
-
-```bash
-docker compose --env-file .env.personal -f docker-compose.personal.yml --profile sandbox pull
-docker compose --env-file .env.personal -f docker-compose.personal.yml --profile sandbox up -d
-```
-
-### 完整版
-
-```bash
-# 1. 克隆（只需要 deploy/ 子目录）
-git clone https://github.com/hjxwz123/Aivory.git
-cd Aivory/deploy
-
-# 2. 填密钥
-cp .env.example .env
-$EDITOR .env             # 至少改 POSTGRES_PASSWORD、REDIS_PASSWORD、JWT_SECRET
-
-# 3. 拉镜像 + 启动
-docker compose -f docker-compose.prod.yml pull
-docker compose -f docker-compose.prod.yml up -d
-```
-
-按版本部署时，修改实际的 `deploy/.env`，例如 `IMAGE_TAG=3.0.0`（镜像标签不带 Git tag 的 `v` 前缀）；应用和两张沙箱镜像会自动使用同一版本。`2.2.6` 等缺少沙箱版本镜像的历史版本需要额外设置 `SANDBOX_IMAGE_TAG=latest`。先运行 `docker compose --env-file .env -f docker-compose.prod.yml config --images` 核对最终镜像，再执行 `pull` 和 `up -d --no-build`。完整说明见 [`deploy/README.zh-CN.md`](deploy/README.zh-CN.md#按版本号部署或回滚)。
-
-### x86_64 与 ARM64 安装
-
-部署前先检查服务器架构：
-
-| `uname -m` 输出 | 镜像平台 | 支持情况 |
-|---|---|---|
-| `x86_64` / `amd64` | `linux/amd64` | 支持 |
-| `aarch64` / `arm64` | `linux/arm64` | 支持，必须使用 64 位 Linux 系统 |
-| `armv7l` / 其他 32 位 ARM | `linux/arm/v7` | 不支持 |
-
-应用、沙箱运行时和沙箱 sidecar 的同一标签会同时包含两种受支持的平台。
-Docker Compose 会自动拉取匹配宿主机的版本，不要额外设置 `platform:`。
-
-已有 x86_64 部署无需修改 `.env`、Compose、镜像标签、数据卷或现有数据，仍按
-原方式更新：
-
-```bash
-cd Aivory/deploy
-docker compose --env-file .env -f docker-compose.prod.yml pull
-docker compose --env-file .env -f docker-compose.prod.yml up -d --no-build
-```
-
-全新 ARM64 部署也使用标准安装命令，不需要 ARM 专用配置：
-
-```bash
-uname -m  # 必须输出 aarch64 或 arm64
-git clone https://github.com/hjxwz123/Aivory.git
-cd Aivory/deploy
-cp .env.example .env
-$EDITOR .env  # 设置 POSTGRES_PASSWORD、REDIS_PASSWORD、JWT_SECRET
-docker compose --env-file .env -f docker-compose.prod.yml pull
-docker compose --env-file .env -f docker-compose.prod.yml up -d
-```
-
-完成后访问 `http://localhost`（默认映射主机 80 端口；如被占用，修改 `docker-compose.prod.yml` 里的 `"80:8787"` 映射）。使用域名或 HTTPS 反向代理时，必须在 `.env` 中将 `ALLOWED_ORIGINS` 设置为浏览器实际访问的 Origin。
-
-**首次启动**：进入初始化页面，填写昵称、邮箱和密码，该账号成为管理员。随后去 `/admin/channels` 添加第一个 Provider key，并创建模型。
-
-完整版包含五个应用服务：
-
-| 容器 | 镜像 | 作用 |
-|------|------|------|
-| `postgres` | `postgres:16-alpine` | 用户、对话、知识库、设置、用量记录 |
-| `redis` | `redis:7-alpine` | 缓存、限频计数器、kill-signal pub/sub |
-| `qdrant` | `qdrant/qdrant:v1.12.4` | RAG 向量检索 |
-| `sandbox` | `ghcr.io/hjxwz123/aivory-sandbox-sidecar:latest` | 内置代码执行沙箱（仅内网） |
-| `app` | `ghcr.io/hjxwz123/aivory-app:latest` | 单容器：Go HTTP + SSE 服务 **同时**托管前端 SPA，同源 |
-
-**数据持久化**：Postgres / Redis / Qdrant 数据落在命名卷（`pgdata` / `redisdata` / `qdrantdata`）。上传文件、生成产物以及头像等 API 本地对象绑定挂载到**宿主机**目录（`DATA_DIR`，默认 `./data`），文件直接落在宿主机文件系统，不进容器，方便查看与备份。本地对象默认保存在 `UPLOAD_DIR/object-storage`，需要时可通过 `AIVORY_LOCAL_STORAGE_DIR` 覆盖。备份时把命名卷和 `DATA_DIR` 一起打包，保证数据库行、向量和磁盘文件三者一致。管理员后台也可以异步生成全量迁移 ZIP，包含数据库行、文件和 Qdrant 向量；生成后的归档位于 `BACKUP_DIR`（默认 `DATA_DIR/backups`）。
-
----
-
 ## 技术架构
+
+<details>
+<summary>查看架构概览海报</summary>
+
+![Aivory architecture overview](docs/screenshots/aivory-architecture-poster.png)
+
+</details>
 
 ```mermaid
 graph TB
@@ -351,9 +363,6 @@ graph TB
 
 > 所有管理端配置(渠道、模型、工具、RAG、存储)保存即生效,全程无需重启。
 
-
----
-
 ## 配置
 
 Aivory 的绝大多数配置项**通过管理后台实时改**，不依赖环境变量。Provider key、MinerU token、S3 凭据、SearXNG 地址、上传白名单、禁用工具列表——全在 admin 页面编辑，保存后下一次请求即生效，无需重启。
@@ -384,8 +393,6 @@ Aivory 的绝大多数配置项**通过管理后台实时改**，不依赖环境
 - 前端 `VITE_*` 变量：执行 `npm run build` 时内联，必须在编译环境设置；运行时修改环境变量无效，需要重新编译前端产物。
 - `SANDBOX_*` 变量：属于 `sandbox-service` 进程，改动后重启该进程生效。
 
----
-
 ## 编译部署（适合本地开发）
 
 本地编译不需要 Docker、Postgres、Redis 或 Qdrant。前端先构建到 `dist/`，Go API 使用 SQLite 和内存缓存，并通过 `STATIC_DIR` 在 `8787` 端口同时提供 SPA 与 `/api`。
@@ -403,19 +410,15 @@ STATIC_DIR=../dist ./aivory
 
 打开 `http://localhost:8787`。本地开发未设置 `JWT_SECRET` 时会在每次启动生成随机密钥，因此重启后已有登录会话失效；数据默认保存在 `server/data/`。首次启动进入初始化页面，创建的第一个账号成为管理员。
 
----
-
 ## 技术栈
 
-- **前端**：React 19、TypeScript 5、Vite 5、Tailwind 4、Radix UI、Zustand、i18next、lucide-react
+- **前端**：React 19、TypeScript 5、Vite 6、Tailwind 4、Radix UI、Zustand、i18next、lucide-react
 - **后端**：Go 1.22、标准 `net/http`、手写 sqlc 风格查询
 - **存储**：PostgreSQL 16（完整版）/ SQLite（个人版与本地运行）
 - **缓存与协调**：Redis 7
 - **向量检索**：Qdrant 1.12（完整版）/ SQLite 内嵌精确余弦检索（个人版）
 - **文档解析**：MinerU 云 API（PDF / DOCX / PPTX / 图片 OCR）
 - **可选**：S3 / 阿里云 OSS 作源文件桶，SearXNG 作自部署搜索引擎
-
----
 
 ## 项目结构
 
@@ -442,8 +445,6 @@ STATIC_DIR=../dist ./aivory
 └── docs/                     设计笔记、规约
 ```
 
----
-
 ## 参与贡献
 
 欢迎 PR。改动较大请先开 issue 讨论形态，避免做完再返工。
@@ -462,13 +463,9 @@ go vet ./...
 go build ./...
 ```
 
----
-
 ## 开源协议
 
 [Apache 2.0](./LICENSE)——允许商用、修改、闭源二次分发，但须保留原始版权声明、附带本协议副本，并在修改的文件中注明变更。
-
----
 
 ## 致谢
 
