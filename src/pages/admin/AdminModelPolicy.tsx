@@ -140,6 +140,32 @@ export default function AdminModelPolicy() {
           </Field>
 
           <Field
+            label={t('admin:settings.fields.taskModel')}
+            htmlFor="task-model"
+            hint={t('admin:settings.fields.taskModelHint')}
+          >
+            <Select
+              value={taskModelId || 'inherit'}
+              onValueChange={(value) =>
+                setDraft((current) => ({ ...current, task_model_id: value === 'inherit' ? '' : value }))
+              }
+            >
+              <SelectTrigger id="task-model" data-admin-tour="model-policy-task-model">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="inherit">{t('admin:settings.fields.currentConversationModel')}</SelectItem>
+                <PolicyModelOptions
+                  currentId={taskModelId}
+                  models={models}
+                  selectableModels={selectableModels}
+                  unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
+                />
+              </SelectContent>
+            </Select>
+          </Field>
+
+          <Field
             label={t('admin:settings.fields.titleModel')}
             htmlFor="title-model"
             hint={t('admin:settings.fields.titleModelHint')}
@@ -211,32 +237,6 @@ export default function AdminModelPolicy() {
                   currentId={fileRouteModelId}
                   models={models}
                   selectableModels={decisionModels}
-                  unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
-                />
-              </SelectContent>
-            </Select>
-          </Field>
-
-          <Field
-            label={t('admin:settings.fields.taskModel')}
-            htmlFor="task-model"
-            hint={t('admin:settings.fields.taskModelHint')}
-          >
-            <Select
-              value={taskModelId || 'inherit'}
-              onValueChange={(value) =>
-                setDraft((current) => ({ ...current, task_model_id: value === 'inherit' ? '' : value }))
-              }
-            >
-              <SelectTrigger id="task-model" data-admin-tour="model-policy-task-model">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="inherit">{t('admin:settings.fields.currentConversationModel')}</SelectItem>
-                <PolicyModelOptions
-                  currentId={taskModelId}
-                  models={models}
-                  selectableModels={selectableModels}
                   unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
                 />
               </SelectContent>

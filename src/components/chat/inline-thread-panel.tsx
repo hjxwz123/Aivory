@@ -159,7 +159,7 @@ function ThreadBody({ quote, childId, onClose }: { quote: string; childId: strin
         <div className="shrink-0 bg-[var(--color-bg-muted)]/55 px-3 py-3 text-center text-[12px] text-[var(--color-fg-muted)]">
           {t('workspace.readOnlyBody', { defaultValue: 'You are a guest in this workspace. You can read shared conversations but not send messages.' })}
         </div>
-      ) : <div className="shrink-0 bg-[var(--color-bg)] p-3">
+      ) : <div className="shrink-0 p-3">
         <div className="flex items-end gap-1.5">
           <textarea
             rows={1}

@@ -41,7 +41,7 @@ export function ChatSidePanel({ open, title, onClose, children }: ChatSidePanelP
           if (event.currentTarget === event.target && !open) setPresent(false)
         }}
         className={cn(
-          'chat-side-panel hidden h-full shrink-0 overflow-hidden bg-[var(--color-bg)] lg:block',
+          'chat-side-panel hidden h-full shrink-0 overflow-hidden bg-[var(--color-surface-sunken)] lg:block',
           !open && 'pointer-events-none',
         )}
       >
@@ -58,7 +58,7 @@ export function ChatSidePanel({ open, title, onClose, children }: ChatSidePanelP
         side="right"
         size="lg"
         label={title}
-        className="w-[min(28rem,94vw)] !border-l-0 bg-[var(--color-bg)] p-0"
+        className="w-[min(28rem,94vw)] !border-l-0 bg-[var(--color-surface-sunken)] p-0"
       >
         {children}
       </SheetContent>
