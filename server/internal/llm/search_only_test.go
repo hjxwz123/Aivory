@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,7 @@ import (
 type searchOnlyTestRunner struct {
 	calls atomic.Int32
 	err   error
+	empty bool
 }
 
 func (r *searchOnlyTestRunner) Run(_ context.Context, _ string, input []byte) (string, []Citation, error) {
@@ -27,13 +29,16 @@ func (r *searchOnlyTestRunner) Run(_ context.Context, _ string, input []byte) (s
 	if err := json.Unmarshal(input, &args); err != nil || len(args.Queries) != 2 {
 		return "", nil, errors.New("batch search arguments were lost")
 	}
+	if r.empty {
+		return "", nil, nil
+	}
 	if r.err != nil {
 		return "", nil, r.err
 	}
 	return "[1] Search evidence for the answer", []Citation{{Index: 1, URL: "https://example.com/source", Source: "web"}}, nil
 }
 
-func TestSearchOnlyProvidersFinishAfterOneBatch(t *testing.T) {
+func TestSearchOnlyProvidersFinishAfterThreeCalls(t *testing.T) {
 	const arguments = `{"queries":["first fact","second fact"]}`
 	cases := []struct {
 		name     string
@@ -74,24 +79,32 @@ func TestSearchOnlyProvidersFinishAfterOneBatch(t *testing.T) {
 	}
 	for _, tc := range cases {
 		for _, mode := range []string{"native", "prompt", "full-tools"} {
-			for _, failed := range []bool{false, true} {
-				name := tc.name + "/" + mode
+			for _, outcome := range []string{"success", "failure", "empty", "early-answer"} {
+				failed := outcome == "failure"
+				empty := outcome == "empty"
+				early := outcome == "early-answer"
+				name := tc.name + "/" + mode + "/" + outcome
 				if failed {
 					name += "/failed-search"
 				}
 				t.Run(name, func(t *testing.T) {
 					searchOnly := mode != "full-tools"
-					toolRounds := 1
+					toolRounds := 3
 					if !searchOnly {
-						toolRounds = 2
+						toolRounds = 4
+					}
+					if early {
+						toolRounds = 1
 					}
 					var requests []map[string]any
 					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						requests = append(requests, decodeBudgetTestRequest(t, r))
+						roundArguments := strings.ReplaceAll(arguments, "fact", fmt.Sprintf("fact round %d", len(requests)))
+						roundSSE := strings.ReplaceAll(tc.toolSSE, "fact", fmt.Sprintf("fact round %d", len(requests)))
 						if tc.name == "google" && mode == "prompt" {
 							text := "answer from the available evidence"
 							if len(requests) <= toolRounds {
-								text = `<tool_call>{"name":"aivory_web_search","arguments":` + arguments + `}</tool_call>`
+								text = `<tool_call>{"name":"aivory_web_search","arguments":` + roundArguments + `}</tool_call>`
 							}
 							w.Header().Set("content-type", "application/json")
 							_, _ = io.WriteString(w, `{"candidates":[{"content":{"parts":[{"text":`+mustJSON(text)+`}]},"finishReason":"STOP"}]}`)
@@ -100,16 +113,16 @@ func TestSearchOnlyProvidersFinishAfterOneBatch(t *testing.T) {
 						w.Header().Set("content-type", "text/event-stream")
 						if len(requests) <= toolRounds {
 							if mode == "prompt" {
-								_, _ = io.WriteString(w, tc.textSSE(`<tool_call>{"name":"aivory_web_search","arguments":`+arguments+`}</tool_call>`))
+								_, _ = io.WriteString(w, tc.textSSE(`<tool_call>{"name":"aivory_web_search","arguments":`+roundArguments+`}</tool_call>`))
 							} else {
-								_, _ = io.WriteString(w, tc.toolSSE)
+								_, _ = io.WriteString(w, roundSSE)
 							}
 							return
 						}
 						_, _ = io.WriteString(w, tc.textSSE("answer from the available evidence"))
 					}))
 					defer server.Close()
-					runner := &searchOnlyTestRunner{}
+					runner := &searchOnlyTestRunner{empty: empty}
 					if failed {
 						runner.err = errors.New("search unavailable")
 					}
@@ -126,18 +139,18 @@ func TestSearchOnlyProvidersFinishAfterOneBatch(t *testing.T) {
 					if len(requests) != toolRounds+1 || runner.calls.Load() != int32(toolRounds) {
 						t.Fatalf("model/tool calls = %d/%d, want %d/%d", len(requests), runner.calls.Load(), toolRounds+1, toolRounds)
 					}
-					if searchOnly {
-						assertToolFieldsRemoved(t, requests[1])
-						if !strings.Contains(mustJSON(requests[1]), "The search round is complete") {
+					if searchOnly && !early {
+						assertToolFieldsRemoved(t, requests[toolRounds])
+						if !strings.Contains(mustJSON(requests[toolRounds]), "The search allowance is complete") {
 							t.Fatal("answer request did not receive completion instruction")
 						}
-					} else if requests[1]["tools"] == nil {
+					} else if mode != "prompt" && requests[1]["tools"] == nil {
 						t.Fatal("full-tools mode lost its second tool round")
 					}
 					if unifiedResultText(result) != "answer from the available evidence" {
 						t.Fatalf("answer = %q", unifiedResultText(result))
 					}
-					if !failed && len(result.Citations) == 0 {
+					if !failed && !empty && len(result.Citations) == 0 {
 						t.Fatal("search citations were lost")
 					}
 					for _, event := range events {
@@ -215,5 +228,63 @@ func TestSearchOnlyHonorsPermissionsAndDoesNotGenerateQueries(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestSearchOnlyConcurrentCallsShareLimitAcrossBatches(t *testing.T) {
+	ctx := contextWithSearchOnly(context.Background(), true)
+	runner := &searchOnlyTestRunner{}
+	call := toolCallSpec{Name: "aivory_web_search", Input: json.RawMessage(`{"queries":["a","b"]}`)}
+	first := runToolsConcurrent(ctx, runner, []toolCallSpec{call, call}, func(SseEvent) {})
+	if signal := toolBatchFinalization(ctx, first); signal != nil {
+		t.Fatalf("stopped before third call: %v", signal)
+	}
+	// Re-entering a provider with the same turn context must not reset its budget.
+	ctx = contextWithSearchOnly(ctx, true)
+	second := runToolsConcurrent(ctx, runner, []toolCallSpec{call, call, call}, func(SseEvent) {})
+	if runner.calls.Load() != 3 || second[0].Err != nil || !errors.Is(second[1].Err, errSearchRoundComplete) || !errors.Is(second[2].Err, errSearchRoundComplete) {
+		t.Fatalf("calls=%d results=%+v", runner.calls.Load(), second)
+	}
+	if !errors.Is(toolBatchFinalization(ctx, second), errSearchRoundComplete) {
+		t.Fatal("exhausted budget did not finalize")
+	}
+	fresh := contextWithSearchOnly(context.Background(), true)
+	runToolsConcurrent(fresh, runner, []toolCallSpec{call}, func(SseEvent) {})
+	if runner.calls.Load() != 4 || toolBatchFinalization(fresh, first) != nil {
+		t.Fatal("new turn inherited old budget")
+	}
+}
+
+func TestSearchOnlyAllowsRefiningEmptyResultsButStopsDuplicates(t *testing.T) {
+	ctx := contextWithSearchOnly(context.Background(), true)
+	tc := &ToolContext{}
+	for i := 0; i < 3; i++ {
+		if !reserveSearchOnlyCall(ctx) {
+			t.Fatal("search rejected before limit")
+		}
+		output, citations, err := tc.executeTrackedTool(ctx, "aivory_web_search", []byte(fmt.Sprintf(`{"query":"refined query %d"}`, i)), func() (string, []Citation, error) { return "", nil, nil })
+		var noProgress *ErrToolNoProgress
+		if !errors.As(err, &noProgress) || noProgress.Kind != "no_new_evidence" {
+			t.Fatalf("expected empty evidence: %v", err)
+		}
+		signal := toolBatchFinalization(ctx, []toolCallResult{{Output: output, Citations: citations, Err: err}})
+		if i < 2 && signal != nil {
+			t.Fatalf("empty result stopped refinement: %v", signal)
+		}
+		if i == 2 && !errors.Is(signal, errSearchRoundComplete) {
+			t.Fatal("third empty result did not stop")
+		}
+	}
+	ctx = contextWithSearchOnly(context.Background(), true)
+	duplicate := &ErrToolNoProgress{Kind: "duplicate_request"}
+	if toolBatchFinalization(ctx, []toolCallResult{{Err: duplicate}}) != duplicate {
+		t.Fatal("duplicate protection lost")
+	}
+	for i := 0; i < 3; i++ {
+		reserveSearchOnlyCall(ctx)
+	}
+	hardLimit := &ErrToolBudgetExceeded{Kind: "time"}
+	if toolBatchFinalization(ctx, []toolCallResult{{Err: hardLimit}}) != hardLimit {
+		t.Fatal("hard budget was masked")
 	}
 }

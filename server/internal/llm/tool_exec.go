@@ -42,31 +42,71 @@ const (
 	toolBudgetFinalInstruction = "The tool execution budget is exhausted. Do not call or request any tools. Based only on the conversation and tool results already available, provide the best possible final answer now. Do not discuss the tool budget unless it prevents you from answering."
 	toolNoProgressOutput       = "This tool request was skipped because it duplicates an earlier request, repeats a failed path, or would add no new evidence. Do not repeat this request. Use the other results already available, and call a different tool only if decisive information is still missing."
 	toolNoProgressInstruction  = "Further tool calls would not add new evidence. Do not call or request any tools. Based only on the conversation and tool results already available, provide the best possible final answer now. Do not discuss this internal stopping condition unless it prevents you from answering."
-	searchOnlyFinalInstruction = "The search round is complete. Do not call or request any tools. Answer the user's question directly using the available search snippets and conversation; cite sources for supported claims. If results failed or do not establish a fact, say what could not be verified instead of guessing. Do not mention internal routing, tool modes, or round limits."
+	searchOnlyFinalInstruction = "The search allowance is complete. Do not call or request any tools. Answer the user's question directly using the available search snippets and conversation; cite sources for supported claims. If results failed or do not establish a fact, say what could not be verified instead of guessing. Do not mention internal routing, tool modes, or round limits."
 )
 
 var errSearchRoundComplete = errors.New("search round complete")
 
+const searchOnlyMaxCalls = 3
+
 type searchOnlyContextKey struct{}
+type searchOnlyBudget struct {
+	mu    sync.Mutex
+	calls int
+}
 
 func contextWithSearchOnly(ctx context.Context, enabled bool) context.Context {
-	return context.WithValue(ctx, searchOnlyContextKey{}, enabled)
+	if !enabled {
+		return context.WithValue(ctx, searchOnlyContextKey{}, (*searchOnlyBudget)(nil))
+	}
+	if isSearchOnly(ctx) {
+		return ctx
+	}
+	return context.WithValue(ctx, searchOnlyContextKey{}, &searchOnlyBudget{})
 }
 
 func isSearchOnly(ctx context.Context) bool {
-	enabled, _ := ctx.Value(searchOnlyContextKey{}).(bool)
-	return enabled
+	budget, _ := ctx.Value(searchOnlyContextKey{}).(*searchOnlyBudget)
+	return budget != nil
 }
 
-// Search-only mode completes after one batch, including empty/failed searches.
-// Keep actual result payloads and statuses intact; this is normal completion,
-// not a fabricated tool error or an extra model decision round.
-func toolBatchFinalization(ctx context.Context, results []toolCallResult) error {
-	if signal := toolFinalizationErrorFromResults(results); signal != nil {
-		return signal
+// Reserve before execution, including failed calls. A batch of queries in one
+// invocation uses one slot; multiple tool invocations each use their own slot.
+func reserveSearchOnlyCall(ctx context.Context) bool {
+	budget, _ := ctx.Value(searchOnlyContextKey{}).(*searchOnlyBudget)
+	if budget == nil {
+		return true
 	}
-	if isSearchOnly(ctx) && len(results) > 0 {
-		return errSearchRoundComplete
+	budget.mu.Lock()
+	defer budget.mu.Unlock()
+	if budget.calls >= searchOnlyMaxCalls {
+		return false
+	}
+	budget.calls++
+	return true
+}
+
+func toolBatchFinalization(ctx context.Context, results []toolCallResult) error {
+	if err := toolBudgetErrorFromResults(results); err != nil {
+		return err
+	}
+	budget, _ := ctx.Value(searchOnlyContextKey{}).(*searchOnlyBudget)
+	if budget != nil {
+		budget.mu.Lock()
+		exhausted := budget.calls >= searchOnlyMaxCalls
+		budget.mu.Unlock()
+		if exhausted {
+			return errSearchRoundComplete
+		}
+	}
+	if signal := toolFinalizationErrorFromResults(results); signal != nil {
+		// A fresh search that found no new evidence may be refined within the
+		// remaining allowance. Identical requests and repeated failed paths still stop.
+		var progress *ErrToolNoProgress
+		if budget != nil && errors.As(signal, &progress) && progress.Kind == "no_new_evidence" {
+			return nil
+		}
+		return signal
 	}
 	return nil
 }
@@ -290,6 +330,9 @@ func (e *ToolUserError) Error() string { return e.Message }
 func publicToolErrorOutput(err error) string {
 	if err == nil {
 		return ""
+	}
+	if errors.Is(err, errSearchRoundComplete) {
+		return searchOnlyFinalInstruction
 	}
 	if IsToolBudgetExceeded(err) {
 		return toolBudgetExceededOutput
@@ -763,6 +806,10 @@ func runToolsConcurrent(ctx context.Context, runner ToolRunner, calls []toolCall
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, maxConcurrentTools)
 	for i, c := range calls {
+		if !reserveSearchOnlyCall(ctx) {
+			results[i] = toolCallResult{Err: errSearchRoundComplete}
+			continue
+		}
 		wg.Add(1)
 		go func(i int, c toolCallSpec) {
 			defer wg.Done()

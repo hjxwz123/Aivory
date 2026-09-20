@@ -1638,7 +1638,7 @@ const (
 	ModeDeepResearch = "deep-research"
 	// ToolModeAuto chooses search-only or full tools using the existing router.
 	ToolModeAuto = "auto"
-	// ToolModeDisabled exposes only permitted Aivory search, with one tool batch.
+	// ToolModeDisabled exposes only permitted Aivory search, with up to three search tool calls.
 	ToolModeDisabled = "disabled"
 	// ToolModeEnabled exposes the resolved model's complete administrator-
 	// configured tool collection (local Functions and provider-hosted tools).
@@ -1733,6 +1733,7 @@ func (o *Orchestrator) streamWithFallback(
 	onEvent func(SseEvent),
 	servedFallbackModel *string,
 ) (*UnifiedResult, error) {
+	ctx = contextWithSearchOnly(ctx, provReq.SearchOnly)
 	ttft := settingInt(o.db, "fallback_ttft_sec")
 	fbID := settingStr(o.db, "fallback_model_id")
 	if ttft <= 0 || fbID == "" || fbID == primaryModelID {

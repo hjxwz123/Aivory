@@ -392,7 +392,11 @@ func RunPromptToolLoopWithRaw(
 			retries int
 		)
 		for retries = 0; retries <= promptMaxRetry; retries++ {
-			output, cites, runErr = toolRunner.Run(ctx, call.Name, call.Arguments)
+			if !reserveSearchOnlyCall(ctx) {
+				runErr = errSearchRoundComplete
+			} else {
+				output, cites, runErr = toolRunner.Run(ctx, call.Name, call.Arguments)
+			}
 			if runErr == nil || isSearchOnly(ctx) || !promptToolErrorRetryable(runErr) {
 				break
 			}
