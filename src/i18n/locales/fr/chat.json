@@ -896,6 +896,7 @@
     "readOnlyTitle": "Accès en lecture seule",
     "readOnlyBody": "Vous êtes invité dans cet espace. Vous pouvez lire les conversations partagées mais pas envoyer de messages.",
     "manageTabs": "Gestion de l'espace",
+    "tabProfile": "Informations générales",
     "tabMembers": "Membres",
     "tabInvites": "Invitations",
     "tabPolicy": "Capacités",

@@ -896,6 +896,7 @@
     "readOnlyTitle": "唯讀存取",
     "readOnlyBody": "你是該工作空間的訪客，可以閱讀共享對話，但無法傳送訊息。",
     "manageTabs": "工作空間管理",
+    "tabProfile": "基本資訊",
     "tabMembers": "成員",
     "tabInvites": "邀請",
     "tabPolicy": "能力",

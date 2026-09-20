@@ -359,7 +359,7 @@
     "signOut": "ログアウト"
   },
   "work": {
-    "subtitle": "ワークスペースの情報と仕事の設定を確認します。",
+    "subtitle": "現在のワークスペースの情報を確認します。",
     "icon": "アイコン",
     "description": "紹介",
     "descriptionPlaceholder": "このワークスペースを紹介…",

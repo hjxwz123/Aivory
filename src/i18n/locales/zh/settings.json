@@ -359,7 +359,7 @@
     "signOut": "退出登录"
   },
   "work": {
-    "subtitle": "查看工作空间信息并管理工作设置。",
+    "subtitle": "查看当前工作空间的信息。",
     "icon": "图标",
     "description": "介绍",
     "descriptionPlaceholder": "介绍这个工作空间…",

@@ -896,6 +896,7 @@
     "readOnlyTitle": "読み取り専用アクセス",
     "readOnlyBody": "あなたはこのワークスペースのゲストです。共有された会話は読めますが、メッセージは送信できません。",
     "manageTabs": "ワークスペース管理",
+    "tabProfile": "基本情報",
     "tabMembers": "メンバー",
     "tabInvites": "招待",
     "tabPolicy": "機能",

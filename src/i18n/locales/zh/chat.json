@@ -896,6 +896,7 @@
     "readOnlyTitle": "只读访问",
     "readOnlyBody": "你是该工作空间的游客，可以阅读共享对话，但不能发送消息。",
     "manageTabs": "工作空间管理",
+    "tabProfile": "基本信息",
     "tabMembers": "成员",
     "tabInvites": "邀请",
     "tabPolicy": "能力",

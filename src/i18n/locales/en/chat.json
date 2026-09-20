@@ -901,6 +901,7 @@
     "readOnlyTitle": "Read-only access",
     "readOnlyBody": "You are a guest in this workspace. You can read shared conversations but not send messages.",
     "manageTabs": "Workspace management",
+    "tabProfile": "General",
     "tabMembers": "Members",
     "tabInvites": "Invites",
     "tabPolicy": "Capabilities",

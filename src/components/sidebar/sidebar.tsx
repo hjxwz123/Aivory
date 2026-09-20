@@ -35,6 +35,7 @@ import {
   CreateWorkspaceDialog,
   SpaceSwitcherButton,
   WorkspaceMenuItems,
+  WorkspaceMembersDialog,
 } from '@/components/sidebar/workspace-menu'
 import { SidebarResizeHandle } from '@/components/sidebar/sidebar-resize-handle'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -1331,6 +1332,9 @@ export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuP
   const setLang = useLanguage((s) => s.setLang)
   const [archivedOpen, setArchivedOpen] = useState(false)
   const [wsCreateOpen, setWsCreateOpen] = useState(false)
+  const [wsManageId, setWsManageId] = useState<string | null>(null)
+  const activeWorkspace = useWorkspaces((s) => s.workspaces.find((w) => w.id === s.activeId))
+  const canManageWorkspace = activeWorkspace?.is_owner || activeWorkspace?.role === 'admin'
   const [systemUpdateOpen, setSystemUpdateOpen] = useState(false)
   const [systemUpdateSummary, setSystemUpdateSummary] = useState<SystemUpdateSummary>({
     currentVersion: typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev',
@@ -1419,7 +1423,10 @@ export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuP
             </DropdownMenuItem>
           </>
         )}
-        <WorkspaceMenuItems onManage={() => openSettings('work')} onCreate={() => setWsCreateOpen(true)} />
+        <WorkspaceMenuItems
+          onManage={() => canManageWorkspace ? setWsManageId(activeWorkspace.id) : openSettings('work')}
+          onCreate={() => setWsCreateOpen(true)}
+        />
         <DropdownMenuSeparator />
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>
@@ -1477,6 +1484,7 @@ export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuP
       />
     )}
     <CreateWorkspaceDialog open={wsCreateOpen} onOpenChange={setWsCreateOpen} />
+    {canManageWorkspace ? <WorkspaceMembersDialog key={activeWorkspace.id} open={wsManageId === activeWorkspace.id} onOpenChange={(open) => setWsManageId(open ? activeWorkspace.id : null)} /> : null}
     <ArchivedDialog open={archivedOpen} onOpenChange={setArchivedOpen} />
     </>
   )

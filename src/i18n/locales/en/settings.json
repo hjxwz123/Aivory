@@ -359,7 +359,7 @@
     "signOut": "Sign out"
   },
   "work": {
-    "subtitle": "View workspace information and manage work settings.",
+    "subtitle": "View information about your current workspace.",
     "icon": "Icon",
     "description": "Description",
     "descriptionPlaceholder": "Describe this workspace…",

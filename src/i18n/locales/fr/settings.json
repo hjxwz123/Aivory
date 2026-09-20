@@ -359,7 +359,7 @@
     "signOut": "Se déconnecter"
   },
   "work": {
-    "subtitle": "Consultez les informations et gérez les paramètres de votre espace de travail.",
+    "subtitle": "Consultez les informations de votre espace de travail actuel.",
     "icon": "Icône",
     "description": "Présentation",
     "descriptionPlaceholder": "Présentez cet espace de travail…",
