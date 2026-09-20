@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Trans, useTranslation } from 'react-i18next'
 import { motion } from 'framer-motion'
@@ -48,8 +48,8 @@ export default function Register() {
 
   // Slider-puzzle captcha (only when the admin requires it) — solved in a modal
   // (PuzzleCaptchaDialog) that returns a single-use pass token. The register call
-  // consumes the token; on captcha failure we clear it and re-open the dialog.
-  const [captchaToken, setCaptchaToken] = useState<string | null>(null)
+  // consumes the token; every retry obtains a fresh one.
+  const submittingRef = useRef(false)
   const [captchaOpen, setCaptchaOpen] = useState(false)
 
   // Verification step state
@@ -71,11 +71,11 @@ export default function Register() {
     setSearchParams(searchParams, { replace: true })
   }, [searchParams, setSearchParams, startEmailVerification])
 
-  function submit(e: React.FormEvent) {
+  async function submit(e: React.FormEvent) {
     e.preventDefault()
     // The form is only rendered while password signup is open, but a stale
     // submit event must not reach the server after the policy changes.
-    if (!signupOpen) return
+    if (!signupOpen || submittingRef.current || captchaOpen) return
     const next: typeof errors = {}
     if (!name.trim()) next.name = t('errors.required')
     if (!email) next.email = t('errors.required')
@@ -85,31 +85,48 @@ export default function Register() {
     if (!agree) next.agree = t('errors.acceptTerms')
     setErrors(next)
     if (Object.keys(next).length) return
-    // Captcha gate: pop the modal first (it hands back a pass token via onSolved,
-    // which then continues the registration). No captcha required → go straight on.
-    if (captchaRequired && !captchaToken) {
+    // Refresh the policy before deciding whether to open the puzzle. A failed
+    // probe still falls back to the server-authoritative registration response.
+    submittingRef.current = true
+    setLoading(true)
+    try {
+      const policy = await authApi.signupOpen()
+      useAuth.setState({ signupOpen: policy.open, captchaRequired: policy.captcha_required })
+    } catch { /* Registration also enforces the current policy. */ }
+    submittingRef.current = false
+    setLoading(false)
+    if (!useAuth.getState().signupOpen) return
+    if (useAuth.getState().captchaRequired) {
       setCaptchaOpen(true)
       return
     }
-    void finishRegister(captchaToken)
+    void finishRegister(null)
   }
 
   async function finishRegister(token: string | null) {
+    if (submittingRef.current || !useAuth.getState().signupOpen) return
+    submittingRef.current = true
     setLoading(true)
-    const result = await register(email, pw, name.trim(), captchaRequired ? token ?? undefined : undefined)
-    setLoading(false)
+    let result: Awaited<ReturnType<typeof register>>
+    try {
+      // Pass the fresh token directly; never reuse a consumed token or drop it
+      // because this render still holds the previous captcha policy.
+      result = await register(email, pw, name.trim(), token ?? undefined)
+    } finally {
+      submittingRef.current = false
+      setLoading(false)
+    }
     if (result === 'verify') {
       // verification_required — the store sets pendingVerification, UI will switch
       return
     }
     if (!result) {
       const err = useAuth.getState().error
-      // The pass token is single-use server-side, so any failure invalidates it —
-      // clear it so the next attempt re-solves the puzzle.
-      setCaptchaToken(null)
+      // The server may require a puzzle even when the public policy was stale.
       if (err === 'captcha_failed') {
         setErrors({ captcha: t('register.captchaWrong', { defaultValue: '验证失败，请重试' }) })
-        if (captchaRequired) setCaptchaOpen(true)
+        useAuth.setState({ captchaRequired: true })
+        setCaptchaOpen(true)
         return
       }
       if (err === 'register_ip_limit') {
@@ -123,9 +140,9 @@ export default function Register() {
     navigate('/')
   }
 
-  // The dialog verified a solution and minted a token → store it and continue.
+  // Continue with the fresh single-use token returned by the dialog.
   function onCaptchaSolved(token: string) {
-    setCaptchaToken(token)
+    setErrors({})
     void finishRegister(token)
   }
 
@@ -302,12 +319,12 @@ export default function Register() {
           className={`${providers.length > 0 && oauthSignupOpen ? '' : 'mt-7 '}flex flex-col gap-4`}
           onSubmit={(e) => void submit(e)}
         >
-          {errors.general ? (
+          {errors.general || errors.captcha ? (
             <motion.div
               variants={fadeUp}
               className="rounded-[10px] border border-[var(--color-danger-soft)] bg-[var(--color-danger-soft)] text-[var(--color-danger)] px-3 py-2 text-sm"
             >
-              {errors.general}
+              {errors.general || errors.captcha}
             </motion.div>
           ) : null}
           <motion.div variants={fadeUp}>
@@ -417,7 +434,7 @@ export default function Register() {
       </motion.p>
 
       {/* Modal security check — opens on submit when a captcha is required. */}
-      {captchaRequired ? (
+      {captchaRequired || captchaOpen ? (
         <PuzzleCaptchaDialog
           open={captchaOpen}
           onOpenChange={setCaptchaOpen}

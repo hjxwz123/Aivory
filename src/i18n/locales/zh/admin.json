@@ -2426,6 +2426,10 @@
     "removeMemberTitle": "移除 {{user}}？",
     "removeMemberHint": "该用户将解除域规则绑定和个人空间限制。如果工作区成员关系原本由域规则创建，也会一并移除；用户原先已在工作区时，其成员关系会保留。",
     "memberRemoved": "成员已从域规则移除。",
-    "removeMemberFailed": "无法移除成员。"
+    "removeMemberFailed": "无法移除成员。",
+    "purchaseAllowedLabel": "允许购买订阅",
+    "purchaseAllowedHint": "关闭后，该域用户的订阅页面仅显示当前用户组卡片，无法发起或继续购买。",
+    "searchGroups": "搜索用户组…",
+    "noGroupsFound": "未找到匹配的用户组"
   }
 }

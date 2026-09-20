@@ -3,6 +3,7 @@ import type { ApiAuthPolicy, ApiUser } from '@/api/types'
 
 const apiMocks = vi.hoisted(() => ({
   session: vi.fn(),
+  register: vi.fn(),
   authPolicy: vi.fn(),
   signupOpen: vi.fn(),
   needsSetup: vi.fn(),
@@ -15,7 +16,9 @@ const clientMocks = vi.hoisted(() => ({
 
 vi.mock('@/api', () => ({
   authApi: apiMocks,
-  ApiError: class ApiError extends Error {},
+  ApiError: class ApiError extends Error {
+    constructor(_status: number, message: string) { super(message) }
+  },
   setAccessToken: clientMocks.setAccessToken,
   resetAuthFailureState: clientMocks.resetAuthFailureState,
 }))
@@ -28,6 +31,7 @@ vi.mock('@/api/client', () => ({
   setRefreshHandler: vi.fn(),
 }))
 
+import { ApiError } from '@/api'
 import { DEFAULT_AUTH_POLICY, useAuth } from '@/store/auth'
 
 const policy: ApiAuthPolicy = {
@@ -118,5 +122,20 @@ describe('auth startup request coalescing', () => {
 
     expect(apiMocks.authPolicy).toHaveBeenCalledOnce()
     expect(useAuth.getState().authPolicy).toEqual(policy)
+  })
+})
+
+
+describe('registration captcha policy recovery', () => {
+  it('requires a puzzle after the server rejects a stale no-captcha policy', async () => {
+    useAuth.setState({ captchaRequired: false, user: null, status: 'unauthenticated' })
+    apiMocks.register.mockRejectedValueOnce(new ApiError(400, 'captcha_failed', undefined))
+    await expect(useAuth.getState().register('user@example.test', 'password123', 'User')).resolves.toBe(false)
+    expect(useAuth.getState().captchaRequired).toBe(true)
+    expect(useAuth.getState().error).toBe('captcha_failed')
+
+    apiMocks.register.mockResolvedValueOnce({ verification_required: true, email: 'user@example.test', retry_after: 60 })
+    await expect(useAuth.getState().register('user@example.test', 'password123', 'User', 'fresh-pass')).resolves.toBe('verify')
+    expect(apiMocks.register).toHaveBeenLastCalledWith('user@example.test', 'password123', 'User', 'fresh-pass')
   })
 })

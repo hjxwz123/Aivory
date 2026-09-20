@@ -406,7 +406,7 @@ export const useAuth = create<AuthState>((set, get) => ({
     } catch (e) {
       if (!isLatestAuthOp(seq)) return false
       const msg = e instanceof ApiError ? e.message : 'Registration failed'
-      set({ error: msg, status: 'unauthenticated' })
+      set({ error: msg, status: 'unauthenticated', ...(msg === 'captcha_failed' ? { captchaRequired: true } : {}) })
       return false
     }
   },

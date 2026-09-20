@@ -25,6 +25,8 @@ func attachGroupInfo(d Deps, r *http.Request, u *store.User) {
 		return
 	}
 	u.ToolModeDefault = effectiveDefaultToolMode(d.DB)
+	access, accessErr := store.GetDomainAccess(r.Context(), d.DB, u.ID)
+	u.SubscriptionPurchaseDisabled = accessErr != nil || (access != nil && access.SubscriptionPurchaseDisabled)
 	// Keep the transient /me payload aligned with authorization. Legacy or
 	// temporarily dangling group references use the permissive compatibility
 	// policy instead of serializing an all-false Go zero value.

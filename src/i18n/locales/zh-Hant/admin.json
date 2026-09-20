@@ -2422,6 +2422,10 @@
     "removeMemberTitle": "移除 {{user}}？",
     "removeMemberHint": "該使用者將解除網域規則綁定和個人空間限制。若工作空間成員關係原本由網域規則建立，也會一併移除；原先已在工作空間的成員關係則會保留。",
     "memberRemoved": "成員已從網域規則移除。",
-    "removeMemberFailed": "無法移除成員。"
+    "removeMemberFailed": "無法移除成員。",
+    "purchaseAllowedLabel": "允許購買訂閱",
+    "purchaseAllowedHint": "關閉後，此網域使用者的訂閱頁面僅顯示目前使用者群組卡片，無法發起或繼續購買。",
+    "searchGroups": "搜尋使用者群組…",
+    "noGroupsFound": "找不到符合的使用者群組"
   }
 }

@@ -46,7 +46,7 @@ func notifyDomainUsers(d Deps, r *http.Request, domain string) {
 	if members, err := store.ListDomainUsers(r.Context(), d.DB, domain); err == nil {
 		for _, m := range members {
 			revokeUserPermissionSnapshots(d, m.UserID)
-			publishUserEvent(d, r, m.UserID, "workspace.membership_updated", "")
+			publishUserEvent(d, r, m.UserID, "account.permissions_updated", "")
 		}
 	}
 }
@@ -63,7 +63,7 @@ func adminDeleteDomainHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	for _, m := range members {
 		revokeUserPermissionSnapshots(d, m.UserID)
-		publishUserEvent(d, r, m.UserID, "workspace.membership_updated", "")
+		publishUserEvent(d, r, m.UserID, "account.permissions_updated", "")
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
@@ -113,7 +113,7 @@ func adminEnrollDomainUsersHandler(d Deps, w http.ResponseWriter, r *http.Reques
 	}
 	for _, userID := range added {
 		revokeUserPermissionSnapshots(d, userID)
-		publishUserEvent(d, r, userID, "workspace.membership_updated", "")
+		publishUserEvent(d, r, userID, "account.permissions_updated", "")
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"added": len(added), "user_ids": added})
 }
@@ -131,7 +131,7 @@ func adminDomainUserAccessHandler(d Deps, w http.ResponseWriter, r *http.Request
 		return
 	}
 	revokeUserPermissionSnapshots(d, uid)
-	publishUserEvent(d, r, uid, "workspace.membership_updated", "")
+	publishUserEvent(d, r, uid, "account.permissions_updated", "")
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 func adminRemoveDomainUserHandler(d Deps, w http.ResponseWriter, r *http.Request) {
@@ -156,6 +156,7 @@ func adminRemoveDomainUserHandler(d Deps, w http.ResponseWriter, r *http.Request
 	}
 	revokeUserPermissionSnapshots(d, uid)
 	publishWorkspaceAccessEvent(d, r, result.WorkspaceID, "workspace.membership_updated", uid)
+	publishUserEvent(d, r, uid, "account.permissions_updated", "")
 	writeJSON(w, http.StatusOK, map[string]bool{
 		"ok":                           true,
 		"workspace_membership_removed": result.WorkspaceMembershipRemoved,

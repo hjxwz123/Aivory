@@ -30,50 +30,67 @@ export function PuzzleCaptchaDialog({ open, onOpenChange, purpose, onSolved }: P
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState<PuzzleStatus>('idle')
   const verifyingRef = useRef(false)
+  const generationRef = useRef(0)
+  const timerRef = useRef<number | undefined>(undefined)
 
   const load = useCallback(async () => {
+    const generation = ++generationRef.current
+    window.clearTimeout(timerRef.current)
+    verifyingRef.current = false
+    setData(null)
     setLoading(true)
     setStatus('idle')
     try {
-      setData(await authApi.captcha(purpose))
+      const challenge = await authApi.captcha(purpose)
+      if (generation === generationRef.current) setData(challenge)
     } catch {
-      setData(null)
+      if (generation === generationRef.current) setData(null)
     } finally {
-      setLoading(false)
+      if (generation === generationRef.current) setLoading(false)
     }
   }, [purpose])
 
   // Fresh puzzle each time the dialog opens; clear on close.
   useEffect(() => {
+    const generation = generationRef
     if (open) void load()
     else {
       setData(null)
       setStatus('idle')
     }
+    return () => {
+      generation.current++
+      verifyingRef.current = false
+      window.clearTimeout(timerRef.current)
+    }
   }, [load, open])
 
   async function onRelease(solution: PuzzleSolution | null) {
-    if (solution == null || !data || verifyingRef.current) return
+    if (solution == null || !data || !open || loading || status !== 'idle' || verifyingRef.current) return
+    const generation = generationRef.current
     verifyingRef.current = true
     setStatus('verifying')
     try {
       const res = await authApi.captchaVerify(data.id, solution)
+      if (generation !== generationRef.current) return
       if (res.ok && res.token) {
         setStatus('success')
         const token = res.token
-        window.setTimeout(() => {
-          onSolved(token)
+        timerRef.current = window.setTimeout(() => {
+          if (generation !== generationRef.current) return
           onOpenChange(false)
+          onSolved(token)
         }, 550)
       } else {
         setStatus('error')
-        window.setTimeout(() => void load(), 700) // re-roll a fresh puzzle
+        timerRef.current = window.setTimeout(() => void load(), 700) // re-roll a fresh puzzle
       }
     } catch {
+      if (generation !== generationRef.current) return
       setStatus('error')
-      window.setTimeout(() => void load(), 700)
+      timerRef.current = window.setTimeout(() => void load(), 700)
     } finally {
-      verifyingRef.current = false
+      if (generation === generationRef.current) verifyingRef.current = false
     }
   }
 

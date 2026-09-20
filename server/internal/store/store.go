@@ -336,6 +336,7 @@ func Migrate(db *sql.DB) error {
 	// Existing enterprise-domain rules keep their historical verification
 	// requirement. Administrators may explicitly relax each rule after upgrade.
 	addRegistrationDomainEmailVerification := `ALTER TABLE registration_domains ADD COLUMN email_verification_required INTEGER NOT NULL DEFAULT 1`
+	addRegistrationDomainSubscriptionPurchase := `ALTER TABLE registration_domains ADD COLUMN subscription_purchase_disabled INTEGER NOT NULL DEFAULT 0`
 	addRegistrationDomainInitialGroup := `ALTER TABLE registration_domains ADD COLUMN initial_group_id TEXT REFERENCES user_groups(id) ON DELETE SET NULL`
 	addDomainUserPersonalDataPromptDismissed := `ALTER TABLE domain_users ADD COLUMN personal_data_prompt_dismissed INTEGER NOT NULL DEFAULT 0`
 	addDomainUserWorkspaceMembershipCreated := `ALTER TABLE domain_users ADD COLUMN workspace_membership_created INTEGER NOT NULL DEFAULT 0`
@@ -471,6 +472,7 @@ func Migrate(db *sql.DB) error {
 		addOAuthAgentID = `ALTER TABLE oauth_providers ADD COLUMN IF NOT EXISTS agent_id TEXT NOT NULL DEFAULT ''`
 		addOAuthSubjectNamespace = `ALTER TABLE oauth_providers ADD COLUMN IF NOT EXISTS subject_namespace TEXT NOT NULL DEFAULT ''`
 		addRegistrationDomainEmailVerification = `ALTER TABLE registration_domains ADD COLUMN IF NOT EXISTS email_verification_required INTEGER NOT NULL DEFAULT 1`
+		addRegistrationDomainSubscriptionPurchase = `ALTER TABLE registration_domains ADD COLUMN IF NOT EXISTS subscription_purchase_disabled INTEGER NOT NULL DEFAULT 0`
 		addRegistrationDomainInitialGroup = `ALTER TABLE registration_domains ADD COLUMN IF NOT EXISTS initial_group_id TEXT REFERENCES user_groups(id) ON DELETE SET NULL`
 		addDomainUserPersonalDataPromptDismissed = `ALTER TABLE domain_users ADD COLUMN IF NOT EXISTS personal_data_prompt_dismissed INTEGER NOT NULL DEFAULT 0`
 		addDomainUserWorkspaceMembershipCreated = `ALTER TABLE domain_users ADD COLUMN IF NOT EXISTS workspace_membership_created INTEGER NOT NULL DEFAULT 0`
@@ -523,7 +525,7 @@ func Migrate(db *sql.DB) error {
 		addPaymentChannelEnvironment, addPaymentOrderEnvironment,
 		addPaymentProviderPaymentID, addPaymentCheckoutSessionID, addPaymentCheckoutURL, addPaymentCheckoutExpiresAt, addPaymentLastReconciledAt, addPaymentReconcileError,
 		addOAuthIssuerURL, addOAuthJWKSURL, addOAuthAgentID, addOAuthSubjectNamespace,
-		addRegistrationDomainEmailVerification, addRegistrationDomainInitialGroup, addDomainUserPersonalDataPromptDismissed, addDomainUserWorkspaceMembershipCreated,
+		addRegistrationDomainEmailVerification, addRegistrationDomainInitialGroup, addRegistrationDomainSubscriptionPurchase, addDomainUserPersonalDataPromptDismissed, addDomainUserWorkspaceMembershipCreated,
 		addPasskeyAuthenticatorFlags, addPasskeyUserHandle,
 	} {
 		_, _ = db.Exec(ddl)
@@ -691,7 +693,7 @@ func Migrate(db *sql.DB) error {
 		"payment_channels":                {"environment"},
 		"payment_orders":                  {"paid_amount_minor", "tax_amount_minor", "provider_amount_minor", "provider_currency", "conversion_rate", "environment", "provider_payment_id", "checkout_session_id", "checkout_url", "checkout_expires_at", "last_reconciled_at", "reconcile_error"},
 		"oauth_providers":                 {"issuer_url", "jwks_url", "agent_id", "subject_namespace"},
-		"registration_domains":            {"email_verification_required", "initial_group_id"},
+		"registration_domains":            {"email_verification_required", "initial_group_id", "subscription_purchase_disabled"},
 		"registration_domain_matches":     {"domain", "rule_domain"},
 		"passkeys":                        {"authenticator_flags", "user_handle"},
 	}

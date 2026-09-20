@@ -100,7 +100,8 @@
       "checkoutStateUnknown": "The payment provider could not confirm whether this checkout can continue. Check the provider order before trying again.",
       "waffoProductCurrencyUnsupported": "This Waffo product does not support the selected payment currency. Ask an administrator to check the product price or payment-channel settings.",
       "userGroupAlreadyPermanent": "You already own this user group permanently, so it doesn’t need to be purchased again.",
-      "userGroupNotPurchasable": "This user group is temporarily unavailable for purchase. Try again later."
+      "userGroupNotPurchasable": "This user group is temporarily unavailable for purchase. Try again later.",
+      "domainPurchaseDisabled": "Subscription purchases are disabled for your domain. Please contact your administrator."
     },
     "or": "or",
     "cardPurchase": "Purchase a prepaid code",

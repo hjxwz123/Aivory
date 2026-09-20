@@ -16,16 +16,17 @@ const (
 )
 
 type RegistrationDomain struct {
-	Domain                    string   `json:"domain"`
-	Domains                   []string `json:"domains"`
-	WorkspaceID               string   `json:"workspace_id"`
-	WorkspaceName             string   `json:"workspace_name"`
-	LockPersonal              bool     `json:"lock_personal"`
-	EmailVerificationRequired bool     `json:"email_verification_required"`
-	InitialGroupID            string   `json:"initial_group_id"`
-	InitialGroupName          string   `json:"initial_group_name"`
-	Enabled                   bool     `json:"enabled"`
-	MemberCount               int      `json:"member_count"`
+	SubscriptionPurchaseDisabled bool     `json:"subscription_purchase_disabled"`
+	Domain                       string   `json:"domain"`
+	Domains                      []string `json:"domains"`
+	WorkspaceID                  string   `json:"workspace_id"`
+	WorkspaceName                string   `json:"workspace_name"`
+	LockPersonal                 bool     `json:"lock_personal"`
+	EmailVerificationRequired    bool     `json:"email_verification_required"`
+	InitialGroupID               string   `json:"initial_group_id"`
+	InitialGroupName             string   `json:"initial_group_name"`
+	Enabled                      bool     `json:"enabled"`
+	MemberCount                  int      `json:"member_count"`
 }
 type DomainUser struct {
 	UserID       string `json:"user_id"`
@@ -42,9 +43,10 @@ type DomainUserCandidate struct {
 	PersonalConversationCount int    `json:"personal_conversation_count"`
 }
 type DomainAccess struct {
-	Domain      string `json:"domain"`
-	WorkspaceID string `json:"workspace_id"`
-	Locked      bool   `json:"locked"`
+	SubscriptionPurchaseDisabled bool   `json:"subscription_purchase_disabled"`
+	Domain                       string `json:"domain"`
+	WorkspaceID                  string `json:"workspace_id"`
+	Locked                       bool   `json:"locked"`
 }
 type DomainPersonalDataStatus struct {
 	NeedsAction               bool   `json:"needs_action"`
@@ -152,8 +154,8 @@ func enrollDomainUser(ctx context.Context, ex RowExecer, userID, email string) e
 }
 func GetDomainAccess(ctx context.Context, ex RowExecer, userID string) (*DomainAccess, error) {
 	var a DomainAccess
-	err := ex.QueryRowContext(ctx, `SELECT d.domain,d.workspace_id,COALESCE(du.lock_override,d.lock_personal)
- FROM domain_users du JOIN registration_domains d ON d.domain=du.domain WHERE du.user_id=?`, userID).Scan(&a.Domain, &a.WorkspaceID, &a.Locked)
+	err := ex.QueryRowContext(ctx, `SELECT d.domain,d.workspace_id,COALESCE(du.lock_override,d.lock_personal),d.subscription_purchase_disabled
+ FROM domain_users du JOIN registration_domains d ON d.domain=du.domain WHERE du.user_id=?`, userID).Scan(&a.Domain, &a.WorkspaceID, &a.Locked, &a.SubscriptionPurchaseDisabled)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -161,7 +163,7 @@ func GetDomainAccess(ctx context.Context, ex RowExecer, userID string) (*DomainA
 }
 func ListRegistrationDomains(ctx context.Context, db *sql.DB) ([]RegistrationDomain, error) {
 	rows, err := db.QueryContext(ctx, `SELECT d.domain,d.workspace_id,w.name,d.lock_personal,d.email_verification_required,
-	 COALESCE(d.initial_group_id,''),COALESCE(g.name,''),d.enabled,
+	 COALESCE(d.initial_group_id,''),COALESCE(g.name,''),d.enabled,d.subscription_purchase_disabled,
 	 (SELECT COUNT(*) FROM domain_users du WHERE du.domain=d.domain)
 	 FROM registration_domains d JOIN workspaces w ON w.id=d.workspace_id
 	 LEFT JOIN user_groups g ON g.id=d.initial_group_id ORDER BY d.domain`)
@@ -171,7 +173,7 @@ func ListRegistrationDomains(ctx context.Context, db *sql.DB) ([]RegistrationDom
 	out := []RegistrationDomain{}
 	for rows.Next() {
 		var d RegistrationDomain
-		if err := rows.Scan(&d.Domain, &d.WorkspaceID, &d.WorkspaceName, &d.LockPersonal, &d.EmailVerificationRequired, &d.InitialGroupID, &d.InitialGroupName, &d.Enabled, &d.MemberCount); err != nil {
+		if err := rows.Scan(&d.Domain, &d.WorkspaceID, &d.WorkspaceName, &d.LockPersonal, &d.EmailVerificationRequired, &d.InitialGroupID, &d.InitialGroupName, &d.Enabled, &d.SubscriptionPurchaseDisabled, &d.MemberCount); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
@@ -294,10 +296,10 @@ func SaveRegistrationDomain(ctx context.Context, db *sql.DB, d RegistrationDomai
 		// A newly created rule always starts running. Stopping enrollment is an
 		// explicit administrative action performed by updating an existing rule.
 		d.Enabled = true
-		_, err = tx.ExecContext(ctx, `INSERT INTO registration_domains(domain,workspace_id,lock_personal,email_verification_required,initial_group_id,enabled) VALUES(?,?,?,?,?,?)`, domain, d.WorkspaceID, boolInt(d.LockPersonal), boolInt(d.EmailVerificationRequired), initialGroupID, boolInt(d.Enabled))
+		_, err = tx.ExecContext(ctx, `INSERT INTO registration_domains(domain,workspace_id,lock_personal,email_verification_required,initial_group_id,enabled,subscription_purchase_disabled) VALUES(?,?,?,?,?,?,?)`, domain, d.WorkspaceID, boolInt(d.LockPersonal), boolInt(d.EmailVerificationRequired), initialGroupID, boolInt(d.Enabled), boolInt(d.SubscriptionPurchaseDisabled))
 	} else {
 		var res sql.Result
-		res, err = tx.ExecContext(ctx, `UPDATE registration_domains SET lock_personal=?,email_verification_required=?,initial_group_id=?,enabled=? WHERE domain=? AND workspace_id=?`, boolInt(d.LockPersonal), boolInt(d.EmailVerificationRequired), initialGroupID, boolInt(d.Enabled), domain, d.WorkspaceID)
+		res, err = tx.ExecContext(ctx, `UPDATE registration_domains SET lock_personal=?,email_verification_required=?,initial_group_id=?,enabled=?,subscription_purchase_disabled=? WHERE domain=? AND workspace_id=?`, boolInt(d.LockPersonal), boolInt(d.EmailVerificationRequired), initialGroupID, boolInt(d.Enabled), boolInt(d.SubscriptionPurchaseDisabled), domain, d.WorkspaceID)
 		if err == nil {
 			if n, _ := res.RowsAffected(); n != 1 {
 				return ErrNotFound

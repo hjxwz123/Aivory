@@ -1,4 +1,5 @@
 const CHECKOUT_ERROR_KEYS = {
+  subscription_purchase_disabled: 'payment.errors.domainPurchaseDisabled',
   payment_method_unavailable: 'payment.errors.methodUnavailable',
   payment_product_unavailable: 'payment.errors.productUnavailable',
   payment_checkout_unavailable: 'payment.errors.checkoutUnavailable',

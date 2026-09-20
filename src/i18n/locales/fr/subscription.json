@@ -100,7 +100,8 @@
       "checkoutStateUnknown": "Le fournisseur de paiement n’a pas pu confirmer si ce paiement peut continuer. Vérifiez la commande auprès du fournisseur avant de réessayer.",
       "waffoProductCurrencyUnsupported": "Ce produit Waffo ne prend pas en charge la devise de paiement sélectionnée. Demandez à un administrateur de vérifier le prix du produit ou les réglages du canal de paiement.",
       "userGroupAlreadyPermanent": "Vous disposez déjà de ce groupe d’utilisateurs de façon permanente ; il n’est pas nécessaire de l’acheter à nouveau.",
-      "userGroupNotPurchasable": "Ce groupe d’utilisateurs est temporairement indisponible à l’achat. Réessayez plus tard."
+      "userGroupNotPurchasable": "Ce groupe d’utilisateurs est temporairement indisponible à l’achat. Réessayez plus tard.",
+      "domainPurchaseDisabled": "Les achats d’abonnements sont désactivés pour votre domaine. Contactez votre administrateur."
     },
     "or": "ou",
     "cardPurchase": "Acheter un code prépayé",

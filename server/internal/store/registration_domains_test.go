@@ -34,13 +34,13 @@ func TestRegistrationDomainMigrationPreservesExistingVerificationPolicy(t *testi
 	if err := Migrate(db); err != nil {
 		t.Fatal(err)
 	}
-	var verificationRequired int
+	var verificationRequired, purchaseDisabled int
 	var initialGroup any
-	if err := db.QueryRow(`SELECT email_verification_required,initial_group_id
-		FROM registration_domains WHERE domain='legacy.example'`).Scan(&verificationRequired, &initialGroup); err != nil {
+	if err := db.QueryRow(`SELECT email_verification_required,initial_group_id,subscription_purchase_disabled
+		FROM registration_domains WHERE domain='legacy.example'`).Scan(&verificationRequired, &initialGroup, &purchaseDisabled); err != nil {
 		t.Fatal(err)
 	}
-	if verificationRequired != 1 || initialGroup != nil {
+	if verificationRequired != 1 || initialGroup != nil || purchaseDisabled != 0 {
 		t.Fatalf("migrated policy verification=%d initial_group=%v", verificationRequired, initialGroup)
 	}
 	var ruleDomain string

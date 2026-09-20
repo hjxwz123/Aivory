@@ -63,7 +63,8 @@ type User struct {
 	// GroupName is the transient display name of the user's membership group (the
 	// "tier" label shown in the sidebar). Populated alongside Features on the
 	// auth/me responses; never persisted on the users table.
-	GroupName string `json:"group_name,omitempty"`
+	GroupName                    string `json:"group_name,omitempty"`
+	SubscriptionPurchaseDisabled bool   `json:"subscription_purchase_disabled"`
 	// MemoryAvailable mirrors the GLOBAL admin `memory_enabled` master switch so the
 	// client can show/hide the per-user memory toggle (when off, no one can enable
 	// memory). Transient — populated alongside the group fields on auth/me; never

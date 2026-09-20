@@ -80,13 +80,77 @@ export function WorkspaceAnnouncementPopup() {
   if (!data) return null
   const title = data.title.trim()
   const closeLocked = data.require_read && secondsRemaining > 0
+  const hasImage = Boolean(data.image_url.trim())
+  const hasBody = Boolean(data.body.trim())
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next && !closeLocked) close() }}>
-      <DialogContent size={data.image_url.trim() ? 'xl' : 'md'} aria-describedby={undefined} closeDisabled={closeLocked} onEscapeKeyDown={(event) => { if (closeLocked) event.preventDefault() }} onInteractOutside={(event) => { if (closeLocked) event.preventDefault() }} className="max-h-[min(88dvh,42rem)] overflow-hidden p-0">
-        <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
-          {data.image_url.trim() ? <div className="shrink-0 bg-[var(--color-bg-muted)] sm:w-[42%]"><img src={data.image_url} alt="" className="h-40 w-full object-cover sm:h-full" draggable={false} /></div> : null}
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col"><DialogHeader className={cn(!title && 'sr-only')}><DialogTitle className="break-words pr-10">{title || t('announcement.title', { defaultValue: 'Announcement' })}</DialogTitle></DialogHeader><DialogBody className="min-w-0 overflow-x-hidden overflow-y-auto"><div className="prose-announcement break-words text-[14.5px] leading-relaxed text-[var(--color-fg)] [&_a]:text-[var(--color-accent)] [&_a]:underline [&_h1]:font-serif [&_h1]:text-xl [&_h2]:font-serif [&_h2]:text-lg [&_li]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_strong]:font-semibold [&_ul]:list-disc [&_ul]:pl-5" dangerouslySetInnerHTML={{ __html: sanitizeHtml(data.body) }} /></DialogBody><DialogFooter className="max-sm:flex-col max-sm:items-stretch">{closeLocked ? <span className="flex min-h-8 items-center gap-1.5 text-[12.5px] text-[var(--color-fg-muted)] sm:mr-auto" role="status"><Clock3 size={14} aria-hidden />{t('announcement.requiredCountdown', { count: secondsRemaining })}</span> : null}<Button variant={data.remember_dismiss ? 'secondary' : 'primary'} disabled={closeLocked} onClick={close}>{t('actions.close')}</Button>{data.remember_dismiss ? <Button disabled={closeLocked} onClick={dismissVersion}>{t('announcement.dontShowAgain', { defaultValue: "Don't show this again" })}</Button> : null}</DialogFooter></div>
-        </div>
+      <DialogContent
+        size={hasImage && hasBody ? 'xl' : 'md'}
+        aria-describedby={undefined}
+        closeDisabled={closeLocked}
+        onEscapeKeyDown={(event) => { if (closeLocked) event.preventDefault() }}
+        onInteractOutside={(event) => { if (closeLocked) event.preventDefault() }}
+        className="max-h-[min(calc(100dvh-2rem),44rem)] overflow-hidden rounded-2xl p-0 [&>button]:z-10 [&>button]:size-11 [&>button]:right-2 [&>button]:top-2"
+      >
+        <DialogHeader className="border-b border-[var(--color-divider)] px-5 py-4 pr-16 sm:px-6 sm:pr-16">
+          <div className="flex min-w-0 items-start gap-2.5">
+            <Megaphone size={18} aria-hidden className="mt-0.5 shrink-0 text-[var(--color-fg-muted)]" />
+            <DialogTitle className="min-w-0 break-words [overflow-wrap:anywhere]">
+              {title || t('announcement.title', { defaultValue: 'Announcement' })}
+            </DialogTitle>
+          </div>
+        </DialogHeader>
+        <DialogBody className="overscroll-contain px-5 py-5 sm:px-6">
+          <div className={cn('min-w-0', hasImage && hasBody && 'grid items-start gap-5 md:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] md:gap-6')}>
+            {hasImage ? (
+              <div className="min-w-0 overflow-hidden rounded-lg bg-[var(--color-bg-muted)]">
+                <img
+                  src={data.image_url}
+                  alt=""
+                  className="mx-auto block max-h-[min(40dvh,16rem)] w-full object-contain md:max-h-[min(50dvh,24rem)]"
+                  draggable={false}
+                />
+              </div>
+            ) : null}
+            {hasBody ? (
+              <div
+                className={cn(
+                  'prose-announcement min-w-0 text-sm leading-7 text-[var(--color-fg)] [overflow-wrap:anywhere]',
+                  '[&>:first-child]:mt-0 [&>:last-child]:mb-0',
+                  '[&_h1]:mb-3 [&_h1]:text-xl [&_h1]:font-semibold [&_h1]:leading-snug',
+                  '[&_h2]:mb-2 [&_h2]:mt-5 [&_h2]:text-base [&_h2]:font-semibold [&_h2]:leading-snug',
+                  '[&_h3]:mb-2 [&_h3]:mt-4 [&_h3]:font-semibold',
+                  '[&_p]:my-3 [&_a]:text-[var(--color-accent)] [&_a]:underline [&_a]:underline-offset-2',
+                  '[&_strong]:font-semibold [&_em]:italic [&_li]:my-1',
+                  '[&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-5',
+                  '[&_img]:my-3 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-lg',
+                  '[&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-[var(--color-bg-muted)] [&_pre]:p-3',
+                  '[&_code]:font-mono [&_code]:text-[0.9em] [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto',
+                  '[&_td]:border [&_td]:border-[var(--color-divider)] [&_td]:px-3 [&_td]:py-2',
+                  '[&_th]:border [&_th]:border-[var(--color-divider)] [&_th]:px-3 [&_th]:py-2 [&_th]:text-left',
+                  '[&_hr]:my-4 [&_hr]:border-[var(--color-divider)]',
+                )}
+                dangerouslySetInnerHTML={{ __html: sanitizeHtml(data.body) }}
+              />
+            ) : null}
+          </div>
+        </DialogBody>
+        <DialogFooter className="flex-wrap gap-2 px-5 py-3 sm:px-6 [&_button]:h-auto [&_button]:min-h-11 [&_button]:whitespace-normal [&_button]:py-2 max-sm:[&_button]:h-auto">
+          {closeLocked ? (
+            <span className="flex w-full items-center gap-1.5 text-xs leading-5 text-[var(--color-fg-muted)] sm:mr-auto sm:w-auto" role="status" aria-live="polite">
+              <Clock3 size={14} aria-hidden className="shrink-0" />
+              {t('announcement.requiredCountdown', { count: secondsRemaining })}
+            </span>
+          ) : null}
+          <Button className="max-sm:flex-1" variant={data.remember_dismiss ? 'secondary' : 'primary'} disabled={closeLocked} onClick={close}>
+            {t('actions.close')}
+          </Button>
+          {data.remember_dismiss ? (
+            <Button className="max-sm:flex-1" disabled={closeLocked} onClick={dismissVersion}>
+              {t('announcement.dontShowAgain', { defaultValue: "Don't show this again" })}
+            </Button>
+          ) : null}
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   )

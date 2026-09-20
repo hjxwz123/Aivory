@@ -2422,6 +2422,10 @@
     "removeMemberTitle": "Retirer {{user}} ?",
     "removeMemberHint": "Le rattachement au domaine et la restriction de l’espace personnel seront supprimés. L’appartenance à l’espace n’est retirée que si la règle de domaine l’avait créée ; une appartenance antérieure est conservée.",
     "memberRemoved": "Le membre a été retiré de la règle de domaine.",
-    "removeMemberFailed": "Impossible de retirer le membre."
+    "removeMemberFailed": "Impossible de retirer le membre.",
+    "purchaseAllowedLabel": "Autoriser les achats d’abonnements",
+    "purchaseAllowedHint": "Si cette option est désactivée, les membres du domaine ne voient que la carte de leur groupe actuel et ne peuvent ni commencer ni reprendre un achat.",
+    "searchGroups": "Rechercher un groupe…",
+    "noGroupsFound": "Aucun groupe correspondant"
   }
 }

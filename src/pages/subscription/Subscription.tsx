@@ -59,6 +59,7 @@ const PAYMENT_HISTORY_PAGE_SIZE = 10
 export default function Subscription() {
   const { t, i18n } = useTranslation(['subscription', 'common'])
   const user = useAuth((state) => state.user)
+  const purchaseAllowed = user?.subscription_purchase_disabled !== true
   const setUser = useAuth((state) => state.setUser)
   const [groups, setGroups] = useState<ApiUserGroup[]>([])
   const [creditPackages, setCreditPackages] = useState<ApiCreditPackage[]>([])
@@ -113,6 +114,10 @@ export default function Subscription() {
   }
 
   useEffect(() => {
+    void useAuth.getState().refreshProfile()
+  }, [])
+
+  useEffect(() => {
     let active = true
 
     setGroupsLoading(true)
@@ -133,6 +138,7 @@ export default function Subscription() {
   useEffect(() => {
     let active = true
 
+    if (!purchaseAllowed) return
     setPackagesLoading(true)
     setPackagesLoadError(false)
     creditPackagesApi
@@ -146,11 +152,12 @@ export default function Subscription() {
     return () => {
       active = false
     }
-  }, [packagesReloadKey])
+  }, [packagesReloadKey, purchaseAllowed])
 
   useEffect(() => {
     let active = true
 
+    if (!purchaseAllowed) return
     setCreditsLoading(true)
     setCreditsLoadError(false)
     authApi
@@ -164,10 +171,11 @@ export default function Subscription() {
     return () => {
       active = false
     }
-  }, [creditsReloadKey])
+  }, [creditsReloadKey, purchaseAllowed])
 
   useEffect(() => {
     let active = true
+    if (!purchaseAllowed) return
     const offset = paymentHistoryPage * PAYMENT_HISTORY_PAGE_SIZE
 
     setPaymentHistoryLoading(true)
@@ -194,7 +202,7 @@ export default function Subscription() {
     return () => {
       active = false
     }
-  }, [paymentHistoryPage, paymentHistoryReloadKey])
+  }, [paymentHistoryPage, paymentHistoryReloadKey, purchaseAllowed])
 
   useEffect(
     () => () => {
@@ -206,6 +214,7 @@ export default function Subscription() {
   )
 
   useEffect(() => {
+    if (!purchaseAllowed) return
     const url = new URL(window.location.href)
     const paymentReturn = url.searchParams.get('payment')
     const orderId = url.searchParams.get('order')?.trim() || ''
@@ -322,7 +331,7 @@ export default function Subscription() {
       cancelled = true
       if (timer !== undefined) window.clearTimeout(timer)
     }
-  }, [setUser, t])
+  }, [setUser, t, purchaseAllowed])
 
   const currentId = user?.group_id || groups.find((group) => group.is_default)?.id || ''
   const sortedGroups = useMemo(
@@ -512,6 +521,30 @@ export default function Subscription() {
   const showAccount = hasCurrentGroup || showCreditsPanel
   const showingGroups = catalogTab === 'groups'
   const catalogCount = showingGroups ? sortedGroups.length : sortedPackages.length
+
+  if (!purchaseAllowed) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col bg-[var(--color-bg)] font-sans text-[var(--color-fg)]">
+        <ContentHeader title={t('subscription:title')} backTo="/" backLabel={t('subscription:back')} />
+        <main className="mx-auto w-full max-w-[var(--layout-content-max-w)] flex-1 overflow-y-auto px-4 py-4 sm:px-8 sm:py-6">
+          {groupsLoading ? <AccountSkeleton t={t} /> : groupsLoadError ? (
+            <CatalogLoadError message={t('subscription:loadFailed')} onRetry={() => setGroupsReloadKey((value) => value + 1)} t={t} />
+          ) : current ? (
+            <div className="max-w-md">
+              <UserGroupTierCard group={current} billingCycle={billingCycle} isCurrent locale={i18n.resolvedLanguage} />
+              {expiresLabel ? <p className="mt-2 text-sm text-[var(--color-fg-muted)]">{expiresLabel}</p> : null}
+            </div>
+          ) : (
+            <section className="max-w-md rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+              <p className="text-sm text-[var(--color-fg-muted)]">{t('subscription:currentPlan')}</p>
+              <h2 className="mt-1 text-lg font-semibold">{currentGroupName || t('subscription:free')}</h2>
+              {expiresLabel ? <p className="mt-2 text-sm text-[var(--color-fg-muted)]">{expiresLabel}</p> : null}
+            </section>
+          )}
+        </main>
+      </div>
+    )
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-[var(--color-bg)] font-sans text-[var(--color-fg)]">

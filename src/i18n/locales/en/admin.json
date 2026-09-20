@@ -2422,6 +2422,10 @@
     "removeMemberTitle": "Remove {{user}}?",
     "removeMemberHint": "This removes the domain binding and personal-space restriction. Workspace membership is also removed only when domain enrollment originally created it; a pre-existing workspace membership is kept.",
     "memberRemoved": "Member removed from the domain rule.",
-    "removeMemberFailed": "Could not remove the member."
+    "removeMemberFailed": "Could not remove the member.",
+    "purchaseAllowedLabel": "Allow subscription purchases",
+    "purchaseAllowedHint": "When off, domain members only see their current user group card on the subscription page and cannot start or resume purchases.",
+    "searchGroups": "Search user groups…",
+    "noGroupsFound": "No matching user groups"
   }
 }

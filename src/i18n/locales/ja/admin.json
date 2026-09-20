@@ -2422,6 +2422,10 @@
     "removeMemberTitle": "{{user}} を削除しますか？",
     "removeMemberHint": "ドメインの紐付けと個人スペース制限を解除します。ドメイン登録によって作成されたワークスペース所属のみ削除され、以前からの所属は維持されます。",
     "memberRemoved": "メンバーをドメインルールから削除しました。",
-    "removeMemberFailed": "メンバーを削除できませんでした。"
+    "removeMemberFailed": "メンバーを削除できませんでした。",
+    "purchaseAllowedLabel": "サブスクリプションの購入を許可",
+    "purchaseAllowedHint": "オフにすると、このドメインのユーザーには現在のユーザーグループのカードのみが表示され、購入の開始や再開はできません。",
+    "searchGroups": "ユーザーグループを検索…",
+    "noGroupsFound": "一致するユーザーグループがありません"
   }
 }

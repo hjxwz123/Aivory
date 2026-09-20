@@ -100,7 +100,8 @@
       "checkoutStateUnknown": "決済事業者がこの支払いを続行できるか確認できませんでした。再試行する前に決済事業者側の注文を確認してください。",
       "waffoProductCurrencyUnsupported": "この Waffo 商品は選択した決済通貨に対応していません。商品価格または決済チャネル設定を管理者に確認してください。",
       "userGroupAlreadyPermanent": "このユーザーグループはすでに永久利用できるため、再度購入する必要はありません。",
-      "userGroupNotPurchasable": "このユーザーグループは現在一時的に購入できません。しばらくしてからもう一度お試しください。"
+      "userGroupNotPurchasable": "このユーザーグループは現在一時的に購入できません。しばらくしてからもう一度お試しください。",
+      "domainPurchaseDisabled": "このドメインではサブスクリプションを購入できません。管理者にお問い合わせください。"
     },
     "or": "または",
     "cardPurchase": "プリペイドコードを購入",

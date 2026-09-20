@@ -71,7 +71,7 @@ func listUserGroupsPublic(d Deps, w http.ResponseWriter, r *http.Request) {
 	currency := globalSettlementCurrency(d)
 	visible := make([]publicUserGroupResponse, 0, len(rows))
 	for _, g := range rows {
-		if g.IsPublic {
+		if g.IsPublic || (authUser(r) != nil && g.ID == authUser(r).GroupID) {
 			visible = append(visible, publicUserGroup(g, currency))
 		}
 	}

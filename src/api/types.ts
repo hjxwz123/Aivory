@@ -21,6 +21,7 @@ export interface ApiTimedCredits {
 }
 
 export interface ApiUser {
+  subscription_purchase_disabled?: boolean
   id: string
   email: string
   name: string

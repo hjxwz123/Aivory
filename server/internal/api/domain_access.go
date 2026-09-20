@@ -22,6 +22,13 @@ func enforceDomainAccess(d Deps, w http.ResponseWriter, r *http.Request, userID 
 		writeError(w, 500, err)
 		return true
 	}
+	if access != nil && access.SubscriptionPurchaseDisabled && r.Method == http.MethodPost {
+		path := strings.TrimSuffix(r.URL.Path, "/")
+		if path == "/api/payments/checkout" || (strings.HasPrefix(path, "/api/payments/orders/") && strings.HasSuffix(path, "/resume")) {
+			writeError(w, http.StatusForbidden, errors.New("subscription_purchase_disabled"))
+			return true
+		}
+	}
 	if access == nil || !access.Locked {
 		return false
 	}

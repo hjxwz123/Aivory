@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { AlertTriangle, ArrowLeft, Globe, LockKeyhole, Plus, Search, Trash2, UserPlus, Users } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Check, ChevronDown, Globe, LockKeyhole, Plus, Search, Trash2, UserPlus, Users } from 'lucide-react'
 import { adminApi, workspacesApi } from '@/api'
 import { domainsApi, type DomainUser, type DomainUserCandidate, type RegistrationDomain } from '@/api/domains'
 import type { ApiUserGroup, ApiWorkspace } from '@/api/types'
@@ -14,6 +14,8 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogBody, DialogFooter } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { toast } from '@/hooks/use-toast'
 
 function matchedDomains(rule: RegistrationDomain): string[] {
@@ -162,6 +164,8 @@ function DomainEditor({ rule, workspaces, groups, onClose, onSaved }: { rule: Re
   const [locked, setLocked] = useState(isNew ? false : rule.lock_personal)
   const [verifyEmail, setVerifyEmail] = useState(isNew ? true : rule.email_verification_required)
   const [initialGroup, setInitialGroup] = useState(isNew ? '' : rule.initial_group_id)
+  const [groupOpen, setGroupOpen] = useState(false)
+  const [purchaseAllowed, setPurchaseAllowed] = useState(isNew || !rule.subscription_purchase_disabled)
   const [enabled, setEnabled] = useState(isNew ? true : rule.enabled)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -172,7 +176,7 @@ function DomainEditor({ rule, workspaces, groups, onClose, onSaved }: { rule: Re
     if (mutation.current || !canSave) return
     mutation.current = true; setBusy(true); setError('')
     try {
-      const body = { domain: isNew ? domains[0] : rule.domain, domains, workspace_id: workspace, lock_personal: locked, email_verification_required: verifyEmail, initial_group_id: initialGroup, enabled: isNew ? true : enabled }
+      const body = { domain: isNew ? domains[0] : rule.domain, domains, workspace_id: workspace, lock_personal: locked, email_verification_required: verifyEmail, subscription_purchase_disabled: !purchaseAllowed, initial_group_id: initialGroup, enabled: isNew ? true : enabled }
       if (isNew) await domainsApi.create(body)
       else await domainsApi.update({ ...rule, ...body })
       toast.success(t('domains.saved')); onSaved()
@@ -204,8 +208,31 @@ function DomainEditor({ rule, workspaces, groups, onClose, onSaved }: { rule: Re
             )}
             <div className="flex items-start justify-between gap-4"><div><label htmlFor="domain-verification" className="text-sm font-medium">{t('domains.verifyEmailLabel')}</label><p className="mt-1 text-sm text-[var(--color-fg-muted)]">{t('domains.verifyEmailHint')}</p></div><Switch id="domain-verification" checked={verifyEmail} onCheckedChange={setVerifyEmail} disabled={busy} /></div>
             <div className="space-y-2"><label id="domain-group-label" className="text-sm font-medium">{t('domains.initialGroupLabel')}</label><p className="text-sm text-[var(--color-fg-muted)]">{t('domains.initialGroupHint')}</p>
-              <Select value={initialGroup || '__system_default__'} onValueChange={(value) => setInitialGroup(value === '__system_default__' ? '' : value)} disabled={busy}><SelectTrigger aria-labelledby="domain-group-label"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__system_default__">{t('domains.systemDefaultGroup')}</SelectItem>{groups.filter((group) => !group.is_default || group.id === initialGroup).map((group) => <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>)}</SelectContent></Select>
+              <Popover open={groupOpen} onOpenChange={setGroupOpen}>
+                <PopoverTrigger asChild>
+                  <Button type="button" variant="secondary" className="w-full justify-between" disabled={busy} aria-labelledby="domain-group-label domain-group-value" trailingIcon={<ChevronDown size={14} aria-hidden />}>
+                    <span id="domain-group-value" className="truncate">{initialGroup ? groups.find((group) => group.id === initialGroup)?.name || initialGroup : t('domains.systemDefaultGroup')}</span>
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-2rem)] min-w-0 overflow-hidden p-0">
+                  <Command>
+                    <CommandInput autoFocus placeholder={t('domains.searchGroups')} aria-label={t('domains.searchGroups')} />
+                    <CommandList className="max-h-[min(18rem,calc(var(--radix-popover-content-available-height)-4rem))] max-sm:max-h-[min(18rem,calc(var(--radix-popover-content-available-height)-4rem))]">
+                      <CommandEmpty>{t('domains.noGroupsFound')}</CommandEmpty>
+                      <CommandItem value="__system_default__" keywords={[t('domains.systemDefaultGroup')]} onSelect={() => { setInitialGroup(''); setGroupOpen(false) }}>
+                        <Check size={14} aria-hidden className={initialGroup ? 'invisible' : ''} />{t('domains.systemDefaultGroup')}
+                      </CommandItem>
+                      {groups.filter((group) => !group.is_default || group.id === initialGroup).map((group) => (
+                        <CommandItem key={group.id} value={group.id} keywords={[group.name]} onSelect={() => { setInitialGroup(group.id); setGroupOpen(false) }}>
+                          <Check size={14} aria-hidden className={initialGroup === group.id ? '' : 'invisible'} /><span className="truncate">{group.name}</span>
+                        </CommandItem>
+                      ))}
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
+            <div className="flex items-start justify-between gap-4"><div><label htmlFor="domain-subscription" className="text-sm font-medium">{t('domains.purchaseAllowedLabel')}</label><p className="mt-1 text-sm text-[var(--color-fg-muted)]">{t('domains.purchaseAllowedHint')}</p></div><Switch id="domain-subscription" checked={purchaseAllowed} onCheckedChange={setPurchaseAllowed} disabled={busy} /></div>
             <div className="flex items-start justify-between gap-4"><div><label htmlFor="domain-lock" className="text-sm font-medium">{t('domains.lockLabel')}</label><p className="mt-1 text-sm text-[var(--color-fg-muted)]">{t('domains.lockHint')}</p></div><Switch id="domain-lock" checked={locked} onCheckedChange={setLocked} disabled={busy} /></div>
             {error && <p role="alert" className="text-sm text-[var(--color-danger)]">{error}</p>}
           </DialogBody>
