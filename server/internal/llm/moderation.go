@@ -71,6 +71,16 @@ func (o *Orchestrator) moderateByModel(ctx context.Context, userText, userID, co
 	if strings.TrimSpace(modelID) == "" {
 		return false, false, nil
 	}
+	if model := o.task.policyDecisionModel(ctx, "moderation_model_id"); model != nil {
+		blocked, decided, err := o.decisionModeration(ctx, model, userText, userID, convID, msgID)
+		if errors.Is(err, ErrTaskBillingRecord) {
+			return false, false, err
+		}
+		if err != nil {
+			return false, false, nil
+		}
+		return blocked, decided, nil
+	}
 	// When the admin has configured violation categories, screen specifically
 	// against them; otherwise fall back to the generic safety prompt.
 	system := moderationModelSystemPrompt

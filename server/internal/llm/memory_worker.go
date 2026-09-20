@@ -250,6 +250,7 @@ func (w *MemoryWorker) adjudicateAndWrite(ctx context.Context, userID, convID st
 			coexist = true
 		case "unknown_current":
 			w.setStatus(ctx, e.ID, "UNKNOWN_CURRENT", "conflicting newer fact, currency unclear", nil)
+			newStatus = "UNKNOWN_CURRENT"
 		default:
 			// §4.16 conservative fallback: when the adjudicator's verdict is
 			// missing OR unparseable, do NOT silently mark the old fact STALE
@@ -302,6 +303,9 @@ func (w *MemoryWorker) adjudicate(ctx context.Context, userID, convID string, c 
 	if w.task == nil {
 		return nil
 	}
+	if model := w.task.policyDecisionModel(ctx, "memory_adjudicate_model_id"); model != nil {
+		return w.decisionMemoryAdjudicate(ctx, model, userID, convID, c, existing)
+	}
 	var p strings.Builder
 	fmt.Fprintf(&p, "New fact (slot=%q): %s = %q\n\n", c.Slot, c.MemoryText, c.Value)
 	p.WriteString("Existing memories on the same slot:\n")
@@ -316,7 +320,8 @@ func (w *MemoryWorker) adjudicate(ctx context.Context, userID, convID string, c 
 		"Be conservative: when in doubt, use unknown_current — never `stale`.")
 	var verdicts map[string]string
 	if err := w.task.RunJSON(ctx, TaskMemoryAdjudicate, p.String(), &verdicts, RunOpts{
-		UserID: userID, ConversationID: convID, MaxOutputTokens: maxOutputTokens2,
+		ModelID: w.memoryPolicyModelID(ctx, "memory_adjudicate_model_id", convID),
+		UserID:  userID, ConversationID: convID, MaxOutputTokens: maxOutputTokens2,
 	}); err != nil {
 		return nil
 	}
@@ -360,6 +365,13 @@ func (w *MemoryWorker) findSemanticDuplicate(ctx context.Context, userID, convID
 			return m.id
 		}
 	}
+	if model := w.task.policyDecisionModel(ctx, "memory_dedup_model_id"); model != nil {
+		candidates := make(map[string]any, len(mems))
+		for _, m := range mems {
+			candidates[m.id] = m.text
+		}
+		return w.decisionMemoryDuplicate(ctx, model, userID, convID, c, candidates)
+	}
 	var p strings.Builder
 	fmt.Fprintf(&p, "New fact: %s\n\nExisting saved memories:\n", strings.TrimSpace(c.MemoryText))
 	for _, m := range mems {
@@ -374,6 +386,7 @@ func (w *MemoryWorker) findSemanticDuplicate(ctx context.Context, userID, convID
 		DuplicateOf string `json:"duplicate_of"`
 	}
 	if err := w.task.RunJSON(ctx, TaskMemoryAdjudicate, p.String(), &out, RunOpts{
+		ModelID:         w.memoryPolicyModelID(ctx, "memory_dedup_model_id", convID),
 		UserID:          userID,
 		ConversationID:  convID,
 		MaxOutputTokens: maxOutputTokens3,

@@ -320,7 +320,8 @@
       "moderationModeModel": "Moderation model",
       "moderationModeModelUnavailable": "Configure a moderation model before selecting model review.",
       "imageTimeout": "Generation timeout (seconds)",
-      "imageTimeoutHint": "Cut a single image request after this many seconds. 0 = no per-model cap."
+      "imageTimeoutHint": "Cut a single image request after this many seconds. 0 = no per-model cap.",
+      "decisionKind": "Decision model"
     },
     "editorTitle": "Edit model",
     "newTitle": "New model",
@@ -718,7 +719,8 @@
       "task_research_plan": "Deep Research planning",
       "task_research_verify": "Deep Research coverage check",
       "task_moderation": "Content safety review",
-      "task_research_validate": "Deep Research evidence cross-check"
+      "task_research_validate": "Deep Research evidence cross-check",
+      "task_memory_dedup": "Memory deduplication model"
     },
     "empty": "No calls in the selected window.",
     "leadRecords": "Every API call, one row. Filter and prune the log below.",
@@ -953,7 +955,7 @@
       "passkeyLogin": "Passkey login (no password)"
     },
     "modelPolicy": {
-      "unavailable": "Choose an enabled chat model whose channel is also enabled.",
+      "unavailable": "Choose an enabled model on an available channel. Jev supports file routing, tool routing, memory deduplication, conflict adjudication and moderation, and requires a channel API key.",
       "stale": "One or more saved policy models are unavailable. Replace them with an enabled model, inherit the conversation model, or select none.",
       "empty": "No chat model is available for model policies. Enable a chat model and its channel first.",
       "unavailableOption": "Unavailable"
@@ -970,7 +972,7 @@
       "queryRouteModel": "Query routing model",
       "queryRouteModelHint": "Chooses lightweight search or full tools in Auto mode, keeping multiple rounds for complex tasks. Prefer a low-latency, non-reasoning model. If unset, the current conversation model is used.",
       "fileRouteModel": "File routing model",
-      "fileRouteModelHint": "Chooses no file context, targeted retrieval, or full-document coverage and resolves current-file references. Prefer a low-latency, non-reasoning model with reliable JSON output. If unset, the other internal task model and then the current conversation model are used.",
+      "fileRouteModelHint": "Chooses no document context, targeted retrieval, or full-document coverage and selects documents for full coverage. Supports chat models and Jev; Jev retrieves using the original question without query rewrites. If unset, uses the internal task model, then the conversation model.",
       "taskModel": "Other internal task model",
       "taskModelHint": "Used for memory extraction and adjudication, research planning and verification, search-query generation, and other internal tasks. If unset, the current conversation model is used.",
       "defaultToolMode": "Default tool mode",
@@ -1122,7 +1124,13 @@
       "logFullRequestsLead": "Choose which upstream requests retain diagnostics and whether sanitized request bodies are stored.",
       "logErrorsOnlyHint": "Logging every request increases database usage; request bodies are still controlled by the separate switch below.",
       "logRequestBodies": "Store complete request bodies",
-      "logRequestBodiesHint": "When off, methods, URLs, sanitized headers, and error details remain available, but prompts, parameters, and attachment contents are not stored."
+      "logRequestBodiesHint": "When off, methods, URLs, sanitized headers, and error details remain available, but prompts, parameters, and attachment contents are not stored.",
+      "memoryDedupModel": "Memory deduplication model",
+      "memoryDedupModelHint": "Checks whether a fact is already saved. Supports chat models and Jev; inherits the task model when unset.",
+      "memoryAdjudicateModel": "Memory conflict model",
+      "memoryAdjudicateModelHint": "Decides whether old and new facts should coexist or replace each other. Supports Jev; uncertain decisions remain conservative.",
+      "moderationModel": "Content moderation model",
+      "moderationModelHint": "Supports chat models and Jev. Shared with the moderation page; enable moderation and select its mode on each chat model."
     }
   },
   "groups": {

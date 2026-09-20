@@ -737,7 +737,7 @@ export interface ApiOAuthIdentity {
 export interface ApiChannel {
   id: string
   name: string
-  type: 'openai' | 'claude' | 'anthropic' | 'google' | 'gemini'
+  type: 'openai' | 'claude' | 'anthropic' | 'google' | 'gemini' | 'typesafe'
   api_format: 'chat' | 'responses' | ''
   base_url: string
   has_api_key: boolean
@@ -753,7 +753,7 @@ export interface ApiChannelModelImportResult {
   skipped_unsupported: number
 }
 
-export type ApiChannelModelKind = 'chat' | 'image' | 'embedding'
+export type ApiChannelModelKind = 'chat' | 'image' | 'embedding' | 'decision'
 
 export interface ApiChannelModelCandidate {
   request_id: string
@@ -938,7 +938,7 @@ export interface ApiModel {
 	mask_edit?: boolean
   id: string
   channel_id: string
-  kind: 'chat' | 'image' | 'embedding'
+  kind: 'chat' | 'image' | 'embedding' | 'decision'
   request_id: string
   label: string
   description: string

@@ -1066,7 +1066,7 @@ export const adminApi = {
     return api<{ ok: true }>(`/admin/payment-orders/${encodeURIComponent(id)}${query}`, { method: 'DELETE' })
   },
 
-  models: (kind?: 'chat' | 'image' | 'embedding') =>
+  models: (kind?: 'chat' | 'image' | 'embedding' | 'decision') =>
     api<ApiModel[]>(`/admin/models${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`),
   builtinTools: () => api<ApiBuiltinTool[]>('/admin/tools/builtins'),
   mcpServers: () => api<ApiMCPServer[]>('/admin/mcp'),

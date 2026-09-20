@@ -311,3 +311,8 @@ func (a taskRouterAdapter) RunJSON(ctx context.Context, kind, prompt string, out
 	}
 	return err
 }
+
+// RouteDocuments supplies the optional typed decision-model route to RAG.
+func (a taskRouterAdapter) RouteDocuments(ctx context.Context, input rag.DocumentRouteInput, opts rag.RouterOpts) (rag.RouteDecision, bool, error) {
+	return a.t.RouteDocuments(ctx, input, opts)
+}

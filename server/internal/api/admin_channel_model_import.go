@@ -104,7 +104,7 @@ func discoverDraftChannelModelsAdmin(d Deps, w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if req.Type == "openai" {
+	if req.Type == "openai" || req.Type == "typesafe" {
 		baseURL, err := normalizeOpenAIChannelBaseURL(req.BaseURL)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err)
@@ -203,7 +203,8 @@ func importChannelModelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 
 func createChannelModelsBatchAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	channelID := pathParam(r, "id")
-	if _, err := store.GetChannel(r.Context(), d.DB, channelID); err != nil {
+	channel, err := store.GetChannel(r.Context(), d.DB, channelID)
+	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, errNotFound)
 			return
@@ -238,7 +239,14 @@ func createChannelModelsBatchAdmin(d Deps, w http.ResponseWriter, r *http.Reques
 		if candidate.Kind == "" {
 			candidate.Kind = "chat"
 		}
-		if candidate.Kind != "chat" && candidate.Kind != "image" && candidate.Kind != "embedding" {
+		if channel.Type == "typesafe" {
+			candidate.Kind = "decision"
+		}
+		if candidate.Kind == "decision" && channel.Type != "typesafe" {
+			writeError(w, 400, errInvalidInput)
+			return
+		}
+		if candidate.Kind != "chat" && candidate.Kind != "image" && candidate.Kind != "embedding" && candidate.Kind != "decision" {
 			writeError(w, http.StatusBadRequest, errInvalidInput)
 			return
 		}
@@ -266,7 +274,7 @@ func createChannelModelsBatchAdmin(d Deps, w http.ResponseWriter, r *http.Reques
 }
 
 func newDiscoveredChannelModel(channelID string, found discoveredChannelModel) store.Model {
-	return store.Model{
+	m := store.Model{
 		ChannelID:   channelID,
 		Kind:        found.Kind,
 		RequestID:   found.RequestID,
@@ -278,6 +286,13 @@ func newDiscoveredChannelModel(channelID string, found discoveredChannelModel) s
 		Stream:      true,
 		Currency:    "USD",
 	}
+	if found.Kind == "decision" {
+		m.ToolMode = "none"
+		m.Vision = false
+		m.Stream = false
+		m.PriceInput = 0.042
+	}
+	return m
 }
 
 func discoverChannelModels(ctx context.Context, channel *store.Channel) (channelModelDiscovery, error) {
@@ -285,6 +300,28 @@ func discoverChannelModels(ctx context.Context, channel *store.Channel) (channel
 		return channelModelDiscovery{}, errors.New("channel required")
 	}
 	switch strings.ToLower(strings.TrimSpace(channel.Type)) {
+	case "typesafe":
+		base := strings.TrimRight(channel.BaseURL, "/")
+		if base == "" {
+			base = "https://api.typesafe.ai/v1"
+		}
+		base = llm.OpenAIBaseURL(base)
+		var response struct {
+			Models []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+			} `json:"models"`
+		}
+		if err := fetchChannelModelJSON(ctx, base+"/models", channel, &response); err != nil {
+			return channelModelDiscovery{}, err
+		}
+		acc := newChannelModelAccumulator()
+		for _, m := range response.Models {
+			if err := acc.add(m.Name, m.Name, m.Description, "decision", true); err != nil {
+				return channelModelDiscovery{}, err
+			}
+		}
+		return acc.result, nil
 	case "openai":
 		return discoverOpenAIChannelModels(ctx, channel)
 	case "claude", "anthropic":
@@ -467,7 +504,7 @@ func fetchChannelModelJSON(ctx context.Context, endpoint string, channel *store.
 	}
 	request.Header.Set("accept", "application/json")
 	switch strings.ToLower(strings.TrimSpace(channel.Type)) {
-	case "openai":
+	case "openai", "typesafe":
 		if channel.APIKey != "" {
 			request.Header.Set("authorization", "Bearer "+channel.APIKey)
 		}

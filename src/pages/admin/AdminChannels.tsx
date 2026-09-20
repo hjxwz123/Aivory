@@ -46,10 +46,11 @@ type ModelDiscoveryState = {
   skippedUnsupported: number
 }
 
-const TYPES = ['openai', 'claude', 'gemini'] as const
+const TYPES = ['openai', 'claude', 'gemini', 'typesafe'] as const
 
 function inferManualModelKind(requestID: string): ApiChannelModelCandidate['kind'] {
   const id = requestID.toLowerCase()
+  if (id.startsWith('jev-')) return 'decision'
   if (id.includes('embedding') || id.startsWith('embed-')) return 'embedding'
   if (
     id.startsWith('dall-e')
@@ -535,7 +536,7 @@ export default function AdminChannels() {
                     invalid={editor.draft.type === 'openai'
                       && showBaseUrlError
                       && normalizeOpenAIBaseUrl(editor.draft.base_url ?? '') === null}
-                    placeholder={editor.draft.type === 'openai' ? 'https://api.openai.com/v1' : 'https://api.example.com'}
+                    placeholder={editor.draft.type === 'openai' ? 'https://api.openai.com/v1' : editor.draft.type === 'typesafe' ? 'https://api.typesafe.ai/v1' : 'https://api.example.com'}
                   />
                 </Field>
                 <Field

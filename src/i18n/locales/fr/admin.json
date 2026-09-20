@@ -320,7 +320,8 @@
       "moderationModeModel": "Modèle de modération",
       "moderationModeModelUnavailable": "Configurez un modèle de modération avant de sélectionner la modération par modèle.",
       "imageTimeout": "Délai de génération (secondes)",
-      "imageTimeoutHint": "Interrompt une requête image après ce nombre de secondes. 0 = aucune limite."
+      "imageTimeoutHint": "Interrompt une requête image après ce nombre de secondes. 0 = aucune limite.",
+      "decisionKind": "Modèle de décision"
     },
     "editorTitle": "Modifier le modèle",
     "newTitle": "Nouveau modèle",
@@ -718,7 +719,8 @@
       "task_research_plan": "Planification de recherche approfondie",
       "task_research_verify": "Vérification de la couverture de recherche",
       "task_moderation": "Contrôle de sécurité du contenu",
-      "task_research_validate": "Validation croisée des preuves de recherche"
+      "task_research_validate": "Validation croisée des preuves de recherche",
+      "task_memory_dedup": "Modèle de déduplication des souvenirs"
     },
     "empty": "Aucun appel dans la fenêtre sélectionnée.",
     "leadRecords": "Un appel API = une ligne. Filtrez et nettoyez le journal ci-dessous.",
@@ -953,7 +955,7 @@
       "passkeyLogin": "Connexion par clé d'accès (sans mot de passe)"
     },
     "modelPolicy": {
-      "unavailable": "Choisissez un modèle de chat actif dont le canal est également actif.",
+      "unavailable": "Choisissez un modèle actif sur un canal disponible. Jev prend en charge le routage des fichiers, le routage des outils, la déduplication des mémoires, la résolution des conflits et la modération, avec une clé API de canal.",
       "stale": "Un ou plusieurs modèles enregistrés sont indisponibles. Remplacez-les par un modèle actif, héritez du modèle de la conversation ou sélectionnez aucun modèle.",
       "empty": "Aucun modèle de chat n’est disponible pour les politiques. Activez d’abord un modèle de chat et son canal.",
       "unavailableOption": "Indisponible"
@@ -970,7 +972,7 @@
       "queryRouteModel": "Modèle de routage des requêtes",
       "queryRouteModelHint": "Choisit une recherche légère ou les outils complets en mode Auto, avec plusieurs étapes pour les tâches complexes. Préférez un modèle rapide sans raisonnement. S'il est vide, le modèle de la conversation est utilisé.",
       "fileRouteModel": "Modèle de routage des fichiers",
-      "fileRouteModelHint": "Choisit de ne pas utiliser de fichier, d'effectuer une recherche ciblée ou de couvrir le document entier, et résout les références au fichier courant. Préférez un modèle rapide sans raisonnement produisant du JSON fiable. S'il est vide, le modèle des autres tâches internes puis celui de la conversation sont utilisés.",
+      "fileRouteModelHint": "Choisit entre aucun contexte documentaire, une recherche ciblée et une couverture intégrale, puis sélectionne les documents à couvrir. Accepte les modèles de chat et Jev ; Jev utilise la question originale sans reformulation. Sans sélection, utilise le modèle des tâches internes, puis celui de la conversation.",
       "taskModel": "Modèle des autres tâches internes",
       "taskModelHint": "Utilisé pour l'extraction et l'arbitrage de mémoire, la planification et la vérification de recherche, la génération de requêtes de recherche et les autres tâches internes. S'il est vide, le modèle de la conversation est utilisé.",
       "defaultToolMode": "Mode d'outil par défaut",
@@ -1122,7 +1124,13 @@
       "logFullRequestsLead": "Choisissez les requêtes amont qui conservent leurs diagnostics et si les corps complets assainis sont stockés.",
       "logErrorsOnlyHint": "Journaliser toutes les requêtes augmente l'utilisation de la base ; les corps restent contrôlés par l'interrupteur séparé ci-dessous.",
       "logRequestBodies": "Stocker les corps complets des requêtes",
-      "logRequestBodiesHint": "Lorsque cette option est désactivée, les méthodes, URL, en-têtes assainis et erreurs restent disponibles, mais les prompts, paramètres et contenus de pièces jointes ne sont pas stockés."
+      "logRequestBodiesHint": "Lorsque cette option est désactivée, les méthodes, URL, en-têtes assainis et erreurs restent disponibles, mais les prompts, paramètres et contenus de pièces jointes ne sont pas stockés.",
+      "memoryDedupModel": "Modèle de déduplication des souvenirs",
+      "memoryDedupModelHint": "Vérifie si un fait est déjà enregistré. Compatible avec les modèles de chat et Jev ; utilise le modèle de tâche par défaut.",
+      "memoryAdjudicateModel": "Modèle de résolution des conflits de mémoire",
+      "memoryAdjudicateModelHint": "Détermine si les faits doivent coexister ou se remplacer. Compatible avec Jev ; traitement prudent en cas d’incertitude.",
+      "moderationModel": "Modèle de modération",
+      "moderationModelHint": "Compatible avec les modèles de chat et Jev. Ce réglage est partagé avec la page de modération ; activez la modération sur chaque modèle de chat."
     }
   },
   "groups": {

@@ -38,7 +38,7 @@ import {
 import { toast } from '@/hooks/use-toast'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 
-const KINDS = ['chat', 'image', 'embedding'] as const
+const KINDS = ['chat', 'image', 'embedding', 'decision'] as const
 
 type CreateDraft = {
   channel_id: string
@@ -130,7 +130,7 @@ export default function AdminModels() {
   function openNew() {
     setCreator({
       open: true,
-      draft: { ...emptyCreate, kind: createKind, channel_id: channels[0]?.id ?? '' },
+      draft: { ...emptyCreate, kind: channels[0]?.type === 'typesafe' ? 'decision' : createKind === 'decision' ? 'chat' : createKind, channel_id: channels[0]?.id ?? '' },
     })
   }
 
@@ -248,6 +248,7 @@ export default function AdminModels() {
         research_enabled: true,
         param_controls: [],
         currency: 'USD',
+        price_input: d.kind === 'decision' || channels.find((c) => c.id === d.channel_id)?.type === 'typesafe' ? 0.042 : 0,
       })
       toast.success(t('admin:models.created'))
       setCreator({ open: false, draft: emptyCreate })
@@ -621,7 +622,7 @@ export default function AdminModels() {
               <Field label={t('admin:models.fields.channel')} htmlFor="m-new-ch">
                 <Select
                   value={creator.draft.channel_id}
-                  onValueChange={(v) => setCreator({ ...creator, draft: { ...creator.draft, channel_id: v } })}
+                  onValueChange={(v) => setCreator({ ...creator, draft: { ...creator.draft, channel_id: v, kind: channels.find((c) => c.id === v)?.type === 'typesafe' ? 'decision' : creator.draft.kind === 'decision' ? 'chat' : creator.draft.kind } })}
                 >
                   <SelectTrigger id="m-new-ch">
                     <SelectValue placeholder={t('admin:settings.fields.pickModel')} />
@@ -646,9 +647,9 @@ export default function AdminModels() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {KINDS.map((k) => (
+                    {KINDS.filter((k) => channels.find((c) => c.id === creator.draft.channel_id)?.type === 'typesafe' ? k === 'decision' : k !== 'decision').map((k) => (
                       <SelectItem key={k} value={k}>
-                        {k}
+                        {k === 'decision' ? t('admin:models.fields.decisionKind') : k}
                       </SelectItem>
                     ))}
                   </SelectContent>

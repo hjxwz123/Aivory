@@ -28,6 +28,9 @@ const OWNED_KEYS = [
   'verify_model_id',
   'fallback_model_id',
   'fallback_ttft_sec',
+  'memory_dedup_model_id',
+  'memory_adjudicate_model_id',
+  'moderation_model_id',
 ] as const
 
 export default function AdminModelPolicy() {
@@ -40,7 +43,7 @@ export default function AdminModelPolicy() {
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    Promise.all([adminApi.settings(), adminApi.models('chat'), adminApi.channels()])
+    Promise.all([adminApi.settings(), adminApi.models(), adminApi.channels()])
       .then(([settings, chatModels, nextChannels]) => {
         setDraft(settings)
         setSavedSettings(settings)
@@ -84,7 +87,8 @@ export default function AdminModelPolicy() {
   const titleModelId = readString('title_model_id')
   const fileRouteModelId = readString('file_route_model_id')
   const selectableModels = availablePolicyModels(models, channels)
-  const unavailableModelIDs = unavailablePolicyModelIDs(draft, selectableModels)
+  const decisionModels = availablePolicyModels(models, channels, 'tool_route_model_id')
+  const unavailableModelIDs = unavailablePolicyModelIDs(draft, selectableModels, decisionModels)
 
   return (
     <div className="mx-auto max-w-[76rem]">
@@ -180,7 +184,7 @@ export default function AdminModelPolicy() {
                 <PolicyModelOptions
                   currentId={readString('tool_route_model_id')}
                   models={models}
-                  selectableModels={selectableModels}
+                  selectableModels={decisionModels}
                   unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
                 />
               </SelectContent>
@@ -206,7 +210,7 @@ export default function AdminModelPolicy() {
                 <PolicyModelOptions
                   currentId={fileRouteModelId}
                   models={models}
-                  selectableModels={selectableModels}
+                  selectableModels={decisionModels}
                   unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
                 />
               </SelectContent>
@@ -238,6 +242,22 @@ export default function AdminModelPolicy() {
               </SelectContent>
             </Select>
           </Field>
+
+          {([
+            ['memory_dedup_model_id', 'memoryDedupModel', 'memoryDedupModelHint'],
+            ['memory_adjudicate_model_id', 'memoryAdjudicateModel', 'memoryAdjudicateModelHint'],
+            ['moderation_model_id', 'moderationModel', 'moderationModelHint'],
+          ] as const).map(([key, label, hint]) => (
+            <Field key={key} label={t(`admin:settings.fields.${label}`)} htmlFor={key} hint={t(`admin:settings.fields.${hint}`)}>
+              <Select value={readString(key) || 'inherit'} onValueChange={(value) => setDraft((current) => ({ ...current, [key]: value === 'inherit' ? '' : value }))}>
+                <SelectTrigger id={key}><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="inherit">{t(key === 'moderation_model_id' ? 'admin:moderation.modelNone' : 'admin:settings.fields.inheritTaskModel')}</SelectItem>
+                  <PolicyModelOptions currentId={readString(key)} models={models} selectableModels={decisionModels} unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')} />
+                </SelectContent>
+              </Select>
+            </Field>
+          ))}
 
           <Field
             label={t('admin:settings.fields.defaultToolMode')}

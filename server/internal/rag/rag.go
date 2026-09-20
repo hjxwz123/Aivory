@@ -3064,9 +3064,15 @@ func (s *Service) routeAndRetrieve(ctx context.Context, userID, convID string, k
 	s.logRetrievalStage(ctx, convID, "router", "started", time.Time{},
 		fmt.Sprintf(" timeout=%s document_hints=%d", routerCallTimeout, len(docHints)))
 	rctx, cancelRouter := context.WithTimeout(ctx, routerCallTimeout)
-	err := s.task.RunJSON(rctx, "task.router", prompt, &d, RouterOpts{
-		UserID: userID, ConversationID: convID, MessageID: billingMessageID(ctx), WorkspaceID: billingWorkspaceID(ctx),
-	})
+	routerOpts := RouterOpts{UserID: userID, ConversationID: convID, MessageID: billingMessageID(ctx), WorkspaceID: billingWorkspaceID(ctx)}
+	var err error
+	handled := false
+	if router, ok := s.task.(DocumentRouter); ok {
+		d, handled, err = router.RouteDocuments(rctx, DocumentRouteInput{Message: userText, Documents: documentRouteHints(scope, retrieveOpts.currentDocumentIDs)}, routerOpts)
+	}
+	if !handled {
+		err = s.task.RunJSON(rctx, "task.router", prompt, &d, routerOpts)
+	}
 	cancelRouter()
 	routerStatus := "completed"
 	if err != nil {
@@ -4227,34 +4233,37 @@ Reply with strict JSON: {"strategy":"retrieve|full_doc|none","document_ids":["do
 }
 
 func buildDocumentRouteHints(scope []store.Chunk, currentDocumentIDs []string) []string {
-	type routeHint struct {
-		DocumentID  string `json:"document_id"`
-		Filename    string `json:"filename"`
-		CurrentTurn bool   `json:"current_turn"`
-		Indexed     bool   `json:"indexed"`
+	hints := documentRouteHints(scope, currentDocumentIDs)
+	out := make([]string, 0, len(hints))
+	for _, hint := range hints {
+		raw, _ := json.Marshal(hint)
+		out = append(out, string(raw))
 	}
+	return out
+}
+
+func documentRouteHints(scope []store.Chunk, currentDocumentIDs []string) []DocumentRouteHint {
 	current := make(map[string]bool, len(currentDocumentIDs))
 	for _, id := range fixedDocumentScope(currentDocumentIDs) {
 		current[id] = true
 	}
 	order := []string{}
-	byID := map[string]*routeHint{}
+	byID := map[string]*DocumentRouteHint{}
 	for _, chunk := range scope {
 		if chunk.ChunkType == "parent" {
 			continue
 		}
 		hint := byID[chunk.DocumentID]
 		if hint == nil {
-			hint = &routeHint{DocumentID: chunk.DocumentID, Filename: chunk.Filename, CurrentTurn: current[chunk.DocumentID]}
+			hint = &DocumentRouteHint{DocumentID: chunk.DocumentID, Filename: chunk.Filename, CurrentTurn: current[chunk.DocumentID]}
 			byID[chunk.DocumentID] = hint
 			order = append(order, chunk.DocumentID)
 		}
 		hint.Indexed = hint.Indexed || strings.TrimSpace(chunk.EmbeddingModel) != ""
 	}
-	out := make([]string, 0, len(order))
+	out := make([]DocumentRouteHint, 0, len(order))
 	for _, id := range order {
-		raw, _ := json.Marshal(byID[id])
-		out = append(out, string(raw))
+		out = append(out, *byID[id])
 	}
 	return out
 }

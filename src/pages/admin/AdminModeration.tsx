@@ -19,6 +19,7 @@ import { Field } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/hooks/use-toast'
 import { PanelFallback } from '@/components/ui/panel-fallback'
+import { availablePolicyModels } from '@/lib/admin-model-policy'
 
 // Radix Select forbids an empty-string item value, so use a sentinel for "none".
 const NONE = '__none'
@@ -36,14 +37,14 @@ export default function AdminModeration() {
   async function load() {
     setLoading(true)
     try {
-      const [s, m] = await Promise.all([adminApi.settings(), adminApi.models('chat')])
+      const [s, m, channels] = await Promise.all([adminApi.settings(), adminApi.models(), adminApi.channels()])
       const kw = Array.isArray(s.moderation_keywords) ? (s.moderation_keywords as string[]) : []
       setKeywordsText(kw.join('\n'))
       const cats = Array.isArray(s.moderation_categories) ? (s.moderation_categories as string[]) : []
       setCategoriesText(cats.join('\n'))
       setModelId(typeof s.moderation_model_id === 'string' ? s.moderation_model_id : '')
       setMessage(typeof s.moderation_message === 'string' ? s.moderation_message : '')
-      setModels(m)
+      setModels(availablePolicyModels(m, channels, 'moderation_model_id'))
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
     } finally {
@@ -127,6 +128,9 @@ export default function AdminModeration() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={NONE}>{t('admin:moderation.modelNone')}</SelectItem>
+                {modelId && !models.some((m) => m.id === modelId) && (
+                  <SelectItem value={modelId} disabled>{modelId} · {t('admin:settings.modelPolicy.unavailableOption')}</SelectItem>
+                )}
                 {models.map((m) => (
                   <SelectItem key={m.id} value={m.id}>
                     {m.label}

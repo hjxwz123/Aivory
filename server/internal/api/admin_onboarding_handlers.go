@@ -140,6 +140,7 @@ func buildAdminOnboardingResponse(r *http.Request, d Deps, userSettings json.Raw
 
 	usableChatModels := make(map[string]bool)
 	usableEmbeddingModels := make(map[string]bool)
+	usableDecisionModels := make(map[string]bool)
 	chatModelReady := false
 	for _, model := range models {
 		if !model.Enabled || !usableChannels[model.ChannelID] || strings.TrimSpace(model.RequestID) == "" {
@@ -149,6 +150,12 @@ func buildAdminOnboardingResponse(r *http.Request, d Deps, userSettings json.Raw
 		case "chat":
 			usableChatModels[model.ID] = true
 			chatModelReady = true
+		case "decision":
+			for _, channel := range channels {
+				if channel.ID == model.ChannelID && channel.Type == "typesafe" {
+					usableDecisionModels[model.ID] = true
+				}
+			}
 		case "embedding":
 			usableEmbeddingModels[model.ID] = true
 		}
@@ -201,7 +208,7 @@ func buildAdminOnboardingResponse(r *http.Request, d Deps, userSettings json.Raw
 		},
 		Optional: []adminOnboardingStep{
 			{ID: "task_model", Complete: usableChatModels[taskModelID]},
-			{ID: "tool_route_model", Complete: usableChatModels[toolRouteModelID]},
+			{ID: "tool_route_model", Complete: usableChatModels[toolRouteModelID] || usableDecisionModels[toolRouteModelID]},
 			{ID: "embedding", Complete: embeddingReady},
 			{ID: "search", Complete: searchReady && !disabledBuiltinTools["aivory_web_search"]},
 			{ID: "sandbox", Complete: sandboxConfigured(d) && !disabledBuiltinTools["python_execute"]},
@@ -239,7 +246,7 @@ func onboardingChannelUsable(channel store.Channel) bool {
 	if validateChannelType(channelType, apiFormat) != nil {
 		return false
 	}
-	return channelType != "openai" || onboardingOpenAIBaseURLUsable(channel.BaseURL)
+	return (channelType != "openai" && channelType != "typesafe") || onboardingOpenAIBaseURLUsable(channel.BaseURL)
 }
 
 // onboardingOpenAIBaseURLUsable accepts the historical host-only shape that

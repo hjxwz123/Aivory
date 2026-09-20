@@ -320,7 +320,8 @@
       "moderationModeModel": "審核模型",
       "moderationModeModelUnavailable": "請先設定審核模型，才能選擇模型審核。",
       "imageTimeout": "生成逾時(秒)",
-      "imageTimeoutHint": "單次圖片請求超過該秒數即中斷。0 = 不限。"
+      "imageTimeoutHint": "單次圖片請求超過該秒數即中斷。0 = 不限。",
+      "decisionKind": "決策模型"
     },
     "editorTitle": "編輯模型",
     "newTitle": "新建模型",
@@ -718,7 +719,8 @@
       "task_research_plan": "深度研究規劃",
       "task_research_verify": "深度研究覆蓋核驗",
       "task_moderation": "內容安全審核",
-      "task_research_validate": "深度研究證據交叉驗證"
+      "task_research_validate": "深度研究證據交叉驗證",
+      "task_memory_dedup": "記憶去重模型"
     },
     "empty": "所選視窗內沒有呼叫記錄。",
     "leadRecords": "每次 API 呼叫一筆記錄。在下方篩選並清理日誌。",
@@ -953,7 +955,7 @@
       "passkeyLogin": "通行金鑰登入（免密碼）"
     },
     "modelPolicy": {
-      "unavailable": "請選擇已啟用且所屬渠道也已啟用的聊天模型。",
+      "unavailable": "請選擇已啟用且渠道可用的模型。Jev 僅支援檔案路由、工具路由、記憶去重、衝突裁決和內容審核，並需設定渠道金鑰。",
       "stale": "部分已儲存的模型策略目前不可用。請改用可用模型，或選擇沿用目前對話模型／不使用。",
       "empty": "目前沒有可用於模型策略的聊天模型，請先啟用聊天模型及其所屬渠道。",
       "unavailableOption": "不可用"
@@ -970,7 +972,7 @@
       "queryRouteModel": "查詢路由模型",
       "queryRouteModelHint": "自動選擇輕量搜尋或完整工具，複雜任務保留多輪執行。建議使用低延遲、非思考模型；未設定時使用目前對話模型。",
       "fileRouteModel": "檔案路由模型",
-      "fileRouteModelHint": "在組裝檔案上下文前選擇略過、片段檢索或全文讀取，並解析目前檔案指代。建議使用能穩定輸出 JSON 的低延遲、非思考模型；未設定時依序使用其他內部任務模型和目前對話模型。",
+      "fileRouteModelHint": "選擇略過文件、片段檢索或全文涵蓋，並選擇需要全文涵蓋的相關文件。支援聊天模型和 Jev；Jev 使用原始問題檢索，不產生改寫詞。未設定時依序使用其他內部任務模型和目前對話模型。",
       "taskModel": "其他內部任務模型",
       "taskModelHint": "用於記憶抽取與裁決、研究規劃與核驗、搜尋查詢生成等其餘內部任務。未設定時使用目前對話模型。",
       "defaultToolMode": "預設工具呼叫方式",
@@ -1122,7 +1124,13 @@
       "logFullRequestsLead": "設定哪些上游請求保留診斷資訊，以及是否儲存已脫敏的完整請求體。",
       "logErrorsOnlyHint": "記錄全部請求會增加資料庫用量；請求體仍由下方獨立開關控制。",
       "logRequestBodies": "儲存完整請求體",
-      "logRequestBodiesHint": "關閉後仍記錄請求方法、網址、已脫敏請求標頭和錯誤詳情，但不會儲存提示詞、參數或附件內容。"
+      "logRequestBodiesHint": "關閉後仍記錄請求方法、網址、已脫敏請求標頭和錯誤詳情，但不會儲存提示詞、參數或附件內容。",
+      "memoryDedupModel": "記憶去重模型",
+      "memoryDedupModelHint": "判斷新事實是否已儲存。支援聊天模型和 Jev；未設定時使用通用任務模型。",
+      "memoryAdjudicateModel": "記憶衝突裁決模型",
+      "memoryAdjudicateModelHint": "判斷新舊事實應保留、替代還是共存。支援 Jev；不確定時保守處理。",
+      "moderationModel": "內容審核模型",
+      "moderationModelHint": "支援聊天模型和 Jev。與內容審核頁面共用此設定；開關與模式仍在各對話模型中設定。"
     }
   },
   "groups": {

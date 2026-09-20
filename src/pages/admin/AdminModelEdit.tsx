@@ -1,3 +1,4 @@
+import { availablePolicyModels } from '@/lib/admin-model-policy'
 /**
  * AdminModelEdit — full settings page for one model.
  *
@@ -70,7 +71,7 @@ import { embeddingGuardErrorText } from '@/lib/admin-embedding-errors'
 import { cn } from '@/lib/utils'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 
-const KINDS = ['chat', 'image', 'embedding'] as const
+const KINDS = ['chat', 'image', 'embedding', 'decision'] as const
 const TOOL_MODES = ['native', 'prompt', 'none'] as const
 const BUILTIN_TOOL_ICONS: Record<string, typeof Wrench> = {
   aivory_web_search: Search,
@@ -251,8 +252,8 @@ export default function AdminModelEdit() {
         setMCPServersError(mcp.failed)
         const moderationModelId =
           typeof settingsResult.value.moderation_model_id === 'string' ? settingsResult.value.moderation_model_id.trim() : ''
-        const hasModerationModel = m.some(
-          (model) => model.id === moderationModelId && model.kind === 'chat' && model.enabled,
+        const hasModerationModel = availablePolicyModels(m, c, 'moderation_model_id').some(
+          (model) => model.id === moderationModelId,
         )
         setModerationModelConfigured(!settingsResult.failed && hasModerationModel)
         const found = m.find((row) => row.id === id)
@@ -605,12 +606,15 @@ export default function AdminModelEdit() {
               <Field label={t('admin:models.fields.channel')} htmlFor="m-ch">
                 <Select
                   value={draft.channel_id ?? ''}
-                  onValueChange={(v) =>
-                    // Clear the fallback if the new primary IS the current fallback —
-                    // otherwise fallback_channel_id == channel_id (a no-op the backend
-                    // ignores) and the fallback Select would render blank.
-                    patch(v === draft.fallback_channel_id ? { channel_id: v, fallback_channel_id: '' } : { channel_id: v })
-                  }
+                  onValueChange={(v) => {
+                    const decision = channels.find((c) => c.id === v)?.type === 'typesafe'
+                    patch({
+                      channel_id: v,
+                      kind: decision ? 'decision' : draft.kind === 'decision' ? 'chat' : draft.kind,
+                      fallback_channel_id: decision || v === draft.fallback_channel_id ? '' : draft.fallback_channel_id,
+                      ...(decision ? { extra_params_text: '{}', price_output: 0, price_cache_read: 0, price_cache_write: 0 } : {}),
+                    })
+                  }}
                 >
                   <SelectTrigger id="m-ch">
                     <SelectValue placeholder={t('admin:settings.fields.pickModel')} />
@@ -633,6 +637,7 @@ export default function AdminModelEdit() {
                 })}
               >
                 <Select
+                  disabled={draft.kind === 'decision'}
                   value={draft.fallback_channel_id && draft.fallback_channel_id !== draft.channel_id ? draft.fallback_channel_id : 'none'}
                   onValueChange={(v) => patch({ fallback_channel_id: v === 'none' ? '' : v })}
                 >
@@ -666,9 +671,9 @@ export default function AdminModelEdit() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {KINDS.map((k) => (
+                    {KINDS.filter((k) => channels.find((c) => c.id === draft.channel_id)?.type === 'typesafe' ? k === 'decision' : k !== 'decision').map((k) => (
                       <SelectItem key={k} value={k}>
-                        {k}
+                        {k === 'decision' ? t('admin:models.fields.decisionKind') : k}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -1537,6 +1542,7 @@ export default function AdminModelEdit() {
                   <Field label={t('admin:models.fields.priceOut')} htmlFor="m-po">
                     <Input
                       id="m-po"
+                      disabled={draft.kind === 'decision'}
                       type="number"
                       step="0.0001"
                       value={String(draft.price_output ?? 0)}
@@ -1546,6 +1552,7 @@ export default function AdminModelEdit() {
                   <Field label={t('admin:models.fields.priceCacheRead')} htmlFor="m-pcr">
                     <Input
                       id="m-pcr"
+                      disabled={draft.kind === 'decision'}
                       type="number"
                       step="0.0001"
                       value={String(draft.price_cache_read ?? 0)}
@@ -1555,6 +1562,7 @@ export default function AdminModelEdit() {
                   <Field label={t('admin:models.fields.priceCacheWrite')} htmlFor="m-pcw">
                     <Input
                       id="m-pcw"
+                      disabled={draft.kind === 'decision'}
                       type="number"
                       step="0.0001"
                       value={String(draft.price_cache_write ?? 0)}

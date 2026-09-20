@@ -78,7 +78,7 @@ func createChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err)
 		return
 	}
-	if req.Type == "openai" {
+	if req.Type == "openai" || req.Type == "typesafe" {
 		baseURL, err := normalizeOpenAIChannelBaseURL(req.BaseURL)
 		if err != nil {
 			writeError(w, 400, err)
@@ -154,7 +154,7 @@ func updateChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	// Validate the effective OpenAI URL whenever the channel type or base URL is
 	// being configured. The upstream API root may use any version or custom path.
-	if effType == "openai" && (p.Type != nil || p.BaseURL != nil) {
+	if (effType == "openai" || effType == "typesafe") && (p.Type != nil || p.BaseURL != nil) {
 		baseURL, err := normalizeOpenAIChannelBaseURL(effBaseURL)
 		if err != nil {
 			writeError(w, 400, err)
@@ -195,7 +195,7 @@ func updateChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 // OpenAI channels (chat | responses); other channel types must leave it empty.
 func validateChannelType(typ, apiFormat string) error {
 	switch typ {
-	case "openai", "claude", "anthropic", "google", "gemini":
+	case "openai", "claude", "anthropic", "google", "gemini", "typesafe":
 	default:
 		return errors.New("invalid channel type")
 	}
@@ -358,6 +358,10 @@ func createModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		m.ResearchEnabled = *req.ResearchEnabled
 		m.ResearchEnabledSet = true
 	}
+	if err := normalizeDecisionModel(r.Context(), d.DB, &m); err != nil {
+		writeError(w, 400, err)
+		return
+	}
 	m.RequestID = strings.TrimSpace(m.RequestID)
 	m.Label = strings.TrimSpace(m.Label)
 	if m.ChannelID == "" || m.RequestID == "" || m.Label == "" {
@@ -447,6 +451,10 @@ func updateModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	if m.Kind != "chat" && !extraParamsProvided {
 		m.ExtraParams = json.RawMessage("{}")
+	}
+	if err := normalizeDecisionModel(r.Context(), d.DB, &m); err != nil {
+		writeError(w, 400, err)
+		return
 	}
 	m.RequestID = strings.TrimSpace(m.RequestID)
 	m.Label = strings.TrimSpace(m.Label)
@@ -1368,7 +1376,7 @@ func analyticsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 // ===== Settings =====
 
 var settingsKeys = []string{
-	"default_model_id", "task_model_id", "title_model_id", "file_route_model_id", "context_compaction_model_id", "tool_route_model_id", "tool_mode_default", "embedding_model_id",
+	"default_model_id", "task_model_id", "title_model_id", "file_route_model_id", "context_compaction_model_id", "tool_route_model_id", "memory_dedup_model_id", "memory_adjudicate_model_id", "tool_mode_default", "embedding_model_id",
 	"keep_recent_rounds", "summary_max_tokens", "compaction_request_max_tokens", "context_compaction_prompt", "compaction_enabled",
 	"compaction_token_trigger", "compaction_token_cap", "compaction_token_target_percentage", "compaction_retention_percentage",
 	"memory_enabled", "daily_message_limit", "daily_image_limit", "signup_open",
@@ -1760,7 +1768,13 @@ func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.R
 					return 0, err
 				}
 				v = normalized
-			case "default_model_id", "task_model_id", "title_model_id", "file_route_model_id", "tool_route_model_id", "verify_model_id", "fallback_model_id":
+			case "file_route_model_id", "tool_route_model_id", "memory_dedup_model_id", "memory_adjudicate_model_id", "moderation_model_id":
+				normalized, err := normalizeDecisionPolicySetting(ctx, d, v)
+				if err != nil {
+					return 0, err
+				}
+				v = normalized
+			case "default_model_id", "task_model_id", "title_model_id", "verify_model_id", "fallback_model_id":
 				normalized, err := normalizeAvailableChatModelSetting(ctx, d, v)
 				if err != nil {
 					return 0, err

@@ -19,6 +19,7 @@ import (
 	"aivory/server/internal/rag"
 	"aivory/server/internal/store"
 	"aivory/server/internal/toolnames"
+	"aivory/server/internal/typesafe"
 )
 
 const (
@@ -93,6 +94,12 @@ func (o *Orchestrator) autoTurnNeedsTools(
 	prompt := formatToolRoutePrompt(capabilities, attachmentKinds, len(files) > 0, req.UserText)
 	routeCtx, cancel := context.WithTimeout(ctx, toolRouteTimeout)
 	defer cancel()
+	if model := o.task.policyDecisionModel(routeCtx, "tool_route_model_id"); model != nil {
+		full, err := o.task.decisionToolScope(routeCtx, model, prompt, typesafe.Metadata{
+			UserID: req.UserID, ConversationID: req.ConversationID, MessageID: messageID, WorkspaceID: workspaceID,
+		})
+		return err != nil || full
+	}
 	decision, err := o.task.Run(routeCtx, TaskToolRoute, prompt, RunOpts{
 		UserID:          req.UserID,
 		ConversationID:  req.ConversationID,

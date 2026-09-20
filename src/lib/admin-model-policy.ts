@@ -10,24 +10,36 @@ export const MODEL_POLICY_MODEL_KEYS = [
   'tool_route_model_id',
   'verify_model_id',
   'fallback_model_id',
+  'memory_dedup_model_id',
+  'memory_adjudicate_model_id',
+  'moderation_model_id',
 ] as const
 
-export function availablePolicyModels(models: ApiModel[], channels: ApiChannel[]): ApiModel[] {
+export const DECISION_POLICY_KEYS = new Set<string>([
+  'file_route_model_id', 'tool_route_model_id', 'memory_dedup_model_id', 'memory_adjudicate_model_id', 'moderation_model_id',
+])
+
+export function availablePolicyModels(models: ApiModel[], channels: ApiChannel[], policyKey = ''): ApiModel[] {
   const enabledChannelIDs = new Set(channels.filter((channel) => channel.enabled).map((channel) => channel.id))
+  const decisionChannelIDs = new Set(channels.filter((channel) => channel.enabled && channel.type === 'typesafe' && channel.has_api_key).map((channel) => channel.id))
   return models.filter(
-    (model) => model.kind === 'chat' && model.enabled && enabledChannelIDs.has(model.channel_id),
+    (model) => model.enabled && (
+      (model.kind === 'chat' && enabledChannelIDs.has(model.channel_id) && !channels.some((c) => c.id === model.channel_id && c.type === 'typesafe'))
+      || (DECISION_POLICY_KEYS.has(policyKey) && model.kind === 'decision' && decisionChannelIDs.has(model.channel_id))
+    ),
   )
 }
 
 export function unavailablePolicyModelIDs(
   settings: Record<string, unknown>,
   availableModels: ApiModel[],
+  availableDecisions: ApiModel[] = [],
 ): string[] {
   const availableIDs = new Set(availableModels.map((model) => model.id))
   const unavailable = new Set<string>()
   for (const key of MODEL_POLICY_MODEL_KEYS) {
     const modelID = typeof settings[key] === 'string' ? settings[key].trim() : ''
-    if (modelID && !availableIDs.has(modelID)) unavailable.add(modelID)
+    if (modelID && !availableIDs.has(modelID) && !(DECISION_POLICY_KEYS.has(key) && availableDecisions.some((m) => m.id === modelID))) unavailable.add(modelID)
   }
   return [...unavailable]
 }
