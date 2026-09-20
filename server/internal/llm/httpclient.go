@@ -137,46 +137,86 @@ func doProviderParsedRequest(
 	consume func(resp *http.Response, onEvent func(SseEvent)) error,
 	onEvent func(SseEvent),
 ) error {
+	return doProviderParsedRequestWithRepair(ctx, m, fallbackUsed, build, consume, onEvent, nil)
+}
+
+// providerRequestNoFallbackError marks a request validation error that must be
+// repaired on the current channel rather than sent to a fallback channel.
+type providerRequestNoFallbackError struct{ error }
+
+func (e *providerRequestNoFallbackError) Unwrap() error { return e.error }
+
+// repair runs before failure recording or fallback selection, at most once per
+// channel attempt and only before any output. It updates the caller's payload;
+// build then recreates the request with the SAME channel credentials.
+func doProviderParsedRequestWithRepair(
+	ctx context.Context,
+	m ModelInfo,
+	fallbackUsed *atomic.Bool,
+	build func(baseURL, apiKey string) (*http.Request, error),
+	consume func(resp *http.Response, onEvent func(SseEvent)) error,
+	onEvent func(SseEvent),
+	repair func(error) bool,
+) error {
 	if onEvent == nil {
 		onEvent = func(SseEvent) {}
 	}
 	visibleOutput := providerVisibleOutputFromContext(ctx)
 
 	consumeAttempt := func(req *http.Request, fallback bool, emit func(SseEvent)) error {
-		resp, err := sendProviderRequest(ctx, req, fallback)
-		if err != nil {
-			if resp != nil && resp.Body != nil {
-				_ = resp.Body.Close()
+		for attempt := 0; ; attempt++ {
+			resp, err := sendProviderRequest(ctx, req, fallback)
+			if err != nil {
+				if resp != nil && resp.Body != nil {
+					_ = resp.Body.Close()
+				}
+				recordProviderRequestFailure(ctx, fallback, err)
+				return err
 			}
-			recordProviderRequestFailure(ctx, fallback, err)
+			if resp == nil {
+				err = errors.New("provider returned no HTTP response")
+				recordProviderRequestFailure(ctx, fallback, err)
+				return err
+			}
+			if resp.Body != nil {
+				defer resp.Body.Close()
+			}
+			emitted := false
+			var generated strings.Builder
+			trackGenerated := func(ev SseEvent) {
+				emitted = true
+				switch ev.Type {
+				case "text_delta", "thinking_delta":
+					generated.WriteString(ev.Text)
+				case "tool_start":
+					generated.WriteString(ev.Name)
+				case "tool_input":
+					generated.WriteString(ev.PartialJson)
+				}
+				emit(ev)
+			}
+			err = consume(resp, trackGenerated)
+			recordProviderRequestOutputEstimate(ctx, estimateTokens(generated.String()))
+			if err != nil && attempt == 0 && !emitted && ctx.Err() == nil && repair != nil && repair(err) {
+				if resp.Body != nil {
+					_ = resp.Body.Close()
+				}
+				baseURL, apiKey := m.BaseURL, m.APIKey
+				if fallback && m.Fallback != nil {
+					baseURL, apiKey = m.Fallback.BaseURL, m.Fallback.APIKey
+				}
+				req, err = build(baseURL, apiKey)
+				if err != nil {
+					recordProviderRequestBuildFailure(ctx, fallback, err)
+					return err
+				}
+				continue
+			}
+			if err != nil {
+				recordProviderRequestFailure(ctx, fallback, err)
+			}
 			return err
 		}
-		if resp == nil {
-			err = errors.New("provider returned no HTTP response")
-			recordProviderRequestFailure(ctx, fallback, err)
-			return err
-		}
-		if resp.Body != nil {
-			defer resp.Body.Close()
-		}
-		var generated strings.Builder
-		trackGenerated := func(ev SseEvent) {
-			switch ev.Type {
-			case "text_delta", "thinking_delta":
-				generated.WriteString(ev.Text)
-			case "tool_start":
-				generated.WriteString(ev.Name)
-			case "tool_input":
-				generated.WriteString(ev.PartialJson)
-			}
-			emit(ev)
-		}
-		err = consume(resp, trackGenerated)
-		recordProviderRequestOutputEstimate(ctx, estimateTokens(generated.String()))
-		if err != nil {
-			recordProviderRequestFailure(ctx, fallback, err)
-		}
-		return err
 	}
 
 	// Once a prior round switched channels, do not probe the failed primary
@@ -282,7 +322,8 @@ func sendProviderRequest(ctx context.Context, req *http.Request, fallback bool) 
 }
 
 func fallbackAllowedAfter(ctx context.Context, err error) bool {
-	if err == nil || ctx.Err() != nil {
+	var noFallback *providerRequestNoFallbackError
+	if err == nil || ctx.Err() != nil || errors.As(err, &noFallback) {
 		return false
 	}
 	return !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)

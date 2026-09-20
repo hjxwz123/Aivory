@@ -211,7 +211,7 @@ func TestResponsesReplayCompatibilityError(t *testing.T) {
 	}
 }
 
-func TestOpenAIResponsesRetriesWithNormalizedReplayInput(t *testing.T) {
+func TestOpenAIResponsesRepairsMessageIDWithoutChangingOtherMetadata(t *testing.T) {
 	var requests []map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var captured map[string]any
@@ -248,15 +248,15 @@ func TestOpenAIResponsesRetriesWithNormalizedReplayInput(t *testing.T) {
 			t.Errorf("input length = %d, want 4: %#v", len(input), captured["input"])
 		}
 		reasoning, _ := input[1].(map[string]any)
-		if reasoning["id"] != "rs_reasoning-uuid" || reasoning["encrypted_content"] != "ciphertext" {
+		if reasoning["id"] != "reasoning-uuid" || reasoning["encrypted_content"] != "ciphertext" {
 			t.Errorf("reasoning replay = %#v", reasoning)
 		}
 		message, _ := input[2].(map[string]any)
 		if message["id"] != "msg_message-uuid" {
 			t.Errorf("message replay id = %v", message["id"])
 		}
-		if _, exists := message["phase"]; exists {
-			t.Errorf("message phase survived retry: %#v", message)
+		if message["phase"] != "final_answer" {
+			t.Errorf("message phase changed during ID repair: %#v", message)
 		}
 		content, _ := jsonArrayItems(message["content"])
 		part, _ := content[0].(map[string]any)

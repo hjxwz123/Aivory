@@ -921,6 +921,39 @@ func normalizeResponsesReplayInput(input []map[string]any) ([]map[string]any, bo
 	return normalized, true
 }
 
+// Only message IDs are repaired here. Other replay metadata retains its
+// existing compatibility path and ordinary channel fallback behavior.
+func responsesMessageIDCompatibilityError(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "message id must be a string starting with 'msg_'")
+}
+
+func responsesMessageIDError(err error) error {
+	if responsesMessageIDCompatibilityError(err) {
+		return &providerRequestNoFallbackError{error: err}
+	}
+	return err
+}
+
+func repairResponsesMessageIDs(input []map[string]any) ([]map[string]any, bool) {
+	repaired := append([]map[string]any(nil), input...)
+	changed := false
+	for i, item := range input {
+		itemType, _ := item["type"].(string)
+		id, _ := item["id"].(string)
+		if itemType != "message" || id == "" || strings.HasPrefix(id, "msg_") {
+			continue
+		}
+		clone := make(map[string]any, len(item))
+		for key, value := range item {
+			clone[key] = value
+		}
+		clone["id"] = "msg_" + id
+		repaired[i] = clone
+		changed = true
+	}
+	return repaired, changed
+}
+
 func responsesReplayCompatibilityError(err error) bool {
 	if err == nil {
 		return false
@@ -1642,7 +1675,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 			onEvent(ev)
 		}
 		runRequest := func() error {
-			return doProviderParsedRequest(ctx, roundModel, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
+			return doProviderParsedRequestWithRepair(ctx, roundModel, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
 				hr, e := http.NewRequestWithContext(ctx, "POST", OpenAIBaseURL(baseURL)+"/responses", bytes.NewReader(raw))
 				if e != nil {
 					return nil, e
@@ -1655,7 +1688,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 				text, reasoning, u = "", "", Usage{}
 				calls, hosted, citations, outputItems, generated = nil, nil, nil, nil, nil
 				if statusErr := requireProviderSuccess(resp, "openai responses"); statusErr != nil {
-					return statusErr
+					return responsesMessageIDError(statusErr)
 				}
 				var readErr error
 				text, reasoning, calls, hosted, citations, u, outputItems, readErr = readOpenAIResponsesStream(resp.Body, emit)
@@ -1663,19 +1696,31 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 				// the one-shot unexpected-EOF retry overwrites u.
 				attachProviderRequestUsage(ctx, u)
 				if readErr != nil {
-					return readErr
+					return responsesMessageIDError(readErr)
 				}
 				var imageErr error
 				hosted, generated, imageErr = decodeHostedGeneratedImages(hosted)
 				return imageErr
-			}, emitRound)
+			}, emitRound, func(err error) bool {
+				if !responsesMessageIDCompatibilityError(err) {
+					return false
+				}
+				repaired, changed := repairResponsesMessageIDs(requestInput)
+				if !changed {
+					return false
+				}
+				requestInput, input = repaired, repaired
+				body["input"] = repaired
+				raw, _ = json.Marshal(body)
+				return true
+			})
 		}
 		err := runRequest()
 		// A strict Responses gateway may reject native replay metadata after the
 		// request has already crossed a channel pool. No output was emitted for
 		// these schema errors, so retry the same round once with portable replay
 		// items; successful native channels keep their original metadata path.
-		if !finalizing && !roundEmitted && responsesReplayCompatibilityError(err) {
+		if !finalizing && !roundEmitted && !responsesMessageIDCompatibilityError(err) && responsesReplayCompatibilityError(err) {
 			if normalized, changed := normalizeResponsesReplayInput(requestInput); changed {
 				if p.logger != nil {
 					p.logger.Printf("openai responses: retrying once with normalized replay metadata (model=%s)", req.Model.RequestID)
