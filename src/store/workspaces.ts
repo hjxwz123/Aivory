@@ -50,6 +50,7 @@ function hasStoredSelection(): boolean {
 }
 
 interface WorkspacesState {
+  domainAccess: import('@/api/domains').DomainAccess | null
   lockedWorkspaceId: string | null
   workspaces: ApiWorkspace[]
   /** Effective workspace-wide capability policies keyed by workspace id. */
@@ -90,6 +91,7 @@ async function reloadSpaceData() {
 }
 
 export const useWorkspaces = create<WorkspacesState>((set, get) => ({
+  domainAccess: null,
   lockedWorkspaceId: null,
   workspaces: [],
   policies: {},
@@ -108,7 +110,7 @@ export const useWorkspaces = create<WorkspacesState>((set, get) => ({
       // A stale persisted id (kicked / deleted space) falls back to personal.
       const valid = activeId != null && workspaces.some((w) => w.id === activeId)
       const lockedWorkspaceId = domain_access?.locked ? domain_access.workspace_id : null
-      set({ workspaces, loaded: true, lockedWorkspaceId })
+      set({ workspaces, loaded: true, lockedWorkspaceId, domainAccess: domain_access ?? null })
       if (lockedWorkspaceId && activeId !== lockedWorkspaceId) {
         await get().switchTo(lockedWorkspaceId)
         return

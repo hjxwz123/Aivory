@@ -34,6 +34,9 @@ const ACCEPT = 'image/png,image/jpeg,image/svg+xml,.svg'
 const MAX_BYTES = envNum('VITE_AIVORY_MAX_BYTES', 256 * 1024) // mirrors backend admin_uploads.go maxIconBytes
 
 interface IconUploaderProps {
+  disabled?: boolean
+  upload?: (file: File) => Promise<{ url: string }>
+  onUploadingChange?: (uploading: boolean) => void
   id?: string
   value: string
   onChange: (value: string) => void
@@ -42,7 +45,7 @@ interface IconUploaderProps {
   preview?: ReactNode
 }
 
-export function IconUploader({ id, value, onChange, placeholder, preview }: IconUploaderProps) {
+export function IconUploader({ id, value, onChange, placeholder, preview, disabled = false, upload = adminApi.uploadIcon, onUploadingChange }: IconUploaderProps) {
   const { t } = useTranslation(['admin', 'common'])
   const [uploading, setUploading] = useState(false)
   const fileRef = useRef<HTMLInputElement | null>(null)
@@ -50,7 +53,7 @@ export function IconUploader({ id, value, onChange, placeholder, preview }: Icon
   async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]
     e.target.value = '' // allow re-picking the same file
-    if (!f) return
+    if (!f || disabled || uploading) return
     const okType =
       ['image/png', 'image/jpeg', 'image/svg+xml'].includes(f.type) || /\.svg$/i.test(f.name)
     if (!okType) {
@@ -62,14 +65,16 @@ export function IconUploader({ id, value, onChange, placeholder, preview }: Icon
       return
     }
     setUploading(true)
+    onUploadingChange?.(true)
     try {
-      const { url } = await adminApi.uploadIcon(f)
+      const { url } = await upload(f)
       onChange(url)
       toast.success(t('admin:icon.uploaded'))
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : t('admin:common.failed'))
     } finally {
       setUploading(false)
+      onUploadingChange?.(false)
     }
   }
 
@@ -80,6 +85,7 @@ export function IconUploader({ id, value, onChange, placeholder, preview }: Icon
       </div>
       <Input
         id={id}
+        disabled={disabled || uploading}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder ?? '🌟 / https://… / —'}
@@ -92,6 +98,7 @@ export function IconUploader({ id, value, onChange, placeholder, preview }: Icon
               aria-label={t('admin:icon.clear')}
               title={t('admin:icon.clear')}
               className="-mr-1 inline-flex size-7 shrink-0 items-center justify-center rounded-[7px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+              disabled={disabled || uploading}
               onClick={() => onChange('')}
             >
               <X size={14} aria-hidden />
@@ -105,6 +112,7 @@ export function IconUploader({ id, value, onChange, placeholder, preview }: Icon
         size="icon"
         leadingIcon={<Upload size={13} aria-hidden />}
         loading={uploading}
+        disabled={disabled || uploading}
         aria-label={t('admin:icon.upload')}
         title={t('admin:icon.upload')}
         className="shrink-0"

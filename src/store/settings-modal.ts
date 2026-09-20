@@ -8,6 +8,7 @@ import { create } from 'zustand'
  */
 export const SETTINGS_TABS = [
   'account',
+  'work',
   'personalization',
   'appearance',
   'models',

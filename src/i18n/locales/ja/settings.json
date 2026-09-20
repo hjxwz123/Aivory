@@ -7,7 +7,8 @@
     "models": "モデル",
     "privacy": "プライバシー",
     "shortcuts": "ショートカット",
-    "about": "について"
+    "about": "について",
+    "work": "仕事"
   },
   "about": {
     "title": "について",
@@ -356,5 +357,15 @@
     "settings": "設定",
     "managePlan": "プランを管理",
     "signOut": "ログアウト"
+  },
+  "work": {
+    "subtitle": "ワークスペースの情報と仕事の設定を確認します。",
+    "icon": "アイコン",
+    "description": "紹介",
+    "descriptionPlaceholder": "このワークスペースを紹介…",
+    "noDescription": "紹介はまだ設定されていません。",
+    "saved": "ワークスペース情報を保存しました",
+    "saveFailed": "ワークスペース情報を保存できませんでした。もう一度お試しください。",
+    "leaveConfirm": "退出すると、このワークスペースの会話や資料にアクセスできなくなります。退出しますか？"
   }
 }

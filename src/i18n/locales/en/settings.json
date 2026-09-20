@@ -7,7 +7,8 @@
     "models": "Models",
     "privacy": "Privacy",
     "shortcuts": "Shortcuts",
-    "about": "About"
+    "about": "About",
+    "work": "Work"
   },
   "about": {
     "title": "About",
@@ -356,5 +357,15 @@
     "settings": "Settings",
     "managePlan": "Manage plan",
     "signOut": "Sign out"
+  },
+  "work": {
+    "subtitle": "View workspace information and manage work settings.",
+    "icon": "Icon",
+    "description": "Description",
+    "descriptionPlaceholder": "Describe this workspace…",
+    "noDescription": "No description has been added.",
+    "saved": "Workspace information saved",
+    "saveFailed": "Could not save workspace information. Please try again.",
+    "leaveConfirm": "Leaving removes your access to this workspace’s conversations and resources. Leave this workspace?"
   }
 }

@@ -1066,7 +1066,8 @@
         "invite.revoked": "Invitation révoquée",
         "resource.visibility_changed": "Visibilité modifiée",
         "policy.updated": "Stratégie modifiée",
-        "announcement.updated": "Annonce modifiée"
+        "announcement.updated": "Annonce modifiée",
+        "workspace.profile_updated": "Informations de l’espace mises à jour"
       }
     },
     "domainLocked": "Espace personnel verrouillé par l’administrateur"

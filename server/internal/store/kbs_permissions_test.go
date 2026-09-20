@@ -416,7 +416,7 @@ func TestCreatedWorkspaceKnowledgeBaseReturnsEffectiveCapabilities(t *testing.T)
 	if err != nil {
 		t.Fatalf("create workspace knowledge base: %v", err)
 	}
-	if created.AccessRole != "workspace" || !created.CanUpload || !created.CanDeleteContent || !created.CanManageMembers {
+	if created.AccessRole != "workspace" || !created.CanUpload || !created.CanDeleteContent || created.CanManageMembers {
 		t.Fatalf("create response capabilities=%+v, want effective creator permissions", created)
 	}
 }
@@ -440,7 +440,7 @@ func TestWorkspaceKnowledgeBaseCreatorObeysContentRestrictions(t *testing.T) {
 	}
 
 	kb, err := GetKB(ctx, db, "workspace-kb", "creator")
-	if err != nil || kb.CanUpload || kb.CanDeleteContent || !kb.CanDelete || !kb.CanManageMembers {
+	if err != nil || kb.CanUpload || kb.CanDeleteContent || !kb.CanDelete || kb.CanManageMembers {
 		t.Fatalf("creator capabilities=%+v err=%v, want content restrictions with metadata management", kb, err)
 	}
 	_, err = CreateDocumentForUser(ctx, db, Document{

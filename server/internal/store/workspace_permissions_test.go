@@ -436,7 +436,7 @@ func TestWorkspaceKnowledgeBasePermissionsUseBothLayers(t *testing.T) {
 	db := openKBPermissionTestDB(t)
 	ctx := context.Background()
 
-	items, err := ListWorkspaceKnowledgeBaseMemberPermissions(ctx, db, "workspace-kb", "creator")
+	items, err := ListWorkspaceKnowledgeBaseMemberPermissions(ctx, db, "workspace-kb", "owner")
 	if err != nil {
 		t.Fatalf("creator list permissions: %v", err)
 	}
@@ -447,12 +447,18 @@ func TestWorkspaceKnowledgeBasePermissionsUseBothLayers(t *testing.T) {
 	if !byUser["owner"].Locked || byUser["creator"].Locked || byUser["member"].Locked {
 		t.Fatalf("locked principals=%+v", byUser)
 	}
+	if _, err := ListWorkspaceKnowledgeBaseMemberPermissions(ctx, db, "workspace-kb", "creator"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("creator directory error=%v", err)
+	}
+	if _, err := UpdateWorkspaceKnowledgeBaseMemberPermission(ctx, db, "workspace-kb", "creator", "member", false, false); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("creator member update error=%v", err)
+	}
 	if _, err := ListWorkspaceKnowledgeBaseMemberPermissions(ctx, db, "workspace-kb", "member"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("ordinary member list error=%v, want ErrNotFound", err)
 	}
 
 	if _, err := UpdateWorkspaceKnowledgeBaseMemberPermission(
-		ctx, db, "workspace-kb", "creator", "member", false, false,
+		ctx, db, "workspace-kb", "owner", "member", false, false,
 	); err != nil {
 		t.Fatalf("disable library permissions: %v", err)
 	}
@@ -496,7 +502,7 @@ func TestWorkspaceKnowledgeBaseCreatorIsCappedByMemberTotals(t *testing.T) {
 	if _, err := UpdateWorkspaceMemberPermissions(ctx, db, "ws1", "owner", "creator", permissions); err != nil {
 		t.Fatalf("disable creator totals: %v", err)
 	}
-	items, err := ListWorkspaceKnowledgeBaseMemberPermissions(ctx, db, "workspace-kb", "creator")
+	items, err := ListWorkspaceKnowledgeBaseMemberPermissions(ctx, db, "workspace-kb", "owner")
 	if err != nil {
 		t.Fatalf("list permissions: %v", err)
 	}

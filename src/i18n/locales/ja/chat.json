@@ -1066,7 +1066,8 @@
         "invite.revoked": "招待失効",
         "resource.visibility_changed": "リソース公開範囲変更",
         "policy.updated": "機能ポリシー変更",
-        "announcement.updated": "お知らせを更新"
+        "announcement.updated": "お知らせを更新",
+        "workspace.profile_updated": "ワークスペース情報を更新"
       }
     },
     "domainLocked": "管理者により個人スペースがロックされています"

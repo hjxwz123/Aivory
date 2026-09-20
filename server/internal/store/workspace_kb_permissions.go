@@ -8,8 +8,7 @@ import (
 )
 
 // ListWorkspaceKnowledgeBaseMemberPermissions returns the per-library layer for
-// one standalone workspace knowledge base. Only the workspace owner or that
-// library's current creator may manage this list.
+// one standalone workspace knowledge base. Only workspace admins may manage this list.
 func ListWorkspaceKnowledgeBaseMemberPermissions(
 	ctx context.Context,
 	db *sql.DB,
@@ -38,8 +37,7 @@ func ListWorkspaceKnowledgeBaseMemberPermissions(
 
 // UpdateWorkspaceKnowledgeBaseMemberPermission changes only the library-level
 // layer. Workspace-member total permissions remain independent upper bounds
-// for ordinary members; owners and current library creators always manage the
-// library they own.
+// for ordinary members. Only workspace admins may manage member permissions.
 func UpdateWorkspaceKnowledgeBaseMemberPermission(
 	ctx context.Context,
 	db *sql.DB,
@@ -66,16 +64,16 @@ func UpdateWorkspaceKnowledgeBaseMemberPermission(
 	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM knowledge_bases k
 		JOIN workspaces w ON w.id=k.workspace_id
 		WHERE k.id=? AND `+standaloneKnowledgeBasePredicate("k")+`
-		  AND `+workspaceResourceManagerPredicate("k"),
-		append([]any{kbID}, workspaceResourceManagerArgs(managerID)...)...).Scan(&allowed); err != nil {
+		  AND `+workspaceDirectoryManagerPredicate("k"),
+		append([]any{kbID}, workspaceDirectoryManagerArgs(managerID)...)...).Scan(&allowed); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, err
 	}
 
-	// Only workspace owners/admins bypass content overlays. A library creator
-	// retains management rights, but content permissions obey the member ceiling.
+	// Only workspace owners/admins bypass content overlays. Library creators
+	// remain subject to the member ceiling.
 	res, err := tx.ExecContext(ctx, `INSERT INTO workspace_kb_member_permissions(
 		kb_id,user_id,can_add_files,can_delete_content,updated_at
 	)
@@ -113,15 +111,15 @@ func UpdateWorkspaceKnowledgeBaseMemberPermission(
 	return &item, nil
 }
 
-// requireWorkspaceKnowledgeBaseManager admits workspace admins and the KB's
-// current creator for the per-library permission overlay (§workspace RBAC).
+// requireWorkspaceKnowledgeBaseManager protects the member directory even when
+// an ordinary member owns the knowledge base.
 func requireWorkspaceKnowledgeBaseManager(ctx context.Context, db *sql.DB, kbID, managerID string) error {
 	var allowed int
 	err := db.QueryRowContext(ctx, `SELECT 1 FROM knowledge_bases k
 		JOIN workspaces w ON w.id=k.workspace_id
 		WHERE k.id=? AND `+standaloneKnowledgeBasePredicate("k")+`
-		  AND `+workspaceResourceManagerPredicate("k"),
-		append([]any{kbID}, workspaceResourceManagerArgs(managerID)...)...).Scan(&allowed)
+		  AND `+workspaceDirectoryManagerPredicate("k"),
+		append([]any{kbID}, workspaceDirectoryManagerArgs(managerID)...)...).Scan(&allowed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -157,3 +155,13 @@ func scanWorkspaceKnowledgeBaseMemberPermission(s scanner) (WorkspaceKnowledgeBa
 	item.AvatarURL = avatarFromSettings(settings)
 	return item, err
 }
+
+// Directory visibility is narrower than resource ownership: creating a library
+// must never grant an ordinary member access to other workspace identities.
+func workspaceDirectoryManagerPredicate(alias string) string {
+	return `EXISTS (SELECT 1 FROM workspaces directory_workspace WHERE directory_workspace.id=` + alias + `.workspace_id
+ AND (directory_workspace.owner_id=? OR EXISTS (SELECT 1 FROM workspace_members directory_member
+ WHERE directory_member.workspace_id=directory_workspace.id AND directory_member.user_id=?
+ AND ` + isAdminRoleSQL("directory_member.role") + `)))`
+}
+func workspaceDirectoryManagerArgs(userID string) []any { return []any{userID, userID} }

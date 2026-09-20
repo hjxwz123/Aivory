@@ -221,7 +221,7 @@ func TestWorkspaceRolePermissionMatrixComplete(t *testing.T) {
 		ActionWorkspaceSettingsUpdate:  {true, true, false, false},
 		ActionUsageView:                {true, true, false, false},
 		ActionWorkspaceAuditView:       {true, true, false, false},
-		ActionWorkspaceMemberView:      {true, true, true, true},
+		ActionWorkspaceMemberView:      {true, true, false, false},
 		ActionModelUse:                 {true, true, true, false},
 		ActionToolUse:                  {true, true, true, false},
 		ActionMCPUse:                   {true, true, true, false},

@@ -108,6 +108,14 @@ func updateWorkspaceAnnouncementHandler(d Deps, w http.ResponseWriter, r *http.R
 }
 
 func uploadWorkspaceAnnouncementImageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	uploadWorkspaceImage(d, w, r, false)
+}
+
+func uploadWorkspaceIconHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	uploadWorkspaceImage(d, w, r, true)
+}
+
+func uploadWorkspaceImage(d Deps, w http.ResponseWriter, r *http.Request, allowSVG bool) {
 	u := authUser(r)
 	id := pathParam(r, "id")
 	decision, err := store.AuthorizeWorkspace(r.Context(), d.DB, store.WorkspaceAuthorizationRequest{
@@ -121,7 +129,7 @@ func uploadWorkspaceAnnouncementImageHandler(d Deps, w http.ResponseWriter, r *h
 		writeError(w, http.StatusNotFound, errNotFound)
 		return
 	}
-	data, ext, _, status, err := readValidatedImageUpload(r, false, errIconBadExt)
+	data, ext, _, status, err := readValidatedImageUpload(r, allowSVG, errIconBadExt)
 	if err != nil {
 		writeError(w, status, err)
 		return

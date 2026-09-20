@@ -1066,7 +1066,8 @@
         "invite.revoked": "撤销邀请",
         "resource.visibility_changed": "资源可见范围变更",
         "policy.updated": "能力策略变更",
-        "announcement.updated": "公告更新"
+        "announcement.updated": "公告更新",
+        "workspace.profile_updated": "更新工作空间资料"
       }
     },
     "domainLocked": "个人空间已由管理员锁定"

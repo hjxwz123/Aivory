@@ -305,6 +305,8 @@ export interface ApiSharedConversation {
 /** Workspace (§workspaces) — fully-isolated collaborative space. */
 export type ApiWorkspaceRole = 'admin' | 'member' | 'guest'
 export interface ApiWorkspace {
+  icon_url?: string
+  description?: string
   id: string
   name: string
   owner_id: string

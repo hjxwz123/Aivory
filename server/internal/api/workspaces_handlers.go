@@ -88,9 +88,7 @@ func listWorkspacesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"workspaces": list, "domain_access": access})
 }
 
-// workspaceMembersHandler lists members — visible to every current member.
-// Emails are admin-only surface: members and guests see names/avatars/roles
-// (§workspace RBAC).
+// workspaceMembersHandler exposes the member directory only to workspace admins.
 func workspaceMembersHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	id := pathParam(r, "id")
@@ -105,11 +103,6 @@ func workspaceMembersHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, 500, err)
 		return
-	}
-	if !decision.IsAdmin {
-		for i := range members {
-			members[i].Email = ""
-		}
 	}
 	writeJSON(w, 200, map[string]any{"members": members})
 }

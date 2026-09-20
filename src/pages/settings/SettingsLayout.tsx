@@ -1,9 +1,10 @@
 import { Suspense, useEffect, useRef, type ComponentType } from 'react'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { useTranslation } from 'react-i18next'
-import { User, Wand2, Palette, Sparkles, ShieldCheck, Keyboard, Info, X } from 'lucide-react'
+import { User, Briefcase, Wand2, Palette, Sparkles, ShieldCheck, Keyboard, Info, X } from 'lucide-react'
 import { DialogOverlay, DialogTitle } from '@/components/ui/dialog'
 import { useSettingsModal, type SettingsTab } from '@/store/settings-modal'
+import { useWorkspaces } from '@/store/workspaces'
 import { useAuth } from '@/store/auth'
 import { RouteFade } from '@/components/ui/route-fade'
 import { PanelFallback } from '@/components/ui/panel-fallback'
@@ -12,6 +13,7 @@ import { cn } from '@/lib/utils'
 
 const tabDefs = [
   { key: 'account', icon: User },
+  { key: 'work', icon: Briefcase },
   { key: 'personalization', icon: Wand2 },
   { key: 'appearance', icon: Palette },
   { key: 'models', icon: Sparkles },
@@ -27,6 +29,7 @@ const tabDefs = [
 // long before a tab chunk resolves.
 const tabPages: Record<SettingsTab, PreloadableLazy<ComponentType>> = {
   account: lazyWithPreload(() => import('./Account')),
+  work: lazyWithPreload(() => import('./Work')),
   personalization: lazyWithPreload(() => import('./Personalization')),
   appearance: lazyWithPreload(() => import('./Appearance')),
   models: lazyWithPreload(() => import('./Models')),
@@ -76,8 +79,13 @@ export default function SettingsDialog() {
     if (!authed) close()
   }, [authed, close])
 
-  // Each tab starts reading from the top — without this the pane keeps the
-  // previous tab's scroll offset (the sticky headers made that look broken).
+  const hasWorkspace = useWorkspaces((s) => s.workspaces.some((w) => w.id === (s.activeId ?? s.domainAccess?.workspace_id)))
+  const visibleTabs = tabDefs.filter((def) => def.key !== 'work' || hasWorkspace)
+  useEffect(() => {
+    if (tab === 'work' && !hasWorkspace) setTab('account')
+  }, [tab, hasWorkspace, setTab])
+
+  // Each tab starts reading from the top rather than keeping the previous offset.
   const paneRef = useRef<HTMLDivElement>(null)
   // Keep tab bodies mounted after their first visit while this dialog instance
   // remains open. Switching back then preserves local form state and avoids
@@ -140,7 +148,7 @@ export default function SettingsDialog() {
               )}
               aria-label={t('settings:title')}
             >
-              {tabDefs.map((def) => {
+              {visibleTabs.map((def) => {
                 const active = def.key === tab
                 return (
                   <button
@@ -203,6 +211,7 @@ export default function SettingsDialog() {
             >
               <RouteFade dep={tab} className="flex min-h-full flex-1 flex-col">
                 {Array.from(visitedTabsRef.current, (visitedTab) => {
+                  if (visitedTab === 'work' && !hasWorkspace) return null
                   const TabPage = tabPages[visitedTab]
                   const active = visitedTab === tab
                   return (

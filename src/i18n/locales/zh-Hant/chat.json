@@ -1066,7 +1066,8 @@
         "invite.revoked": "撤銷邀請",
         "resource.visibility_changed": "資源可見範圍變更",
         "policy.updated": "能力策略變更",
-        "announcement.updated": "公告更新"
+        "announcement.updated": "公告更新",
+        "workspace.profile_updated": "更新工作空間資料"
       }
     },
     "domainLocked": "個人空間已由管理員鎖定"

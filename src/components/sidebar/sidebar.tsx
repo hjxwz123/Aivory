@@ -1,3 +1,4 @@
+import { WorkspaceIcon } from '@/components/workspace/workspace-icon'
 import { type CSSProperties, type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
@@ -20,7 +21,6 @@ import {
   Loader2,
   X,
   ArrowLeftRight,
-  Briefcase,
   FolderOpen,
   LibraryBig,
   CircleHelp,
@@ -34,7 +34,6 @@ import { useWorkspaces } from '@/store/workspaces'
 import {
   CreateWorkspaceDialog,
   SpaceSwitcherButton,
-  WorkspaceMembersDialog,
   WorkspaceMenuItems,
 } from '@/components/sidebar/workspace-menu'
 import { SidebarResizeHandle } from '@/components/sidebar/sidebar-resize-handle'
@@ -427,8 +426,8 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
                 aria-label={activeWorkspace.name}
                 title={activeWorkspace.name}
               >
-                <Briefcase size={16} aria-hidden className="shrink-0 text-[var(--color-secondary)]" />
-                <span className="truncate text-[15px] text-[var(--color-fg)]">{activeWorkspace.name}</span>
+                <WorkspaceIcon icon={activeWorkspace.icon_url} size={20} />
+                <span className="truncate font-sans text-[15px] font-semibold text-[var(--color-fg)]">{activeWorkspace.name}</span>
               </Link>
               {/* Prominent escape hatch back to the personal space, right next to
                   the workspace name (§workspaces: 标题旁显著切换按钮). Sage =
@@ -1331,7 +1330,6 @@ export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuP
   const lang = useLanguage((s) => s.lang)
   const setLang = useLanguage((s) => s.setLang)
   const [archivedOpen, setArchivedOpen] = useState(false)
-  const [wsMembersOpen, setWsMembersOpen] = useState(false)
   const [wsCreateOpen, setWsCreateOpen] = useState(false)
   const [systemUpdateOpen, setSystemUpdateOpen] = useState(false)
   const [systemUpdateSummary, setSystemUpdateSummary] = useState<SystemUpdateSummary>({
@@ -1421,7 +1419,7 @@ export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuP
             </DropdownMenuItem>
           </>
         )}
-        <WorkspaceMenuItems onManage={() => setWsMembersOpen(true)} onCreate={() => setWsCreateOpen(true)} />
+        <WorkspaceMenuItems onManage={() => openSettings('work')} onCreate={() => setWsCreateOpen(true)} />
         <DropdownMenuSeparator />
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>
@@ -1478,7 +1476,6 @@ export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuP
         onSummaryChange={setSystemUpdateSummary}
       />
     )}
-    <WorkspaceMembersDialog open={wsMembersOpen} onOpenChange={setWsMembersOpen} />
     <CreateWorkspaceDialog open={wsCreateOpen} onOpenChange={setWsCreateOpen} />
     <ArchivedDialog open={archivedOpen} onOpenChange={setArchivedOpen} />
     </>

@@ -601,6 +601,13 @@ export interface SearchHit {
 // ----- Workspaces (§workspaces) ---------------------------------------------
 
 export const workspacesApi = {
+  updateProfile: (id: string, body: { icon_url: string; description: string }) =>
+    api<ApiWorkspace>(`/workspaces/${encodeURIComponent(id)}/profile`, { method: 'PATCH', body }),
+  uploadIcon: (id: string, file: File) => {
+    const data = new FormData()
+    data.append('file', file)
+    return apiUpload<{ url: string }>(`/workspaces/${encodeURIComponent(id)}/icon`, data)
+  },
   adminCreate: (name: string, ownerId: string) => api<ApiWorkspace>('/admin/workspaces', { method: 'POST', body: { name, owner_id: ownerId } }),
   adminTransfer: (id: string, userId: string) => api<ApiWorkspace>(`/admin/workspaces/${encodeURIComponent(id)}/transfer`, { method: 'POST', body: { user_id: userId } }),
   list: () => api<{ workspaces: ApiWorkspace[]; domain_access?: import('./domains').DomainAccess | null }>('/workspaces'),

@@ -7,7 +7,8 @@
     "models": "Modèles",
     "privacy": "Confidentialité",
     "shortcuts": "Raccourcis",
-    "about": "À propos"
+    "about": "À propos",
+    "work": "Travail"
   },
   "about": {
     "title": "À propos",
@@ -356,5 +357,15 @@
     "settings": "Paramètres",
     "managePlan": "Gérer le forfait",
     "signOut": "Se déconnecter"
+  },
+  "work": {
+    "subtitle": "Consultez les informations et gérez les paramètres de votre espace de travail.",
+    "icon": "Icône",
+    "description": "Présentation",
+    "descriptionPlaceholder": "Présentez cet espace de travail…",
+    "noDescription": "Aucune présentation renseignée.",
+    "saved": "Informations enregistrées",
+    "saveFailed": "Impossible d’enregistrer les informations. Réessayez.",
+    "leaveConfirm": "En quittant cet espace, vous perdez l’accès à ses conversations et ressources. Voulez-vous continuer ?"
   }
 }

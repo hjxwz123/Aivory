@@ -573,13 +573,13 @@ func enrichKnowledgeBasePermissions(ctx context.Context, q rowQueryer, kb *Knowl
 	args = append(args, kb.ID)
 	args = append(args, knowledgeBaseDeleteArgs(userID)...)
 	args = append(args, kb.ID)
-	args = append(args, workspaceResourceManagerArgs(userID)...)
+	args = append(args, workspaceDirectoryManagerArgs(userID)...)
 	var canUpload, canDeleteContent, canDelete, canManageMembers int
 	err := q.QueryRowContext(ctx, `SELECT
 		CASE WHEN EXISTS (SELECT 1 FROM knowledge_bases permission_upload WHERE permission_upload.id=? AND `+knowledgeBaseWritePredicate("permission_upload")+`) THEN 1 ELSE 0 END,
 		CASE WHEN EXISTS (SELECT 1 FROM knowledge_bases permission_content WHERE permission_content.id=? AND `+workspaceKnowledgeBaseContentDeletePredicate("permission_content")+`) THEN 1 ELSE 0 END,
 		CASE WHEN EXISTS (SELECT 1 FROM knowledge_bases permission_delete WHERE permission_delete.id=? AND `+knowledgeBaseDeletePredicate("permission_delete")+`) THEN 1 ELSE 0 END,
-		CASE WHEN EXISTS (SELECT 1 FROM knowledge_bases permission_manage WHERE permission_manage.id=? AND `+workspaceResourceManagerPredicate("permission_manage")+`) THEN 1 ELSE 0 END`, args...).Scan(
+		CASE WHEN EXISTS (SELECT 1 FROM knowledge_bases permission_manage WHERE permission_manage.id=? AND `+workspaceDirectoryManagerPredicate("permission_manage")+`) THEN 1 ELSE 0 END`, args...).Scan(
 		&canUpload, &canDeleteContent, &canDelete, &canManageMembers,
 	)
 	if err != nil {

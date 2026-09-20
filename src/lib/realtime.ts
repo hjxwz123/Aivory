@@ -174,6 +174,7 @@ function handleEvent(ev: RealtimeEvent): void {
     case 'workspace.membership_updated':
     case 'workspace.policy_updated':
     case 'workspace.announcement_updated':
+    case 'workspace.profile_updated':
       void reconcileAccessState('workspace')
       return
     case 'knowledge_base.access_updated':

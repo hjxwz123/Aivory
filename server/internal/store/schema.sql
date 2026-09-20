@@ -1021,6 +1021,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_image_styles_name_unique ON image_styles(l
 CREATE TABLE IF NOT EXISTS workspaces (
   id           TEXT PRIMARY KEY,
   name         TEXT NOT NULL,
+  icon_url     TEXT NOT NULL DEFAULT '',
+  description  TEXT NOT NULL DEFAULT '',
   owner_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   invite_token TEXT NOT NULL UNIQUE,
   deleting     INTEGER NOT NULL DEFAULT 0,

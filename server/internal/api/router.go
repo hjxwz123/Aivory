@@ -336,6 +336,8 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/workspaces", requireAuth(d, listWorkspacesHandler))
 	mux.handle("POST", "/api/workspaces", requireAuth(d, createWorkspaceHandler))
 	mux.handle("DELETE", "/api/workspaces/:id", requireAuth(d, deleteWorkspaceHandler))
+	mux.handle("PATCH", "/api/workspaces/:id/profile", requireAuth(d, updateWorkspaceProfileHandler))
+	mux.handle("POST", "/api/workspaces/:id/icon", requireAuth(d, uploadWorkspaceIconHandler))
 	mux.handle("GET", "/api/workspaces/:id/members", requireAuth(d, workspaceMembersHandler))
 	mux.handle("PATCH", "/api/workspaces/:id/members/:uid/permissions", requireAuth(d, updateWorkspaceMemberPermissionsHandler))
 	mux.handle("PATCH", "/api/workspaces/:id/members/:uid/role", requireAuth(d, updateWorkspaceMemberRoleHandler))

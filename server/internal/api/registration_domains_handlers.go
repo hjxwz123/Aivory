@@ -29,7 +29,7 @@ func adminSaveDomainHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	err := store.SaveRegistrationDomain(r.Context(), d.DB, req, create)
 	if err != nil {
 		status := 409
-		if errors.Is(err, store.ErrInvalidDomain) {
+		if errors.Is(err, store.ErrInvalidDomain) || errors.Is(err, store.ErrInvalidWorkspaceProfile) {
 			status = 400
 		}
 		if errors.Is(err, store.ErrNotFound) {
@@ -40,6 +40,7 @@ func adminSaveDomainHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	domain, _ := store.NormalizeRegistrationDomain(req.Domain)
 	notifyDomainUsers(d, r, domain)
+	publishWorkspaceAccessEvent(d, r, req.WorkspaceID, "workspace.profile_updated")
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 func notifyDomainUsers(d Deps, r *http.Request, domain string) {

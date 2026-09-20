@@ -230,7 +230,8 @@ func AuthorizeWorkspace(
 	switch req.Action {
 	// --- workspace management ----------------------------------------------
 	case ActionWorkspaceMemberView:
-		allowed = true // every current member (guest included) may list
+		allowed = isAdmin
+		reason = "only workspace admins may list members"
 	case ActionWorkspaceMemberInvite:
 		allowed = isAdmin
 		reason = "only workspace admins may manage invites"

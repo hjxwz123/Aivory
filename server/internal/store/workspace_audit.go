@@ -17,6 +17,7 @@ import (
 
 // Audit action identifiers.
 const (
+	AuditWorkspaceProfileUpdated   = "workspace.profile_updated"
 	AuditWorkspaceCreated          = "workspace.created"
 	AuditWorkspaceDeleted          = "workspace.deleted"
 	AuditWorkspaceTransferred      = "workspace.transferred"

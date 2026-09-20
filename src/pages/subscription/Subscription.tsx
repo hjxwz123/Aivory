@@ -157,7 +157,6 @@ export default function Subscription() {
   useEffect(() => {
     let active = true
 
-    if (!purchaseAllowed) return
     setCreditsLoading(true)
     setCreditsLoadError(false)
     authApi
@@ -171,7 +170,7 @@ export default function Subscription() {
     return () => {
       active = false
     }
-  }, [creditsReloadKey, purchaseAllowed])
+  }, [creditsReloadKey])
 
   useEffect(() => {
     let active = true
@@ -522,30 +521,6 @@ export default function Subscription() {
   const showingGroups = catalogTab === 'groups'
   const catalogCount = showingGroups ? sortedGroups.length : sortedPackages.length
 
-  if (!purchaseAllowed) {
-    return (
-      <div className="flex min-h-0 flex-1 flex-col bg-[var(--color-bg)] font-sans text-[var(--color-fg)]">
-        <ContentHeader title={t('subscription:title')} backTo="/" backLabel={t('subscription:back')} />
-        <main className="mx-auto w-full max-w-[var(--layout-content-max-w)] flex-1 overflow-y-auto px-4 py-4 sm:px-8 sm:py-6">
-          {groupsLoading ? <AccountSkeleton t={t} /> : groupsLoadError ? (
-            <CatalogLoadError message={t('subscription:loadFailed')} onRetry={() => setGroupsReloadKey((value) => value + 1)} t={t} />
-          ) : current ? (
-            <div className="max-w-md">
-              <UserGroupTierCard group={current} billingCycle={billingCycle} isCurrent locale={i18n.resolvedLanguage} />
-              {expiresLabel ? <p className="mt-2 text-sm text-[var(--color-fg-muted)]">{expiresLabel}</p> : null}
-            </div>
-          ) : (
-            <section className="max-w-md rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
-              <p className="text-sm text-[var(--color-fg-muted)]">{t('subscription:currentPlan')}</p>
-              <h2 className="mt-1 text-lg font-semibold">{currentGroupName || t('subscription:free')}</h2>
-              {expiresLabel ? <p className="mt-2 text-sm text-[var(--color-fg-muted)]">{expiresLabel}</p> : null}
-            </section>
-          )}
-        </main>
-      </div>
-    )
-  }
-
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-[var(--color-bg)] font-sans text-[var(--color-fg)]">
       <ContentHeader title={t('subscription:title')} backTo="/" backLabel={t('subscription:back')} />
@@ -604,191 +579,195 @@ export default function Subscription() {
             </section>
           ) : null}
 
-          <section className="mt-5 sm:mt-6" aria-labelledby="subscription-catalog-heading">
-            <div className="flex items-center">
-              <SegmentedControl<CatalogTab>
-                label={t('subscription:catalog.label')}
-                value={catalogTab}
-                onChange={setCatalogTab}
-                fullWidthOnMobile
-                options={[
-                  { value: 'groups', label: t('subscription:catalog.userGroups') },
-                  { value: 'credit-packages', label: t('subscription:catalog.creditPackages') },
-                ]}
-              />
-            </div>
-
-            <div className="mt-3 sm:mt-4">
-              <div className="flex min-w-0 items-center justify-between gap-3">
-                <h2
-                  id="subscription-catalog-heading"
-                  className="min-w-0 text-[1.25rem] font-semibold leading-7 text-[var(--color-fg)]"
-                >
-                  {showingGroups ? t('subscription:allPlans') : t('subscription:packages.title')}
-                </h2>
-                {showingGroups ? (
-                  <SegmentedControl<BillingCycle>
-                    compact
-                    label={t('subscription:billing.label')}
-                    value={billingCycle}
-                    onChange={setBillingCycle}
+          {purchaseAllowed ? (
+            <>
+              <section className="mt-5 sm:mt-6" aria-labelledby="subscription-catalog-heading">
+                <div className="flex items-center">
+                  <SegmentedControl<CatalogTab>
+                    label={t('subscription:catalog.label')}
+                    value={catalogTab}
+                    onChange={setCatalogTab}
+                    fullWidthOnMobile
                     options={[
-                      { value: 'monthly', label: t('subscription:billing.monthly') },
-                      { value: 'yearly', label: t('subscription:billing.yearly') },
+                      { value: 'groups', label: t('subscription:catalog.userGroups') },
+                      { value: 'credit-packages', label: t('subscription:catalog.creditPackages') },
                     ]}
                   />
-                ) : null}
-              </div>
-              <div className="mt-1 flex min-w-0 items-start justify-between gap-4">
-                <p className="max-w-[60ch] text-[13px] leading-relaxed text-[var(--color-fg-muted)]">
-                  {showingGroups ? t('subscription:subtitle') : t('subscription:packages.subtitle')}
-                </p>
-                {catalogCount > 0 ? (
-                  <span className="hidden shrink-0 pt-1 text-[12px] tabular-nums text-[var(--color-fg-subtle)] sm:inline">
-                    {showingGroups
-                      ? t('subscription:planCount', { count: catalogCount })
-                      : t('subscription:packages.count', { count: catalogCount })}
-                  </span>
-                ) : null}
-              </div>
-            </div>
+                </div>
 
-            <div id="subscription-catalog" className="mt-3 sm:mt-4">
-              {showingGroups ? (
-                groupsLoading ? (
-                  <CardsSkeleton t={t} />
-                ) : groupsLoadError ? (
-                  <CatalogLoadError
-                    message={t('subscription:loadFailed')}
-                    onRetry={() => setGroupsReloadKey((value) => value + 1)}
-                    t={t}
-                  />
-                ) : sortedGroups.length > 0 ? (
-                  <div className="grid items-stretch gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                    {sortedGroups.map((group) => (
-                      <UserGroupTierCard
-                        key={group.id}
-                        group={group}
-                        billingCycle={billingCycle}
-                        isCurrent={group.id === currentId}
-                        canRenew={group.id === currentId && !group.is_default && expiresAt > 0}
-                        isPermanentlyOwned={group.id === permanentBaselineId}
-                        isRecommended={group.id === recommendedId}
-                        onSwitch={() => setUpgrade(group)}
-                        onPurchase={() => {
-                          if (group.is_purchasable === false) return
-                          setPurchaseTarget({
-                            type: 'user_group',
-                            id: group.id,
-                            name: group.name,
-                            billingCycle,
-                          })
-                        }}
-                        locale={i18n.resolvedLanguage}
+                <div className="mt-3 sm:mt-4">
+                  <div className="flex min-w-0 items-center justify-between gap-3">
+                    <h2
+                      id="subscription-catalog-heading"
+                      className="min-w-0 text-[1.25rem] font-semibold leading-7 text-[var(--color-fg)]"
+                    >
+                      {showingGroups ? t('subscription:allPlans') : t('subscription:packages.title')}
+                    </h2>
+                    {showingGroups ? (
+                      <SegmentedControl<BillingCycle>
+                        compact
+                        label={t('subscription:billing.label')}
+                        value={billingCycle}
+                        onChange={setBillingCycle}
+                        options={[
+                          { value: 'monthly', label: t('subscription:billing.monthly') },
+                          { value: 'yearly', label: t('subscription:billing.yearly') },
+                        ]}
                       />
-                    ))}
+                    ) : null}
                   </div>
-                ) : (
-                  <EmptyCatalog>{t('subscription:noGroups')}</EmptyCatalog>
-                )
-              ) : packagesLoading ? (
-                <CardsSkeleton t={t} />
-              ) : packagesLoadError ? (
-                <CatalogLoadError
-                  message={t('subscription:loadPackagesFailed')}
-                  onRetry={() => setPackagesReloadKey((value) => value + 1)}
-                  t={t}
-                />
-              ) : sortedPackages.length > 0 ? (
-                <div className="grid items-stretch gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {sortedPackages.map((creditPackage) => (
-                    <CreditPackageCard
-                      key={creditPackage.id}
-                      creditPackage={creditPackage}
-                      onPurchase={() =>
-                        setPurchaseTarget({
-                          type: 'credit_package',
-                          id: creditPackage.id,
-                          name: creditPackage.name,
-                        })
-                      }
-                      locale={i18n.resolvedLanguage}
+                  <div className="mt-1 flex min-w-0 items-start justify-between gap-4">
+                    <p className="max-w-[60ch] text-[13px] leading-relaxed text-[var(--color-fg-muted)]">
+                      {showingGroups ? t('subscription:subtitle') : t('subscription:packages.subtitle')}
+                    </p>
+                    {catalogCount > 0 ? (
+                      <span className="hidden shrink-0 pt-1 text-[12px] tabular-nums text-[var(--color-fg-subtle)] sm:inline">
+                        {showingGroups
+                          ? t('subscription:planCount', { count: catalogCount })
+                          : t('subscription:packages.count', { count: catalogCount })}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div id="subscription-catalog" className="mt-3 sm:mt-4">
+                  {showingGroups ? (
+                    groupsLoading ? (
+                      <CardsSkeleton t={t} />
+                    ) : groupsLoadError ? (
+                      <CatalogLoadError
+                        message={t('subscription:loadFailed')}
+                        onRetry={() => setGroupsReloadKey((value) => value + 1)}
+                        t={t}
+                      />
+                    ) : sortedGroups.length > 0 ? (
+                      <div className="grid items-stretch gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                        {sortedGroups.map((group) => (
+                          <UserGroupTierCard
+                            key={group.id}
+                            group={group}
+                            billingCycle={billingCycle}
+                            isCurrent={group.id === currentId}
+                            canRenew={group.id === currentId && !group.is_default && expiresAt > 0}
+                            isPermanentlyOwned={group.id === permanentBaselineId}
+                            isRecommended={group.id === recommendedId}
+                            onSwitch={() => setUpgrade(group)}
+                            onPurchase={() => {
+                              if (group.is_purchasable === false) return
+                              setPurchaseTarget({
+                                type: 'user_group',
+                                id: group.id,
+                                name: group.name,
+                                billingCycle,
+                              })
+                            }}
+                            locale={i18n.resolvedLanguage}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <EmptyCatalog>{t('subscription:noGroups')}</EmptyCatalog>
+                    )
+                  ) : packagesLoading ? (
+                    <CardsSkeleton t={t} />
+                  ) : packagesLoadError ? (
+                    <CatalogLoadError
+                      message={t('subscription:loadPackagesFailed')}
+                      onRetry={() => setPackagesReloadKey((value) => value + 1)}
                       t={t}
                     />
-                  ))}
+                  ) : sortedPackages.length > 0 ? (
+                    <div className="grid items-stretch gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {sortedPackages.map((creditPackage) => (
+                        <CreditPackageCard
+                          key={creditPackage.id}
+                          creditPackage={creditPackage}
+                          onPurchase={() =>
+                            setPurchaseTarget({
+                              type: 'credit_package',
+                              id: creditPackage.id,
+                              name: creditPackage.name,
+                            })
+                          }
+                          locale={i18n.resolvedLanguage}
+                          t={t}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <EmptyCatalog>{t('subscription:packages.empty')}</EmptyCatalog>
+                  )}
                 </div>
-              ) : (
-                <EmptyCatalog>{t('subscription:packages.empty')}</EmptyCatalog>
-              )}
-            </div>
-          </section>
+              </section>
 
-          <section className="mt-6" aria-labelledby="redeem-heading">
-            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between xl:gap-6">
-              <div className="flex min-w-0 items-start gap-2.5">
-                <span className="mt-0.5 inline-flex size-8 shrink-0 items-center justify-center rounded-[8px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
-                  <Ticket size={16} aria-hidden />
-                </span>
-                <div className="min-w-0">
-                  <h2 id="redeem-heading" className="text-[1rem] font-semibold text-[var(--color-fg)]">
-                    {t('subscription:redeem.title')}
-                  </h2>
-                  <p className="mt-0.5 max-w-[60ch] text-[12px] leading-snug text-[var(--color-fg-muted)]">
-                    {t('subscription:redeem.subtitle')}
-                  </p>
+              <section className="mt-6" aria-labelledby="redeem-heading">
+                <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between xl:gap-6">
+                  <div className="flex min-w-0 items-start gap-2.5">
+                    <span className="mt-0.5 inline-flex size-8 shrink-0 items-center justify-center rounded-[8px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
+                      <Ticket size={16} aria-hidden />
+                    </span>
+                    <div className="min-w-0">
+                      <h2 id="redeem-heading" className="text-[1rem] font-semibold text-[var(--color-fg)]">
+                        {t('subscription:redeem.title')}
+                      </h2>
+                      <p className="mt-0.5 max-w-[60ch] text-[12px] leading-snug text-[var(--color-fg-muted)]">
+                        {t('subscription:redeem.subtitle')}
+                      </p>
+                    </div>
+                  </div>
+                  <form
+                    className="flex min-w-0 items-center gap-2 sm:max-w-[30rem] xl:w-[26rem] xl:shrink-0"
+                    onSubmit={(event) => {
+                      event.preventDefault()
+                      submitRedeem()
+                    }}
+                  >
+                    <label className="sr-only" htmlFor="redeem-code">
+                      {t('subscription:redeem.inputLabel')}
+                    </label>
+                    <Input
+                      id="redeem-code"
+                      value={redeemCode}
+                      onChange={(event) => setRedeemCode(event.target.value.toUpperCase())}
+                      placeholder={t('subscription:redeem.inputPlaceholder')}
+                      autoComplete="off"
+                      spellCheck={false}
+                      wrapperClassName="h-11 min-w-0 flex-1 sm:h-9"
+                      className="min-w-0 font-sans tracking-normal"
+                    />
+                    <Button
+                      className="min-h-11 shrink-0 px-4 sm:min-h-9"
+                      type="submit"
+                      size="sm"
+                      loading={redeeming}
+                      disabled={!redeemCode.trim() || redeeming}
+                    >
+                      {redeeming ? t('subscription:redeem.redeeming') : t('subscription:redeem.submit')}
+                    </Button>
+                  </form>
                 </div>
-              </div>
-              <form
-                className="flex min-w-0 items-center gap-2 sm:max-w-[30rem] xl:w-[26rem] xl:shrink-0"
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  submitRedeem()
-                }}
-              >
-                <label className="sr-only" htmlFor="redeem-code">
-                  {t('subscription:redeem.inputLabel')}
-                </label>
-                <Input
-                  id="redeem-code"
-                  value={redeemCode}
-                  onChange={(event) => setRedeemCode(event.target.value.toUpperCase())}
-                  placeholder={t('subscription:redeem.inputPlaceholder')}
-                  autoComplete="off"
-                  spellCheck={false}
-                  wrapperClassName="h-11 min-w-0 flex-1 sm:h-9"
-                  className="min-w-0 font-sans tracking-normal"
-                />
-                <Button
-                  className="min-h-11 shrink-0 px-4 sm:min-h-9"
-                  type="submit"
-                  size="sm"
-                  loading={redeeming}
-                  disabled={!redeemCode.trim() || redeeming}
-                >
-                  {redeeming ? t('subscription:redeem.redeeming') : t('subscription:redeem.submit')}
-                </Button>
-              </form>
-            </div>
-          </section>
+              </section>
 
-          <PaymentHistory
-            orders={paymentOrders}
-            total={paymentHistoryTotal}
-            page={paymentHistoryPage}
-            loading={paymentHistoryLoading}
-            error={paymentHistoryError}
-            locale={i18n.resolvedLanguage}
-            resumingOrderId={resumingPaymentOrderId}
-            onRetry={() => setPaymentHistoryReloadKey((value) => value + 1)}
-            onResume={requestPaymentOrderResume}
-            onViewDetails={(order) => void loadPaymentOrderDetail(order)}
-            onPageChange={setPaymentHistoryPage}
-            t={t}
-          />
+              <PaymentHistory
+                orders={paymentOrders}
+                total={paymentHistoryTotal}
+                page={paymentHistoryPage}
+                loading={paymentHistoryLoading}
+                error={paymentHistoryError}
+                locale={i18n.resolvedLanguage}
+                resumingOrderId={resumingPaymentOrderId}
+                onRetry={() => setPaymentHistoryReloadKey((value) => value + 1)}
+                onResume={requestPaymentOrderResume}
+                onViewDetails={(order) => void loadPaymentOrderDetail(order)}
+                onPageChange={setPaymentHistoryPage}
+                t={t}
+              />
+            </>
+          ) : null}
         </main>
       </div>
 
-      {purchaseTarget ? (
+      {purchaseAllowed && purchaseTarget ? (
         <PaymentMethodDialog
           open
           onOpenChange={(open) => !open && setPurchaseTarget(null)}
@@ -800,7 +779,7 @@ export default function Subscription() {
       ) : null}
 
       <PaymentOrderDetailsDialog
-        open={Boolean(selectedPaymentOrder)}
+        open={purchaseAllowed && Boolean(selectedPaymentOrder)}
         order={paymentOrderDetail}
         selectedOrder={selectedPaymentOrder}
         loading={paymentOrderDetailLoading}
@@ -818,7 +797,7 @@ export default function Subscription() {
       />
 
       <Dialog
-        open={Boolean(retryPaymentOrder)}
+        open={purchaseAllowed && Boolean(retryPaymentOrder)}
         onOpenChange={(open) => {
           if (!open) paymentRecoveryCoordinatorRef.current!.cancelRetry()
         }}
@@ -856,7 +835,7 @@ export default function Subscription() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(redeemSuccess)} onOpenChange={(open) => !open && setRedeemSuccess(null)}>
+      <Dialog open={purchaseAllowed && Boolean(redeemSuccess)} onOpenChange={(open) => !open && setRedeemSuccess(null)}>
         <DialogContent size="sm" className="font-sans">
           <DialogHeader>
             <div className="mx-auto mb-1 inline-flex size-12 items-center justify-center rounded-full bg-[var(--color-secondary-soft)] text-[var(--color-secondary)]">
@@ -889,7 +868,7 @@ export default function Subscription() {
       </Dialog>
 
       <Dialog
-        open={Boolean(confirmOverride)}
+        open={purchaseAllowed && Boolean(confirmOverride)}
         onOpenChange={(open) => !open && !redeeming && setConfirmOverride(null)}
       >
         <DialogContent size="sm" className="font-sans">
@@ -924,7 +903,7 @@ export default function Subscription() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(upgrade)} onOpenChange={(open) => !open && setUpgrade(null)}>
+      <Dialog open={purchaseAllowed && Boolean(upgrade)} onOpenChange={(open) => !open && setUpgrade(null)}>
         <DialogContent size="sm" className="font-sans">
           <DialogHeader>
             <DialogTitle>{upgrade ? t('subscription:upgradeTitle', { name: upgrade.name }) : ''}</DialogTitle>

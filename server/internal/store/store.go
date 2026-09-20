@@ -285,6 +285,8 @@ func Migrate(db *sql.DB) error {
 	addWorkspaceInvitePurpose := `ALTER TABLE workspace_invites ADD COLUMN purpose TEXT NOT NULL DEFAULT 'manual'`
 	// A durable deletion fence prevents creations from racing a multi-step
 	// workspace teardown. It is reset when a recoverable teardown fails.
+	addWorkspaceIcon := `ALTER TABLE workspaces ADD COLUMN icon_url TEXT NOT NULL DEFAULT ''`
+	addWorkspaceDescription := `ALTER TABLE workspaces ADD COLUMN description TEXT NOT NULL DEFAULT ''`
 	addWorkspaceDeleting := `ALTER TABLE workspaces ADD COLUMN deleting INTEGER NOT NULL DEFAULT 0`
 	addWorkspaceAllowToolCalling := `ALTER TABLE workspace_policies ADD COLUMN allow_tool_calling INTEGER NOT NULL DEFAULT 1`
 	addWorkspaceAllowDrawing := `ALTER TABLE workspace_policies ADD COLUMN allow_drawing INTEGER NOT NULL DEFAULT 1`
@@ -434,6 +436,8 @@ func Migrate(db *sql.DB) error {
 		addWorkspaceCanDeleteKBContent = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_delete_kb_content INTEGER NOT NULL DEFAULT 1`
 		addWorkspaceCanDeleteConversations = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_delete_conversations INTEGER NOT NULL DEFAULT 1`
 		addWorkspaceInvitePurpose = `ALTER TABLE workspace_invites ADD COLUMN IF NOT EXISTS purpose TEXT NOT NULL DEFAULT 'manual'`
+		addWorkspaceIcon = `ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS icon_url TEXT NOT NULL DEFAULT ''`
+		addWorkspaceDescription = `ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT ''`
 		addWorkspaceDeleting = `ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS deleting INTEGER NOT NULL DEFAULT 0`
 		addWorkspaceAllowToolCalling = `ALTER TABLE workspace_policies ADD COLUMN IF NOT EXISTS allow_tool_calling INTEGER NOT NULL DEFAULT 1`
 		addWorkspaceAllowDrawing = `ALTER TABLE workspace_policies ADD COLUMN IF NOT EXISTS allow_drawing INTEGER NOT NULL DEFAULT 1`
@@ -514,7 +518,7 @@ func Migrate(db *sql.DB) error {
 		addModelFallbackChannel, addUsageChannel, addUsageFallback, addUsageStatus, addUsageError,
 		addUsageRequestMethod, addUsageRequestURL, addUsageRequestHeaders, addUsageRequestBody, addUsageTTFTFallback,
 		addFileDraft, addFileBranchMessage, addDocumentIngestUpdatedAt, addDocumentUploader,
-		addWorkspaceCanCreateProjects, addWorkspaceCanPrivateConversations, addWorkspaceCanCreateSkillsPrompts, addWorkspaceCanCreatePrompts, addWorkspaceCanCreateSkills, addWorkspaceCanCreateMCP, addWorkspaceCanUsePrompts, addWorkspaceCanUseSkills, addWorkspaceCanUseMCP, addWorkspaceCanCreateKB, addWorkspaceCanAddKBFiles, addWorkspaceCanDeleteKBContent, addWorkspaceCanDeleteConversations, addWorkspaceInvitePurpose, addWorkspaceDeleting,
+		addWorkspaceCanCreateProjects, addWorkspaceCanPrivateConversations, addWorkspaceCanCreateSkillsPrompts, addWorkspaceCanCreatePrompts, addWorkspaceCanCreateSkills, addWorkspaceCanCreateMCP, addWorkspaceCanUsePrompts, addWorkspaceCanUseSkills, addWorkspaceCanUseMCP, addWorkspaceCanCreateKB, addWorkspaceCanAddKBFiles, addWorkspaceCanDeleteKBContent, addWorkspaceCanDeleteConversations, addWorkspaceInvitePurpose, addWorkspaceDeleting, addWorkspaceIcon, addWorkspaceDescription,
 		addWorkspaceAllowToolCalling, addWorkspaceAllowDrawing, addWorkspaceAllowMCP, addWorkspaceAllowSkills, addWorkspaceAllowPrompts,
 		addWorkspaceAllowPrivateChat,
 		addKBIsPublic, addProjectIsPublic,

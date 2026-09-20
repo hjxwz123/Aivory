@@ -1071,7 +1071,8 @@
         "invite.revoked": "Invite revoked",
         "resource.visibility_changed": "Resource visibility changed",
         "policy.updated": "Capability policy changed",
-        "announcement.updated": "Announcement updated"
+        "announcement.updated": "Announcement updated",
+        "workspace.profile_updated": "Workspace information updated"
       }
     },
     "domainLocked": "Personal space locked by your administrator"

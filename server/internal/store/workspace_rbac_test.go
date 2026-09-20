@@ -504,7 +504,7 @@ func TestAuthorizeWorkspaceMatrix(t *testing.T) {
 		{"member", ActionWorkspaceMemberInvite, false},
 		{"guest", ActionWorkspaceMemberInvite, false},
 		{"owner", ActionWorkspaceMemberView, true},
-		{"guest", ActionWorkspaceMemberView, true},
+		{"guest", ActionWorkspaceMemberView, false},
 		{"guest", ActionModelUse, false},
 		{"guest", ActionConversationReply, false},
 		{"guest", ActionToolUse, false},

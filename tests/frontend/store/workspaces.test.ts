@@ -64,6 +64,7 @@ describe('workspace switch tool selection isolation', () => {
       selectedToolIdsByModel: { model_1: ['usermcp:old-server'] },
     })
     useWorkspaces.setState({
+      domainAccess: null,
       lockedWorkspaceId: null,
       workspaces: [],
       activeId: 'workspace-current',
@@ -93,6 +94,7 @@ describe('workspace switch tool selection isolation', () => {
     await useWorkspaces.getState().load()
     expect(useWorkspaces.getState().activeId).toBe('workspace-next')
     expect(useWorkspaces.getState().lockedWorkspaceId).toBe('workspace-next')
+    expect(useWorkspaces.getState().domainAccess?.workspace_id).toBe('workspace-next')
     const reloads = loadMocks.conversations.mock.calls.length
     await useWorkspaces.getState().switchTo(null)
     await useWorkspaces.getState().switchTo('workspace-foreign')
@@ -102,6 +104,7 @@ describe('workspace switch tool selection isolation', () => {
     apiMocks.list.mockResolvedValue({ workspaces: [{ id: 'workspace-next' }], domain_access: null })
     await useWorkspaces.getState().load()
     expect(useWorkspaces.getState().lockedWorkspaceId).toBeNull()
+    expect(useWorkspaces.getState().domainAccess).toBeNull()
     await useWorkspaces.getState().switchTo(null)
     expect(useWorkspaces.getState().activeId).toBeNull()
   })

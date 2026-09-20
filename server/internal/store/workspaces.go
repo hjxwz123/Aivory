@@ -51,9 +51,11 @@ func isCollaboratorRoleSQL(expr string) string {
 
 // Workspace is one workspace row.
 type Workspace struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	OwnerID string `json:"owner_id"`
+	IconURL     string `json:"icon_url"`
+	Description string `json:"description"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	OwnerID     string `json:"owner_id"`
 	// InviteToken is retained for legacy database compatibility only. It is not
 	// an accepted join capability and is cleared from user-facing responses.
 	InviteToken string `json:"invite_token,omitempty"`
@@ -617,11 +619,11 @@ func CreateWorkspace(ctx context.Context, db *sql.DB, ownerID, name string) (*Wo
 func GetWorkspace(ctx context.Context, db *sql.DB, id string) (*Workspace, error) {
 	var w Workspace
 	err := db.QueryRowContext(ctx,
-		`SELECT w.id, w.name, w.owner_id, w.invite_token, w.created_at, COALESCE(u.name,'')
+		`SELECT w.id, w.name, w.owner_id, w.invite_token, w.created_at, w.icon_url, w.description, COALESCE(u.name,'')
 		   FROM workspaces w
 		   LEFT JOIN users u ON u.id=w.owner_id
 		  WHERE w.id=?`, id,
-	).Scan(&w.ID, &w.Name, &w.OwnerID, &w.InviteToken, &w.CreatedAt, &w.OwnerName)
+	).Scan(&w.ID, &w.Name, &w.OwnerID, &w.InviteToken, &w.CreatedAt, &w.IconURL, &w.Description, &w.OwnerName)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -638,7 +640,7 @@ func GetWorkspace(ctx context.Context, db *sql.DB, id string) (*Workspace, error
 func GetWorkspaceForMember(ctx context.Context, db *sql.DB, id, userID string) (*Workspace, error) {
 	var w Workspace
 	err := db.QueryRowContext(ctx,
-		`SELECT w.id, w.name, w.owner_id, w.invite_token, w.created_at,
+		`SELECT w.id, w.name, w.owner_id, w.invite_token, w.created_at, w.icon_url, w.description,
 		        CASE WHEN w.owner_id=? THEN 'admin' ELSE `+normalizeWorkspaceRoleSQL("m.role")+` END,
 		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_create_projects,0) END,
 		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_private_conversations,0) END,
@@ -659,7 +661,7 @@ func GetWorkspaceForMember(ctx context.Context, db *sql.DB, id, userID string) (
 		userID, userID, userID, userID, userID, userID, userID, userID, userID, userID, userID, userID, userID, userID,
 		userID, id, userID, userID,
 	).Scan(
-		&w.ID, &w.Name, &w.OwnerID, &w.InviteToken, &w.CreatedAt, &w.Role,
+		&w.ID, &w.Name, &w.OwnerID, &w.InviteToken, &w.CreatedAt, &w.IconURL, &w.Description, &w.Role,
 		&w.CanCreateProjects, &w.CanPrivateConversations, &w.CanCreateSkillsPrompts,
 		&w.CanCreatePrompts, &w.CanCreateSkills, &w.CanCreateMCP,
 		&w.CanUsePrompts, &w.CanUseSkills, &w.CanUseMCP, &w.CanCreateKB,
@@ -690,7 +692,7 @@ func GetWorkspaceByInviteToken(_ context.Context, _ *sql.DB, _ string) (*Workspa
 // anyway by joining flow, but least-privilege costs nothing).
 func ListWorkspacesForUser(ctx context.Context, db *sql.DB, userID string) ([]Workspace, error) {
 	rows, err := db.QueryContext(ctx,
-		`SELECT w.id, w.name, w.owner_id, w.invite_token, w.created_at,
+		`SELECT w.id, w.name, w.owner_id, w.invite_token, w.created_at, w.icon_url, w.description,
 		        CASE WHEN w.owner_id=? THEN 'admin' ELSE `+normalizeWorkspaceRoleSQL("m.role")+` END,
 		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_create_projects,0) END,
 		        CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_private_conversations,0) END,
@@ -719,7 +721,7 @@ func ListWorkspacesForUser(ctx context.Context, db *sql.DB, userID string) ([]Wo
 	for rows.Next() {
 		var w Workspace
 		if err := rows.Scan(
-			&w.ID, &w.Name, &w.OwnerID, &w.InviteToken, &w.CreatedAt, &w.Role,
+			&w.ID, &w.Name, &w.OwnerID, &w.InviteToken, &w.CreatedAt, &w.IconURL, &w.Description, &w.Role,
 			&w.CanCreateProjects, &w.CanPrivateConversations, &w.CanCreateSkillsPrompts,
 			&w.CanCreatePrompts, &w.CanCreateSkills, &w.CanCreateMCP,
 			&w.CanUsePrompts, &w.CanUseSkills, &w.CanUseMCP, &w.CanCreateKB,
@@ -1527,7 +1529,7 @@ func ListAllWorkspaces(ctx context.Context, db *sql.DB, limit, offset int) ([]Wo
 		limit = 200
 	}
 	rows, err := db.QueryContext(ctx,
-		`SELECT w.id, w.name, w.owner_id, w.created_at, COALESCE(u.name,''),
+		`SELECT w.id, w.name, w.owner_id, w.created_at, w.icon_url, w.description, COALESCE(u.name,''),
 		        (SELECT COUNT(*) FROM workspace_members m WHERE m.workspace_id=w.id)
 		   FROM workspaces w LEFT JOIN users u ON u.id = w.owner_id
 		  ORDER BY w.created_at DESC LIMIT ? OFFSET ?`, limit, offset)
@@ -1538,7 +1540,7 @@ func ListAllWorkspaces(ctx context.Context, db *sql.DB, limit, offset int) ([]Wo
 	out := []Workspace{}
 	for rows.Next() {
 		var w Workspace
-		if err := rows.Scan(&w.ID, &w.Name, &w.OwnerID, &w.CreatedAt, &w.OwnerName, &w.MemberCount); err != nil {
+		if err := rows.Scan(&w.ID, &w.Name, &w.OwnerID, &w.CreatedAt, &w.IconURL, &w.Description, &w.OwnerName, &w.MemberCount); err != nil {
 			return nil, err
 		}
 		out = append(out, w)

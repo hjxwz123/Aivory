@@ -7,6 +7,8 @@ export interface DomainAccess {
   locked: boolean
 }
 export interface RegistrationDomain {
+  icon_url?: string
+  description?: string
   subscription_purchase_disabled: boolean
   domain: string
   domains: string[]
@@ -44,7 +46,7 @@ export interface DomainPersonalDataStatus {
 }
 export const domainsApi = {
   list: () => api<{ domains: RegistrationDomain[] }>('/admin/domains'),
-  create: (body: Pick<RegistrationDomain, 'domain' | 'domains' | 'workspace_id' | 'lock_personal' | 'email_verification_required' | 'subscription_purchase_disabled' | 'initial_group_id' | 'enabled'>) =>
+  create: (body: Pick<RegistrationDomain, 'icon_url' | 'description' | 'domain' | 'domains' | 'workspace_id' | 'lock_personal' | 'email_verification_required' | 'subscription_purchase_disabled' | 'initial_group_id' | 'enabled'>) =>
     api('/admin/domains', { method: 'POST', body }),
   update: (body: RegistrationDomain) =>
     api(`/admin/domains/${encodeURIComponent(body.domain)}`, { method: 'PATCH', body }),

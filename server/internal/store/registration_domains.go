@@ -16,6 +16,8 @@ const (
 )
 
 type RegistrationDomain struct {
+	IconURL                      *string  `json:"icon_url,omitempty"`
+	Description                  *string  `json:"description,omitempty"`
 	SubscriptionPurchaseDisabled bool     `json:"subscription_purchase_disabled"`
 	Domain                       string   `json:"domain"`
 	Domains                      []string `json:"domains"`
@@ -162,7 +164,7 @@ func GetDomainAccess(ctx context.Context, ex RowExecer, userID string) (*DomainA
 	return &a, err
 }
 func ListRegistrationDomains(ctx context.Context, db *sql.DB) ([]RegistrationDomain, error) {
-	rows, err := db.QueryContext(ctx, `SELECT d.domain,d.workspace_id,w.name,d.lock_personal,d.email_verification_required,
+	rows, err := db.QueryContext(ctx, `SELECT d.domain,d.workspace_id,w.name,w.icon_url,w.description,d.lock_personal,d.email_verification_required,
 	 COALESCE(d.initial_group_id,''),COALESCE(g.name,''),d.enabled,d.subscription_purchase_disabled,
 	 (SELECT COUNT(*) FROM domain_users du WHERE du.domain=d.domain)
 	 FROM registration_domains d JOIN workspaces w ON w.id=d.workspace_id
@@ -173,7 +175,7 @@ func ListRegistrationDomains(ctx context.Context, db *sql.DB) ([]RegistrationDom
 	out := []RegistrationDomain{}
 	for rows.Next() {
 		var d RegistrationDomain
-		if err := rows.Scan(&d.Domain, &d.WorkspaceID, &d.WorkspaceName, &d.LockPersonal, &d.EmailVerificationRequired, &d.InitialGroupID, &d.InitialGroupName, &d.Enabled, &d.SubscriptionPurchaseDisabled, &d.MemberCount); err != nil {
+		if err := rows.Scan(&d.Domain, &d.WorkspaceID, &d.WorkspaceName, &d.IconURL, &d.Description, &d.LockPersonal, &d.EmailVerificationRequired, &d.InitialGroupID, &d.InitialGroupName, &d.Enabled, &d.SubscriptionPurchaseDisabled, &d.MemberCount); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
@@ -317,6 +319,25 @@ func SaveRegistrationDomain(ctx context.Context, db *sql.DB, d RegistrationDomai
 			if _, err := tx.ExecContext(ctx, `INSERT INTO registration_domain_matches(domain,rule_domain) VALUES(?,?)`, matchedDomain, domain); err != nil {
 				return err
 			}
+		}
+	}
+	if d.IconURL != nil || d.Description != nil {
+		var profile WorkspaceProfile
+		if err := tx.QueryRowContext(ctx, `SELECT icon_url,description FROM workspaces WHERE id=?`, d.WorkspaceID).Scan(&profile.IconURL, &profile.Description); err != nil {
+			return err
+		}
+		if d.IconURL != nil {
+			profile.IconURL = *d.IconURL
+		}
+		if d.Description != nil {
+			profile.Description = *d.Description
+		}
+		profile, err = NormalizeWorkspaceProfile(profile)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET icon_url=?,description=? WHERE id=?`, profile.IconURL, profile.Description, d.WorkspaceID); err != nil {
+			return err
 		}
 	}
 	if err := ensureLockedDomainMembers(ctx, tx, domain); err != nil {

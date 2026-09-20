@@ -7,7 +7,8 @@
     "models": "模型",
     "privacy": "隱私",
     "shortcuts": "快捷鍵",
-    "about": "關於"
+    "about": "關於",
+    "work": "工作"
   },
   "about": {
     "title": "關於",
@@ -356,5 +357,15 @@
     "settings": "設定",
     "managePlan": "管理訂閱",
     "signOut": "退出登入"
+  },
+  "work": {
+    "subtitle": "查看工作空間資訊並管理工作設定。",
+    "icon": "圖示",
+    "description": "介紹",
+    "descriptionPlaceholder": "介紹這個工作空間…",
+    "noDescription": "尚未設定介紹。",
+    "saved": "工作空間資訊已儲存",
+    "saveFailed": "無法儲存工作空間資訊，請重試。",
+    "leaveConfirm": "退出後將無法存取此工作空間的對話和資料。確定退出嗎？"
   }
 }

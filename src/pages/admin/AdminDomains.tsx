@@ -1,3 +1,6 @@
+import { WorkspaceProfileFields, type WorkspaceProfileDraft } from '@/components/workspace/workspace-profile-fields'
+import { WorkspaceIcon } from '@/components/workspace/workspace-icon'
+import { useWorkspaces } from '@/store/workspaces'
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -108,7 +111,7 @@ export default function AdminDomains() {
               {rows.map((row) => (
                 <tr key={row.domain} className="border-b border-[var(--color-divider)] last:border-0">
                   <td className="px-4 py-3 font-medium"><div className="flex max-w-64 flex-wrap gap-x-2 gap-y-1">{matchedDomains(row).map((domain) => <span key={domain} className="break-all">{domain}</span>)}</div></td>
-                  <td className="max-w-56 break-words px-4 py-3">{row.workspace_name}</td>
+                  <td className="max-w-56 break-words px-4 py-3"><span className="flex items-center gap-2"><WorkspaceIcon icon={row.icon_url} />{row.workspace_name}</span></td>
                   <td className="px-4 py-3"><div className="flex flex-col items-start gap-1.5">
                     <Badge variant={row.enabled ? 'success' : 'neutral'}>{t(row.enabled ? 'domains.enabled' : 'domains.paused')}</Badge>
                     <span className="text-xs text-[var(--color-fg-muted)]">{t(row.email_verification_required ? 'domains.verificationRequired' : 'domains.verificationOptional')}</span>
@@ -161,6 +164,8 @@ function DomainEditor({ rule, workspaces, groups, onClose, onSaved }: { rule: Re
   const isNew = rule === 'new'
   const [domainsText, setDomainsText] = useState(isNew ? '' : matchedDomains(rule).join('\n'))
   const [workspace, setWorkspace] = useState(isNew ? '' : rule.workspace_id)
+  const [profile, setProfile] = useState<WorkspaceProfileDraft>({ icon_url: isNew ? '' : rule.icon_url ?? '', description: isNew ? '' : rule.description ?? '' })
+  const [uploading, setUploading] = useState(false)
   const [locked, setLocked] = useState(isNew ? false : rule.lock_personal)
   const [verifyEmail, setVerifyEmail] = useState(isNew ? true : rule.email_verification_required)
   const [initialGroup, setInitialGroup] = useState(isNew ? '' : rule.initial_group_id)
@@ -173,12 +178,18 @@ function DomainEditor({ rule, workspaces, groups, onClose, onSaved }: { rule: Re
   const domains = parseDomains(domainsText)
   const canSave = domains.length > 0 && domains.length <= 50 && !!workspace
   async function save() {
-    if (mutation.current || !canSave) return
+    if (mutation.current || !canSave || uploading) return
     mutation.current = true; setBusy(true); setError('')
     try {
-      const body = { domain: isNew ? domains[0] : rule.domain, domains, workspace_id: workspace, lock_personal: locked, email_verification_required: verifyEmail, subscription_purchase_disabled: !purchaseAllowed, initial_group_id: initialGroup, enabled: isNew ? true : enabled }
+      const previous = isNew ? workspaces.find((w) => w.id === workspace) : rule
+      const profilePatch = { ...(profile.icon_url !== (previous?.icon_url ?? '') ? { icon_url: profile.icon_url } : {}), ...(profile.description !== (previous?.description ?? '') ? { description: profile.description } : {}) }
+      const body = { ...profilePatch, domain: isNew ? domains[0] : rule.domain, domains, workspace_id: workspace, lock_personal: locked, email_verification_required: verifyEmail, subscription_purchase_disabled: !purchaseAllowed, initial_group_id: initialGroup, enabled: isNew ? true : enabled }
       if (isNew) await domainsApi.create(body)
-      else await domainsApi.update({ ...rule, ...body })
+      else {
+        const { icon_url: _icon, description: _description, ...domainRule } = rule
+        await domainsApi.update({ ...domainRule, ...body })
+      }
+      void useWorkspaces.getState().load()
       toast.success(t('domains.saved')); onSaved()
     } catch (e) { setError(e instanceof Error ? e.message : t('domains.saveFailed')) }
     finally { mutation.current = false; setBusy(false) }
@@ -199,8 +210,9 @@ function DomainEditor({ rule, workspaces, groups, onClose, onSaved }: { rule: Re
             </aside>
             <div className="space-y-2"><label htmlFor="domain-names" className="text-sm font-medium">{t('domains.domain')}</label><Textarea id="domain-names" autoFocus disabled={busy} rows={4} value={domainsText} onChange={(e) => setDomainsText(e.target.value)} placeholder={'example.com\nexample.org'} maxLength={12699} required aria-describedby="domain-names-hint" /><p id="domain-names-hint" className="text-sm text-[var(--color-fg-muted)]">{t('domains.domainsHint')}</p></div>
             <div className="space-y-2"><label id="domain-workspace-label" className="text-sm font-medium">{t('domains.workspace')}</label>
-              <Select value={workspace} onValueChange={setWorkspace} disabled={!isNew || busy}><SelectTrigger aria-labelledby="domain-workspace-label"><SelectValue placeholder={t('domains.chooseWorkspace')} /></SelectTrigger><SelectContent>{workspaces.map((w) => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent></Select>
+              <Select value={workspace} onValueChange={(id) => { setWorkspace(id); const selected = workspaces.find((w) => w.id === id); setProfile({ icon_url: selected?.icon_url ?? '', description: selected?.description ?? '' }) }} disabled={!isNew || busy || uploading}><SelectTrigger aria-labelledby="domain-workspace-label"><SelectValue placeholder={t('domains.chooseWorkspace')} /></SelectTrigger><SelectContent>{workspaces.map((w) => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent></Select>
             </div>
+            <WorkspaceProfileFields value={profile} onChange={setProfile} disabled={busy || uploading} onUploadingChange={setUploading} />
             {isNew ? (
               <p className="text-sm leading-6 text-[var(--color-fg-muted)]">{t('domains.startsEnabledHint')}</p>
             ) : (
@@ -236,7 +248,7 @@ function DomainEditor({ rule, workspaces, groups, onClose, onSaved }: { rule: Re
             <div className="flex items-start justify-between gap-4"><div><label htmlFor="domain-lock" className="text-sm font-medium">{t('domains.lockLabel')}</label><p className="mt-1 text-sm text-[var(--color-fg-muted)]">{t('domains.lockHint')}</p></div><Switch id="domain-lock" checked={locked} onCheckedChange={setLocked} disabled={busy} /></div>
             {error && <p role="alert" className="text-sm text-[var(--color-danger)]">{error}</p>}
           </DialogBody>
-          <DialogFooter><Button type="button" variant="ghost" disabled={busy} onClick={onClose}>{t('domains.cancel')}</Button><Button type="submit" loading={busy} disabled={!canSave}>{t('domains.save')}</Button></DialogFooter>
+          <DialogFooter><Button type="button" variant="ghost" disabled={busy} onClick={onClose}>{t('domains.cancel')}</Button><Button type="submit" loading={busy} disabled={!canSave || uploading}>{t('domains.save')}</Button></DialogFooter>
         </form>
       </DialogContent>
     </Dialog>

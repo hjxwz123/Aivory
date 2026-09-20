@@ -90,17 +90,13 @@ export function WorkspaceAnnouncementPopup() {
         closeDisabled={closeLocked}
         onEscapeKeyDown={(event) => { if (closeLocked) event.preventDefault() }}
         onInteractOutside={(event) => { if (closeLocked) event.preventDefault() }}
-        className="max-h-[min(calc(100dvh-2rem),44rem)] overflow-hidden rounded-2xl p-0 [&>button]:z-10 [&>button]:size-11 [&>button]:right-2 [&>button]:top-2"
       >
-        <DialogHeader className="border-b border-[var(--color-divider)] px-5 py-4 pr-16 sm:px-6 sm:pr-16">
-          <div className="flex min-w-0 items-start gap-2.5">
-            <Megaphone size={18} aria-hidden className="mt-0.5 shrink-0 text-[var(--color-fg-muted)]" />
-            <DialogTitle className="min-w-0 break-words [overflow-wrap:anywhere]">
-              {title || t('announcement.title', { defaultValue: 'Announcement' })}
-            </DialogTitle>
-          </div>
+        <DialogHeader>
+          <DialogTitle className="break-words pr-10 [overflow-wrap:anywhere]">
+            {title || t('announcement.title', { defaultValue: 'Announcement' })}
+          </DialogTitle>
         </DialogHeader>
-        <DialogBody className="overscroll-contain px-5 py-5 sm:px-6">
+        <DialogBody className="min-w-0 overscroll-contain">
           <div className={cn('min-w-0', hasImage && hasBody && 'grid items-start gap-5 md:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] md:gap-6')}>
             {hasImage ? (
               <div className="min-w-0 overflow-hidden rounded-lg bg-[var(--color-bg-muted)]">
@@ -135,18 +131,18 @@ export function WorkspaceAnnouncementPopup() {
             ) : null}
           </div>
         </DialogBody>
-        <DialogFooter className="flex-wrap gap-2 px-5 py-3 sm:px-6 [&_button]:h-auto [&_button]:min-h-11 [&_button]:whitespace-normal [&_button]:py-2 max-sm:[&_button]:h-auto">
+        <DialogFooter className="flex-wrap">
           {closeLocked ? (
             <span className="flex w-full items-center gap-1.5 text-xs leading-5 text-[var(--color-fg-muted)] sm:mr-auto sm:w-auto" role="status" aria-live="polite">
               <Clock3 size={14} aria-hidden className="shrink-0" />
               {t('announcement.requiredCountdown', { count: secondsRemaining })}
             </span>
           ) : null}
-          <Button className="max-sm:flex-1" variant={data.remember_dismiss ? 'secondary' : 'primary'} disabled={closeLocked} onClick={close}>
+          <Button variant={data.remember_dismiss ? 'secondary' : 'primary'} disabled={closeLocked} onClick={close}>
             {t('actions.close')}
           </Button>
           {data.remember_dismiss ? (
-            <Button className="max-sm:flex-1" disabled={closeLocked} onClick={dismissVersion}>
+            <Button disabled={closeLocked} onClick={dismissVersion}>
               {t('announcement.dontShowAgain', { defaultValue: "Don't show this again" })}
             </Button>
           ) : null}

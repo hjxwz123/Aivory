@@ -1,11 +1,11 @@
 /**
  * Workspace UI (§workspaces) — the avatar-menu section for switching/creating
- * workspaces plus the members/invite management dialog. Users with no
+ * workspaces plus the settings workspace management panel. Users with no
  * workspaces AND no create-capability see nothing (per spec: 左下角不显示).
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { AlertTriangle, ArrowLeftRight, BarChart3, Briefcase, Check, Copy, FileClock, Home, LockKeyhole, KeyRound, LogOut, Megaphone, Plus, RefreshCw, Settings2, ShieldCheck, SlidersHorizontal, Trash2, UserPlus, UserX, Users } from 'lucide-react'
+import { AlertTriangle, ArrowLeftRight, BarChart3, Briefcase, Check, Copy, FileClock, Home, LockKeyhole, KeyRound, Megaphone, Plus, RefreshCw, Settings2, ShieldCheck, SlidersHorizontal, Trash2, UserPlus, UserX, Users } from 'lucide-react'
 import { workspacesApi } from '@/api'
 import type { ApiAnnouncement } from '@/api/endpoints'
 import type {
@@ -22,7 +22,6 @@ import { useAuth } from '@/store/auth'
 import { useWorkspaces } from '@/store/workspaces'
 import { toast } from '@/hooks/use-toast'
 import { useCopy } from '@/hooks/use-clipboard'
-import { useMediaQuery } from '@/hooks/use-media-query'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { initials } from '@/components/ui/avatar.utils'
 import { Button } from '@/components/ui/button'
@@ -266,13 +265,11 @@ export function CreateWorkspaceDialog({ open, onOpenChange }: { open: boolean; o
 }
 
 /** Members + invite management for the ACTIVE workspace. */
-export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+export function WorkspaceManagementPanel({ workspaceID, open }: { workspaceID: string; open: boolean }) {
   const { t } = useTranslation('chat')
-  const activeId = useWorkspaces((s) => s.activeId)
-  const ws = useWorkspaces((s) => (s.activeId ? s.workspaces.find((w) => w.id === s.activeId) : undefined))
+  const activeId = workspaceID
+  const ws = useWorkspaces((s) => s.workspaces.find((w) => w.id === workspaceID))
   const removeWs = useWorkspaces((s) => s.remove)
-  const leaveWs = useWorkspaces((s) => s.leave)
-  const domainLocked = useWorkspaces((s) => !!s.lockedWorkspaceId)
   const [members, setMembers] = useState<ApiWorkspaceMember[]>([])
   // Distinguish "still fetching" from "loaded, empty": without it the dialog
   // opens claiming "0 members" and the list pops in a beat later.
@@ -308,15 +305,10 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
   const roleBusyRef = useRef<{ uid: string; role: ApiWorkspaceRole; epoch: number } | null>(null)
   const operationEpochRef = useRef(0)
   // §workspace RBAC phases 3/4: managers switch between members, invites and
-  // the capability policy; non-managers only ever see the member list.
+  // the capability policy; the entire management panel is admin-only.
   const [tab, setTab] = useState<'members' | 'invites' | 'policy' | 'announcement' | 'audit' | 'statistics'>('members')
-  const desktopNavigation = useMediaQuery('(min-width: 640px)')
-  const paneRef = useRef<HTMLDivElement>(null)
   const [transferOpen, setTransferOpen] = useState(false)
 
-  useEffect(() => {
-    paneRef.current?.scrollTo({ top: 0 })
-  }, [tab, activeId, open, canManage])
 
   function roleLabel(role: ApiWorkspaceRole | undefined): string {
     switch (role) {
@@ -347,7 +339,7 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
     permissionDraftDirtyRef.current = false
     setPermissionDraftDirty(false)
     setPermissionConflict(false)
-    if (!open || !activeId) return
+    if (!open || !activeId || !canManage) { setMembers([]); return }
     setInviteToken('')
     setMembersLoading(true)
     setMembersLoadFailed(false)
@@ -364,7 +356,7 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
       .finally(() => {
         if (request === membersRequestRef.current) setMembersLoading(false)
       })
-  }, [open, activeId, membersLoadAttempt])
+  }, [open, activeId, membersLoadAttempt, canManage])
 
   // Each opening starts at the member overview. Keeping a previous workspace's
   // policy/audit tab selected is disorienting after switching spaces, and can
@@ -397,7 +389,7 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
     [open],
   )
 
-  if (!ws || !activeId) return null
+  if (!ws || !activeId || !canManage) return null
   const inviteURL = inviteToken ? `${window.location.origin}/workspace/join/${inviteToken}` : ''
 
   async function kick(uid: string) {
@@ -555,7 +547,6 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
     setActioning(true)
     try {
       await fn(workspaceID)
-      if (actioningRef.current === operation && epoch === operationEpochRef.current) onOpenChange(false)
     } catch {
       if (actioningRef.current === operation && epoch === operationEpochRef.current) toast.error(failureMessage)
     } finally {
@@ -567,39 +558,17 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
   }
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        if (!next && (actioningRef.current || savingPermissionsRef.current !== null || busyUidRef.current)) return
-        onOpenChange(next)
-      }}
-    >
-      <DialogContent
-        size="full"
-        closeDisabled={actioning || savingPermissions || busyUid !== null}
-        className="h-[min(44rem,calc(100dvh-3rem))] max-w-[68rem] overflow-hidden sm:w-[min(94vw,68rem)] sm:flex-row max-sm:h-dvh max-sm:max-h-dvh max-sm:w-full max-sm:rounded-none max-sm:border-0"
-      >
-        <div className="flex min-h-0 shrink-0 flex-col bg-[var(--color-bg-muted)]/50 sm:w-48">
-        <DialogHeader className="px-4 pb-3 pt-5 max-sm:pr-12">
-          <DialogTitle className="flex min-w-0 items-center gap-2">
-            <Briefcase size={15} aria-hidden className="shrink-0" />
-            <span className="truncate" title={ws.name}>{ws.name}</span>
-          </DialogTitle>
-          <DialogDescription>
-            {membersLoading
-              ? t('workspace.membersLoading', { defaultValue: 'Loading members…' })
-              : membersLoadFailed
-                ? t('workspace.membersLoadFailed', { defaultValue: 'Could not load workspace members.' })
-                : t('workspace.membersBody', { count: members.length, defaultValue: '{{count}} members' })}
-          </DialogDescription>
-        </DialogHeader>
-
+    <>
+      <section className="mt-6 min-w-0 border-t border-[var(--color-divider)] pt-4">
+        <p className="mb-3 text-sm text-[var(--color-fg-muted)]">
+          {membersLoading ? t('workspace.membersLoading') : membersLoadFailed ? t('workspace.membersLoadFailed') : t('workspace.membersBody', { count: members.length })}
+        </p>
           {canManage ? (
             <div
               role="tablist"
-              aria-orientation={desktopNavigation ? 'vertical' : 'horizontal'}
+              aria-orientation="horizontal"
               aria-label={t('workspace.manageTabs', { defaultValue: 'Workspace management' })}
-              className="flex min-h-0 min-w-0 gap-1 overflow-x-auto overscroll-contain px-2 pb-3 scrollbar-none sm:flex-1 sm:flex-col sm:overflow-x-hidden sm:overflow-y-auto"
+              className="flex min-w-0 gap-1 overflow-x-auto pb-3 scrollbar-thin"
             >
             {WORKSPACE_MANAGEMENT_TABS.map(({ key, icon: Icon, label }) => (
               <button
@@ -612,8 +581,8 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
                 tabIndex={tab === key ? 0 : -1}
                 onClick={() => setTab(key)}
                 onKeyDown={(event) => {
-                  const previousKey = desktopNavigation ? 'ArrowUp' : 'ArrowLeft'
-                  const nextKey = desktopNavigation ? 'ArrowDown' : 'ArrowRight'
+                  const previousKey = 'ArrowLeft'
+                  const nextKey = 'ArrowRight'
                   if (![previousKey, nextKey, 'Home', 'End'].includes(event.key)) return
                   const tabs = Array.from(
                     event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [],
@@ -629,7 +598,7 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
                   tabs[next]?.focus()
                   tabs[next]?.click()
                 }}
-                className={`inline-flex min-h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-[8px] px-2.5 py-1.5 text-sm font-medium interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] sm:min-h-9 sm:w-full ${
+                className={`inline-flex min-h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-[8px] px-2.5 py-1.5 text-sm font-medium interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] sm:min-h-9 ${
                   tab === key
                     ? 'bg-[var(--color-surface)] text-[var(--color-fg)] ring-1 ring-inset ring-[var(--color-accent)] sm:bg-[var(--color-bg-muted)]'
                     : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)]/60 hover:text-[var(--color-fg)]'
@@ -641,15 +610,7 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
             ))}
             </div>
           ) : null}
-        </div>
-
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="shrink-0 border-b border-[var(--color-divider)] px-5 py-4 sm:px-6 sm:pr-14 sm:pt-5">
-            <h2 className="text-lg font-medium text-[var(--color-fg)]">
-              {t(WORKSPACE_MANAGEMENT_TABS.find((item) => item.key === (canManage ? tab : 'members'))!.label)}
-            </h2>
-          </div>
-          <div ref={paneRef} data-workspace-management-scroll className="min-h-0 min-w-0 flex-1 space-y-4 overflow-x-hidden overflow-y-auto overscroll-contain px-5 py-5 scrollbar-thin sm:px-6">
+          <div data-workspace-management-scroll className="min-w-0 space-y-4 py-3">
 
         {tab !== 'members' && canManage ? null : (
         <div
@@ -866,7 +827,7 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
         ) : null}
           </div>
 
-        <DialogFooter className="flex-wrap justify-between gap-y-2">
+        <div className="flex flex-wrap gap-2 border-t border-[var(--color-divider)] pt-3">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             {isOwner && tab === 'members' ? (
               <Button
@@ -892,28 +853,10 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
                 <Trash2 size={13} aria-hidden />
                 {t('workspace.delete', { defaultValue: 'Delete workspace' })}
               </Button>
-            ) : (
-              <Button
-                variant="destructive"
-                loading={actioning}
-                disabled={domainLocked}
-                title={domainLocked ? t('workspace.domainLocked') : undefined}
-                onClick={() => void runFooterAction(
-                  leaveWs,
-                  t('workspace.leaveFailed', { defaultValue: 'Could not leave the workspace.' }),
-                )}
-              >
-                <LogOut size={13} aria-hidden />
-                {t('workspace.leave', { defaultValue: 'Leave workspace' })}
-              </Button>
-            )}
+            ) : null}
           </div>
-          <Button variant="ghost" disabled={actioning || busyUid !== null} onClick={() => onOpenChange(false)}>
-            {t('common.close', { ns: 'common', defaultValue: 'Close' })}
-          </Button>
-        </DialogFooter>
         </div>
-      </DialogContent>
+      </section>
 
       <WorkspaceTransferDialog
         open={transferOpen}
@@ -1036,7 +979,7 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </Dialog>
+    </>
   )
 }
 

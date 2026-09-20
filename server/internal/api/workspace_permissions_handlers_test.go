@@ -205,7 +205,7 @@ func TestHTTPWorkspaceKnowledgeBaseManagersUpdateOnlyLibraryLayer(t *testing.T) 
 		t, http.MethodGet, "/api/kbs/x/workspace-members", member,
 		map[string]string{"id": kbID}, nil,
 	))
-	if listed.Code != http.StatusOK {
+	if listed.Code != http.StatusNotFound {
 		t.Fatalf("creator list status=%d body=%s", listed.Code, listed.Body.String())
 	}
 
@@ -231,7 +231,7 @@ func TestHTTPWorkspaceKnowledgeBaseManagersUpdateOnlyLibraryLayer(t *testing.T) 
 		t.Fatalf("owner could not restrict creator: status=%d body=%s", lockedCreator.Code, lockedCreator.Body.String())
 	}
 	kb, err := store.GetKB(t.Context(), deps.DB, kbID, member.ID)
-	if err != nil || kb.CanUpload || kb.CanDeleteContent || !kb.CanManageMembers {
+	if err != nil || kb.CanUpload || kb.CanDeleteContent || kb.CanManageMembers {
 		t.Fatalf("creator effective rights=%+v err=%v", kb, err)
 	}
 }

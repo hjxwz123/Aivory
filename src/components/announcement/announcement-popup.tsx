@@ -2,9 +2,9 @@
  * AnnouncementPopup — the global notice (§ announcement) shown to users on load.
  *
  * Config comes from GET /api/announcement. An image makes it an image
- * announcement (image left, text right); without one it's a clean text card with
- * a thin accent rule. A configured plain-text title is shown above the sanitized
- * HTML body; legacy announcements keep an a11y-only title. When the admin allows
+ * announcement (image left, text right); without one it uses the standard dialog.
+ * A plain-text title is shown above the sanitized HTML body, defaulting to
+ * the localized announcement title when unset. When the admin allows
  * remembered dismissals, the footer offers a dedicated action that hides only
  * this version on future visits; a newly updated announcement appears again.
  * Mandatory announcements lock every dismissal path for five seconds.
@@ -170,12 +170,12 @@ export function AnnouncementPopup() {
             </div>
           ) : null}
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            <DialogHeader className={cn(!title && 'sr-only')}>
+            <DialogHeader>
               <DialogTitle className="break-words pr-10">
                 {title || t('announcement.title', { defaultValue: 'Announcement' })}
               </DialogTitle>
             </DialogHeader>
-            <DialogBody className={cn('min-w-0 overflow-x-hidden', !title && 'pt-5 pr-14')}>
+            <DialogBody className="min-w-0 overflow-x-hidden">
               {data.body.trim() ? (
                 <div
                   className={cn(
@@ -194,7 +194,7 @@ export function AnnouncementPopup() {
                 />
               ) : null}
             </DialogBody>
-            <DialogFooter className="max-sm:flex-col max-sm:items-stretch">
+            <DialogFooter className="flex-wrap">
               {closeLocked ? (
                 <span
                   className="flex min-h-8 items-center gap-1.5 text-[12.5px] text-[var(--color-fg-muted)] sm:mr-auto"
