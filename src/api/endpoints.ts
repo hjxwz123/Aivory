@@ -238,6 +238,12 @@ export const authApi = {
       `/me/files${qs.toString() ? `?${qs}` : ''}`,
     )
   },
+  /** Save an edited preview as a new standalone attachment. */
+  saveDocumentCopy: (blob: Blob, filename: string) => {
+    const form = new FormData()
+    form.append('file', blob, filename)
+    return apiUpload<ApiAttachment>('/files', form)
+  },
   deleteMyFiles: (items: Array<{ source: 'file' | 'document'; id: string }>) =>
     api<{ deleted: number }>('/me/files/delete', { method: 'POST', body: { items } }),
   myFileContentBlob: async (source: 'file' | 'document', id: string, signal?: AbortSignal): Promise<Blob> => {
