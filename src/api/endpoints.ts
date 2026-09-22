@@ -42,6 +42,7 @@ import type {
   ApiAuthPolicy,
   ApiAuthResponse,
   ApiAuthSessionResponse,
+  ApiAttachment,
   ApiBuiltinTool,
   ApiChannel,
   ApiChannelModelBatchResult,
