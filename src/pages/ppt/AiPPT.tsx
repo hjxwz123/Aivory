@@ -50,8 +50,7 @@ import { useTheme } from '@/store/theme'
 type SDKState = 'idle' | 'loading' | 'ready' | 'error'
 
 /** Pages the embedded SDK can show; mapping is page → our own header toggle. */
-const SDK_PAGES = ['creator', 'dashboard'] as const
-type SDKPage = (typeof SDK_PAGES)[number]
+type SDKPage = 'creator' | 'dashboard'
 
 function apiErrorCode(error: unknown): string | null {
   if (!(error instanceof ApiError)) return null
