@@ -346,6 +346,45 @@ func uploadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, verr)
 		return
 	}
+	// Folder uploads send one request per file plus the file's path inside the
+	// folder (`rel_path`), which is what lets the folder keep its shape all the
+	// way into the code sandbox. Single-file uploads omit the field entirely and
+	// keep rel_path == "" — the behaviour every existing caller depends on.
+	//
+	// The folder name that prefixes the staged tree travels in `folder_name`
+	// (one value, repeated identically on every request of the batch). It is a
+	// single path segment, never a path, so it is sanitised as one.
+	folder := strings.TrimSpace(r.FormValue("folder_name"))
+	if folder != "" {
+		folderBase := filepath.Base(strings.ReplaceAll(folder, "\\", "/"))
+		if folderBase != folder || folderBase == "" || folderBase == "." || folderBase == ".." || strings.HasPrefix(folderBase, ".") {
+			writeError(w, 400, fmt.Errorf("%w: invalid folder name", errInvalidUpload))
+			return
+		}
+		folder = folderBase
+	}
+	relPath := ""
+	if rawRel := strings.TrimSpace(r.FormValue("rel_path")); rawRel != "" {
+		// A folder upload must also name the folder itself; a bare rel_path
+		// would stage files at the uploads root and collide across batches.
+		if folder == "" {
+			writeError(w, 400, fmt.Errorf("%w: rel_path requires folder_name", errInvalidUpload))
+			return
+		}
+		cleaned, ok := validateUploadRelPath(rawRel)
+		if !ok {
+			writeError(w, 400, fmt.Errorf("%w: invalid relative path", errInvalidUpload))
+			return
+		}
+		// The path's last segment IS the filename that validateUpload already
+		// checked; a mismatch means the client is describing a different file
+		// than it attached, so refuse rather than store a lying path.
+		if filepath.Base(cleaned) != safe {
+			writeError(w, 400, fmt.Errorf("%w: relative path does not match the filename", errInvalidUpload))
+			return
+		}
+		relPath = cleaned
+	}
 	// Inspect a bounded prefix before creating the application-owned destination.
 	// Filename and multipart MIME are both client-controlled; a PNG renamed to
 	// notes.txt must still be treated as an image for model-capability gating.
@@ -454,6 +493,7 @@ func uploadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	f, err := store.CreateFile(r.Context(), d.DB, store.File{
 		UserID: u.ID, ConversationID: conv, Filename: safe,
+		RelPath:  folderRelativeName(folder, relPath, safe),
 		MimeType: mimeType, SizeBytes: n,
 		Kind: kind, StoragePath: path,
 		Draft: draft,
@@ -486,7 +526,14 @@ func uploadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// the project opted in, also register it as a project-KB document + ingest.
 	// Best-effort — never fails the upload. Reuses the conversation fetched by
 	// the scope check above.
-	if scopeConv != nil && isDocKind(f.Kind) {
+	//
+	// Folder uploads are excluded from BOTH ingest paths below: a shared project
+	// directory is hundreds of files, and firing one parse+embed job per file
+	// would saturate the ingest queue and the vector store for content the model
+	// reads directly from the sandbox instead. Single files keep working exactly
+	// as before (relPath == "").
+	isFolderUpload := f.RelPath != ""
+	if scopeConv != nil && isDocKind(f.Kind) && !isFolderUpload {
 		if c := scopeConv; c.ProjectID != "" {
 			permissions, permissionErr := requestPermissions(d, r)
 			if p, err := store.GetProject(r.Context(), d.DB, c.ProjectID, u.ID); permissionErr == nil && permissions.AllowKnowledgeBases && err == nil && p.AutoAddUploads && p.KBID != "" && knowledgeBaseAccessPolicy(d, r, p.KBID, true) == nil {
@@ -506,7 +553,7 @@ func uploadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// it. The chunks live ONLY for this conversation (cascade-deleted on conv
 	// delete via FK), so they don't pollute the project KB.
 	wantRAG := r.URL.Query().Get("rag")
-	if conv != "" && isDocKind(f.Kind) && (wantRAG == "1" || wantRAG == "true") {
+	if conv != "" && isDocKind(f.Kind) && !isFolderUpload && (wantRAG == "1" || wantRAG == "true") {
 		if doc, derr := store.CreateDocumentForUser(r.Context(), d.DB, store.Document{
 			ConversationID: conv, Filename: f.Filename, MimeType: f.MimeType,
 			SizeBytes: f.SizeBytes, Status: "pending", StoragePath: f.StoragePath,
@@ -521,6 +568,34 @@ func uploadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// after the local blob URL is revoked (§ user-bubble image preview).
 	f.URL = "/api/files/" + f.ID
 	writeJSON(w, 201, f)
+}
+
+// folderRelativeName renders the path a staged file should occupy inside the
+// sandbox, relative to /workspace/uploads: the uploaded folder's name followed
+// by the file's path within it ("my-project/src/app.ts").
+//
+// Folding the folder name into the stored path (rather than storing the folder
+// only on upload and discarding it) is what makes the shape durable: it is read
+// back by the sandbox stager and by the folder manifest on a later turn, when
+// the original request is long gone.
+//
+// The single-file case (folder == "" and relPath == "") returns "", which every
+// existing consumer treats as "flat uploads/<filename>".
+func folderRelativeName(folder, relPath, filename string) string {
+	if folder == "" {
+		return ""
+	}
+	if relPath == "" {
+		return folder + "/" + filename
+	}
+	// The picker reports "folder/sub/file.txt"; the folder prefix is already
+	// present in the stored path, so strip exactly one occurrence of it to avoid
+	// staging at folder/folder/sub/file.txt.
+	prefix := folder + "/"
+	if strings.HasPrefix(relPath, prefix) {
+		return relPath
+	}
+	return prefix + relPath
 }
 
 // isDocKind reports whether a file kind should be RAG-ingested as a document.

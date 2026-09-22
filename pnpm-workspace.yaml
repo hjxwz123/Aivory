@@ -1,0 +1,52 @@
+# pnpm 11 settings. This checkout ships an npm `package-lock.json`, but the build
+# environment provides pnpm only, and pnpm 11 reads settings from this file
+# rather than the `pnpm` field in package.json.
+#
+# The overrides mirror what `package-lock.json` already pins so a pnpm install
+# reproduces the tree the project was tested against. Without them pnpm resolves
+# the caret ranges declared by @tiptap/starter-kit@3.28.0 to 3.31.x extension
+# packages, which import `getPreviousBlockSibling` from an API that
+# @tiptap/core@3.28.0 does not export — breaking rich-composer-editor at import.
+allowBuilds:
+  esbuild: true
+
+minimumReleaseAgeExclude:
+  - '@lezer/javascript@1.5.5'
+
+overrides:
+  # pnpm resolved this to 1.0.0 (a 2021-era build) even though the range is
+  # ^1.0.0 and 1.5.5 is current. Its pre-generated parser tables are
+  # incompatible with @lezer/lr@1.4.10, so the HTML code editor threw
+  # "RangeError: Invalid top rule name SingleExpression" and rendered NOTHING.
+  # Only reachable in a real browser — tsc, unit tests and vite build all passed.
+  '@lezer/javascript': 1.5.5
+  '@tiptap/core': 3.28.0
+  '@tiptap/pm': 3.28.0
+  '@tiptap/react': 3.28.0
+  '@tiptap/starter-kit': 3.28.0
+  '@tiptap/extensions': 3.28.0
+  '@tiptap/extension-blockquote': 3.28.0
+  '@tiptap/extension-bold': 3.28.0
+  '@tiptap/extension-bubble-menu': 3.28.0
+  '@tiptap/extension-bullet-list': 3.28.0
+  '@tiptap/extension-code': 3.28.0
+  '@tiptap/extension-code-block': 3.28.0
+  '@tiptap/extension-document': 3.28.0
+  '@tiptap/extension-dropcursor': 3.28.0
+  '@tiptap/extension-floating-menu': 3.28.0
+  '@tiptap/extension-gapcursor': 3.28.0
+  '@tiptap/extension-hard-break': 3.28.0
+  '@tiptap/extension-heading': 3.28.0
+  '@tiptap/extension-horizontal-rule': 3.28.0
+  '@tiptap/extension-italic': 3.28.0
+  '@tiptap/extension-link': 3.28.0
+  '@tiptap/extension-list': 3.28.0
+  '@tiptap/extension-list-item': 3.28.0
+  '@tiptap/extension-list-keymap': 3.28.0
+  '@tiptap/extension-mathematics': 3.28.0
+  '@tiptap/extension-ordered-list': 3.28.0
+  '@tiptap/extension-paragraph': 3.28.0
+  '@tiptap/extension-placeholder': 3.28.0
+  '@tiptap/extension-strike': 3.28.0
+  '@tiptap/extension-text': 3.28.0
+  '@tiptap/extension-underline': 3.28.0

@@ -56,6 +56,16 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  optimizeDeps: {
+    // The dev-time dependency pre-bundler targets es2020 by default, but
+    // @docx-editor.dev/core ships TOP-LEVEL AWAIT in its dist. Production builds
+    // already pass (build.target is es2022) — without this the dev server alone
+    // fails to optimise the Word editor's chunk, so `npm run dev` breaks the
+    // moment a .docx is opened. Keep the two targets aligned.
+    esbuildOptions: {
+      target: 'es2022',
+    },
+  },
   server: {
     port: 5173,
     host: true,

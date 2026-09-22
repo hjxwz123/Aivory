@@ -66,6 +66,16 @@ vi.mock('@/store/models', () => ({
 
 import { useToastStore } from '@/hooks/use-toast'
 
+/**
+ * This test does no waiting of its own — it flushes two microtasks and asserts.
+ * The only reason it can exceed vitest's 5s default is that the machine was
+ * starved while the dynamic `import('@/lib/realtime')` resolved its module
+ * graph, which is exactly what happens when several full suites run at once.
+ * Raising the ceiling cannot hide a logic defect, because there is no logic
+ * here that could take 30 seconds.
+ */
+const TEST_TIMEOUT_MS = 30_000
+
 describe('automatic compaction notifications', () => {
   afterEach(() => {
     realtimeAuth.user = null
@@ -83,5 +93,5 @@ describe('automatic compaction notifications', () => {
     await Promise.resolve()
 
     expect(useToastStore.getState().toasts).toHaveLength(0)
-  })
+  }, TEST_TIMEOUT_MS)
 })

@@ -1,8 +1,26 @@
 import tailwindBrowserUrl from '@tailwindcss/browser?url'
 
-const PREVIEW_RESOURCE_HEAD =
-  '<meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">' +
-  '<base target="_blank" rel="noopener noreferrer">'
+const PREVIEW_BASE = '<base target="_blank" rel="noopener noreferrer">'
+const UPGRADE_INSECURE =
+  '<meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">'
+
+/**
+ * `upgrade-insecure-requests` exists to stop a browser blocking `http://`
+ * subresources as mixed content when the app is served over HTTPS.
+ *
+ * On an HTTP origin there is no mixed content to fix, but the directive still
+ * rewrites SAME-ORIGIN `http://` subresources to `https://` — and on a plain-http
+ * self-hosted deployment that fails with ERR_SSL_PROTOCOL_ERROR. Because the
+ * injected Tailwind runtime is one of those subresources, the runtime never
+ * loaded and every assistant-written artifact rendered completely unstyled.
+ *
+ * `localhost` is a "potentially trustworthy origin" and is exempt from the
+ * directive, which is why this only ever reproduced off-localhost.
+ */
+function securePreviewHead(): string {
+  const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:'
+  return isHttps ? UPGRADE_INSECURE + PREVIEW_BASE : PREVIEW_BASE
+}
 
 const TAILWIND_RUNTIME = `<script data-aivory-tailwind src="${tailwindBrowserUrl}"></script>`
 const PUBLIC_TAILWIND_RUNTIME = '<script data-aivory-tailwind src="/tailwind-browser.js"></script>'
@@ -49,11 +67,11 @@ function rewriteRestrictedResources(html: string): string {
     .replace(GOOGLE_FONTS_FILE_HOST, 'https://gstatic.loli.net')
 }
 
-function buildPreviewDocument(html: string, tailwindRuntime: string): string {
+function buildPreviewDocument(html: string, tailwindRuntime: string, resourceHead: string): string {
   if (!html) return html
 
   const previewHtml = rewriteRestrictedResources(html)
-  const previewHead = PREVIEW_RESOURCE_HEAD + (usesTailwindUtilities(previewHtml) ? tailwindRuntime : '')
+  const previewHead = resourceHead + (usesTailwindUtilities(previewHtml) ? tailwindRuntime : '')
   const headOpen = /<head[^>]*>/i
   if (headOpen.test(previewHtml)) return previewHtml.replace(headOpen, (match) => match + previewHead)
 
@@ -65,10 +83,16 @@ function buildPreviewDocument(html: string, tailwindRuntime: string): string {
 
 /** Build the in-app iframe document using Vite's current hashed runtime asset. */
 export function buildHtmlPreviewDocument(html: string): string {
-  return buildPreviewDocument(html, TAILWIND_RUNTIME)
+  return buildPreviewDocument(html, TAILWIND_RUNTIME, securePreviewHead())
 }
 
-/** Build a durable public document whose runtime URL survives app upgrades. */
+/**
+ * Build a durable public document whose runtime URL survives app upgrades.
+ *
+ * The public head always upgrades insecure requests: the shared preview is
+ * served from its own origin by our server, and the document is built before
+ * that origin is known, so the conservative directive is kept.
+ */
 export function buildPublicHtmlPreviewDocument(html: string): string {
-  return buildPreviewDocument(html, PUBLIC_TAILWIND_RUNTIME)
+  return buildPreviewDocument(html, PUBLIC_TAILWIND_RUNTIME, UPGRADE_INSECURE + PREVIEW_BASE)
 }

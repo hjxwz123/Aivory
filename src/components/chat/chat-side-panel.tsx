@@ -1,9 +1,13 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 import { X } from 'lucide-react'
+import { ArtifactPanelResizeHandle } from '@/components/chat/artifact-panel-resize-handle'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { Tooltip } from '@/components/ui/tooltip'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { mediaQuery } from '@/lib/design-tokens'
+import { ARTIFACT_PANEL_DEFAULT_WIDTH } from '@/lib/artifact-panel-width'
+import { useSettings } from '@/store/settings'
 import { cn } from '@/lib/utils'
 
 interface ChatSidePanelProps {
@@ -13,10 +17,22 @@ interface ChatSidePanelProps {
   children: ReactNode
 }
 
-/** Shared shell for the mutually exclusive chat-side surfaces. */
+/**
+ * Shared shell for the mutually exclusive chat-side surfaces.
+ *
+ * Desktop renders a docked column whose width the user controls by dragging the
+ * divider on its left edge (or with the arrow keys / Home / End / Enter while it
+ * is focused). The width lives in the settings store, so it survives reloads and
+ * is shared by every right-edge panel — the HTML preview, the document viewer
+ * and the file editors all resize the same way.
+ */
 export function ChatSidePanel({ open, title, onClose, children }: ChatSidePanelProps) {
   const isDesktop = useMediaQuery(mediaQuery.desktop)
+  const { t } = useTranslation('common')
   const [present, setPresent] = useState(open)
+  const panelRef = useRef<HTMLElement>(null)
+  const panelWidth = useSettings((s) => s.artifactPanelWidth)
+  const setPanelWidth = useSettings((s) => s.setArtifactPanelWidth)
 
   useEffect(() => {
     if (open) {
@@ -31,24 +47,47 @@ export function ChatSidePanel({ open, title, onClose, children }: ChatSidePanelP
     return () => window.clearTimeout(timer)
   }, [open, present])
 
+  // The persisted width has to reach CSS before the panel's open animation ends,
+  // otherwise the first frame after a reload would use the default width and
+  // visibly snap once React committed the stored value.
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    document.documentElement.style.setProperty('--chat-side-panel-width', `${panelWidth}px`)
+  }, [panelWidth])
+
   if (isDesktop) {
     if (!present) return null
     return (
-      <aside
-        aria-label={title}
+      <div
         data-state={open ? 'open' : 'closed'}
-        onAnimationEnd={(event) => {
-          if (event.currentTarget === event.target && !open) setPresent(false)
-        }}
         className={cn(
-          'chat-side-panel hidden h-full shrink-0 overflow-hidden bg-[var(--color-surface-sunken)] lg:block',
+          'chat-side-panel-frame flex h-full shrink-0 overflow-hidden',
           !open && 'pointer-events-none',
         )}
       >
-        <div className="chat-side-panel-inner flex h-full flex-col">
-          {children}
-        </div>
-      </aside>
+        <ArtifactPanelResizeHandle
+          label={t('aria.panelResize', { defaultValue: 'Resize the preview panel' })}
+          controlsId="chat-side-panel"
+          targetRef={panelRef}
+          width={panelWidth}
+          onCommit={setPanelWidth}
+          onReset={() => setPanelWidth(ARTIFACT_PANEL_DEFAULT_WIDTH)}
+        />
+        <aside
+          ref={panelRef}
+          id="chat-side-panel"
+          aria-label={title}
+          data-state={open ? 'open' : 'closed'}
+          onAnimationEnd={(event) => {
+            if (event.currentTarget === event.target && !open) setPresent(false)
+          }}
+          className="chat-side-panel hidden h-full min-w-0 flex-1 overflow-hidden bg-[var(--color-surface-sunken)] lg:block"
+        >
+          <div className="chat-side-panel-inner flex h-full flex-col">
+            {children}
+          </div>
+        </aside>
+      </div>
     )
   }
 

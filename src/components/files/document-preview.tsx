@@ -5,6 +5,7 @@ import { DocxNativePreview } from '@/components/files/docx-native-preview'
 import { PdfNativePreview } from '@/components/files/pdf-native-preview'
 import { PptxNativePreview } from '@/components/files/pptx-native-preview'
 import { SpreadsheetNativePreview } from '@/components/files/spreadsheet-native-preview'
+import { SandboxedHtmlFrame } from '@/components/html/sandboxed-html-frame'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { documentPreviewKind, MAX_TEXT_PREVIEW_BYTES } from '@/lib/file-preview-kind'
@@ -87,7 +88,9 @@ export function DocumentPreview({
   const { t, i18n } = useTranslation('files')
   const kind = documentPreviewKind(name, mimeType, backendKind)
   const text = useMemo(() => {
-    if (kind !== 'text' || !data || data.byteLength > MAX_TEXT_PREVIEW_BYTES) return null
+    if ((kind !== 'text' && kind !== 'html') || !data || data.byteLength > MAX_TEXT_PREVIEW_BYTES) {
+      return null
+    }
     return new TextDecoder('utf-8', { fatal: false }).decode(data)
   }, [data, kind])
 
@@ -180,6 +183,15 @@ export function DocumentPreview({
         }}
       />
     )
+  }
+
+  if (kind === 'html' && data) {
+    if (data.byteLength > MAX_TEXT_PREVIEW_BYTES) {
+      return <PreviewNotice kind="unsupported" title={t('preview.tooLarge')} />
+    }
+    // Rendered live in an opaque-origin sandbox, never shown as source — see
+    // SandboxedHtmlFrame for why the sandbox must not gain allow-same-origin.
+    return <SandboxedHtmlFrame doc={text ?? ''} title={name} />
   }
 
   if (kind === 'text' && data) {

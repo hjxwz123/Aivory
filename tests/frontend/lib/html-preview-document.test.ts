@@ -1,6 +1,13 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import { buildHtmlPreviewDocument, buildPublicHtmlPreviewDocument } from '@/lib/html-preview-document'
 
+/**
+ * jsdom's default URL is plain http, which is the branch that used to break:
+ * `upgrade-insecure-requests` rewrote our own same-origin Tailwind runtime to
+ * https, TLS failed, and every artifact rendered unstyled. The HTTPS branch is
+ * pinned by the sibling html-preview-document-https.test.ts.
+ */
 describe('buildHtmlPreviewDocument', () => {
   it('loads the bundled Tailwind runtime for generated utility-class fragments', () => {
     const document = buildHtmlPreviewDocument(
@@ -9,8 +16,9 @@ describe('buildHtmlPreviewDocument', () => {
 
     expect(document).toContain('data-aivory-tailwind')
     expect(document).not.toContain('cdn.jsdelivr.net')
-    expect(document).toContain('upgrade-insecure-requests')
     expect(document).toContain('target="_blank"')
+    // Plain http: nothing to upgrade, and upgrading would break the runtime.
+    expect(document).not.toContain('upgrade-insecure-requests')
   })
 
   it('inserts preview resources inside an existing document head', () => {
@@ -18,8 +26,9 @@ describe('buildHtmlPreviewDocument', () => {
       '<!doctype html><html><head><title>Preview</title></head><body class="grid gap-4"></body></html>',
     )
 
-    expect(document.indexOf('upgrade-insecure-requests')).toBeGreaterThan(document.indexOf('<head>'))
-    expect(document.indexOf('upgrade-insecure-requests')).toBeLessThan(document.indexOf('<title>'))
+    const base = document.indexOf('target="_blank"')
+    expect(base).toBeGreaterThan(document.indexOf('<head>'))
+    expect(base).toBeLessThan(document.indexOf('<title>'))
     expect(document).toContain('data-aivory-tailwind')
   })
 

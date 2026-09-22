@@ -2,6 +2,7 @@ export type DocumentPreviewKind =
   | 'image'
   | 'pdf'
   | 'text'
+  | 'html'
   | 'docx'
   | 'pptx'
   | 'xlsx'
@@ -72,8 +73,6 @@ const TEXT_EXTENSIONS = new Set([
   'h',
   'hs',
   'hpp',
-  'htm',
-  'html',
   'ini',
   'java',
   'js',
@@ -120,6 +119,15 @@ const TEXT_EXTENSIONS = new Set([
 ])
 
 const DELIMITED_TEXT_EXTENSIONS = new Set(['csv', 'tsv'])
+
+/**
+ * Markup extensions that render in the sandboxed preview iframe instead of
+ * being shown as source. Kept apart from TEXT_EXTENSIONS on purpose: these
+ * files preview as a live document but still belong to the "text" browse
+ * filter (see fileTypeFilterFor).
+ */
+const HTML_EXTENSIONS = new Set(['htm', 'html', 'xhtml'])
+
 const DOCX_EXTENSIONS = new Set(['docx'])
 const PPTX_EXTENSIONS = new Set(['pptx'])
 const XLSX_EXTENSIONS = new Set(['xlsx', 'xlsm'])
@@ -217,9 +225,11 @@ const TEXT_MIME_TYPES = new Set([
   'application/x-javascript',
   'application/x-sh',
   'application/x-yaml',
-  'application/xhtml+xml',
   'application/xml',
 ])
+
+/** MIME types served as a rendered document rather than as source text. */
+const HTML_MIME_TYPES = new Set(['application/xhtml+xml', 'text/html'])
 
 function normalizedMime(mime?: string): string {
   return (mime ?? '').split(';', 1)[0]?.trim().toLowerCase() ?? ''
@@ -249,6 +259,7 @@ export function documentPreviewKind(
   if (DOCX_EXTENSIONS.has(extension)) return 'docx'
   if (PPTX_EXTENSIONS.has(extension)) return 'pptx'
   if (XLSX_EXTENSIONS.has(extension)) return 'xlsx'
+  if (HTML_EXTENSIONS.has(extension)) return 'html'
   if (TEXT_EXTENSIONS.has(extension) || DELIMITED_TEXT_EXTENSIONS.has(extension)) return 'text'
   if (
     IMAGE_EXTENSIONS.has(extension) ||
@@ -265,6 +276,7 @@ export function documentPreviewKind(
   if (DOCX_MIME_TYPES.has(normalized)) return 'docx'
   if (PPTX_MIME_TYPES.has(normalized)) return 'pptx'
   if (XLSX_MIME_TYPES.has(normalized)) return 'xlsx'
+  if (HTML_MIME_TYPES.has(normalized)) return 'html'
   if (
     normalized.startsWith('text/') ||
     TEXT_MIME_TYPES.has(normalized) ||
@@ -314,6 +326,9 @@ export function fileTypeFilterFor(
   if (PRESENTATION_EXTENSIONS.has(extension)) return 'presentation'
   if (SPREADSHEET_EXTENSIONS.has(extension)) return 'spreadsheet'
   if (IMAGE_EXTENSIONS.has(extension)) return 'image'
+  // Rendered as a document, but still a source-text file in the browse filter —
+  // matching the grouping users already had before HTML files became previewable.
+  if (HTML_EXTENSIONS.has(extension)) return 'text'
   if (TEXT_EXTENSIONS.has(extension)) return 'text'
 
   const normalized = normalizedMime(mime)
@@ -366,6 +381,7 @@ export function isPreviewSupported(name: string, mime?: string, backendKind?: st
 export function documentPreviewByteLimit(kind: DocumentPreviewKind): number | null {
   switch (kind) {
     case 'text':
+    case 'html':
       return MAX_TEXT_PREVIEW_BYTES
     case 'docx':
     case 'pptx':

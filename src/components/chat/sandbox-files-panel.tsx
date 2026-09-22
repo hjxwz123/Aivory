@@ -1,23 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { ArrowLeft, ChevronRight, Folder, Home, RefreshCw } from 'lucide-react'
 import { conversationsApi } from '@/api/endpoints'
 import { ChatSidePanel, ChatSidePanelHeader } from '@/components/chat/chat-side-panel'
-import { FilePreview } from '@/components/chat/file-preview'
 import { Tooltip } from '@/components/ui/tooltip'
 import { fileIconFor } from '@/lib/file-icon'
 import { sandboxEntriesAtPath, sandboxFileKind } from '@/lib/sandbox-browser'
 import { cn } from '@/lib/utils'
+import { useArtifactPanel } from '@/store/artifact-panel'
 import { useSandboxFiles } from '@/store/sandbox-files'
-import type { Attachment } from '@/types/chat'
-
-interface PreviewTarget {
-  name: string
-  url: string
-  kind: Attachment['kind']
-  authenticated: true
-}
 
 export function SandboxFilesPanel() {
   const open = useSandboxFiles((state) => state.open)
@@ -51,13 +43,15 @@ function SandboxFilesBody({ onClose }: { onClose: () => void }) {
   const load = useSandboxFiles((state) => state.load)
   const enter = useSandboxFiles((state) => state.enter)
   const up = useSandboxFiles((state) => state.up)
-  const [preview, setPreview] = useState<PreviewTarget | null>(null)
   const entries = useMemo(() => sandboxEntriesAtPath(files, currentPath), [currentPath, files])
   const breadcrumbs = currentPath ? currentPath.split('/') : []
 
   function previewFile(name: string, path: string) {
     if (!conversationId) return
-    setPreview({
+    // Hand the document to the shared right-edge Artifact panel instead of a
+    // centered dialog, so the file listing stays visible while it loads.
+    useArtifactPanel.getState().openArtifact({
+      type: 'file',
       name,
       url: conversationsApi.sandboxFileUrl(conversationId, path),
       kind: sandboxFileKind(name),
@@ -179,8 +173,6 @@ function SandboxFilesBody({ onClose }: { onClose: () => void }) {
           </ul>
         )}
       </div>
-
-      <FilePreview open={Boolean(preview)} onOpenChange={(open) => { if (!open) setPreview(null) }} file={preview} />
     </>
   )
 }

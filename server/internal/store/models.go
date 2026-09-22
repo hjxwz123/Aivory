@@ -674,9 +674,18 @@ type File struct {
 	UserID         string `json:"user_id"`
 	ConversationID string `json:"conversation_id"`
 	Filename       string `json:"filename"`
-	MimeType       string `json:"mime_type"`
-	SizeBytes      int64  `json:"size_bytes"`
-	Kind           string `json:"kind"`
+	// RelPath is the file's path INSIDE an uploaded folder, relative to that
+	// folder's root ("src/app/main.ts"). Empty for a single-file upload.
+	//
+	// It exists so a folder upload keeps its shape: the sandbox stages each file
+	// at /workspace/uploads/<folder>/<RelPath> instead of flattening every
+	// basename into one directory, and the model is handed a tree it can walk.
+	// Always "/"-separated, never absolute, never containing "..", and never
+	// containing an empty segment — see validateUploadRelPath in the api package.
+	RelPath   string `json:"rel_path,omitempty"`
+	MimeType  string `json:"mime_type"`
+	SizeBytes int64  `json:"size_bytes"`
+	Kind      string `json:"kind"`
 	// Draft is true for a composer upload that has not yet been committed to a
 	// user message. Conversation-file drawer uploads are immediately committed.
 	Draft bool `json:"draft"`

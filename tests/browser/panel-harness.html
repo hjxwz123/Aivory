@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Artifact panel harness</title>
+    <!--
+      Dev/test-only page. Not reachable from index.html, so it never ships.
+
+      Mounts the REAL ArtifactPanel beside a stand-in conversation column, so
+      tests/browser/run-panel.mjs can drive the file preview / editor flow and
+      the resizable split exactly as the chat shell does.
+
+      Query params: ?file=<fixture>&name=<filename>&dir=<fixture dir>
+    -->
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/tests/browser/panel-harness.ts"></script>
+  </body>
+</html>

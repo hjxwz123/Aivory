@@ -1,13 +1,13 @@
 import { create } from 'zustand'
-import { useHtmlPreview } from './html-preview'
+import { useArtifactPanel } from './artifact-panel'
 import { useConversationFiles } from './conversation-files'
 import { useSandboxFiles } from './sandbox-files'
 
 /**
  * inline-thread — drives the right-side drawer that shows a text-selection
  * sub-conversation (§ text-selection threads). Only one right-edge drawer may be
- * visible at a time, so opening this one closes the HTML preview and vice-versa
- * (the coordination lives here + in html-preview.ts).
+ * visible at a time, so opening this one closes the artifact panel and vice-versa
+ * (the coordination lives here + in artifact-panel.ts).
  */
 interface InlineThreadDrawerStore {
   open: boolean
@@ -24,8 +24,8 @@ export const useInlineThreadDrawer = create<InlineThreadDrawerStore>((set) => ({
   childId: null,
   quote: '',
   openThread({ childId, quote }) {
-    // Mutual exclusion: the HTML preview and this drawer share the right edge.
-    useHtmlPreview.getState().close()
+    // Mutual exclusion: the artifact panel and this drawer share the right edge.
+    useArtifactPanel.getState().close()
     useConversationFiles.getState().close()
     useSandboxFiles.getState().close()
     set({ open: true, childId, quote })

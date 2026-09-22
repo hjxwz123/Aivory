@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { conversationsApi } from '@/api/endpoints'
 import { apiUpload } from '@/api/client'
 import type { ApiConversationFile } from '@/api/types'
-import { useHtmlPreview } from './html-preview'
+import { useArtifactPanel } from './artifact-panel'
 import { useInlineThreadDrawer } from './inline-thread'
 import { useSandboxFiles } from './sandbox-files'
 
@@ -37,7 +37,7 @@ export const useConversationFiles = create<ConversationFilesStore>((set, get) =>
 
   openDrawer(conversationId) {
     // Mutual exclusion: the right-edge drawers share the same column.
-    useHtmlPreview.getState().close()
+    useArtifactPanel.getState().close()
     useInlineThreadDrawer.getState().close()
     useSandboxFiles.getState().close()
     set({ open: true, conversationId })

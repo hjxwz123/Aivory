@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { VoiceStreamController } from '@/lib/audio-stream'
 
 type SocketPayload = ArrayBuffer | string
 
@@ -111,6 +112,46 @@ class FakeWebSocket {
 
 let mediaStream: FakeMediaStream
 
+/**
+ * The session a test started, so teardown can always cancel it.
+ *
+ * Without this, a test that fails or times out part-way through
+ * `startVoiceStream` leaves a live session behind. Its late continuation pushes
+ * a socket into the shared static `instances` array AFTER `beforeEach` cleared
+ * it, so the next test's `latestSocket()` returns the ZOMBIE socket and then
+ * observes the previous test's buffered audio. That is the exact failure this
+ * suite used to reproduce under CPU contention:
+ *
+ *   AssertionError: expected [ ArrayBuffer [51, 19, 51, 19, …] ] to deeply equal []
+ *
+ * (0x1333 = 4915 = the previous test's 0.15 sample amplitude.)
+ */
+let activeController: VoiceStreamController | null = null
+
+/**
+ * The in-flight `startVoiceStream` of the current test.
+ *
+ * Teardown MUST await this. A test that fails or times out leaves the call
+ * unresolved, and `startVoiceStream` only constructs its socket after awaiting
+ * `getUserMedia` — so an un-awaited start would create its socket during the
+ * NEXT test, land in that test's freshly-cleared instance registry, and hand the
+ * next test the previous test's socket with the previous test's buffered audio:
+ *
+ *   AssertionError: expected [ ArrayBuffer [51, 19, 51, 19, …] ] to deeply equal []
+ *
+ * (0x1333 = 4915 = the previous test's 0.15 sample amplitude.)
+ *
+ * A generation/token tag cannot fix this: a late start reads the CURRENT globals,
+ * so it is indistinguishable from the live test's own call. Draining it in
+ * teardown is what actually removes the zombie.
+ */
+let pendingStart: Promise<VoiceStreamController> | null = null
+
+/** Generous on purpose: these tests do no waiting of their own, so exceeding
+ *  the 5s default only ever means the machine was starved — and a timeout here
+ *  is what creates a zombie session in the first place. */
+const TEST_TIMEOUT_MS = 30_000
+
 function samples(length: number, value: number): Float32Array {
   return new Float32Array(length).fill(value)
 }
@@ -142,16 +183,33 @@ beforeEach(() => {
   vi.stubGlobal('WebSocket', FakeWebSocket)
 })
 
-afterEach(() => {
+afterEach(async () => {
+  // Drain an in-flight start BEFORE the globals are torn down and before the
+  // next test clears the registries — otherwise its socket is created under the
+  // next test's fakes and that test observes this test's audio.
+  const pending = pendingStart
+  pendingStart = null
+  if (pending) {
+    try {
+      ;(await pending).cancel()
+    } catch {
+      /* the start rejected: there is no session to cancel */
+    }
+  }
+
+  activeController?.cancel()
+  activeController = null
   vi.unstubAllGlobals()
   vi.useRealTimers()
   vi.resetModules()
-})
+}, TEST_TIMEOUT_MS)
 
 describe('startVoiceStream', () => {
   it('buffers opening PCM until the backend reports ready', async () => {
     const { startVoiceStream } = await import('@/lib/audio-stream')
-    const controller = await startVoiceStream({})
+    pendingStart = startVoiceStream({})
+    const controller = await pendingStart
+    activeController = controller
     const socket = latestSocket()
     const context = latestContext()
 
@@ -171,11 +229,13 @@ describe('startVoiceStream', () => {
 
     socket.receive({ type: 'final', text: '' })
     controller.cancel()
-  })
+  }, TEST_TIMEOUT_MS)
 
   it('flushes buffered audio before ending when stopped during connection', async () => {
     const { startVoiceStream } = await import('@/lib/audio-stream')
-    const controller = await startVoiceStream({})
+    pendingStart = startVoiceStream({})
+    const controller = await pendingStart
+    activeController = controller
     const socket = latestSocket()
     const context = latestContext()
 
@@ -194,5 +254,5 @@ describe('startVoiceStream', () => {
     expect(socket.sent[1]).toBe('{"type":"end"}')
 
     socket.receive({ type: 'final', text: '' })
-  })
+  }, TEST_TIMEOUT_MS)
 })

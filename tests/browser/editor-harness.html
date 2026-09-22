@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Editor mount harness</title>
+    <!--
+      Dev/test-only page. Not reachable from index.html, so it is never part of
+      the production bundle. Driven by tests/browser/run-editors.mjs, which
+      mounts one real editor at a time against a reference-library fixture and
+      asserts it renders and produces edited bytes.
+
+      ?editor=code|sheet|docx|pptx &file=<fixture> &name=<filename>
+    -->
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      #root {
+        height: 100vh;
+        /* Roughly the real artifact panel's widest size. */
+        width: 560px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/tests/browser/editor-harness.ts"></script>
+  </body>
+</html>

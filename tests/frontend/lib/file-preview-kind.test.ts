@@ -49,6 +49,11 @@ describe('documentPreviewKind', () => {
     ['', '', 'xlsx', 'xlsx'],
     ['data.csv', 'text/csv', undefined, 'text'],
     ['data.TSV', '', 'sheet', 'text'],
+    ['page.HTML', '', undefined, 'html'],
+    ['page.htm', '', 'code', 'html'],
+    ['doc.xhtml', '', undefined, 'html'],
+    ['', 'text/html; charset=utf-8', undefined, 'html'],
+    ['', 'application/xhtml+xml', undefined, 'html'],
   ])('classifies %s (%s, %s) as %s', (name, mime, backendKind, expected) => {
     expect(documentPreviewKind(name, mime, backendKind)).toBe(expected)
   })
@@ -79,6 +84,9 @@ describe('fileTypeFilterFor', () => {
     ['rows.tsv', '', undefined, 'spreadsheet'],
     ['photo.jpeg', '', undefined, 'image'],
     ['script.py', '', undefined, 'text'],
+    ['page.html', '', undefined, 'text'],
+    ['page.htm', '', 'code', 'text'],
+    ['', 'text/html; charset=utf-8', undefined, 'text'],
     ['', 'text/plain; charset=utf-8', undefined, 'text'],
     ['', 'application/json; charset=utf-8', undefined, 'text'],
     ['', 'application/vnd.ms-powerpoint.template.macroEnabled.12', undefined, 'presentation'],
@@ -99,6 +107,22 @@ describe('fileTypeFilterFor', () => {
     }
   })
 
+  it('renders markup as a live document while keeping it in the text filter group', () => {
+    for (const name of ['page.html', 'PAGE.HTM?raw=1', 'doc.xhtml']) {
+      const kind = documentPreviewKind(name, '')
+      expect(kind).toBe('html')
+      expect(fileTypeFilterFor(name, '')).toBe('text')
+      expect(isPreviewSupported(name, '')).toBe(true)
+      expect(documentPreviewByteLimit(kind)).toBe(MAX_TEXT_PREVIEW_BYTES)
+    }
+  })
+
+  it('still previews every other source extension as plain text', () => {
+    for (const name of ['index.js', 'app.tsx', 'style.css', 'data.xml', 'feed.json', 'notes.md']) {
+      expect(documentPreviewKind(name, '')).toBe('text')
+    }
+  })
+
   it('groups legacy Office files correctly without marking them previewable', () => {
     expect(fileTypeFilterFor('old.doc', '')).toBe('document')
     expect(fileTypeFilterFor('old.ppt', '')).toBe('presentation')
@@ -112,6 +136,7 @@ describe('fileTypeFilterFor', () => {
 describe('documentPreviewByteLimit', () => {
   it.each<[DocumentPreviewKind, number | null]>([
     ['text', MAX_TEXT_PREVIEW_BYTES],
+    ['html', MAX_TEXT_PREVIEW_BYTES],
     ['docx', MAX_OFFICE_PREVIEW_BYTES],
     ['pptx', MAX_OFFICE_PREVIEW_BYTES],
     ['xlsx', MAX_OFFICE_PREVIEW_BYTES],

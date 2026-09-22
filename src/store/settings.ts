@@ -10,6 +10,7 @@ import {
   type PrivacySettings,
 } from '@/types/settings'
 import { clampSidebarWidth } from '@/lib/sidebar-width'
+import { clampArtifactPanelWidth } from '@/lib/artifact-panel-width'
 
 const RESPONSE_LENGTHS = ['concise', 'balanced', 'detailed'] as const
 const CHAT_WIDTHS: readonly ChatWidthPref[] = ['narrow', 'comfortable', 'wide', 'full', 'max']
@@ -25,12 +26,19 @@ interface SettingsState {
   privacy: PrivacySettings
   sidebarCollapsed: boolean
   sidebarWidth: number
+  /**
+   * Desktop width of the right-edge artifact panel (the HTML preview / document
+   * surface). The user sets it by dragging the divider between the conversation
+   * and the panel; it persists with the other appearance preferences.
+   */
+  artifactPanelWidth: number
   setAppearance: (patch: Partial<AppearanceSettings>) => void
   syncUserSettings: (settings: Record<string, unknown>) => void
   setModels: (patch: Partial<ModelSettings>) => void
   setPrivacy: (patch: Partial<PrivacySettings>) => void
   setSidebarCollapsed: (v: boolean) => void
   setSidebarWidth: (width: number) => void
+  setArtifactPanelWidth: (width: number) => void
   toggleSidebar: () => void
 }
 
@@ -46,7 +54,7 @@ function load(): Partial<SettingsState> {
   }
 }
 
-function persist(s: Pick<SettingsState, 'appearance' | 'models' | 'privacy' | 'sidebarCollapsed' | 'sidebarWidth'>) {
+function persist(s: Pick<SettingsState, 'appearance' | 'models' | 'privacy' | 'sidebarCollapsed' | 'sidebarWidth' | 'artifactPanelWidth'>) {
   try {
     localStorage.setItem(
       KEY,
@@ -56,6 +64,7 @@ function persist(s: Pick<SettingsState, 'appearance' | 'models' | 'privacy' | 's
         privacy: s.privacy,
         sidebarCollapsed: s.sidebarCollapsed,
         sidebarWidth: s.sidebarWidth,
+        artifactPanelWidth: s.artifactPanelWidth,
       }),
     )
   } catch {
@@ -89,6 +98,7 @@ export const useSettings = create<SettingsState>((set) => ({
   },
   sidebarCollapsed: initial.sidebarCollapsed ?? false,
   sidebarWidth: clampSidebarWidth(initial.sidebarWidth),
+  artifactPanelWidth: clampArtifactPanelWidth(initial.artifactPanelWidth),
   setAppearance(patch) {
     set((s) => {
       const next = { ...s, appearance: { ...s.appearance, ...patch } }
@@ -159,6 +169,13 @@ export const useSettings = create<SettingsState>((set) => ({
   setSidebarWidth(width) {
     set((s) => {
       const next = { ...s, sidebarWidth: clampSidebarWidth(width) }
+      persist(next)
+      return next
+    })
+  },
+  setArtifactPanelWidth(width) {
+    set((s) => {
+      const next = { ...s, artifactPanelWidth: clampArtifactPanelWidth(width) }
       persist(next)
       return next
     })

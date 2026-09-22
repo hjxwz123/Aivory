@@ -1343,14 +1343,19 @@ func retryConversationDocumentHandler(d Deps, w http.ResponseWriter, r *http.Req
 // files): the authoritative set of files this conversation references, each with
 // a download URL.
 type convFile struct {
-	ID             string `json:"id"`
-	Filename       string `json:"filename"`
-	Kind           string `json:"kind"`
-	MimeType       string `json:"mime_type"`
-	SizeBytes      int64  `json:"size_bytes"`
-	CreatedAt      int64  `json:"created_at"`
-	URL            string `json:"url"`
-	Draft          bool   `json:"draft"`
+	ID        string `json:"id"`
+	Filename  string `json:"filename"`
+	Kind      string `json:"kind"`
+	MimeType  string `json:"mime_type"`
+	SizeBytes int64  `json:"size_bytes"`
+	CreatedAt int64  `json:"created_at"`
+	URL       string `json:"url"`
+	Draft     bool   `json:"draft"`
+	// RelPath is the file's path inside an uploaded folder ("my-project/src/a.ts"),
+	// empty for a single-file upload. Sent so a client CAN group a folder upload
+	// back into a tree; the composer's chip list does not group yet, so today the
+	// structure is otherwise only visible inside the sandbox.
+	RelPath        string `json:"rel_path,omitempty"`
 	DocumentID     string `json:"document_id,omitempty"`
 	DocumentStatus string `json:"document_status,omitempty"`
 	DocumentError  string `json:"document_error,omitempty"`
@@ -1395,6 +1400,7 @@ func listConversationFilesHandler(d Deps, w http.ResponseWriter, r *http.Request
 		row := convFile{
 			ID: f.ID, Filename: f.Filename, Kind: f.Kind, MimeType: f.MimeType,
 			SizeBytes: f.SizeBytes, CreatedAt: f.CreatedAt, URL: "/api/files/" + f.ID, Draft: f.Draft,
+			RelPath: f.RelPath,
 		}
 		if doc, ok := docByPath[f.StoragePath]; ok {
 			row.DocumentID = doc.ID

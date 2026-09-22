@@ -55,7 +55,18 @@ func publicHTMLPreviewShareHandler(d Deps, w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusNotFound, errNotFound)
 		return
 	}
-	w.Header().Set("Content-Security-Policy", "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox; upgrade-insecure-requests")
+	// `upgrade-insecure-requests` is only meaningful — and only safe — when the
+	// browser↔edge connection is HTTPS, where it stops `http://` subresources
+	// being blocked as mixed content. On a plain-HTTP deployment it instead
+	// rewrites SAME-ORIGIN subresources to https, and the shared preview's own
+	// `/tailwind-browser.js` then fails with ERR_SSL_PROTOCOL_ERROR, leaving the
+	// shared artifact completely unstyled. Same transport predicate the session
+	// cookies use, for the same reason.
+	csp := "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox"
+	if secureCookie(r) {
+		csp += "; upgrade-insecure-requests"
+	}
+	w.Header().Set("Content-Security-Policy", csp)
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "public, max-age=60")

@@ -23,6 +23,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	// `path` (not `path/filepath`) is deliberate: every path handled here is a
+	// SANDBOX path, which is always "/"-separated regardless of the host OS that
+	// the server itself runs on.
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -910,6 +914,122 @@ func readSandboxUpload(path string, storedSize, limit int64, roots ...string) ([
 	return data, nil
 }
 
+// artifactDedupeName keeps a generated image's name unique against everything
+// already staged. It shares the `seen` set with the upload stager, so a
+// generated image can never silently overwrite a user upload that happens to
+// share its basename.
+func artifactDedupeName(name string, seen map[string]bool) string {
+	base := filepath.Base(name)
+	if base == "" || base == "." || base == "/" {
+		base = "generated"
+	}
+	if !seen[base] {
+		seen[base] = true
+		return base
+	}
+	ext := filepath.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
+	for i := 2; ; i++ {
+		cand := fmt.Sprintf("%s-%d%s", stem, i, ext)
+		if !seen[cand] {
+			seen[cand] = true
+			return cand
+		}
+	}
+}
+
+// sandboxUploadPath renders where one conversation upload belongs inside
+// /workspace/uploads.
+//
+// A single-file upload keeps the historical flat layout ("image.png"), while a
+// file that arrived inside an uploaded folder is staged at its recorded path
+// ("my-project/src/app.ts"), so the folder the user shared still looks like a
+// folder when the model lists it. `seen` dedupes by FULL path: two files with
+// the same basename in different directories are distinct, and only a genuine
+// same-path collision earns a "-2" suffix.
+func sandboxUploadPath(f store.File, seen map[string]bool) string {
+	rel := strings.TrimSpace(filepath.ToSlash(f.RelPath))
+	if rel == "" || strings.HasPrefix(rel, "../") || strings.HasPrefix(rel, "/") || strings.Contains(rel, "\x00") {
+		rel = filepath.Base(f.Filename)
+	}
+	if rel == "" || rel == "." || rel == "/" {
+		rel = "file"
+	}
+	if !seen[rel] {
+		seen[rel] = true
+		return "/workspace/uploads/" + rel
+	}
+	dir, base := path.Split(rel)
+	ext := path.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
+	for i := 2; ; i++ {
+		cand := fmt.Sprintf("%s%s-%d%s", dir, stem, i, ext)
+		if !seen[cand] {
+			seen[cand] = true
+			return "/workspace/uploads/" + cand
+		}
+	}
+}
+
+// folderManifestPath is where the staged-folder index is written.
+//
+// It deliberately lives OUTSIDE /workspace/uploads: the sidecar's reset-inputs
+// wipes that directory before every call, while this file is rewritten in the
+// same pass — and keeping it out of uploads means a model that globs the upload
+// tree never sees the index as one of the user's files.
+const folderManifestPath = "/workspace/aivory-uploads.txt"
+
+// maxFolderManifestEntries caps how much of a large folder the index spells out.
+// Past this the model is told to enumerate with Python instead, which is both
+// cheaper and complete.
+const maxFolderManifestEntries = 2000
+
+// buildFolderManifest renders the uploaded-folder tree as a flat, deterministic
+// list the model can read without executing anything. Only folder uploads are
+// listed: a single-file upload needs no index.
+//
+// Returns "" when nothing about this conversation came from a folder.
+func buildFolderManifest(files []store.File) string {
+	type entry struct {
+		rel  string
+		size int64
+	}
+	entries := make([]entry, 0, len(files))
+	folders := map[string]bool{}
+	for _, f := range files {
+		rel := strings.TrimSpace(filepath.ToSlash(f.RelPath))
+		if rel == "" {
+			continue
+		}
+		entries = append(entries, entry{rel: rel, size: f.SizeBytes})
+		// Remember every ancestor directory so empty-ish trees still read as
+		// directories rather than a bare list of files.
+		for dir := path.Dir(rel); dir != "." && dir != "/" && dir != ""; dir = path.Dir(dir) {
+			folders[dir] = true
+		}
+	}
+	if len(entries) == 0 {
+		return ""
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].rel < entries[j].rel })
+
+	var b strings.Builder
+	b.WriteString("# Uploaded folder contents (/workspace/uploads/)\n")
+	b.WriteString("# Every file below is already staged in the sandbox at the path shown.\n")
+	truncated := false
+	if len(entries) > maxFolderManifestEntries {
+		entries = entries[:maxFolderManifestEntries]
+		truncated = true
+	}
+	for _, e := range entries {
+		fmt.Fprintf(&b, "%8d  /workspace/uploads/%s\n", e.size, e.rel)
+	}
+	if truncated {
+		fmt.Fprintf(&b, "# ... and more. Enumerate the rest in Python, e.g. `for r, d, fs in os.walk('/workspace/uploads'): ...`\n")
+	}
+	return b.String()
+}
+
 // convSandboxMu serialises sandbox-session provisioning per conversation so two
 // concurrent python_execute calls in one turn don't each create a session and
 // clobber the conversation's sandbox_id (leaking the orphaned container until
@@ -936,7 +1056,7 @@ type pythonExecuteTool struct {
 
 func (t *pythonExecuteTool) Name() string { return "python_execute" }
 func (t *pythonExecuteTool) Description() string {
-	return "Run Python in a persistent sandbox for math, data analysis, image editing, plotting, spreadsheet/CSV processing, editing existing PDF/Office documents, and generating downloadable files (PDF/PPTX/DOCX/XLSX/PNG). The session and its /workspace persist across calls AND across turns in this conversation, so call it several times in a row — inspect the inputs first, then edit or compute, and read again differently if the first attempt doesn't fit. Every conversation upload, including the original PDF/DOCX/PPTX/XLSX file, is staged without format conversion in /workspace/uploads/; prior image-generation outputs are staged there too, and public images fetched with fetch_image are stored in /workspace/downloads/. Run `import os; os.listdir('/workspace/uploads')` and inspect /workspace/downloads when needed, then use the real paths (for example python-docx/python-pptx/pypdf for documents, Pillow for images, and pandas for tables). Preserve the original file's layout and formatting when the user asks for a targeted edit. Write outputs, including edited images, plots, and documents, to /workspace/outputs to return them as downloadable artifacts. Produced files are attached to the assistant message automatically: refer to them by filename and never emit sandbox: or /workspace/outputs paths as download links. Stdout/stderr is returned."
+	return "Run Python in a persistent sandbox for math, data analysis, image editing, plotting, spreadsheet/CSV processing, editing existing PDF/Office documents, and generating downloadable files (PDF/PPTX/DOCX/XLSX/PNG). The session and its /workspace persist across calls AND across turns in this conversation, so call it several times in a row — inspect the inputs first, then edit or compute, and read again differently if the first attempt doesn't fit. Every conversation upload, including the original PDF/DOCX/PPTX/XLSX file, is staged without format conversion in /workspace/uploads/; prior image-generation outputs are staged there too, and public images fetched with fetch_image are stored in /workspace/downloads/. Uploaded FOLDERS keep their directory structure under /workspace/uploads/<folder>/, and an index of every staged file is always written to /workspace/aivory-uploads.txt — read it first (or `for r, d, fs in os.walk('/workspace/uploads')`) when the user asks about a project or folder rather than a single file, then work on the real paths. Use the real paths (for example python-docx/python-pptx/pypdf for documents, Pillow for images, and pandas for tables). Preserve the original file's layout and formatting when the user asks for a targeted edit. Write outputs, including edited images, plots, and documents, to /workspace/outputs to return them as downloadable artifacts. Produced files are attached to the assistant message automatically: refer to them by filename and never emit sandbox: or /workspace/outputs paths as download links. Stdout/stderr is returned."
 }
 func (t *pythonExecuteTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"code":{"type":"string","minLength":1}},"required":["code"]}`)
@@ -1033,36 +1153,25 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		if tc == nil || tc.DB == nil || tc.ConvID == "" {
 			return nil
 		}
-		// Dedupe staged names so multiple files that share a basename (e.g. four
-		// pasted "image.png") don't overwrite each other at the same path — every
-		// upload must land distinctly so the model can use all of them.
+		// Dedupe staged paths so multiple files that share a basename (e.g. four
+		// pasted "image.png") don't overwrite each other, while a folder upload's
+		// two "index.ts" files in different directories both survive.
 		seen := map[string]bool{}
-		uniqueName := func(name string) string {
-			base := filepath.Base(name)
-			if base == "" || base == "." || base == "/" {
-				base = "file"
-			}
-			if !seen[base] {
-				seen[base] = true
-				return base
-			}
-			ext := filepath.Ext(base)
-			stem := strings.TrimSuffix(base, ext)
-			for i := 2; ; i++ {
-				cand := fmt.Sprintf("%s-%d%s", stem, i, ext)
-				if !seen[cand] {
-					seen[cand] = true
-					return cand
+		if files, err := store.ListFilesByConversationBranch(ctx, tc.DB, tc.ConvID, tc.UserID, tc.MessageID); err == nil {
+			// Folder uploads keep their shape, but the model still needs to know
+			// what arrived: write the tree index before the bytes so a staging
+			// failure can never advertise files that are not there.
+			if manifest := buildFolderManifest(files); manifest != "" {
+				if err := t.sandbox.PutFile(ctx, sid, folderManifestPath, []byte(manifest)); err != nil {
+					return fmt.Errorf("stage folder manifest: %w", err)
 				}
 			}
-		}
-		if files, err := store.ListFilesByConversationBranch(ctx, tc.DB, tc.ConvID, tc.UserID, tc.MessageID); err == nil {
 			for _, f := range files {
 				data, err := readSandboxUpload(f.StoragePath, f.SizeBytes, pythonExecuteUploadStagingFileSize, t.uploadDir)
 				if err != nil {
 					continue
 				}
-				dest := "/workspace/uploads/" + uniqueName(f.Filename)
+				dest := sandboxUploadPath(f, seen)
 				if err := t.sandbox.PutFile(ctx, sid, dest, data); err != nil {
 					return fmt.Errorf("stage conversation upload %q: %w", f.Filename, err)
 				}
@@ -1084,7 +1193,9 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 				if mimeType == "" {
 					continue
 				}
-				name := uniqueName("generated-" + artifact.Filename)
+				// Namespaced under a directory of its own so a generated image can
+				// never collide with, or be mistaken for, one of the user's uploads.
+				name := artifactDedupeName("generated-"+artifact.Filename, seen)
 				_ = t.sandbox.PutFile(ctx, sid, "/workspace/uploads/"+name, data)
 			}
 		}

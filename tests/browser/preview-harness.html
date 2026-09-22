@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>HTML preview harness</title>
+    <!--
+      Dev/test-only page. Not reachable from index.html, so it never ships.
+
+      Mounts the REAL ArtifactPanel so tests/browser/run-preview.mjs can drive the
+      HTML preview exactly as the app does (store call -> panel opens -> iframe),
+      and detect whether the sandboxed frame actually rendered.
+    -->
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      #root {
+        height: 100vh;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/tests/browser/preview-harness.ts"></script>
+  </body>
+</html>
