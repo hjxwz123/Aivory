@@ -12,7 +12,7 @@ import {
   type PythonRunResult,
   type PythonStreamChunk,
 } from '@/lib/pyodide-runner'
-import { autoOpenPreview, useHtmlPreview } from '@/store/html-preview'
+import { autoOpenPreview, useArtifactPanel } from '@/store/artifact-panel'
 import { useTheme } from '@/store/theme'
 import { CodeRunOutput } from './code-run-output'
 import { cn } from '@/lib/utils'
@@ -109,14 +109,14 @@ export function CodeBlock({ code, lang, className, live = false, previewKey, all
   useEffect(() => () => handleRef.current?.cancel(), [])
 
   // ---- HTML live preview --------------------------------------------------
-  const ownsPreview = useHtmlPreview((s) => s.sourceKey === blockKey)
+  const ownsPreview = useArtifactPanel((s) => s.source?.type === 'html' && s.source.sourceKey === blockKey)
   useEffect(() => {
     if (!isHtml) return
     if (live && code.trim().length > 16) {
-      // Streaming HTML pops the drawer once, then keeps it in sync.
+      // Streaming HTML pops the panel once, then keeps it in sync.
       autoOpenPreview(blockKey, code)
     } else if (ownsPreview) {
-      useHtmlPreview.getState().syncHtml(blockKey, code, allowPublicShare && !live)
+      useArtifactPanel.getState().syncHtml(blockKey, code, allowPublicShare && !live)
     }
   }, [isHtml, live, code, blockKey, ownsPreview, allowPublicShare])
 
@@ -159,7 +159,7 @@ export function CodeBlock({ code, lang, className, live = false, previewKey, all
           ) : null}
           {isHtml ? (
             <IconAction
-              onClick={() => useHtmlPreview.getState().openPreview(blockKey, code, allowPublicShare && !live)}
+              onClick={() => useArtifactPanel.getState().openArtifact({ type: 'html', sourceKey: blockKey, html: code, shareable: allowPublicShare && !live })}
               label={t('code.preview')}
             >
               <AppWindow size={13} aria-hidden />

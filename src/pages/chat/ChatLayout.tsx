@@ -3,7 +3,7 @@ import { Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { PanelLeftOpen, Menu } from 'lucide-react'
 import { Sidebar } from '@/components/sidebar/sidebar'
-import { HtmlPreviewPanel } from '@/components/chat/html-preview-panel'
+import { ArtifactPanel } from '@/components/chat/artifact-panel'
 import { InlineThreadPanel } from '@/components/chat/inline-thread-panel'
 import { ConversationFilesPanel } from '@/components/chat/conversation-files-panel'
 import { SandboxFilesPanel } from '@/components/chat/sandbox-files-panel'
@@ -182,7 +182,7 @@ export default function ChatLayout() {
 
         {/* Right-edge drawers — mutually exclusive (see store coordination). */}
         {!privateChat && <>
-          <HtmlPreviewPanel />
+          <ArtifactPanel />
           <InlineThreadPanel />
           <SandboxFilesPanel />
           <ConversationFilesPanel />

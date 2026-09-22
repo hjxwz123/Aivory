@@ -3,7 +3,7 @@ import { conversationsApi } from '@/api/endpoints'
 import type { ApiSandboxFile } from '@/api/types'
 import { sandboxParentPath } from '@/lib/sandbox-browser'
 import { useConversationFiles } from './conversation-files'
-import { useHtmlPreview } from './html-preview'
+import { useArtifactPanel } from './artifact-panel'
 import { useInlineThreadDrawer } from './inline-thread'
 
 interface SandboxFilesStore {
@@ -34,7 +34,7 @@ export const useSandboxFiles = create<SandboxFilesStore>((set, get) => ({
 
   openDrawer(conversationId) {
     useConversationFiles.getState().close()
-    useHtmlPreview.getState().close()
+    useArtifactPanel.getState().close()
     useInlineThreadDrawer.getState().close()
     set({
       open: true,

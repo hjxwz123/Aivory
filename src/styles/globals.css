@@ -570,11 +570,42 @@
   background-size: 160px 160px;
 }
 
-/* The three mutually exclusive desktop chat panels share one quiet transition.
-   Width participates so the conversation column does not jump on open/close. */
+/* The four mutually exclusive desktop chat panels share one quiet transition.
+   Width participates so the conversation column does not jump on open/close.
+   The width itself is the `--chat-side-panel-width` custom property, which the
+   panel's drag handle writes to directly: the divider therefore resizes the HTML
+   preview, the document viewer and the editors alike, and the open/close
+   animation below still owns the value while it runs. */
+.chat-side-panel-frame {
+  max-width: var(--chat-side-panel-width, clamp(22rem, 34vw, 36rem));
+  opacity: 1;
+  transform: translateX(0);
+  transition:
+    max-width 220ms var(--ease-out),
+    opacity 220ms var(--ease-out),
+    transform 220ms var(--ease-out);
+}
+
+/* A live drag must track the pointer exactly — no easing, no lag. */
+.chat-side-panel-frame[data-resizing='true'] {
+  transition: none;
+}
+
+/* Closing: the frame collapses on the same beat as the panel's own width
+   keyframe (180ms), so the wrapper never clips the sliding panel. */
+.chat-side-panel-frame[data-state='closed'] {
+  max-width: 0;
+  opacity: 0;
+  transform: translateX(12px);
+  transition:
+    max-width 180ms var(--ease-in),
+    opacity 180ms var(--ease-in),
+    transform 180ms var(--ease-in);
+}
+
 .chat-side-panel,
 .chat-side-panel-inner {
-  width: clamp(22rem, 34vw, 36rem);
+  width: var(--chat-side-panel-width, clamp(22rem, 34vw, 36rem));
 }
 
 .chat-side-panel[data-state='open'] {
@@ -593,7 +624,7 @@
   }
 
   to {
-    width: clamp(22rem, 34vw, 36rem);
+    width: var(--chat-side-panel-width, clamp(22rem, 34vw, 36rem));
     opacity: 1;
     transform: translateX(0);
   }
@@ -601,7 +632,7 @@
 
 @keyframes chat-side-panel-out {
   from {
-    width: clamp(22rem, 34vw, 36rem);
+    width: var(--chat-side-panel-width, clamp(22rem, 34vw, 36rem));
     opacity: 1;
     transform: translateX(0);
   }

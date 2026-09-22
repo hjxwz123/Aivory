@@ -1392,6 +1392,11 @@ export interface ApiConversationFile {
   created_at: number
   url: string
   draft: boolean
+  /** Path inside an uploaded folder ("my-project/src/a.ts"); absent for a
+   *  single-file upload. The composer's chip rail groups by its first segment so
+   *  a folder shows as one node, and it survives a refresh so the grouping does
+   *  not unravel when a conversation is reopened. */
+  rel_path?: string
   document_id?: string
   document_status?: ApiDocument['status']
   document_error?: string

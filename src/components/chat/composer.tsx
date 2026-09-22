@@ -21,6 +21,7 @@ import {
   AudioWaveform,
   Paperclip,
   Image as ImageIcon,
+  FolderUp,
   StopCircle,
   Telescope,
   ShieldCheck,
@@ -81,6 +82,16 @@ import type {
 import { toast, useToastStore } from '@/hooks/use-toast'
 import { cn, uid, modKey } from '@/lib/utils'
 import { attachmentKindLabel, attachmentTileClass, fileIconFor } from '@/lib/file-icon'
+import {
+  FOLDER_MAX_FILES_DEFAULT,
+  FOLDER_MAX_TOTAL_BYTES_DEFAULT,
+  folderUploadFields,
+  selectFolderFiles,
+  type FolderSkipReason,
+} from '@/lib/folder-upload'
+import { chipRailItems } from '@/lib/folder-attachments'
+import { AttachmentChip, type AttachmentChipAttachment } from './composer-attachment-chip'
+import { FolderChip } from './folder-chip'
 import {
   addSelectedUserSkill,
   createScopedCommandGate,
@@ -270,7 +281,55 @@ function getUploadLimits() {
   return uploadLimitsCache
 }
 
+/**
+ * The admin's extension allowlist, cached across composer instances.
+ *
+ * A folder upload filters before sending, so it needs this before the first
+ * request. A failed fetch returns [] ("no client-side extension filter") rather
+ * than blocking the upload — the server re-validates every file regardless, so
+ * the worst case is a per-file rejection the user already sees today.
+ */
+let uploadExtensionsCache: Promise<string[]> | null = null
+function getUploadPolicyExtensions(): Promise<string[]> {
+  if (!uploadExtensionsCache) {
+    uploadExtensionsCache = api<{ allowed_extensions?: string[] }>('/me/upload-policy')
+      .then((p) => (Array.isArray(p.allowed_extensions) ? p.allowed_extensions : []))
+      .catch(() => [])
+  }
+  return uploadExtensionsCache
+}
+
+/**
+ * One line explaining what a folder upload left out, for the toast body.
+ *
+ * Reported per reason with a representative path so the user can act on it
+ * ("skipped node_modules", "not an allowed file type") instead of wondering why
+ * a folder arrived incomplete.
+ */
+function describeFolderSkips(
+  skipped: ReadonlyArray<{ reason: FolderSkipReason; path: string; count: number }>,
+  t: (key: string, options?: Record<string, unknown>) => string,
+): string {
+  const label: Record<FolderSkipReason, string> = {
+    'skipped-dir': t('composer.folderSkipDir', { defaultValue: 'dependency/build folders' }),
+    'skipped-file': t('composer.folderSkipNoise', { defaultValue: 'system files' }),
+    extension: t('composer.folderSkipExtension', { defaultValue: 'unsupported file types' }),
+    'no-extension': t('composer.folderSkipNoExtension', { defaultValue: 'files without an extension' }),
+    'too-many': t('composer.folderSkipTooMany', { defaultValue: 'files over the count limit' }),
+    'too-large': t('composer.folderSkipTooLarge', { defaultValue: 'files over the size limit' }),
+  }
+  return skipped
+    .map((entry) => `${label[entry.reason]} · ${entry.count}`)
+    .join('; ')
+}
+
 interface PendingAttachment extends Attachment {
+  /**
+   * Path of this file inside an uploaded folder ("my-project/src/main.ts").
+   * Empty/absent for a single-file upload. The chip rail groups by its first
+   * segment, so a folder shows as one node instead of hundreds of chips.
+   */
+  relPath?: string
   /** true while POST /api/files is in flight. */
   uploading?: boolean
   /** Browser-reported upload progress, 0-100, while uploading is true. */
@@ -346,6 +405,9 @@ function restoreConversationFile(file: ApiConversationFile, scopeId: string): Pe
     documentId: file.document_id,
     ingest: restoredIngestStatus(file.document_status),
     ingestErrorCode: file.document_error_code,
+    // Survives a refresh: a restored folder member must still group, otherwise
+    // reloading a conversation would explode one folder back into N chips.
+    relPath: file.rel_path,
   }
 }
 
@@ -929,6 +991,15 @@ export function Composer({
   const ref = useRef<RichComposerEditorHandle>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const imageFileRef = useRef<HTMLInputElement>(null)
+  const folderFileRef = useRef<HTMLInputElement>(null)
+  /**
+   * Folder path per picked File, for the duration of one folder upload.
+   *
+   * `handleFolderAttach` has to re-wrap the accepted files into a FileList to
+   * reuse the normal attach pipeline, and constructing a File strips
+   * `webkitRelativePath`. The map restores it, keyed by the File object itself.
+   */
+  const folderPathOverrides = useRef<Map<File, string>>(new Map())
   const [formulaOpen, setFormulaOpen] = useState(false)
   const [formulaTarget, setFormulaTarget] = useState<FormulaTarget | null>(null)
   const formulaSelectionRef = useRef<{ from: number; to: number } | null>(null)
@@ -991,6 +1062,14 @@ export function Composer({
   // would be ignored via onWheel).
   const chipsRailRef = useRef<HTMLDivElement | null>(null)
   const hasAttachments = attachments.length > 0
+  /** >4 chips: chips stop shrinking and the rail scrolls horizontally instead. */
+  const manyAttachments = attachments.length > 4
+  /**
+   * The chip rail's contents: one node per uploaded folder, plus loose files,
+   * in attach order. Folder members stay ordinary attachments for sending — this
+   * only changes how many boxes the user has to look at.
+   */
+  const chipRail = useMemo(() => chipRailItems(attachments), [attachments])
 
   useEffect(() => {
     void loadLibrary(workspaceId)
@@ -1837,7 +1916,12 @@ export function Composer({
   // On success we swap the local blob URL for the persistent backend URL
   // (`/api/files/<id>`) BEFORE revoking the blob — otherwise the user-bubble
   // image preview later renders a dead URL once handleSubmit clears the draft.
-  async function uploadAttachment(file: File, local: PendingAttachment, scopeId?: string): Promise<PendingAttachment | null> {
+  async function uploadAttachment(
+    file: File,
+    local: PendingAttachment,
+    scopeId?: string,
+    folderPath = '',
+  ): Promise<PendingAttachment | null> {
     if (!canUploadFilesRef.current) {
       removedAttachmentIds.current.delete(local.id)
       if (local.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(local.previewUrl)
@@ -1853,17 +1937,28 @@ export function Composer({
     try {
       const form = new FormData()
       form.append('file', file)
+      // Folder upload: one request per file, each carrying its path inside the
+      // folder plus the folder's own name, so the server can rebuild the tree
+      // (and stage it into the sandbox as a real directory).
+      const folderFields = folderPath ? folderUploadFields(folderPath, file.name) : null
+      if (folderFields) {
+        form.append('folder_name', folderFields.folderName)
+        form.append('rel_path', folderFields.relPath)
+      }
+      const inFolder = folderFields !== null
       // §4.11.2 session-scoped temp docs: ingest doc-like uploads (or anything
       // when a KB is bound) as conversation-scoped RAG so the user can ask over
       // what they just shared, without polluting any project KB.
       // Anything that isn't an image is treated as a readable document so the
       // model can use it (the backend reads unknown types as plain text and
       // routes spreadsheets to the sandbox). Images don't need RAG.
+      // Folder contents are NEVER ingested: a shared project is hundreds of
+      // files and the model reads them from the sandbox instead.
       const isDocLike = local.kind !== 'image'
       if (isDocLike && !scopeId) {
         throw new Error(t('composer.documentScopeRequired', { defaultValue: 'Create a conversation before uploading documents.' }))
       }
-      const ragFlag = (kbIds && kbIds.length > 0) || isDocLike
+      const ragFlag = !inFolder && ((kbIds && kbIds.length > 0) || isDocLike)
       const query = new URLSearchParams()
       if (scopeId) {
         query.set('conversation_id', scopeId)
@@ -1905,6 +2000,11 @@ export function Composer({
         uploadScopeId: scopeId,
         previewUrl: persistentUrl,
         documentId: res.document_id,
+        // Record the folder membership so the chip rail can group this file.
+        // The server echoes the authoritative path, but it also stored exactly
+        // what we sent, so the local value is equivalent and available even if
+        // an older backend omits the field.
+        relPath: folderFields?.relPath ?? local.relPath,
         // A conversation doc was created → it's being parsed/embedded; track it
         // so the send stays blocked until it's searchable.
         ingest: res.document_id ? 'parsing' : undefined,
@@ -2078,7 +2178,7 @@ export function Composer({
     }
   }, [canUploadFiles, conversationId, startIngestPoll, t])
 
-  async function retryAttachmentIngest(a: PendingAttachment) {
+  async function retryAttachmentIngest(a: AttachmentChipAttachment) {
     if (!a.uploadScopeId || !a.documentId) return
     const tm = pollTimers.current.get(a.id)
     if (tm) {
@@ -2102,7 +2202,13 @@ export function Composer({
 
   // Returns how many files actually uploaded, so callers that transform user
   // input into an attachment (attachTextAsFile) can tell success from failure.
-  async function handleAttach(files: FileList | null): Promise<number> {
+  //
+  // `inflight` caps how many uploads run at once. A handful of picked files can
+  // all go at once (the browser caps per-host connections anyway), but a folder
+  // upload is hundreds of requests: they are throttled so the server's per-user
+  // upload rate limit is not tripped, and the memory used by concurrent
+  // multipart bodies stays bounded.
+  async function handleAttach(files: FileList | null, inflight = Number.POSITIVE_INFINITY): Promise<number> {
     if (!files || !files.length) return 0
     if (!canUploadFiles) {
       toast.error(t('composer.permissions.fileUpload', { defaultValue: 'Your user group cannot upload files.' }))
@@ -2119,6 +2225,14 @@ export function Composer({
     // repeatedly. Oversize candidates are removed again after policy validation.
     const candidates = all.map((file) => ({
       file,
+      // A directory picker reports "my-project/src/a.ts" in webkitRelativePath;
+      // a plain file picker reports "". A FileList cannot be rebuilt by hand
+      // without losing that property, so a folder upload hands the paths over
+      // here instead (see handleFolderAttach) before re-wrapping the files.
+      folderPath:
+        folderPathOverrides.current.get(file) ??
+        (file as File & { webkitRelativePath?: string }).webkitRelativePath ??
+        '',
       attachment: {
         id: uid('att'),
         name: file.name,
@@ -2187,7 +2301,13 @@ export function Composer({
           ),
         )
       }
-      preparedCandidates.push({ file: preparedFile, attachment: preparedAttachment })
+      preparedCandidates.push({
+        file: preparedFile,
+        // Carried through image preparation: a folder upload must keep the
+        // path even when the bytes were re-encoded on the way up.
+        folderPath: candidate.folderPath,
+        attachment: preparedAttachment,
+      })
     }
 
     const overFile = preparedCandidates.filter(
@@ -2244,14 +2364,98 @@ export function Composer({
         scopeId = undefined
       }
     }
-    const done = await Promise.all(
-      accepted.map(({ file, attachment }) => uploadAttachment(file, attachment, scopeId)),
-    )
-    return done.filter(Boolean).length
+    const results: Array<PendingAttachment | null> = []
+    if (!Number.isFinite(inflight) || inflight <= 0) {
+      results.push(
+        ...(await Promise.all(
+          accepted.map(({ file, attachment, folderPath }) =>
+            uploadAttachment(file, attachment, scopeId, folderPath),
+          ),
+        )),
+      )
+    } else {
+      const queue = [...accepted]
+      const workers = Array.from({ length: Math.min(inflight, queue.length) }, async () => {
+        for (;;) {
+          const next = queue.shift()
+          if (!next) return
+          results.push(await uploadAttachment(next.file, next.attachment, scopeId, next.folderPath))
+        }
+      })
+      await Promise.all(workers)
+    }
+    return results.filter(Boolean).length
   }
   // Keep the window-level drag listeners calling the current closure (it reads
   // conversationId / kbIds / ensureConversationId), without re-subscribing them.
   handleAttachRef.current = handleAttach
+
+  /**
+   * Upload a whole folder, preserving its structure.
+   *
+   * The picked list is pre-filtered in the browser (dependency trees, build
+   * output, disallowed extensions, size caps — see `selectFolderFiles`) because
+   * each accepted file costs one request and an unfiltered `node_modules` would
+   * be tens of thousands of them. Whatever is dropped is reported to the user
+   * rather than silently discarded, and the files that do go up carry their path
+   * inside the folder so the server can rebuild the tree for the sandbox.
+   */
+  async function handleFolderAttach(files: FileList | null): Promise<number> {
+    if (!files || !files.length) return 0
+    if (!canUploadFiles) {
+      toast.error(t('composer.permissions.fileUpload', { defaultValue: 'Your user group cannot upload files.' }))
+      return 0
+    }
+    const [limits, policy] = await Promise.all([getUploadLimits(), getUploadPolicyExtensions()])
+    const candidates = Array.from(files)
+      .map((file) => ({
+        file,
+        path: (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name,
+      }))
+      // A directory picker can report entries without a path (older engines);
+      // those have no folder to preserve, so they are treated as loose files.
+      .filter((entry) => entry.path.includes('/'))
+    if (!candidates.length) return 0
+
+    const selection = selectFolderFiles(
+      candidates.map((entry) => ({
+        file: entry.file,
+        path: entry.path,
+        fileName: entry.file.name,
+        size: entry.file.size,
+      })),
+      {
+        maxFiles: FOLDER_MAX_FILES_DEFAULT,
+        maxTotalBytes: Math.min(FOLDER_MAX_TOTAL_BYTES_DEFAULT, Math.max(limits.max_file_bytes, 0) * 400),
+        allowedExtensions: policy,
+      },
+    )
+    const folderName = candidates[0]?.path.split('/')[0] ?? ''
+    if (!selection.accepted.length) {
+      toast.error(
+        t('composer.folderNothingToUpload', { defaultValue: 'Nothing in “{{folder}}” could be uploaded', folder: folderName }),
+        describeFolderSkips(selection.skipped, t),
+      )
+      return 0
+    }
+    if (selection.skipped.length) {
+      toast.info(
+        t('composer.folderPartial', { defaultValue: 'Uploading {{count}} files from “{{folder}}”', count: selection.accepted.length, folder: folderName }),
+        describeFolderSkips(selection.skipped, t),
+      )
+    }
+
+    const list = new DataTransfer()
+    folderPathOverrides.current = new Map(selection.accepted.map((entry) => [entry.file, entry.path]))
+    for (const entry of selection.accepted) list.items.add(entry.file)
+    // 3 at a time: enough to keep the pipe busy over a slow link, few enough that
+    // a 300-file folder does not trip the server's per-user upload rate limit.
+    try {
+      return await handleAttach(list.files, 3)
+    } finally {
+      folderPathOverrides.current = new Map()
+    }
+  }
 
   // Codex-style long-text overflow (§4.11-B3): text past MAX_LEN becomes a .txt
   // attachment instead of being blocked. The backend line-gates it — small
@@ -3314,148 +3518,30 @@ export function Composer({
           as the scroll affordance. */}
       {attachments.length > 0 && (
         <div ref={chipsRailRef} className="flex items-stretch gap-1.5 overflow-x-auto px-3 pb-1 pt-2.5 scrollbar-none">
-          {attachments.map((a) => {
-            const manyAttachments = attachments.length > 4
-            const busy = a.uploading || a.ingest === 'parsing' || a.ingest === 'embedding'
-            const failed = a.ingest === 'failed'
-            const uploadPercent = Math.max(0, Math.min(100, Math.round(a.uploadProgress ?? 0)))
-            // Browser progress hits 100% when the bytes are handed to the socket,
-            // but the request isn't done until the server has received + written
-            // the file (and any reverse proxy has finished buffering it). Show a
-            // neutral "processing" state so a parked 100% doesn't read as frozen.
-            const serverProcessing = a.uploading && uploadPercent >= 100
-            const status =
-              serverProcessing
-                ? t('composer.processing', { defaultValue: 'Processing…' })
-                : a.uploading
-                ? t('composer.uploadingPercent', { defaultValue: 'Uploading {{percent}}%', percent: uploadPercent })
-                : a.ingest === 'embedding'
-                ? t('composer.indexing')
-                : a.ingest === 'parsing'
-                  ? t('composer.parsing')
-                  : attachmentKindLabel(a)
-
-            if (a.kind === 'image' && a.previewUrl) {
-              return (
-                <span key={a.id} className="group/att relative inline-block shrink-0">
-                  <img
-                    src={a.previewUrl}
-                    alt={a.name}
-                    className="size-14 rounded-[10px] border border-[var(--color-border-subtle)] bg-[var(--color-bg-muted)] object-cover"
-                  />
-                  {busy ? (
-                    <span className="absolute inset-0 grid place-items-center rounded-[10px] bg-[var(--color-overlay)]">
-                      {a.uploading && !serverProcessing ? (
-                        <ProgressRing
-                          value={uploadPercent}
-                          size={34}
-                          strokeWidth={3}
-                          showValue
-                          label={status}
-                          className="text-[var(--color-fg-inverted)]"
-                        />
-                      ) : (
-                        <Loader2 size={13} className="animate-spin text-[var(--color-fg-inverted)]" aria-hidden />
-                      )}
-                    </span>
-                  ) : null}
-                  <button
-                    type="button"
-                    aria-label={`Remove ${a.name}`}
-                    onClick={() => removeAttachment(a.id)}
-                    className="absolute -right-1.5 -top-1.5 inline-flex size-5 items-center justify-center rounded-full bg-[var(--color-fg)] text-[var(--color-fg-inverted)] shadow-[var(--shadow-sm)] interactive hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-                  >
-                    <X size={13} aria-hidden />
-                  </button>
-                </span>
-              )
-            }
-
-            const Icon = fileIconFor(a.name, a.kind)
-            return (
-              <span
-                key={a.id}
-                className={cn(
-                  'group/att relative flex h-14 items-center gap-2.5 rounded-[10px] border bg-[var(--color-surface-raised)] py-2 pl-2.5 pr-8 shadow-[var(--shadow-xs)]',
-                  manyAttachments
-                    ? // >4 chips: stop shrinking. Fixed width targets ~4.5 chips per
-                      // row (half chip visible = "there's more" affordance), floored
-                      // so names stay readable on narrow rails.
-                      'w-[clamp(10rem,calc((100%_-_1.5rem)/4.5),15rem)] flex-none'
-                    : 'min-w-0 max-w-[min(28rem,calc(100vw-6rem))] flex-[1_1_15rem]',
-                  failed ? 'border-[var(--color-danger)]/50' : 'border-[var(--color-border)]',
-                )}
-              >
-                <span
-                  className={cn(
-                    'grid size-9 shrink-0 place-items-center rounded-[9px]',
-                    failed
-                      ? 'bg-[var(--color-danger-soft)] text-[var(--color-danger)]'
-                      : attachmentTileClass(a),
-                  )}
-                  aria-hidden
-                >
-                  {busy ? (
-                    a.uploading && !serverProcessing ? (
-                      <ProgressRing value={uploadPercent} size={30} strokeWidth={3} showValue label={status} />
-                    ) : (
-                      <Loader2 size={17} className="animate-spin" />
-                    )
-                  ) : failed ? (
-                    <AlertTriangle size={17} />
-                  ) : (
-                    <Icon size={18} strokeWidth={2} />
-                  )}
-                </span>
-                <span className="grid min-w-0 flex-1 gap-0.5 text-left">
-                  <span className="truncate text-[0.8125rem] font-semibold leading-tight text-[var(--color-fg)]">
-                    {a.name}
-                  </span>
-                  <span
-                    className={cn(
-                      'min-w-0 text-[0.75rem] leading-tight',
-                      !failed && 'truncate',
-                      failed
-                        ? 'text-[var(--color-danger)]'
-                        : busy
-                          ? 'text-[var(--color-fg-muted)]'
-                          : 'text-[var(--color-fg-subtle)]',
-                    )}
-                  >
-                    {failed ? (
-                      <span className="flex min-w-0 items-center gap-1">
-                        <span className="truncate">
-                          {a.ingestErrorCode === DOCUMENT_PARSER_NOT_CONFIGURED
-                            ? t('composer.parserNotConfigured', { defaultValue: 'Document parsing isn\'t configured. Ask your admin to enable it, then' })
-                            : t('composer.ingestFailedAction', { defaultValue: 'Parsing failed. Remove it or' })}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            void retryAttachmentIngest(a)
-                          }}
-                          className="shrink-0 font-semibold underline underline-offset-2 hover:text-[var(--color-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-                        >
-                          {t('composer.retry', { defaultValue: 'Retry' })}
-                        </button>
-                      </span>
-                    ) : (
-                      status
-                    )}
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  aria-label={`Remove ${a.name}`}
-                  onClick={() => removeAttachment(a.id)}
-                  className="absolute right-1.5 top-1.5 inline-flex size-5 items-center justify-center rounded-full bg-[var(--color-fg)] text-[var(--color-fg-inverted)] shadow-[var(--shadow-xs)] interactive hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-                >
-                  <X size={13} aria-hidden />
-                </button>
-              </span>
-            )
-          })}
+          {/* A folder upload is hundreds of files that the user thinks of as ONE
+              thing, so the rail shows one node per folder and keeps the files
+              behind it. Members remain ordinary attachments for sending, and the
+              rail keeps each folder where its first file was attached. */}
+          {chipRail.map((item) =>
+            item.type === 'folder' ? (
+              <FolderChip
+                key={`folder:${item.folder}`}
+                folder={item.folder}
+                members={item.members}
+                compact={manyAttachments}
+                onRemoveMember={removeAttachment}
+                onRemoveFolder={(ids) => ids.forEach((id) => removeAttachment(id))}
+              />
+            ) : (
+              <AttachmentChip
+                key={item.attachment.id}
+                attachment={item.attachment}
+                manyAttachments={manyAttachments}
+                onRemove={removeAttachment}
+                onRetryIngest={retryAttachmentIngest}
+              />
+            ),
+          )}
         </div>
       )}
 
@@ -3569,6 +3655,23 @@ export function Composer({
               e.currentTarget.value = ''
             }}
           />
+          {/* Directory picker. `webkitdirectory` is the only way a browser lets
+              the user choose a FOLDER, and it can only be opened from a real
+              user gesture — which is why this has its own visible menu entry
+              rather than being folded into the file button. */}
+          <input
+            type="file"
+            ref={folderFileRef}
+            hidden
+            multiple
+            // React has no typed prop for the directory attributes; they are
+            // set as-is on the DOM node.
+            {...({ webkitdirectory: '', directory: '' } as Record<string, string>)}
+            onChange={(e) => {
+              void handleFolderAttach(e.currentTarget.files)
+              e.currentTarget.value = ''
+            }}
+          />
         </>
       ) : null}
 
@@ -3653,6 +3756,26 @@ export function Composer({
                     >
                       <ImageIcon size={18} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden />
                       {t('composer.addImage')}
+                    </button>
+                  ) : null}
+                  {canUploadFiles ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMoreOpen(false)
+                        folderFileRef.current?.click()
+                      }}
+                      className="flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-left text-[15px] text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)] active:bg-[var(--color-bg-muted)]"
+                    >
+                      <FolderUp size={18} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden />
+                      <span className="grid min-w-0 gap-0.5">
+                        <span>{t('composer.attachFolder', { defaultValue: 'Upload folder' })}</span>
+                        <span className="truncate text-[0.75rem] leading-tight text-[var(--color-fg-subtle)]">
+                          {t('composer.attachFolderHint', {
+                            defaultValue: 'Let the assistant work inside the whole folder',
+                          })}
+                        </span>
+                      </span>
                     </button>
                   ) : null}
                 </>
@@ -3790,6 +3913,19 @@ export function Composer({
                   className="inline-flex items-center justify-center size-8 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                 >
                   <ImageIcon size={15} aria-hidden />
+                </button>
+              </Tooltip>
+            ) : null}
+
+            {canUploadFiles ? (
+              <Tooltip content={t('composer.attachFolder', { defaultValue: 'Upload folder' })}>
+                <button
+                  type="button"
+                  onClick={() => folderFileRef.current?.click()}
+                  aria-label={t('composer.attachFolder', { defaultValue: 'Upload folder' })}
+                  className="inline-flex items-center justify-center size-8 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                >
+                  <FolderUp size={15} aria-hidden />
                 </button>
               </Tooltip>
             ) : null}

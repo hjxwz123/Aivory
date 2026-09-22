@@ -39,10 +39,10 @@ import { toastStorageQuotaFull } from '@/lib/quota-toast'
 import { formatRelativeDate, cn } from '@/lib/utils'
 import { envNum } from '@/lib/env-config'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { FilePreview } from '@/components/chat/file-preview'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { initials } from '@/components/ui/avatar.utils'
 import { useAuth } from '@/store/auth'
+import { useArtifactPanel } from '@/store/artifact-panel'
 import { useWorkspaces } from '@/store/workspaces'
 import { userCan } from '@/lib/user-permissions'
 import { workspaceCapabilitiesForScope } from '@/lib/workspace-permissions'
@@ -135,7 +135,6 @@ export default function KnowledgeBaseDetail() {
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [uploaderID, setUploaderID] = useState('all')
   const [uploaders, setUploaders] = useState<ApiKnowledgeBaseUploader[]>([])
-  const [previewDoc, setPreviewDoc] = useState<ApiDocument | null>(null)
   const [renameDoc, setRenameDoc] = useState<ApiDocument | null>(null)
   const [renameFilename, setRenameFilename] = useState('')
   const [shareOpen, setShareOpen] = useState(false)
@@ -217,7 +216,7 @@ export default function KnowledgeBaseDetail() {
         setOpen(false)
         setShareOpen(false)
         setWorkspaceMembersOpen(false)
-        setPreviewDoc(null)
+        useArtifactPanel.getState().close()
         setRenameDoc(null)
         setRenameFilename('')
         setConfirmDeleteKB(false)
@@ -263,7 +262,7 @@ export default function KnowledgeBaseDetail() {
     setOpen(false)
     setShareOpen(false)
     setWorkspaceMembersOpen(false)
-    setPreviewDoc(null)
+    useArtifactPanel.getState().close()
     setRenameDoc(null)
     setRenameFilename('')
     setConfirmDeleteKB(false)
@@ -273,12 +272,26 @@ export default function KnowledgeBaseDetail() {
     void load()
   }, [load, t])
 
+  // Document previews open in the shared right-edge Artifact panel (never a
+  // centered dialog), so the knowledge-base list stays visible while the bytes
+  // load. A 403/404 keeps its old meaning: access changed under us.
   const handlePreviewLoadError = useCallback((status?: number) => {
     if (status !== 403 && status !== 404) return
-    setPreviewDoc(null)
+    useArtifactPanel.getState().close()
     toast.error(t('kb:permissionChanged'))
     void load()
   }, [load, t])
+
+  function previewDocument(doc: ApiDocument) {
+    useArtifactPanel.getState().openArtifact({
+      type: 'file',
+      name: doc.filename,
+      kind: 'other',
+      url: apiUrl(`/documents/${encodeURIComponent(doc.id)}/content`),
+      authenticated: true,
+      onLoadError: handlePreviewLoadError,
+    })
+  }
 
   useEffect(
     () =>
@@ -778,7 +791,7 @@ export default function KnowledgeBaseDetail() {
                       variant="ghost"
                       size="sm"
                       leadingIcon={<Eye size={13} aria-hidden />}
-                      onClick={() => setPreviewDoc(d)}
+                      onClick={() => previewDocument(d)}
                     >
                       {t('kb:detail.preview', { defaultValue: 'Preview' })}
                     </Button>
@@ -986,18 +999,6 @@ export default function KnowledgeBaseDetail() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <FilePreview
-        open={previewDoc !== null}
-        onOpenChange={(next) => { if (!next) setPreviewDoc(null) }}
-        onLoadError={handlePreviewLoadError}
-        file={previewDoc ? {
-          name: previewDoc.filename,
-          kind: 'other',
-          url: apiUrl(`/documents/${encodeURIComponent(previewDoc.id)}/content`),
-          authenticated: true,
-        } : null}
-      />
 
       {kb?.can_share && !kb.workspace_id && canShareKnowledgeBases ? (
         <KnowledgeBaseShareDialog

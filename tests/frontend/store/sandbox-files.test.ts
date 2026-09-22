@@ -9,7 +9,7 @@ vi.mock('@/api/endpoints', () => ({
 }))
 
 import { useConversationFiles } from '@/store/conversation-files'
-import { useHtmlPreview } from '@/store/html-preview'
+import { useArtifactPanel } from '@/store/artifact-panel'
 import { useInlineThreadDrawer } from '@/store/inline-thread'
 import { useSandboxFiles } from '@/store/sandbox-files'
 
@@ -21,7 +21,7 @@ describe('sandbox files drawer', () => {
       files: [{ path: 'outputs/report.pdf', size: 100 }],
     })
     useConversationFiles.setState({ open: false })
-    useHtmlPreview.setState({ open: false })
+    useArtifactPanel.setState({ open: false, source: null })
     useInlineThreadDrawer.setState({ open: false })
     useSandboxFiles.setState({
       open: false,
@@ -37,7 +37,10 @@ describe('sandbox files drawer', () => {
 
   it('opens read-only data for one conversation and closes the other side panels', async () => {
     useConversationFiles.setState({ open: true })
-    useHtmlPreview.setState({ open: true })
+    useArtifactPanel.setState({
+      open: true,
+      source: { type: 'html', sourceKey: 'block-1', html: '<p>hi</p>', shareable: false },
+    })
     useInlineThreadDrawer.setState({ open: true })
 
     useSandboxFiles.getState().openDrawer('conv-1')
@@ -51,7 +54,7 @@ describe('sandbox files drawer', () => {
       files: [{ path: 'outputs/report.pdf', size: 100 }],
     })
     expect(useConversationFiles.getState().open).toBe(false)
-    expect(useHtmlPreview.getState().open).toBe(false)
+    expect(useArtifactPanel.getState().open).toBe(false)
     expect(useInlineThreadDrawer.getState().open).toBe(false)
   })
 })

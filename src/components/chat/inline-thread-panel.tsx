@@ -14,7 +14,7 @@ import { hasMathContent } from '@/lib/math-content'
 
 /**
  * InlineThreadPanel — the right-edge drawer that renders a text-selection
- * sub-conversation (§ inline threads). Mirrors HtmlPreviewPanel's layout
+ * sub-conversation (§ inline threads). Mirrors ArtifactPanel's layout
  * (desktop inline aside / mobile Sheet) and shares the right edge with it
  * (mutual exclusion enforced in the stores). The child conversation streams
  * through the normal conversations store, so answers never touch the main thread.

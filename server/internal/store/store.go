@@ -263,6 +263,9 @@ func Migrate(db *sql.DB) error {
 	// Conversation uploads inherit only along the message branch where they were
 	// created. An empty value is retained for legacy rows and root uploads.
 	addFileBranchMessage := `ALTER TABLE files ADD COLUMN branch_message_id TEXT NOT NULL DEFAULT ''`
+	// Folder uploads keep their shape: the file's path inside the uploaded
+	// folder. "" is every single-file upload and every pre-existing row.
+	addFileRelPath := `ALTER TABLE files ADD COLUMN rel_path TEXT NOT NULL DEFAULT ''`
 	// Persisted ingest heartbeat lets the RAG watchdog distinguish a live long-
 	// running parse from a task abandoned by timeout, crash, or lease expiry.
 	addDocumentIngestUpdatedAt := `ALTER TABLE documents ADD COLUMN ingest_updated_at INTEGER NOT NULL DEFAULT 0`
@@ -420,6 +423,7 @@ func Migrate(db *sql.DB) error {
 		addUsageTTFTFallback = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS ttft_fallback_model TEXT NOT NULL DEFAULT ''`
 		addFileDraft = `ALTER TABLE files ADD COLUMN IF NOT EXISTS draft INTEGER NOT NULL DEFAULT 0`
 		addFileBranchMessage = `ALTER TABLE files ADD COLUMN IF NOT EXISTS branch_message_id TEXT NOT NULL DEFAULT ''`
+		addFileRelPath = `ALTER TABLE files ADD COLUMN IF NOT EXISTS rel_path TEXT NOT NULL DEFAULT ''`
 		addDocumentIngestUpdatedAt = `ALTER TABLE documents ADD COLUMN IF NOT EXISTS ingest_updated_at BIGINT NOT NULL DEFAULT 0`
 		addDocumentUploader = `ALTER TABLE documents ADD COLUMN IF NOT EXISTS uploaded_by_user_id TEXT NOT NULL DEFAULT ''`
 		addWorkspaceCanCreateProjects = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_create_projects INTEGER NOT NULL DEFAULT 1`
@@ -517,7 +521,7 @@ func Migrate(db *sql.DB) error {
 		addConvWorkspace, addConvIsPublic, addProjWorkspace, addKBWorkspace, addMsgAuthor, addUsageWorkspace, addGroupMaxWorkspaces, addGroupMaxStorage, addGroupIsPublic, addGroupIsPurchasable, addGroupPermissions,
 		addModelFallbackChannel, addUsageChannel, addUsageFallback, addUsageStatus, addUsageError,
 		addUsageRequestMethod, addUsageRequestURL, addUsageRequestHeaders, addUsageRequestBody, addUsageTTFTFallback,
-		addFileDraft, addFileBranchMessage, addDocumentIngestUpdatedAt, addDocumentUploader,
+		addFileDraft, addFileBranchMessage, addFileRelPath, addDocumentIngestUpdatedAt, addDocumentUploader,
 		addWorkspaceCanCreateProjects, addWorkspaceCanPrivateConversations, addWorkspaceCanCreateSkillsPrompts, addWorkspaceCanCreatePrompts, addWorkspaceCanCreateSkills, addWorkspaceCanCreateMCP, addWorkspaceCanUsePrompts, addWorkspaceCanUseSkills, addWorkspaceCanUseMCP, addWorkspaceCanCreateKB, addWorkspaceCanAddKBFiles, addWorkspaceCanDeleteKBContent, addWorkspaceCanDeleteConversations, addWorkspaceInvitePurpose, addWorkspaceDeleting, addWorkspaceIcon, addWorkspaceDescription,
 		addWorkspaceAllowToolCalling, addWorkspaceAllowDrawing, addWorkspaceAllowMCP, addWorkspaceAllowSkills, addWorkspaceAllowPrompts,
 		addWorkspaceAllowPrivateChat,

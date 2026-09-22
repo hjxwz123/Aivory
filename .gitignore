@@ -65,3 +65,8 @@ sauc_go/
 /android/
 /assets/
 /capacitor.config.ts
+
+# OOXML round-trip check: `out/` holds files the vitest suite writes for
+# verify_roundtrip.py to re-open with openpyxl / python-pptx. Generated, never
+# committed. Run `npm run test:ooxml-roundtrip` (on Windows: `python`).
+tests/fixtures/ooxml/out/

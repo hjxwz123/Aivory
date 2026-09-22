@@ -101,19 +101,19 @@ func CreateFile(ctx context.Context, db *sql.DB, f File) (*File, error) {
 	var result sql.Result
 	if f.ConversationID == "" {
 		result, err = tx.ExecContext(ctx,
-			`INSERT INTO files(id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, draft, branch_message_id, created_at) VALUES(?, ?, NULL, ?, ?, ?, ?, ?, ?, '', ?)`,
-			f.ID, f.UserID, f.Filename, f.MimeType, f.SizeBytes, f.StoragePath, f.Kind, boolInt(f.Draft), now)
+			`INSERT INTO files(id, user_id, conversation_id, filename, rel_path, mime_type, size_bytes, storage_path, kind, draft, branch_message_id, created_at) VALUES(?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, '', ?)`,
+			f.ID, f.UserID, f.Filename, f.RelPath, f.MimeType, f.SizeBytes, f.StoragePath, f.Kind, boolInt(f.Draft), now)
 	} else {
 		args := []any{
-			f.ID, f.UserID, f.ConversationID, f.Filename, f.MimeType,
+			f.ID, f.UserID, f.ConversationID, f.Filename, f.RelPath, f.MimeType,
 			f.SizeBytes, f.StoragePath, f.Kind, boolInt(f.Draft), strings.TrimSpace(f.BranchMessageID), now,
 			f.ConversationID,
 		}
 		args = append(args, conversationMemberMutationArgs(f.UserID)...)
 		// Uploads are mutations: workspace guests are read-only, so the member
 		// mutation predicate (access + non-guest) replaces the plain read one.
-		q := `INSERT INTO files(id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, draft, branch_message_id, created_at)
-			 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+		q := `INSERT INTO files(id, user_id, conversation_id, filename, rel_path, mime_type, size_bytes, storage_path, kind, draft, branch_message_id, created_at)
+			 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 			   FROM conversations c
 			  WHERE c.id=? AND ` + conversationMemberMutationPredicate("c")
 		if workspaceID != "" {
@@ -138,9 +138,9 @@ func CreateFile(ctx context.Context, db *sql.DB, f File) (*File, error) {
 	var conversationID sql.NullString
 	var draft int
 	if err := tx.QueryRowContext(ctx,
-		`SELECT id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, draft, branch_message_id, created_at
+		`SELECT id, user_id, conversation_id, filename, rel_path, mime_type, size_bytes, storage_path, kind, draft, branch_message_id, created_at
 		   FROM files WHERE id=?`, f.ID,
-	).Scan(&created.ID, &created.UserID, &conversationID, &created.Filename, &created.MimeType,
+	).Scan(&created.ID, &created.UserID, &conversationID, &created.Filename, &created.RelPath, &created.MimeType,
 		&created.SizeBytes, &created.StoragePath, &created.Kind, &draft, &created.BranchMessageID, &created.CreatedAt); err != nil {
 		return nil, err
 	}
@@ -261,7 +261,7 @@ func ListFilesByConversation(ctx context.Context, db *sql.DB, convID, userID str
 	args = append(args, workspaceResourceAccessArgs(userID)...)
 	args = append(args, userID)
 	rows, err := db.QueryContext(ctx,
-		`SELECT id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, draft, branch_message_id, created_at
+		`SELECT id, user_id, conversation_id, filename, rel_path, mime_type, size_bytes, storage_path, kind, draft, branch_message_id, created_at
 		 FROM files f
 		 WHERE f.conversation_id=?
 		   AND EXISTS (
@@ -280,7 +280,7 @@ func ListFilesByConversation(ctx context.Context, db *sql.DB, convID, userID str
 		var f File
 		var conv sql.NullString
 		var draft int
-		if err := rows.Scan(&f.ID, &f.UserID, &conv, &f.Filename, &f.MimeType, &f.SizeBytes, &f.StoragePath, &f.Kind, &draft, &f.BranchMessageID, &f.CreatedAt); err != nil {
+		if err := rows.Scan(&f.ID, &f.UserID, &conv, &f.Filename, &f.RelPath, &f.MimeType, &f.SizeBytes, &f.StoragePath, &f.Kind, &draft, &f.BranchMessageID, &f.CreatedAt); err != nil {
 			return nil, err
 		}
 		f.ConversationID = conv.String
@@ -310,7 +310,7 @@ func ConversationFilesByIDs(ctx context.Context, db *sql.DB, convID, userID stri
 	args = append(args, workspaceResourceAccessArgs(userID)...)
 	args = append(args, userID)
 	rows, err := db.QueryContext(ctx, `
-		SELECT f.id, f.user_id, f.conversation_id, f.filename, f.mime_type,
+		SELECT f.id, f.user_id, f.conversation_id, f.filename, f.rel_path, f.mime_type,
 		       f.size_bytes, f.storage_path, f.kind, f.draft, f.created_at,
 		       COALESCE((
 		         SELECT d.id FROM documents d
@@ -338,7 +338,7 @@ func ConversationFilesByIDs(ctx context.Context, db *sql.DB, convID, userID stri
 		var conv sql.NullString
 		var draft int
 		if err := rows.Scan(
-			&f.ID, &f.UserID, &conv, &f.Filename, &f.MimeType,
+			&f.ID, &f.UserID, &conv, &f.Filename, &f.RelPath, &f.MimeType,
 			&f.SizeBytes, &f.StoragePath, &f.Kind, &draft, &f.CreatedAt,
 			&f.DocumentID,
 		); err != nil {
@@ -849,7 +849,7 @@ func looksLocalStoragePath(p string) bool {
 func GetFile(ctx context.Context, db *sql.DB, id, userID string) (*File, error) {
 	var f File
 	var conv sql.NullString
-	q := `SELECT f.id, f.user_id, f.conversation_id, f.filename, f.mime_type, f.size_bytes, f.storage_path, f.kind, f.draft, f.created_at FROM files f WHERE f.id=?`
+	q := `SELECT f.id, f.user_id, f.conversation_id, f.filename, f.rel_path, f.mime_type, f.size_bytes, f.storage_path, f.kind, f.draft, f.created_at FROM files f WHERE f.id=?`
 	args := []any{id}
 	if userID != "" {
 		// Standalone uploads remain personal. Conversation uploads inherit the
@@ -867,7 +867,7 @@ func GetFile(ctx context.Context, db *sql.DB, id, userID string) (*File, error) 
 	}
 	var draft int
 	err := db.QueryRowContext(ctx, q, args...).
-		Scan(&f.ID, &f.UserID, &conv, &f.Filename, &f.MimeType, &f.SizeBytes, &f.StoragePath, &f.Kind, &draft, &f.CreatedAt)
+		Scan(&f.ID, &f.UserID, &conv, &f.Filename, &f.RelPath, &f.MimeType, &f.SizeBytes, &f.StoragePath, &f.Kind, &draft, &f.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}

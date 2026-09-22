@@ -223,6 +223,80 @@ func (p uploadPolicy) validateUpload(rawName string) (string, string, error) {
 	return name, ext, nil
 }
 
+// validateUploadRelPath sanitises the relative path a FOLDER upload reports for
+// one of its files, and reports whether the path is usable.
+//
+// A folder upload sends one request per file, so the shape of the folder can
+// only be preserved if the server accepts a client-supplied relative path. That
+// path is therefore untrusted input that eventually becomes a sandbox path
+// (`/workspace/uploads/<folder>/<relPath>`), so it is constrained here rather
+// than at the point of use:
+//
+//   - backslashes are folded to "/" (a Windows folder picker reports them);
+//   - a single leading "./" is dropped, and a leading "/" is REJECTED rather
+//     than silently stripped — an absolute path means the client is confused
+//     about what it is sending, and quietly reinterpreting it as relative is how
+//     a path bug becomes a security bug later;
+//   - an empty segment ("a//b"), "." and ".." are rejected outright — the latter
+//     is what would otherwise let a crafted upload escape the folder root;
+//   - NUL and control characters are rejected (filesystem boundary + logging);
+//   - each segment is length-capped, matching the filename rule.
+//
+// Returns ("", false) for anything unusable, so the caller can reject the
+// request instead of silently flattening the file into the folder root.
+func validateUploadRelPath(raw string) (string, bool) {
+	if raw == "" {
+		return "", false
+	}
+	if strings.ContainsRune(raw, 0) {
+		return "", false
+	}
+	for _, r := range raw {
+		if r < 0x20 || r == 0x7f {
+			return "", false
+		}
+	}
+	// A Windows client may report "sub\dir\file.txt"; the browser's
+	// webkitRelativePath uses "/", but a hand-crafted request need not.
+	normalized := strings.ReplaceAll(raw, "\\", "/")
+	if strings.HasPrefix(normalized, "/") {
+		return "", false
+	}
+	if strings.HasPrefix(normalized, "./") {
+		normalized = normalized[2:]
+	}
+	segments := strings.Split(normalized, "/")
+	cleaned := make([]string, 0, len(segments))
+	for _, segment := range segments {
+		if segment == "" {
+			// Covers a leading/duplicated separator and a trailing one.
+			return "", false
+		}
+		if segment == "." || segment == ".." {
+			return "", false
+		}
+		if len(segment) > 200 {
+			return "", false
+		}
+		cleaned = append(cleaned, segment)
+	}
+	if len(cleaned) == 0 || len(cleaned) > maxFolderRelPathSegments {
+		return "", false
+	}
+	joined := strings.Join(cleaned, "/")
+	if len(joined) > maxFolderRelPathBytes {
+		return "", false
+	}
+	return joined, true
+}
+
+const (
+	// A folder deeper or longer than this is almost certainly not a project the
+	// user meant to share, and the path is echoed into a sandbox manifest.
+	maxFolderRelPathSegments = 32
+	maxFolderRelPathBytes    = 1024
+)
+
 // AllowedExtensionsSlice is the policy's allowlist as a sorted slice — used
 // by the policy endpoint that hands the list back to the frontend so the
 // composer can set `<input accept>` accordingly.

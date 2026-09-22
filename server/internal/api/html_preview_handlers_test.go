@@ -45,8 +45,26 @@ func TestHTMLPreviewShareReturnsOnlySandboxedHTML(t *testing.T) {
 	if got := publicRec.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
 		t.Fatalf("Content-Type=%q", got)
 	}
-	if got := publicRec.Header().Get("Content-Security-Policy"); !strings.Contains(got, "sandbox allow-scripts") || strings.Contains(got, "allow-same-origin") {
-		t.Fatalf("unsafe Content-Security-Policy=%q", got)
+	csp := publicRec.Header().Get("Content-Security-Policy")
+	if !strings.Contains(csp, "sandbox allow-scripts") || strings.Contains(csp, "allow-same-origin") {
+		t.Fatalf("unsafe Content-Security-Policy=%q", csp)
+	}
+	// The upgrade directive has to be conditional on the transport. On plain HTTP
+	// it rewrites the shared page's OWN /tailwind-browser.js to https, which
+	// fails with ERR_SSL_PROTOCOL_ERROR and leaves the artifact unstyled — the
+	// "blank preview" symptom. httptest requests carry no TLS and no forwarding
+	// header, so this is the plain-HTTP case.
+	if strings.Contains(csp, "upgrade-insecure-requests") {
+		t.Fatalf("plain-http CSP must not upgrade insecure requests: %q", csp)
+	}
+
+	secureReq := httptest.NewRequest(http.MethodGet, created.URL, nil)
+	secureReq = secureReq.WithContext(context.WithValue(secureReq.Context(), pathCtxKey{}, map[string]string{"token": created.ID}))
+	secureReq.Header.Set("X-Forwarded-Proto", "https")
+	secureRec := httptest.NewRecorder()
+	publicHTMLPreviewShareHandler(Deps{DB: db}, secureRec, secureReq)
+	if got := secureRec.Header().Get("Content-Security-Policy"); !strings.Contains(got, "upgrade-insecure-requests") {
+		t.Fatalf("https Content-Security-Policy must upgrade insecure requests: %q", got)
 	}
 	if got := publicRec.Header().Get("Referrer-Policy"); got != "no-referrer" {
 		t.Fatalf("Referrer-Policy=%q", got)

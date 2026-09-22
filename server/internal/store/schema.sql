@@ -762,6 +762,9 @@ CREATE TABLE IF NOT EXISTS files (
   kind            TEXT NOT NULL DEFAULT 'other',
   draft           INTEGER NOT NULL DEFAULT 0,
   branch_message_id TEXT NOT NULL DEFAULT '',
+  -- Path of this file inside an uploaded folder ("" for a single-file upload).
+  -- Lets a folder upload keep its shape all the way into the code sandbox.
+  rel_path        TEXT NOT NULL DEFAULT '',
   created_at      INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
 CREATE INDEX IF NOT EXISTS idx_files_user ON files(user_id);

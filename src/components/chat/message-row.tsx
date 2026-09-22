@@ -64,6 +64,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useCopy } from '@/hooks/use-clipboard'
 import { useAuth } from '@/store/auth'
+import { useArtifactPanel } from '@/store/artifact-panel'
 import { initials } from '@/components/ui/avatar.utils'
 import { useModels } from '@/store/models'
 import { useMediaQuery } from '@/hooks/use-media-query'
@@ -83,7 +84,6 @@ import { ResearchPanel } from './research-panel'
 import { CitationList } from './citation'
 import { VerifyBadge } from './verify-badge'
 import { ImageLightbox } from './image-lightbox'
-import { FilePreview } from './file-preview'
 import { toast } from '@/hooks/use-toast'
 import { cn, safeHref } from '@/lib/utils'
 import { isEmptyStoppedMessage, messageHasActions } from '@/lib/message-state'
@@ -332,19 +332,19 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
   const canEditImage = (artifact: ArtifactRef) => !readOnly && !message.streaming && !!onImageEdit &&
     (artifact.source === 'image_generate' || artifact.source === 'image_generation' ||
       (!artifact.source && (model?.kind === 'image' || message.reasoning?.some((item) => item.kind === 'tool' && item.tool.name === 'image_generate'))))
-  // Non-image attachment preview (pdf / docx / text / fallback) — opens a modal
-  // instead of letting the click download the file.
-  const [filePreview, setFilePreview] = useState<{
-    attachmentId?: string
-    name: string
-    url?: string
-    kind: Attachment['kind']
-    authenticated?: boolean
-  } | null>(null)
+  // Non-image attachment preview (pdf / docx / text / fallback). The document
+  // opens in the shared right-edge Artifact panel, keyed by attachment id so a
+  // deleted attachment can still be detected and dismissed.
   const openDocumentCitation = useCallback((citation: Citation) => {
     const url = documentCitationContentUrl(citation)
     if (!url) return
-    setFilePreview({ name: citation.title, url, kind: 'other', authenticated: true })
+    useArtifactPanel.getState().openArtifact({
+      type: 'file',
+      name: citation.title,
+      url,
+      kind: 'other',
+      authenticated: true,
+    })
   }, [])
   const editRef = useRef<RichComposerEditorHandle>(null)
   const assistantEditRef = useRef<HTMLTextAreaElement>(null)
@@ -621,8 +621,13 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
         ),
       )
     if (isDeleted(lightbox?.attachmentId)) setLightbox(null)
-    if (isDeleted(filePreview?.attachmentId)) setFilePreview(null)
-  }, [filePreview?.attachmentId, lightbox?.attachmentId, message.attachments])
+    // The preview lives in the shared Artifact panel now, so the row can no
+    // longer close it by clearing local state — look at what the panel is
+    // showing and dismiss it only when that exact attachment was deleted.
+    const panel = useArtifactPanel.getState()
+    const panelFile = panel.source?.type === 'file' ? panel.source : null
+    if (panel.open && panelFile && isDeleted(panelFile.attachmentId)) panel.close()
+  }, [lightbox?.attachmentId, message.attachments])
 
   const imageAttachments = attachments.filter(
     (attachment) => attachment.kind === 'image' && attachment.previewUrl && !attachment.deleted && !brokenAtts.has(attachment.id),
@@ -874,11 +879,13 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
                           key={attachment.id}
                           type="button"
                           onClick={() =>
-                            setFilePreview({
+                            useArtifactPanel.getState().openArtifact({
+                              type: 'file',
                               attachmentId: attachment.id,
                               name: attachment.name,
-                              url: attachment.previewUrl,
+                              url: attachment.previewUrl ?? '',
                               kind: attachment.kind,
+                              authenticated: false,
                             })
                           }
                           aria-label={t('actions.previewFile', { defaultValue: 'Preview file' })}
@@ -1434,12 +1441,6 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
           onImageEdit?.(lightbox.artifact!, message.id)
           setLightbox(null)
         } : undefined}
-      />
-      {/* Non-image attachment preview modal. */}
-      <FilePreview
-        open={filePreview !== null}
-        onOpenChange={(o) => !o && setFilePreview(null)}
-        file={filePreview}
       />
       {/* Phone: per-message actions as a bottom Sheet (§ mobile redesign). */}
       {isPhone && (
