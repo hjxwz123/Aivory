@@ -187,7 +187,7 @@ function FileBody({ file, onClose }: { file: FileSource; onClose: () => void }) 
   const objectUrlRef = useRef<string | null>(null)
   const [saving, setSaving] = useState(false)
 
-  const { url, authenticated, kind, name, onLoadError } = file
+  const { url, authenticated, kind, backendKind, name, onLoadError } = file
 
   useEffect(() => {
     if (!url) {
@@ -243,7 +243,9 @@ function FileBody({ file, onClose }: { file: FileSource; onClose: () => void }) 
 
   const actionUrl = preview.objectUrl ?? (authenticated ? undefined : url)
 
-  const previewKind = documentPreviewKind(name, preview.mimeType, kind)
+  // `backendKind` (a tool artifact's real MIME type) wins when present; an
+  // upload falls back to its backend `kind`, which is what it always passed.
+  const previewKind = documentPreviewKind(name, preview.mimeType, backendKind || kind)
   const editor = documentEditorFor(name, previewKind)
   const [mode, setMode] = useState<'view' | 'edit'>('view')
   const [edited, setEdited] = useState<EditedContent | null>(null)

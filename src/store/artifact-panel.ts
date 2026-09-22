@@ -25,6 +25,13 @@ export type ArtifactSource =
       kind: Attachment['kind']
       authenticated: boolean
       attachmentId?: string
+      /**
+       * Declared type when the filename alone is inconclusive — a tool artifact
+       * carries its real MIME type (the SSE/artifact block `summary`) instead of
+       * an upload's `kind`, which has no Office members. DocumentPreview reads it
+       * as the backend kind, matching how Files passes `file.mime_type`.
+       */
+      backendKind?: string
       onLoadError?: (status?: number) => void
     }
 
