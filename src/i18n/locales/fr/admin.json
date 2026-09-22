@@ -2076,7 +2076,31 @@
     "dailyTokenLimit": "Limite quotidienne de Token",
     "dailyTokenLimitHint": "Total maximal de Token en entrée et sortie par utilisateur et par jour UTC. 0 = illimité.",
     "maxConcurrentGenerations": "Générations simultanées par utilisateur",
-    "maxConcurrentGenerationsHint": "Nombre maximal de flux de réponse actifs par utilisateur. 0 = illimité."
+    "maxConcurrentGenerationsHint": "Nombre maximal de flux de réponse actifs par utilisateur. 0 = illimité.",
+    "docmee": {
+      "title": "AI PPT (文多多)",
+      "lead": "Intègre l’espace de présentations Docmee et facture un prix fixe en crédits par présentation générée. Laissez la clé API vide pour désactiver la fonctionnalité.",
+      "enabled": "Activer AI PPT",
+      "apiKey": "Clé API Docmee",
+      "apiKeyHint": "Créée sur la plateforme ouverte Docmee. Stockée côté serveur et affichée masquée.",
+      "creditsPerPpt": "Crédits par présentation générée",
+      "creditsPerPptHint": "0 = gratuit. La facturation exige aussi un taux de crédits par USD supérieur à 0 ci-dessus.",
+      "creatorVersion": "Version de création",
+      "creatorVersionHint": "v2 est le mode conversationnel (recommandé) ; v1 est le flux étape par étape.",
+      "tokenHours": "Durée de vie du jeton (heures)",
+      "tokenHoursHint": "0 = valeur par défaut de Docmee.",
+      "apiBaseUrl": "URL de base de l’API Docmee",
+      "apiBaseUrlHint": "Point d’appel serveur de createApiToken. À modifier uniquement pour la version internationale ou un proxy auto-hébergé.",
+      "domain": "Origine internationale",
+      "domainHint": "Laissez vide pour la version chinoise. La version internationale utilise https://app.xpptx.com.",
+      "sdkUrl": "URL du script du SDK iframe",
+      "sdkUrlHint": "Version épinglée par défaut ; pointez-la vers une copie auto-hébergée ou un miroir interne si besoin.",
+      "sdkBaseUrl": "Base du proxy API iframe",
+      "enabledToast": "AI PPT est activé",
+      "disabledToast": "AI PPT est désactivé",
+      "offWithKeyHint": "Une clé API Docmee est configurée mais AI PPT est actuellement désactivé. Activez l’interrupteur ci-dessus pour l’activer.",
+      "sdkBaseUrlHint": "À définir uniquement si le navigateur doit joindre Docmee via votre propre domaine."
+    }
   },
   "systemStorage": {
     "title": "Stockage et téléversements",

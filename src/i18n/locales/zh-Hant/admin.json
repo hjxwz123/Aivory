@@ -2076,7 +2076,31 @@
     "dailyTokenLimit": "每日 Token 上限",
     "dailyTokenLimitHint": "每位使用者每個 UTC 日的輸入與輸出 Token 總上限。0 = 不限制。",
     "maxConcurrentGenerations": "每位使用者並行生成數",
-    "maxConcurrentGenerationsHint": "每位使用者同時進行的回應串流上限。0 = 不限制。"
+    "maxConcurrentGenerationsHint": "每位使用者同時進行的回應串流上限。0 = 不限制。",
+    "docmee": {
+      "title": "AI PPT（文多多）",
+      "lead": "嵌入文多多簡報工作台，並依每次成功產生的 PPT 固定扣除積分。API Key 留空即關閉此功能。",
+      "enabled": "啟用 AI PPT",
+      "apiKey": "文多多 API Key",
+      "apiKeyHint": "在文多多開放平台建立。僅儲存於伺服端，讀取時以遮罩顯示。",
+      "creditsPerPpt": "每份 PPT 扣除積分",
+      "creditsPerPptHint": "0 表示免費。扣費還需要上方「每美元積分」大於 0，否則全站積分功能為關閉狀態。",
+      "creatorVersion": "創作版本",
+      "creatorVersionHint": "v2 為對話式創作（建議），v1 為步驟式創作。",
+      "tokenHours": "Token 有效期限（小時）",
+      "tokenHoursHint": "0 表示使用文多多預設值。",
+      "apiBaseUrl": "文多多 API 位址",
+      "apiBaseUrlHint": "伺服端呼叫 createApiToken 的位址。僅國際版或自建代理時才需要修改。",
+      "domain": "國際版網域",
+      "domainHint": "中國版留空。國際版填寫 https://app.xpptx.com。",
+      "sdkUrl": "Iframe SDK 腳本位址",
+      "sdkUrlHint": "預設固定版本；如需自架或走內網鏡像，可在此修改。",
+      "sdkBaseUrl": "Iframe 介面代理位址",
+      "enabledToast": "AI PPT 已啟用",
+      "disabledToast": "AI PPT 已關閉",
+      "offWithKeyHint": "已設定文多多 API Key，但 AI PPT 目前處於關閉狀態。開啟上方開關即可啟用。",
+      "sdkBaseUrlHint": "僅當瀏覽器需要透過你自己的網域存取文多多介面時才需設定。"
+    }
   },
   "systemStorage": {
     "title": "儲存與上傳",

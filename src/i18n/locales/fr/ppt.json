@@ -1,0 +1,41 @@
+{
+  "title": "AI PPT",
+  "price": "{{price}} crédits par présentation",
+  "balance": "{{available}} disponibles",
+  "reload": "Recharger l’éditeur",
+  "pages": {
+    "creator": "Créer",
+    "dashboard": "Mes présentations"
+  },
+  "charged": {
+    "title": "{{price}} crédits débités",
+    "description": "Il reste {{available}} crédits"
+  },
+  "insufficient": {
+    "title": "Crédits insuffisants",
+    "description": "Générer une présentation coûte {{price}} crédits et vous en avez {{available}}. Rechargez pour continuer.",
+    "action": "Voir les offres"
+  },
+  "unconfigured": {
+    "title": "AI PPT n’est pas configuré",
+    "description": "Un administrateur doit renseigner la clé API Docmee dans Admin → Crédits et quotas pour activer AI PPT."
+  },
+  "disabled": {
+    "title": "AI PPT est désactivé",
+    "description": "Un administrateur a désactivé AI PPT pour ce déploiement."
+  },
+  "loadFailed": {
+    "title": "Impossible de charger AI PPT",
+    "description": "La configuration d’AI PPT n’a pas pu être récupérée."
+  },
+  "sdkFailed": {
+    "title": "Impossible de démarrer AI PPT",
+    "description": "L’éditeur de présentations n’a pas pu être chargé.",
+    "retry": "Réessayer"
+  },
+  "errors": {
+    "generic": "Impossible de lancer la génération",
+    "charge": "Impossible de débiter les crédits",
+    "upstream": "Le service de présentations a renvoyé une erreur"
+  }
+}

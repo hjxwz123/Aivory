@@ -53,6 +53,9 @@ type Deps struct {
 	// UserMCPHTTPClient is an optional test injection. Production leaves it nil
 	// and user MCP handlers construct the dial-time restricted netsafe client.
 	UserMCPHTTPClient *http.Client
+	// DocmeeHTTPClient is an optional test injection for the AI PPT token-minting
+	// call. Production leaves it nil (§ docmee_handlers.go).
+	DocmeeHTTPClient *http.Client
 }
 
 // Env-overridable per-IP rate-limit budgets ("<N> per <window>") and the CORS
@@ -315,6 +318,16 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/image/styles", requireAuth(d, listImageStylesPublic))
 	// §4.20 the signed-in user's own generated-image gallery.
 	mux.handle("GET", "/api/me/images", requireAuth(d, listMyImages))
+	// § AI PPT (Docmee iframe): the browser never sees the Docmee API key or
+	// touches the credit ledger. `token` mints the short-lived iframe token (no
+	// billing), `attempt` holds the per-deck price before generation starts,
+	// `charge` settles that hold under the upstream PPT id, and `release` refunds
+	// a generation that failed or was abandoned.
+	mux.handle("GET", "/api/me/ppt/config", requireAuth(d, meDocmeeConfigHandler))
+	mux.handle("GET", "/api/me/ppt/token", requireAuth(d, meDocmeeTokenHandler))
+	mux.handle("POST", "/api/me/ppt/attempt", requireAuth(d, meDocmeeAttemptHandler))
+	mux.handle("POST", "/api/me/ppt/charge", requireAuth(d, meDocmeeChargeHandler))
+	mux.handle("POST", "/api/me/ppt/release", requireAuth(d, meDocmeeReleaseHandler))
 	mux.handle("GET", "/api/user-groups", requireAuth(d, listUserGroupsPublic))
 	mux.handle("GET", "/api/payment-methods", requireAuth(d, listPaymentMethodsPublic))
 	mux.handle("POST", "/api/payments/checkout", rateLimitedIP(d, "payment-checkout", rlPaymentCheckoutMax, rlPaymentCheckoutWindow, requireAuth(d, createPaymentCheckoutHandler)))
