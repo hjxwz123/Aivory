@@ -1497,6 +1497,16 @@ var settingsKeys = []string{
 	// requests expose diagnostics. log_request_bodies is an independent privacy
 	// boundary: false keeps method/URL/headers/error while omitting every body.
 	"log_full_requests", "log_errors_only", "log_request_bodies",
+	// § AI PPT (Docmee / 文多多 iframe, "接入方案二"). docmee_api_key mints the
+	// per-user iframe token server-side and is masked as a secret on GET; the
+	// browser only ever receives a short-lived token. docmee_enabled unset
+	// follows the key's presence. docmee_credits_per_ppt is the flat price
+	// charged per successfully generated deck (0 = free). docmee_domain and
+	// docmee_sdk_base_url exist for the international build (app.xpptx.com) and
+	// for deployments that proxy the SDK/API through their own domain.
+	"docmee_enabled", "docmee_api_key", "docmee_api_base_url", "docmee_domain",
+	"docmee_sdk_url", "docmee_sdk_base_url", "docmee_creator_version",
+	"docmee_credits_per_ppt", "docmee_token_hours",
 }
 
 // sensitiveKeywords lists substrings that identify secret settings fields.
@@ -1686,6 +1696,43 @@ func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.R
 				if micros, err := store.CreditsToMicros(amount); err != nil || amount > 0 && micros == 0 {
 					return 0, errInvalidInput
 				}
+			case "docmee_credits_per_ppt":
+				// Flat per-deck price. Non-negative and exactly representable in
+				// credit micros, matching the ledger's own arithmetic so an admin
+				// cannot save a price the debit call would later reject.
+				var amount float64
+				if json.Unmarshal(v, &amount) != nil || amount < 0 || math.IsNaN(amount) || math.IsInf(amount, 0) {
+					return 0, errInvalidInput
+				}
+				if micros, err := store.CreditsToMicros(amount); err != nil || amount > 0 && micros == 0 {
+					return 0, errInvalidInput
+				}
+			case "docmee_token_hours":
+				// Upstream token lifetime in hours; 0 = let Docmee pick its default.
+				var hours int
+				if json.Unmarshal(v, &hours) != nil || hours < 0 || hours > 24*30 {
+					return 0, errInvalidInput
+				}
+			case "docmee_creator_version":
+				var version string
+				if json.Unmarshal(v, &version) != nil {
+					return 0, errInvalidInput
+				}
+				version = strings.ToLower(strings.TrimSpace(version))
+				if version != "" && version != "v1" && version != "v2" {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(version)
+			case "docmee_api_base_url", "docmee_domain", "docmee_sdk_url", "docmee_sdk_base_url":
+				var rawURL string
+				if json.Unmarshal(v, &rawURL) != nil {
+					return 0, errInvalidInput
+				}
+				normalized, err := normalizeDocmeeURL(rawURL)
+				if err != nil {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(normalized)
 			case "max_image_upload_mb", "max_file_upload_mb":
 				// Per-kind upload caps in MB. Non-negative integer; 0 = "use default".
 				// The byte ceiling (env MaxUploadBytes) is applied at read time.

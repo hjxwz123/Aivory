@@ -14,8 +14,7 @@ import {
 } from './client'
 import { withRequestActivity, type RequestActivityMode } from '@/lib/request-activity'
 import type {
-  ApiAdminOverview,
-  ApiAdminMessageFeedbackPage,
+  ApiAdminOverview,  ApiAdminMessageFeedbackPage,
   ApiAdminOnboarding,
   ApiAdminUserFeedbackPage,
   ApiAdminFile,
@@ -39,6 +38,11 @@ import type {
   ApiWorkspaceUsageAnalytics,
   ApiWorkspaceAuditLog,
   ApiAnalytics,
+  ApiAiPPTAttempt,
+  ApiAiPPTCharge,
+  ApiAiPPTConfig,
+  ApiAiPPTRelease,
+  ApiAiPPToken,
   ApiAuthPolicy,
   ApiAuthResponse,
   ApiAuthSessionResponse,
@@ -257,6 +261,24 @@ export const authApi = {
     })
     if (!res.ok) throw new ApiError(res.status, `preview failed (${res.status})`, null)
     return res.blob()
+  },
+  /**
+   * Persist an edited document as a NEW standalone file owned by the caller.
+   *
+   * Reuses the existing upload pipeline (`POST /files`) instead of adding a
+   * write-back endpoint: "save a copy" deliberately never mutates the bytes a
+   * past message, citation, or artifact link already points at, so history
+   * cannot change under the user.
+   *
+   * Two server-side rules apply and surface as ordinary API errors:
+   * - the admin-tunable upload allowlist must permit the extension;
+   * - `.html`/`.htm` are rejected by default on purpose (stored HTML served
+   *   inline is an XSS vector — see server/internal/api/upload_policy.go).
+   */
+  saveDocumentCopy: (blob: Blob, filename: string) => {
+    const form = new FormData()
+    form.append('file', new File([blob], filename, { type: blob.type || 'application/octet-stream' }))
+    return apiUpload<{ id: string; filename: string }>('/files', form)
   },
   /** Credit balance (timed pool + permanent pool) for the subscription page. */
   credits: () => api<ApiCredits>('/me/credits'),
@@ -553,10 +575,35 @@ export const audioApi = {
   },
 }
 
+// ----- AI PPT (Docmee iframe) ----------------------------------------------
+
+/**
+ * Billing-aware wrapper around the embedded Docmee iframe (§ AI PPT).
+ *
+ * The browser never holds the Docmee API key: `token` mints a short-lived iframe
+ * token server-side (no billing), `attempt` holds the per-deck price before
+ * generation starts, `charge` settles that attempt under the upstream PPT id,
+ * and `release` refunds an attempt that failed or was abandoned. A hold that is
+ * never settled expires server-side, so a closed tab cannot strand credits.
+ */
+export const aipptApi = {
+  config: () => api<ApiAiPPTConfig>('/me/ppt/config'),
+  token: () => api<ApiAiPPToken>('/me/ppt/token'),
+  /** Open a generation attempt; 402 when the balance cannot cover the price. */
+  attempt: () => api<ApiAiPPTAttempt>('/me/ppt/attempt', { method: 'POST', body: {} }),
+  /** Settle one attempt. The upstream ppt id makes the debit idempotent. */
+  charge: (attemptId: string, pptId?: string) =>
+    api<ApiAiPPTCharge>('/me/ppt/charge', {
+      method: 'POST',
+      body: { attempt_id: attemptId, ppt_id: pptId ?? '' },
+    }),
+  release: (attemptId: string) =>
+    api<ApiAiPPTRelease>('/me/ppt/release', { method: 'POST', body: { attempt_id: attemptId } }),
+}
+
 // ----- Projects ------------------------------------------------------------
 
-export const projectsApi = {
-  list: (workspaceId?: string) =>
+export const projectsApi = {  list: (workspaceId?: string) =>
     api<ApiProject[]>(`/projects${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`),
   get: (id: string) =>
     api<{ project: ApiProject; documents: ApiDocument[]; conversations: ApiConversation[] }>(

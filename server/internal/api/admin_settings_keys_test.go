@@ -46,6 +46,25 @@ func TestAdminSettingsKeysAreUniqueAndExcludeRetiredPurchasingSettings(t *testin
 			t.Fatalf("rerank setting %q is not exposed by the admin settings API", key)
 		}
 	}
+
+	// § AI PPT (Docmee iframe): every knob the integration reads must be writable
+	// through the admin settings API, otherwise the deployment cannot be
+	// configured from the UI at all.
+	for _, key := range []string{
+		"docmee_enabled",
+		"docmee_api_key",
+		"docmee_api_base_url",
+		"docmee_domain",
+		"docmee_sdk_url",
+		"docmee_sdk_base_url",
+		"docmee_creator_version",
+		"docmee_credits_per_ppt",
+		"docmee_token_hours",
+	} {
+		if _, exists := seen[key]; !exists {
+			t.Fatalf("AI PPT setting %q is not exposed by the admin settings API", key)
+		}
+	}
 }
 
 func TestAdminSettingsReportsEffectiveSandboxAvailability(t *testing.T) {

@@ -1,4 +1,4 @@
-const CHAT_SHELL_PREFIXES = ['/chat', '/projects', '/files', '/skills', '/kb', '/subscription'] as const
+const CHAT_SHELL_PREFIXES = ['/chat', '/projects', '/files', '/skills', '/kb', '/ppt', '/subscription'] as const
 
 /** Routes rendered inside ChatLayout and therefore needing its sidebar caches/realtime stream. */
 export function isChatShellPath(pathname: string): boolean {

@@ -1382,6 +1382,69 @@ export interface ApiCreditAdjustmentNotification {
   created_at: number
 }
 
+/**
+ * AI PPT runtime config (§ AI PPT / Docmee iframe). The server keeps the Docmee
+ * API key and only ever hands the browser a short-lived `token`, so this payload
+ * is safe to render and log.
+ */
+export interface ApiAiPPTConfig {
+  /** The iframe can be served (enabled AND an upstream API key is configured). */
+  enabled: boolean
+  /** An upstream key exists — lets the page tell "off" apart from "unconfigured". */
+  configured: boolean
+  /** A generation is charged. False = the platform credit system is off (free). */
+  credits_enabled: boolean
+  /** Flat price per generated deck, in credits. */
+  credits_per_ppt: number
+  /** Spendable balance (timed + permanent, minus live holds). */
+  credits_available: number
+  /** Seconds a session's credit hold survives before it expires on its own. */
+  reservation_ttl: number
+  /** Pinned iframe SDK script URL (admin-configurable, never an npm import). */
+  sdk_url: string
+  /** International build origin (`https://app.xpptx.com`); blank = China build. */
+  domain: string
+  /** Optional API base for the SDK when the deployment proxies Docmee. */
+  sdk_base_url: string
+  creator_version: 'v1' | 'v2'
+  download_button: boolean
+  outline_export_format: 'txt' | 'md'
+}
+
+/** Short-lived iframe token minted server-side from the Docmee API key. */
+export interface ApiAiPPToken {
+  token: string
+  /** Seconds the server considers the token reusable (it caches it). */
+  expires_in: number
+}
+
+/**
+ * One billed generation attempt: the credit hold taken before generation starts.
+ * `charge` settles it under the upstream PPT id; `release` refunds it.
+ */
+export interface ApiAiPPTAttempt {
+  attempt_id: string
+  /** Unix seconds at which the hold expires on its own. */
+  expires_at: number
+  credits_per_ppt: number
+  credits_charged: boolean
+  credits_available: number
+}
+
+/** Result of settling an attempt under the upstream PPT id. */
+export interface ApiAiPPTCharge {
+  credits: number
+  /** The deck had already been billed — no new debit was made. */
+  already_charged: boolean
+  credits_per_ppt: number
+  credits_available: number
+}
+
+export interface ApiAiPPTRelease {
+  released: boolean
+  credits_available: number
+}
+
 /** A file referenced by a conversation (§ conversation files drawer). */
 export interface ApiConversationFile {
   id: string
@@ -1393,9 +1456,8 @@ export interface ApiConversationFile {
   url: string
   draft: boolean
   /** Path inside an uploaded folder ("my-project/src/a.ts"); absent for a
-   *  single-file upload. The composer's chip rail groups by its first segment so
-   *  a folder shows as one node, and it survives a refresh so the grouping does
-   *  not unravel when a conversation is reopened. */
+   *  single-file upload. Available for grouping a folder into a tree — the
+   *  composer does not group yet, so treat this as plumbing, not a guarantee. */
   rel_path?: string
   document_id?: string
   document_status?: ApiDocument['status']

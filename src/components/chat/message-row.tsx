@@ -13,6 +13,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
+  Eye,
   FileDown,
   GitBranchPlus,
   AlertTriangle,
@@ -88,6 +89,7 @@ import { toast } from '@/hooks/use-toast'
 import { cn, safeHref } from '@/lib/utils'
 import { isEmptyStoppedMessage, messageHasActions } from '@/lib/message-state'
 import { documentCitationContentUrl } from '@/lib/citations'
+import { artifactBackendKind } from '@/lib/artifact-preview-kind'
 import { userCan } from '@/lib/user-permissions'
 import { attachmentKindLabel, attachmentTileClass, fileIconFor } from '@/lib/file-icon'
 import {
@@ -344,6 +346,24 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
       url,
       kind: 'other',
       authenticated: true,
+    })
+  }, [])
+  // Generated files (sandbox outputs, rendered HTML, exported Office documents)
+  // arrive as artifacts with a download link. The same bytes render in the
+  // shared right-edge Artifact panel, so delivery offers preview BESIDE download
+  // instead of forcing a round-trip through the browser's download folder.
+  const openArtifactPreview = useCallback((artifact: ArtifactRef, url: string) => {
+    useArtifactPanel.getState().openArtifact({
+      type: 'file',
+      name: artifact.filename,
+      url,
+      kind: 'other',
+      authenticated: true,
+      // Widens the preview kind beyond the filename extension: `kind` has no
+      // Office member, and the fetched Content-Type is the server's generic
+      // one, so the MIME the artifact recorded is what keeps a generated
+      // .pptx/.docx/.xlsx from landing on "unsupported".
+      backendKind: artifactBackendKind(artifact),
     })
   }, [])
   const editRef = useRef<RichComposerEditorHandle>(null)
@@ -1112,15 +1132,44 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
                         )
                       }
                       return (
-                        <a
+                        // Delivery card: the file name identifies the artifact,
+                        // the trailing icon group carries the two actions the
+                        // user actually needs — render it here (preview) or take
+                        // the bytes (download). Unsupported formats still open the
+                        // panel, which states that honestly instead of failing
+                        // silently in a new tab, and an unsafe URL never gets a
+                        // preview affordance (nothing to render).
+                        <div
                           key={a.id}
-                          href={href}
-                          download={a.filename}
-                          className="inline-flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-subtle)] px-3 py-2 text-sm text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)]"
+                          className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-subtle)] py-1.5 pl-3 pr-1.5 text-sm text-[var(--color-fg)]"
                         >
-                          <Download className="size-4 text-[var(--color-fg-muted)]" />
-                          {a.filename}
-                        </a>
+                          <span className="min-w-0 truncate">{a.filename}</span>
+                          {href ? (
+                            <span className="inline-flex shrink-0 items-center gap-0.5">
+                              <Tooltip content={t('actions.previewFile', { defaultValue: 'Preview file' })}>
+                                <button
+                                  type="button"
+                                  data-artifact-preview="true"
+                                  onClick={() => openArtifactPreview(a, href)}
+                                  aria-label={t('actions.previewFile', { defaultValue: 'Preview file' })}
+                                  className="inline-flex size-7 items-center justify-center rounded-[7px] text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                                >
+                                  <Eye className="size-4" aria-hidden />
+                                </button>
+                              </Tooltip>
+                              <a
+                                href={href}
+                                download={a.filename}
+                                aria-label={t('actions.download', { defaultValue: 'Download' })}
+                                className="inline-flex size-7 items-center justify-center rounded-[7px] text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                              >
+                                <Download className="size-4" aria-hidden />
+                              </a>
+                            </span>
+                          ) : (
+                            <Download className="mx-1 size-4 shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
+                          )}
+                        </div>
                       )
                     })}
                   </div>

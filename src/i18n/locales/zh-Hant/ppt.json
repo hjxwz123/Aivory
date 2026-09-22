@@ -1,0 +1,41 @@
+{
+  "title": "AI PPT",
+  "price": "每次生成 {{price}} 積分",
+  "balance": "餘額 {{available}}",
+  "reload": "重新載入編輯器",
+  "pages": {
+    "creator": "開始創作",
+    "dashboard": "我的 PPT"
+  },
+  "charged": {
+    "title": "已扣除 {{price}} 積分",
+    "description": "剩餘 {{available}} 積分"
+  },
+  "insufficient": {
+    "title": "積分不足",
+    "description": "生成一份 PPT 需要 {{price}} 積分，目前可用 {{available}} 積分。請先儲值後再繼續。",
+    "action": "查看方案"
+  },
+  "unconfigured": {
+    "title": "AI PPT 尚未設定",
+    "description": "請聯絡管理員在「管理後台 → 積分與配額」中填寫文多多 API Key 後再使用。"
+  },
+  "disabled": {
+    "title": "AI PPT 已關閉",
+    "description": "管理員已為本部署關閉 AI PPT。"
+  },
+  "loadFailed": {
+    "title": "AI PPT 載入失敗",
+    "description": "無法取得 AI PPT 設定。"
+  },
+  "sdkFailed": {
+    "title": "無法啟動 AI PPT",
+    "description": "簡報編輯器載入失敗。",
+    "retry": "重試"
+  },
+  "errors": {
+    "generic": "無法開始生成",
+    "charge": "扣費失敗",
+    "upstream": "簡報服務回報錯誤"
+  }
+}

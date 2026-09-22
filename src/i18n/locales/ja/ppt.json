@@ -1,0 +1,41 @@
+{
+  "title": "AI PPT",
+  "price": "1 回の生成につき {{price}} クレジット",
+  "balance": "残り {{available}}",
+  "reload": "エディターを再読み込み",
+  "pages": {
+    "creator": "作成",
+    "dashboard": "マイ PPT"
+  },
+  "charged": {
+    "title": "{{price}} クレジットを消費しました",
+    "description": "残り {{available}} クレジット"
+  },
+  "insufficient": {
+    "title": "クレジットが不足しています",
+    "description": "1 回の生成に {{price}} クレジット必要ですが、利用可能なのは {{available}} クレジットです。続けるにはチャージしてください。",
+    "action": "プランを見る"
+  },
+  "unconfigured": {
+    "title": "AI PPT が未設定です",
+    "description": "管理者が「管理画面 → クレジットと割り当て」で文多多の API キーを設定すると利用できます。"
+  },
+  "disabled": {
+    "title": "AI PPT は無効です",
+    "description": "管理者がこの環境で AI PPT を無効にしています。"
+  },
+  "loadFailed": {
+    "title": "AI PPT を読み込めませんでした",
+    "description": "AI PPT の設定を取得できませんでした。"
+  },
+  "sdkFailed": {
+    "title": "AI PPT を起動できませんでした",
+    "description": "プレゼンテーションエディターの読み込みに失敗しました。",
+    "retry": "再試行"
+  },
+  "errors": {
+    "generic": "生成を開始できませんでした",
+    "charge": "クレジットを消費できませんでした",
+    "upstream": "プレゼンテーションサービスがエラーを返しました"
+  }
+}
