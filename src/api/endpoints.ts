@@ -46,7 +46,6 @@ import type {
   ApiAuthPolicy,
   ApiAuthResponse,
   ApiAuthSessionResponse,
-  ApiAttachment,
   ApiBuiltinTool,
   ApiChannel,
   ApiChannelModelBatchResult,
@@ -242,12 +241,6 @@ export const authApi = {
     return api<{ files: ApiAdminFile[]; total: number; limit: number; offset: number }>(
       `/me/files${qs.toString() ? `?${qs}` : ''}`,
     )
-  },
-  /** Save an edited preview as a new standalone attachment. */
-  saveDocumentCopy: (blob: Blob, filename: string) => {
-    const form = new FormData()
-    form.append('file', blob, filename)
-    return apiUpload<ApiAttachment>('/files', form)
   },
   deleteMyFiles: (items: Array<{ source: 'file' | 'document'; id: string }>) =>
     api<{ deleted: number }>('/me/files/delete', { method: 'POST', body: { items } }),
