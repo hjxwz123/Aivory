@@ -1,5 +1,7 @@
 # AI PPT (Docmee / 文多多 AiPPT iframe)
 
+[简体中文](./ai-ppt-docmee.zh-CN.md)
+
 Aivory embeds the Docmee presentation workbench as an iframe and bills it through
 the same credit ledger the rest of the product uses: **one flat price per
 generated deck**.
@@ -8,6 +10,27 @@ This is the "接入方案二" integration shape — the Docmee UI SDK is loaded 
 plain `<script>` from a URL pinned in admin settings (no npm dependency, no
 build-time coupling to a third party), and the page talks to it through its
 `onMessage` callback.
+
+## Availability and first use
+
+AI PPT is an optional deployment capability. It is unavailable until an
+administrator enters a Docmee API key and enables the integration in **Admin →
+Credits and quotas → AI PPT (Docmee)**.
+
+- The sidebar loads the server's runtime configuration once and renders **AI
+  PPT** only when `enabled` is true. An unconfigured deployment therefore has
+  no PPT navigation item.
+- `enabled` means that the master switch is on and an API key is available. If
+  the switch has never been saved, a configured key enables the integration by
+  default; an explicit off value overrides the key.
+- The `/ppt` route remains addressable so bookmarked links do not become 404s,
+  but it shows an unavailable state and cannot mint a token or begin a
+  generation while the integration is disabled or unconfigured.
+
+For a standard deployment, configure the key, choose the per-deck credit price
+(or `0` for free generations), save the section, then enable the switch. The
+shared configuration is refreshed after a successful save, so the sidebar and
+PPT page update without requiring users to reload.
 
 ## What lives where
 
@@ -121,11 +144,11 @@ values are per-deployment, so one Aivory instance serves a single Docmee region.
 
 ## Access and gating
 
-The integration is gated by the admin switch alone: `DOCMEE_ENABLED`-style
-per-group permissions are deliberately not part of this change, because a group
-permission would also need a new row in the group editor's permission matrix.
-Any signed-in member can use the page once an administrator enables it; the
-per-deck price is what limits consumption.
+The integration is gated by the admin switch and the presence of a usable API
+key. Per-group permissions are not part of the current integration. Any
+signed-in member can use the page once an administrator enables it; the
+per-deck price is what limits consumption. A workspace does not change this
+rule: the balance and billed usage belong to the signed-in user.
 
 ## Tests
 
