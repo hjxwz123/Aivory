@@ -704,6 +704,7 @@
       "chat": "Chat response",
       "image": "Image generation",
       "embedding": "Document embedding",
+      "ppt": "AI PPT generation",
       "task_title": "Title generation (conversation title)",
       "task_router": "File routing (file selection and RAG strategy)",
       "task_rag_evidence_judge": "RAG evidence sufficiency check",

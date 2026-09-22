@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	neturl "net/url"
 	"strings"
@@ -17,6 +18,25 @@ import (
 	"aivory/server/internal/envcfg"
 	"aivory/server/internal/store"
 )
+
+// docmeeUsagePurpose is the usage_logs/usage_stats purpose for a billed deck.
+//
+// A settled credit reservation only writes credit_ledger, and the admin
+// "Usage & billing" page reads usage_logs exclusively — so without a row here a
+// charged deck is invisible in usage reporting even though the credits really
+// moved. "ppt" is a distinct purpose so it can be filtered and translated
+// instead of showing up as an unnamed raw value.
+const docmeeUsagePurpose = "ppt"
+
+// docmeeUsageMemoPrefix namespaces the idempotency key written to
+// usage_logs.message_id.
+//
+// usage_logs requires a NOT NULL message id ('' is allowed), and LogUsage is the
+// documented way to publish a row that usage_stats mirrors. The upstream deck id
+// is the same key the credit settlement re-keys its reservation onto, so the
+// usage row and the ledger entry share one identity and a replayed charge is
+// recognized instead of logged twice.
+const docmeeUsageMemoPrefix = "ppt:"
 
 // AI PPT (§ Docmee / 文多多 AiPPT iframe integration, "接入方案二").
 //
@@ -517,11 +537,64 @@ func meDocmeeChargeHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+
+	// Publish the billed deck to usage reporting. A settled reservation only
+	// touches credit_ledger, which the admin usage page does not read, so
+	// without this the charge is invisible there. Best-effort: the credits have
+	// already moved, and failing the request here would tell the user their
+	// generation did not bill when it did.
+	usageRecorded := true
+	if err := recordDocmeeDeckUsage(r.Context(), d, u, finalID, debit.Total, already); err != nil {
+		usageRecorded = false
+		slog.Error("ppt usage record failed", "user_id", u.ID, "ppt_id", finalID, "credits", debit.Total, "err", err)
+	}
+
 	writeJSON(w, 200, map[string]any{
 		"credits":           debit.Total,
 		"already_charged":   already,
 		"credits_per_ppt":   cfg.CreditsPerPPT,
 		"credits_available": balance.Available,
+		"usage_recorded":    usageRecorded,
+	})
+}
+
+// recordDocmeeDeckUsage writes the usage_logs/usage_stats row for one billed
+// deck, at most once per deck id.
+//
+// `already` is true when the settlement recognized a replay; the row has then
+// normally been written by the original call, so the existence check below only
+// has to cover the case where that first write failed. The check runs before
+// every insert (not only on replays) so an earlier best-effort failure is
+// repaired by a later retry instead of leaving the deck permanently invisible.
+func recordDocmeeDeckUsage(
+	ctx context.Context, d Deps, u *store.User, pptID string, credits float64, already bool,
+) error {
+	memo := docmeeUsageMemoPrefix + pptID
+	var existing int
+	if err := d.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM usage_logs WHERE user_id=? AND purpose=? AND message_id=?`,
+		u.ID, docmeeUsagePurpose, memo,
+	).Scan(&existing); err != nil {
+		return err
+	}
+	if existing > 0 {
+		return nil
+	}
+	if already {
+		// A replay plus a missing row means the original write never landed;
+		// fall through and write it now.
+		slog.Warn("ppt usage row missing for a replayed charge; backfilling", "user_id", u.ID, "ppt_id", pptID)
+	}
+	return store.LogUsage(ctx, d.DB, store.UsageLog{
+		UserID:  u.ID,
+		MessageID: memo,
+		Purpose: docmeeUsagePurpose,
+		// Credits is the settled amount, not the configured price: an admin who
+		// changes docmee_credits_per_ppt must not rewrite what history says was
+		// actually charged.
+		Credits:   credits,
+		Status:    "ok",
+		CreatedAt: time.Now().Unix(),
 	})
 }
 

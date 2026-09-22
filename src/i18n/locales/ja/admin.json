@@ -704,6 +704,7 @@
       "chat": "チャット応答",
       "image": "画像生成",
       "embedding": "文書の埋め込み生成",
+      "ppt": "AI PPT 生成",
       "task_title": "タイトル生成（会話タイトル）",
       "task_router": "ファイルルーティング（対象ファイルと RAG 方式の選択）",
       "task_rag_evidence_judge": "RAG 証拠の充足判定",

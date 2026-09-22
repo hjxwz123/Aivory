@@ -704,6 +704,7 @@
       "chat": "Réponse de chat",
       "image": "Génération d’image",
       "embedding": "Vectorisation de documents",
+      "ppt": "Génération de PPT par IA",
       "task_title": "Génération du titre (conversation)",
       "task_router": "Routage des fichiers (sélection et stratégie RAG)",
       "task_rag_evidence_judge": "Vérification de la suffisance des preuves RAG",
