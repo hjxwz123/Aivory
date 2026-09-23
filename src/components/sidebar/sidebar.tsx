@@ -28,7 +28,6 @@ import {
   UserRound,
   Download,
   PackageCheck,
-  Presentation,
 } from 'lucide-react'
 import { LogoMark, TracedLogo } from '@/components/brand/logo'
 import { useWorkspaces } from '@/store/workspaces'
@@ -78,7 +77,6 @@ import { useProjects } from '@/store/projects'
 import { useModels } from '@/store/models'
 import { useSettings } from '@/store/settings'
 import { useAuth } from '@/store/auth'
-import { useAiPPT } from '@/store/aippt'
 import { useLanguage } from '@/store/language'
 import { SUPPORTED_LANGUAGES } from '@/i18n'
 import { useCommandMenu } from '@/hooks/use-command-menu'
@@ -220,11 +218,6 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
   // Projects, Files, and Skills are their own routes — highlight their entry
   // when the current path is under them.
   const filesActive = location.pathname === '/files'
-  const aiPptActive = location.pathname === '/ppt' || location.pathname.startsWith('/ppt/')
-  // § AI PPT: the entry appears only when the deployment actually configured the
-  // Docmee integration, so an unused third-party surface never shows up.
-  const aiPptEnabled = useAiPPT((s) => s.config?.enabled === true)
-  const loadAiPPTConfig = useAiPPT((s) => s.load)
   const knowledgeBasesActive = location.pathname === '/kb' || location.pathname.startsWith('/kb/')
   const skillsActive = location.pathname === '/skills' || location.pathname.startsWith('/skills/')
   const sortedProjects = useMemo(
@@ -297,12 +290,6 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
     loadingProjectIdsRef.current = new Set()
     setLoadingProjectIds(new Set())
   }, [activeWsId])
-
-  // § AI PPT: one cached config read decides whether the entry exists. The store
-  // de-duplicates concurrent loads, so mounting several sidebars is harmless.
-  useEffect(() => {
-    void loadAiPPTConfig()
-  }, [loadAiPPTConfig])
 
   function ensureProjectConversations(projectId: string) {
     if (loadedProjectIdsRef.current.has(projectId) || loadingProjectIdsRef.current.has(projectId)) return
@@ -578,29 +565,6 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             collapsed ? 'w-5' : 'mx-2',
           )}
         />
-
-        {/* § AI PPT — the Docmee iframe workbench. Rendered only when the
-            deployment configured the integration (see useAiPPT). */}
-        {aiPptEnabled && (
-          <Tooltip content={collapsed ? tNav('aiPpt', { defaultValue: 'AI PPT' }) : ''} side="right">
-            <Link
-              to="/ppt"
-              onClick={onClose}
-              aria-current={aiPptActive ? 'page' : undefined}
-              className={cn(
-                'inline-flex h-8 items-center gap-2 rounded-[8px] text-[13px] interactive max-lg:h-[var(--tap-min)] max-sm:!h-9 max-sm:gap-1.5',
-                aiPptActive
-                  ? 'bg-[var(--color-bg-muted)] text-[var(--color-fg)] font-medium'
-                  : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                collapsed ? 'w-8 justify-center px-0' : 'w-full justify-start px-2.5',
-              )}
-            >
-              <Presentation size={15} aria-hidden />
-              {!collapsed && <span>{tNav('aiPpt', { defaultValue: 'AI PPT' })}</span>}
-            </Link>
-          </Tooltip>
-        )}
 
         {/* § user files page — every upload (chat + KB) with the storage meter.
             The page is scoped to the user's PERSONAL uploads (GET /me/files),
