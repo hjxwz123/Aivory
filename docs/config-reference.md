@@ -439,11 +439,6 @@ HTTP server 超时、优雅关闭、启动流程常量等。
 | 环境变量 | 类型 | 默认值 | 位置 | 说明 |
 | --- | --- | --- | --- | --- |
 | `VECTOR_BACKEND` | `string` | `"auto"` | `config/config.go` | Selects the vector backend at process startup. `auto` preserves compatibility: use Qdrant when `QDRANT_URL` is set, otherwise disable vector retrieval and use full-context fallback. `qdrant` requires `QDRANT_URL`; `sqlite` requires a non-PostgreSQL `DATABASE_URL` and enables embedded exact cosine search; `disabled` always disables vector retrieval. Invalid combinations stop startup with an explicit error. |
-| `DOCMEE_API_KEY` | `string` | `""` | `api/docmee_handlers.go` | Optional fallback for the Docmee AI PPT API key when the administrator has not stored `docmee_api_key` in the database. The database setting takes precedence. |
-| `DOCMEE_API_BASE_URL` | `string` | `"https://docmee.cn"` | `api/docmee_handlers.go` | Optional fallback for the server-side Docmee token API origin. The database setting takes precedence. |
-| `DOCMEE_DOMAIN` | `string` | `""` | `api/docmee_handlers.go` | Optional fallback for the Docmee iframe domain, for example an international endpoint or an administrator-operated proxy. The database setting takes precedence. |
-| `DOCMEE_SDK_URL` | `string` | pinned Docmee jsDelivr SDK URL | `api/docmee_handlers.go` | Optional fallback for the browser SDK script URL. Use it only for a self-hosted copy or trusted internal mirror when the database setting is blank. |
-| `DOCMEE_SDK_BASE_URL` | `string` | `""` | `api/docmee_handlers.go` | Optional fallback for the SDK base URL used with a Docmee proxy. The database setting takes precedence. |
 | `AIVORY_CMD_ARCHIVE_GC_BOOT_SETTLE_DELAY` | `duration` | `2*time.Minute` | `cmd/api/main.go:40` | Delay after server boot before the first archived-workspace GC sweep, so a cold start isn't swept immediately. |
 | `AIVORY_CMD_RUN_PRUNE` | `duration` | `5*time.Minute` | `cmd/api/main.go:41` | Context timeout for one archived-workspace GC prune run against object storage. |
 | `AIVORY_CMD_ARCHIVE_GC_SWEEP_INTERVAL` | `duration` | `6*time.Hour` | `cmd/api/main.go:42` | Interval between archived-workspace GC sweeps that delete stale /workspace tarballs from object storage. |

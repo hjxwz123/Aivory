@@ -32,7 +32,6 @@ Bring multi-model chat, research, code execution, and team collaboration togethe
 | **Tools that work together** | Chain search, web fetching, Python, and file generation — up to **48 tool calls across 12 model cycles** per turn. |
 | **Knowledge & documents** | Organize knowledge bases, retrieve relevant passages, and get answers with source citations. |
 | **Persistent sandbox** | Analyze data and create charts, spreadsheets, and presentations in an isolated workspace for each conversation. |
-| **AI presentations** | Let administrators connect Docmee's AI PPT workbench, set a per-deck credit price, and give signed-in users a secure presentation creator. |
 | **Team workspaces** | Share conversations, projects, files, and knowledge with your team, separate from personal data. |
 | **Platform administration** | Manage providers, users, subscriptions, credits, quotas, and storage from the admin UI. |
 
@@ -418,8 +417,6 @@ graph TB
 ## Configuration
 
 Most of Aivory is configured from the admin UI at runtime — provider keys, MinerU token, S3 credentials, SearXNG URL, upload allowlist, disabled tools, compaction settings. All apply on the next request, no restart needed.
-
-The optional **AI PPT** workbench is configured in **Admin → Credits and quotas → AI PPT (Docmee)**. Once an administrator saves a Docmee API key and enables the integration, signed-in users see **AI PPT** in the sidebar. Until then, the sidebar entry stays hidden and the `/ppt` page cannot start a generation. See the [AI PPT integration guide](docs/ai-ppt-docmee.md) for the credit lifecycle, international/proxy deployment options, and operating details.
 
 The env file only holds boot-time essentials:
 
