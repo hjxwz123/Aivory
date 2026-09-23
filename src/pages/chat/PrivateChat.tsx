@@ -46,6 +46,9 @@ export default function PrivateChat() {
   const [models, setModels] = useState<ApiModel[]>([])
   const [modelId, setModelId] = useState('')
   const [loadingModels, setLoadingModels] = useState(true)
+  // §4.6: this page keeps its own model list, so the flag is read from the same
+  // /api/models response rather than the shared store.
+  const [visionOutsource, setVisionOutsource] = useState(false)
   const [messages, setMessages] = useState<PrivateDisplayMessage[]>([])
   const [draft, setDraft] = useState('')
   const [images, setImages] = useState<PrivateImage[]>([])
@@ -85,6 +88,7 @@ export default function PrivateChat() {
       if (!alive) return
       const available = response.models.filter((item) => item.kind === 'chat' && item.enabled && !item.fast)
       setModels(available)
+      setVisionOutsource(Boolean(response.vision_available))
       setModelId(available.some((item) => item.id === response.default_id) ? response.default_id : available[0]?.id ?? '')
     }).catch(() => {
       if (alive) setError('private_model_unavailable')
@@ -116,7 +120,7 @@ export default function PrivateChat() {
   async function pickImages(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? [])
     event.target.value = ''
-    if (!allowed || !canUpload || !model?.vision || controllerRef.current || imageReadRef.current || files.length === 0) return
+    if (!allowed || !canUpload || !(model?.vision || visionOutsource) || controllerRef.current || imageReadRef.current || files.length === 0) return
     const imageCount = messages.reduce((count, message) => count + (message.images?.length ?? 0), images.length + files.length)
     if (imageCount > 16) {
       setError('private_image_limit')
@@ -192,7 +196,7 @@ export default function PrivateChat() {
     const userRow: PrivateDisplayMessage = { id: ++sequenceRef.current, role: 'user', text, images: images.length ? [...images] : undefined, createdAt: Date.now() }
     const requestHistory: PrivateMessage[] = [...historyFor(messages), { role: 'user', text, ...(userRow.images?.length ? { images: userRow.images } : {}) }]
     try {
-      validatePrivateHistory(requestHistory, model.id, model.vision)
+      validatePrivateHistory(requestHistory, model.id, model.vision, visionOutsource)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'private_invalid_request')
       return
@@ -210,7 +214,7 @@ export default function PrivateChat() {
     const display = messages.slice(0, index)
     const requestHistory = historyFor(display)
     try {
-      validatePrivateHistory(requestHistory, model.id, model.vision)
+      validatePrivateHistory(requestHistory, model.id, model.vision, visionOutsource)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'private_invalid_request')
       return
@@ -228,7 +232,7 @@ export default function PrivateChat() {
     const display = messages.slice(0, index)
     const requestHistory = [...historyFor(display), { role: 'user', text, ...(edited.images?.length ? { images: edited.images } : {}) } as PrivateMessage]
     try {
-      validatePrivateHistory(requestHistory, model.id, model.vision)
+      validatePrivateHistory(requestHistory, model.id, model.vision, visionOutsource)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'private_invalid_request')
       return
@@ -260,10 +264,10 @@ export default function PrivateChat() {
             setError('')
           }} disabled={streaming || readingImages || loadingModels || models.length === 0}>
             <SelectTrigger aria-label={t('private.model')} className="h-9 border-0 bg-transparent px-2 text-xs shadow-none"><SelectValue placeholder={t(loadingModels ? 'private.loadingModels' : 'private.noModels')} /></SelectTrigger>
-            <SelectContent>{models.map((item) => <SelectItem key={item.id} value={item.id} disabled={hasImageHistory && !item.vision}>{item.label}</SelectItem>)}</SelectContent>
+            <SelectContent>{models.map((item) => <SelectItem key={item.id} value={item.id} disabled={hasImageHistory && !item.vision && !visionOutsource}>{item.label}</SelectItem>)}</SelectContent>
           </Select>
         </div>
-        {model?.vision && canUpload && <>
+        {(model?.vision || visionOutsource) && canUpload && <>
           <input ref={fileRef} type="file" accept={PRIVATE_IMAGE_TYPES.join(',')} multiple className="hidden" onChange={(event) => void pickImages(event)} aria-label={t('private.addImage')} />
           <Tooltip content={t('private.addImage')}><Button variant="ghost" size="icon" loading={readingImages} disabled={streaming || readingImages} aria-label={t('private.addImage')} onClick={() => fileRef.current?.click()}><ImagePlus size={18} aria-hidden /></Button></Tooltip>
         </>}

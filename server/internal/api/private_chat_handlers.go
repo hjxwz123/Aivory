@@ -175,6 +175,12 @@ func privateChatHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	// §4.6 image outsourcing: private chat stores nothing, so a text-only model
+	// gets the newest turn's images read by the configured vision model and every
+	// earlier image replaced by a placeholder. See OutsourcedPrivateImages.
+	if !model.Vision {
+		history = d.Orchestrator.OutsourcedPrivateImages(r.Context(), authUser(r).ID, history, configuredVisionModelID(r.Context(), d))
+	}
 	stream := sse.New(w)
 	if stream == nil {
 		return

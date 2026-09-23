@@ -283,15 +283,28 @@ func assistantRendersEmpty(m store.Message) bool {
 // function runs. Retain the defensive branch below for legacy/misclassified
 // history so no image bytes can reach a text-only provider.
 //
+// §4.6 image outsourcing: when a text-only model is selected AND the
+// administrator configured a vision model, images are not skipped. Each one is
+// read by that vision model and injected as structured text evidence, cached on
+// the file row so the same image is only ever read once. Without the setting the
+// historical placeholder text is used unchanged.
+//
 // Documents are deliberately NOT attached as native provider file/document
 // blocks. Every LLM API request uses the RAG text path for PDFs/DOCX/PPTX/etc.:
 // upload -> parse/OCR -> chunks -> retrieval/full-text injection. This keeps
 // provider wire formats simple and avoids gateway-specific file-block failures.
-func (o *Orchestrator) resolveAttachments(ctx context.Context, userID, convID string, hist []UnifiedMessage, model *store.Model, onEvent func(SseEvent)) {
+func (o *Orchestrator) resolveAttachments(ctx context.Context, userID, convID string, hist []UnifiedMessage, model *store.Model, visionModelID string, onEvent func(SseEvent)) {
 	visionCapable := model != nil && model.Vision
+	if visionCapable {
+		visionModelID = ""
+	}
 	notedNonVision := false
 	notedPDFRAGOnly := false
 	notedOversizeImage := false
+	freshEvidenceUsed := 0
+	notedEvidenceNotice := false
+	notedEvidenceBudget := false
+	notedEvidenceFailure := false
 	for i := range hist {
 		// §4.6-C role gate: attachments belong to the user turn that uploaded them.
 		// A non-user row can only carry an image attachment via a copy path (share
@@ -317,13 +330,62 @@ func (o *Orchestrator) resolveAttachments(ctx context.Context, userID, convID st
 					// image. Current normalized attachments are removed from the
 					// provider request earlier, while their durable file rows remain
 					// available to sandbox tools.
-					if !notedNonVision && onEvent != nil {
-						onEvent(SseEvent{Type: "rag", Status: "warning", Summary: "model does not support images; attached images were skipped"})
-						notedNonVision = true
+					reader := visionModelID
+					if reader == "" {
+						if !notedNonVision && onEvent != nil {
+							onEvent(SseEvent{Type: "rag", Status: "warning", Summary: "model does not support images; attached images were skipped"})
+							notedNonVision = true
+						}
+						hist[i].Blocks = append(hist[i].Blocks, UnifiedBlock{
+							Kind: "text",
+							Text: "[image attachment skipped — current model lacks vision capability]",
+						})
+						continue
+					}
+					evidence := f.VisionEvidence
+					if evidence == "" || f.VisionEvidenceKey != visionEvidenceStamp(reader) {
+						if freshEvidenceUsed >= visionEvidenceMaxImagesPerTurn {
+							// Cached evidence is uncapped, so only images that would
+							// need a NEW vision call wait for a later turn. Ordered
+							// iteration makes each turn advance through the backlog.
+							if !notedEvidenceBudget && onEvent != nil {
+								onEvent(SseEvent{Type: "rag", Status: "warning", Summary: "an attached image could not be read this turn and was skipped"})
+								notedEvidenceBudget = true
+							}
+							hist[i].Blocks = append(hist[i].Blocks, UnifiedBlock{
+								Kind: "text",
+								Text: fmt.Sprintf("[The image %q could not be loaded for this turn. Answer from what you have and ask the user for anything you still need; do not mention why the image is unavailable.]", f.Filename),
+							})
+							continue
+						}
+						freshEvidenceUsed++
+						generated, genErr := o.visionEvidenceFor(ctx, userID, convID, f, data, imageMIME, reader)
+						if genErr != nil {
+							// Fail open: an unusable vision model must not cost the
+							// user their turn, and the raw error stays out of the
+							// prompt.
+							if o.logger != nil {
+								o.logger.Printf("vision evidence: model %q failed for file %q: %v", reader, f.ID, genErr)
+							}
+							if !notedEvidenceFailure && onEvent != nil {
+								onEvent(SseEvent{Type: "rag", Status: "warning", Summary: "an attached image could not be read and was skipped"})
+								notedEvidenceFailure = true
+							}
+							hist[i].Blocks = append(hist[i].Blocks, UnifiedBlock{
+								Kind: "text",
+								Text: fmt.Sprintf("[The image %q could not be loaded for this turn. Answer from what you have and ask the user for anything you still need; do not mention why the image is unavailable.]", f.Filename),
+							})
+							continue
+						}
+						evidence = generated
+					}
+					if !notedEvidenceNotice {
+						hist[i].Blocks = append(hist[i].Blocks, UnifiedBlock{Kind: "text", Text: visionEvidenceNotice})
+						notedEvidenceNotice = true
 					}
 					hist[i].Blocks = append(hist[i].Blocks, UnifiedBlock{
 						Kind: "text",
-						Text: "[image attachment skipped — current model lacks vision capability]",
+						Text: visionEvidenceBlock(f.Filename, evidence),
 					})
 					continue
 				}
@@ -354,6 +416,27 @@ func (o *Orchestrator) resolveAttachments(ctx context.Context, userID, convID st
 				continue
 			}
 		}
+	}
+	// §4.6 image outsourcing keeps image attachments in the request history so
+	// this function can turn them into text (see stripImageBlocksKeepingAttachments),
+	// which means this function now owns the content of those turns. Anything it
+	// could not resolve — an unreadable file, an oversize image, an exhausted
+	// per-turn budget — must still leave a visible trace, because a contentless
+	// user turn is rejected outright by Anthropic and Gemini.
+	if visionCapable {
+		return
+	}
+	for i := range hist {
+		if hist[i].Role != "user" || len(hist[i].Attachments) == 0 {
+			continue
+		}
+		if strings.TrimSpace(renderBlocksAsText(hist[i].Blocks)) != "" {
+			continue
+		}
+		hist[i].Blocks = append(hist[i].Blocks, UnifiedBlock{
+			Kind: "text",
+			Text: nonVisionImagePlaceholder,
+		})
 	}
 }
 

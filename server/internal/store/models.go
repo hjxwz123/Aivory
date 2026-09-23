@@ -702,6 +702,13 @@ type File struct {
 	// document's ingest status before sending its first question (§ chat uploads).
 	DocumentID string `json:"document_id,omitempty"`
 	CreatedAt  int64  `json:"created_at"`
+	// VisionEvidence is the structured text evidence a configured vision model
+	// produced for this image (§4.6 image outsourcing). VisionEvidenceKey stamps
+	// the model + prompt revision that produced it, so a policy change
+	// re-generates instead of serving stale evidence. Both are internal: they are
+	// never serialized to a client.
+	VisionEvidence    string `json:"-"`
+	VisionEvidenceKey string `json:"-"`
 }
 
 // Helper: read settings value as JSON. Backed by a short-TTL process-local

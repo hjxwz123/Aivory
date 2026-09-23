@@ -382,6 +382,9 @@ export const modelsApi = {
       models: ApiModel[]
       default_id: string
       verify_available?: boolean
+      /** §4.6 image outsourcing: a vision model is configured, so a text-only
+       *  model can still accept images (they are read and injected as text). */
+      vision_available?: boolean
       fast_available?: boolean
       /** Anonymous capability only; the hidden fast model identity stays server-side. */
       fast_vision?: boolean

@@ -720,7 +720,8 @@
       "task_research_verify": "詳細調査の網羅性確認",
       "task_moderation": "コンテンツ安全性審査",
       "task_research_validate": "調査証拠のクロスチェック",
-      "task_memory_dedup": "記憶の重複判定モデル"
+      "task_memory_dedup": "記憶の重複判定モデル",
+      "task_vision_caption": "画像認識（視覚モデル）"
     },
     "empty": "選択した期間内に呼び出しはありません。",
     "leadRecords": "API 呼び出しごとに 1 行。下で絞り込み・整理できます。",
@@ -1116,6 +1117,8 @@
       "imagePromptModelHint": "描画前にプロンプトを調整するテキストモデル。なし＝スキップ。",
       "verifyModel": "検証（監査）モデル",
       "verifyModelHint": "検証モードで回答をチェックする2つ目のモデル。なし＝検証オフ。",
+      "visionModel": "画像認識モデル",
+      "visionModelHint": "画像を見られないモデルの代わりに読み、構造化テキストとして渡します。なし＝画像をスキップ。",
       "storageLocal": "ローカルディスク（サーバーのボリューム）",
       "storageLocalNote": "ローカルモードでは、アバターなどのアプリケーションオブジェクトを API が AIVORY_LOCAL_STORAGE_DIR（既定値: UPLOAD_DIR/object-storage）へ直接保存します。サンドボックスのワークスペースは引き続き SANDBOX_LOCAL_STORAGE_DIR を使用します。単一ノード専用で、MinerU の文書解析にはオブジェクトストレージが必要です。",
       "sandboxIdleTtl": "アイドル回収（秒）",

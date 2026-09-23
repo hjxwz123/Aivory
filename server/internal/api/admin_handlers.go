@@ -1483,6 +1483,9 @@ var settingsKeys = []string{
 	// §verify: the secondary auditor model that fact-checks answers in Verify
 	// mode. Blank = Verify mode off platform-wide.
 	"verify_model_id",
+	// §4.6 image outsourcing: the vision-capable model that reads image
+	// attachments on behalf of a text-only conversation model. Blank = off.
+	"vision_model_id",
 	// §4.11-B RAG injection knobs (admin → Documents). §4.11-B3 adds the line cap
 	// for code/config/txt/unknown-format docs (≤ N lines → full inject; above →
 	// embed + retrieve).
@@ -1780,6 +1783,12 @@ func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.R
 					return 0, err
 				}
 				v = normalized
+			case "vision_model_id":
+				normalized, err := normalizeVisionModelSetting(ctx, d, v)
+				if err != nil {
+					return 0, err
+				}
+				v = normalized
 			case "tool_mode_default":
 				var mode string
 				if json.Unmarshal(v, &mode) != nil {
@@ -2048,6 +2057,46 @@ func isSupportedContextCompactionChannelType(channelType string) bool {
 	default:
 		return false
 	}
+}
+
+// normalizeVisionModelSetting validates the §4.6 image-outsourcing model. An
+// empty value is the feature switch itself and is always accepted. A non-empty
+// value must be an enabled chat model whose administrator explicitly enabled
+// Vision on a usable channel: a model that cannot read images would turn the
+// configured outsourcing into a silent no-op, which is worse than rejecting the
+// patch. Unlike the decision-policy keys there is no Jev fallback — the
+// TypeSafe channel has no vision capability.
+func normalizeVisionModelSetting(ctx context.Context, d Deps, raw json.RawMessage) (json.RawMessage, error) {
+	var modelID string
+	if json.Unmarshal(raw, &modelID) != nil {
+		return nil, errInvalidInput
+	}
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		return json.RawMessage(`""`), nil
+	}
+	model, err := store.GetModel(ctx, d.DB, modelID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, errModelPolicyModelUnavailable
+		}
+		return nil, err
+	}
+	if !model.Enabled || model.Kind != "chat" || !model.Vision {
+		return nil, errModelPolicyModelUnavailable
+	}
+	channel, err := store.GetChannel(ctx, d.DB, model.ChannelID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, errModelPolicyModelUnavailable
+		}
+		return nil, err
+	}
+	if !channel.Enabled || !isSupportedContextCompactionChannelType(channel.Type) {
+		return nil, errModelPolicyModelUnavailable
+	}
+	normalized, _ := json.Marshal(modelID)
+	return normalized, nil
 }
 
 func ensureEmbeddingModelSettingCanChange(d Deps, next json.RawMessage) error {

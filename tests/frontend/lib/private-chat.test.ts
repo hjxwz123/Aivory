@@ -13,6 +13,22 @@ describe('private chat request boundary', () => {
     expect(() => validatePrivateHistory([{ role: 'user', text: 'hi', images: [image] }], 'text', false)).toThrow('private_images_not_supported')
   })
 
+  it('accepts images for a text-only model when a vision model is configured', () => {
+    expect(() => validatePrivateHistory([{ role: 'user', text: 'hi', images: [image] }], 'text', false, true)).not.toThrow()
+    expect(() => validatePrivateHistory([{ role: 'user', text: 'hi', images: [image] }], 'text', false, false)).toThrow('private_images_not_supported')
+  })
+
+  it('still refuses images on an assistant turn under outsourcing', () => {
+    // The server serializes images on user turns only, so a non-user image is
+    // invalid regardless of how the image is read. The trailing user turn keeps
+    // the alternation rule from rejecting the history first.
+    expect(() => validatePrivateHistory([
+      { role: 'user', text: 'hi' },
+      { role: 'assistant', text: 'hello', images: [image] },
+      { role: 'user', text: 'again' },
+    ], 'text', false, true)).toThrow('private_images_not_supported')
+  })
+
   it('rejects files rather than routing them through the upload API', async () => {
     await expect(readPrivateImage(new File(['file'], 'file.pdf', { type: 'application/pdf' }))).rejects.toThrow('private_image_invalid')
     await expect(readPrivateImage(new File(['<svg/>'], 'image.svg', { type: 'image/svg+xml' }))).rejects.toThrow('private_image_invalid')

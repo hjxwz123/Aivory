@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { ApiChannel, ApiModel } from '@/api/types'
 import {
   availablePolicyModels,
+  availableVisionModels,
   unavailablePolicyModelIDs,
 } from '@/lib/admin-model-policy'
 
@@ -59,4 +60,36 @@ it('offers configured decision models only to supported decision policies', () =
   const decisions = availablePolicyModels(decisionModels, decisionChannels, 'tool_route_model_id')
   expect(unavailablePolicyModelIDs({ tool_route_model_id: 'jev', moderation_model_id: 'jev' }, chat, decisions)).toEqual([])
   expect(unavailablePolicyModelIDs({ task_model_id: 'jev', memory_dedup_model_id: 'jev' }, chat, decisions)).toEqual(['jev'])
+})
+
+describe('vision recognition model availability', () => {
+  const visionModels = [...models,
+    { id: 'sees-images', channel_id: 'channel-on', kind: 'chat', enabled: true, vision: true },
+    { id: 'text-only', channel_id: 'channel-on', kind: 'chat', enabled: true, vision: false },
+    { id: 'vision-off', channel_id: 'channel-on', kind: 'chat', enabled: false, vision: true },
+    { id: 'vision-channel-off', channel_id: 'channel-off', kind: 'chat', enabled: true, vision: true },
+    { id: 'vision-image-kind', channel_id: 'channel-on', kind: 'image', enabled: true, vision: true },
+  ] as ApiModel[]
+
+  it('offers only enabled vision-capable chat models on enabled channels', () => {
+    expect(availableVisionModels(visionModels, channels).map((model) => model.id)).toEqual(['sees-images'])
+  })
+
+  it('never offers a Jev channel model even though it is a chat-shaped kind', () => {
+    const withTypesafe = [...channels, { id: 'ts', type: 'typesafe', enabled: true, has_api_key: true }] as ApiChannel[]
+    const withJev = [...visionModels, { id: 'jev-vision', channel_id: 'ts', kind: 'chat', enabled: true, vision: true }] as ApiModel[]
+    expect(availableVisionModels(withJev, withTypesafe).map((model) => model.id)).toEqual(['sees-images'])
+  })
+
+  it('flags a saved vision model that lost its Vision flag as stale', () => {
+    const chat = availablePolicyModels(visionModels, channels)
+    const vision = availableVisionModels(visionModels, channels)
+    // A plain chat model would look available to every other policy key, so the
+    // vision key needs its own narrower check.
+    expect(unavailablePolicyModelIDs({ vision_model_id: 'text-only' }, chat, [], vision)).toEqual(['text-only'])
+    expect(unavailablePolicyModelIDs({ vision_model_id: 'sees-images' }, chat, [], vision)).toEqual([])
+    expect(unavailablePolicyModelIDs({ vision_model_id: 'vision-off' }, chat, [], vision)).toEqual(['vision-off'])
+    // Other keys keep their own rules; the vision list must not narrow them.
+    expect(unavailablePolicyModelIDs({ default_model_id: 'text-only' }, chat, [], vision)).toEqual([])
+  })
 })

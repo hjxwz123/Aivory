@@ -54,6 +54,7 @@ const TASK_PURPOSES = [
   'task.research_verify',
   'task.research_validate',
   'task.moderation',
+  'task.vision_caption',
 ] as const
 
 export default function AdminUsage() {

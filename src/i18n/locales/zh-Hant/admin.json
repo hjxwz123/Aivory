@@ -720,7 +720,8 @@
       "task_research_verify": "深度研究覆蓋核驗",
       "task_moderation": "內容安全審核",
       "task_research_validate": "深度研究證據交叉驗證",
-      "task_memory_dedup": "記憶去重模型"
+      "task_memory_dedup": "記憶去重模型",
+      "task_vision_caption": "圖片辨識（視覺模型）"
     },
     "empty": "所選視窗內沒有呼叫記錄。",
     "leadRecords": "每次 API 呼叫一筆記錄。在下方篩選並清理日誌。",
@@ -1116,6 +1117,8 @@
       "imagePromptModelHint": "繪圖前用於潤色提示詞的文字模型。選「無」則略過。",
       "verifyModel": "審校（審計）模型",
       "verifyModelHint": "在審校模式下核查答案的第二個模型。選「無」則關閉審校。",
+      "visionModel": "視覺辨識模型",
+      "visionModelHint": "替不支援視覺的模型讀圖，把圖片轉成結構化文字證據。選「無」則略過圖片。",
       "storageLocal": "本機磁碟（伺服器卷）",
       "storageLocalNote": "本機模式下，頭像等應用物件由 API 直接寫入 AIVORY_LOCAL_STORAGE_DIR（預設 UPLOAD_DIR/object-storage）；沙箱工作區仍歸檔到 SANDBOX_LOCAL_STORAGE_DIR。僅適用於單節點；MinerU 文件解析仍需物件儲存。",
       "sandboxIdleTtl": "閒置回收（秒）",
