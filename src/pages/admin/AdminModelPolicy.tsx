@@ -12,6 +12,7 @@ import { PanelFallback } from '@/components/ui/panel-fallback'
 import { changedAdminSettings } from '@/lib/admin-settings-patch'
 import {
   availablePolicyModels,
+  availableVisionModels,
   modelPolicyErrorText,
   unavailablePolicyModelIDs,
 } from '@/lib/admin-model-policy'
@@ -31,6 +32,7 @@ const OWNED_KEYS = [
   'memory_dedup_model_id',
   'memory_adjudicate_model_id',
   'moderation_model_id',
+  'vision_model_id',
 ] as const
 
 export default function AdminModelPolicy() {
@@ -88,7 +90,8 @@ export default function AdminModelPolicy() {
   const fileRouteModelId = readString('file_route_model_id')
   const selectableModels = availablePolicyModels(models, channels)
   const decisionModels = availablePolicyModels(models, channels, 'tool_route_model_id')
-  const unavailableModelIDs = unavailablePolicyModelIDs(draft, selectableModels, decisionModels)
+  const visionModels = availableVisionModels(models, channels)
+  const unavailableModelIDs = unavailablePolicyModelIDs(draft, selectableModels, decisionModels, visionModels)
 
   return (
     <div className="mx-auto max-w-[76rem]">
@@ -258,6 +261,32 @@ export default function AdminModelPolicy() {
               </Select>
             </Field>
           ))}
+
+          <Field
+            label={t('admin:settings.fields.visionModel')}
+            htmlFor="vision-model"
+            hint={t('admin:settings.fields.visionModelHint')}
+          >
+            <Select
+              value={readString('vision_model_id') || 'none'}
+              onValueChange={(value) =>
+                setDraft((current) => ({ ...current, vision_model_id: value === 'none' ? '' : value }))
+              }
+            >
+              <SelectTrigger id="vision-model">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">{t('admin:settings.fields.fallbackNone')}</SelectItem>
+                <PolicyModelOptions
+                  currentId={readString('vision_model_id')}
+                  models={models}
+                  selectableModels={visionModels}
+                  unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
+                />
+              </SelectContent>
+            </Select>
+          </Field>
 
           <Field
             label={t('admin:settings.fields.defaultToolMode')}

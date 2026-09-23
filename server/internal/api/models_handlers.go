@@ -445,11 +445,48 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 			verifyAvailable = true
 		}
 	}
+	// §4.6 image outsourcing: whether a vision model is configured, so the
+	// composer may accept images for a text-only model. The server re-checks
+	// usability at turn time; this is the presentation ceiling only.
+	visionAvailable := visionOutsourcingAvailable(r.Context(), d)
 	return map[string]any{
 		"models":           items,
 		"default_id":       defaultID,
 		"verify_available": verifyAvailable,
+		"vision_available": visionAvailable,
 	}
+}
+
+// configuredVisionModelID returns the §4.6 image-outsourcing model when it can
+// actually serve a read right now. A setting pointing at a disabled model or
+// channel is not a capability: callers must degrade to the pre-existing
+// "images skipped" behaviour instead of promising a read that cannot happen.
+func configuredVisionModelID(ctx context.Context, d Deps) string {
+	raw, err := store.GetSetting(d.DB, "vision_model_id")
+	if err != nil || len(raw) == 0 {
+		return ""
+	}
+	var modelID string
+	if json.Unmarshal(raw, &modelID) != nil {
+		return ""
+	}
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		return ""
+	}
+	model, err := store.GetModel(ctx, d.DB, modelID)
+	if err != nil || model == nil || !model.Enabled || model.Kind != "chat" || !model.Vision {
+		return ""
+	}
+	channel, err := store.GetChannel(ctx, d.DB, model.ChannelID)
+	if err != nil || channel == nil || !channel.Enabled {
+		return ""
+	}
+	return modelID
+}
+
+func visionOutsourcingAvailable(ctx context.Context, d Deps) bool {
+	return configuredVisionModelID(ctx, d) != ""
 }
 
 // effectivePublicBuiltinTools resolves the nullable persisted policy into an

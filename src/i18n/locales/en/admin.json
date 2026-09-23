@@ -721,7 +721,8 @@
       "task_research_verify": "Deep Research coverage check",
       "task_moderation": "Content safety review",
       "task_research_validate": "Deep Research evidence cross-check",
-      "task_memory_dedup": "Memory deduplication model"
+      "task_memory_dedup": "Memory deduplication model",
+      "task_vision_caption": "Image recognition (vision model)"
     },
     "empty": "No calls in the selected window.",
     "leadRecords": "Every API call, one row. Filter and prune the log below.",
@@ -1117,6 +1118,8 @@
       "imagePromptModelHint": "Text model that refines image prompts before drawing. None = skip.",
       "verifyModel": "Verify (auditor) model",
       "verifyModelHint": "Second model that fact-checks answers in Verify mode. None = Verify off.",
+      "visionModel": "Vision recognition model",
+      "visionModelHint": "Reads images for models that cannot see them, as structured text. None = images are skipped.",
       "storageLocal": "Local disk (server volume)",
       "storageLocalNote": "In local mode, application objects such as avatars are written directly by the API to AIVORY_LOCAL_STORAGE_DIR (default: UPLOAD_DIR/object-storage); sandbox workspaces still use SANDBOX_LOCAL_STORAGE_DIR. Single-node only; MinerU document parsing still needs an object store.",
       "sandboxIdleTtl": "Idle recycle (seconds)",

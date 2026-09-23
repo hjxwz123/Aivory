@@ -60,6 +60,8 @@ describe('changedAdminSettings', () => {
       expect(messages.admin.settings.modelPolicy.stale, `${locale} stale model warning`).toBeTruthy()
       expect(messages.admin.settings.modelPolicy.empty, `${locale} empty model policy`).toBeTruthy()
       expect(messages.admin.settings.modelPolicy.unavailableOption, `${locale} unavailable option`).toBeTruthy()
+      expect(messages.admin.settings.fields.visionModel, `${locale} vision model label`).toBeTruthy()
+      expect(messages.admin.settings.fields.visionModelHint, `${locale} vision model hint`).toBeTruthy()
       expect(messages.auth.register.passwordSignupClosed, `${locale} closed signup message`).toBeTruthy()
     }
   })

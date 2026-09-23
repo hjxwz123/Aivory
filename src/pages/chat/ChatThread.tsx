@@ -417,10 +417,12 @@ export default function ChatThread() {
 
   function modelReadsImages(id: string): boolean {
     if (!id) return false
-    const { models, imageModels } = useModels.getState()
+    const { models, imageModels, visionAvailable } = useModels.getState()
     const model = findSelectedModel(id, models, imageModels)
     // kind=image models always accept reference images (composer: resolveImageAttachmentCapability).
-    return Boolean(model && (model.kind === 'image' || model.vision))
+    if (model && (model.kind === 'image' || model.vision)) return true
+    // §4.6: with a vision model configured they are read, not dropped.
+    return visionAvailable
   }
 
   // §2.3-D cross-vendor downgrade: only warn when switching provider type.

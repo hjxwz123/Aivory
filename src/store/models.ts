@@ -25,6 +25,9 @@ interface ModelStore {
   /** §verify: true when an admin configured an auditor model, so the composer
    *  shows the Verify toggle. */
   verifyAvailable: boolean
+  /** §4.6: an admin configured a vision model, so text-only models still accept
+   *  images. */
+  visionAvailable: boolean
   /** §fast-mode: true when an admin configured a fast model, so the composer
    *  offers the 快速 option. */
   fastAvailable: boolean
@@ -57,6 +60,7 @@ export const useModels = create<ModelStore>((set, get) => ({
   tags: [],
   defaultId: '',
   verifyAvailable: false,
+  visionAvailable: false,
   fastAvailable: false,
   fastVision: false,
   loaded: false,
@@ -83,6 +87,7 @@ export const useModels = create<ModelStore>((set, get) => ({
           imageModels: [],
           defaultId: '',
           verifyAvailable: false,
+          visionAvailable: false,
           fastAvailable: false,
           fastVision: false,
           loaded: false,
@@ -112,6 +117,7 @@ export const useModels = create<ModelStore>((set, get) => ({
         imageModels: [],
         defaultId: '',
         verifyAvailable: false,
+        visionAvailable: false,
         fastAvailable: false,
         fastVision: false,
         loaded: false,
@@ -197,6 +203,7 @@ export const useModels = create<ModelStore>((set, get) => ({
         tags: tagResult.ok && state.tags === tagsAtLoadStart ? tagResult.tags : state.tags,
         defaultId: userDefault?.id || globalDefault?.id || firstEnabled?.id || resp.models[0]?.id || '',
         verifyAvailable: Boolean(resp.verify_available),
+        visionAvailable: Boolean(resp.vision_available),
         fastAvailable: Boolean(resp.fast_available),
         fastVision: Boolean(resp.fast_vision),
         loaded: true,
@@ -221,6 +228,7 @@ export const useModels = create<ModelStore>((set, get) => ({
           imageModels: [],
           defaultId: '',
           verifyAvailable: false,
+          visionAvailable: false,
           fastAvailable: false,
           fastVision: false,
           error: msg,

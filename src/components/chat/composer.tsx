@@ -1517,6 +1517,7 @@ export function Composer({
   const modelsLoadedPolicyKey = useModels((s) => s.loadedPolicyKey)
   const fastAvailable = useModels((s) => s.fastAvailable)
   const fastVision = useModels((s) => s.fastVision)
+  const visionAvailable = useModels((s) => s.visionAvailable)
   const modelCatalogReady = isModelCatalogReadyForScope({
     loaded: modelsLoaded,
     loadedScope: modelsLoadedScope,
@@ -1578,6 +1579,7 @@ export function Composer({
   const imageAttachmentCapability = resolveImageAttachmentCapability(currentModel, {
     fast: effectiveFast,
     fastVision,
+    visionOutsource: visionAvailable,
   })
   // Uploading an image is independent from native provider vision support. A
   // text-only model must still be able to receive the file as a durable

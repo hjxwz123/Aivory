@@ -157,7 +157,7 @@ func TestResolveAttachmentsUsesConversationFileBytesNotClientMetadata(t *testing
 	}}
 	var events []SseEvent
 	(&Orchestrator{db: db}).resolveAttachments(
-		context.Background(), "u1", "c1", history, &store.Model{Vision: true},
+		context.Background(), "u1", "c1", history, &store.Model{Vision: true}, "",
 		func(event SseEvent) { events = append(events, event) },
 	)
 
@@ -218,7 +218,7 @@ func TestResolveAttachmentsStripsLegacyImageBytesForNonVisionModel(t *testing.T)
 		t.Fatal(err)
 	}
 	history := []UnifiedMessage{{Role: "user", Attachments: []Attachment{{ID: "f1", Kind: "other"}}}}
-	(&Orchestrator{db: db}).resolveAttachments(context.Background(), "u1", "c1", history, &store.Model{Vision: false}, nil)
+	(&Orchestrator{db: db}).resolveAttachments(context.Background(), "u1", "c1", history, &store.Model{Vision: false}, "", nil)
 	if len(history[0].Blocks) != 1 || history[0].Blocks[0].Kind != "text" || !strings.Contains(history[0].Blocks[0].Text, "lacks vision") {
 		t.Fatalf("legacy image was not replaced by non-vision placeholder: %+v", history[0].Blocks)
 	}

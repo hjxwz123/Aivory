@@ -34,14 +34,20 @@ const IMAGE_EXTENSIONS = new Set([
  * Resolves whether the active turn can send image attachments. Fast mode uses
  * only the anonymous capability returned by /api/models, never the hidden
  * fast-model record. Image-generation models always accept reference images.
+ *
+ * `visionOutsource` is the §4.6 escape hatch: a configured vision model reads the
+ * images server-side.
  */
 export function resolveImageAttachmentCapability(
   model: ImageAttachmentModel | null | undefined,
-  options: { fast: boolean; fastVision: boolean },
+  options: { fast: boolean; fastVision: boolean; visionOutsource?: boolean },
 ): ImageAttachmentCapability {
   // Image-generation models accept reference images directly. This takes
   // precedence over a stale fast-mode preference carried across routes.
   if (model?.kind === 'image') return 'allowed'
+  // Outsourcing covers every chat model, including the hidden fast model, so it
+  // is checked before the fast-mode branch rather than inside it.
+  if (options.visionOutsource) return 'allowed'
   if (options.fast) return options.fastVision ? 'allowed' : 'blocked'
   if (!model) return 'unknown'
   return model.kind === 'chat' && model.vision === true ? 'allowed' : 'blocked'

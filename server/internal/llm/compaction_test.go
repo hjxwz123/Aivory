@@ -3121,7 +3121,7 @@ func TestCompactionHistoryForRequestMatchesToolAndFastFiltering(t *testing.T) {
 	})
 	history := []store.Message{{ID: "a1", Role: "assistant", Provider: "openai", ModelID: "m1", Raw: raw, Blocks: blocks}}
 
-	got := compactionHistoryForRequest(history, "openai", "m1", true, map[string]bool{}, true, true)
+	got := compactionHistoryForRequest(history, "openai", "m1", true, map[string]bool{}, true, imageInputPolicy{Native: true})
 	if len(got) != 1 {
 		t.Fatalf("transformed history length = %d, want 1", len(got))
 	}
