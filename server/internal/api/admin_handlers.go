@@ -1497,16 +1497,18 @@ var settingsKeys = []string{
 	// requests expose diagnostics. log_request_bodies is an independent privacy
 	// boundary: false keeps method/URL/headers/error while omitting every body.
 	"log_full_requests", "log_errors_only", "log_request_bodies",
-	// § AI PPT (Docmee / 文多多 iframe, "接入方案二"). docmee_api_key mints the
-	// per-user iframe token server-side and is masked as a secret on GET; the
-	// browser only ever receives a short-lived token. docmee_enabled unset
-	// follows the key's presence. docmee_credits_per_ppt is the flat price
-	// charged per successfully generated deck (0 = free). docmee_domain and
-	// docmee_sdk_base_url exist for the international build (app.xpptx.com) and
-	// for deployments that proxy the SDK/API through their own domain.
-	"docmee_enabled", "docmee_api_key", "docmee_api_base_url", "docmee_domain",
-	"docmee_sdk_url", "docmee_sdk_base_url", "docmee_creator_version",
+	// § AI PPT (Docmee / 文多多, API mode). docmee_api_key is used server-side only
+	// and is masked as a secret on GET; the browser never receives it. An unset
+	// docmee_enabled follows the key's presence. docmee_credits_per_ppt is the
+	// flat price charged per generated deck (0 = free), docmee_edit_credits prices
+	// an edit (AI rewrite / template change), and docmee_max_upload_mb caps the
+	// upload input's file size.
+	"docmee_enabled", "docmee_api_key", "docmee_api_base_url",
 	"docmee_credits_per_ppt", "docmee_token_hours",
+	"docmee_edit_credits", "docmee_default_template_id", "docmee_max_upload_mb",
+	// § AI PPT editor surface (vendor iframe): the SDK script and the international
+	// origin. Creation stays on our own UI; only slide-level editing needs these.
+	"docmee_sdk_url", "docmee_domain",
 }
 
 // sensitiveKeywords lists substrings that identify secret settings fields.
@@ -1713,17 +1715,42 @@ func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.R
 				if json.Unmarshal(v, &hours) != nil || hours < 0 || hours > 24*30 {
 					return 0, errInvalidInput
 				}
-			case "docmee_creator_version":
-				var version string
-				if json.Unmarshal(v, &version) != nil {
+			case "docmee_edit_credits":
+				// Price of one edit (AI rewrite / template change); 0 = free.
+				var amount float64
+				if json.Unmarshal(v, &amount) != nil || amount < 0 || math.IsNaN(amount) || math.IsInf(amount, 0) {
 					return 0, errInvalidInput
 				}
-				version = strings.ToLower(strings.TrimSpace(version))
-				if version != "" && version != "v1" && version != "v2" {
+				if micros, err := store.CreditsToMicros(amount); err != nil || amount > 0 && micros == 0 {
 					return 0, errInvalidInput
 				}
-				v, _ = json.Marshal(version)
-			case "docmee_api_base_url", "docmee_domain", "docmee_sdk_url", "docmee_sdk_base_url":
+			case "docmee_max_upload_mb":
+				// Per-file cap for the upload input; 0 = the built-in default.
+				var mb int
+				if json.Unmarshal(v, &mb) != nil || mb < 0 || mb > 200 {
+					return 0, errInvalidInput
+				}
+			case "docmee_default_template_id":
+				var id string
+				if json.Unmarshal(v, &id) != nil {
+					return 0, errInvalidInput
+				}
+				id = strings.TrimSpace(id)
+				if len(id) > 64 {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(id)
+			case "docmee_sdk_url", "docmee_domain":
+				var editorURL string
+				if json.Unmarshal(v, &editorURL) != nil {
+					return 0, errInvalidInput
+				}
+				normalized, err := normalizeDocmeeURL(editorURL)
+				if err != nil {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(normalized)
+			case "docmee_api_base_url":
 				var rawURL string
 				if json.Unmarshal(v, &rawURL) != nil {
 					return 0, errInvalidInput

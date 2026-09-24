@@ -1,11 +1,170 @@
 {
   "title": "AI PPT",
   "price": "每次生成 {{price}} 积分",
+  "priceInactive": "每次生成 {{price}} 积分 · 当前免费",
   "balance": "余额 {{available}}",
-  "reload": "重新加载编辑器",
-  "pages": {
-    "creator": "开始创作",
-    "dashboard": "我的 PPT"
+  "view": {
+    "create": "开始创作",
+    "decks": "我的 PPT"
+  },
+  "steps": {
+    "input": "输入",
+    "outline": "大纲",
+    "template": "模板",
+    "result": "成品"
+  },
+  "input": {
+    "title": "想做什么主题的 PPT？",
+    "lead": "可以直接给主题，也可以粘贴文字、给网页地址、上传文档，或直接给 Markdown 大纲。",
+    "optionsTitle": "生成选项",
+    "optionsLead": "这些选项决定大纲的写法，除篇幅外都是可选的。",
+    "anyOption": "交给模型判断",
+    "types": {
+      "topic": "主题生成",
+      "text": "粘贴文本",
+      "url": "网页链接",
+      "upload": "上传文件",
+      "markdown": "Markdown 大纲"
+    },
+    "placeholders": {
+      "topic": "例如：2026 年 AI 办公趋势",
+      "text": "粘贴需要转成幻灯片的原始内容…",
+      "url": "https://example.com/article",
+      "markdown": "# 主题\n## 章节\n### 页面\n#### 段落\n- 内容"
+    },
+    "uploadHint": "拖拽文件到此处，或点击选择（不超过 {{mb}} MB）",
+    "uploadTypes": "支持 Word、PDF、文本、Markdown 或现有演示文稿。",
+    "uploadPick": "选择文件",
+    "uploadMissing": "请先选择文件",
+    "contentMissing": "请先填写内容",
+    "length": "篇幅",
+    "lengths": {
+      "short": "简短",
+      "medium": "适中",
+      "long": "详细"
+    },
+    "scene": "演示场景",
+    "audience": "目标受众",
+    "lang": "输出语言",
+    "prompt": "附加要求",
+    "promptHint": "{{count}}/50 字",
+    "promptPlaceholder": "例如：语气务实一点",
+    "submit": "生成大纲",
+    "priceHint": "生成这份 PPT 将扣除 {{price}} 积分。",
+    "freeHint": "当前部署生成 PPT 免费。",
+    "freeHintPriced": "当前部署生成 PPT 免费（管理后台设置的标准价为每次 {{price}} 积分）。",
+    "examples": {
+      "label": "试试这些主题",
+      "one": "2026 年 AI 办公趋势",
+      "two": "季度经营复盘",
+      "three": "新产品发布方案"
+    },
+    "defaultTemplate": {
+      "label": "默认模板",
+      "hint": "未选择模板时使用，之后仍可更换。"
+    }
+  },
+  "outline": {
+    "title": "大纲",
+    "counts": "{{chapters}} 个章节 · {{pages}} 个页面",
+    "streaming": "正在生成…",
+    "empty": "暂无内容",
+    "placeholder": "大纲会实时生成在这里，生成后可自行修改再排版。",
+    "structure": "结构预览",
+    "structureHint": "共 {{paragraphs}} 个段落标题。",
+    "regenerate": "重新生成",
+    "next": "选择模板",
+    "rewrite": "AI 改写",
+    "rewriteTitle": "AI 改写大纲",
+    "rewriteLead": "描述修改意见，模型会重写整份大纲。",
+    "rewriteBilled": "本次改写消耗 {{price}} 积分。",
+    "rewritePlaceholder": "例如：改成金字塔结构",
+    "warnings": {
+      "missing-title": "需要一个一级标题（#）",
+      "multiple-titles": "一级标题（#）只能有一个",
+      "missing-chapters": "至少需要一个章节（##）",
+      "missing-pages": "至少需要一个页面（###）"
+    },
+    "waiting": "模型正在思考，大纲会一边写一边显示在这里。",
+    "progress": "已写入 {{count}} 字"
+  },
+  "template": {
+    "title": "选择模板",
+    "lead": "决定每一页的视觉风格。",
+    "selected": "已选择：{{name}}",
+    "back": "返回大纲",
+    "generate": "生成 PPT",
+    "generateBilled": "生成 PPT · {{price}} 积分",
+    "system": "系统模板",
+    "mine": "我的模板",
+    "all": "全部",
+    "empty": "暂无可用模板",
+    "loadMore": "加载更多",
+    "upload": "上传模板",
+    "uploading": "上传中 {{percent}}%",
+    "uploaded": "模板已上传",
+    "uploadHint": "仅支持 .pptx，建议 960×540",
+    "uploadFailed": "模板上传失败",
+    "uploadTooLarge": "模板文件过大",
+    "uploadPptxOnly": "自定义模板必须是 .pptx 文件",
+    "rename": "重命名",
+    "renameTitle": "重命名模板",
+    "renameLead": "只改显示名称，不影响模板内容。",
+    "renameLabel": "模板名称",
+    "renamed": "模板已重命名",
+    "renameFailed": "重命名失败",
+    "delete": "删除",
+    "deleteTitle": "删除这个模板？",
+    "deleteBody": "模板会从「我的模板」中移除，已生成的 PPT 不受影响。",
+    "deleted": "模板已删除",
+    "deleteFailed": "删除失败"
+  },
+  "result": {
+    "untitled": "未命名 PPT",
+    "rename": "重命名",
+    "renamed": "名称已更新",
+    "defaultTemplate": "默认模板",
+    "download": "下载 .pptx",
+    "preview": "预览",
+    "previewTitle": "预览",
+    "previewLead": "已保存到你的文件中的成品。",
+    "previewFailed": "无法预览该 PPT",
+    "mirrorPending": "文件尚未保存到你的文件中，请重试保存。",
+    "retrySave": "保存到我的文件",
+    "changeTemplate": "更换模板",
+    "changeTemplateLead": "用另一个模板重新排版这份 PPT。",
+    "changeTemplateBilled": "重新排版消耗 {{price}} 积分。",
+    "applyTemplate": "应用",
+    "templateChanged": "模板已更新",
+    "templateChangedBilled": "模板已更新 · 已扣除 {{price}} 积分",
+    "newDeck": "新建 PPT",
+    "previewScrollHint": "向下滚动即可查看全部页面。",
+    "edit": "编辑幻灯片",
+    "template": "模板",
+    "credits": "积分",
+    "priceNote": "管理后台设置的价格：每次生成 {{price}} 积分。",
+    "saved": "已保存到我的文件",
+    "saving": "正在保存到我的文件…"
+  },
+  "decks": {
+    "empty": "还没有 PPT",
+    "emptyHint": "生成的 PPT 会显示在这里，同时 .pptx 也会保存到你的文件。",
+    "loadFailed": "无法加载 PPT 列表",
+    "open": "打开",
+    "continue": "继续",
+    "delete": "删除 PPT",
+    "deleteTitle": "删除这份 PPT？",
+    "deleteBody": "记录与你文件中的 .pptx 都会被删除，且无法恢复。",
+    "deleted": "已删除",
+    "untitled": "未命名 PPT",
+    "credits": "{{credits}} 积分",
+    "status": {
+      "draft": "草稿",
+      "outline_ready": "大纲就绪",
+      "generating": "排版中",
+      "ready": "已完成",
+      "failed": "失败"
+    }
   },
   "charged": {
     "title": "已扣除 {{price}} 积分",
@@ -13,7 +172,7 @@
   },
   "insufficient": {
     "title": "积分不足",
-    "description": "生成一份 PPT 需要 {{price}} 积分，当前可用 {{available}} 积分。请先充值后再继续。",
+    "description": "本次操作需要 {{price}} 积分，当前可用 {{available}} 积分。请先充值后再继续。",
     "action": "查看套餐"
   },
   "unconfigured": {
@@ -28,14 +187,30 @@
     "title": "AI PPT 加载失败",
     "description": "无法获取 AI PPT 配置。"
   },
-  "sdkFailed": {
-    "title": "无法启动 AI PPT",
-    "description": "演示文稿编辑器加载失败。",
-    "retry": "重试"
-  },
   "errors": {
-    "generic": "无法开始生成",
+    "generic": "操作失败",
     "charge": "扣费失败",
     "upstream": "演示文稿服务返回错误"
+  },
+  "editor": {
+    "title": "编辑演示文稿",
+    "lead": "编辑在文多多编辑器中进行，关闭时会自动把文件同步回你的文件。",
+    "loading": "正在打开编辑器…",
+    "failed": "编辑器打开失败。",
+    "retry": "重试",
+    "syncNow": "立即同步文件",
+    "synced": "编辑后的文件已保存到你的文件",
+    "syncFailed": "编辑后的文件同步失败",
+    "done": "完成"
+  },
+  "render": {
+    "title": "正在生成《{{subject}}》",
+    "lead": "正在用所选模板排版每一页，请稍候几秒。",
+    "stages": {
+      "content": "内容",
+      "layout": "版式",
+      "render": "渲染",
+      "save": "保存"
+    }
   }
 }

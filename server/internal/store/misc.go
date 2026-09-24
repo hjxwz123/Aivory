@@ -1166,6 +1166,15 @@ type AdminUsageRecord struct {
 	Cost                float64 `json:"cost"`
 	Currency            string  `json:"currency"`
 	CreatedAt           int64   `json:"created_at"`
+	// Credits is the credit amount this row actually moved (0 = nothing charged).
+	// For a purpose="ppt" row it is the settled price of that call.
+	Credits float64 `json:"credits"`
+	// AiPPT is the AI PPT call detail (deck, template, event) for a purpose="ppt"
+	// row; nil for every other purpose.
+	AiPPT *AdminUsageAiPPT `json:"aippt,omitempty"`
+	// messageID is the raw usage_logs.message_id — the idempotency memo that names
+	// an AI PPT row's deck. Unexported on purpose: an internal key, not payload.
+	messageID string
 	// §workspaces: which workspace the spend belongs to ('' = personal).
 	WorkspaceID   string `json:"workspace_id,omitempty"`
 	WorkspaceName string `json:"workspace_name,omitempty"`
@@ -1256,6 +1265,7 @@ func AdminUsageRecords(ctx context.Context, db *sql.DB, f UsageFilter, limit, of
 	q := `SELECT u.id, u.user_id, COALESCE(usr.name,''), COALESCE(usr.email,''), COALESCE(u.conversation_id,''), CASE WHEN substr(u.message_id,1,8)='private_' THEN '匿名对话' ELSE COALESCE(c.title,'') END,
 	             CASE WHEN u.conversation_id IS NOT NULL AND u.conversation_id <> '' AND c.id IS NULL THEN 1 ELSE 0 END,
 	             u.model_id, u.purpose, u.input_tokens, u.output_tokens, u.cost, u.currency, u.created_at,
+	             COALESCE(u.credits,0), COALESCE(u.message_id,''),
 	             COALESCE(u.workspace_id,''), COALESCE(w.name,''),
 		             COALESCE(u.channel_id,''), COALESCE(ch.name,''), COALESCE(u.fallback,0), COALESCE(u.status,'ok'), COALESCE(u.error,''),
 		             COALESCE(u.request_method,''), COALESCE(u.request_url,''), COALESCE(u.request_headers,''), COALESCE(u.request_body,''), COALESCE(u.ttft_fallback_model,'')
@@ -1277,6 +1287,7 @@ func AdminUsageRecords(ctx context.Context, db *sql.DB, f UsageFilter, limit, of
 		var gone, fb int
 		if err := rows.Scan(&r.ID, &r.UserID, &r.UserName, &r.UserEmail, &r.ConversationID, &r.ConversationTitle, &gone,
 			&r.ModelID, &r.Purpose, &r.InputTokens, &r.OutputTokens, &r.Cost, &r.Currency, &r.CreatedAt,
+			&r.Credits, &r.messageID,
 			&r.WorkspaceID, &r.WorkspaceName, &r.ChannelID, &r.ChannelName, &fb, &r.Status, &r.Error,
 			&r.RequestMethod, &r.RequestURL, &r.RequestHeaders, &r.RequestBody, &r.TTFTFallbackModel); err != nil {
 			return nil, err
@@ -1285,7 +1296,13 @@ func AdminUsageRecords(ctx context.Context, db *sql.DB, f UsageFilter, limit, of
 		r.Fallback = fb == 1
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// AI PPT rows carry the deck they generated/edited; resolve it in one query
+	// for the whole page (see aippt_usage.go).
+	attachAiPPTUsageDetails(ctx, db, out)
+	return out, nil
 }
 
 // AdminUsageCount returns the retained diagnostic rows and their displayed cost

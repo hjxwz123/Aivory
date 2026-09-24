@@ -1,143 +1,262 @@
-# AI PPT (Docmee / 文多多 AiPPT iframe)
+# AI PPT (Docmee / 文多多, API mode)
 
-Aivory embeds the Docmee presentation workbench as an iframe and bills it through
-the same credit ledger the rest of the product uses: **one flat price per
-generated deck**.
+Aivory generates presentations through the Docmee V2 API and renders them in its
+own UI. Nothing of the vendor's interface is embedded: the browser only talks to
+our endpoints, and billing runs through the same credit ledger as the rest of the
+product — **one flat price per generated deck**.
 
-This is the "接入方案二" integration shape — the Docmee UI SDK is loaded as a
-plain `<script>` from a URL pinned in admin settings (no npm dependency, no
-build-time coupling to a third party), and the page talks to it through its
-`onMessage` callback.
+> The earlier integration embedded Docmee's iframe UI SDK. It was removed: the
+> vendor's look could not be reconciled with the product's, and the iframe gave us
+> no control over the flow. `docmee_domain`, `docmee_sdk_url`,
+> `docmee_sdk_base_url` and `docmee_creator_version` are retired (dropped on
+> migration), and `src/lib/docmee-sdk.ts` / `src/lib/aippt-billing.ts` are gone.
 
-## What lives where
+## Flow
 
-| Concern | Owner |
+```
+input (topic / text / URL / file / Markdown)
+  → POST /api/me/ppt/tasks              open a vendor task + our deck row
+  → POST /api/me/ppt/decks/:id/outline  stream the outline (our SSE)   [editable]
+  → GET  /api/me/ppt/templates          pick a template (covers proxied)
+  → POST /api/me/ppt/decks/:id/pptx     render, charge, mirror the .pptx
+  → GET  /api/me/ppt/decks              "My decks" (our records)
+```
+
+Everything Docmee-facing happens server-side (`server/internal/api/aippt_client.go`,
+`aippt_handlers.go`): the Api-Key stays in settings, the short-lived vendor token
+is minted and cached per user, and the vendor's own error envelope is translated
+into our typed errors.
+
+## Verified vendor behaviour (probed against the live API)
+
+The published docs leave several things open; these were confirmed by running the
+real flow and shape the implementation:
+
+| Finding | Consequence |
 | --- | --- |
-| Docmee API key, API base URL, SDK URL, per-deck price | Admin → **Credits and quotas** → *AI PPT (文多多)* |
-| Per-user iframe token (`createApiToken`) | Server (`POST /api/me/ppt/*`), cached ~20 min per user |
-| Credit hold / settle / refund | Server, on the shared `credit_ledger` + `credit_reservations` tables |
-| Iframe lifecycle + event wiring | `src/pages/ppt/AiPPT.tsx`, `src/lib/docmee-sdk.ts` |
-| Client-side de-duplication of billing events | `src/lib/aippt-billing.ts` |
+| Failures arrive as **HTTP 200 with `code != 0`** (e.g. `1010` method/param, `5001` task failed) | every call inspects `code`; a non-zero code becomes an `aiPPTError` → our `502 upstream_error` |
+| `generateContent` with `stream=true` ends with `status=4` carrying **only the outline tree** | the Markdown is accumulated from the `text` deltas (and `stream=false` returns `data.text` complete, ~30s) |
+| `POST /api/ppt/v2/options` → `1010`; it is **GET** | the options handler uses GET |
+| `templates` returns a **bare array** in `data` (no pagination envelope) | the handler adds `page`/`size`/`has_more` for the UI |
+| Template covers are **403 without the temporary token** (`chatmee.cn/...png`) | covers load through `GET /api/me/ppt/resource?url=…`, which injects the token server-side (host-allowlisted) |
+| `generatePptx` is fast (~1.7s) and returns `pptInfo`, sometimes without `fileUrl` | the mirror path asks `downloadPptx` when `fileUrl` is missing |
+| `downloadPptx` returns a **2-hour Aliyun OSS signed URL** | the render is downloaded and stored as a normal user file (`files` row), so it never expires and appears in *My files* |
+| `loadPptxMarkdown` works; `loadPptx`/`listPptx` are not needed | deck lists come from our own `aippt_decks` table; the outline comes from the vendor |
+| Upload path: `type=2` + multipart `file` works (docx parsed in ~3.6s) | the upload input is proxied with the configured size cap |
+| `updatePptTemplate` takes **`pptId`** (not `id`) and defaults to `sync=false` | sending `id` answers `{"code":-1,"message":"参数错误"}`, which reached users as a bare "service rejected the request"; the client sends `pptId` + `sync=true` so the re-layout is finished before the file is refreshed |
+| `uploadTemplate` (`type=4`) answers with the new template object; a `type=4` page then lists it with `num` pages and `pageCoverUrls: null` until Docmee's AI marking finishes | the picker reloads **Mine** after an upload; the template is usable for `generatePptx` right away (verified), while a broken marking only shows up as odd content placement |
+| A `type=4` page mixes the caller's own uploads (`userId` = `…_<uid>`) with account-public templates (`userId` = `""`) | the handler marks entries `owned` and only those may be renamed/deleted |
+| `updateTemplate` / `delTemplateId` want the **user token**, not the Api-Key (the Api-Key answers `模板不存在` for a uid-level template; a *system* template is refused with `1003 无权限访问`) | rename/delete run under the caller's token; account-public templates are refused for both |
+| An **Api-Key upload** creates an account-owned template (`userId` = the account id) that **no uid can see**; only `updateUserTemplate` (`isPublic: true`) publishes it (`userId` becomes `""`) | the admin panel pairs the upload with a "share with all users" switch, and the list reports which templates are shared — otherwise an admin upload silently helps nobody |
+| Uploading a template costs **1 vendor credit** | the admin page states the cost, and uploads are administrator-only |
+| Vendor pricing: **1 credit per generated deck**, +1 per `updateContent` call, +1 per template re-layout | `docmee_credits_per_ppt` / `docmee_edit_credits` must be priced to cover it (≈¥0.32–0.50 per vendor credit) |
 
-The browser never receives the Docmee API key. It only ever sees a short-lived
-`token` bound to a per-user Docmee `uid` (a salted hash of the local user id, so
-internal ids never leave the deployment).
+## Billing
 
-## Billing protocol
+- `POST /decks/:id/pptx` opens a credit hold (`store.ReserveCredits`) **before**
+  the vendor renders, answers `402 insufficient_credits` when the balance is
+  short, then settles under the upstream ppt id
+  (`store.SettleCreditReservationByKey`). The ledger row is keyed by that deck id,
+  so a retry, a double click or a re-render can never debit twice.
+- A failed render releases the hold; a deck that already carries a charge is
+  re-rendered for free (the UI's "Save to my files" and "Change template" paths).
+- Charging is gated by the **platform-wide credit system**, exactly like chat:
+  `billingEnabled` requires `docmee_credits_per_ppt > 0` **and** a non-zero
+  `credits_per_usd` rate. With `credits_per_usd = 0` (Admin → Credits & quotas →
+  *模型成本内部换算*) the whole credit system is off, chat is free as well, and a
+  generation costs nothing. The configured per-deck price stays visible to users
+  either way.
+- **Every AI PPT event is published to `usage_logs`/`usage_stats`** (purpose
+  `ppt`), whether or not it was charged:
+  - one row per generated deck (`store.AiPPTGenerateUsageMemo` — the upstream ppt
+    id, the same key the settlement uses, so a re-render cannot log twice), and
+  - one row per charged edit (`store.AiPPTEditUsageMemo`: `rewrite` / `template`,
+    keyed by the attempt id, because every edit is its own charge).
+  The row's `credits` column carries what the ledger actually took (0 = free), so
+  the row records the CALL while every billing total stays exact.
+- Edits (AI rewrite / template change) are free unless `docmee_edit_credits > 0`.
 
-A generation moves through three authenticated calls. All of them require a
-signed-in user; none of them accept a price from the client.
+### What the admin sees
 
-1. `GET /api/me/ppt/token` — **no billing.** Mints (or reuses) the iframe token.
-   Kept separate from the hold so merely opening the page never reserves credits.
-2. `POST /api/me/ppt/attempt` — opens a generation attempt and **holds
-   `docmee_credits_per_ppt`** against the user's balance (`store.ReserveCredits`,
-   TTL 30 min). Answers `402 insufficient_credits` when the balance cannot cover
-   it, which the page turns into a "top up" dialog and a `false` return from
-   `beforeGenerate` — so generation is blocked *before* any upstream work.
-3. `POST /api/me/ppt/charge` `{attempt_id, ppt_id}` — **settles** the hold under
-   the upstream PPT id (`store.SettleCreditReservationByKey`). The ledger row is
-   keyed by that PPT id, so a replayed `charge`/`afterGenerate` event, a page
-   reload re-reporting the same deck, or two concurrent requests debit exactly
-   once. A duplicate attempt for an already-billed deck has its own hold
-   refunded and answers `already_charged: true`.
-
-`POST /api/me/ppt/release` `{attempt_id}` refunds an attempt whose generation
-failed or was abandoned. It is idempotent, and only the hold's owner may release
-it. A hold that is never settled expires on its own (30 min), so closing the tab
-cannot strand a user's credits.
-
-Client-side, the tracker distinguishes two ways of leaving the page: a hold taken
-while the user was only browsing (nothing had started generating) is refunded
-immediately, while a hold whose generation already started is left in place —
-releasing it would hand out a deck that the upstream may still produce. That hold
-simply expires if the charge event never arrives.
-
-Notes:
-
-- Billing is considered **off** (generation is free) unless both
-  `docmee_credits_per_ppt > 0` **and** the platform-wide `credits_per_usd > 0`.
-  A self-hosted deployment that never turned credits on gets the feature for
-  free instead of an unpayable prompt.
-- A deck that somehow reaches the `charge` event without a live hold still bills
-  correctly: the tracker opens a hold at settle time. If the balance is short at
-  that moment the debit fails and the page reports it — the safe direction, but
-  keeping `credits_per_ppt` affordable is what prevents the situation.
+Admin → **Usage & billing** → *Usage* lists those rows next to chat/image rows:
+the purpose reads **AI PPT 生成**, the conversation column shows the deck title
+with a `PPT · 生成 / AI 改写 / 更换模板` tag, a **Credits** column carries the
+charge, and a click opens the call detail (event, subject, Docmee ppt id, our
+deck record id, template, deck status, user, time, charged credits). The detail is
+resolved server-side by `store.attachAiPPTUsageDetails` from the row's memo, so a
+deck that was deleted afterwards still reports its event and its charge.
 
 ## Admin settings
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `docmee_enabled` | follows the key | Master switch. Unset ⇒ on when a key exists; an explicit `false` always wins (park the integration without deleting credentials). |
-| `docmee_api_key` | *(empty)* | Docmee open-platform API key. Masked on read; the display mask is ignored on write. |
+| `docmee_enabled` | follows the key | Master switch. Unset ⇒ on when a key exists; an explicit `false` always wins. |
+| `docmee_api_key` | *(empty)* | Docmee open-platform API key. Server-side only, masked on read. |
+| `docmee_api_base_url` | `https://docmee.cn` | API origin (international build or a self-hosted proxy). |
 | `docmee_credits_per_ppt` | `10` | Flat price per generated deck. `0` = free. |
-| `docmee_creator_version` | `v2` | `v2` = conversational creator (passes `content`), `v1` = step-by-step. |
-| `docmee_api_base_url` | `https://docmee.cn` | Server-side `createApiToken` endpoint. Change for the international build or a self-hosted proxy. |
-| `docmee_domain` | *(empty)* | Passed to the SDK as `DOMAIN`. Empty ⇒ China build; the international build uses `https://app.xpptx.com`. |
-| `docmee_sdk_url` | pinned jsDelivr build | Iframe SDK script URL. Point it at a self-hosted copy or an internal mirror to drop the third-party dependency at runtime. |
-| `docmee_sdk_base_url` | *(empty)* | Passed to the SDK as `baseURL` when the browser must reach Docmee through your own domain (§ Docmee's nginx 接口转发 guide). |
-| `docmee_token_hours` | `2` | Upstream token lifetime (`timeOfHours`); `0` = Docmee default. |
+| `docmee_edit_credits` | `0` | Price of one edit (AI rewrite / template change). `0` = free. |
+| `docmee_default_template_id` | *(empty)* | Fallback template when a render request has none. |
+| `docmee_max_upload_mb` | `50` | Per-file cap for the upload input. |
+| `docmee_token_hours` | `2` | Vendor token lifetime (`timeOfHours`); `0` = vendor default. |
+| `docmee_sdk_url` | pinned CDN build | Editor SDK script (self-hosted copy / internal mirror). |
+| `docmee_domain` | *(empty)* | Editor origin for the international build (`https://app.xpptx.com`). |
 
 Optional environment fallbacks (used when the stored setting is blank):
-`DOCMEE_API_KEY`, `DOCMEE_API_BASE_URL`, `DOCMEE_DOMAIN`, `DOCMEE_SDK_URL`,
-`DOCMEE_SDK_BASE_URL` — the same pattern as the MinerU integration.
+`DOCMEE_API_KEY`, `DOCMEE_API_BASE_URL`.
 
-### Enabling it from the admin UI
+The settings page also shows the **vendor's own balance** (`GET
+/api/admin/aippt/vendor` → `availableCount`/`usedCount`), because Docmee bills the
+deployment separately from our users' credits.
+
+### Enabling it
 
 - The **Enable AI PPT** switch saves on flip (its own PATCH), so it cannot be lost
   by refreshing before the section's Save button is pressed.
-- The section's Save button writes the key, price, version and URLs. It only sends
-  `docmee_enabled` when the admin expressed an intent in that session: the switch
-  they flipped, or "true" because they just supplied a key. It never writes a
-  *derived* `false` — that used to persist an explicit off state, which outranks
-  the "unset follows the key" default and left a configured integration reporting
-  "disabled" after every refresh (and would have disabled deployments whose key
-  comes from `DOCMEE_API_KEY`, where the form field is legitimately blank).
-- If the flag is off while a key is configured, the section says so and points at
-  the switch.
-- URL fields accept a bare host (`app.xpptx.com`) and gain an `https://` scheme;
-  values that cannot be a URL are rejected. A rejected PATCH changes nothing, so a
-  typo cannot half-apply a configuration.
-- After a successful save the page refreshes the shared runtime config, so the
-  sidebar entry and the `/ppt` page react without a full reload.
+- The Save button only sends `docmee_enabled` when the admin expressed an intent:
+  the switch they flipped, or "true" because they just supplied a key. It never
+  writes a *derived* `false` (that used to outrank the "unset follows the key"
+  default and left a configured integration reporting "disabled" after a refresh,
+  and would have disabled deployments whose key comes from `DOCMEE_API_KEY`).
+- URL fields accept a bare host (`docmee.cn`) and gain an `https://` scheme; values
+  that cannot be a URL are rejected, and a rejected PATCH changes nothing.
 
-## Self-hosting the SDK or proxying Docmee
+## Data model
 
-Docmee's own guidance is to start on their CDN and self-host later. Two
-independent knobs cover the production shapes:
+`aippt_decks` (one row per generation, owned by the user):
 
-- **Self-host the SDK file**: download the Docmee iframe SDK and set
-  `docmee_sdk_url` to your copy. Nothing else changes.
-- **Proxy the API through your domain**: set `docmee_domain` (and
-  `docmee_sdk_base_url` if the SDK should call your proxy) so the browser talks
-  to your origin, and `docmee_api_base_url` so the server mints tokens through
-  the same proxy.
+| column | notes |
+| --- | --- |
+| `id` | our id (`ppt_…`), used by every endpoint |
+| `task_id` / `ppt_id` | vendor identifiers |
+| `subject`, `outline` | display name + the Markdown the deck was built from |
+| `status` | `draft` → `outline_ready` → `generating` → `ready`/`failed` |
+| `template_id`, `template_name`, `cover_url` | chosen template |
+| `file_id` | the mirrored `.pptx` in our `files` table (preview/download/share) |
+| `credits`, `error`, `options_json` | what was charged, why it failed, the inputs |
 
-## International build
+## Endpoints
 
-Set `docmee_domain` to `https://app.xpptx.com` and point
-`docmee_api_base_url` at the international API origin your account uses. Both
-values are per-deployment, so one Aivory instance serves a single Docmee region.
+All require a signed-in user and never accept a price from the client.
 
-## Access and gating
+| Method + path | Purpose |
+| --- | --- |
+| `GET /api/me/ppt/config` | feature flags, prices, upload cap, balance |
+| `GET /api/me/ppt/options` | vendor enumerations (cached 30 min) |
+| `GET /api/me/ppt/templates` | template page (cached 15 min; user templates are always read through) |
+| `POST /api/me/ppt/templates` | upload a custom template (`type=4`, .pptx only, cap = `docmee_max_upload_mb`) |
+| `POST /api/me/ppt/templates/:id/rename` | rename one of the caller's own custom templates |
+| `DELETE /api/me/ppt/templates/:id` | delete one of the caller's own custom templates |
+| `GET /api/me/ppt/resource?url=` | cover/file proxy (host allowlist) |
+| `POST /api/me/ppt/tasks` | create task (JSON or multipart upload) |
+| `GET /api/me/ppt/decks` | the caller's decks |
+| `GET`/`DELETE /api/me/ppt/decks/:id` | one deck (delete also drops the file) |
+| `POST /api/me/ppt/decks/:id/outline` | our SSE: `delta` / `done` / `error`; also the AI-rewrite path |
+| `POST /api/me/ppt/decks/:id/pptx` | render + charge + mirror |
+| `POST /api/me/ppt/decks/:id/template` | re-layout with another template (vendor `updatePptTemplate` + file refresh) |
+| `POST /api/me/ppt/decks/:id/rename` | rename (ours + vendor) |
+| `GET /api/me/ppt/decks/:id/editor` | one-time session to open the vendor's **editor** for this deck |
+| `POST /api/me/ppt/decks/:id/refresh-file` | re-pull the (possibly edited) deck into the mirrored file |
+| `GET /api/admin/aippt/vendor` | deployment's vendor balance (admin) |
+| `GET /api/admin/aippt/templates` | the deployment's own templates + how many are shared (admin) |
+| `POST /api/admin/aippt/templates` | upload/overwrite a deployment template; `public=true` also publishes it (admin) |
+| `POST /api/admin/aippt/templates/:id/public` | publish (`is_public: true`) or withdraw a deployment template (admin) |
+| `DELETE /api/admin/aippt/templates/:id` | delete a deployment template (admin) |
 
-The integration is gated by the admin switch alone: `DOCMEE_ENABLED`-style
-per-group permissions are deliberately not part of this change, because a group
-permission would also need a new row in the group editor's permission matrix.
-Any signed-in member can use the page once an administrator enables it; the
-per-deck price is what limits consumption.
+## Custom templates
+
+The template picker offers **Upload template**: the browser posts a `.pptx` to
+`POST /api/me/ppt/templates`, which forwards it to Docmee's `uploadTemplate` with
+`type=4` under the caller's own token. Docmee learns and marks up the file
+server-side, so it appears under **Mine** a moment later — the picker switches to
+that tab, reloads and pre-selects it. Only `.pptx` is accepted, capped by
+`docmee_max_upload_mb` (Docmee suggests 960×540 standard-size templates).
+
+Overwriting a **public** (Api-Key-level) template is a different trust domain:
+Docmee only allows it with the Api-Key, so that path is admin-only.
+
+### Deployment templates (Admin → Credits & quotas)
+
+The Docmee block carries a **Deployment templates** panel (`DocmeeTemplateAdmin`):
+upload or overwrite a `.pptx`, see the deployment's templates, share/unshare and
+delete them. It exists because of the account-owned/published split above — an
+administrator who only uploads gets a template that users cannot pick, so the
+panel always reports which templates are actually shared.
+
+- `POST /api/admin/aippt/templates` accepts `public=true`, which publishes the
+  new template in the same request; if the publish fails the response still
+  carries `template_id` (502) so the template can be published from the list
+  instead of being re-uploaded.
+- `GET /api/admin/aippt/templates` lists what the **Api-Key** sees: the
+  deployment's own templates. A user's private upload never appears there.
+
+Uploads can also be **renamed** and **deleted** from the card itself
+(`POST …/templates/:id/rename`, `DELETE …/templates/:id`). Both run under the
+caller's token and both check ownership first — a `type=4` page also lists the
+deployment's shared templates, so the handler marks each entry `owned` (its
+`userId` ends with the caller's upstream uid) and answers `404 template_not_found`
+for anything else, without calling the vendor.
+
+Template requirements worth telling an uploader: **16:9, i.e. 960×540** (Docmee's
+own guidance is to fix a non-standard deck in Office under *Design → Slide size →
+33.867 × 19.05 cm*). Docmee AI-marks the uploaded deck to learn its layout; if a
+generated deck places content oddly, that marking can be corrected by hand at
+`https://docmee.cn/marker/{templateId}?token={apiKey}`.
+
+## Rendering feedback
+
+`generatePptx` returns no per-page progress, so the UI stages it honestly: after
+choosing a template the page shows a rendering stage (fanned shimmering slides
+behind a staged checklist — content → layout → render → save) whose bar creeps
+towards 92% while the request is in flight and snaps to 100% on the response,
+with a minimum visible beat so a fast render does not flash. Motion is skipped
+under `prefers-reduced-motion`.
+
+## Editing slides
+
+Creation, templates and the outline live in our own UI, but slide-level editing
+is the one thing a bespoke front end cannot reasonably rebuild — so the result
+step offers **Edit slides**, which opens Docmee's editor for that deck:
+
+- the browser gets a one-time `{token, ppt_id, sdk_url, domain}` hand-off (never
+  the Api-Key), then mounts the vendor's editor iframe;
+- the editor saves upstream, so closing it pulls the deck back with
+  `refresh-file`: the mirrored `.pptx` in the user's files is replaced and the
+  previous copy is retired;
+- `docmee_sdk_url` (pinned CDN build, or a self-hosted copy) and `docmee_domain`
+  (international build origin) exist only for this surface — the frontend can also
+  override the SDK URL at build time with `VITE_AIVORY_DOCMEE_SDK_URL`;
+- the cover proxy is a signature-exempt GET (`/api/me/ppt/resource`) because an
+  `<img>` cannot attach the request proof; it still requires a session and a
+  vendor-host allowlist.
 
 ## Tests
 
-- `server/internal/store/credits_test.go` — settle-by-key idempotency, refunds,
-  foreign/released holds.
-- `server/internal/api/docmee_handlers_test.go` — token caching, hold
-  open/refuse, single debit per deck, release guards, free-when-credits-off, and
-  that upstream error text never reaches the browser.
-- `tests/frontend/lib/aippt-billing.test.ts` — the client-side event tracker
-  (one hold, one settle, refunds, retries after failure).
-- `tests/frontend/lib/aippt-admin-settings.test.ts` — the admin form's enable-flag
-  rules (never persist a derived `false`; a supplied key activates the feature).
-- `TestDocmeeAdminSettingsRoundTripKeepsTheIntegrationEnabled` and
-  `TestDocmeeAdminSettingsNormalizesURLs` — the admin save → reload path, masked
-  key handling, and URL normalization.
+- `server/internal/api/aippt_handlers_test.go` — proxying (options/templates),
+  resource host allowlist, outline streaming + persistence, render → single charge
+  → mirrored file, fail-closed without credits, ownership, typed upstream errors,
+  upload path, deck lifecycle, template switch (asserts the vendor's `pptId`/`sync`
+  parameters and that no re-render happens), template rename/delete + the
+  foreign-template refusal, admin template list/publish/delete and the
+  upload-and-publish-in-one-step path (including a publish failure that keeps the
+  uploaded id), and that every AI PPT route is really wired through the router.
+- `server/internal/api/docmee_handlers_test.go` — config payload (no secrets, no
+  retired fields), configuration/off-switch states, upstream error mapping, admin
+  round-trip, URL normalization.
+- `server/internal/api/docmee_usage_test.go` — the usage row: one per deck,
+  correct credits, backfill, the AI PPT deck detail, and that an unbilled
+  generation is still recorded as a call with 0 credits.
+- `server/internal/store/aippt_usage_test.go` — the memo format and the deck
+  resolution behind a `ppt` row (generate by vendor id, edit by deck id, deleted
+  deck keeps the event, non-PPT rows carry no detail).
+- `server/internal/store/credits_test.go` — settle-by-key idempotency.
+- `tests/frontend/lib/aippt-outline.test.ts` — Markdown outline parsing/warnings.
+- `tests/frontend/lib/aippt-admin-settings.test.ts` — the enable-flag rules.
+
+## Known limits
+
+- **Slide-level editing** happens in the vendor's editor (see above); our own pptx
+  editor is not wired into this flow. If the editor is unreachable, the deck is
+  still complete: outline AI-rewrite, template change and rename all run server-side.
+- A deck whose mirror failed stays usable upstream (`status=ready`, no `file_id`);
+  the UI offers "Save to my files" to retry.
+- One deployment serves one Docmee region/account (`docmee_api_base_url`).

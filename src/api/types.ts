@@ -1398,51 +1398,119 @@ export interface ApiAiPPTConfig {
   credits_per_ppt: number
   /** Spendable balance (timed + permanent, minus live holds). */
   credits_available: number
-  /** Seconds a session's credit hold survives before it expires on its own. */
-  reservation_ttl: number
-  /** Pinned iframe SDK script URL (admin-configurable, never an npm import). */
-  sdk_url: string
-  /** International build origin (`https://app.xpptx.com`); blank = China build. */
-  domain: string
-  /** Optional API base for the SDK when the deployment proxies Docmee. */
-  sdk_base_url: string
-  creator_version: 'v1' | 'v2'
-  download_button: boolean
-  outline_export_format: 'txt' | 'md'
+  /** What one edit (AI rewrite / template change) costs; 0 = free. */
+  edit_credits: number
+  /** An edit is charged (edit price > 0 and credits are on platform-wide). */
+  edit_credits_enabled: boolean
+  /** Fallback template when the picker has nothing selected. */
+  default_template_id: string
+  /** Per-file cap for the upload input, in MB. */
+  max_upload_mb: number
 }
 
-/** Short-lived iframe token minted server-side from the Docmee API key. */
-export interface ApiAiPPToken {
-  token: string
-  /** Seconds the server considers the token reusable (it caches it). */
-  expires_in: number
+/** One selectable value the vendor exposes (language, scene, audience …). */
+export interface ApiAiPPTOption {
+  name: string
+  value: string
+}
+
+/** Vendor enumerations, keyed by field name, used to fill the create form. */
+export interface ApiAiPPTOptions {
+  options: Record<string, ApiAiPPTOption[]>
+}
+
+/** One presentation template from the vendor's catalogue. */
+export interface ApiAiPPTTemplate {
+  id: string
+  name: string
+  category?: string
+  /** Vendor-hosted cover; load it through our resource proxy. */
+  coverUrl?: string
+  pageCoverUrls?: string[]
+  lang?: string
+  num?: number
+  /**
+   * True only for a custom template this user uploaded. The vendor's `type=4`
+   * page also lists the deployment's shared (account-public) templates, which
+   * the UI must not offer to rename or delete.
+   */
+  owned?: boolean
+  /**
+   * True when the deployment published this template to every user (admin list
+   * only). An upload alone stays private to the vendor account.
+   */
+  shared?: boolean
+}
+
+export interface ApiAiPPTTemplatePage {
+  templates: ApiAiPPTTemplate[]
+  page: number
+  size: number
+  has_more: boolean
+}
+
+/** Lifecycle of one generation: draft → outline_ready → generating → ready/failed. */
+export type ApiAiPPTDeckStatus = 'draft' | 'outline_ready' | 'generating' | 'ready' | 'failed'
+
+/** Our record of a generated deck (vendor ids + the mirrored .pptx file). */
+export interface ApiAiPPTDeck {
+  id: string
+  /** Upstream task id (present once the vendor task was created). */
+  task_id?: string
+  /** Upstream deck id (present once the deck was rendered). */
+  ppt_id?: string
+  subject: string
+  source_type: number
+  status: ApiAiPPTDeckStatus
+  outline: string
+  template_id: string
+  template_name: string
+  /** Vendor-hosted cover; load it through the resource proxy. */
+  cover_url: string
+  /** `files` row of the mirrored .pptx (preview/download through the file routes). */
+  file_id: string
+  error: string
+  credits: number
+  created_at: number
+  updated_at: number
+}
+
+export interface ApiAiPPTDeckPage {
+  decks: ApiAiPPTDeck[]
+  total: number
+  limit: number
+  offset: number
+}
+
+/** Events our own SSE relay emits for the outline step. */
+export interface ApiAiPPTStreamEvent {
+  type: 'delta' | 'done' | 'error'
+  text?: string
+  code?: string
+  message?: string
+  markdown?: string
+  deck?: ApiAiPPTDeck
+  credits_available?: number
+}
+
+export interface ApiAiPPTGenerateResult {
+  deck: ApiAiPPTDeck
+  credits: number
+  credits_available: number
 }
 
 /**
- * One billed generation attempt: the credit hold taken before generation starts.
- * `charge` settles it under the upstream PPT id; `release` refunds it.
+ * One-time hand-off for the vendor's editor: a short-lived token (never the
+ * Api-Key), the upstream deck id, and where the editor SDK lives.
  */
-export interface ApiAiPPTAttempt {
-  attempt_id: string
-  /** Unix seconds at which the hold expires on its own. */
-  expires_at: number
-  credits_per_ppt: number
-  credits_charged: boolean
-  credits_available: number
-}
-
-/** Result of settling an attempt under the upstream PPT id. */
-export interface ApiAiPPTCharge {
-  credits: number
-  /** The deck had already been billed — no new debit was made. */
-  already_charged: boolean
-  credits_per_ppt: number
-  credits_available: number
-}
-
-export interface ApiAiPPTRelease {
-  released: boolean
-  credits_available: number
+export interface ApiAiPPTEditorSession {
+  token: string
+  ppt_id: string
+  subject: string
+  sdk_url: string
+  /** International build origin; empty on the China build. */
+  domain: string
+  credits_available?: number
 }
 
 /** A file referenced by a conversation (§ conversation files drawer). */
@@ -1695,6 +1763,22 @@ export interface ApiAdminUserFeedbackPage {
   offset: number
 }
 
+// §AI PPT: the deck behind a purpose="ppt" usage row (see the server's
+// store/aippt_usage.go). One row is written per generation and per charged edit,
+// so a "ppt" row always answers "which deck, and what did it cost".
+export interface ApiUsageAiPPT {
+  /** generate | rewrite | template */
+  event: string
+  /** Our aippt_decks id (absent when the deck record is gone). */
+  deck_id?: string
+  subject?: string
+  /** The vendor (Docmee) deck id. */
+  ppt_id?: string
+  template_name?: string
+  /** draft | outline_ready | generating | ready | failed */
+  status?: string
+}
+
 // A single usage_logs row (one API call) for the admin usage list.
 export interface ApiUsageRecord {
   id: number
@@ -1712,6 +1796,10 @@ export interface ApiUsageRecord {
   cost: number
   currency: string
   created_at: number
+  /** Credits this call actually moved (0 = nothing was charged). */
+  credits: number
+  /** §AI PPT call detail; present only on purpose="ppt" rows. */
+  aippt?: ApiUsageAiPPT
   /** §workspaces */
   workspace_id?: string
   workspace_name?: string

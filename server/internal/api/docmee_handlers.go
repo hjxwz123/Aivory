@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	neturl "net/url"
 	"strings"
@@ -19,90 +18,82 @@ import (
 	"aivory/server/internal/store"
 )
 
-// docmeeUsagePurpose is the usage_logs/usage_stats purpose for a billed deck.
+// AI PPT usage reporting.
 //
-// A settled credit reservation only writes credit_ledger, and the admin
-// "Usage & billing" page reads usage_logs exclusively — so without a row here a
-// charged deck is invisible in usage reporting even though the credits really
-// moved. "ppt" is a distinct purpose so it can be filtered and translated
-// instead of showing up as an unnamed raw value.
-const docmeeUsagePurpose = "ppt"
+// The ledger is the money, usage_logs is the report: settling a reservation
+// writes credit_ledger only, while Admin → Usage & billing reads usage_logs, so
+// every AI PPT call publishes one row here (purpose "ppt", memo built by
+// store.AiPPTGenerateUsageMemo / store.AiPPTEditUsageMemo). The row's credits
+// column carries what the ledger actually took, so a free generation is still
+// visible as a call without distorting any billing total.
 
-// docmeeUsageMemoPrefix namespaces the idempotency key written to
-// usage_logs.message_id.
+// AI PPT (§ Docmee / 文多多, API mode).
 //
-// usage_logs requires a NOT NULL message id ('' is allowed), and LogUsage is the
-// documented way to publish a row that usage_stats mirrors. The upstream deck id
-// is the same key the credit settlement re-keys its reservation onto, so the
-// usage row and the ledger entry share one identity and a replayed charge is
-// recognized instead of logged twice.
-const docmeeUsageMemoPrefix = "ppt:"
-
-// AI PPT (§ Docmee / 文多多 AiPPT iframe integration, "接入方案二").
+// Our own UI drives the vendor's V2 API through the handlers in
+// aippt_handlers.go; this file owns the configuration and the server-side
+// credentials. Two things must never live in the browser:
 //
-// The browser embeds Docmee's iframe UI SDK (a <script> file loaded from a
-// configurable CDN URL, not an npm dependency) and talks to the SDK through its
-// onMessage callback. Two things must never live in the browser:
+//   - the Docmee API key, which mints the short-lived per-user token that every
+//     upstream call carries, and
+//   - the platform credit ledger, which bills one fixed price per generated deck.
 //
-//   - the Docmee API key, which mints the per-user iframe token, and
-//   - the platform credit ledger, which bills one fixed price per generated
-//     deck.
-//
-// So the browser gets a short-lived token from POST /api/me/ppt/session, and
-// every billing transition is an authenticated API call:
-//
-//	session → hold `credits_per_ppt` from the user's balance (402 when short)
-//	charge  → settle that hold under the upstream PPT id (idempotent per deck)
-//	release → refund the hold when generation failed or was abandoned
-//
-// A hold that is never settled expires on its own (docmeeReservationTTL), so a
-// closed tab can never strand a user's credits.
+// The config endpoint only ever reports non-secret flags, the prices and the
+// caller's own balance; the key is masked on admin reads.
 
 const (
 	// docmeeAttemptSourceType is the credit-ledger source for a PPT generation
 	// attempt. The final billed key is the upstream PPT id.
 	docmeeAttemptSourceType = "ppt"
 
-	docmeeDefaultAPIBaseURL = "https://docmee.cn"
-	// Pinned by default so a deployment's served SDK cannot drift under it; the
-	// admin can point this at a self-hosted copy or an internal mirror.
+	docmeeDefaultAPIBaseURL    = "https://docmee.cn"
+	docmeeDefaultCreditsPerPPT = 10
+	// Pinned by default: the editor surface loads this script, and a deployment
+	// can point it at a self-hosted copy or an internal mirror.
 	docmeeDefaultSDKURL           = "https://cdn.jsdelivr.net/npm/@docmee/sdk-ui@1.6.47/dist/index.global.js"
-	docmeeDefaultCreatorVersion   = "v2"
-	docmeeDefaultCreditsPerPPT    = 10
 	docmeeDefaultTokenHours       = 2
 	docmeeReservationTTL          = 30 * time.Minute
 	docmeeTokenCacheTTL           = 20 * time.Minute
 	docmeeUpstreamTimeout         = 20 * time.Second
 	docmeeUpstreamResponseReadCap = 64 << 10
 	docmeeSessionRateLimit        = 30
-	// Charge is called from SDK lifecycle events (and their retries), so it gets a
-	// roomier bucket than the token/attempt calls that start a generation.
-	docmeeChargeRateLimit         = 90
 	docmeeMaxAttemptIDLen         = 128
 	docmeeMaxUpstreamMessageLen   = 240
 	docmeeMaxUpstreamURLBytes     = 2048
+	// docmeeDefaultMaxUploadMB mirrors Docmee's own upload guidance (≤50MB/file).
+	docmeeDefaultMaxUploadMB = 50
 )
 
 var (
-	errDocmeeDisabled       = errors.New("AI PPT is disabled")
-	errDocmeeNotConfigured  = errors.New("AI PPT is not configured — set the Docmee API key in Admin → Credits & quotas")
-	errDocmeeInsufficient   = errors.New("insufficient credits")
-	errDocmeeUnknownAttempt = errors.New("unknown or expired AI PPT session")
+	errDocmeeDisabled      = errors.New("AI PPT is disabled")
+	errDocmeeNotConfigured = errors.New("AI PPT is not configured — set the Docmee API key in Admin → Credits & quotas")
+	errDocmeeInsufficient  = errors.New("insufficient credits")
 )
 
 // docmeeConfig is the resolved runtime configuration. Settings live in the
 // admin settings table (see settingsKeys); the API key and API base URL also
 // honour environment fallbacks so a self-hoster can wire it without the UI.
 type docmeeConfig struct {
-	Enabled        bool
-	APIKey         string
-	APIBaseURL     string
-	Domain         string
-	SDKURL         string
-	SDKBaseURL     string
-	CreatorVersion string
-	CreditsPerPPT  float64
-	TokenHours     int
+	Enabled       bool
+	APIKey        string
+	APIBaseURL    string
+	CreditsPerPPT float64
+	TokenHours    int
+	// Editor surface (vendor iframe): creation runs on our own UI, but real
+	// slide-level editing is only possible in Docmee's editor, which is loaded
+	// from SDKURL and needs DOMAIN on the international build.
+	SDKURL string
+	Domain string
+	// API-mode settings: what one edit costs the user, the fallback template when
+	// the picker has nothing selected, and the per-file cap for upload inputs.
+	EditCredits       float64
+	DefaultTemplateID string
+	MaxUploadMB       int
+}
+
+// editBillingEnabled mirrors billingEnabled for the edit operations (AI rewrite /
+// template change). Zero price means edits are free.
+func (c docmeeConfig) editBillingEnabled(d Deps) bool {
+	return c.EditCredits > 0 && globalCreditsPerUSD(d) > 0
 }
 
 // configured reports whether the iframe can be served at all: the feature is on
@@ -117,17 +108,6 @@ func (c docmeeConfig) configured() bool {
 // self-hosters who never turned credits on.
 func (c docmeeConfig) billingEnabled(d Deps) bool {
 	return c.CreditsPerPPT > 0 && globalCreditsPerUSD(d) > 0
-}
-
-func normalizeDocmeeCreatorVersion(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "v1":
-		return "v1"
-	case "", "v2":
-		return docmeeDefaultCreatorVersion
-	default:
-		return docmeeDefaultCreatorVersion
-	}
 }
 
 // docmeeSettingString reads a string setting, falling back to an env var and
@@ -184,13 +164,15 @@ func docmeeSettingInt(d Deps, key string, def int) int {
 
 func docmeeConfigFor(d Deps) docmeeConfig {
 	cfg := docmeeConfig{
-		APIKey:        docmeeSettingString(d, "docmee_api_key", "DOCMEE_API_KEY", ""),
-		APIBaseURL:    docmeeSettingString(d, "docmee_api_base_url", "DOCMEE_API_BASE_URL", docmeeDefaultAPIBaseURL),
-		Domain:        docmeeSettingString(d, "docmee_domain", "DOCMEE_DOMAIN", ""),
-		SDKURL:        docmeeSettingString(d, "docmee_sdk_url", "DOCMEE_SDK_URL", docmeeDefaultSDKURL),
-		SDKBaseURL:    docmeeSettingString(d, "docmee_sdk_base_url", "DOCMEE_SDK_BASE_URL", ""),
-		CreditsPerPPT: docmeeSettingFloat(d, "docmee_credits_per_ppt", docmeeDefaultCreditsPerPPT),
-		TokenHours:    docmeeSettingInt(d, "docmee_token_hours", docmeeDefaultTokenHours),
+		APIKey:            docmeeSettingString(d, "docmee_api_key", "DOCMEE_API_KEY", ""),
+		APIBaseURL:        docmeeSettingString(d, "docmee_api_base_url", "DOCMEE_API_BASE_URL", docmeeDefaultAPIBaseURL),
+		SDKURL:            docmeeSettingString(d, "docmee_sdk_url", "DOCMEE_SDK_URL", docmeeDefaultSDKURL),
+		Domain:            docmeeSettingString(d, "docmee_domain", "DOCMEE_DOMAIN", ""),
+		CreditsPerPPT:     docmeeSettingFloat(d, "docmee_credits_per_ppt", docmeeDefaultCreditsPerPPT),
+		TokenHours:        docmeeSettingInt(d, "docmee_token_hours", docmeeDefaultTokenHours),
+		EditCredits:       docmeeSettingFloat(d, "docmee_edit_credits", 0),
+		DefaultTemplateID: docmeeSettingString(d, "docmee_default_template_id", "", ""),
+		MaxUploadMB:       docmeeSettingInt(d, "docmee_max_upload_mb", docmeeDefaultMaxUploadMB),
 	}
 	// An unset enable flag follows the key: present key ⇒ feature on. Storing an
 	// explicit false always wins, so an admin can park the integration without
@@ -200,8 +182,6 @@ func docmeeConfigFor(d Deps) docmeeConfig {
 	} else {
 		cfg.Enabled = strings.TrimSpace(cfg.APIKey) != ""
 	}
-	cfg.CreatorVersion = normalizeDocmeeCreatorVersion(
-		docmeeSettingString(d, "docmee_creator_version", "", docmeeDefaultCreatorVersion))
 	cfg.APIBaseURL = strings.TrimRight(cfg.APIBaseURL, "/")
 	if cfg.APIBaseURL == "" {
 		cfg.APIBaseURL = docmeeDefaultAPIBaseURL
@@ -349,50 +329,20 @@ func meDocmeeConfigHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{
-		"enabled":               cfg.configured(),
-		"configured":            strings.TrimSpace(cfg.APIKey) != "",
-		"credits_enabled":       cfg.billingEnabled(d),
-		"credits_per_ppt":       cfg.CreditsPerPPT,
-		"credits_available":     balance.Available,
-		"reservation_ttl":       int64(docmeeReservationTTL / time.Second),
-		"sdk_url":               cfg.SDKURL,
-		"domain":                cfg.Domain,
-		"sdk_base_url":          cfg.SDKBaseURL,
-		"creator_version":       cfg.CreatorVersion,
-		"download_button":       true,
-		"outline_export_format": "md",
-	})
-}
-
-// meDocmeeTokenHandler mints (or reuses) the short-lived iframe token. It
-// deliberately takes NO credit hold: the token is needed the moment the page
-// loads, while credits are only held when the user actually starts a generation
-// (meDocmeeAttemptHandler).
-func meDocmeeTokenHandler(d Deps, w http.ResponseWriter, r *http.Request) {
-	u := authUser(r)
-	cfg, ok := docmeeReadyConfig(d, w)
-	if !ok {
-		return
-	}
-	if !rateLimitUser(d, u.ID, "ppt", docmeeSessionRateLimit, time.Minute) {
-		writeError(w, http.StatusTooManyRequests, errors.New("too many AI PPT sessions — try again shortly"))
-		return
-	}
-	token, err := docmeeToken(r.Context(), d, cfg, u.ID)
-	if err != nil {
-		// The upstream message can echo the admin's key/uid, so it stays in the
-		// server log; the client gets a typed, retryable error.
-		if d.Logger != nil {
-			d.Logger.Printf("docmee token mint failed (user=%s): %v", u.ID, err)
-		}
-		writeJSON(w, http.StatusBadGateway, map[string]any{
-			"error": "AI PPT service is temporarily unavailable", "code": "upstream_error",
-		})
-		return
-	}
-	writeJSON(w, 200, map[string]any{
-		"token":      token,
-		"expires_in": int64(docmeeTokenCacheTTL / time.Second),
+		"enabled":           cfg.configured(),
+		"configured":        strings.TrimSpace(cfg.APIKey) != "",
+		"credits_enabled":   cfg.billingEnabled(d),
+		"credits_per_ppt":   cfg.CreditsPerPPT,
+		"credits_available": balance.Available,
+		// API-mode fields (self-built UI, § AI PPT).
+		"edit_credits":         cfg.EditCredits,
+		"edit_credits_enabled": cfg.editBillingEnabled(d),
+		"default_template_id":  cfg.DefaultTemplateID,
+		"max_upload_mb":        cfg.MaxUploadMB,
+		// Editor surface: the browser loads this SDK to open Docmee's editor for a
+		// finished deck (slide-level editing is not something we rebuild).
+		"sdk_url": cfg.SDKURL,
+		"domain":  cfg.Domain,
 	})
 }
 
@@ -419,229 +369,37 @@ func docmeeReadyConfig(d Deps, w http.ResponseWriter) (docmeeConfig, bool) {
 	return cfg, true
 }
 
-// meDocmeeAttemptHandler opens one generation attempt by holding the per-deck
-// price against the user's balance. Charging happens later, when the upstream
-// reports the deck: see meDocmeeChargeHandler.
-func meDocmeeAttemptHandler(d Deps, w http.ResponseWriter, r *http.Request) {
-	u := authUser(r)
-	cfg, ok := docmeeReadyConfig(d, w)
-	if !ok {
-		return
-	}
-	if !rateLimitUser(d, u.ID, "ppt", docmeeSessionRateLimit, time.Minute) {
-		writeError(w, http.StatusTooManyRequests, errors.New("too many AI PPT sessions — try again shortly"))
-		return
-	}
-
-	attemptID := store.GenID("ppt")
-	billing := cfg.billingEnabled(d)
-	if billing {
-		if _, err := store.ReserveCredits(r.Context(), d.DB, u.ID, cfg.CreditsPerPPT,
-			docmeeAttemptSourceType, attemptID, docmeeReservationTTL); err != nil {
-			if errors.Is(err, store.ErrInsufficientCredits) {
-				writeJSON(w, http.StatusPaymentRequired, map[string]any{
-					"error":           errDocmeeInsufficient.Error(),
-					"code":            "insufficient_credits",
-					"credits_per_ppt": cfg.CreditsPerPPT,
-				})
-				return
-			}
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-	}
-
-	balance, err := store.GetCreditBalance(r.Context(), d.DB, u.ID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, 200, map[string]any{
-		"attempt_id":        attemptID,
-		"expires_at":        time.Now().Add(docmeeReservationTTL).Unix(),
-		"credits_per_ppt":   cfg.CreditsPerPPT,
-		"credits_charged":   false,
-		"credits_available": balance.Available,
-	})
-}
-
-type docmeeChargeRequest struct {
-	AttemptID string `json:"attempt_id"`
-	PptID     string `json:"ppt_id"`
-}
-
-// meDocmeeChargeHandler settles one generation. The upstream PPT id becomes the
-// billed key, so a replayed event (or a reloaded page re-reporting the same deck)
-// can never debit twice — see store.SettleCreditReservationByKey.
-func meDocmeeChargeHandler(d Deps, w http.ResponseWriter, r *http.Request) {
-	u := authUser(r)
-	var body docmeeChargeRequest
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, errInvalidInput)
-		return
-	}
-	attemptID := strings.TrimSpace(body.AttemptID)
-	if attemptID == "" || len(attemptID) > docmeeMaxAttemptIDLen {
-		writeError(w, http.StatusBadRequest, errInvalidInput)
-		return
-	}
-	cfg := docmeeConfigFor(d)
-	if !cfg.billingEnabled(d) {
-		writeJSON(w, 200, map[string]any{"credits": 0, "already_charged": false, "credits_per_ppt": 0})
-		return
-	}
-	// Separate bucket from token/attempt: an SDK retry storm must not starve the
-	// calls that open the next generation.
-	if !rateLimitUser(d, u.ID, "ppt-charge", docmeeChargeRateLimit, time.Minute) {
-		writeError(w, http.StatusTooManyRequests, errors.New("too many AI PPT charge attempts — try again shortly"))
-		return
-	}
-	finalID := strings.TrimSpace(body.PptID)
-	if finalID == "" {
-		// No upstream id (older SDK builds only send the attempt): bill the
-		// attempt itself, which keeps the charge idempotent within the session.
-		finalID = attemptID
-	}
-	if len(finalID) > docmeeMaxAttemptIDLen*2 {
-		writeError(w, http.StatusBadRequest, errInvalidInput)
-		return
-	}
-
-	debit, already, err := store.SettleCreditReservationByKey(r.Context(), d.DB, u.ID,
-		docmeeAttemptSourceType, attemptID, docmeeAttemptSourceType, finalID, cfg.CreditsPerPPT)
-	switch {
-	case errors.Is(err, store.ErrNotFound):
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": errDocmeeUnknownAttempt.Error(), "code": "unknown_attempt"})
-		return
-	case errors.Is(err, store.ErrCreditReservationReleased):
-		writeJSON(w, http.StatusConflict, map[string]any{"error": "generation hold expired", "code": "attempt_released"})
-		return
-	case errors.Is(err, store.ErrCreditReservationConflict):
-		writeJSON(w, http.StatusConflict, map[string]any{"error": "charge already in flight", "code": "charge_conflict"})
-		return
-	case errors.Is(err, store.ErrInsufficientCredits):
-		writeJSON(w, http.StatusPaymentRequired, map[string]any{
-			"error": errDocmeeInsufficient.Error(), "code": "insufficient_credits",
-		})
-		return
-	case errors.Is(err, store.ErrInvalidCreditAmount), errors.Is(err, store.ErrCreditReservationSourceID):
-		writeError(w, http.StatusBadRequest, errInvalidInput)
-		return
-	case err != nil:
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-
-	balance, err := store.GetCreditBalance(r.Context(), d.DB, u.ID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-
-	// Publish the billed deck to usage reporting. A settled reservation only
-	// touches credit_ledger, which the admin usage page does not read, so
-	// without this the charge is invisible there. Best-effort: the credits have
-	// already moved, and failing the request here would tell the user their
-	// generation did not bill when it did.
-	usageRecorded := true
-	if err := recordDocmeeDeckUsage(r.Context(), d, u, finalID, debit.Total, already); err != nil {
-		usageRecorded = false
-		slog.Error("ppt usage record failed", "user_id", u.ID, "ppt_id", finalID, "credits", debit.Total, "err", err)
-	}
-
-	writeJSON(w, 200, map[string]any{
-		"credits":           debit.Total,
-		"already_charged":   already,
-		"credits_per_ppt":   cfg.CreditsPerPPT,
-		"credits_available": balance.Available,
-		"usage_recorded":    usageRecorded,
-	})
-}
-
-// recordDocmeeDeckUsage writes the usage_logs/usage_stats row for one billed
-// deck, at most once per deck id.
+// recordDocmeeUsage writes the usage_logs/usage_stats row for one AI PPT call, at
+// most once per memo key.
 //
-// `already` is true when the settlement recognized a replay; the row has then
-// normally been written by the original call, so the existence check below only
-// has to cover the case where that first write failed. The check runs before
-// every insert (not only on replays) so an earlier best-effort failure is
-// repaired by a later retry instead of leaving the deck permanently invisible.
-func recordDocmeeDeckUsage(
-	ctx context.Context, d Deps, u *store.User, pptID string, credits float64, already bool,
-) error {
-	memo := docmeeUsageMemoPrefix + pptID
+// The existence check runs before every insert (not only on replays) so an
+// earlier best-effort failure is repaired by a later retry instead of leaving the
+// call permanently invisible. `credits` is the amount the ledger actually took —
+// 0 for a free generation — never the configured price, so an admin changing
+// docmee_credits_per_ppt cannot rewrite what history says was charged.
+func recordDocmeeUsage(ctx context.Context, d Deps, userID, memo string, credits float64) error {
 	var existing int
 	if err := d.DB.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM usage_logs WHERE user_id=? AND purpose=? AND message_id=?`,
-		u.ID, docmeeUsagePurpose, memo,
+		userID, store.AiPPTUsagePurpose, memo,
 	).Scan(&existing); err != nil {
 		return err
 	}
 	if existing > 0 {
 		return nil
 	}
-	if already {
-		// A replay plus a missing row means the original write never landed;
-		// fall through and write it now.
-		slog.Warn("ppt usage row missing for a replayed charge; backfilling", "user_id", u.ID, "ppt_id", pptID)
-	}
 	return store.LogUsage(ctx, d.DB, store.UsageLog{
-		UserID:  u.ID,
+		UserID:    userID,
 		MessageID: memo,
-		Purpose: docmeeUsagePurpose,
-		// Credits is the settled amount, not the configured price: an admin who
-		// changes docmee_credits_per_ppt must not rewrite what history says was
-		// actually charged.
+		Purpose:   store.AiPPTUsagePurpose,
 		Credits:   credits,
 		Status:    "ok",
 		CreatedAt: time.Now().Unix(),
 	})
 }
 
-type docmeeReleaseRequest struct {
-	AttemptID string `json:"attempt_id"`
-}
-
-// meDocmeeReleaseHandler refunds a hold whose generation failed or was
-// abandoned. It is intentionally idempotent: an unknown or already-terminal hold
-// reports released=false instead of failing.
-func meDocmeeReleaseHandler(d Deps, w http.ResponseWriter, r *http.Request) {
-	u := authUser(r)
-	var body docmeeReleaseRequest
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, errInvalidInput)
-		return
-	}
-	attemptID := strings.TrimSpace(body.AttemptID)
-	if attemptID == "" || len(attemptID) > docmeeMaxAttemptIDLen {
-		writeError(w, http.StatusBadRequest, errInvalidInput)
-		return
-	}
-	hold, err := store.LookupCreditReservation(r.Context(), d.DB, docmeeAttemptSourceType, attemptID)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeJSON(w, 200, map[string]any{"released": false})
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	// A hold id is not a capability: only its owner may refund it.
-	if hold.UserID != u.ID {
-		writeError(w, http.StatusForbidden, errPermissionDenied)
-		return
-	}
-	if err := store.ReleaseCreditReservation(r.Context(), d.DB, docmeeAttemptSourceType, attemptID); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	balance, err := store.GetCreditBalance(r.Context(), d.DB, u.ID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, 200, map[string]any{
-		"released":          true,
-		"credits_available": balance.Available,
-	})
+// recordDocmeeDeckUsage publishes one generated deck (memo = the upstream ppt id,
+// the same key the credit settlement uses, so a re-render cannot log it twice).
+func recordDocmeeDeckUsage(ctx context.Context, d Deps, userID, pptID string, credits float64) error {
+	return recordDocmeeUsage(ctx, d, userID, store.AiPPTGenerateUsageMemo(pptID), credits)
 }

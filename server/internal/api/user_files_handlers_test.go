@@ -59,7 +59,8 @@ func TestUserFileListCarriesFolderRelativePaths(t *testing.T) {
 	}
 }
 
-func TestUserStorageUsageExcludesImagesAndTwins(t *testing.T) {	ctx := context.Background()
+func TestUserStorageUsageExcludesImagesAndTwins(t *testing.T) {
+	ctx := context.Background()
 	db := openMigrated(t, filepath.Join(t.TempDir(), "usage.db"))
 	defer db.Close()
 

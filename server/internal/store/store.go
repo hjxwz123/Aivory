@@ -499,6 +499,12 @@ func Migrate(db *sql.DB) error {
 	if _, err := db.Exec(`DELETE FROM settings WHERE key IN ('summary_target_percent','summary_merge_max_tokens')`); err != nil {
 		return fmt.Errorf("remove retired compaction settings: %w", err)
 	}
+	// Retired with the Docmee iframe integration: creation now runs on our own UI,
+	// so the API-proxy base and the creator version have no reader. The editor
+	// hand-off still uses docmee_sdk_url / docmee_domain, which are kept.
+	if _, err := db.Exec(`DELETE FROM settings WHERE key IN ('docmee_sdk_base_url','docmee_creator_version')`); err != nil {
+		return fmt.Errorf("remove retired docmee iframe settings: %w", err)
+	}
 	// Best-effort additive migrations for existing databases — CREATE TABLE
 	// IF NOT EXISTS won't add columns to a pre-existing table. On SQLite a
 	// duplicate-column error is expected and ignored; Postgres uses IF NOT

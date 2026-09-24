@@ -54,15 +54,23 @@ func TestAdminSettingsKeysAreUniqueAndExcludeRetiredPurchasingSettings(t *testin
 		"docmee_enabled",
 		"docmee_api_key",
 		"docmee_api_base_url",
-		"docmee_domain",
-		"docmee_sdk_url",
-		"docmee_sdk_base_url",
-		"docmee_creator_version",
 		"docmee_credits_per_ppt",
 		"docmee_token_hours",
+		"docmee_edit_credits",
+		"docmee_default_template_id",
+		"docmee_max_upload_mb",
+		// Editor surface: the vendor iframe is only used for slide-level editing.
+		"docmee_sdk_url",
+		"docmee_domain",
 	} {
 		if _, exists := seen[key]; !exists {
 			t.Fatalf("AI PPT setting %q is not exposed by the admin settings API", key)
+		}
+	}
+	// Retired with the iframe creation flow.
+	for _, retired := range []string{"docmee_sdk_base_url", "docmee_creator_version"} {
+		if _, exists := seen[retired]; exists {
+			t.Fatalf("retired AI PPT setting %q is still exposed", retired)
 		}
 	}
 }

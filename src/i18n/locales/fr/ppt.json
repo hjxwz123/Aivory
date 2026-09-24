@@ -1,11 +1,170 @@
 {
   "title": "AI PPT",
   "price": "{{price}} crédits par présentation",
+  "priceInactive": "{{price}} crédits par présentation · gratuit pour l’instant",
   "balance": "{{available}} disponibles",
-  "reload": "Recharger l’éditeur",
-  "pages": {
-    "creator": "Créer",
-    "dashboard": "Mes présentations"
+  "view": {
+    "create": "Créer",
+    "decks": "Mes présentations"
+  },
+  "steps": {
+    "input": "Source",
+    "outline": "Plan",
+    "template": "Modèle",
+    "result": "Rendu"
+  },
+  "input": {
+    "title": "Sur quoi doit porter la présentation ?",
+    "lead": "Partez d'un sujet, collez votre texte, indiquez une page web, importez un document ou fournissez un plan Markdown.",
+    "optionsTitle": "Options de génération",
+    "optionsLead": "Elles orientent la rédaction du plan. Tout est facultatif sauf la longueur.",
+    "anyOption": "Laisser le modèle décider",
+    "types": {
+      "topic": "Sujet",
+      "text": "Coller du texte",
+      "url": "Page web",
+      "upload": "Importer un fichier",
+      "markdown": "Plan Markdown"
+    },
+    "placeholders": {
+      "topic": "ex. : tendances de l'IA au bureau en 2026",
+      "text": "Collez le contenu à transformer en diapositives…",
+      "url": "https://example.com/article",
+      "markdown": "# Titre\n## Chapitre\n### Page\n#### Paragraphe\n- Contenu"
+    },
+    "uploadHint": "Déposez un fichier ici ou choisissez-en un (jusqu'à {{mb}} Mo)",
+    "uploadTypes": "Word, PDF, texte, Markdown ou une présentation existante.",
+    "uploadPick": "Choisir un fichier",
+    "uploadMissing": "Choisissez d'abord un fichier",
+    "contentMissing": "Saisissez d'abord le contenu",
+    "length": "Longueur",
+    "lengths": {
+      "short": "Courte",
+      "medium": "Moyenne",
+      "long": "Détaillée"
+    },
+    "scene": "Contexte",
+    "audience": "Public",
+    "lang": "Langue",
+    "prompt": "Consignes supplémentaires",
+    "promptHint": "{{count}}/50 caractères",
+    "promptPlaceholder": "ex. : garder un ton pragmatique",
+    "submit": "Générer le plan",
+    "priceHint": "Générer cette présentation coûte {{price}} crédits.",
+    "freeHint": "La génération est gratuite sur ce déploiement.",
+    "freeHintPriced": "La génération est gratuite sur ce déploiement (le prix standard configuré est de {{price}} crédits par présentation).",
+    "examples": {
+      "label": "Quelques idées",
+      "one": "Tendances de l'IA au bureau en 2026",
+      "two": "Revue trimestrielle",
+      "three": "Plan de lancement produit"
+    },
+    "defaultTemplate": {
+      "label": "Modèle par défaut",
+      "hint": "Utilisé si vous n’en choisissez aucun plus tard. Modifiable après le plan."
+    }
+  },
+  "outline": {
+    "title": "Plan",
+    "counts": "{{chapters}} chapitres · {{pages}} pages",
+    "streaming": "Rédaction…",
+    "empty": "Rien pour l'instant",
+    "placeholder": "Le plan s'affiche ici en direct ; vous pouvez le modifier avant la mise en page.",
+    "structure": "Structure",
+    "structureHint": "{{paragraphs}} titres de paragraphe pour l'instant.",
+    "regenerate": "Régénérer",
+    "next": "Choisir un modèle",
+    "rewrite": "Réécriture IA",
+    "rewriteTitle": "Réécrire le plan",
+    "rewriteLead": "Décrivez la modification : le modèle réécrit tout le plan.",
+    "rewriteBilled": "Cette réécriture coûte {{price}} crédits.",
+    "rewritePlaceholder": "ex. : appliquer le principe de la pyramide",
+    "warnings": {
+      "missing-title": "Ajoutez un seul titre de niveau 1 (#)",
+      "multiple-titles": "Un seul titre de niveau 1 (#) est autorisé",
+      "missing-chapters": "Ajoutez au moins un chapitre (##)",
+      "missing-pages": "Ajoutez au moins une page (###)"
+    },
+    "waiting": "Le modèle réfléchit : le plan s’affichera ici au fur et à mesure.",
+    "progress": "{{count}} caractères écrits"
+  },
+  "template": {
+    "title": "Choisir un modèle",
+    "lead": "Détermine l'apparence de toutes les diapositives.",
+    "selected": "Sélectionné : {{name}}",
+    "back": "Retour au plan",
+    "generate": "Générer la présentation",
+    "generateBilled": "Générer · {{price}} crédits",
+    "system": "Système",
+    "mine": "Les miens",
+    "all": "Tous",
+    "empty": "Aucun modèle disponible",
+    "loadMore": "Charger plus",
+    "upload": "Ajouter un modèle",
+    "uploading": "Envoi {{percent}} %",
+    "uploaded": "Modèle ajouté",
+    "uploadHint": "Un .pptx, idéalement 960×540",
+    "uploadFailed": "L'envoi du modèle a échoué",
+    "uploadTooLarge": "Ce modèle est trop volumineux",
+    "uploadPptxOnly": "Les modèles personnalisés doivent être des fichiers .pptx",
+    "rename": "Renommer",
+    "renameTitle": "Renommer le modèle",
+    "renameLead": "Seul le nom affiché change ; le modèle reste identique.",
+    "renameLabel": "Nom du modèle",
+    "renamed": "Modèle renommé",
+    "renameFailed": "Impossible de renommer le modèle",
+    "delete": "Supprimer",
+    "deleteTitle": "Supprimer ce modèle ?",
+    "deleteBody": "Il disparaît de « Les miens ». Les présentations déjà générées ne sont pas affectées.",
+    "deleted": "Modèle supprimé",
+    "deleteFailed": "Impossible de supprimer le modèle"
+  },
+  "result": {
+    "untitled": "Présentation sans titre",
+    "rename": "Renommer",
+    "renamed": "Nom mis à jour",
+    "defaultTemplate": "Modèle par défaut",
+    "download": "Télécharger le .pptx",
+    "preview": "Aperçu",
+    "previewTitle": "Aperçu",
+    "previewLead": "Le rendu tel qu'enregistré dans vos fichiers.",
+    "previewFailed": "Impossible de prévisualiser cette présentation",
+    "mirrorPending": "Le fichier n'est pas encore enregistré dans vos fichiers. Relancez l'enregistrement.",
+    "retrySave": "Enregistrer dans mes fichiers",
+    "changeTemplate": "Changer de modèle",
+    "changeTemplateLead": "Remettre en page avec un autre modèle.",
+    "changeTemplateBilled": "La remise en page coûte {{price}} crédits.",
+    "applyTemplate": "Appliquer",
+    "templateChanged": "Modèle mis à jour",
+    "templateChangedBilled": "Modèle mis à jour · {{price}} crédits débités",
+    "newDeck": "Nouvelle présentation",
+    "previewScrollHint": "Faites défiler pour parcourir toutes les diapositives.",
+    "edit": "Modifier les diapositives",
+    "template": "Modèle",
+    "credits": "Crédits",
+    "priceNote": "Prix configuré par l’administrateur : {{price}} crédits par présentation.",
+    "saved": "Enregistré dans vos fichiers",
+    "saving": "Enregistrement dans vos fichiers…"
+  },
+  "decks": {
+    "empty": "Aucune présentation",
+    "emptyHint": "Les présentations générées apparaissent ici, avec le .pptx enregistré dans vos fichiers.",
+    "loadFailed": "Impossible de charger vos présentations",
+    "open": "Ouvrir",
+    "continue": "Continuer",
+    "delete": "Supprimer",
+    "deleteTitle": "Supprimer cette présentation ?",
+    "deleteBody": "L'enregistrement et le .pptx de vos fichiers seront supprimés. Action irréversible.",
+    "deleted": "Présentation supprimée",
+    "untitled": "Présentation sans titre",
+    "credits": "{{credits}} crédits",
+    "status": {
+      "draft": "Brouillon",
+      "outline_ready": "Plan prêt",
+      "generating": "Mise en page",
+      "ready": "Prête",
+      "failed": "Échec"
+    }
   },
   "charged": {
     "title": "{{price}} crédits débités",
@@ -13,11 +172,11 @@
   },
   "insufficient": {
     "title": "Crédits insuffisants",
-    "description": "Générer une présentation coûte {{price}} crédits et vous en avez {{available}}. Rechargez pour continuer.",
+    "description": "Cette action coûte {{price}} crédits et vous en avez {{available}}. Rechargez pour continuer.",
     "action": "Voir les offres"
   },
   "unconfigured": {
-    "title": "AI PPT n’est pas configuré",
+    "title": "AI PPT n'est pas configuré",
     "description": "Un administrateur doit renseigner la clé API Docmee dans Admin → Crédits et quotas pour activer AI PPT."
   },
   "disabled": {
@@ -26,16 +185,32 @@
   },
   "loadFailed": {
     "title": "Impossible de charger AI PPT",
-    "description": "La configuration d’AI PPT n’a pas pu être récupérée."
-  },
-  "sdkFailed": {
-    "title": "Impossible de démarrer AI PPT",
-    "description": "L’éditeur de présentations n’a pas pu être chargé.",
-    "retry": "Réessayer"
+    "description": "La configuration d'AI PPT n'a pas pu être récupérée."
   },
   "errors": {
-    "generic": "Impossible de lancer la génération",
+    "generic": "L'opération a échoué",
     "charge": "Impossible de débiter les crédits",
     "upstream": "Le service de présentations a renvoyé une erreur"
+  },
+  "editor": {
+    "title": "Modifier la présentation",
+    "lead": "L'édition se fait dans l'éditeur Docmee ; à la fermeture, le fichier est resynchronisé.",
+    "loading": "Ouverture de l'éditeur…",
+    "failed": "L'éditeur n'a pas pu être ouvert.",
+    "retry": "Réessayer",
+    "syncNow": "Synchroniser maintenant",
+    "synced": "Le fichier modifié a été enregistré dans vos fichiers",
+    "syncFailed": "Le fichier modifié n'a pas pu être enregistré",
+    "done": "Terminé"
+  },
+  "render": {
+    "title": "Création de « {{subject}} »",
+    "lead": "Mise en page de chaque diapositive avec votre modèle — quelques secondes.",
+    "stages": {
+      "content": "Contenu",
+      "layout": "Mise en page",
+      "render": "Rendu",
+      "save": "Enregistrement"
+    }
   }
 }

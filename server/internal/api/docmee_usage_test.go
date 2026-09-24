@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -18,134 +19,142 @@ import (
 // database mirrors from usage_logs). Neither table was ever written, so a charged
 // deck was invisible in reporting even though the credits really moved.
 //
-// These tests pin the row that closes the gap, the roll-up that the billing
-// summary renders, and the two properties they must keep: one row per deck, and
-// credits that match what the ledger actually took.
-func TestDocmeeChargeRecordsUsageForBillingPage(t *testing.T) {
-	fixture := docmeeTestDeps(t, 25, docmeeBillingSettings(nil))
+// These tests pin the row that closes the gap, the roll-up the billing summary
+// renders, and the properties they must keep: one row per deck, credits that
+// match what the ledger actually took, and no row at all when nothing was billed.
+//
+// They drive the API-mode flow (create deck → render), which is where the charge
+// and the usage write now live.
 
-	attempt := docmeeOpenAttempt(t, fixture)
-	charge := docmeeCharge(t, fixture, attempt, "deck-usage-1")
-	if charge.Credits != 10 {
-		t.Fatalf("charge = %+v, want 10 credits", charge)
+func TestAiPPTChargeRecordsUsageForBillingPage(t *testing.T) {
+	fixture := aipptTestDeps(t, 25, nil)
+	deckID := createDeck(t, fixture, fixture.user)
+
+	rendered := aipptRender(t, fixture, deckID)
+	if rendered.Credits != 10 {
+		t.Fatalf("render = %+v, want 10 credits", rendered)
 	}
-	if !charge.UsageRecorded {
-		t.Fatal("charge reported usage_recorded=false; the deck would be invisible in usage reporting")
+	if !rendered.UsageRecorded {
+		t.Fatal("render reported usage_recorded=false; the deck would be invisible in usage reporting")
 	}
 
-	// The row the admin usage table renders.
-	rows := docmeeUsageRows(t, fixture)
+	rows := docmeeUsageRows(t, fixture.db)
 	if len(rows) != 1 {
 		t.Fatalf("usage rows = %d, want exactly 1 for one billed deck", len(rows))
 	}
 	if rows[0].Purpose != "ppt" {
-		t.Fatalf("purpose = %q, want %q", rows[0].Purpose, "ppt")
+		t.Fatalf("purpose = %q, want ppt", rows[0].Purpose)
 	}
 	if rows[0].UserID != "u1" {
 		t.Fatalf("row user = %q, want u1", rows[0].UserID)
 	}
-
-	// The roll-up the billing summary renders must now account for the credits.
-	if got := docmeeUsageCredits(t, fixture); got != 10 {
+	if got := docmeeUsageCredits(t, fixture.db); got != 10 {
 		t.Fatalf("billing-summary credits = %v, want 10", got)
 	}
+	// The row must identify the deck it paid for: the admin usage page renders
+	// these fields as the AI PPT call detail.
+	if rows[0].AiPPT == nil {
+		t.Fatal("ppt row carries no AI PPT detail")
+	}
+	if rows[0].AiPPT.Event != store.AiPPTUsageEventGenerate {
+		t.Fatalf("event = %q, want %q", rows[0].AiPPT.Event, store.AiPPTUsageEventGenerate)
+	}
+	if rows[0].AiPPT.PptID != fixture.stub.pptID {
+		t.Fatalf("ppt id = %q, want the rendered deck's %q", rows[0].AiPPT.PptID, fixture.stub.pptID)
+	}
+	if rows[0].AiPPT.Subject == "" || rows[0].AiPPT.DeckID == "" {
+		t.Fatalf("detail = %+v, want the deck's subject and record id", rows[0].AiPPT)
+	}
 
-	// Replaying the charge (an SDK retry, or a reloaded page re-reporting the
-	// same deck) must not add a second row or double the roll-up.
-	replay := docmeeCharge(t, fixture, attempt, "deck-usage-1")
-	if !replay.AlreadyCharged {
-		t.Fatalf("replay = %+v, want already_charged", replay)
+	// Re-rendering the same deck is already paid for: no second debit, and no
+	// second usage row.
+	replay := aipptRender(t, fixture, deckID)
+	if replay.Credits != 10 || replay.CreditsAvailable != 15 {
+		t.Fatalf("replay = %+v, want the original 10-credit charge and an unchanged balance", replay)
 	}
-	if got := len(docmeeUsageRows(t, fixture)); got != 1 {
-		t.Fatalf("usage rows after replay = %d, want still 1 (a replay must not double-count)", got)
+	if got := len(docmeeUsageRows(t, fixture.db)); got != 1 {
+		t.Fatalf("usage rows after replay = %d, want still 1", got)
 	}
-	if got := docmeeUsageCredits(t, fixture); got != 10 {
+	if got := docmeeUsageCredits(t, fixture.db); got != 10 {
 		t.Fatalf("billing-summary credits after replay = %v, want 10", got)
 	}
 }
 
-// A page reload opens a fresh attempt and reports the SAME deck id. The ledger
-// already bills that deck once; usage reporting must agree.
-func TestDocmeeReopenedAttemptDoesNotDuplicateUsage(t *testing.T) {
-	fixture := docmeeTestDeps(t, 25, docmeeBillingSettings(nil))
-
-	first := docmeeOpenAttempt(t, fixture)
-	docmeeCharge(t, fixture, first, "deck-shared")
-
-	second := docmeeOpenAttempt(t, fixture)
-	if second == first {
-		t.Fatal("second attempt reused the first attempt id")
-	}
-	docmeeCharge(t, fixture, second, "deck-shared")
-
-	if got := len(docmeeUsageRows(t, fixture)); got != 1 {
-		t.Fatalf("usage rows = %d, want 1 for one deck billed from two attempts", got)
-	}
-	if got := docmeeUsageCredits(t, fixture); got != 10 {
-		t.Fatalf("billing-summary credits = %v, want 10", got)
-	}
-}
-
 // Two different decks are two billable units and must both show up.
-func TestDocmeeTwoDecksRecordTwoUsageRows(t *testing.T) {
-	fixture := docmeeTestDeps(t, 40, docmeeBillingSettings(nil))
+func TestAiPPTTwoDecksRecordTwoUsageRows(t *testing.T) {
+	fixture := aipptTestDeps(t, 40, nil)
 
-	docmeeCharge(t, fixture, docmeeOpenAttempt(t, fixture), "deck-a")
-	docmeeCharge(t, fixture, docmeeOpenAttempt(t, fixture), "deck-b")
+	first := createDeck(t, fixture, fixture.user)
+	aipptRender(t, fixture, first)
+	// The second deck must be a DIFFERENT upstream deck, so give the stub a new id.
+	fixture.stub.pptID = "ppt_stub_2"
+	second := createDeck(t, fixture, fixture.user)
+	aipptRender(t, fixture, second)
 
-	rows := docmeeUsageRows(t, fixture)
-	if len(rows) != 2 {
-		t.Fatalf("usage rows = %d, want 2 for two billed decks", len(rows))
+	if got := len(docmeeUsageRows(t, fixture.db)); got != 2 {
+		t.Fatalf("usage rows = %d, want 2 for two billed decks", got)
 	}
-	if got := docmeeUsageCredits(t, fixture); got != 20 {
+	if got := docmeeUsageCredits(t, fixture.db); got != 20 {
 		t.Fatalf("billing-summary credits = %v, want 20", got)
 	}
 }
 
 // A failed-then-retried write must be repairable: if the original usage write
-// never landed, a later replay of the same charge has to backfill it rather than
+// never landed, a later render of the same deck has to backfill it rather than
 // leave the deck permanently missing from reporting.
-func TestDocmeeReplayBackfillsAMissingUsageRow(t *testing.T) {
-	fixture := docmeeTestDeps(t, 25, docmeeBillingSettings(nil))
-	ctx := context.Background()
+func TestAiPPTReRenderBackfillsAMissingUsageRow(t *testing.T) {
+	fixture := aipptTestDeps(t, 25, nil)
+	deckID := createDeck(t, fixture, fixture.user)
+	aipptRender(t, fixture, deckID)
 
-	attempt := docmeeOpenAttempt(t, fixture)
-	docmeeCharge(t, fixture, attempt, "deck-backfill")
-
-	// Simulate the lost write (e.g. the process died between the debit and the
-	// insert): the ledger has it, usage reporting does not.
-	if _, err := fixture.db.ExecContext(ctx, `DELETE FROM usage_logs WHERE purpose='ppt'`); err != nil {
+	// Simulate the lost write (the process died between the debit and the insert).
+	if _, err := fixture.db.ExecContext(context.Background(), `DELETE FROM usage_logs WHERE purpose='ppt'`); err != nil {
 		t.Fatalf("delete usage row: %v", err)
 	}
-	if got := len(docmeeUsageRows(t, fixture)); got != 0 {
+	if got := len(docmeeUsageRows(t, fixture.db)); got != 0 {
 		t.Fatalf("precondition: rows = %d, want 0", got)
 	}
 
-	replay := docmeeCharge(t, fixture, attempt, "deck-backfill")
-	if !replay.AlreadyCharged || !replay.UsageRecorded {
-		t.Fatalf("replay = %+v, want already_charged with usage_recorded", replay)
+	backfill := aipptRender(t, fixture, deckID)
+	if !backfill.UsageRecorded {
+		t.Fatalf("re-render = %+v, want usage_recorded", backfill)
 	}
-	if got := len(docmeeUsageRows(t, fixture)); got != 1 {
+	if got := len(docmeeUsageRows(t, fixture.db)); got != 1 {
 		t.Fatalf("usage rows after backfill = %d, want 1", got)
+	}
+	// The backfilled row must carry the amount the ledger actually took. (The
+	// usage_stats roll-up is deliberately not asserted here: this test removes
+	// only the log row, which is not a state the app can reach on its own.)
+	var logged float64
+	if err := fixture.db.QueryRowContext(context.Background(),
+		`SELECT COALESCE(SUM(credits),0) FROM usage_logs WHERE purpose='ppt'`).Scan(&logged); err != nil {
+		t.Fatalf("sum usage credits: %v", err)
+	}
+	if logged != 10 {
+		t.Fatalf("backfilled usage credits = %v, want 10", logged)
 	}
 }
 
-// A generation that was never charged (billing off) must not fabricate a usage
-// row — the report has to stay a record of money that actually moved.
-func TestDocmeeUnbilledChargeRecordsNoUsage(t *testing.T) {
+// A generation that was never charged (billing off platform-wide, or a price of
+// 0) is still a CALL the admin must be able to see. The row is written with
+// credits=0, so it shows up in the report without moving any money.
+func TestAiPPTUnbilledGenerationStillRecordsTheCall(t *testing.T) {
 	// Credits-per-deck 0 disables billing entirely.
-	fixture := docmeeTestDeps(t, 25, docmeeBillingSettings(map[string]any{"docmee_credits_per_ppt": 0}))
+	fixture := aipptTestDeps(t, 25, map[string]any{"docmee_credits_per_ppt": 0})
+	deckID := createDeck(t, fixture, fixture.user)
 
-	attempt := docmeeOpenAttempt(t, fixture)
-	charge := docmeeCharge(t, fixture, attempt, "deck-free")
-
-	if charge.Credits != 0 {
-		t.Fatalf("charge = %+v, want 0 credits when billing is off", charge)
+	rendered := aipptRender(t, fixture, deckID)
+	if rendered.Credits != 0 {
+		t.Fatalf("render = %+v, want 0 credits when billing is off", rendered)
 	}
-	if got := len(docmeeUsageRows(t, fixture)); got != 0 {
-		t.Fatalf("usage rows = %d, want 0 for an unbilled generation", got)
+	rows := docmeeUsageRows(t, fixture.db)
+	if len(rows) != 1 {
+		t.Fatalf("usage rows = %d, want 1 for an unbilled generation", len(rows))
 	}
-	if got := docmeeUsageCredits(t, fixture); got != 0 {
+	if rows[0].Credits != 0 {
+		t.Fatalf("row credits = %v, want 0 — the row reports the call, not a charge", rows[0].Credits)
+	}
+	if got := docmeeUsageCredits(t, fixture.db); got != 0 {
 		t.Fatalf("billing-summary credits = %v, want 0", got)
 	}
 }
@@ -160,45 +169,27 @@ type docmeeChargeResult struct {
 	UsageRecorded    bool    `json:"usage_recorded"`
 }
 
-func docmeeOpenAttempt(t *testing.T, fixture docmeeFixture) string {
+// aipptRender runs the render endpoint (the step that charges) and returns the
+// billing/usage outcome.
+func aipptRender(t *testing.T, fixture aipptFixture, deckID string) docmeeChargeResult {
 	t.Helper()
-	rec, req := docmeeRequest(t, fixture, http.MethodPost, "/api/me/ppt/attempt", nil)
-	meDocmeeAttemptHandler(fixture.deps, rec, req)
+	rec, req := aipptReq(t, fixture, fixture.user, http.MethodPost, "/api/me/ppt/decks/"+deckID+"/pptx",
+		map[string]any{"template_id": "tpl_stub_1", "markdown": "# 主题\n## 章节\n### 页面"})
+	meAiPPTGenerateHandler(fixture.deps, rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("attempt status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	var body struct {
-		AttemptID string `json:"attempt_id"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode attempt: %v", err)
-	}
-	if body.AttemptID == "" {
-		t.Fatal("attempt returned no id")
-	}
-	return body.AttemptID
-}
-
-func docmeeCharge(t *testing.T, fixture docmeeFixture, attemptID, pptID string) docmeeChargeResult {
-	t.Helper()
-	rec, req := docmeeRequest(t, fixture, http.MethodPost, "/api/me/ppt/charge",
-		map[string]string{"attempt_id": attemptID, "ppt_id": pptID})
-	meDocmeeChargeHandler(fixture.deps, rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("charge status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("render status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 	var out docmeeChargeResult
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-		t.Fatalf("decode charge: %v", err)
+		t.Fatalf("decode render: %v", err)
 	}
 	return out
 }
 
 // docmeeUsageRows returns the AI-PPT rows the admin usage table would list.
-func docmeeUsageRows(t *testing.T, fixture docmeeFixture) []store.AdminUsageRecord {
+func docmeeUsageRows(t *testing.T, db *sql.DB) []store.AdminUsageRecord {
 	t.Helper()
-	rows, err := store.AdminUsageRecords(context.Background(), fixture.db,
-		store.UsageFilter{ModelID: ""}, 50, 0)
+	rows, err := store.AdminUsageRecords(context.Background(), db, store.UsageFilter{ModelID: ""}, 50, 0)
 	if err != nil {
 		t.Fatalf("AdminUsageRecords: %v", err)
 	}
@@ -213,10 +204,10 @@ func docmeeUsageRows(t *testing.T, fixture docmeeFixture) []store.AdminUsageReco
 
 // docmeeUsageCredits reads the credit column of the billing summary — the number
 // the "Usage & billing" totals box renders, sourced from usage_stats.
-func docmeeUsageCredits(t *testing.T, fixture docmeeFixture) float64 {
+func docmeeUsageCredits(t *testing.T, db *sql.DB) float64 {
 	t.Helper()
 	now := time.Now().Unix() + 60
-	totals, err := store.AdminUsageTotalsBetween(context.Background(), fixture.db, 0, now)
+	totals, err := store.AdminUsageTotalsBetween(context.Background(), db, 0, now)
 	if err != nil {
 		t.Fatalf("AdminUsageTotalsBetween: %v", err)
 	}

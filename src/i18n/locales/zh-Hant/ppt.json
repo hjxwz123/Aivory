@@ -1,11 +1,170 @@
 {
   "title": "AI PPT",
   "price": "每次生成 {{price}} 積分",
+  "priceInactive": "每次生成 {{price}} 積分 · 目前免費",
   "balance": "餘額 {{available}}",
-  "reload": "重新載入編輯器",
-  "pages": {
-    "creator": "開始創作",
-    "dashboard": "我的 PPT"
+  "view": {
+    "create": "開始創作",
+    "decks": "我的 PPT"
+  },
+  "steps": {
+    "input": "輸入",
+    "outline": "大綱",
+    "template": "範本",
+    "result": "成品"
+  },
+  "input": {
+    "title": "想做什麼主題的 PPT？",
+    "lead": "可以直接給主題，也可以貼上文字、給網頁網址、上傳文件，或直接給 Markdown 大綱。",
+    "optionsTitle": "生成選項",
+    "optionsLead": "這些選項決定大綱的寫法，除篇幅外都是可選的。",
+    "anyOption": "交給模型判斷",
+    "types": {
+      "topic": "主題生成",
+      "text": "貼上文字",
+      "url": "網頁連結",
+      "upload": "上傳檔案",
+      "markdown": "Markdown 大綱"
+    },
+    "placeholders": {
+      "topic": "例如：2026 年 AI 辦公趨勢",
+      "text": "貼上要轉成簡報的原始內容…",
+      "url": "https://example.com/article",
+      "markdown": "# 主題\n## 章節\n### 頁面\n#### 段落\n- 內容"
+    },
+    "uploadHint": "拖曳檔案到此處，或點擊選擇（不超過 {{mb}} MB）",
+    "uploadTypes": "支援 Word、PDF、文字、Markdown 或現有簡報。",
+    "uploadPick": "選擇檔案",
+    "uploadMissing": "請先選擇檔案",
+    "contentMissing": "請先填寫內容",
+    "length": "篇幅",
+    "lengths": {
+      "short": "簡短",
+      "medium": "適中",
+      "long": "詳細"
+    },
+    "scene": "簡報場景",
+    "audience": "目標受眾",
+    "lang": "輸出語言",
+    "prompt": "附加要求",
+    "promptHint": "{{count}}/50 字",
+    "promptPlaceholder": "例如：語氣務實一點",
+    "submit": "生成大綱",
+    "priceHint": "產生這份 PPT 將扣除 {{price}} 積分。",
+    "freeHint": "目前部署產生 PPT 免費。",
+    "freeHintPriced": "目前部署產生 PPT 免費（管理後台設定的標準價為每次 {{price}} 積分）。",
+    "examples": {
+      "label": "試試這些主題",
+      "one": "2026 年 AI 辦公趨勢",
+      "two": "季度經營複盤",
+      "three": "新產品發布方案"
+    },
+    "defaultTemplate": {
+      "label": "預設範本",
+      "hint": "未選擇範本時使用，之後仍可更換。"
+    }
+  },
+  "outline": {
+    "title": "大綱",
+    "counts": "{{chapters}} 個章節 · {{pages}} 個頁面",
+    "streaming": "正在生成…",
+    "empty": "尚無內容",
+    "placeholder": "大綱會即時生成在這裡，生成後可自行修改再排版。",
+    "structure": "結構預覽",
+    "structureHint": "共 {{paragraphs}} 個段落標題。",
+    "regenerate": "重新生成",
+    "next": "選擇範本",
+    "rewrite": "AI 改寫",
+    "rewriteTitle": "AI 改寫大綱",
+    "rewriteLead": "描述修改意見，模型會重寫整份大綱。",
+    "rewriteBilled": "本次改寫消耗 {{price}} 積分。",
+    "rewritePlaceholder": "例如：改成金字塔結構",
+    "warnings": {
+      "missing-title": "需要一個一級標題（#）",
+      "multiple-titles": "一級標題（#）只能有一個",
+      "missing-chapters": "至少需要一個章節（##）",
+      "missing-pages": "至少需要一個頁面（###）"
+    },
+    "waiting": "模型正在思考，大綱會一邊撰寫一邊顯示在這裡。",
+    "progress": "已寫入 {{count}} 字"
+  },
+  "template": {
+    "title": "選擇範本",
+    "lead": "決定每一頁的視覺風格。",
+    "selected": "已選擇：{{name}}",
+    "back": "返回大綱",
+    "generate": "生成 PPT",
+    "generateBilled": "生成 PPT · {{price}} 積分",
+    "system": "系統範本",
+    "mine": "我的範本",
+    "all": "全部",
+    "empty": "尚無可用範本",
+    "loadMore": "載入更多",
+    "upload": "上傳範本",
+    "uploading": "上傳中 {{percent}}%",
+    "uploaded": "範本已上傳",
+    "uploadHint": "僅支援 .pptx，建議 960×540",
+    "uploadFailed": "範本上傳失敗",
+    "uploadTooLarge": "範本檔案過大",
+    "uploadPptxOnly": "自訂範本必須是 .pptx 檔案",
+    "rename": "重新命名",
+    "renameTitle": "重新命名範本",
+    "renameLead": "只改顯示名稱，不影響範本內容。",
+    "renameLabel": "範本名稱",
+    "renamed": "範本已重新命名",
+    "renameFailed": "重新命名失敗",
+    "delete": "刪除",
+    "deleteTitle": "刪除這個範本？",
+    "deleteBody": "範本會從「我的範本」中移除，已產生的 PPT 不受影響。",
+    "deleted": "範本已刪除",
+    "deleteFailed": "刪除失敗"
+  },
+  "result": {
+    "untitled": "未命名 PPT",
+    "rename": "重新命名",
+    "renamed": "名稱已更新",
+    "defaultTemplate": "預設範本",
+    "download": "下載 .pptx",
+    "preview": "預覽",
+    "previewTitle": "預覽",
+    "previewLead": "已儲存到你的檔案中的成品。",
+    "previewFailed": "無法預覽該 PPT",
+    "mirrorPending": "檔案尚未儲存到你的檔案中，請重試儲存。",
+    "retrySave": "儲存到我的檔案",
+    "changeTemplate": "更換範本",
+    "changeTemplateLead": "用另一個範本重新排版這份 PPT。",
+    "changeTemplateBilled": "重新排版消耗 {{price}} 積分。",
+    "applyTemplate": "套用",
+    "templateChanged": "範本已更新",
+    "templateChangedBilled": "範本已更新 · 已扣除 {{price}} 積分",
+    "newDeck": "新增 PPT",
+    "previewScrollHint": "向下捲動即可查看全部頁面。",
+    "edit": "編輯投影片",
+    "template": "範本",
+    "credits": "積分",
+    "priceNote": "管理後台設定的價格：每次生成 {{price}} 積分。",
+    "saved": "已儲存到我的檔案",
+    "saving": "正在儲存到我的檔案…"
+  },
+  "decks": {
+    "empty": "還沒有 PPT",
+    "emptyHint": "生成的 PPT 會顯示在這裡，同時 .pptx 也會儲存到你的檔案。",
+    "loadFailed": "無法載入 PPT 清單",
+    "open": "開啟",
+    "continue": "繼續",
+    "delete": "刪除 PPT",
+    "deleteTitle": "刪除這份 PPT？",
+    "deleteBody": "紀錄與你檔案中的 .pptx 都會被刪除，且無法復原。",
+    "deleted": "已刪除",
+    "untitled": "未命名 PPT",
+    "credits": "{{credits}} 積分",
+    "status": {
+      "draft": "草稿",
+      "outline_ready": "大綱就緒",
+      "generating": "排版中",
+      "ready": "已完成",
+      "failed": "失敗"
+    }
   },
   "charged": {
     "title": "已扣除 {{price}} 積分",
@@ -13,7 +172,7 @@
   },
   "insufficient": {
     "title": "積分不足",
-    "description": "生成一份 PPT 需要 {{price}} 積分，目前可用 {{available}} 積分。請先儲值後再繼續。",
+    "description": "本次操作需要 {{price}} 積分，目前可用 {{available}} 積分。請先儲值後再繼續。",
     "action": "查看方案"
   },
   "unconfigured": {
@@ -28,14 +187,30 @@
     "title": "AI PPT 載入失敗",
     "description": "無法取得 AI PPT 設定。"
   },
-  "sdkFailed": {
-    "title": "無法啟動 AI PPT",
-    "description": "簡報編輯器載入失敗。",
-    "retry": "重試"
-  },
   "errors": {
-    "generic": "無法開始生成",
+    "generic": "操作失敗",
     "charge": "扣費失敗",
     "upstream": "簡報服務回報錯誤"
+  },
+  "editor": {
+    "title": "編輯簡報",
+    "lead": "編輯在文多多編輯器中進行，關閉時會自動把檔案同步回你的檔案。",
+    "loading": "正在開啟編輯器…",
+    "failed": "編輯器開啟失敗。",
+    "retry": "重試",
+    "syncNow": "立即同步檔案",
+    "synced": "編輯後的檔案已儲存到你的檔案",
+    "syncFailed": "編輯後的檔案同步失敗",
+    "done": "完成"
+  },
+  "render": {
+    "title": "正在產生《{{subject}}》",
+    "lead": "正在用所選範本排版每一頁，請稍候幾秒。",
+    "stages": {
+      "content": "內容",
+      "layout": "版式",
+      "render": "渲染",
+      "save": "儲存"
+    }
   }
 }

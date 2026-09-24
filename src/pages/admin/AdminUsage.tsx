@@ -28,6 +28,7 @@ import { Pagination } from '@/components/ui/pagination'
 import { toast } from '@/hooks/use-toast'
 import { envNum } from '@/lib/env-config'
 import { usageUserLabel } from '@/lib/admin-usage'
+import { cn } from '@/lib/utils'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 
 const RANGE_IDS = ['1', '7', '30', '90'] as const
@@ -77,6 +78,8 @@ export default function AdminUsage() {
   const [busyId, setBusyId] = useState<number | null>(null)
   // The failed-request record whose upstream error detail is being viewed (§usage errors).
   const [errorDetail, setErrorDetail] = useState<ApiUsageRecord | null>(null)
+  // The AI PPT row whose call/charge detail is being viewed (§ AI PPT).
+  const [pptDetail, setPptDetail] = useState<ApiUsageRecord | null>(null)
 
   // Debounce the free-text user filter so we don't refetch on every keystroke.
   useEffect(() => {
@@ -155,6 +158,28 @@ export default function AdminUsage() {
     if (value === 'all') return t('usage.filters.allPurposes')
     if (value === 'task') return t('usage.filters.taskAll')
     return purposeLabel(value)
+  }
+
+  /** § AI PPT: which AI PPT step produced this row. */
+  function aipptEventLabel(event?: string): string {
+    if (event === 'rewrite') return t('usage.aippt.events.rewrite', { defaultValue: 'AI rewrite' })
+    if (event === 'template') return t('usage.aippt.events.template', { defaultValue: 'Template change' })
+    return t('usage.aippt.events.generate', { defaultValue: 'Generation' })
+  }
+
+  function aipptStatusLabel(status?: string): string {
+    if (!status) return '—'
+    return t(`usage.aippt.deckStatus.${status}`, { defaultValue: status })
+  }
+
+  /** The deck title of an AI PPT row, falling back to its ids. */
+  function aipptTitle(row: ApiUsageRecord | null): string {
+    return (
+      row?.aippt?.subject ||
+      row?.aippt?.deck_id ||
+      row?.aippt?.ppt_id ||
+      t('usage.aippt.untitled', { defaultValue: 'Untitled PPT' })
+    )
   }
 
   async function deleteOne(id: number) {
@@ -304,7 +329,7 @@ export default function AdminUsage() {
         ) : (
           <>
           <div className="hidden overflow-x-auto rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] xl:block">
-            <table className="w-full min-w-[1320px] table-fixed text-sm tabular-nums">
+            <table className="w-full min-w-[1420px] table-fixed text-sm tabular-nums">
               <colgroup>
                 <col className="w-[150px]" />
                 <col className="w-[190px]" />
@@ -315,6 +340,7 @@ export default function AdminUsage() {
                 <col className="w-[82px]" />
                 <col className="w-[82px]" />
                 <col className="w-[105px]" />
+                <col className="w-[92px]" />
                 <col className="w-[56px]" />
               </colgroup>
               <thead className="whitespace-nowrap bg-[var(--color-bg-muted)] text-[12px] text-[var(--color-fg-subtle)]">
@@ -328,6 +354,7 @@ export default function AdminUsage() {
                   <th className="text-right py-2.5 px-4 font-medium">{t('usage.table.in')}</th>
                   <th className="text-right py-2.5 px-4 font-medium">{t('usage.table.out')}</th>
                   <th className="text-right py-2.5 px-4 font-medium">{t('usage.table.cost')}</th>
+                  <th className="text-right py-2.5 px-4 font-medium">{t('usage.table.credits', { defaultValue: 'Credits' })}</th>
                   <th className="text-right py-2.5 px-4 font-medium" aria-label={t('usage.table.actions', { defaultValue: 'Actions' })} />
                 </tr>
               </thead>
@@ -338,7 +365,23 @@ export default function AdminUsage() {
                     <td className="truncate px-4 py-2" title={usageUserLabel(r)}>{usageUserLabel(r)}</td>
                     <td className="px-4 py-2">
                       <div className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
-                        {r.conversation_deleted ? (
+                        {/* § AI PPT: a ppt row has no conversation — show the deck it
+                            generated/edited and open the call + charge detail. */}
+                        {r.aippt ? (
+                          <button
+                            type="button"
+                            onClick={() => setPptDetail(r)}
+                            title={t('usage.aippt.detail', { defaultValue: 'View AI PPT call detail' })}
+                            className="flex min-w-0 flex-1 items-center gap-1.5 text-left interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                          >
+                            <span className="min-w-0 flex-1 truncate text-[var(--color-accent)] hover:underline">
+                              {aipptTitle(r)}
+                            </span>
+                            <span className="shrink-0 rounded-full border border-[var(--color-border)] px-1.5 text-[10px] text-[var(--color-fg-subtle)]">
+                              {t('usage.aippt.tag', { defaultValue: 'PPT' })} · {aipptEventLabel(r.aippt.event)}
+                            </span>
+                          </button>
+                        ) : r.conversation_deleted ? (
                           <span className="min-w-0 truncate text-[var(--color-fg-faint)] italic">
                             {t('usage.conversationDeleted', { defaultValue: 'Deleted' })}
                           </span>
@@ -432,6 +475,15 @@ export default function AdminUsage() {
                     <td className="py-2 px-4 text-right">{r.output_tokens}</td>
                     <td className="py-2 px-4 text-right">${r.cost.toFixed(4)}</td>
                     <td className="py-2 px-4 text-right">
+                      {r.credits > 0 ? (
+                        <span className="text-[var(--color-fg)]">{formatCredits(r.credits)}</span>
+                      ) : r.aippt ? (
+                        <span className="text-[var(--color-fg-subtle)]">{t('usage.aippt.free', { defaultValue: 'Free' })}</span>
+                      ) : (
+                        <span className="text-[var(--color-fg-faint)]">—</span>
+                      )}
+                    </td>
+                    <td className="py-2 px-4 text-right">
                       <button
                         type="button"
                         onClick={() => void deleteOne(r.id)}
@@ -522,9 +574,24 @@ export default function AdminUsage() {
                     </dd>
                   </div>
                   <div className="col-span-2 min-w-0">
-                    <dt className="text-[11px] text-[var(--color-fg-subtle)]">{t('usage.table.conversation', { defaultValue: 'Conversation' })}</dt>
+                    <dt className="text-[11px] text-[var(--color-fg-subtle)]">
+                      {r.aippt
+                        ? t('usage.aippt.subject', { defaultValue: 'PPT' })
+                        : t('usage.table.conversation', { defaultValue: 'Conversation' })}
+                    </dt>
                     <dd className="mt-0.5 min-w-0">
-                      {r.conversation_deleted ? (
+                      {r.aippt ? (
+                        <button
+                          type="button"
+                          onClick={() => setPptDetail(r)}
+                          className="flex min-w-0 items-center gap-1.5 text-left text-[var(--color-accent)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                        >
+                          <span className="min-w-0 truncate">{aipptTitle(r)}</span>
+                          <span className="shrink-0 rounded-[5px] border border-[var(--color-border)] px-1.5 text-[10px] text-[var(--color-fg-subtle)]">
+                            {t('usage.aippt.tag', { defaultValue: 'PPT' })} · {aipptEventLabel(r.aippt.event)}
+                          </span>
+                        </button>
+                      ) : r.conversation_deleted ? (
                         <span className="italic text-[var(--color-fg-faint)]">{t('usage.conversationDeleted', { defaultValue: 'Deleted' })}</span>
                       ) : r.conversation_id ? (
                         <Link
@@ -540,10 +607,20 @@ export default function AdminUsage() {
                   </div>
                 </dl>
 
-                <div className="mt-3 grid grid-cols-3 divide-x divide-[var(--color-divider)] rounded-[8px] bg-[var(--color-bg-muted)] py-2 text-center tabular-nums">
+                <div className="mt-3 grid grid-cols-4 divide-x divide-[var(--color-divider)] rounded-[8px] bg-[var(--color-bg-muted)] py-2 text-center tabular-nums">
                   <UsageMetric label={t('usage.table.in')} value={String(r.input_tokens)} />
                   <UsageMetric label={t('usage.table.out')} value={String(r.output_tokens)} />
                   <UsageMetric label={t('usage.table.cost')} value={`$${r.cost.toFixed(4)}`} />
+                  <UsageMetric
+                    label={t('usage.table.credits', { defaultValue: 'Credits' })}
+                    value={
+                      r.credits > 0
+                        ? formatCredits(r.credits)
+                        : r.aippt
+                          ? t('usage.aippt.free', { defaultValue: 'Free' })
+                          : '—'
+                    }
+                  />
                 </div>
               </li>
             ))}
@@ -591,6 +668,53 @@ export default function AdminUsage() {
           </DialogBody>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setErrorDetail(null)}>
+              {t('common.close', { defaultValue: 'Close' })}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* § AI PPT: one row per generation / charged edit, so the admin can see the
+          deck behind a "ppt" row and exactly what it cost. */}
+      <Dialog open={!!pptDetail} onOpenChange={(open) => !open && setPptDetail(null)}>
+        <DialogContent size="sm">
+          <DialogHeader>
+            <DialogTitle>{t('usage.aippt.title', { defaultValue: 'AI PPT call detail' })}</DialogTitle>
+            <DialogDescription>{aipptTitle(pptDetail)}</DialogDescription>
+          </DialogHeader>
+          <DialogBody>
+            <div className="flex items-center justify-between gap-3 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
+              <span className="text-[12px] text-[var(--color-fg-muted)]">
+                {t('usage.aippt.credits', { defaultValue: 'Charged' })}
+              </span>
+              <span className="font-serif text-lg tabular-nums text-[var(--color-fg)]">
+                {pptDetail && pptDetail.credits > 0
+                  ? t('usage.aippt.creditsValue', { defaultValue: '{{credits}} credits', credits: formatCredits(pptDetail.credits) })
+                  : t('usage.aippt.free', { defaultValue: 'Free' })}
+              </span>
+            </div>
+            <p className="mt-2 text-[11px] leading-relaxed text-[var(--color-fg-subtle)]">
+              {t('usage.aippt.priceNote', {
+                defaultValue:
+                  'A generation is settled at the fixed price configured in Admin → Credits & quotas (docmee_credits_per_ppt); an AI rewrite or template change is charged only when its own price is above zero.',
+              })}
+            </p>
+            <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-[12px]">
+              <DetailItem label={t('usage.aippt.event', { defaultValue: 'Event' })} value={aipptEventLabel(pptDetail?.aippt?.event)} />
+              <DetailItem label={t('usage.aippt.deckStatusLabel', { defaultValue: 'Status' })} value={aipptStatusLabel(pptDetail?.aippt?.status)} />
+              <DetailItem label={t('usage.table.user')} value={pptDetail ? usageUserLabel(pptDetail) : ''} />
+              <DetailItem
+                label={t('usage.table.time', { defaultValue: 'Time' })}
+                value={pptDetail ? timeFmt.format(new Date(pptDetail.created_at * 1000)) : ''}
+              />
+              <DetailItem label={t('usage.aippt.subject', { defaultValue: 'Subject' })} value={pptDetail?.aippt?.subject || '—'} />
+              <DetailItem label={t('usage.aippt.template', { defaultValue: 'Template' })} value={pptDetail?.aippt?.template_name || '—'} />
+              <DetailItem label={t('usage.aippt.pptId', { defaultValue: 'Docmee PPT id' })} value={pptDetail?.aippt?.ppt_id || '—'} mono />
+              <DetailItem label={t('usage.aippt.deckId', { defaultValue: 'Deck record id' })} value={pptDetail?.aippt?.deck_id || '—'} mono />
+            </dl>
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setPptDetail(null)}>
               {t('common.close', { defaultValue: 'Close' })}
             </Button>
           </DialogFooter>
@@ -649,4 +773,19 @@ function UsageMetric({ label, value }: { label: string; value: string }) {
       <div className="mt-0.5 truncate text-[11px] text-[var(--color-fg)]">{value}</div>
     </div>
   )
+}
+
+/** One label/value pair of the AI PPT call-detail dialog. */
+function DetailItem({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-[11px] text-[var(--color-fg-subtle)]">{label}</dt>
+      <dd className={cn('mt-0.5 break-all text-[var(--color-fg)]', mono && 'font-mono text-[11px]')}>{value}</dd>
+    </div>
+  )
+}
+
+/** Credits are fractional for token-metered rows; keep the number honest. */
+function formatCredits(value: number): string {
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 6 }).format(value)
 }

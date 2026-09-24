@@ -39,6 +39,9 @@ var backupTableOrder = []string{
 	"redeem_codes", "redeem_redemptions",
 	"model_skills", "knowledge_bases", "knowledge_base_shares", "workspace_kb_member_permissions", "projects", "conversations", "conversation_compaction_leases", "conversation_generation_leases", "messages", "message_feedback", "user_feedback",
 	"conversation_shares", "html_preview_shares", "files", "documents", "chunks", "vector_points", "memories",
+	// AI PPT decks reference users and (via file_id, without a FK) the mirrored
+	// file above, so they restore after both.
+	"aippt_decks",
 	"usage_stats", "usage_logs", "artifacts", "refresh_tokens", "oauth_identities", "passkeys",
 	"workspace_invites", "workspace_policies", "workspace_announcements", "workspace_audit_logs",
 	"pending_storage_cleanup",
