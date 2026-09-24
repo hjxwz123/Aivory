@@ -106,12 +106,26 @@
 | 文件 | 改动 |
 | --- | --- |
 | `lib/folder-upload.ts` | **新增**。纯函数 `selectFolderFiles`：跳过目录 / 噪声文件 / 白名单外扩展名 / 无扩展名 / 超数量 / 超体积，并返回**每种原因的代表路径与数量**供 UI 如实展示；纯函数 `folderUploadFields`：把选择器路径转成服务端要求的 `folder_name` + `rel_path` 两个字段，与服务端校验规则一一对应 |
+| `lib/folder-picker.ts` | **新增**。目录选择器的能力层：`pickFolderWithFileSystemApi()` 优先用 File System Access API（`showDirectoryPicker`），`walkDirectory()` 把目录句柄树递归摊平成「相对路径 + File」，`canPickDirectoryWithFileSystemApi()` 供 composer 判断是否需要回退，`isPickerCancellation()` 把用户取消与真失败区分开 |
 | `lib/folder-attachments.ts` | **新增**。纯函数 `groupAttachmentsByFolder`（按 `relPath` 首段分组）与 `chipRailItems`（把分组摊回一条保持附件顺序的渲染列表）、`pathWithinFolder`、`folderGroupSize` |
 | `components/chat/folder-chip.tsx` | **新增**。折叠后的目录节点：目录名 + 文件数 + 总体积、聚合上传进度、失败计数、展开/收起、整目录移除 |
 | `components/chat/composer-attachment-chip.tsx` | **新增**。从 composer 抽出的单文件/图片 chip（渲染逻辑逐字搬迁，未改行为） |
-| `components/chat/composer.tsx` | 新增隐藏的 `webkitdirectory` 输入框 + 桌面工具栏按钮 + 移动端「+」菜单项（带副标题）；`handleAttach(files, inflight)` 支持受控并发；`handleFolderAttach` 组合过滤与上传；`folderPathOverrides` 在重新包装 FileList 时保住 `webkitRelativePath`；目录上传**不带 `rag=1`**；chip 轨道改为渲染 `chipRail`（目录节点 + 零散文件） |
+| `components/chat/composer.tsx` | 目录选择优先走 `pickAndAttachFolder()`（File System Access API → `walkDirectory`，取不到才回退到隐藏的 `webkitdirectory` 输入框）；`handleAttach(files, inflight)` 支持受控并发；`handleFolderAttach(picked, knownFolder)` 组合过滤与上传；`folderPathOverrides` 在重新包装 FileList 时保住相对路径；目录上传**不带 `rag=1`**；chip 轨道改为渲染 `chipRail`（目录节点 + 零散文件） |
 | `api/types.ts` | `ApiConversationFile.rel_path?`，并在 `restoreConversationFile` 里还原到附件上（刷新后目录仍然折叠） |
-| `i18n/locales/{en,zh,zh-Hant,ja,fr}/chat.json` | 新增 19 个文案键（上传/过滤 10 个 + 目录节点 9 个），五语言齐全 |
+| `i18n/locales/{en,zh,zh-Hant,ja,fr}/chat.json` | 新增 19 个文案键（上传/过滤 10 个 + 目录节点 9 个），五语言齐全；修复轮另加 3 个（路径读不到 / 提示 / 选择失败），同样五语言 |
+
+### 2.5 目录选择器（修复轮）
+
+**背景**：首版只用 `<input type="file" webkitdirectory>`。这个属性不是标准，宿主 WebView 不认时会把文件当普通多选返回，`webkitRelativePath` 为空字符串；而 `handleFolderAttach` 当时把所有「路径里没有 `/`」的条目直接过滤掉，**一个都没剩下时静默 `return 0`** —— 用户看到的就是「点了没反应、没有成功提示、传不上去」。
+
+| 修复 | 说明 |
+| --- | --- |
+| 首选 File System Access API | `pickFolderWithFileSystemApi()` + `walkDirectory()` 直接遍历真实目录句柄，相对路径是构造出来的，不再依赖宿主是否实现非标准属性；`<input webkitdirectory>` 降级保留，用于不实现该 API 的宿主 |
+| 根目录文件不再丢 | 现代选择器把目录名单独给出，位于目录**根**的文件路径只有一段（`main.ts`）。`FolderCandidate.folder` 让跳过规则不再把这一段误读成目录名，`folderUploadFields(path, name, folder)` 用已知目录名补全；服务端 `folderRelativeName` 把这两者拼成 `目录名/main.ts` |
+| 不再静默 | 路径整体不可用时明确弹错（`folderPathsUnavailable` + 提示「拖拽文件夹或逐个选择」）；选择器抛非取消错误时弹 `folderPickFailed`；用户取消（`AbortError`）静默忽略 |
+| 重复点击保护 | `folderPickPending` 防止异步选择过程中重复开窗/重入 |
+| 走不完的目录会说明 | `walkDirectory` 返回 `truncated`（层级/数量上限）与 `failed`（个别文件读不到，如权限拒绝），composer 在上传前先弹「只读取到一部分」+ 具体原因；单个坏文件不再让整个目录失败 |
+| 文件抽屉按目录建树 | `fileFolderTree(files, meta)`（`src/lib/folder-attachments.ts`）纯函数把 `rel_path` 还原成嵌套目录树，并给出每个节点的文件数与总体积；抽屉默认折叠，根目录文件与 `..`/`.`/绝对路径等异常路径一律当松散文件处理，绝不凭空造目录 |
 
 ---
 
@@ -131,8 +145,9 @@
 
 | 项 | 现状 | 影响 |
 | --- | --- | --- |
-| 附件区已折叠成树；**文件抽屉仍是平铺列表** | 上传完成后 composer 里整个目录显示为**一个**节点（目录名 + 文件数 + 体积 + 聚合进度），可展开看到成员的相对路径，可单独移除成员或整目录；但右侧「会话文件」抽屉（`conversation-files-panel`）仍逐个列文件，未按 `rel_path` 建树 | 抽屉里 300 个文件仍是 300 行；`rel_path` 已在接口里，抽屉建树是纯渲染层后续工作 |
-| 空目录不上传 | 浏览器目录选择器**只返回文件**，不返回空目录 | 空目录结构会丢失，这是 Web API 的既有限制 |
+| 文件抽屉已按目录建树 | 修复轮补齐：`conversation-files-panel` 用 `fileFolderTree` 把 `rel_path` 还原成目录树——选中的目录是**一行**（目录名 + 文件数 + 体积），子目录是它下面的行，默认折叠可展开；整目录可一键移除。单文件上传没有 `rel_path`，仍是顶层一行 | 抽屉里 300 个文件不再平铺成 300 行 |
+| 空目录不上传 | 目录选择器**只返回文件**，不返回空目录 | 空目录结构会丢失，这是 Web API 的既有限制 |
+| 宿主不支持 File System Access API 时 | 回退到 `<input webkitdirectory>`；若该宿主连这个非标准属性也不认（返回的文件没有相对路径），会明确报错并提示改用拖拽，而不再静默失败 | 极少数旧 WebView 上无法用按钮选目录，拖拽目录仍然可用 |
 | 符号链接 | 选择器按文件返回，符号链接指向的目标会被当作普通文件上传 | 无安全影响；只是可能重复上传同一内容 |
 | 沙箱不可用时不能执行 | 本机无 Docker / 未配 `SANDBOX_BASE_URL` | 需要在部署侧配置沙箱服务；代码路径已按"有则用、无则降级"实现 |
 | 上传是逐文件请求 | 300 个文件 = 300 次请求 | 受控并发压到 3，但弱网下仍慢；将来可考虑批量端点 |
@@ -169,11 +184,22 @@ npx vitest run --dir tests/frontend lib/folder-upload lib/locale-parity
 
 覆盖：跳过规则优先级（`node_modules` 里的 `.js` 报"跳过目录"而不是"扩展名不符"）、扩展名白名单、无扩展名、数量上限、体积上限不切分文件、Windows 反斜杠路径、`folderUploadFields` 与服务端字段契约（单段路径不算目录、文件名不一致则不声称目录、绝对路径不当作目录）、五语言文案键对齐。
 
-### 4.3 整体回归（本次实际执行）
+修复轮补充：
+
+| 用例文件 | 覆盖 |
+| --- | --- |
+| `tests/frontend/lib/folder-picker.test.ts`（新增，9 例） | `walkDirectory` 递归摊平、路径以目录名为首段、同一 `File` 只报一次、深度上限、数量上限、空目录不抛错、**单个文件读不到时记入 `failed` 并继续走完其余目录**、**触到上限时 `truncated=true`**；无 DOM 时 `canPickDirectoryWithFileSystemApi()` 为 false（必须回退输入框）；`AbortError` 被判为用户取消 |
+| `tests/frontend/lib/folder-upload.test.ts`（+5 例） | 目录**根**文件被保留；根文件 `build` 不会被误判成「跳过目录」；嵌套的 `node_modules` 仍按目录跳过；`folderUploadFields` 用已知目录名补全根文件、拒绝绝对路径/文件名不一致 |
+| `tests/frontend/lib/folder-attachments.test.ts`（+4 例） | `fileFolderTree`：单文件留在顶层、子目录嵌套且各级都计入文件数/体积、两个目录并列、`..`/`.`/绝对路径/空路径一律当松散文件不造目录 |
+| `server/internal/api/upload_folder_test.go`（+1 例） | `TestFolderUploadAcceptsFileAtFolderRoot`：单段 `rel_path` + `folder_name` 在服务端被落成 `目录名/文件名`，不散落在 uploads 根 |
+
+### 4.3 整体回归
 
 | 范围 | 命令 | 结果 |
 | --- | --- | --- |
 | 前端全量 | `vitest run --dir tests/frontend` | **132 文件 / 764 用例全通过** |
+
+**修复轮（目录选择器 + 抽屉建树）复跑**：前端 **138 文件 / 826 用例全通过**，`tsc -b --noEmit` 通过；Go `go test ./internal/api/ -run 'TestFolderUpload|TestSingleFileUploadKeepsEmptyRelativePath'` 全过（本机需 `GOARCH=amd64` + `CGO_ENABLED=1` 才能链接 sqlite，32 位默认组合会因 mingw 链接脚本冲突构建失败）。
 | Go store | `go test ./internal/store/ -timeout 1200s` | 通过（564s） |
 | Go tools | `go test ./internal/tools/` | 通过（142s） |
 | Go api | `go test ./internal/api/ -timeout 1800s` | 1533s，**仅 2 项失败，均为 Windows 平台固有失败**（下详） |

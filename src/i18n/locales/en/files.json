@@ -8,6 +8,9 @@
   "noInlinePreview": "No inline preview for this file type.",
   "confirmTitle": "Delete this file?",
   "confirmBody": "\"{{name}}\" will be removed everywhere — the file itself, its database records, and its search index. This cannot be undone.",
+  "confirmFolderTitle": "Delete this folder?",
+  "confirmFolderBody": "All {{count}} files in \"{{name}}\" will be removed everywhere — the files themselves, their database records, and their search index. This cannot be undone.",
+  "folderSummary": "{{count}} files · {{size}}",
   "origin": {
     "all": "All sources",
     "conversation": "Conversation",

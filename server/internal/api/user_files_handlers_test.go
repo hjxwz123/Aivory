@@ -13,6 +13,52 @@ import (
 	"aivory/server/internal/store"
 )
 
+// The Files page folds an uploaded folder into one expandable row, which needs
+// each files row's folder-relative path. The shared admin inventory query does
+// not select rel_path (it unions files with documents), so the user-facing
+// handler fills it in — and must leave single-file / document rows without one.
+func TestUserFileListCarriesFolderRelativePaths(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "user-files-relpath.db"))
+	defer db.Close()
+
+	mustExec(t, db, `INSERT INTO users(id,email,name,password_hash,role) VALUES('u1','a@x.test','A','h','user')`)
+	mustExec(t, db, `INSERT INTO conversations(id,user_id,title) VALUES('c1','u1','T')`)
+	mustExec(t, db, `INSERT INTO files(id,user_id,conversation_id,filename,rel_path,mime_type,size_bytes,storage_path,kind,draft,created_at) VALUES
+		('f-nested','u1','c1','main.ts','my-project/src/main.ts','text/plain',10,'/up/main.ts','text',0,3),
+		('f-root','u1','c1','README.md','my-project/README.md','text/markdown',20,'/up/README.md','text',0,2),
+		('f-loose','u1','c1','notes.txt','','text/plain',30,'/up/notes.txt','text',0,1)`)
+
+	req := httptest.NewRequest("GET", "/api/me/files", nil)
+	req = req.WithContext(context.WithValue(req.Context(), userCtxKey{}, &store.User{ID: "u1", Role: "user", Status: "active"}))
+	rec := httptest.NewRecorder()
+	listMyFilesHandler(Deps{DB: db}, rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("list status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var listed struct {
+		Files []store.AdminFile `json:"files"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	byID := map[string]string{}
+	for _, file := range listed.Files {
+		byID[file.ID] = file.RelPath
+	}
+	if got := byID["f-nested"]; got != "my-project/src/main.ts" {
+		t.Fatalf("nested rel_path = %q; want my-project/src/main.ts", got)
+	}
+	if got := byID["f-root"]; got != "my-project/README.md" {
+		t.Fatalf("root rel_path = %q; want my-project/README.md", got)
+	}
+	// A single-file upload has no folder; the field must be absent rather than an
+	// invented path, or the page would show a phantom folder.
+	if got, present := byID["f-loose"]; present && got != "" {
+		t.Fatalf("loose rel_path = %q; want empty", got)
+	}
+}
+
 func TestUserStorageUsageExcludesImagesAndTwins(t *testing.T) {
 	ctx := context.Background()
 	db := openMigrated(t, filepath.Join(t.TempDir(), "usage.db"))

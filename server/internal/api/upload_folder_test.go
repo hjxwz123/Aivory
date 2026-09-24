@@ -122,6 +122,23 @@ func TestFolderUploadPersistsRelativePath(t *testing.T) {
 	}
 }
 
+// A file sitting at the ROOT of the picked folder arrives as a single-segment
+// rel_path (the File System Access picker reports the folder separately). The
+// server must still place it inside the folder's tree instead of flat at the
+// uploads root — the client-side counterpart of this is folderUploadFields'
+// `knownFolder` argument.
+func TestFolderUploadAcceptsFileAtFolderRoot(t *testing.T) {
+	fx := seedFolderUploadFixture(t)
+	_, created := postFolderFile(t, fx, "README.md", "README.md", []byte("# project\n"))
+
+	if created.RelPath != "my-project/README.md" {
+		t.Fatalf("rel_path = %q; want my-project/README.md", created.RelPath)
+	}
+	if created.Filename != "README.md" {
+		t.Fatalf("filename = %q; want README.md", created.Filename)
+	}
+}
+
 // A plain single-file upload must keep rel_path empty: every existing consumer
 // treats "" as "flat uploads/<filename>".
 func TestSingleFileUploadKeepsEmptyRelativePath(t *testing.T) {

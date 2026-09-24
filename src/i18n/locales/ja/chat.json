@@ -61,6 +61,12 @@
     "attachFolderHint": "フォルダー全体で AI に作業させます",
     "folderPartial": "「{{folder}}」の {{count}} 件のファイルをアップロード中",
     "folderNothingToUpload": "「{{folder}}」にアップロードできるファイルがありません",
+    "folderPathsUnavailable": "「{{folder}}」内のファイルの相対パスを読み取れませんでした",
+    "folderPathsUnavailableHint": "フォルダーを入力欄に直接ドラッグするか、ファイルを個別に選択してください。",
+    "folderPickFailed": "このフォルダーを読み取れませんでした",
+    "folderWalkIncomplete": "「{{folder}}」の一部しか読み取れませんでした",
+    "folderWalkTruncated": "階層またはファイル数の上限に達しました。",
+    "folderWalkFailed": "{{count}} 件のファイルを読み取れませんでした。",
     "folderSkipDir": "依存関係/ビルドのフォルダー",
     "folderSkipNoise": "システムファイル",
     "folderSkipExtension": "未対応のファイル形式",
@@ -546,6 +552,7 @@
     "loading": "読み込み中…",
     "empty": "ファイルはまだありません。追加するとモデルが読み取れます。",
     "added": "ファイルを追加しました",
+    "folderSummary": "{{count}} 件 · {{size}}",
     "addFailed": "ファイルを追加できませんでした",
     "imageUseComposer": "画像はメッセージ入力欄から添付してください。画像認識 API 経由で送信されます。",
     "remove": "{{name}} を削除",
@@ -875,6 +882,10 @@
         "label": "スキルを使用",
         "description": "ワークスペースのリソースライブラリに共有されたスキルを実行します。"
       },
+      "can_use_ai_ppt": {
+        "label": "AI PPT を使用",
+        "description": "グループとワークスペースの両方が許可する場合に、AI プレゼンテーションを作成・編集できます。"
+      },
       "can_use_mcp": {
         "label": "MCP サービスを使用",
         "description": "このワークスペースで利用可能な MCP サービスのツールを呼び出します。"
@@ -1024,6 +1035,10 @@
       "AllowDrawing": {
         "label": "描画",
         "description": "専用の描画モードと画像モデルを許可します。"
+      },
+      "AllowAiPPT": {
+        "label": "AI PPT",
+        "description": "このワークスペースで AI プレゼンテーションを許可します。グループとメンバーの制限も適用されます。"
       },
       "AllowPrivateChat": {
         "label": "プライベートチャット",

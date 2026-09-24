@@ -61,6 +61,12 @@
     "attachFolderHint": "讓 AI 在整個資料夾裡執行任務",
     "folderPartial": "正在上傳「{{folder}}」中的 {{count}} 個檔案",
     "folderNothingToUpload": "「{{folder}}」裡沒有可上傳的檔案",
+    "folderPathsUnavailable": "無法讀取「{{folder}}」內檔案的相對路徑",
+    "folderPathsUnavailableHint": "請改為把資料夾直接拖到輸入框，或逐個選擇檔案。",
+    "folderPickFailed": "無法讀取該資料夾",
+    "folderWalkIncomplete": "「{{folder}}」只讀取到一部分",
+    "folderWalkTruncated": "已到層級或檔案數上限。",
+    "folderWalkFailed": "{{count}} 個檔案無法讀取。",
     "folderSkipDir": "依賴/建置目錄",
     "folderSkipNoise": "系統檔案",
     "folderSkipExtension": "不支援的檔案類型",
@@ -546,6 +552,7 @@
     "loading": "載入中…",
     "empty": "尚無檔案。新增後模型即可讀取。",
     "added": "已新增檔案",
+    "folderSummary": "{{count}} 個檔案 · {{size}}",
     "addFailed": "新增檔案失敗",
     "imageUseComposer": "請從訊息輸入框附加圖片，以便透過視覺 API 傳送。",
     "remove": "移除 {{name}}",
@@ -875,6 +882,10 @@
         "label": "使用技能",
         "description": "執行工作空間資源庫中共享的技能。"
       },
+      "can_use_ai_ppt": {
+        "label": "使用 AI PPT",
+        "description": "使用者群組與工作空間都允許時，可製作和編輯 AI 簡報。"
+      },
       "can_use_mcp": {
         "label": "使用 MCP 服務",
         "description": "呼叫此工作空間中可用 MCP 服務提供的工具。"
@@ -1024,6 +1035,10 @@
       "AllowDrawing": {
         "label": "繪圖",
         "description": "允許使用獨立繪圖模式與繪圖模型。"
+      },
+      "AllowAiPPT": {
+        "label": "AI PPT",
+        "description": "允許在此工作空間製作 AI 簡報；群組與成員權限仍可限制。"
       },
       "AllowPrivateChat": {
         "label": "隱私對話",

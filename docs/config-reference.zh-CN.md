@@ -438,6 +438,10 @@ HTTP server 超时、优雅关闭、启动流程常量等。
 | 环境变量 | 类型 | 默认值 | 位置 | 说明 |
 | --- | --- | --- | --- | --- |
 | `VECTOR_BACKEND` | `string` | `"auto"` | `config/config.go` | 选择进程启动时使用的向量后端。`auto` 保持兼容行为：设置了 `QDRANT_URL` 就使用 Qdrant，否则关闭向量检索并使用全文上下文回退；`qdrant` 要求同时设置 `QDRANT_URL`；`sqlite` 要求 `DATABASE_URL` 不是 PostgreSQL，并启用 SQLite 内嵌精确余弦检索；`disabled` 始终关闭向量检索。值或组合无效时会输出明确错误并拒绝启动。 |
+| `DOCMEE_API_KEY` | `string` | `""` | `api/docmee_handlers.go` | 当管理员尚未在数据库保存 `docmee_api_key` 时，作为文多多 AI PPT API Key 的可选兜底。数据库设置优先，且该 Key 仅用于服务端。 |
+| `DOCMEE_API_BASE_URL` | `string` | `"https://docmee.cn"` | `api/docmee_handlers.go` | 服务端调用文多多 API 地址的可选兜底。数据库设置优先。 |
+| `DOCMEE_DOMAIN` | `string` | `""` | `api/docmee_handlers.go` | 用户打开文多多幻灯片编辑器时浏览器所加载的编辑器域名的可选兜底，可用于国际版端点或管理员维护的代理。数据库设置优先。 |
+| `DOCMEE_SDK_URL` | `string` | 固定的 Docmee jsDelivr SDK URL | `api/docmee_handlers.go` | 编辑器 SDK 脚本地址的可选兜底。仅当数据库设置为空且使用自托管副本或受信任内网镜像时设置。 |
 | `AIVORY_CMD_ARCHIVE_GC_BOOT_SETTLE_DELAY` | `duration` | `2*time.Minute` | `cmd/api/main.go:40` | 服务器启动后到首次归档工作区 GC 清扫之间的延迟，避免冷启动时立即清扫。 |
 | `AIVORY_CMD_RUN_PRUNE` | `duration` | `5*time.Minute` | `cmd/api/main.go:41` | 单次归档工作区 GC 清理（针对对象存储）运行的上下文超时时间。 |
 | `AIVORY_CMD_ARCHIVE_GC_SWEEP_INTERVAL` | `duration` | `6*time.Hour` | `cmd/api/main.go:42` | 归档工作区 GC 清扫之间的间隔，用于从对象存储删除过期的 /workspace 归档包。 |

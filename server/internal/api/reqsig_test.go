@@ -282,6 +282,11 @@ func TestRequestSignatureExemptionsAreGETOnlyAndExplicit(t *testing.T) {
 		{method: http.MethodGet, target: "/api/artifacts/a1", want: true},
 		{method: http.MethodGet, target: "/api/documents/d1/content", want: true},
 		{method: http.MethodGet, target: "/api/conversations/c1/sandbox/file", want: true},
+		// § AI PPT covers: an <img> cannot attach the proof, and the handler still
+		// requires a session and a vendor-host allowlist.
+		{method: http.MethodGet, target: "/api/me/ppt/resource", want: true},
+		{method: http.MethodPost, target: "/api/me/ppt/resource", want: false},
+		{method: http.MethodGet, target: "/api/me/ppt/resource/extra", want: false},
 		{method: http.MethodGet, target: "/api/audio/stream", upgrade: "websocket", want: true},
 		{method: http.MethodGet, target: "/api/audio/stream", want: false},
 		{method: http.MethodGet, target: "/api/me", want: false},

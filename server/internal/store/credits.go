@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"math"
+	"strings"
 	"time"
 )
 
@@ -405,6 +406,145 @@ func ReleaseCreditReservation(ctx context.Context, db *sql.DB, sourceType, sourc
 	_, err := db.ExecContext(ctx,
 		`UPDATE credit_reservations SET status=?, updated_at=? WHERE source_type=? AND source_id=? AND status=?`,
 		CreditReservationReleased, time.Now().Unix(), sourceType, sourceID, CreditReservationReserved)
+	return err
+}
+
+// LookupCreditReservation returns the reservation stored under (sourceType,
+// sourceID), or ErrNotFound. Handlers use it to check ownership before mutating
+// a hold whose id came from the client.
+func LookupCreditReservation(ctx context.Context, db *sql.DB, sourceType, sourceID string) (*CreditReservation, error) {
+	return creditReservationBySource(ctx, db, sourceType, sourceID, false)
+}
+
+// SettleCreditReservationByKey settles a credit reservation under a FINAL
+// billing key that is only known after the hold was taken — e.g. a document id
+// returned by an upstream generator. The reservation is re-keyed to
+// (finalSourceType, finalSourceID) inside the settlement transaction, so the
+// ledger, and every later retry that presents the same final key, sees exactly
+// one debit for that piece of work.
+//
+// alreadySettled is true when the final key had already been charged by an
+// earlier call. The caller's own hold (sourceType, sourceID) is then released,
+// so a duplicated upstream event refunds instead of double-charging. In that
+// case the returned CreditDebit carries the earlier amount in Total.
+//
+// Billing is intentionally fail-closed: an unknown, released, or foreign hold
+// returns an error rather than debiting on faith.
+func SettleCreditReservationByKey(
+	ctx context.Context, db *sql.DB, userID, sourceType, sourceID, finalSourceType, finalSourceID string, actual float64,
+) (CreditDebit, bool, error) {
+	if strings.TrimSpace(finalSourceID) == "" {
+		return CreditDebit{}, false, ErrCreditReservationSourceID
+	}
+	actualMicros, err := CreditsToMicros(actual)
+	if err != nil || actualMicros <= 0 {
+		return CreditDebit{}, false, ErrInvalidCreditAmount
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return CreditDebit{}, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := time.Now().Unix()
+
+	// 1. Has the final key already been charged? A settled row under the final
+	// key is the durable marker that this unit of work was billed.
+	final, err := creditReservationBySource(ctx, tx, finalSourceType, finalSourceID, true)
+	switch {
+	case err == nil:
+		if final.UserID != userID {
+			return CreditDebit{}, false, ErrCreditReservationConflict
+		}
+		if final.Status == CreditReservationReserved {
+			// A live hold exists for the final key but belongs to another attempt
+			// of the same user (e.g. the page was reloaded mid-generation and a
+			// fresh attempt is asking to bill the same document). Bill the final
+			// key once by settling it and releasing this attempt's duplicate hold.
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE credit_reservations SET status='settling', actual_micros=?, updated_at=? WHERE id=? AND status=?`,
+				actualMicros, now, final.ID, CreditReservationReserved); err != nil {
+				return CreditDebit{}, false, err
+			}
+			debit, err := debitCreditsTx(ctx, tx, final.UserID, actualMicros, finalSourceType, finalSourceID, now)
+			if err != nil {
+				return CreditDebit{}, false, err
+			}
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE credit_reservations SET status=?, actual_micros=?, updated_at=? WHERE id=?`,
+				CreditReservationSettled, actualMicros, now, final.ID); err != nil {
+				return CreditDebit{}, false, err
+			}
+			if err := releaseReservationTx(ctx, tx, userID, sourceType, sourceID, now); err != nil {
+				return CreditDebit{}, false, err
+			}
+			if err := tx.Commit(); err != nil {
+				return CreditDebit{}, false, err
+			}
+			return debit, true, nil
+		}
+		if err := releaseReservationTx(ctx, tx, userID, sourceType, sourceID, now); err != nil {
+			return CreditDebit{}, false, err
+		}
+		if err := tx.Commit(); err != nil {
+			return CreditDebit{}, false, err
+		}
+		return CreditDebit{Total: final.Actual}, true, nil
+	case errors.Is(err, ErrNotFound):
+		// Expected: the final key is new.
+	default:
+		return CreditDebit{}, false, err
+	}
+
+	// 2. Load and validate the caller's hold.
+	hold, err := creditReservationBySource(ctx, tx, sourceType, sourceID, true)
+	if err != nil {
+		return CreditDebit{}, false, err
+	}
+	if hold.UserID != userID {
+		return CreditDebit{}, false, ErrCreditReservationConflict
+	}
+	if hold.Status == CreditReservationSettled {
+		// Replayed settle for the same attempt: idempotent, nothing to debit.
+		if err := tx.Commit(); err != nil {
+			return CreditDebit{}, false, err
+		}
+		return CreditDebit{Total: hold.Actual}, true, nil
+	}
+	if hold.Status != CreditReservationReserved {
+		return CreditDebit{}, false, ErrCreditReservationReleased
+	}
+
+	// 3. Re-key onto the final billing key, then debit exactly once.
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE credit_reservations SET source_type=?, source_id=?, status='settling', actual_micros=?, updated_at=? WHERE id=?`,
+		finalSourceType, finalSourceID, actualMicros, now, hold.ID); err != nil {
+		// A concurrent insert for the same final key wins the unique index; the
+		// loser must not debit. Callers surface this as "already charged" after a
+		// retry, never as a silent second charge.
+		return CreditDebit{}, false, ErrCreditReservationConflict
+	}
+	debit, err := debitCreditsTx(ctx, tx, userID, actualMicros, finalSourceType, finalSourceID, now)
+	if err != nil {
+		return CreditDebit{}, false, err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE credit_reservations SET status=?, actual_micros=?, updated_at=? WHERE id=?`,
+		CreditReservationSettled, actualMicros, now, hold.ID); err != nil {
+		return CreditDebit{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return CreditDebit{}, false, err
+	}
+	return debit, false, nil
+}
+
+// releaseReservationTx marks a still-reserved hold as released inside an open
+// transaction. A missing or already-terminal hold is not an error: releasing is
+// best-effort cleanup on a path that has already billed (or never held).
+func releaseReservationTx(ctx context.Context, tx *sql.Tx, userID, sourceType, sourceID string, now int64) error {
+	_, err := tx.ExecContext(ctx,
+		`UPDATE credit_reservations SET status=?, updated_at=? WHERE source_type=? AND source_id=? AND user_id=? AND status=?`,
+		CreditReservationReleased, now, sourceType, sourceID, userID, CreditReservationReserved)
 	return err
 }
 

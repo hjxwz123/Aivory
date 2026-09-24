@@ -8,6 +8,9 @@
   "noInlinePreview": "该文件类型不支持在线预览。",
   "confirmTitle": "删除该文件?",
   "confirmBody": "「{{name}}」将被彻底删除——文件本体、数据库记录与检索索引都会移除,不可恢复。",
+  "confirmFolderTitle": "删除该文件夹?",
+  "confirmFolderBody": "「{{name}}」中的 {{count}} 个文件将被彻底删除——文件本体、数据库记录与检索索引都会移除,不可恢复。",
+  "folderSummary": "{{count}} 个文件 · {{size}}",
   "origin": {
     "all": "全部来源",
     "conversation": "对话",

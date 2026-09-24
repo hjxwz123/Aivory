@@ -1,0 +1,229 @@
+{
+  "title": "AI PPT",
+  "price": "1 回の生成につき {{price}} クレジット",
+  "priceInactive": "1 回の生成につき {{price}} クレジット · 現在は無料",
+  "balance": "残り {{available}}",
+  "view": {
+    "create": "作成",
+    "decks": "マイ PPT"
+  },
+  "steps": {
+    "input": "入力",
+    "outline": "構成",
+    "template": "テンプレート",
+    "result": "完成"
+  },
+  "input": {
+    "title": "どんなテーマの PPT を作りますか？",
+    "lead": "テーマや手元の資料から始めましょう。構成を整えてから、スライドのデザインを選べます。",
+    "optionsTitle": "詳細設定",
+    "optionsLead": "必要に応じて、用途・対象者・文章の要望を指定できます。",
+    "anyOption": "モデルに任せる",
+    "types": {
+      "topic": "テーマ",
+      "text": "テキスト貼り付け",
+      "url": "Web ページ",
+      "upload": "ファイルをアップロード",
+      "markdown": "Markdown 構成"
+    },
+    "placeholders": {
+      "topic": "例：2026 年の AI オフィス動向",
+      "text": "スライドにしたい元の内容を貼り付けてください…",
+      "url": "https://example.com/article",
+      "markdown": "# テーマ\n## 章\n### ページ\n#### 段落\n- 内容"
+    },
+    "uploadHint": "ここにファイルをドロップ、または選択（最大 {{mb}} MB）",
+    "uploadTypes": "Word、PDF、テキスト、Markdown、既存のプレゼンテーションに対応。",
+    "uploadPick": "ファイルを選択",
+    "uploadMissing": "先にファイルを選択してください",
+    "contentMissing": "先に内容を入力してください",
+    "length": "長さ",
+    "lengths": {
+      "short": "短め",
+      "medium": "標準",
+      "long": "詳細"
+    },
+    "scene": "利用シーン",
+    "audience": "対象",
+    "lang": "出力言語",
+    "prompt": "追加の指示",
+    "promptHint": "{{count}}/50 文字",
+    "promptPlaceholder": "例：実務的なトーンで",
+    "submit": "構成を生成",
+    "priceHint": "まず構成を確認できます。PPT 生成時に {{price}} クレジットを使用します。",
+    "freeHint": "構成を確認してからテンプレートを選べます。今回は無料で生成できます。",
+    "freeHintPriced": "この環境では PPT の生成は無料です（管理者が設定した標準価格は 1 回 {{price}} クレジットです）。",
+    "examples": {
+      "label": "こんなテーマはいかがですか",
+      "one": "2026 年の AI オフィス動向",
+      "two": "四半期ビジネスレビュー",
+      "three": "新製品リリース計画"
+    },
+    "defaultTemplate": {
+      "label": "既定のテンプレート",
+      "hint": "テンプレート未選択時に使われます。後から変更できます。"
+    },
+    "source": "コンテンツの種類",
+    "uploadTooLarge": "ファイルサイズは {{mb}} MB 以下にしてください"
+  },
+  "outline": {
+    "title": "構成",
+    "counts": "{{chapters}} 章 · {{pages}} ページ",
+    "streaming": "生成中…",
+    "empty": "まだありません",
+    "placeholder": "ここに構成がストリーミング表示されます。生成後に編集できます。",
+    "structure": "構造プレビュー",
+    "structureHint": "段落見出しは現在 {{paragraphs}} 件です。",
+    "regenerate": "再生成",
+    "next": "テンプレートを選ぶ",
+    "rewrite": "AI で書き直す",
+    "rewriteTitle": "構成を AI で書き直す",
+    "rewriteLead": "変更内容を書くと、モデルが構成全体を書き直します。",
+    "rewriteBilled": "この書き直しは {{price}} クレジットを消費します。",
+    "rewritePlaceholder": "例：ピラミッド原則の構成にして",
+    "warnings": {
+      "missing-title": "レベル 1 の見出し（#）を 1 つ入れてください",
+      "multiple-titles": "レベル 1 の見出し（#）は 1 つだけにしてください",
+      "missing-chapters": "章（##）を 1 つ以上入れてください",
+      "missing-pages": "ページ（###）を 1 つ以上入れてください"
+    },
+    "waiting": "モデルが考えています。構成は書かれた順にここへ表示されます。",
+    "progress": "{{count}} 文字を生成しました"
+  },
+  "template": {
+    "title": "テンプレートを選択",
+    "lead": "全スライドの見た目を決めます。",
+    "selected": "選択中：{{name}}",
+    "back": "構成に戻る",
+    "generate": "PPT を生成",
+    "generateBilled": "PPT を生成 · {{price}} クレジット",
+    "system": "システム",
+    "mine": "マイテンプレート",
+    "all": "すべて",
+    "empty": "利用できるテンプレートがありません",
+    "loadMore": "さらに読み込む",
+    "upload": "テンプレートを追加",
+    "uploading": "アップロード中 {{percent}}%",
+    "uploaded": "テンプレートを追加しました",
+    "uploadHint": ".pptx のみ・960×540 推奨",
+    "uploadFailed": "テンプレートのアップロードに失敗しました",
+    "uploadTooLarge": "テンプレートのサイズが大きすぎます",
+    "uploadPptxOnly": "カスタムテンプレートは .pptx のみ対応です",
+    "rename": "名前を変更",
+    "renameTitle": "テンプレート名を変更",
+    "renameLead": "表示名だけを変更します。テンプレートの内容は変わりません。",
+    "renameLabel": "テンプレート名",
+    "renamed": "テンプレート名を変更しました",
+    "renameFailed": "名前を変更できませんでした",
+    "delete": "削除",
+    "deleteTitle": "このテンプレートを削除しますか？",
+    "deleteBody": "「マイテンプレート」から削除されます。作成済みの PPT には影響しません。",
+    "deleted": "テンプレートを削除しました",
+    "deleteFailed": "削除できませんでした",
+    "category": "テンプレートのカテゴリ"
+  },
+  "result": {
+    "untitled": "無題の PPT",
+    "rename": "名前を変更",
+    "renamed": "名前を更新しました",
+    "defaultTemplate": "既定のテンプレート",
+    "download": ".pptx をダウンロード",
+    "preview": "プレビュー",
+    "previewTitle": "プレビュー",
+    "previewLead": "ファイルに保存された完成版です。",
+    "previewFailed": "この PPT をプレビューできませんでした",
+    "mirrorPending": "ファイルはまだ保存されていません。保存を再試行してください。",
+    "retrySave": "マイファイルに保存",
+    "changeTemplate": "テンプレートを変更",
+    "changeTemplateLead": "別のテンプレートで再レンダリングします。",
+    "changeTemplateBilled": "再レンダリングは {{price}} クレジットを消費します。",
+    "applyTemplate": "適用",
+    "templateChanged": "テンプレートを更新しました",
+    "templateChangedBilled": "テンプレートを更新 · {{price}} クレジット消費",
+    "newDeck": "新規作成",
+    "previewScrollHint": "スクロールするとすべてのスライドを確認できます。",
+    "edit": "スライドを編集",
+    "template": "テンプレート",
+    "credits": "クレジット",
+    "priceNote": "管理者が設定した価格：1 回の生成につき {{price}} クレジット。",
+    "saved": "マイファイルに保存済み",
+    "saving": "マイファイルに保存中…",
+    "expandPreview": "プレビューを拡大"
+  },
+  "decks": {
+    "empty": "まだ PPT がありません",
+    "emptyHint": "生成した PPT はここに表示され、.pptx はマイファイルに保存されます。",
+    "loadFailed": "PPT 一覧を読み込めませんでした",
+    "open": "開く",
+    "continue": "続きから",
+    "delete": "PPT を削除",
+    "deleteTitle": "この PPT を削除しますか？",
+    "deleteBody": "記録とマイファイルの .pptx の両方が削除されます。元に戻せません。",
+    "deleted": "削除しました",
+    "untitled": "無題の PPT",
+    "credits": "{{credits}} クレジット",
+    "status": {
+      "draft": "下書き",
+      "outline_ready": "構成作成済み",
+      "generating": "レンダリング中",
+      "ready": "完成",
+      "failed": "失敗"
+    },
+    "lead": "完成したプレゼンテーションを開くか、構成の編集を再開できます。"
+  },
+  "charged": {
+    "title": "{{price}} クレジットを消費しました",
+    "description": "残り {{available}} クレジット"
+  },
+  "insufficient": {
+    "title": "クレジットが不足しています",
+    "description": "この操作には {{price}} クレジット必要ですが、利用可能なのは {{available}} クレジットです。続けるにはチャージしてください。",
+    "action": "プランを見る"
+  },
+  "unconfigured": {
+    "title": "AI PPT が未設定です",
+    "description": "管理者が「管理画面 → クレジットと割り当て」で文多多の API キーを設定すると利用できます。"
+  },
+  "permissionDenied": {
+    "title": "このスペースでは AI PPT を利用できません",
+    "description": "管理者にグループ、ワークスペース、メンバーの権限を確認してください。"
+  },
+  "disabled": {
+    "title": "AI PPT は無効です",
+    "description": "管理者がこの環境で AI PPT を無効にしています。"
+  },
+  "loadFailed": {
+    "title": "AI PPT を読み込めませんでした",
+    "description": "AI PPT の設定を取得できませんでした。"
+  },
+  "errors": {
+    "generic": "操作に失敗しました",
+    "charge": "クレジットを消費できませんでした",
+    "upstream": "プレゼンテーションサービスがエラーを返しました"
+  },
+  "editor": {
+    "title": "プレゼンテーションを編集",
+    "lead": "編集は Docmee のエディターで行い、閉じるとファイルが自動で保存されます。",
+    "loading": "エディターを開いています…",
+    "failed": "エディターを開けませんでした。",
+    "retry": "再試行",
+    "syncNow": "今すぐ同期",
+    "synced": "編集したファイルを保存しました",
+    "syncFailed": "編集したファイルを保存できませんでした",
+    "done": "完了"
+  },
+  "render": {
+    "title": "「{{subject}}」を生成しています",
+    "lead": "スライドをレイアウトして準備しています。完了するとプレビューが表示されます。",
+    "stages": {
+      "content": "内容",
+      "layout": "レイアウト",
+      "render": "描画",
+      "save": "保存"
+    },
+    "waiting": "このページを開いたままお待ちください"
+  },
+  "workflow": {
+    "steps": "作成手順"
+  }
+}

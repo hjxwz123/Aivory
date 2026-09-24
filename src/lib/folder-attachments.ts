@@ -68,11 +68,104 @@ export function groupAttachmentsByFolder<T extends FolderGroupableAttachment>(
   return { folders: [...groups.values()], loose }
 }
 
-/** The folder name a relative path belongs to, or "" when it is not in one. */export function folderRootOf(relPath: string | undefined): string {
+/** The folder name a relative path belongs to, or "" when it is not in one. */
+export function folderRootOf(relPath: string | undefined): string {
   if (!relPath) return ''
   const first = relPath.replace(/\\/g, '/').split('/')[0] ?? ''
   if (!first || first === '.' || first === '..') return ''
   return first
+}
+
+/** One directory node of a drawer tree, with everything under it. */
+export interface FolderTreeNode<T> {
+  /** Directory name (its last path segment). */
+  name: string
+  /** Path from the uploaded folder's root down to this directory. */
+  path: string
+  /** Files directly inside this directory, in listing order. */
+  files: T[]
+  /** Subdirectories, in first-seen order. */
+  children: Array<FolderTreeNode<T>>
+  /** Files anywhere under this node (its own + every descendant's). */
+  fileCount: number
+  /** Combined bytes of those files. */
+  size: number
+}
+
+export interface FolderTreeNodeMeta {
+  /**
+   * The file's folder-relative path. NOT a display fallback: a name or URL is
+   * not a path, and feeding one in would invent directories that do not exist.
+   */
+  relPath?: string
+  size?: number
+}
+
+/**
+ * Build a directory tree for the files drawer.
+ *
+ * The drawer used to list every uploaded file flat, so a 300-file project was
+ * 300 interchangeable rows. Grouping by `relPath` puts each picked folder back
+ * together, with the subdirectories the user saw in their own file manager.
+ *
+ * `relPath` is untrusted display input: only the FIRST segment identifies a
+ * folder, and a path with none (a single-file upload) stays at the top level
+ * rather than being invented into a folder named "." or "..".
+ */
+export function fileFolderTree<T>(
+  files: readonly T[],
+  meta: (file: T) => FolderTreeNodeMeta,
+): { rootFiles: T[]; folders: Array<FolderTreeNode<T>> } {
+  const rootFiles: T[] = []
+  const folders = new Map<string, FolderTreeNode<T>>()
+
+  const ensureNode = (segments: string[]): FolderTreeNode<T> | null => {
+    if (!segments.length) return null
+    const path = segments.join('/')
+    let node = folders.get(path)
+    if (!node) {
+      node = { name: segments[segments.length - 1], path, files: [], children: [], fileCount: 0, size: 0 }
+      folders.set(path, node)
+      // Registering the node in `folders` is what preserves first-seen order,
+      // but only the root of each picked folder goes in the top-level list.
+      if (segments.length > 1) {
+        const parent = ensureNode(segments.slice(0, -1))
+        if (parent && !parent.children.includes(node)) parent.children.push(node)
+      }
+    }
+    return node
+  }
+
+  for (const file of files) {
+    const info = meta(file)
+    const path = (info.relPath ?? '').replace(/\\/g, '/')
+    const segments = path.split('/').filter((segment) => segment.length > 0)
+    // A path needs a folder AND a file inside it, and the folder must be a real
+    // name: an absolute "/x.ts", "./x.ts" or "../x.ts" would otherwise invent a
+    // directory called "", "." or "..". A single segment means the file was not
+    // uploaded inside a folder, so it stays at the top level.
+    const folder = segments[0] ?? ''
+    if (path.startsWith('/') || segments.length < 2 || !folder || folder === '.' || folder === '..') {
+      rootFiles.push(file)
+      continue
+    }
+    const size = Number.isFinite(info.size) ? (info.size as number) : 0
+    // Walk every level so intermediate directories exist even when only a deep
+    // file was uploaded, and every ancestor counts the file.
+    for (let depth = 1; depth < segments.length; depth += 1) {
+      const node = ensureNode(segments.slice(0, depth))
+      if (!node) continue
+      node.fileCount += 1
+      node.size += size
+    }
+    const leaf = ensureNode(segments.slice(0, -1))
+    if (leaf) leaf.files.push(file)
+  }
+
+  return {
+    rootFiles,
+    folders: [...folders.values()].filter((node) => !node.path.includes('/')),
+  }
 }
 
 /** The member's path shown inside an expanded folder, relative to the folder. */

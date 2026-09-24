@@ -35,6 +35,7 @@ type WorkspacePolicy struct {
 	// AllowPrivateChat controls temporary, unsaved chat, independently of
 	// member conversation visibility (CanPrivateConversations).
 	AllowPrivateChat bool
+	AllowAiPPT       bool
 	// Deprecated compatibility switches. They remain readable for old clients
 	// and old policy rows, but are intentionally not consulted by the current
 	// runtime. New callers must use AllowToolCalling and AllowDrawing.
@@ -61,6 +62,7 @@ func DefaultWorkspacePolicy(workspaceID string) WorkspacePolicy {
 		AllowSkills:              true,
 		AllowPrompts:             true,
 		AllowPrivateChat:         true,
+		AllowAiPPT:               true,
 		AllowSandbox:             true,
 		AllowImageGeneration:     true,
 		AllowKnowledgeBases:      true,
@@ -81,6 +83,7 @@ type WorkspacePolicyPatch struct {
 	AllowSkills              *bool
 	AllowPrompts             *bool
 	AllowPrivateChat         *bool
+	AllowAiPPT               *bool
 	AllowSandbox             *bool
 	AllowImageGeneration     *bool
 	AllowKnowledgeBases      *bool
@@ -125,11 +128,11 @@ func scanWorkspacePolicy(s scanner) (WorkspacePolicy, error) {
 	var p WorkspacePolicy
 	var models, tools, mcp string
 	var toolCalling, drawing, allowMCP, allowSkills, allowPrompts int
-	var sandbox, image, kbs, upload, privateChat int
+	var sandbox, image, kbs, upload, privateChat, aiPPT int
 	if err := s.Scan(
 		&p.WorkspaceID, &models, &tools, &mcp,
 		&toolCalling, &drawing, &allowMCP, &allowSkills, &allowPrompts,
-		&sandbox, &image, &kbs, &upload, &privateChat,
+		&sandbox, &image, &kbs, &upload, &privateChat, &aiPPT,
 		&p.MemberMonthlyCreditLimit, &p.UpdatedBy, &p.UpdatedAt,
 	); err != nil {
 		return p, err
@@ -154,6 +157,7 @@ func scanWorkspacePolicy(s scanner) (WorkspacePolicy, error) {
 	p.AllowKnowledgeBases = kbs == 1
 	p.AllowFileUpload = upload == 1
 	p.AllowPrivateChat = privateChat == 1
+	p.AllowAiPPT = aiPPT == 1
 	return p, nil
 }
 
@@ -167,7 +171,7 @@ func GetWorkspacePolicy(ctx context.Context, db *sql.DB, workspaceID string) (Wo
 	p, err := scanWorkspacePolicy(db.QueryRowContext(ctx,
 		`SELECT workspace_id, allowed_model_ids, allowed_tool_ids, allowed_mcp_server_ids,
 		        allow_tool_calling, allow_drawing, allow_mcp, allow_skills, allow_prompts,
-		        allow_sandbox, allow_image_generation, allow_knowledge_bases, allow_file_upload, allow_private_chat,
+		        allow_sandbox, allow_image_generation, allow_knowledge_bases, allow_file_upload, allow_private_chat, allow_ai_ppt,
 		        member_monthly_credit_limit, updated_by, updated_at
 		   FROM workspace_policies WHERE workspace_id=?`, workspaceID))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -210,7 +214,7 @@ func UpdateWorkspacePolicy(ctx context.Context, db *sql.DB, workspaceID, actorID
 	current, err := scanWorkspacePolicy(tx.QueryRowContext(ctx,
 		`SELECT workspace_id, allowed_model_ids, allowed_tool_ids, allowed_mcp_server_ids,
 		        allow_tool_calling, allow_drawing, allow_mcp, allow_skills, allow_prompts,
-		        allow_sandbox, allow_image_generation, allow_knowledge_bases, allow_file_upload, allow_private_chat,
+		        allow_sandbox, allow_image_generation, allow_knowledge_bases, allow_file_upload, allow_private_chat, allow_ai_ppt,
 		        member_monthly_credit_limit, updated_by, updated_at
 		   FROM workspace_policies WHERE workspace_id=?`, workspaceID))
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -255,6 +259,9 @@ func UpdateWorkspacePolicy(ctx context.Context, db *sql.DB, workspaceID, actorID
 	}
 	if patch.AllowPrivateChat != nil {
 		current.AllowPrivateChat = *patch.AllowPrivateChat
+	}
+	if patch.AllowAiPPT != nil {
+		current.AllowAiPPT = *patch.AllowAiPPT
 	}
 	if patch.AllowSandbox != nil {
 		current.AllowSandbox = *patch.AllowSandbox
@@ -304,6 +311,9 @@ func UpdateWorkspacePolicy(ctx context.Context, db *sql.DB, workspaceID, actorID
 	if patch.AllowPrivateChat != nil {
 		changed = append(changed, "allow_private_chat")
 	}
+	if patch.AllowAiPPT != nil {
+		changed = append(changed, "allow_ai_ppt")
+	}
 	if patch.AllowSandbox != nil {
 		changed = append(changed, "allow_sandbox")
 	}
@@ -334,9 +344,9 @@ func UpdateWorkspacePolicy(ctx context.Context, db *sql.DB, workspaceID, actorID
 		`INSERT INTO workspace_policies(
 		   workspace_id, allowed_model_ids, allowed_tool_ids, allowed_mcp_server_ids,
 		   allow_tool_calling, allow_drawing, allow_mcp, allow_skills, allow_prompts,
-		   allow_sandbox, allow_image_generation, allow_knowledge_bases, allow_file_upload, allow_private_chat,
+		   allow_sandbox, allow_image_generation, allow_knowledge_bases, allow_file_upload, allow_private_chat, allow_ai_ppt,
 		   member_monthly_credit_limit, updated_by, updated_at
-		 ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(workspace_id) DO UPDATE SET
 		   allowed_model_ids=excluded.allowed_model_ids,
 		   allowed_tool_ids=excluded.allowed_tool_ids,
@@ -351,6 +361,7 @@ func UpdateWorkspacePolicy(ctx context.Context, db *sql.DB, workspaceID, actorID
 		   allow_knowledge_bases=excluded.allow_knowledge_bases,
 		   allow_file_upload=excluded.allow_file_upload,
 		   allow_private_chat=excluded.allow_private_chat,
+		   allow_ai_ppt=excluded.allow_ai_ppt,
 		   member_monthly_credit_limit=excluded.member_monthly_credit_limit,
 		   updated_by=excluded.updated_by,
 		   updated_at=excluded.updated_at`,
@@ -360,7 +371,7 @@ func UpdateWorkspacePolicy(ctx context.Context, db *sql.DB, workspaceID, actorID
 		boolInt(current.AllowSkills), boolInt(current.AllowPrompts),
 		boolInt(current.AllowSandbox), boolInt(current.AllowImageGeneration),
 		boolInt(current.AllowKnowledgeBases), boolInt(current.AllowFileUpload),
-		boolInt(current.AllowPrivateChat),
+		boolInt(current.AllowPrivateChat), boolInt(current.AllowAiPPT),
 		current.MemberMonthlyCreditLimit, current.UpdatedBy, current.UpdatedAt); err != nil {
 		return nil, err
 	}

@@ -8,6 +8,9 @@
   "noInlinePreview": "該檔案類型不支援線上預覽。",
   "confirmTitle": "刪除該檔案?",
   "confirmBody": "「{{name}}」將被徹底刪除——檔案本體、資料庫記錄與檢索索引都會移除,無法復原。",
+  "confirmFolderTitle": "刪除該資料夾?",
+  "confirmFolderBody": "「{{name}}」中的 {{count}} 個檔案將被徹底刪除——檔案本體、資料庫記錄與檢索索引都會移除,無法復原。",
+  "folderSummary": "{{count}} 個檔案 · {{size}}",
   "origin": {
     "all": "全部來源",
     "conversation": "對話",

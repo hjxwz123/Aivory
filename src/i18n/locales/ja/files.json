@@ -8,6 +8,9 @@
   "noInlinePreview": "このファイル形式はインラインプレビューに対応していません。",
   "confirmTitle": "このファイルを削除しますか?",
   "confirmBody": "「{{name}}」は完全に削除されます——ファイル本体、データベース記録、検索インデックスがすべて除去されます。元に戻せません。",
+  "confirmFolderTitle": "このフォルダーを削除しますか?",
+  "confirmFolderBody": "「{{name}}」内の {{count}} 件のファイルが完全に削除されます——ファイル本体、データベース記録、検索インデックスがすべて除去されます。元に戻せません。",
+  "folderSummary": "{{count}} 件 · {{size}}",
   "origin": {
     "all": "すべてのソース",
     "conversation": "会話",
