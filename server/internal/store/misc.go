@@ -892,7 +892,7 @@ func looksLocalStoragePath(p string) bool {
 func GetFile(ctx context.Context, db *sql.DB, id, userID string) (*File, error) {
 	var f File
 	var conv sql.NullString
-	q := `SELECT f.id, f.user_id, f.conversation_id, f.filename, f.rel_path, f.mime_type, f.size_bytes, f.storage_path, f.kind, f.draft, f.created_at FROM files f WHERE f.id=?`
+	q := `SELECT f.id, f.user_id, f.conversation_id, f.filename, f.rel_path, f.mime_type, f.size_bytes, f.storage_path, f.kind, f.draft, f.created_at, f.vision_evidence, f.vision_evidence_key FROM files f WHERE f.id=?`
 	args := []any{id}
 	if userID != "" {
 		// Standalone uploads remain personal. Conversation uploads inherit the
@@ -910,7 +910,8 @@ func GetFile(ctx context.Context, db *sql.DB, id, userID string) (*File, error) 
 	}
 	var draft int
 	err := db.QueryRowContext(ctx, q, args...).
-		Scan(&f.ID, &f.UserID, &conv, &f.Filename, &f.RelPath, &f.MimeType, &f.SizeBytes, &f.StoragePath, &f.Kind, &draft, &f.CreatedAt)
+		Scan(&f.ID, &f.UserID, &conv, &f.Filename, &f.RelPath, &f.MimeType, &f.SizeBytes, &f.StoragePath, &f.Kind, &draft, &f.CreatedAt,
+			&f.VisionEvidence, &f.VisionEvidenceKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -920,6 +921,22 @@ func GetFile(ctx context.Context, db *sql.DB, id, userID string) (*File, error) 
 	f.ConversationID = conv.String
 	f.Draft = draft != 0
 	return &f, nil
+}
+
+// SetFileVisionEvidence stores the structured text evidence a vision model
+// produced for an image attachment, together with the model+prompt stamp that
+// produced it. Evidence is advisory context: a failure to persist it must not
+// fail the turn that generated it, and an image that already has evidence is
+// never overwritten with an empty value.
+func SetFileVisionEvidence(ctx context.Context, db *sql.DB, fileID, key, evidence string) error {
+	fileID = strings.TrimSpace(fileID)
+	if fileID == "" || strings.TrimSpace(evidence) == "" {
+		return nil
+	}
+	_, err := db.ExecContext(ctx,
+		`UPDATE files SET vision_evidence=?, vision_evidence_key=? WHERE id=?`,
+		evidence, strings.TrimSpace(key), fileID)
+	return err
 }
 
 // ListMemories returns the user's memories filtered by status (or all).

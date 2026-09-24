@@ -1436,18 +1436,34 @@ func (o *Orchestrator) CompactConversation(ctx context.Context, userID, conversa
 // place is important for asynchronous rebasing: stable non-history overhead
 // must be subtracted from the same history representation that was originally
 // estimated, rather than from raw database messages.
+// imageInputPolicy describes how the request copy must treat image content for
+// the model answering this turn.
+type imageInputPolicy struct {
+	// Native is true when the model itself accepts image input.
+	Native bool
+	// Outsource is true when a configured vision model will read the images and
+	// the result is injected as text (§4.6 image outsourcing). It only matters
+	// when Native is false: the attachment references must then survive history
+	// assembly so resolveAttachments can turn them into evidence.
+	Outsource bool
+}
+
 func compactionHistoryForRequest(
 	history []store.Message,
 	currentProvider, currentModelID string,
 	nativeToolReplay bool,
 	allowedTools map[string]bool,
-	_ bool, vision bool,
+	_ bool, images imageInputPolicy,
 ) []UnifiedMessage {
 	unified := storeToUnified(history, currentProvider, currentModelID, nativeToolReplay)
 	unified = stripRetiredKnowledgeSearchToolBlocks(unified)
 	unified = stripDisallowedBuiltinToolBlocks(unified, allowedTools)
-	if !vision {
-		unified = stripImageBlocks(unified)
+	if !images.Native {
+		if images.Outsource {
+			unified = stripImageBlocksKeepingAttachments(unified)
+		} else {
+			unified = stripImageBlocks(unified)
+		}
 	}
 	return unified
 }
@@ -3463,8 +3479,16 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	}
 	keep := history[frontier:]
 	allowedHistoryTools := unifiedToolNameSet(toolDefs, hostedToolNames, hostedToolRequests)
+	// §4.6 image outsourcing: resolved once here and reused by resolveAttachments,
+	// so history assembly and the injection that depends on it can never disagree
+	// about which model reads the images.
+	visionModelID := ""
+	if !model.Vision {
+		visionModelID = o.resolveVisionModelID(ctx)
+	}
+	imageInput := imageInputPolicy{Native: model.Vision, Outsource: visionModelID != ""}
 	baseHistory := compactionHistoryForRequest(
-		keep, channel.Type, model.ID, nativeToolReplay, allowedHistoryTools, fastMode, model.Vision,
+		keep, channel.Type, model.ID, nativeToolReplay, allowedHistoryTools, fastMode, imageInput,
 	)
 	uHist := cloneUnifiedMessages(baseHistory)
 	// Private skills are user-authored instructions and therefore belong in the
@@ -3488,7 +3512,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	//     §4.6 vision gating: strip legacy image blocks/attachments before any
 	//     provider resolution. This changes only the request copy; stored history
 	//     remains available if the user later switches back to a vision model.
-	o.resolveAttachments(ctx, req.UserID, conv.ID, uHist, model, onEvent)
+	o.resolveAttachments(ctx, req.UserID, conv.ID, uHist, model, visionModelID, onEvent)
 	if hostedImageEnabled {
 		o.resolveImageArtifactBlocks(ctx, req.UserID, uHist)
 	}
@@ -3615,7 +3639,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			return cached
 		}
 		projected := compactionHistoryForRequest(
-			history[start:], channel.Type, model.ID, nativeToolReplay, allowedHistoryTools, fastMode, model.Vision,
+			history[start:], channel.Type, model.ID, nativeToolReplay, allowedHistoryTools, fastMode, imageInput,
 		)
 		if toolHistoryCompacted {
 			projected, _ = compactHistoricalToolResults(projected)
@@ -3774,7 +3798,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		uHist = injectSummaryIntoHistory(uHist, ApplySummaryBlocks(summaryBlocks))
 		uHist = injectRAGIntoHistory(uHist, ragContext)
 		o.injectCompactionMedia(ctx, req.UserID, conv.ID, uHist, summaryBlocks, model.Vision)
-		o.resolveAttachments(ctx, req.UserID, conv.ID, uHist, model, nil)
+		o.resolveAttachments(ctx, req.UserID, conv.ID, uHist, model, visionModelID, nil)
 		if hostedImageEnabled {
 			o.resolveImageArtifactBlocks(ctx, req.UserID, uHist)
 		}

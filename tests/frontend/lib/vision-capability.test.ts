@@ -36,6 +36,29 @@ describe('image attachment capability', () => {
   it('stays conservative while the selected model is unresolved', () => {
     expect(resolveImageAttachmentCapability(undefined, { fast: false, fastVision: false })).toBe('unknown')
   })
+
+  it('allows images for a text-only model when a vision model is configured', () => {
+    const textOnly = { kind: 'chat', vision: false }
+    expect(resolveImageAttachmentCapability(textOnly, { fast: false, fastVision: false, visionOutsource: true })).toBe(
+      'allowed',
+    )
+    // The configured vision model covers the hidden fast model too, so the
+    // anonymous fast capability no longer decides.
+    expect(resolveImageAttachmentCapability(textOnly, { fast: true, fastVision: false, visionOutsource: true })).toBe(
+      'allowed',
+    )
+    // Outsourcing does not depend on the picker resolving a model: the server
+    // reads the image regardless of which chat model ends up answering.
+    expect(resolveImageAttachmentCapability(undefined, { fast: false, fastVision: false, visionOutsource: true })).toBe(
+      'allowed',
+    )
+  })
+
+  it('keeps blocking text-only models while outsourcing is off', () => {
+    expect(
+      resolveImageAttachmentCapability({ kind: 'chat', vision: false }, { fast: false, fastVision: false, visionOutsource: false }),
+    ).toBe('blocked')
+  })
 })
 
 describe('image file filtering', () => {

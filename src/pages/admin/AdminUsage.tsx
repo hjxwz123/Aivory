@@ -55,6 +55,7 @@ const TASK_PURPOSES = [
   'task.research_verify',
   'task.research_validate',
   'task.moderation',
+  'task.vision_caption',
 ] as const
 
 export default function AdminUsage() {
@@ -297,8 +298,8 @@ export default function AdminUsage() {
               <SelectItem value="chat">{purposeLabel('chat')}</SelectItem>
               <SelectItem value="image">{purposeLabel('image')}</SelectItem>
               <SelectItem value="embedding">{purposeLabel('embedding')}</SelectItem>
-              {/* Billed AI PPT decks: a credit-only row with no model or tokens,
-                  so it would otherwise be hard to isolate in the list. */}
+              {/* AI PPT calls: credit-only rows with no model or tokens, so they
+                  would otherwise be hard to isolate in the list. */}
               <SelectItem value="ppt">{purposeLabel('ppt')}</SelectItem>
               {/* "task" is the backend umbrella matching every task.* sub-purpose */}
               <SelectItem value="task">

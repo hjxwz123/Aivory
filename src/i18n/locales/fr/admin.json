@@ -733,7 +733,6 @@
       "chat": "Réponse de chat",
       "image": "Génération d’image",
       "embedding": "Vectorisation de documents",
-      "ppt": "Génération de PPT par IA",
       "task_title": "Génération du titre (conversation)",
       "task_router": "Routage des fichiers (sélection et stratégie RAG)",
       "task_rag_evidence_judge": "Vérification de la suffisance des preuves RAG",
@@ -751,6 +750,8 @@
       "task_moderation": "Contrôle de sécurité du contenu",
       "task_research_validate": "Validation croisée des preuves de recherche",
       "task_memory_dedup": "Modèle de déduplication des souvenirs"
+,
+      "task_vision_caption": "Reconnaissance d'image (modèle de vision)"
     },
     "empty": "Aucun appel dans la fenêtre sélectionnée.",
     "leadRecords": "Un appel API = une ligne. Filtrez et nettoyez le journal ci-dessous.",
@@ -1146,6 +1147,8 @@
       "imagePromptModelHint": "Modèle texte qui affine les prompts avant le dessin. Aucun = ignorer.",
       "verifyModel": "Modèle vérificateur",
       "verifyModelHint": "Second modèle qui vérifie les réponses en mode Vérifier. Aucun = désactivé.",
+      "visionModel": "Modèle de reconnaissance visuelle",
+      "visionModelHint": "Lit les images pour les modèles qui ne voient pas, sous forme de texte structuré. Aucun = images ignorées.",
       "storageLocal": "Disque local (volume serveur)",
       "storageLocalNote": "En mode local, les objets applicatifs comme les avatars sont écrits directement par l’API dans AIVORY_LOCAL_STORAGE_DIR (par défaut : UPLOAD_DIR/object-storage) ; les espaces de travail sandbox utilisent toujours SANDBOX_LOCAL_STORAGE_DIR. Nœud unique uniquement ; l’analyse MinerU nécessite toujours un stockage objet.",
       "sandboxIdleTtl": "Recyclage inactif (secondes)",

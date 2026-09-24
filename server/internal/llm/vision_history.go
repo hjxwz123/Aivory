@@ -11,6 +11,23 @@ const nonVisionImagePlaceholder = "[Image omitted because the selected model doe
 // to a text-only model. Stored/UI history remains unchanged so a later switch
 // back to a vision-capable model can still use the original images.
 func stripImageBlocks(history []UnifiedMessage) []UnifiedMessage {
+	return stripImageContent(history, false)
+}
+
+// stripImageBlocksKeepingAttachments is the request-assembly variant used when a
+// configured vision model will read the images on the text-only model's behalf
+// (§4.6 image outsourcing). Image blocks and image-bearing native Raw are still
+// removed so no image bytes can reach the provider, but the attachment
+// references survive so resolveAttachments can replace them with text evidence.
+//
+// Providers never serialize Attachments — they build their wire format from
+// Blocks and Raw — so a surviving reference is inert until that substitution
+// happens, and resolveAttachments guarantees the turn is never left contentless.
+func stripImageBlocksKeepingAttachments(history []UnifiedMessage) []UnifiedMessage {
+	return stripImageContent(history, true)
+}
+
+func stripImageContent(history []UnifiedMessage, keepImageAttachments bool) []UnifiedMessage {
 	out := make([]UnifiedMessage, len(history))
 	for i, message := range history {
 		filtered := UnifiedMessage{Role: message.Role}
@@ -33,6 +50,10 @@ func stripImageBlocks(history []UnifiedMessage) []UnifiedMessage {
 		for _, attachment := range message.Attachments {
 			if attachmentIsImage(attachment) {
 				affected = true
+				if !keepImageAttachments {
+					continue
+				}
+				filtered.Attachments = append(filtered.Attachments, attachment)
 				continue
 			}
 			filtered.Attachments = append(filtered.Attachments, attachment)
@@ -51,7 +72,12 @@ func stripImageBlocks(history []UnifiedMessage) []UnifiedMessage {
 		// A contentless user/model turn is invalid for Anthropic and Gemini and
 		// can also collapse adjacent roles. Preserve an image-only turn as plain
 		// text while leaving mixed text/image turns otherwise untouched.
-		if affected && strings.TrimSpace(renderBlocksAsText(filtered.Blocks)) == "" {
+		//
+		// When the attachments are being kept for outsourcing, that substitute is
+		// deliberately NOT written here: resolveAttachments owns this turn's image
+		// text, and a placeholder next to real evidence would contradict it. It
+		// guarantees a non-empty turn for every kept attachment it cannot resolve.
+		if affected && !keepImageAttachments && strings.TrimSpace(renderBlocksAsText(filtered.Blocks)) == "" {
 			filtered.Blocks = append(filtered.Blocks, UnifiedBlock{
 				Kind: "text",
 				Text: nonVisionImagePlaceholder,

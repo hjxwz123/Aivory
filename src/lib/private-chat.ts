@@ -40,7 +40,13 @@ export function readPrivateImage(file: File): Promise<PrivateImage> {
   })
 }
 
-export function validatePrivateHistory(messages: PrivateMessage[], modelId: string, vision: boolean): void {
+export function validatePrivateHistory(
+  messages: PrivateMessage[],
+  modelId: string,
+  vision: boolean,
+  // §4.6: a configured vision model accepts images on a text-only model's behalf.
+  visionOutsource = false,
+): void {
   if (!modelId) throw new Error('private_model_unavailable')
   if (!messages.length || messages.length > 127 || messages.at(-1)?.role !== 'user') {
     throw new Error('private_history_limit')
@@ -53,7 +59,7 @@ export function validatePrivateHistory(messages: PrivateMessage[], modelId: stri
     }
     textBytes += new TextEncoder().encode(message.text).length
     imageCount += message.images?.length ?? 0
-    if (message.images?.length && (!vision || message.role !== 'user')) {
+    if (message.images?.length && ((!vision && !visionOutsource) || message.role !== 'user')) {
       throw new Error('private_images_not_supported')
     }
   }

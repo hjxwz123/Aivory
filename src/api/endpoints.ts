@@ -245,6 +245,12 @@ export const authApi = {
       `/me/files${qs.toString() ? `?${qs}` : ''}`,
     )
   },
+  /** Save an edited preview as a new standalone file without changing the original. */
+  saveDocumentCopy: (blob: Blob, filename: string) => {
+    const form = new FormData()
+    form.append('file', new File([blob], filename, { type: blob.type || 'application/octet-stream' }))
+    return apiUpload<{ id: string; filename: string }>('/files', form)
+  },
   deleteMyFiles: (items: Array<{ source: 'file' | 'document'; id: string }>) =>
     api<{ deleted: number }>('/me/files/delete', { method: 'POST', body: { items } }),
   myFileContentBlob: async (source: 'file' | 'document', id: string, signal?: AbortSignal): Promise<Blob> => {
@@ -257,24 +263,6 @@ export const authApi = {
     })
     if (!res.ok) throw new ApiError(res.status, `preview failed (${res.status})`, null)
     return res.blob()
-  },
-  /**
-   * Persist an edited document as a NEW standalone file owned by the caller.
-   *
-   * Reuses the existing upload pipeline (`POST /files`) instead of adding a
-   * write-back endpoint: "save a copy" deliberately never mutates the bytes a
-   * past message, citation, or artifact link already points at, so history
-   * cannot change under the user.
-   *
-   * Two server-side rules apply and surface as ordinary API errors:
-   * - the admin-tunable upload allowlist must permit the extension;
-   * - `.html`/`.htm` are rejected by default on purpose (stored HTML served
-   *   inline is an XSS vector — see server/internal/api/upload_policy.go).
-   */
-  saveDocumentCopy: (blob: Blob, filename: string) => {
-    const form = new FormData()
-    form.append('file', new File([blob], filename, { type: blob.type || 'application/octet-stream' }))
-    return apiUpload<{ id: string; filename: string }>('/files', form)
   },
   /** Credit balance (timed pool + permanent pool) for the subscription page. */
   credits: () => api<ApiCredits>('/me/credits'),
@@ -402,6 +390,9 @@ export const modelsApi = {
       models: ApiModel[]
       default_id: string
       verify_available?: boolean
+      /** §4.6 image outsourcing: a vision model is configured, so a text-only
+       *  model can still accept images (they are read and injected as text). */
+      vision_available?: boolean
       fast_available?: boolean
       /** Anonymous capability only; the hidden fast model identity stays server-side. */
       fast_vision?: boolean

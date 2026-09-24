@@ -266,6 +266,11 @@ func Migrate(db *sql.DB) error {
 	// Folder uploads keep their shape: the file's path inside the uploaded
 	// folder. "" is every single-file upload and every pre-existing row.
 	addFileRelPath := `ALTER TABLE files ADD COLUMN rel_path TEXT NOT NULL DEFAULT ''`
+	// §4.6 image outsourcing: the structured text evidence a configured vision
+	// model produced for this image, plus the model+prompt stamp that produced it.
+	// A stamp mismatch re-generates instead of serving stale evidence.
+	addFileVisionEvidence := `ALTER TABLE files ADD COLUMN vision_evidence TEXT NOT NULL DEFAULT ''`
+	addFileVisionEvidenceKey := `ALTER TABLE files ADD COLUMN vision_evidence_key TEXT NOT NULL DEFAULT ''`
 	// Persisted ingest heartbeat lets the RAG watchdog distinguish a live long-
 	// running parse from a task abandoned by timeout, crash, or lease expiry.
 	addDocumentIngestUpdatedAt := `ALTER TABLE documents ADD COLUMN ingest_updated_at INTEGER NOT NULL DEFAULT 0`
@@ -424,6 +429,8 @@ func Migrate(db *sql.DB) error {
 		addFileDraft = `ALTER TABLE files ADD COLUMN IF NOT EXISTS draft INTEGER NOT NULL DEFAULT 0`
 		addFileBranchMessage = `ALTER TABLE files ADD COLUMN IF NOT EXISTS branch_message_id TEXT NOT NULL DEFAULT ''`
 		addFileRelPath = `ALTER TABLE files ADD COLUMN IF NOT EXISTS rel_path TEXT NOT NULL DEFAULT ''`
+		addFileVisionEvidence = `ALTER TABLE files ADD COLUMN IF NOT EXISTS vision_evidence TEXT NOT NULL DEFAULT ''`
+		addFileVisionEvidenceKey = `ALTER TABLE files ADD COLUMN IF NOT EXISTS vision_evidence_key TEXT NOT NULL DEFAULT ''`
 		addDocumentIngestUpdatedAt = `ALTER TABLE documents ADD COLUMN IF NOT EXISTS ingest_updated_at BIGINT NOT NULL DEFAULT 0`
 		addDocumentUploader = `ALTER TABLE documents ADD COLUMN IF NOT EXISTS uploaded_by_user_id TEXT NOT NULL DEFAULT ''`
 		addWorkspaceCanCreateProjects = `ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS can_create_projects INTEGER NOT NULL DEFAULT 1`
@@ -527,7 +534,7 @@ func Migrate(db *sql.DB) error {
 		addConvWorkspace, addConvIsPublic, addProjWorkspace, addKBWorkspace, addMsgAuthor, addUsageWorkspace, addGroupMaxWorkspaces, addGroupMaxStorage, addGroupIsPublic, addGroupIsPurchasable, addGroupPermissions,
 		addModelFallbackChannel, addUsageChannel, addUsageFallback, addUsageStatus, addUsageError,
 		addUsageRequestMethod, addUsageRequestURL, addUsageRequestHeaders, addUsageRequestBody, addUsageTTFTFallback,
-		addFileDraft, addFileBranchMessage, addFileRelPath, addDocumentIngestUpdatedAt, addDocumentUploader,
+		addFileDraft, addFileBranchMessage, addFileRelPath, addFileVisionEvidence, addFileVisionEvidenceKey, addDocumentIngestUpdatedAt, addDocumentUploader,
 		addWorkspaceCanCreateProjects, addWorkspaceCanPrivateConversations, addWorkspaceCanCreateSkillsPrompts, addWorkspaceCanCreatePrompts, addWorkspaceCanCreateSkills, addWorkspaceCanCreateMCP, addWorkspaceCanUsePrompts, addWorkspaceCanUseSkills, addWorkspaceCanUseMCP, addWorkspaceCanCreateKB, addWorkspaceCanAddKBFiles, addWorkspaceCanDeleteKBContent, addWorkspaceCanDeleteConversations, addWorkspaceInvitePurpose, addWorkspaceDeleting, addWorkspaceIcon, addWorkspaceDescription,
 		addWorkspaceAllowToolCalling, addWorkspaceAllowDrawing, addWorkspaceAllowMCP, addWorkspaceAllowSkills, addWorkspaceAllowPrompts,
 		addWorkspaceAllowPrivateChat,
@@ -1177,6 +1184,10 @@ func Seed(db *sql.DB, cfg config.Config) error {
 		"tool_route_model_id":         `""`,
 		"image_prompt_model_id":       `""`,
 		"verify_model_id":             `""`,
+		// §4.6 image outsourcing: the vision-capable model that reads attachments
+		// for a text-only conversation model and returns structured text evidence.
+		// Blank = feature off (a non-vision model still skips images).
+		"vision_model_id": `""`,
 		// §4.11-B RAG injection knobs (admin → Documents). A conversation doc at/below
 		// rag_full_text_threshold (est. tokens) is injected in full; above it, it's
 		// vectorised and only chunks are retrieved (rag_top_k of them, or — when
