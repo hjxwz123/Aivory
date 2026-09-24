@@ -26,6 +26,11 @@ type AdminFile struct {
 	ConversationID string `json:"conversation_id"`
 	KBID           string `json:"kb_id"`
 	KBName         string `json:"kb_name"`
+	// RelPath is the file's path inside an uploaded folder ("my-project/src/a.ts").
+	// Only files rows have one, and the shared inventory query does not select it;
+	// the user-facing inventory fills it in separately (see FileRelPathsByID) so a
+	// picked folder renders as one row instead of a pile of files.
+	RelPath string `json:"rel_path,omitempty"`
 	// BillingUserID is the quota principal. For committed workspace content it
 	// is the canonical workspace owner, which can differ from UserID (the
 	// uploader or container creator shown in the admin attribution columns).

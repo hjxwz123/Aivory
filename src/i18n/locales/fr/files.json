@@ -8,6 +8,9 @@
   "noInlinePreview": "Pas d'aperçu intégré pour ce type de fichier.",
   "confirmTitle": "Supprimer ce fichier ?",
   "confirmBody": "« {{name}} » sera supprimé partout — le fichier lui-même, ses enregistrements et son index de recherche. Irréversible.",
+  "confirmFolderTitle": "Supprimer ce dossier ?",
+  "confirmFolderBody": "Les {{count}} fichiers de « {{name}} » seront supprimés partout — les fichiers eux-mêmes, leurs enregistrements et leur index de recherche. Irréversible.",
+  "folderSummary": "{{count}} fichiers · {{size}}",
   "origin": {
     "all": "Toutes les sources",
     "conversation": "Conversation",

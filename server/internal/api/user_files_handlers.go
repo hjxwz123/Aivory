@@ -73,7 +73,27 @@ func listMyFilesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"files": rows, "total": total, "limit": limit, "offset": offset})
+	// Carry each files row's folder-relative path so the Files page can show an
+	// uploaded folder as ONE row instead of a pile of files. Only the files table
+	// records a rel_path, so it is fetched separately rather than folded into the
+	// shared admin inventory query (which unions files with documents).
+	fileIDs := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if row.Source == "file" {
+			fileIDs = append(fileIDs, row.ID)
+		}
+	}
+	relPaths, err := store.FileRelPathsByID(r.Context(), d.DB, fileIDs)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	payload := make([]store.AdminFile, 0, len(rows))
+	for _, row := range rows {
+		row.RelPath = relPaths[row.ID]
+		payload = append(payload, row)
+	}
+	writeJSON(w, 200, map[string]any{"files": payload, "total": total, "limit": limit, "offset": offset})
 }
 
 // ownsAdminFileRow reports whether the row is billed to the user using the

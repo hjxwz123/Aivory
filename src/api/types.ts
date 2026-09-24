@@ -1644,6 +1644,10 @@ export interface ApiAdminFile {
   conversation_id: string
   kb_id: string
   kb_name: string
+  /** Path inside an uploaded folder ("my-project/src/a.ts"); absent for a
+   *  single-file upload and for knowledge-base documents. Lets the Files page
+   *  show a picked folder as one row (see `fileFolderTree`). */
+  rel_path?: string
 }
 
 /** Metadata-only administrator inventory row for a public HTML preview link. */

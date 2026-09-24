@@ -254,6 +254,49 @@ func ConversationDocumentIDsForBranch(ctx context.Context, db *sql.DB, convID, u
 	return out, rows.Err()
 }
 
+// FileRelPathsByID returns the folder-relative path recorded for each files row
+// (`rel_path`), keyed by file id. Rows uploaded as single files have no path and
+// are omitted.
+//
+// This exists so the user-facing file inventory can group a picked folder into
+// one row without changing the shared admin inventory query: that query unions
+// the files and documents tables, and only files rows can carry a rel_path.
+func FileRelPathsByID(ctx context.Context, db *sql.DB, ids []string) (map[string]string, error) {
+	out := map[string]string{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	// Bounded IN list: the inventory page caps a request at 200 rows, and the
+	// placeholder count is derived from the caller's ids rather than user input.
+	args := make([]any, 0, len(ids))
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		args = append(args, id)
+	}
+	if len(args) == 0 {
+		return out, nil
+	}
+	q := `SELECT id, rel_path FROM files WHERE rel_path <> '' AND id IN (` +
+		strings.TrimSuffix(strings.Repeat("?,", len(args)), ",") + `)`
+	rows, err := db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, relPath string
+		if err := rows.Scan(&id, &relPath); err != nil {
+			return nil, err
+		}
+		if relPath != "" {
+			out[id] = relPath
+		}
+	}
+	return out, rows.Err()
+}
+
 // ListFilesByConversation returns a conversation's uploaded files (oldest
 // first) — used to stage data files into the sandbox /workspace/uploads (§4.5).
 func ListFilesByConversation(ctx context.Context, db *sql.DB, convID, userID string) ([]File, error) {
