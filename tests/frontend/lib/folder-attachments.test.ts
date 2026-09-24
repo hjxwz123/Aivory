@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   chipRailItems,
+  fileFolderTree,
   folderGroupSize,
   folderRootOf,
   groupAttachmentsByFolder,
@@ -137,5 +138,66 @@ describe('folder path helpers', () => {  it('extracts the folder root', () => {
     expect(folderGroupSize([{ size: 10 }, { size: 32 }])).toBe(42)
     expect(folderGroupSize([{ size: Number.NaN }, { size: 5 }])).toBe(5)
     expect(folderGroupSize([])).toBe(0)
+  })
+})
+
+// The files drawer used to list every uploaded file flat. These pin the tree
+// that puts a picked folder — and the subdirectories inside it — back together.
+describe('files drawer folder tree', () => {
+  const meta = (file: { relPath?: string; size: number }) => ({ relPath: file.relPath, size: file.size })
+
+  it('keeps loose single-file uploads at the top level', () => {
+    const tree = fileFolderTree([attachment('1', 'report.pdf'), attachment('2', 'photo.png')], meta)
+
+    expect(tree.folders).toEqual([])
+    expect(tree.rootFiles.map((f) => f.id)).toEqual(['1', '2'])
+  })
+
+  it('nests subdirectories and counts every descendant', () => {
+    const tree = fileFolderTree(
+      [
+        attachment('1', 'a.ts', 'p/src/deep/a.ts', 10),
+        attachment('2', 'b.ts', 'p/src/b.ts', 20),
+        attachment('3', 'c.ts', 'p/c.ts', 30),
+      ],
+      meta,
+    )
+
+    expect(tree.rootFiles).toEqual([])
+    expect(tree.folders.map((f) => f.path)).toEqual(['p'])
+    const root = tree.folders[0]
+    expect(root.name).toBe('p')
+    expect(root.fileCount).toBe(3)
+    expect(root.size).toBe(60)
+    // Direct child directories only; "deep" hangs off "src", not off the root.
+    expect(root.children.map((c) => c.path)).toEqual(['p/src'])
+    const src = root.children[0]
+    expect(src.files.map((f) => f.id)).toEqual(['2'])
+    expect(src.children.map((c) => c.path)).toEqual(['p/src/deep'])
+    expect(src.children[0].files.map((f) => f.id)).toEqual(['1'])
+    // A file directly in the picked folder stays in that folder's own list.
+    expect(root.files.map((f) => f.id)).toEqual(['3'])
+  })
+
+  it('groups two separately picked folders side by side', () => {
+    const tree = fileFolderTree(
+      [
+        attachment('1', 'a.ts', 'alpha/a.ts', 1),
+        attachment('2', 'b.ts', 'beta/b.ts', 1),
+        attachment('3', 'loose.ts', undefined, 1),
+      ],
+      meta,
+    )
+
+    expect(tree.folders.map((f) => f.path)).toEqual(['alpha', 'beta'])
+    expect(tree.rootFiles.map((f) => f.id)).toEqual(['3'])
+  })
+
+  it('treats a hostile path as a loose file instead of inventing a folder', () => {
+    for (const relPath of ['', '..', './x.ts', '/absolute/x.ts']) {
+      const tree = fileFolderTree([attachment('1', 'x.ts', relPath)], meta)
+      expect(tree.folders).toEqual([])
+      expect(tree.rootFiles.map((f) => f.id)).toEqual(['1'])
+    }
   })
 })

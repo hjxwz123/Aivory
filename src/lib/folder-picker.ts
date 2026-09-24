@@ -52,6 +52,10 @@ export interface PickedFolder {
   /** The picked directory's own name — the first segment of every `path`. */
   name: string
   files: PickedFolderFile[]
+  /** True when a cap (depth or file count) stopped the walk early. */
+  truncated: boolean
+  /** Paths whose bytes could not be read (permission, removed mid-walk). */
+  failed: string[]
 }
 
 /** How deep the walk descends. A guard against a pathological/cyclic tree. */
@@ -71,9 +75,17 @@ function isFileEntry(entry: DirectoryEntryLike): entry is FileHandleLike {
  * exact shape `folderUploadFields` and the server expect, so a modern pick needs
  * no `webkitRelativePath` at all.
  *
- * Directories only are pruned by depth and by the file ceiling; which of these
- * files is actually *worth* uploading is `selectFolderFiles`'s job, deliberately
- * kept separate so the walk stays a plain enumeration.
+ * Descent is recursive, so a nested subdirectory is enumerated exactly like the
+ * root — that is the whole point of walking handles instead of trusting the
+ * input's magic property. Which of these files is actually *worth* uploading is
+ * `selectFolderFiles`'s job, deliberately kept separate so the walk stays a
+ * plain enumeration.
+ *
+ * Neither a cap nor an unreadable entry throws away the rest of the walk: a
+ * single file that cannot be read (permission denied, deleted mid-walk) is
+ * recorded in `failed` and the remaining directories still upload, and reaching
+ * a cap sets `truncated` so the caller can say so instead of quietly shipping
+ * half the folder.
  */
 export async function walkDirectory(
   handle: DirectoryHandleLike,
@@ -82,17 +94,32 @@ export async function walkDirectory(
   const maxDepth = options.maxDepth ?? FOLDER_MAX_DEPTH
   const maxFiles = options.maxFiles ?? FOLDER_MAX_WALKED_FILES
   const files: PickedFolderFile[] = []
+  const failed: string[] = []
   // A handle can be reached twice in a tree (symlinked/shared directories); the
   // first path wins so a file is never listed — or uploaded — twice.
   const seen = new Set<File>()
+  let truncated = false
 
   const visit = async (dir: DirectoryHandleLike | DirectoryChildLike, prefix: string, depth: number): Promise<void> => {
-    if (depth > maxDepth) return
+    if (depth > maxDepth) {
+      truncated = true
+      return
+    }
     for await (const entry of dir.values()) {
-      if (files.length >= maxFiles) return
+      if (files.length >= maxFiles) {
+        truncated = true
+        return
+      }
       const path = `${prefix}/${entry.name}`
       if (isFileEntry(entry)) {
-        const file = await entry.getFile()
+        let file: File
+        try {
+          file = await entry.getFile()
+        } catch {
+          // One unreadable file must not abort the whole folder.
+          failed.push(path)
+          continue
+        }
         if (seen.has(file)) continue
         seen.add(file)
         files.push({ file, path })
@@ -102,8 +129,15 @@ export async function walkDirectory(
     }
   }
 
-  await visit(handle, handle.name, 1)
-  return { name: handle.name, files }
+  try {
+    await visit(handle, handle.name, 1)
+  } catch (error) {
+    // The read failed part-way. Whatever was already enumerated is still worth
+    // offering; rethrow only when that is nothing at all.
+    if (!files.length) throw error
+    truncated = true
+  }
+  return { name: handle.name, files, truncated, failed }
 }
 
 /** Minimal view of `window` for the optional File System Access API. */

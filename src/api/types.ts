@@ -1456,8 +1456,8 @@ export interface ApiConversationFile {
   url: string
   draft: boolean
   /** Path inside an uploaded folder ("my-project/src/a.ts"); absent for a
-   *  single-file upload. Available for grouping a folder into a tree — the
-   *  composer does not group yet, so treat this as plumbing, not a guarantee. */
+   *  single-file upload. Drives both the composer's folder chip and the files
+   *  drawer's directory tree (see `fileFolderTree`). */
   rel_path?: string
   document_id?: string
   document_status?: ApiDocument['status']

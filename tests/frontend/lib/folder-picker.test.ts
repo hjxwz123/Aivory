@@ -96,6 +96,34 @@ describe('walkDirectory', () => {
   it('returns nothing for an empty folder rather than throwing', async () => {
     const picked = await walkDirectory(dir('empty', []))
     expect(picked.files).toEqual([])
+    expect(picked.truncated).toBe(false)
+    expect(picked.failed).toEqual([])
+  })
+
+  it('records an unreadable file and still walks the rest of the tree', async () => {
+    const locked: FileHandleLike = {
+      kind: 'file',
+      name: 'locked.ts',
+      getFile: async () => {
+        throw new Error('NotAllowedError')
+      },
+    }
+    const root = dir('p', [locked, dir('src', [file('ok.ts')])])
+
+    const picked = await walkDirectory(root)
+
+    expect(picked.failed).toEqual(['p/locked.ts'])
+    expect(picked.files.map((entry) => entry.path)).toEqual(['p/src/ok.ts'])
+    expect(picked.truncated).toBe(false)
+  })
+
+  it('flags the walk as truncated when a cap stopped it', async () => {
+    const root = dir('p', [file('a.ts'), file('b.ts')])
+
+    const picked = await walkDirectory(root, { maxFiles: 1 })
+
+    expect(picked.truncated).toBe(true)
+    expect(picked.files).toHaveLength(1)
   })
 })
 

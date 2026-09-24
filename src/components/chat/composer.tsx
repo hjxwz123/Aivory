@@ -2424,6 +2424,30 @@ export function Composer({
         folderFileRef.current?.click()
         return
       }
+      // An incomplete enumeration is stated up front, so "the subdirectory is
+      // missing" is never a mystery: a cap or an unreadable entry is named here
+      // before the files that DID read are uploaded.
+      if (picked.truncated || picked.failed.length) {
+        toast.info(
+          t('composer.folderWalkIncomplete', {
+            defaultValue: 'Only part of “{{folder}}” could be read',
+            folder: picked.name,
+          }),
+          [
+            picked.truncated
+              ? t('composer.folderWalkTruncated', { defaultValue: 'Stopped at the depth or file-count limit.' })
+              : '',
+            picked.failed.length
+              ? t('composer.folderWalkFailed', {
+                  defaultValue: '{{count}} file(s) could not be read.',
+                  count: picked.failed.length,
+                })
+              : '',
+          ]
+            .filter(Boolean)
+            .join(' '),
+        )
+      }
       await handleFolderAttach(picked.files, picked.name)
     } catch (error) {
       // A dismissed picker is not a failure — the user simply changed their mind.
