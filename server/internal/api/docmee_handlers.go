@@ -323,13 +323,15 @@ func docmeeToken(ctx context.Context, d Deps, cfg docmeeConfig, userID string) (
 func meDocmeeConfigHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	cfg := docmeeConfigFor(d)
+	allowed := aiPPTPermission(d, r) == nil
 	balance, err := store.GetCreditBalance(r.Context(), d.DB, u.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{
-		"enabled":           cfg.configured(),
+		"enabled":           cfg.configured() && allowed,
+		"allowed":           allowed,
 		"configured":        strings.TrimSpace(cfg.APIKey) != "",
 		"credits_enabled":   cfg.billingEnabled(d),
 		"credits_per_ppt":   cfg.CreditsPerPPT,

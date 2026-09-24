@@ -44,6 +44,7 @@ type UserGroupPermissions struct {
 	AllowMemory               bool                 `json:"allow_memory"`
 	AllowDrawing              bool                 `json:"allow_drawing"`
 	AllowPrivateChat          bool                 `json:"allow_private_chat"`
+	AllowAiPPT                bool                 `json:"allow_ai_ppt"`
 }
 
 // UserGroupPermissionState couples the policy with the membership row that
@@ -73,6 +74,7 @@ func DefaultUserGroupPermissions() UserGroupPermissions {
 		AllowMemory:               true,
 		AllowDrawing:              true,
 		AllowPrivateChat:          true,
+		AllowAiPPT:                true,
 	}
 }
 
@@ -142,6 +144,7 @@ func NormalizeUserGroupPermissions(raw json.RawMessage) (UserGroupPermissions, e
 		"allow_memory":                 &permissions.AllowMemory,
 		"allow_drawing":                &permissions.AllowDrawing,
 		"allow_private_chat":           &permissions.AllowPrivateChat,
+		"allow_ai_ppt":                 &permissions.AllowAiPPT,
 	} {
 		if err := decode(key, target); err != nil {
 			return UserGroupPermissions{}, ErrInvalidUserGroupPermissions
@@ -253,7 +256,8 @@ func UserGroupPermissionsEqual(a, b UserGroupPermissions) bool {
 		a.AllowVoiceTranscription == b.AllowVoiceTranscription &&
 		a.AllowMemory == b.AllowMemory &&
 		a.AllowDrawing == b.AllowDrawing &&
-		a.AllowPrivateChat == b.AllowPrivateChat
+		a.AllowPrivateChat == b.AllowPrivateChat &&
+		a.AllowAiPPT == b.AllowAiPPT
 }
 
 func resourceAccessPoliciesEqual(a, b ResourceAccessPolicy) bool {

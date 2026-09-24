@@ -305,7 +305,7 @@ func meAiPPTCreateTaskHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	subject := aiPPTSubjectFor(typ, content, fname)
 	optionsJSON, _ := json.Marshal(map[string]any{"type": typ, "content": truncateAiPPT(content, 2000), "file_name": fname})
 	deck, err := store.CreateAiPPTDeck(r.Context(), d.DB, store.AiPPTDeck{
-		UserID: u.ID, TaskID: taskID, Subject: subject, SourceType: typ,
+		UserID: u.ID, WorkspaceID: aiPPTWorkspaceID(r), TaskID: taskID, Subject: subject, SourceType: typ,
 		Status: store.AiPPTDeckDraft, OptionsJSON: string(optionsJSON),
 	})
 	if err != nil {
@@ -321,12 +321,12 @@ func meAiPPTDecksHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := atoiOr(q.Get("limit"), 50)
 	offset := atoiOr(q.Get("offset"), 0)
-	decks, err := store.ListAiPPTDecks(r.Context(), d.DB, u.ID, limit, offset)
+	decks, err := store.ListAiPPTDecks(r.Context(), d.DB, u.ID, limit, offset, aiPPTWorkspaceID(r))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	total, err := store.CountAiPPTDecks(r.Context(), d.DB, u.ID)
+	total, err := store.CountAiPPTDecks(r.Context(), d.DB, u.ID, aiPPTWorkspaceID(r))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return

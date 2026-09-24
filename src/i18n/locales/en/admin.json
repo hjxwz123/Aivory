@@ -1240,6 +1240,8 @@
       "drawing": "Drawing",
       "drawingHint": "Use image models, image styles, and image generation tools.",
       "privateChat": "Private chat",
+      "aiPpt": "AI PPT",
+      "aiPptHint": "Allow this group to create and use AI presentations. Workspace and member settings may further restrict access.",
       "userMCP": "User-created MCP services",
       "userMCPHint": "Allow MCP services created by users or workspaces. Workspace switches, member permissions and resource access still apply.",
       "privateChatHint": "Use ephemeral chats that remain only in the browser and are not saved to conversation history."

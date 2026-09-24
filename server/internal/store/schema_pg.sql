@@ -125,6 +125,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_reservations_user_status
 CREATE TABLE IF NOT EXISTS aippt_decks (
   id            TEXT PRIMARY KEY,
   user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  workspace_id  TEXT NOT NULL DEFAULT '',
   task_id       TEXT NOT NULL DEFAULT '',
   ppt_id        TEXT NOT NULL DEFAULT '',
   subject       TEXT NOT NULL DEFAULT '',
@@ -1004,6 +1005,7 @@ CREATE TABLE IF NOT EXISTS workspace_members (
   can_add_kb_files          INTEGER NOT NULL DEFAULT 1,
   can_delete_kb_content     INTEGER NOT NULL DEFAULT 1,
   can_delete_conversations  INTEGER NOT NULL DEFAULT 1,
+  can_use_ai_ppt            INTEGER NOT NULL DEFAULT 1,
   joined_at                 BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint),
   PRIMARY KEY (workspace_id, user_id)
 );
@@ -1055,6 +1057,7 @@ CREATE TABLE IF NOT EXISTS workspace_policies (
   allow_skills                INTEGER NOT NULL DEFAULT 1,
   allow_prompts               INTEGER NOT NULL DEFAULT 1,
   allow_private_chat          INTEGER NOT NULL DEFAULT 1,
+  allow_ai_ppt                INTEGER NOT NULL DEFAULT 1,
   allow_knowledge_bases       INTEGER NOT NULL DEFAULT 1,
   allow_file_upload           INTEGER NOT NULL DEFAULT 1,
   member_monthly_credit_limit REAL NOT NULL DEFAULT 0,

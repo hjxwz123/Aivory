@@ -15,9 +15,9 @@
   },
   "input": {
     "title": "What should the deck be about?",
-    "lead": "Start from a topic, paste your own text, point at a page, upload a document, or hand over a Markdown outline.",
-    "optionsTitle": "Generation options",
-    "optionsLead": "These shape the outline the model writes. Everything except the length is optional.",
+    "lead": "Start with an idea or your own material. Shape the outline, then choose a look for your slides.",
+    "optionsTitle": "More options",
+    "optionsLead": "Add a use case, audience or writing preferences when you need them.",
     "anyOption": "Let the model decide",
     "types": {
       "topic": "Topic",
@@ -50,8 +50,8 @@
     "promptHint": "{{count}}/50 characters",
     "promptPlaceholder": "e.g. keep the tone practical",
     "submit": "Generate outline",
-    "priceHint": "Generating this deck costs {{price}} credits.",
-    "freeHint": "Generating a deck is free on this deployment.",
+    "priceHint": "Review the outline first. Generating the deck costs {{price}} credits.",
+    "freeHint": "Review the outline, then choose a template. This generation is free.",
     "freeHintPriced": "Generating a deck is free on this deployment (the configured standard price is {{price}} credits per deck).",
     "examples": {
       "label": "Try one of these",
@@ -62,7 +62,9 @@
     "defaultTemplate": {
       "label": "Default template",
       "hint": "Used when you pick nothing later. You can change it after the outline."
-    }
+    },
+    "source": "Content source",
+    "uploadTooLarge": "Files must be no larger than {{mb}} MB"
   },
   "outline": {
     "title": "Outline",
@@ -117,7 +119,8 @@
     "deleteTitle": "Delete this template?",
     "deleteBody": "It disappears from “Mine”. Decks you already generated are not affected.",
     "deleted": "Template deleted",
-    "deleteFailed": "Could not delete the template"
+    "deleteFailed": "Could not delete the template",
+    "category": "Template category"
   },
   "result": {
     "untitled": "Untitled deck",
@@ -144,7 +147,8 @@
     "credits": "Credits",
     "priceNote": "Admin-configured price: {{price}} credits per deck.",
     "saved": "Saved to your files",
-    "saving": "Saving to your files…"
+    "saving": "Saving to your files…",
+    "expandPreview": "Expand preview"
   },
   "decks": {
     "empty": "No decks yet",
@@ -164,7 +168,8 @@
       "generating": "Rendering",
       "ready": "Ready",
       "failed": "Failed"
-    }
+    },
+    "lead": "Open a finished presentation or pick up where you left off."
   },
   "charged": {
     "title": "Charged {{price}} credits",
@@ -178,6 +183,10 @@
   "unconfigured": {
     "title": "AI PPT is not configured",
     "description": "An administrator must add the Docmee API key under Admin → Credits & quotas before AI PPT becomes available."
+  },
+  "permissionDenied": {
+    "title": "AI PPT is unavailable here",
+    "description": "Ask an administrator to review your group, workspace and member permissions."
   },
   "disabled": {
     "title": "AI PPT is turned off",
@@ -205,12 +214,16 @@
   },
   "render": {
     "title": "Building “{{subject}}”",
-    "lead": "Laying out every slide with your template — this takes a few seconds.",
+    "lead": "Your slides are being laid out and prepared. The preview will appear when they are ready.",
     "stages": {
       "content": "Content",
       "layout": "Layout",
       "render": "Rendering",
       "save": "Saving"
-    }
+    },
+    "waiting": "Keep this page open"
+  },
+  "workflow": {
+    "steps": "Presentation steps"
   }
 }

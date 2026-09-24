@@ -882,6 +882,10 @@
         "label": "スキルを使用",
         "description": "ワークスペースのリソースライブラリに共有されたスキルを実行します。"
       },
+      "can_use_ai_ppt": {
+        "label": "AI PPT を使用",
+        "description": "グループとワークスペースの両方が許可する場合に、AI プレゼンテーションを作成・編集できます。"
+      },
       "can_use_mcp": {
         "label": "MCP サービスを使用",
         "description": "このワークスペースで利用可能な MCP サービスのツールを呼び出します。"
@@ -1031,6 +1035,10 @@
       "AllowDrawing": {
         "label": "描画",
         "description": "専用の描画モードと画像モデルを許可します。"
+      },
+      "AllowAiPPT": {
+        "label": "AI PPT",
+        "description": "このワークスペースで AI プレゼンテーションを許可します。グループとメンバーの制限も適用されます。"
       },
       "AllowPrivateChat": {
         "label": "プライベートチャット",

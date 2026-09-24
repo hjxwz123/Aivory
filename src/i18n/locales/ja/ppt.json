@@ -15,9 +15,9 @@
   },
   "input": {
     "title": "どんなテーマの PPT を作りますか？",
-    "lead": "テーマを入力するか、テキストの貼り付け、Web ページ、ファイルのアップロード、Markdown 構成の入力を選べます。",
-    "optionsTitle": "生成オプション",
-    "optionsLead": "構成の書き方を決める項目です。長さ以外は任意です。",
+    "lead": "テーマや手元の資料から始めましょう。構成を整えてから、スライドのデザインを選べます。",
+    "optionsTitle": "詳細設定",
+    "optionsLead": "必要に応じて、用途・対象者・文章の要望を指定できます。",
     "anyOption": "モデルに任せる",
     "types": {
       "topic": "テーマ",
@@ -50,8 +50,8 @@
     "promptHint": "{{count}}/50 文字",
     "promptPlaceholder": "例：実務的なトーンで",
     "submit": "構成を生成",
-    "priceHint": "この PPT の生成には {{price}} クレジットを消費します。",
-    "freeHint": "この環境では PPT の生成は無料です。",
+    "priceHint": "まず構成を確認できます。PPT 生成時に {{price}} クレジットを使用します。",
+    "freeHint": "構成を確認してからテンプレートを選べます。今回は無料で生成できます。",
     "freeHintPriced": "この環境では PPT の生成は無料です（管理者が設定した標準価格は 1 回 {{price}} クレジットです）。",
     "examples": {
       "label": "こんなテーマはいかがですか",
@@ -62,7 +62,9 @@
     "defaultTemplate": {
       "label": "既定のテンプレート",
       "hint": "テンプレート未選択時に使われます。後から変更できます。"
-    }
+    },
+    "source": "コンテンツの種類",
+    "uploadTooLarge": "ファイルサイズは {{mb}} MB 以下にしてください"
   },
   "outline": {
     "title": "構成",
@@ -117,7 +119,8 @@
     "deleteTitle": "このテンプレートを削除しますか？",
     "deleteBody": "「マイテンプレート」から削除されます。作成済みの PPT には影響しません。",
     "deleted": "テンプレートを削除しました",
-    "deleteFailed": "削除できませんでした"
+    "deleteFailed": "削除できませんでした",
+    "category": "テンプレートのカテゴリ"
   },
   "result": {
     "untitled": "無題の PPT",
@@ -144,7 +147,8 @@
     "credits": "クレジット",
     "priceNote": "管理者が設定した価格：1 回の生成につき {{price}} クレジット。",
     "saved": "マイファイルに保存済み",
-    "saving": "マイファイルに保存中…"
+    "saving": "マイファイルに保存中…",
+    "expandPreview": "プレビューを拡大"
   },
   "decks": {
     "empty": "まだ PPT がありません",
@@ -164,7 +168,8 @@
       "generating": "レンダリング中",
       "ready": "完成",
       "failed": "失敗"
-    }
+    },
+    "lead": "完成したプレゼンテーションを開くか、構成の編集を再開できます。"
   },
   "charged": {
     "title": "{{price}} クレジットを消費しました",
@@ -178,6 +183,10 @@
   "unconfigured": {
     "title": "AI PPT が未設定です",
     "description": "管理者が「管理画面 → クレジットと割り当て」で文多多の API キーを設定すると利用できます。"
+  },
+  "permissionDenied": {
+    "title": "このスペースでは AI PPT を利用できません",
+    "description": "管理者にグループ、ワークスペース、メンバーの権限を確認してください。"
   },
   "disabled": {
     "title": "AI PPT は無効です",
@@ -205,12 +214,16 @@
   },
   "render": {
     "title": "「{{subject}}」を生成しています",
-    "lead": "選んだテンプレートで各スライドをレイアウトしています。少々お待ちください。",
+    "lead": "スライドをレイアウトして準備しています。完了するとプレビューが表示されます。",
     "stages": {
       "content": "内容",
       "layout": "レイアウト",
       "render": "描画",
       "save": "保存"
-    }
+    },
+    "waiting": "このページを開いたままお待ちください"
+  },
+  "workflow": {
+    "steps": "作成手順"
   }
 }

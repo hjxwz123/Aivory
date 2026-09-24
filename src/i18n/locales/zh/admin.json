@@ -1244,6 +1244,8 @@
       "drawing": "绘图",
       "drawingHint": "使用绘图模型、图片风格和图片生成工具。",
       "privateChat": "隐私对话",
+      "aiPpt": "AI PPT",
+      "aiPptHint": "允许此用户组制作和使用 AI 演示文稿；工作空间和成员设置仍可进一步限制。",
       "userMCP": "自建 MCP 服务",
       "userMCPHint": "允许使用用户或工作空间创建的 MCP 服务。仍须满足工作空间开关、成员权限和资源访问规则。",
       "privateChatHint": "允许使用仅保存在当前浏览器中、不写入对话历史的隐私对话。"

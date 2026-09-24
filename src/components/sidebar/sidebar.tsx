@@ -88,6 +88,7 @@ import { duration } from '@/lib/design-tokens'
 import { accentClasses } from '@/lib/project-helpers'
 import { partitionConversationNavigation } from '@/lib/conversation-navigation'
 import { userCan } from '@/lib/user-permissions'
+import { subscribeAccessInvalidation } from '@/lib/access-events'
 import { workspaceCapabilitiesForScope } from '@/lib/workspace-permissions'
 import { type DateBucket, bucketFor, modKey, cn, truncate } from '@/lib/utils'
 import { toast } from '@/hooks/use-toast'
@@ -302,7 +303,9 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
   // de-duplicates concurrent loads, so mounting several sidebars is harmless.
   useEffect(() => {
     void loadAiPPTConfig()
-  }, [loadAiPPTConfig])
+  }, [activeWsId, loadAiPPTConfig])
+
+  useEffect(() => subscribeAccessInvalidation(() => { void loadAiPPTConfig(true) }), [loadAiPPTConfig])
 
   function ensureProjectConversations(projectId: string) {
     if (loadedProjectIdsRef.current.has(projectId) || loadingProjectIdsRef.current.has(projectId)) return

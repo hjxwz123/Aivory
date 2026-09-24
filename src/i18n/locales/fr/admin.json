@@ -1240,6 +1240,8 @@
       "drawing": "Génération d'images",
       "drawingHint": "Utiliser les modèles d'image, les styles et les outils de génération d'images.",
       "privateChat": "Conversation privée",
+      "aiPpt": "AI PPT",
+      "aiPptHint": "Autoriser ce groupe à créer et utiliser des présentations IA. L’espace de travail et les membres peuvent restreindre l’accès.",
       "userMCP": "Services MCP créés par les utilisateurs",
       "userMCPHint": "Autoriser les services MCP créés par les utilisateurs ou les espaces. Les réglages de l’espace, les droits des membres et l’accès aux ressources restent applicables.",
       "privateChatHint": "Utiliser des conversations éphémères conservées uniquement dans le navigateur et non enregistrées dans l'historique."

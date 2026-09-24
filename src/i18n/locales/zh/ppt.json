@@ -15,9 +15,9 @@
   },
   "input": {
     "title": "想做什么主题的 PPT？",
-    "lead": "可以直接给主题，也可以粘贴文字、给网页地址、上传文档，或直接给 Markdown 大纲。",
-    "optionsTitle": "生成选项",
-    "optionsLead": "这些选项决定大纲的写法，除篇幅外都是可选的。",
+    "lead": "从一个主题或已有资料开始，先整理大纲，再选择适合的演示风格。",
+    "optionsTitle": "更多设置",
+    "optionsLead": "按需补充使用场景、受众和写作要求。",
     "anyOption": "交给模型判断",
     "types": {
       "topic": "主题生成",
@@ -50,8 +50,8 @@
     "promptHint": "{{count}}/50 字",
     "promptPlaceholder": "例如：语气务实一点",
     "submit": "生成大纲",
-    "priceHint": "生成这份 PPT 将扣除 {{price}} 积分。",
-    "freeHint": "当前部署生成 PPT 免费。",
+    "priceHint": "大纲可先修改，生成 PPT 时扣除 {{price}} 积分。",
+    "freeHint": "确认大纲后再选择模板，本次生成免费。",
     "freeHintPriced": "当前部署生成 PPT 免费（管理后台设置的标准价为每次 {{price}} 积分）。",
     "examples": {
       "label": "试试这些主题",
@@ -62,7 +62,9 @@
     "defaultTemplate": {
       "label": "默认模板",
       "hint": "未选择模板时使用，之后仍可更换。"
-    }
+    },
+    "source": "内容来源",
+    "uploadTooLarge": "文件大小不能超过 {{mb}} MB"
   },
   "outline": {
     "title": "大纲",
@@ -117,7 +119,8 @@
     "deleteTitle": "删除这个模板？",
     "deleteBody": "模板会从「我的模板」中移除，已生成的 PPT 不受影响。",
     "deleted": "模板已删除",
-    "deleteFailed": "删除失败"
+    "deleteFailed": "删除失败",
+    "category": "模板分类"
   },
   "result": {
     "untitled": "未命名 PPT",
@@ -144,7 +147,8 @@
     "credits": "积分",
     "priceNote": "管理后台设置的价格：每次生成 {{price}} 积分。",
     "saved": "已保存到我的文件",
-    "saving": "正在保存到我的文件…"
+    "saving": "正在保存到我的文件…",
+    "expandPreview": "放大预览"
   },
   "decks": {
     "empty": "还没有 PPT",
@@ -164,7 +168,8 @@
       "generating": "排版中",
       "ready": "已完成",
       "failed": "失败"
-    }
+    },
+    "lead": "查看已完成的演示文稿，或继续编辑之前的大纲。"
   },
   "charged": {
     "title": "已扣除 {{price}} 积分",
@@ -178,6 +183,10 @@
   "unconfigured": {
     "title": "AI PPT 尚未配置",
     "description": "请联系管理员在「管理后台 → 积分与配额」中填写文多多 API Key 后再使用。"
+  },
+  "permissionDenied": {
+    "title": "当前空间不可使用 AI PPT",
+    "description": "请联系管理员确认用户组、工作空间及成员权限。"
   },
   "disabled": {
     "title": "AI PPT 已关闭",
@@ -205,12 +214,16 @@
   },
   "render": {
     "title": "正在生成《{{subject}}》",
-    "lead": "正在用所选模板排版每一页，请稍候几秒。",
+    "lead": "正在排版并准备演示文稿。完成后会自动显示预览。",
     "stages": {
       "content": "内容",
       "layout": "版式",
       "render": "渲染",
       "save": "保存"
-    }
+    },
+    "waiting": "请保持页面打开"
+  },
+  "workflow": {
+    "steps": "制作步骤"
   }
 }

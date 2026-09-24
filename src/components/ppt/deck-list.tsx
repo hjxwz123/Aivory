@@ -6,7 +6,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Clock, FileText, ImageOff, Presentation, Trash2 } from 'lucide-react'
+import { ArrowRight, Presentation, Trash2 } from 'lucide-react'
 
 import { aipptApi, ApiError } from '@/api'
 import type { ApiAiPPTDeck, ApiAiPPTDeckStatus } from '@/api/types'
@@ -23,10 +23,10 @@ import {
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/hooks/use-toast'
-import { cn } from '@/lib/utils'
 
 interface DeckListProps {
   onOpen: (deck: ApiAiPPTDeck) => void
+  onCreate: () => void
   /** Bumped by the page after a generation so the list refetches. */
   refreshToken: number
 }
@@ -39,7 +39,7 @@ const STATUS_VARIANT: Record<ApiAiPPTDeckStatus, 'neutral' | 'success' | 'warnin
   failed: 'danger',
 }
 
-export function DeckList({ onOpen, refreshToken }: DeckListProps) {
+export function DeckList({ onOpen, onCreate, refreshToken }: DeckListProps) {
   const { t, i18n } = useTranslation('ppt')
   const [decks, setDecks] = useState<ApiAiPPTDeck[]>([])
   const [loading, setLoading] = useState(true)
@@ -81,9 +81,12 @@ export function DeckList({ onOpen, refreshToken }: DeckListProps) {
 
   if (loading && decks.length === 0) {
     return (
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      <div role="status" aria-label={t('common:common.loading')} className="min-h-0 flex-1 overflow-y-auto">
         {Array.from({ length: 6 }).map((_, index) => (
-          <Skeleton key={index} className="h-40 rounded-[12px]" />
+          <div key={index} className="flex items-center gap-4 border-b border-[var(--color-divider)] py-4">
+            <Skeleton className="aspect-video w-24 shrink-0 rounded-[8px] sm:w-36" />
+            <div className="flex-1 space-y-3"><Skeleton className="h-4 w-2/3" /><Skeleton className="h-3 w-1/3" /></div>
+          </div>
         ))}
       </div>
     )
@@ -94,11 +97,7 @@ export function DeckList({ onOpen, refreshToken }: DeckListProps) {
         icon={<Presentation size={22} aria-hidden />}
         title={t('decks.loadFailed')}
         description={error}
-        action={
-          <Button variant="outline" onClick={() => void load()}>
-            {t('template.loadMore')}
-          </Button>
-        }
+        action={<Button variant="secondary" onClick={() => void load()}>{t('common:actions.tryAgain')}</Button>}
       />
     )
   }
@@ -108,88 +107,59 @@ export function DeckList({ onOpen, refreshToken }: DeckListProps) {
         icon={<Presentation size={22} aria-hidden />}
         title={t('decks.empty')}
         description={t('decks.emptyHint')}
+        action={<Button size="sm" onClick={onCreate}>{t('result.newDeck')}</Button>}
       />
     )
   }
 
   return (
     <>
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {decks.map((deck) => {
-          const cover =
-            deck.cover_url && !brokenCovers.has(deck.id) ? aipptApi.resourceUrl(deck.cover_url) : null
-          const updated = new Intl.DateTimeFormat(i18n.language, {
-            dateStyle: 'medium',
-            timeStyle: 'short',
-          }).format(new Date(deck.updated_at * 1000))
-          return (
-            <article
-              key={deck.id}
-              className={cn(
-                'flex flex-col overflow-hidden rounded-[12px] border border-[var(--color-border)]',
-                'bg-[var(--color-surface)]',
-              )}
-            >
-              <button
-                type="button"
-                onClick={() => onOpen(deck)}
-                className="block aspect-[16/9] w-full bg-[var(--color-bg-muted)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-              >
-                {cover ? (
-                  <img
-                    src={cover}
-                    alt=""
-                    loading="lazy"
-                    className="h-full w-full object-cover"
-                    onError={() => setBrokenCovers((current) => new Set(current).add(deck.id))}
-                  />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center text-[var(--color-fg-muted)]">
-                    <ImageOff size={20} aria-hidden />
-                  </div>
-                )}
-              </button>
-              <div className="flex min-w-0 flex-1 flex-col gap-2 p-3">
-                <div className="flex items-start gap-2">
-                  <h3 className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--color-fg)]">
-                    {deck.subject || t('decks.untitled')}
-                  </h3>
-                  <Badge variant={STATUS_VARIANT[deck.status]}>{t(`decks.status.${deck.status}`)}</Badge>
-                </div>
-                <p className="flex items-center gap-1.5 text-xs text-[var(--color-fg-muted)]">
-                  <Clock size={12} aria-hidden />
-                  {updated}
-                  {deck.credits > 0 ? <span className="ml-1">· {t('decks.credits', { credits: deck.credits })}</span> : null}
-                </p>
-                {deck.error ? (
-                  <p className="text-xs text-[var(--color-danger)]">{deck.error}</p>
-                ) : !deck.file_id && deck.status === 'ready' ? (
-                  <p className="text-xs text-[var(--color-fg-muted)]">{t('result.mirrorPending')}</p>
-                ) : null}
-                <div className="mt-auto flex items-center gap-2">
-                  <Button size="sm" variant="secondary" onClick={() => onOpen(deck)}>
-                    {deck.file_id ? (
-                      <>
-                        <FileText size={13} aria-hidden className="mr-1.5" />
-                        {t('decks.open')}
-                      </>
-                    ) : (
-                      t('decks.continue')
-                    )}
-                  </Button>
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label={t('decks.delete')}
-                    onClick={() => setConfirming(deck)}
-                  >
-                    <Trash2 size={14} aria-hidden />
-                  </Button>
-                </div>
-              </div>
-            </article>
-          )
-        })}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <p className="mb-3 text-sm leading-6 text-[var(--color-fg-muted)]">{t('decks.lead')}</p>
+        <div className="divide-y divide-[var(--color-divider)]">
+          {decks.map((deck) => {
+            const cover = deck.cover_url && !brokenCovers.has(deck.id) ? aipptApi.resourceUrl(deck.cover_url) : null
+            const title = deck.subject || t('decks.untitled')
+            const updated = new Intl.DateTimeFormat(i18n.language, { dateStyle: 'medium', timeStyle: 'short' })
+              .format(new Date(deck.updated_at * 1000))
+            return (
+              <article key={deck.id} className="group flex items-center gap-2 py-2">
+                <button
+                  type="button"
+                  onClick={() => onOpen(deck)}
+                  aria-label={`${deck.status === 'ready' ? t('decks.open') : t('decks.continue')}: ${title}`}
+                  className="flex min-w-0 flex-1 items-center gap-3 rounded-[10px] py-3 pr-2 text-left interactive hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] sm:gap-5 sm:pr-4"
+                >
+                  <span className="flex aspect-video w-20 shrink-0 items-center justify-center overflow-hidden rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)] sm:w-36">
+                    {cover ? (
+                      <img src={cover} alt="" loading="lazy" className="h-full w-full object-contain"
+                        onError={() => setBrokenCovers((current) => new Set(current).add(deck.id))} />
+                    ) : <Presentation size={22} strokeWidth={1.5} aria-hidden />}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                      <span className="line-clamp-2 break-words text-sm font-medium text-[var(--color-fg)]">{title}</span>
+                      <Badge variant={STATUS_VARIANT[deck.status]}>{t(`decks.status.${deck.status}`)}</Badge>
+                    </span>
+                    <span className="mt-2 block text-xs leading-5 text-[var(--color-fg-muted)]">
+                      <time dateTime={new Date(deck.updated_at * 1000).toISOString()}>{updated}</time>
+                      {deck.credits > 0 ? ` · ${t('decks.credits', { credits: deck.credits })}` : ''}
+                    </span>
+                    {deck.error ? (
+                      <span className="mt-1 line-clamp-2 break-words text-xs text-[var(--color-danger)]">{deck.error}</span>
+                    ) : !deck.file_id && deck.status === 'ready' ? (
+                      <span className="mt-1 block text-xs text-[var(--color-fg-muted)]">{t('result.mirrorPending')}</span>
+                    ) : null}
+                  </span>
+                  <ArrowRight size={16} aria-hidden className="hidden shrink-0 text-[var(--color-fg-muted)] sm:block" />
+                </button>
+                <Button size="icon" variant="ghost" aria-label={`${t('decks.delete')}: ${title}`} onClick={() => setConfirming(deck)}>
+                  <Trash2 size={15} aria-hidden />
+                </Button>
+              </article>
+            )
+          })}
+        </div>
       </div>
 
       <Dialog open={confirming !== null} onOpenChange={(open) => (!open ? setConfirming(null) : null)}>

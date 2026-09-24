@@ -15,9 +15,9 @@
   },
   "input": {
     "title": "想做什麼主題的 PPT？",
-    "lead": "可以直接給主題，也可以貼上文字、給網頁網址、上傳文件，或直接給 Markdown 大綱。",
-    "optionsTitle": "生成選項",
-    "optionsLead": "這些選項決定大綱的寫法，除篇幅外都是可選的。",
+    "lead": "從一個主題或現有資料開始，先整理大綱，再選擇合適的簡報風格。",
+    "optionsTitle": "更多設定",
+    "optionsLead": "依需求補充使用情境、受眾和寫作要求。",
     "anyOption": "交給模型判斷",
     "types": {
       "topic": "主題生成",
@@ -50,8 +50,8 @@
     "promptHint": "{{count}}/50 字",
     "promptPlaceholder": "例如：語氣務實一點",
     "submit": "生成大綱",
-    "priceHint": "產生這份 PPT 將扣除 {{price}} 積分。",
-    "freeHint": "目前部署產生 PPT 免費。",
+    "priceHint": "可先修改大綱，產生簡報時扣除 {{price}} 積分。",
+    "freeHint": "確認大綱後再選擇範本，本次產生免費。",
     "freeHintPriced": "目前部署產生 PPT 免費（管理後台設定的標準價為每次 {{price}} 積分）。",
     "examples": {
       "label": "試試這些主題",
@@ -62,7 +62,9 @@
     "defaultTemplate": {
       "label": "預設範本",
       "hint": "未選擇範本時使用，之後仍可更換。"
-    }
+    },
+    "source": "內容來源",
+    "uploadTooLarge": "檔案大小不能超過 {{mb}} MB"
   },
   "outline": {
     "title": "大綱",
@@ -117,7 +119,8 @@
     "deleteTitle": "刪除這個範本？",
     "deleteBody": "範本會從「我的範本」中移除，已產生的 PPT 不受影響。",
     "deleted": "範本已刪除",
-    "deleteFailed": "刪除失敗"
+    "deleteFailed": "刪除失敗",
+    "category": "範本分類"
   },
   "result": {
     "untitled": "未命名 PPT",
@@ -144,7 +147,8 @@
     "credits": "積分",
     "priceNote": "管理後台設定的價格：每次生成 {{price}} 積分。",
     "saved": "已儲存到我的檔案",
-    "saving": "正在儲存到我的檔案…"
+    "saving": "正在儲存到我的檔案…",
+    "expandPreview": "放大預覽"
   },
   "decks": {
     "empty": "還沒有 PPT",
@@ -164,7 +168,8 @@
       "generating": "排版中",
       "ready": "已完成",
       "failed": "失敗"
-    }
+    },
+    "lead": "查看已完成的簡報，或繼續編輯先前的大綱。"
   },
   "charged": {
     "title": "已扣除 {{price}} 積分",
@@ -178,6 +183,10 @@
   "unconfigured": {
     "title": "AI PPT 尚未設定",
     "description": "請聯絡管理員在「管理後台 → 積分與配額」中填寫文多多 API Key 後再使用。"
+  },
+  "permissionDenied": {
+    "title": "目前空間無法使用 AI PPT",
+    "description": "請聯絡管理員確認使用者群組、工作空間及成員權限。"
   },
   "disabled": {
     "title": "AI PPT 已關閉",
@@ -205,12 +214,16 @@
   },
   "render": {
     "title": "正在產生《{{subject}}》",
-    "lead": "正在用所選範本排版每一頁，請稍候幾秒。",
+    "lead": "正在排版並準備簡報。完成後會自動顯示預覽。",
     "stages": {
       "content": "內容",
       "layout": "版式",
       "render": "渲染",
       "save": "儲存"
-    }
+    },
+    "waiting": "請保持頁面開啟"
+  },
+  "workflow": {
+    "steps": "製作步驟"
   }
 }

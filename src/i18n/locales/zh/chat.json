@@ -886,6 +886,10 @@
         "label": "使用 MCP 服务",
         "description": "调用此工作空间中可用 MCP 服务提供的工具。"
       },
+      "can_use_ai_ppt": {
+        "label": "使用 AI PPT",
+        "description": "用户组和工作空间都允许时，可制作和编辑 AI 演示文稿。"
+      },
       "can_create_prompts": {
         "label": "创建提示词",
         "description": "在此工作空间创建新的提示词。"
@@ -1035,6 +1039,10 @@
       "AllowPrivateChat": {
         "label": "隐私对话",
         "description": "允许使用不保存到历史的临时对话。还须系统用户组允许；工作空间管理员同样受此开关限制。"
+      },
+      "AllowAiPPT": {
+        "label": "AI PPT",
+        "description": "允许在此工作空间制作 AI 演示文稿；用户组和成员权限仍可限制。"
       },
       "AllowMCP": {
         "label": "MCP 服务",

@@ -5,7 +5,7 @@
  * image is loaded through our own resource proxy (`aipptApi.resourceUrl`) — the
  * browser never sees the token.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Check, ImageOff, Loader2, Pencil, Trash2, Upload } from 'lucide-react'
 
@@ -23,6 +23,8 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { SegmentedControl } from '@/components/ui/segmented-control'
 import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 
@@ -41,6 +43,7 @@ export function TemplatePicker({ selectedId, onSelect, disabled = false, onDelet
   const [templates, setTemplates] = useState<ApiAiPPTTemplate[]>([])
   const [type, setType] = useState<1 | 4>(1)
   const [category, setCategory] = useState<string>('')
+  const [categories, setCategories] = useState<string[]>([])
   const [page, setPage] = useState(1)
   const [hasMore, setHasMore] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -53,9 +56,11 @@ export function TemplatePicker({ selectedId, onSelect, disabled = false, onDelet
   const [removing, setRemoving] = useState<ApiAiPPTTemplate | null>(null)
   const [managing, setManaging] = useState(false)
   const fileRef = useRef<HTMLInputElement | null>(null)
+  const requestRef = useRef(0)
 
   const load = useCallback(
     async (nextPage: number, append: boolean) => {
+      const request = ++requestRef.current
       setLoading(true)
       setError(null)
       try {
@@ -65,13 +70,16 @@ export function TemplatePicker({ selectedId, onSelect, disabled = false, onDelet
           size: PAGE_SIZE,
           category: category || undefined,
         })
+        if (request !== requestRef.current) return
         setTemplates((current) => (append ? [...current, ...result.templates] : result.templates))
+        setCategories((current) => [...new Set([...current, ...result.templates.map((item) => (item.category ?? '').trim()).filter(Boolean)])].slice(0, 12))
         setHasMore(Boolean(result.has_more))
         setPage(nextPage)
       } catch (err) {
+        if (request !== requestRef.current) return
         setError(err instanceof ApiError ? err.message : t('errors.upstream'))
       } finally {
-        setLoading(false)
+        if (request === requestRef.current) setLoading(false)
       }
     },
     [category, t, type],
@@ -79,6 +87,7 @@ export function TemplatePicker({ selectedId, onSelect, disabled = false, onDelet
 
   useEffect(() => {
     void load(1, false)
+    return () => { requestRef.current += 1 }
   }, [load])
 
   /**
@@ -162,85 +171,39 @@ export function TemplatePicker({ selectedId, onSelect, disabled = false, onDelet
     }
   }, [onDeleted, removing, t])
 
-  // Categories come from the first page rather than a second endpoint: the
-  // vendor's own template/options route is not part of the documented V2 set.
-  const categories = useMemo(() => {
-    const seen = new Set<string>()
-    for (const template of templates) {
-      const value = (template.category ?? '').trim()
-      if (value) seen.add(value)
-    }
-    return [...seen].slice(0, 12)
-  }, [templates])
-
   const coverURL = (template: ApiAiPPTTemplate): string | null => {
     if (!template.coverUrl || brokenCovers.has(template.id)) return null
     return aipptApi.resourceUrl(template.coverUrl)
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="inline-flex items-center rounded-full bg-[var(--color-bg-muted)] p-0.5">
-          {([1, 4] as const).map((value) => (
-            <button
-              key={value}
-              type="button"
-              disabled={disabled}
-              onClick={() => {
-                setType(value)
-                setCategory('')
-                setTemplates([])
-              }}
-              aria-pressed={type === value}
-              className={cn(
-                'rounded-full px-3 py-1 text-xs interactive',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                type === value
-                  ? 'bg-[var(--color-surface)] font-medium text-[var(--color-fg)]'
-                  : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
-              )}
-            >
-              {t(value === 1 ? 'template.system' : 'template.mine')}
-            </button>
-          ))}
-        </div>
-
-        {categories.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={() => setCategory('')}
-              aria-pressed={category === ''}
-              className={cn(
-                'rounded-full border px-2.5 py-1 text-xs interactive',
-                category === ''
-                  ? 'border-[var(--color-accent)] text-[var(--color-accent)]'
-                  : 'border-[var(--color-border)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
-              )}
-            >
-              {t('template.all')}
-            </button>
-            {categories.map((value) => (
-              <button
-                key={value}
-                type="button"
-                disabled={disabled}
-                onClick={() => setCategory(value)}
-                aria-pressed={category === value}
-                className={cn(
-                  'rounded-full border px-2.5 py-1 text-xs interactive',
-                  category === value
-                    ? 'border-[var(--color-accent)] text-[var(--color-accent)]'
-                    : 'border-[var(--color-border)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
-                )}
-              >
-                {value}
-              </button>
-            ))}
-          </div>
-        )}
+    <div className="flex h-full min-h-0 flex-1 flex-col gap-4">
+      <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-[var(--color-divider)] pb-3">
+        <fieldset disabled={disabled || uploading || managing} className="min-w-0">
+          <SegmentedControl
+            label={t('template.title')}
+            value={String(type)}
+            options={[{ value: '1', label: t('template.system') }, { value: '4', label: t('template.mine') }]}
+            onChange={(value) => {
+              if (String(type) === value) return
+              setType(value === '4' ? 4 : 1)
+              setCategory('')
+              setCategories([])
+              setTemplates([])
+            }}
+          />
+        </fieldset>
+        {categories.length > 0 ? (
+          <Select value={category || '__all'} disabled={disabled || uploading} onValueChange={(value) => setCategory(value === '__all' ? '' : value)}>
+            <SelectTrigger aria-label={t('template.category')} className="h-8 w-auto min-w-28 max-w-48 bg-transparent text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all">{t('template.all')}</SelectItem>
+              {categories.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        ) : null}
 
         {/* Custom templates: Docmee learns a .pptx server-side (type=4), so the
             upload lands in the account's own catalogue. */}
@@ -256,7 +219,7 @@ export function TemplatePicker({ selectedId, onSelect, disabled = false, onDelet
               {t('template.upload')}
             </Button>
           )}
-          <span className="hidden text-[11px] text-[var(--color-fg-muted)] sm:inline">
+          <span className="hidden text-xs text-[var(--color-fg-muted)] xl:inline">
             {t('template.uploadHint')}
           </span>
           <input
@@ -274,16 +237,17 @@ export function TemplatePicker({ selectedId, onSelect, disabled = false, onDelet
       </div>
 
       {error ? (
-        <p className="rounded-[8px] border border-[var(--color-border)] px-3 py-2 text-sm text-[var(--color-fg-muted)]">
-          {error}
-        </p>
+        <div role="alert" className="flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-[8px] bg-[var(--color-bg-muted)] px-3 py-2 text-sm text-[var(--color-fg-muted)]">
+          <p>{error}</p>
+          <Button size="sm" variant="secondary" onClick={() => void load(page, page > 1)}>{t('common:actions.tryAgain')}</Button>
+        </div>
       ) : null}
 
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
         {loading && templates.length === 0 ? (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
             {Array.from({ length: 8 }).map((_, index) => (
-              <Skeleton key={index} className="aspect-[4/3] rounded-[10px]" />
+              <Skeleton key={index} className="aspect-video rounded-[10px]" />
             ))}
           </div>
         ) : templates.length === 0 ? (
@@ -298,7 +262,7 @@ export function TemplatePicker({ selectedId, onSelect, disabled = false, onDelet
                   <div
                     key={template.id}
                     className={cn(
-                      'flex flex-col overflow-hidden rounded-[10px] border interactive',
+                      'flex min-w-0 flex-col overflow-hidden rounded-[10px] border bg-[var(--color-surface)] interactive',
                       selected
                         ? 'border-[var(--color-accent)] ring-1 ring-[var(--color-accent)]'
                         : 'border-[var(--color-border)] hover:border-[var(--color-border-strong)]',
@@ -309,15 +273,15 @@ export function TemplatePicker({ selectedId, onSelect, disabled = false, onDelet
                       disabled={disabled}
                       onClick={() => onSelect(template)}
                       aria-pressed={selected}
-                      className="block text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                      className="block min-w-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)] disabled:opacity-60"
                     >
-                      <div className="aspect-[4/3] w-full bg-[var(--color-bg-muted)]">
+                      <div className="aspect-video w-full bg-[var(--color-bg-muted)]">
                         {cover ? (
                           <img
                             src={cover}
                             alt=""
                             loading="lazy"
-                            className="h-full w-full object-cover"
+                            className="h-full w-full object-contain"
                             onError={() => setBrokenCovers((current) => new Set(current).add(template.id))}
                           />
                         ) : (
@@ -326,8 +290,8 @@ export function TemplatePicker({ selectedId, onSelect, disabled = false, onDelet
                           </div>
                         )}
                       </div>
-                      <div className="flex items-center gap-1.5 px-2 py-1.5">
-                        <span className="min-w-0 flex-1 truncate text-xs text-[var(--color-fg)]">{template.name}</span>
+                      <div className="flex min-h-12 items-center gap-2 px-3 py-2.5">
+                        <span className="line-clamp-2 min-w-0 flex-1 break-words text-[13px] text-[var(--color-fg)]">{template.name}</span>
                         {selected ? (
                           <Check size={13} aria-hidden className="shrink-0 text-[var(--color-accent)]" />
                         ) : null}

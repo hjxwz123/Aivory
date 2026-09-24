@@ -13,6 +13,7 @@ import (
 type AiPPTDeck struct {
 	ID           string  `json:"id"`
 	UserID       string  `json:"user_id"`
+	WorkspaceID  string  `json:"workspace_id"`
 	TaskID       string  `json:"task_id"`
 	PptID        string  `json:"ppt_id"`
 	Subject      string  `json:"subject"`
@@ -41,14 +42,14 @@ const (
 	AiPPTDeckFailed       = "failed"
 )
 
-const aiPPTDeckColumns = `id,user_id,task_id,ppt_id,subject,source_type,status,outline,
+const aiPPTDeckColumns = `id,user_id,workspace_id,task_id,ppt_id,subject,source_type,status,outline,
 	template_id,template_name,cover_url,file_id,error,credits,options_json,created_at,updated_at`
 
 func scanAiPPTDeck(row interface {
 	Scan(...any) error
 }) (*AiPPTDeck, error) {
 	var d AiPPTDeck
-	if err := row.Scan(&d.ID, &d.UserID, &d.TaskID, &d.PptID, &d.Subject, &d.SourceType, &d.Status,
+	if err := row.Scan(&d.ID, &d.UserID, &d.WorkspaceID, &d.TaskID, &d.PptID, &d.Subject, &d.SourceType, &d.Status,
 		&d.Outline, &d.TemplateID, &d.TemplateName, &d.CoverURL, &d.FileID, &d.Error, &d.Credits,
 		&d.OptionsJSON, &d.CreatedAt, &d.UpdatedAt); err != nil {
 		return nil, err
@@ -71,8 +72,8 @@ func CreateAiPPTDeck(ctx context.Context, db *sql.DB, deck AiPPTDeck) (*AiPPTDec
 	}
 	if _, err := db.ExecContext(ctx,
 		`INSERT INTO aippt_decks(`+aiPPTDeckColumns+`)
-		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		deck.ID, deck.UserID, deck.TaskID, deck.PptID, deck.Subject, deck.SourceType, deck.Status,
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		deck.ID, deck.UserID, deck.WorkspaceID, deck.TaskID, deck.PptID, deck.Subject, deck.SourceType, deck.Status,
 		deck.Outline, deck.TemplateID, deck.TemplateName, deck.CoverURL, deck.FileID, deck.Error,
 		deck.Credits, deck.OptionsJSON, now, now); err != nil {
 		return nil, err
@@ -96,16 +97,20 @@ func GetAiPPTDeck(ctx context.Context, db *sql.DB, id, userID string) (*AiPPTDec
 }
 
 // ListAiPPTDecks returns the user's decks, newest first.
-func ListAiPPTDecks(ctx context.Context, db *sql.DB, userID string, limit, offset int) ([]AiPPTDeck, error) {
+func ListAiPPTDecks(ctx context.Context, db *sql.DB, userID string, limit, offset int, scope ...string) ([]AiPPTDeck, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
 	if offset < 0 {
 		offset = 0
 	}
+	workspaceID := ""
+	if len(scope) > 0 {
+		workspaceID = scope[0]
+	}
 	rows, err := db.QueryContext(ctx,
-		`SELECT `+aiPPTDeckColumns+` FROM aippt_decks WHERE user_id=?
-		  ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?`, userID, limit, offset)
+		`SELECT `+aiPPTDeckColumns+` FROM aippt_decks WHERE user_id=? AND workspace_id=?
+		  ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?`, userID, workspaceID, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -122,9 +127,13 @@ func ListAiPPTDecks(ctx context.Context, db *sql.DB, userID string, limit, offse
 }
 
 // CountAiPPTDecks counts the user's decks so the list page can paginate.
-func CountAiPPTDecks(ctx context.Context, db *sql.DB, userID string) (int, error) {
+func CountAiPPTDecks(ctx context.Context, db *sql.DB, userID string, scope ...string) (int, error) {
 	var n int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM aippt_decks WHERE user_id=?`, userID).Scan(&n); err != nil {
+	workspaceID := ""
+	if len(scope) > 0 {
+		workspaceID = scope[0]
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM aippt_decks WHERE user_id=? AND workspace_id=?`, userID, workspaceID).Scan(&n); err != nil {
 		return 0, err
 	}
 	return n, nil

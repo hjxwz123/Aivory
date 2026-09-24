@@ -16,6 +16,7 @@ type AiPPTStatus = 'idle' | 'loading' | 'ready' | 'error'
 
 interface AiPPTStore {
   config: ApiAiPPTConfig | null
+  scope: string
   status: AiPPTStatus
   error: string | null
   /** Authoritative spendable balance, refreshed by every billing transition. */
@@ -26,42 +27,48 @@ interface AiPPTStore {
   reset: () => void
 }
 
-let inFlight: Promise<ApiAiPPTConfig | null> | null = null
+let inFlight: { scope: string; promise: Promise<ApiAiPPTConfig | null> } | null = null
+let revision = 0
 
 export const useAiPPT = create<AiPPTStore>((set, get) => ({
   config: null,
+  scope: '',
   status: 'idle',
   error: null,
   available: 0,
   load: (force = false) => {
-    if (!force && get().status === 'ready' && get().config) {
+    const scope = aipptApi.scopedPath('/me/ppt/config')
+    if (!force && get().scope === scope && get().status === 'ready' && get().config) {
       return Promise.resolve(get().config)
     }
-    if (inFlight) return inFlight
-    set({ status: 'loading' })
-    inFlight = aipptApi
+    if (!force && inFlight?.scope === scope) return inFlight.promise
+    const requestRevision = ++revision
+    set({ scope, config: null, status: 'loading' })
+    const promise = aipptApi
       .config()
       .then((config) => {
-        set({ config, status: 'ready', error: null, available: config.credits_available })
+        if (revision === requestRevision) set({ config, status: 'ready', error: null, available: config.credits_available })
         return config
       })
       .catch((error: unknown) => {
-        set({
+        if (revision === requestRevision) set({
           status: 'error',
           error: error instanceof Error ? error.message : String(error),
         })
         return null
       })
       .finally(() => {
-        inFlight = null
+        if (inFlight?.promise === promise) inFlight = null
       })
-    return inFlight
+    inFlight = { scope, promise }
+    return promise
   },
   setAvailable: (available) => {
     if (Number.isFinite(available)) set({ available })
   },
   reset: () => {
+    revision += 1
     inFlight = null
-    set({ config: null, status: 'idle', error: null, available: 0 })
+    set({ config: null, scope: '', status: 'idle', error: null, available: 0 })
   },
 }))

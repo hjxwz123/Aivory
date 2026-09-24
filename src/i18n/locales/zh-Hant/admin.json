@@ -1240,6 +1240,8 @@
       "drawing": "繪圖",
       "drawingHint": "使用繪圖模型、圖片樣式和圖片生成工具。",
       "privateChat": "隱私對話",
+      "aiPpt": "AI PPT",
+      "aiPptHint": "允許此使用者群組製作和使用 AI 簡報；工作空間與成員設定仍可進一步限制。",
       "userMCP": "自建 MCP 服務",
       "userMCPHint": "允許使用使用者或工作空間建立的 MCP 服務。仍須符合工作空間開關、成員權限及資源存取規則。",
       "privateChatHint": "允許使用僅保存在目前瀏覽器中、不寫入對話記錄的隱私對話。"

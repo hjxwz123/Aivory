@@ -15,9 +15,9 @@
   },
   "input": {
     "title": "Sur quoi doit porter la présentation ?",
-    "lead": "Partez d'un sujet, collez votre texte, indiquez une page web, importez un document ou fournissez un plan Markdown.",
-    "optionsTitle": "Options de génération",
-    "optionsLead": "Elles orientent la rédaction du plan. Tout est facultatif sauf la longueur.",
+    "lead": "Partez d’une idée ou de vos documents. Affinez le plan, puis choisissez le style de vos diapositives.",
+    "optionsTitle": "Plus d’options",
+    "optionsLead": "Précisez si besoin le contexte, le public et vos préférences de rédaction.",
     "anyOption": "Laisser le modèle décider",
     "types": {
       "topic": "Sujet",
@@ -50,8 +50,8 @@
     "promptHint": "{{count}}/50 caractères",
     "promptPlaceholder": "ex. : garder un ton pragmatique",
     "submit": "Générer le plan",
-    "priceHint": "Générer cette présentation coûte {{price}} crédits.",
-    "freeHint": "La génération est gratuite sur ce déploiement.",
+    "priceHint": "Vérifiez d’abord le plan. La génération coûte {{price}} crédits.",
+    "freeHint": "Vérifiez le plan, puis choisissez un modèle. Cette génération est gratuite.",
     "freeHintPriced": "La génération est gratuite sur ce déploiement (le prix standard configuré est de {{price}} crédits par présentation).",
     "examples": {
       "label": "Quelques idées",
@@ -62,7 +62,9 @@
     "defaultTemplate": {
       "label": "Modèle par défaut",
       "hint": "Utilisé si vous n’en choisissez aucun plus tard. Modifiable après le plan."
-    }
+    },
+    "source": "Source du contenu",
+    "uploadTooLarge": "Le fichier ne doit pas dépasser {{mb}} Mo"
   },
   "outline": {
     "title": "Plan",
@@ -117,7 +119,8 @@
     "deleteTitle": "Supprimer ce modèle ?",
     "deleteBody": "Il disparaît de « Les miens ». Les présentations déjà générées ne sont pas affectées.",
     "deleted": "Modèle supprimé",
-    "deleteFailed": "Impossible de supprimer le modèle"
+    "deleteFailed": "Impossible de supprimer le modèle",
+    "category": "Catégorie de modèle"
   },
   "result": {
     "untitled": "Présentation sans titre",
@@ -144,7 +147,8 @@
     "credits": "Crédits",
     "priceNote": "Prix configuré par l’administrateur : {{price}} crédits par présentation.",
     "saved": "Enregistré dans vos fichiers",
-    "saving": "Enregistrement dans vos fichiers…"
+    "saving": "Enregistrement dans vos fichiers…",
+    "expandPreview": "Agrandir l’aperçu"
   },
   "decks": {
     "empty": "Aucune présentation",
@@ -164,7 +168,8 @@
       "generating": "Mise en page",
       "ready": "Prête",
       "failed": "Échec"
-    }
+    },
+    "lead": "Ouvrez une présentation terminée ou reprenez un plan en cours."
   },
   "charged": {
     "title": "{{price}} crédits débités",
@@ -178,6 +183,10 @@
   "unconfigured": {
     "title": "AI PPT n'est pas configuré",
     "description": "Un administrateur doit renseigner la clé API Docmee dans Admin → Crédits et quotas pour activer AI PPT."
+  },
+  "permissionDenied": {
+    "title": "AI PPT n’est pas disponible ici",
+    "description": "Demandez à un administrateur de vérifier les droits du groupe, de l’espace de travail et du membre."
   },
   "disabled": {
     "title": "AI PPT est désactivé",
@@ -205,12 +214,16 @@
   },
   "render": {
     "title": "Création de « {{subject}} »",
-    "lead": "Mise en page de chaque diapositive avec votre modèle — quelques secondes.",
+    "lead": "Vos diapositives sont en cours de mise en page. L’aperçu s’affichera dès qu’elles seront prêtes.",
     "stages": {
       "content": "Contenu",
       "layout": "Mise en page",
       "render": "Rendu",
       "save": "Enregistrement"
-    }
+    },
+    "waiting": "Gardez cette page ouverte"
+  },
+  "workflow": {
+    "steps": "Étapes de création"
   }
 }

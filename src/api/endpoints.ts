@@ -572,11 +572,19 @@ export const audioApi = {
  * the credit ledger is billed server-side, and the rendered .pptx is mirrored
  * into the user's own files.
  */
+function pptPath(path: string): string {
+  let scope: string | null = null
+  try { scope = typeof localStorage === 'undefined' ? null : localStorage.getItem('aivory.workspace') } catch { return path }
+  if (!scope || scope === 'personal') return path
+  return `${path}${path.includes('?') ? '&' : '?'}workspace_id=${encodeURIComponent(scope)}`
+}
+
 export const aipptApi = {
-  config: () => api<ApiAiPPTConfig>('/me/ppt/config'),
+  scopedPath: pptPath,
+  config: () => api<ApiAiPPTConfig>(pptPath('/me/ppt/config')),
   /** Vendor enumerations (language / scene / audience …) for the create form. */
   options: (lang?: string) =>
-    api<ApiAiPPTOptions>(`/me/ppt/options${lang ? `?lang=${encodeURIComponent(lang)}` : ''}`),
+    api<ApiAiPPTOptions>(pptPath(`/me/ppt/options${lang ? `?lang=${encodeURIComponent(lang)}` : ''}`)),
   /** Paged template catalogue (type 1 = system, 4 = the account's own). */
   templates: (params: { type?: 1 | 4; page?: number; size?: number; category?: string } = {}) => {
     const qs = new URLSearchParams()
@@ -584,13 +592,13 @@ export const aipptApi = {
     if (params.page) qs.set('page', String(params.page))
     if (params.size) qs.set('size', String(params.size))
     if (params.category) qs.set('category', params.category)
-    return api<ApiAiPPTTemplatePage>(`/me/ppt/templates${qs.toString() ? `?${qs}` : ''}`)
+    return api<ApiAiPPTTemplatePage>(pptPath(`/me/ppt/templates${qs.toString() ? `?${qs}` : ''}`))
   },
   /**
    * Same-origin URL for a vendor-hosted image (template/deck cover). The vendor
    * returns 403 without its temporary token, which stays server-side.
    */
-  resourceUrl: (raw: string) => apiUrl(`/me/ppt/resource?url=${encodeURIComponent(raw)}`),
+  resourceUrl: (raw: string) => apiUrl(pptPath(`/me/ppt/resource?url=${encodeURIComponent(raw)}`)),
   /**
    * Register a custom template: Docmee learns the .pptx and files it under the
    * account's own catalogue. Passing a template id would overwrite an existing
@@ -603,20 +611,20 @@ export const aipptApi = {
     const fd = new FormData()
     fd.append('file', file, file.name)
     if (opts.templateId) fd.append('template_id', opts.templateId)
-    return apiUpload<{ template_id: string }>('/me/ppt/templates', fd, opts)
+    return apiUpload<{ template_id: string }>(pptPath('/me/ppt/templates'), fd, opts)
   },
   /** Rename one of the caller's own custom templates. */
   renameTemplate: (id: string, name: string) =>
     api<{ template_id: string; name: string }>(
-      `/me/ppt/templates/${encodeURIComponent(id)}/rename`,
+      pptPath(`/me/ppt/templates/${encodeURIComponent(id)}/rename`),
       { method: 'POST', body: { name } },
     ),
   /** Delete one of the caller's own custom templates. */
   deleteTemplate: (id: string) =>
-    api<{ ok: boolean }>(`/me/ppt/templates/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    api<{ ok: boolean }>(pptPath(`/me/ppt/templates/${encodeURIComponent(id)}`), { method: 'DELETE' }),
   /** Open a generation task from text/URL/Markdown input. */
   createTask: (body: { type: number; content: string }) =>
-    api<{ deck: ApiAiPPTDeck }>('/me/ppt/tasks', { method: 'POST', body }),
+    api<{ deck: ApiAiPPTDeck }>(pptPath('/me/ppt/tasks'), { method: 'POST', body }),
   /** Open a generation task from an uploaded file (multipart passthrough). */
   createTaskFromFile: (
     file: File,
@@ -625,36 +633,36 @@ export const aipptApi = {
     const fd = new FormData()
     fd.append('type', String(opts.type ?? 2))
     fd.append('file', file, file.name)
-    return apiUpload<{ deck: ApiAiPPTDeck }>('/me/ppt/tasks', fd, opts)
+    return apiUpload<{ deck: ApiAiPPTDeck }>(pptPath('/me/ppt/tasks'), fd, opts)
   },
   decks: (params: { limit?: number; offset?: number } = {}) => {
     const qs = new URLSearchParams()
     if (params.limit) qs.set('limit', String(params.limit))
     if (params.offset) qs.set('offset', String(params.offset))
-    return api<ApiAiPPTDeckPage>(`/me/ppt/decks${qs.toString() ? `?${qs}` : ''}`)
+    return api<ApiAiPPTDeckPage>(pptPath(`/me/ppt/decks${qs.toString() ? `?${qs}` : ''}`))
   },
-  deck: (id: string) => api<{ deck: ApiAiPPTDeck }>(`/me/ppt/decks/${encodeURIComponent(id)}`),
+  deck: (id: string) => api<{ deck: ApiAiPPTDeck }>(pptPath(`/me/ppt/decks/${encodeURIComponent(id)}`)),
   deleteDeck: (id: string) =>
-    api<{ ok: true }>(`/me/ppt/decks/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    api<{ ok: true }>(pptPath(`/me/ppt/decks/${encodeURIComponent(id)}`), { method: 'DELETE' }),
   /** Render the deck (charges the per-deck price) and mirror the .pptx. */
   generate: (id: string, body: { template_id?: string; markdown?: string }) =>
-    api<ApiAiPPTGenerateResult>(`/me/ppt/decks/${encodeURIComponent(id)}/pptx`, {
+    api<ApiAiPPTGenerateResult>(pptPath(`/me/ppt/decks/${encodeURIComponent(id)}/pptx`), {
       method: 'POST',
       body,
     }),
   /** Re-render with another template (may charge the edit price). */
   changeTemplate: (id: string, templateId: string) =>
-    api<{ deck: ApiAiPPTDeck }>(`/me/ppt/decks/${encodeURIComponent(id)}/template`, {
+    api<{ deck: ApiAiPPTDeck }>(pptPath(`/me/ppt/decks/${encodeURIComponent(id)}/template`), {
       method: 'POST',
       body: { template_id: templateId },
     }),
   /** One-time session for the vendor's editor (slide-level editing). */
-  editor: (id: string) => api<ApiAiPPTEditorSession>(`/me/ppt/decks/${encodeURIComponent(id)}/editor`),
+  editor: (id: string) => api<ApiAiPPTEditorSession>(pptPath(`/me/ppt/decks/${encodeURIComponent(id)}/editor`)),
   /** Pull a deck edited in the vendor's editor back into the user's files. */
   refreshFile: (id: string) =>
-    api<{ deck: ApiAiPPTDeck }>(`/me/ppt/decks/${encodeURIComponent(id)}/refresh-file`, { method: 'POST', body: {} }),
+    api<{ deck: ApiAiPPTDeck }>(pptPath(`/me/ppt/decks/${encodeURIComponent(id)}/refresh-file`), { method: 'POST', body: {} }),
   renameDeck: (id: string, subject: string) =>
-    api<{ deck: ApiAiPPTDeck }>(`/me/ppt/decks/${encodeURIComponent(id)}/rename`, {
+    api<{ deck: ApiAiPPTDeck }>(pptPath(`/me/ppt/decks/${encodeURIComponent(id)}/rename`), {
       method: 'POST',
       body: { subject },
     }),
@@ -766,6 +774,7 @@ export const workspacesApi = {
       AllowSkills: 'allow_skills',
       AllowPrompts: 'allow_prompts',
       AllowPrivateChat: 'allow_private_chat',
+      AllowAiPPT: 'allow_ai_ppt',
       AllowSandbox: 'allow_sandbox',
       AllowImageGeneration: 'allow_image_generation',
       AllowKnowledgeBases: 'allow_knowledge_bases',

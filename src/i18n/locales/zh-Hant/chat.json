@@ -882,6 +882,10 @@
         "label": "使用技能",
         "description": "執行工作空間資源庫中共享的技能。"
       },
+      "can_use_ai_ppt": {
+        "label": "使用 AI PPT",
+        "description": "使用者群組與工作空間都允許時，可製作和編輯 AI 簡報。"
+      },
       "can_use_mcp": {
         "label": "使用 MCP 服務",
         "description": "呼叫此工作空間中可用 MCP 服務提供的工具。"
@@ -1031,6 +1035,10 @@
       "AllowDrawing": {
         "label": "繪圖",
         "description": "允許使用獨立繪圖模式與繪圖模型。"
+      },
+      "AllowAiPPT": {
+        "label": "AI PPT",
+        "description": "允許在此工作空間製作 AI 簡報；群組與成員權限仍可限制。"
       },
       "AllowPrivateChat": {
         "label": "隱私對話",

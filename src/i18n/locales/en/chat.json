@@ -887,6 +887,10 @@
         "label": "Use skills",
         "description": "Run skills shared in the workspace library."
       },
+      "can_use_ai_ppt": {
+        "label": "Use AI PPT",
+        "description": "Create and edit AI presentations when the group and workspace both allow it."
+      },
       "can_use_mcp": {
         "label": "Use MCP services",
         "description": "Call tools exposed by MCP services available in this workspace."
@@ -1036,6 +1040,10 @@
       "AllowDrawing": {
         "label": "Drawing",
         "description": "Allow the dedicated drawing mode and image models."
+      },
+      "AllowAiPPT": {
+        "label": "AI PPT",
+        "description": "Allow AI presentations in this workspace. Group and member restrictions still apply."
       },
       "AllowPrivateChat": {
         "label": "Private chat",

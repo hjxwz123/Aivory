@@ -882,6 +882,10 @@
         "label": "Utiliser les compétences",
         "description": "Exécuter les compétences partagées dans la bibliothèque."
       },
+      "can_use_ai_ppt": {
+        "label": "Utiliser AI PPT",
+        "description": "Créer et modifier des présentations IA si le groupe et l’espace de travail l’autorisent."
+      },
       "can_use_mcp": {
         "label": "Utiliser les services MCP",
         "description": "Appeler les outils des services MCP disponibles dans cet espace."
@@ -1031,6 +1035,10 @@
       "AllowDrawing": {
         "label": "Dessin",
         "description": "Autoriser le mode dessin dédié et les modèles d'image."
+      },
+      "AllowAiPPT": {
+        "label": "AI PPT",
+        "description": "Autoriser les présentations IA ici. Les restrictions du groupe et des membres restent applicables."
       },
       "AllowPrivateChat": {
         "label": "Conversation privée",

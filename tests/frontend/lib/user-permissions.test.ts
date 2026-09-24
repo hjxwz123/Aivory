@@ -35,6 +35,13 @@ describe('user group capabilities', () => {
     }, 'allow_private_chat')).toBe(false)
   })
 
+  it('treats AI PPT as a group ceiling with a permissive legacy default', () => {
+    expect(userCan({ role: 'user' }, 'allow_ai_ppt')).toBe(true)
+    const permissions = { ...DEFAULT_USER_PERMISSIONS, allow_ai_ppt: false }
+    expect(userCan({ role: 'user', permissions }, 'allow_ai_ppt')).toBe(false)
+    expect(userCan({ role: 'admin', permissions }, 'allow_ai_ppt')).toBe(true)
+  })
+
   it('keeps administrator access independent of group restrictions', () => {
     expect(userCan({
       role: 'admin',

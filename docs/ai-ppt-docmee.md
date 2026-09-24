@@ -127,12 +127,31 @@ deployment separately from our users' credits.
 | column | notes |
 | --- | --- |
 | `id` | our id (`ppt_…`), used by every endpoint |
+| `workspace_id` | creation scope; empty for personal decks, immutable afterward |
 | `task_id` / `ppt_id` | vendor identifiers |
 | `subject`, `outline` | display name + the Markdown the deck was built from |
 | `status` | `draft` → `outline_ready` → `generating` → `ready`/`failed` |
 | `template_id`, `template_name`, `cover_url` | chosen template |
 | `file_id` | the mirrored `.pptx` in our `files` table (preview/download/share) |
 | `credits`, `error`, `options_json` | what was charged, why it failed, the inputs |
+
+## Permissions
+
+- Platform administrators set `allow_ai_ppt` on each user group. Site admins
+  bypass the group restriction, as with other group capabilities.
+- Workspace admins set `allow_ai_ppt` in the workspace policy and
+  `can_use_ai_ppt` for ordinary members. Workspace admins and owners bypass
+  member limits, but not their own user-group limit or the workspace switch.
+- Effective access is the intersection: deployment enabled, group allowed,
+  workspace allowed, and member allowed. Guests cannot use AI PPT. Personal
+  space has only the deployment and group gates. Missing fields in older rows
+  default to allowed, preserving existing installations.
+- All `/api/me/ppt/*` operations re-check permission on every request. Clients
+  pass `workspace_id` as a query parameter for workspace operations, including
+  template covers and SSE outlines. Deck routes also require that scope to
+  match the deck's immutable `workspace_id`; switching to personal space cannot
+  reopen a workspace deck after permission is revoked. Legacy decks remain
+  personal. The generated `.pptx` is still mirrored to the creator's own files.
 
 ## Endpoints
 
@@ -204,12 +223,17 @@ generated deck places content oddly, that marking can be corrected by hand at
 
 ## Rendering feedback
 
-`generatePptx` returns no per-page progress, so the UI stages it honestly: after
-choosing a template the page shows a rendering stage (fanned shimmering slides
-behind a staged checklist — content → layout → render → save) whose bar creeps
-towards 92% while the request is in flight and snaps to 100% on the response,
-with a minimum visible beat so a fast render does not flash. Motion is skipped
-under `prefers-reduced-motion`.
+`generatePptx` returns no per-page progress. While the request is pending, the UI
+shows the selected template and an indeterminate status, without estimating a
+percentage or marking unconfirmed processing steps as complete. The preview
+opens as soon as the response arrives. The status indicator respects
+`prefers-reduced-motion`.
+
+The creation page shares the site's header, theme tokens and form controls.
+Creation and saved decks remain accessible on small screens, template covers keep
+their 16:9 ratio, and the result has an inline preview on desktop and mobile.
+Changing a template or syncing the editor reloads the preview even if the file id
+is unchanged. Retrying a file save uses `refresh-file` rather than rendering again.
 
 ## Editing slides
 

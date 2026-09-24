@@ -475,6 +475,7 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
       can_add_kb_files: member.can_add_kb_files,
       can_delete_kb_content: member.can_delete_kb_content,
       can_delete_conversations: member.can_delete_conversations,
+      can_use_ai_ppt: member.can_use_ai_ppt ?? true,
     })
   }
 
@@ -1081,6 +1082,7 @@ const WORKSPACE_PERMISSION_GROUPS: WorkspaceMemberPermissionGroup[] = [
       { key: 'can_use_prompts', label: 'Use prompts', description: 'Apply prompts from the workspace library.' },
       { key: 'can_use_skills', label: 'Use skills', description: 'Run skills shared in the workspace library.' },
       { key: 'can_use_mcp', label: 'Use MCP services', description: 'Call tools exposed by MCP services available in this workspace.' },
+      { key: 'can_use_ai_ppt', label: 'Use AI PPT', description: 'Create and edit AI presentations when the user group and workspace both allow it.' },
     ],
   },
   {
@@ -1517,7 +1519,7 @@ function WorkspacePolicyPanel({ workspaceID }: { workspaceID: string }) {
 
   const allModelsAllowed = policy.AllowedModelIDs.length === 0
   const capabilities = workspaceCapabilities(policy)
-  type CapabilityKey = 'AllowToolCalling' | 'AllowDrawing' | 'AllowPrivateChat' | 'AllowMCP' | 'AllowSkills' | 'AllowPrompts' | 'AllowKnowledgeBases' | 'AllowFileUpload'
+  type CapabilityKey = 'AllowToolCalling' | 'AllowDrawing' | 'AllowPrivateChat' | 'AllowAiPPT' | 'AllowMCP' | 'AllowSkills' | 'AllowPrompts' | 'AllowKnowledgeBases' | 'AllowFileUpload'
   const capabilityGroups: Array<{
     id: 'core' | 'resources' | 'content'
     label: string
@@ -1532,6 +1534,7 @@ function WorkspacePolicyPanel({ workspaceID }: { workspaceID: string }) {
         { key: 'AllowToolCalling', label: 'Tool calling', description: 'Allow model tool calls, including built-in tools and MCP services.' },
         { key: 'AllowDrawing', label: 'Drawing', description: 'Allow the dedicated drawing mode and image models.' },
         { key: 'AllowPrivateChat', label: 'Private chat', description: 'Allow temporary chats when the system user group also permits them. Applies to workspace admins too.' },
+        { key: 'AllowAiPPT', label: 'AI PPT', description: 'Allow AI presentations in this workspace. User group and member restrictions still apply.' },
       ],
     },
     {
@@ -1570,6 +1573,7 @@ function WorkspacePolicyPanel({ workspaceID }: { workspaceID: string }) {
         AllowSkills: capabilities.skills,
         AllowPrompts: capabilities.prompts,
         AllowPrivateChat: capabilities.privateChat,
+        AllowAiPPT: policy!.AllowAiPPT ?? true,
         AllowKnowledgeBases: capabilities.knowledgeBases,
         AllowFileUpload: capabilities.fileUpload,
         MemberMonthlyCreditLimit: Math.max(0, Number(limitDraft) || 0),
@@ -1636,6 +1640,8 @@ function WorkspacePolicyPanel({ workspaceID }: { workspaceID: string }) {
                           ? capabilities.prompts
                           : row.key === 'AllowPrivateChat'
                             ? capabilities.privateChat
+                            : row.key === 'AllowAiPPT'
+                              ? policy.AllowAiPPT ?? true
                             : row.key === 'AllowKnowledgeBases'
                               ? capabilities.knowledgeBases
                               : capabilities.fileUpload
@@ -1662,6 +1668,7 @@ function WorkspacePolicyPanel({ workspaceID }: { workspaceID: string }) {
                           if (row.key === 'AllowSkills') return { ...current, AllowSkills: checked }
                           if (row.key === 'AllowPrompts') return { ...current, AllowPrompts: checked }
                           if (row.key === 'AllowPrivateChat') return { ...current, AllowPrivateChat: checked }
+                          if (row.key === 'AllowAiPPT') return { ...current, AllowAiPPT: checked }
                           if (row.key === 'AllowKnowledgeBases') return { ...current, AllowKnowledgeBases: checked }
                           return { ...current, AllowFileUpload: checked }
                         })

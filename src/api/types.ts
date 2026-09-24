@@ -357,12 +357,14 @@ export interface ApiWorkspaceMember {
   can_add_kb_files: boolean
   can_delete_kb_content: boolean
   can_delete_conversations: boolean
+  can_use_ai_ppt: boolean
 }
 
 export interface ApiWorkspaceMemberPermissions {
   can_create_projects: boolean
   can_private_conversations: boolean
   can_create_skills_prompts: boolean
+  can_use_ai_ppt: boolean
   /** Creation and usage are intentionally independent capabilities. */
   can_create_prompts?: boolean
   can_create_skills?: boolean
@@ -405,6 +407,7 @@ export interface ApiWorkspacePolicy {
   AllowSkills: boolean
   AllowPrompts: boolean
   AllowPrivateChat: boolean
+  AllowAiPPT?: boolean
   /** Deprecated fields retained for older deployments. */
   AllowSandbox?: boolean
   AllowImageGeneration?: boolean
@@ -509,6 +512,7 @@ export interface ApiUserGroupPermissions {
   allow_memory: boolean
   allow_drawing: boolean
   allow_private_chat: boolean
+  allow_ai_ppt: boolean
 }
 
 export interface ApiKnowledgeBaseShare {
@@ -1390,6 +1394,7 @@ export interface ApiCreditAdjustmentNotification {
 export interface ApiAiPPTConfig {
   /** The iframe can be served (enabled AND an upstream API key is configured). */
   enabled: boolean
+  allowed: boolean
   /** An upstream key exists — lets the page tell "off" apart from "unconfigured". */
   configured: boolean
   /** A generation is charged. False = the platform credit system is off (free). */
@@ -1455,6 +1460,7 @@ export type ApiAiPPTDeckStatus = 'draft' | 'outline_ready' | 'generating' | 'rea
 /** Our record of a generated deck (vendor ids + the mirrored .pptx file). */
 export interface ApiAiPPTDeck {
   id: string
+  workspace_id: string
   /** Upstream task id (present once the vendor task was created). */
   task_id?: string
   /** Upstream deck id (present once the deck was rendered). */
