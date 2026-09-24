@@ -69,10 +69,22 @@ export interface FolderLimits {
 }
 
 export interface FolderCandidate {
-  /** Path relative to the picked folder, "/"-separated ("src/app/main.ts"). */
+  /** The picked `File`, carried through so the caller can upload the accepted ones. */
+  file: File
+  /** Path relative to the picked folder, "/"-separated ("my-project/src/app/main.ts"). */
   path: string
   fileName: string
   size: number
+  /**
+   * The picked folder's own name, when the caller knows it.
+   *
+   * A modern directory picker reports it directly, and it matters for a file
+   * sitting at the folder's ROOT: its path is then just "main.ts", which the
+   * skip rules must not read as a directory-named path. Older callers that only
+   * have the picker-provided path can leave this out — the first path segment
+   * is then used as a best effort.
+   */
+  folder?: string
 }
 
 export type FolderSkipReason =
@@ -103,12 +115,16 @@ export interface FolderSelection<T extends FolderCandidate> {
  * whose last segment is not the attached filename. Keeping the rule here — pure
  * and tested — means the composer cannot drift from the server.
  *
- * A path with a single segment ("a.txt") is NOT a folder upload: the user
- * attached one file, and the server should treat it exactly as before.
+ * `path` may be a single segment when `knownFolder` is given: that is a file at
+ * the root of the picked folder ("main.ts" inside the folder "my-project"), and
+ * the server builds `my-project/main.ts` from the pair itself. Without
+ * `knownFolder` a single-segment path is NOT a folder upload: the user attached
+ * one loose file, and the server must treat it exactly as before.
  */
 export function folderUploadFields(
   relativePath: string,
   fileName: string,
+  knownFolder = '',
 ): { folderName: string; relPath: string } | null {
   const normalized = relativePath.replace(/\\/g, '/')
   // An absolute path is not a folder-relative path. The server rejects it
@@ -116,12 +132,21 @@ export function folderUploadFields(
   // folder member whose path the server would refuse.
   if (normalized.startsWith('/')) return null
   const segments = normalized.split('/').filter((segment) => segment.length > 0)
-  if (segments.length < 2) return null
-  const [folderName] = segments
-  if (!folderName || folderName === '.' || folderName === '..') return null
+  const folder = (knownFolder.replace(/\\/g, '/').split('/')[0] ?? '').trim()
+  if (segments.length < 2 && !folder) return null
+  if (!segments.length) return null
   // The server refuses a rel_path that contradicts the filename, so drop the
   // folder claim rather than sending a request that is guaranteed to 400.
   if (segments[segments.length - 1] !== fileName) return null
+  // With a known folder, the folder is authoritative and the path inside it is
+  // the whole path — a root file keeps its bare filename, and the server
+  // prefixes it (see folderRelativeName on the Go side).
+  if (folder) {
+    if (!segments[0] || segments[0] === '.' || segments[0] === '..') return null
+    return { folderName: folder, relPath: segments.join('/') }
+  }
+  const [folderName] = segments
+  if (!folderName || folderName === '.' || folderName === '..') return null
   return { folderName, relPath: segments.join('/') }
 }
 
@@ -165,7 +190,13 @@ export function selectFolderFiles<T extends FolderCandidate>(
 
   for (const candidate of candidates) {
     const segments = pathSegments(candidate.path)
-    const dirSegments = segments.slice(0, -1)
+    // Directory segments only. A file at the picked folder's ROOT has a
+    // single-segment path ("main.ts"), and reading that as a directory name
+    // would both hide it from the skip reasons and, when the folder happens to
+    // be called "dist" or "build", drop the file for the wrong reason. The
+    // folder itself is never a skip target — the user picked it deliberately.
+    const folder = candidate.folder?.replace(/\\/g, '/').split('/')[0] ?? ''
+    const dirSegments = segments.slice(0, -1).filter((segment) => segment !== folder)
     if (dirSegments.some((segment) => FOLDER_SKIP_DIRS.includes(segment))) {
       record('skipped-dir', candidate.path)
       continue

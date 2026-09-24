@@ -357,12 +357,14 @@ export interface ApiWorkspaceMember {
   can_add_kb_files: boolean
   can_delete_kb_content: boolean
   can_delete_conversations: boolean
+  can_use_ai_ppt: boolean
 }
 
 export interface ApiWorkspaceMemberPermissions {
   can_create_projects: boolean
   can_private_conversations: boolean
   can_create_skills_prompts: boolean
+  can_use_ai_ppt: boolean
   /** Creation and usage are intentionally independent capabilities. */
   can_create_prompts?: boolean
   can_create_skills?: boolean
@@ -405,6 +407,7 @@ export interface ApiWorkspacePolicy {
   AllowSkills: boolean
   AllowPrompts: boolean
   AllowPrivateChat: boolean
+  AllowAiPPT?: boolean
   /** Deprecated fields retained for older deployments. */
   AllowSandbox?: boolean
   AllowImageGeneration?: boolean
@@ -509,6 +512,7 @@ export interface ApiUserGroupPermissions {
   allow_memory: boolean
   allow_drawing: boolean
   allow_private_chat: boolean
+  allow_ai_ppt: boolean
 }
 
 export interface ApiKnowledgeBaseShare {
@@ -1382,6 +1386,139 @@ export interface ApiCreditAdjustmentNotification {
   created_at: number
 }
 
+/**
+ * AI PPT runtime config (§ AI PPT / Docmee iframe). The server keeps the Docmee
+ * API key and only ever hands the browser a short-lived `token`, so this payload
+ * is safe to render and log.
+ */
+export interface ApiAiPPTConfig {
+  /** The iframe can be served (enabled AND an upstream API key is configured). */
+  enabled: boolean
+  allowed: boolean
+  /** An upstream key exists — lets the page tell "off" apart from "unconfigured". */
+  configured: boolean
+  /** A generation is charged. False = the platform credit system is off (free). */
+  credits_enabled: boolean
+  /** Flat price per generated deck, in credits. */
+  credits_per_ppt: number
+  /** Spendable balance (timed + permanent, minus live holds). */
+  credits_available: number
+  /** What one edit (AI rewrite / template change) costs; 0 = free. */
+  edit_credits: number
+  /** An edit is charged (edit price > 0 and credits are on platform-wide). */
+  edit_credits_enabled: boolean
+  /** Fallback template when the picker has nothing selected. */
+  default_template_id: string
+  /** Per-file cap for the upload input, in MB. */
+  max_upload_mb: number
+}
+
+/** One selectable value the vendor exposes (language, scene, audience …). */
+export interface ApiAiPPTOption {
+  name: string
+  value: string
+}
+
+/** Vendor enumerations, keyed by field name, used to fill the create form. */
+export interface ApiAiPPTOptions {
+  options: Record<string, ApiAiPPTOption[]>
+}
+
+/** One presentation template from the vendor's catalogue. */
+export interface ApiAiPPTTemplate {
+  id: string
+  name: string
+  category?: string
+  /** Vendor-hosted cover; load it through our resource proxy. */
+  coverUrl?: string
+  pageCoverUrls?: string[]
+  lang?: string
+  num?: number
+  /**
+   * True only for a custom template this user uploaded. The vendor's `type=4`
+   * page also lists the deployment's shared (account-public) templates, which
+   * the UI must not offer to rename or delete.
+   */
+  owned?: boolean
+  /**
+   * True when the deployment published this template to every user (admin list
+   * only). An upload alone stays private to the vendor account.
+   */
+  shared?: boolean
+}
+
+export interface ApiAiPPTTemplatePage {
+  templates: ApiAiPPTTemplate[]
+  page: number
+  size: number
+  has_more: boolean
+}
+
+/** Lifecycle of one generation: draft → outline_ready → generating → ready/failed. */
+export type ApiAiPPTDeckStatus = 'draft' | 'outline_ready' | 'generating' | 'ready' | 'failed'
+
+/** Our record of a generated deck (vendor ids + the mirrored .pptx file). */
+export interface ApiAiPPTDeck {
+  id: string
+  workspace_id: string
+  /** Upstream task id (present once the vendor task was created). */
+  task_id?: string
+  /** Upstream deck id (present once the deck was rendered). */
+  ppt_id?: string
+  subject: string
+  source_type: number
+  status: ApiAiPPTDeckStatus
+  outline: string
+  template_id: string
+  template_name: string
+  /** Vendor-hosted cover; load it through the resource proxy. */
+  cover_url: string
+  /** `files` row of the mirrored .pptx (preview/download through the file routes). */
+  file_id: string
+  error: string
+  credits: number
+  created_at: number
+  updated_at: number
+}
+
+export interface ApiAiPPTDeckPage {
+  decks: ApiAiPPTDeck[]
+  total: number
+  limit: number
+  offset: number
+}
+
+/** Events our own SSE relay emits for the outline step. */
+export interface ApiAiPPTStreamEvent {
+  type: 'delta' | 'done' | 'error'
+  text?: string
+  code?: string
+  message?: string
+  markdown?: string
+  deck?: ApiAiPPTDeck
+  credits_available?: number
+}
+
+export interface ApiAiPPTGenerateResult {
+  deck: ApiAiPPTDeck
+  credits: number
+  credits_available: number
+}
+
+/**
+ * One-time hand-off for the vendor's editor: a short-lived token (never the
+ * Api-Key), the upstream deck id, and where the editor SDK lives.
+ */
+export interface ApiAiPPTEditorSession {
+  token: string
+  ppt_id: string
+  subject: string
+  sdk_url: string
+  /** International build origin; empty on the China build. */
+  domain: string
+  credits_available?: number
+}
+
 /** A file referenced by a conversation (§ conversation files drawer). */
 export interface ApiConversationFile {
   id: string
@@ -1393,9 +1530,8 @@ export interface ApiConversationFile {
   url: string
   draft: boolean
   /** Path inside an uploaded folder ("my-project/src/a.ts"); absent for a
-   *  single-file upload. The composer's chip rail groups by its first segment so
-   *  a folder shows as one node, and it survives a refresh so the grouping
-   *  does not unravel when a conversation is reopened. */
+   *  single-file upload. Drives both the composer's folder chip and the files
+   *  drawer's directory tree (see `fileFolderTree`). */
   rel_path?: string
   document_id?: string
   document_status?: ApiDocument['status']
@@ -1582,6 +1718,10 @@ export interface ApiAdminFile {
   conversation_id: string
   kb_id: string
   kb_name: string
+  /** Path inside an uploaded folder ("my-project/src/a.ts"); absent for a
+   *  single-file upload and for knowledge-base documents. Lets the Files page
+   *  show a picked folder as one row (see `fileFolderTree`). */
+  rel_path?: string
 }
 
 /** Metadata-only administrator inventory row for a public HTML preview link. */
@@ -1629,6 +1769,22 @@ export interface ApiAdminUserFeedbackPage {
   offset: number
 }
 
+// §AI PPT: the deck behind a purpose="ppt" usage row (see the server's
+// store/aippt_usage.go). One row is written per generation and per charged edit,
+// so a "ppt" row always answers "which deck, and what did it cost".
+export interface ApiUsageAiPPT {
+  /** generate | rewrite | template */
+  event: string
+  /** Our aippt_decks id (absent when the deck record is gone). */
+  deck_id?: string
+  subject?: string
+  /** The vendor (Docmee) deck id. */
+  ppt_id?: string
+  template_name?: string
+  /** draft | outline_ready | generating | ready | failed */
+  status?: string
+}
+
 // A single usage_logs row (one API call) for the admin usage list.
 export interface ApiUsageRecord {
   id: number
@@ -1646,6 +1802,10 @@ export interface ApiUsageRecord {
   cost: number
   currency: string
   created_at: number
+  /** Credits this call actually moved (0 = nothing was charged). */
+  credits: number
+  /** §AI PPT call detail; present only on purpose="ppt" rows. */
+  aippt?: ApiUsageAiPPT
   /** §workspaces */
   workspace_id?: string
   workspace_name?: string

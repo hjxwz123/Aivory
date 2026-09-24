@@ -4,12 +4,15 @@ import {
   FOLDER_MAX_TOTAL_BYTES_DEFAULT,
   folderUploadFields,
   selectFolderFiles,
-  type FolderCandidate,
   type FolderLimits,
 } from '@/lib/folder-upload'
 
-function candidate(path: string, size = 10): FolderCandidate {
-  return { path, fileName: path.split('/').pop() ?? path, size }
+/**
+ * `selectFolderFiles` is generic over the candidate, so the tests drive it with
+ * the part of a candidate the rules actually read — no `File` needed.
+ */
+function candidate(path: string, size = 10, folder?: string) {
+  return { file: new File(['x'], path), path, fileName: path.split('/').pop() ?? path, size, folder }
 }
 
 const LIMITS: FolderLimits = {
@@ -77,6 +80,37 @@ describe('folder upload selection', () => {
     expect(reasons(selection)).toEqual({ extension: 2 })
   })
 
+  it('keeps files at the picked folder root, whose path has no directory part', () => {
+    // A modern directory picker reports the folder name separately, so a file
+    // at the folder's root arrives as a single-segment path. It must be uploaded
+    // — dropping it is how whole projects lost their README/Makefile/LICENSE.
+    const selection = selectFolderFiles(
+      [
+        candidate('README.md', 10, 'my-project'),
+        candidate('src/main.ts', 10, 'my-project'),
+      ],
+      LIMITS,
+    )
+    expect(selection.accepted.map((f) => f.path)).toEqual(['README.md', 'src/main.ts'])
+    expect(selection.skipped).toEqual([])
+  })
+
+  it('does not mistake a root file for a skipped directory name', () => {
+    // "build" as a FILE at the root is not the "build" output directory.
+    const selection = selectFolderFiles([candidate('build', 10, 'my-project')], {
+      ...LIMITS,
+      allowedExtensions: [],
+    })
+    // It has no extension, so the honest reason is the extension rule — not
+    // "skipped-dir", which would have been read off the folder name.
+    expect(reasons(selection)).toEqual({ 'no-extension': 1 })
+  })
+
+  it('still skips a real skipped directory nested inside the folder', () => {
+    const selection = selectFolderFiles([candidate('p/node_modules/x.ts', 10, 'p')], LIMITS)
+    expect(reasons(selection)).toEqual({ 'skipped-dir': 1 })
+  })
+
   it('rejects extensionless files, which the server cannot classify', () => {
     const selection = selectFolderFiles([candidate('p/Makefile'), candidate('p/ok.txt')], LIMITS)
     expect(selection.accepted.map((f) => f.path)).toEqual(['p/ok.txt'])
@@ -135,6 +169,24 @@ describe('folder upload request fields', () => {
   it('treats a single-segment path as a plain file, not a folder', () => {
     expect(folderUploadFields('main.ts', 'main.ts')).toBeNull()
     expect(folderUploadFields('', 'main.ts')).toBeNull()
+  })
+
+  it('uses the known folder for a file at the picked folder root', () => {
+    // The modern picker reports the folder itself, so a root file's own path is
+    // a single segment — the server composes "my-project/main.ts" from the pair.
+    expect(folderUploadFields('main.ts', 'main.ts', 'my-project')).toEqual({
+      folderName: 'my-project',
+      relPath: 'main.ts',
+    })
+    expect(folderUploadFields('src/main.ts', 'main.ts', 'my-project')).toEqual({
+      folderName: 'my-project',
+      relPath: 'src/main.ts',
+    })
+  })
+
+  it('ignores a known folder that contradicts an absolute or mismatched path', () => {
+    expect(folderUploadFields('/etc/passwd', 'passwd', 'my-project')).toBeNull()
+    expect(folderUploadFields('src/main.ts', 'other.ts', 'my-project')).toBeNull()
   })
 
   it('normalizes Windows separators into the server-side form', () => {

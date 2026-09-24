@@ -53,6 +53,9 @@ type Deps struct {
 	// UserMCPHTTPClient is an optional test injection. Production leaves it nil
 	// and user MCP handlers construct the dial-time restricted netsafe client.
 	UserMCPHTTPClient *http.Client
+	// DocmeeHTTPClient is an optional test injection for the AI PPT token-minting
+	// call. Production leaves it nil (§ docmee_handlers.go).
+	DocmeeHTTPClient *http.Client
 }
 
 // Env-overridable per-IP rate-limit budgets ("<N> per <window>") and the CORS
@@ -315,6 +318,29 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/image/styles", requireAuth(d, listImageStylesPublic))
 	// §4.20 the signed-in user's own generated-image gallery.
 	mux.handle("GET", "/api/me/images", requireAuth(d, listMyImages))
+	// § AI PPT (Docmee): the browser never sees the Docmee API key or touches the
+	// credit ledger. Every call below is served by our own handlers, which proxy
+	// the vendor API, bill the ledger and mirror the rendered file.
+	mux.handle("GET", "/api/me/ppt/config", requireAuth(d, meDocmeeConfigHandler))
+	// § AI PPT API mode (self-built UI): every Docmee call happens server-side, so
+	// the vendor token never reaches the browser and decks/files live in our own
+	// database and storage.
+	mux.handle("GET", "/api/me/ppt/options", requireAuth(d, aiPPTAuthorized(d, meAiPPTOptionsHandler)))
+	mux.handle("GET", "/api/me/ppt/templates", requireAuth(d, aiPPTAuthorized(d, meAiPPTTemplatesHandler)))
+	mux.handle("POST", "/api/me/ppt/templates", requireAuth(d, aiPPTAuthorized(d, meAiPPTTemplateUploadHandler)))
+	mux.handle("POST", "/api/me/ppt/templates/:id/rename", requireAuth(d, aiPPTAuthorized(d, meAiPPTTemplateRenameHandler)))
+	mux.handle("DELETE", "/api/me/ppt/templates/:id", requireAuth(d, aiPPTAuthorized(d, meAiPPTTemplateDeleteHandler)))
+	mux.handle("GET", "/api/me/ppt/resource", requireAuth(d, aiPPTAuthorized(d, meAiPPTResourceHandler)))
+	mux.handle("POST", "/api/me/ppt/tasks", requireAuth(d, aiPPTAuthorized(d, meAiPPTCreateTaskHandler)))
+	mux.handle("GET", "/api/me/ppt/decks", requireAuth(d, aiPPTAuthorized(d, meAiPPTDecksHandler)))
+	mux.handle("GET", "/api/me/ppt/decks/:id", requireAuth(d, aiPPTAuthorized(d, meAiPPTDeckHandler)))
+	mux.handle("DELETE", "/api/me/ppt/decks/:id", requireAuth(d, aiPPTAuthorized(d, meAiPPTDeckHandler)))
+	mux.handle("POST", "/api/me/ppt/decks/:id/outline", requireAuth(d, aiPPTAuthorized(d, meAiPPTOutlineHandler)))
+	mux.handle("POST", "/api/me/ppt/decks/:id/pptx", requireAuth(d, aiPPTAuthorized(d, meAiPPTGenerateHandler)))
+	mux.handle("POST", "/api/me/ppt/decks/:id/template", requireAuth(d, aiPPTAuthorized(d, meAiPPTDeckTemplateHandler)))
+	mux.handle("POST", "/api/me/ppt/decks/:id/rename", requireAuth(d, aiPPTAuthorized(d, meAiPPTDeckRenameHandler)))
+	mux.handle("GET", "/api/me/ppt/decks/:id/editor", requireAuth(d, aiPPTAuthorized(d, meAiPPTDeckEditorHandler)))
+	mux.handle("POST", "/api/me/ppt/decks/:id/refresh-file", requireAuth(d, aiPPTAuthorized(d, meAiPPTDeckRefreshFileHandler)))
 	mux.handle("GET", "/api/user-groups", requireAuth(d, listUserGroupsPublic))
 	mux.handle("GET", "/api/payment-methods", requireAuth(d, listPaymentMethodsPublic))
 	mux.handle("POST", "/api/payments/checkout", rateLimitedIP(d, "payment-checkout", rlPaymentCheckoutMax, rlPaymentCheckoutWindow, requireAuth(d, createPaymentCheckoutHandler)))
@@ -599,6 +625,15 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("DELETE", "/api/admin/oauth-providers/:id", requireAdmin(d, deleteOAuthProviderAdmin))
 	mux.handle("GET", "/api/admin/settings", requireAdmin(d, adminSettingsGet))
 	mux.handle("PATCH", "/api/admin/settings", requireAdmin(d, adminSettingsSet))
+	// § AI PPT: the deployment's remaining vendor (Docmee) balance, so an admin
+	// can top up before users start hitting upstream rejections.
+	mux.handle("GET", "/api/admin/aippt/vendor", requireAdmin(d, adminAiPPTVendorHandler))
+	// Deployment templates (§ AI PPT): an Api-Key upload is account-owned and
+	// invisible to users until it is published with `updateUserTemplate`.
+	mux.handle("GET", "/api/admin/aippt/templates", requireAdmin(d, adminAiPPTTemplatesHandler))
+	mux.handle("POST", "/api/admin/aippt/templates", requireAdmin(d, adminAiPPTTemplateUploadHandler))
+	mux.handle("POST", "/api/admin/aippt/templates/:id/public", requireAdmin(d, adminAiPPTTemplatePublicHandler))
+	mux.handle("DELETE", "/api/admin/aippt/templates/:id", requireAdmin(d, adminAiPPTTemplateDeleteHandler))
 	// Database backup / migration (§ admin → data migration). Export streams a
 	// logical, engine-neutral archive; import replaces ALL data from one.
 	mux.handle("GET", "/api/admin/backup/export", requireAdmin(d, exportBackupAdmin))

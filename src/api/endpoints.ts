@@ -38,6 +38,14 @@ import type {
   ApiWorkspaceUsageAnalytics,
   ApiWorkspaceAuditLog,
   ApiAnalytics,
+  ApiAiPPTConfig,
+  ApiAiPPTDeck,
+  ApiAiPPTDeckPage,
+  ApiAiPPTEditorSession,
+  ApiAiPPTGenerateResult,
+  ApiAiPPTOptions,
+  ApiAiPPTTemplate,
+  ApiAiPPTTemplatePage,
   ApiAuthPolicy,
   ApiAuthResponse,
   ApiAuthSessionResponse,
@@ -554,6 +562,112 @@ export const audioApi = {
   },
 }
 
+// ----- AI PPT (Docmee) ------------------------------------------------------
+
+/**
+ * AI PPT calls (§ AI PPT API mode).
+ *
+ * Our server owns every Docmee interaction: the browser only ever talks to these
+ * endpoints, so the Api-Key and the vendor's temporary token stay server-side,
+ * the credit ledger is billed server-side, and the rendered .pptx is mirrored
+ * into the user's own files.
+ */
+function pptPath(path: string): string {
+  let scope: string | null = null
+  try { scope = typeof localStorage === 'undefined' ? null : localStorage.getItem('aivory.workspace') } catch { return path }
+  if (!scope || scope === 'personal') return path
+  return `${path}${path.includes('?') ? '&' : '?'}workspace_id=${encodeURIComponent(scope)}`
+}
+
+export const aipptApi = {
+  scopedPath: pptPath,
+  config: () => api<ApiAiPPTConfig>(pptPath('/me/ppt/config')),
+  /** Vendor enumerations (language / scene / audience …) for the create form. */
+  options: (lang?: string) =>
+    api<ApiAiPPTOptions>(pptPath(`/me/ppt/options${lang ? `?lang=${encodeURIComponent(lang)}` : ''}`)),
+  /** Paged template catalogue (type 1 = system, 4 = the account's own). */
+  templates: (params: { type?: 1 | 4; page?: number; size?: number; category?: string } = {}) => {
+    const qs = new URLSearchParams()
+    if (params.type) qs.set('type', String(params.type))
+    if (params.page) qs.set('page', String(params.page))
+    if (params.size) qs.set('size', String(params.size))
+    if (params.category) qs.set('category', params.category)
+    return api<ApiAiPPTTemplatePage>(pptPath(`/me/ppt/templates${qs.toString() ? `?${qs}` : ''}`))
+  },
+  /**
+   * Same-origin URL for a vendor-hosted image (template/deck cover). The vendor
+   * returns 403 without its temporary token, which stays server-side.
+   */
+  resourceUrl: (raw: string) => apiUrl(pptPath(`/me/ppt/resource?url=${encodeURIComponent(raw)}`)),
+  /**
+   * Register a custom template: Docmee learns the .pptx and files it under the
+   * account's own catalogue. Passing a template id would overwrite an existing
+   * one, which the vendor only allows for Api-Key-level templates.
+   */
+  uploadTemplate: (
+    file: File,
+    opts: { templateId?: string; onProgress?: (progress: UploadProgress) => void } = {},
+  ) => {
+    const fd = new FormData()
+    fd.append('file', file, file.name)
+    if (opts.templateId) fd.append('template_id', opts.templateId)
+    return apiUpload<{ template_id: string }>(pptPath('/me/ppt/templates'), fd, opts)
+  },
+  /** Rename one of the caller's own custom templates. */
+  renameTemplate: (id: string, name: string) =>
+    api<{ template_id: string; name: string }>(
+      pptPath(`/me/ppt/templates/${encodeURIComponent(id)}/rename`),
+      { method: 'POST', body: { name } },
+    ),
+  /** Delete one of the caller's own custom templates. */
+  deleteTemplate: (id: string) =>
+    api<{ ok: boolean }>(pptPath(`/me/ppt/templates/${encodeURIComponent(id)}`), { method: 'DELETE' }),
+  /** Open a generation task from text/URL/Markdown input. */
+  createTask: (body: { type: number; content: string }) =>
+    api<{ deck: ApiAiPPTDeck }>(pptPath('/me/ppt/tasks'), { method: 'POST', body }),
+  /** Open a generation task from an uploaded file (multipart passthrough). */
+  createTaskFromFile: (
+    file: File,
+    opts: { type?: number; onProgress?: (progress: UploadProgress) => void; signal?: AbortSignal } = {},
+  ) => {
+    const fd = new FormData()
+    fd.append('type', String(opts.type ?? 2))
+    fd.append('file', file, file.name)
+    return apiUpload<{ deck: ApiAiPPTDeck }>(pptPath('/me/ppt/tasks'), fd, opts)
+  },
+  decks: (params: { limit?: number; offset?: number } = {}) => {
+    const qs = new URLSearchParams()
+    if (params.limit) qs.set('limit', String(params.limit))
+    if (params.offset) qs.set('offset', String(params.offset))
+    return api<ApiAiPPTDeckPage>(pptPath(`/me/ppt/decks${qs.toString() ? `?${qs}` : ''}`))
+  },
+  deck: (id: string) => api<{ deck: ApiAiPPTDeck }>(pptPath(`/me/ppt/decks/${encodeURIComponent(id)}`)),
+  deleteDeck: (id: string) =>
+    api<{ ok: true }>(pptPath(`/me/ppt/decks/${encodeURIComponent(id)}`), { method: 'DELETE' }),
+  /** Render the deck (charges the per-deck price) and mirror the .pptx. */
+  generate: (id: string, body: { template_id?: string; markdown?: string }) =>
+    api<ApiAiPPTGenerateResult>(pptPath(`/me/ppt/decks/${encodeURIComponent(id)}/pptx`), {
+      method: 'POST',
+      body,
+    }),
+  /** Re-render with another template (may charge the edit price). */
+  changeTemplate: (id: string, templateId: string) =>
+    api<{ deck: ApiAiPPTDeck }>(pptPath(`/me/ppt/decks/${encodeURIComponent(id)}/template`), {
+      method: 'POST',
+      body: { template_id: templateId },
+    }),
+  /** One-time session for the vendor's editor (slide-level editing). */
+  editor: (id: string) => api<ApiAiPPTEditorSession>(pptPath(`/me/ppt/decks/${encodeURIComponent(id)}/editor`)),
+  /** Pull a deck edited in the vendor's editor back into the user's files. */
+  refreshFile: (id: string) =>
+    api<{ deck: ApiAiPPTDeck }>(pptPath(`/me/ppt/decks/${encodeURIComponent(id)}/refresh-file`), { method: 'POST', body: {} }),
+  renameDeck: (id: string, subject: string) =>
+    api<{ deck: ApiAiPPTDeck }>(pptPath(`/me/ppt/decks/${encodeURIComponent(id)}/rename`), {
+      method: 'POST',
+      body: { subject },
+    }),
+}
+
 // ----- Projects ------------------------------------------------------------
 
 export const projectsApi = {  list: (workspaceId?: string) =>
@@ -660,6 +774,7 @@ export const workspacesApi = {
       AllowSkills: 'allow_skills',
       AllowPrompts: 'allow_prompts',
       AllowPrivateChat: 'allow_private_chat',
+      AllowAiPPT: 'allow_ai_ppt',
       AllowSandbox: 'allow_sandbox',
       AllowImageGeneration: 'allow_image_generation',
       AllowKnowledgeBases: 'allow_knowledge_bases',
@@ -1526,6 +1641,39 @@ export const adminApi = {
     }),
 
   settings: () => api<Record<string, unknown>>('/admin/settings'),
+  /** Deployment-side Docmee balance (§ AI PPT): vendor credits left/used. */
+  aipptVendor: () => api<{ available_count: number; used_count: number }>('/admin/aippt/vendor'),
+  /**
+   * Templates the deployment itself owns. An Api-Key upload stays account-owned
+   * until it is published, which is what `shared` reports.
+   */
+  aipptTemplates: () =>
+    api<{ templates: ApiAiPPTTemplate[]; total: number; shared: number; max_upload_mb: number }>(
+      '/admin/aippt/templates',
+    ),
+  /** Upload a deployment template; `public` publishes it to every user. */
+  aipptUploadTemplate: (
+    file: File,
+    opts: {
+      templateId?: string
+      public?: boolean
+      onProgress?: (progress: UploadProgress) => void
+    } = {},
+  ) => {
+    const fd = new FormData()
+    fd.append('file', file, file.name)
+    if (opts.templateId) fd.append('template_id', opts.templateId)
+    if (opts.public) fd.append('public', 'true')
+    return apiUpload<{ template_id: string; shared: boolean }>('/admin/aippt/templates', fd, opts)
+  },
+  /** Publish (or withdraw) a deployment template for every user. */
+  aipptSetTemplatePublic: (id: string, isPublic: boolean) =>
+    api<{ template_id: string; shared: boolean }>(
+      `/admin/aippt/templates/${encodeURIComponent(id)}/public`,
+      { method: 'POST', body: { is_public: isPublic } },
+    ),
+  aipptDeleteTemplate: (id: string) =>
+    api<{ ok: boolean }>(`/admin/aippt/templates/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   updateSettings: (patch: Record<string, unknown>) =>
     api<Record<string, unknown>>('/admin/settings', { method: 'PATCH', body: patch }),
 

@@ -1,0 +1,229 @@
+{
+  "title": "AI PPT",
+  "price": "{{price}} credits per deck",
+  "priceInactive": "{{price}} credits per deck · free right now",
+  "balance": "{{available}} available",
+  "view": {
+    "create": "Create",
+    "decks": "My decks"
+  },
+  "steps": {
+    "input": "Input",
+    "outline": "Outline",
+    "template": "Template",
+    "result": "Deck"
+  },
+  "input": {
+    "title": "What should the deck be about?",
+    "lead": "Start with an idea or your own material. Shape the outline, then choose a look for your slides.",
+    "optionsTitle": "More options",
+    "optionsLead": "Add a use case, audience or writing preferences when you need them.",
+    "anyOption": "Let the model decide",
+    "types": {
+      "topic": "Topic",
+      "text": "Paste text",
+      "url": "Web page",
+      "upload": "Upload file",
+      "markdown": "Markdown outline"
+    },
+    "placeholders": {
+      "topic": "e.g. AI trends in the workplace for 2026",
+      "text": "Paste the source material you want turned into slides…",
+      "url": "https://example.com/article",
+      "markdown": "# Title\n## Chapter\n### Page\n#### Paragraph\n- Content"
+    },
+    "uploadHint": "Drop a file here or choose one (up to {{mb}} MB)",
+    "uploadTypes": "Word, PDF, text, Markdown or an existing presentation.",
+    "uploadPick": "Choose a file",
+    "uploadMissing": "Choose a file first",
+    "contentMissing": "Add the source content first",
+    "length": "Length",
+    "lengths": {
+      "short": "Short",
+      "medium": "Medium",
+      "long": "Long"
+    },
+    "scene": "Scenario",
+    "audience": "Audience",
+    "lang": "Language",
+    "prompt": "Extra instructions",
+    "promptHint": "{{count}}/50 characters",
+    "promptPlaceholder": "e.g. keep the tone practical",
+    "submit": "Generate outline",
+    "priceHint": "Review the outline first. Generating the deck costs {{price}} credits.",
+    "freeHint": "Review the outline, then choose a template. This generation is free.",
+    "freeHintPriced": "Generating a deck is free on this deployment (the configured standard price is {{price}} credits per deck).",
+    "examples": {
+      "label": "Try one of these",
+      "one": "AI trends in the workplace for 2026",
+      "two": "Quarterly business review",
+      "three": "New product launch plan"
+    },
+    "defaultTemplate": {
+      "label": "Default template",
+      "hint": "Used when you pick nothing later. You can change it after the outline."
+    },
+    "source": "Content source",
+    "uploadTooLarge": "Files must be no larger than {{mb}} MB"
+  },
+  "outline": {
+    "title": "Outline",
+    "counts": "{{chapters}} chapters · {{pages}} pages",
+    "streaming": "Writing…",
+    "empty": "Nothing yet",
+    "placeholder": "The outline will stream in here, and you can edit it before rendering.",
+    "structure": "Structure",
+    "structureHint": "{{paragraphs}} paragraph headings so far.",
+    "regenerate": "Regenerate",
+    "next": "Choose a template",
+    "rewrite": "AI rewrite",
+    "rewriteTitle": "Rewrite the outline",
+    "rewriteLead": "Describe the change and the model rewrites the whole outline.",
+    "rewriteBilled": "This rewrite costs {{price}} credits.",
+    "rewritePlaceholder": "e.g. make the structure follow the pyramid principle",
+    "warnings": {
+      "missing-title": "Add one level-1 title (#)",
+      "multiple-titles": "Keep only one level-1 title (#)",
+      "missing-chapters": "Add at least one chapter (##)",
+      "missing-pages": "Add at least one page (###)"
+    },
+    "waiting": "The model is thinking — the outline will appear here as it is written.",
+    "progress": "{{count}} characters written"
+  },
+  "template": {
+    "title": "Choose a template",
+    "lead": "Pick the look of every slide.",
+    "selected": "Selected: {{name}}",
+    "back": "Back to outline",
+    "generate": "Generate deck",
+    "generateBilled": "Generate deck · {{price}} credits",
+    "system": "System",
+    "mine": "Mine",
+    "all": "All",
+    "empty": "No templates available",
+    "loadMore": "Load more",
+    "upload": "Upload template",
+    "uploading": "Uploading {{percent}}%",
+    "uploaded": "Template uploaded",
+    "uploadHint": "A .pptx, ideally 960×540",
+    "uploadFailed": "Template upload failed",
+    "uploadTooLarge": "That template is too large",
+    "uploadPptxOnly": "Custom templates must be .pptx files",
+    "rename": "Rename",
+    "renameTitle": "Rename template",
+    "renameLead": "Only the display name changes; the template itself stays as it is.",
+    "renameLabel": "Template name",
+    "renamed": "Template renamed",
+    "renameFailed": "Could not rename the template",
+    "delete": "Delete",
+    "deleteTitle": "Delete this template?",
+    "deleteBody": "It disappears from “Mine”. Decks you already generated are not affected.",
+    "deleted": "Template deleted",
+    "deleteFailed": "Could not delete the template",
+    "category": "Template category"
+  },
+  "result": {
+    "untitled": "Untitled deck",
+    "rename": "Rename",
+    "renamed": "Name updated",
+    "defaultTemplate": "Default template",
+    "download": "Download .pptx",
+    "preview": "Preview",
+    "previewTitle": "Preview",
+    "previewLead": "The rendered deck, as saved in your files.",
+    "previewFailed": "This deck could not be previewed",
+    "mirrorPending": "The file is not saved in your files yet. Retry the save.",
+    "retrySave": "Save to my files",
+    "changeTemplate": "Change template",
+    "changeTemplateLead": "Re-render this deck with another template.",
+    "changeTemplateBilled": "Re-rendering costs {{price}} credits.",
+    "applyTemplate": "Apply",
+    "templateChanged": "Template updated",
+    "templateChangedBilled": "Template updated · {{price}} credits charged",
+    "newDeck": "New deck",
+    "previewScrollHint": "Scroll to page through every slide.",
+    "edit": "Edit slides",
+    "template": "Template",
+    "credits": "Credits",
+    "priceNote": "Admin-configured price: {{price}} credits per deck.",
+    "saved": "Saved to your files",
+    "saving": "Saving to your files…",
+    "expandPreview": "Expand preview"
+  },
+  "decks": {
+    "empty": "No decks yet",
+    "emptyHint": "Generated decks appear here, together with the .pptx saved in your files.",
+    "loadFailed": "Could not load your decks",
+    "open": "Open",
+    "continue": "Continue",
+    "delete": "Delete deck",
+    "deleteTitle": "Delete this deck?",
+    "deleteBody": "The deck record and the .pptx saved in your files are both removed. This cannot be undone.",
+    "deleted": "Deck deleted",
+    "untitled": "Untitled deck",
+    "credits": "{{credits}} credits",
+    "status": {
+      "draft": "Draft",
+      "outline_ready": "Outline ready",
+      "generating": "Rendering",
+      "ready": "Ready",
+      "failed": "Failed"
+    },
+    "lead": "Open a finished presentation or pick up where you left off."
+  },
+  "charged": {
+    "title": "Charged {{price}} credits",
+    "description": "{{available}} credits left"
+  },
+  "insufficient": {
+    "title": "Not enough credits",
+    "description": "This action costs {{price}} credits and you have {{available}} available. Top up to continue.",
+    "action": "View plans"
+  },
+  "unconfigured": {
+    "title": "AI PPT is not configured",
+    "description": "An administrator must add the Docmee API key under Admin → Credits & quotas before AI PPT becomes available."
+  },
+  "permissionDenied": {
+    "title": "AI PPT is unavailable here",
+    "description": "Ask an administrator to review your group, workspace and member permissions."
+  },
+  "disabled": {
+    "title": "AI PPT is turned off",
+    "description": "An administrator has disabled AI PPT for this deployment."
+  },
+  "loadFailed": {
+    "title": "Could not load AI PPT",
+    "description": "The AI PPT configuration could not be loaded."
+  },
+  "errors": {
+    "generic": "Something went wrong",
+    "charge": "Could not charge credits",
+    "upstream": "The presentation service reported an error"
+  },
+  "editor": {
+    "title": "Edit presentation",
+    "lead": "Editing happens in the Docmee editor; closing it saves the file back to your files.",
+    "loading": "Opening the editor…",
+    "failed": "The editor could not be opened.",
+    "retry": "Try again",
+    "syncNow": "Sync file now",
+    "synced": "The edited file was saved to your files",
+    "syncFailed": "The edited file could not be saved to your files",
+    "done": "Done"
+  },
+  "render": {
+    "title": "Building “{{subject}}”",
+    "lead": "Your slides are being laid out and prepared. The preview will appear when they are ready.",
+    "stages": {
+      "content": "Content",
+      "layout": "Layout",
+      "render": "Rendering",
+      "save": "Saving"
+    },
+    "waiting": "Keep this page open"
+  },
+  "workflow": {
+    "steps": "Presentation steps"
+  }
+}

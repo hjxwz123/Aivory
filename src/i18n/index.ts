@@ -17,6 +17,7 @@ import enMemory from './locales/en/memory.json'
 import enSubscription from './locales/en/subscription.json'
 import enWelcome from './locales/en/welcome.json'
 import enLibrary from './locales/en/library.json'
+import enPpt from './locales/en/ppt.json'
 
 // Chinese bundles
 import zhCommon from './locales/zh/common.json'
@@ -33,6 +34,7 @@ import zhMemory from './locales/zh/memory.json'
 import zhSubscription from './locales/zh/subscription.json'
 import zhWelcome from './locales/zh/welcome.json'
 import zhLibrary from './locales/zh/library.json'
+import zhPpt from './locales/zh/ppt.json'
 
 // Traditional Chinese bundles (generated from zh via OpenCC s2twp)
 import zhHantCommon from './locales/zh-Hant/common.json'
@@ -49,6 +51,7 @@ import zhHantMemory from './locales/zh-Hant/memory.json'
 import zhHantSubscription from './locales/zh-Hant/subscription.json'
 import zhHantWelcome from './locales/zh-Hant/welcome.json'
 import zhHantLibrary from './locales/zh-Hant/library.json'
+import zhHantPpt from './locales/zh-Hant/ppt.json'
 
 // Japanese bundles
 import jaCommon from './locales/ja/common.json'
@@ -65,6 +68,7 @@ import jaMemory from './locales/ja/memory.json'
 import jaSubscription from './locales/ja/subscription.json'
 import jaWelcome from './locales/ja/welcome.json'
 import jaLibrary from './locales/ja/library.json'
+import jaPpt from './locales/ja/ppt.json'
 
 // French bundles
 import frCommon from './locales/fr/common.json'
@@ -81,6 +85,7 @@ import frMemory from './locales/fr/memory.json'
 import frSubscription from './locales/fr/subscription.json'
 import frWelcome from './locales/fr/welcome.json'
 import frLibrary from './locales/fr/library.json'
+import frPpt from './locales/fr/ppt.json'
 
 export const SUPPORTED_LANGUAGES = [
   { code: 'en', label: 'English', short: 'EN' },
@@ -110,7 +115,7 @@ export function normalizeLanguage(code: unknown): LanguageCode | null {
 }
 
 export const DEFAULT_NS = 'common'
-export const NAMESPACES = ['common', 'nav', 'landing', 'chat', 'auth', 'settings', 'errors', 'projects', 'admin', 'kb', 'files', 'memory', 'subscription', 'welcome', 'library'] as const
+export const NAMESPACES = ['common', 'nav', 'landing', 'chat', 'auth', 'settings', 'errors', 'projects', 'admin', 'kb', 'files', 'memory', 'subscription', 'welcome', 'library', 'ppt'] as const
 
 const resources = {
   en: {
@@ -128,6 +133,7 @@ const resources = {
     subscription: enSubscription,
     welcome: enWelcome,
     library: enLibrary,
+    ppt: enPpt,
   },
   zh: {
     common: zhCommon,
@@ -144,6 +150,7 @@ const resources = {
     subscription: zhSubscription,
     welcome: zhWelcome,
     library: zhLibrary,
+    ppt: zhPpt,
   },
   'zh-Hant': {
     common: zhHantCommon,
@@ -160,6 +167,7 @@ const resources = {
     subscription: zhHantSubscription,
     welcome: zhHantWelcome,
     library: zhHantLibrary,
+    ppt: zhHantPpt,
   },
   ja: {
     common: jaCommon,
@@ -176,6 +184,7 @@ const resources = {
     subscription: jaSubscription,
     welcome: jaWelcome,
     library: jaLibrary,
+    ppt: jaPpt,
   },
   fr: {
     common: frCommon,
@@ -192,6 +201,7 @@ const resources = {
     subscription: frSubscription,
     welcome: frWelcome,
     library: frLibrary,
+    ppt: frPpt,
   },
 } as const
 

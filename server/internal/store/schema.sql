@@ -126,6 +126,34 @@ CREATE TABLE IF NOT EXISTS credit_reservations (
 CREATE INDEX IF NOT EXISTS idx_credit_reservations_user_status
   ON credit_reservations(user_id, status, expires_at);
 
+-- AI PPT decks (§ AI PPT / Docmee API mode): one row per generation, owned by
+-- the user who started it. `task_id`/`ppt_id` are the upstream identifiers and
+-- `file_id` points at the mirrored .pptx in our own `files` table, so a deck
+-- outlives Docmee's 2-hour download links and appears in the user's file list.
+CREATE TABLE IF NOT EXISTS aippt_decks (
+  id            TEXT PRIMARY KEY,
+  user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  workspace_id  TEXT NOT NULL DEFAULT '',
+  task_id       TEXT NOT NULL DEFAULT '',
+  ppt_id        TEXT NOT NULL DEFAULT '',
+  subject       TEXT NOT NULL DEFAULT '',
+  source_type   INTEGER NOT NULL DEFAULT 1,
+  status        TEXT NOT NULL DEFAULT 'draft'
+                CHECK(status IN ('draft','outline_ready','generating','ready','failed')),
+  outline       TEXT NOT NULL DEFAULT '',
+  template_id   TEXT NOT NULL DEFAULT '',
+  template_name TEXT NOT NULL DEFAULT '',
+  cover_url     TEXT NOT NULL DEFAULT '',
+  file_id       TEXT NOT NULL DEFAULT '',
+  error         TEXT NOT NULL DEFAULT '',
+  credits       REAL NOT NULL DEFAULT 0,
+  options_json  TEXT NOT NULL DEFAULT '',
+  created_at    INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  updated_at    INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_aippt_decks_user_updated
+  ON aippt_decks(user_id, updated_at);
+
 CREATE TABLE IF NOT EXISTS quota_ledger (
   id              TEXT PRIMARY KEY,
   user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1050,6 +1078,7 @@ CREATE TABLE IF NOT EXISTS workspace_members (
   can_add_kb_files         INTEGER NOT NULL DEFAULT 1,
   can_delete_kb_content    INTEGER NOT NULL DEFAULT 1,
   can_delete_conversations INTEGER NOT NULL DEFAULT 1,
+  can_use_ai_ppt            INTEGER NOT NULL DEFAULT 1,
   joined_at                INTEGER NOT NULL DEFAULT (strftime('%s','now')),
   PRIMARY KEY (workspace_id, user_id)
 );
@@ -1103,6 +1132,7 @@ CREATE TABLE IF NOT EXISTS workspace_policies (
   allow_skills                INTEGER NOT NULL DEFAULT 1,
   allow_prompts               INTEGER NOT NULL DEFAULT 1,
   allow_private_chat          INTEGER NOT NULL DEFAULT 1,
+  allow_ai_ppt                INTEGER NOT NULL DEFAULT 1,
   allow_knowledge_bases       INTEGER NOT NULL DEFAULT 1,
   allow_file_upload           INTEGER NOT NULL DEFAULT 1,
   member_monthly_credit_limit REAL NOT NULL DEFAULT 0,

@@ -604,5 +604,12 @@ func requestSignatureExempt(r *http.Request) bool {
 		segments[2] != "" && segments[3] == "sandbox" && segments[4] == "file" {
 		return true
 	}
+	// § AI PPT: template/deck covers live on the vendor's hosts and are 403 without
+	// Docmee's temporary token, so the browser loads them through our proxy. An
+	// <img> cannot attach the request proof, and the handler still requires a
+	// session plus a host allowlist.
+	if len(segments) == 3 && segments[0] == "me" && segments[1] == "ppt" && segments[2] == "resource" {
+		return true
+	}
 	return p == "/me/files/content"
 }

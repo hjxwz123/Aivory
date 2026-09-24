@@ -37,6 +37,7 @@ const ForgotPassword = lazy(() => import('@/pages/auth/ForgotPassword'))
 const Privacy = lazy(() => import('@/pages/legal/Privacy'))
 const Terms = lazy(() => import('@/pages/legal/Terms'))
 const Subscription = lazy(() => import('@/pages/subscription/Subscription'))
+const AiPPT = lazy(() => import('@/pages/ppt/AiPPT'))
 const SharedConversation = lazy(() => import('@/pages/share/SharedConversation'))
 const JoinWorkspace = lazy(() => import('@/pages/workspace/JoinWorkspace'))
 const AdminLayout = lazy(() => import('@/pages/admin/AdminLayout'))
@@ -234,6 +235,10 @@ export default function App() {
             </Route>
             <Route path="/files" element={<ChatLayout />}>
               <Route index element={<UserFiles />} />
+            </Route>
+            {/* § AI PPT: the Docmee iframe workbench (per-deck credit billing). */}
+            <Route path="/ppt" element={<ChatLayout />}>
+              <Route index element={<AiPPT />} />
             </Route>
             <Route path="/skills" element={<ChatLayout />}>
               <Route index element={<SkillsPrompts />} />

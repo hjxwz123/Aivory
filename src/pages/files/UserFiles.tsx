@@ -7,8 +7,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   ArrowLeft,
+  ChevronDown,
+  ChevronRight,
   Download,
   FileQuestion,
+  Folder as FolderIcon,
   FolderOpen,
   HardDrive,
   MessageSquare,
@@ -38,6 +41,7 @@ import { toast } from '@/hooks/use-toast'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { envNum } from '@/lib/env-config'
 import { fileIconFor } from '@/lib/file-icon'
+import { fileFolderTree, type FolderTreeNode } from '@/lib/folder-attachments'
 import {
   documentPreviewByteLimit,
   documentPreviewKind,
@@ -48,6 +52,13 @@ import { useConversations } from '@/store/conversations'
 
 const PAGE_SIZE = envNum('VITE_AIVORY_PAGE_SIZE', 50)
 const ALL = 'all'
+
+function fileTreeOf(rows: readonly ApiAdminFile[]): {
+  rootFiles: ApiAdminFile[]
+  folders: Array<FolderTreeNode<ApiAdminFile>>
+} {
+  return fileFolderTree(rows, (file) => ({ relPath: file.rel_path, size: file.size_bytes }))
+}
 
 function fmtBytes(n: number): string {
   if (n >= 1024 * 1024 * 1024) return `${(n / (1024 * 1024 * 1024)).toFixed(1)} GB`
@@ -104,7 +115,14 @@ export default function UserFiles() {
   const [mobilePreviewOpen, setMobilePreviewOpen] = useState(false)
   const [preview, setPreview] = useState<PreviewState | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<ApiAdminFile | null>(null)
+  // Deleting a folder is one decision, not N: the whole subtree is collected and
+  // removed together, with the dialog naming how many files that is.
+  const [confirmDeleteFolder, setConfirmDeleteFolder] = useState<FolderTreeNode<ApiAdminFile> | null>(null)
   const [busy, setBusy] = useState(false)
+  // Which directory rows are open on this page. A folder upload arrives as N
+  // rows carrying the same rel_path prefix; showing them flat loses the folder
+  // the user actually picked, so they are folded into one expandable row.
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
 
   const listRequestRef = useRef(0)
   const previewRequestRef = useRef(0)
@@ -263,8 +281,61 @@ export default function UserFiles() {
     if (!compact && preview?.key !== nextKey) void openPreview(next, false)
   }, [clearPreview, compact, loading, openPreview, preview?.key, rows, selectedKey])
 
-  const runDelete = async (file: ApiAdminFile) => {
+  /**
+   * Remove every file under a folder row in one go.
+   *
+   * The API deletes by row, so the subtree is flattened first. Chunks keep a
+   * 300-file project from becoming one enormous request body, and the successful
+   * ids are remembered so a later chunk failing does not silently claim the whole
+   * folder was removed.
+   */
+  const runDeleteFolder = async (node: FolderTreeNode<ApiAdminFile>) => {
+    const items: Array<{ source: ApiAdminFile['source']; id: string }> = []
+    const collect = (current: FolderTreeNode<ApiAdminFile>) => {
+      current.files.forEach((file) => items.push({ source: file.source, id: file.id }))
+      current.children.forEach(collect)
+    }
+    collect(node)
+    if (!items.length) {
+      setConfirmDeleteFolder(null)
+      return
+    }
     setBusy(true)
+    const removedIds: string[] = []
+    try {
+      for (let i = 0; i < items.length; i += 50) {
+        const chunk = items.slice(i, i + 50)
+        await authApi.deleteMyFiles(chunk)
+        removedIds.push(...chunk.map((item) => item.id))
+      }
+      useConversations
+        .getState()
+        .markAttachmentsDeleted(
+          removedIds,
+          node.files[0]?.conversation_id || undefined,
+        )
+      if (preview && removedIds.includes(preview.file.id)) {
+        clearPreview()
+        setSelectedKey('')
+        setMobilePreviewOpen(false)
+      }
+      toast.success(t('files:deleted'))
+      setConfirmDeleteFolder(null)
+      await load()
+      loadStorage()
+    } catch (error) {
+      // Report what did go, so the list the user sees matches the server.
+      if (removedIds.length) {
+        useConversations.getState().markAttachmentsDeleted(removedIds, node.files[0]?.conversation_id || undefined)
+        await load()
+      }
+      toast.error(error instanceof ApiError ? error.message : t('common:actions.failed', { defaultValue: 'Failed' }))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const runDelete = async (file: ApiAdminFile) => {    setBusy(true)
     try {
       await authApi.deleteMyFiles([{ source: file.source, id: file.id }])
       useConversations
@@ -294,6 +365,11 @@ export default function UserFiles() {
     () => new Intl.DateTimeFormat(i18n.language, { dateStyle: 'medium' }),
     [i18n.language],
   )
+
+  // One row per uploaded folder — and per subdirectory inside it — instead of one
+  // row per file. `rel_path` is what identifies the folder the user picked;
+  // single-file uploads have none and stay top-level rows.
+  const fileTree = useMemo(() => fileTreeOf(rows), [rows])
 
   const quota = storage?.quota_bytes ?? 0
   const used = storage?.used_bytes ?? 0
@@ -430,66 +506,53 @@ export default function UserFiles() {
                   className="min-h-0 flex-1 overflow-y-auto p-1.5 scrollbar-thin"
                   aria-label={t('files:accessibility.fileList')}
                 >
-                  {rows.map((file) => {
-                    const key = rowKey(file)
-                    const selected = key === selectedKey
-                    const FileIcon = fileIconFor(file.filename)
-                    return (
-                      <li
-                        key={key}
-                        className={cn(
-                          'group/file flex min-h-16 items-stretch rounded-[8px] transition-colors',
-                          selected ? 'bg-[var(--color-accent-soft)]' : 'hover:bg-[var(--color-bg-muted)]',
-                        )}
-                      >
-                        <button
-                          type="button"
-                          aria-current={selected ? 'true' : undefined}
-                          className="flex min-w-0 flex-1 items-center gap-2.5 rounded-l-[8px] px-2.5 py-2 text-left focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)]"
-                          onClick={() => void openPreview(file)}
-                        >
-                          <span
-                            className={cn(
-                              'inline-flex size-9 shrink-0 items-center justify-center rounded-[8px]',
-                              selected
-                                ? 'bg-[var(--color-surface)] text-[var(--color-accent)]'
-                                : 'bg-[var(--color-surface-sunken)] text-[var(--color-fg-muted)]',
-                            )}
-                          >
-                            <FileIcon size={17} aria-hidden />
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate text-[0.875rem] font-medium text-[var(--color-fg)]" title={file.filename}>
-                              {file.filename}
-                            </span>
-                            <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[0.71875rem] text-[var(--color-fg-subtle)]">
-                              <span className="shrink-0 font-medium">{typeLabel(file)}</span>
-                              <span aria-hidden>·</span>
-                              <span className="shrink-0 tabular-nums">{fmtBytes(file.size_bytes)}</span>
-                              <span aria-hidden>·</span>
-                              <span className="truncate">{shortDateFormat.format(new Date(file.created_at * 1000))}</span>
-                            </span>
-                            <span className="mt-0.5 flex min-w-0 items-center gap-1 text-[0.71875rem] text-[var(--color-fg-subtle)]">
-                              {file.origin === 'kb' ? <FolderOpen size={11} className="shrink-0" aria-hidden /> : <MessageSquare size={11} className="shrink-0" aria-hidden />}
-                              <span className="truncate">
-                                {file.origin === 'kb' ? file.kb_name || t('files:origin.kb') : t('files:origin.conversation')}
-                              </span>
-                            </span>
-                          </span>
-                        </button>
-                        <Tooltip content={t('common:actions.delete', { defaultValue: 'Delete' })} side="left">
-                          <button
-                            type="button"
-                            aria-label={`${t('common:actions.delete', { defaultValue: 'Delete' })}: ${file.filename}`}
-                            className="inline-flex w-11 shrink-0 items-center justify-center rounded-r-[8px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)] lg:opacity-0 lg:group-hover/file:opacity-100 lg:group-focus-within/file:opacity-100"
-                            onClick={() => setConfirmDelete(file)}
-                          >
-                            <Trash2 size={15} aria-hidden />
-                          </button>
-                        </Tooltip>
-                      </li>
-                    )
-                  })}
+                  {fileTree.folders.map((folder) => (
+                    <UserFileFolderRows
+                      key={`folder:${folder.path}`}
+                      node={folder}
+                      depth={0}
+                      expanded={expandedFolders}
+                      onToggle={(path) =>
+                        setExpandedFolders((current) => {
+                          const next = new Set(current)
+                          if (next.has(path)) next.delete(path)
+                          else next.add(path)
+                          return next
+                        })
+                      }
+                      onDeleteFolder={setConfirmDeleteFolder}
+                      selectedKey={selectedKey}
+                      onOpen={(file) => void openPreview(file)}
+                      onDeleteFile={setConfirmDelete}
+                      shortDateFormat={shortDateFormat}
+                      labels={{
+                        conversation: t('files:origin.conversation'),
+                        kb: t('files:origin.kb'),
+                        deleteAction: t('common:actions.delete', { defaultValue: 'Delete' }),
+                        folderSummary: (count, size) =>
+                          t('files:folderSummary', { defaultValue: '{{count}} files · {{size}}', count, size }),
+                        expand: (name) => t('composer.folderExpand', { defaultValue: 'Expand {{folder}}', folder: name }),
+                        collapse: (name) => t('composer.folderCollapse', { defaultValue: 'Collapse {{folder}}', folder: name }),
+                        removeFolder: (name) => t('composer.folderRemoveAll', { defaultValue: 'Remove {{folder}}', folder: name }),
+                      }}
+                    />
+                  ))}
+                  {fileTree.rootFiles.map((file) => (
+                    <UserFileRow
+                      key={rowKey(file)}
+                      file={file}
+                      depth={0}
+                      selected={rowKey(file) === selectedKey}
+                      onOpen={() => void openPreview(file)}
+                      onDelete={() => setConfirmDelete(file)}
+                      shortDateFormat={shortDateFormat}
+                      labels={{
+                        conversation: t('files:origin.conversation'),
+                        kb: t('files:origin.kb'),
+                        deleteAction: t('common:actions.delete', { defaultValue: 'Delete' }),
+                      }}
+                    />
+                  ))}
                 </ul>
               )}
 
@@ -586,22 +649,247 @@ export default function UserFiles() {
         </div>
       </main>
 
-      <Dialog open={confirmDelete !== null} onOpenChange={(open) => !open && setConfirmDelete(null)}>
+      <Dialog
+        open={confirmDelete !== null || confirmDeleteFolder !== null}
+        onOpenChange={(open) => {
+          if (open) return
+          setConfirmDelete(null)
+          setConfirmDeleteFolder(null)
+        }}
+      >
         <DialogContent size="sm">
           <DialogHeader>
-            <DialogTitle>{t('files:confirmTitle')}</DialogTitle>
-            <DialogDescription>{t('files:confirmBody', { name: confirmDelete?.filename ?? '' })}</DialogDescription>
+            <DialogTitle>
+              {confirmDeleteFolder ? t('files:confirmFolderTitle', { defaultValue: 'Delete this folder?' }) : t('files:confirmTitle')}
+            </DialogTitle>
+            <DialogDescription>
+              {confirmDeleteFolder
+                ? t('files:confirmFolderBody', {
+                    defaultValue: 'All {{count}} files in “{{name}}” will be removed.',
+                    count: confirmDeleteFolder.fileCount,
+                    name: confirmDeleteFolder.name,
+                  })
+                : t('files:confirmBody', { name: confirmDelete?.filename ?? '' })}
+            </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setConfirmDelete(null)} disabled={busy}>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setConfirmDelete(null)
+                setConfirmDeleteFolder(null)
+              }}
+              disabled={busy}
+            >
               {t('common:actions.cancel', { defaultValue: 'Cancel' })}
             </Button>
-            <Button variant="destructive" loading={busy} onClick={() => confirmDelete && void runDelete(confirmDelete)}>
+            <Button
+              variant="destructive"
+              loading={busy}
+              onClick={() => {
+                if (confirmDeleteFolder) void runDeleteFolder(confirmDeleteFolder)
+                else if (confirmDelete) void runDelete(confirmDelete)
+              }}
+            >
               {t('common:actions.delete', { defaultValue: 'Delete' })}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+/** Labels the rows need, resolved once by the page so the rows stay dumb. */
+interface FileRowLabels {
+  conversation: string
+  kb: string
+  deleteAction: string
+}
+
+interface FolderRowLabels extends FileRowLabels {
+  folderSummary: (count: number, size: string) => string
+  expand: (name: string) => string
+  collapse: (name: string) => string
+  removeFolder: (name: string) => string
+}
+
+interface UserFileRowProps {
+  file: ApiAdminFile
+  depth: number
+  selected: boolean
+  onOpen: () => void
+  onDelete: () => void
+  shortDateFormat: Intl.DateTimeFormat
+  labels: FileRowLabels
+}
+
+/**
+ * One file row. `depth` indents it inside the directory that contains it; the
+ * markup mirrors the flat list that came before, so selection, preview and delete
+ * behave identically whether the file is loose or inside a folder.
+ */
+function UserFileRow({ file, depth, selected, onOpen, onDelete, shortDateFormat, labels }: UserFileRowProps) {
+  const FileIcon = fileIconFor(file.filename)
+  return (
+    <li
+      className={cn(
+        'group/file flex min-h-16 items-stretch rounded-[8px] transition-colors',
+        selected ? 'bg-[var(--color-accent-soft)]' : 'hover:bg-[var(--color-bg-muted)]',
+      )}
+    >
+      <button
+        type="button"
+        aria-current={selected ? 'true' : undefined}
+        style={{ paddingLeft: `${0.625 + depth * 0.875}rem` }}
+        className="flex min-w-0 flex-1 items-center gap-2.5 rounded-l-[8px] py-2 pr-2.5 text-left focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)]"
+        onClick={onOpen}
+      >
+        <span
+          className={cn(
+            'inline-flex size-9 shrink-0 items-center justify-center rounded-[8px]',
+            selected
+              ? 'bg-[var(--color-surface)] text-[var(--color-accent)]'
+              : 'bg-[var(--color-surface-sunken)] text-[var(--color-fg-muted)]',
+          )}
+        >
+          <FileIcon size={17} aria-hidden />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[0.875rem] font-medium text-[var(--color-fg)]" title={file.filename}>
+            {file.filename}
+          </span>
+          <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[0.71875rem] text-[var(--color-fg-subtle)]">
+            <span className="shrink-0 font-medium">{typeLabel(file)}</span>
+            <span aria-hidden>·</span>
+            <span className="shrink-0 tabular-nums">{fmtBytes(file.size_bytes)}</span>
+            <span aria-hidden>·</span>
+            <span className="truncate">{shortDateFormat.format(new Date(file.created_at * 1000))}</span>
+          </span>
+          <span className="mt-0.5 flex min-w-0 items-center gap-1 text-[0.71875rem] text-[var(--color-fg-subtle)]">
+            {file.origin === 'kb' ? <FolderOpen size={11} className="shrink-0" aria-hidden /> : <MessageSquare size={11} className="shrink-0" aria-hidden />}
+            <span className="truncate">
+              {file.origin === 'kb' ? file.kb_name || labels.kb : labels.conversation}
+            </span>
+          </span>
+        </span>
+      </button>
+      <Tooltip content={labels.deleteAction} side="left">
+        <button
+          type="button"
+          aria-label={`${labels.deleteAction}: ${file.filename}`}
+          className="inline-flex w-11 shrink-0 items-center justify-center rounded-r-[8px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)] lg:opacity-0 lg:group-hover/file:opacity-100 lg:group-focus-within/file:opacity-100"
+          onClick={onDelete}
+        >
+          <Trash2 size={15} aria-hidden />
+        </button>
+      </Tooltip>
+    </li>
+  )
+}
+
+interface UserFileFolderRowsProps {
+  node: FolderTreeNode<ApiAdminFile>
+  depth: number
+  expanded: Set<string>
+  onToggle: (path: string) => void
+  onDeleteFolder: (node: FolderTreeNode<ApiAdminFile>) => void
+  selectedKey: string
+  onOpen: (file: ApiAdminFile) => void
+  onDeleteFile: (file: ApiAdminFile) => void
+  shortDateFormat: Intl.DateTimeFormat
+  labels: FolderRowLabels
+}
+
+/**
+ * A directory row plus, when open, its subdirectories and files. This is what
+ * turns an uploaded folder back into the one thing the user picked.
+ */
+function UserFileFolderRows({
+  node,
+  depth,
+  expanded,
+  onToggle,
+  onDeleteFolder,
+  selectedKey,
+  onOpen,
+  onDeleteFile,
+  shortDateFormat,
+  labels,
+}: UserFileFolderRowsProps) {
+  const open = expanded.has(node.path)
+  return (
+    <li className="flex flex-col">
+      <div
+        style={{ paddingLeft: `${0.625 + depth * 0.875}rem` }}
+        className="group/folder flex min-h-16 items-center gap-1 rounded-[8px] pr-2.5 transition-colors hover:bg-[var(--color-bg-muted)]"
+      >
+        <button
+          type="button"
+          onClick={() => onToggle(node.path)}
+          aria-expanded={open}
+          aria-label={open ? labels.collapse(node.name) : labels.expand(node.name)}
+          className="flex min-w-0 flex-1 items-center gap-2.5 py-2 text-left focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)]"
+        >
+          {open ? (
+            <ChevronDown size={15} className="shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
+          ) : (
+            <ChevronRight size={15} className="shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
+          )}
+          <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-[8px] bg-[var(--color-surface-sunken)] text-[var(--color-fg-muted)]">
+            <FolderIcon size={17} aria-hidden />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[0.875rem] font-medium text-[var(--color-fg)]" title={node.path}>
+              {node.name}
+            </span>
+            <span className="mt-0.5 block truncate text-[0.71875rem] text-[var(--color-fg-subtle)]">
+              {labels.folderSummary(node.fileCount, fmtBytes(node.size))}
+            </span>
+          </span>
+        </button>
+        <Tooltip content={labels.removeFolder(node.name)} side="left">
+          <button
+            type="button"
+            aria-label={labels.removeFolder(node.name)}
+            className="inline-flex w-11 shrink-0 items-center justify-center rounded-r-[8px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)] lg:opacity-0 lg:group-hover/folder:opacity-100 lg:group-focus-within/folder:opacity-100"
+            onClick={() => onDeleteFolder(node)}
+          >
+            <Trash2 size={15} aria-hidden />
+          </button>
+        </Tooltip>
+      </div>
+      {open ? (
+        <ul className="flex flex-col">
+          {node.children.map((child) => (
+            <UserFileFolderRows
+              key={`folder:${child.path}`}
+              node={child}
+              depth={depth + 1}
+              expanded={expanded}
+              onToggle={onToggle}
+              onDeleteFolder={onDeleteFolder}
+              selectedKey={selectedKey}
+              onOpen={onOpen}
+              onDeleteFile={onDeleteFile}
+              shortDateFormat={shortDateFormat}
+              labels={labels}
+            />
+          ))}
+          {node.files.map((file) => (
+            <UserFileRow
+              key={rowKey(file)}
+              file={file}
+              depth={depth + 1}
+              selected={rowKey(file) === selectedKey}
+              onOpen={() => onOpen(file)}
+              onDelete={() => onDeleteFile(file)}
+              shortDateFormat={shortDateFormat}
+              labels={labels}
+            />
+          ))}
+        </ul>
+      ) : null}
+    </li>
   )
 }

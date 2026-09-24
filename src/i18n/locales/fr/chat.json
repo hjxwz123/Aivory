@@ -61,6 +61,12 @@
     "attachFolderHint": "Laissez l’assistant travailler dans tout le dossier",
     "folderPartial": "Import de {{count}} fichiers depuis « {{folder}} »",
     "folderNothingToUpload": "Aucun fichier de « {{folder}} » n’a pu être importé",
+    "folderPathsUnavailable": "Impossible de lire les chemins des fichiers de « {{folder}} »",
+    "folderPathsUnavailableHint": "Glissez plutôt le dossier sur le champ de saisie, ou joignez les fichiers un par un.",
+    "folderPickFailed": "Impossible de lire ce dossier",
+    "folderWalkIncomplete": "Seule une partie de « {{folder}} » a pu être lue",
+    "folderWalkTruncated": "Limite de profondeur ou de nombre de fichiers atteinte.",
+    "folderWalkFailed": "{{count}} fichier(s) n’ont pas pu être lus.",
     "folderSkipDir": "dossiers de dépendances/build",
     "folderSkipNoise": "fichiers système",
     "folderSkipExtension": "types de fichiers non pris en charge",
@@ -546,6 +552,7 @@
     "loading": "Chargement…",
     "empty": "Aucun fichier. Ajoutez-en un pour que le modèle puisse le lire.",
     "added": "Fichier ajouté",
+    "folderSummary": "{{count}} fichiers · {{size}}",
     "addFailed": "Impossible d’ajouter le fichier",
     "imageUseComposer": "Joignez les images depuis la zone de message afin de les envoyer via l’API de vision.",
     "remove": "Retirer {{name}}",
@@ -875,6 +882,10 @@
         "label": "Utiliser les compétences",
         "description": "Exécuter les compétences partagées dans la bibliothèque."
       },
+      "can_use_ai_ppt": {
+        "label": "Utiliser AI PPT",
+        "description": "Créer et modifier des présentations IA si le groupe et l’espace de travail l’autorisent."
+      },
       "can_use_mcp": {
         "label": "Utiliser les services MCP",
         "description": "Appeler les outils des services MCP disponibles dans cet espace."
@@ -1024,6 +1035,10 @@
       "AllowDrawing": {
         "label": "Dessin",
         "description": "Autoriser le mode dessin dédié et les modèles d'image."
+      },
+      "AllowAiPPT": {
+        "label": "AI PPT",
+        "description": "Autoriser les présentations IA ici. Les restrictions du groupe et des membres restent applicables."
       },
       "AllowPrivateChat": {
         "label": "Conversation privée",

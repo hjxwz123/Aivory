@@ -17,6 +17,7 @@ export const DEFAULT_USER_PERMISSIONS: ApiUserGroupPermissions = {
   allow_memory: true,
   allow_drawing: true,
   allow_private_chat: true,
+  allow_ai_ppt: true,
 }
 
 export type UserCapability = keyof Pick<
@@ -34,6 +35,7 @@ export type UserCapability = keyof Pick<
   | 'allow_memory'
   | 'allow_drawing'
   | 'allow_private_chat'
+  | 'allow_ai_ppt'
 >
 
 /**
