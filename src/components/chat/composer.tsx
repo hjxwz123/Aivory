@@ -87,8 +87,14 @@ import {
   FOLDER_MAX_TOTAL_BYTES_DEFAULT,
   folderUploadFields,
   selectFolderFiles,
+  type FolderCandidate,
   type FolderSkipReason,
 } from '@/lib/folder-upload'
+import {
+  isPickerCancellation,
+  pickFolderWithFileSystemApi,
+  type PickedFolderFile,
+} from '@/lib/folder-picker'
 import { chipRailItems } from '@/lib/folder-attachments'
 import { AttachmentChip, type AttachmentChipAttachment } from './composer-attachment-chip'
 import { FolderChip } from './folder-chip'
@@ -1000,6 +1006,15 @@ export function Composer({
    * `webkitRelativePath`. The map restores it, keyed by the File object itself.
    */
   const folderPathOverrides = useRef<Map<File, string>>(new Map())
+  /**
+   * True while a File System Access directory pick is in flight.
+   *
+   * That picker is asynchronous and returns handles rather than a FileList, so
+   * it cannot ride the input's `change` event. Its own promise carries the
+   * result, and this ref lets the click handler fall back to the hidden
+   * `webkitdirectory` input when the walk finds nothing to offer.
+   */
+  const folderPickPending = useRef(false)
   const [formulaOpen, setFormulaOpen] = useState(false)
   const [formulaTarget, setFormulaTarget] = useState<FormulaTarget | null>(null)
   const formulaSelectionRef = useRef<{ from: number; to: number } | null>(null)
@@ -2391,6 +2406,39 @@ export function Composer({
   handleAttachRef.current = handleAttach
 
   /**
+   * Open the folder picker and upload whatever it returns.
+   *
+   * Prefers the File System Access API: it yields real directory handles, so
+   * every file's relative path is correct by construction. `<input
+   * webkitdirectory>` is the fallback, and it is the only option on hosts that
+   * do not implement the modern picker.
+   */
+  async function pickAndAttachFolder(): Promise<void> {
+    if (folderPickPending.current) return
+    folderPickPending.current = true
+    try {
+      const picked = await pickFolderWithFileSystemApi()
+      if (picked === null) {
+        // No File System Access API: the hidden `webkitdirectory` input is the
+        // only remaining way to choose a directory.
+        folderFileRef.current?.click()
+        return
+      }
+      await handleFolderAttach(picked.files, picked.name)
+    } catch (error) {
+      // A dismissed picker is not a failure — the user simply changed their mind.
+      if (!isPickerCancellation(error)) {
+        toast.error(
+          t('composer.folderPickFailed', { defaultValue: "Couldn't read that folder" }),
+          error instanceof Error ? error.message : undefined,
+        )
+      }
+    } finally {
+      folderPickPending.current = false
+    }
+  }
+
+  /**
    * Upload a whole folder, preserving its structure.
    *
    * The picked list is pre-filtered in the browser (dependency trees, build
@@ -2399,38 +2447,66 @@ export function Composer({
    * be tens of thousands of them. Whatever is dropped is reported to the user
    * rather than silently discarded, and the files that do go up carry their path
    * inside the folder so the server can rebuild the tree for the sandbox.
+   *
+   * `files` comes from either picker. A `FileList` from the legacy input carries
+   * its own paths in `webkitRelativePath`; a modern pick passes the walked paths
+   * explicitly (and its folder name, which the legacy path must infer).
    */
-  async function handleFolderAttach(files: FileList | null): Promise<number> {
-    if (!files || !files.length) return 0
+  async function handleFolderAttach(
+    picked: FileList | readonly PickedFolderFile[] | null,
+    knownFolder = '',
+  ): Promise<number> {
+    if (!picked) return 0
     if (!canUploadFiles) {
       toast.error(t('composer.permissions.fileUpload', { defaultValue: 'Your user group cannot upload files.' }))
       return 0
     }
-    const [limits, policy] = await Promise.all([getUploadLimits(), getUploadPolicyExtensions()])
-    const candidates = Array.from(files)
-      .map((file) => ({
-        file,
-        path: (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name,
-      }))
-      // A directory picker can report entries without a path (older engines);
-      // those have no folder to preserve, so they are treated as loose files.
-      .filter((entry) => entry.path.includes('/'))
-    if (!candidates.length) return 0
+    const entries: PickedFolderFile[] = Array.isArray(picked)
+      ? [...(picked as readonly PickedFolderFile[])]
+      : Array.from(picked as FileList).map((file) => ({
+          file,
+          path: (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name,
+        }))
+    if (!entries.length) return 0
 
-    const selection = selectFolderFiles(
-      candidates.map((entry) => ({
-        file: entry.file,
-        path: entry.path,
-        fileName: entry.file.name,
-        size: entry.file.size,
-      })),
-      {
-        maxFiles: FOLDER_MAX_FILES_DEFAULT,
-        maxTotalBytes: Math.min(FOLDER_MAX_TOTAL_BYTES_DEFAULT, Math.max(limits.max_file_bytes, 0) * 400),
-        allowedExtensions: policy,
-      },
+    const [limits, policy] = await Promise.all([getUploadLimits(), getUploadPolicyExtensions()])
+    const folderName =
+      knownFolder || (entries[0]?.path.includes('/') ? entries[0].path.split('/')[0] : '')
+    const candidates = entries.map<FolderCandidate>((entry) => ({
+      file: entry.file,
+      path: entry.path,
+      fileName: entry.file.name,
+      size: entry.file.size,
+      // The folder name is known for BOTH pickers: the legacy input's paths
+      // always start with it, the modern pick is told it. Passing it keeps a
+      // file at the folder's root ("main.ts") from being read as a
+      // directory-named path by the skip rules.
+      folder: folderName || undefined,
+    }))
+    const selection = selectFolderFiles(candidates, {
+      maxFiles: FOLDER_MAX_FILES_DEFAULT,
+      maxTotalBytes: Math.min(FOLDER_MAX_TOTAL_BYTES_DEFAULT, Math.max(limits.max_file_bytes, 0) * 400),
+      allowedExtensions: policy,
+    })
+    // EVERY file missing the folder in its path means the picker reported no
+    // usable relative paths at all — the legacy input on a host that ignores
+    // `webkitdirectory`. Say so: the previous silent `return 0` is
+    // indistinguishable from a dead button, which is how this bug was reported.
+    const pathsIntact = candidates.some((candidate) =>
+      folderUploadFields(candidate.path, candidate.fileName, folderName) !== null,
     )
-    const folderName = candidates[0]?.path.split('/')[0] ?? ''
+    if (!pathsIntact) {
+      toast.error(
+        t('composer.folderPathsUnavailable', {
+          defaultValue: "Couldn't read the folder's file paths",
+          folder: folderName || undefined,
+        }),
+        t('composer.folderPathsUnavailableHint', {
+          defaultValue: 'Drag the folder onto the composer instead, or attach the files individually.',
+        }),
+      )
+      return 0
+    }
     if (!selection.accepted.length) {
       toast.error(
         t('composer.folderNothingToUpload', { defaultValue: 'Nothing in “{{folder}}” could be uploaded', folder: folderName }),
@@ -3655,10 +3731,11 @@ export function Composer({
               e.currentTarget.value = ''
             }}
           />
-          {/* Directory picker. `webkitdirectory` is the only way a browser lets
-              the user choose a FOLDER, and it can only be opened from a real
-              user gesture — which is why this has its own visible menu entry
-              rather than being folded into the file button. */}
+          {/* Fallback directory picker. The primary path is the File System
+              Access API (see `pickAndAttachFolder`); `webkitdirectory` is a
+              non-standard attribute, so this input is what remains on a host
+              that does not implement it. It can only be opened from a real user
+              gesture, which is why the folder button drives it directly. */}
           <input
             type="file"
             ref={folderFileRef}
@@ -3763,7 +3840,7 @@ export function Composer({
                       type="button"
                       onClick={() => {
                         setMoreOpen(false)
-                        folderFileRef.current?.click()
+                        void pickAndAttachFolder()
                       }}
                       className="flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-left text-[15px] text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)] active:bg-[var(--color-bg-muted)]"
                     >
@@ -3921,7 +3998,7 @@ export function Composer({
               <Tooltip content={t('composer.attachFolder', { defaultValue: 'Upload folder' })}>
                 <button
                   type="button"
-                  onClick={() => folderFileRef.current?.click()}
+                  onClick={() => void pickAndAttachFolder()}
                   aria-label={t('composer.attachFolder', { defaultValue: 'Upload folder' })}
                   className="inline-flex items-center justify-center size-8 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                 >
