@@ -46,13 +46,6 @@ import { LogoMark } from '@/components/brand/logo'
 import { ModelIcon } from '@/components/chat/model-icon'
 import { Tooltip } from '@/components/ui/tooltip'
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -237,7 +230,7 @@ interface MessageRowProps {
   /** Called when the user clicks `<` / `>` to switch between sibling
    *  branches. Receives the target message id. */
   onBranchSwitch?: (leafId: string) => void
-  /** Called when the user picks "Fork to new conversation" from the menu. */
+  /** Called when the user forks from this message into a new conversation. */
   onFork?: (leafId: string) => void
   /** Delete this whole round (the question + all its answers). Branch-safe. */
   onDelete?: (id: string) => void
@@ -296,7 +289,6 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
   const { t, i18n } = useTranslation('chat')
   const displayUserName = message.authorName ?? userName ?? t('common.you', { ns: 'common' })
   const [hovered, setHovered] = useState(false)
-  const [menuOpen, setMenuOpen] = useState(false)
   // Phone: the per-message actions live in a bottom Sheet (a clean thread reveals
   // them on tap) instead of an always-on row of tiny icons (§ mobile redesign).
   const isPhone = useMediaQuery(mediaQuery.phone)
@@ -630,7 +622,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
     )
   }
 
-  const visible = hovered || menuOpen || message.liked || message.disliked || feedbackPanelOpen || feedbackSubmitted
+  const visible = hovered || message.liked || message.disliked || feedbackPanelOpen || feedbackSubmitted
   const attachments = message.attachments ?? []
   useEffect(() => {
     const isDeleted = (attachmentId?: string) =>
@@ -1271,6 +1263,32 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
                   </Tooltip>
                 ) : null}
 
+                {!isUser && onRegenerate ? (
+                  <Tooltip content={t('actions.regenerate')}>
+                    <button
+                      type="button"
+                      onClick={() => onRegenerate(message.id)}
+                      aria-label={t('actions.regenerate')}
+                      className="inline-flex items-center justify-center size-7 max-sm:size-9 rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                    >
+                      <RefreshCw size={13} aria-hidden />
+                    </button>
+                  </Tooltip>
+                ) : null}
+
+                {onFork ? (
+                  <Tooltip content={t('actions.fork')}>
+                    <button
+                      type="button"
+                      onClick={() => onFork(message.id)}
+                      aria-label={t('actions.fork')}
+                      className="inline-flex items-center justify-center size-7 max-sm:size-9 rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                    >
+                      <GitBranchPlus size={13} aria-hidden />
+                    </button>
+                  </Tooltip>
+                ) : null}
+
                 {!isUser && (
                   <>
                     {message.content && canExportConversations ? (
@@ -1284,18 +1302,6 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
                           className="inline-flex items-center justify-center size-7 max-sm:size-9 rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:opacity-50 disabled:pointer-events-none"
                         >
                           <FileDown size={13} aria-hidden />
-                        </button>
-                      </Tooltip>
-                    ) : null}
-                    {onRegenerate ? (
-                      <Tooltip content={t('actions.regenerate')}>
-                        <button
-                          type="button"
-                          onClick={() => onRegenerate(message.id)}
-                          aria-label={t('actions.regenerate')}
-                          className="inline-flex items-center justify-center size-7 max-sm:size-9 rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-                        >
-                          <RefreshCw size={13} aria-hidden />
                         </button>
                       </Tooltip>
                     ) : null}
@@ -1358,19 +1364,6 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
                   </Tooltip>
                 )}
 
-                {onDelete && (
-                  <Tooltip content={t('actions.delete', { defaultValue: 'Delete' })}>
-                    <button
-                      type="button"
-                      onClick={() => setConfirmDelete(true)}
-                      aria-label={t('actions.delete', { defaultValue: 'Delete' })}
-                      className="inline-flex items-center justify-center size-7 max-sm:size-9 rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-                    >
-                      <Trash2 size={13} aria-hidden />
-                    </button>
-                  </Tooltip>
-                )}
-
                 {onReport ? (
                   <Tooltip content={t('actions.reportIssue')}>
                     <button
@@ -1384,43 +1377,18 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
                   </Tooltip>
                 ) : null}
 
-                <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-                  <Tooltip content={t('actions.more')}>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        aria-label={t('actions.more')}
-                        className="inline-flex items-center justify-center size-7 max-sm:size-9 rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-                      >
-                        <MoreHorizontal size={13} aria-hidden />
-                      </button>
-                    </DropdownMenuTrigger>
+                {onDelete && (
+                  <Tooltip content={t('actions.delete', { defaultValue: 'Delete' })}>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDelete(true)}
+                      aria-label={t('actions.delete', { defaultValue: 'Delete' })}
+                      className="inline-flex items-center justify-center size-7 max-sm:size-9 rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                    >
+                      <Trash2 size={13} aria-hidden />
+                    </button>
                   </Tooltip>
-                  <DropdownMenuContent align={isUser ? 'end' : 'start'}>
-                    <DropdownMenuItem onClick={() => copy(message.content)}>
-                      <Copy size={13} aria-hidden />
-                      {t('actions.copyMessage')}
-                    </DropdownMenuItem>
-                    {onFork ? (
-                      // Feedback (forking… → forked/failed) is owned by handleFork
-                      // in message-list — a success toast here would fire before
-                      // the request even starts (§2.7).
-                      <DropdownMenuItem onClick={() => onFork(message.id)}>
-                        <GitBranchPlus size={13} aria-hidden />
-                        {t('actions.fork', { defaultValue: 'Fork to new conversation' })}
-                      </DropdownMenuItem>
-                    ) : null}
-                    {!isUser && onRegenerate && (
-                      <>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem onClick={() => onRegenerate?.(message.id)}>
-                          <RefreshCw size={13} aria-hidden />
-                          {t('actions.regenerate')}
-                        </DropdownMenuItem>
-                      </>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                )}
 
                 {/* Credits spent on this turn — shown after the action icons for
                     credit-charged replies (§ credits). Sage = an AI-status moment. */}
@@ -1512,45 +1480,12 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
                       onClick={() => { setActionSheetOpen(false); setEditing(true) }}
                     />
                   ) : null}
-                  {message.content && canExportConversations ? (
-                    <MsgActionRow
-                      icon={<FileDown size={18} aria-hidden />}
-                      label={t('actions.exportDocx', { defaultValue: 'Export as Word' })}
-                      onClick={() => { setActionSheetOpen(false); void exportDocx() }}
-                    />
-                  ) : null}
                   {onRegenerate ? (
                     <MsgActionRow
                       icon={<RefreshCw size={18} aria-hidden />}
                       label={t('actions.regenerate')}
                       onClick={() => { setActionSheetOpen(false); onRegenerate(message.id) }}
                     />
-                  ) : null}
-                  {onFeedback ? (
-                    <>
-                      <MsgActionRow
-                        icon={<ThumbsUp size={18} aria-hidden />}
-                        label={t('actions.helpful')}
-                        active={message.liked}
-                        disabled={feedbackPending}
-                        onClick={() => {
-                          setActionSheetOpen(false)
-                          void toggleLike()
-                        }}
-                      />
-                      <MsgActionRow
-                        icon={<ThumbsDown size={18} aria-hidden />}
-                        label={t('actions.notHelpful')}
-                        active={message.disliked}
-                        disabled={feedbackPending}
-                        controls={feedbackPanelId}
-                        expanded={feedbackPanelOpen}
-                        onClick={() => {
-                          setActionSheetOpen(false)
-                          void toggleDislike()
-                        }}
-                      />
-                    </>
                   ) : null}
                 </>
               ) : isOwn && onEdit ? (
@@ -1565,9 +1500,51 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
                   icon={<GitBranchPlus size={18} aria-hidden />}
                   label={t('actions.fork', { defaultValue: 'Fork to new conversation' })}
                   onClick={() => {
-                    // handleFork owns the forking…/forked/failed toasts (§2.7).
                     setActionSheetOpen(false)
                     onFork(message.id)
+                  }}
+                />
+              ) : null}
+              {!isUser && message.content && canExportConversations ? (
+                <MsgActionRow
+                  icon={<FileDown size={18} aria-hidden />}
+                  label={t('actions.exportDocx', { defaultValue: 'Export as Word' })}
+                  onClick={() => { setActionSheetOpen(false); void exportDocx() }}
+                />
+              ) : null}
+              {!isUser && onFeedback ? (
+                <>
+                  <MsgActionRow
+                    icon={<ThumbsUp size={18} aria-hidden />}
+                    label={t('actions.helpful')}
+                    active={message.liked}
+                    disabled={feedbackPending}
+                    onClick={() => {
+                      setActionSheetOpen(false)
+                      void toggleLike()
+                    }}
+                  />
+                  <MsgActionRow
+                    icon={<ThumbsDown size={18} aria-hidden />}
+                    label={t('actions.notHelpful')}
+                    active={message.disliked}
+                    disabled={feedbackPending}
+                    controls={feedbackPanelId}
+                    expanded={feedbackPanelOpen}
+                    onClick={() => {
+                      setActionSheetOpen(false)
+                      void toggleDislike()
+                    }}
+                  />
+                </>
+              ) : null}
+              {onReport ? (
+                <MsgActionRow
+                  icon={<Flag size={18} aria-hidden />}
+                  label={t('actions.reportIssue')}
+                  onClick={() => {
+                    setActionSheetOpen(false)
+                    window.setTimeout(() => onReport(message.id), 200)
                   }}
                 />
               ) : null}
@@ -1581,16 +1558,6 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
                     onClick={() => { setActionSheetOpen(false); setConfirmDelete(true) }}
                   />
                 </>
-              ) : null}
-              {onReport ? (
-                <MsgActionRow
-                  icon={<Flag size={18} aria-hidden />}
-                  label={t('actions.reportIssue')}
-                  onClick={() => {
-                    setActionSheetOpen(false)
-                    window.setTimeout(() => onReport(message.id), 200)
-                  }}
-                />
               ) : null}
             </div>
           </SheetContent>
