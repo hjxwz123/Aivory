@@ -273,6 +273,7 @@ function formatCredits(credits: number): string {
 function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, onSaveEdit, onFeedback, onBranchSwitch, onFork, onDelete, onReport, readOnly = false, userMessageMarkdown = false }: MessageRowProps) {
   const ragInjection = visibleRagInjection(message)
   const isUser = message.role === 'user'
+  const canTargetMessage = !message.localOnly
   const userHasMath = useMemo(() => isUser && hasMathContent(message.content), [isUser, message.content])
   // §workspaces: in a shared conversation "own" = authored by ME — other
   // members' questions render LEFT like the assistant, with the author's
@@ -1276,7 +1277,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
                   </Tooltip>
                 ) : null}
 
-                {onFork ? (
+                {onFork && canTargetMessage ? (
                   <Tooltip content={t('actions.fork')}>
                     <button
                       type="button"
@@ -1364,7 +1365,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
                   </Tooltip>
                 )}
 
-                {onReport ? (
+                {onReport && canTargetMessage ? (
                   <Tooltip content={t('actions.reportIssue')}>
                     <button
                       type="button"
@@ -1377,7 +1378,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
                   </Tooltip>
                 ) : null}
 
-                {onDelete && (
+                {onDelete && canTargetMessage && (
                   <Tooltip content={t('actions.delete', { defaultValue: 'Delete' })}>
                     <button
                       type="button"
@@ -1495,7 +1496,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
                   onClick={() => { setActionSheetOpen(false); setEditing(true) }}
                 />
               ) : null}
-              {onFork ? (
+              {onFork && canTargetMessage ? (
                 <MsgActionRow
                   icon={<GitBranchPlus size={18} aria-hidden />}
                   label={t('actions.fork', { defaultValue: 'Fork to new conversation' })}
@@ -1538,7 +1539,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
                   />
                 </>
               ) : null}
-              {onReport ? (
+              {onReport && canTargetMessage ? (
                 <MsgActionRow
                   icon={<Flag size={18} aria-hidden />}
                   label={t('actions.reportIssue')}
@@ -1548,7 +1549,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
                   }}
                 />
               ) : null}
-              {onDelete ? (
+              {onDelete && canTargetMessage ? (
                 <>
                   <div className="my-1.5 h-px bg-[var(--color-divider)]" aria-hidden />
                   <MsgActionRow

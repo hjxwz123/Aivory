@@ -3310,8 +3310,14 @@ function applyVerifyEvent(prev: VerifyResult | undefined, ev: ApiSseEvent): Veri
 // appendNarration moves the model's pre-tool "let me look this up…" text into
 // the reasoning trace (§4.3) so it doesn't pollute the final answer. Merges
 // into a trailing narration run if one is already open.
+function repeatsLastThinking(reasoning: ReasoningItem[], text: string): boolean {
+  const last = reasoning[reasoning.length - 1]
+  return last?.kind === 'thinking' && last.text.trim() === text.trim()
+}
+
 function appendNarration(reasoning: ReasoningItem[], text: string): ReasoningItem[] {
   if (!text.trim()) return reasoning
+  if (repeatsLastThinking(reasoning, text)) return reasoning
   const last = reasoning[reasoning.length - 1]
   if (last && last.kind === 'narration') {
     return [...reasoning.slice(0, -1), { ...last, text: last.text + text }]
@@ -3417,7 +3423,9 @@ export function toLocalMessage(m: ApiMessage): Message {
     } else if (b.kind === 'tool_call') {
       // Flush any narration that preceded this tool into the trace.
       if (pendingText.trim()) {
-        reasoning.push({ kind: 'narration', id: `${m.id}-n${idx}`, text: pendingText })
+        if (!repeatsLastThinking(reasoning, pendingText)) {
+          reasoning.push({ kind: 'narration', id: `${m.id}-n${idx}`, text: pendingText })
+        }
         pendingText = ''
       }
       const id = b.tool_id ?? `${m.id}-r${idx}`
