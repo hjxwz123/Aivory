@@ -901,6 +901,41 @@ describe('stopped turn optimistic-id reconciliation', () => {
     })
   })
 
+  it('keeps identical pre-tool text from repeating the preceding thought live or after reload', async () => {
+    const thought = 'I will inspect the animation before changing the layout.'
+    apiMocks.streamSSE.mockReturnValue(
+      events(
+        { type: 'message_start', message_id: 'msg_tool_thought' },
+        { type: 'thinking_delta', text: thought },
+        { type: 'text_delta', text: thought },
+        { type: 'tool_start', id: 'tool_inspect', name: 'python_execute' },
+        { type: 'error', message: 'Interrupted' },
+      ),
+    )
+
+    await useConversations.getState().sendMessage({
+      conversationId: 'conv_stop',
+      text: 'Inspect the animation',
+      modelId: 'model_1',
+      toolMode: 'auto',
+    })
+
+    const live = useConversations.getState().conversations[0].messages.at(-1)
+    expect(live?.reasoning?.map((item) => item.kind)).toEqual(['thinking', 'tool'])
+    expect(live?.content).toBe('')
+
+    const persisted = apiMessage('msg_tool_thought', 'assistant', 'msg_user', 'complete', '')
+    persisted.blocks = [
+      { kind: 'thinking', text: thought },
+      { kind: 'text', text: thought },
+      { kind: 'tool_call', tool_id: 'tool_inspect', tool_name: 'python_execute' },
+      { kind: 'text', text: 'Done.' },
+    ]
+    const reloaded = toLocalMessage(persisted)
+    expect(reloaded.reasoning?.map((item) => item.kind)).toEqual(['thinking', 'tool'])
+    expect(reloaded.content).toBe('Done.')
+  })
+
   it('keeps the interruption marker and partial answer from a normal send', async () => {
     apiMocks.streamSSE.mockReturnValue(
       events(
