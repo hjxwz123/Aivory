@@ -1,11 +1,8 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Mail, Lock, User, ArrowRight, ShieldCheck } from 'lucide-react'
-import { BlurText } from '@/components/landing/fx/blur-text'
-import { Input } from '@/components/ui/input'
+import { AuthField } from '@/components/auth/auth-field'
 import { Button } from '@/components/ui/button'
-import { Field } from '@/components/ui/label'
 import { useAuth } from '@/store/auth'
 import { authErrorText } from '@/lib/auth-errors'
 
@@ -27,6 +24,7 @@ export default function Setup() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
+    if (loading) return
     const next: typeof errors = {}
     if (!name.trim()) next.name = t('errors.required')
     if (!email) next.email = t('errors.required')
@@ -46,61 +44,52 @@ export default function Setup() {
   }
 
   return (
-    <div>
-      <div className="mx-auto mb-5 inline-flex size-12 items-center justify-center rounded-full bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
-        <ShieldCheck size={20} aria-hidden />
-      </div>
-      <h1 className="font-serif tracking-tight text-3xl text-[var(--color-fg)] text-balance">
-        <BlurText text={t('setup.title')} delay={110} />
-      </h1>
-      <p className="mt-2.5 text-sm text-[var(--color-fg-muted)]">{t('setup.subtitle')}</p>
-
-      <form className="mt-7 flex flex-col gap-4" onSubmit={(e) => void submit(e)}>
-        {errors.general ? (
-          <div className="rounded-[10px] border border-[var(--color-danger-soft)] bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)]">
-            {errors.general}
-          </div>
-        ) : null}
-        <Field label={t('register.name')} htmlFor="setup-name" error={errors.name}>
-          <Input
-            id="setup-name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder={t('register.namePlaceholder')}
-            leadingIcon={<User size={14} aria-hidden />}
-            autoComplete="name"
-            invalid={!!errors.name}
-            wrapperClassName="focus-within:ring-0"
-          />
-        </Field>
-        <Field label={t('fields.email')} htmlFor="setup-email" error={errors.email}>
-          <Input
-            id="setup-email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@example.com"
-            leadingIcon={<Mail size={14} aria-hidden />}
-            autoComplete="email"
-            invalid={!!errors.email}
-            wrapperClassName="focus-within:ring-0"
-          />
-        </Field>
-        <Field label={t('fields.password')} htmlFor="setup-pw" hint={t('fields.passwordHint')} error={errors.pw}>
-          <Input
-            id="setup-pw"
-            type="password"
-            value={pw}
-            onChange={(e) => setPw(e.target.value)}
-            leadingIcon={<Lock size={14} aria-hidden />}
-            autoComplete="new-password"
-            invalid={!!errors.pw}
-            wrapperClassName="focus-within:ring-0"
-          />
-        </Field>
-        <Button type="submit" size="lg" loading={loading} trailingIcon={<ArrowRight size={15} aria-hidden />} className="w-full">
-          {t('setup.submit')}
-        </Button>
+    <div className="login-content">
+      <h1 id="login-title" className="login-title">{t('setup.title')}</h1>
+      <p className="login-intro">{t('setup.subtitle')}</p>
+      <form onSubmit={(e) => void submit(e)} noValidate>
+        {errors.general ? <p className="login-error" role="alert">{errors.general}</p> : null}
+        <AuthField
+          id="setup-name"
+          name="name"
+          label={t('register.name')}
+          value={name}
+          onChange={(e) => { setName(e.target.value); setErrors({}) }}
+          placeholder={t('register.namePlaceholder')}
+          autoComplete="name"
+          required
+          error={errors.name}
+        />
+        <AuthField
+          id="setup-email"
+          name="email"
+          type="email"
+          inputMode="email"
+          label={t('login.emailLabel')}
+          value={email}
+          onChange={(e) => { setEmail(e.target.value); setErrors({}) }}
+          placeholder="you@example.com"
+          autoComplete="email"
+          autoCapitalize="none"
+          spellCheck={false}
+          required
+          error={errors.email}
+        />
+        <AuthField
+          id="setup-pw"
+          name="password"
+          type="password"
+          label={t('fields.password')}
+          value={pw}
+          onChange={(e) => { setPw(e.target.value); setErrors({}) }}
+          autoComplete="new-password"
+          placeholder={t('fields.passwordHint')}
+          description={t('fields.passwordHint')}
+          required
+          minLength={8}
+          error={errors.pw}
+        />
+        <Button type="submit" loading={loading} className="login-submit">{t('setup.submit')}</Button>
       </form>
     </div>
   )

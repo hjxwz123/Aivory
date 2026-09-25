@@ -1,14 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
-import { useTranslation } from 'react-i18next'
-import { motion } from 'framer-motion'
-import { Mail, Lock, ArrowRight, Eye, EyeOff, ShieldCheck, ArrowLeft, KeyRound } from 'lucide-react'
-import { BlurText } from '@/components/landing/fx/blur-text'
-import { Input } from '@/components/ui/input'
+import { Trans, useTranslation } from 'react-i18next'
+import { ShieldCheck, ArrowLeft, Fingerprint } from 'lucide-react'
+import { AuthField } from '@/components/auth/auth-field'
 import { Button } from '@/components/ui/button'
-import { Field } from '@/components/ui/label'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Separator } from '@/components/ui/separator'
 import { toast } from '@/hooks/use-toast'
 import { useAuth } from '@/store/auth'
 import { OAuthButtons } from '@/components/auth/oauth-buttons'
@@ -31,13 +26,6 @@ function safeRedirect(from: unknown): string {
   return typeof from === 'string' && from.startsWith('/') && !from.startsWith('//') ? from : '/'
 }
 
-const ease: [number, number, number, number] = [0.2, 0.8, 0.2, 1]
-const stagger = { hidden: {}, visible: { transition: { staggerChildren: 0.06, delayChildren: 0.04 } } }
-const fadeUp = {
-  hidden: { opacity: 0, y: 14 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease } },
-}
-
 export default function Login() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -58,7 +46,6 @@ export default function Login() {
   const [email, setEmail] = useState('')
   const [pw, setPw] = useState('')
   const [rememberPassword, setRememberPassword] = useState(rememberPasswordPreference)
-  const [showPw, setShowPw] = useState(false)
   const [loading, setLoading] = useState(false)
   const [errors, setErrors] = useState<{ email?: string; pw?: string; general?: string }>({})
   const [code, setCode] = useState('')
@@ -220,237 +207,150 @@ export default function Login() {
 
   if (show2fa) {
     return (
-      <motion.div initial="hidden" animate="visible" variants={stagger}>
-        <motion.div
-          variants={fadeUp}
-          className="inline-flex size-11 items-center justify-center rounded-[12px] bg-[var(--color-secondary-soft)] text-[var(--color-secondary)]"
-        >
-          <ShieldCheck size={20} aria-hidden />
-        </motion.div>
-        <motion.h1
-          variants={fadeUp}
-          className="mt-5 font-serif tracking-tight text-3xl text-[var(--color-fg)] text-balance"
-        >
-          {t('twofa.title')}
-        </motion.h1>
-        <motion.p variants={fadeUp} className="mt-2.5 text-sm text-[var(--color-fg-muted)]">
-          {t('twofa.subtitle')}
-        </motion.p>
-
-        <motion.form variants={stagger} className="mt-7 flex flex-col gap-4" onSubmit={(e) => void submitCode(e)}>
+      <div className="login-content">
+        <ShieldCheck className="login-twofa-icon" size={28} aria-hidden />
+        <h1 id="login-title" className="login-title">{t('twofa.title')}</h1>
+        <p className="login-intro">{t('twofa.subtitle')}</p>
+        <form onSubmit={(e) => void submitCode(e)} noValidate>
           {errors.general ? (
-            <motion.div
-              variants={fadeUp}
-              className="rounded-[10px] border border-[var(--color-danger-soft)] bg-[var(--color-danger-soft)] text-[var(--color-danger)] px-3 py-2 text-sm"
-            >
-              {errors.general}
-            </motion.div>
+            <p id="login-code-error" className="login-error" role="alert">{errors.general}</p>
           ) : null}
-          <motion.div variants={fadeUp}>
-            <Field label={t('twofa.codeLabel')} htmlFor="code">
-              <Input
-                id="code"
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                autoFocus
-                value={code}
-                onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                leadingIcon={<ShieldCheck size={14} aria-hidden />}
-                placeholder="000000"
-                className="tracking-[0.4em] font-mono text-center text-lg"
-                wrapperClassName="focus-within:ring-0"
-              />
-            </Field>
-          </motion.div>
-          <motion.div variants={fadeUp}>
-            <Button type="submit" size="lg" loading={loading} trailingIcon={<ArrowRight size={15} aria-hidden />} className="w-full">
-              {t('twofa.verify')}
-            </Button>
-          </motion.div>
-          <motion.button
-            type="button"
-            variants={fadeUp}
-            onClick={cancelTwoFactor}
-            className="inline-flex items-center justify-center gap-1.5 text-xs text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)]"
-          >
+          <AuthField
+            id="code"
+            name="code"
+            label={t('twofa.codeLabel')}
+            className="login-code"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            autoFocus
+            required
+            maxLength={6}
+            value={code}
+            onChange={(e) => { setCode(e.target.value.replace(/\D/g, '').slice(0, 6)); setErrors({}) }}
+            placeholder="000000"
+            aria-invalid={Boolean(errors.general) || undefined}
+            aria-describedby={errors.general ? 'login-code-error' : undefined}
+          />
+          <Button type="submit" loading={loading} className="login-submit">
+            {t('twofa.verify')}
+          </Button>
+          <button type="button" onClick={cancelTwoFactor} className="login-back" disabled={loading}>
             <ArrowLeft size={12} aria-hidden />
             {t('twofa.back')}
-          </motion.button>
-        </motion.form>
-      </motion.div>
+          </button>
+        </form>
+      </div>
     )
   }
 
   return (
-    <motion.div initial="hidden" animate="visible" variants={stagger}>
-      {/* The title drifts into focus (BlurText) instead of riding the fadeUp
-          stagger — one entrance per element (§ welcome fx). */}
-      <h1 className="font-serif tracking-tight text-3xl text-[var(--color-fg)] text-balance">
-        <BlurText text={t('login.title')} delay={110} />
-      </h1>
-      <motion.p variants={fadeUp} className="mt-2.5 text-sm text-[var(--color-fg-muted)]">
-        {t('login.subtitle')}
-      </motion.p>
+    <div className="login-content">
+      <h1 id="login-title" className="login-title">{t('login.title')}</h1>
+      <p className="login-intro">{t('login.subtitle')}</p>
 
-      {providers.length > 0 ? (
-        <>
-          <motion.div variants={fadeUp} className="mt-7 flex flex-col gap-2">
-            <OAuthButtons providers={providers} captchaRequired={registrationCaptchaRequired} />
-          </motion.div>
-
-          {showPasskey || showPasswordLogin ? (
-            <motion.div
-              variants={fadeUp}
-              className="my-6 flex items-center gap-3 text-[11px] uppercase tracking-wider text-[var(--color-fg-subtle)]"
+      {providers.length > 0 || showPasskey ? (
+        <div className="login-providers">
+          <OAuthButtons providers={providers} captchaRequired={registrationCaptchaRequired} />
+          {showPasskey ? (
+            <Button
+              type="button"
+              variant="secondary"
+              loading={passkeyBusy}
+              disabled={loading}
+              onClick={() => void passkeyLogin()}
+              leadingIcon={<Fingerprint size={17} strokeWidth={1.6} aria-hidden />}
             >
-              <Separator className="flex-1" />
-              <span>{t('login.or')}</span>
-              <Separator className="flex-1" />
-            </motion.div>
+              {t('login.passkeyLabel')}
+            </Button>
           ) : null}
-        </>
-      ) : showPasswordLogin ? (
-        <div className="mt-7" />
+        </div>
       ) : providerRequired ? (
-        <motion.div
-          variants={fadeUp}
-          role="alert"
-          className="mt-7 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3.5 py-3 text-sm text-[var(--color-fg-muted)]"
-        >
-          {t('login.noProviders')}
-        </motion.div>
+        <p className="login-notice" role="alert">{t('login.noProviders')}</p>
       ) : null}
 
-      {/* Passkey (WebAuthn) login — fingerprint / face / device PIN, no
-          password. Optional surface next to password + OAuth. */}
-      {showPasskey ? (
-        <motion.div variants={fadeUp} className={providers.length > 0 ? 'flex flex-col gap-2' : 'mt-4 flex flex-col gap-2'}>
-          <Button
-            type="button"
-            variant={showPasswordLogin ? 'secondary' : 'primary'}
-            size="lg"
-            loading={passkeyBusy}
-            onClick={() => void passkeyLogin()}
-            className="w-full"
-            leadingIcon={<KeyRound size={15} aria-hidden />}
-          >
-            {t('login.passkey')}
-          </Button>
-        </motion.div>
+      {(providers.length > 0 || showPasskey) && showPasswordLogin ? (
+        <div className="login-divider">{t('login.emailDivider')}</div>
       ) : null}
 
-      {showPasskey && showPasswordLogin ? (
-        <motion.div
-          variants={fadeUp}
-          className="my-6 flex items-center gap-3 text-[11px] uppercase tracking-wider text-[var(--color-fg-subtle)]"
-        >
-          <Separator className="flex-1" />
-          <span>{t('login.or')}</span>
-          <Separator className="flex-1" />
-        </motion.div>
+      {banned ? (
+        <div className="login-notice login-notice-error" role="alert">
+          <strong>{t('login.suspended.title')}</strong>
+          <p>{t('login.suspended.body')}</p>
+        </div>
+      ) : null}
+      {errors.general ? (
+        <p id="login-error" className="login-error" role="alert">{errors.general}</p>
       ) : null}
 
       {showPasswordLogin ? (
-        <motion.form
-          variants={stagger}
-          className="flex flex-col gap-4"
+        <form
           autoComplete={rememberPassword ? 'on' : 'off'}
           onSubmit={(e) => void submit(e)}
+          noValidate
         >
-          {banned ? (
-            <motion.div
-              variants={fadeUp}
-              role="alert"
-              className="rounded-[10px] border border-[var(--color-danger)] bg-[var(--color-danger-soft)] text-[var(--color-danger)] px-3.5 py-3 text-sm"
-            >
-              <div className="font-medium">{t('login.suspended.title')}</div>
-              <p className="mt-0.5 text-[13px] text-[var(--color-fg-muted)]">{t('login.suspended.body')}</p>
-            </motion.div>
-          ) : null}
-          {errors.general ? (
-            <motion.div
-              variants={fadeUp}
-              className="rounded-[10px] border border-[var(--color-danger-soft)] bg-[var(--color-danger-soft)] text-[var(--color-danger)] px-3 py-2 text-sm"
-            >
-              {errors.general}
-            </motion.div>
-          ) : null}
-          <motion.div variants={fadeUp}>
-            <Field label={t('fields.email')} htmlFor="email" error={errors.email}>
-              <Input
-                id="email"
-                name="email"
-                type="email"
-                value={email}
-                autoComplete={rememberPassword ? 'email' : 'off'}
-                onChange={(e) => setEmail(e.target.value)}
-                leadingIcon={<Mail size={14} aria-hidden />}
-                placeholder={t('fields.emailPlaceholder')}
-                invalid={!!errors.email}
-                wrapperClassName="focus-within:ring-0"
-              />
-            </Field>
-          </motion.div>
-          <motion.div variants={fadeUp}>
-            <Field label={t('fields.password')} htmlFor="pw" error={errors.pw}>
-              <Input
-                id="pw"
-                name="password"
-                type={showPw ? 'text' : 'password'}
-                value={pw}
-                autoComplete={rememberPassword ? 'current-password' : 'off'}
-                onChange={(e) => setPw(e.target.value)}
-                leadingIcon={<Lock size={14} aria-hidden />}
-                invalid={!!errors.pw}
-                wrapperClassName="focus-within:ring-0"
-                trailingSlot={
-                  <button
-                    type="button"
-                    onClick={() => setShowPw((s) => !s)}
-                    aria-label={showPw ? t('fields.hidePassword') : t('fields.showPassword')}
-                    className="inline-flex items-center justify-center size-7 rounded-[6px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]"
-                  >
-                    {showPw ? <EyeOff size={13} aria-hidden /> : <Eye size={13} aria-hidden />}
-                  </button>
-                }
-              />
-            </Field>
-          </motion.div>
-          <motion.div variants={fadeUp} className="flex items-center justify-between gap-4">
-            <label className="inline-flex cursor-pointer select-none items-center gap-2 text-xs text-[var(--color-fg-muted)]">
-              <Checkbox
-                checked={rememberPassword}
-                onChange={(event) => {
-                  const remember = event.target.checked
-                  setRememberPassword(remember)
-                  setRememberPasswordPreference(remember)
-                }}
-              />
-              <span>{t('login.rememberPassword')}</span>
-            </label>
-            <Link to="/forgot-password" className="text-xs text-[var(--color-accent)] hover:text-[var(--color-accent-hover)]">
-              {t('login.forgot')}
-            </Link>
-          </motion.div>
-          <motion.div variants={fadeUp}>
-            <Button type="submit" size="lg" loading={loading} trailingIcon={<ArrowRight size={15} aria-hidden />} className="w-full">
-              {t('login.submit')}
-            </Button>
-          </motion.div>
-        </motion.form>
+          <AuthField
+            id="email"
+            name="email"
+            type="email"
+            inputMode="email"
+            label={t('login.emailLabel')}
+            value={email}
+            autoComplete={rememberPassword ? 'email' : 'off'}
+            autoCapitalize="none"
+            spellCheck={false}
+            required
+            onChange={(e) => { setEmail(e.target.value); setErrors({}) }}
+            placeholder="you@example.com"
+            error={errors.email}
+          />
+          <AuthField
+            id="pw"
+            name="password"
+            type="password"
+            label={t('fields.password')}
+            headingAction={<Link to="/forgot-password" className="login-forgot">{t('login.forgot')}</Link>}
+            value={pw}
+            autoComplete={rememberPassword ? 'current-password' : 'off'}
+            onChange={(e) => { setPw(e.target.value); setErrors({}) }}
+            placeholder={t('login.passwordPlaceholder')}
+            required
+            error={errors.pw}
+          />
+          <label className="login-remember">
+            <input
+              type="checkbox"
+              checked={rememberPassword}
+              onChange={(event) => {
+                const remember = event.target.checked
+                setRememberPassword(remember)
+                setRememberPasswordPreference(remember)
+              }}
+            />
+            <span>{t('login.rememberPassword')}</span>
+          </label>
+          <Button type="submit" loading={loading} disabled={passkeyBusy} className="login-submit">
+            {t('login.submit')}
+          </Button>
+        </form>
       ) : null}
 
       {showPasswordLogin ? (
-        <motion.p variants={fadeUp} className="mt-7 text-center text-sm text-[var(--color-fg-muted)]">
-          {t('login.noAccount')}{' '}
-          <Link to="/register" className="text-[var(--color-accent)] hover:text-[var(--color-accent-hover)] font-medium">
-            {t('login.noAccountAction')}
-          </Link>
-        </motion.p>
+        <p className="login-switch">
+          <span>{t('login.noAccount')}</span>
+          <Link to="/register">{t('login.noAccountAction')}</Link>
+        </p>
       ) : null}
+      <p className="login-terms">
+        <Trans
+          t={t}
+          i18nKey="login.agree"
+          components={{
+            terms: <Link to="/terms" target="_blank" rel="noopener noreferrer" />,
+            privacy: <Link to="/privacy" target="_blank" rel="noopener noreferrer" />,
+          }}
+        />
+      </p>
 
-      {/* Modal security check — opens on submit when the admin requires a
-          captcha on sign-in. */}
       {showPasswordLogin && loginCaptchaRequired ? (
         <PuzzleCaptchaDialog
           open={captchaOpen}
@@ -459,6 +359,6 @@ export default function Login() {
           onSolved={onCaptchaSolved}
         />
       ) : null}
-    </motion.div>
+    </div>
   )
 }

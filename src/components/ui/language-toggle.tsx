@@ -12,7 +12,7 @@ import { useLanguage } from '@/store/language'
 import { cn } from '@/lib/utils'
 
 interface LanguageToggleProps {
-  variant?: 'icon' | 'pill'
+  variant?: 'icon' | 'pill' | 'text'
   className?: string
 }
 
@@ -37,11 +37,14 @@ export function LanguageToggle({ variant = 'icon', className }: LanguageTogglePr
                 'size-8 rounded-[8px] hover:bg-[var(--color-bg-muted)]',
               variant === 'pill' &&
                 'h-9 px-3 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] text-sm font-medium',
+              variant === 'text' && 'min-h-8 rounded-[6px] px-1.5 text-[11px]',
               className,
             )}
           >
-            <Languages size={14} aria-hidden />
-            <span className={cn(variant === 'icon' && 'sr-only')}>{current.label}</span>
+            {variant !== 'text' && <Languages size={14} aria-hidden />}
+            <span className={cn(variant === 'icon' && 'sr-only')}>
+              {variant === 'text' ? current.short : current.label}
+            </span>
           </button>
         </DropdownMenuTrigger>
       </Tooltip>

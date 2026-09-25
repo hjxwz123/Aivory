@@ -1,0 +1,62 @@
+.login-growth-art {
+  --growth-ink: color-mix(in oklch, var(--color-fg) 76%, var(--color-accent));
+  --growth-pigment: color-mix(in oklch, var(--color-accent) 86%, var(--color-fg-muted));
+  --growth-mid: color-mix(in oklch, var(--color-accent) 62%, var(--color-bg));
+  --growth-soft: color-mix(in oklch, var(--color-accent) 34%, var(--color-bg));
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* The departing botanical layer stays visible during the theme crossfade.
+   Ease its ink colors as well, so changing theme tokens does not flash it. */
+.login-growth-art :is(g, path, circle, ellipse, line, polygon, polyline, use) {
+  transition: fill .7s ease, stroke .7s ease;
+}
+
+.growth-pigment-0 { fill: var(--growth-pigment); }
+.growth-pigment-1 { fill: var(--growth-mid); }
+.growth-pigment-2 { fill: var(--growth-soft); }
+.growth-leaf-fold { fill: var(--color-bg); opacity: .24; }
+.growth-petal-fold { fill: var(--color-bg); opacity: .26; }
+.growth-petal-line { fill: none; stroke: var(--growth-ink); stroke-width: .9; opacity: .27; }
+.growth-vein { fill: none; stroke: var(--growth-ink); stroke-width: .9; opacity: .46; }
+.growth-stem { fill: none; stroke: var(--growth-ink); stroke-width: 1.9; }
+.growth-rootwork { fill: none; stroke: var(--growth-ink); stroke-width: 1; opacity: .3; }
+.growth-tendril { fill: none; stroke: var(--growth-ink); stroke-width: 1; opacity: .52; }
+.growth-seed { fill: var(--growth-ink); stroke: none; }
+.growth-flower-heart circle { fill: var(--color-bg); }
+.growth-flower-heart path { stroke: var(--growth-ink); stroke-width: 1.5; }
+.growth-filigree { fill: none; stroke: var(--growth-pigment); stroke-width: .7; stroke-opacity: .52; }
+.growth-echo-lines { fill: none; stroke: var(--growth-pigment); stroke-width: .8; stroke-opacity: .2; }
+.growth-filament { fill: none; stroke: var(--growth-ink); stroke-width: .95; opacity: .58; }
+.growth-tuft { fill: none; stroke: var(--growth-pigment); stroke-width: .85; }
+.growth-kernel { stroke: var(--growth-ink); stroke-width: 2.5; }
+.growth-wind { fill: none; stroke: var(--growth-ink); stroke-width: .8; stroke-opacity: .21; }
+.growth-ephemeral { opacity: 0; }
+
+/* The crown is a sphere of fine parachutes, with thin stalks connecting each
+   seed to its receptacle. Keep the silhouette airy and the stem legible. */
+.dandelion-crown-volume { fill: var(--growth-soft); opacity: .12; }
+.dandelion-stalk { fill: none; stroke: var(--growth-ink); stroke-width: .9; opacity: .58; }
+.dandelion-parachute { fill: none; stroke: var(--growth-ink); stroke-width: .95; stroke-opacity: .8; }
+.dandelion-canopy-edge { stroke: var(--growth-pigment); stroke-width: .7; stroke-opacity: .32; }
+.dandelion-wind { fill: none; stroke: var(--growth-pigment); stroke-width: .9; }
+
+@media (max-width: 800px) {
+  /* Simplify secondary ink at small sizes while keeping the whole story. */
+  .login-growth-art [data-detail] { display: none; }
+  .login-growth-art .growth-stem { stroke-width: 3; }
+  .login-growth-art .growth-vein { stroke-width: 1.5; }
+  .login-growth-art .growth-filament { stroke-width: 1.7; }
+  .login-growth-art .growth-tuft { stroke-width: 1.5; }
+  .login-growth-art :is(.growth-petal-line, .growth-rootwork) { display: none; }
+  .login-dandelion-art .dandelion-stalk { stroke-width: 1.7; }
+  .login-dandelion-art .dandelion-parachute { stroke-width: 1.7; }
+  .login-dandelion-art .dandelion-canopy-edge { display: none; }
+}
