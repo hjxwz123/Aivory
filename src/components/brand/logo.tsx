@@ -52,24 +52,44 @@ export function LogoMark({ size = 24, className, tone = 'system' }: LogoMarkProp
 interface TracedLogoProps {
   size?: 'sm' | 'md' | 'lg'
   className?: string
+  tone?: 'system' | 'lockup'
 }
 
-export function TracedLogo({ size = 'md', className }: TracedLogoProps) {
+export function TracedLogo({ size = 'md', className, tone = 'lockup' }: TracedLogoProps) {
+  const wordmarkClassName = cn(
+    'aivory-wordmark block shrink-0 select-none',
+    size === 'sm' && 'h-4',
+    size === 'md' && 'h-[19px]',
+    size === 'lg' && 'h-[26px]',
+  )
+
   return (
     <span className={cn('inline-flex items-center gap-2', className)}>
-      <LogoMark size={size === 'sm' ? 18 : size === 'md' ? 22 : 30} tone="lockup" />
-      <img
-        src={wordmarkUrl}
-        alt=""
-        aria-hidden="true"
-        draggable={false}
-        className={cn(
-          'block w-auto shrink-0 select-none dark:brightness-[2] dark:saturate-50',
-          size === 'sm' && 'h-4',
-          size === 'md' && 'h-[19px]',
-          size === 'lg' && 'h-[26px]',
-        )}
-      />
+      <LogoMark size={size === 'sm' ? 18 : size === 'md' ? 22 : 30} tone={tone} />
+      {tone === 'system' ? (
+        <span
+          aria-hidden="true"
+          className={wordmarkClassName}
+          style={{
+            aspectRatio: '726 / 221',
+            backgroundColor: 'var(--color-fg)',
+            maskImage: `url(${wordmarkUrl})`,
+            WebkitMaskImage: `url(${wordmarkUrl})`,
+            maskMode: 'alpha',
+            maskRepeat: 'no-repeat',
+            maskPosition: 'center',
+            maskSize: 'contain',
+          }}
+        />
+      ) : (
+        <img
+          src={wordmarkUrl}
+          alt=""
+          aria-hidden="true"
+          draggable={false}
+          className={cn(wordmarkClassName, 'w-auto dark:brightness-[2] dark:saturate-50')}
+        />
+      )}
     </span>
   )
 }
