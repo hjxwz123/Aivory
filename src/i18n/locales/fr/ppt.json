@@ -182,7 +182,7 @@
   },
   "unconfigured": {
     "title": "AI PPT n'est pas configuré",
-    "description": "Un administrateur doit renseigner la clé API Docmee dans Admin → Crédits et quotas pour activer AI PPT."
+    "description": "Un administrateur doit renseigner la clé API Docmee dans Admin → Capacités et intégrations → AI PPT pour l'activer."
   },
   "permissionDenied": {
     "title": "AI PPT n’est pas disponible ici",

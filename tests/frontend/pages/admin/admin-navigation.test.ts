@@ -32,6 +32,7 @@ describe('administrator navigation', () => {
   it.each([
     ['/admin/settings/model-policy', 'ai'],
     ['/admin/settings/context-memory', 'ai'],
+    ['/admin/ai-ppt', 'capabilities'],
     ['/admin/settings/registration', 'access'],
     ['/admin/credits', 'billing'],
     ['/admin/payment-channels', 'billing'],
@@ -49,6 +50,7 @@ describe('administrator navigation', () => {
 
   it('keeps model and user drill-down routes on their parent tabs', () => {
     expect(adminNavGroupForPath('/admin/models/model-1')?.key).toBe('ai')
+    expect(activeItemPath('/admin/ai-ppt')).toBe('/admin/ai-ppt')
     expect(activeItemPath('/admin/models/model-1')).toBe('/admin/models')
 
     expect(adminNavGroupForPath('/admin/model-tags')?.key).toBe('ai')
