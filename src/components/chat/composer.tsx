@@ -67,6 +67,7 @@ import { useModels } from '@/store/models'
 import { useAuth } from '@/store/auth'
 import { useComposerPrefs } from '@/store/composer-prefs'
 import { useQueuedTurns } from '@/store/queued-turns'
+import { useSandboxFiles } from '@/store/sandbox-files'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api, apiUpload, ApiError } from '@/api/client'
 import { blockReload } from '@/lib/sync-guards'
@@ -83,12 +84,8 @@ import { toast, useToastStore } from '@/hooks/use-toast'
 import { cn, uid, modKey } from '@/lib/utils'
 import { attachmentKindLabel, attachmentTileClass, fileIconFor } from '@/lib/file-icon'
 import {
-  FOLDER_MAX_FILES_DEFAULT,
-  FOLDER_MAX_TOTAL_BYTES_DEFAULT,
-  folderUploadFields,
-  selectFolderFiles,
-  type FolderCandidate,
-  type FolderSkipReason,
+  containsDroppedDirectory,
+  prepareSandboxFolderUpload,
 } from '@/lib/folder-upload'
 import {
   isPickerCancellation,
@@ -285,48 +282,6 @@ function getUploadLimits() {
       .catch(() => DEFAULT_UPLOAD_LIMITS)
   }
   return uploadLimitsCache
-}
-
-/**
- * The admin's extension allowlist, cached across composer instances.
- *
- * A folder upload filters before sending, so it needs this before the first
- * request. A failed fetch returns [] ("no client-side extension filter") rather
- * than blocking the upload — the server re-validates every file regardless, so
- * the worst case is a per-file rejection the user already sees today.
- */
-let uploadExtensionsCache: Promise<string[]> | null = null
-function getUploadPolicyExtensions(): Promise<string[]> {
-  if (!uploadExtensionsCache) {
-    uploadExtensionsCache = api<{ allowed_extensions?: string[] }>('/me/upload-policy')
-      .then((p) => (Array.isArray(p.allowed_extensions) ? p.allowed_extensions : []))
-      .catch(() => [])
-  }
-  return uploadExtensionsCache
-}
-
-/**
- * One line explaining what a folder upload left out, for the toast body.
- *
- * Reported per reason with a representative path so the user can act on it
- * ("skipped node_modules", "not an allowed file type") instead of wondering why
- * a folder arrived incomplete.
- */
-function describeFolderSkips(
-  skipped: ReadonlyArray<{ reason: FolderSkipReason; path: string; count: number }>,
-  t: (key: string, options?: Record<string, unknown>) => string,
-): string {
-  const label: Record<FolderSkipReason, string> = {
-    'skipped-dir': t('composer.folderSkipDir', { defaultValue: 'dependency/build folders' }),
-    'skipped-file': t('composer.folderSkipNoise', { defaultValue: 'system files' }),
-    extension: t('composer.folderSkipExtension', { defaultValue: 'unsupported file types' }),
-    'no-extension': t('composer.folderSkipNoExtension', { defaultValue: 'files without an extension' }),
-    'too-many': t('composer.folderSkipTooMany', { defaultValue: 'files over the count limit' }),
-    'too-large': t('composer.folderSkipTooLarge', { defaultValue: 'files over the size limit' }),
-  }
-  return skipped
-    .map((entry) => `${label[entry.reason]} · ${entry.count}`)
-    .join('; ')
 }
 
 interface PendingAttachment extends Attachment {
@@ -796,6 +751,25 @@ export function Composer({
     (!workspaceId || workspaceMemberCanUse(activeWorkspace, 'skill'))
   const canUseKnowledgeBases = userCan(user, 'allow_knowledge_bases') && workspaceCaps.knowledgeBases
   const canUploadFiles = userCan(user, 'allow_file_upload') && workspaceCaps.fileUpload
+  const [sandboxAvailable, setSandboxAvailable] = useState(false)
+  const [folderUpload, setFolderUpload] = useState<{ name: string; progress: number } | null>(null)
+  const workspaceAllowsFolderTool = !workspaceId || (
+    activeWorkspace != null && activeWorkspace.role !== 'guest' && workspacePolicy != null &&
+    ((workspacePolicy.AllowedToolIDs.length === 0 && workspacePolicy.AllowedMCPServerIDs.length === 0) ||
+      workspacePolicy.AllowedToolIDs.includes('builtin:python_execute'))
+  )
+  const canUploadFolder = canUploadFiles && workspaceCaps.toolCalling && workspaceAllowsFolderTool && sandboxAvailable
+  useEffect(() => {
+    let active = true
+    const refresh = () => {
+      void conversationsApi.sandboxUploadAvailability()
+        .then((result) => { if (active) setSandboxAvailable(result.available) })
+        .catch(() => { if (active) setSandboxAvailable(false) })
+    }
+    refresh()
+    window.addEventListener('focus', refresh)
+    return () => { active = false; window.removeEventListener('focus', refresh) }
+  }, [])
   const canUploadFilesRef = useRef(canUploadFiles)
   canUploadFilesRef.current = canUploadFiles
   const canUseVoice = userCan(user, 'allow_voice_transcription')
@@ -999,14 +973,6 @@ export function Composer({
   const imageFileRef = useRef<HTMLInputElement>(null)
   const folderFileRef = useRef<HTMLInputElement>(null)
   /**
-   * Folder path per picked File, for the duration of one folder upload.
-   *
-   * `handleFolderAttach` has to re-wrap the accepted files into a FileList to
-   * reuse the normal attach pipeline, and constructing a File strips
-   * `webkitRelativePath`. The map restores it, keyed by the File object itself.
-   */
-  const folderPathOverrides = useRef<Map<File, string>>(new Map())
-  /**
    * True while a File System Access directory pick is in flight.
    *
    * That picker is asynchronous and returns handles rather than a FileList, so
@@ -1166,6 +1132,10 @@ export function Composer({
       e.preventDefault()
       dragDepthRef.current = 0
       setDragOver(false)
+      if (containsDroppedDirectory(e.dataTransfer?.items ?? null, e.dataTransfer?.files ?? null)) {
+        toast.error(t('composer.folderDropUsePicker', { defaultValue: 'Use Upload folder to send a directory to the sandbox.' }))
+        return
+      }
       if (e.dataTransfer?.files?.length) void handleAttachRef.current(e.dataTransfer.files)
     }
     window.addEventListener('dragenter', onDragEnter)
@@ -1178,7 +1148,7 @@ export function Composer({
       window.removeEventListener('dragleave', onDragLeave)
       window.removeEventListener('drop', onDrop)
     }
-  }, [canUploadFiles])
+  }, [canUploadFiles, t])
 
   // § paste-to-attach: a file copied on the machine (Finder/Explorer copy,
   // screenshot) pasted ANYWHERE inside the composer attaches it — including when
@@ -1735,6 +1705,7 @@ export function Composer({
     (canUploadFiles || attachments.length === 0) &&
     !voiceActive &&
     !uploading &&
+    !folderUpload &&
     !restoringAttachments &&
     !documentNotReady &&
     !imagePermissionDenied &&
@@ -1793,7 +1764,7 @@ export function Composer({
       await runCompactCommand()
       return
     }
-    if (voiceActive || uploading || restoringAttachments || documentNotReady || executingCurrentCommand) return
+    if (voiceActive || uploading || folderUpload || restoringAttachments || documentNotReady || executingCurrentCommand) return
     // A workspace switch clears and reloads the scoped model catalog. Ignore a
     // stale keyboard/click submit until the catalog represents this workspace
     // and policy; loading is not the same as a revoked model and stays silent.
@@ -1937,7 +1908,6 @@ export function Composer({
     file: File,
     local: PendingAttachment,
     scopeId?: string,
-    folderPath = '',
   ): Promise<PendingAttachment | null> {
     if (!canUploadFilesRef.current) {
       removedAttachmentIds.current.delete(local.id)
@@ -1954,28 +1924,17 @@ export function Composer({
     try {
       const form = new FormData()
       form.append('file', file)
-      // Folder upload: one request per file, each carrying its path inside the
-      // folder plus the folder's own name, so the server can rebuild the tree
-      // (and stage it into the sandbox as a real directory).
-      const folderFields = folderPath ? folderUploadFields(folderPath, file.name) : null
-      if (folderFields) {
-        form.append('folder_name', folderFields.folderName)
-        form.append('rel_path', folderFields.relPath)
-      }
-      const inFolder = folderFields !== null
       // §4.11.2 session-scoped temp docs: ingest doc-like uploads (or anything
       // when a KB is bound) as conversation-scoped RAG so the user can ask over
       // what they just shared, without polluting any project KB.
       // Anything that isn't an image is treated as a readable document so the
       // model can use it (the backend reads unknown types as plain text and
       // routes spreadsheets to the sandbox). Images don't need RAG.
-      // Folder contents are NEVER ingested: a shared project is hundreds of
-      // files and the model reads them from the sandbox instead.
       const isDocLike = local.kind !== 'image'
       if (isDocLike && !scopeId) {
         throw new Error(t('composer.documentScopeRequired', { defaultValue: 'Create a conversation before uploading documents.' }))
       }
-      const ragFlag = !inFolder && ((kbIds && kbIds.length > 0) || isDocLike)
+      const ragFlag = (kbIds && kbIds.length > 0) || isDocLike
       const query = new URLSearchParams()
       if (scopeId) {
         query.set('conversation_id', scopeId)
@@ -2017,11 +1976,6 @@ export function Composer({
         uploadScopeId: scopeId,
         previewUrl: persistentUrl,
         documentId: res.document_id,
-        // Record the folder membership so the chip rail can group this file.
-        // The server echoes the authoritative path, but it also stored exactly
-        // what we sent, so the local value is equivalent and available even if
-        // an older backend omits the field.
-        relPath: folderFields?.relPath ?? local.relPath,
         // A conversation doc was created → it's being parsed/embedded; track it
         // so the send stays blocked until it's searchable.
         ingest: res.document_id ? 'parsing' : undefined,
@@ -2220,13 +2174,13 @@ export function Composer({
   // Returns how many files actually uploaded, so callers that transform user
   // input into an attachment (attachTextAsFile) can tell success from failure.
   //
-  // `inflight` caps how many uploads run at once. A handful of picked files can
-  // all go at once (the browser caps per-host connections anyway), but a folder
-  // upload is hundreds of requests: they are throttled so the server's per-user
-  // upload rate limit is not tripped, and the memory used by concurrent
-  // multipart bodies stays bounded.
+  // `inflight` caps how many individual attachments upload at once.
   async function handleAttach(files: FileList | null, inflight = Number.POSITIVE_INFINITY): Promise<number> {
     if (!files || !files.length) return 0
+    if (Array.from(files).some((file) => file.webkitRelativePath)) {
+      toast.error(t('composer.folderDropUsePicker', { defaultValue: 'Use Upload folder to send a directory to the sandbox.' }))
+      return 0
+    }
     if (!canUploadFiles) {
       toast.error(t('composer.permissions.fileUpload', { defaultValue: 'Your user group cannot upload files.' }))
       return 0
@@ -2242,14 +2196,6 @@ export function Composer({
     // repeatedly. Oversize candidates are removed again after policy validation.
     const candidates = all.map((file) => ({
       file,
-      // A directory picker reports "my-project/src/a.ts" in webkitRelativePath;
-      // a plain file picker reports "". A FileList cannot be rebuilt by hand
-      // without losing that property, so a folder upload hands the paths over
-      // here instead (see handleFolderAttach) before re-wrapping the files.
-      folderPath:
-        folderPathOverrides.current.get(file) ??
-        (file as File & { webkitRelativePath?: string }).webkitRelativePath ??
-        '',
       attachment: {
         id: uid('att'),
         name: file.name,
@@ -2318,13 +2264,7 @@ export function Composer({
           ),
         )
       }
-      preparedCandidates.push({
-        file: preparedFile,
-        // Carried through image preparation: a folder upload must keep the
-        // path even when the bytes were re-encoded on the way up.
-        folderPath: candidate.folderPath,
-        attachment: preparedAttachment,
-      })
+      preparedCandidates.push({ file: preparedFile, attachment: preparedAttachment })
     }
 
     const overFile = preparedCandidates.filter(
@@ -2385,8 +2325,8 @@ export function Composer({
     if (!Number.isFinite(inflight) || inflight <= 0) {
       results.push(
         ...(await Promise.all(
-          accepted.map(({ file, attachment, folderPath }) =>
-            uploadAttachment(file, attachment, scopeId, folderPath),
+          accepted.map(({ file, attachment }) =>
+            uploadAttachment(file, attachment, scopeId),
           ),
         )),
       )
@@ -2396,7 +2336,7 @@ export function Composer({
         for (;;) {
           const next = queue.shift()
           if (!next) return
-          results.push(await uploadAttachment(next.file, next.attachment, scopeId, next.folderPath))
+          results.push(await uploadAttachment(next.file, next.attachment, scopeId))
         }
       })
       await Promise.all(workers)
@@ -2416,6 +2356,7 @@ export function Composer({
    * do not implement the modern picker.
    */
   async function pickAndAttachFolder(): Promise<void> {
+    if (!canUploadFolder || folderUpload) return
     if (folderPickPending.current) return
     folderPickPending.current = true
     try {
@@ -2426,11 +2367,8 @@ export function Composer({
         folderFileRef.current?.click()
         return
       }
-      // An incomplete enumeration is stated up front, so "the subdirectory is
-      // missing" is never a mystery: a cap or an unreadable entry is named here
-      // before the files that DID read are uploaded.
       if (picked.truncated || picked.failed.length) {
-        toast.info(
+        toast.error(
           t('composer.folderWalkIncomplete', {
             defaultValue: 'Only part of “{{folder}}” could be read',
             folder: picked.name,
@@ -2449,6 +2387,7 @@ export function Composer({
             .filter(Boolean)
             .join(' '),
         )
+        return
       }
       await handleFolderAttach(picked.files, picked.name)
     } catch (error) {
@@ -2464,27 +2403,14 @@ export function Composer({
     }
   }
 
-  /**
-   * Upload a whole folder, preserving its structure.
-   *
-   * The picked list is pre-filtered in the browser (dependency trees, build
-   * output, disallowed extensions, size caps — see `selectFolderFiles`) because
-   * each accepted file costs one request and an unfiltered `node_modules` would
-   * be tens of thousands of them. Whatever is dropped is reported to the user
-   * rather than silently discarded, and the files that do go up carry their path
-   * inside the folder so the server can rebuild the tree for the sandbox.
-   *
-   * `files` comes from either picker. A `FileList` from the legacy input carries
-   * its own paths in `webkitRelativePath`; a modern pick passes the walked paths
-   * explicitly (and its folder name, which the legacy path must infer).
-   */
+  /** Upload original folder bytes to the conversation sandbox in one request. */
   async function handleFolderAttach(
     picked: FileList | readonly PickedFolderFile[] | null,
     knownFolder = '',
   ): Promise<number> {
     if (!picked) return 0
-    if (!canUploadFiles) {
-      toast.error(t('composer.permissions.fileUpload', { defaultValue: 'Your user group cannot upload files.' }))
+    if (!canUploadFolder || folderUpload) {
+      toast.error(t('composer.folderSandboxUnavailable', { defaultValue: 'Configure and enable the sandbox to upload folders.' }))
       return 0
     }
     const entries: PickedFolderFile[] = Array.isArray(picked)
@@ -2493,69 +2419,64 @@ export function Composer({
           file,
           path: (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name,
         }))
-    if (!entries.length) return 0
-
-    const [limits, policy] = await Promise.all([getUploadLimits(), getUploadPolicyExtensions()])
-    const folderName =
-      knownFolder || (entries[0]?.path.includes('/') ? entries[0].path.split('/')[0] : '')
-    const candidates = entries.map<FolderCandidate>((entry) => ({
-      file: entry.file,
-      path: entry.path,
-      fileName: entry.file.name,
-      size: entry.file.size,
-      // The folder name is known for BOTH pickers: the legacy input's paths
-      // always start with it, the modern pick is told it. Passing it keeps a
-      // file at the folder's root ("main.ts") from being read as a
-      // directory-named path by the skip rules.
-      folder: folderName || undefined,
-    }))
-    const selection = selectFolderFiles(candidates, {
-      maxFiles: FOLDER_MAX_FILES_DEFAULT,
-      maxTotalBytes: Math.min(FOLDER_MAX_TOTAL_BYTES_DEFAULT, Math.max(limits.max_file_bytes, 0) * 400),
-      allowedExtensions: policy,
-    })
-    // EVERY file missing the folder in its path means the picker reported no
-    // usable relative paths at all — the legacy input on a host that ignores
-    // `webkitdirectory`. Say so: the previous silent `return 0` is
-    // indistinguishable from a dead button, which is how this bug was reported.
-    const pathsIntact = candidates.some((candidate) =>
-      folderUploadFields(candidate.path, candidate.fileName, folderName) !== null,
-    )
-    if (!pathsIntact) {
+    const selection = prepareSandboxFolderUpload(entries, knownFolder)
+    if (!selection.ok && selection.reason === 'empty') {
+      toast.error(t('composer.folderNothingToUpload', { defaultValue: 'This folder is empty', folder: knownFolder }))
+      return 0
+    }
+    if (!selection.ok && selection.reason === 'paths') {
       toast.error(
         t('composer.folderPathsUnavailable', {
           defaultValue: "Couldn't read the folder's file paths",
-          folder: folderName || undefined,
+          folder: knownFolder || undefined,
         }),
         t('composer.folderPathsUnavailableHint', {
-          defaultValue: 'Drag the folder onto the composer instead, or attach the files individually.',
+          defaultValue: 'Choose the folder in a supported browser, or attach files individually.',
         }),
       )
       return 0
     }
-    if (!selection.accepted.length) {
+    if (!selection.ok) {
       toast.error(
-        t('composer.folderNothingToUpload', { defaultValue: 'Nothing in “{{folder}}” could be uploaded', folder: folderName }),
-        describeFolderSkips(selection.skipped, t),
+        t('composer.folderLimitExceeded', { defaultValue: 'Folder exceeds the upload limits' }),
       )
       return 0
     }
-    if (selection.skipped.length) {
-      toast.info(
-        t('composer.folderPartial', { defaultValue: 'Uploading {{count}} files from “{{folder}}”', count: selection.accepted.length, folder: folderName }),
-        describeFolderSkips(selection.skipped, t),
-      )
+    const { folder: folderName, paths, files } = selection
+    let scopeId = conversationId
+    if (!scopeId && ensureConversationId) {
+      try {
+        scopeId = await ensureConversationId()
+      } catch {
+        scopeId = undefined
+      }
     }
-
-    const list = new DataTransfer()
-    folderPathOverrides.current = new Map(selection.accepted.map((entry) => [entry.file, entry.path]))
-    for (const entry of selection.accepted) list.items.add(entry.file)
-    // 3 at a time: enough to keep the pipe busy over a slow link, few enough that
-    // a 300-file folder does not trip the server's per-user upload rate limit.
+    if (!scopeId) {
+      toast.error(t('composer.documentScopeRequired'))
+      return 0
+    }
+    const form = new FormData()
+    form.append('folder_name', folderName)
+    form.append('paths', JSON.stringify(paths))
+    files.forEach((file) => form.append('file', file))
+    setFolderUpload({ name: folderName, progress: 0 })
     try {
-      return await handleAttach(list.files, 3)
+      await conversationsApi.uploadSandboxFolder(scopeId, form, (progress) => {
+        setFolderUpload({ name: folderName, progress: progress.percent ?? 0 })
+      })
+      toast.success(t('composer.folderSandboxUploaded', {
+        defaultValue: '{{folder}} is ready in the sandbox', folder: folderName,
+      }))
+      useSandboxFiles.getState().openDrawer(scopeId)
+      return entries.length
+    } catch (error) {
+      toast.error(
+        t('composer.folderSandboxUploadFailed', { defaultValue: 'Folder upload failed' }),
+        error instanceof Error ? error.message : undefined,
+      )
+      return 0
     } finally {
-      folderPathOverrides.current = new Map()
+      setFolderUpload(null)
     }
   }
 
@@ -3618,6 +3539,12 @@ export function Composer({
           scrolls horizontally (wheel deltas translated via chipsRailRef) and
           chip width is sized to ~4.5 per row so a half chip peeks at the edge
           as the scroll affordance. */}
+      {folderUpload ? (
+        <div aria-live="polite" className="flex items-center gap-2 px-3 pb-1 pt-2.5 text-xs text-[var(--color-fg-muted)]">
+          <ProgressRing value={folderUpload.progress} size={20} strokeWidth={2} label={folderUpload.name} />
+          <span className="truncate">{folderUpload.name}</span>
+        </div>
+      ) : null}
       {attachments.length > 0 && (
         <div ref={chipsRailRef} className="flex items-stretch gap-1.5 overflow-x-auto px-3 pb-1 pt-2.5 scrollbar-none">
           {/* A folder upload is hundreds of files that the user thinks of as ONE
@@ -3762,7 +3689,7 @@ export function Composer({
               non-standard attribute, so this input is what remains on a host
               that does not implement it. It can only be opened from a real user
               gesture, which is why the folder button drives it directly. */}
-          <input
+          {canUploadFolder ? <input
             type="file"
             ref={folderFileRef}
             hidden
@@ -3774,7 +3701,7 @@ export function Composer({
               void handleFolderAttach(e.currentTarget.files)
               e.currentTarget.value = ''
             }}
-          />
+          /> : null}
         </>
       ) : null}
 
@@ -3861,7 +3788,7 @@ export function Composer({
                       {t('composer.addImage')}
                     </button>
                   ) : null}
-                  {canUploadFiles ? (
+                  {canUploadFolder ? (
                     <button
                       type="button"
                       onClick={() => {
@@ -4020,7 +3947,7 @@ export function Composer({
               </Tooltip>
             ) : null}
 
-            {canUploadFiles ? (
+            {canUploadFolder ? (
               <Tooltip content={t('composer.attachFolder', { defaultValue: 'Upload folder' })}>
                 <button
                   type="button"
