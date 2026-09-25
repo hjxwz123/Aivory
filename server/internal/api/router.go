@@ -431,6 +431,8 @@ func NewRouter(d Deps) http.Handler {
 	// no user-facing mutation route for sandbox workspace contents.
 	mux.handle("GET", "/api/conversations/:id/sandbox", requireAuth(d, sandboxFilesHandler))
 	mux.handle("GET", "/api/conversations/:id/sandbox/file", requireAuth(d, sandboxFileGetHandler))
+	mux.handle("GET", "/api/sandbox/availability", requireAuth(d, sandboxUploadAvailabilityHandler))
+	mux.handle("POST", "/api/conversations/:id/sandbox/folders", requireAuth(d, uploadSandboxFolderHandler))
 	sharingPermission := func(p store.UserGroupPermissions) bool { return p.AllowSharing }
 	mux.handle("GET", "/api/conversations/:id/share", requireAuth(d, requireCapabilityHandler(errSharingGroupPermission, sharingPermission, getShareHandler)))
 	mux.handle("POST", "/api/conversations/:id/share", requireAuth(d, requireCapabilityHandler(errSharingGroupPermission, sharingPermission, createShareHandler)))

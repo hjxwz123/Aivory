@@ -226,11 +226,8 @@ func (p uploadPolicy) validateUpload(rawName string) (string, string, error) {
 // validateUploadRelPath sanitises the relative path a FOLDER upload reports for
 // one of its files, and reports whether the path is usable.
 //
-// A folder upload sends one request per file, so the shape of the folder can
-// only be preserved if the server accepts a client-supplied relative path. That
-// path is therefore untrusted input that eventually becomes a sandbox path
-// (`/workspace/uploads/<folder>/<relPath>`), so it is constrained here rather
-// than at the point of use:
+// A direct folder upload carries client-supplied relative paths that become
+// sandbox paths under /workspace/folders. Validate each path before writing.
 //
 //   - backslashes are folded to "/" (a Windows folder picker reports them);
 //   - a single leading "./" is dropped, and a leading "/" is REJECTED rather

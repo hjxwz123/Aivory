@@ -862,6 +862,14 @@ export interface ConversationCompactionResult {
 }
 
 export const conversationsApi = {
+  sandboxUploadAvailability: () => api<{ available: boolean }>('/sandbox/availability'),
+  uploadSandboxFolder: (
+    id: string,
+    body: FormData,
+    onProgress?: (progress: { percent?: number }) => void,
+  ) => apiUpload<{ folder: string; files: number; bytes: number }>(
+    `/conversations/${encodeURIComponent(id)}/sandbox/folders`, body, { onProgress },
+  ),
   list: (
     projectId?: string,
     limit = envNum('VITE_AIVORY_CONVERSATIONS_API_LIST_LIMIT', 20),

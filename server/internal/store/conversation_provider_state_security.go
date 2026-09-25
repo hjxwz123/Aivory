@@ -94,3 +94,56 @@ func SetConvProviderStateKeyForUser(ctx context.Context, db *sql.DB, convID, mes
 	}
 	return tx.Commit()
 }
+
+func SetConvProviderStateKeyForMember(ctx context.Context, db *sql.DB, convID, userID, key, value string) error {
+	if strings.TrimSpace(convID) == "" || strings.TrimSpace(userID) == "" || strings.TrimSpace(key) == "" {
+		return ErrNotFound
+	}
+	var workspaceID string
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(workspace_id,'') FROM conversations WHERE id=?`, convID).Scan(&workspaceID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	var tx *sql.Tx
+	var err error
+	if workspaceID != "" {
+		tx, err = beginWorkspaceMutationTx(ctx, db, workspaceID)
+	} else {
+		tx, err = db.BeginTx(ctx, nil)
+	}
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	args := []any{convID}
+	args = append(args, conversationMemberMutationArgs(userID)...)
+	var raw string
+	if err := tx.QueryRowContext(ctx, `SELECT provider_state FROM conversations WHERE id=? AND `+conversationMemberMutationPredicate("conversations"), args...).Scan(&raw); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrConversationAccessRevoked
+		}
+		return err
+	}
+	state := map[string]any{}
+	_ = json.Unmarshal([]byte(orDefault(raw, "{}")), &state)
+	state[key] = value
+	encoded, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	updateArgs := []any{string(encoded), time.Now().Unix(), convID}
+	updateArgs = append(updateArgs, conversationMemberMutationArgs(userID)...)
+	result, err := tx.ExecContext(ctx, `UPDATE conversations SET provider_state=?, updated_at=? WHERE id=? AND `+conversationMemberMutationPredicate("conversations"), updateArgs...)
+	if err != nil {
+		return err
+	}
+	if affected, err := result.RowsAffected(); err != nil {
+		return err
+	} else if affected != 1 {
+		return ErrConversationAccessRevoked
+	}
+	return tx.Commit()
+}
