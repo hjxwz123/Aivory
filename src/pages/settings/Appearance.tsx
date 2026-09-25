@@ -62,6 +62,7 @@ export default function Appearance() {
   const lang = useLanguage((s) => s.lang)
   const setLang = useLanguage((s) => s.setLang)
   const { t } = useTranslation(['settings', 'common'])
+  const chatWidthIndex = Math.max(0, CHAT_WIDTH_STOPS.indexOf(appearance.chatWidth))
 
   useEffect(() => syncSystem(), [syncSystem])
   function onChangeAccent(preset: AccentPref) {
@@ -155,25 +156,34 @@ export default function Appearance() {
           {/* w-56 (not 64): the row's control slot can't shrink, and at the sm
               breakpoint's narrowest dialog a 256px control overflows the card. */}
           <div className="w-56">
-            <input
-              type="range"
-              min={0}
-              max={CHAT_WIDTH_STOPS.length - 1}
-              step={1}
-              value={Math.max(0, CHAT_WIDTH_STOPS.indexOf(appearance.chatWidth))}
-              onChange={(e) => onChangeChatWidth(CHAT_WIDTH_STOPS[Number(e.target.value)])}
-              aria-label={t('appearance.chatWidth.label')}
-              aria-valuetext={t(`appearance.chatWidth.${appearance.chatWidth}`)}
-              className="w-full accent-[var(--color-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] rounded-full"
-            />
-            <div className="mt-1 flex justify-between">
+            <div className="relative">
+              <div className="pointer-events-none absolute inset-x-[10%] top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-[var(--color-border-strong)]">
+                <div
+                  className="h-full rounded-full bg-[var(--color-accent)]"
+                  style={{ width: `${(chatWidthIndex / (CHAT_WIDTH_STOPS.length - 1)) * 100}%` }}
+                />
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={CHAT_WIDTH_STOPS.length - 1}
+                step={1}
+                value={chatWidthIndex}
+                onChange={(e) => onChangeChatWidth(CHAT_WIDTH_STOPS[Number(e.target.value)])}
+                aria-label={t('appearance.chatWidth.label')}
+                aria-valuetext={t(`appearance.chatWidth.${appearance.chatWidth}`)}
+                className="chat-width-range focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] rounded-full"
+              />
+            </div>
+            <div className="mt-1 grid grid-cols-5">
               {CHAT_WIDTH_STOPS.map((stop) => (
                 <button
                   key={stop}
                   type="button"
                   onClick={() => onChangeChatWidth(stop)}
+                  aria-pressed={appearance.chatWidth === stop}
                   className={cn(
-                    'text-[11px] interactive rounded-[4px] px-0.5',
+                    'min-w-0 text-center text-[11px] leading-tight interactive rounded-[4px] px-0.5',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                     appearance.chatWidth === stop
                       ? 'text-[var(--color-fg)] font-medium'
