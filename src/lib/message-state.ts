@@ -16,7 +16,9 @@ export function messageHasActions(message: Message): boolean {
   // Optimistic ids are not valid API targets yet. Keep the stopped status
   // visible, but wait for message_start/reconciliation before exposing delete,
   // regenerate, feedback, or fork commands that would otherwise send a local id.
-  if (message.localOnly) return false
+  // User messages can still expose local copy/edit actions while their reply is
+  // streaming; API-target actions remain hidden by MessageRow until persistence.
+  if (message.localOnly && message.role !== 'user') return false
   return Boolean(message.content || message.error || message.stopped || (message.artifacts?.length ?? 0) > 0)
 }
 
