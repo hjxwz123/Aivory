@@ -9,7 +9,6 @@ import { Pencil, Plus, Trash2 } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
 import type { ApiCreditPackage } from '@/api/types'
 import { AdminSortableList } from '@/components/admin/AdminSortableList'
-import { DocmeeTemplateAdmin } from '@/components/admin/docmee-templates'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -24,15 +23,9 @@ import {
 import { Input } from '@/components/ui/input'
 import { Field } from '@/components/ui/label'
 import { PanelFallback } from '@/components/ui/panel-fallback'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from '@/hooks/use-toast'
-import {
-  docmeeEnabledPatch as resolveDocmeeEnabledPatch,
-  storedDocmeeEnabled,
-} from '@/lib/aippt-admin-settings'
-import { useAiPPT } from '@/store/aippt'
 import {
   currencyInputStep,
   formatCurrencyMinor,
@@ -57,20 +50,6 @@ const OWNED_KEYS = [
   'max_concurrent_generations',
   'credit_preflight_enabled',
   'quota_exceeded_message',
-  // § AI PPT (Docmee, API mode): the API key is used server-side only and comes
-  // back masked; credits_per_ppt is the flat price per generated deck, and
-  // edit_credits prices an edit (AI rewrite / template change; 0 = free).
-  'docmee_enabled',
-  'docmee_api_key',
-  'docmee_api_base_url',
-  'docmee_credits_per_ppt',
-  'docmee_edit_credits',
-  'docmee_default_template_id',
-  'docmee_max_upload_mb',
-  // Editor surface only: the vendor iframe is used just for slide-level editing.
-  'docmee_sdk_url',
-  'docmee_domain',
-  'docmee_token_hours',
 ] as const
 
 function nonNegativeNumber(value: number, integer = false): number {
@@ -87,17 +66,6 @@ export default function AdminCreditSettings() {
   const [loading, setLoading] = useState(true)
   const [savingSettings, setSavingSettings] = useState(false)
   const settingsSavingRef = useRef(false)
-  /**
-   * True once the admin has flipped the AI PPT switch in this session. The switch
-   * writes immediately, so the general Save must not overwrite it with a derived
-   * value — and must not persist a derived `false` at all (see docmeeEnabledPatch).
-   */
-  const [docmeeEnabledTouched, setDocmeeEnabledTouched] = useState(false)
-  const [docmeeSwitchSaving, setDocmeeSwitchSaving] = useState(false)
-  /** Deployment-side Docmee balance (vendor credits), fetched on demand. */
-  const [vendor, setVendor] = useState<{ available_count: number; used_count: number } | null>(null)
-  const [vendorLoading, setVendorLoading] = useState(false)
-  const [vendorError, setVendorError] = useState<string | null>(null)
   const [packageEditor, setPackageEditor] = useState<{
     open: boolean
     row?: ApiCreditPackage
@@ -134,23 +102,6 @@ export default function AdminCreditSettings() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  /**
-   * The vendor's own credit balance. Not part of `load()`: it is an extra
-   * upstream call, and a failure must not block the settings page.
-   */
-  async function loadVendor() {
-    if (vendorLoading) return
-    setVendorLoading(true)
-    setVendorError(null)
-    try {
-      setVendor(await adminApi.aipptVendor())
-    } catch (error) {
-      setVendorError(error instanceof ApiError ? error.message : t('admin:common.failed'))
-    } finally {
-      setVendorLoading(false)
-    }
-  }
-
   function readString(key: string, fallback = ''): string {
     const value = draft[key]
     return typeof value === 'string' ? value : fallback
@@ -178,52 +129,6 @@ export default function AdminCreditSettings() {
     setDraft((current) => ({ ...current, [key]: value }))
   }
 
-  /** The stored AI PPT enable flag (null = never written; the server follows the key). */
-  function docmeeEnabled(): boolean | null {
-    return storedDocmeeEnabled(draft)
-  }
-
-  /**
-   * The value a general Save should send for `docmee_enabled`, or undefined to
-   * leave the stored value untouched. See src/lib/aippt-admin-settings.ts for the
-   * regression this guards (a derived `false` used to survive refreshes and keep
-   * an otherwise configured integration switched off).
-   */
-  function docmeeEnabledPatch(): boolean | undefined {
-    return resolveDocmeeEnabledPatch({
-      stored: docmeeEnabled(),
-      keyInput: readString('docmee_api_key'),
-      touched: docmeeEnabledTouched,
-    })
-  }
-
-  /**
-   * The AI PPT switch persists on flip. A switch is a stateful control: requiring
-   * a separate Save click meant "I turned it on, refreshed, and it was off again".
-   */
-  async function toggleDocmeeEnabled(enabled: boolean) {
-    setSetting('docmee_enabled', enabled)
-    setDocmeeEnabledTouched(true)
-    if (docmeeSwitchSaving) return
-    setDocmeeSwitchSaving(true)
-    try {
-      await adminApi.updateSettings({ docmee_enabled: enabled })
-      // The sidebar entry and the /ppt page read this cached config.
-      void useAiPPT.getState().load(true)
-      toast.success(
-        t(enabled ? 'admin:creditSettings.docmee.enabledToast' : 'admin:creditSettings.docmee.disabledToast', {
-          defaultValue: enabled ? 'AI PPT is enabled' : 'AI PPT is disabled',
-        }),
-      )
-    } catch (error) {
-      // Roll the draft back so the switch never shows a state the server rejected.
-      setSetting('docmee_enabled', !enabled)
-      toast.error(error instanceof ApiError ? error.message : t('admin:common.failed'))
-    } finally {
-      setDocmeeSwitchSaving(false)
-    }
-  }
-
   async function saveSettings() {
     if (settingsSavingRef.current) return
 
@@ -234,9 +139,7 @@ export default function AdminCreditSettings() {
     }
 
     type OwnedKey = (typeof OWNED_KEYS)[number]
-    // `docmee_enabled` is deliberately absent here: it is written only when the
-    // admin expressed an intent this session (see docmeeEnabledPatch).
-    const values: Record<Exclude<OwnedKey, 'docmee_enabled'>, unknown> = {
+    const values: Record<OwnedKey, unknown> = {
       settlement_currency: normalizeSettlementCurrency(currencyInput),
       credits_per_usd: nonNegativeNumber(readNumber('credits_per_usd')),
       daily_message_limit: nonNegativeNumber(readNumber('daily_message_limit', 200), true),
@@ -245,25 +148,11 @@ export default function AdminCreditSettings() {
       max_concurrent_generations: nonNegativeNumber(readNumber('max_concurrent_generations', 3), true),
       credit_preflight_enabled: readBool('credit_preflight_enabled', true),
       quota_exceeded_message: readString('quota_exceeded_message'),
-      // § AI PPT. A masked key ("••••••") is echoed back unchanged — the server
-      // treats the display mask as "keep the stored value".
-      docmee_api_key: readString('docmee_api_key'),
-      docmee_api_base_url: readString('docmee_api_base_url').trim(),
-      docmee_credits_per_ppt: nonNegativeNumber(readNumber('docmee_credits_per_ppt', 10)),
-      docmee_edit_credits: nonNegativeNumber(readNumber('docmee_edit_credits', 0)),
-      docmee_default_template_id: readString('docmee_default_template_id').trim(),
-      docmee_max_upload_mb: nonNegativeNumber(readNumber('docmee_max_upload_mb', 50), true),
-      docmee_sdk_url: readString('docmee_sdk_url').trim(),
-      docmee_domain: readString('docmee_domain').trim(),
-      docmee_token_hours: nonNegativeNumber(readNumber('docmee_token_hours', 2), true),
     }
     const patch: Settings = {}
     for (const key of OWNED_KEYS) {
-      if (key === 'docmee_enabled') continue
       patch[key] = values[key]
-    }    // Only ever send the enable flag deliberately (see docmeeEnabledPatch).
-    const enabledPatch = docmeeEnabledPatch()
-    if (enabledPatch !== undefined) patch.docmee_enabled = enabledPatch
+    }
 
     settingsSavingRef.current = true
     setSavingSettings(true)
@@ -272,11 +161,8 @@ export default function AdminCreditSettings() {
       setDraft((current) => ({
         ...current,
         ...values,
-        ...(enabledPatch === undefined ? {} : { docmee_enabled: enabledPatch }),
       }))
       setPackageCurrency(values.settlement_currency as string)
-      // Reflect the new state in the sidebar / /ppt page without a manual reload.
-      void useAiPPT.getState().load(true)
       toast.success(t('admin:settings.saved'))
     } catch (error) {
       toast.error(error instanceof ApiError ? error.message : t('admin:common.failed'))
@@ -590,249 +476,6 @@ export default function AdminCreditSettings() {
             </div>
           </section>
 
-          <section className="mt-10 border-t border-[var(--color-divider)] pt-8">
-            <div>
-              <h2 className="font-serif text-xl tracking-tight text-[var(--color-fg)]">
-                {t('admin:creditSettings.docmee.title', { defaultValue: 'AI PPT (文多多)' })}
-              </h2>
-              <p className="mt-1 text-sm text-[var(--color-fg-muted)]">
-                {t('admin:creditSettings.docmee.lead', {
-                  defaultValue:
-                    'Embeds the Docmee presentation workbench and charges a flat credit price per generated deck. Leave the API key empty to turn the feature off.',
-                })}
-              </p>
-            </div>
-
-            <div className="mt-5 flex flex-col gap-5">
-              <ToggleRow
-                label={t('admin:creditSettings.docmee.enabled', { defaultValue: 'Enable AI PPT' })}
-                checked={docmeeEnabled() ?? readString('docmee_api_key').trim() !== ''}
-                onChange={(value) => void toggleDocmeeEnabled(value)}
-              />
-              {/* Ambiguous states are called out instead of silently looking off:
-                  a stored key with the switch off is the exact combination that
-                  made an enabled integration appear to disable itself. */}
-              {docmeeEnabled() === false && readString('docmee_api_key').trim() !== '' && (
-                <p className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2 text-xs text-[var(--color-fg-muted)]">
-                  {t('admin:creditSettings.docmee.offWithKeyHint', {
-                    defaultValue:
-                      'A Docmee API key is configured but AI PPT is currently switched off. Turn the switch on to activate it.',
-                  })}
-                </p>
-              )}
-              {/* A price that cannot take effect is the other half of the same
-                  confusion: ppt billing shares the platform-wide credit switch
-                  (credits_per_usd), so a zero rate silently makes it free. */}
-              {readNumber('docmee_credits_per_ppt') > 0 && readNumber('credits_per_usd') === 0 && (
-                <p className="rounded-[8px] border border-[var(--color-warning)] px-3 py-2 text-xs text-[var(--color-warning)]">
-                  {t('admin:creditSettings.docmee.creditsOffHint', {
-                    price: readNumber('docmee_credits_per_ppt'),
-                    defaultValue:
-                      'A price of {{price}} credits per deck is set, but the platform-wide credit system is off (Model cost conversion (per USD) = 0): generations are free, no charge is recorded in Usage, and users see the feature as free. Set that conversion rate above zero to charge this price — the same switch also enables credit billing for chat.',
-                  })}
-                </p>
-              )}
-
-              <div className="grid gap-5 lg:grid-cols-2">
-                <Field
-                  label={t('admin:creditSettings.docmee.apiKey', { defaultValue: 'Docmee API key' })}
-                  htmlFor="docmee-api-key"
-                  hint={t('admin:creditSettings.docmee.apiKeyHint', {
-                    defaultValue: 'Created on the Docmee open platform. Stored server-side and shown masked.',
-                  })}
-                >
-                  <Input
-                    id="docmee-api-key"
-                    type="password"
-                    autoComplete="off"
-                    spellCheck={false}
-                    value={readString('docmee_api_key')}
-                    onChange={(event) => setSetting('docmee_api_key', event.target.value)}
-                    placeholder="sk-…"
-                  />
-                </Field>
-                <Field
-                  label={t('admin:creditSettings.docmee.creditsPerPpt', {
-                    defaultValue: 'Credits per generated deck',
-                  })}
-                  htmlFor="docmee-credits"
-                  hint={t('admin:creditSettings.docmee.creditsPerPptHint', {
-                    defaultValue:
-                      '0 = free. Charging also requires a credits-per-USD rate above (otherwise credits are off platform-wide).',
-                  })}
-                >
-                  <Input
-                    id="docmee-credits"
-                    type="number"
-                    min={0}
-                    step="any"
-                    value={String(readNumber('docmee_credits_per_ppt', 10))}
-                    onChange={(event) =>
-                      setSetting('docmee_credits_per_ppt', nonNegativeNumber(Number(event.target.value)))
-                    }
-                  />
-                </Field>
-                <Field
-                  label={t('admin:creditSettings.docmee.editCredits', { defaultValue: 'Credits per edit' })}
-                  htmlFor="docmee-edit-credits"
-                  hint={t('admin:creditSettings.docmee.editCreditsHint', {
-                    defaultValue: 'Charged for an AI rewrite or a template change. 0 = free. Docmee bills 1 credit per such call.',
-                  })}
-                >
-                  <Input
-                    id="docmee-edit-credits"
-                    type="number"
-                    min={0}
-                    step="any"
-                    value={String(readNumber('docmee_edit_credits'))}
-                    onChange={(event) =>
-                      setSetting('docmee_edit_credits', nonNegativeNumber(Number(event.target.value)))
-                    }
-                  />
-                </Field>
-                <Field
-                  label={t('admin:creditSettings.docmee.defaultTemplate', { defaultValue: 'Default template id' })}
-                  htmlFor="docmee-default-template"
-                  hint={t('admin:creditSettings.docmee.defaultTemplateHint', {
-                    defaultValue: 'Optional. Used when a render request arrives without a template.',
-                  })}
-                >
-                  <Input
-                    id="docmee-default-template"
-                    value={readString('docmee_default_template_id')}
-                    onChange={(event) => setSetting('docmee_default_template_id', event.target.value)}
-                    placeholder="1940697631068151808"
-                    spellCheck={false}
-                  />
-                </Field>
-                <Field
-                  label={t('admin:creditSettings.docmee.maxUpload', { defaultValue: 'Upload cap (MB)' })}
-                  htmlFor="docmee-max-upload"
-                  hint={t('admin:creditSettings.docmee.maxUploadHint', {
-                    defaultValue: 'Largest file accepted by the upload input. Docmee recommends ≤ 50 MB.',
-                  })}
-                >
-                  <Input
-                    id="docmee-max-upload"
-                    type="number"
-                    min={0}
-                    step={1}
-                    value={String(readNumber('docmee_max_upload_mb', 50))}
-                    onChange={(event) =>
-                      setSetting('docmee_max_upload_mb', nonNegativeNumber(Number(event.target.value), true))
-                    }
-                  />
-                </Field>
-                <Field
-                  label={t('admin:creditSettings.docmee.tokenHours', { defaultValue: 'Token lifetime (hours)' })}
-                  htmlFor="docmee-token-hours"
-                  hint={t('admin:creditSettings.docmee.tokenHoursHint', { defaultValue: '0 = Docmee default.' })}
-                >
-                  <Input
-                    id="docmee-token-hours"
-                    type="number"
-                    min={0}
-                    step={1}
-                    value={String(readNumber('docmee_token_hours', 2))}
-                    onChange={(event) =>
-                      setSetting('docmee_token_hours', nonNegativeNumber(Number(event.target.value), true))
-                    }
-                  />
-                </Field>
-                <Field
-                  label={t('admin:creditSettings.docmee.apiBaseUrl', { defaultValue: 'Docmee API base URL' })}
-                  htmlFor="docmee-api-base"
-                  hint={t('admin:creditSettings.docmee.apiBaseUrlHint', {
-                    defaultValue:
-                      'Server-side API endpoint. Change only for the international build or a self-hosted proxy.',
-                  })}
-                >
-                  <Input
-                    id="docmee-api-base"
-                    value={readString('docmee_api_base_url')}
-                    onChange={(event) => setSetting('docmee_api_base_url', event.target.value)}
-                    placeholder="https://docmee.cn"
-                    spellCheck={false}
-                  />
-                </Field>
-                {/* Editor-only surface: creation runs on our own UI, so these two
-                    matter only for the "Edit slides" hand-off. */}
-                <Field
-                  label={t('admin:creditSettings.docmee.sdkUrl', { defaultValue: 'Editor SDK script URL' })}
-                  htmlFor="docmee-sdk-url"
-                  hint={t('admin:creditSettings.docmee.sdkUrlHint', {
-                    defaultValue:
-                      'Loaded only when a user opens the Docmee editor. Point it at a self-hosted copy or an internal mirror if needed.',
-                  })}
-                >
-                  <Input
-                    id="docmee-sdk-url"
-                    value={readString('docmee_sdk_url')}
-                    onChange={(event) => setSetting('docmee_sdk_url', event.target.value)}
-                    placeholder="https://cdn.jsdelivr.net/npm/@docmee/sdk-ui@1.6.47/dist/index.global.js"
-                    spellCheck={false}
-                  />
-                </Field>
-                <Field
-                  label={t('admin:creditSettings.docmee.domain', { defaultValue: 'Editor origin (international)' })}
-                  htmlFor="docmee-domain"
-                  hint={t('admin:creditSettings.docmee.domainHint', {
-                    defaultValue:
-                      'Leave empty for the China build. The international build uses https://app.xpptx.com.',
-                  })}
-                >
-                  <Input
-                    id="docmee-domain"
-                    value={readString('docmee_domain')}
-                    onChange={(event) => setSetting('docmee_domain', event.target.value)}
-                    placeholder="https://app.xpptx.com"
-                    spellCheck={false}
-                  />
-                </Field>
-              </div>
-            </div>
-
-            {/* Deployment-side vendor balance: Docmee charges its own credits per
-                deck, so an admin needs to see when the account runs dry. */}
-            <div className="mt-5 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs text-[var(--color-fg-muted)]">
-                  {t('admin:creditSettings.docmee.vendorBalance', { defaultValue: 'Docmee account balance' })}
-                </span>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  loading={vendorLoading}
-                  disabled={vendorLoading}
-                  onClick={() => void loadVendor()}
-                >
-                  {t('admin:creditSettings.docmee.vendorRefresh', { defaultValue: 'Check' })}
-                </Button>
-                {vendor ? (
-                  <span className="text-xs text-[var(--color-fg)]">
-                    {t('admin:creditSettings.docmee.vendorCounts', {
-                      available: vendor.available_count,
-                      used: vendor.used_count,
-                      defaultValue: '{{available}} credits left · {{used}} used',
-                    })}
-                  </span>
-                ) : vendorError ? (
-                  <span className="text-xs text-[var(--color-danger)]">{vendorError}</span>
-                ) : null}
-              </div>
-            </div>
-
-            {/* Deployment templates: uploading with the Api-Key is not enough —
-                the vendor keeps it account-owned until it is published, so the
-                panel pairs the upload with a share switch. */}
-            <DocmeeTemplateAdmin enabled={readString('docmee_api_key').trim() !== ''} />
-
-            <div className="mt-6 flex justify-end">
-              <Button onClick={() => void saveSettings()} loading={savingSettings} disabled={savingSettings}>
-                {t('common:actions.save')}
-              </Button>
-            </div>
-          </section>
 
           <section className="mt-10 border-t border-[var(--color-divider)] pt-8">
             <div className="flex flex-col items-stretch gap-4 sm:flex-row sm:items-end sm:justify-between">

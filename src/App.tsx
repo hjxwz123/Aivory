@@ -67,6 +67,7 @@ const AdminSystemLegal = lazy(() => import('@/pages/admin/AdminSystemLegal'))
 const AdminSystemLogging = lazy(() => import('@/pages/admin/AdminSystemLogging'))
 const AdminSystemStorage = lazy(() => import('@/pages/admin/AdminSystemStorage'))
 const AdminCreditSettings = lazy(() => import('@/pages/admin/AdminCreditSettings'))
+const AdminAiPPT = lazy(() => import('@/pages/admin/AdminAiPPT'))
 const AdminBackup = lazy(() => import('@/pages/admin/AdminBackup'))
 const AdminModeration = lazy(() => import('@/pages/admin/AdminModeration'))
 const AdminAnnouncement = lazy(() => import('@/pages/admin/AdminAnnouncement'))
@@ -293,6 +294,7 @@ export default function App() {
               <Route path="tools" element={<AdminTools />} />
               <Route path="mcp" element={<AdminMCP />} />
               <Route path="audio" element={<AdminAudio />} />
+              <Route path="ai-ppt" element={<AdminAiPPT />} />
               <Route path="oauth" element={<AdminOAuth />} />
               <Route path="moderation" element={<AdminModeration />} />
               <Route path="announcement" element={<AdminAnnouncement />} />

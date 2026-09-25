@@ -182,7 +182,7 @@
   },
   "unconfigured": {
     "title": "AI PPT 尚未設定",
-    "description": "請聯絡管理員在「管理後台 → 積分與配額」中填寫文多多 API Key 後再使用。"
+    "description": "請聯絡管理員在「管理後台 → 能力與整合 → AI PPT」中填寫文多多 API Key 後再使用。"
   },
   "permissionDenied": {
     "title": "目前空間無法使用 AI PPT",

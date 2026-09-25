@@ -182,7 +182,7 @@
   },
   "unconfigured": {
     "title": "AI PPT is not configured",
-    "description": "An administrator must add the Docmee API key under Admin → Credits & quotas before AI PPT becomes available."
+    "description": "An administrator must add the Docmee API key under Admin → Capabilities & integrations → AI PPT before it becomes available."
   },
   "permissionDenied": {
     "title": "AI PPT is unavailable here",
