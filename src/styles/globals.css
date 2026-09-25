@@ -8,6 +8,48 @@
 /* Treat `.dark` (or any descendant) as the dark-mode signal. */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* The range thumb has a fixed size so its five stops line up with the
+   centers of the equal-width chat-width labels. */
+.chat-width-range {
+  display: block;
+  width: calc(80% + 1rem);
+  height: 1.5rem;
+  margin-inline: auto;
+  margin-block: 0;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.chat-width-range::-webkit-slider-runnable-track {
+  height: 0.375rem;
+  background: transparent;
+}
+
+.chat-width-range::-moz-range-track,
+.chat-width-range::-moz-range-progress {
+  height: 0.375rem;
+  background: transparent;
+}
+
+.chat-width-range::-webkit-slider-thumb {
+  width: 1rem;
+  height: 1rem;
+  border: 0;
+  border-radius: 50%;
+  background: var(--color-accent);
+  margin-top: -0.3125rem;
+  appearance: none;
+}
+
+.chat-width-range::-moz-range-thumb {
+  width: 1rem;
+  height: 1rem;
+  border: 0;
+  border-radius: 50%;
+  background: var(--color-accent);
+}
+
 /* ============================================================================
  * Tailwind v4 @theme — map design tokens to Tailwind's design system
  * ============================================================================ */
