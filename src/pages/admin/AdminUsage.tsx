@@ -697,7 +697,7 @@ export default function AdminUsage() {
             <p className="mt-2 text-[11px] leading-relaxed text-[var(--color-fg-subtle)]">
               {t('usage.aippt.priceNote', {
                 defaultValue:
-                  'A generation is settled at the fixed price configured in Admin → Credits & quotas (docmee_credits_per_ppt); an AI rewrite or template change is charged only when its own price is above zero.',
+                  'A generation is settled at the price configured in Admin → Capabilities & integrations → AI PPT; an AI rewrite or template change is charged only when its own price is above zero.',
               })}
             </p>
             <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-[12px]">

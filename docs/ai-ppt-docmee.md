@@ -88,6 +88,12 @@ deck that was deleted afterwards still reports its event and its charge.
 
 ## Admin settings
 
+Configure the integration under **Admin → Capabilities & integrations → AI PPT**
+(`/admin/ai-ppt`). This page owns the enable switch, Docmee connection,
+generation/edit prices, template settings, vendor balance and shared templates.
+**Credits & quotas** owns only the platform-wide credit conversion rate and
+general usage limits; saving either page does not overwrite the other's fields.
+
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `docmee_enabled` | follows the key | Master switch. Unset ⇒ on when a key exists; an explicit `false` always wins. |
@@ -193,7 +199,7 @@ that tab, reloads and pre-selects it. Only `.pptx` is accepted, capped by
 Overwriting a **public** (Api-Key-level) template is a different trust domain:
 Docmee only allows it with the Api-Key, so that path is admin-only.
 
-### Deployment templates (Admin → Credits & quotas)
+### Deployment templates (Admin → Capabilities & integrations → AI PPT)
 
 The Docmee block carries a **Deployment templates** panel (`DocmeeTemplateAdmin`):
 upload or overwrite a `.pptx`, see the deployment's templates, share/unshare and

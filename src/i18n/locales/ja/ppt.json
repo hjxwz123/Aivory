@@ -182,7 +182,7 @@
   },
   "unconfigured": {
     "title": "AI PPT が未設定です",
-    "description": "管理者が「管理画面 → クレジットと割り当て」で文多多の API キーを設定すると利用できます。"
+    "description": "管理者が「管理画面 → 機能と連携 → AI PPT」で文多多の API キーを設定すると利用できます。"
   },
   "permissionDenied": {
     "title": "このスペースでは AI PPT を利用できません",
