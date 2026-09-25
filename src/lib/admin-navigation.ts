@@ -69,6 +69,7 @@ export const ADMIN_NAV_GROUPS: readonly AdminNavGroup[] = [
       { to: '/admin/documents', labelKey: 'admin:documents.title', defaultLabel: 'Documents & knowledge' },
       { to: '/admin/image-styles', labelKey: 'admin:imageStyles.title', defaultLabel: 'Image generation' },
       { to: '/admin/audio', labelKey: 'admin:audio.title', defaultLabel: 'Speech' },
+      { to: '/admin/ai-ppt', labelKey: 'admin:menu.aiPpt', defaultLabel: 'AI PPT' },
     ],
   },
   {

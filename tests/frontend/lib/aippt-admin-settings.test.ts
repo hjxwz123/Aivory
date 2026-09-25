@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   docmeeEnabledPatch,
   docmeeKeyProvided,
+  docmeeSettingsPatch,
   SETTING_MASK,
   storedDocmeeEnabled,
 } from '@/lib/aippt-admin-settings'
@@ -15,6 +16,43 @@ describe('storedDocmeeEnabled', () => {
     expect(storedDocmeeEnabled({ docmee_enabled: 'false' })).toBe(false)
     expect(storedDocmeeEnabled({ docmee_enabled: null })).toBeNull()
     expect(storedDocmeeEnabled({})).toBeNull()
+  })
+})
+
+describe('docmeeSettingsPatch', () => {
+  it('saves only AI PPT fields and leaves the platform credit rate untouched', () => {
+    const patch = docmeeSettingsPatch({
+      docmee_api_key: 'sk-live',
+      docmee_credits_per_ppt: 12,
+      credits_per_usd: 20,
+      settlement_currency: 'USD',
+    }, false)
+    expect(patch).toMatchObject({ docmee_api_key: 'sk-live', docmee_credits_per_ppt: 12, docmee_enabled: true })
+    expect(patch).not.toHaveProperty('credits_per_usd')
+    expect(patch).not.toHaveProperty('settlement_currency')
+  })
+
+  it('preserves a masked key without accidentally changing the enable switch', () => {
+    const patch = docmeeSettingsPatch({ docmee_api_key: SETTING_MASK, docmee_enabled: false }, false)
+    expect(patch.docmee_api_key).toBe(SETTING_MASK)
+    expect(patch).not.toHaveProperty('docmee_enabled')
+  })
+
+  it('normalizes prices and integer limits without writing unrelated settings', () => {
+    const patch = docmeeSettingsPatch({
+      docmee_credits_per_ppt: -5,
+      docmee_edit_credits: '2.5',
+      docmee_max_upload_mb: '40.9',
+      docmee_token_hours: -2,
+      daily_message_limit: 200,
+    }, false)
+    expect(patch).toMatchObject({
+      docmee_credits_per_ppt: 0,
+      docmee_edit_credits: 2.5,
+      docmee_max_upload_mb: 40,
+      docmee_token_hours: 0,
+    })
+    expect(patch).not.toHaveProperty('daily_message_limit')
   })
 })
 

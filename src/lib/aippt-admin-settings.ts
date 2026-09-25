@@ -50,3 +50,31 @@ export function docmeeEnabledPatch(options: {
   if (docmeeKeyProvided(options.keyInput)) return true
   return undefined
 }
+
+export function docmeeSettingsPatch(draft: Record<string, unknown>, touched: boolean): Record<string, unknown> {
+  const readString = (key: string) => typeof draft[key] === 'string' ? draft[key] as string : ''
+  const readNumber = (key: string, fallback: number, integer = false) => {
+    const raw = draft[key]
+    const parsed = typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() ? Number(raw) : fallback
+    const value = Number.isFinite(parsed) ? parsed : fallback
+    return Math.max(0, integer ? Math.floor(value) : value)
+  }
+  const patch: Record<string, unknown> = {
+    docmee_api_key: readString('docmee_api_key'),
+    docmee_api_base_url: readString('docmee_api_base_url').trim(),
+    docmee_credits_per_ppt: readNumber('docmee_credits_per_ppt', 10),
+    docmee_edit_credits: readNumber('docmee_edit_credits', 0),
+    docmee_default_template_id: readString('docmee_default_template_id').trim(),
+    docmee_max_upload_mb: readNumber('docmee_max_upload_mb', 50, true),
+    docmee_sdk_url: readString('docmee_sdk_url').trim(),
+    docmee_domain: readString('docmee_domain').trim(),
+    docmee_token_hours: readNumber('docmee_token_hours', 2, true),
+  }
+  const enabled = docmeeEnabledPatch({
+    stored: storedDocmeeEnabled(draft),
+    keyInput: readString('docmee_api_key'),
+    touched,
+  })
+  if (enabled !== undefined) patch.docmee_enabled = enabled
+  return patch
+}
