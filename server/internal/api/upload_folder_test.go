@@ -3,7 +3,10 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -13,207 +16,223 @@ import (
 	"aivory/server/internal/cache"
 	"aivory/server/internal/config"
 	"aivory/server/internal/store"
+	"aivory/server/internal/tools"
 )
 
-// folderUploadFixture is the minimum state uploadFileHandler needs: an
-// authenticated uploader with upload permission, and a conversation to scope
-// the files to (folder contents are conversation files).
-type folderUploadFixture struct {
-	deps Deps
-	user *store.User
-	conv *store.Conversation
-}
-
-func seedFolderUploadFixture(t *testing.T) folderUploadFixture {
-	t.Helper()
-	db := openMigrated(t, filepath.Join(t.TempDir(), "folder-upload.db"))
-	t.Cleanup(func() { _ = db.Close() })
-	mustExec(t, db, `INSERT INTO users(id,email,password_hash,role) VALUES('u1','folder@example.com','h','user')`)
-	conv, err := store.CreateConversation(context.Background(), db, store.Conversation{
-		ID: "c1", UserID: "u1", Title: "Folder upload",
-	})
-	if err != nil {
-		t.Fatalf("create conversation: %v", err)
-	}
-	return folderUploadFixture{
-		deps: Deps{
-			DB: db, Cache: cache.NewMemory(),
-			Config: config.Config{UploadDir: filepath.Join(t.TempDir(), "uploads"), MaxUploadBytes: 10 << 20},
-		},
-		user: &store.User{ID: "u1", Role: "user", Status: "active"},
-		conv: conv,
-	}
-}
-
-// folderUploadRequest posts ONE file of a folder batch, exactly the way the
-// composer's directory picker does: the file plus folder_name and rel_path.
-func folderUploadRequest(t *testing.T, user *store.User, filename string, data []byte, folder, relPath string) *http.Request {
+func folderUploadRequest(t *testing.T, userID, folder string, paths []string, names []string, files [][]byte) *http.Request {
 	t.Helper()
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	part, err := writer.CreateFormFile("file", filename)
+	if err := writer.WriteField("folder_name", folder); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(paths)
 	if err != nil {
-		t.Fatalf("create multipart file: %v", err)
+		t.Fatal(err)
 	}
-	if _, err := part.Write(data); err != nil {
-		t.Fatalf("write multipart file: %v", err)
+	if err := writer.WriteField("paths", string(encoded)); err != nil {
+		t.Fatal(err)
 	}
-	if folder != "" {
-		if err := writer.WriteField("folder_name", folder); err != nil {
-			t.Fatalf("write folder_name: %v", err)
+	for index, data := range files {
+		part, err := writer.CreateFormFile("file", names[index])
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	if relPath != "" {
-		if err := writer.WriteField("rel_path", relPath); err != nil {
-			t.Fatalf("write rel_path: %v", err)
+		if _, err := part.Write(data); err != nil {
+			t.Fatal(err)
 		}
 	}
 	if err := writer.Close(); err != nil {
-		t.Fatalf("close multipart body: %v", err)
+		t.Fatal(err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/files?conversation_id=c1&draft=1", &body)
+	req := httptest.NewRequest(http.MethodPost, "/api/conversations/c1/sandbox/folders", &body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
-	return req.WithContext(context.WithValue(req.Context(), userCtxKey{}, user))
+	req = req.WithContext(context.WithValue(req.Context(), pathCtxKey{}, map[string]string{"id": "c1"}))
+	return req.WithContext(context.WithValue(req.Context(), userCtxKey{}, &store.User{ID: userID, Role: "user", Status: "active"}))
 }
 
-func postFolderFile(t *testing.T, fx folderUploadFixture, filename, relPath string, data []byte) (*httptest.ResponseRecorder, store.File) {
+func seedSandboxFolderDB(t *testing.T) *Deps {
 	t.Helper()
-	rec := httptest.NewRecorder()
-	uploadFileHandler(fx.deps, rec, folderUploadRequest(t, fx.user, filename, data, "my-project", relPath))
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("upload %s -> %d: %s", relPath, rec.Code, rec.Body.String())
+	db := openMigrated(t, filepath.Join(t.TempDir(), "folder.db"))
+	t.Cleanup(func() { _ = db.Close() })
+	mustExec(t, db, `INSERT INTO users(id,email,password_hash,role,status) VALUES
+		('u1','u1@example.test','h','user','active'),
+		('other','other@example.test','h','user','active')`)
+	if _, err := store.CreateConversation(context.Background(), db, store.Conversation{ID: "c1", UserID: "u1", Title: "Folder"}); err != nil {
+		t.Fatal(err)
 	}
-	var created store.File
-	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
-		t.Fatalf("decode upload response: %v", err)
-	}
-	return rec, created
+	d := &Deps{DB: db, Cache: cache.NewMemory(), Config: config.Config{UploadDir: filepath.Join(t.TempDir(), "uploads"), MaxUploadBytes: 40 << 20}}
+	d.Tools = tools.NewRegistry(db, d.Config, log.New(io.Discard, "", 0))
+	return d
 }
 
-// A folder upload must remember each file's path inside the folder, prefixed
-// with the folder's own name — that recorded path is what the sandbox stager and
-// the folder manifest read on a later turn.
-func TestFolderUploadPersistsRelativePath(t *testing.T) {
-	fx := seedFolderUploadFixture(t)
-	_, nested := postFolderFile(t, fx, "main.ts", "my-project/src/main.ts", []byte("export const x = 1\n"))
-
-	if nested.RelPath != "my-project/src/main.ts" {
-		t.Fatalf("rel_path = %q; want my-project/src/main.ts", nested.RelPath)
+func TestSandboxFolderUploadStoresOriginalBytesWithoutApplicationFiles(t *testing.T) {
+	d := seedSandboxFolderDB(t)
+	var uploaded []struct {
+		Path string
+		Data []byte
 	}
-	if nested.Filename != "main.ts" {
-		t.Fatalf("filename = %q; want the basename main.ts", nested.Filename)
-	}
-
-	// Read it back through the store: the value must be durable, not just echoed.
-	stored, err := store.GetFile(context.Background(), fx.deps.DB, nested.ID, "u1")
-	if err != nil || stored == nil {
-		t.Fatalf("get file: %v", err)
-	}
-	if stored.RelPath != "my-project/src/main.ts" {
-		t.Fatalf("stored rel_path = %q; want my-project/src/main.ts", stored.RelPath)
-	}
-	// And through the conversation listing, which the drawer groups by.
-	files, err := store.ListFilesByConversation(context.Background(), fx.deps.DB, "c1", "u1")
-	if err != nil || len(files) != 1 {
-		t.Fatalf("list files: %v (%d rows)", err, len(files))
-	}
-	if files[0].RelPath != "my-project/src/main.ts" {
-		t.Fatalf("listed rel_path = %q", files[0].RelPath)
-	}
-}
-
-// A file sitting at the ROOT of the picked folder arrives as a single-segment
-// rel_path (the File System Access picker reports the folder separately). The
-// server must still place it inside the folder's tree instead of flat at the
-// uploads root — the client-side counterpart of this is folderUploadFields'
-// `knownFolder` argument.
-func TestFolderUploadAcceptsFileAtFolderRoot(t *testing.T) {
-	fx := seedFolderUploadFixture(t)
-	_, created := postFolderFile(t, fx, "README.md", "README.md", []byte("# project\n"))
-
-	if created.RelPath != "my-project/README.md" {
-		t.Fatalf("rel_path = %q; want my-project/README.md", created.RelPath)
-	}
-	if created.Filename != "README.md" {
-		t.Fatalf("filename = %q; want README.md", created.Filename)
-	}
-}
-
-// A plain single-file upload must keep rel_path empty: every existing consumer
-// treats "" as "flat uploads/<filename>".
-func TestSingleFileUploadKeepsEmptyRelativePath(t *testing.T) {
-	fx := seedFolderUploadFixture(t)
-	rec := httptest.NewRecorder()
-	uploadFileHandler(fx.deps, rec, folderUploadRequest(t, fx.user, "notes.txt", []byte("hi"), "", ""))
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("upload -> %d: %s", rec.Code, rec.Body.String())
-	}
-	var created store.File
-	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if created.RelPath != "" {
-		t.Fatalf("single-file rel_path = %q; want empty", created.RelPath)
-	}
-}
-
-// The relative path is untrusted input that becomes a sandbox path, so every
-// escape and malformed shape must be rejected before a byte is written.
-func TestFolderUploadRejectsUnsafeRelativePaths(t *testing.T) {
-	fx := seedFolderUploadFixture(t)
-	cases := []struct {
-		name    string
-		folder  string
-		relPath string
-	}{
-		{"traversal", "my-project", "my-project/../../etc/passwd"},
-		{"nested traversal", "my-project", "my-project/src/../../../../evil.txt"},
-		{"absolute", "my-project", "/etc/passwd"},
-		{"empty segment", "my-project", "my-project//a.txt"},
-		{"trailing separator", "my-project", "my-project/a.txt/"},
-		{"dot segment", "my-project", "my-project/./a.txt"},
-		{"path as folder name", "", "a/b.txt"},
-		{"filename mismatch", "my-project", "my-project/other.txt"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			rec := httptest.NewRecorder()
-			uploadFileHandler(fx.deps, rec, folderUploadRequest(t, fx.user, "a.txt", []byte("x"), tc.folder, tc.relPath))
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d; want 400 (body %s)", rec.Code, rec.Body.String())
+	sidecar := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/sessions":
+			_, _ = io.WriteString(w, `{"session_id":"sid"}`)
+		case "/files":
+			var body struct {
+				SessionID string `json:"session_id"`
+				Path      string `json:"path"`
+				Data      string `json:"data_base64"`
 			}
-		})
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Error(err)
+			}
+			data, err := base64.StdEncoding.DecodeString(body.Data)
+			if err != nil || body.SessionID != "sid" {
+				t.Errorf("invalid sidecar body: %v", err)
+			}
+			uploaded = append(uploaded, struct {
+				Path string
+				Data []byte
+			}{body.Path, data})
+			_, _ = io.WriteString(w, `{"ok":true}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer sidecar.Close()
+	if err := store.SetSetting(d.DB, "sandbox_base_url", sidecar.URL); err != nil {
+		t.Fatal(err)
 	}
-}
-
-// A folder upload must NOT create RAG documents: a shared project is hundreds of
-// files and the model reads them from the sandbox instead.
-func TestFolderUploadSkipsRAGIngestion(t *testing.T) {
-	fx := seedFolderUploadFixture(t)
-	// rag=1 is what a single document upload sends; the folder path must ignore it.
-	req := folderUploadRequest(t, fx.user, "readme.md", []byte("# hi"), "my-project", "my-project/readme.md")
-	q := req.URL.Query()
-	q.Set("rag", "1")
-	req.URL.RawQuery = q.Encode()
-
+	data := []byte{0, 1, 2, 255}
+	req := folderUploadRequest(t, "u1", "project", []string{"project/src/main", "project/.env"}, []string{"main", ".env"}, [][]byte{data, []byte("SECRET=x")})
 	rec := httptest.NewRecorder()
-	uploadFileHandler(fx.deps, rec, req)
+	uploadSandboxFolderHandler(*d, rec, req)
 	if rec.Code != http.StatusCreated {
-		t.Fatalf("upload -> %d: %s", rec.Code, rec.Body.String())
+		t.Fatalf("upload status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	var created store.File
-	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if created.DocumentID != "" {
-		t.Fatalf("folder file produced a RAG document %q; want none", created.DocumentID)
+	if len(uploaded) != 2 || uploaded[0].Path != "/workspace/folders/project/src/main" || !bytes.Equal(uploaded[0].Data, data) || uploaded[1].Path != "/workspace/folders/project/.env" {
+		t.Fatalf("sidecar uploads=%+v", uploaded)
 	}
 	var count int
-	if err := fx.deps.DB.QueryRowContext(context.Background(),
-		`SELECT COUNT(*) FROM documents WHERE conversation_id='c1'`).Scan(&count); err != nil {
-		t.Fatalf("count documents: %v", err)
+	if err := d.DB.QueryRow(`SELECT COUNT(*) FROM files WHERE conversation_id='c1'`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("application files=%d error=%v", count, err)
 	}
-	if count != 0 {
-		t.Fatalf("documents = %d; want 0 for a folder upload", count)
+	if entries, err := filepath.Glob(filepath.Join(d.Config.UploadDir, "*")); err != nil || len(entries) != 0 {
+		t.Fatalf("upload directory entries=%v error=%v", entries, err)
+	}
+}
+
+func TestSandboxFolderUploadRequiresSandboxAndSafePaths(t *testing.T) {
+	d := seedSandboxFolderDB(t)
+	if err := store.SetSetting(d.DB, "sandbox_base_url", ""); err != nil {
+		t.Fatal(err)
+	}
+	req := folderUploadRequest(t, "u1", "project", []string{"project/file.txt"}, []string{"file.txt"}, [][]byte{[]byte("x")})
+	rec := httptest.NewRecorder()
+	uploadSandboxFolderHandler(*d, rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unconfigured status=%d", rec.Code)
+	}
+	if err := store.SetSetting(d.DB, "sandbox_base_url", "http://127.0.0.1:1"); err != nil {
+		t.Fatal(err)
+	}
+	for _, unsafe := range []string{"project/../file.txt", "project//file.txt", "project/src/../../file.txt", "/project/file.txt"} {
+		rec = httptest.NewRecorder()
+		uploadSandboxFolderHandler(*d, rec, folderUploadRequest(t, "u1", "project", []string{unsafe}, []string{"file.txt"}, [][]byte{[]byte("x")}))
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("path=%q status=%d", unsafe, rec.Code)
+		}
+	}
+	rec = httptest.NewRecorder()
+	uploadSandboxFolderHandler(*d, rec, folderUploadRequest(t, "other", "project", []string{"project/file.txt"}, []string{"file.txt"}, [][]byte{[]byte("x")}))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("foreign conversation status=%d", rec.Code)
+	}
+}
+
+func TestLegacyFileEndpointRejectsFolderMetadata(t *testing.T) {
+	d := seedSandboxFolderDB(t)
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	_ = writer.WriteField("folder_name", "project")
+	_ = writer.WriteField("rel_path", "project/file.txt")
+	part, _ := writer.CreateFormFile("file", "file.txt")
+	_, _ = part.Write([]byte("x"))
+	_ = writer.Close()
+	req := httptest.NewRequest(http.MethodPost, "/api/files?conversation_id=c1", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req = req.WithContext(context.WithValue(req.Context(), userCtxKey{}, &store.User{ID: "u1", Role: "user", Status: "active"}))
+	rec := httptest.NewRecorder()
+	uploadFileHandler(*d, rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("legacy folder status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSandboxFolderUploadIntersectsGroupAndWorkspacePermissions(t *testing.T) {
+	d := seedSandboxFolderDB(t)
+	if err := store.SetSetting(d.DB, "sandbox_base_url", "http://127.0.0.1:1"); err != nil {
+		t.Fatal(err)
+	}
+	request := func(userID string) *http.Request {
+		return folderUploadRequest(t, userID, "project", []string{"project/a.txt"}, []string{"a.txt"}, [][]byte{[]byte("a")})
+	}
+	permissions := store.DefaultUserGroupPermissions()
+	permissions.AllowFileUpload = false
+	setIntersectionGroup(t, *d, "u1", permissions)
+	rec := httptest.NewRecorder()
+	uploadSandboxFolderHandler(*d, rec, request("u1"))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("group file-upload deny status=%d", rec.Code)
+	}
+	permissions.AllowFileUpload = true
+	permissions.Tools.Mode = store.ResourceAccessNone
+	setIntersectionGroup(t, *d, "u1", permissions)
+	rec = httptest.NewRecorder()
+	uploadSandboxFolderHandler(*d, rec, request("u1"))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("group tool deny status=%d", rec.Code)
+	}
+	permissions = store.DefaultUserGroupPermissions()
+	setIntersectionGroup(t, *d, "u1", permissions)
+	workspace, err := store.CreateWorkspace(t.Context(), d.DB, "u1", "Folder permissions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, d.DB, `UPDATE conversations SET workspace_id=?, is_public=1 WHERE id='c1'`, workspace.ID)
+	denied := false
+	if _, err := store.UpdateWorkspacePolicy(t.Context(), d.DB, workspace.ID, "u1", store.WorkspacePolicyPatch{AllowToolCalling: &denied}); err != nil {
+		t.Fatal(err)
+	}
+	rec = httptest.NewRecorder()
+	uploadSandboxFolderHandler(*d, rec, request("u1"))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("workspace tool deny status=%d", rec.Code)
+	}
+	allowed := true
+	if _, err := store.UpdateWorkspacePolicy(t.Context(), d.DB, workspace.ID, "u1", store.WorkspacePolicyPatch{AllowToolCalling: &allowed}); err != nil {
+		t.Fatal(err)
+	}
+	legacySandbox := false
+	if _, err := store.UpdateWorkspacePolicy(t.Context(), d.DB, workspace.ID, "u1", store.WorkspacePolicyPatch{AllowSandbox: &legacySandbox}); err != nil {
+		t.Fatal(err)
+	}
+	if status, err := sandboxFolderAccess(*d, request("u1"), "c1"); err != nil || status != 0 {
+		t.Fatalf("retired sandbox switch denied upload: status=%d error=%v", status, err)
+	}
+	allowedTools := []string{"builtin:web_search"}
+	if _, err := store.UpdateWorkspacePolicy(t.Context(), d.DB, workspace.ID, "u1", store.WorkspacePolicyPatch{AllowedToolIDs: &allowedTools}); err != nil {
+		t.Fatal(err)
+	}
+	if status, err := sandboxFolderAccess(*d, request("u1"), "c1"); err == nil || status != http.StatusForbidden {
+		t.Fatalf("workspace tool allowlist status=%d error=%v", status, err)
+	}
+	if err := store.JoinWorkspace(t.Context(), d.DB, workspace.ID, "other"); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, d.DB, `UPDATE workspace_members SET role='guest' WHERE workspace_id=? AND user_id='other'`, workspace.ID)
+	rec = httptest.NewRecorder()
+	uploadSandboxFolderHandler(*d, rec, request("other"))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("workspace guest status=%d", rec.Code)
 	}
 }

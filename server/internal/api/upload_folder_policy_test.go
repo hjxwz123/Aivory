@@ -62,25 +62,3 @@ func TestValidateUploadRelPathDepth(t *testing.T) {
 		t.Error("path beyond the segment limit was accepted")
 	}
 }
-
-// folderRelativeName turns "folder + file rel_path" into the durable staged path,
-// and must never double the folder prefix the picker already includes.
-func TestFolderRelativeName(t *testing.T) {
-	cases := []struct {
-		folder, relPath, filename, want string
-	}{
-		{"", "", "a.txt", ""},
-		{"p", "p/a.txt", "a.txt", "p/a.txt"},
-		{"p", "a.txt", "a.txt", "p/a.txt"},
-		{"p", "p/src/a.txt", "a.txt", "p/src/a.txt"},
-		{"my-project", "my-project/src/main.ts", "main.ts", "my-project/src/main.ts"},
-		// A folder upload whose picker reported no rel_path still lands inside
-		// the folder rather than at the uploads root.
-		{"p", "", "a.txt", "p/a.txt"},
-	}
-	for _, tc := range cases {
-		if got := folderRelativeName(tc.folder, tc.relPath, tc.filename); got != tc.want {
-			t.Errorf("folderRelativeName(%q, %q, %q) = %q; want %q", tc.folder, tc.relPath, tc.filename, got, tc.want)
-		}
-	}
-}
