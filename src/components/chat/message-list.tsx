@@ -305,8 +305,8 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
 
   // §2.7 double-submit guard: forking a long conversation copies every message
   // server-side and can take a while. Without the ref a user who sees nothing
-  // happen reopens the menu and clicks again — each click forks another copy.
-  // Feedback is owned here (not at the menu items): instant "forking…" info on
+  // happen clicks the action again — each click forks another copy.
+  // Feedback is owned here: instant "forking…" info on
   // click, success/error only when the request actually resolves.
   const forkingRef = useRef(false)
   const handleFork = useCallback(
