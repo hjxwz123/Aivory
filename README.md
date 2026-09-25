@@ -262,7 +262,7 @@ HTML code blocks open a **live preview panel** alongside the chat as the assista
 
 | Tool | What it does |
 |------|--------------|
-| `aivory_web_search` | Full-text web search through Aivory via SearXNG (self-hosted) or Serper / Brave |
+| `aivory_web_search` | Full-text web search through Aivory via DuckDuckGo (free, no key), SearXNG (self-hosted) or Serper / Brave / Tavily |
 | `web_fetch` | Fetch and extract a URL — respects robots.txt |
 | `python_execute` | Run Python in the persistent sandbox; full stdlib, packages, real file I/O |
 | `image_generate` | Call a configured image model and save the result as an artifact |

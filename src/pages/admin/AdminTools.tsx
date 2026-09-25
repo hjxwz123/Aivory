@@ -1,6 +1,7 @@
 /**
  * AdminTools — outbound services the assistant invokes during a conversation:
- * web search (SearXNG / Serper / Brave / Tavily) and the code sandbox sidecar.
+ * web search (DuckDuckGo / SearXNG / Serper / Brave / Tavily) and the code
+ * sandbox sidecar.
  *
  * Shares the global `/admin/settings` endpoint with other admin pages; PATCH
  * is scoped to the keys this page owns so concurrent edits don't clobber
@@ -379,6 +380,7 @@ export default function AdminTools() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">{t('admin:settings.fields.searchNone')}</SelectItem>
+                    <SelectItem value="duckduckgo">{t('admin:settings.fields.searchDuckduckgo')}</SelectItem>
                     <SelectItem value="searxng">{t('admin:settings.fields.searchSearxng')}</SelectItem>
                     <SelectItem value="serper">{t('admin:settings.fields.searchSerper')}</SelectItem>
                     <SelectItem value="brave">{t('admin:settings.fields.searchBrave')}</SelectItem>
@@ -386,6 +388,14 @@ export default function AdminTools() {
                   </SelectContent>
                 </Select>
               </Field>
+
+              {searchProvider === 'duckduckgo' && (
+                <div className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-4">
+                  <p className="text-xs leading-relaxed text-[var(--color-fg-subtle)]">
+                    {t('admin:settings.fields.searchDuckduckgoHint')}
+                  </p>
+                </div>
+              )}
 
               {searchProvider === 'searxng' && (
                 <div className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-4">

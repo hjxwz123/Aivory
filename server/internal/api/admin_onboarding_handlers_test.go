@@ -89,3 +89,30 @@ func TestAdminOnboardingOptionalTaskAndToolRouteModels(t *testing.T) {
 		t.Fatal("valid tool route model should complete its optional step")
 	}
 }
+
+func TestOnboardingSearchReadyTreatsDuckDuckGoAsKeyless(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "onboarding-search.db"))
+	defer db.Close()
+
+	// DuckDuckGo is the keyless channel: no key and no base URL still counts as
+	// configured. auto deliberately stays opt-in, so it must not.
+	for _, provider := range []string{"duckduckgo", "ddg"} {
+		if err := store.SetSetting(db, "search_provider", provider); err != nil {
+			t.Fatal(err)
+		}
+		ready, err := onboardingSearchReady(Deps{DB: db})
+		if err != nil {
+			t.Fatalf("%s: %v", provider, err)
+		}
+		if !ready {
+			t.Fatalf("%s needs no key or base URL but reads as unready", provider)
+		}
+	}
+
+	if err := store.SetSetting(db, "search_provider", "auto"); err != nil {
+		t.Fatal(err)
+	}
+	if ready, err := onboardingSearchReady(Deps{DB: db}); err != nil || ready {
+		t.Fatalf("auto with no key or base URL must stay unready, ready=%v err=%v", ready, err)
+	}
+}

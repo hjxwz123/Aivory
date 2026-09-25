@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"unicode"
 
@@ -20,8 +21,9 @@ type Searcher interface {
 	Search(ctx context.Context, query string, topK int) (text string, citations []llm.Citation, err error)
 }
 
-// newSearcher builds the configured searcher. SearXNG can run unauthenticated
-// (apiKey is empty), but Serper/Brave/Tavily require a key.
+// newSearcher builds the configured searcher. Serper/Brave/Tavily require a
+// key and SearXNG a base URL; DuckDuckGo is the free keyless channel and needs
+// no configuration at all.
 func newSearcher(provider, apiKey, baseURL string, selectedEngines ...[]string) Searcher {
 	switch strings.ToLower(provider) {
 	case "serper":
@@ -44,6 +46,9 @@ func newSearcher(provider, apiKey, baseURL string, selectedEngines ...[]string) 
 			return nil
 		}
 		return &searxngSearcher{baseURL: strings.TrimRight(baseURL, "/"), engines: firstEngineSelection(selectedEngines)}
+	case "duckduckgo", "ddg":
+		// Free, keyless scraping of DuckDuckGo's public HTML endpoints.
+		return &duckduckgoSearcher{}
 	case "", "auto":
 		if apiKey != "" {
 			return &serperSearcher{apiKey: apiKey}
@@ -51,6 +56,9 @@ func newSearcher(provider, apiKey, baseURL string, selectedEngines ...[]string) 
 		if baseURL != "" {
 			return &searxngSearcher{baseURL: strings.TrimRight(baseURL, "/"), engines: firstEngineSelection(selectedEngines)}
 		}
+		// DuckDuckGo deliberately stays OUT of auto: silently sending user
+		// queries to a third-party scraper target is an admin privacy call,
+		// and the free endpoints are unstable from datacenter IPs.
 		return nil
 	default:
 		return nil
@@ -339,6 +347,265 @@ func (s *searxngSearcher) Search(ctx context.Context, query string, topK int) (s
 			fmt.Fprintf(&out, "(date: %s)\n", r.PublishedAt)
 		}
 		out.WriteString("\n")
+	}
+	return out.String(), citations, nil
+}
+
+// --- DuckDuckGo (free, keyless) -------------------------------------------
+//
+// DuckDuckGo has no public search API, only the two server-rendered HTML
+// endpoints below:
+//
+//	html.duckduckgo.com/html/  — full result cards with snippets
+//	lite.duckduckgo.com/lite/  — a minimal table fallback
+//
+// The html endpoint is tried first; when it is bot-challenged, errored, or
+// parsed to zero rows (layout shift), the request falls through to lite, whose
+// independent markup confirms whether the query genuinely has no results.
+
+const (
+	ddgHTMLBase = "https://html.duckduckgo.com/html/"
+	ddgLiteBase = "https://lite.duckduckgo.com/lite/"
+	// ddgUserAgent: DuckDuckGo's bot filter trips on library-flavoured UAs, so
+	// present a plain desktop browser one.
+	ddgUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+	ddgBodyCap   = 1 << 20 // result pages are ~100-400 KB; 1 MiB bounds a misbehaving endpoint
+	// ddgMaxResults: one DDG result page carries at most 10 rows, so a larger
+	// top_k cannot be served by the single request below.
+	ddgMaxResults = 10
+)
+
+type duckduckgoSearcher struct {
+	// Endpoint overrides exist for tests to serve fixtures; empty = the real
+	// DuckDuckGo bases above.
+	htmlEndpoint string
+	liteEndpoint string
+}
+
+type ddgResult struct {
+	title   string
+	url     string
+	snippet string
+}
+
+func (d *duckduckgoSearcher) html() string {
+	if d.htmlEndpoint != "" {
+		return d.htmlEndpoint
+	}
+	return ddgHTMLBase
+}
+
+func (d *duckduckgoSearcher) lite() string {
+	if d.liteEndpoint != "" {
+		return d.liteEndpoint
+	}
+	return ddgLiteBase
+}
+
+func (d *duckduckgoSearcher) Search(ctx context.Context, query string, topK int) (string, []llm.Citation, error) {
+	if topK > ddgMaxResults {
+		topK = ddgMaxResults
+	}
+	htmlBody, htmlStatus, htmlErr := ddgGet(ctx, d.html(), query)
+	htmlOK := htmlErr == nil && htmlStatus == http.StatusOK && !ddgBlockedPage(htmlBody)
+	if htmlOK {
+		if results := parseDDGHTML(htmlBody, topK); len(results) > 0 {
+			return formatDDGResults(results)
+		}
+		// Zero parsed rows: confirm against lite (genuine miss or html layout shift).
+	}
+
+	liteBody, liteStatus, liteErr := ddgGet(ctx, d.lite(), query)
+	liteOK := liteErr == nil && liteStatus == http.StatusOK && !ddgBlockedPage(liteBody)
+	if liteOK {
+		results := parseDDGLite(liteBody, topK)
+		if len(results) == 0 {
+			// An explicit empty message keeps the model from reading an empty
+			// payload as a backend failure (same contract as SearXNG / Tavily).
+			return "No web results found for this query.", nil, nil
+		}
+		return formatDDGResults(results)
+	}
+
+	// Both endpoints failed or were challenged. Surface why for each leg so the
+	// admin sees the actual cause (403 vs challenge vs transport) plus the fix.
+	reason := ddgEndpointProblem("lite.duckduckgo.com", liteStatus, liteBody, liteErr)
+	if !htmlOK {
+		reason += "; also " + ddgEndpointProblem("html.duckduckgo.com", htmlStatus, htmlBody, htmlErr)
+	}
+	return "", nil, fmt.Errorf(
+		"duckduckgo: %s — DuckDuckGo's free endpoints rate-limit some server IPs (especially datacenter ranges); retry later or switch search_provider to Serper / Brave / Tavily / SearXNG",
+		reason)
+}
+
+// ddgGet issues one keyless GET against an endpoint for the query. kl=wt-wt is
+// DuckDuckGo's "no region preference" value.
+func ddgGet(ctx context.Context, endpoint, query string) (body string, status int, err error) {
+	params := url.Values{"q": []string{query}, "kl": []string{"wt-wt"}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"?"+params.Encode(), nil)
+	if err != nil {
+		return "", 0, err
+	}
+	req.Header.Set("User-Agent", ddgUserAgent)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+	resp, err := toolHTTPClient.Do(req)
+	if err != nil {
+		return "", 0, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, ddgBodyCap))
+	if err != nil {
+		return "", 0, err
+	}
+	return string(raw), resp.StatusCode, nil
+}
+
+// ddgBlockedPage reports whether a 200 page is actually DuckDuckGo's anti-bot
+// interstitial (anomaly / Cloudflare challenge) rather than a results page. The
+// markers are structural — the challenge's own class and script names — because
+// result text is not evidence: a query like "captcha bypass" legitimately puts
+// that word in the page, and a query like "anomaly detection" returns snippets
+// that mention it.
+func ddgBlockedPage(body string) bool {
+	if strings.Contains(body, "anomaly-modal") ||
+		strings.Contains(body, "challenge-platform") ||
+		strings.Contains(body, "challenge-form") {
+		return true
+	}
+	// Fallback for a re-marked-up challenge: bot-check wording counts only when
+	// the page carries no result container at all.
+	hasResults := strings.Contains(body, "results_links") || strings.Contains(body, "result-link")
+	return !hasResults && strings.Contains(strings.ToLower(body), "captcha")
+}
+
+// ddgEndpointProblem renders one endpoint's failure as a short clause.
+func ddgEndpointProblem(host string, status int, body string, err error) string {
+	switch {
+	case err != nil:
+		return fmt.Sprintf("%s unreachable: %v", host, err)
+	case status == http.StatusForbidden, status == http.StatusTooManyRequests:
+		return fmt.Sprintf("%s rate-limited this server (HTTP %d)", host, status)
+	case ddgBlockedPage(body):
+		return fmt.Sprintf("%s returned an anti-bot challenge page", host)
+	case status >= 400:
+		return fmt.Sprintf("%s returned HTTP %d", host, status)
+	default:
+		return fmt.Sprintf("%s returned an unrecognised page", host)
+	}
+}
+
+var (
+	// ddgBlockRe anchors on each html-endpoint result container; the captured
+	// class tail lets ads (result--ad) be skipped before parsing their rows.
+	ddgBlockRe   = regexp.MustCompile(`class="result results_links([^"]*)"`)
+	ddgLinkRe    = regexp.MustCompile(`(?s)<a[^>]*class="result__a"[^>]*?href="([^"]*)"[^>]*>(.*?)</a>`)
+	ddgSnippetRe = regexp.MustCompile(`(?s)class="result__snippet"[^>]*>(.*?)</a>`)
+
+	ddgLiteLinkRe    = regexp.MustCompile(`(?s)<a[^>]*href="([^"]*)"[^>]*class=['"]result-link['"][^>]*>(.*?)</a>`)
+	ddgLiteSnippetRe = regexp.MustCompile(`(?s)class=['"]result-snippet['"][^>]*>(.*?)</td>`)
+
+	ddgTagRe = regexp.MustCompile(`<[^>]*>`)
+)
+
+func parseDDGHTML(body string, topK int) []ddgResult {
+	blocks := ddgBlockRe.FindAllStringSubmatchIndex(body, -1)
+	results := make([]ddgResult, 0, len(blocks))
+	for i, m := range blocks {
+		if strings.Contains(body[m[2]:m[3]], "result--ad") {
+			continue
+		}
+		segEnd := len(body)
+		if i+1 < len(blocks) {
+			segEnd = blocks[i+1][0]
+		}
+		seg := body[m[1]:segEnd]
+		link := ddgLinkRe.FindStringSubmatch(seg)
+		if link == nil {
+			continue
+		}
+		r := ddgResult{
+			title: ddgText(link[2]),
+			url:   ddgResolveURL(htmlEntities.Replace(link[1])),
+		}
+		if snip := ddgSnippetRe.FindStringSubmatch(seg); snip != nil {
+			r.snippet = cleanSnippet(ddgText(snip[1]))
+		}
+		if r.title == "" || r.url == "" {
+			continue
+		}
+		results = append(results, r)
+		if len(results) >= topK {
+			break
+		}
+	}
+	return results
+}
+
+func parseDDGLite(body string, topK int) []ddgResult {
+	links := ddgLiteLinkRe.FindAllStringSubmatch(body, -1)
+	snips := ddgLiteSnippetRe.FindAllStringSubmatch(body, -1)
+	results := make([]ddgResult, 0, len(links))
+	for i, link := range links {
+		r := ddgResult{
+			title: ddgText(link[2]),
+			url:   ddgResolveURL(htmlEntities.Replace(link[1])),
+		}
+		if i < len(snips) {
+			r.snippet = cleanSnippet(ddgText(snips[i][1]))
+		}
+		if r.title == "" || r.url == "" {
+			continue
+		}
+		results = append(results, r)
+		if len(results) >= topK {
+			break
+		}
+	}
+	return results
+}
+
+// ddgText reduces a result fragment (titles and snippets carry <b> search-term
+// highlighting) to a single plain-text line.
+func ddgText(fragment string) string {
+	plain := htmlEntities.Replace(ddgTagRe.ReplaceAllString(fragment, ""))
+	return strings.Join(strings.Fields(plain), " ")
+}
+
+// ddgResolveURL unwraps DuckDuckGo's redirect links
+// (//duckduckgo.com/l/?uddg=<encoded target>&rut=…) into the real destination;
+// direct http(s) links pass through. Anything else (tracking link without a
+// target, relative junk) yields "" and the row is dropped.
+func ddgResolveURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if strings.HasPrefix(raw, "//") {
+		raw = "https:" + raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	if strings.EqualFold(u.Host, "duckduckgo.com") && strings.HasPrefix(u.Path, "/l/") {
+		// The unwrapped target is re-parsed, so it faces the same scheme check
+		// as a direct link.
+		if u, err = url.Parse(strings.TrimSpace(u.Query().Get("uddg"))); err != nil {
+			return ""
+		}
+	}
+	if u.Scheme == "http" || u.Scheme == "https" {
+		return u.String()
+	}
+	return ""
+}
+
+func formatDDGResults(results []ddgResult) (string, []llm.Citation, error) {
+	citations := make([]llm.Citation, 0, len(results))
+	out := strings.Builder{}
+	for i, r := range results {
+		citations = append(citations, llm.Citation{
+			ID: fmt.Sprintf("w_%d", i+1), Index: i + 1,
+			Title: r.title, URL: r.url, Snippet: r.snippet, Source: "web",
+		})
+		fmt.Fprintf(&out, "[%d] %s\n%s\n%s\n\n", i+1, r.title, r.url, r.snippet)
 	}
 	return out.String(), citations, nil
 }
