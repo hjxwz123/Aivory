@@ -89,6 +89,37 @@ type cachedMCPClient struct {
 // inspect / clear a conversation's workspace.
 func (r *Registry) Sandbox() sandbox.Service { return r.sandbox }
 
+func (r *Registry) EnsureConversationSandbox(ctx context.Context, convID, userID string) (string, error) {
+	if r.sandbox == nil || !r.sandbox.Enabled() {
+		return "", errors.New("sandbox not configured")
+	}
+	unlock := lockConvSandbox(convID)
+	defer unlock()
+	sessionID, err := store.GetConvProviderStateKey(ctx, r.db, convID, "sandbox_id")
+	if err != nil {
+		return "", err
+	}
+	if sessionID != "" {
+		if _, err := r.sandbox.ListFiles(ctx, sessionID); err == nil {
+			return sessionID, nil
+		} else {
+			var httpErr *sandbox.HTTPError
+			if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusNotFound {
+				return "", err
+			}
+		}
+	}
+	sessionID, err = r.sandbox.NewSession(ctx, convID)
+	if err != nil {
+		return "", err
+	}
+	if err := store.SetConvProviderStateKeyForMember(ctx, r.db, convID, userID, "sandbox_id", sessionID); err != nil {
+		_ = r.sandbox.Release(ctx, sessionID)
+		return "", err
+	}
+	return sessionID, nil
+}
+
 // NewRegistry builds the default registry with the built-in tools.
 func NewRegistry(db *sql.DB, cfg config.Config, logger *log.Logger) *Registry {
 	r := &Registry{
