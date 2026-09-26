@@ -798,7 +798,7 @@ export default function ChatThread() {
               commandsEnabled={conversation.creatorId === meId}
               kbIds={conversation.kbIds}
               projectKBId={project?.files.length ? project.kbId : undefined}
-              onKBChange={project?.files.length ? (ids) => void setKBs(conversation.id, ids) : undefined}
+              onKBChange={(ids) => void setKBs(conversation.id, ids)}
               modelPickerInHeader
             />
           )}

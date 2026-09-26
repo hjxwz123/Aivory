@@ -15,7 +15,6 @@
   },
   "input": {
     "title": "Sur quoi doit porter la présentation ?",
-    "lead": "Partez d’une idée ou de vos documents. Affinez le plan, puis choisissez le style de vos diapositives.",
     "optionsTitle": "Plus d’options",
     "optionsLead": "Précisez si besoin le contexte, le public et vos préférences de rédaction.",
     "anyOption": "Laisser le modèle décider",
@@ -145,7 +144,6 @@
     "edit": "Modifier les diapositives",
     "template": "Modèle",
     "credits": "Crédits",
-    "priceNote": "Prix configuré par l’administrateur : {{price}} crédits par présentation.",
     "saved": "Enregistré dans vos fichiers",
     "saving": "Enregistrement dans vos fichiers…",
     "expandPreview": "Agrandir l’aperçu"
@@ -203,11 +201,9 @@
   },
   "editor": {
     "title": "Modifier la présentation",
-    "lead": "L'édition se fait dans l'éditeur Docmee ; à la fermeture, le fichier est resynchronisé.",
     "loading": "Ouverture de l'éditeur…",
     "failed": "L'éditeur n'a pas pu être ouvert.",
     "retry": "Réessayer",
-    "syncNow": "Synchroniser maintenant",
     "synced": "Le fichier modifié a été enregistré dans vos fichiers",
     "syncFailed": "Le fichier modifié n'a pas pu être enregistré",
     "done": "Terminé"

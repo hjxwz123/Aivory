@@ -36,21 +36,22 @@ export function DocmeeEditorDialog({ deck, onClose, onSynced }: DocmeeEditorDial
   const [phase, setPhase] = useState<Phase>('loading')
   const [error, setError] = useState<string | null>(null)
   const [syncing, setSyncing] = useState(false)
+  const closingRef = useRef(false)
   /** Only pull the file back if the editor actually mounted. */
   const mountedRef = useRef(false)
 
   const syncFile = useCallback(
-    async (silent: boolean) => {
-      if (!deck) return
+    async () => {
+      if (!deck) return false
       setSyncing(true)
       try {
         const result = await aipptApi.refreshFile(deck.id)
         onSynced(result.deck)
-        if (!silent) toast.success(t('editor.synced'))
+        toast.success(t('editor.synced'))
+        return true
       } catch (err) {
-        // A failed pull must not look like a failed edit: the deck is saved
-        // upstream either way.
         toast.error(t('editor.syncFailed'), err instanceof ApiError ? err.message : undefined)
+        return false
       } finally {
         setSyncing(false)
       }
@@ -98,15 +99,20 @@ export function DocmeeEditorDialog({ deck, onClose, onSynced }: DocmeeEditorDial
     }
   }, [deck, mount])
 
-  function close() {
-    const wasMounted = mountedRef.current
+  async function close() {
+    if (closingRef.current) return
+    closingRef.current = true
+    // Pull the latest file before closing so the user's copy is current when
+    // they return to the deck. Keep the editor open if synchronization fails.
+    if (mountedRef.current && !(await syncFile())) {
+      closingRef.current = false
+      return
+    }
     mountedRef.current = false
     editorRef.current?.destroy()
     editorRef.current = null
     onClose()
-    // The editor persists to Docmee; pull the result into our storage so the
-    // user's copy matches what they just edited.
-    if (wasMounted) void syncFile(true).then(() => toast.success(t('editor.synced')))
+    closingRef.current = false
   }
 
   return (
@@ -136,22 +142,10 @@ export function DocmeeEditorDialog({ deck, onClose, onSynced }: DocmeeEditorDial
           ) : null}
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--color-divider)] px-4 py-3 sm:px-5">
-          <p className="text-xs text-[var(--color-fg-muted)]">{t('editor.lead')}</p>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              loading={syncing}
-              disabled={syncing || phase !== 'ready'}
-              onClick={() => void syncFile(false)}
-            >
-              {t('editor.syncNow')}
-            </Button>
-            <Button size="sm" onClick={close}>
-              {t('editor.done')}
-            </Button>
-          </div>
+        <div className="flex justify-end border-t border-[var(--color-divider)] px-4 py-3 sm:px-5">
+          <Button size="sm" loading={syncing} disabled={syncing} onClick={() => void close()}>
+            {t('editor.done')}
+          </Button>
         </div>
       </DialogContent>
     </Dialog>

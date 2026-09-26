@@ -48,6 +48,7 @@ import { TemplatePicker } from '@/components/ppt/template-picker'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -556,12 +557,14 @@ export default function AiPPT() {
               {editBilled ? t('ppt:outline.rewriteBilled', { price: editPrice }) : t('ppt:outline.rewriteLead')}
             </DialogDescription>
           </DialogHeader>
-          <Textarea
-            value={rewriteQuestion}
-            onChange={(event) => setRewriteQuestion(event.target.value)}
-            placeholder={t('ppt:outline.rewritePlaceholder')}
-            rows={3}
-          />
+          <DialogBody>
+            <Textarea
+              value={rewriteQuestion}
+              onChange={(event) => setRewriteQuestion(event.target.value)}
+              placeholder={t('ppt:outline.rewritePlaceholder')}
+              rows={3}
+            />
+          </DialogBody>
           <DialogFooter>
             <Button variant="outline" onClick={() => setRewriteOpen(false)}>
               {t('common:actions.cancel')}
@@ -694,7 +697,6 @@ function StepInput(props: StepInputProps) {
           <h2 className="text-[24px] font-semibold leading-snug tracking-tight text-[var(--color-fg)]">
             {t('input.title')}
           </h2>
-          <p className="mt-2 max-w-[65ch] text-[14px] leading-6 text-[var(--color-fg-muted)]">{t('input.lead')}</p>
         </div>
 
         <fieldset disabled={busy} className="min-w-0">
@@ -1276,7 +1278,6 @@ function StepResult(props: StepResultProps) {
               <dd className="mt-1 tabular-nums text-[var(--color-fg)]">{t('ppt:decks.credits', { credits: deck.credits })}</dd>
             </div>
           </dl>
-          {price > 0 ? <p className="mt-3 text-xs leading-5 text-[var(--color-fg-muted)]">{t('ppt:result.priceNote', { price })}</p> : null}
           {deck.error ? <p className="mt-3 break-words text-xs leading-5 text-[var(--color-danger)]">{deck.error}</p> : null}
           <div className="mt-5 flex flex-col items-start gap-1 border-t border-[var(--color-divider)] pt-3">
             <Button size="sm" variant="ghost" disabled={busy} onClick={() => setTemplateOpen(true)} leadingIcon={<Presentation size={14} aria-hidden />}>

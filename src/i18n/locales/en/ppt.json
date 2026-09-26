@@ -15,7 +15,6 @@
   },
   "input": {
     "title": "What should the deck be about?",
-    "lead": "Start with an idea or your own material. Shape the outline, then choose a look for your slides.",
     "optionsTitle": "More options",
     "optionsLead": "Add a use case, audience or writing preferences when you need them.",
     "anyOption": "Let the model decide",
@@ -145,7 +144,6 @@
     "edit": "Edit slides",
     "template": "Template",
     "credits": "Credits",
-    "priceNote": "Admin-configured price: {{price}} credits per deck.",
     "saved": "Saved to your files",
     "saving": "Saving to your files…",
     "expandPreview": "Expand preview"
@@ -203,11 +201,9 @@
   },
   "editor": {
     "title": "Edit presentation",
-    "lead": "Editing happens in the Docmee editor; closing it saves the file back to your files.",
     "loading": "Opening the editor…",
     "failed": "The editor could not be opened.",
     "retry": "Try again",
-    "syncNow": "Sync file now",
     "synced": "The edited file was saved to your files",
     "syncFailed": "The edited file could not be saved to your files",
     "done": "Done"
