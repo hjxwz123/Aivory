@@ -233,7 +233,7 @@ docker compose --env-file .env -f docker-compose.prod.yml up -d
 
 | 工具 | 功能 |
 |------|------|
-| `aivory_web_search` | 通过 Aivory 配置的 SearXNG（自部署）、Serper 或 Brave 后端进行全文网络搜索。 |
+| `aivory_web_search` | 通过 Aivory 配置的 DuckDuckGo（免费，无需 Key）、SearXNG（自部署）、Serper、Brave 或 Tavily 后端进行全文网络搜索。 |
 | `web_fetch` | 抓取指定 URL 并提取正文，遵守 robots.txt 与内容安全过滤。 |
 | `python_execute` | 在无网络的隔离沙箱中运行 Python 代码。支持完整标准库、预装依赖和文件 I/O。 |
 | `image_generate` | 调用配置的图像模型（Gemini Imagen、OpenAI DALL-E 等）生成图片并保存为产物。 |

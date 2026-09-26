@@ -16,6 +16,7 @@ dist-ssr
 # Backend
 server/data/
 server/aivory
+server/bin/
 server/.env
 /deploy/.env.personal
 /deploy/data-personal/
