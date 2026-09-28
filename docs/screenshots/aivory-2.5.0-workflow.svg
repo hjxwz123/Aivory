@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">Aivory 2.5.0: from conversation to finished work</title>
+  <desc id="desc">A four-step illustration of model collaboration, folder tasks, file preview and editing, and AI presentations.</desc>
+  <rect width="1600" height="900" fill="#111318"/>
+  <path d="M80 106H1520M80 780H1520" stroke="#3d4248" stroke-width="2"/>
+  <path d="M80 52l12 22h-24z" fill="none" stroke="#a4efce" stroke-width="3" stroke-linejoin="round"/>
+  <text x="108" y="77" fill="#f3f4f0" font-family="Georgia, serif" font-size="36">Aivory</text>
+  <text x="1520" y="77" text-anchor="end" fill="#a4efce" font-family="Arial, sans-serif" font-size="24" font-weight="700">2.5.0 / RELEASE</text>
+
+  <text x="80" y="252" fill="#f3f4f0" font-family="PingFang SC, Noto Sans CJK SC, sans-serif" font-size="96" font-weight="700">从对话，到交付</text>
+  <text x="84" y="315" fill="#b4bdc0" font-family="PingFang SC, Noto Sans CJK SC, sans-serif" font-size="30">在一个自部署工作空间里，把资料、工具和产物接起来。</text>
+
+  <path d="M210 481H1350" stroke="#555e60" stroke-width="3"/>
+  <path d="M1350 481l-15-9v18z" fill="#555e60"/>
+  <circle cx="210" cy="481" r="38" fill="#a4efce"/>
+  <circle cx="590" cy="481" r="38" fill="#92c7e8"/>
+  <circle cx="970" cy="481" r="38" fill="#f0bb7a"/>
+  <circle cx="1350" cy="481" r="38" fill="#d6b8f3"/>
+  <g fill="#111318" font-family="Arial, sans-serif" font-size="27" font-weight="700" text-anchor="middle">
+    <text x="210" y="491">01</text>
+    <text x="590" y="491">02</text>
+    <text x="970" y="491">03</text>
+    <text x="1350" y="491">04</text>
+  </g>
+
+  <g fill="#f3f4f0" font-family="PingFang SC, Noto Sans CJK SC, sans-serif" font-size="36" font-weight="700" text-anchor="middle">
+    <text x="210" y="579">多模型协作</text>
+    <text x="590" y="579">文件进入任务</text>
+    <text x="970" y="579">预览与编辑</text>
+    <text x="1350" y="579">演示文稿</text>
+  </g>
+  <g fill="#b4bdc0" font-family="PingFang SC, Noto Sans CJK SC, sans-serif" font-size="24" text-anchor="middle">
+    <text x="210" y="631">搜索、视觉与工具路由</text>
+    <text x="590" y="631">整包上传，保留目录结构</text>
+    <text x="970" y="631">对话旁查看和修改产物</text>
+    <text x="1350" y="631">可选的 AI PPT 创作台</text>
+  </g>
+
+  <text x="80" y="835" fill="#a4efce" font-family="Arial, sans-serif" font-size="22" font-weight="700">AIVORY 2.5.0</text>
+  <text x="1520" y="835" text-anchor="end" fill="#8f999c" font-family="PingFang SC, Noto Sans CJK SC, sans-serif" font-size="22">能力示意 · 实际功能以部署配置和权限为准</text>
+</svg>

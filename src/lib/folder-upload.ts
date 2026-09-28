@@ -35,7 +35,8 @@ export function folderUploadFields(
       folderName === '.' || folderName === '..' ||
       segments.length < (knownFolder ? 1 : 2) ||
       segments.some((segment) => !segment || segment === '.' || segment === '..' ||
-        new TextEncoder().encode(segment).length > 200 || /[\x00-\x1f\x7f]/.test(segment)) ||
+        new TextEncoder().encode(segment).length > 200 ||
+        [...segment].some((char) => char.charCodeAt(0) < 0x20 || char.charCodeAt(0) === 0x7f)) ||
       segments[segments.length - 1] !== fileName) return null
   const relPath = segments.join('/')
   if (segments.length > 32 || new TextEncoder().encode(relPath).length > 1024) return null

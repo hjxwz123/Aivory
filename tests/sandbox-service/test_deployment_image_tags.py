@@ -14,10 +14,10 @@ SIDECAR_DOCKERFILE = REPO_ROOT / "sandbox-service" / "Dockerfile.sidecar"
 
 
 class DeploymentImageTagsTest(unittest.TestCase):
-    def test_sandbox_tags_inherit_app_tag_with_optional_override(self) -> None:
+    def test_images_inherit_release_tag_with_optional_overrides(self) -> None:
         compose = PROD_COMPOSE.read_text(encoding="utf-8")
 
-        self.assertIn("aivory-app:${IMAGE_TAG:-latest}", compose)
+        self.assertIn("aivory-app:${APP_IMAGE_TAG:-${IMAGE_TAG:-latest}}", compose)
         self.assertEqual(
             compose.count("${SANDBOX_IMAGE_TAG:-${IMAGE_TAG:-latest}}"),
             3,
