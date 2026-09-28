@@ -59,6 +59,24 @@ describe('opening-round deletion protection', () => {
     expect([...protectedFirstRoundMessageIds(conversation([root, answer]))]).toEqual(['root', 'answer'])
   })
 
+  it('allows a stopped opening round to be deleted once persisted', () => {
+    const root = message({ id: 'root', role: 'user' })
+    const stopped = message({ id: 'stopped-answer', parentId: root.id, stopped: true })
+
+    expect(protectedFirstRoundMessageIds(conversation([root, stopped])).size).toBe(0)
+    expect(messageHasActions(stopped)).toBe(true)
+  })
+
+  it('keeps the opening question protected when a stopped answer has another branch', () => {
+    const root = message({ id: 'root', role: 'user' })
+    const stopped = message({
+      id: 'stopped-answer', parentId: root.id, stopped: true,
+      siblings: ['stopped-answer', 'other-answer'],
+    })
+
+    expect([...protectedFirstRoundMessageIds(conversation([root, stopped]))]).toEqual(['root'])
+  })
+
   it('allows an edited root sibling and its empty stopped answer to be deleted', () => {
     const editedRoot = message({
       id: 'edited-root',

@@ -477,6 +477,97 @@ describe('stopped turn optimistic-id reconciliation', () => {
     expect(messageHasActions(messages[1])).toBe(true)
   })
 
+  it('waits for a stopping turn to finalize before editing and resending it', async () => {
+    const requestBodies: Array<Record<string, unknown>> = []
+    apiMocks.streamSSE.mockImplementation(
+      (_path: string, body: Record<string, unknown>, signal: AbortSignal) => {
+        requestBodies.push(body)
+        return requestBodies.length === 1
+          ? abortBeforeMessageStart(signal)
+          : events(
+              { type: 'message_start', message_id: 'msg_edited_assistant' },
+              { type: 'text_delta', text: 'edited answer' },
+              { type: 'done', stop_reason: 'stop' },
+            )
+      },
+    )
+    let finishStopping!: (response: ReturnType<typeof pathResponse>) => void
+    const editedUser = apiMessage('msg_edited_user', 'user', '', 'complete', 'edited question')
+    const editedAssistant = apiMessage(
+      'msg_edited_assistant', 'assistant', editedUser.id, 'complete', 'edited answer',
+    )
+    apiMocks.get
+      .mockResolvedValueOnce(pathResponse('stopping'))
+      .mockImplementationOnce(() => new Promise((resolve) => { finishStopping = resolve }))
+      .mockResolvedValueOnce({
+        conversation: apiConversation(editedAssistant.id),
+        messages: [editedUser, editedAssistant],
+        has_more: false,
+      })
+
+    const firstSend = useConversations.getState().sendMessage({
+      conversationId: 'conv_stop', text: 'question', modelId: 'model_1', toolMode: 'auto',
+    })
+    const localAssistant = useConversations.getState().conversations[0].messages.at(-1)!
+    useConversations.getState().abortStream(localAssistant.id)
+    const editedSend = useConversations.getState().sendMessage({
+      conversationId: 'conv_stop', text: 'edited question', parentId: '', branch: true,
+      modelId: 'model_1', toolMode: 'auto',
+    })
+
+    await vi.waitFor(() => expect(apiMocks.get).toHaveBeenCalledTimes(2))
+    expect(apiMocks.streamSSE).toHaveBeenCalledTimes(1)
+    expect(useConversations.getState().conversations[0].messages.at(-1)).toMatchObject({
+      stopped: true, streaming: false,
+    })
+
+    finishStopping(pathResponse('stopped'))
+    await Promise.all([firstSend, editedSend])
+
+    expect(requestBodies).toHaveLength(2)
+    expect(requestBodies[1]).toMatchObject({ text: 'edited question', branch: true })
+    expect(useConversations.getState().conversations[0].messages.map((message) => message.id)).toEqual([
+      editedUser.id, editedAssistant.id,
+    ])
+    expect(useConversations.getState().conversations[0].messages[1]).toMatchObject({
+      content: 'edited answer', stopped: false, streaming: false,
+    })
+  })
+
+  it('does not restore a stopped reply after its round was deleted', async () => {
+    apiMocks.streamSSE.mockImplementation(
+      (_path: string, _body: Record<string, unknown>, signal: AbortSignal) =>
+        (async function* () {
+          yield { data: { type: 'message_start', message_id: 'msg_server_assistant' } as ApiSseEvent }
+          await new Promise<void>((_resolve, reject) => {
+            const onAbort = () => reject(new DOMException('Aborted', 'AbortError'))
+            if (signal.aborted) onAbort()
+            else signal.addEventListener('abort', onAbort, { once: true })
+          })
+        })(),
+    )
+    let finishOldReconcile!: (response: ReturnType<typeof pathResponse>) => void
+    apiMocks.get
+      .mockImplementationOnce(() => new Promise((resolve) => { finishOldReconcile = resolve }))
+      .mockResolvedValue(pathResponse('stopped'))
+    apiMocks.deleteMessage.mockResolvedValue({ ok: true, active_leaf_id: '', messages: [] })
+
+    const sending = useConversations.getState().sendMessage({
+      conversationId: 'conv_stop', text: 'question', modelId: 'model_1', toolMode: 'auto',
+    })
+    await vi.waitFor(() => expect(useConversations.getState().conversations[0].messages.at(-1)?.id)
+      .toBe('msg_server_assistant'))
+    useConversations.getState().abortStream('msg_server_assistant')
+    await vi.waitFor(() => expect(apiMocks.get).toHaveBeenCalledTimes(1))
+
+    await useConversations.getState().deleteMessage('conv_stop', 'msg_server_assistant')
+    finishOldReconcile(pathResponse('stopped'))
+    await sending
+
+    expect(apiMocks.deleteMessage).toHaveBeenCalledWith('conv_stop', 'msg_server_assistant')
+    expect(useConversations.getState().conversations[0].messages).toEqual([])
+  })
+
   it('routes a stop from the pre-message_start optimistic id after the row is re-keyed', async () => {
     let release: (() => void) | undefined
     apiMocks.streamSSE.mockImplementation(

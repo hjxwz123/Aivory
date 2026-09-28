@@ -37,6 +37,13 @@ export function protectedFirstRoundMessageIds(conversation: Conversation): Set<s
       (firstUser.siblings?.length ?? 0) > 1 &&
       firstUser.siblings?.[0] !== firstUser.id)
   if (firstUser.parentId || isAlternateRoot) return ids
+  const firstAnswer = messages.slice(firstUserIdx + 1).find((message) => message.role !== 'system')
+  // A stopped sole answer is an incomplete opening round, not an anchor.
+  // Keep the root protected if it has another regenerated answer branch.
+  if (firstAnswer?.role === 'assistant' && firstAnswer.stopped &&
+      (firstAnswer.branchCount ?? firstAnswer.siblings?.length ?? 1) === 1) {
+    return ids
+  }
   for (let index = firstUserIdx; index < messages.length; index++) {
     if (index > firstUserIdx && messages[index].role === 'user') break
     const message = messages[index]
@@ -44,7 +51,7 @@ export function protectedFirstRoundMessageIds(conversation: Conversation): Set<s
     // that answer branch. Keep the original question protected, but allow each
     // redundant answer to be removed until only one remains; the final answer
     // becomes protected again because deleting it would remove the whole round.
-    if (message.role === 'assistant' && (message.branchCount ?? 1) > 1) continue
+    if (message.role === 'assistant' && (message.branchCount ?? message.siblings?.length ?? 1) > 1) continue
     ids.add(message.id)
   }
   return ids

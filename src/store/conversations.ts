@@ -748,15 +748,22 @@ function scheduleStoppedPathReconcile(
       if (!current) return
       // A newer send/regeneration owns the visible path. Never let an older stop
       // reconcile overwrite it; normal sends wait on this task before starting.
-      if (current.messages.some((message) => message.streaming)) return
+      if (current.messages.some((message) => message.streaming) || messageDeleteRevisions.has(conversationId)) return
+      if (options.expectedAssistantId && !current.messages.some((message) => message.id === options.expectedAssistantId)) return
+      const currentLeafId = current.messages.at(-1)?.id
 
       try {
         const resp = await conversationsApi.get(conversationId, { limit: MSG_PAGE })
         if (stoppedPathReconcileEpochs.get(conversationId) !== epoch) return
         const latest = get().conversations.find((conversation) => conversation.id === conversationId)
-        if (!latest || latest.messages.some((message) => message.streaming)) return
+        if (!latest || latest.messages.some((message) => message.streaming) ||
+            messageDeleteRevisions.has(conversationId) || latest.messages.at(-1)?.id !== currentLeafId) return
 
-        const serverStillStreaming = resp.messages.some((message) => message.status === 'streaming')
+        // `stopping` is only the stop acknowledgement. The generation still
+        // owns its server slot until it finalizes as `stopped`.
+        const serverStillStreaming = resp.messages.some(
+          (message) => message.status === 'streaming' || message.status === 'stopping',
+        )
         const messages = resp.messages.map((message) => ({
           ...toLocalMessage(message),
           streaming: false,
