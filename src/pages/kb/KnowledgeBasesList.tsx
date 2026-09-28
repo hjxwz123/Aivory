@@ -228,11 +228,7 @@ export default function KnowledgeBasesList() {
       />
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="mx-auto w-full max-w-[var(--layout-content-max-w)] px-5 pb-24 pt-5 sm:px-8 sm:pt-6">
-          <p className="max-w-[60ch] text-[13.5px] leading-relaxed text-[var(--color-fg-muted)]">
-            {t('kb:lead')}
-          </p>
-
-          <section className="mt-6">
+          <section>
             {workspacePolicyPending ? (
               <KnowledgeBasesSkeleton label={t('common:common.loading')} />
             ) : !canUseKnowledgeBases ? (
