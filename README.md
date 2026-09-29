@@ -419,7 +419,7 @@ graph TB
 
 Most of Aivory is configured from the admin UI at runtime — provider keys, MinerU token, S3 credentials, SearXNG URL, upload allowlist, disabled tools, compaction settings. All apply on the next request, no restart needed.
 
-The optional **AI PPT** workbench is configured in **Admin → Credits and quotas → AI PPT (Docmee)**. Once an administrator saves a Docmee API key and enables the integration, signed-in users see **AI PPT** in the sidebar; until then the entry stays hidden and the `/ppt` page cannot start a generation. Generations are billed per deck through the same credit system as chat, and every generation (and every charged edit) is reported in **Admin → Usage & billing**. See the [AI PPT integration guide](docs/ai-ppt-docmee.md) for the credit lifecycle, template management and operating details.
+The optional **AI PPT** workbench is configured in **Admin → Capabilities & integrations → AI PPT**. Once an administrator saves a Docmee API key and enables the integration, signed-in users with permission see **AI PPT** in the sidebar; until then the entry stays hidden and the `/ppt` page cannot start a generation. Generations are billed per deck through the same credit system as chat, and every generation (and every charged edit) is reported in **Admin → Usage & billing**. See the [AI PPT integration guide](docs/ai-ppt-docmee.md) for the credit lifecycle, template management and operating details.
 
 The env file only holds boot-time essentials:
 
