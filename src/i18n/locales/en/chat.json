@@ -656,6 +656,7 @@
     "searching": "Searching…",
     "groups": {
       "actions": "Actions",
+      "recent": "Recent",
       "theme": "Theme",
       "conversations": "Conversations",
       "messages": "In messages",
@@ -670,7 +671,6 @@
       "light": "Light theme",
       "dark": "Dark theme",
       "system": "System theme",
-      "recent": "Recent",
       "shortcuts": "Keyboard shortcuts",
       "switchLanguage": "Switch to {{language}}"
     },
@@ -1140,6 +1140,7 @@
   "private": {
     "enter": "Start private chat",
     "title": "Private chat",
+    "badge": "Private",
     "exit": "Exit and discard conversation",
     "clear": "Clear chat",
     "footer": "Only in this tab · No saved history · Cleared on refresh",
@@ -1149,12 +1150,12 @@
     "removeImage": "Remove image {{index}}",
     "reasoning": "Reasoning",
     "placeholder": "This conversation stays in this tab only and is destroyed when you refresh, leave, or clear it.",
+    "placeholderMobile": "Kept in this tab — erased on refresh",
     "model": "Choose model",
     "loadingModels": "Loading models…",
     "noModels": "No models available",
     "addImage": "Add images (memory only)",
     "stop": "Stop response",
-    "badge": "Private",
     "send": "Send message",
     "responding": "Responding…",
     "errors": {
@@ -1164,7 +1165,6 @@
       "private_image_limit": "Use images up to 5 MB each, with at most 16 images per conversation. Your deployment may set a lower limit.",
       "private_image_invalid": "Choose a valid PNG, JPEG, WebP, or GIF image.",
       "private_images_not_supported": "This model does not support images. Choose a vision-enabled model or clear the conversation.",
-    "placeholderMobile": "Kept in this tab — erased on refresh",
       "private_quota_exceeded": "Your usage allowance or credits are insufficient.",
       "private_billing_error": "Usage could not be recorded. Please contact your administrator.",
       "private_provider_error": "The model request failed. Please try again.",
