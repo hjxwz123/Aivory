@@ -1668,10 +1668,6 @@ export function Composer({
     if (autoFocus) ref.current?.focus('end')
   }, [autoFocus])
 
-  const openNewFormula = () => {
-    formulaSelectionRef.current = ref.current?.captureSelection() ?? null
-    setFormulaTarget(null)
-    setFormulaOpen(true)
   const appliedFillIdRef = useRef<number | undefined>(undefined)
   const focusAfterFillRef = useRef(false)
   useEffect(() => {
@@ -1694,6 +1690,10 @@ export function Composer({
     ref.current?.focus('end')
   }, [value])
 
+  const openNewFormula = () => {
+    formulaSelectionRef.current = ref.current?.captureSelection() ?? null
+    setFormulaTarget(null)
+    setFormulaOpen(true)
   }
 
   const openExistingFormula = (target: FormulaTarget) => {
@@ -3222,11 +3222,11 @@ export function Composer({
     </Tooltip>
   ) : queuedTurn ? (
     <Tooltip
+      key="queued"
       content={queuedTurn.status === 'dispatching' ? t('composer.queuedSending') : t('composer.queued')}
     >
       <button
         type="button"
-      key="queued"
         disabled
         aria-label={queuedTurn.status === 'dispatching' ? t('composer.queuedSending') : t('composer.queued')}
         data-composer-action="queue-pending"
@@ -3294,11 +3294,11 @@ export function Composer({
     </Tooltip>
   ) : (
     <Tooltip
+      key="send"
       content={
         selectedModelUnavailable
           ? t('modelPicker.unavailableHint', {
               defaultValue: 'This model is no longer available. Choose another model.',
-      key="send"
             })
           : imagePermissionDenied
             ? t('messages.error.drawingPermission', {
@@ -3338,11 +3338,11 @@ export function Composer({
     <div
       ref={composerRootRef}
       data-drag-over={dragOver ? 'true' : undefined}
+      data-vt-composer={viewTransitionAnchor ? '' : undefined}
       className={cn(
         'chat-composer-shell relative isolate min-w-0 w-full max-w-full',
         'rounded-popup border-0 bg-[var(--color-surface)]',
       )}
-      data-vt-composer={viewTransitionAnchor ? '' : undefined}
     >
       {/* Full-screen drag-and-drop overlay — shown while a file is dragged
           anywhere over the window. Portalled to <body> so it stays viewport-fixed
