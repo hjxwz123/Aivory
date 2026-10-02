@@ -231,12 +231,17 @@ export function ProjectActionsMenu({
               type="button"
               aria-label={t('chat:actions.more')}
               className={cn(
-                'inline-flex shrink-0 items-center justify-center text-[var(--color-fg-muted)] interactive',
-                'hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] data-[state=open]:bg-[var(--color-bg-muted)]',
+                'inline-flex shrink-0 items-center justify-center interactive',
+                'hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] data-[state=open]:bg-[var(--color-bg-muted)] data-[state=open]:text-[var(--color-fg)]',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                 sidebar
-                  ? 'mr-1 size-8 rounded-[7px] max-lg:size-[var(--tap-min)] max-sm:!size-9'
-                  : 'size-9 rounded-[10px] max-lg:size-[var(--tap-min)]',
+                  // Matches the conversation rows: revealed on hover/focus in
+                  // the desktop rail, always present but quiet in the drawer.
+                  ? cn(
+                      'rounded-[6px] lg:size-6 lg:text-[var(--color-fg-muted)] lg:opacity-0 lg:group-hover/project:opacity-100 lg:group-focus-within/project:opacity-100 lg:data-[state=open]:opacity-100',
+                      'max-lg:size-8 max-lg:text-[var(--color-fg-faint)]',
+                    )
+                  : 'size-9 rounded-[10px] text-[var(--color-fg-muted)] max-lg:size-[var(--tap-min)]',
               )}
             >
               <MoreHorizontal size={sidebar ? 14 : 15} aria-hidden />

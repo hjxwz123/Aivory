@@ -15,8 +15,8 @@ const menuClass = cn(
   'rounded-popup border border-[var(--color-border)] bg-[var(--color-surface-raised)]',
   'shadow-[var(--shadow-popover)]',
   'p-1.5',
-  'data-[state=open]:animate-[slide-down_180ms_var(--ease-out)]',
-  'data-[state=closed]:animate-[fade-out_120ms_var(--ease-in)]',
+  // Direction-aware enter/exit (globals.css): grows out of the trigger side.
+  'popup-motion',
 )
 
 export const DropdownMenuContent = forwardRef<

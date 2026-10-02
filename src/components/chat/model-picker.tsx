@@ -27,6 +27,8 @@ interface ModelPickerProps {
   className?: string
   /** Align the menu to the trigger. Mobile title bars use `center`. */
   menuAlign?: 'start' | 'center' | 'end'
+  /** Preferred menu side; Radix flips it when that side lacks room. */
+  menuSide?: 'top' | 'bottom'
   /** Keep the current model visible while preventing changes in read-only views. */
   disabled?: boolean
   /** Workspace scope for policy-gated image models. Omit to follow the active
@@ -47,6 +49,7 @@ export function ModelPicker({
   onFastChange,
   className,
   menuAlign = 'end',
+  menuSide = 'top',
   disabled = false,
   workspaceId: scopedWorkspaceId,
 }: ModelPickerProps) {
@@ -147,7 +150,7 @@ export function ModelPicker({
         <ChevronDown size={13} aria-hidden />
       </DropdownMenuTrigger>
       <DropdownMenuContent
-        side="top"
+        side={menuSide}
         align={menuAlign}
         // collisionPadding keeps the menu ≥12px from every viewport edge and makes
         // Radix subtract that gap from --radix-popper-available-height — the exact

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
+import { flushSync } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { ArrowUp, ImagePlus, Menu, ShieldOff, Square, X } from 'lucide-react'
@@ -8,11 +9,20 @@ import { streamSSE } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tooltip } from '@/components/ui/tooltip'
+import { HOME_SWAP_STATE, HomeLayout } from '@/components/chat/home-layout'
 import { PrivateMessageRow, type PrivateDisplayMessage } from '@/components/chat/private-message-row'
 import { PRIVATE_IMAGE_TYPES, privateImageURL, readPrivateImage, validatePrivateHistory, type PrivateImage, type PrivateMessage } from '@/lib/private-chat'
 import { blockReload } from '@/lib/sync-guards'
+import { isModelCatalogReadyForScope } from '@/lib/model-selection'
+import { workspaceModelPolicyKey } from '@/lib/workspace-permissions'
 import { useMediaQuery } from '@/hooks/use-media-query'
+import { useAutosizeTextarea } from '@/hooks/use-autosize-textarea'
+import { cn } from '@/lib/utils'
+import { pulseComposerShell } from '@/lib/composer-pulse'
+import { runViewTransition } from '@/lib/view-transition'
+import { useModels } from '@/store/models'
 import { useUI } from '@/store/ui'
+import { useWorkspaces } from '@/store/workspaces'
 import { usePrivateChatPermission } from '@/hooks/use-private-chat-permission'
 
 /**
@@ -38,17 +48,58 @@ function historyFor(display: PrivateDisplayMessage[]): PrivateMessage[] {
   return history
 }
 
+interface PrivateModelCatalog {
+  models: ApiModel[]
+  defaultId: string
+  visionOutsource: boolean
+}
+
+function privateCatalog(models: ApiModel[], defaultId: string, visionOutsource: boolean): PrivateModelCatalog {
+  return {
+    models: models.filter((item) => item.kind === 'chat' && item.enabled && !item.fast),
+    defaultId,
+    visionOutsource,
+  }
+}
+
+function pickPrivateModel(catalog: PrivateModelCatalog): string {
+  return catalog.models.some((item) => item.id === catalog.defaultId)
+    ? catalog.defaultId
+    : catalog.models[0]?.id ?? ''
+}
+
+/**
+ * The shared picker catalog, when it already answers for this scope. Entering
+ * private mode from the home screen then needs no model request of its own,
+ * so the composer is usable on the first frame.
+ */
+function cachedPrivateCatalog(workspaceId: string | null | undefined): PrivateModelCatalog | null {
+  const catalog = useModels.getState()
+  const policy = workspaceId ? useWorkspaces.getState().policies[workspaceId] : undefined
+  const ready = isModelCatalogReadyForScope({
+    loaded: catalog.loaded,
+    loadedScope: catalog.loadedScope,
+    loadedPolicyKey: catalog.loadedPolicyKey,
+    expectedScope: workspaceId ?? null,
+    expectedPolicyKey: workspaceModelPolicyKey(workspaceId, policy),
+  })
+  if (!ready || catalog.error) return null
+  return privateCatalog(catalog.models, catalog.defaultId, catalog.visionAvailable)
+}
+
 export default function PrivateChat() {
   const { t } = useTranslation('chat')
   const navigate = useNavigate()
   const { workspaceId, allowed, canUpload } = usePrivateChatPermission()
   const isDesktop = useMediaQuery('(min-width: 1024px)')
-  const [models, setModels] = useState<ApiModel[]>([])
-  const [modelId, setModelId] = useState('')
-  const [loadingModels, setLoadingModels] = useState(true)
-  // §4.6: this page keeps its own model list, so the flag is read from the same
-  // /api/models response rather than the shared store.
-  const [visionOutsource, setVisionOutsource] = useState(false)
+  const isPhone = useMediaQuery('(max-width: 639px)')
+  const [initialCatalog] = useState(() => cachedPrivateCatalog(workspaceId))
+  const [models, setModels] = useState<ApiModel[]>(() => initialCatalog?.models ?? [])
+  const [modelId, setModelId] = useState(() => (initialCatalog ? pickPrivateModel(initialCatalog) : ''))
+  const [loadingModels, setLoadingModels] = useState(!initialCatalog)
+  // §4.6: this page filters its own model list, so the flag travels with the
+  // same catalog (shared store or /api/models response) it was filtered from.
+  const [visionOutsource, setVisionOutsource] = useState(initialCatalog?.visionOutsource ?? false)
   const [messages, setMessages] = useState<PrivateDisplayMessage[]>([])
   const [draft, setDraft] = useState('')
   const [images, setImages] = useState<PrivateImage[]>([])
@@ -57,6 +108,7 @@ export default function PrivateChat() {
   const [error, setError] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const formRef = useRef<HTMLFormElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const controllerRef = useRef<AbortController | null>(null)
   const epochRef = useRef(0)
@@ -81,20 +133,30 @@ export default function PrivateChat() {
 
   useEffect(() => {
     let alive = true
-    setLoadingModels(true)
-    setModels([])
-    setModelId('')
-    void modelsApi.list(workspaceId ?? undefined).then((response) => {
-      if (!alive) return
-      const available = response.models.filter((item) => item.kind === 'chat' && item.enabled && !item.fast)
-      setModels(available)
-      setVisionOutsource(Boolean(response.vision_available))
-      setModelId(available.some((item) => item.id === response.default_id) ? response.default_id : available[0]?.id ?? '')
-    }).catch(() => {
-      if (alive) setError('private_model_unavailable')
-    }).finally(() => {
-      if (alive) setLoadingModels(false)
-    })
+    const applyCatalog = (catalog: PrivateModelCatalog) => {
+      setModels(catalog.models)
+      setVisionOutsource(catalog.visionOutsource)
+      setModelId((current) => (
+        catalog.models.some((item) => item.id === current) ? current : pickPrivateModel(catalog)
+      ))
+    }
+    const cached = cachedPrivateCatalog(workspaceId)
+    if (cached) {
+      applyCatalog(cached)
+      setLoadingModels(false)
+    } else {
+      setLoadingModels(true)
+      setModels([])
+      setModelId('')
+      void modelsApi.list(workspaceId ?? undefined).then((response) => {
+        if (!alive) return
+        applyCatalog(privateCatalog(response.models, response.default_id, Boolean(response.vision_available)))
+      }).catch(() => {
+        if (alive) setError('private_model_unavailable')
+      }).finally(() => {
+        if (alive) setLoadingModels(false)
+      })
+    }
     window.addEventListener('pagehide', clear)
     const onPageShow = (event: PageTransitionEvent) => {
       if (event.persisted) clear()
@@ -112,6 +174,19 @@ export default function PrivateChat() {
     const element = scrollRef.current
     if (element) element.scrollTop = element.scrollHeight
   }, [messages])
+
+  useAutosizeTextarea(inputRef, draft, isPhone ? 7 : 12)
+  // Entering private mode lands in the input, as the ordinary home does.
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+
+  // Like the ordinary home, this page renders its own mobile controls, so the
+  // layout's brand bar never flashes while switching between the two.
+  useEffect(() => {
+    useUI.getState().setPageOwnsTopBar(true)
+    return () => useUI.getState().setPageOwnsTopBar(false)
+  }, [])
 
   useEffect(() => {
     if (messages.length || draft || images.length || readingImages || streaming) return blockReload()
@@ -240,22 +315,49 @@ export default function PrivateChat() {
     await runStream(model, requestHistory, [...display, edited])
   }
 
+  /** Home suggestions land in the draft for the user to finish. */
+  function fillDraft(prompt: string) {
+    if (streaming) return
+    setDraft(prompt.slice(0, 12000))
+    pulseComposerShell(formRef.current)
+    requestAnimationFrame(() => {
+      const input = inputRef.current
+      if (!input) return
+      input.focus()
+      input.setSelectionRange(input.value.length, input.value.length)
+    })
+  }
+
   const errorKey = `private.errors.${error}`
+  const errorNotice = error
+    ? <p role="alert" className="mb-3 text-sm text-[var(--color-danger)]">{t(errorKey, { defaultValue: t('private.errors.private_provider_error') })}</p>
+    : null
+  // Sized like the ordinary composer (editor 72px + 50px toolbar), so entering
+  // or leaving private mode swaps the input without moving anything around it.
+  const canSend = allowed && !!model && !readingImages && (!!draft.trim() || images.length > 0)
   const composer = (
-    <form onSubmit={(event) => void send(event)} className="chat-composer-shell relative isolate min-w-0 w-full rounded-popup border-0 bg-[var(--color-surface)] p-3">
-      {images.length > 0 && <div className="mb-2 flex gap-2 overflow-x-auto py-1">{images.map((image, index) => (
+    <form ref={formRef} onSubmit={(event) => void send(event)} data-vt-composer="" className="chat-composer-shell relative isolate min-w-0 w-full rounded-popup border-0 bg-[var(--color-surface)]">
+      {images.length > 0 && <div className="flex gap-2 overflow-x-auto px-3 pb-1 pt-3">{images.map((image, index) => (
         <div key={index} className="relative shrink-0">
           <img src={privateImageURL(image)} alt={t('private.image', { index: index + 1 })} className="size-16 rounded-[8px] object-cover" />
           <Button size="icon-sm" variant="secondary" className="absolute -right-1 -top-1" aria-label={t('private.removeImage', { index: index + 1 })} disabled={streaming || readingImages} onClick={() => setImages((current) => current.filter((_, imageIndex) => index !== imageIndex))}><X size={12} aria-hidden /></Button>
         </div>
       ))}</div>}
-      <textarea ref={inputRef} aria-label={t('private.placeholder')} value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={t('private.placeholder')} rows={3} maxLength={12000} disabled={streaming} autoComplete="off" spellCheck={false} autoCorrect="off" autoCapitalize="off" data-gramm="false" className="block max-h-48 min-h-20 w-full resize-none bg-transparent px-1 py-2 text-[0.9375rem] leading-relaxed outline-none placeholder:text-[var(--color-fg-muted)]" onKeyDown={(event) => {
+      <textarea ref={inputRef} aria-label={t('private.placeholder')} value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={t(isPhone ? 'private.placeholderMobile' : 'private.placeholder')} rows={1} maxLength={12000} disabled={streaming} autoComplete="off" spellCheck={false} autoCorrect="off" autoCapitalize="off" data-gramm="false" className="block min-h-[4.5rem] w-full resize-none bg-transparent px-4 pb-1 pt-3 text-[0.9375rem] leading-[1.55] outline-none placeholder:text-[var(--color-fg-muted)] max-sm:min-h-[3.25rem] max-sm:text-[1rem]" onKeyDown={(event) => {
         if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) {
           event.preventDefault()
           event.currentTarget.form?.requestSubmit()
         }
       }} />
-      <div className="flex min-w-0 items-center gap-2">
+      <div className="flex min-w-0 items-center gap-1 px-2.5 pb-2.5 pt-1">
+        {/* The rest of the screen matches the ordinary home, so the mode is
+            named here, inside the one surface that differs. */}
+        <Tooltip content={t('private.footer')}>
+          <span className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full bg-[var(--color-accent-soft)] pl-2 pr-2.5 text-[12px] font-medium text-[var(--color-accent)]">
+            <ShieldOff size={12} aria-hidden />
+            {t('private.badge')}
+          </span>
+        </Tooltip>
         <div className="min-w-0 max-w-[min(70%,20rem)]">
           <Select value={modelId} onValueChange={(value) => {
             if (!models.some((item) => item.id === value)) return
@@ -272,7 +374,17 @@ export default function PrivateChat() {
           <Tooltip content={t('private.addImage')}><Button variant="ghost" size="icon" loading={readingImages} disabled={streaming || readingImages} aria-label={t('private.addImage')} onClick={() => fileRef.current?.click()}><ImagePlus size={18} aria-hidden /></Button></Tooltip>
         </>}
         <div className="ml-auto">
-          {streaming ? <Button size="icon" variant="secondary" aria-label={t('private.stop')} onClick={() => controllerRef.current?.abort()}><Square size={14} fill="currentColor" aria-hidden /></Button> : <Button type="submit" size="icon" className="rounded-full" aria-label={t('private.send')} disabled={!allowed || !model || readingImages || (!draft.trim() && !images.length)}><ArrowUp size={18} aria-hidden /></Button>}
+          {/* Same primary action as the ordinary composer: ink when ready,
+              muted when there is nothing to send. */}
+          {streaming ? (
+            <button key="stop" type="button" aria-label={t('private.stop')} onClick={() => controllerRef.current?.abort()} className="inline-flex size-9 shrink-0 items-center justify-center rounded-full interactive hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:size-11">
+              <span className="inline-flex size-8 items-center justify-center rounded-full bg-[var(--color-fg)] text-[var(--color-fg-inverted)] animate-[action-swap_160ms_var(--ease-out)]"><Square size={12} fill="currentColor" aria-hidden /></span>
+            </button>
+          ) : (
+            <button key="send" type="submit" aria-label={t('private.send')} disabled={!canSend} className={cn('inline-flex size-9 shrink-0 items-center justify-center rounded-full interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:size-11', canSend ? 'hover:opacity-90' : 'cursor-not-allowed')}>
+              <span className={cn('inline-flex size-8 items-center justify-center rounded-full animate-[action-swap_160ms_var(--ease-out)]', canSend ? 'bg-[var(--color-fg)] text-[var(--color-fg-inverted)]' : 'bg-[var(--color-bg-muted)] text-[var(--color-fg-faint)]')}><ArrowUp size={15} aria-hidden /></span>
+            </button>
+          )}
         </div>
       </div>
     </form>
@@ -280,9 +392,28 @@ export default function PrivateChat() {
   const headerActions = (
     <>
       <Button variant="ghost" size="sm" onClick={clear} disabled={!messages.length && !draft && !images.length && !readingImages}>{t('private.clear')}</Button>
-      <Tooltip content={t('private.exit')}><Button size="icon-lg" variant="ghost" aria-label={t('private.exit')} aria-pressed onClick={() => { clear(); navigate('/') }}><ShieldOff size={19} aria-hidden /></Button></Tooltip>
+      <Tooltip content={t('private.exit')}>
+        <button
+          type="button"
+          aria-label={t('private.exit')}
+          aria-pressed
+          onClick={() => {
+            clear()
+            void runViewTransition('private', () => flushSync(() => navigate('/', { state: HOME_SWAP_STATE })))
+          }}
+          className="inline-flex size-11 items-center justify-center rounded-[10px] bg-[var(--color-accent-soft)] text-[var(--color-accent)] interactive hover:text-[var(--color-accent-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+        >
+          <ShieldOff size={19} aria-hidden />
+        </button>
+      </Tooltip>
     </>
   )
+
+  // A fresh private conversation is the ordinary home screen with the private
+  // composer in place of the regular one.
+  if (messages.length === 0) {
+    return <HomeLayout variant="private" composer={composer} notice={errorNotice} onSuggestion={fillDraft} />
+  }
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--color-bg)] text-[var(--color-fg)]">
@@ -310,49 +441,27 @@ export default function PrivateChat() {
         </header>
       )}
 
-      {messages.length === 0 ? (
-        isDesktop ? (
-          <div className="relative flex flex-1 min-h-0 flex-col items-center justify-center overflow-y-auto px-6 py-10 text-center">
-            <h2 className="text-balance font-sans text-[2.5rem] font-semibold leading-[1.12] tracking-tight text-[var(--color-fg)]">{t('private.title')}</h2>
-            <div className="mt-10 w-full max-w-[44rem] text-left">
-              {error && <p role="alert" className="mb-3 text-sm text-[var(--color-danger)]">{t(errorKey, { defaultValue: t('private.errors.private_provider_error') })}</p>}
-              {composer}
-            </div>
-          </div>
-        ) : (
-          <>
-            <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
-              <h2 className="text-balance font-sans text-[1.6rem] font-semibold leading-[1.14] tracking-tight text-[var(--color-fg)]">{t('private.title')}</h2>
-            </div>
-            <div className="mx-auto w-full shrink-0 max-w-[48rem] px-3 pb-2">
-              {error && <p role="alert" className="mb-3 text-sm text-[var(--color-danger)]">{t(errorKey, { defaultValue: t('private.errors.private_provider_error') })}</p>}
-              {composer}
-            </div>
-          </>
-        )
-      ) : (
-        <div className="relative flex flex-1 min-h-0 flex-col">
-          <div ref={scrollRef} data-scroll-root className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden scrollbar-thin">
-            <div className="chat-thread flex flex-col px-[var(--layout-gutter-mobile)] sm:px-6 lg:px-8 py-8 mx-auto w-full max-w-[var(--layout-message-max-w)]" role="log" aria-label={t('private.title')} aria-live="polite" aria-atomic="false" aria-relevant="additions text">
-              {messages.map((message, index) => (
-                <PrivateMessageRow
-                  key={message.id}
-                  message={message}
-                  model={message.role === 'assistant' ? model : undefined}
-                  isLastAssistant={index === messages.length - 1 && message.role === 'assistant'}
-                  locked={streaming || readingImages}
-                  onRegenerate={() => void regenerate(message.id)}
-                  onEdit={(text) => void editAndResend(message.id, text)}
-                />
-              ))}
-            </div>
-          </div>
-          <div className="mx-auto w-full shrink-0 max-w-[var(--layout-message-max-w)] px-3 pb-2 sm:px-8 sm:pb-4">
-            {error && <p role="alert" className="mb-3 text-sm text-[var(--color-danger)]">{t(errorKey, { defaultValue: t('private.errors.private_provider_error') })}</p>}
-            {composer}
+      <div className="relative flex flex-1 min-h-0 flex-col">
+        <div ref={scrollRef} data-scroll-root className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden scrollbar-thin">
+          <div className="chat-thread flex flex-col px-[var(--layout-gutter-mobile)] sm:px-6 lg:px-8 py-8 mx-auto w-full max-w-[var(--layout-message-max-w)]" role="log" aria-label={t('private.title')} aria-live="polite" aria-atomic="false" aria-relevant="additions text">
+            {messages.map((message, index) => (
+              <PrivateMessageRow
+                key={message.id}
+                message={message}
+                model={message.role === 'assistant' ? model : undefined}
+                isLastAssistant={index === messages.length - 1 && message.role === 'assistant'}
+                locked={streaming || readingImages}
+                onRegenerate={() => void regenerate(message.id)}
+                onEdit={(text) => void editAndResend(message.id, text)}
+              />
+            ))}
           </div>
         </div>
-      )}
+        <div className="mx-auto w-full shrink-0 max-w-[var(--layout-message-max-w)] px-3 pb-2 sm:px-8 sm:pb-4">
+          {errorNotice}
+          {composer}
+        </div>
+      </div>
     </div>
   )
 }

@@ -37,11 +37,14 @@
     ],
     "lead": "Have a question? Think it through with Aivory.",
     "changeSubtitle": "Show another opening question",
+    "shuffleSuggestions": "Show other suggestions",
+    "continue": "Pick up where you left off",
     "disclaimer": "Aivory can make mistakes. Check anything important.",
     "drawLead": "Describe what you want to create — your gallery is below."
   },
   "composer": {
     "placeholder": "Ask anything — type / for skills, commands, and prompts.",
+    "placeholderMobile": "Ask anything, or type /",
     "commands": {
       "compactDescription": "Summarize earlier turns and keep recent context",
       "compacting": "Compacting conversation context…",
@@ -667,6 +670,7 @@
       "light": "Light theme",
       "dark": "Dark theme",
       "system": "System theme",
+      "recent": "Recent",
       "shortcuts": "Keyboard shortcuts",
       "switchLanguage": "Switch to {{language}}"
     },
@@ -1150,6 +1154,7 @@
     "noModels": "No models available",
     "addImage": "Add images (memory only)",
     "stop": "Stop response",
+    "badge": "Private",
     "send": "Send message",
     "responding": "Responding…",
     "errors": {
@@ -1159,6 +1164,7 @@
       "private_image_limit": "Use images up to 5 MB each, with at most 16 images per conversation. Your deployment may set a lower limit.",
       "private_image_invalid": "Choose a valid PNG, JPEG, WebP, or GIF image.",
       "private_images_not_supported": "This model does not support images. Choose a vision-enabled model or clear the conversation.",
+    "placeholderMobile": "Kept in this tab — erased on refresh",
       "private_quota_exceeded": "Your usage allowance or credits are insufficient.",
       "private_billing_error": "Usage could not be recorded. Please contact your administrator.",
       "private_provider_error": "The model request failed. Please try again.",

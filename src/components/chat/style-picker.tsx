@@ -12,6 +12,8 @@ interface StylePickerProps {
   onChange: (id: string) => void
   workspaceId?: string
   className?: string
+  /** Preferred popover side; the centered home composer opens downward. */
+  side?: 'top' | 'bottom'
 }
 
 /**
@@ -19,7 +21,7 @@ interface StylePickerProps {
  * model is selected. A popover of example-thumbnail swatches; the style's hidden
  * prompt lives server-side and is never fetched here.
  */
-export function StylePicker({ value, onChange, workspaceId, className }: StylePickerProps) {
+export function StylePicker({ value, onChange, workspaceId, className, side = 'top' }: StylePickerProps) {
   const { t } = useTranslation('chat')
   const [styles, setStyles] = useState<ApiImageStyle[]>([])
   const [loaded, setLoaded] = useState(false)
@@ -69,7 +71,7 @@ export function StylePicker({ value, onChange, workspaceId, className }: StylePi
         </PopoverTrigger>
       </Tooltip>
       <PopoverContent
-        side="top"
+        side={side}
         align="start"
         // collisionPadding keeps the popover ≥12px from every viewport edge and
         // makes Radix expose the remaining space as

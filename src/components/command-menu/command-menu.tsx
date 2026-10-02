@@ -4,9 +4,9 @@ import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
   MessageSquare,
+  PanelLeft,
   Plus,
   Settings,
-  Search,
   Sun,
   Moon,
   Monitor,
@@ -39,7 +39,7 @@ import { useTheme } from '@/store/theme'
 import { useSettings } from '@/store/settings'
 import { useLanguage } from '@/store/language'
 import { SUPPORTED_LANGUAGES } from '@/i18n'
-import { truncate, modKey } from '@/lib/utils'
+import { formatShortcut, formatTimeAgo, truncate } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/store/auth'
 import { userCan } from '@/lib/user-permissions'
@@ -50,12 +50,18 @@ export function CommandMenu() {
   const setOpen = useCommandMenu((s) => s.setOpen)
   const navigate = useNavigate()
   const openSettings = useOpenSettings()
-  const { t } = useTranslation(['chat', 'projects'])
+  const { t, i18n } = useTranslation(['chat', 'projects'])
   // Summary-only subscription (see sidebar): don't re-render per streamed token.
   const allConversations = useConversations((s) => s.conversations, sameConvListShape)
+  const activeConversationScope = useWorkspaces((state) => state.activeId ?? '')
+  // Most recent first and scoped to the current space, matching the sidebar.
   const conversations = useMemo(
-    () => allConversations.filter((c) => !c.archived && !c.inline),
-    [allConversations],
+    () =>
+      allConversations
+        .filter((c) => !c.archived && !c.inline && (c.workspaceId ?? '') === activeConversationScope)
+        .slice()
+        .sort((a, b) => b.updatedAt - a.updatedAt),
+    [activeConversationScope, allConversations],
   )
   const projects = useProjects((s) => s.projects)
   const recentProjects = useMemo(
@@ -210,6 +216,31 @@ export function CommandMenu() {
               ) : (
                 <CommandEmpty>{t('chat:commandMenu.noMatch')}</CommandEmpty>
               )}
+              {/* Recent conversations lead: ⌘K is mostly reached for to jump back
+                  into a chat, so with an empty query they come first (and Enter
+                  opens the latest). Keep dynamic groups mounted while cmdk
+                  filters — cmdk 1.1.1 can otherwise retain a removed group ID
+                  for one sorting pass and call forEach on its deleted item Set. */}
+              <CommandGroup
+                heading={query.trim() ? t('chat:commandMenu.groups.conversations') : t('chat:commandMenu.groups.recent')}
+                className={conversations.length === 0 ? 'hidden' : undefined}
+              >
+                {conversations.slice(0, 8).map((c) => (
+                  <CommandItem
+                    key={c.id}
+                    value={`${c.title} ${c.id}`}
+                    onSelect={() => run(() => navigate(`/chat/${c.id}`))}
+                  >
+                    <Sparkles size={14} className="text-[var(--color-secondary)]" aria-hidden />
+                    <span className="min-w-0 flex-1 truncate">{truncate(c.title || t('chat:share.untitled'), 60)}</span>
+                    <span className="ml-auto shrink-0 text-[12px] tabular-nums text-[var(--color-fg-subtle)]">
+                      {formatTimeAgo(c.updatedAt, i18n.language)}
+                    </span>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+              {conversations.length > 0 ? <CommandSeparator /> : null}
+
               <CommandGroup heading={t('chat:commandMenu.groups.actions')}>
                 <CommandItem
                   onSelect={() =>
@@ -221,7 +252,7 @@ export function CommandMenu() {
                 >
                   <Plus size={14} aria-hidden />
                   {t('chat:commandMenu.actions.newChat')}
-                  <CommandShortcut>{modKey()} Shift O</CommandShortcut>
+                  <CommandShortcut>{formatShortcut('O', { shift: true })}</CommandShortcut>
                 </CommandItem>
                 <CommandItem onSelect={() => run(() => navigate('/chat'))}>
                   <MessageSquare size={14} aria-hidden />
@@ -230,12 +261,12 @@ export function CommandMenu() {
                 <CommandItem onSelect={() => run(() => openSettings('account'))}>
                   <Settings size={14} aria-hidden />
                   {t('chat:commandMenu.actions.openSettings')}
-                  <CommandShortcut>{modKey()} ,</CommandShortcut>
+                  <CommandShortcut>{formatShortcut(',')}</CommandShortcut>
                 </CommandItem>
                 <CommandItem onSelect={() => run(() => toggleSidebar())}>
-                  <Search size={14} aria-hidden />
+                  <PanelLeft size={14} aria-hidden />
                   {t('chat:commandMenu.actions.toggleSidebar')}
-                  <CommandShortcut>{modKey()} B</CommandShortcut>
+                  <CommandShortcut>{formatShortcut('B')}</CommandShortcut>
                 </CommandItem>
               </CommandGroup>
 
@@ -303,27 +334,6 @@ export function CommandMenu() {
                 ))}
               </CommandGroup>
 
-              {conversations.length > 0 ? <CommandSeparator /> : null}
-              {/* Keep dynamic groups mounted while cmdk filters. cmdk 1.1.1 can
-                  otherwise retain a removed group ID for one sorting pass and
-                  call forEach on its already-deleted item Set. */}
-              <CommandGroup
-                heading={t('chat:commandMenu.groups.conversations')}
-                className={conversations.length === 0 ? 'hidden' : undefined}
-              >
-                {conversations.slice(0, 8).map((c) => (
-                  <CommandItem
-                    key={c.id}
-                    value={`${c.title} ${c.id}`}
-                    onSelect={() => run(() => navigate(`/chat/${c.id}`))}
-                  >
-                    <Sparkles size={14} className="text-[var(--color-secondary)]" aria-hidden />
-                    {truncate(c.title, 60)}
-                    <ArrowRight size={12} className="ml-auto text-[var(--color-fg-subtle)]" aria-hidden />
-                  </CommandItem>
-                ))}
-              </CommandGroup>
-
               {extraTitleHits.length > 0 ? <CommandSeparator /> : null}
               <CommandGroup
                 heading={t('chat:commandMenu.groups.conversations')}
@@ -382,7 +392,7 @@ export function CommandMenu() {
                 <CommandItem onSelect={() => run(() => openSettings('shortcuts'))}>
                   <HelpCircle size={14} aria-hidden />
                   {t('chat:commandMenu.actions.shortcuts')}
-                  <CommandShortcut>{modKey()} /</CommandShortcut>
+                  <CommandShortcut>{formatShortcut('/')}</CommandShortcut>
                 </CommandItem>
               </CommandGroup>
             </CommandList>
