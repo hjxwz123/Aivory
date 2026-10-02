@@ -264,13 +264,19 @@
   /* Sidebar — visually distinct panel, higher contrast than content area */
   --color-sidebar-bg: oklch(93.5% 0.022 var(--accent-hue));
   --color-sidebar-border: oklch(87% 0.022 var(--accent-hue));
+  /* Every sidebar row (nav entries, projects, conversations) shares one hover
+     and one selected fill, so the rail reads as a single list. Both lift the
+     row toward the content surface; theme/accent overrides of the inputs flow
+     through because the mix resolves on the root element. */
+  --color-sidebar-hover: color-mix(in oklch, var(--color-surface) 55%, var(--color-sidebar-bg));
+  --color-sidebar-active: var(--color-surface);
 
   /* ---------- LAYOUT --------------------------------------------------- */
   --layout-sidebar-w-min: 14rem;
   --layout-sidebar-w: 17.5rem;
   --layout-sidebar-w-max: 25rem;
   /* desktop sidebar: 224 min / 280 default / 400 max */
-  --layout-sidebar-w-collapsed: 3.5rem;
+  --layout-sidebar-w-collapsed: 3.25rem;
   --layout-topbar-h: 3rem;
   --layout-composer-max-w: 50rem;
   --layout-content-max-w: 76rem;
