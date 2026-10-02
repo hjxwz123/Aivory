@@ -33,7 +33,7 @@ export function Tooltip({ content, children, side = 'top', align = 'center', del
               'bg-[var(--color-fg)] text-[var(--color-fg-inverted)]',
               'text-xs font-medium',
               'shadow-[var(--shadow-md)]',
-              'data-[state=delayed-open]:animate-[slide-down_140ms_var(--ease-out)]',
+              'popup-motion',
             )}
           >
             {content}

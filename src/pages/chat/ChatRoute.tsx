@@ -1,15 +1,19 @@
 import ChatHome from '@/pages/chat/ChatHome'
 import ChatThread from '@/pages/chat/ChatThread'
+import PrivateChat from '@/pages/chat/PrivateChat'
 
 interface ChatRouteProps {
-  page: 'home' | 'thread'
+  page: 'home' | 'thread' | 'private'
 }
 
 /**
- * Home and thread intentionally share one lazy route module. Once the home is
- * visible, the thread component is already loaded, so a first send cannot flash
- * the content-panel loading fallback while switching to the optimistic route.
+ * Home, thread and private mode intentionally share one lazy route module.
+ * Once the home is visible, the other two are already loaded, so neither a
+ * first send nor entering private mode can flash the content-panel loading
+ * fallback while switching routes.
  */
 export default function ChatRoute({ page }: ChatRouteProps) {
-  return page === 'thread' ? <ChatThread /> : <ChatHome />
+  if (page === 'thread') return <ChatThread />
+  if (page === 'private') return <PrivateChat />
+  return <ChatHome />
 }

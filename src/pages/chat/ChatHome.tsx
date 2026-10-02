@@ -1,25 +1,15 @@
-import { type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { useTranslation } from 'react-i18next'
-import { gsap } from 'gsap'
-import { useGSAP } from '@gsap/react'
-import { ChevronDown, Menu, ShieldOff } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Tooltip } from '@/components/ui/tooltip'
 import { Composer } from '@/components/chat/composer'
-import { UserMenu } from '@/components/sidebar/sidebar'
-import { SuggestionCard } from '@/components/chat/suggestion-card'
-import { MyGallery } from '@/components/chat/my-gallery'
-import { SUGGESTIONS } from '@/data/suggestions'
-import { useConversations, resolveArmedTurnFlags } from '@/store/conversations'
+import { HomeLayout } from '@/components/chat/home-layout'
+import { useConversations } from '@/store/conversations'
 import { useAuth } from '@/store/auth'
 import { useModels } from '@/store/models'
 import { useUI } from '@/store/ui'
 import { useComposerPrefs } from '@/store/composer-prefs'
 import { useWorkspaces } from '@/store/workspaces'
 import { conversationsApi } from '@/api'
-import { cn } from '@/lib/utils'
 import {
   clearPendingConversation,
   pendingConversationKey,
@@ -33,175 +23,11 @@ import { resolveNewConversationFastMode } from '@/lib/chat-defaults'
 import { isModelCatalogReadyForScope } from '@/lib/model-selection'
 import { userCan } from '@/lib/user-permissions'
 import { workspaceCapabilitiesForScope, workspaceModelPolicyKey } from '@/lib/workspace-permissions'
-import { usePrivateChatPermission } from '@/hooks/use-private-chat-permission'
 import { enterOptimisticConversation } from '@/lib/optimistic-conversation-start'
-import { useMediaQuery } from '@/hooks/use-media-query'
-import { mediaQuery } from '@/lib/design-tokens'
-
-gsap.registerPlugin(useGSAP)
-
-const PROMPT_POINTER_COOLDOWN_MS = 650
-const PROMPT_POINTER_DISTANCE_PX = 48
-
-function initialPromptIndex(variants: string[]): number {
-  // The third localized variant is "What can I help you with?". Keep that
-  // recognizable line as the initial banner, then let interaction reveal the
-  // rest of the set.
-  return Math.min(2, Math.max(variants.length - 1, 0))
-}
-
-function RotatingHomePrompt({ variants, label }: { variants: string[]; label: string }) {
-  const root = useRef<HTMLButtonElement>(null)
-  const currentTextRef = useRef<HTMLSpanElement>(null)
-  const incomingTextRef = useRef<HTMLSpanElement>(null)
-  const [currentIndex, setCurrentIndex] = useState(() => initialPromptIndex(variants))
-  const [incomingIndex, setIncomingIndex] = useState<number | null>(null)
-  const currentIndexRef = useRef(currentIndex)
-  const transitionRunningRef = useRef(false)
-  const lastRotationAtRef = useRef(Number.NEGATIVE_INFINITY)
-  const pointerAnchorRef = useRef<{ x: number; y: number } | null>(null)
-
-  const safeCurrentIndex = variants.length > 0 ? currentIndex % variants.length : 0
-  currentIndexRef.current = safeCurrentIndex
-
-  const showNext = () => {
-    if (variants.length < 2 || transitionRunningRef.current) return
-    const nextIndex = (currentIndexRef.current + 1) % variants.length
-    const reducedMotion =
-      typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    if (reducedMotion) {
-      currentIndexRef.current = nextIndex
-      setCurrentIndex(nextIndex)
-      return
-    }
-    transitionRunningRef.current = true
-    setIncomingIndex(nextIndex)
-  }
-
-  useGSAP(
-    () => {
-      if (incomingIndex === null || !currentTextRef.current || !incomingTextRef.current) return
-      const current = currentTextRef.current
-      const incoming = incomingTextRef.current
-      gsap.set(incoming, { yPercent: 58, autoAlpha: 0 })
-      const timeline = gsap.timeline({
-        onComplete: () => {
-          currentIndexRef.current = incomingIndex
-          setCurrentIndex(incomingIndex)
-          setIncomingIndex(null)
-          transitionRunningRef.current = false
-        },
-      })
-      timeline
-        .to(current, { yPercent: -46, autoAlpha: 0, duration: 0.16, ease: 'power2.in' }, 0)
-        .to(incoming, { yPercent: 0, autoAlpha: 1, duration: 0.24, ease: 'power3.out' }, 0.05)
-      return () => timeline.kill()
-    },
-    { scope: root, dependencies: [incomingIndex], revertOnUpdate: true },
-  )
-
-  const handlePointerEnter = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (event.pointerType !== 'mouse') return
-    pointerAnchorRef.current = { x: event.clientX, y: event.clientY }
-    const now = performance.now()
-    if (now - lastRotationAtRef.current < PROMPT_POINTER_COOLDOWN_MS) return
-    lastRotationAtRef.current = now
-    showNext()
-  }
-
-  const handlePointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (event.pointerType !== 'mouse') return
-    const anchor = pointerAnchorRef.current
-    if (!anchor) {
-      pointerAnchorRef.current = { x: event.clientX, y: event.clientY }
-      return
-    }
-    const distance = Math.hypot(event.clientX - anchor.x, event.clientY - anchor.y)
-    const now = performance.now()
-    if (distance < PROMPT_POINTER_DISTANCE_PX || now - lastRotationAtRef.current < PROMPT_POINTER_COOLDOWN_MS) return
-    pointerAnchorRef.current = { x: event.clientX, y: event.clientY }
-    lastRotationAtRef.current = now
-    showNext()
-  }
-
-  const handleClick = () => {
-    const now = performance.now()
-    // Pointer entry already changed the line. Ignore the immediate synthetic
-    // click, while retaining click/tap and keyboard activation as fallbacks.
-    if (now - lastRotationAtRef.current < PROMPT_POINTER_COOLDOWN_MS) return
-    lastRotationAtRef.current = now
-    showNext()
-  }
-
-  const currentText = variants[safeCurrentIndex] ?? ''
-  const incomingText = incomingIndex === null ? null : variants[incomingIndex] ?? ''
-
-  return (
-    <button
-      ref={root}
-      type="button"
-      aria-label={`${currentText}. ${label}`}
-      onPointerEnter={handlePointerEnter}
-      onPointerMove={handlePointerMove}
-      onPointerLeave={() => {
-        pointerAnchorRef.current = null
-      }}
-      onClick={handleClick}
-      className="inline-flex max-w-full cursor-pointer align-baseline rounded-[6px] font-normal text-[var(--color-fg-muted)] interactive hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg)]"
-    >
-      <span className="inline-grid max-w-full overflow-hidden text-balance">
-        {variants.map((variant, index) => (
-          <span
-            key={`${index}:${variant}`}
-            aria-hidden
-            className="invisible pointer-events-none col-start-1 row-start-1"
-          >
-            {variant}
-          </span>
-        ))}
-        <span
-          ref={currentTextRef}
-          aria-live="polite"
-          aria-atomic="true"
-          className="col-start-1 row-start-1 will-change-transform"
-        >
-          {currentText}
-        </span>
-        {incomingText !== null ? (
-          <span
-            ref={incomingTextRef}
-            aria-hidden
-            className="col-start-1 row-start-1 will-change-transform"
-          >
-            {incomingText}
-          </span>
-        ) : null}
-      </span>
-    </button>
-  )
-}
-
-function fisherYatesPick<T>(arr: T[], count: number): T[] {
-  const a = [...arr]
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[a[i], a[j]] = [a[j], a[i]]
-  }
-  return a.slice(0, count)
-}
-
-function greetingKey(): 'morning' | 'afternoon' | 'evening' | 'stillUp' {
-  const h = new Date().getHours()
-  if (h < 5) return 'stillUp'
-  if (h < 12) return 'morning'
-  if (h < 18) return 'afternoon'
-  if (h < 22) return 'evening'
-  return 'stillUp'
-}
+import { runViewTransition } from '@/lib/view-transition'
 
 export default function ChatHome() {
   const navigate = useNavigate()
-  const { t } = useTranslation('chat')
   const beginOptimisticConversation = useConversations((s) => s.beginOptimisticConversation)
   const sendMessage = useConversations((s) => s.sendMessage)
   const defaultModelId = useModels((s) => s.defaultId)
@@ -211,7 +37,6 @@ export default function ChatHome() {
   const modelsLoadedPolicyKey = useModels((s) => s.loadedPolicyKey)
   const modelsLoading = useModels((s) => s.loading)
   const user = useAuth((s) => s.user)
-  const { allowed: canUsePrivateChat } = usePrivateChatPermission()
   const workspaceId = useWorkspaces((s) => s.activeId ?? undefined)
   const workspacesLoaded = useWorkspaces((s) => s.loaded)
   const workspacePolicyLoading = useWorkspaces((s) =>
@@ -242,11 +67,10 @@ export default function ChatHome() {
     expectedPolicyKey: workspaceModelPolicyKey(workspaceId, workspacePolicy),
   })
   const clearComposerDraft = useComposerPrefs((s) => s.clearDraft)
-  const isPhone = useMediaQuery(mediaQuery.phone)
 
   // The home screen has no title to show, so on mobile it drops the layout's
-  // standalone brand bar entirely (§ mobile home redesign) — a light floating
-  // button below replaces it for opening the sidebar drawer.
+  // standalone brand bar entirely (§ mobile home redesign) — HomeLayout's
+  // light floating button replaces it for opening the sidebar drawer.
   useEffect(() => {
     useUI.getState().setPageOwnsTopBar(true)
     return () => useUI.getState().setPageOwnsTopBar(false)
@@ -333,7 +157,7 @@ export default function ChatHome() {
   )
   const pendingStorageKeyRef = useRef(pendingStorageKey)
   pendingStorageKeyRef.current = pendingStorageKey
-  // Guards startNew against a double fire (rapid re-click, two suggestion cards)
+  // Guards startNew against a double fire (rapid re-click / repeated Enter)
   // spawning duplicate conversations + sends.
   const startedRef = useRef(false)
 
@@ -406,10 +230,9 @@ export default function ChatHome() {
             workspace_id: workspaceId,
             fast,
           })
-          // A suggestion card can bypass the composer's upload gate while this
-          // create is in flight. A mode/workspace switch also invalidates this
-          // scope before any upload starts. So does removing every attachment
-          // before the create lands (draft abandoned).
+          // A mode/workspace switch invalidates this scope before any upload
+          // starts. So does removing every attachment before the create lands
+          // (draft abandoned).
           if (draftAbandonedRef.current || pendingStorageKeyRef.current !== storageKey) {
             void conversationsApi.remove(created.id).catch(() => {})
             return undefined
@@ -453,83 +276,10 @@ export default function ChatHome() {
     if (pending) void conversationsApi.remove(pending.id).catch(() => {})
   }
 
-  const firstName = (user?.name || user?.email?.split('@')[0] || 'friend').split(' ')[0]
-  // Greeting depends on the active language; recompute whenever t changes.
-  const greeting = useMemo(
-    () => `${t(`greeting.${greetingKey()}`)}, ${firstName}.`,
-    [t, firstName],
-  )
-  // The prompt banner starts with the familiar help question, then cycles
-  // through the localized alternatives when the user moves across it.
-  const subtitleVariants = useMemo(() => {
-    const raw = t('empty.subtitleVariants', { returnObjects: true }) as unknown
-    const pool = Array.isArray(raw) && raw.length > 0 ? (raw as string[]) : [t('empty.subtitle')]
-    return pool
-  }, [t])
-  const cards = useMemo(() => fisherYatesPick(SUGGESTIONS, 6), [])
-
-  // The suggestion rail is a single horizontally-scrollable row. Translate a
-  // dominant vertical mouse-wheel delta into horizontal movement while leaving
-  // native horizontal trackpad gestures untouched. Yield back to page scrolling
-  // at either edge, and do not intercept browser/trackpad pinch zoom. A native
-  // non-passive listener is required because React delegates wheel passively.
-  const suggestionsRailRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const el = suggestionsRailRef.current
-    if (!el) return
-    const onWheel = (e: WheelEvent) => {
-      if (e.ctrlKey || e.metaKey || el.scrollWidth <= el.clientWidth) return
-      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return
-
-      const scale = e.deltaMode === WheelEvent.DOM_DELTA_LINE
-        ? 24
-        : e.deltaMode === WheelEvent.DOM_DELTA_PAGE
-          ? el.clientWidth
-          : 1
-      const current = el.scrollLeft
-      const next = Math.min(el.scrollWidth - el.clientWidth, Math.max(0, current + e.deltaY * scale))
-      if (Math.abs(next - current) < 1) return
-
-      e.preventDefault()
-      el.scrollLeft = next
-    }
-    el.addEventListener('wheel', onWheel, { passive: false })
-    return () => el.removeEventListener('wheel', onWheel)
-  }, [drawMode])
-
-  // Entrance choreography — the home screen used to pop in flat. Now the
-  // heading, lead, composer and suggestion cards rise + fade in sequence, with a
-  // whisper-faint accent glow breathing behind the greeting for depth. All gated
-  // behind prefers-reduced-motion via gsap.matchMedia (reduced → static, fully
-  // visible). useGSAP sets the `from` state before paint, so there's no flash.
-  const root = useRef<HTMLDivElement>(null)
-  // Drawing mode: the gallery sits below the centered hero; the scroll cue jumps
-  // to it, and the gallery itself defers loading until scrolled into view.
-  const galleryRef = useRef<HTMLDivElement>(null)
-  useGSAP(
-    () => {
-      const mm = gsap.matchMedia()
-      mm.add('(prefers-reduced-motion: no-preference)', () => {
-        const tl = gsap.timeline({ defaults: { ease: 'power3.out' } })
-        // opacity (not autoAlpha) so the composer stays focusable while fading —
-        // autoAlpha's visibility:hidden would swallow the textarea's autoFocus.
-        tl.from('.home-rise', { y: 16, opacity: 0, duration: 0.6, stagger: 0.09 })
-          .from('.home-card', { y: 14, opacity: 0, duration: 0.5, stagger: 0.06 }, '-=0.28')
-          // Land at the faint 0.07 the class defines (autoAlpha would force 1).
-          .fromTo('.home-glow', { opacity: 0, scale: 0.9 }, { opacity: 0.07, scale: 1, duration: 1.1 }, 0)
-        gsap.to('.home-glow', {
-          scale: 1.12,
-          opacity: '+=0.04',
-          duration: 7,
-          ease: 'sine.inOut',
-          repeat: -1,
-          yoyo: true,
-          delay: 1.1,
-        })
-      })
-    },
-    { scope: root },
-  )
+  // A suggestion is placed in the composer for the user to finish; the id makes
+  // picking the same suggestion twice still refill a draft edited since.
+  const [fillRequest, setFillRequest] = useState<{ text: string; id: number }>()
+  const fillIdRef = useRef(0)
 
   function startNew(
     text: string,
@@ -565,6 +315,11 @@ export default function ChatHome() {
     setPendingConversationId(undefined)
     clearPendingConversation(pendingStorageKey)
 
+    // The route commit runs inside a view transition (the composer glides from
+    // the centered home to the thread's dock), whose update callback fires a
+    // frame later. Background work waits for that commit so the temp→real id
+    // swap below always sees the optimistic thread URL.
+    let routeCommitted: Promise<void> = Promise.resolve()
     enterOptimisticConversation({
       createConversation: () =>
         beginOptimisticConversation(
@@ -580,8 +335,10 @@ export default function ChatHome() {
       // Commit the already-loaded thread before background conversation work
       // starts. This is the one transition where a visible response in the same
       // click matters more than React's normal event-batch deferral.
-      navigate: (tempId) => flushSync(() => navigate(`/chat/${tempId}`)),
-      startBackgroundWork: (tempId) => sendMessage({
+      navigate: (tempId) => {
+        routeCommitted = runViewTransition('send', () => flushSync(() => navigate(`/chat/${tempId}`)))
+      },
+      startBackgroundWork: (tempId) => routeCommitted.then(() => sendMessage({
         conversationId: tempId,
         createFirst: true,
         preparedConversation,
@@ -604,192 +361,40 @@ export default function ChatHome() {
         // reachable from the sidebar; yanking them would be worse than a stale URL.
         onConversationId: (realId) => {
           if (window.location.pathname === `/chat/${tempId}`) {
-            navigate(`/chat/${realId}`, { replace: true })
+            // Same thread, new id: the layout keeps the mounted thread (and a
+            // still-running send transition) instead of remounting it.
+            navigate(`/chat/${realId}`, { replace: true, state: { rekeyedFrom: tempId } })
           }
         },
-      }),
+      })),
     })
   }
 
+  const composer = (
+    <Composer
+      modelId={modelId}
+      onModelChange={setPickedModelId}
+      fast={fast}
+      onFastChange={setPickedFast}
+      onSubmit={(text, atts, opts) => void startNew(text, atts, opts)}
+      draftScope={draftScope}
+      conversationId={pendingConversationId}
+      ensureConversationId={ensureConversation}
+      onAttachmentsDrained={discardDraftConversation}
+      kbIds={selectedKnowledgeBaseIds}
+      onKBChange={setSelectedKnowledgeBaseIds}
+      autoFocus
+      fillRequest={fillRequest}
+      menuSide="bottom"
+      viewTransitionAnchor
+    />
+  )
+
   return (
-    <div
-      ref={root}
-      className={cn(
-        'relative flex-1 flex flex-col overflow-hidden sm:overflow-y-auto sm:overflow-x-hidden',
-        // Drawing keeps its existing scrollable gallery on phones. The normal
-        // chat home below is a fixed-height mobile workspace instead.
-        drawMode && 'max-sm:overflow-y-auto',
-      )}
-    >
-      {/* Mobile home: a compact, direct way to reach the navigation drawer. */}
-      <button
-        type="button"
-        aria-label={t('commandMenu.actions.toggleSidebar')}
-        onClick={() => useUI.getState().setNavOpen(true)}
-        className="lg:hidden absolute left-3 top-3 z-20 inline-flex size-[var(--tap-min)] items-center justify-center rounded-[10px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:left-2 max-sm:top-2 max-sm:size-10 max-sm:rounded-[8px]"
-      >
-        <Menu size={17} aria-hidden />
-      </button>
-      {/* Mobile home top-right: the account avatar opens the same menu the
-          sidebar footer's avatar does (placement="header" adapts the trigger +
-          popup direction for a top-right corner). */}
-      <div className="absolute right-3 top-3 z-20 flex items-center gap-2 max-sm:right-2 max-sm:top-2">
-        {canUsePrivateChat && (
-          <Tooltip content={t('private.enter')}>
-            <Button variant="ghost" size="icon-lg" aria-label={t('private.enter')} onClick={() => navigate('/private-chat')}>
-              <ShieldOff size={19} aria-hidden />
-            </Button>
-          </Tooltip>
-        )}
-        <div className="lg:hidden"><UserMenu placement="header" /></div>
-      </div>
-      {/* Desktop-only ambient depth; the phone layout stays deliberately direct. */}
-      <div
-        className="home-glow pointer-events-none absolute left-1/2 top-[14%] -z-0 hidden size-[34rem] max-w-[88vw] -translate-x-1/2 rounded-full bg-[var(--color-accent)] opacity-[0.07] blur-[90px] sm:block"
-        aria-hidden
-      />
-
-      {/* Phone chat home: welcome copy occupies the available center space while
-          the composer remains in a dedicated bottom work area. */}
-      {!drawMode && isPhone && (
-        <div className="relative z-10 flex min-h-0 flex-1 flex-col px-3 sm:hidden">
-          <header className="flex min-h-0 flex-1 flex-col items-center justify-center pb-8 pt-12 text-center">
-            <h1 className="home-rise max-w-[18rem] text-balance font-sans text-[1.6rem] font-semibold leading-[1.14] tracking-tight text-[var(--color-fg)]">
-              {greeting}{' '}
-              <RotatingHomePrompt variants={subtitleVariants} label={t('empty.changeSubtitle')} />
-            </h1>
-          </header>
-          <div className="home-rise shrink-0 pb-2">
-            <Composer
-              modelId={modelId}
-              onModelChange={setPickedModelId}
-              fast={fast}
-              onFastChange={setPickedFast}
-              onSubmit={(text, atts, opts) => void startNew(text, atts, opts)}
-              draftScope={draftScope}
-              conversationId={pendingConversationId}
-              ensureConversationId={ensureConversation}
-              onAttachmentsDrained={discardDraftConversation}
-              kbIds={selectedKnowledgeBaseIds}
-              onKBChange={setSelectedKnowledgeBaseIds}
-              autoFocus
-            />
-          </div>
-        </div>
-      )}
-
-      {(drawMode || !isPhone) && <div
-        className={cn(
-          'relative z-10 mx-auto min-h-full w-full max-w-[var(--layout-message-max-w)] flex-col px-[var(--layout-gutter-mobile)] sm:px-8',
-          'flex',
-        )}
-      >
-        {/* HERO — greeting + composer, vertically centered in the first screenful
-            (both chat and drawing mode, PC and mobile). In drawing mode it caps at
-            ~one viewport so the gallery sits just below the fold. */}
-        <div className={cn('flex flex-col', drawMode ? 'min-h-[90dvh]' : 'flex-1')}>
-          <div className="flex flex-1 flex-col justify-center py-10 sm:py-12">
-            <header className="text-center">
-              <h1 className="home-rise font-sans font-semibold tracking-tight text-[1.6rem] sm:text-[2.5rem] leading-[1.14] sm:leading-[1.12] text-[var(--color-fg)] text-balance">
-                {greeting}{' '}
-                <RotatingHomePrompt variants={subtitleVariants} label={t('empty.changeSubtitle')} />
-              </h1>
-              <p
-                className={cn(
-                  'home-rise mt-3.5 text-[var(--color-fg-muted)] text-sm sm:text-base text-pretty mx-auto max-w-2xl',
-                  // The lead is a desktop nicety; on a phone it just pushes the
-                  // input down, so hide it for chat (drawing mode keeps its line).
-                  !drawMode && 'max-sm:hidden',
-                )}
-              >
-                {drawMode
-                  ? t('empty.drawLead', { defaultValue: 'Describe what you want to create — your gallery is below.' })
-                  : t('empty.lead')}
-              </p>
-            </header>
-
-            {/* Fixed, comfortable width — deliberately NOT --layout-message-max-w,
-                so the home input doesn't widen with the appearance → chat-width
-                ("full") setting (that governs the conversation column, not this). */}
-            <div className="home-rise mt-7 sm:mt-10 mx-auto w-full max-w-[44rem]">
-              <Composer
-                modelId={modelId}
-                onModelChange={setPickedModelId}
-                fast={fast}
-                onFastChange={setPickedFast}
-                onSubmit={(text, atts, opts) => void startNew(text, atts, opts)}
-                draftScope={draftScope}
-                conversationId={pendingConversationId}
-                ensureConversationId={ensureConversation}
-                onAttachmentsDrained={discardDraftConversation}
-                kbIds={selectedKnowledgeBaseIds}
-                onKBChange={setSelectedKnowledgeBaseIds}
-                autoFocus
-              />
-            </div>
-
-            {!drawMode && (
-              <div className="mt-8 sm:mt-10 mx-auto w-full max-w-[44rem]">
-                {/* Single row, fixed-width cards, horizontally scrollable by mouse
-                    wheel or native horizontal gestures. Mandatory snapping is
-                    touch-only: on desktop it can pull small wheel deltas back to the
-                    current card and make the rail appear frozen. Scrollbar hidden;
-                    on phones the rail bleeds to the screen edges so the next card
-                    peeks. The vertical padding leaves room for the hover lift. */}
-                <div
-                  ref={suggestionsRailRef}
-                  className="flex gap-3 overflow-x-auto overscroll-x-contain px-1 -mx-1 max-sm:-mx-[var(--layout-gutter-mobile)] max-sm:px-[var(--layout-gutter-mobile)] max-sm:scroll-px-[var(--layout-gutter-mobile)] pt-2 pb-2 max-sm:snap-x max-sm:snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-                >
-                  {cards.map((s) => {
-                    const title = t(s.titleKey)
-                    const prompt = t(s.promptKey)
-                    return (
-                      <div key={s.id} className="home-card w-[13.5rem] sm:w-[15.5rem] shrink-0 max-sm:snap-start">
-                        <SuggestionCard
-                          icon={s.icon}
-                          title={title}
-                          prompt={prompt}
-                          onClick={() =>
-                            void startNew(prompt, [], {
-                              ...resolveArmedTurnFlags(modelId, pendingConversationId ?? draftScope),
-                              fast,
-                            })
-                          }
-                          className="h-full"
-                        />
-                      </div>
-                    )
-                  })}
-                </div>
-                <p className="mt-6 text-center text-xs text-[var(--color-fg-subtle)]">
-                  {t('empty.disclaimer')}
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* Drawing mode: a bobbing cue at the bottom of the first screen that
-              jumps to the (below-the-fold, lazily-loaded) gallery. */}
-          {drawMode && (
-            <button
-              type="button"
-              onClick={() => galleryRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-              aria-label={t('empty.galleryScrollCue', { defaultValue: '下拉查看我的画廊' })}
-              className="home-rise mx-auto mb-6 inline-flex size-10 items-center justify-center rounded-full text-[var(--color-fg-faint)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-            >
-              <ChevronDown size={20} strokeWidth={1.5} aria-hidden className="animate-[bob_1.6s_ease-in-out_infinite]" />
-            </button>
-          )}
-        </div>
-
-        {/* §4.20 gallery — below the fold; defers its own image fetch until it
-            scrolls into view (shows just the heading + a "scroll to view" hint). */}
-        {drawMode && (
-          <div ref={galleryRef} className="pb-16 sm:pb-20">
-            <MyGallery />
-          </div>
-        )}
-      </div>}
-    </div>
+    <HomeLayout
+      variant={drawMode ? 'draw' : 'chat'}
+      composer={composer}
+      onSuggestion={(prompt) => setFillRequest({ text: prompt, id: ++fillIdRef.current })}
+    />
   )
 }

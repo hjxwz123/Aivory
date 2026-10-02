@@ -587,6 +587,178 @@
   animation: page-enter var(--duration-base) var(--ease-out);
 }
 
+/* Popups (menus, popovers, selects, tooltips) grow out of their trigger. The
+   travel direction follows the side Radix actually resolved — a menu that
+   flips above its trigger rises instead of dropping — and the slight scale
+   starts from the trigger-facing edge (Radix's popper transform origin). */
+@keyframes popup-in {
+  from {
+    opacity: 0;
+    transform: translate(var(--popup-from-x), var(--popup-from-y)) scale(0.97);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+}
+
+.popup-motion {
+  --popup-from-x: 0px;
+  --popup-from-y: -4px;
+  transform-origin: var(--radix-popper-transform-origin, center);
+}
+
+.popup-motion[data-side='top'] {
+  --popup-from-y: 4px;
+}
+
+.popup-motion[data-side='left'] {
+  --popup-from-x: 4px;
+  --popup-from-y: 0px;
+}
+
+.popup-motion[data-side='right'] {
+  --popup-from-x: -4px;
+  --popup-from-y: 0px;
+}
+
+.popup-motion[data-state='open'],
+.popup-motion[data-state='delayed-open'] {
+  animation: popup-in 170ms var(--ease-out);
+}
+
+.popup-motion[data-state='closed'] {
+  animation: fade-out 110ms var(--ease-in);
+}
+
+/* View transitions (see lib/view-transition.ts). Only the composer carries a
+   name, and only while a tagged transition runs: on the first send it glides
+   from the centered home position to the thread's bottom dock while the rest
+   of the page cross-fades; entering or leaving private mode cross-fades the
+   composer in place. */
+html[data-view-transition='send'] [data-vt-composer],
+html[data-view-transition='private'] [data-vt-composer] {
+  view-transition-name: chat-composer;
+}
+
+/* The home and thread composers differ in width, so their snapshots must not
+   be rescaled into one another (that ghosts the text and stretches corners).
+   Instead the shell is painted by its own group — a box that only changes
+   size and position — while the editor and toolbar zones travel as separate
+   unscaled layers anchored to their own edges. */
+html[data-view-transition='send'] [data-vt-composer] .rich-composer-editor {
+  view-transition-name: chat-composer-editor;
+}
+
+html[data-view-transition='send'] [data-vt-composer] [data-vt-part='tools'] {
+  view-transition-name: chat-composer-tools;
+}
+
+html[data-view-transition='send'] [data-vt-composer] [data-vt-part='actions'] {
+  view-transition-name: chat-composer-actions;
+}
+
+html[data-view-transition='send'] [data-vt-composer] [data-vt-part='toolbar'] {
+  view-transition-name: chat-composer-toolbar;
+}
+
+html[data-view-transition='send']::view-transition-group(*) {
+  animation-duration: 380ms;
+  animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+html[data-view-transition='send']::view-transition-group(chat-composer) {
+  border-radius: var(--radius-popup);
+  background: var(--color-surface);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, var(--color-accent) 42%, var(--color-border-strong)),
+    0 6px 14px -7px color-mix(in oklch, var(--color-accent) 24%, transparent),
+    var(--shadow-sm);
+}
+
+html[data-view-transition='send']::view-transition-old(chat-composer),
+html[data-view-transition='send']::view-transition-new(chat-composer) {
+  animation: none;
+  opacity: 0;
+}
+
+html[data-view-transition='send']::view-transition-old(chat-composer-editor),
+html[data-view-transition='send']::view-transition-new(chat-composer-editor) {
+  block-size: 100%;
+  object-fit: none;
+  object-position: left top;
+}
+
+html[data-view-transition='send']::view-transition-old(chat-composer-tools),
+html[data-view-transition='send']::view-transition-new(chat-composer-tools),
+html[data-view-transition='send']::view-transition-old(chat-composer-toolbar),
+html[data-view-transition='send']::view-transition-new(chat-composer-toolbar) {
+  block-size: 100%;
+  object-fit: none;
+  object-position: left center;
+}
+
+html[data-view-transition='send']::view-transition-old(chat-composer-actions),
+html[data-view-transition='send']::view-transition-new(chat-composer-actions) {
+  block-size: 100%;
+  object-fit: none;
+  object-position: right center;
+}
+
+html[data-view-transition='send']::view-transition-old(root) {
+  animation-duration: 160ms;
+}
+
+html[data-view-transition='send']::view-transition-new(root) {
+  animation-duration: 280ms;
+  animation-delay: 60ms;
+}
+
+html[data-view-transition='private']::view-transition-group(chat-composer),
+html[data-view-transition='private']::view-transition-old(chat-composer),
+html[data-view-transition='private']::view-transition-new(chat-composer) {
+  animation-duration: 220ms;
+}
+
+html[data-view-transition='private']::view-transition-old(root),
+html[data-view-transition='private']::view-transition-new(root) {
+  animation-duration: 180ms;
+}
+
+/* A suggestion just landed in the composer: one soft accent ring that eases
+   outward, so the eye follows the text into the input. */
+@keyframes composer-fill-pulse {
+  from {
+    outline-color: color-mix(in oklch, var(--color-accent) 45%, transparent);
+    outline-offset: 0px;
+  }
+
+  to {
+    outline-color: transparent;
+    outline-offset: 7px;
+  }
+}
+
+.composer-fill-pulse {
+  outline: 2px solid transparent;
+  animation: composer-fill-pulse 650ms var(--ease-out);
+}
+
+/* The composer's primary action (voice ⇄ send ⇄ stop) swaps with a quick
+   scale-in instead of a hard cut. */
+@keyframes action-swap {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 /* Landing — edge-faded auto-scrolling marquee (model logos). The track holds two
    copies of the row; translating it -50% lands exactly on the seam, so the loop
    is seamless. Pauses on hover. prefers-reduced-motion zeroes it (static row). */
@@ -898,54 +1070,17 @@
     transition-timing-function: var(--ease-out);
   }
 
-  /* Conversation titles keep their normal ellipsis until the pointer rests on
-     an actually overflowing label. The duplicate visual track is aria-hidden;
-     keyboard focus on the parent link triggers the same reveal. */
-  .conversation-title-viewport {
-    position: relative;
+  /* Sidebar row titles fade out at the trailing edge instead of ending in an
+     ellipsis; the full title is offered by a tooltip (see ConversationTitle). */
+  .sidebar-row-title {
     display: block;
     overflow: hidden;
-  }
-
-  .conversation-title-static {
-    display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
-    transition: opacity var(--duration-instant) var(--ease-out);
   }
 
-  .conversation-title-track {
-    position: absolute;
-    inset-block-start: 0;
-    inset-inline-start: 0;
-    max-width: none;
-    white-space: nowrap;
-    pointer-events: none;
-    opacity: 0;
-    transform: translateX(0);
-    transition:
-      opacity var(--duration-instant) var(--ease-out),
-      transform 0ms linear var(--duration-instant);
-  }
-
-  .conversation-title-viewport[data-scrollable='true']:hover .conversation-title-static,
-  .conversation-title-link:focus-visible
-    .conversation-title-viewport[data-scrollable='true']
-    .conversation-title-static {
-    opacity: 0;
-  }
-
-  .conversation-title-viewport[data-scrollable='true']:hover .conversation-title-track,
-  .conversation-title-link:focus-visible
-    .conversation-title-viewport[data-scrollable='true']
-    .conversation-title-track {
-    opacity: 1;
-    transform: translateX(calc(0px - var(--conversation-title-distance, 0px)));
-    will-change: transform;
-    transition:
-      opacity var(--duration-instant) var(--ease-out),
-      transform var(--conversation-title-duration, 3000ms) linear var(--duration-base);
+  .sidebar-row-title[data-overflowing='true'] {
+    mask-image: linear-gradient(to right, black calc(100% - 1.75rem), transparent);
+    -webkit-mask-image: linear-gradient(to right, black calc(100% - 1.75rem), transparent);
   }
 
   /* The composer focus state stays attached to the working surface: a fine
@@ -1538,6 +1673,23 @@ mark.inline-thread-mark:hover {
   height: 0;
   color: var(--color-fg-muted);
   pointer-events: none;
+}
+
+/* The phone editor is only a couple of lines tall, so a wrapping placeholder
+   was clipped mid-line. Keep it on one line and let it end in an ellipsis. */
+.rich-composer-editor--mobile .ProseMirror p.is-editor-empty:first-child {
+  position: relative;
+}
+
+.rich-composer-editor--mobile .ProseMirror p.is-editor-empty:first-child::before {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  float: none;
+  height: auto;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .rich-composer-editor .tiptap-mathematics-render {

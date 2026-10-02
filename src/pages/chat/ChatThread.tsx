@@ -800,6 +800,7 @@ export default function ChatThread() {
               projectKBId={project?.files.length ? project.kbId : undefined}
               onKBChange={(ids) => void setKBs(conversation.id, ids)}
               modelPickerInHeader
+              viewTransitionAnchor
             />
           )}
         </div>

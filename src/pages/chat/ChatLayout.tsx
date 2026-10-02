@@ -1,7 +1,7 @@
 import { Suspense, useEffect, useRef } from 'react'
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { PanelLeftOpen, Menu } from 'lucide-react'
+import { Menu } from 'lucide-react'
 import { Sidebar } from '@/components/sidebar/sidebar'
 import { ArtifactPanel } from '@/components/chat/artifact-panel'
 import { InlineThreadPanel } from '@/components/chat/inline-thread-panel'
@@ -15,7 +15,6 @@ import { useWorkspaces } from '@/store/workspaces'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { mediaQuery } from '@/lib/design-tokens'
 import { useTheme } from '@/store/theme'
-import { Tooltip } from '@/components/ui/tooltip'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { AnnouncementBar } from '@/components/announcement/announcement-bar'
 import { AnnouncementPopup } from '@/components/announcement/announcement-popup'
@@ -31,7 +30,6 @@ import { usePrivateChatPermission } from '@/hooks/use-private-chat-permission'
 
 export default function ChatLayout() {
   const isDesktop = useMediaQuery(mediaQuery.desktop)
-  const collapsed = useSettings((s) => s.sidebarCollapsed)
   const syncSystem = useTheme((s) => s.syncSystem)
   const { t } = useTranslation('chat')
   const drawerOpen = useUI((s) => s.navOpen)
@@ -47,11 +45,21 @@ export default function ChatLayout() {
   // /chat/:id, /projects/:id, /kb/:id) to their first segment so switching
   // conversations within a section doesn't re-fade — only section-to-section
   // navigation (the abrupt jumps) animates.
-  const { pathname } = useLocation()
+  const location = useLocation()
+  const { pathname } = location
   const privateChat = pathname === '/private-chat'
   // Home ('/') and the chat thread ('/chat', '/chat/:id') are one section so
   // creating a conversation (/ → /chat/:id) doesn't flash a transition.
   const routeKeys = chatRouteKeys(pathname)
+  // The first send swaps an optimistic temp id for the server id in the URL.
+  // That is the same thread, so keep its Suspense boundary (no remount) —
+  // remounting would also cut short the send view transition, whose captured
+  // composer must stay in the document.
+  const contentKeyRef = useRef(routeKeys.content)
+  const rekeyedFrom = (location.state as { rekeyedFrom?: unknown } | null)?.rekeyedFrom
+  if (!(typeof rekeyedFrom === 'string' && contentKeyRef.current === `/chat/${rekeyedFrom}`)) {
+    contentKeyRef.current = routeKeys.content
+  }
   const accessRedirect = chatRouteAccessRedirect(pathname, { domainLocked, canUsePrivateChat })
 
   useEffect(() => syncSystem(), [syncSystem])
@@ -132,31 +140,11 @@ export default function ChatLayout() {
             </div>
           )}
 
-          {/* Floating expand toggle when sidebar is collapsed */}
-          {isDesktop && collapsed && (
-            <div className="absolute left-3 top-3 z-10">
-              <Tooltip content={t('commandMenu.actions.toggleSidebar')} side="right">
-                <button
-                  type="button"
-                  aria-label={t('commandMenu.actions.toggleSidebar')}
-                  onClick={() => useSettings.getState().toggleSidebar()}
-                  className="inline-flex items-center justify-center size-8 rounded-[8px] bg-[var(--color-bg)]/85 backdrop-blur-sm text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive"
-                >
-                  <PanelLeftOpen size={14} aria-hidden />
-                </button>
-              </Tooltip>
-            </div>
-          )}
-
-          {/* Page content. When the sidebar is collapsed on desktop, reserve
-              a 44px gutter on the left so the floating expand toggle never
-              sits on top of titles, breadcrumbs, or topbar content. */}
+          {/* Page content. The collapsed rail carries its own expand control,
+              so the page keeps its full width in both sidebar states. */}
           <RouteFade
             dep={`${routeKeys.section}:${activeWsId ?? 'personal'}`}
-            className={cn(
-              'flex-1 min-h-0 flex flex-col',
-              isDesktop && collapsed && 'pl-11',
-            )}
+            className="flex-1 min-h-0 flex flex-col"
           >
             {/* Switching sections keeps the desktop shell visible with a panel
                 loader. On mobile the same canonical loader covers the screen,
@@ -168,7 +156,7 @@ export default function ChatLayout() {
                 the target location + sidebar state immediately and confines
                 loading feedback to this content pane. */}
             <Suspense
-              key={routeKeys.content}
+              key={contentKeyRef.current}
               fallback={<PanelFallback scope={isDesktop ? 'panel' : 'screen'} />}
             >
               {/* activeId changes before the new space-scoped stores finish

@@ -128,6 +128,31 @@ export function modKey(): string {
 }
 
 /**
+ * One compact shortcut label for `mod + [shift +] key`: "⇧⌘O" on macOS,
+ * "Ctrl+Shift+O" elsewhere. Every surface that names a shortcut uses it, so
+ * the sidebar, tooltips and the command menu spell the same keys alike.
+ */
+export function formatShortcut(key: string, { shift = false, mac = isMac() }: { shift?: boolean; mac?: boolean } = {}): string {
+  if (mac) return `${shift ? '⇧' : ''}⌘${key}`
+  return ['Ctrl', shift ? 'Shift' : '', key].filter(Boolean).join('+')
+}
+
+/**
+ * Localized "time ago" for a past timestamp in ms ("2 小时前", "yesterday"),
+ * falling back to a short calendar date after a week.
+ */
+export function formatTimeAgo(timestamp: number, locale: string, now = Date.now()): string {
+  const seconds = Math.round((timestamp - now) / 1000)
+  const elapsed = Math.abs(seconds)
+  const format = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' })
+  if (elapsed < 60) return format.format(0, 'second')
+  if (elapsed < 3600) return format.format(Math.round(seconds / 60), 'minute')
+  if (elapsed < 86400) return format.format(Math.round(seconds / 3600), 'hour')
+  if (elapsed < 7 * 86400) return format.format(Math.round(seconds / 86400), 'day')
+  return new Date(timestamp).toLocaleDateString(locale, { month: 'short', day: 'numeric' })
+}
+
+/**
  * Cancellable timeout — returns a function that cancels.
  */
 export function timeout(fn: () => void, ms: number): () => void {
