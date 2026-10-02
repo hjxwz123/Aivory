@@ -9,7 +9,17 @@ import { Field } from '@/components/ui/label'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/hooks/use-toast'
-import { docmeeSettingsPatch, storedDocmeeEnabled } from '@/lib/aippt-admin-settings'
+import {
+  DOCMEE_PRICES,
+  docmeeDisplayPriceUSD,
+  docmeeSettingsPatch,
+  storedDocmeeEnabled,
+} from '@/lib/aippt-admin-settings'
+
+/** A USD amount for an input or message: up to six decimals, no trailing zeros. */
+function formatUSD(value: number): string {
+  return String(Number(value.toFixed(6)))
+}
 import { useAiPPT } from '@/store/aippt'
 
 type Settings = Record<string, unknown>
@@ -181,27 +191,38 @@ export default function AdminAiPPT() {
 
           <section className="mt-10 border-t border-[var(--color-divider)] pt-8">
             <h2 className="font-serif text-xl text-[var(--color-fg)]">{t('admin:creditSettings.docmee.pricing')}</h2>
-            {readNumber('docmee_credits_per_ppt', 10) > 0 && readNumber('credits_per_usd') === 0 ? (
+            {(docmeeDisplayPriceUSD(draft, DOCMEE_PRICES[0]) ?? 0) > 0 && readNumber('credits_per_usd') === 0 ? (
               <p className="mt-4 text-sm text-[var(--color-warning)]">
-                {t('admin:creditSettings.docmee.creditsOffHint', { price: readNumber('docmee_credits_per_ppt', 10) })}{' '}
+                {t('admin:creditSettings.docmee.creditsOffHint', {
+                  price: formatUSD(docmeeDisplayPriceUSD(draft, DOCMEE_PRICES[0]) ?? 0),
+                })}{' '}
                 <Link to="/admin/credits" className="font-medium underline underline-offset-2">
                   {t('admin:creditSettings.docmee.openCredits')}
                 </Link>
               </p>
             ) : null}
             <div className="mt-5 grid gap-5 lg:grid-cols-2">
-              <Field label={t('admin:creditSettings.docmee.creditsPerPpt')} htmlFor="docmee-credits"
-                hint={t('admin:creditSettings.docmee.creditsPerPptHint')}>
-                <Input id="docmee-credits" type="number" min={0} step="any"
-                  value={String(readNumber('docmee_credits_per_ppt', 10))}
-                  onChange={(event) => setSetting('docmee_credits_per_ppt', Math.max(0, Number(event.target.value)))} />
-              </Field>
-              <Field label={t('admin:creditSettings.docmee.editCredits')} htmlFor="docmee-edit-credits"
-                hint={t('admin:creditSettings.docmee.editCreditsHint')}>
-                <Input id="docmee-edit-credits" type="number" min={0} step="any"
-                  value={String(readNumber('docmee_edit_credits'))}
-                  onChange={(event) => setSetting('docmee_edit_credits', Math.max(0, Number(event.target.value)))} />
-              </Field>
+              {DOCMEE_PRICES.map((price) => {
+                const deck = price.usdKey === 'docmee_price_per_ppt_usd'
+                const usd = docmeeDisplayPriceUSD(draft, price)
+                const ratio = readNumber('credits_per_usd')
+                const raw = draft[price.usdKey]
+                const hint = t(deck ? 'admin:creditSettings.docmee.pricePerPptHint' : 'admin:creditSettings.docmee.editPriceHint')
+                return (
+                  <Field key={price.usdKey}
+                    label={t(deck ? 'admin:creditSettings.docmee.pricePerPpt' : 'admin:creditSettings.docmee.editPrice')}
+                    htmlFor={price.usdKey}
+                    hint={usd !== undefined && usd > 0 && ratio > 0
+                      ? `${hint} ${t('admin:creditSettings.docmee.creditsEquivalent', {
+                        credits: Number((usd * ratio).toFixed(4)).toLocaleString(),
+                      })}`
+                      : hint}>
+                    <Input id={price.usdKey} type="number" min={0} step="any" inputMode="decimal" placeholder="0"
+                      value={typeof raw === 'number' || typeof raw === 'string' ? String(raw) : usd !== undefined ? formatUSD(usd) : ''}
+                      onChange={(event) => setSetting(price.usdKey, event.target.value)} />
+                  </Field>
+                )
+              })}
             </div>
           </section>
 

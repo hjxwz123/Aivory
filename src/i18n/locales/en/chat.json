@@ -231,7 +231,11 @@
       "selectedCount_other": "{{count}} tools selected",
       "cancel": "Cancel",
       "done": "Done"
-    }
+    },
+    "voiceInsufficientCredits": "Not enough credits for model speech recognition. You can switch to browser recognition in Settings → Models.",
+    "voiceCreditsExhausted": "Your credits ran out, so voice input stopped.",
+    "voiceNoMicrophone": "No microphone was found.",
+    "voiceNetwork": "Browser speech recognition needs a network connection. Check your connection and try again."
   },
   "imageConversationTitle": "Image conversation",
   "assistant": "Aivory",
@@ -412,7 +416,21 @@
     "steps": "{{done}}/{{total}}",
     "planLabel": "Research plan",
     "sourcesLabel": "Sources ({{count}})",
-    "credibility": "Source credibility {{grade}} (A official/academic … D unattributed)"
+    "credibility": "Source credibility {{grade}} (A official/academic … D unattributed)",
+    "notesLabel": "Research log",
+    "round": "Round {{round}}",
+    "offTopic": "Read, not relevant",
+    "phase": {
+      "planning": "Planning the investigation",
+      "searching_one": "Searching {{count}} query",
+      "searching_other": "Searching {{count}} queries",
+      "reading_one": "Reading {{count}} source",
+      "reading_other": "Reading {{count}} sources",
+      "reflecting": "Reviewing findings and planning the next step",
+      "validating_one": "Cross-checking {{count}} source",
+      "validating_other": "Cross-checking {{count}} sources",
+      "writing": "Writing the report"
+    }
   },
   "share": {
     "title": "Share conversation",

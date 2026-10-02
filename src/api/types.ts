@@ -975,6 +975,11 @@ export interface ApiModel {
   /** Unified public capability bit. True when the administrator configured at
    * least one available local Function, provider-hosted tool, or MCP service. */
   tools_available?: boolean
+  /** Public capability bit for Deep Research's own search pipeline. Unlike
+   * `builtin_tools` it ignores the model's default tool selection, so a custom
+   * list without web search still offers Deep Research. Absent from older
+   * backends ⇒ derived from `builtin_tools`. */
+  research_tools_available?: boolean
   /** Optional chat-model JSON object merged into the upstream provider request. */
   extra_params?: Record<string, unknown>
   /** Provider-hosted tools offered by this model. Present only in admin model
@@ -1399,11 +1404,15 @@ export interface ApiAiPPTConfig {
   configured: boolean
   /** A generation is charged. False = the platform credit system is off (free). */
   credits_enabled: boolean
-  /** Flat price per generated deck, in credits. */
+  /** The administrator's USD price per generated deck. */
+  price_per_ppt_usd?: number
+  /** What one deck debits, in credits, at the current credits-per-USD rate. */
   credits_per_ppt: number
   /** Spendable balance (timed + permanent, minus live holds). */
   credits_available: number
-  /** What one edit (AI rewrite / template change) costs; 0 = free. */
+  /** The administrator's USD price per edit. */
+  edit_price_usd?: number
+  /** What one edit (AI rewrite / template change) debits in credits; 0 = free. */
   edit_credits: number
   /** An edit is charged (edit price > 0 and credits are on platform-wide). */
   edit_credits_enabled: boolean
@@ -1899,6 +1908,10 @@ export type ApiSseEvent =
   | { type: 'research_task'; id: string; text?: string; status?: string; name?: string }
   | { type: 'research_source'; id: string; url?: string; title?: string; summary?: string; status?: string }
   | { type: 'research_section'; id: string; title?: string; status?: string }
+  /** One research-log entry: the reflection written between rounds. */
+  | { type: 'research_note'; id: string; text?: string; name?: string }
+  /** Live engine phase (planning | searching | reading | reflecting | validating | writing). */
+  | { type: 'research_phase'; status?: string; name?: string; source_count?: number }
   // Verify mode (§verify): auditor lifecycle. started → N findings → done.
   | { type: 'verify_started'; message_id?: string }
   | { type: 'verify_finding'; message_id?: string; finding: ApiVerifyFinding }

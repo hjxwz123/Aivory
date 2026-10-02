@@ -204,6 +204,9 @@ var settingsAllowlist = map[string]bool{
 	"code_theme":            true,
 	"user_message_markdown": true,
 	"onboarded":             true,
+	// Default speech recognition: "model" (the administrator's server-side
+	// service), "browser" (the browser's own engine) or "" (automatic).
+	"speech_recognition": true,
 }
 
 // updateMeSettingsHandler merges patch keys into settings.
@@ -232,6 +235,11 @@ func updateMeSettingsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	if !permissions.AllowDrawing {
 		delete(patch, "image_model_id")
+	}
+	if value, ok := patch["speech_recognition"]; ok {
+		if engine, isString := value.(string); !isString || (engine != "" && engine != "model" && engine != "browser") {
+			delete(patch, "speech_recognition")
+		}
 	}
 	upd, err := store.UpdateUserSettings(r.Context(), d.DB, u.ID, patch)
 	if err != nil {

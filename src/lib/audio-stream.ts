@@ -26,10 +26,12 @@ export interface VoiceStreamHandlers {
   onReady?: () => void
   /** Incremental (cumulative) transcript while speaking. */
   onPartial?: (text: string) => void
-  /** Final transcript for the utterance; the session is finished after this. */
-  onFinal?: (text: string) => void
-  /** A recoverable error; the session is torn down after this fires. */
-  onError?: (message: string) => void
+  /** Final transcript for the utterance; the session is finished after this.
+   *  `code` is "credits_exhausted" when the balance cut the session short. */
+  onFinal?: (text: string, code?: string) => void
+  /** A recoverable error; the session is torn down after this fires.
+   *  `code` is "insufficient_credits" when the balance refused the session. */
+  onError?: (message: string, code?: string) => void
   /** The session ended (after final, error, or a socket close). Fires once. */
   onClose?: () => void
 }
@@ -269,7 +271,7 @@ export async function startVoiceStream(handlers: VoiceStreamHandlers): Promise<V
 
   ws.onmessage = (e) => {
     if (typeof e.data !== 'string') return
-    let msg: { type?: string; text?: string; message?: string }
+    let msg: { type?: string; text?: string; message?: string; code?: string }
     try {
       msg = JSON.parse(e.data)
     } catch {
@@ -292,11 +294,11 @@ export async function startVoiceStream(handlers: VoiceStreamHandlers): Promise<V
         handlers.onPartial?.(msg.text ?? '')
         break
       case 'final':
-        handlers.onFinal?.(msg.text ?? '')
+        handlers.onFinal?.(msg.text ?? '', msg.code)
         cleanup()
         break
       case 'error':
-        handlers.onError?.(msg.message || 'transcription failed')
+        handlers.onError?.(msg.message || 'transcription failed', msg.code)
         cleanup()
         break
     }

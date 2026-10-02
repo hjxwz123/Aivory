@@ -1454,6 +1454,9 @@ var settingsKeys = []string{
 	"volcano_asr_app_id", "volcano_asr_access_token", "volcano_asr_resource_id",
 	"volcano_asr_ws_url", "volcano_asr_model_name",
 	"volcano_asr_enable_itn", "volcano_asr_enable_punc", "volcano_asr_enable_ddc",
+	// § voice billing: USD per second of server-side transcription, charged in
+	// credits via credits_per_usd (0 = free; see audio_billing.go).
+	"audio_transcribe_price_per_second",
 	// §4.4 web search backend — admin-configurable, live-reloaded each call.
 	// Provider ∈ {"", "serper", "brave", "tavily", "searxng", "duckduckgo"
 	// (alias "ddg"), "auto"}. SearXNG is the self-hosted option and only needs
@@ -1504,11 +1507,15 @@ var settingsKeys = []string{
 	"log_full_requests", "log_errors_only", "log_request_bodies",
 	// § AI PPT (Docmee / 文多多, API mode). docmee_api_key is used server-side only
 	// and is masked as a secret on GET; the browser never receives it. An unset
-	// docmee_enabled follows the key's presence. docmee_credits_per_ppt is the
-	// flat price charged per generated deck (0 = free), docmee_edit_credits prices
-	// an edit (AI rewrite / template change), and docmee_max_upload_mb caps the
-	// upload input's file size.
+	// docmee_enabled follows the key's presence. docmee_price_per_ppt_usd is the
+	// flat USD price per generated deck and docmee_edit_price_usd prices an edit
+	// (AI rewrite / template change); both are charged in credits via
+	// credits_per_usd (0 = free). The legacy credit-denominated
+	// docmee_credits_per_ppt / docmee_edit_credits still apply until a USD price
+	// is saved (see docmeeConfigFor). docmee_max_upload_mb caps the upload
+	// input's file size.
 	"docmee_enabled", "docmee_api_key", "docmee_api_base_url",
+	"docmee_price_per_ppt_usd", "docmee_edit_price_usd",
 	"docmee_credits_per_ppt", "docmee_token_hours",
 	"docmee_edit_credits", "docmee_default_template_id", "docmee_max_upload_mb",
 	// § AI PPT editor surface (vendor iframe): the SDK script and the international
@@ -1701,6 +1708,13 @@ func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.R
 					return 0, errInvalidInput
 				}
 				if micros, err := store.CreditsToMicros(amount); err != nil || amount > 0 && micros == 0 {
+					return 0, errInvalidInput
+				}
+			case "audio_transcribe_price_per_second", "docmee_price_per_ppt_usd", "docmee_edit_price_usd":
+				// USD prices converted to credits at charge time via credits_per_usd.
+				// Non-negative and finite; 0 = free.
+				var price float64
+				if json.Unmarshal(v, &price) != nil || price < 0 || price > 1e6 || math.IsNaN(price) || math.IsInf(price, 0) {
 					return 0, errInvalidInput
 				}
 			case "docmee_credits_per_ppt":

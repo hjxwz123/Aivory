@@ -331,9 +331,11 @@ var perTurnToolLimits = map[string]int{
 
 // deepResearchToolLimits are the much higher per-turn caps used while the Deep
 // Research engine runs — it deliberately fans out many searches + source reads.
+// The search/fetch defaults cover drMaxRounds × drQueriesPerRound searches and
+// drMaxRounds × drFetchPerRound fetches (deep_research.go).
 var deepResearchToolLimits = map[string]int{
-	toolnames.AivoryWebSearch: envcfg.Int("AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_SEARCH", 40),
-	"web_fetch":               envcfg.Int("AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_FETCH", 25),
+	toolnames.AivoryWebSearch: envcfg.Int("AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_SEARCH", 60),
+	"web_fetch":               envcfg.Int("AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_FETCH", 64),
 	"fetch_image":             envcfg.Int("AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_FETCH_IMAGE", 12),
 	"image_generate":          envcfg.Int("AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_IMAGE_GENERATE", 4),
 	"python_execute":          envcfg.Int("AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_PYTHON_EXECUTE", 8),
@@ -345,11 +347,13 @@ var deepResearchToolLimits = map[string]int{
 // per round. Deep Research deliberately fans out far more.
 var (
 	maxToolCallsPerTurn     = envcfg.Int("AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN", 48)
-	maxToolCallsPerTurnDeep = envcfg.Int("AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN_DEEP", 150)
+	maxToolCallsPerTurnDeep = envcfg.Int("AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN_DEEP", 200)
 	maxToolCallsPerTurnFast = configuredFastMaxToolCallsPerTurn()
 	maxToolTimePerTurn      = envcfg.Dur("AIVORY_LLM_MAX_TOOL_TIME_PER_TURN", 15*time.Minute)
-	maxToolTimePerTurnDeep  = envcfg.Dur("AIVORY_LLM_MAX_TOOL_TIME_PER_TURN_DEEP", 4*time.Minute)
-	maxToolTimePerTurnFast  = envcfg.Dur("AIVORY_LLM_MAX_TOOL_TIME_PER_TURN_FAST", 3*time.Minute)
+	// Measured from the first tool call, so it must exceed the Deep Research
+	// round budget (AIVORY_LLM_DR_RESEARCH_BUDGET) or rounds stop early.
+	maxToolTimePerTurnDeep = envcfg.Dur("AIVORY_LLM_MAX_TOOL_TIME_PER_TURN_DEEP", 25*time.Minute)
+	maxToolTimePerTurnFast = envcfg.Dur("AIVORY_LLM_MAX_TOOL_TIME_PER_TURN_FAST", 3*time.Minute)
 )
 
 // §fast-mode budgets are independent from normal-mode settings. Zero hides a
@@ -413,6 +417,26 @@ func modelBuiltinToolSet(raw json.RawMessage) map[string]bool {
 		allowed[name] = true
 	}
 	return allowed
+}
+
+// withDeepResearchBuiltinTools keeps a model's default local-tool selection from
+// disabling Deep Research. The engine owns an internal search/read pipeline and
+// is exposed by the model's separate research flag, so the Function list offered
+// to ordinary chat turns must not decide whether it can search. Only this
+// model-level default is relaxed: global, group, workspace and per-turn
+// ceilings are applied to the declarations separately and re-checked at the
+// execution boundary.
+func withDeepResearchBuiltinTools(allowed map[string]bool) map[string]bool {
+	if allowed == nil {
+		return nil
+	}
+	out := make(map[string]bool, len(allowed)+2)
+	for name, ok := range allowed {
+		out[name] = ok
+	}
+	out[toolnames.AivoryWebSearch] = true
+	out["web_fetch"] = true
+	return out
 }
 
 func filterModelBuiltinTools(defs []ToolDef, allowed map[string]bool) []ToolDef {
@@ -3143,6 +3167,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		}
 		if req.SelectedToolsConfigured {
 			builtinDefs = filterBuiltinToolsBySelection(builtinDefs, selectedTools)
+		} else if req.Mode == ModeDeepResearch {
+			builtinDefs = filterModelBuiltinTools(builtinDefs, withDeepResearchBuiltinTools(builtinTools))
 		} else {
 			builtinDefs = filterModelBuiltinTools(builtinDefs, builtinTools)
 		}

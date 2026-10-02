@@ -12,6 +12,7 @@ import (
 	"aivory/server/internal/envcfg"
 	"aivory/server/internal/llm"
 	"aivory/server/internal/store"
+	"aivory/server/internal/toolnames"
 )
 
 // creditMultiplierDivisor is env-overridable (§ config-reference) and keeps the
@@ -253,12 +254,16 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 		BuiltinTools []string `json:"builtin_tools"`
 		// ToolsAvailable is the unified user-facing capability bit. It remains true
 		// when a model default is empty but the user may manually select a live tool.
-		ToolsAvailable bool            `json:"tools_available"`
-		ParamControls  json.RawMessage `json:"param_controls"`
-		ChannelID      string          `json:"channel_id"`
-		SortOrder      int             `json:"sort_order"`
-		Currency       string          `json:"currency"`
-		Tags           json.RawMessage `json:"tags"`
+		ToolsAvailable bool `json:"tools_available"`
+		// ResearchToolsAvailable reports whether Deep Research's own search
+		// pipeline may run. It ignores the model's default built-in selection (see
+		// researchToolsAvailable), unlike BuiltinTools above.
+		ResearchToolsAvailable bool            `json:"research_tools_available"`
+		ParamControls          json.RawMessage `json:"param_controls"`
+		ChannelID              string          `json:"channel_id"`
+		SortOrder              int             `json:"sort_order"`
+		Currency               string          `json:"currency"`
+		Tags                   json.RawMessage `json:"tags"`
 		// UsesCredits is true when this model has NO free allotment left for the
 		// caller's group (none configured, or the per-cycle count is used up) —
 		// the picker shows the credit multiplier instead of a lock (§ credits).
@@ -421,10 +426,11 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 		items = append(items, item{
 			ID: m.ID, Label: m.Label, Description: m.Description, Icon: m.Icon,
 			Kind: m.Kind, Enabled: m.Enabled, Vision: m.Vision, Stream: m.Stream, ResearchEnabled: m.ResearchEnabled, ToolMode: m.ToolMode,
-			MaskEdit:       llm.SupportsImageMaskEdit(&m, maskChannels[m.ChannelID]),
-			BuiltinTools:   builtinDefaults,
-			ToolsAvailable: m.ToolMode != "none" && (len(availableBuiltinTools) > 0 || hostedToolsAvailable || mcpToolsAvailable),
-			ParamControls:  m.ParamControls, ChannelID: m.ChannelID, SortOrder: m.SortOrder,
+			MaskEdit:               llm.SupportsImageMaskEdit(&m, maskChannels[m.ChannelID]),
+			BuiltinTools:           builtinDefaults,
+			ToolsAvailable:         m.ToolMode != "none" && (len(availableBuiltinTools) > 0 || hostedToolsAvailable || mcpToolsAvailable),
+			ResearchToolsAvailable: researchToolsAvailable(m, availableBuiltinTools),
+			ParamControls:          m.ParamControls, ChannelID: m.ChannelID, SortOrder: m.SortOrder,
 			Currency:        m.Currency,
 			Tags:            tags,
 			UsesCredits:     usesCredits,
@@ -487,6 +493,16 @@ func configuredVisionModelID(ctx context.Context, d Deps) string {
 
 func visionOutsourcingAvailable(ctx context.Context, d Deps) bool {
 	return configuredVisionModelID(ctx, d) != ""
+}
+
+// researchToolsAvailable reports whether Deep Research can search for a model.
+// The engine runs its own search/read pipeline, so the model's default built-in
+// selection (including a custom list without the search tool) does not decide
+// it; only the model-level deny-all tool mode and the global, group and
+// workspace ceilings folded into `available` do. This mirrors the orchestrator,
+// which adds the research tools to a Deep Research turn's model allowlist.
+func researchToolsAvailable(m store.Model, available map[string]bool) bool {
+	return m.Kind == "chat" && m.ToolMode != "none" && available[toolnames.AivoryWebSearch]
 }
 
 // effectivePublicBuiltinTools resolves the nullable persisted policy into an

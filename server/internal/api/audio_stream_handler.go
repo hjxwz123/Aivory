@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"aivory/server/internal/envcfg"
@@ -57,22 +58,31 @@ type streamEvent struct {
 	Type    string `json:"type"`              // ready | partial | final | error
 	Text    string `json:"text,omitempty"`    // cumulative transcript
 	Message string `json:"message,omitempty"` // error detail
+	// Code is machine-readable: "insufficient_credits" on an error that refused
+	// the session, "credits_exhausted" on a final cut short by the balance.
+	Code string `json:"code,omitempty"`
 }
 
 // audioCapabilitiesHandler tells the composer which STT provider is active so it
-// can choose record-then-transcribe (gpt) vs. live streaming (volcano), and
-// whether its required credentials are present. No secrets are exposed.
-func audioCapabilitiesHandler(d Deps, w http.ResponseWriter, _ *http.Request) {
+// can choose record-then-transcribe (gpt) vs. live streaming (volcano), whether
+// its required credentials are present, and what it costs this caller. No
+// secrets are exposed.
+func audioCapabilitiesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	provider := settingString(d, "audio_transcribe_provider", "gpt")
 	enabled := settingString(d, "audio_transcribe_api_key", "") != ""
 	if provider == "volcano" {
 		enabled = settingString(d, "volcano_asr_app_id", "") != "" &&
 			settingString(d, "volcano_asr_access_token", "") != ""
 	}
+	creditsPerMinute := 0.0
+	if billing := audioBillingFor(d, authUser(r)); billing != nil {
+		creditsPerMinute = billing.credits(60)
+	}
 	writeJSON(w, 200, map[string]any{
-		"provider":  provider,
-		"streaming": provider == "volcano",
-		"enabled":   enabled,
+		"provider":           provider,
+		"streaming":          provider == "volcano",
+		"enabled":            enabled,
+		"credits_per_minute": creditsPerMinute,
 	})
 }
 
@@ -133,6 +143,60 @@ func audioStreamHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(watcher.Context(), audioStreamMaxDur)
 	defer cancel()
 
+	// § voice billing: the session length is unknown up front, so hold what the
+	// balance can pay for (up to the session ceiling) and cap the relayed audio
+	// at that length; settlement charges only the seconds actually relayed.
+	billing := audioBillingFor(d, u)
+	sourceID := store.GenID("asr")
+	maxBytes := audioStreamMaxBytes
+	creditCapped := false
+	if billing != nil {
+		affordable, err := billing.affordableSeconds(ctx, d)
+		if err != nil {
+			writeStreamEvent(bconn, streamEvent{Type: "error", Message: "couldn't check your credit balance"})
+			return
+		}
+		if affordable < 1 {
+			writeStreamEvent(bconn, streamEvent{Type: "error", Code: "insufficient_credits", Message: errAudioInsufficientCredits.Error()})
+			return
+		}
+		maxSeconds := min(affordable, int64(audioStreamMaxDur/time.Second))
+		if err := billing.reserve(ctx, d, sourceID, maxSeconds); err != nil {
+			event := streamEvent{Type: "error", Message: "couldn't reserve credits"}
+			if errors.Is(err, errAudioInsufficientCredits) {
+				event = streamEvent{Type: "error", Code: "insufficient_credits", Message: err.Error()}
+			}
+			writeStreamEvent(bconn, event)
+			return
+		}
+		if capBytes := maxSeconds * audioPCMBytesPerSecond; capBytes < maxBytes {
+			maxBytes = capBytes
+			creditCapped = true
+		}
+	}
+	// sent counts the PCM bytes actually relayed upstream. G1 is its only writer;
+	// wg.Wait (or no goroutine at all on an early return) orders it before this
+	// deferred settlement.
+	var sent int64
+	defer func() {
+		seconds := billableSeconds(float64(sent) / audioPCMBytesPerSecond)
+		credits := 0.0
+		if billing != nil {
+			debit, err := billing.settle(r.Context(), d, sourceID, seconds) // 0 seconds releases the hold
+			if err != nil {
+				if d.Logger != nil {
+					d.Logger.Printf("voice charge failed (user=%s source=%s seconds=%d): %v", u.ID, sourceID, seconds, err)
+				}
+			} else {
+				credits = debit.Total
+			}
+		}
+		if seconds > 0 {
+			recordAudioUsage(r.Context(), d, u.ID, sourceID, seconds, billing, credits)
+		}
+	}()
+	var creditsExhausted atomic.Bool
+
 	vsess, err := dialVolcano(ctx, cfg)
 	if err != nil {
 		if watcher.Revoked() {
@@ -166,7 +230,6 @@ func audioStreamHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// G1: browser PCM → Volcano audio packets. Sole writer of the Volcano conn.
 	go func() {
 		defer wg.Done()
-		var total int64
 		for {
 			mt, data, rerr := bconn.ReadMessage()
 			if rerr != nil {
@@ -181,13 +244,16 @@ func audioStreamHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			if mt != websocket.BinaryMessage || len(data) == 0 {
 				continue
 			}
-			total += int64(len(data))
-			if total > audioStreamMaxBytes {
+			if sent+int64(len(data)) > maxBytes {
+				if creditCapped {
+					creditsExhausted.Store(true)
+				}
 				break
 			}
 			if serr := vsess.sendAudio(data); serr != nil {
 				break
 			}
+			sent += int64(len(data))
 		}
 		// Flush the final (negative-seq) packet so Volcano emits its last result,
 		// then keep the upstream open until G2 has drained it (or the session
@@ -229,6 +295,9 @@ func audioStreamHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 				ev := streamEvent{Type: "partial", Text: resp.Text}
 				if resp.IsLastPackage {
 					ev.Type = "final"
+					if creditsExhausted.Load() {
+						ev.Code = "credits_exhausted"
+					}
 				}
 				writeStreamEvent(bconn, ev)
 			}

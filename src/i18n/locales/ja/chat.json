@@ -226,7 +226,11 @@
       "selectedCount": "{{count}} 件のツールを選択中",
       "cancel": "キャンセル",
       "done": "完了"
-    }
+    },
+    "voiceInsufficientCredits": "クレジットが不足しているため、モデル音声認識を使えません。「設定 → モデル」でブラウザ認識に切り替えられます。",
+    "voiceCreditsExhausted": "クレジットがなくなったため、音声入力を停止しました。",
+    "voiceNoMicrophone": "マイクが見つかりません。",
+    "voiceNetwork": "ブラウザ音声認識にはネットワーク接続が必要です。接続を確認して、もう一度お試しください。"
   },
   "imageConversationTitle": "画像の会話",
   "assistant": "Aivory",
@@ -407,7 +411,18 @@
     "steps": "{{done}}/{{total}}",
     "planLabel": "リサーチプラン",
     "sourcesLabel": "ソース（{{count}}）",
-    "credibility": "情報源の信頼度 {{grade}}（A 公式/学術 … D 出所不明）"
+    "credibility": "情報源の信頼度 {{grade}}（A 公式/学術 … D 出所不明）",
+    "notesLabel": "リサーチログ",
+    "round": "ラウンド {{round}}",
+    "offTopic": "読了・関連なし",
+    "phase": {
+      "planning": "調査計画を立てています",
+      "searching": "{{count}} 件のクエリを検索中",
+      "reading": "{{count}} 件のソースを精読中",
+      "reflecting": "調査結果を振り返り、次の手を検討中",
+      "validating": "{{count}} 件のソースをクロスチェック中",
+      "writing": "レポートを執筆中"
+    }
   },
   "share": {
     "title": "会話を共有",

@@ -19,6 +19,95 @@ import { userCan } from '@/lib/user-permissions'
 import { workspaceCapabilitiesForScope } from '@/lib/workspace-permissions'
 import { useWorkspaces } from '@/store/workspaces'
 import { persistUserSettings } from '@/lib/user-settings'
+import { browserSpeechSupported } from '@/lib/browser-speech'
+import {
+  defaultSpeechEngine,
+  loadSttCapability,
+  resolveSpeechEngine,
+  speechEnginePreference,
+  type SpeechEngine,
+  type SttCapability,
+} from '@/lib/speech-recognition'
+
+/**
+ * Default speech recognition for the composer microphone (§ voice). Unset means
+ * automatic: the administrator's service when configured, else the browser's.
+ */
+function VoiceInputSettings() {
+  const { t } = useTranslation(['settings', 'common'])
+  const user = useAuth((s) => s.user)
+  const userId = user?.id
+  const [capability, setCapability] = useState<SttCapability | null>(null)
+  const [browserSupported] = useState(browserSpeechSupported)
+  const [saving, setSaving] = useState(false)
+  useEffect(() => {
+    let live = true
+    void loadSttCapability(userId).then((next) => {
+      if (live) setCapability(next)
+    })
+    return () => {
+      live = false
+    }
+  }, [userId])
+
+  const serverEnabled = Boolean(capability?.enabled)
+  const preference = speechEnginePreference(user?.settings)
+  const selected = preference ?? defaultSpeechEngine(serverEnabled)
+  const effective = capability ? resolveSpeechEngine(preference, { serverEnabled, browserSupported }) : selected
+  const engineLabel = (engine: SpeechEngine) =>
+    engine === 'model' ? t('settings:models.voiceModel') : t('settings:models.voiceBrowser')
+
+  const onPick = (value: string) => {
+    if ((value !== 'model' && value !== 'browser') || value === preference) return
+    setSaving(true)
+    void persistUserSettings({ speech_recognition: value })
+      .then(() => toast.success(t('common:actions.save')))
+      .catch((e) =>
+        toast.error(t('common:actions.failed', { defaultValue: 'Failed to save' }), e instanceof Error ? e.message : undefined),
+      )
+      .finally(() => setSaving(false))
+  }
+
+  const modelDetail = !capability
+    ? ''
+    : !serverEnabled
+      ? t('settings:models.voiceModelUnavailable')
+      : capability.creditsPerMinute > 0
+        ? t('settings:models.voiceCostPerMinute', {
+            credits: Number(capability.creditsPerMinute.toFixed(4)).toLocaleString(),
+          })
+        : t('settings:models.voiceFree')
+  const browserDetail = browserSupported ? t('settings:models.voiceFree') : t('settings:models.voiceBrowserUnsupported')
+
+  return (
+    <SettingsSection title={t('settings:models.voiceTitle')}>
+      <SettingsRow label={t('settings:models.voiceEngine')} description={t('settings:models.voiceEngineBody')}>
+        <Select value={selected} onValueChange={onPick} disabled={!capability || saving}>
+          <SelectTrigger className="w-64" aria-label={t('settings:models.voiceEngine')}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="model" disabled={!serverEnabled}>
+              {engineLabel('model')}
+              {modelDetail ? <span className="ml-1.5 text-[var(--color-fg-subtle)]">· {modelDetail}</span> : null}
+            </SelectItem>
+            <SelectItem value="browser" disabled={!browserSupported}>
+              {engineLabel('browser')}
+              <span className="ml-1.5 text-[var(--color-fg-subtle)]">· {browserDetail}</span>
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </SettingsRow>
+      {capability && effective !== selected ? (
+        <p className="px-4 pb-3 text-xs text-[var(--color-warning)]">
+          {effective
+            ? t('settings:models.voiceFallback', { engine: engineLabel(effective) })
+            : t('settings:models.voiceUnavailable')}
+        </p>
+      ) : null}
+    </SettingsSection>
+  )
+}
 
 export default function Models() {
   const models = useSettings((s) => s.models)
@@ -48,6 +137,7 @@ export default function Models() {
     policyError: workspacePolicyError,
   })
   const canDraw = userCan(user, 'allow_drawing') && workspaceCaps.drawing
+  const canUseVoice = userCan(user, 'allow_voice_transcription')
   const { t } = useTranslation(['settings', 'common'])
 
   // Image-generation model pre-selection (§4.12-B). Persists to user settings.
@@ -169,6 +259,8 @@ export default function Models() {
           </SettingsRow>
         </SettingsSection>
       ) : null}
+
+      {canUseVoice ? <VoiceInputSettings /> : null}
 
       <SettingsSection
         title={t('settings:models.custom')}

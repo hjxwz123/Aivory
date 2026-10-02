@@ -74,6 +74,7 @@ func TestModelExtraParamsFlowToEveryTaskAndFallback(t *testing.T) {
 		TaskMemoryAdjudicate,
 		TaskDowngrade,
 		TaskResearchPlan,
+		TaskResearchRead,
 		TaskResearchVerify,
 		TaskResearchValidate,
 		TaskModeration,

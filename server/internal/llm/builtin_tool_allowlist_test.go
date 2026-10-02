@@ -495,6 +495,79 @@ func TestDeepResearchDoesNotBypassBuiltinToolAllowlist(t *testing.T) {
 	}
 }
 
+func TestWithDeepResearchBuiltinToolsAddsOnlyResearchPipelineTools(t *testing.T) {
+	if got := withDeepResearchBuiltinTools(nil); got != nil {
+		t.Fatalf("default-all policy must stay default-all, got %v", got)
+	}
+	original := map[string]bool{"python_execute": true}
+	got := withDeepResearchBuiltinTools(original)
+	want := map[string]bool{"python_execute": true, "aivory_web_search": true, "web_fetch": true}
+	if len(got) != len(want) {
+		t.Fatalf("withDeepResearchBuiltinTools() = %v, want %v", got, want)
+	}
+	for name := range want {
+		if !got[name] {
+			t.Fatalf("withDeepResearchBuiltinTools() = %v, missing %q", got, name)
+		}
+	}
+	if len(original) != 1 || original["aivory_web_search"] {
+		t.Fatalf("model policy was mutated: %v", original)
+	}
+	// An explicit empty selection is still a custom list: research keeps working.
+	if got := withDeepResearchBuiltinTools(map[string]bool{}); !got["aivory_web_search"] || got["python_execute"] {
+		t.Fatalf("empty custom selection resolved to %v", got)
+	}
+}
+
+func TestDeepResearchSearchesWhenModelBuiltinToolsAreCustom(t *testing.T) {
+	run := func(t *testing.T, disabled []string, req RunRequest) []string {
+		t.Helper()
+		orchestrator, _, model, conversation, _, db := setupToolRouteTest(t)
+		// A custom model selection that deliberately omits web search.
+		if _, err := db.Exec(`UPDATE models SET builtin_tools='["python_execute"]' WHERE id=?`, model.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.SetSetting(db, "disabled_tools", disabled); err != nil {
+			t.Fatal(err)
+		}
+		registry := &recordingToolRegistry{}
+		orchestrator.tools = registry
+		req.ToolMode = ToolModeEnabled
+		req.Mode = ModeDeepResearch
+		req.UserText = "Research this topic"
+		runToolRouteTurn(t, orchestrator, model.ID, conversation.ID, req)
+		return registry.calls
+	}
+	hasSearch := func(calls []string) bool {
+		for _, name := range calls {
+			if name == "aivory_web_search" {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("model default selection does not disable research search", func(t *testing.T) {
+		if calls := run(t, []string{}, RunRequest{}); !hasSearch(calls) {
+			t.Fatalf("Deep Research did not search with a custom built-in list: %v", calls)
+		}
+	})
+	t.Run("global disable still wins", func(t *testing.T) {
+		if calls := run(t, []string{"aivory_web_search"}, RunRequest{}); hasSearch(calls) {
+			t.Fatalf("Deep Research searched although the tool is globally disabled: %v", calls)
+		}
+	})
+	t.Run("group ceiling still wins", func(t *testing.T) {
+		calls := run(t, []string{}, RunRequest{ToolAccessPolicy: &ToolAccessPolicy{
+			Mode: store.ResourceAccessSelected, IDs: []string{"builtin:python_execute"},
+			AllowDrawing: true, AllowMemory: true, AllowSkills: true,
+		}})
+		if hasSearch(calls) {
+			t.Fatalf("Deep Research searched although the group policy denies it: %v", calls)
+		}
+	})
+}
+
 func TestDeepResearchKeepsSearchEvidenceWithoutWebFetch(t *testing.T) {
 	registry := &snippetSearchRegistry{}
 	rs := &researcher{

@@ -69,19 +69,29 @@
 | `AIVORY_LLM_COMPACTION_MEDIA_INLINE_BYTES` | `int64` | `20*1024*1024` | `llm/compaction_media.go` | 为视觉模型恢复压缩图片时的总字节预算；所有图片引用都会持久化，未恢复的引用会以元数据形式标明。 |
 | `AIVORY_LLM_CHUNK_SIZE` | `int` | `400` | `llm/compaction.go:810` | 重新校验已摘要消息是否仍存在时每条 SQL IN(...) 查询的消息 ID 批大小（用于规避驱动占位符上限分块）。 |
 | `AIVORY_LLM_COMPACTION_LEASE_TTL` | `duration` | `2*time.Hour` | `llm/orchestrator.go` | 数据库支持的每会话压缩租约有效期，防止后台和手动摘要并发执行；即使多副本未配置 Redis 也会互斥。低于 `AIVORY_API_MAX_GEN_DURATION` 加最终落库余量的值会被自动抬高。 |
-| `AIVORY_LLM_DR_MAX_ROUNDS` | `int` | `4` | `llm/deep_research.go:47` | 深度研究引擎运行的 搜索再验证 轮次数量的硬性上限。 |
-| `AIVORY_LLM_DR_QUERIES_PER_ROUND` | `int` | `6` | `llm/deep_research.go:48` | 每个深度研究轮次派发的最大搜索查询数。 |
-| `AIVORY_LLM_DR_FETCH_PER_ROUND` | `int` | `5` | `llm/deep_research.go:49` | 每个深度研究轮次挑选并读取的最大新来源候选数。 |
-| `AIVORY_LLM_DR_MIN_DEEP_READS` | `int` | `5` | `llm/deep_research.go:50` | 深度研究在允许收尾前必须达到的最小深读来源数（即便覆盖缺口已看似充足）。 |
-| `AIVORY_LLM_DR_SEARCH_TOP_K` | `int` | `8` | `llm/deep_research.go:51` | 每次深度研究搜索调用请求的结果数（top_k）。 |
-| `AIVORY_LLM_DR_WALL_CLOCK` | `duration` | `5*time.Minute` | `llm/deep_research.go:52` | 限定整个深度研究引擎运行的总墙钟超时。 |
-| `AIVORY_LLM_DR_CALL_TIMEOUT` | `duration` | `30*time.Second` | `llm/deep_research.go:53` | 单次深度研究搜索或抓取请求的每调用超时。 |
-| `AIVORY_LLM_DEEP_RESEARCH_VALIDATE_TIMEOUT` | `duration` | `75*time.Second` | `llm/deep_research.go:64` | 限定深度研究在撰写前审查薄弱/单来源论断的 validate 阶段的超时。 |
-| `AIVORY_LLM_SCORE_A` | `float` | `9` | `llm/deep_research.go:67` | 为 URL 信誉等级为 A 的候选来源所加的排序分（信誉在排序中占主导）。 |
-| `AIVORY_LLM_SCORE_B` | `float` | `6` | `llm/deep_research.go:68` | 为 URL 信誉等级为 B 的候选来源所加的排序分。 |
-| `AIVORY_LLM_SCORE_C` | `float` | `3` | `llm/deep_research.go:69` | 为 URL 信誉等级为 C 的候选来源所加的排序分。 |
-| `AIVORY_LLM_SCORE_KW` | `float` | `1` | `llm/deep_research.go:70` | 候选来源标题或摘要中每命中一个问题关键词（长度大于 3）所加的排序分。 |
-| `AIVORY_LLM_SCORE_FRESH_DOMAIN` | `float` | `2` | `llm/deep_research.go:71` | 为来自本次研究尚未见过域名的候选来源所加的排序加分。 |
+| `AIVORY_LLM_DR_MAX_ROUNDS` | `int` | `8` | `llm/deep_research.go` | 深度研究引擎“搜索 → 精读 → 反思”轮次数量的硬性上限。 |
+| `AIVORY_LLM_DR_QUERIES_PER_ROUND` | `int` | `6` | `llm/deep_research.go` | 每个深度研究轮次派发的最大搜索查询数。 |
+| `AIVORY_LLM_DR_FETCH_PER_ROUND` | `int` | `8` | `llm/deep_research.go` | 每个深度研究轮次抓取并精读的最大新来源数。 |
+| `AIVORY_LLM_DR_MIN_DEEP_READS` | `int` | `12` | `llm/deep_research.go` | 反思判定“已充分”后、允许提前结束研究前必须完成精读的相关来源数；未达到时继续执行剩余查询。 |
+| `AIVORY_LLM_DR_SEARCH_TOP_K` | `int` | `8` | `llm/deep_research.go` | 每次深度研究搜索调用请求的结果数（top_k）。 |
+| `AIVORY_LLM_DR_WALL_CLOCK` | `duration` | `45*time.Minute` | `llm/deep_research.go` | 整个深度研究运行（含撰写报告）的总墙钟上限；研究轮次最多占用其中三分之二。 |
+| `AIVORY_LLM_DR_CALL_TIMEOUT` | `duration` | `30*time.Second` | `llm/deep_research.go` | 单次深度研究搜索或抓取请求的每调用超时。 |
+| `AIVORY_LLM_DR_MIN_ROUNDS` | `int` | `3` | `llm/deep_research.go` | 最少研究轮数：只要仍有后续查询或尚未执行的计划查询，至少进行这么多轮研究。 |
+| `AIVORY_LLM_DR_MAX_SUB_QUESTIONS` | `int` | `8` | `llm/deep_research.go` | 研究子问题数量上限（含初始计划和反思阶段新增的子问题）。 |
+| `AIVORY_LLM_DR_RESEARCH_BUDGET` | `duration` | `20*time.Minute` | `llm/deep_research.go` | 规划及“搜索/精读/反思”轮次的时间预算（不超过 `AIVORY_LLM_DR_WALL_CLOCK` 的三分之二）。交叉验证和撰写报告在其后使用剩余时间。 |
+| `AIVORY_LLM_DR_ROUND_RESERVE` | `duration` | `2*time.Minute` | `llm/deep_research.go` | 剩余研究时间（或深度研究工具时间）少于该值时，不再开始新一轮研究。 |
+| `AIVORY_LLM_DR_READ_SOURCES` | `bool` | `true` | `llm/deep_research.go` | 用任务模型精读每个抓取到的页面，提炼出带日期的事实、相关性判断和后续线索。关闭后报告直接使用页面原文摘录。 |
+| `AIVORY_LLM_DR_READ_BODY_CHARS` | `int` | `12000` | `llm/deep_research.go` | 单次来源精读调用可读取的页面正文字节数。 |
+| `AIVORY_LLM_DR_READ_CONCURRENCY` | `int` | `4` | `llm/deep_research.go` | 并行执行的来源精读调用数。 |
+| `AIVORY_LLM_DR_READ_TIMEOUT` | `duration` | `90*time.Second` | `llm/deep_research.go` | 单次来源精读调用的超时；失败时该来源保留原文摘录。 |
+| `AIVORY_LLM_DR_REFLECT_TIMEOUT` | `duration` | `2*time.Minute` | `llm/deep_research.go` | 单次轮间反思调用的超时。 |
+| `AIVORY_LLM_DR_WRITER_SOURCE_CHARS` | `int` | `100000` | `llm/deep_research.go` | 撰写报告提示词中全部来源材料的字节预算；优先放入精读笔记，剩余额度分配给原文摘录。 |
+| `AIVORY_LLM_DEEP_RESEARCH_VALIDATE_TIMEOUT` | `duration` | `3*time.Minute` | `llm/deep_research.go` | 深度研究在撰写前将精读笔记交叉验证为已证实/有争议/未验证结论这一阶段的超时。 |
+| `AIVORY_LLM_SCORE_A` | `float` | `9` | `llm/deep_research.go` | 为 URL 信誉等级为 A 的候选来源所加的排序分（信誉在排序中占主导）。 |
+| `AIVORY_LLM_SCORE_B` | `float` | `6` | `llm/deep_research.go` | 为 URL 信誉等级为 B 的候选来源所加的排序分。 |
+| `AIVORY_LLM_SCORE_C` | `float` | `3` | `llm/deep_research.go` | 为 URL 信誉等级为 C 的候选来源所加的排序分。 |
+| `AIVORY_LLM_SCORE_KW` | `float` | `1` | `llm/deep_research.go` | 候选来源标题或摘要中每命中一个问题关键词（长度大于 3）所加的排序分。 |
+| `AIVORY_LLM_SCORE_FRESH_DOMAIN` | `float` | `2` | `llm/deep_research.go` | 为来自本次研究尚未见过域名的候选来源所加的排序加分。 |
 | `AIVORY_LLM_MAX_ITER_4` | `int` | `20` | `llm/google_provider.go:68` | Gemini 流式 Stream 循环中原生工具调用轮次（generateContent 调用次数）的硬性上限。 |
 | `AIVORY_LLM_GEMINI_MAX_TOK` | `int` | `64000` | `llm/google_provider.go:78` | Gemini 流式循环中每次请求 generationConfig.maxOutputTokens 的默认值（除非请求覆盖）。 |
 | `AIVORY_LLM_GEMINI_MAX_TOK_2` | `int` | `64000` | `llm/google_provider.go:472` | Gemini 提示词工具模式调用中 generationConfig.maxOutputTokens 的默认值（除非请求覆盖）。 |
@@ -107,15 +117,15 @@
 | `AIVORY_LLM_FAST_TOOL_LIMITS_FETCH_IMAGE` | `int` | `0` | `llm/orchestrator.go` | 快速模式下 fetch_image 系统工具的调用上限；设为 `0` 时隐藏，设为正数时仍需满足原有依赖和权限。 |
 | `AIVORY_LLM_FAST_TOOL_LIMITS_IMAGE_GENERATE` | `int` | `2` | `llm/orchestrator.go` | 快速模式下 image_generate 系统工具的调用上限；设为 `0` 时隐藏。 |
 | `AIVORY_LLM_FAST_TOOL_LIMITS_PYTHON_EXECUTE` | `int` | `0` | `llm/orchestrator.go` | 快速模式下 python_execute 系统工具的调用上限；设为 `0` 时隐藏，设为正数时仍需已配置沙箱并满足原有权限。 |
-| `AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_SEARCH` | `int` | `40` | `llm/orchestrator.go:157` | 深度研究运行时每条消息允许的 `aivory_web_search` 调用次数上限；超出即令该调用失败。 |
-| `AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_FETCH` | `int` | `25` | `llm/orchestrator.go:158` | 深度研究运行时每条消息允许的 web_fetch 调用次数上限；超出即令该调用失败。 |
+| `AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_SEARCH` | `int` | `60` | `llm/orchestrator.go:157` | 深度研究运行时每条消息允许的 `aivory_web_search` 调用次数上限；超出即令该调用失败。 |
+| `AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_FETCH` | `int` | `64` | `llm/orchestrator.go:158` | 深度研究运行时每条消息允许的 web_fetch 调用次数上限；超出即令该调用失败。 |
 | `AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_IMAGE_GENERATE` | `int` | `4` | `llm/orchestrator.go:160` | 深度研究运行时每条消息允许的 image_generate 调用次数上限；超出即令该调用失败。 |
 | `AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_PYTHON_EXECUTE` | `int` | `8` | `llm/orchestrator.go:161` | 深度研究运行时每条消息允许的 python_execute 沙箱执行次数上限；超出即令该调用失败。 |
 | `AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN` | `int` | `48` | `llm/orchestrator.go:169` | 普通模式下每条消息跨所有工具的工具调用总数全局上限，叠加在各工具单独上限之上。 |
-| `AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN_DEEP` | `int` | `150` | `llm/orchestrator.go:170` | 深度研究运行时每条消息跨所有工具的工具调用总数全局上限。 |
+| `AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN_DEEP` | `int` | `200` | `llm/orchestrator.go:170` | 深度研究运行时每条消息跨所有工具的工具调用总数全局上限。 |
 | `AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN_FAST` | `int` | `12` | `llm/orchestrator.go` | 快速模式下系统工具的独立调用总数上限；服务商托管工具保持可用且不计入。 |
 | `AIVORY_LLM_MAX_TOOL_TIME_PER_TURN` | `duration` | `15*time.Minute` | `llm/orchestrator.go` | 普通消息中所有工具执行的累计墙钟时间预算。耗尽后移除全部工具，并仅允许模型执行一次无工具收尾请求。设为非正值可禁用该时间预算。 |
-| `AIVORY_LLM_MAX_TOOL_TIME_PER_TURN_DEEP` | `duration` | `4*time.Minute` | `llm/orchestrator.go` | 深度研究的累计工具执行时间预算，在五分钟研究窗口内为一次无工具报告写作请求预留时间。设为非正值可禁用该时间预算。 |
+| `AIVORY_LLM_MAX_TOOL_TIME_PER_TURN_DEEP` | `duration` | `25*time.Minute` | `llm/orchestrator.go` | 深度研究的工具时间预算，从首次工具调用开始计时。应大于 `AIVORY_LLM_DR_RESEARCH_BUDGET`，否则研究轮次会提前停止。设为非正值可禁用该时间预算。 |
 | `AIVORY_LLM_MAX_TOOL_TIME_PER_TURN_FAST` | `duration` | `3*time.Minute` | `llm/orchestrator.go` | 快速模式的累计工具执行时间预算，耗尽后仅执行一次无工具收尾请求。设为非正值可禁用该时间预算。 |
 | `AIVORY_LLM_TOOL_TIMEOUTS` | `duration` | `10*time.Second` | `llm/orchestrator.go:2326` | 单次 `aivory_web_search` 工具调用的每次调用超时上限。 |
 | `AIVORY_LLM_TOOL_TIMEOUTS_2` | `duration` | `60*time.Second` | `llm/orchestrator_automation.go` | 单次 web_fetch 的超时上限，为直连尝试后的 Jina 降级保留足够时间。 |

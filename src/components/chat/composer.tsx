@@ -104,6 +104,15 @@ import {
 import { skillDisplayDescription } from '@/lib/skill-description'
 import { encodeWavFromBlob } from '@/lib/audio'
 import { startVoiceStream, type VoiceStreamController } from '@/lib/audio-stream'
+import {
+  browserSpeechSupported,
+  joinTranscript,
+  speechLangFor,
+  startBrowserSpeech,
+  type BrowserSpeechController,
+  type BrowserSpeechError,
+} from '@/lib/browser-speech'
+import { loadSttCapability, resolveSpeechEngine, speechEnginePreference } from '@/lib/speech-recognition'
 import { ProgressRing } from '@/components/ui/progress-ring'
 import { SkillIcon } from '@/components/ui/skill-icon'
 import { envNum } from '@/lib/env-config'
@@ -119,7 +128,7 @@ import {
 } from './rich-composer-editor'
 import { FormulaEditorDialog } from './formula-editor-dialog'
 import { ToolSelectionDialog } from './tool-selection-dialog'
-import { modelHasBuiltinTools, modelSupportsBuiltinTool } from '@/lib/builtin-tools'
+import { modelHasBuiltinTools, modelSupportsBuiltinTool, modelSupportsResearchTools } from '@/lib/builtin-tools'
 import { hasImageAttachment, hasSendableMessageContent } from '@/lib/chat-message-input'
 import { knowledgeBaseSelectionContext } from '@/lib/knowledge-base-selection'
 import { userCan } from '@/lib/user-permissions'
@@ -257,23 +266,26 @@ function unmarkFileCommitted(id: string) {
   committedFileIds.delete(id)
 }
 
-// Speech-to-text capability is shared across composer instances. Besides the
-// provider, the backend reports whether its required credentials exist so the
-// prominent empty-draft action never records a clip it cannot transcribe.
-interface SttCapability {
-  provider: string
-  enabled: boolean
+/** A voice-transcription failure caused by the caller's credit balance. */
+function isInsufficientCreditsError(e: unknown): boolean {
+  if (!(e instanceof ApiError) || e.status !== 402) return false
+  const body = e.body as { code?: unknown } | null
+  return body?.code === 'insufficient_credits'
 }
 
-let sttCapabilityPromise: Promise<SttCapability> | null = null
-function loadSttCapability(): Promise<SttCapability> {
-  if (!sttCapabilityPromise) {
-    sttCapabilityPromise = audioApi
-      .capabilities()
-      .then((c) => ({ provider: c.provider || 'gpt', enabled: Boolean(c.enabled) }))
-      .catch(() => ({ provider: 'gpt', enabled: false }))
+function browserSpeechErrorKey(error: BrowserSpeechError): string {
+  switch (error) {
+    case 'permission':
+      return 'composer.voicePermission'
+    case 'no-microphone':
+      return 'composer.voiceNoMicrophone'
+    case 'network':
+      return 'composer.voiceNetwork'
+    case 'unsupported':
+      return 'composer.voiceUnsupported'
+    default:
+      return 'composer.voiceFailed'
   }
-  return sttCapabilityPromise
 }
 
 // §4.6-A upload size caps. The /api/files handler is authoritative; the image
@@ -726,10 +738,11 @@ export function Composer({
   onKBChange,
   modelPickerInHeader = false,
 }: ComposerProps) {
-  const { t } = useTranslation(['chat', 'library'])
+  const { t, i18n } = useTranslation(['chat', 'library'])
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const user = useAuth((state) => state.user)
+  const userId = user?.id
   const activeWorkspaceId = useWorkspaces((state) => state.activeId ?? undefined)
   const workspaceId = scopedWorkspaceId !== undefined ? scopedWorkspaceId ?? undefined : activeWorkspaceId
   const workspacesLoaded = useWorkspaces((state) => state.loaded)
@@ -1230,7 +1243,22 @@ export function Composer({
   // `streamConnecting` covers the mic-acquire + socket-connect gap before audio
   // flows. streamBaseRef holds the composer text the live transcript appends to.
   const [sttProvider, setSttProvider] = useState('gpt')
-  const [voiceEnabled, setVoiceEnabled] = useState(false)
+  // § voice engine: the user's default (Settings → Models) resolved against what
+  // works here — the administrator's service ("model") and/or the browser's own
+  // Web Speech engine ("browser"). Nothing is enabled until the server
+  // capability is known, so a click can never pick the wrong engine.
+  const [serverVoiceEnabled, setServerVoiceEnabled] = useState(false)
+  const [sttLoaded, setSttLoaded] = useState(false)
+  const [browserSpeechAvailable] = useState(browserSpeechSupported)
+  const speechEngine = sttLoaded
+    ? resolveSpeechEngine(speechEnginePreference(user?.settings), {
+        serverEnabled: serverVoiceEnabled,
+        browserSupported: browserSpeechAvailable,
+      })
+    : null
+  const voiceEnabled = speechEngine !== null
+  const browserSpeechRef = useRef<BrowserSpeechController | null>(null)
+  const recordStartedAtRef = useRef(0)
   const [voiceStarting, setVoiceStarting] = useState(false)
   const [streamConnecting, setStreamConnecting] = useState(false)
   const streamCtlRef = useRef<VoiceStreamController | null>(null)
@@ -1252,6 +1280,8 @@ export function Composer({
       streamAttemptRef.current += 1
       streamCtlRef.current?.cancel()
       streamCtlRef.current = null
+      browserSpeechRef.current?.cancel()
+      browserSpeechRef.current = null
       const recorder = recorderRef.current
       if (recorder && recorder.state !== 'inactive') {
         recorder.ondataavailable = null
@@ -1266,20 +1296,22 @@ export function Composer({
       setStreamConnecting(false)
       setRecording(false)
       setTranscribing(false)
-      setVoiceEnabled(false)
+      setServerVoiceEnabled(false)
+      setSttLoaded(false)
       return
     }
     let live = true
-    void loadSttCapability().then((capability) => {
+    void loadSttCapability(userId).then((capability) => {
       if (live) {
         setSttProvider(capability.provider)
-        setVoiceEnabled(capability.enabled)
+        setServerVoiceEnabled(capability.enabled)
+        setSttLoaded(true)
       }
     })
     return () => {
       live = false
     }
-  }, [canUseVoice])
+  }, [canUseVoice, userId])
 
   // Never leave the mic hot / a socket open when the composer unmounts. The
   // recorded-clip path needs explicit track cleanup too; stopping only the live
@@ -1291,6 +1323,8 @@ export function Composer({
       transcriptionAttemptRef.current += 1
       streamAttemptRef.current += 1
       streamCtlRef.current?.cancel()
+      browserSpeechRef.current?.cancel()
+      browserSpeechRef.current = null
       const recorder = recorderRef.current
       if (recorder && recorder.state !== 'inactive') {
         recorder.ondataavailable = null
@@ -1345,8 +1379,18 @@ export function Composer({
   // transcribes it. A second click always stops whatever is active.
   async function toggleVoice() {
     if (!canUseVoice || !voiceEnabled || transcribing) return
-    if (voiceStartingRef.current || recording || streamConnecting || streamCtlRef.current) {
+    if (
+      voiceStartingRef.current ||
+      recording ||
+      streamConnecting ||
+      streamCtlRef.current ||
+      browserSpeechRef.current
+    ) {
       stopVoice()
+      return
+    }
+    if (speechEngine === 'browser') {
+      startBrowserRecognition()
       return
     }
     if (sttProvider === 'volcano') {
@@ -1361,6 +1405,13 @@ export function Composer({
       voiceStartAttemptRef.current += 1
       voiceStartingRef.current = false
       setVoiceStarting(false)
+      return
+    }
+    if (browserSpeechRef.current) {
+      // Listening (or still waiting for the browser to start) → stop and let
+      // the engine deliver its final words.
+      setTranscribing(true)
+      browserSpeechRef.current.stop()
       return
     }
     if (streamCtlRef.current) {
@@ -1398,14 +1449,17 @@ export function Composer({
         onPartial: (text) => {
           if (streamAttemptRef.current === attempt) updateValue(streamBaseRef.current + text)
         },
-        onFinal: (text) => {
-          if (streamAttemptRef.current === attempt && text) {
+        onFinal: (text, code) => {
+          if (streamAttemptRef.current !== attempt) return
+          if (text) {
             updateValue(streamBaseRef.current + text)
             requestAnimationFrame(() => ref.current?.focus('end'))
           }
+          if (code === 'credits_exhausted') toast.error(t('composer.voiceCreditsExhausted'))
         },
-        onError: () => {
-          if (streamAttemptRef.current === attempt) toast.error(t('composer.voiceFailed'))
+        onError: (_message, code) => {
+          if (streamAttemptRef.current !== attempt) return
+          toast.error(code === 'insufficient_credits' ? t('composer.voiceInsufficientCredits') : t('composer.voiceFailed'))
         },
         onClose: () => {
           if (streamAttemptRef.current !== attempt) return
@@ -1425,6 +1479,48 @@ export function Composer({
       setStreamConnecting(false)
       const msg = e instanceof Error ? e.message : ''
       toast.error(msg === 'unsupported' ? t('composer.voiceUnsupported') : t('composer.voicePermission'))
+    }
+  }
+
+  // Browser path (§ voice): the browser's own Web Speech engine — free and never
+  // routed through our server. Like the Volcano path, the live transcript is
+  // appended to whatever text the composer held when listening started.
+  function startBrowserRecognition() {
+    const attempt = streamAttemptRef.current + 1
+    streamAttemptRef.current = attempt
+    const base = valueRef.current
+    const withBase = (text: string) => (text ? joinTranscript(base, text) : base)
+    setStreamConnecting(true)
+    try {
+      browserSpeechRef.current = startBrowserSpeech(speechLangFor(i18n.resolvedLanguage ?? i18n.language), {
+        onStart: () => {
+          if (streamAttemptRef.current !== attempt) return
+          setStreamConnecting(false)
+          setRecording(true)
+        },
+        onPartial: (text) => {
+          if (streamAttemptRef.current === attempt) updateValue(withBase(text))
+        },
+        onFinal: (text) => {
+          if (streamAttemptRef.current !== attempt || !text) return
+          updateValue(withBase(text))
+          requestAnimationFrame(() => ref.current?.focus('end'))
+        },
+        onError: (error) => {
+          if (streamAttemptRef.current === attempt) toast.error(t(browserSpeechErrorKey(error)))
+        },
+        onEnd: () => {
+          if (streamAttemptRef.current !== attempt) return
+          browserSpeechRef.current = null
+          setRecording(false)
+          setStreamConnecting(false)
+          setTranscribing(false)
+        },
+      })
+    } catch {
+      browserSpeechRef.current = null
+      setStreamConnecting(false)
+      toast.error(t('composer.voiceUnsupported'))
     }
   }
 
@@ -1471,10 +1567,11 @@ export function Composer({
         const blob = new Blob(chunksRef.current, { type: rec.mimeType || 'audio/webm' })
         if (blob.size === 0) return
         setTranscribing(true)
-        void transcribeRecording(blob)
+        void transcribeRecording(blob, performance.now() - recordStartedAtRef.current)
       }
       recorderRef.current = rec
       rec.start()
+      recordStartedAtRef.current = performance.now()
       setRecording(true)
     } catch {
       stream.getTracks().forEach((track) => track.stop())
@@ -1488,7 +1585,7 @@ export function Composer({
   // duration parsing requires full EBML parser"). Re-encode to a 16 kHz mono WAV
   // (explicit duration, speech-model-native rate); fall back to the raw recording
   // if the browser can't decode it.
-  async function transcribeRecording(blob: Blob) {
+  async function transcribeRecording(blob: Blob, durationMs: number) {
     const attempt = transcriptionAttemptRef.current + 1
     transcriptionAttemptRef.current = attempt
     try {
@@ -1500,7 +1597,7 @@ export function Composer({
       } catch {
         /* browser can't decode — send the original recording as-is */
       }
-      const { text } = await audioApi.transcribe(sendBlob, filename)
+      const { text } = await audioApi.transcribe(sendBlob, filename, durationMs)
       if (text && canUseVoice && transcriptionAttemptRef.current === attempt) {
         const current = valueRef.current
         updateValue((current.trim() ? current.trimEnd() + ' ' : '') + text)
@@ -1508,7 +1605,13 @@ export function Composer({
       }
     } catch (e) {
       if (canUseVoice && transcriptionAttemptRef.current === attempt) {
-        toast.error(e instanceof ApiError ? e.message : t('composer.voiceFailed'))
+        toast.error(
+          isInsufficientCreditsError(e)
+            ? t('composer.voiceInsufficientCredits')
+            : e instanceof ApiError
+              ? e.message
+              : t('composer.voiceFailed'),
+        )
       }
     } finally {
       if (transcriptionAttemptRef.current === attempt) setTranscribing(false)
@@ -1576,7 +1679,11 @@ export function Composer({
   // Deep Research is implemented through the web-search tool. A workspace-wide
   // tool ban therefore removes the mode itself, not just its underlying tool,
   // so the composer can never advertise a mode that the turn cannot execute.
-  const researchEnabled = workspaceCaps.toolCalling && groupResearchEnabled && modelResearchEnabled && supportsWebSearch
+  // It runs its own search pipeline, so the model's default built-in tool
+  // selection (supportsWebSearch) deliberately does not gate it.
+  const researchToolsAvailable = !isImageMode && modelSupportsResearchTools(currentModel)
+  const researchEnabled =
+    workspaceCaps.toolCalling && groupResearchEnabled && modelResearchEnabled && researchToolsAvailable
   // §verify: only offer the toggle when an admin has configured an auditor model.
   const verifyAvailable = useModels((s) => s.verifyAvailable)
   const paramControls = currentModel?.param_controls
