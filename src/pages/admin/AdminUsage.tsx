@@ -52,6 +52,7 @@ const TASK_PURPOSES = [
   'task.tool_route',
   'task.search_queries',
   'task.research_plan',
+  'task.research_read',
   'task.research_verify',
   'task.research_validate',
   'task.moderation',
@@ -301,6 +302,8 @@ export default function AdminUsage() {
               {/* AI PPT calls: credit-only rows with no model or tokens, so they
                   would otherwise be hard to isolate in the list. */}
               <SelectItem value="ppt">{purposeLabel('ppt')}</SelectItem>
+              {/* Server-side speech recognition, billed per second (§ voice). */}
+              <SelectItem value="audio.transcription">{purposeLabel('audio.transcription')}</SelectItem>
               {/* "task" is the backend umbrella matching every task.* sub-purpose */}
               <SelectItem value="task">
                 {t('usage.filters.taskAll', { defaultValue: 'All internal model tasks' })}

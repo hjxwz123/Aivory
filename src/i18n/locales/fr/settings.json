@@ -290,7 +290,18 @@
     "charactersOf": "{{used}} / {{max}} caractères",
     "available": "Modèles disponibles",
     "locked": "Verrouillé",
-    "upgradeMocked": "La mise à niveau du forfait est simulée."
+    "upgradeMocked": "La mise à niveau du forfait est simulée.",
+    "voiceTitle": "Saisie vocale",
+    "voiceEngine": "Reconnaissance vocale par défaut",
+    "voiceEngineBody": "La reconnaissance par modèle utilise le service configuré par votre administrateur et peut consommer des crédits selon la durée de l'audio. La reconnaissance du navigateur utilise son moteur intégré : gratuite, mais sa qualité dépend du navigateur.",
+    "voiceModel": "Reconnaissance par modèle",
+    "voiceBrowser": "Reconnaissance du navigateur",
+    "voiceCostPerMinute": "environ {{credits}} crédits/min",
+    "voiceFree": "gratuit",
+    "voiceModelUnavailable": "non configurée",
+    "voiceBrowserUnsupported": "non prise en charge par ce navigateur",
+    "voiceFallback": "L'option choisie n'est pas disponible ici : {{engine}} est utilisée à la place.",
+    "voiceUnavailable": "Aucune reconnaissance vocale n'est disponible ici."
   },
   "privacy": {
     "title": "Confidentialité et données",

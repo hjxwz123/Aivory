@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"mime/multipart"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -77,9 +79,45 @@ func transcribeAudioHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
+	// Read through a capped reader so an oversized upload can't balloon memory.
+	audio, err := io.ReadAll(io.LimitReader(file, maxAudioBytes))
+	if err != nil {
+		writeError(w, 400, errors.New("audio file could not be read"))
+		return
+	}
 
-	// Re-package as multipart for the upstream call. Stream through a capped
-	// reader so an oversized upload can't balloon memory.
+	// § voice billing: measure the clip, then hold its price before any upstream
+	// spend. A WAV upload (what the composer sends) is measured exactly from its
+	// samples; anything else uses the recorder's reported duration, or a
+	// conservative size-based estimate, and is trued up against the length the
+	// upstream reports.
+	billing := audioBillingFor(d, u)
+	sourceID := store.GenID("asr")
+	seconds, exact := wavDurationSeconds(audio)
+	if !exact {
+		seconds = reportedAudioSeconds(r.FormValue("duration_ms"))
+		if seconds <= 0 {
+			seconds = float64(len(audio)) / audioFallbackBytesPerSecond
+		}
+	}
+	settled := false
+	if billing != nil {
+		if err := billing.reserve(r.Context(), d, sourceID, billableSeconds(seconds)); err != nil {
+			if errors.Is(err, errAudioInsufficientCredits) {
+				writeJSON(w, http.StatusPaymentRequired, map[string]string{"error": err.Error(), "code": "insufficient_credits"})
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		defer func() {
+			if !settled {
+				billing.release(r.Context(), d, sourceID)
+			}
+		}()
+	}
+
+	// Re-package as multipart for the upstream call.
 	body := &bytes.Buffer{}
 	mw := multipart.NewWriter(body)
 	filename := header.Filename
@@ -91,7 +129,7 @@ func transcribeAudioHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
-	if _, err := io.Copy(part, io.LimitReader(file, maxAudioBytes)); err != nil {
+	if _, err := part.Write(audio); err != nil {
 		writeError(w, 500, err)
 		return
 	}
@@ -149,7 +187,37 @@ func transcribeAudioHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, errVoiceGroupPermission)
 		return
 	}
+	if !exact {
+		seconds = math.Max(seconds, upstreamAudioSeconds(respBytes))
+	}
+	billed := billableSeconds(seconds)
+	credits := 0.0
+	if billing != nil {
+		settled = true
+		debit, err := billing.settle(r.Context(), d, sourceID, billed)
+		if err != nil {
+			// The transcript was already produced; deliver it and leave the
+			// shortfall in the log rather than discarding the user's speech.
+			if d.Logger != nil {
+				d.Logger.Printf("voice charge failed (user=%s source=%s seconds=%d): %v", u.ID, sourceID, billed, err)
+			}
+		} else {
+			credits = debit.Total
+		}
+	}
+	recordAudioUsage(r.Context(), d, u.ID, sourceID, billed, billing, credits)
 	writeJSON(w, 200, map[string]string{"text": strings.TrimSpace(parsed.Text)})
+}
+
+// reportedAudioSeconds parses the recorder's duration hint (milliseconds) for a
+// non-WAV upload. It only ever raises the bill (the upstream-reported length is
+// taken when larger) and is capped so a bogus value cannot block a balance.
+func reportedAudioSeconds(raw string) float64 {
+	ms, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+	if err != nil || ms <= 0 || math.IsNaN(ms) || math.IsInf(ms, 0) {
+		return 0
+	}
+	return math.Min(ms/1000, audioMaxReportedSeconds)
 }
 
 // settingString reads a JSON-string setting, falling back to def when unset.

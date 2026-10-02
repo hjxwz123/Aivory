@@ -123,13 +123,28 @@ export interface ResearchSource {
   url: string
   title: string
   domain: string
+  /** found → kept (read and relevant) | read (read, judged off-topic) | failed */
   status: 'found' | 'read' | 'kept' | 'failed'
   verdict?: string
+}
+/** One research-log entry: the engine's reflection after a round. */
+export interface ResearchNote {
+  id: string
+  text: string
+  round?: number
+}
+/** What the engine is doing right now. Live only — never persisted. */
+export interface ResearchPhase {
+  name: 'planning' | 'searching' | 'reading' | 'reflecting' | 'validating' | 'writing' | (string & {})
+  round?: number
+  count?: number
 }
 export interface ResearchState {
   title: string
   tasks: ResearchTask[]
   sources: ResearchSource[]
+  notes?: ResearchNote[]
+  phase?: ResearchPhase
   rounds?: number
 }
 

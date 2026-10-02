@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	neturl "net/url"
 	"strings"
@@ -73,11 +74,15 @@ var (
 // admin settings table (see settingsKeys); the API key and API base URL also
 // honour environment fallbacks so a self-hoster can wire it without the UI.
 type docmeeConfig struct {
-	Enabled       bool
-	APIKey        string
-	APIBaseURL    string
-	CreditsPerPPT float64
-	TokenHours    int
+	Enabled    bool
+	APIKey     string
+	APIBaseURL string
+	// PricePerPPTUSD is the administrator's USD price per generated deck;
+	// CreditsPerPPT is what one deck debits at the current credits_per_usd rate
+	// (see docmeePrice). EditPriceUSD / EditCredits are the same pair per edit.
+	PricePerPPTUSD float64
+	CreditsPerPPT  float64
+	TokenHours     int
 	// Editor surface (vendor iframe): creation runs on our own UI, but real
 	// slide-level editing is only possible in Docmee's editor, which is loaded
 	// from SDKURL and needs DOMAIN on the international build.
@@ -85,9 +90,28 @@ type docmeeConfig struct {
 	Domain string
 	// API-mode settings: what one edit costs the user, the fallback template when
 	// the picker has nothing selected, and the per-file cap for upload inputs.
+	EditPriceUSD      float64
 	EditCredits       float64
 	DefaultTemplateID string
 	MaxUploadMB       int
+}
+
+// docmeePrice resolves one AI PPT price. A saved USD price is authoritative and
+// converts at the current credits_per_usd rate. Until an administrator saves
+// one, the legacy credit-denominated setting keeps charging exactly what it did
+// before USD pricing existed, and its USD equivalent is reported for display.
+func docmeePrice(d Deps, usdKey, legacyCreditsKey string, legacyDefault, ratio float64) (usd, credits float64) {
+	if raw, err := store.GetSetting(d.DB, usdKey); err == nil && len(bytes.TrimSpace(raw)) > 0 && string(bytes.TrimSpace(raw)) != "null" {
+		var price float64
+		if json.Unmarshal(raw, &price) == nil && price >= 0 && !math.IsNaN(price) && !math.IsInf(price, 0) {
+			return price, roundCreditMicros(price * ratio)
+		}
+	}
+	credits = docmeeSettingFloat(d, legacyCreditsKey, legacyDefault)
+	if ratio > 0 {
+		usd = credits / ratio
+	}
+	return usd, credits
 }
 
 // editBillingEnabled mirrors billingEnabled for the edit operations (AI rewrite /
@@ -168,12 +192,13 @@ func docmeeConfigFor(d Deps) docmeeConfig {
 		APIBaseURL:        docmeeSettingString(d, "docmee_api_base_url", "DOCMEE_API_BASE_URL", docmeeDefaultAPIBaseURL),
 		SDKURL:            docmeeSettingString(d, "docmee_sdk_url", "DOCMEE_SDK_URL", docmeeDefaultSDKURL),
 		Domain:            docmeeSettingString(d, "docmee_domain", "DOCMEE_DOMAIN", ""),
-		CreditsPerPPT:     docmeeSettingFloat(d, "docmee_credits_per_ppt", docmeeDefaultCreditsPerPPT),
 		TokenHours:        docmeeSettingInt(d, "docmee_token_hours", docmeeDefaultTokenHours),
-		EditCredits:       docmeeSettingFloat(d, "docmee_edit_credits", 0),
 		DefaultTemplateID: docmeeSettingString(d, "docmee_default_template_id", "", ""),
 		MaxUploadMB:       docmeeSettingInt(d, "docmee_max_upload_mb", docmeeDefaultMaxUploadMB),
 	}
+	ratio := globalCreditsPerUSD(d)
+	cfg.PricePerPPTUSD, cfg.CreditsPerPPT = docmeePrice(d, "docmee_price_per_ppt_usd", "docmee_credits_per_ppt", docmeeDefaultCreditsPerPPT, ratio)
+	cfg.EditPriceUSD, cfg.EditCredits = docmeePrice(d, "docmee_edit_price_usd", "docmee_edit_credits", 0, ratio)
 	// An unset enable flag follows the key: present key ⇒ feature on. Storing an
 	// explicit false always wins, so an admin can park the integration without
 	// deleting credentials.
@@ -330,13 +355,17 @@ func meDocmeeConfigHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{
-		"enabled":           cfg.configured() && allowed,
-		"allowed":           allowed,
-		"configured":        strings.TrimSpace(cfg.APIKey) != "",
-		"credits_enabled":   cfg.billingEnabled(d),
+		"enabled":         cfg.configured() && allowed,
+		"allowed":         allowed,
+		"configured":      strings.TrimSpace(cfg.APIKey) != "",
+		"credits_enabled": cfg.billingEnabled(d),
+		// Prices are set in USD; credits_per_ppt / edit_credits are what one
+		// deck / edit debits at the current credits_per_usd rate.
+		"price_per_ppt_usd": cfg.PricePerPPTUSD,
 		"credits_per_ppt":   cfg.CreditsPerPPT,
 		"credits_available": balance.Available,
 		// API-mode fields (self-built UI, § AI PPT).
+		"edit_price_usd":       cfg.EditPriceUSD,
 		"edit_credits":         cfg.EditCredits,
 		"edit_credits_enabled": cfg.editBillingEnabled(d),
 		"default_template_id":  cfg.DefaultTemplateID,

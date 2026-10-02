@@ -67,19 +67,29 @@
 | `AIVORY_LLM_COMPACTION_MEDIA_INLINE_BYTES` | `int64` | `20*1024*1024` | `llm/compaction_media.go` | Aggregate byte budget used when rehydrating compacted images for a vision model; all image references remain persisted and excluded references are reported as metadata. |
 | `AIVORY_LLM_CHUNK_SIZE` | `int` | `400` | `llm/compaction.go:810` | Message-ID batch size per SQL IN(...) query when re-checking that summarised messages still exist (driver placeholder-limit chunking). |
 | `AIVORY_LLM_COMPACTION_LEASE_TTL` | `duration` | `2*time.Hour` | `llm/orchestrator.go` | TTL of the database-backed per-conversation compaction lease used to prevent background and manual summaries from running concurrently, including across replicas without Redis. Values below `AIVORY_API_MAX_GEN_DURATION` plus the finalisation margin are raised automatically. |
-| `AIVORY_LLM_DR_MAX_ROUNDS` | `int` | `4` | `llm/deep_research.go:47` | Hard cap on the number of search-then-verify rounds the deep-research engine runs. |
-| `AIVORY_LLM_DR_QUERIES_PER_ROUND` | `int` | `6` | `llm/deep_research.go:48` | Maximum search queries dispatched per deep-research round. |
-| `AIVORY_LLM_DR_FETCH_PER_ROUND` | `int` | `5` | `llm/deep_research.go:49` | Maximum new source candidates picked and read per deep-research round. |
-| `AIVORY_LLM_DR_MIN_DEEP_READS` | `int` | `5` | `llm/deep_research.go:50` | Minimum deep-read sources required before deep research may settle, even once coverage gaps look sufficient. |
-| `AIVORY_LLM_DR_SEARCH_TOP_K` | `int` | `8` | `llm/deep_research.go:51` | Number of results requested per deep-research search call (top_k). |
-| `AIVORY_LLM_DR_WALL_CLOCK` | `duration` | `5*time.Minute` | `llm/deep_research.go:52` | Overall wall-clock timeout bounding an entire deep-research engine run. |
-| `AIVORY_LLM_DR_CALL_TIMEOUT` | `duration` | `30*time.Second` | `llm/deep_research.go:53` | Per-call timeout for an individual deep-research search or fetch request. |
-| `AIVORY_LLM_DEEP_RESEARCH_VALIDATE_TIMEOUT` | `duration` | `75*time.Second` | `llm/deep_research.go:64` | Timeout bounding the deep-research validate pass that scrutinises weak/single-source claims before writing. |
-| `AIVORY_LLM_SCORE_A` | `float` | `9` | `llm/deep_research.go:67` | Ranking score added to a candidate source whose URL is credibility grade A (credibility dominates ranking). |
-| `AIVORY_LLM_SCORE_B` | `float` | `6` | `llm/deep_research.go:68` | Ranking score added to a candidate source whose URL is credibility grade B. |
-| `AIVORY_LLM_SCORE_C` | `float` | `3` | `llm/deep_research.go:69` | Ranking score added to a candidate source whose URL is credibility grade C. |
-| `AIVORY_LLM_SCORE_KW` | `float` | `1` | `llm/deep_research.go:70` | Ranking score added per question keyword (over 3 chars) found in a candidate's title or snippet. |
-| `AIVORY_LLM_SCORE_FRESH_DOMAIN` | `float` | `2` | `llm/deep_research.go:71` | Ranking bonus added to a candidate from a domain not yet seen in this research run. |
+| `AIVORY_LLM_DR_MAX_ROUNDS` | `int` | `8` | `llm/deep_research.go` | Hard cap on the search → read → reflect rounds the deep-research engine runs. |
+| `AIVORY_LLM_DR_QUERIES_PER_ROUND` | `int` | `6` | `llm/deep_research.go` | Maximum search queries dispatched per deep-research round. |
+| `AIVORY_LLM_DR_FETCH_PER_ROUND` | `int` | `8` | `llm/deep_research.go` | Maximum new sources fetched and read per deep-research round. |
+| `AIVORY_LLM_DR_MIN_DEEP_READS` | `int` | `12` | `llm/deep_research.go` | Relevant sources that must have been read in full before a reflection's "sufficient" verdict may end the research; until then the engine keeps working through remaining queries. |
+| `AIVORY_LLM_DR_SEARCH_TOP_K` | `int` | `8` | `llm/deep_research.go` | Number of results requested per deep-research search call (top_k). |
+| `AIVORY_LLM_DR_WALL_CLOCK` | `duration` | `45*time.Minute` | `llm/deep_research.go` | Backstop for an entire deep-research run, report included; the research rounds get at most two thirds of it. |
+| `AIVORY_LLM_DR_CALL_TIMEOUT` | `duration` | `30*time.Second` | `llm/deep_research.go` | Per-call timeout for an individual deep-research search or fetch request. |
+| `AIVORY_LLM_DR_MIN_ROUNDS` | `int` | `3` | `llm/deep_research.go` | Minimum research rounds: while follow-up or never-run plan queries remain, the engine keeps researching for at least this many rounds. |
+| `AIVORY_LLM_DR_MAX_SUB_QUESTIONS` | `int` | `8` | `llm/deep_research.go` | Cap on research sub-questions, counting the plan and those added by reflections. |
+| `AIVORY_LLM_DR_RESEARCH_BUDGET` | `duration` | `20*time.Minute` | `llm/deep_research.go` | Time budget for planning plus the search/read/reflect rounds (at most two thirds of `AIVORY_LLM_DR_WALL_CLOCK`). Cross-validation and the report run after it on the remaining wall clock. |
+| `AIVORY_LLM_DR_ROUND_RESERVE` | `duration` | `2*time.Minute` | `llm/deep_research.go` | No new research round starts once less than this much research time (or deep tool time) remains. |
+| `AIVORY_LLM_DR_READ_SOURCES` | `bool` | `true` | `llm/deep_research.go` | Read every fetched page with the task model and distil it into dated facts, a relevance verdict and follow-up leads. When off, the report uses raw page excerpts. |
+| `AIVORY_LLM_DR_READ_BODY_CHARS` | `int` | `12000` | `llm/deep_research.go` | Bytes of page text given to one source-reading call. |
+| `AIVORY_LLM_DR_READ_CONCURRENCY` | `int` | `4` | `llm/deep_research.go` | Source-reading calls run in parallel. |
+| `AIVORY_LLM_DR_READ_TIMEOUT` | `duration` | `90*time.Second` | `llm/deep_research.go` | Timeout for one source-reading call; on failure the source keeps its raw excerpt. |
+| `AIVORY_LLM_DR_REFLECT_TIMEOUT` | `duration` | `2*time.Minute` | `llm/deep_research.go` | Timeout for one between-round reflection call. |
+| `AIVORY_LLM_DR_WRITER_SOURCE_CHARS` | `int` | `100000` | `llm/deep_research.go` | Byte budget for all source material in the report-writing prompt; reading notes go in first and raw excerpts share the rest. |
+| `AIVORY_LLM_DEEP_RESEARCH_VALIDATE_TIMEOUT` | `duration` | `3*time.Minute` | `llm/deep_research.go` | Timeout for the deep-research cross-validation pass that sorts the reading notes into confirmed, disputed and unverified findings before writing. |
+| `AIVORY_LLM_SCORE_A` | `float` | `9` | `llm/deep_research.go` | Ranking score added to a candidate source whose URL is credibility grade A (credibility dominates ranking). |
+| `AIVORY_LLM_SCORE_B` | `float` | `6` | `llm/deep_research.go` | Ranking score added to a candidate source whose URL is credibility grade B. |
+| `AIVORY_LLM_SCORE_C` | `float` | `3` | `llm/deep_research.go` | Ranking score added to a candidate source whose URL is credibility grade C. |
+| `AIVORY_LLM_SCORE_KW` | `float` | `1` | `llm/deep_research.go` | Ranking score added per question keyword (over 3 chars) found in a candidate's title or snippet. |
+| `AIVORY_LLM_SCORE_FRESH_DOMAIN` | `float` | `2` | `llm/deep_research.go` | Ranking bonus added to a candidate from a domain not yet seen in this research run. |
 | `AIVORY_LLM_MAX_ITER_4` | `int` | `20` | `llm/google_provider.go:68` | Hard cap on native tool-use rounds (generateContent calls) in the Gemini streaming Stream loop. |
 | `AIVORY_LLM_GEMINI_MAX_TOK` | `int` | `64000` | `llm/google_provider.go:78` | Default generationConfig.maxOutputTokens sent on each Gemini streaming request unless the request overrides it. |
 | `AIVORY_LLM_GEMINI_MAX_TOK_2` | `int` | `64000` | `llm/google_provider.go:472` | Default generationConfig.maxOutputTokens for the Gemini prompt-tool-mode call unless the request overrides it. |
@@ -106,16 +116,16 @@
 | `AIVORY_LLM_FAST_TOOL_LIMITS_FETCH_IMAGE` | `int` | `0` | `llm/orchestrator.go` | Fast-mode cap for the fetch_image system tool; `0` hides it, while a positive value still requires its normal dependencies and permissions. |
 | `AIVORY_LLM_FAST_TOOL_LIMITS_IMAGE_GENERATE` | `int` | `2` | `llm/orchestrator.go` | Fast-mode cap for the image_generate system tool; `0` hides it. |
 | `AIVORY_LLM_FAST_TOOL_LIMITS_PYTHON_EXECUTE` | `int` | `0` | `llm/orchestrator.go` | Fast-mode cap for the python_execute system tool; `0` hides it, while a positive value still requires a configured sandbox and normal permissions. |
-| `AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_SEARCH` | `int` | `40` | `llm/orchestrator.go:157` | Max `aivory_web_search` calls allowed per message while Deep Research runs; exceeding it fails the call. |
-| `AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_FETCH` | `int` | `25` | `llm/orchestrator.go:158` | Max web_fetch calls allowed per message while Deep Research runs; exceeding it fails the call. |
+| `AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_SEARCH` | `int` | `60` | `llm/orchestrator.go:157` | Max `aivory_web_search` calls allowed per message while Deep Research runs; exceeding it fails the call. |
+| `AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_FETCH` | `int` | `64` | `llm/orchestrator.go:158` | Max web_fetch calls allowed per message while Deep Research runs; exceeding it fails the call. |
 | `AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_FETCH_IMAGE` | `int` | `12` | `llm/orchestrator.go` | Max public-image downloads allowed per message while Deep Research runs; exceeding it fails the call. |
 | `AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_IMAGE_GENERATE` | `int` | `4` | `llm/orchestrator.go:160` | Max image_generate calls allowed per message while Deep Research runs; exceeding it fails the call. |
 | `AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_PYTHON_EXECUTE` | `int` | `8` | `llm/orchestrator.go:161` | Max python_execute sandbox runs allowed per message while Deep Research runs; exceeding it fails the call. |
 | `AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN` | `int` | `48` | `llm/orchestrator.go:169` | Global ceiling on total tool calls across all tools per message in normal mode, on top of the per-tool caps. |
-| `AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN_DEEP` | `int` | `150` | `llm/orchestrator.go:170` | Global ceiling on total tool calls across all tools per message while Deep Research runs. |
+| `AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN_DEEP` | `int` | `200` | `llm/orchestrator.go:170` | Global ceiling on total tool calls across all tools per message while Deep Research runs. |
 | `AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN_FAST` | `int` | `12` | `llm/orchestrator.go` | Independent total system-tool call ceiling in fast mode; provider-hosted tools remain available and are not counted. |
 | `AIVORY_LLM_MAX_TOOL_TIME_PER_TURN` | `duration` | `15*time.Minute` | `llm/orchestrator.go` | Cumulative wall-clock budget for tool execution in a normal message. Once exhausted, all tools are removed and the model gets one tool-free finalization request. Set a non-positive value to disable this time budget. |
-| `AIVORY_LLM_MAX_TOOL_TIME_PER_TURN_DEEP` | `duration` | `4*time.Minute` | `llm/orchestrator.go` | Cumulative Deep Research tool-execution budget, leaving time inside the five-minute research window for one tool-free report-writing request. Set a non-positive value to disable this time budget. |
+| `AIVORY_LLM_MAX_TOOL_TIME_PER_TURN_DEEP` | `duration` | `25*time.Minute` | `llm/orchestrator.go` | Deep Research tool-time budget, measured from the first tool call. Keep it above `AIVORY_LLM_DR_RESEARCH_BUDGET`, or research rounds stop early. Set a non-positive value to disable this time budget. |
 | `AIVORY_LLM_MAX_TOOL_TIME_PER_TURN_FAST` | `duration` | `3*time.Minute` | `llm/orchestrator.go` | Cumulative tool-execution budget for fast mode before its one tool-free finalization request. Set a non-positive value to disable this time budget. |
 | `AIVORY_LLM_TOOL_TIMEOUTS` | `duration` | `10*time.Second` | `llm/orchestrator.go:2326` | Per-invocation timeout bounding a single `aivory_web_search` tool call. |
 | `AIVORY_LLM_TOOL_TIMEOUTS_2` | `duration` | `60*time.Second` | `llm/orchestrator_automation.go` | Per-invocation timeout for web_fetch, leaving time for Jina fallback after the direct attempt. |

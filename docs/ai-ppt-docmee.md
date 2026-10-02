@@ -49,7 +49,7 @@ real flow and shape the implementation:
 | `updateTemplate` / `delTemplateId` want the **user token**, not the Api-Key (the Api-Key answers `模板不存在` for a uid-level template; a *system* template is refused with `1003 无权限访问`) | rename/delete run under the caller's token; account-public templates are refused for both |
 | An **Api-Key upload** creates an account-owned template (`userId` = the account id) that **no uid can see**; only `updateUserTemplate` (`isPublic: true`) publishes it (`userId` becomes `""`) | the admin panel pairs the upload with a "share with all users" switch, and the list reports which templates are shared — otherwise an admin upload silently helps nobody |
 | Uploading a template costs **1 vendor credit** | the admin page states the cost, and uploads are administrator-only |
-| Vendor pricing: **1 credit per generated deck**, +1 per `updateContent` call, +1 per template re-layout | `docmee_credits_per_ppt` / `docmee_edit_credits` must be priced to cover it (≈¥0.32–0.50 per vendor credit) |
+| Vendor pricing: **1 credit per generated deck**, +1 per `updateContent` call, +1 per template re-layout | `docmee_price_per_ppt_usd` / `docmee_edit_price_usd` must be priced to cover it (≈¥0.32–0.50 per vendor credit) |
 
 ## Billing
 
@@ -61,8 +61,8 @@ real flow and shape the implementation:
 - A failed render releases the hold; a deck that already carries a charge is
   re-rendered for free (the UI's "Save to my files" and "Change template" paths).
 - Charging is gated by the **platform-wide credit system**, exactly like chat:
-  `billingEnabled` requires `docmee_credits_per_ppt > 0` **and** a non-zero
-  `credits_per_usd` rate. With `credits_per_usd = 0` (Admin → Credits & quotas →
+  prices are set in USD and converted at `credits_per_usd`, so `billingEnabled`
+  requires a positive per-deck price **and** a non-zero `credits_per_usd` rate. With `credits_per_usd = 0` (Admin → Credits & quotas →
   *模型成本内部换算*) the whole credit system is off, chat is free as well, and a
   generation costs nothing. The configured per-deck price stays visible to users
   either way.
@@ -74,7 +74,10 @@ real flow and shape the implementation:
     keyed by the attempt id, because every edit is its own charge).
   The row's `credits` column carries what the ledger actually took (0 = free), so
   the row records the CALL while every billing total stays exact.
-- Edits (AI rewrite / template change) are free unless `docmee_edit_credits > 0`.
+- Edits (AI rewrite / template change) are free unless `docmee_edit_price_usd > 0`.
+- Legacy deployments: until a USD price is saved, the old credit-denominated
+  `docmee_credits_per_ppt` / `docmee_edit_credits` keep charging exactly what they
+  did, and the admin page shows their USD equivalent (`docmeePrice`).
 
 ### What the admin sees
 
@@ -99,8 +102,9 @@ general usage limits; saving either page does not overwrite the other's fields.
 | `docmee_enabled` | follows the key | Master switch. Unset ⇒ on when a key exists; an explicit `false` always wins. |
 | `docmee_api_key` | *(empty)* | Docmee open-platform API key. Server-side only, masked on read. |
 | `docmee_api_base_url` | `https://docmee.cn` | API origin (international build or a self-hosted proxy). |
-| `docmee_credits_per_ppt` | `10` | Flat price per generated deck. `0` = free. |
-| `docmee_edit_credits` | `0` | Price of one edit (AI rewrite / template change). `0` = free. |
+| `docmee_price_per_ppt_usd` | *(unset)* | Flat USD price per generated deck, debited as `price × credits_per_usd` credits. `0` = free. |
+| `docmee_edit_price_usd` | *(unset)* | USD price of one edit (AI rewrite / template change), converted the same way. `0` = free. |
+| `docmee_credits_per_ppt` / `docmee_edit_credits` | `10` / `0` | Legacy credit prices, used only until the matching USD price is saved. |
 | `docmee_default_template_id` | *(empty)* | Fallback template when a render request has none. |
 | `docmee_max_upload_mb` | `50` | Per-file cap for the upload input. |
 | `docmee_token_hours` | `2` | Vendor token lifetime (`timeOfHours`); `0` = vendor default. |

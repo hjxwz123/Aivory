@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   modelHasBuiltinTools,
   modelSupportsBuiltinTool,
+  modelSupportsResearchTools,
   replaceVisibleBuiltinToolNames,
   resolveBuiltinToolNames,
   toggleBuiltinToolName,
@@ -67,5 +68,27 @@ describe('built-in tool selection', () => {
       false,
     )
     expect(modelSupportsBuiltinTool({ tool_mode: 'native' }, 'python_execute')).toBe(true)
+  })
+
+  it('offers Deep Research regardless of the model default built-in selection', () => {
+    // Custom list without web search, and even an explicit empty list: the
+    // research engine owns its own search pipeline.
+    expect(
+      modelSupportsResearchTools({ tool_mode: 'native', builtin_tools: ['python_execute'], research_tools_available: true }),
+    ).toBe(true)
+    expect(modelSupportsResearchTools({ tool_mode: 'native', builtin_tools: [], research_tools_available: true })).toBe(true)
+    // The server reports the search tool removed by a global/group/workspace ceiling.
+    expect(
+      modelSupportsResearchTools({ tool_mode: 'native', builtin_tools: AVAILABLE, research_tools_available: false }),
+    ).toBe(false)
+    // Deny-all tool mode and a missing model always hide it.
+    expect(modelSupportsResearchTools({ tool_mode: 'none', research_tools_available: true })).toBe(false)
+    expect(modelSupportsResearchTools(undefined)).toBe(false)
+  })
+
+  it('falls back to the default selection for servers without the research bit', () => {
+    expect(modelSupportsResearchTools({ tool_mode: 'native', builtin_tools: ['aivory_web_search'] })).toBe(true)
+    expect(modelSupportsResearchTools({ tool_mode: 'native', builtin_tools: ['python_execute'] })).toBe(false)
+    expect(modelSupportsResearchTools({ tool_mode: 'native' })).toBe(true)
   })
 })

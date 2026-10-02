@@ -63,3 +63,18 @@ export function modelSupportsBuiltinTool(
   if (!modelHasBuiltinTools(model)) return false
   return Array.isArray(model?.builtin_tools) ? model.builtin_tools.includes(name) : true
 }
+
+interface ResearchToolCapabilityModel extends BuiltinToolCapabilityModel {
+  research_tools_available?: boolean | null
+}
+
+/** Whether Deep Research can search for this model. The engine owns its search
+ * pipeline, so the model's default built-in selection (e.g. a custom list
+ * without web search) must not hide it. Public responses state this directly
+ * after the global/group/workspace ceilings; older servers omit the bit and
+ * keep the previous default-selection check. */
+export function modelSupportsResearchTools(model: ResearchToolCapabilityModel | null | undefined): boolean {
+  if (!model || model.tool_mode === 'none') return false
+  if (typeof model.research_tools_available === 'boolean') return model.research_tools_available
+  return modelSupportsBuiltinTool(model, 'aivory_web_search')
+}

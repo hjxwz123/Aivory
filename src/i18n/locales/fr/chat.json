@@ -226,7 +226,11 @@
       "selectedCount": "{{count}} outil(s) sélectionné(s)",
       "cancel": "Annuler",
       "done": "Terminé"
-    }
+    },
+    "voiceInsufficientCredits": "Crédits insuffisants pour la reconnaissance vocale par modèle. Vous pouvez passer à la reconnaissance du navigateur dans Paramètres → Modèles.",
+    "voiceCreditsExhausted": "Vos crédits sont épuisés : la saisie vocale s'est arrêtée.",
+    "voiceNoMicrophone": "Aucun microphone détecté.",
+    "voiceNetwork": "La reconnaissance vocale du navigateur nécessite une connexion réseau. Vérifiez votre connexion et réessayez."
   },
   "imageConversationTitle": "Conversation sur une image",
   "assistant": "Aivory",
@@ -407,7 +411,18 @@
     "steps": "{{done}}/{{total}}",
     "planLabel": "Plan de recherche",
     "sourcesLabel": "Sources ({{count}})",
-    "credibility": "Fiabilité de la source {{grade}} (A officiel/académique … D non attribué)"
+    "credibility": "Fiabilité de la source {{grade}} (A officiel/académique … D non attribué)",
+    "notesLabel": "Journal de recherche",
+    "round": "Tour {{round}}",
+    "offTopic": "Lue, non pertinente",
+    "phase": {
+      "planning": "Planification de l’enquête",
+      "searching": "Recherche de {{count}} requête(s)",
+      "reading": "Lecture de {{count}} source(s)",
+      "reflecting": "Bilan des résultats et préparation de la suite",
+      "validating": "Vérification croisée de {{count}} source(s)",
+      "writing": "Rédaction du rapport"
+    }
   },
   "share": {
     "title": "Partager la conversation",

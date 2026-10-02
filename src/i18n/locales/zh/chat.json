@@ -226,7 +226,11 @@
       "selectedCount": "已选择 {{count}} 个工具",
       "cancel": "取消",
       "done": "完成"
-    }
+    },
+    "voiceInsufficientCredits": "积分不足，无法使用大模型语音识别。可在「设置 → 模型」中改用浏览器识别。",
+    "voiceCreditsExhausted": "积分已用完，语音输入已停止。",
+    "voiceNoMicrophone": "未检测到麦克风。",
+    "voiceNetwork": "浏览器语音识别需要联网，请检查网络后重试。"
   },
   "imageConversationTitle": "图片对话",
   "assistant": "Aivory",
@@ -407,7 +411,18 @@
     "steps": "{{done}}/{{total}}",
     "planLabel": "研究计划",
     "sourcesLabel": "来源（{{count}}）",
-    "credibility": "来源可信度 {{grade}}（A 官方/学术 … D 无署名）"
+    "credibility": "来源可信度 {{grade}}（A 官方/学术 … D 无署名）",
+    "notesLabel": "研究思路",
+    "round": "第 {{round}} 轮",
+    "offTopic": "已阅读，与问题无关",
+    "phase": {
+      "planning": "正在制定研究计划",
+      "searching": "正在搜索 {{count}} 个查询",
+      "reading": "正在精读 {{count}} 个来源",
+      "reflecting": "正在复盘发现并规划下一步",
+      "validating": "正在交叉验证 {{count}} 个来源",
+      "writing": "正在撰写报告"
+    }
   },
   "share": {
     "title": "分享对话",

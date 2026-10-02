@@ -11,6 +11,7 @@
  * mask, so saving without retyping a key preserves it (mirrors AdminTools).
  */
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { adminApi, ApiError } from '@/api'
 import { Button } from '@/components/ui/button'
@@ -34,6 +35,8 @@ const STRING_KEYS = [
 ] as const
 
 const BOOL_KEYS = ['volcano_asr_enable_itn', 'volcano_asr_enable_punc', 'volcano_asr_enable_ddc'] as const
+const PRICE_KEY = 'audio_transcribe_price_per_second'
+
 const BOOL_DEFAULTS: Record<string, boolean> = {
   volcano_asr_enable_itn: true,
   volcano_asr_enable_punc: true,
@@ -57,9 +60,18 @@ export default function AdminAudio() {
 
   const read = (k: string, fallback = '') => (typeof draft[k] === 'string' ? (draft[k] as string) : fallback)
   const readBool = (k: string) => (typeof draft[k] === 'boolean' ? (draft[k] as boolean) : BOOL_DEFAULTS[k] ?? false)
+  const readNumber = (k: string) => {
+    const raw = draft[k]
+    const value = typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() ? Number(raw) : 0
+    return Number.isFinite(value) ? Math.max(0, value) : 0
+  }
   const set = (k: string, v: string | boolean) => setDraft((d) => ({ ...d, [k]: v }))
 
   const provider = read('audio_transcribe_provider') || 'gpt'
+  // § voice billing: USD per second, charged in credits at credits_per_usd.
+  const pricePerSecond = readNumber(PRICE_KEY)
+  const creditsPerUSD = readNumber('credits_per_usd')
+  const priceInput = typeof draft[PRICE_KEY] === 'number' ? String(draft[PRICE_KEY]) : read(PRICE_KEY)
 
   async function save() {
     setSaving(true)
@@ -67,6 +79,7 @@ export default function AdminAudio() {
       const patch: Record<string, unknown> = {}
       for (const k of STRING_KEYS) patch[k] = k === 'audio_transcribe_provider' ? provider : read(k)
       for (const k of BOOL_KEYS) patch[k] = readBool(k)
+      patch[PRICE_KEY] = pricePerSecond
       await adminApi.updateSettings(patch)
       toast.success(t('admin:audio.saved'))
     } catch (e) {
@@ -220,6 +233,39 @@ export default function AdminAudio() {
               </div>
             </div>
           )}
+
+          {/* Billing (§ voice) ---------------------------------------------- */}
+          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5 flex flex-col gap-4">
+            <h2 className="text-sm font-medium text-[var(--color-fg)]">{t('admin:audio.billing.title')}</h2>
+            <Field label={t('admin:audio.billing.price')} htmlFor="a-price" hint={t('admin:audio.billing.priceHint')}>
+              <Input
+                id="a-price"
+                type="number"
+                min={0}
+                step="any"
+                inputMode="decimal"
+                value={priceInput}
+                onChange={(e) => set(PRICE_KEY, e.target.value)}
+                placeholder="0"
+              />
+            </Field>
+            {pricePerSecond > 0 && creditsPerUSD > 0 ? (
+              <p className="text-[12.5px] text-[var(--color-fg-muted)]">
+                {t('admin:audio.billing.conversion', {
+                  ratio: creditsPerUSD.toLocaleString(),
+                  credits: Number((pricePerSecond * 60 * creditsPerUSD).toFixed(4)).toLocaleString(),
+                })}
+              </p>
+            ) : null}
+            {pricePerSecond > 0 && creditsPerUSD === 0 ? (
+              <p className="text-[12.5px] text-[var(--color-warning)]">
+                {t('admin:audio.billing.creditsOff')}{' '}
+                <Link to="/admin/credits" className="font-medium underline underline-offset-2">
+                  {t('admin:creditSettings.docmee.openCredits')}
+                </Link>
+              </p>
+            ) : null}
+          </div>
 
           <div className="flex justify-end">
             <Button loading={saving} onClick={() => void save()}>

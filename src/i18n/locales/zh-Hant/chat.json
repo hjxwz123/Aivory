@@ -226,7 +226,11 @@
       "selectedCount": "已選擇 {{count}} 個工具",
       "cancel": "取消",
       "done": "完成"
-    }
+    },
+    "voiceInsufficientCredits": "積分不足，無法使用大模型語音辨識。可在「設定 → 模型」中改用瀏覽器辨識。",
+    "voiceCreditsExhausted": "積分已用完，語音輸入已停止。",
+    "voiceNoMicrophone": "未偵測到麥克風。",
+    "voiceNetwork": "瀏覽器語音辨識需要連線，請檢查網路後重試。"
   },
   "imageConversationTitle": "圖片對話",
   "assistant": "Aivory",
@@ -407,7 +411,18 @@
     "steps": "{{done}}/{{total}}",
     "planLabel": "研究計劃",
     "sourcesLabel": "來源（{{count}}）",
-    "credibility": "來源可信度 {{grade}}（A 官方/學術 … D 無署名）"
+    "credibility": "來源可信度 {{grade}}（A 官方/學術 … D 無署名）",
+    "notesLabel": "研究思路",
+    "round": "第 {{round}} 輪",
+    "offTopic": "已閱讀，與問題無關",
+    "phase": {
+      "planning": "正在制定研究計劃",
+      "searching": "正在搜尋 {{count}} 個查詢",
+      "reading": "正在精讀 {{count}} 個來源",
+      "reflecting": "正在複盤發現並規劃下一步",
+      "validating": "正在交叉驗證 {{count}} 個來源",
+      "writing": "正在撰寫報告"
+    }
   },
   "share": {
     "title": "分享對話",

@@ -54,6 +54,8 @@ func TestAdminSettingsKeysAreUniqueAndExcludeRetiredPurchasingSettings(t *testin
 		"docmee_enabled",
 		"docmee_api_key",
 		"docmee_api_base_url",
+		"docmee_price_per_ppt_usd",
+		"docmee_edit_price_usd",
 		"docmee_credits_per_ppt",
 		"docmee_token_hours",
 		"docmee_edit_credits",
@@ -66,6 +68,9 @@ func TestAdminSettingsKeysAreUniqueAndExcludeRetiredPurchasingSettings(t *testin
 		if _, exists := seen[key]; !exists {
 			t.Fatalf("AI PPT setting %q is not exposed by the admin settings API", key)
 		}
+	}
+	if _, exists := seen["audio_transcribe_price_per_second"]; !exists {
+		t.Fatal(`voice price "audio_transcribe_price_per_second" is not exposed by the admin settings API`)
 	}
 	// Retired with the iframe creation flow.
 	for _, retired := range []string{"docmee_sdk_base_url", "docmee_creator_version"} {

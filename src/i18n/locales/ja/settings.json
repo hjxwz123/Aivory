@@ -290,7 +290,18 @@
     "charactersOf": "{{used}} / {{max}} 文字",
     "available": "利用可能なモデル",
     "locked": "ロック中",
-    "upgradeMocked": "プランのアップグレードはモックです。"
+    "upgradeMocked": "プランのアップグレードはモックです。",
+    "voiceTitle": "音声入力",
+    "voiceEngine": "既定の音声認識",
+    "voiceEngineBody": "モデル認識は管理者が設定した音声認識サービスを使い、音声の長さに応じてクレジットを消費する場合があります。ブラウザ認識はブラウザ内蔵のエンジンを使い、無料ですが精度はブラウザによって異なります。",
+    "voiceModel": "モデル認識",
+    "voiceBrowser": "ブラウザ認識",
+    "voiceCostPerMinute": "1 分あたり約 {{credits}} クレジット",
+    "voiceFree": "無料",
+    "voiceModelUnavailable": "管理者が未設定",
+    "voiceBrowserUnsupported": "このブラウザは非対応",
+    "voiceFallback": "選択した方式はこの環境では使えないため、{{engine}}を使います。",
+    "voiceUnavailable": "この環境で使える音声認識はありません。"
   },
   "privacy": {
     "title": "プライバシーとデータ",

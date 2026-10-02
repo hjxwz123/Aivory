@@ -2166,6 +2166,8 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           case 'research_plan':
           case 'research_task':
           case 'research_source':
+          case 'research_note':
+          case 'research_phase':
             updateAssistant(set, input.conversationId, serverAssistantId, (m) => ({
               ...m,
               research: applyResearchEvent(m.research, ev),
@@ -2662,6 +2664,8 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           case 'research_plan':
           case 'research_task':
           case 'research_source':
+          case 'research_note':
+          case 'research_phase':
             updateAssistant(set, conversationId, serverAssistantId, (m) => ({
               ...m,
               research: applyResearchEvent(m.research, ev),
@@ -3093,6 +3097,8 @@ function applyReplayEvent(
     case 'research_plan':
     case 'research_task':
     case 'research_source':
+    case 'research_note':
+    case 'research_phase':
       updateAssistant(set, conversationId, assistantId, (m) => ({ ...m, research: applyResearchEvent(m.research, ev) }))
       break
     case 'verify_started':
@@ -3244,8 +3250,9 @@ function appendToolStart(reasoning: ReasoningItem[], tool: ToolCall): ReasoningI
 }
 
 // --- Deep Research panel state (§ deep-research mode) ----------------------
-// Folds research_plan/research_task/research_source SSE events into one
-// ResearchState. Shared by the sendMessage + regenerate stream loops.
+// Folds research_plan/research_task/research_source/research_note/
+// research_phase SSE events into one ResearchState. Shared by the sendMessage
+// + regenerate stream loops.
 function parseRound(name?: string): number | undefined {
   if (!name) return undefined
   const m = name.match(/(\d+)/)
@@ -3256,6 +3263,17 @@ function applyResearchEvent(prev: ResearchState | undefined, ev: ApiSseEvent): R
   const r: ResearchState = prev ?? { title: '', tasks: [], sources: [] }
   if (ev.type === 'research_plan') {
     return { ...r, title: ev.text ?? r.title }
+  }
+  if (ev.type === 'research_phase') {
+    return {
+      ...r,
+      phase: ev.status ? { name: ev.status, round: parseRound(ev.name), count: ev.source_count } : undefined,
+    }
+  }
+  if (ev.type === 'research_note') {
+    const notes = r.notes ?? []
+    if (!ev.text || notes.some((n) => n.id === ev.id)) return r
+    return { ...r, notes: [...notes, { id: ev.id, text: ev.text, round: parseRound(ev.name) }] }
   }
   if (ev.type === 'research_task') {
     const tasks = r.tasks.slice()

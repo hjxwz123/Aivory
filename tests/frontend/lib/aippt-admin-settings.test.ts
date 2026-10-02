@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  DOCMEE_PRICES,
+  docmeeDisplayPriceUSD,
   docmeeEnabledPatch,
   docmeeKeyProvided,
   docmeeSettingsPatch,
@@ -23,11 +25,11 @@ describe('docmeeSettingsPatch', () => {
   it('saves only AI PPT fields and leaves the platform credit rate untouched', () => {
     const patch = docmeeSettingsPatch({
       docmee_api_key: 'sk-live',
-      docmee_credits_per_ppt: 12,
+      docmee_price_per_ppt_usd: 0.12,
       credits_per_usd: 20,
       settlement_currency: 'USD',
     }, false)
-    expect(patch).toMatchObject({ docmee_api_key: 'sk-live', docmee_credits_per_ppt: 12, docmee_enabled: true })
+    expect(patch).toMatchObject({ docmee_api_key: 'sk-live', docmee_price_per_ppt_usd: 0.12, docmee_enabled: true })
     expect(patch).not.toHaveProperty('credits_per_usd')
     expect(patch).not.toHaveProperty('settlement_currency')
   })
@@ -40,19 +42,44 @@ describe('docmeeSettingsPatch', () => {
 
   it('normalizes prices and integer limits without writing unrelated settings', () => {
     const patch = docmeeSettingsPatch({
-      docmee_credits_per_ppt: -5,
-      docmee_edit_credits: '2.5',
+      docmee_price_per_ppt_usd: -5,
+      docmee_edit_price_usd: '2.5',
       docmee_max_upload_mb: '40.9',
       docmee_token_hours: -2,
       daily_message_limit: 200,
     }, false)
     expect(patch).toMatchObject({
-      docmee_credits_per_ppt: 0,
-      docmee_edit_credits: 2.5,
+      docmee_price_per_ppt_usd: 0,
+      docmee_edit_price_usd: 2.5,
       docmee_max_upload_mb: 40,
       docmee_token_hours: 0,
     })
     expect(patch).not.toHaveProperty('daily_message_limit')
+  })
+
+  it('never writes a derived price for a deployment still on legacy credit prices', () => {
+    const patch = docmeeSettingsPatch({ docmee_credits_per_ppt: 10, credits_per_usd: 0 }, false)
+    expect(patch).not.toHaveProperty('docmee_price_per_ppt_usd')
+    expect(patch).not.toHaveProperty('docmee_edit_price_usd')
+    // The legacy credit settings are no longer written either.
+    expect(patch).not.toHaveProperty('docmee_credits_per_ppt')
+  })
+})
+
+describe('docmeeDisplayPriceUSD', () => {
+  const [deck, edit] = DOCMEE_PRICES
+
+  it('prefers a saved USD price', () => {
+    expect(docmeeDisplayPriceUSD({ docmee_price_per_ppt_usd: 0.3, credits_per_usd: 100 }, deck)).toBe(0.3)
+  })
+
+  it('shows a legacy credit price as its USD equivalent at the current rate', () => {
+    expect(docmeeDisplayPriceUSD({ credits_per_usd: 100 }, deck)).toBe(0.1)
+    expect(docmeeDisplayPriceUSD({ docmee_edit_credits: 5, credits_per_usd: 100 }, edit)).toBe(0.05)
+  })
+
+  it('has nothing to show for a legacy price while credits are off', () => {
+    expect(docmeeDisplayPriceUSD({ docmee_credits_per_ppt: 10, credits_per_usd: 0 }, deck)).toBeUndefined()
   })
 })
 
