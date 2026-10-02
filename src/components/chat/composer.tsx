@@ -63,6 +63,7 @@ import { StylePicker } from './style-picker'
 import { ParamControls } from './param-controls'
 import { filterVisibleParams, parseControls } from './param-controls.utils'
 import { useMediaQuery } from '@/hooks/use-media-query'
+import { pulseComposerShell } from '@/lib/composer-pulse'
 import { useModels } from '@/store/models'
 import { useAuth } from '@/store/auth'
 import { useComposerPrefs } from '@/store/composer-prefs'
@@ -178,6 +179,20 @@ interface ComposerProps {
   compact?: boolean
   /** Autofocus on mount. */
   autoFocus?: boolean
+  /**
+   * Replace the draft with `text` and focus its end, once per `id`. Home
+   * suggestions use it so the user can finish a prompt before sending.
+   */
+  fillRequest?: { text: string; id: number }
+  /**
+   * Which side the composer's menus (model picker, feature menu) prefer. The
+   * vertically centered home composer opens them downward so they never cover
+   * the greeting; Radix still flips them when that side lacks room.
+   */
+  menuSide?: 'top' | 'bottom'
+  /** Marks the page's main composer as the element that morphs during the
+   *  first-send and private-mode view transitions. */
+  viewTransitionAnchor?: boolean
   /** Optional local draft cache scope. Used by the new-chat composer only. */
   draftScope?: string
   /** Conversation id (so uploads carry the right scope). */
@@ -697,6 +712,9 @@ export function Composer({
   placeholder,
   compact = false,
   autoFocus = false,
+  fillRequest,
+  menuSide = 'top',
+  viewTransitionAnchor = false,
   draftScope,
   conversationId,
   workspaceId: scopedWorkspaceId,
@@ -1526,7 +1544,11 @@ export function Composer({
   const imagePromptRequired = isImageMode && hasDraftImage && value.trim().length === 0
   const effectivePlaceholder =
     placeholder ??
-    (imagePromptRequired ? t('composer.imagePromptRequired') : t('composer.placeholder'))
+    (imagePromptRequired
+      ? t('composer.imagePromptRequired')
+      : isMobile
+        ? t('composer.placeholderMobile')
+        : t('composer.placeholder'))
   const [imageStyleId, setImageStyleId] = useState('')
   // Deep Research is both a per-group capability and a per-model exposure flag.
   // Admins bypass the group feature but still respect the current model's flag.
@@ -1650,6 +1672,28 @@ export function Composer({
     formulaSelectionRef.current = ref.current?.captureSelection() ?? null
     setFormulaTarget(null)
     setFormulaOpen(true)
+  const appliedFillIdRef = useRef<number | undefined>(undefined)
+  const focusAfterFillRef = useRef(false)
+  useEffect(() => {
+    if (!fillRequest || appliedFillIdRef.current === fillRequest.id) return
+    appliedFillIdRef.current = fillRequest.id
+    const next = fillRequest.text.slice(0, MAX_LEN)
+    if (valueRef.current === next) {
+      ref.current?.focus('end')
+      return
+    }
+    // The editor adopts the new value in its own effect during the next
+    // commit; focus once that commit lands so the caret ends after the text.
+    focusAfterFillRef.current = true
+    updateValue(next)
+    pulseComposerShell(composerRootRef.current)
+  }, [fillRequest, updateValue])
+  useEffect(() => {
+    if (!focusAfterFillRef.current) return
+    focusAfterFillRef.current = false
+    ref.current?.focus('end')
+  }, [value])
+
   }
 
   const openExistingFormula = (target: FormulaTarget) => {
@@ -3141,13 +3185,15 @@ export function Composer({
     'inline-flex shrink-0 items-center justify-center size-9 max-sm:size-11 rounded-full interactive',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
   )
-  const primaryActionSurface = 'inline-flex size-8 items-center justify-center rounded-full'
+  // Each action variant below carries its own key, so switching between them
+  // (voice ⇄ send ⇄ stop) remounts the surface and replays this scale-in.
+  const primaryActionSurface = 'inline-flex size-8 items-center justify-center rounded-full animate-[action-swap_160ms_var(--ease-out)]'
   const queuedSummary = queuedTurn
     ? queuedTurn.text.trim() || queuedTurn.attachments.map((attachment) => attachment.name).join(', ')
     : ''
 
   const primaryAction = canQueue ? (
-    <Tooltip content={t('composer.queue')}>
+    <Tooltip key="queue" content={t('composer.queue')}>
       <button
         type="button"
         onClick={() => void handleSubmit()}
@@ -3161,7 +3207,7 @@ export function Composer({
       </button>
     </Tooltip>
   ) : streaming ? (
-    <Tooltip content={t('composer.stop')}>
+    <Tooltip key="stop" content={t('composer.stop')}>
       <button
         type="button"
         onClick={onStop}
@@ -3180,6 +3226,7 @@ export function Composer({
     >
       <button
         type="button"
+      key="queued"
         disabled
         aria-label={queuedTurn.status === 'dispatching' ? t('composer.queuedSending') : t('composer.queued')}
         data-composer-action="queue-pending"
@@ -3198,7 +3245,7 @@ export function Composer({
       </button>
     </Tooltip>
   ) : showVoiceAction ? (
-    <Tooltip content={voiceStatusLabel}>
+    <Tooltip key="voice" content={voiceStatusLabel}>
       <button
         type="button"
         onClick={() => void toggleVoice()}
@@ -3251,6 +3298,7 @@ export function Composer({
         selectedModelUnavailable
           ? t('modelPicker.unavailableHint', {
               defaultValue: 'This model is no longer available. Choose another model.',
+      key="send"
             })
           : imagePermissionDenied
             ? t('messages.error.drawingPermission', {
@@ -3294,6 +3342,7 @@ export function Composer({
         'chat-composer-shell relative isolate min-w-0 w-full max-w-full',
         'rounded-popup border-0 bg-[var(--color-surface)]',
       )}
+      data-vt-composer={viewTransitionAnchor ? '' : undefined}
     >
       {/* Full-screen drag-and-drop overlay — shown while a file is dragged
           anywhere over the window. Portalled to <body> so it stays viewport-fixed
@@ -3707,7 +3756,7 @@ export function Composer({
 
       {isMobile ? (
         /* ── Mobile: fixed [+] + scroll-safe context + fixed primary action ── */
-        <div className="flex min-w-0 items-center gap-1 px-2 pb-2.5 pt-1">
+        <div data-vt-part="toolbar" className="flex min-w-0 items-center gap-1 px-2 pb-2.5 pt-1">
           <Popover
             open={moreOpen}
             onOpenChange={(o) => {
@@ -3738,7 +3787,7 @@ export function Composer({
               </button>
             </PopoverTrigger>
             <PopoverContent
-              side="top"
+              side={menuSide}
               align="start"
               sideOffset={10}
               collisionPadding={12}
@@ -3865,13 +3914,13 @@ export function Composer({
                 </button>
               </Tooltip>
             ) : null}
-            {isImageMode ? <StylePicker value={imageStyleId} onChange={setImageStyleId} workspaceId={workspaceId} className="min-w-0 max-w-[42vw] shrink" /> : null}
+            {isImageMode ? <StylePicker value={imageStyleId} onChange={setImageStyleId} workspaceId={workspaceId} side={menuSide} className="min-w-0 max-w-[42vw] shrink" /> : null}
 
             {/* On phones the header already carries the model picker (ChatThread),
                 so we drop the composer's to keep the row uncluttered. New-chat
                 (ChatHome) has no header picker, so it keeps this one. */}
             {!modelPickerInHeader ? (
-            <ModelPicker value={modelId} onChange={onModelChange} fast={fast} onFastChange={onFastChange} workspaceId={workspaceId} className="min-w-0 max-w-[42vw] shrink" />
+            <ModelPicker value={modelId} onChange={onModelChange} fast={fast} onFastChange={onFastChange} workspaceId={workspaceId} menuSide={menuSide} className="min-w-0 max-w-[42vw] shrink" />
             ) : null}
           </div>
 
@@ -3880,7 +3929,7 @@ export function Composer({
       ) : (
         /* ── Desktop: inline scrollable left zone + pinned right zone ── */
         <div className="flex items-center gap-1 px-2.5 pb-2.5 pt-1">
-          <div className="-my-1.5 flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto py-1.5 scrollbar-none">
+          <div data-vt-part="tools" className="-my-1.5 flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto py-1.5 scrollbar-none">
             {featureMenuAvailable ? (
               <Popover open={featuresOpen} onOpenChange={setFeaturesOpen}>
                 <Tooltip content={t('composer.features.title', { defaultValue: 'Turn features' })}>
@@ -3901,7 +3950,7 @@ export function Composer({
                 </Tooltip>
                 <PopoverContent
                   align="start"
-                  side="top"
+                  side={menuSide}
                   sideOffset={10}
                   className="max-h-[min(70vh,var(--radix-popover-content-available-height))] w-72 overflow-y-auto overscroll-contain p-1.5 scrollbar-thin"
                 >
@@ -3981,7 +4030,7 @@ export function Composer({
               </Tooltip>
             ) : null}
 
-            {isImageMode ? <StylePicker value={imageStyleId} onChange={setImageStyleId} workspaceId={workspaceId} /> : null}
+            {isImageMode ? <StylePicker value={imageStyleId} onChange={setImageStyleId} workspaceId={workspaceId} side={menuSide} /> : null}
 
             {/* Per-model param_controls (§2.3-G). Picked values flow up via onSubmit(). */}
             {visibleParamControls ? (
@@ -4068,8 +4117,8 @@ export function Composer({
             </div>
           ) : null}
           {/* Pinned — model picker + send/stop, always visible (never shrinks). */}
-          <div className="flex shrink-0 items-center gap-1.5 pl-1">
-            <ModelPicker value={modelId} onChange={onModelChange} fast={fast} onFastChange={onFastChange} workspaceId={workspaceId} />
+          <div data-vt-part="actions" className="flex shrink-0 items-center gap-1.5 pl-1">
+            <ModelPicker value={modelId} onChange={onModelChange} fast={fast} onFastChange={onFastChange} workspaceId={workspaceId} menuSide={menuSide} />
             {primaryAction}
           </div>
         </div>

@@ -1,10 +1,11 @@
 import { WorkspaceIcon } from '@/components/workspace/workspace-icon'
-import { type CSSProperties, type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
   Search,
   Plus,
   PanelLeftClose,
+  PanelLeftOpen,
   Settings,
   Star,
   Pencil,
@@ -29,6 +30,7 @@ import {
   Download,
   PackageCheck,
   Presentation,
+  type LucideIcon,
 } from 'lucide-react'
 import { LogoMark, TracedLogo } from '@/components/brand/logo'
 import { useWorkspaces } from '@/store/workspaces'
@@ -42,7 +44,7 @@ import { SidebarResizeHandle } from '@/components/sidebar/sidebar-resize-handle'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { initials } from '@/components/ui/avatar.utils'
 import { Tooltip } from '@/components/ui/tooltip'
-import { KeyboardShortcut } from '@/components/ui/kbd'
+import { Kbd } from '@/components/ui/kbd'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -90,7 +92,7 @@ import { partitionConversationNavigation } from '@/lib/conversation-navigation'
 import { userCan } from '@/lib/user-permissions'
 import { subscribeAccessInvalidation } from '@/lib/access-events'
 import { workspaceCapabilitiesForScope } from '@/lib/workspace-permissions'
-import { type DateBucket, bucketFor, modKey, cn, truncate } from '@/lib/utils'
+import { type DateBucket, bucketFor, formatShortcut, cn, truncate } from '@/lib/utils'
 import { toast } from '@/hooks/use-toast'
 import { exportConversation } from '@/lib/conversation-export'
 import { useTranslation } from 'react-i18next'
@@ -217,7 +219,9 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
   // "New chat" is the current page ONLY on the plain new-chat home ('/', not
   // draw mode). Elsewhere (/chat/:id, /projects, /kb, …) it's just an action,
   // not the selected entry — so it must not keep a permanent "selected" fill.
-  const newChatActive = location.pathname === '/' && !drawActive
+  // Private mode is the same home screen with a different composer, so it
+  // keeps the entry selected too.
+  const newChatActive = (location.pathname === '/' && !drawActive) || location.pathname === '/private-chat'
   // Projects, Files, and Skills are their own routes — highlight their entry
   // when the current path is under them.
   const filesActive = location.pathname === '/files'
@@ -248,13 +252,56 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
   )
   const setOpen = useCommandMenu((s) => s.setOpen)
   const collapsed = useSettings((s) => s.sidebarCollapsed) && variant === 'desktop'
+  const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
+  // Collapse/expand motion: while the rail's width animates, the content keeps
+  // its expanded layout at the full width and is simply clipped (labels fade),
+  // so icons never shift. The compact rail layout takes over only once the
+  // collapse has finished; expanding switches back immediately.
+  const [railSettled, setRailSettled] = useState(collapsed)
+  const [expanding, setExpanding] = useState(false)
+  const previousCollapsedRef = useRef(collapsed)
+  useEffect(() => {
+    if (previousCollapsedRef.current === collapsed) return
+    previousCollapsedRef.current = collapsed
+    // The aside's width transitionend settles the layout (see onTransitionEnd
+    // below); this timer is only the fallback for a missed or skipped event.
+    const wait = reducedMotion ? 0 : duration.base + 120
+    if (collapsed) {
+      const timer = window.setTimeout(() => setRailSettled(true), wait)
+      return () => window.clearTimeout(timer)
+    }
+    setRailSettled(false)
+    setExpanding(true)
+    const timer = window.setTimeout(() => setExpanding(false), wait)
+    return () => window.clearTimeout(timer)
+  }, [collapsed, reducedMotion])
+  const compact = collapsed && railSettled
+  const holdExpandedLayout = !compact && (collapsed || expanding)
   const sidebarWidth = useSettings((s) => s.sidebarWidth)
   const setSidebarWidth = useSettings((s) => s.setSidebarWidth)
   const toggleSidebar = useSettings((s) => s.toggleSidebar)
   const sidebarRef = useRef<HTMLElement>(null)
   const sidebarId = useId()
   const [newProjectOpen, setNewProjectOpen] = useState(false)
-  const [conversationListScrolled, setConversationListScrolled] = useState(false)
+  // Which list edges have rows hidden beyond them — drives the top/bottom fades.
+  const listContentRef = useRef<HTMLDivElement>(null)
+  const [listEdges, setListEdges] = useState({ top: false, bottom: false })
+  const measureListEdges = useCallback(() => {
+    const list = listScrollRef.current
+    if (!list) return
+    const top = list.scrollTop > 2
+    const bottom = list.scrollTop + list.clientHeight < list.scrollHeight - 2
+    setListEdges((current) => (current.top === top && current.bottom === bottom ? current : { top, bottom }))
+  }, [])
+  useEffect(() => {
+    if (compact) return
+    measureListEdges()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measureListEdges)
+    if (listScrollRef.current) observer.observe(listScrollRef.current)
+    if (listContentRef.current) observer.observe(listContentRef.current)
+    return () => observer.disconnect()
+  }, [compact, measureListEdges])
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(() => new Set())
   const [loadingProjectIds, setLoadingProjectIds] = useState<Set<string>>(() => new Set())
   const loadedProjectIdsRef = useRef<Set<string>>(new Set())
@@ -360,10 +407,9 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
   // active id — a deep-linked row is inserted by loadOne asynchronously, so the
   // effect re-runs as `conversations` updates until the row exists (and bails
   // O(1) once handled). Resets on collapse so re-expanding re-centers it.
-  const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
   const scrolledForIdRef = useRef<string | undefined>(undefined)
   useEffect(() => {
-    if (collapsed) {
+    if (compact) {
       scrolledForIdRef.current = undefined
       return
     }
@@ -383,7 +429,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
       container.scrollTo({ top: target, behavior: !reducedMotion && near ? 'smooth' : 'auto' })
     }
     scrolledForIdRef.current = currentId
-  }, [activeConversations, collapsed, currentId, expandedProjectIds, reducedMotion])
+  }, [activeConversations, compact, currentId, expandedProjectIds, reducedMotion])
 
   function startNewChat() {
     // A new chat starts from model defaults, never a prior conversation's
@@ -417,6 +463,11 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
       data-collapsed={collapsed ? 'true' : 'false'}
       aria-label={t('sidebar.navAria', { defaultValue: 'Conversation navigation' })}
       style={variant === 'desktop' && !collapsed ? { width: `${sidebarWidth}px` } : undefined}
+      onTransitionEnd={(event) => {
+        if (event.target !== event.currentTarget || event.propertyName !== 'width') return
+        if (collapsed) setRailSettled(true)
+        else setExpanding(false)
+      }}
       className={cn(
         'relative flex h-full shrink-0 flex-col bg-[var(--color-sidebar-bg)]',
         variant === 'desktop' && 'border-r border-[var(--color-sidebar-border)]',
@@ -425,14 +476,24 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
         'transition-[width] duration-[var(--duration-base)] ease-[var(--ease-out)] data-[resizing=true]:transition-none',
       )}
     >
+      {/* Clip layer: the resize handle sits outside the rail, so clipping
+          lives here instead of on the aside. */}
+      <div className="flex h-full min-h-0 w-full flex-col overflow-hidden">
+      <div
+        className="flex h-full min-h-0 w-full shrink-0 flex-col"
+        // The desktop rail's 1px right border sits inside its width.
+        style={holdExpandedLayout ? { width: `${sidebarWidth - 1}px` } : undefined}
+      >
       {/* Header — inside a workspace the brand slot shows the WORKSPACE NAME
           (§workspaces spec: sidebar 上方原先显示 aivory 的地方显示工作空间名称).
           Keyed on the active space so switching replays a fade-in (§ workspace
           switch animation) instead of the name jump-cutting. */}
       <div className="flex h-[56px] shrink-0 items-center justify-between px-3 max-sm:h-12 max-sm:px-2">
-        {!collapsed ? (
+        {/* The brand mark sits on the nav icons' x-line (18px) in both rail
+            states, so collapsing never moves it. */}
+        {!compact ? (
           activeWorkspace ? (
-            <div key={activeWorkspace.id} className="page-enter flex min-w-0 items-center gap-1.5">
+            <div key={activeWorkspace.id} className="page-enter ml-1.5 flex min-w-0 items-center gap-1.5 max-sm:ml-2.5">
               <Link
                 to="/"
                 onClick={() => {
@@ -468,24 +529,42 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
               resetComposerForNewConversation()
               onClose?.()
             }}
-            className="page-enter inline-flex items-center"
+            className="page-enter ml-1.5 inline-flex items-center max-sm:ml-2.5"
             aria-label={tCommon('aria.homeLink')}
           >
             <TracedLogo size="sm" />
           </Link>
           )
         ) : (
-          <Link to="/" onClick={resetComposerForNewConversation} className="mx-auto" aria-label={tCommon('aria.homeLink')}>
-            <LogoMark size={22} />
-          </Link>
-        )}
-        {!collapsed && variant === 'desktop' && (
-          <Tooltip content={t('commandMenu.actions.toggleSidebar')} shortcut={`${modKey()}B`}>
+          // The collapsed rail owns its own expand control: the mark turns into
+          // the panel icon on hover/focus, so no second floating button has to
+          // sit on top of the page content.
+          <Tooltip content={t('commandMenu.actions.toggleSidebar')} shortcut={formatShortcut('B')} side="right">
             <button
               type="button"
               onClick={toggleSidebar}
               aria-label={t('commandMenu.actions.toggleSidebar')}
-              className="inline-flex items-center justify-center size-7 rounded-[7px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)] interactive"
+              className="group/rail-toggle relative -ml-[3px] inline-flex size-9 shrink-0 items-center justify-center rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-sidebar-hover)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+            >
+              <LogoMark
+                size={18}
+                className="transition-opacity duration-[var(--duration-fast)] group-hover/rail-toggle:opacity-0 group-focus-visible/rail-toggle:opacity-0"
+              />
+              <PanelLeftOpen
+                size={15}
+                aria-hidden
+                className="absolute opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover/rail-toggle:opacity-100 group-focus-visible/rail-toggle:opacity-100"
+              />
+            </button>
+          </Tooltip>
+        )}
+        {!compact && variant === 'desktop' && (
+          <Tooltip content={t('commandMenu.actions.toggleSidebar')} shortcut={formatShortcut('B')}>
+            <button
+              type="button"
+              onClick={toggleSidebar}
+              aria-label={t('commandMenu.actions.toggleSidebar')}
+              className="inline-flex items-center justify-center size-7 rounded-[7px] text-[var(--color-fg-muted)] hover:bg-[var(--color-sidebar-hover)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
             >
               <PanelLeftClose size={14} aria-hidden />
             </button>
@@ -498,207 +577,122 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             type="button"
             onClick={onClose}
             aria-label={tCommon('actions.close', { defaultValue: 'Close' })}
-            className="inline-flex size-[var(--tap-min)] items-center justify-center rounded-[10px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:size-9 max-sm:rounded-[8px]"
+            className="inline-flex size-[var(--tap-min)] items-center justify-center rounded-[10px] text-[var(--color-fg-muted)] hover:bg-[var(--color-sidebar-hover)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:size-9 max-sm:rounded-[8px]"
           >
             <X size={18} aria-hidden />
           </button>
         )}
       </div>
 
-      {/* Actions */}
-      <div className={cn('flex flex-col gap-px px-2', collapsed && 'items-center')}>
-        <Tooltip content={collapsed ? t('sidebar.newChat') : ''} side="right">
-          <button
-            type="button"
-            onClick={() => void startNewChat()}
-            aria-current={newChatActive ? 'page' : undefined}
-            className={cn(
-              'inline-flex h-8 items-center gap-2 rounded-[8px] text-[13px] font-medium max-lg:h-[var(--tap-min)] max-sm:!h-9 max-sm:gap-1.5',
-              // Filled "selected" look ONLY on the new-chat home; a plain nav row
-              // everywhere else so it never reads as selected on /chat, /projects…
-              newChatActive
-                ? 'bg-[var(--color-bg-muted)] border border-[var(--color-border-strong)] text-[var(--color-fg)] hover:bg-[var(--color-bg)] hover:border-[var(--color-border-strong)]'
-                : 'border border-transparent text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-              'interactive',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-              collapsed ? 'w-8 justify-center px-0' : 'w-full justify-between px-2.5',
-            )}
-          >
-            <span className="inline-flex items-center gap-2">
-              <Plus size={15} className="text-[var(--color-accent)]" aria-hidden />
-              {!collapsed && <span>{t('sidebar.newChat')}</span>}
-            </span>
-            {!collapsed && <KeyboardShortcut combo={[modKey(), 'Shift', 'O']} className="max-lg:hidden" />}
-          </button>
-        </Tooltip>
-
-        <Tooltip content={collapsed ? `${t('sidebar.search')} (${modKey()}K)` : ''} side="right">
-          <button
-            type="button"
-            onClick={() => setOpen(true)}
-            className={cn(
-              'inline-flex h-8 items-center gap-2 rounded-[8px] text-[13px] max-lg:h-[var(--tap-min)] max-sm:!h-9 max-sm:gap-1.5',
-              'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-              collapsed ? 'w-8 justify-center px-0' : 'w-full justify-between px-2.5',
-            )}
-          >
-            <span className="inline-flex items-center gap-2">
-              <Search size={15} aria-hidden />
-              {!collapsed && <span>{t('sidebar.search')}</span>}
-            </span>
-            {!collapsed && <KeyboardShortcut combo={[modKey(), 'K']} className="max-lg:hidden" />}
-          </button>
-        </Tooltip>
+      {/* Actions — every entry is one SidebarNavItem so hover, selection and
+          shortcut hints stay identical across the rail. */}
+      <div className="flex flex-col gap-px px-2">
+        <SidebarNavItem
+          icon={Plus}
+          iconClassName="text-[var(--color-accent)]"
+          label={t('sidebar.newChat')}
+          collapsed={collapsed}
+          active={newChatActive}
+          shortcut={formatShortcut('O', { shift: true })}
+          onClick={startNewChat}
+        />
+        <SidebarNavItem
+          icon={Search}
+          label={t('sidebar.search')}
+          collapsed={collapsed}
+          shortcut={formatShortcut('K')}
+          onClick={() => setOpen(true)}
+        />
 
         {/* §4.20 Draw — opens a new conversation pre-set to an image model. */}
         {hasImageModels && (
-          <Tooltip content={collapsed ? tNav('draw', { defaultValue: 'Draw' }) : ''} side="right">
-            <Link
-              to="/?mode=draw"
-              onClick={onClose}
-              aria-current={drawActive ? 'page' : undefined}
-              className={cn(
-                'inline-flex h-8 items-center gap-2 rounded-[8px] text-[13px] max-lg:h-[var(--tap-min)] max-sm:!h-9 max-sm:gap-1.5',
-                drawActive
-                  ? 'bg-[var(--color-bg-muted)] text-[var(--color-fg)] font-medium'
-                  : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-                'interactive',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                collapsed ? 'w-8 justify-center px-0' : 'w-full justify-start px-2.5',
-              )}
-            >
-              <ImagePlus size={15} aria-hidden />
-              {!collapsed && <span>{tNav('draw', { defaultValue: 'Draw' })}</span>}
-            </Link>
-          </Tooltip>
+          <SidebarNavItem
+            icon={ImagePlus}
+            label={tNav('draw', { defaultValue: 'Draw' })}
+            collapsed={collapsed}
+            active={drawActive}
+            to="/?mode=draw"
+            onClick={onClose}
+          />
         )}
 
         <div
           aria-hidden
-          className={cn(
-            'my-1 h-px shrink-0 bg-[var(--color-divider)]/60',
-            collapsed ? 'w-5' : 'mx-2',
-          )}
+          className="mx-2.5 my-1 h-px shrink-0 bg-[var(--color-divider)]/60"
         />
 
         {/* § AI PPT — the Docmee iframe workbench. Rendered only when the
             deployment configured the integration (see useAiPPT). */}
         {aiPptEnabled && (
-          <Tooltip content={collapsed ? tNav('aiPpt', { defaultValue: 'AI PPT' }) : ''} side="right">
-            <Link
-              to="/ppt"
-              onClick={onClose}
-              aria-current={aiPptActive ? 'page' : undefined}
-              className={cn(
-                'inline-flex h-8 items-center gap-2 rounded-[8px] text-[13px] interactive max-lg:h-[var(--tap-min)] max-sm:!h-9 max-sm:gap-1.5',
-                aiPptActive
-                  ? 'bg-[var(--color-bg-muted)] text-[var(--color-fg)] font-medium'
-                  : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                collapsed ? 'w-8 justify-center px-0' : 'w-full justify-start px-2.5',
-              )}
-            >
-              <Presentation size={15} aria-hidden />
-              {!collapsed && <span>{tNav('aiPpt', { defaultValue: 'AI PPT' })}</span>}
-            </Link>
-          </Tooltip>
+          <SidebarNavItem
+            icon={Presentation}
+            label={tNav('aiPpt', { defaultValue: 'AI PPT' })}
+            collapsed={collapsed}
+            active={aiPptActive}
+            to="/ppt"
+            onClick={onClose}
+          />
         )}
 
         {/* § user files page — every upload (chat + KB) with the storage meter.
             The page is scoped to the user's PERSONAL uploads (GET /me/files),
             so it's hidden inside a workspace where files are shared, not owned. */}
         {!activeWorkspace && (
-          <Tooltip content={collapsed ? tNav('files', { defaultValue: 'Files' }) : ''} side="right">
-            <Link
-              to="/files"
-              onClick={onClose}
-              aria-current={filesActive ? 'page' : undefined}
-              className={cn(
-                'inline-flex h-8 items-center gap-2 rounded-[8px] text-[13px] interactive max-lg:h-[var(--tap-min)] max-sm:!h-9 max-sm:gap-1.5',
-                filesActive
-                  ? 'bg-[var(--color-bg-muted)] text-[var(--color-fg)] font-medium'
-                  : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                collapsed ? 'w-8 justify-center px-0' : 'w-full justify-start px-2.5',
-              )}
-            >
-              <FolderOpen size={15} aria-hidden />
-              {!collapsed && <span>{tNav('files', { defaultValue: 'Files' })}</span>}
-            </Link>
-          </Tooltip>
+          <SidebarNavItem
+            icon={FolderOpen}
+            label={tNav('files', { defaultValue: 'Files' })}
+            collapsed={collapsed}
+            active={filesActive}
+            to="/files"
+            onClick={onClose}
+          />
         )}
 
         {canUseKnowledgeBases && (
-          <Tooltip
-            content={collapsed ? tNav('knowledgeBases', { defaultValue: 'Knowledge' }) : ''}
-            side="right"
-          >
-            <Link
-              to="/kb"
-              onClick={onClose}
-              aria-current={knowledgeBasesActive ? 'page' : undefined}
-              className={cn(
-                'inline-flex h-8 items-center gap-2 rounded-[8px] text-[13px] interactive max-lg:h-[var(--tap-min)] max-sm:!h-9 max-sm:gap-1.5',
-                knowledgeBasesActive
-                  ? 'bg-[var(--color-bg-muted)] text-[var(--color-fg)] font-medium'
-                  : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                collapsed ? 'w-8 justify-center px-0' : 'w-full justify-start px-2.5',
-              )}
-            >
-              <Database size={15} aria-hidden />
-              {!collapsed && (
-                <span>{tNav('knowledgeBases', { defaultValue: 'Knowledge' })}</span>
-              )}
-            </Link>
-          </Tooltip>
+          <SidebarNavItem
+            icon={Database}
+            label={tNav('knowledgeBases', { defaultValue: 'Knowledge' })}
+            collapsed={collapsed}
+            active={knowledgeBasesActive}
+            to="/kb"
+            onClick={onClose}
+          />
         )}
 
         {resourceLibraryVisible && (
-          <Tooltip
-            content={collapsed ? tNav('resources', { defaultValue: 'Library' }) : ''}
-            side="right"
-          >
-            <Link
-              to="/skills"
-              onClick={onClose}
-              aria-current={skillsActive ? 'page' : undefined}
-              className={cn(
-                'inline-flex h-8 items-center gap-2 rounded-[8px] text-[13px] interactive max-lg:h-[var(--tap-min)] max-sm:!h-9 max-sm:gap-1.5',
-                skillsActive
-                  ? 'bg-[var(--color-bg-muted)] text-[var(--color-fg)] font-medium'
-                  : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                collapsed ? 'w-8 justify-center px-0' : 'w-full justify-start px-2.5',
-              )}
-            >
-              <LibraryBig size={15} aria-hidden />
-              {!collapsed && <span>{tNav('resources', { defaultValue: 'Library' })}</span>}
-            </Link>
-          </Tooltip>
+          <SidebarNavItem
+            icon={LibraryBig}
+            label={tNav('resources', { defaultValue: 'Library' })}
+            collapsed={collapsed}
+            active={skillsActive}
+            to="/skills"
+            onClick={onClose}
+          />
         )}
       </div>
 
       {/* Conversation list — while a workspace switch is reloading data, the list
           fades out and a spinner takes its place instead of flashing the old
           (or momentarily empty) space's rows (§ workspace switch animation). */}
-      {!collapsed && (
-        <div className="relative mt-1 flex-1 min-h-0">
+      {!compact && (
+        <div
+          className={cn(
+            'relative mt-1 flex-1 min-h-0 transition-opacity duration-[var(--duration-fast)] ease-[var(--ease-out)]',
+            collapsed ? 'pointer-events-none opacity-0' : 'animate-[fade-in_var(--duration-base)_var(--ease-out)]',
+          )}
+        >
           <div
             ref={listScrollRef}
-            onScroll={(event) => {
-              const scrolled = event.currentTarget.scrollTop > 2
-              setConversationListScrolled((current) => (current === scrolled ? current : scrolled))
-            }}
+            onScroll={measureListEdges}
             className={cn(
               'h-full overflow-y-auto scrollbar-thin transition-opacity duration-200',
               switching && 'opacity-0 pointer-events-none',
             )}
           >
-            {canUseKnowledgeBases ? <section className="py-1.5 max-sm:py-1">
-              <div className="flex items-center pr-2">
-                <h3 className="min-w-0 flex-1 px-4 py-1 text-[10px] font-medium uppercase tracking-wider text-[var(--color-fg-subtle)] max-lg:py-1.5 max-lg:text-[11px] max-sm:px-3 max-sm:py-0.5">
+            <div ref={listContentRef} className="pb-2">
+            {canUseKnowledgeBases ? <section className="pt-2">
+              <div className="flex items-center pr-3.5">
+                <SidebarSectionLabel className="min-w-0 flex-1">
                   <Link
                     to="/projects"
                     onClick={onClose}
@@ -707,23 +701,23 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
                   >
                     {tNav('projects')}
                   </Link>
-                </h3>
+                </SidebarSectionLabel>
                 {canCreateProject ? (
                   <Tooltip content={tProjects('nav.newProject')}>
                     <button
                       type="button"
                       onClick={() => setNewProjectOpen(true)}
                       aria-label={tProjects('nav.newProject')}
-                      className="inline-flex size-6 shrink-0 items-center justify-center rounded-[6px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-lg:size-10 max-sm:!size-8"
+                      className="-mt-1 inline-flex size-6 shrink-0 items-center justify-center rounded-[6px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-sidebar-hover)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-lg:size-8"
                     >
-                      <Plus size={12} aria-hidden />
+                      <Plus size={13} aria-hidden />
                     </button>
                   </Tooltip>
                 ) : null}
               </div>
 
               {sortedProjects.length === 0 ? (
-                <p className="px-4 py-2 text-[11.5px] text-[var(--color-fg-subtle)]">
+                <p className="px-[18px] py-1.5 text-[12px] text-[var(--color-fg-subtle)]">
                   {tProjects('nav.empty')}
                 </p>
               ) : (
@@ -734,52 +728,82 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
                     const projectConversations = projectConversationsById.get(project.id) ?? []
                     const childListId = `${sidebarId}-project-${project.id}`
                     const projectActive = activeProjectId === project.id
+                    const chip = (className?: string) => (
+                      <span
+                        className={cn(
+                          'inline-flex size-5 shrink-0 items-center justify-center rounded-[6px] text-[11px] font-medium',
+                          accent.chip,
+                          className,
+                        )}
+                        aria-hidden
+                      >
+                        {project.emoji?.trim() || project.name.trim().slice(0, 1).toUpperCase()}
+                      </span>
+                    )
+                    const chevron = (
+                      <ChevronRight
+                        size={13}
+                        aria-hidden
+                        className={cn(
+                          'transition-transform duration-[var(--duration-base)] ease-[var(--ease-out)]',
+                          expanded && 'rotate-90',
+                        )}
+                      />
+                    )
                     return (
                       <li key={project.id}>
                         <div
                           className={cn(
-                            'group/project mx-1 flex min-h-8 items-center rounded-[8px] interactive max-lg:min-h-[var(--tap-min)] max-sm:!min-h-9',
-                            projectActive ? 'bg-[var(--color-bg)]' : 'hover:bg-[var(--color-bg)]',
+                            'group/project relative mx-2 my-px flex min-h-8 items-center gap-2 rounded-[8px] pl-2.5 pr-1.5 interactive max-lg:min-h-[var(--tap-min)] max-sm:!min-h-9',
+                            projectActive
+                              ? 'bg-[var(--color-sidebar-active)] shadow-[var(--shadow-xs)]'
+                              : 'hover:bg-[var(--color-sidebar-hover)]',
                           )}
                         >
+                          {/* Desktop: the project chip doubles as the disclosure
+                              toggle and turns into a chevron while the row is
+                              hovered or focused, keeping the chip on the same
+                              x-line as every other row icon. */}
                           <button
                             type="button"
                             aria-label={project.name}
                             aria-expanded={expanded}
                             aria-controls={childListId}
                             onClick={() => toggleProject(project.id, expanded)}
-                            className="inline-flex size-8 shrink-0 items-center justify-center rounded-[7px] text-[var(--color-fg-faint)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-lg:size-[var(--tap-min)] max-sm:!size-9"
+                            className="relative inline-flex size-5 shrink-0 items-center justify-center rounded-[6px] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-lg:hidden"
                           >
-                            <ChevronRight
-                              size={13}
-                              aria-hidden
-                              className={cn(
-                                'transition-transform duration-[var(--duration-base)] ease-[var(--ease-out)]',
-                                expanded && 'rotate-90',
-                              )}
-                            />
+                            {chip('transition-opacity duration-[var(--duration-fast)] group-hover/project:opacity-0 group-focus-within/project:opacity-0')}
+                            <span className="absolute inset-0 inline-flex items-center justify-center opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover/project:opacity-100 group-focus-within/project:opacity-100">
+                              {chevron}
+                            </span>
                           </button>
+                          {chip('lg:hidden')}
                           <Link
                             to={`/projects/${project.id}`}
                             onClick={onClose}
-                            aria-label={project.name}
                             aria-current={location.pathname === `/projects/${project.id}` ? 'page' : undefined}
                             title={project.name}
-                            className="flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-[7px] py-1.5 pl-0.5 pr-2 text-[13px] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-lg:min-h-[var(--tap-min)] max-sm:!min-h-9 max-sm:gap-1.5 max-sm:py-1"
+                            className={cn(
+                              'flex min-w-0 flex-1 items-center self-stretch rounded-[6px] text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                              projectActive
+                                ? 'font-medium text-[var(--color-fg)]'
+                                : 'text-[var(--color-fg-muted)] group-hover/project:text-[var(--color-fg)]',
+                            )}
                           >
-                            <span
-                              className={cn(
-                                'inline-flex size-5 shrink-0 items-center justify-center rounded-[6px] text-[11px] font-medium',
-                                accent.chip,
-                              )}
-                              aria-hidden
-                            >
-                              {project.emoji?.trim() || project.name.trim().slice(0, 1).toUpperCase()}
-                            </span>
-                            <span className={cn('min-w-0 flex-1 truncate', projectActive && 'font-medium text-[var(--color-fg)]')}>
-                              {truncate(project.name, 30)}
-                            </span>
+                            <span className="min-w-0 flex-1 truncate">{truncate(project.name, 30)}</span>
                           </Link>
+                          {/* Touch has no hover to reveal the chip's chevron, so
+                              the drawer keeps an explicit disclosure control. */}
+                          <button
+                            type="button"
+                            aria-label={project.name}
+                            aria-expanded={expanded}
+                            aria-controls={childListId}
+                            onClick={() => toggleProject(project.id, expanded)}
+                            className="inline-flex size-8 shrink-0 items-center justify-center rounded-[6px] text-[var(--color-fg-faint)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] lg:hidden"
+                          >
+                            {chevron}
+                          </button>
                           <ProjectActionsMenu
                             project={project}
                             canUseKnowledgeBases={canUseKnowledgeBases}
@@ -807,7 +831,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
                                 <li
                                   role="status"
                                   aria-label={tCommon('common.loading')}
-                                  className="ml-11 flex min-h-8 items-center text-[var(--color-fg-subtle)]"
+                                  className="flex min-h-8 items-center pl-[46px] text-[var(--color-fg-subtle)]"
                                 >
                                   <Loader2 size={12} className="animate-spin" aria-hidden />
                                 </li>
@@ -819,7 +843,6 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
                                   active={conversation.id === currentId}
                                   onSelect={onClose}
                                   t={t}
-                                  reducedMotion={reducedMotion}
                                   nested
                                   dense={variant === 'sheet'}
                                 />
@@ -827,7 +850,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
                               {!loadingProjectIds.has(project.id) &&
                                 loadedProjectIdsRef.current.has(project.id) &&
                                 projectConversations.length === 0 ? (
-                                <li className="ml-11 min-h-8 py-1.5 pr-2 text-[11.5px] text-[var(--color-fg-subtle)]">
+                                <li className="flex min-h-8 items-center pl-[46px] pr-2 text-[12px] text-[var(--color-fg-subtle)]">
                                   {tProjects('detail.chatsEmpty')}
                                 </li>
                               ) : null}
@@ -848,7 +871,6 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
                 currentId={currentId}
                 onSelect={onClose}
                 t={t}
-                reducedMotion={reducedMotion}
                 dense={variant === 'sheet'}
               />
             )}
@@ -862,7 +884,6 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
                     currentId={currentId}
                     onSelect={onClose}
                     t={t}
-                    reducedMotion={reducedMotion}
                     dense={variant === 'sheet'}
                   />
                 ),
@@ -876,19 +897,31 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
               </div>
             )}
             {conversations.length === 0 && (
-              <p className="px-4 py-6 text-xs text-[var(--color-fg-subtle)] text-center">
+              <p className="px-[18px] py-6 text-xs text-[var(--color-fg-subtle)] text-center">
                 {t('sidebar.empty')}
               </p>
             )}
+            </div>
           </div>
+          {/* Edge fades only appear while more rows sit beyond that edge, so a
+              row is never cut hard against the header actions or the footer. */}
           <div
             aria-hidden
             className={cn(
               'pointer-events-none absolute inset-x-0 top-0 z-10 h-5',
               reducedMotion ? 'transition-none' : 'transition-opacity duration-150',
-              conversationListScrolled && !switching ? 'opacity-100' : 'opacity-0',
+              listEdges.top && !switching ? 'opacity-100' : 'opacity-0',
             )}
             style={{ background: 'linear-gradient(to bottom, var(--color-sidebar-bg), transparent)' }}
+          />
+          <div
+            aria-hidden
+            className={cn(
+              'pointer-events-none absolute inset-x-0 bottom-0 z-10 h-8',
+              reducedMotion ? 'transition-none' : 'transition-opacity duration-150',
+              listEdges.bottom && !switching ? 'opacity-100' : 'opacity-0',
+            )}
+            style={{ background: 'linear-gradient(to top, var(--color-sidebar-bg), transparent)' }}
           />
           {switching && (
             <div className="absolute inset-0 flex items-center justify-center">
@@ -902,13 +935,16 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
           flat picker (personal + every workspace) shown whenever the user has
           any workspace, so it works both in the personal space (pick one to
           enter) and inside a workspace (§workspaces 头像旁切换按钮). */}
-      <div className={cn('mt-auto p-2 max-sm:p-1.5', collapsed && 'flex items-center justify-center')}>
-        <div className={cn('flex items-center gap-1', collapsed && 'flex-col')}>
-          <div className="min-w-0 flex-1">
-            <UserMenu collapsed={collapsed} />
+      {/* The avatar keeps one x-position (10px) in both layouts. */}
+      <div className="mt-auto p-1">
+        <div className={cn('flex items-center gap-1', compact && 'flex-col')}>
+          <div className={cn('min-w-0', !compact && 'flex-1')}>
+            <UserMenu collapsed={compact} />
           </div>
           <SpaceSwitcherButton />
         </div>
+      </div>
+      </div>
       </div>
 
       <NewProjectDialog open={newProjectOpen && canCreateProject} onOpenChange={setNewProjectOpen} />
@@ -928,13 +964,100 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
   )
 }
 
+function SidebarSectionLabel({ children, className }: { children: ReactNode; className?: string }) {
+  // Sentence case at a readable size: uppercase + wide tracking does nothing
+  // for CJK labels and made 10px Latin labels hard to scan.
+  return (
+    <h3 className={cn('px-[18px] pb-1 text-[12px] font-medium leading-5 text-[var(--color-fg-subtle)]', className)}>
+      {children}
+    </h3>
+  )
+}
+
+interface SidebarNavItemProps {
+  icon: LucideIcon
+  label: string
+  collapsed: boolean
+  active?: boolean
+  /** Shown as one key chip only while the row is hovered or focused. */
+  shortcut?: string
+  /** Renders a router link; without it the row is a button. */
+  to?: string
+  onClick?: () => void
+  iconClassName?: string
+}
+
+function SidebarNavItem({
+  icon: Icon,
+  label,
+  collapsed,
+  active = false,
+  shortcut,
+  to,
+  onClick,
+  iconClassName,
+}: SidebarNavItemProps) {
+  const className = cn(
+    'group/nav inline-flex h-8 items-center gap-2 rounded-[8px] text-[13px] interactive max-lg:h-[var(--tap-min)] max-sm:!h-9 max-sm:gap-1.5',
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+    active
+      ? 'bg-[var(--color-sidebar-active)] font-medium text-[var(--color-fg)] shadow-[var(--shadow-xs)]'
+      : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-sidebar-hover)] hover:text-[var(--color-fg)]',
+    // Same box in both rail states: the icon keeps its x while the label fades
+    // and the rail's clip edge closes over it.
+    'w-full overflow-hidden px-2.5',
+  )
+  const content = (
+    <>
+      <Icon size={15} aria-hidden className={cn('shrink-0', iconClassName)} />
+      <span
+        className={cn(
+          'min-w-0 flex-1 truncate text-left transition-opacity duration-[var(--duration-fast)] ease-[var(--ease-out)]',
+          collapsed && 'opacity-0',
+        )}
+      >
+        {label}
+      </span>
+      {!collapsed && shortcut ? (
+        <Kbd className="opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover/nav:opacity-100 group-focus-visible/nav:opacity-100 max-lg:hidden">
+          {shortcut}
+        </Kbd>
+      ) : null}
+    </>
+  )
+  return (
+    <Tooltip content={collapsed ? label : ''} shortcut={collapsed ? shortcut : undefined} side="right">
+      {to ? (
+        <Link
+          to={to}
+          onClick={onClick}
+          aria-current={active ? 'page' : undefined}
+          aria-label={collapsed ? label : undefined}
+          className={className}
+        >
+          {content}
+        </Link>
+      ) : (
+        <button
+          type="button"
+          onClick={onClick}
+          aria-current={active ? 'page' : undefined}
+          aria-label={collapsed ? label : undefined}
+          className={className}
+        >
+          {content}
+        </button>
+      )}
+    </Tooltip>
+  )
+}
+
 function Group({
   label,
   items,
   currentId,
   onSelect,
   t,
-  reducedMotion,
   dense = false,
 }: {
   label: string
@@ -942,14 +1065,11 @@ function Group({
   currentId: string | undefined
   onSelect?: () => void
   t: TFunction<'chat'>
-  reducedMotion: boolean
   dense?: boolean
 }) {
   return (
-    <div className={cn('py-1.5', dense && 'py-1')}>
-      <h3 className={cn('px-4 py-1 max-lg:py-1.5 text-[10px] max-lg:text-[11px] font-medium uppercase tracking-wider text-[var(--color-fg-subtle)]', dense && 'px-3 py-0.5')}>
-        {label}
-      </h3>
+    <div className="pt-3">
+      <SidebarSectionLabel>{label}</SidebarSectionLabel>
       <ul>
         {items.map((c) => (
           <ConversationItem
@@ -958,7 +1078,6 @@ function Group({
             active={c.id === currentId}
             onSelect={onSelect}
             t={t}
-            reducedMotion={reducedMotion}
             dense={dense}
           />
         ))}
@@ -1041,7 +1160,6 @@ function ConversationItem({
   active,
   onSelect,
   t,
-  reducedMotion,
   nested = false,
   dense = false,
 }: {
@@ -1049,7 +1167,6 @@ function ConversationItem({
   active: boolean
   onSelect?: () => void
   t: TFunction<'chat'>
-  reducedMotion: boolean
   nested?: boolean
   dense?: boolean
 }) {
@@ -1076,7 +1193,7 @@ function ConversationItem({
   const [shareOpen, setShareOpen] = useState(false)
   const [confirm, setConfirm] = useState(false)
   const [exporting, setExporting] = useState(false)
-  const displayTitle = `${conversation.starred ? '☆ ' : ''}${conversation.title || t('untitled')}`
+  const displayTitle = conversation.title || t('untitled')
   const streaming = isConversationStreaming(conversation)
 
   useEffect(() => {
@@ -1108,62 +1225,65 @@ function ConversationItem({
     <li data-conversation-id={conversation.id}>
       <div
         className={cn(
-          'group/conv relative my-px rounded-[10px] interactive',
-          nested ? (dense ? 'ml-7 mr-0.5' : 'ml-9 mr-1') : dense ? 'mx-1.5' : 'mx-2',
-          active ? 'bg-[var(--color-surface)] shadow-[var(--shadow-xs)]' : 'hover:bg-[var(--color-bg)]',
+          'group/conv relative my-px rounded-[8px] interactive',
+          nested ? 'ml-9 mr-2' : 'mx-2',
+          active
+            ? 'bg-[var(--color-sidebar-active)] shadow-[var(--shadow-xs)]'
+            : 'hover:bg-[var(--color-sidebar-hover)]',
         )}
       >
         <Link
           to={`/chat/${conversation.id}`}
           onClick={onSelect}
           className={cn(
-            'conversation-title-link block rounded-[10px] px-2.5 pr-9 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-            dense ? 'py-1.5 pr-8' : cn('max-lg:pr-12', nested ? 'py-1.5 max-lg:py-2.5' : 'py-2 max-lg:py-2.5'),
+            'flex items-center gap-2 rounded-[8px] px-2.5 py-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+            dense ? 'min-h-9 pr-10' : 'min-h-8 pr-9',
           )}
         >
-          <span className="flex items-center gap-2">
-            <OverflowingConversationTitle
-              title={displayTitle}
-              reducedMotion={reducedMotion}
-              className={cn(
-                'min-w-0 flex-1 leading-snug',
-                dense ? 'text-[12.5px]' : cn('max-lg:text-[15px]', nested ? 'text-[12.5px]' : 'text-[13.5px]'),
-                active ? 'text-[var(--color-fg)] font-medium' : 'text-[var(--color-fg-muted)]',
-              )}
-            />
-            {streaming ? (
+          <ConversationTitle
+            title={displayTitle}
+            className={cn(
+              'min-w-0 flex-1 text-[13px] leading-5',
+              active ? 'text-[var(--color-fg)] font-medium' : 'text-[var(--color-fg-muted)] group-hover/conv:text-[var(--color-fg)]',
+            )}
+          />
+          {/* The Starred group already says so; nested project rows keep a
+              quiet filled star because they never appear in that group. */}
+          {nested && conversation.starred ? (
+            <Star size={11} aria-hidden className="shrink-0 fill-current text-[var(--color-fg-subtle)]" />
+          ) : null}
+          {streaming ? (
+            <span
+              role="status"
+              aria-label={t('sidebar.replying')}
+              className="inline-flex size-4 shrink-0 items-center justify-center text-[var(--color-fg-subtle)]"
+            >
+              <Loader2 size={12} className="animate-spin motion-reduce:animate-none" aria-hidden />
+            </span>
+          ) : null}
+          {conversation.workspaceId && !conversation.isPublic ? (
+            <Tooltip content={t('visibility.privateTooltip')}>
               <span
-                role="status"
-                aria-label={t('sidebar.replying')}
-                className="inline-flex size-4 shrink-0 items-center justify-center text-[var(--color-fg-subtle)]"
+                className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]"
+                aria-label={t('visibility.private')}
               >
-                <Loader2 size={12} className="animate-spin motion-reduce:animate-none" aria-hidden />
+                <UserRound size={12} aria-hidden />
               </span>
-            ) : null}
-            {conversation.workspaceId && !conversation.isPublic ? (
-              <Tooltip content={t('visibility.privateTooltip')}>
-                <span
-                  className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]"
-                  aria-label={t('visibility.private')}
-                >
-                  <UserRound size={12} aria-hidden />
-                </span>
-              </Tooltip>
-            ) : conversation.workspaceId && conversation.creatorName ? (
-              <span
-                className="flex max-w-[45%] shrink-0 items-center gap-1 text-[11px] text-[var(--color-fg-subtle)]"
-                title={conversation.creatorName}
-              >
-                <Avatar size="xs">
-                  {conversation.creatorAvatar ? (
-                    <AvatarImage src={conversation.creatorAvatar} alt={conversation.creatorName} />
-                  ) : null}
-                  <AvatarFallback>{initials(conversation.creatorName)}</AvatarFallback>
-                </Avatar>
-                <span className="truncate">{conversation.creatorName}</span>
-              </span>
-            ) : null}
-          </span>
+            </Tooltip>
+          ) : conversation.workspaceId && conversation.creatorName ? (
+            <span
+              className="flex max-w-[45%] shrink-0 items-center gap-1 text-[11px] text-[var(--color-fg-subtle)]"
+              title={conversation.creatorName}
+            >
+              <Avatar size="xs">
+                {conversation.creatorAvatar ? (
+                  <AvatarImage src={conversation.creatorAvatar} alt={conversation.creatorName} />
+                ) : null}
+                <AvatarFallback>{initials(conversation.creatorName)}</AvatarFallback>
+              </Avatar>
+              <span className="truncate">{conversation.creatorName}</span>
+            </span>
+          ) : null}
         </Link>
         {!isWorkspaceGuest ? <div className="absolute right-1.5 top-1/2 -translate-y-1/2">
           <DropdownMenu>
@@ -1172,11 +1292,16 @@ function ConversationItem({
                 type="button"
                 aria-label={t('sidebar.actions')}
                 className={cn(
-                  'inline-flex items-center justify-center rounded-[6px] opacity-0 group-hover/conv:opacity-100 data-[state=open]:opacity-100 text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                  dense ? 'size-7 opacity-100' : 'size-6 max-lg:size-10 max-lg:opacity-100',
+                  'inline-flex items-center justify-center rounded-[6px] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] data-[state=open]:bg-[var(--color-bg-muted)] data-[state=open]:text-[var(--color-fg)]',
+                  // Desktop reveals the menu on hover/focus like every other
+                  // row action. Touch has no hover, so the drawer keeps it
+                  // visible but quiet enough that a column of dots recedes.
+                  dense
+                    ? cn('size-8', active ? 'text-[var(--color-fg-muted)]' : 'text-[var(--color-fg-faint)]')
+                    : 'size-6 text-[var(--color-fg-muted)] opacity-0 group-hover/conv:opacity-100 group-focus-within/conv:opacity-100 data-[state=open]:opacity-100',
                 )}
               >
-                <MoreHorizontal size={13} aria-hidden />
+                <MoreHorizontal size={14} aria-hidden />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-[180px]">
@@ -1287,65 +1412,46 @@ function ConversationItem({
   )
 }
 
-function OverflowingConversationTitle({
-  title,
-  reducedMotion,
-  className,
-}: {
-  title: string
-  reducedMotion: boolean
-  className?: string
-}) {
-  const viewportRef = useRef<HTMLSpanElement>(null)
-  const trackRef = useRef<HTMLSpanElement>(null)
-  const [overflow, setOverflow] = useState(0)
+/**
+ * A long title fades out at its trailing edge instead of ending in "…" or
+ * scrolling on hover; the full title is offered in a tooltip only when it is
+ * actually clipped.
+ */
+function ConversationTitle({ title, className }: { title: string; className?: string }) {
+  const ref = useRef<HTMLSpanElement>(null)
+  const [overflowing, setOverflowing] = useState(false)
 
   useEffect(() => {
-    const viewport = viewportRef.current
-    const track = trackRef.current
-    if (!viewport || !track) return
-
+    const node = ref.current
+    if (!node) return
     let disposed = false
     const measure = () => {
       if (disposed) return
-      const next = Math.max(0, Math.ceil(track.getBoundingClientRect().width - viewport.clientWidth))
-      setOverflow((current) => (current === next ? current : next))
+      const next = node.scrollWidth > node.clientWidth + 1
+      setOverflowing((current) => (current === next ? current : next))
     }
-
     measure()
     const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure)
-    observer?.observe(viewport)
-    observer?.observe(track)
-    window.addEventListener('resize', measure)
+    observer?.observe(node)
     void document.fonts?.ready.then(measure)
-
     return () => {
       disposed = true
       observer?.disconnect()
-      window.removeEventListener('resize', measure)
     }
   }, [title])
 
-  const scrollable = overflow > 0 && !reducedMotion
-  const durationMs = Math.min(9000, Math.max(3000, Math.round(overflow * 18)))
-  const style = {
-    '--conversation-title-distance': `${overflow}px`,
-    '--conversation-title-duration': `${durationMs}ms`,
-  } as CSSProperties
-
   return (
-    <span
-      ref={viewportRef}
-      data-scrollable={scrollable ? 'true' : undefined}
-      title={overflow > 0 && reducedMotion ? title : undefined}
-      className={cn('conversation-title-viewport', className)}
-      style={style}
+    // The Tooltip root stays mounted with empty content so the measured span
+    // never remounts when the overflow state flips.
+    <Tooltip
+      content={overflowing ? <span className="block max-w-[20rem] whitespace-normal break-words">{title}</span> : ''}
+      side="right"
+      delayDuration={600}
     >
-      <span className="conversation-title-static">{title}</span>
-      <span ref={trackRef} aria-hidden className="conversation-title-track">
+      <span ref={ref} data-overflowing={overflowing ? 'true' : undefined} className={cn('sidebar-row-title', className)}>
         {title}
       </span>
-    </span>
+    </Tooltip>
   )
 }
 
@@ -1390,8 +1496,11 @@ export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuP
           aria-label={t('settings:user.menuAria')}
           className={cn(
             'flex items-center justify-center gap-2.5 rounded-[10px] interactive',
-            'hover:bg-[var(--color-bg)] data-[state=open]:bg-[var(--color-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-            inHeader ? 'size-[var(--tap-min)]' : collapsed ? 'p-1.5' : 'w-full p-2',
+            inHeader
+              ? 'hover:bg-[var(--color-bg-muted)] data-[state=open]:bg-[var(--color-bg-muted)]'
+              : 'hover:bg-[var(--color-sidebar-hover)] data-[state=open]:bg-[var(--color-sidebar-hover)]',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+            inHeader ? 'size-[var(--tap-min)]' : collapsed ? 'p-1.5' : 'w-full p-1.5',
           )}
         >
           <Avatar size="md" tone="clay" className={cn(inHeader && 'ring-1 ring-[var(--color-border)]')}>

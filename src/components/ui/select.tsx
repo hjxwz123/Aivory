@@ -58,8 +58,7 @@ export const SelectContent = forwardRef<
           'max-h-[min(22rem,var(--radix-select-content-available-height))]',
           'rounded-popup bg-[var(--color-surface-raised)] border border-[var(--color-border)]',
           'shadow-[var(--shadow-popover)] p-1',
-          'data-[state=open]:animate-[slide-down_180ms_var(--ease-out)]',
-          'data-[state=closed]:animate-[fade-out_120ms_var(--ease-in)]',
+          'popup-motion',
           className,
         )}
         {...rest}

@@ -105,7 +105,7 @@ export function SpaceSwitcherButton() {
           <button
             type="button"
             aria-label={t('workspace.switchSpace', { defaultValue: 'Switch space' })}
-            className="inline-flex size-8 shrink-0 items-center justify-center rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] data-[state=open]:bg-[var(--color-bg)] data-[state=open]:text-[var(--color-fg)]"
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-sidebar-hover)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] data-[state=open]:bg-[var(--color-sidebar-hover)] data-[state=open]:text-[var(--color-fg)]"
           >
             <ArrowLeftRight size={15} aria-hidden />
           </button>
