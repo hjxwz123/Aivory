@@ -19,6 +19,8 @@ interface ModelStore {
   models: ApiModel[]
   /** §4.20 image (kind=image) models — selectable in the picker to draw. */
   imageModels: ApiModel[]
+  /** Image catalog readiness is independent of chat models and optional tags. */
+  imageModelsLoaded: boolean
   /** Admin-managed tags (§ model tags) — drives the picker's filter chips. */
   tags: ApiModelTag[]
   defaultId: string
@@ -57,6 +59,7 @@ let reloadRequested = false
 export const useModels = create<ModelStore>((set, get) => ({
   models: [],
   imageModels: [],
+  imageModelsLoaded: false,
   tags: [],
   defaultId: '',
   verifyAvailable: false,
@@ -85,6 +88,7 @@ export const useModels = create<ModelStore>((set, get) => ({
         set({
           models: [],
           imageModels: [],
+          imageModelsLoaded: false,
           defaultId: '',
           verifyAvailable: false,
           visionAvailable: false,
@@ -107,7 +111,9 @@ export const useModels = create<ModelStore>((set, get) => ({
     const catalogContextChanged =
       stateAtLoadStart.loadedScope !== scopeKey ||
       stateAtLoadStart.loadedPolicyKey !== policyKey ||
-      !stateAtLoadStart.loaded
+      !stateAtLoadStart.loaded ||
+      // A failed, empty catalog has no usable cache to preserve on retry.
+      (Boolean(stateAtLoadStart.error) && stateAtLoadStart.models.length === 0 && stateAtLoadStart.imageModels.length === 0)
     if (catalogContextChanged) {
       // Every catalog-derived value is workspace-scoped. Assign the new scope
       // only after clearing all previous values so a failed request cannot
@@ -115,6 +121,7 @@ export const useModels = create<ModelStore>((set, get) => ({
       set({
         models: [],
         imageModels: [],
+        imageModelsLoaded: false,
         defaultId: '',
         verifyAvailable: false,
         visionAvailable: false,
@@ -145,23 +152,30 @@ export const useModels = create<ModelStore>((set, get) => ({
       // scope returns only its policy-allowed models; personal returns all.
       // Tags + image models are optional decoration for the picker — never let
       // their fetch failing block the chat model list.
-      const [resp, tagResult, img] = await Promise.all([
-        modelsApi.list(workspaceId),
-        modelsApi.tags().then(
-          (tags) => ({ ok: true as const, tags }),
-          () => ({ ok: false as const, tags: [] as ApiModelTag[] }),
-        ),
-          canDraw
-          ? modelsApi.listImage(workspaceId).catch(() => ({ models: [], default_id: '' }))
-          : Promise.resolve({ models: [], default_id: '' }),
-      ])
+      // Start all requests together, but publish the chat catalog as soon as
+      // it arrives. Optional tags and drawing must not delay a usable editor.
+      const chatRequest = modelsApi.list(workspaceId)
+      const tagRequest = modelsApi.tags().then(
+        (tags) => ({ ok: true as const, tags }),
+        () => ({ ok: false as const, tags: [] as ApiModelTag[] }),
+      )
+      const imageRequest = canDraw
+        ? modelsApi.listImage(workspaceId).catch(() => ({ models: [], default_id: '' }))
+        : Promise.resolve({ models: [], default_id: '' })
+      const requestIsCurrent = () => {
+        const latest = useWorkspaces.getState()
+        const latestId = activeWorkspaceId()
+        const latestPolicy = latestId ? latest.policies[latestId] : undefined
+        const current = latestId === workspaceId &&
+          workspaceModelPolicyKey(latestId, latestPolicy) === policyKey
+        if (!current) reloadRequested = true
+        return current
+      }
+      const resp = await chatRequest
       // A workspace switch can finish while the requests above are in flight.
       // Do not publish the previous scope's models into the new space; the
       // trailing reload scheduled by the switch will hydrate the right list.
-      if (activeWorkspaceId() !== workspaceId) {
-        reloadRequested = true
-        return
-      }
+      if (!requestIsCurrent()) return
       const userDefaultId = useSettings.getState().models.defaultModelId
       const firstEnabled = resp.models.find((m) => m.enabled)
       const globalDefault = resp.default_id
@@ -170,37 +184,8 @@ export const useModels = create<ModelStore>((set, get) => ({
       const userDefault = userDefaultId
         ? resp.models.find((m) => m.id === userDefaultId && m.enabled)
         : undefined
-      const latestWorkspaceId = activeWorkspaceId()
-      const latestWorkspaceState = useWorkspaces.getState()
-      const latestWorkspacePolicy = latestWorkspaceId
-        ? latestWorkspaceState.policies[latestWorkspaceId]
-        : undefined
-      const latestPolicyKey = workspaceModelPolicyKey(latestWorkspaceId, latestWorkspacePolicy)
-      // A policy update can land without changing the active workspace id. Do
-      // not publish a response fetched under the previous allowlist/drawing
-      // ceiling; the policy setter has already requested a trailing reload.
-      if (latestPolicyKey !== policyKey) {
-        reloadRequested = true
-        return
-      }
-      const latestWorkspaceCaps = workspaceCapabilitiesForScope(latestWorkspaceId, latestWorkspacePolicy, {
-        workspacesLoaded: latestWorkspaceState.loaded,
-        policyLoading: latestWorkspaceId ? latestWorkspaceState.policyLoading[latestWorkspaceId] === true : false,
-        switching: latestWorkspaceState.switching,
-        policyError: latestWorkspaceId ? latestWorkspaceState.policyErrors[latestWorkspaceId] : null,
-      })
-      const latestCanDraw = userCan(useAuth.getState().user, 'allow_drawing') &&
-        latestWorkspaceCaps.drawing
-      set((state) => ({
+      set({
         models: resp.models,
-        // A group permission can change while these requests are in flight.
-        // Re-check at commit time so a stale response never restores drawing.
-        imageModels: latestCanDraw ? img.models : [],
-        // An admin mutation may have updated the shared picker cache while
-        // these requests were in flight. Never replace that newer state with
-        // a stale response, and preserve the cache when optional tag loading
-        // fails.
-        tags: tagResult.ok && state.tags === tagsAtLoadStart ? tagResult.tags : state.tags,
         defaultId: userDefault?.id || globalDefault?.id || firstEnabled?.id || resp.models[0]?.id || '',
         verifyAvailable: Boolean(resp.verify_available),
         visionAvailable: Boolean(resp.vision_available),
@@ -209,12 +194,39 @@ export const useModels = create<ModelStore>((set, get) => ({
         loaded: true,
         loadedScope: scopeKey,
         loadedPolicyKey: policyKey,
-        loading: false,
-      }))
+      })
+      await Promise.all([
+        imageRequest.then((img) => {
+          if (!requestIsCurrent()) return
+          const latest = useWorkspaces.getState()
+          const latestPolicy = workspaceId ? latest.policies[workspaceId] : undefined
+          const latestCaps = workspaceCapabilitiesForScope(workspaceId, latestPolicy, {
+            workspacesLoaded: latest.loaded,
+            policyLoading: workspaceId ? latest.policyLoading[workspaceId] === true : false,
+            switching: latest.switching,
+            policyError: workspaceId ? latest.policyErrors[workspaceId] : null,
+          })
+          // Permissions can change while the optional request is in flight.
+          set({
+            imageModels: userCan(useAuth.getState().user, 'allow_drawing') && latestCaps.drawing ? img.models : [],
+            imageModelsLoaded: true,
+          })
+        }),
+        tagRequest.then((tagResult) => {
+          if (!requestIsCurrent()) return
+          // Preserve a newer admin reorder and keep cached tags on failure.
+          set((state) => ({
+            tags: tagResult.ok && state.tags === tagsAtLoadStart ? tagResult.tags : state.tags,
+          }))
+        }),
+      ])
+      if (requestIsCurrent()) set({ loading: false })
     } catch (e) {
       // A superseded request must not overwrite the empty cache already
       // assigned to the newly active workspace. Its queued reload runs below.
-      if (activeWorkspaceId() !== workspaceId) {
+      const latestScope = activeWorkspaceId()
+      const latestPolicy = latestScope ? useWorkspaces.getState().policies[latestScope] : undefined
+      if (latestScope !== workspaceId || workspaceModelPolicyKey(latestScope, latestPolicy) !== policyKey) {
         reloadRequested = true
         return
       }
@@ -226,6 +238,7 @@ export const useModels = create<ModelStore>((set, get) => ({
         set({
           models: [],
           imageModels: [],
+          imageModelsLoaded: true,
           defaultId: '',
           verifyAvailable: false,
           visionAvailable: false,

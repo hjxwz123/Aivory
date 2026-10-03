@@ -26,6 +26,8 @@
     "stillUp": "Still up"
   },
   "empty": {
+    "loadingRecent": "Loading recent chats",
+    "recentLoadFailed": "Recent chats could not be loaded",
     "subtitle": "What's on your mind?",
     "subtitleVariants": [
       "What's on your mind?",
@@ -658,6 +660,11 @@
     "advancedSection": "Advanced"
   },
   "modelPicker": {
+    "loading": "Loading models",
+    "retryLoad": "Reload models",
+    "loadFailed": "Models could not be loaded. Try again.",
+    "empty": "No models available",
+    "select": "Choose a model",
     "section": "Models",
     "moreSoon": "More models coming soon",
     "current": "Current model",

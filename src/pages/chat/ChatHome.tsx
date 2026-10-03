@@ -35,7 +35,7 @@ export default function ChatHome() {
   const modelsLoaded = useModels((s) => s.loaded)
   const modelsLoadedScope = useModels((s) => s.loadedScope)
   const modelsLoadedPolicyKey = useModels((s) => s.loadedPolicyKey)
-  const modelsLoading = useModels((s) => s.loading)
+  const imageModelsLoaded = useModels((s) => s.imageModelsLoaded)
   const user = useAuth((s) => s.user)
   const workspaceId = useWorkspaces((s) => s.activeId ?? undefined)
   const workspacesLoaded = useWorkspaces((s) => s.loaded)
@@ -95,7 +95,7 @@ export default function ChatHome() {
   // Falls back to the draw default (if any), then the async-loaded chat default,
   // so a new chat honours the picker instead of always using the default model.
   const [pickedModelId, setPickedModelId] = useState<string | null>(null)
-  const modelId = pickedModelId ?? (drawDefault || defaultModelId)
+  const modelId = pickedModelId ?? (drawDefault || (drawRequested ? '' : defaultModelId))
   // A user's explicit default model starts new chats in advanced mode. Accounts
   // without one start in 快速 when the deployment provides a fast model. Draw
   // mode (image models) is always advanced.
@@ -103,7 +103,7 @@ export default function ChatHome() {
   const [pickedFast, setPickedFast] = useState<boolean | null>(null)
   const [selectedKnowledgeBaseIds, setSelectedKnowledgeBaseIds] = useState<string[]>([])
   const fast =
-    !drawMode &&
+    !drawRequested &&
     (pickedFast ?? resolveNewConversationFastMode(user?.settings, fastAvailable, drawMode))
 
   useEffect(() => {
@@ -120,10 +120,10 @@ export default function ChatHome() {
       modelsLoadedScope !== modelScope ||
       modelsLoadedPolicyKey !== modelPolicyKey ||
       !modelsLoaded ||
-      modelsLoading
+      !imageModelsLoaded
     )) return
     navigate('/', { replace: true })
-  }, [canDraw, drawMode, drawRequested, modelsLoaded, modelsLoadedPolicyKey, modelsLoadedScope, modelsLoading, navigate, workspaceId, workspacePolicy, workspacePolicyPending])
+  }, [canDraw, drawMode, drawRequested, imageModelsLoaded, modelsLoaded, modelsLoadedPolicyKey, modelsLoadedScope, navigate, workspaceId, workspacePolicy, workspacePolicyPending])
 
   useEffect(() => {
     setPickedModelId(null)

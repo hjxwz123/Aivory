@@ -26,6 +26,8 @@
     "stillUp": "夜深了"
   },
   "empty": {
+    "loadingRecent": "正在載入最近聊天",
+    "recentLoadFailed": "最近聊天暫時無法載入",
     "subtitle": "在想些什麼？",
     "subtitleVariants": [
       "在想些什麼？",
@@ -650,6 +652,11 @@
     "advancedSection": "進階"
   },
   "modelPicker": {
+    "loading": "正在載入模型",
+    "retryLoad": "重新載入模型",
+    "loadFailed": "模型載入失敗，點擊重試。",
+    "empty": "暫無可用模型",
+    "select": "選擇模型",
     "section": "模型",
     "moreSoon": "更多模型即將上線",
     "current": "當前模型",
