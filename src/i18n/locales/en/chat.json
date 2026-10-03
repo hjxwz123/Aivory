@@ -475,6 +475,10 @@
     "footer": "Shared from Aivory — a thoughtful AI workspace."
   },
   "code": {
+    "wrap": "Wrap code",
+    "enableWrap": "Enable line wrapping",
+    "disableWrap": "Disable line wrapping",
+    "resetWrap": "Use default wrapping",
     "run": "Run",
     "rerun": "Run again",
     "stop": "Stop",

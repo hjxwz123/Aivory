@@ -19,6 +19,8 @@ import { Sun, Moon, Monitor, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from '@/hooks/use-toast'
 import { persistUserSettings } from '@/lib/user-settings'
+import { useAuth } from '@/store/auth'
+import { saveCodeBlockWrapPreference } from '@/lib/code-block-wrap-preference'
 
 // Slider stops, narrow → full. Order defines the slider's left-to-right axis;
 // widths live in tokens.css ([data-chat-width=…] → --layout-message-max-w).
@@ -59,12 +61,21 @@ export default function Appearance() {
   const setAccent = useAccent((s) => s.setAccent)
   const appearance = useSettings((s) => s.appearance)
   const setAppearance = useSettings((s) => s.setAppearance)
+  const codeBlockWrapSaving = useSettings((state) => state.codeBlockWrapPending !== null)
   const lang = useLanguage((s) => s.lang)
   const setLang = useLanguage((s) => s.setLang)
   const { t } = useTranslation(['settings', 'common'])
   const chatWidthIndex = Math.max(0, CHAT_WIDTH_STOPS.indexOf(appearance.chatWidth))
 
   useEffect(() => syncSystem(), [syncSystem])
+  useEffect(() => {
+    if (!useSettings.getState().codeBlockWrapPending) void useAuth.getState().refreshProfile()
+  }, [])
+  function onToggleCodeBlockWrap(enabled: boolean) {
+    void saveCodeBlockWrapPreference(enabled).catch((error) => {
+      toast.error(t('common:actions.failed', { defaultValue: 'Failed to save' }), error instanceof Error ? error.message : undefined)
+    })
+  }
   function onChangeAccent(preset: AccentPref) {
     setAccent(preset)
   }
@@ -201,6 +212,15 @@ export default function Appearance() {
             checked={appearance.userMessageMarkdown}
             onCheckedChange={(v) => onToggleUserMessageMarkdown(Boolean(v))}
             aria-label={t('appearance.userMessageMarkdown.label')}
+          />
+        </SettingsRow>
+        <SettingsRow label={t('appearance.codeBlockWrap.label')} description={t('appearance.codeBlockWrap.body')}>
+          <Switch
+            checked={appearance.codeBlockWrap}
+            onCheckedChange={(value) => onToggleCodeBlockWrap(Boolean(value))}
+            disabled={codeBlockWrapSaving}
+            aria-label={t('appearance.codeBlockWrap.label')}
+            aria-busy={codeBlockWrapSaving}
           />
         </SettingsRow>
         <SettingsRow label={t('appearance.fontSize')} description={t('appearance.fontSizeBody')}>

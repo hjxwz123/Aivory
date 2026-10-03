@@ -467,6 +467,10 @@
     "footer": "由 Aivory 分享 —— 一個用心的 AI 工作空間。"
   },
   "code": {
+    "wrap": "程式碼自動換行",
+    "enableWrap": "開啟自動換行",
+    "disableWrap": "關閉自動換行",
+    "resetWrap": "恢復預設",
     "run": "執行",
     "rerun": "重新執行",
     "stop": "停止",

@@ -248,6 +248,10 @@
       "full": "Pleine largeur",
       "max": "Très large"
     },
+    "codeBlockWrap": {
+      "label": "Retour à la ligne du code par défaut",
+      "body": "Renvoyer les longues lignes de code à la ligne par défaut. Chaque bloc reste réglable séparément."
+    },
     "userMessageMarkdown": {
       "label": "Markdown dans vos messages",
       "body": "Affiche vos messages en Markdown (blocs de code, tableaux, formules)."
