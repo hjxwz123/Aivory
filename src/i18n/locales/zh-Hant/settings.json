@@ -248,6 +248,10 @@
       "full": "全寬",
       "max": "超寬"
     },
+    "codeBlockWrap": {
+      "label": "程式碼區塊預設自動換行",
+      "body": "預設將超出寬度的程式碼自動折行，仍可在每個程式碼區塊中單獨調整。"
+    },
     "userMessageMarkdown": {
       "label": "使用者訊息 Markdown",
       "body": "用 Markdown 渲染你傳送的訊息（含程式碼區塊、表格、公式）。"

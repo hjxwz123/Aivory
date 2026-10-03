@@ -30,6 +30,7 @@ export interface AppearanceSettings {
   chatWidth: ChatWidthPref
   /** When true, user-authored message bubbles render through the same markdown pipeline as assistant messages. */
   userMessageMarkdown: boolean
+  codeBlockWrap: boolean
 }
 
 export interface ModelSettings {

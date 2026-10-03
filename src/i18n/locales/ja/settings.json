@@ -248,6 +248,10 @@
       "full": "全幅",
       "max": "特大幅"
     },
+    "codeBlockWrap": {
+      "label": "コードブロックを既定で折り返す",
+      "body": "長いコード行を既定で折り返します。各コードブロックで個別に変更できます。"
+    },
     "userMessageMarkdown": {
       "label": "自分のメッセージの Markdown",
       "body": "送信したメッセージを Markdown（コードブロック・表・数式）で表示します。"
