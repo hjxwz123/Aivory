@@ -1,7 +1,10 @@
-import { createElement } from 'react'
+import { createElement, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { PrivateMarkdown } from '@/components/chat/private-markdown'
+
+vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
+vi.mock('@/components/ui/tooltip', () => ({ Tooltip: ({ children }: { children: ReactNode }) => children }))
 
 describe('private markdown', () => {
   it('never mounts remote images, HTML, iframes or code execution controls', () => {
@@ -11,7 +14,10 @@ describe('private markdown', () => {
     expect(html).not.toContain('<img')
     expect(html).not.toContain('<script')
     expect(html).not.toContain('<iframe')
-    expect(html).not.toContain('<button')
+    expect(html).toContain('aria-label="code.wrap"')
+    expect(html).not.toContain('aria-label="code.run"')
+    expect(html).not.toContain('aria-label="code.preview"')
+    expect(html).not.toContain('aria-label="actions.copy"')
     expect(html).toContain('&lt;script&gt;')
   })
 

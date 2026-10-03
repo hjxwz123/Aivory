@@ -1,7 +1,6 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Copy, Check, Play, Square, AppWindow, CodeXml, Link2, LoaderCircle } from 'lucide-react'
-import { Tooltip } from '@/components/ui/tooltip'
+import { Copy, Check, Play, Square, AppWindow, Link2, LoaderCircle } from 'lucide-react'
 import { useCopy } from '@/hooks/use-clipboard'
 import { useHTMLPreviewShare } from '@/hooks/use-html-preview-share'
 import { useCodeHighlight } from '@/lib/syntax/use-code-highlight'
@@ -15,7 +14,8 @@ import {
 import { autoOpenPreview, useArtifactPanel } from '@/store/artifact-panel'
 import { useTheme } from '@/store/theme'
 import { CodeRunOutput } from './code-run-output'
-import { cn } from '@/lib/utils'
+import { CodeBlockFrame } from './code-block-frame'
+import { CodeAction as IconAction } from './code-action'
 
 interface CodeBlockProps {
   code: string
@@ -34,27 +34,6 @@ interface CodeBlockProps {
 
 const PYTHON_LANGS = new Set(['python', 'py', 'python3'])
 const HTML_LANGS = new Set(['html', 'htm', 'xhtml'])
-
-// Friendly, properly-cased display names for the header. Anything not listed
-// falls back to a simple capitalisation ("java" → "Java", "ruby" → "Ruby").
-const LANG_LABELS: Record<string, string> = {
-  js: 'JavaScript', javascript: 'JavaScript', mjs: 'JavaScript', cjs: 'JavaScript',
-  ts: 'TypeScript', typescript: 'TypeScript', jsx: 'JSX', tsx: 'TSX',
-  py: 'Python', python: 'Python', python3: 'Python', rb: 'Ruby', go: 'Go', golang: 'Go',
-  rs: 'Rust', rust: 'Rust', java: 'Java', kt: 'Kotlin', kotlin: 'Kotlin',
-  cs: 'C#', csharp: 'C#', cpp: 'C++', 'c++': 'C++', c: 'C', objc: 'Objective-C',
-  php: 'PHP', sh: 'Shell', bash: 'Bash', zsh: 'Zsh', shell: 'Shell', ps1: 'PowerShell',
-  html: 'HTML', htm: 'HTML', xml: 'XML', css: 'CSS', scss: 'SCSS', sass: 'Sass', less: 'Less',
-  json: 'JSON', jsonc: 'JSON', yaml: 'YAML', yml: 'YAML', toml: 'TOML',
-  sql: 'SQL', md: 'Markdown', markdown: 'Markdown', diff: 'Diff', graphql: 'GraphQL',
-  swift: 'Swift', dart: 'Dart', scala: 'Scala', r: 'R', lua: 'Lua', dockerfile: 'Dockerfile',
-}
-
-function langLabel(lang?: string): string {
-  if (!lang) return 'Plain'
-  const key = lang.toLowerCase()
-  return LANG_LABELS[key] ?? key.charAt(0).toUpperCase() + key.slice(1)
-}
 
 /** Fenced block is HTML when tagged so, or (untagged) when it *reads* like a document. */
 function isHtmlSnippet(code: string, lang?: string): boolean {
@@ -121,31 +100,13 @@ export function CodeBlock({ code, lang, className, live = false, previewKey, all
   }, [isHtml, live, code, blockKey, ownsPreview, allowPublicShare])
 
   return (
-    <div
-      className={cn(
-        // `overflow-hidden` would become the sticky toolbar's scroll ancestor,
-        // so use clip to preserve the rounded crop without breaking page-level
-        // vertical sticking. The code body keeps its own horizontal scroller.
-        'group/code relative isolate my-3.5 max-w-full overflow-clip',
-        'rounded-[14px] border border-[var(--color-border)]',
-        'bg-[var(--color-code-bg)] text-[var(--color-code-fg)]',
-        className,
-      )}
-    >
-      <div
-        data-code-toolbar
-        className={cn(
-          'sticky z-[var(--z-sticky)] flex h-10 min-w-0 items-center justify-between gap-2 px-4',
-          'border-b border-[var(--color-border-subtle)] bg-[var(--color-code-bg)]',
-          'max-sm:h-[var(--tap-min)] max-sm:px-3',
-        )}
-        style={{ top: 'var(--code-toolbar-sticky-top, 0px)' }}
-      >
-        <span className="inline-flex min-w-0 items-center gap-1.5 truncate text-[12.5px] font-medium text-[var(--color-fg-muted)]">
-          <CodeXml size={14} strokeWidth={1.5} aria-hidden className="shrink-0 text-[var(--color-fg-subtle)]" />
-          {langLabel(lang)}
-        </span>
-        <div className="flex shrink-0 items-center gap-0.5">
+    <CodeBlockFrame
+      code={code}
+      lang={lang}
+      html={html}
+      className={className}
+      actions={
+        <>
           {isPython && !live ? (
             running ? (
               <IconAction onClick={() => handleRef.current?.cancel()} label={t('code.stop')}>
@@ -180,15 +141,14 @@ export function CodeBlock({ code, lang, className, live = false, previewKey, all
               )}
             </IconAction>
           ) : null}
-          <IconAction onClick={() => void copy(code)} label={copied ? t('actions.copied') : t('actions.copy')}>
-            {copied ? <Check size={13} aria-hidden /> : <Copy size={13} aria-hidden />}
-          </IconAction>
-        </div>
-      </div>
-      <pre className="overflow-x-auto px-4 pb-4 pt-1 text-[13px] leading-[1.65]">
-        <code className="font-mono whitespace-pre" dangerouslySetInnerHTML={{ __html: html }} />
-      </pre>
-      {isPython ? (
+        </>
+      }
+      copyAction={
+        <IconAction onClick={() => void copy(code)} label={copied ? t('actions.copied') : t('actions.copy')}>
+          {copied ? <Check size={13} aria-hidden /> : <Copy size={13} aria-hidden />}
+        </IconAction>
+      }
+      footer={isPython ? (
         <CodeRunOutput
           running={running}
           phase={phase}
@@ -200,36 +160,6 @@ export function CodeBlock({ code, lang, className, live = false, previewKey, all
           }}
         />
       ) : null}
-    </div>
-  )
-}
-
-interface IconActionProps {
-  onClick: () => void
-  label: string
-  children: ReactNode
-  disabled?: boolean
-}
-
-// Icon-only header action (Run / Preview / Copy). The label rides in a tooltip
-// + aria-label so the header stays minimal while keeping the action discoverable.
-function IconAction({ onClick, label, children, disabled = false }: IconActionProps) {
-  return (
-    <Tooltip content={label}>
-      <button
-        type="button"
-        onClick={onClick}
-        disabled={disabled}
-        aria-label={label}
-        className={cn(
-          'inline-flex items-center justify-center size-7 max-sm:size-[var(--tap-min)] rounded-[7px]',
-          'text-[var(--color-fg-subtle)] interactive',
-          'hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:pointer-events-none disabled:opacity-50',
-        )}
-      >
-        {children}
-      </button>
-    </Tooltip>
+    />
   )
 }

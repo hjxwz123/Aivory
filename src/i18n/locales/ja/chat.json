@@ -467,6 +467,10 @@
     "footer": "Aivory から共有 — 思慮深い AI ワークスペース。"
   },
   "code": {
+    "wrap": "コードを折り返す",
+    "enableWrap": "折り返しを有効にする",
+    "disableWrap": "折り返しを無効にする",
+    "resetWrap": "既定の折り返しに戻す",
     "run": "実行",
     "rerun": "再実行",
     "stop": "停止",

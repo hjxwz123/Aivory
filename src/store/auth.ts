@@ -17,6 +17,7 @@ import {
   setRefreshHandler,
 } from '@/api/client'
 import type { ApiAuthPolicy, ApiUser } from '@/api/types'
+import { getUserSettingsRevision } from '@/lib/user-settings-revision'
 
 export const DEFAULT_AUTH_POLICY: ApiAuthPolicy = {
   password_login_enabled: true,
@@ -262,13 +263,17 @@ export const useAuth = create<AuthState>((set, get) => ({
     const expectedUserId = get().user?.id
     if (!expectedUserId || get().status !== 'authenticated') return null
     if (profileRefresh?.userId === expectedUserId) return profileRefresh.promise
+    const settingsRevision = getUserSettingsRevision()
     const promise = authApi
       .me()
       .then((fresh) => {
         const current = get()
         if (current.status === 'authenticated' && current.user?.id === expectedUserId && fresh.id === expectedUserId) {
-          set({ user: fresh, error: null })
-          return fresh
+          const next = settingsRevision === getUserSettingsRevision()
+            ? fresh
+            : { ...fresh, settings: current.user.settings }
+          set({ user: next, error: null })
+          return next
         }
         return null
       })
