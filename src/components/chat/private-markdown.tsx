@@ -1,5 +1,6 @@
 import { Fragment, useMemo, type ReactNode } from 'react'
 import { marked, type Token, type Tokens } from 'marked'
+import { CodeBlockFrame } from './code-block-frame'
 
 function renderTokens(tokens: Token[], depth = 0): ReactNode {
   if (depth > 24) return null
@@ -18,7 +19,7 @@ function renderTokens(tokens: Token[], depth = 0): ReactNode {
       case 'br': return <br key={index} />
       case 'hr': return <hr key={index} className="border-[var(--color-divider)]" />
       case 'codespan': return <code key={index} className="rounded bg-[var(--color-bg-muted)] px-1 py-0.5 font-mono text-[0.9em]">{token.text}</code>
-      case 'code': return <pre key={index} className="overflow-x-auto rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-4 text-sm"><code>{token.text}</code></pre>
+      case 'code': return <CodeBlockFrame key={index} code={token.text} lang={token.lang?.split(/\s+/)[0]} />
       case 'blockquote': return <blockquote key={index} className="space-y-3 border-l-2 border-[var(--color-border-strong)] pl-4 text-[var(--color-fg-muted)]">{children}</blockquote>
       case 'list': {
         const items = (token as Tokens.List).items.map((item, itemIndex) => <li key={itemIndex}>{renderTokens(item.tokens, depth + 1)}</li>)
