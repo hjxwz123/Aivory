@@ -10,6 +10,7 @@ import {
 } from '@/lib/markdown'
 import { CodeBlock } from './code-block'
 import { MermaidDiagram } from './mermaid-diagram'
+import { NestedMarkdown } from './nested-markdown'
 import { cn, safeHref } from '@/lib/utils'
 import { rewriteSandboxArtifactLinks } from '@/lib/artifact-links'
 import { useMathCopy } from '@/hooks/use-math-copy'
@@ -122,10 +123,9 @@ const MarkdownBlockView = memo(
               '[&_ul_ul]:list-[circle] [&_ul_ul]:my-0.5 [&_ol_ol]:my-0.5 [&_li_p]:my-0',
               blockAnim,
             )}
-            dangerouslySetInnerHTML={{
-              __html: blockMarkdownToHtml(b.content, cites, breaks, mathCopyLabels),
-            }}
-          />
+          >
+            <NestedMarkdown content={b.content} pathPrefix={`${blockKeyPrefix ?? 'markdown'}#${index}`} cites={cites} breaks={breaks} mathCopyLabels={mathCopyLabels} />
+          </div>
         )
       case 'code':
         if ((b.lang ?? '').toLowerCase() === 'mermaid') {
@@ -148,10 +148,9 @@ const MarkdownBlockView = memo(
               'border-l-2 border-[var(--color-border-strong)] pl-4 text-[var(--color-fg-muted)] italic',
               blockAnim,
             )}
-            dangerouslySetInnerHTML={{
-              __html: inlineMarkdownToHtml(b.content, cites, breaks, mathCopyLabels),
-            }}
-          />
+          >
+            <NestedMarkdown content={b.content} pathPrefix={`${blockKeyPrefix ?? 'markdown'}#${index}`} cites={cites} breaks={breaks} mathCopyLabels={mathCopyLabels} />
+          </blockquote>
         )
       case 'math':
         {
@@ -288,7 +287,7 @@ export const Markdown = memo(function Markdown({
     <div className={cn('prose-aivory', className)} onClick={handleContentClick}>
       {blocks.map((block, index) => (
         <MarkdownBlockView
-          key={index}
+          key={`${blockKeyPrefix ?? 'markdown'}#${index}`}
           block={block}
           index={index}
           live={live}
