@@ -467,6 +467,10 @@
     "footer": "Partagé depuis Aivory — un espace de travail IA réfléchi."
   },
   "code": {
+    "wrap": "Retour à la ligne du code",
+    "enableWrap": "Activer le retour à la ligne",
+    "disableWrap": "Désactiver le retour à la ligne",
+    "resetWrap": "Utiliser le réglage par défaut",
     "run": "Exécuter",
     "rerun": "Réexécuter",
     "stop": "Arrêter",

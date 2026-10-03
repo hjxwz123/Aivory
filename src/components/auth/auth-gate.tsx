@@ -25,6 +25,7 @@ import { apiUrl } from '@/api'
 import { oauthStartPath } from '@/lib/oauth'
 import { isChatShellPath } from '@/lib/app-paths'
 import { PanelFallback } from '@/components/ui/panel-fallback'
+import { useUserSettingsRefresh } from '@/hooks/use-user-settings-refresh'
 
 const PUBLIC_PATHS = ['/welcome', '/login', '/register', '/forgot-password', '/share', '/setup', '/privacy', '/terms']
 
@@ -33,6 +34,7 @@ function isPublic(path: string): boolean {
 }
 
 export function AuthGate({ children }: { children: ReactNode }) {
+  useUserSettingsRefresh()
   const status = useAuth((s) => s.status)
   const hydrate = useAuth((s) => s.hydrate)
   const user = useAuth((s) => s.user)
@@ -84,10 +86,14 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   // Keep local UI preferences in sync with the authenticated profile.
   useEffect(() => {
+    if (status === 'authenticated' && user) {
+      syncUserSettings(user.settings ?? {}, user.id)
+    } else if (status === 'unauthenticated') {
+      useSettings.getState().cancelCodeBlockWrapSave()
+    }
     if (status !== 'authenticated' || !user?.settings) {
       return
     }
-    syncUserSettings(user.settings)
     const language = toSupportedLanguage(user.settings.language)
     if (language) {
       useLanguage.getState().applyLang(language)
@@ -109,7 +115,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     // The deployment-wide administrator policy is the only global default.
     // Historical account-level tool settings are intentionally ignored.
     useComposerPrefs.getState().setDefaultToolMode(resolveDefaultToolMode(user.tool_mode_default))
-  }, [status, user?.settings, user?.tool_mode_default, syncUserSettings])
+  }, [status, user, syncUserSettings])
 
   // Hydrate chat-shell caches only on routes that render them. Admin, legal and
   // public pages must not pay for conversations/projects/workspaces/models they

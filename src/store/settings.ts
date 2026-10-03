@@ -33,7 +33,12 @@ interface SettingsState {
    */
   artifactPanelWidth: number
   setAppearance: (patch: Partial<AppearanceSettings>) => void
-  syncUserSettings: (settings: Record<string, unknown>) => void
+  syncUserSettings: (settings: Record<string, unknown>, userId: string) => void
+  codeBlockWrapPending: { requestId: number; userId: string | null; value: boolean; previousValue: boolean } | null
+  codeBlockWrapAccountId: string | null
+  beginCodeBlockWrapSave: (value: boolean, userId: string | null) => number
+  finishCodeBlockWrapSave: (requestId: number, value: boolean) => void
+  cancelCodeBlockWrapSave: () => void
   setModels: (patch: Partial<ModelSettings>) => void
   setPrivacy: (patch: Partial<PrivacySettings>) => void
   setSidebarCollapsed: (v: boolean) => void
@@ -73,6 +78,7 @@ function persist(s: Pick<SettingsState, 'appearance' | 'models' | 'privacy' | 's
 }
 
 const initial = load()
+let codeBlockWrapRequestId = 0
 
 export const useSettings = create<SettingsState>((set) => ({
   appearance: {
@@ -82,6 +88,7 @@ export const useSettings = create<SettingsState>((set) => ({
     chatWidth: 'full',
     userMessageMarkdown: false,
     ...(initial.appearance ?? {}),
+    codeBlockWrap: initial.appearance?.codeBlockWrap === true,
     font: normalizeFontPref(initial.appearance?.font) ?? 'default',
   },
   models: {
@@ -106,13 +113,52 @@ export const useSettings = create<SettingsState>((set) => ({
       return next
     })
   },
-  syncUserSettings(settings) {
+  codeBlockWrapPending: null,
+  codeBlockWrapAccountId: null,
+  beginCodeBlockWrapSave(value, userId) {
+    const requestId = ++codeBlockWrapRequestId
+    set((state) => {
+      if (state.codeBlockWrapPending) throw new Error('A code wrapping preference is already being saved')
+      const next = {
+        ...state,
+        appearance: { ...state.appearance, codeBlockWrap: value },
+        codeBlockWrapPending: { requestId, userId, value, previousValue: state.appearance.codeBlockWrap },
+      }
+      persist(next)
+      return next
+    })
+    return requestId
+  },
+  finishCodeBlockWrapSave(requestId, value) {
+    set((state) => {
+      if (state.codeBlockWrapPending?.requestId !== requestId) return state
+      const next = { ...state, codeBlockWrapPending: null, appearance: { ...state.appearance, codeBlockWrap: value } }
+      persist(next)
+      return next
+    })
+  },
+  cancelCodeBlockWrapSave() {
+    set((state) => {
+      if (!state.codeBlockWrapPending) return { ...state, codeBlockWrapAccountId: null }
+      const next = {
+        ...state,
+        appearance: { ...state.appearance, codeBlockWrap: state.codeBlockWrapPending.previousValue },
+        codeBlockWrapPending: null,
+        codeBlockWrapAccountId: null,
+      }
+      persist(next)
+      return next
+    })
+  },
+  syncUserSettings(settings, userId) {
     set((s) => {
       const appearancePatch: Partial<AppearanceSettings> = {}
       const modelsPatch: Partial<ModelSettings> = {}
       const privacyPatch: Partial<PrivacySettings> = {}
 
       appearancePatch.userMessageMarkdown = settings.user_message_markdown === true
+      const pending = s.codeBlockWrapPending?.userId === userId ? s.codeBlockWrapPending : null
+      appearancePatch.codeBlockWrap = pending?.value ?? (settings.code_block_wrap === true)
       const font = normalizeFontPref(settings.font_family)
       if (font) appearancePatch.font = font
       if (typeof settings.chat_width === 'string' && (CHAT_WIDTHS as readonly string[]).includes(settings.chat_width)) {
@@ -137,6 +183,8 @@ export const useSettings = create<SettingsState>((set) => ({
 
       const next = {
         ...s,
+        codeBlockWrapPending: pending,
+        codeBlockWrapAccountId: userId,
         appearance: { ...s.appearance, ...appearancePatch },
         models: { ...s.models, ...modelsPatch },
         privacy: { ...s.privacy, ...privacyPatch },

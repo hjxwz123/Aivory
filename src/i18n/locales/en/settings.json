@@ -248,6 +248,10 @@
       "full": "Full width",
       "max": "Extra wide"
     },
+    "codeBlockWrap": {
+      "label": "Wrap code blocks by default",
+      "body": "Wrap long code lines by default. You can still change wrapping for each code block."
+    },
     "userMessageMarkdown": {
       "label": "Markdown in your messages",
       "body": "Render your sent messages with Markdown (code blocks, tables, math)."

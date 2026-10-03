@@ -1609,6 +1609,20 @@ mark.inline-thread-mark:hover {
 
 /* Shiki final-render tokens. The worker uses Shiki's CSS-variable theme so
    token colors stay bound to Aivory design tokens instead of bundled themes. */
+[data-code-body][data-wrap='false'],
+[data-code-body][data-wrap='false'] > code {
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+[data-code-body][data-wrap='true'],
+[data-code-body][data-wrap='true'] > code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
 .prose-aivory pre code,
 .group\/code pre code {
   --shiki-foreground: var(--color-code-fg);
