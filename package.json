@@ -14,7 +14,8 @@
     "test:ooxml-roundtrip": "vitest run tests/frontend/lib/ooxml/real-fixtures.test.ts && python3 tests/fixtures/ooxml/verify_roundtrip.py",
     "test:browser": "node tests/browser/run-editors.mjs",
     "test:preview": "node tests/browser/run-preview.mjs",
-    "test:panel": "node tests/browser/run-panel.mjs"
+    "test:panel": "node tests/browser/run-panel.mjs",
+    "test:code-wrap": "node tests/browser/run-code-wrap.mjs"
   },
   "dependencies": {
     "@aiden0z/pptx-renderer": "^1.2.4",
