@@ -202,6 +202,7 @@ var settingsAllowlist = map[string]bool{
 	"chat_width":            true,
 	"sidebar_collapsed":     true,
 	"code_theme":            true,
+	"code_block_wrap":       true,
 	"user_message_markdown": true,
 	"onboarded":             true,
 	// Default speech recognition: "model" (the administrator's server-side
@@ -218,6 +219,12 @@ func updateMeSettingsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if err := decodeJSON(r, &patch); err != nil {
 		writeError(w, 400, errInvalidInput)
 		return
+	}
+	if value, exists := patch["code_block_wrap"]; exists {
+		if _, valid := value.(bool); !valid {
+			writeError(w, http.StatusBadRequest, errInvalidInput)
+			return
+		}
 	}
 	// Strip keys that are not on the allowlist.
 	for k := range patch {
