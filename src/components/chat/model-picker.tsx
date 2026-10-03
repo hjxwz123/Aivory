@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { CircleAlert, ChevronDown, Zap } from 'lucide-react'
+import { CircleAlert, ChevronDown, RefreshCw, Zap } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useModels } from '@/store/models'
 import {
@@ -13,9 +13,9 @@ import { ModelIcon } from '@/components/chat/model-icon'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/store/auth'
 import { userCan } from '@/lib/user-permissions'
-import { workspaceCapabilitiesForScope } from '@/lib/workspace-permissions'
+import { workspaceCapabilitiesForScope, workspaceModelPolicyKey } from '@/lib/workspace-permissions'
 import { useWorkspaces } from '@/store/workspaces'
-import { findSelectedModel, isSelectedModelUnavailable } from '@/lib/model-selection'
+import { findSelectedModel, isModelCatalogReadyForScope, isSelectedModelUnavailable } from '@/lib/model-selection'
 
 interface ModelPickerProps {
   value: string
@@ -81,6 +81,18 @@ export function ModelPicker({
   const tags = useModels((s) => s.tags)
   const fastAvailable = useModels((s) => s.fastAvailable)
   const modelsLoaded = useModels((s) => s.loaded)
+  const imageModelsLoaded = useModels((s) => s.imageModelsLoaded)
+  const loadedScope = useModels((s) => s.loadedScope)
+  const loadedPolicyKey = useModels((s) => s.loadedPolicyKey)
+  const error = useModels((s) => s.error)
+  const load = useModels((s) => s.load)
+  const catalogReady = isModelCatalogReadyForScope({
+    loaded: modelsLoaded,
+    loadedScope,
+    loadedPolicyKey,
+    expectedScope: workspaceId ?? null,
+    expectedPolicyKey: workspaceModelPolicyKey(workspaceId, workspacePolicy),
+  })
   // §fast-mode: a fast selection only holds while a fast model is actually
   // configured (fastAvailable) — otherwise fall through to the advanced model.
   const isFast = Boolean(fast) && fastAvailable
@@ -90,7 +102,7 @@ export function ModelPicker({
   const unavailable = isSelectedModelUnavailable({
     modelId: value,
     currentModel: current,
-    modelsLoaded,
+    modelsLoaded: catalogReady && (Boolean(current) || imageModelsLoaded),
     fast,
     fastAvailable,
   })
@@ -111,25 +123,54 @@ export function ModelPicker({
       ? models.filter((m) => (m.tags ?? []).includes(activeTag))
       : models
 
+  const pending = !catalogReady || (!current && !isFast && !imageModelsLoaded)
+  const failed = catalogReady && Boolean(error) && !current && !isFast
+  const empty = catalogReady && imageModelsLoaded && models.length === 0 && imageModels.length === 0 && !isFast
+  // Reserve the same width in every state so late model labels don't shift
+  // adjacent composer controls. The caller can still constrain it on phones.
+  const triggerClassName = cn(
+    'inline-flex h-8 w-[180px] min-w-0 max-w-[180px] items-center gap-1.5 rounded-[8px] px-2.5',
+    'text-[13px] font-medium text-[var(--color-fg-muted)]',
+    'hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive',
+    'focus-visible:outline-none focus-visible:bg-[var(--color-bg-muted)] focus-visible:text-[var(--color-fg)]',
+    'disabled:pointer-events-none disabled:opacity-70',
+    className,
+  )
+
+  if (pending) {
+    return (
+      <button type="button" disabled className={triggerClassName} aria-busy="true" aria-label={t('modelPicker.loading')}>
+        <span aria-hidden className="home-loading-placeholder flex min-w-0 flex-1 items-center gap-1.5">
+          <span className="size-4 shrink-0 rounded-[4px] bg-[var(--color-border-subtle)]" />
+          <span className="h-2.5 w-20 rounded-full bg-[var(--color-border-subtle)]" />
+        </span>
+        <ChevronDown size={13} className="ml-auto shrink-0 opacity-40" aria-hidden />
+      </button>
+    )
+  }
+  if (failed) {
+    return (
+      <button type="button" disabled={disabled} className={triggerClassName}
+        onClick={() => void load()} aria-label={t('modelPicker.retryLoad')} title={t('modelPicker.loadFailed')}>
+        <RefreshCw size={16} className="shrink-0" aria-hidden />
+        <span className="home-loading-content truncate">{t('modelPicker.retryLoad')}</span>
+      </button>
+    )
+  }
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        className={cn(
-          'inline-flex min-w-0 items-center gap-1.5 h-8 px-2.5 rounded-[8px]',
-          'text-[13px] font-medium text-[var(--color-fg-muted)]',
-          'hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive',
-          'focus-visible:outline-none focus-visible:bg-[var(--color-bg-muted)] focus-visible:text-[var(--color-fg)]',
-          'max-w-[180px]',
-          'disabled:pointer-events-none disabled:opacity-70',
-          className,
-        )}
-        disabled={disabled}
+        className={triggerClassName}
+        disabled={disabled || empty}
         aria-label={
           isFast
             ? t('fastMode.label', { defaultValue: '快速' })
             : unavailable
               ? t('modelPicker.unavailableHint', { defaultValue: 'This model is no longer available. Choose another model.' })
-              : t('modelPicker.label', { name: current?.label ?? 'Model' })
+              : empty
+                ? t('modelPicker.empty')
+                : t('modelPicker.label', { name: current?.label ?? t('modelPicker.select') })
         }
         aria-invalid={unavailable || undefined}
       >
@@ -140,14 +181,16 @@ export function ModelPicker({
         ) : (
           <ModelIcon icon={current?.icon} size={16} />
         )}
-        <span className={cn('truncate', unavailable && 'text-[var(--color-danger)]')}>
+        <span key={isFast ? 'fast' : current?.id ?? 'empty'} className={cn('home-loading-content truncate', unavailable && 'text-[var(--color-danger)]')}>
           {isFast
             ? t('fastMode.label', { defaultValue: '快速' })
             : unavailable
               ? t('modelPicker.unavailable', { defaultValue: 'Model unavailable' })
-              : current?.label ?? 'Model'}
+              : empty
+                ? t('modelPicker.empty')
+                : current?.label ?? t('modelPicker.select')}
         </span>
-        <ChevronDown size={13} aria-hidden />
+        <ChevronDown size={13} className="ml-auto shrink-0" aria-hidden />
       </DropdownMenuTrigger>
       <DropdownMenuContent
         side={menuSide}

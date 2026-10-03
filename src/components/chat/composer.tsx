@@ -1619,6 +1619,7 @@ export function Composer({
   }
   const currentModel = useModels((s) => findSelectedModel(modelId, s.models, s.imageModels))
   const modelsLoaded = useModels((s) => s.loaded)
+  const imageModelsLoaded = useModels((s) => s.imageModelsLoaded)
   const modelsLoadedScope = useModels((s) => s.loadedScope)
   const modelsLoadedPolicyKey = useModels((s) => s.loadedPolicyKey)
   const fastAvailable = useModels((s) => s.fastAvailable)
@@ -1635,7 +1636,7 @@ export function Composer({
   const selectedModelUnavailable = isSelectedModelUnavailable({
     modelId,
     currentModel,
-    modelsLoaded,
+    modelsLoaded: modelsLoaded && (Boolean(currentModel) || imageModelsLoaded),
     fast,
     fastAvailable,
   })
@@ -1861,6 +1862,7 @@ export function Composer({
     !documentNotReady &&
     !imagePermissionDenied &&
     modelCatalogReady &&
+    (effectiveFast || Boolean(currentModel)) &&
     !selectedModelUnavailable &&
     !executingCurrentCommand
   const canSubmit = draftReady && !streaming && !queuedTurn
@@ -1936,6 +1938,9 @@ export function Composer({
       )
       return
     }
+    // A selected image model may still be arriving after the chat catalog.
+    // Keyboard submission must obey the same readiness gate as the button.
+    if (!effectiveFast && !currentModel) return
     if (!canUploadFiles && attachments.length > 0) {
       toast.error(t('composer.permissions.fileUpload', { defaultValue: 'Your user group cannot upload files.' }))
       return

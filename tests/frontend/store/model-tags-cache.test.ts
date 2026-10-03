@@ -47,6 +47,7 @@ describe('model tag picker cache', () => {
     useModels.setState({
       models: [],
       imageModels: [],
+      imageModelsLoaded: false,
       tags: [],
       defaultId: '',
       verifyAvailable: false,
@@ -120,6 +121,77 @@ describe('model tag picker cache', () => {
     await useModels.getState().load()
 
     expect(useModels.getState().tags.map((item) => item.id)).toEqual(['gemini'])
+  })
+
+  it('makes the default chat model usable before slow tags and image models arrive', async () => {
+    const chatModel = { id: 'chat', label: 'Chat model', enabled: true } as ApiModel
+    const imageModel = { id: 'image', label: 'Image model', enabled: true, kind: 'image' } as ApiModel
+    let resolveImages!: (value: { models: ApiModel[]; default_id: string }) => void
+    let resolveTags!: (tags: ApiModelTag[]) => void
+    apiMocks.list.mockResolvedValue({ models: [chatModel], default_id: chatModel.id })
+    apiMocks.listImage.mockReturnValue(new Promise((resolve) => { resolveImages = resolve }))
+    apiMocks.tags.mockReturnValue(new Promise((resolve) => { resolveTags = resolve }))
+
+    const loading = useModels.getState().load()
+    await vi.waitFor(() => expect(useModels.getState().loaded).toBe(true))
+    expect(useModels.getState()).toMatchObject({
+      defaultId: chatModel.id,
+      models: [chatModel],
+      imageModelsLoaded: false,
+      loading: true,
+    })
+
+    resolveImages({ models: [imageModel], default_id: imageModel.id })
+    await vi.waitFor(() => expect(useModels.getState().imageModelsLoaded).toBe(true))
+    expect(useModels.getState().imageModels).toEqual([imageModel])
+    // Drawing is ready even though the optional tag request is still pending.
+    expect(useModels.getState().loading).toBe(true)
+
+    resolveTags([tag('chat', 'Chat', 0)])
+    await loading
+    expect(useModels.getState().loading).toBe(false)
+  })
+
+  it('does not publish late optional results after a workspace switch', async () => {
+    let resolveImages!: (value: { models: ApiModel[]; default_id: string }) => void
+    let resolveTags!: (tags: ApiModelTag[]) => void
+    apiMocks.list.mockResolvedValue({ models: [], default_id: '' })
+    apiMocks.listImage
+      .mockReturnValueOnce(new Promise((resolve) => { resolveImages = resolve }))
+      .mockResolvedValue({ models: [], default_id: '' })
+    apiMocks.tags
+      .mockReturnValueOnce(new Promise((resolve) => { resolveTags = resolve }))
+      .mockResolvedValue([])
+
+    const oldLoading = useModels.getState().load()
+    await vi.waitFor(() => expect(useModels.getState().loaded).toBe(true))
+    useWorkspaces.setState({ activeId: 'workspace-1', policies: { 'workspace-1': workspacePolicy } })
+    await useModels.getState().load()
+    resolveImages({ models: [{ id: 'old-image' } as ApiModel], default_id: 'old-image' })
+    resolveTags([tag('old-tag', 'Old tag', 0)])
+    await oldLoading
+    await vi.waitFor(() => expect(useModels.getState().loading).toBe(false))
+
+    expect(useModels.getState().loadedScope).toBe('workspace-1')
+    expect(useModels.getState().imageModels).toEqual([])
+    expect(useModels.getState().tags).toEqual([])
+  })
+
+  it('returns a failed empty catalog to its loading state when retried', async () => {
+    apiMocks.list.mockRejectedValueOnce(new Error('offline'))
+    apiMocks.listImage.mockResolvedValue({ models: [], default_id: '' })
+    apiMocks.tags.mockResolvedValue([])
+    await useModels.getState().load()
+    expect(useModels.getState().error).toBeTruthy()
+
+    let resolveModels!: (value: { models: ApiModel[]; default_id: string }) => void
+    apiMocks.list.mockReturnValueOnce(new Promise((resolve) => { resolveModels = resolve }))
+    const retry = useModels.getState().load()
+    expect(useModels.getState()).toMatchObject({ loaded: false, imageModelsLoaded: false, loading: true, error: null })
+
+    resolveModels({ models: [], default_id: '' })
+    await retry
+    expect(useModels.getState()).toMatchObject({ loaded: true, imageModelsLoaded: true, loading: false, error: null })
   })
 
   it('clears stale image models before a workspace-scoped reload resolves', async () => {

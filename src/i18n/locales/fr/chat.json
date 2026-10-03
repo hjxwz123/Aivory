@@ -26,6 +26,8 @@
     "stillUp": "Encore debout"
   },
   "empty": {
+    "loadingRecent": "Chargement des discussions récentes",
+    "recentLoadFailed": "Impossible de charger les discussions récentes",
     "subtitle": "À quoi pensez-vous ?",
     "subtitleVariants": [
       "À quoi pensez-vous ?",
@@ -650,6 +652,11 @@
     "advancedSection": "Avancé"
   },
   "modelPicker": {
+    "loading": "Chargement des modèles",
+    "retryLoad": "Recharger les modèles",
+    "loadFailed": "Impossible de charger les modèles. Réessayez.",
+    "empty": "Aucun modèle disponible",
+    "select": "Choisir un modèle",
     "section": "Modèles",
     "moreSoon": "D'autres modèles arrivent bientôt",
     "current": "Modèle actuel",

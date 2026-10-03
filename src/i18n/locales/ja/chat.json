@@ -26,6 +26,8 @@
     "stillUp": "まだ起きていますね"
   },
   "empty": {
+    "loadingRecent": "最近のチャットを読み込み中",
+    "recentLoadFailed": "最近のチャットを読み込めませんでした",
     "subtitle": "何をお考えですか？",
     "subtitleVariants": [
       "何をお考えですか？",
@@ -650,6 +652,11 @@
     "advancedSection": "詳細"
   },
   "modelPicker": {
+    "loading": "モデルを読み込み中",
+    "retryLoad": "モデルを再読み込み",
+    "loadFailed": "モデルを読み込めませんでした。再試行してください。",
+    "empty": "利用可能なモデルがありません",
+    "select": "モデルを選択",
     "section": "モデル",
     "moreSoon": "さらに多くのモデルが近日登場",
     "current": "現在のモデル",

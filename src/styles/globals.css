@@ -476,6 +476,32 @@
   }
 }
 
+/* Async home content appears in reserved slots without moving the editor. */
+.home-loading-content {
+  animation: home-content-in 200ms var(--ease-out);
+}
+
+.home-loading-placeholder {
+  animation: home-placeholder-breathe 1.8s ease-in-out infinite;
+}
+
+@keyframes home-content-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes home-placeholder-breathe {
+  0%, 100% { opacity: 0.65; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-loading-content,
+  .home-loading-placeholder {
+    animation: none;
+  }
+}
+
 /* Soft enter for new list items / messages. Respects prefers-reduced-motion. */
 @keyframes message-in {
   from {

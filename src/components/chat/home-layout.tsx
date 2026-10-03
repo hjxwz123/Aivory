@@ -299,6 +299,12 @@ const RECENT_CONVERSATIONS = 2
 function HomeRecentConversations() {
   const { t, i18n } = useTranslation('chat')
   const activeWorkspaceId = useWorkspaces((s) => s.activeId)
+  const workspacesLoaded = useWorkspaces((s) => s.loaded)
+  const workspaceSwitching = useWorkspaces((s) => s.switching)
+  const loaded = useConversations((s) => s.loaded)
+  const loading = useConversations((s) => s.loading)
+  const error = useConversations((s) => s.error)
+  const load = useConversations((s) => s.load)
   // Summary-only subscription (see sidebar): streamed tokens don't re-render.
   const conversations = useConversations((s) => s.conversations, sameConvListShape)
   const recent = useMemo(
@@ -314,33 +320,63 @@ function HomeRecentConversations() {
         .slice(0, RECENT_CONVERSATIONS),
     [activeWorkspaceId, conversations],
   )
-  if (recent.length === 0) return null
+  // Keep two rows' worth of space even for an empty account. This region is
+  // inside the centered hero, so mounting/collapsing it would move the editor.
+  const pending = recent.length === 0 && (
+    !workspacesLoaded || workspaceSwitching || loading || (!loaded && !error)
+  )
+  const failed = !pending && recent.length === 0 && Boolean(error)
 
   return (
-    <nav aria-label={t('empty.continue')} className="mx-auto mt-9 w-full max-w-[30rem]">
-      <p className="home-card mb-1 px-3 text-[12px] font-medium text-[var(--color-fg-subtle)]">{t('empty.continue')}</p>
-      <ul>
-        {recent.map((conversation) => (
-          <li key={conversation.id}>
-            <Link
-              to={`/chat/${conversation.id}`}
-              className="home-card group/recent flex h-9 items-center gap-2.5 rounded-[10px] px-3 text-[13px] text-[var(--color-fg-muted)] transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-            >
-              <MessageSquare size={14} aria-hidden className="shrink-0 text-[var(--color-fg-subtle)]" />
-              <span className="min-w-0 flex-1 truncate">{conversation.title || t('share.untitled')}</span>
-              <span className="shrink-0 text-[12px] tabular-nums text-[var(--color-fg-subtle)] group-hover/recent:hidden group-focus-visible/recent:hidden">
-                {formatTimeAgo(conversation.updatedAt, i18n.language)}
-              </span>
-              <ArrowRight
-                size={13}
-                aria-hidden
-                className="hidden shrink-0 text-[var(--color-fg-muted)] group-hover/recent:block group-focus-visible/recent:block"
-              />
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </nav>
+    <div className="home-recent-slot relative mx-auto mt-9 h-[94px] w-full max-w-[30rem]">
+      {pending && (
+        <div role="status" aria-label={t('empty.loadingRecent')} className="home-loading-placeholder" aria-busy="true">
+          <div aria-hidden className="mb-1 flex h-[18px] items-center px-3">
+            <span className="h-2.5 w-20 rounded-full bg-[var(--color-border-subtle)]" />
+          </div>
+          {Array.from({ length: RECENT_CONVERSATIONS }, (_, index) => (
+            <div key={index} aria-hidden className="flex h-9 items-center gap-2.5 px-3">
+              <span className="size-3.5 shrink-0 rounded-[3px] bg-[var(--color-border-subtle)]" />
+              <span className={cn('h-2.5 rounded-full bg-[var(--color-border-subtle)]', index === 0 ? 'w-[55%]' : 'w-[40%]')} />
+              <span className="ml-auto h-2 w-9 rounded-full bg-[var(--color-border-subtle)]" />
+            </div>
+          ))}
+        </div>
+      )}
+      {failed && (
+        <div className="home-loading-content flex h-full items-center justify-center gap-3 px-3 text-[12px] text-[var(--color-fg-muted)]">
+          <p role="status">{t('empty.recentLoadFailed')}</p>
+          <button type="button" onClick={() => void load()} disabled={loading}
+            className="rounded px-2 py-1 text-[var(--color-fg)] underline underline-offset-4 hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:opacity-50">
+            {t('imageEdit.retry')}
+          </button>
+        </div>
+      )}
+      {recent.length > 0 && <nav aria-label={t('empty.continue')} className="home-loading-content">
+        <p className="mb-1 h-[18px] px-3 text-[12px] font-medium text-[var(--color-fg-subtle)]">{t('empty.continue')}</p>
+        <ul>
+          {recent.map((conversation) => (
+            <li key={conversation.id}>
+              <Link
+                to={`/chat/${conversation.id}`}
+                className="group/recent flex h-9 items-center gap-2.5 rounded-[10px] px-3 text-[13px] text-[var(--color-fg-muted)] transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+              >
+                <MessageSquare size={14} aria-hidden className="shrink-0 text-[var(--color-fg-subtle)]" />
+                <span className="min-w-0 flex-1 truncate">{conversation.title || t('share.untitled')}</span>
+                <span className="shrink-0 text-[12px] tabular-nums text-[var(--color-fg-subtle)] group-hover/recent:hidden group-focus-visible/recent:hidden">
+                  {formatTimeAgo(conversation.updatedAt, i18n.language)}
+                </span>
+                <ArrowRight
+                  size={13}
+                  aria-hidden
+                  className="hidden shrink-0 text-[var(--color-fg-muted)] group-hover/recent:block group-focus-visible/recent:block"
+                />
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </nav>}
+    </div>
   )
 }
 

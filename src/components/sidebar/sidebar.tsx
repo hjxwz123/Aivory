@@ -68,6 +68,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { PanelFallback } from '@/components/ui/panel-fallback'
 import { SystemUpdateDialog, type SystemUpdateSummary } from '@/components/admin/system-update-dialog'
 import { NewProjectDialog } from '@/components/projects/new-project-dialog'
 import { MoveToProjectSub } from '@/components/projects/move-to-project-menu'
@@ -152,6 +153,10 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
   // content — so a streaming turn's per-token message updates don't re-run the
   // filter/sort/bucket pipeline below or reconcile every row (§ perf).
   const allConversationsRaw = useConversations((s) => s.conversations, sameConvListShape)
+  const conversationsLoaded = useConversations((s) => s.loaded)
+  const conversationsLoading = useConversations((s) => s.loading)
+  const conversationsError = useConversations((s) => s.error)
+  const loadConversations = useConversations((s) => s.load)
   // §workspaces isolation: the cache can transiently hold rows from another
   // space (loadOne of a cross-space deep link, a stale in-flight list) — the
   // sidebar only ever RENDERS the current space's rows.
@@ -204,6 +209,12 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
     [activeConversations],
   )
   const conversations = navigationConversations.ordinary
+  // Workspace discovery runs before the first history request. Keep one
+  // loading state across both steps, then fade in the completed list. A usable
+  // same-space cache stays visible during background refreshes.
+  const historyPending = switching ||
+    ((!workspacesLoaded || !conversationsLoaded) && !conversationsError) ||
+    (conversationsLoading && activeConversations.length === 0)
   const projectConversationsById = navigationConversations.byProject
   const projects = useProjects((s) => s.projects)
   // §4.20: show the Draw entry only when an image model is configured.
@@ -671,9 +682,8 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
         )}
       </div>
 
-      {/* Conversation list — while a workspace switch is reloading data, the list
-          fades out and a spinner takes its place instead of flashing the old
-          (or momentarily empty) space's rows (§ workspace switch animation). */}
+      {/* History has a loading indicator from first mount through hydration,
+          and while changing spaces; resolved rows fade in at the same place. */}
       {!compact && (
         <div
           className={cn(
@@ -684,9 +694,11 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
           <div
             ref={listScrollRef}
             onScroll={measureListEdges}
+            inert={historyPending}
+            aria-hidden={historyPending || undefined}
             className={cn(
-              'h-full overflow-y-auto scrollbar-thin transition-opacity duration-200',
-              switching && 'opacity-0 pointer-events-none',
+              'h-full overflow-y-auto scrollbar-thin transition-opacity duration-200 motion-reduce:transition-none',
+              historyPending && 'opacity-0 pointer-events-none',
             )}
           >
             <div ref={listContentRef} className="pb-2">
@@ -896,11 +908,19 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
                 {loadingMore ? <Loader2 size={13} className="animate-spin" aria-hidden /> : null}
               </div>
             )}
-            {conversations.length === 0 && (
+            {!historyPending && conversations.length === 0 && (conversationsError ? (
+              <div className="flex flex-col items-center gap-2 px-[18px] py-6 text-center text-xs text-[var(--color-fg-muted)]">
+                <p role="status">{t('empty.recentLoadFailed')}</p>
+                <button type="button" onClick={() => void loadConversations()}
+                  className="rounded-[5px] px-2 py-1 underline underline-offset-4 hover:bg-[var(--color-sidebar-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]">
+                  {t('imageEdit.retry')}
+                </button>
+              </div>
+            ) : (
               <p className="px-[18px] py-6 text-xs text-[var(--color-fg-subtle)] text-center">
                 {t('sidebar.empty')}
               </p>
-            )}
+            ))}
             </div>
           </div>
           {/* Edge fades only appear while more rows sit beyond that edge, so a
@@ -910,7 +930,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             className={cn(
               'pointer-events-none absolute inset-x-0 top-0 z-10 h-5',
               reducedMotion ? 'transition-none' : 'transition-opacity duration-150',
-              listEdges.top && !switching ? 'opacity-100' : 'opacity-0',
+              listEdges.top && !historyPending ? 'opacity-100' : 'opacity-0',
             )}
             style={{ background: 'linear-gradient(to bottom, var(--color-sidebar-bg), transparent)' }}
           />
@@ -919,13 +939,13 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             className={cn(
               'pointer-events-none absolute inset-x-0 bottom-0 z-10 h-8',
               reducedMotion ? 'transition-none' : 'transition-opacity duration-150',
-              listEdges.bottom && !switching ? 'opacity-100' : 'opacity-0',
+              listEdges.bottom && !historyPending ? 'opacity-100' : 'opacity-0',
             )}
             style={{ background: 'linear-gradient(to top, var(--color-sidebar-bg), transparent)' }}
           />
-          {switching && (
+          {historyPending && (
             <div className="absolute inset-0 flex items-center justify-center">
-              <Loader2 size={16} className="animate-spin text-[var(--color-fg-subtle)]" aria-hidden />
+              <PanelFallback scope="fill" />
             </div>
           )}
         </div>
