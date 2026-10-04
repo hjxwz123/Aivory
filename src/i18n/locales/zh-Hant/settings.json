@@ -297,7 +297,7 @@
     "upgradeMocked": "升級訂閱為模擬。",
     "voiceTitle": "語音輸入",
     "voiceEngine": "預設語音辨識",
-    "voiceEngineBody": "大模型辨識使用管理員設定的語音辨識服務，可能依音訊時長扣除積分；瀏覽器辨識使用瀏覽器內建的語音引擎，免費，但辨識效果取決於瀏覽器。",
+    "voiceEngineBody": "選擇合適的語音辨識服務。",
     "voiceModel": "大模型辨識",
     "voiceBrowser": "瀏覽器辨識",
     "voiceCostPerMinute": "約 {{credits}} 積分/分鐘",

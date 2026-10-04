@@ -297,7 +297,7 @@
     "upgradeMocked": "La mise à niveau du forfait est simulée.",
     "voiceTitle": "Saisie vocale",
     "voiceEngine": "Reconnaissance vocale par défaut",
-    "voiceEngineBody": "La reconnaissance par modèle utilise le service configuré par votre administrateur et peut consommer des crédits selon la durée de l'audio. La reconnaissance du navigateur utilise son moteur intégré : gratuite, mais sa qualité dépend du navigateur.",
+    "voiceEngineBody": "Choisir le bon service de reconnaissance vocale.",
     "voiceModel": "Reconnaissance par modèle",
     "voiceBrowser": "Reconnaissance du navigateur",
     "voiceCostPerMinute": "environ {{credits}} crédits/min",

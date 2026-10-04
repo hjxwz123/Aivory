@@ -297,7 +297,7 @@
     "upgradeMocked": "Plan upgrade is mocked.",
     "voiceTitle": "Voice input",
     "voiceEngine": "Default speech recognition",
-    "voiceEngineBody": "Model recognition uses the speech service your administrator configured and may charge credits by audio length. Browser recognition uses your browser's built-in engine: free, but its quality depends on the browser.",
+    "voiceEngineBody": "Choose the appropriate speech recognition service.",
     "voiceModel": "Model recognition",
     "voiceBrowser": "Browser recognition",
     "voiceCostPerMinute": "about {{credits}} credits/min",

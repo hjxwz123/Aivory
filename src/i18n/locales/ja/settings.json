@@ -297,7 +297,7 @@
     "upgradeMocked": "プランのアップグレードはモックです。",
     "voiceTitle": "音声入力",
     "voiceEngine": "既定の音声認識",
-    "voiceEngineBody": "モデル認識は管理者が設定した音声認識サービスを使い、音声の長さに応じてクレジットを消費する場合があります。ブラウザ認識はブラウザ内蔵のエンジンを使い、無料ですが精度はブラウザによって異なります。",
+    "voiceEngineBody": "適切な音声認識サービスの選択。",
     "voiceModel": "モデル認識",
     "voiceBrowser": "ブラウザ認識",
     "voiceCostPerMinute": "1 分あたり約 {{credits}} クレジット",

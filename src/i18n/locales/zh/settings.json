@@ -297,7 +297,7 @@
     "upgradeMocked": "升级订阅为模拟。",
     "voiceTitle": "语音输入",
     "voiceEngine": "默认语音识别",
-    "voiceEngineBody": "大模型识别使用管理员配置的语音识别服务，可能按音频时长扣除积分；浏览器识别使用浏览器自带的语音引擎，免费，但识别效果取决于浏览器。",
+    "voiceEngineBody": "选择合适的语音识别服务",
     "voiceModel": "大模型识别",
     "voiceBrowser": "浏览器识别",
     "voiceCostPerMinute": "约 {{credits}} 积分/分钟",
