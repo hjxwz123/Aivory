@@ -3,7 +3,7 @@
  * destinations as a route-aware tab row above the page.
  */
 import { Suspense, useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
-import { Link, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { Link, Navigate, Outlet, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
   ArrowLeft,
@@ -16,12 +16,15 @@ import {
   Settings2,
   Sparkles,
   Users,
+  X,
 } from 'lucide-react'
 import { useAuth } from '@/store/auth'
+import { useSettings } from '@/store/settings'
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { UserMenu } from '@/components/sidebar/sidebar'
 import { Tooltip } from '@/components/ui/tooltip'
+import { LogoMark } from '@/components/brand/logo'
 import { AdminOnboardingTour } from '@/components/admin/admin-onboarding-tour'
 import type { ApiAdminOnboarding } from '@/api/types'
 import { acquireStartupDialog } from '@/lib/startup-dialog-queue'
@@ -53,7 +56,6 @@ const GROUP_ICONS = {
 } satisfies Record<AdminNavGroupKey, typeof Cpu>
 
 export default function AdminLayout() {
-  const navigate = useNavigate()
   const location = useLocation()
   const user = useAuth((s) => s.user)
   const status = useAuth((s) => s.status)
@@ -78,6 +80,7 @@ export default function AdminLayout() {
   const navigationFinishTimerRef = useRef<number | null>(null)
   const navigationWatchdogRef = useRef<number | null>(null)
   const requestActivity = useRequestActivity()
+  const sidebarWidth = useSettings((s) => s.sidebarWidth)
 
   const handleOnboardingSnapshot = useCallback((snapshot: ApiAdminOnboarding) => {
     // Manual replays refresh the live checklist as well. Keeping the newest
@@ -317,24 +320,43 @@ export default function AdminLayout() {
     )
   }
 
+  // Shares the chat sidebar's row recipe (SidebarNavItem): same height,
+  // radius, type size and hover/selected fills, so moving between the app and
+  // the console never changes how navigation looks.
+  function navRowClass(active: boolean) {
+    return cn(
+      'group/nav inline-flex h-8 w-full items-center gap-2 overflow-hidden rounded-[8px] px-2.5 text-[13px] interactive max-lg:h-[var(--tap-min)] max-sm:!h-9',
+      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+      active
+        ? 'bg-[var(--color-sidebar-active)] font-medium text-[var(--color-fg)] shadow-[var(--shadow-xs)]'
+        : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-sidebar-hover)] hover:text-[var(--color-fg)]',
+    )
+  }
+
   function renderNavItems() {
     const overviewActive = adminNavItemActive(path, ADMIN_OVERVIEW)
     return (
-      <div className="flex flex-col gap-0.5">
+      <div className="flex flex-col gap-px">
+        <Link
+          to="/"
+          onClick={() => setMobileOpen(false)}
+          className={navRowClass(false)}
+        >
+          <ArrowLeft size={15} aria-hidden className="shrink-0" />
+          <span className="min-w-0 flex-1 truncate text-left">{t('admin:backToChat')}</span>
+        </Link>
+
+        <div aria-hidden className="mx-0.5 my-1 h-px shrink-0 bg-[var(--color-divider)]/60" />
+
         <Link
           to={ADMIN_OVERVIEW.to}
           aria-current={overviewActive ? 'page' : undefined}
           aria-busy={navigationTarget === ADMIN_OVERVIEW.to || undefined}
           onClick={() => setMobileOpen(false)}
-          className={cn(
-            'flex h-11 items-center gap-2.5 rounded-[8px] px-3 text-[13px] interactive md:h-9',
-            overviewActive
-              ? 'bg-[var(--color-surface)] font-medium text-[var(--color-fg)]'
-              : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-          )}
+          className={navRowClass(overviewActive)}
         >
-          <LayoutDashboard size={14} aria-hidden />
-          <span className="truncate">
+          <LayoutDashboard size={15} aria-hidden className="shrink-0" />
+          <span className="min-w-0 flex-1 truncate text-left">
             {t(ADMIN_OVERVIEW.labelKey, { defaultValue: ADMIN_OVERVIEW.defaultLabel })}
           </span>
           {navigationSpinner(ADMIN_OVERVIEW.to)}
@@ -350,21 +372,52 @@ export default function AdminLayout() {
               aria-current={active ? 'location' : undefined}
               aria-busy={navigationTarget === group.to || undefined}
               onClick={() => setMobileOpen(false)}
-              className={cn(
-                'flex h-11 items-center gap-2.5 rounded-[8px] px-3 text-[13px] interactive md:h-9',
-                active
-                  ? 'bg-[var(--color-surface)] font-medium text-[var(--color-fg)]'
-                  : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-              )}
+              className={navRowClass(active)}
             >
-              <Icon size={14} aria-hidden />
-              <span className="truncate">
+              <Icon size={15} aria-hidden className="shrink-0" />
+              <span className="min-w-0 flex-1 truncate text-left">
                 {t(group.labelKey, { defaultValue: group.defaultLabel })}
               </span>
               {navigationSpinner(group.to)}
             </Link>
           )
         })}
+      </div>
+    )
+  }
+
+  function renderSidebar(variant: 'desktop' | 'sheet') {
+    return (
+      <div className="flex h-full min-h-0 w-full flex-col bg-[var(--color-sidebar-bg)]">
+        {/* Brand row mirrors the chat sidebar header: 56px tall, mark on the
+            nav icons' x-line, sans name at the workspace-name size. */}
+        <div className="flex h-[56px] shrink-0 items-center justify-between gap-2 px-3 max-sm:h-12 max-sm:px-2">
+          <div className="ml-1.5 flex min-w-0 items-center gap-2 max-sm:ml-2.5">
+            <LogoMark size={20} />
+            <span className="truncate font-sans text-[15px] font-semibold text-[var(--color-fg)]">
+              {t('admin:title')}
+            </span>
+          </div>
+          {variant === 'sheet' ? (
+            <button
+              type="button"
+              onClick={() => setMobileOpen(false)}
+              aria-label={t('common:actions.close', { defaultValue: 'Close' })}
+              className="inline-flex size-[var(--tap-min)] shrink-0 items-center justify-center rounded-[8px] text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-sidebar-hover)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:size-9"
+            >
+              <X size={18} aria-hidden />
+            </button>
+          ) : null}
+        </div>
+        <nav
+          aria-label={t('admin:title')}
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-3 scrollbar-thin"
+        >
+          {renderNavItems()}
+        </nav>
+        <div className="mt-auto shrink-0 p-1">
+          <UserMenu />
+        </div>
       </div>
     )
   }
@@ -376,12 +429,10 @@ export default function AdminLayout() {
     return (
       <nav
         aria-label={groupLabel}
-        className={cn(
-          'min-w-0 shrink-0 overflow-x-auto overscroll-x-contain border-b border-[var(--color-divider)] scrollbar-none',
-          filesWorkspace && 'px-4 pt-3 sm:px-8 sm:pt-4 lg:px-12',
-        )}
+        className="min-w-0 overflow-x-auto overscroll-x-contain scrollbar-none"
       >
-        <div className="flex w-max min-w-full items-end gap-1">
+        {/* Same underline treatment as the app's Tabs primitive. */}
+        <div className="flex h-10 w-max min-w-full items-end gap-6 border-b border-[var(--color-divider)] max-sm:h-11 max-sm:gap-5">
           {currentGroup.items.map((item) => {
             const active = adminNavItemActive(path, item)
             return (
@@ -391,9 +442,10 @@ export default function AdminLayout() {
                 aria-current={active ? 'page' : undefined}
                 aria-busy={navigationTarget === item.to || navigationTarget?.startsWith(`${item.to}?`) || undefined}
                 className={cn(
-                  '-mb-px inline-flex h-11 shrink-0 items-center whitespace-nowrap border-b-2 px-3 text-[13px] interactive sm:h-9 sm:px-3.5',
+                  '-mb-px inline-flex h-full shrink-0 items-center gap-2 whitespace-nowrap rounded-t-[6px] border-b-2 text-sm font-medium interactive',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)]',
                   active
-                    ? 'border-[var(--color-accent)] font-medium text-[var(--color-fg)]'
+                    ? 'border-[var(--color-fg)] text-[var(--color-fg)]'
                     : 'border-transparent text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
                 )}
               >
@@ -407,36 +459,23 @@ export default function AdminLayout() {
     )
   }
 
+  const areaLabel = currentGroup
+    ? t(currentGroup.labelKey, { defaultValue: currentGroup.defaultLabel })
+    : t('admin:title')
+  const groupTabs = renderGroupTabs()
+
   return (
     <div
       className="flex h-full w-full overflow-hidden bg-[var(--color-bg)] text-[var(--color-fg)]"
       onClickCapture={handleAdminNavigationClick}
     >
-      <aside className="hidden w-[16rem] flex-col border-r border-[var(--color-divider)] bg-[var(--color-bg-muted)]/40 md:flex">
-        <button
-          type="button"
-          onClick={() => navigate('/')}
-          className="m-3 inline-flex items-center gap-2 self-start rounded-[6px] px-2 py-1.5 text-[12.5px] text-[var(--color-fg-subtle)] interactive hover:text-[var(--color-fg)]"
-        >
-          <ArrowLeft size={12} aria-hidden />
-          {t('admin:backToChat')}
-        </button>
-        <div className="flex items-center justify-between gap-2 px-4 pt-1">
-          <h2 className="min-w-0 flex-1 truncate font-serif text-[15px] text-[var(--color-fg)]">{t('admin:title')}</h2>
-          <Tooltip content={t('admin:onboarding.review')} side="right">
-            <button
-              type="button"
-              onClick={openOnboarding}
-              aria-label={t('admin:onboarding.review')}
-              className="inline-flex size-8 shrink-0 items-center justify-center rounded-[8px] text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-            >
-              <Compass size={15} aria-hidden />
-            </button>
-          </Tooltip>
-        </div>
-        <nav className="mt-4 min-h-0 flex-1 overflow-y-auto px-3 pb-4">
-          {renderNavItems()}
-        </nav>
+      {/* Desktop rail: same width (the user's resized chat sidebar width),
+          surface and breakpoint as the chat sidebar. */}
+      <aside
+        style={{ width: `${sidebarWidth}px` }}
+        className="hidden shrink-0 border-r border-[var(--color-sidebar-border)] pt-[var(--safe-top)] lg:flex"
+      >
+        {renderSidebar('desktop')}
       </aside>
 
       <main
@@ -466,90 +505,73 @@ export default function AdminLayout() {
             </div>
           </div>
         ) : null}
-        <div className="flex h-[calc(var(--layout-topbar-h-mobile)+var(--safe-top))] shrink-0 items-center gap-2 border-b border-[var(--color-divider)] pl-[max(.5rem,var(--safe-left))] pr-[max(.5rem,var(--safe-right))] pt-[var(--safe-top)] md:hidden">
-          <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-            <SheetTrigger asChild>
-              <button
-                type="button"
-                aria-label={t('admin:title')}
-                className="inline-flex size-[var(--tap-min)] items-center justify-center rounded-[10px] text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-              >
-                <Menu size={18} aria-hidden />
-              </button>
-            </SheetTrigger>
-            <SheetContent side="left" size="sm" label={t('admin:title')}>
-              <div className="flex h-full flex-col">
+
+        {/* Page bar — the console's counterpart of ContentHeader: a fixed
+            56px row naming the current area, with the area's destinations as
+            an underline tab row beneath it. The page body scrolls below. */}
+        <header className="shrink-0 bg-[var(--color-bg)] pt-[var(--safe-top)]">
+          <div
+            className={cn(
+              'flex h-14 w-full items-center gap-2 pl-[max(.5rem,var(--safe-left))] pr-[max(.5rem,var(--safe-right))] sm:gap-3 sm:px-8',
+              !filesWorkspace && 'mx-auto max-w-[var(--layout-content-max-w)]',
+            )}
+          >
+            <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+              <SheetTrigger asChild>
                 <button
                   type="button"
-                  onClick={() => { setMobileOpen(false); navigate('/') }}
-                  className="m-3 inline-flex items-center gap-2 self-start rounded-[6px] px-2 py-1.5 text-[12.5px] text-[var(--color-fg-subtle)] interactive hover:text-[var(--color-fg)]"
+                  aria-label={t('admin:title')}
+                  className="-ml-1 inline-flex size-[var(--tap-min)] shrink-0 items-center justify-center rounded-[8px] text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] lg:hidden"
                 >
-                  <ArrowLeft size={12} aria-hidden />
-                  {t('admin:backToChat')}
+                  <Menu size={18} aria-hidden />
                 </button>
-                <div className="flex items-center justify-between gap-2 px-4 pt-1">
-                  <h2 className="min-w-0 flex-1 truncate font-serif text-[15px] text-[var(--color-fg)]">{t('admin:title')}</h2>
-                  <Tooltip content={t('admin:onboarding.review')} side="right">
-                    <button
-                      type="button"
-                      onClick={() => { setMobileOpen(false); openOnboarding() }}
-                      aria-label={t('admin:onboarding.review')}
-                      className="inline-flex size-8 shrink-0 items-center justify-center rounded-[8px] text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-                    >
-                      <Compass size={15} aria-hidden />
-                    </button>
-                  </Tooltip>
-                </div>
-                <nav className="mt-4 min-h-0 flex-1 overflow-y-auto px-3 pb-4">
-                  {renderNavItems()}
-                </nav>
-              </div>
-            </SheetContent>
-          </Sheet>
-          <h2 className="min-w-0 flex-1 truncate font-serif text-[15px] text-[var(--color-fg)]">{t('admin:title')}</h2>
-          <Tooltip content={t('admin:onboarding.review')}>
-            <button
-              type="button"
-              onClick={openOnboarding}
-              aria-label={t('admin:onboarding.review')}
-              className="inline-flex size-[var(--tap-min)] shrink-0 items-center justify-center rounded-[10px] text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+              </SheetTrigger>
+              <SheetContent side="left" size="nav" label={t('admin:title')} className="bg-[var(--color-sidebar-bg)]">
+                {renderSidebar('sheet')}
+              </SheetContent>
+            </Sheet>
+            <p className="min-w-0 flex-1 truncate text-[15px] font-semibold text-[var(--color-fg)]">{areaLabel}</p>
+            <Tooltip content={t('admin:onboarding.review')}>
+              <button
+                type="button"
+                onClick={openOnboarding}
+                aria-label={t('admin:onboarding.review')}
+                className="inline-flex size-[var(--tap-min)] shrink-0 items-center justify-center rounded-[8px] text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] lg:size-9 lg:rounded-[8px]"
+              >
+                <Compass size={16} aria-hidden />
+              </button>
+            </Tooltip>
+            <div className="lg:hidden">
+              <UserMenu placement="header" />
+            </div>
+          </div>
+          {groupTabs ? (
+            <div
+              className={cn(
+                'w-full px-4 sm:px-8',
+                !filesWorkspace && 'mx-auto max-w-[var(--layout-content-max-w)]',
+              )}
             >
-              <Compass size={18} aria-hidden />
-            </button>
-          </Tooltip>
-          <UserMenu placement="header" />
-        </div>
+              {groupTabs}
+            </div>
+          ) : null}
+        </header>
 
         {filesWorkspace ? (
           <div className="flex min-h-0 w-full flex-1 flex-col">
-            {renderGroupTabs()}
-            <div className="flex min-h-0 flex-1 flex-col">
+            <Suspense fallback={<PanelFallback />}>
+              <Outlet />
+            </Suspense>
+          </div>
+        ) : (
+          <div
+            ref={contentScrollRef}
+            className="min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain scrollbar-thin"
+          >
+            <div className="mx-auto w-full min-w-0 max-w-[var(--layout-content-max-w)] px-4 pb-[max(1.5rem,var(--safe-bottom))] pt-5 sm:px-8 sm:pb-12 sm:pt-6">
               <Suspense fallback={<PanelFallback />}>
                 <Outlet />
               </Suspense>
-            </div>
-          </div>
-        ) : (
-          <div className="flex min-h-0 w-full flex-1 flex-col">
-            {currentGroup ? (
-              <div className="mx-auto w-full max-w-[84rem] shrink-0 px-4 pt-3 sm:px-8 sm:pt-8 lg:px-12 lg:pt-10">
-                {renderGroupTabs()}
-              </div>
-            ) : null}
-            <div
-              ref={contentScrollRef}
-              className="min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain scrollbar-thin"
-            >
-              <div
-                className={cn(
-                  'mx-auto min-w-0 w-full max-w-[84rem] px-4 pb-[max(1.5rem,var(--safe-bottom))] sm:px-8 sm:pb-12 lg:px-12',
-                  currentGroup ? 'pt-5 sm:pt-6' : 'pt-5 sm:pt-12',
-                )}
-              >
-                <Suspense fallback={<PanelFallback />}>
-                  <Outlet />
-                </Suspense>
-              </div>
             </div>
           </div>
         )}

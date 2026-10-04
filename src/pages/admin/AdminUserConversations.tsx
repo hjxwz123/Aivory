@@ -26,6 +26,7 @@ import {
 } from '@/components/ui/dialog'
 import { toast } from '@/hooks/use-toast'
 import { PanelFallback } from '@/components/ui/panel-fallback'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
 
 function formatStamp(unixSec: number): string {
   if (!unixSec) return ''
@@ -97,12 +98,8 @@ export default function AdminUserConversations() {
     <div>
       <AdminDetailHeader backTo="/admin/users" backLabel={t('users.backToUsers')} />
 
-      <header>
-        <h1
-          className="break-words font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl"
-          aria-busy={pageLoading}
-        >
-          {pageLoading ? (
+      <AdminPageHeader
+        title={pageLoading ? (
             <span className="block" role="status" aria-live="polite">
               <span className="sr-only">{t('admin:common.loading')}</span>
               <span
@@ -115,21 +112,19 @@ export default function AdminUserConversations() {
           ) : (
             t('users.conversationsFallbackTitle')
           )}
-        </h1>
-        <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">
-          {t('users.conversationsLead')}
-        </p>
-      </header>
+        titleBusy={pageLoading}
+        description={t('users.conversationsLead')}
+      />
 
       <section className="mt-6 sm:mt-8">
         {pageLoading ? (
           <PanelFallback />
         ) : rows.length === 0 ? (
-          <div className="text-sm text-[var(--color-fg-subtle)] rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-10 text-center">
+          <div className="text-sm text-[var(--color-fg-subtle)] rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-10 text-center">
             {t('users.noConversations')}
           </div>
         ) : (
-          <ul className="flex flex-col divide-y divide-[var(--color-divider)] rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)]">
+          <ul className="flex flex-col divide-y divide-[var(--color-divider)] rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
             {rows.map((c) => (
               <li key={c.id} className="grid grid-cols-[minmax(0,1fr)_3rem] items-stretch sm:flex sm:items-center">
                 <Link

@@ -30,6 +30,7 @@ import { Badge } from '@/components/ui/badge'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { normalizeOpenAIBaseUrl } from '@/lib/channel-base-url'
 import { embeddingGuardErrorText } from '@/lib/admin-embedding-errors'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
 
 type Editable = Partial<ApiChannel> & { api_key?: string }
 type ChannelEditor = {
@@ -380,21 +381,27 @@ export default function AdminChannels() {
 
   return (
     <div>
-      <header className="flex flex-col items-start gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">{t('admin:channels.title')}</h1>
-          <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('admin:channels.lead')}</p>
-        </div>
-        <Button data-admin-tour="channels-create" className="min-h-[var(--tap-min)] w-full sm:min-h-0 sm:w-auto" leadingIcon={<Plus size={15} aria-hidden />} onClick={openNew}>
-          {t('admin:channels.new')}
-        </Button>
-      </header>
+      <AdminPageHeader
+        title={t('admin:channels.title')}
+        description={t('admin:channels.lead')}
+        actions={(
+          <Button
+            data-admin-tour="channels-create"
+            size="sm"
+            className="max-sm:min-h-[var(--tap-min)] max-sm:flex-1"
+            leadingIcon={<Plus size={15} aria-hidden />}
+            onClick={openNew}
+          >
+            {t('admin:channels.new')}
+          </Button>
+        )}
+      />
 
       <section className="mt-8">
         {loading ? (
           <PanelFallback />
         ) : rows.length === 0 ? (
-          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center">
+          <div className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center">
             <p className="text-[var(--color-fg-muted)] text-sm">{t('admin:channels.empty')}</p>
             <div className="mt-4">
               <Button onClick={openNew}>{t('admin:common.createFirst', { kind: t('admin:channels.title').toLowerCase() })}</Button>
@@ -553,7 +560,7 @@ export default function AdminChannels() {
                     placeholder="sk-…"
                   />
                 </Field>
-                <div className="rounded-[10px] bg-[var(--color-bg-muted)] p-1">
+                <div className="rounded-[8px] bg-[var(--color-bg-muted)] p-1">
                   <label className="flex min-h-11 items-center justify-between gap-4 rounded-[8px] px-2.5 py-2">
                     <span className="text-sm text-[var(--color-fg)]">{t('admin:channels.fields.enabled')}</span>
                     <Switch
@@ -616,7 +623,7 @@ export default function AdminChannels() {
                             <Badge size="xs">{model.kind}</Badge>
                           </span>
                           {model.label !== model.request_id ? (
-                            <span className="mt-0.5 block truncate font-mono text-[11px] text-[var(--color-fg-subtle)]">
+                            <span className="mt-0.5 block truncate font-mono text-[12px] text-[var(--color-fg-subtle)]">
                               {model.request_id}
                             </span>
                           ) : null}
@@ -730,7 +737,7 @@ export default function AdminChannels() {
                             <Badge size="xs">{model.kind}</Badge>
                             {alreadyAdded ? <Badge size="xs" variant="success">{t('admin:channels.modelAdd.added')}</Badge> : null}
                           </span>
-                          <span className="mt-0.5 block truncate font-mono text-[11px] text-[var(--color-fg-subtle)]">
+                          <span className="mt-0.5 block truncate font-mono text-[12px] text-[var(--color-fg-subtle)]">
                             {model.request_id}
                           </span>
                         </span>

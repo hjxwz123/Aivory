@@ -12,6 +12,8 @@ import { changedAdminSettings } from '@/lib/admin-settings-patch'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useAuth } from '@/store/auth'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
+import { SettingsActions, SettingsBlock, SettingsRow, SettingsSection } from '@/components/settings/settings-section'
 
 type Settings = Record<string, unknown>
 
@@ -132,12 +134,10 @@ export default function AdminRegistration() {
   const enabledProviders = providers.filter((provider) => provider.enabled)
 
   return (
-    <div className="mx-auto max-w-[76rem]">
-      <header>
-        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">
-          {t('admin:menu.registrationPolicy', { defaultValue: 'Registration policy' })}
-        </h1>
-      </header>
+    <div>
+      <AdminPageHeader
+        title={t('admin:menu.registrationPolicy', { defaultValue: 'Registration policy' })}
+      />
 
       {loading ? (
         <PanelFallback />
@@ -149,40 +149,39 @@ export default function AdminRegistration() {
           </Button>
         </div>
       ) : (
-        <section className="mt-8 flex flex-col gap-5">
-          <div className="border-b border-[var(--color-divider)] pb-7">
-            <div className="mb-5 max-w-2xl">
-              <h2 className="text-base font-semibold text-[var(--color-fg)]">
-                {t('admin:settings.authPolicy.title')}
-              </h2>
-              <p className="mt-1.5 text-sm leading-relaxed text-[var(--color-fg-muted)]">
-                {t('admin:settings.authPolicy.description')}
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-5">
-              <ToggleRow
-                label={t('admin:settings.authPolicy.passwordLogin')}
+        <div className="mt-8">
+          <SettingsSection
+            title={t('admin:settings.authPolicy.title')}
+            description={t('admin:settings.authPolicy.description')}
+          >
+            <SettingsRow label={t('admin:settings.authPolicy.passwordLogin')} htmlFor="password-login">
+              <Switch
+                id="password-login"
                 checked={passwordLoginEnabled}
-                onChange={(value) =>
+                onCheckedChange={(value) =>
                   setDraft((current) => ({
                     ...current,
                     password_login_enabled: value,
                   }))
                 }
               />
-
-              <ToggleRow
-                label={t('admin:settings.authPolicy.passkeyLogin', { defaultValue: 'Passkey login' })}
+            </SettingsRow>
+            <SettingsRow
+              label={t('admin:settings.authPolicy.passkeyLogin', { defaultValue: 'Passkey login' })}
+              htmlFor="passkey-login"
+            >
+              <Switch
+                id="passkey-login"
                 checked={passkeyLoginEnabled}
-                onChange={(value) =>
+                onCheckedChange={(value) =>
                   setDraft((current) => ({
                     ...current,
                     passkey_login_enabled: value,
                   }))
                 }
               />
-
+            </SettingsRow>
+            <SettingsBlock className="flex flex-col gap-5">
               <Field
                 label={t('admin:settings.authPolicy.entryMode')}
                 htmlFor="auth-entry-mode"
@@ -253,14 +252,19 @@ export default function AdminRegistration() {
                   </SelectContent>
                 </Select>
               </Field>
-
-              <ToggleRow
-                label={t('admin:settings.authPolicy.autoProvision')}
-                hint={t('admin:settings.authPolicy.autoProvisionHint')}
+            </SettingsBlock>
+            <SettingsRow
+              label={t('admin:settings.authPolicy.autoProvision')}
+              description={t('admin:settings.authPolicy.autoProvisionHint')}
+              htmlFor="oauth-auto-provision"
+            >
+              <Switch
+                id="oauth-auto-provision"
                 checked={readBool('oauth_auto_provision_enabled', true)}
-                onChange={(value) => setDraft((current) => ({ ...current, oauth_auto_provision_enabled: value }))}
+                onCheckedChange={(value) => setDraft((current) => ({ ...current, oauth_auto_provision_enabled: value }))}
               />
-
+            </SettingsRow>
+            <SettingsBlock className="py-3">
               {enabledProviders.length === 0 ? (
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-[8px] bg-[var(--color-bg-muted)] px-3.5 py-3 text-sm text-[var(--color-fg-muted)]">
                   <span>{t('admin:settings.authPolicy.noProviders')}</span>
@@ -273,123 +277,99 @@ export default function AdminRegistration() {
                   {t('admin:settings.authPolicy.lockoutNotice')}
                 </p>
               )}
-            </div>
-          </div>
+            </SettingsBlock>
+          </SettingsSection>
 
-          <div className="flex flex-col gap-5 pt-1">
-            <h2 className="text-base font-semibold text-[var(--color-fg)]">
-              {t('admin:settings.authPolicy.registrationTitle')}
-            </h2>
-            <ToggleRow
+          <SettingsSection title={t('admin:settings.authPolicy.registrationTitle')}>
+            <SettingsRow
               label={t('admin:settings.fields.signupOpen')}
-              hint={t('admin:settings.fields.signupOpenHint')}
-              checked={readBool('signup_open', true)}
-              onChange={(value) => setDraft((current) => ({ ...current, signup_open: value }))}
-            />
-
-            <Field
-              label={t('admin:settings.fields.registerIpDailyLimit')}
-              htmlFor="register-ip-daily-limit"
-              hint={t('admin:settings.fields.registerIpDailyLimitHint')}
+              description={t('admin:settings.fields.signupOpenHint')}
+              htmlFor="signup-open"
             >
-              <Input
-                id="register-ip-daily-limit"
-                type="number"
-                min={0}
-                value={String(readNumber('register_ip_daily_limit'))}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    register_ip_daily_limit: Math.max(0, Number(event.target.value) || 0),
-                  }))
-                }
+              <Switch
+                id="signup-open"
+                checked={readBool('signup_open', true)}
+                onCheckedChange={(value) => setDraft((current) => ({ ...current, signup_open: value }))}
               />
-            </Field>
-
-            <div>
-              <ToggleRow
-                label={t('admin:settings.fields.registerCaptcha')}
+            </SettingsRow>
+            <SettingsBlock>
+              <Field
+                label={t('admin:settings.fields.registerIpDailyLimit')}
+                htmlFor="register-ip-daily-limit"
+                hint={t('admin:settings.fields.registerIpDailyLimitHint')}
+              >
+                <Input
+                  id="register-ip-daily-limit"
+                  type="number"
+                  min={0}
+                  value={String(readNumber('register_ip_daily_limit'))}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      register_ip_daily_limit: Math.max(0, Number(event.target.value) || 0),
+                    }))
+                  }
+                />
+              </Field>
+            </SettingsBlock>
+            <SettingsRow
+              label={t('admin:settings.fields.registerCaptcha')}
+              description={registrationCaptchaRequired ? t('admin:settings.fields.registerCaptchaHint') : undefined}
+              htmlFor="register-captcha"
+            >
+              <Switch
+                id="register-captcha"
                 checked={registrationCaptchaRequired}
-                onChange={(value) => setDraft((current) => ({ ...current, register_captcha_required: value }))}
+                onCheckedChange={(value) => setDraft((current) => ({ ...current, register_captcha_required: value }))}
               />
-              {registrationCaptchaRequired && (
-                <p className="mt-2 pl-1 text-xs text-[var(--color-fg-subtle)]">
-                  {t('admin:settings.fields.registerCaptchaHint')}
-                </p>
-              )}
-            </div>
-
-            <div>
-              <ToggleRow
-                label={t('admin:settings.fields.loginCaptcha')}
-                checked={loginCaptchaRequired}
-                onChange={(value) => setDraft((current) => ({ ...current, login_captcha_required: value }))}
-              />
-              {loginCaptchaRequired && (
-                <p className="mt-2 pl-1 text-xs text-[var(--color-fg-subtle)]">
-                  {t('admin:settings.fields.loginCaptchaHint')}
-                </p>
-              )}
-            </div>
-
-            <div>
-              <ToggleRow
-                label={t('admin:settings.fields.emailVerificationRequired')}
-                checked={emailVerificationRequired}
-                onChange={(value) => setDraft((current) => ({ ...current, email_verification_required: value }))}
-              />
-              {emailVerificationRequired && (
-                <p className="mt-2 pl-1 text-xs text-[var(--color-fg-subtle)]">
-                  {t('admin:settings.fields.emailVerificationHint')}
-                </p>
-              )}
-            </div>
-
-            <Field
-              label={t('admin:settings.fields.domainWhitelist')}
-              htmlFor="email-domain-whitelist"
-              hint={t('admin:settings.fields.domainWhitelistHint')}
+            </SettingsRow>
+            <SettingsRow
+              label={t('admin:settings.fields.loginCaptcha')}
+              description={loginCaptchaRequired ? t('admin:settings.fields.loginCaptchaHint') : undefined}
+              htmlFor="login-captcha"
             >
-              <Input
-                id="email-domain-whitelist"
-                value={readString('email_domain_whitelist')}
-                placeholder="example.com, company.io"
-                onChange={(event) =>
-                  setDraft((current) => ({ ...current, email_domain_whitelist: event.target.value }))
-                }
+              <Switch
+                id="login-captcha"
+                checked={loginCaptchaRequired}
+                onCheckedChange={(value) => setDraft((current) => ({ ...current, login_captcha_required: value }))}
               />
-            </Field>
-          </div>
+            </SettingsRow>
+            <SettingsRow
+              label={t('admin:settings.fields.emailVerificationRequired')}
+              description={emailVerificationRequired ? t('admin:settings.fields.emailVerificationHint') : undefined}
+              htmlFor="email-verification"
+            >
+              <Switch
+                id="email-verification"
+                checked={emailVerificationRequired}
+                onCheckedChange={(value) => setDraft((current) => ({ ...current, email_verification_required: value }))}
+              />
+            </SettingsRow>
+            <SettingsBlock>
+              <Field
+                label={t('admin:settings.fields.domainWhitelist')}
+                htmlFor="email-domain-whitelist"
+                hint={t('admin:settings.fields.domainWhitelistHint')}
+              >
+                <Input
+                  id="email-domain-whitelist"
+                  value={readString('email_domain_whitelist')}
+                  placeholder="example.com, company.io"
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, email_domain_whitelist: event.target.value }))
+                  }
+                />
+              </Field>
+            </SettingsBlock>
+          </SettingsSection>
 
-          <div className="flex justify-end">
+          <SettingsActions>
             <Button loading={saving} onClick={() => void save()}>
               {t('common:actions.save')}
             </Button>
-          </div>
-        </section>
+          </SettingsActions>
+        </div>
       )}
     </div>
-  )
-}
-
-function ToggleRow({
-  label,
-  hint,
-  checked,
-  onChange,
-}: {
-  label: string
-  hint?: string
-  checked: boolean
-  onChange: (value: boolean) => void
-}) {
-  return (
-    <label className="flex items-center justify-between gap-4 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
-      <span className="min-w-0">
-        <span className="block text-sm text-[var(--color-fg)]">{label}</span>
-        {hint ? <span className="mt-1 block text-xs leading-relaxed text-[var(--color-fg-subtle)]">{hint}</span> : null}
-      </span>
-      <Switch checked={checked} onCheckedChange={onChange} />
-    </label>
   )
 }

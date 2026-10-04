@@ -44,6 +44,7 @@ import {
 import { toast } from '@/hooks/use-toast'
 import { useAuth } from '@/store/auth'
 import { envNum } from '@/lib/env-config'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
 
 // The literal an admin must type to authorise a destructive restore. Kept as a
 // fixed token (not localized) so muscle memory can't fire it blind.
@@ -409,15 +410,11 @@ export default function AdminBackup() {
   const failedVectorJob = !runningVector && latestVectorJob?.status === 'failed' ? latestVectorJob : null
 
   return (
-    <div className="mx-auto max-w-[76rem]">
-      <header>
-        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">
-          {t('admin:backup.title')}
-        </h1>
-        <p className="mt-2 max-w-2xl text-sm text-[var(--color-fg-muted)]">
-          {t('admin:backup.lead')}
-        </p>
-      </header>
+    <div>
+      <AdminPageHeader
+        title={t('admin:backup.title')}
+        description={t('admin:backup.lead')}
+      />
 
       <div className="mt-8 flex flex-col gap-8">
         <BackupSection
@@ -426,6 +423,7 @@ export default function AdminBackup() {
           description={t('admin:backup.export.lead')}
           actions={
             <Button
+              size="sm"
               onClick={onExport}
               loading={exporting || Boolean(runningExport)}
               disabled={fullBackupBusy}
@@ -451,7 +449,7 @@ export default function AdminBackup() {
             />
           </label>
           {runningExport && (
-            <div className="mt-5 rounded-[10px] bg-[var(--color-bg-muted)] p-4" role="status" aria-live="polite">
+            <div className="mt-5 rounded-[8px] bg-[var(--color-bg-muted)] p-4" role="status" aria-live="polite">
               <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-fg)]">
                 <Clock3 size={15} className="text-[var(--color-accent)]" aria-hidden />
                 {t('admin:backup.export.running')}
@@ -474,7 +472,7 @@ export default function AdminBackup() {
           )}
 
           {!runningExport && failedExport && (
-            <div className="mt-5 flex items-start gap-2.5 rounded-[10px] bg-[var(--color-danger-soft)] p-3.5" role="alert">
+            <div className="mt-5 flex items-start gap-2.5 rounded-[8px] bg-[var(--color-danger-soft)] p-3.5" role="alert">
               <XCircle size={15} className="mt-0.5 shrink-0 text-[var(--color-danger)]" aria-hidden />
               <p className="text-xs leading-relaxed text-[var(--color-fg-muted)]">
                 {t('admin:backup.export.failed', { error: failedExport.error || t('admin:common.failed') })}
@@ -576,6 +574,7 @@ export default function AdminBackup() {
           actions={
             <>
               <Button
+                size="sm"
                 variant="secondary"
                 onClick={onVectorCheck}
                 loading={startingVectorJob === 'check' || runningVector?.type === 'check'}
@@ -585,6 +584,7 @@ export default function AdminBackup() {
                 {t('admin:backup.vectors.checkAction')}
               </Button>
               <Button
+                size="sm"
                 variant="secondary"
                 onClick={onVectorRebuild}
                 loading={startingVectorJob === 'rebuild' || runningVector?.type === 'rebuild'}
@@ -723,7 +723,7 @@ export default function AdminBackup() {
                         <p className="truncate text-xs font-medium text-[var(--color-fg)]">
                           {issue.filename || issue.document_id}
                         </p>
-                        <p className="mt-0.5 truncate text-[11px] text-[var(--color-fg-muted)]">
+                        <p className="mt-0.5 truncate text-[12px] text-[var(--color-fg-muted)]">
                           {issue.reason} · {issue.embedding_model} · {issue.dim || '—'}d · {issue.chunk_id}
                         </p>
                       </div>
@@ -745,6 +745,7 @@ export default function AdminBackup() {
           description={t('admin:backup.config.export.lead')}
           actions={
             <Button
+              size="sm"
               variant="secondary"
               onClick={onExportConfig}
               loading={exportingConfig}
@@ -771,6 +772,7 @@ export default function AdminBackup() {
                 onChange={onPickConfig}
               />
               <Button
+                size="sm"
                 variant="secondary"
                 onClick={() => cfgFileRef.current?.click()}
                 disabled={exportBusy}
@@ -801,6 +803,7 @@ export default function AdminBackup() {
               onChange={onPick}
             />
             <Button
+              size="sm"
               variant="secondary"
               onClick={() => fileRef.current?.click()}
               disabled={fullBackupBusy}
@@ -818,6 +821,7 @@ export default function AdminBackup() {
               )}
             </div>
             <Button
+              size="sm"
               variant="destructive"
               disabled={!picked || fullBackupBusy}
               onClick={() => {
@@ -830,7 +834,7 @@ export default function AdminBackup() {
             </Button>
           </div>
           {result && (
-            <div className="mt-5 rounded-[10px] bg-[var(--color-success-soft)] p-4" role="status" aria-live="polite">
+            <div className="mt-5 rounded-[8px] bg-[var(--color-success-soft)] p-4" role="status" aria-live="polite">
               <div className="flex items-center gap-2">
                 <CheckCircle2 size={15} className="shrink-0 text-[var(--color-success)]" aria-hidden />
                 <p className="text-sm font-medium text-[var(--color-fg)]">{t('admin:backup.import.successTitle')}</p>

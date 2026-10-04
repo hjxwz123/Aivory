@@ -21,6 +21,8 @@ function formatUSD(value: number): string {
   return String(Number(value.toFixed(6)))
 }
 import { useAiPPT } from '@/store/aippt'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
+import { SettingsActions, SettingsBlock, SettingsRow, SettingsSection } from '@/components/settings/settings-section'
 
 type Settings = Record<string, unknown>
 
@@ -125,15 +127,11 @@ export default function AdminAiPPT() {
   const keyConfigured = readString('docmee_api_key').trim() !== ''
 
   return (
-    <div className="mx-auto max-w-[76rem]">
-      <header>
-        <h1 className="font-serif text-2xl text-[var(--color-fg)] sm:text-3xl">
-          {t('admin:creditSettings.docmee.title')}
-        </h1>
-        <p className="mt-2 max-w-2xl text-sm text-[var(--color-fg-muted)]">
-          {t('admin:creditSettings.docmee.lead')}
-        </p>
-      </header>
+    <div>
+      <AdminPageHeader
+        title={t('admin:creditSettings.docmee.title')}
+        description={t('admin:creditSettings.docmee.lead')}
+      />
 
       {loading ? <PanelFallback /> : loadError ? (
         <div className="mt-8 flex flex-wrap items-center gap-3">
@@ -142,12 +140,12 @@ export default function AdminAiPPT() {
         </div>
       ) : (
         <>
-          <section className="mt-8">
-            <h2 className="font-serif text-xl text-[var(--color-fg)]">{t('admin:creditSettings.docmee.connection')}</h2>
-            <div className="mt-5 flex items-center justify-between gap-4 border-y border-[var(--color-divider)] py-4">
-              <label htmlFor="docmee-enabled" className="text-sm font-medium text-[var(--color-fg)]">
-                {t('admin:creditSettings.docmee.enabled')}
-              </label>
+          <SettingsSection title={t('admin:creditSettings.docmee.connection')} className="mt-8">
+            <SettingsRow
+              label={t('admin:creditSettings.docmee.enabled')}
+              description={enabled === false && keyConfigured ? t('admin:creditSettings.docmee.offWithKeyHint') : undefined}
+              htmlFor="docmee-enabled"
+            >
               <Switch
                 id="docmee-enabled"
                 checked={enabled ?? keyConfigured}
@@ -155,25 +153,24 @@ export default function AdminAiPPT() {
                 aria-busy={switchSaving || undefined}
                 onCheckedChange={(value) => void toggleEnabled(value)}
               />
-            </div>
-            {enabled === false && keyConfigured ? (
-              <p className="mt-4 text-sm text-[var(--color-fg-muted)]">{t('admin:creditSettings.docmee.offWithKeyHint')}</p>
-            ) : null}
-            <div className="mt-5 grid gap-5 lg:grid-cols-2">
-              <Field label={t('admin:creditSettings.docmee.apiKey')} htmlFor="docmee-api-key"
-                hint={t('admin:creditSettings.docmee.apiKeyHint')}>
-                <Input id="docmee-api-key" type="password" autoComplete="off" spellCheck={false}
-                  value={readString('docmee_api_key')} onChange={(event) => setSetting('docmee_api_key', event.target.value)}
-                  placeholder="sk-…" />
-              </Field>
-              <Field label={t('admin:creditSettings.docmee.apiBaseUrl')} htmlFor="docmee-api-base"
-                hint={t('admin:creditSettings.docmee.apiBaseUrlHint')}>
-                <Input id="docmee-api-base" value={readString('docmee_api_base_url')}
-                  onChange={(event) => setSetting('docmee_api_base_url', event.target.value)}
-                  placeholder="https://docmee.cn" spellCheck={false} />
-              </Field>
-            </div>
-            <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-[var(--color-divider)] pt-4">
+            </SettingsRow>
+            <SettingsBlock>
+              <div className="grid gap-5 lg:grid-cols-2">
+                <Field label={t('admin:creditSettings.docmee.apiKey')} htmlFor="docmee-api-key"
+                  hint={t('admin:creditSettings.docmee.apiKeyHint')}>
+                  <Input id="docmee-api-key" type="password" autoComplete="off" spellCheck={false}
+                    value={readString('docmee_api_key')} onChange={(event) => setSetting('docmee_api_key', event.target.value)}
+                    placeholder="sk-…" />
+                </Field>
+                <Field label={t('admin:creditSettings.docmee.apiBaseUrl')} htmlFor="docmee-api-base"
+                  hint={t('admin:creditSettings.docmee.apiBaseUrlHint')}>
+                  <Input id="docmee-api-base" value={readString('docmee_api_base_url')}
+                    onChange={(event) => setSetting('docmee_api_base_url', event.target.value)}
+                    placeholder="https://docmee.cn" spellCheck={false} />
+                </Field>
+              </div>
+            </SettingsBlock>
+            <SettingsBlock className="flex flex-wrap items-center gap-3 py-3">
               <span className="text-sm text-[var(--color-fg-muted)]">{t('admin:creditSettings.docmee.vendorBalance')}</span>
               <Button size="sm" variant="secondary" loading={vendorLoading} disabled={vendorLoading}
                 onClick={() => void loadVendor()}>
@@ -186,90 +183,91 @@ export default function AdminAiPPT() {
                   })}
                 </span>
               ) : vendorError ? <span className="text-sm text-[var(--color-danger)]">{vendorError}</span> : null}
-            </div>
-          </section>
+            </SettingsBlock>
+          </SettingsSection>
 
-          <section className="mt-10 border-t border-[var(--color-divider)] pt-8">
-            <h2 className="font-serif text-xl text-[var(--color-fg)]">{t('admin:creditSettings.docmee.pricing')}</h2>
-            {(docmeeDisplayPriceUSD(draft, DOCMEE_PRICES[0]) ?? 0) > 0 && readNumber('credits_per_usd') === 0 ? (
-              <p className="mt-4 text-sm text-[var(--color-warning)]">
-                {t('admin:creditSettings.docmee.creditsOffHint', {
-                  price: formatUSD(docmeeDisplayPriceUSD(draft, DOCMEE_PRICES[0]) ?? 0),
-                })}{' '}
-                <Link to="/admin/credits" className="font-medium underline underline-offset-2">
-                  {t('admin:creditSettings.docmee.openCredits')}
-                </Link>
-              </p>
-            ) : null}
-            <div className="mt-5 grid gap-5 lg:grid-cols-2">
-              {DOCMEE_PRICES.map((price) => {
-                const deck = price.usdKey === 'docmee_price_per_ppt_usd'
-                const usd = docmeeDisplayPriceUSD(draft, price)
-                const ratio = readNumber('credits_per_usd')
-                const raw = draft[price.usdKey]
-                const hint = t(deck ? 'admin:creditSettings.docmee.pricePerPptHint' : 'admin:creditSettings.docmee.editPriceHint')
-                return (
-                  <Field key={price.usdKey}
-                    label={t(deck ? 'admin:creditSettings.docmee.pricePerPpt' : 'admin:creditSettings.docmee.editPrice')}
-                    htmlFor={price.usdKey}
-                    hint={usd !== undefined && usd > 0 && ratio > 0
-                      ? `${hint} ${t('admin:creditSettings.docmee.creditsEquivalent', {
-                        credits: Number((usd * ratio).toFixed(4)).toLocaleString(),
-                      })}`
-                      : hint}>
-                    <Input id={price.usdKey} type="number" min={0} step="any" inputMode="decimal" placeholder="0"
-                      value={typeof raw === 'number' || typeof raw === 'string' ? String(raw) : usd !== undefined ? formatUSD(usd) : ''}
-                      onChange={(event) => setSetting(price.usdKey, event.target.value)} />
-                  </Field>
-                )
-              })}
-            </div>
-          </section>
+          <SettingsSection title={t('admin:creditSettings.docmee.pricing')} bodyClassName="divide-y-0">
+            <SettingsBlock>
+              {(docmeeDisplayPriceUSD(draft, DOCMEE_PRICES[0]) ?? 0) > 0 && readNumber('credits_per_usd') === 0 ? (
+                <p className="mb-4 text-sm text-[var(--color-warning)]">
+                  {t('admin:creditSettings.docmee.creditsOffHint', {
+                    price: formatUSD(docmeeDisplayPriceUSD(draft, DOCMEE_PRICES[0]) ?? 0),
+                  })}{' '}
+                  <Link to="/admin/credits" className="font-medium underline underline-offset-2">
+                    {t('admin:creditSettings.docmee.openCredits')}
+                  </Link>
+                </p>
+              ) : null}
+              <div className="grid gap-5 lg:grid-cols-2">
+                {DOCMEE_PRICES.map((price) => {
+                  const deck = price.usdKey === 'docmee_price_per_ppt_usd'
+                  const usd = docmeeDisplayPriceUSD(draft, price)
+                  const ratio = readNumber('credits_per_usd')
+                  const raw = draft[price.usdKey]
+                  const hint = t(deck ? 'admin:creditSettings.docmee.pricePerPptHint' : 'admin:creditSettings.docmee.editPriceHint')
+                  return (
+                    <Field key={price.usdKey}
+                      label={t(deck ? 'admin:creditSettings.docmee.pricePerPpt' : 'admin:creditSettings.docmee.editPrice')}
+                      htmlFor={price.usdKey}
+                      hint={usd !== undefined && usd > 0 && ratio > 0
+                        ? `${hint} ${t('admin:creditSettings.docmee.creditsEquivalent', {
+                          credits: Number((usd * ratio).toFixed(4)).toLocaleString(),
+                        })}`
+                        : hint}>
+                      <Input id={price.usdKey} type="number" min={0} step="any" inputMode="decimal" placeholder="0"
+                        value={typeof raw === 'number' || typeof raw === 'string' ? String(raw) : usd !== undefined ? formatUSD(usd) : ''}
+                        onChange={(event) => setSetting(price.usdKey, event.target.value)} />
+                    </Field>
+                  )
+                })}
+              </div>
+            </SettingsBlock>
+          </SettingsSection>
 
-          <section className="mt-10 border-t border-[var(--color-divider)] pt-8">
-            <h2 className="font-serif text-xl text-[var(--color-fg)]">{t('admin:creditSettings.docmee.editor')}</h2>
-            <div className="mt-5 grid gap-5 lg:grid-cols-2">
-              <Field label={t('admin:creditSettings.docmee.defaultTemplate')} htmlFor="docmee-default-template"
-                hint={t('admin:creditSettings.docmee.defaultTemplateHint')}>
-                <Input id="docmee-default-template" value={readString('docmee_default_template_id')}
-                  onChange={(event) => setSetting('docmee_default_template_id', event.target.value)}
-                  placeholder="1940697631068151808" spellCheck={false} />
-              </Field>
-              <Field label={t('admin:creditSettings.docmee.maxUpload')} htmlFor="docmee-max-upload"
-                hint={t('admin:creditSettings.docmee.maxUploadHint')}>
-                <Input id="docmee-max-upload" type="number" min={0} step={1}
-                  value={String(readNumber('docmee_max_upload_mb', 50))}
-                  onChange={(event) => setSetting('docmee_max_upload_mb', Math.max(0, Number(event.target.value)))} />
-              </Field>
-              <Field label={t('admin:creditSettings.docmee.tokenHours')} htmlFor="docmee-token-hours"
-                hint={t('admin:creditSettings.docmee.tokenHoursHint')}>
-                <Input id="docmee-token-hours" type="number" min={0} step={1}
-                  value={String(readNumber('docmee_token_hours', 2))}
-                  onChange={(event) => setSetting('docmee_token_hours', Math.max(0, Number(event.target.value)))} />
-              </Field>
-              <Field label={t('admin:creditSettings.docmee.sdkUrl')} htmlFor="docmee-sdk-url"
-                hint={t('admin:creditSettings.docmee.sdkUrlHint')}>
-                <Input id="docmee-sdk-url" value={readString('docmee_sdk_url')}
-                  onChange={(event) => setSetting('docmee_sdk_url', event.target.value)}
-                  placeholder="https://cdn.jsdelivr.net/npm/@docmee/sdk-ui@1.6.47/dist/index.global.js" spellCheck={false} />
-              </Field>
-              <Field label={t('admin:creditSettings.docmee.domain')} htmlFor="docmee-domain"
-                hint={t('admin:creditSettings.docmee.domainHint')}>
-                <Input id="docmee-domain" value={readString('docmee_domain')}
-                  onChange={(event) => setSetting('docmee_domain', event.target.value)}
-                  placeholder="https://app.xpptx.com" spellCheck={false} />
-              </Field>
-            </div>
-          </section>
+          <SettingsSection title={t('admin:creditSettings.docmee.editor')} bodyClassName="divide-y-0">
+            <SettingsBlock>
+              <div className="grid gap-5 lg:grid-cols-2">
+                <Field label={t('admin:creditSettings.docmee.defaultTemplate')} htmlFor="docmee-default-template"
+                  hint={t('admin:creditSettings.docmee.defaultTemplateHint')}>
+                  <Input id="docmee-default-template" value={readString('docmee_default_template_id')}
+                    onChange={(event) => setSetting('docmee_default_template_id', event.target.value)}
+                    placeholder="1940697631068151808" spellCheck={false} />
+                </Field>
+                <Field label={t('admin:creditSettings.docmee.maxUpload')} htmlFor="docmee-max-upload"
+                  hint={t('admin:creditSettings.docmee.maxUploadHint')}>
+                  <Input id="docmee-max-upload" type="number" min={0} step={1}
+                    value={String(readNumber('docmee_max_upload_mb', 50))}
+                    onChange={(event) => setSetting('docmee_max_upload_mb', Math.max(0, Number(event.target.value)))} />
+                </Field>
+                <Field label={t('admin:creditSettings.docmee.tokenHours')} htmlFor="docmee-token-hours"
+                  hint={t('admin:creditSettings.docmee.tokenHoursHint')}>
+                  <Input id="docmee-token-hours" type="number" min={0} step={1}
+                    value={String(readNumber('docmee_token_hours', 2))}
+                    onChange={(event) => setSetting('docmee_token_hours', Math.max(0, Number(event.target.value)))} />
+                </Field>
+                <Field label={t('admin:creditSettings.docmee.sdkUrl')} htmlFor="docmee-sdk-url"
+                  hint={t('admin:creditSettings.docmee.sdkUrlHint')}>
+                  <Input id="docmee-sdk-url" value={readString('docmee_sdk_url')}
+                    onChange={(event) => setSetting('docmee_sdk_url', event.target.value)}
+                    placeholder="https://cdn.jsdelivr.net/npm/@docmee/sdk-ui@1.6.47/dist/index.global.js" spellCheck={false} />
+                </Field>
+                <Field label={t('admin:creditSettings.docmee.domain')} htmlFor="docmee-domain"
+                  hint={t('admin:creditSettings.docmee.domainHint')}>
+                  <Input id="docmee-domain" value={readString('docmee_domain')}
+                    onChange={(event) => setSetting('docmee_domain', event.target.value)}
+                    placeholder="https://app.xpptx.com" spellCheck={false} />
+                </Field>
+              </div>
+            </SettingsBlock>
+          </SettingsSection>
 
-          <section className="mt-10 border-t border-[var(--color-divider)] pt-8">
-            <DocmeeTemplateAdmin enabled={keyConfigured} />
-          </section>
-          <div className="mt-8 flex justify-end">
+          <DocmeeTemplateAdmin enabled={keyConfigured} />
+
+          <SettingsActions className="mt-8">
             <Button onClick={() => void save()} loading={saving} disabled={saving || switchSaving}>
               {t('common:actions.save')}
             </Button>
-          </div>
+          </SettingsActions>
         </>
       )}
     </div>

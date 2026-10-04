@@ -37,6 +37,7 @@ import {
 } from '@/components/ui/dialog'
 import { toast } from '@/hooks/use-toast'
 import { PanelFallback } from '@/components/ui/panel-fallback'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
 
 const KINDS = ['chat', 'image', 'embedding', 'decision'] as const
 
@@ -333,39 +334,47 @@ export default function AdminModels() {
 
   return (
     <div>
-      <header className="flex flex-col items-start gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">{t('admin:models.title')}</h1>
-          <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('admin:models.lead')}</p>
-        </div>
-        <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:items-center sm:justify-end">
-          <Button
-            variant="secondary"
-            className="min-h-[var(--tap-min)] flex-1 px-2 sm:min-h-0 sm:flex-none sm:px-4"
-            leadingIcon={<TagsIcon size={15} aria-hidden />}
-            onClick={() => navigate('/admin/model-tags')}
-          >
-            {t('admin:modelTags.manage', { defaultValue: 'Manage tags' })}
-          </Button>
-          <Button
-            variant="secondary"
-            className="min-h-[var(--tap-min)] flex-1 px-2 sm:min-h-0 sm:flex-none sm:px-4"
-            leadingIcon={<RefreshCw size={15} aria-hidden />}
-            onClick={openPullModels}
-          >
-            {t('admin:models.pull.action')}
-          </Button>
-          <Button data-admin-tour="models-create" className="min-h-[var(--tap-min)] flex-1 px-2 sm:min-h-0 sm:flex-none sm:px-4" leadingIcon={<Plus size={15} aria-hidden />} onClick={openNew}>
-            {t('admin:models.new')}
-          </Button>
-        </div>
-      </header>
+      <AdminPageHeader
+        title={t('admin:models.title')}
+        description={t('admin:models.lead')}
+        actions={(
+          <>
+            <Button
+              size="sm"
+              variant="secondary"
+              className="max-sm:min-h-[var(--tap-min)] max-sm:flex-1"
+              leadingIcon={<TagsIcon size={15} aria-hidden />}
+              onClick={() => navigate('/admin/model-tags')}
+            >
+              {t('admin:modelTags.manage', { defaultValue: 'Manage tags' })}
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              className="max-sm:min-h-[var(--tap-min)] max-sm:flex-1"
+              leadingIcon={<RefreshCw size={15} aria-hidden />}
+              onClick={openPullModels}
+            >
+              {t('admin:models.pull.action')}
+            </Button>
+            <Button
+              data-admin-tour="models-create"
+              size="sm"
+              className="max-sm:min-h-[var(--tap-min)] max-sm:flex-1"
+              leadingIcon={<Plus size={15} aria-hidden />}
+              onClick={openNew}
+            >
+              {t('admin:models.new')}
+            </Button>
+          </>
+        )}
+      />
 
       <section className="mt-8">
         {loading ? (
           <PanelFallback />
         ) : models.length === 0 ? (
-          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center text-sm text-[var(--color-fg-muted)]">
+          <div className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center text-sm text-[var(--color-fg-muted)]">
             {t('admin:models.empty')}
           </div>
         ) : (
@@ -383,7 +392,7 @@ export default function AdminModels() {
               const toggling = togglingModelIds.has(m.id)
               return (
                 <>
-                  <div className="col-start-2 row-start-1 grid size-9 shrink-0 place-items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-muted)] md:col-start-auto md:row-start-auto">
+                  <div className="col-start-2 row-start-1 grid size-9 shrink-0 place-items-center rounded-[12px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] md:col-start-auto md:row-start-auto">
                     <ModelIcon icon={m.icon} size={22} />
                   </div>
                   <div className="col-start-3 row-start-1 min-w-0 md:col-start-auto md:row-start-auto">
@@ -455,7 +464,7 @@ export default function AdminModels() {
           </DialogHeader>
           <DialogBody>
             {channels.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-[var(--color-border)] px-5 py-8 text-center text-sm text-[var(--color-fg-muted)]">
+              <div className="rounded-[12px] border border-dashed border-[var(--color-border)] px-5 py-8 text-center text-sm text-[var(--color-fg-muted)]">
                 {t('admin:models.pull.noChannels')}
               </div>
             ) : (
@@ -488,7 +497,7 @@ export default function AdminModels() {
                 </div>
 
                 {pullModels.error ? (
-                  <div className="flex flex-col items-start gap-3 rounded-lg border border-[var(--color-danger)]/30 bg-[var(--color-danger)]/5 px-4 py-3 text-sm text-[var(--color-fg)] sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex flex-col items-start gap-3 rounded-[12px] border border-[var(--color-danger)]/30 bg-[var(--color-danger)]/5 px-4 py-3 text-sm text-[var(--color-fg)] sm:flex-row sm:items-center sm:justify-between">
                     <span>{t('admin:models.pull.failed')}</span>
                     <Button variant="ghost" size="sm" onClick={() => void discoverSavedModels()}>
                       {t('admin:models.pull.retry')}
@@ -556,7 +565,7 @@ export default function AdminModels() {
                           {pulledAvailable.length === 0 ? (
                             <p className="mb-3 text-sm text-[var(--color-fg-muted)]">{t('admin:models.pull.allAdded')}</p>
                           ) : null}
-                          <div className="max-h-[min(42vh,24rem)] overflow-y-auto rounded-lg border border-[var(--color-border)]">
+                          <div className="max-h-[min(42vh,24rem)] overflow-y-auto rounded-[12px] border border-[var(--color-border)]">
                           {pulledFiltered.map((candidate) => {
                             const key = candidate.request_id.trim().toLowerCase()
                             const existing = pulledExistingKeys.has(key)

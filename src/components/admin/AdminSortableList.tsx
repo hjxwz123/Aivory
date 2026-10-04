@@ -244,7 +244,7 @@ export function AdminSortableList<T extends SortableItem>({
     <>
       <ul
         className={cn(
-          'flex min-w-0 max-w-full flex-col divide-y divide-[var(--color-divider)] overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]',
+          'flex min-w-0 max-w-full flex-col divide-y divide-[var(--color-divider)] overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]',
           drag && 'select-none',
           listClassName,
         )}
@@ -277,7 +277,7 @@ export function AdminSortableList<T extends SortableItem>({
           className={cn(
             'min-w-0 max-w-full',
             rowClassName,
-            'pointer-events-none fixed rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-surface)] shadow-[var(--shadow-xl)]',
+            'pointer-events-none fixed rounded-[12px] border border-[var(--color-border-strong)] bg-[var(--color-surface)] shadow-[var(--shadow-xl)]',
           )}
           style={{
             left: drag.left,

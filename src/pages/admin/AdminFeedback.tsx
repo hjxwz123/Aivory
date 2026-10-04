@@ -19,6 +19,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
 
 const PAGE_SIZE = 50
 
@@ -137,22 +138,20 @@ export default function AdminFeedback() {
 
   return (
     <div className="min-w-0 pb-10">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="font-serif text-2xl text-[var(--color-fg)] sm:text-3xl">{t('admin:userFeedback.title')}</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[var(--color-fg-muted)]">
-            {t('admin:userFeedback.lead')}
-          </p>
-        </div>
-        <Input
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          leadingIcon={<Search size={15} aria-hidden />}
-          placeholder={t('admin:userFeedback.searchPlaceholder')}
-          aria-label={t('admin:userFeedback.searchPlaceholder')}
-          wrapperClassName="w-full sm:w-80"
-        />
-      </div>
+      <AdminPageHeader
+        title={t('admin:userFeedback.title')}
+        description={t('admin:userFeedback.lead')}
+        actions={(
+          <Input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            leadingIcon={<Search size={15} aria-hidden />}
+            placeholder={t('admin:userFeedback.searchPlaceholder')}
+            aria-label={t('admin:userFeedback.searchPlaceholder')}
+            wrapperClassName="h-8 w-full max-sm:h-[var(--tap-min)] sm:w-72"
+          />
+        )}
+      />
 
       <div className="mt-7 overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="flex min-h-11 items-center justify-between gap-3 border-b border-[var(--color-divider)] px-4 py-2.5 sm:px-5">
@@ -211,7 +210,7 @@ export default function AdminFeedback() {
                       <span className="mt-1.5 block line-clamp-2 text-sm leading-relaxed text-[var(--color-fg-muted)]">
                         {item.description}
                       </span>
-                      <span className="mt-2 block truncate text-[11px] text-[var(--color-fg-subtle)]">
+                      <span className="mt-2 block truncate text-[12px] text-[var(--color-fg-subtle)]">
                         {item.conversation_title || item.page_path || item.conversation_id || '—'}
                       </span>
                     </span>
@@ -315,7 +314,7 @@ function MetaRow({ label, value, mono = false }: { label: string; value: string;
   return (
     <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 py-2.5">
       <dt className="text-[var(--color-fg-subtle)]">{label}</dt>
-      <dd className={cn('min-w-0 break-words text-right text-[var(--color-fg)]', mono && 'font-mono text-[11px]')}>{value}</dd>
+      <dd className={cn('min-w-0 break-words text-right text-[var(--color-fg)]', mono && 'font-mono text-[12px]')}>{value}</dd>
     </div>
   )
 }

@@ -31,6 +31,7 @@ import { PanelFallback } from '@/components/ui/panel-fallback'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from '@/hooks/use-toast'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
 
 interface HeaderDraft {
   id: number
@@ -311,29 +312,28 @@ export default function AdminMCP() {
   }
 
   return (
-    <div className="mx-auto max-w-[76rem]">
-      <header className="flex flex-col items-start gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">
-            {t('admin:mcp.title')}
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm text-[var(--color-fg-muted)]">{t('admin:mcp.lead')}</p>
-        </div>
-        <Button
-          leadingIcon={<Plus size={15} aria-hidden />}
-          onClick={openNew}
-          disabled={loading || loadFailed}
-          className="max-sm:min-h-[var(--tap-min)]"
-        >
-          {t('admin:mcp.new')}
-        </Button>
-      </header>
+    <div>
+      <AdminPageHeader
+        title={t('admin:mcp.title')}
+        description={t('admin:mcp.lead')}
+        actions={(
+          <Button
+            size="sm"
+            leadingIcon={<Plus size={15} aria-hidden />}
+            onClick={openNew}
+            disabled={loading || loadFailed}
+            className="max-sm:min-h-[var(--tap-min)] max-sm:flex-1"
+          >
+            {t('admin:mcp.new')}
+          </Button>
+        )}
+      />
 
       <section className="mt-8" aria-label={t('admin:mcp.listLabel')}>
         {loading ? (
           <PanelFallback />
         ) : loadFailed ? (
-          <div className="flex min-h-64 flex-col items-center justify-center rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center">
+          <div className="flex min-h-64 flex-col items-center justify-center rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center">
             <AlertCircle size={22} aria-hidden className="text-[var(--color-danger)]" />
             <p className="mt-3 text-sm font-medium text-[var(--color-fg)]">{t('admin:mcp.loadFailed')}</p>
             <Button
@@ -347,12 +347,12 @@ export default function AdminMCP() {
             </Button>
           </div>
         ) : rows.length === 0 ? (
-          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center">
+          <div className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center">
             <p className="text-sm font-medium text-[var(--color-fg)]">{t('admin:mcp.emptyTitle')}</p>
             <p className="mx-auto mt-1 max-w-lg text-sm text-[var(--color-fg-muted)]">{t('admin:mcp.emptyBody')}</p>
           </div>
         ) : (
-          <div className="divide-y divide-[var(--color-divider)] overflow-hidden rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)]">
+          <div className="divide-y divide-[var(--color-divider)] overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
             {rows.map((server) => {
               const toolCount = server.discovered_tools?.length ?? 0
               const syncedAt = formatTimestamp(server.last_synced_at)
@@ -361,7 +361,7 @@ export default function AdminMCP() {
               return (
                 <article key={server.id} className="px-4 py-4 sm:px-5">
                   <div className="flex min-w-0 items-start gap-3">
-                    <span className="grid size-10 shrink-0 place-items-center rounded-[9px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
+                    <span className="grid size-10 shrink-0 place-items-center rounded-[8px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
                       <LucideGlyph name={server.icon || 'Blocks'} size={17} aria-hidden />
                     </span>
                     <div className="min-w-0 flex-1">
@@ -386,7 +386,7 @@ export default function AdminMCP() {
                         {server.description}
                       </p>
                       <p
-                        className="mt-1.5 truncate font-mono text-[11px] text-[var(--color-fg-faint)]"
+                        className="mt-1.5 truncate font-mono text-[12px] text-[var(--color-fg-faint)]"
                         title={server.url}
                         dir="ltr"
                       >
@@ -398,7 +398,7 @@ export default function AdminMCP() {
                           <span className="break-words">{server.last_error}</span>
                         </p>
                       ) : syncedAt ? (
-                        <p className="mt-1.5 text-[11px] text-[var(--color-fg-faint)]">
+                        <p className="mt-1.5 text-[12px] text-[var(--color-fg-faint)]">
                           {t('admin:mcp.lastSynced', { time: syncedAt })}
                         </p>
                       ) : null}
@@ -544,7 +544,7 @@ export default function AdminMCP() {
                 </div>
 
                 {editor.draft.headers.length === 0 ? (
-                  <p className="mt-3 rounded-[10px] bg-[var(--color-bg-muted)] px-3 py-4 text-center text-[12px] text-[var(--color-fg-subtle)]">
+                  <p className="mt-3 rounded-[8px] bg-[var(--color-bg-muted)] px-3 py-4 text-center text-[12px] text-[var(--color-fg-subtle)]">
                     {t('admin:mcp.fields.noHeaders')}
                   </p>
                 ) : (
@@ -552,7 +552,7 @@ export default function AdminMCP() {
                     {editor.draft.headers.map((header, index) => (
                       <div
                         key={header.id}
-                        className="relative grid gap-2 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-3 pr-12 sm:grid-cols-2"
+                        className="relative grid gap-2 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-3 pr-12 sm:grid-cols-2"
                       >
                         <Input
                           aria-label={t('admin:mcp.fields.headerNameLabel', { index: index + 1 })}
@@ -578,7 +578,7 @@ export default function AdminMCP() {
                               aria-label={header.revealed ? t('admin:mcp.actions.hideHeader') : t('admin:mcp.actions.showHeader')}
                               title={header.revealed ? t('admin:mcp.actions.hideHeader') : t('admin:mcp.actions.showHeader')}
                               onClick={() => updateHeader(header.id, { revealed: !header.revealed })}
-                              className="inline-flex size-7 shrink-0 items-center justify-center rounded-[7px] text-[var(--color-fg-faint)] interactive hover:bg-[var(--color-surface)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                              className="inline-flex size-7 shrink-0 items-center justify-center rounded-[6px] text-[var(--color-fg-faint)] interactive hover:bg-[var(--color-surface)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                             >
                               {header.revealed ? <EyeOff size={14} aria-hidden /> : <Eye size={14} aria-hidden />}
                             </button>
@@ -601,7 +601,7 @@ export default function AdminMCP() {
 
               <label
                 htmlFor="mcp-enabled"
-                className="flex items-center justify-between rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5 sm:col-span-2"
+                className="flex items-center justify-between rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5 sm:col-span-2"
               >
                 <span>
                   <span className="block text-sm font-medium text-[var(--color-fg)]">{t('admin:mcp.fields.enabled')}</span>

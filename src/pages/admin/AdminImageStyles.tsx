@@ -19,6 +19,7 @@ import { IconUploader } from '@/components/admin/icon-uploader'
 import { toast } from '@/hooks/use-toast'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { AdminSortableList } from '@/components/admin/AdminSortableList'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
 
 export default function AdminImageStyles() {
   const { t } = useTranslation(['admin', 'common'])
@@ -117,17 +118,13 @@ export default function AdminImageStyles() {
   }
 
   return (
-    <div className="mx-auto max-w-[76rem]">
-      <header>
-        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">
-          {t('admin:imageStyles.title', { defaultValue: 'Image styles' })}
-        </h1>
-        <p className="mt-2 max-w-2xl text-sm text-[var(--color-fg-muted)]">
-          {t('admin:imageStyles.lead', {
-            defaultValue: 'Looks users can pick when drawing. The style prompt is hidden from users.',
-          })}
-        </p>
-      </header>
+    <div>
+      <AdminPageHeader
+        title={t('admin:imageStyles.title', { defaultValue: 'Image styles' })}
+        description={t('admin:imageStyles.lead', {
+          defaultValue: 'Looks users can pick when drawing. The style prompt is hidden from users.',
+        })}
+      />
 
       {!loading ? (
         <section className="mt-8 flex items-end gap-3 border-y border-[var(--color-divider)] py-4 max-sm:flex-col max-sm:items-stretch">
@@ -266,7 +263,7 @@ function StyleCard({
     <div className="min-w-0">
       <div className="flex flex-col gap-4 sm:flex-row">
         {/* Example thumbnail */}
-        <div className="size-20 shrink-0 overflow-hidden rounded-[10px] border border-[var(--color-border-subtle)] bg-[var(--color-bg-muted)]">
+        <div className="size-20 shrink-0 overflow-hidden rounded-[8px] border border-[var(--color-border-subtle)] bg-[var(--color-bg-muted)]">
           {style.example_image_url ? (
             <img src={style.example_image_url} alt="" className="size-full object-cover" />
           ) : (

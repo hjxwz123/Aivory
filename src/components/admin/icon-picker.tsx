@@ -156,7 +156,7 @@ export function IconPicker({ id, value, onChange, className, 'aria-label': ariaL
           aria-label={t('admin:icon.clear', { defaultValue: 'Clear icon' })}
           title={t('admin:icon.clear', { defaultValue: 'Clear icon' })}
           onClick={() => onChange('')}
-          className="absolute right-1 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-[7px] text-[var(--color-fg-faint)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:right-0 max-sm:size-11"
+          className="absolute right-1 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-[6px] text-[var(--color-fg-faint)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:right-0 max-sm:size-11"
         >
           <X size={13} aria-hidden />
         </button>

@@ -30,6 +30,7 @@ import { formatCurrencyMinor } from '@/lib/currency'
 import { adminPaymentOrderErrorKey } from '@/lib/payment-errors'
 import { canDeletePaymentOrder } from '@/lib/payment-order-state'
 import { copyText, formatDateTime } from '@/lib/utils'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
 
 type StatusFilter = 'all' | ApiPaymentOrderStatus
 type ProviderFilter = 'all' | ApiPaymentProvider
@@ -296,7 +297,7 @@ export default function AdminPaymentOrders() {
       <div className="mt-1.5 flex flex-wrap gap-1">
         {active && order.provider !== 'epay' ? (
           <Button
-            className="rounded-[8px]"
+            
             size="xs"
             variant="secondary"
             leadingIcon={<RefreshCw size={11} aria-hidden />}
@@ -309,7 +310,7 @@ export default function AdminPaymentOrders() {
         ) : null}
         {active ? (
           <Button
-            className="rounded-[8px] text-[var(--color-danger)] hover:text-[var(--color-danger)]"
+            className="text-[var(--color-danger)] hover:text-[var(--color-danger)]"
             size="xs"
             variant="ghost"
             leadingIcon={<CircleX size={11} aria-hidden />}
@@ -336,7 +337,7 @@ export default function AdminPaymentOrders() {
               : t('admin:paymentOrders.actions.deleteUnavailable')}
           >
             <Button
-              className="rounded-[8px] text-[var(--color-danger)] hover:text-[var(--color-danger)]"
+              className="text-[var(--color-danger)] hover:text-[var(--color-danger)]"
               size="icon-sm"
               variant="ghost"
               aria-label={deletable
@@ -356,16 +357,16 @@ export default function AdminPaymentOrders() {
 
   return (
     <div className="min-w-0 font-sans">
-      <header>
-        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">{t('admin:paymentOrders.title')}</h1>
-        <p className="mt-1 max-w-2xl text-[13px] leading-5 text-[var(--color-fg-muted)]">{t('admin:paymentOrders.lead')}</p>
-      </header>
+      <AdminPageHeader
+        title={t('admin:paymentOrders.title')}
+        description={t('admin:paymentOrders.lead')}
+      />
 
       <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">{copyAnnouncement}</p>
 
-      <form className="mt-5 grid min-w-0 grid-cols-1 gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3 sm:grid-cols-2 lg:grid-cols-[minmax(14rem,1fr)_minmax(9rem,10rem)_minmax(9rem,10rem)_auto]" onSubmit={applySearch}>
+      <form className="mt-5 grid min-w-0 grid-cols-1 gap-2 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 sm:grid-cols-2 lg:grid-cols-[minmax(14rem,1fr)_minmax(9rem,10rem)_minmax(9rem,10rem)_auto]" onSubmit={applySearch}>
         <Input
-          wrapperClassName="min-w-0 rounded-[8px] max-sm:h-11 sm:col-span-2 lg:col-span-1"
+          wrapperClassName="min-w-0 max-sm:h-11 sm:col-span-2 lg:col-span-1"
           leadingIcon={<Search size={14} aria-hidden />}
           value={searchDraft}
           onChange={(event) => setSearchDraft(event.target.value)}
@@ -373,7 +374,7 @@ export default function AdminPaymentOrders() {
           aria-label={t('admin:paymentOrders.filters.search')}
         />
         <Select value={status} onValueChange={(value) => { setStatus(value as StatusFilter); setPage(1) }}>
-          <SelectTrigger className="w-full min-w-0 rounded-[8px] max-sm:h-11" aria-label={t('admin:paymentOrders.filters.status')}><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-full min-w-0 max-sm:h-11" aria-label={t('admin:paymentOrders.filters.status')}><SelectValue /></SelectTrigger>
           <SelectContent>
             {STATUSES.map((value) => (
               <SelectItem key={value} value={value}>{t(`admin:paymentOrders.status.${value}`)}</SelectItem>
@@ -381,7 +382,7 @@ export default function AdminPaymentOrders() {
           </SelectContent>
         </Select>
         <Select value={provider} onValueChange={(value) => { setProvider(value as ProviderFilter); setPage(1) }}>
-          <SelectTrigger className="w-full min-w-0 rounded-[8px] max-sm:h-11" aria-label={t('admin:paymentOrders.filters.provider')}><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-full min-w-0 max-sm:h-11" aria-label={t('admin:paymentOrders.filters.provider')}><SelectValue /></SelectTrigger>
           <SelectContent>
             {PROVIDERS.map((value) => (
               <SelectItem key={value} value={value}>
@@ -391,11 +392,11 @@ export default function AdminPaymentOrders() {
           </SelectContent>
         </Select>
         <div className="flex min-w-0 gap-1.5 sm:col-span-2 lg:col-span-1">
-          <Button className="min-w-0 flex-1 rounded-[8px] max-sm:h-11 lg:flex-none" size="sm" type="submit" leadingIcon={<Search size={13} aria-hidden />}>
+          <Button className="min-w-0 flex-1 max-sm:h-11 lg:flex-none" size="sm" type="submit" leadingIcon={<Search size={13} aria-hidden />}>
             {t('admin:paymentOrders.filters.apply')}
           </Button>
           {filtersActive || searchDraft ? (
-            <Button className="shrink-0 rounded-[8px] max-sm:size-11" size="icon" variant="ghost" title={t('admin:paymentOrders.filters.clear')} aria-label={t('admin:paymentOrders.filters.clear')} onClick={clearFilters}>
+            <Button className="shrink-0 max-sm:size-11" size="icon" variant="ghost" title={t('admin:paymentOrders.filters.clear')} aria-label={t('admin:paymentOrders.filters.clear')} onClick={clearFilters}>
               <X size={14} aria-hidden />
             </Button>
           ) : null}
@@ -411,19 +412,19 @@ export default function AdminPaymentOrders() {
         {loading && orders.length === 0 ? (
           <PanelFallback />
         ) : loadError ? (
-          <div className="flex flex-col items-start gap-3 rounded-xl border border-[var(--color-danger)]/25 bg-[var(--color-danger-soft)] px-4 py-3 text-[13px] text-[var(--color-danger)] sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col items-start gap-3 rounded-[12px] border border-[var(--color-danger)]/25 bg-[var(--color-danger-soft)] px-4 py-3 text-[13px] text-[var(--color-danger)] sm:flex-row sm:items-center sm:justify-between">
             <span>{loadError}</span>
-            <Button className="rounded-[8px] max-sm:h-11" variant="secondary" size="sm" leadingIcon={<RefreshCw size={13} aria-hidden />} onClick={() => setReloadKey((value) => value + 1)}>{t('admin:paymentOrders.retry')}</Button>
+            <Button className="max-sm:h-11" variant="secondary" size="sm" leadingIcon={<RefreshCw size={13} aria-hidden />} onClick={() => setReloadKey((value) => value + 1)}>{t('admin:paymentOrders.retry')}</Button>
           </div>
         ) : orders.length === 0 ? (
-          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center">
+          <div className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center">
             <p className="text-sm font-medium text-[var(--color-fg)]">{filtersActive ? t('admin:paymentOrders.emptyFilteredTitle') : t('admin:paymentOrders.emptyTitle')}</p>
             <p className="mx-auto mt-1 max-w-lg text-[13px] text-[var(--color-fg-muted)]">{filtersActive ? t('admin:paymentOrders.emptyFiltered') : t('admin:paymentOrders.empty')}</p>
-            {filtersActive ? <Button className="mt-4 rounded-[8px] max-sm:h-11" variant="secondary" size="sm" onClick={clearFilters}>{t('admin:paymentOrders.filters.clear')}</Button> : null}
+            {filtersActive ? <Button className="mt-4 max-sm:h-11" variant="secondary" size="sm" onClick={clearFilters}>{t('admin:paymentOrders.filters.clear')}</Button> : null}
           </div>
         ) : (
           <>
-            <div className="hidden max-w-full overflow-x-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] xl:block">
+            <div className="hidden max-w-full overflow-x-auto rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] xl:block">
               <table className="w-full min-w-[72rem] table-fixed border-collapse text-left text-[12px]">
                 <colgroup>
                   <col className="w-[12%]" />
@@ -451,9 +452,9 @@ export default function AdminPaymentOrders() {
                       <tr key={order.id} className="align-top hover:bg-[var(--color-bg-muted)]/45">
                         <td className="px-3 py-2.5 text-[var(--color-fg-muted)]">
                           <div className="flex min-w-0 items-start gap-1">
-                            <code className="min-w-0 flex-1 break-all font-mono text-[11px] leading-4">{order.id}</code>
+                            <code className="min-w-0 flex-1 break-all font-mono text-[12px] leading-4">{order.id}</code>
                             <Button
-                              className="shrink-0 rounded-[8px]"
+                              className="shrink-0"
                               size="icon-sm"
                               variant="ghost"
                               title={copiedOrderId === order.id ? t('admin:paymentOrders.copied') : t('admin:paymentOrders.copyOrder')}
@@ -467,27 +468,27 @@ export default function AdminPaymentOrders() {
                         <td className="px-3 py-2.5 text-[var(--color-fg)]"><span className="block break-all">{order.user_email}</span></td>
                         <td className="px-3 py-2.5">
                           <span className="block break-words font-medium text-[var(--color-fg)] [overflow-wrap:anywhere]">{targetLabel(order)}</span>
-                          <span className="mt-0.5 block text-[11px] text-[var(--color-fg-subtle)]">{t(`admin:paymentOrders.targets.${order.target_type}`)}</span>
+                          <span className="mt-0.5 block text-[12px] text-[var(--color-fg-subtle)]">{t(`admin:paymentOrders.targets.${order.target_type}`)}</span>
                         </td>
                         <td className="whitespace-nowrap px-3 py-2.5 font-medium tabular-nums text-[var(--color-fg)]">{formatCurrencyMinor(order.amount_minor, order.currency, i18n.resolvedLanguage)}</td>
                         <td className="px-3 py-2.5">
                           <span className="block break-words text-[var(--color-fg)] [overflow-wrap:anywhere]">{channelLabel(order) || '—'}</span>
-                          <span className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] text-[var(--color-fg-subtle)]">
+                          <span className="mt-0.5 flex flex-wrap items-center gap-1 text-[12px] text-[var(--color-fg-subtle)]">
                             {t(`admin:paymentProviders.${order.provider}`)}
                             <Badge size="xs" variant={order.environment === 'test' ? 'warning' : 'neutral'}>{environmentLabel(order)}</Badge>
                           </span>
                         </td>
                         <td className="px-3 py-2.5">
                           <Badge size="xs" variant={statusVariant(order.status)}>{t(`admin:paymentOrders.status.${order.status}`)}</Badge>
-                          {order.failure_reason ? <span className="mt-1 block whitespace-pre-wrap break-words text-[11px] leading-4 text-[var(--color-danger)] [overflow-wrap:anywhere]">{order.failure_reason}</span> : null}
+                          {order.failure_reason ? <span className="mt-1 block whitespace-pre-wrap break-words text-[12px] leading-4 text-[var(--color-danger)] [overflow-wrap:anywhere]">{order.failure_reason}</span> : null}
                           {order.reconcile_error ? (
-                            <span className="mt-1 block whitespace-pre-wrap break-words text-[11px] leading-4 text-[var(--color-danger)] [overflow-wrap:anywhere]">
+                            <span className="mt-1 block whitespace-pre-wrap break-words text-[12px] leading-4 text-[var(--color-danger)] [overflow-wrap:anywhere]">
                               {t('admin:paymentOrders.reconcileError', { error: order.reconcile_error })}
                             </span>
                           ) : null}
                           {renderOrderActions(order)}
                         </td>
-                        <td className="whitespace-nowrap px-3 py-2.5 text-[11px] text-[var(--color-fg-muted)]">
+                        <td className="whitespace-nowrap px-3 py-2.5 text-[12px] text-[var(--color-fg-muted)]">
                           {renderOrderTimes(order)}
                         </td>
                       </tr>
@@ -497,7 +498,7 @@ export default function AdminPaymentOrders() {
               </table>
             </div>
 
-            <ul className="divide-y divide-[var(--color-divider)] overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] xl:hidden">
+            <ul className="divide-y divide-[var(--color-divider)] overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] xl:hidden">
               {orders.map((order) => {
                 return (
                   <li key={order.id} className="px-3 py-3">
@@ -511,11 +512,11 @@ export default function AdminPaymentOrders() {
 
                     <dl className="mt-3 grid min-w-0 grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
                       <div className="min-w-0">
-                        <dt className="text-[11px] text-[var(--color-fg-subtle)]">{t('admin:paymentOrders.table.order')}</dt>
+                        <dt className="text-[12px] text-[var(--color-fg-subtle)]">{t('admin:paymentOrders.table.order')}</dt>
                         <dd className="mt-0.5 flex min-w-0 items-start gap-1">
-                          <code className="min-w-0 flex-1 break-all font-mono text-[11px] leading-5 text-[var(--color-fg-muted)]">{order.id}</code>
+                          <code className="min-w-0 flex-1 break-all font-mono text-[12px] leading-5 text-[var(--color-fg-muted)]">{order.id}</code>
                           <Button
-                            className="shrink-0 rounded-[8px] max-sm:size-11"
+                            className="shrink-0 max-sm:size-11"
                             size="icon-sm"
                             variant="ghost"
                             title={copiedOrderId === order.id ? t('admin:paymentOrders.copied') : t('admin:paymentOrders.copyOrder')}
@@ -527,33 +528,33 @@ export default function AdminPaymentOrders() {
                         </dd>
                       </div>
                       <div className="min-w-0">
-                        <dt className="text-[11px] text-[var(--color-fg-subtle)]">{t('admin:paymentOrders.table.method')}</dt>
+                        <dt className="text-[12px] text-[var(--color-fg-subtle)]">{t('admin:paymentOrders.table.method')}</dt>
                         <dd className="mt-0.5 break-words text-[12px] leading-5 text-[var(--color-fg)] [overflow-wrap:anywhere]">{channelLabel(order) || '—'}</dd>
-                        <dd className="flex flex-wrap items-center gap-1 text-[11px] text-[var(--color-fg-subtle)]">
+                        <dd className="flex flex-wrap items-center gap-1 text-[12px] text-[var(--color-fg-subtle)]">
                           {t(`admin:paymentProviders.${order.provider}`)}
                           <Badge size="xs" variant={order.environment === 'test' ? 'warning' : 'neutral'}>{environmentLabel(order)}</Badge>
                         </dd>
                       </div>
                       <div>
-                        <dt className="text-[11px] text-[var(--color-fg-subtle)]">{t('admin:paymentOrders.table.amount')}</dt>
+                        <dt className="text-[12px] text-[var(--color-fg-subtle)]">{t('admin:paymentOrders.table.amount')}</dt>
                         <dd className="mt-0.5 text-[13px] font-semibold tabular-nums text-[var(--color-fg)]">{formatCurrencyMinor(order.amount_minor, order.currency, i18n.resolvedLanguage)}</dd>
                       </div>
                       <div>
-                        <dt className="text-[11px] text-[var(--color-fg-subtle)]">{t('admin:paymentOrders.table.time')}</dt>
-                        <dd className="mt-0.5 text-[11px] leading-5 text-[var(--color-fg-muted)]">
+                        <dt className="text-[12px] text-[var(--color-fg-subtle)]">{t('admin:paymentOrders.table.time')}</dt>
+                        <dd className="mt-0.5 text-[12px] leading-5 text-[var(--color-fg-muted)]">
                           {renderOrderTimes(order)}
                         </dd>
                       </div>
                       {order.failure_reason ? (
                         <div className="min-w-0 sm:col-span-2">
-                          <dt className="text-[11px] text-[var(--color-fg-subtle)]">{t('admin:paymentOrders.failureReason')}</dt>
-                          <dd className="mt-0.5 whitespace-pre-wrap break-words text-[11px] leading-5 text-[var(--color-danger)] [overflow-wrap:anywhere]">{order.failure_reason}</dd>
+                          <dt className="text-[12px] text-[var(--color-fg-subtle)]">{t('admin:paymentOrders.failureReason')}</dt>
+                          <dd className="mt-0.5 whitespace-pre-wrap break-words text-[12px] leading-5 text-[var(--color-danger)] [overflow-wrap:anywhere]">{order.failure_reason}</dd>
                         </div>
                       ) : null}
                       {order.reconcile_error ? (
                         <div className="min-w-0 sm:col-span-2">
-                          <dt className="text-[11px] text-[var(--color-fg-subtle)]">{t('admin:paymentOrders.reconciliation')}</dt>
-                          <dd className="mt-0.5 whitespace-pre-wrap break-words text-[11px] leading-5 text-[var(--color-danger)] [overflow-wrap:anywhere]">{order.reconcile_error}</dd>
+                          <dt className="text-[12px] text-[var(--color-fg-subtle)]">{t('admin:paymentOrders.reconciliation')}</dt>
+                          <dd className="mt-0.5 whitespace-pre-wrap break-words text-[12px] leading-5 text-[var(--color-danger)] [overflow-wrap:anywhere]">{order.reconcile_error}</dd>
                         </div>
                       ) : null}
                     </dl>
@@ -596,7 +597,7 @@ export default function AdminPaymentOrders() {
               </label>
               <Textarea
                 id="payment-order-close-reason"
-                className="mt-1.5 min-h-20 rounded-[8px] text-[13px]"
+                className="mt-1.5 min-h-20 text-[13px]"
                 value={closeReason}
                 onChange={(event) => setCloseReason(event.target.value)}
                 placeholder={t('admin:paymentOrders.closeDialog.reasonPlaceholder')}
@@ -604,7 +605,7 @@ export default function AdminPaymentOrders() {
                 disabled={Boolean(closeTarget && busyOrders[closeTarget.id] === 'close')}
                 aria-describedby="payment-order-close-reason-hint"
               />
-              <p id="payment-order-close-reason-hint" className="mt-1 text-[11px] text-[var(--color-fg-subtle)]">
+              <p id="payment-order-close-reason-hint" className="mt-1 text-[12px] text-[var(--color-fg-subtle)]">
                 {t('admin:paymentOrders.closeDialog.reasonHint')}
               </p>
 
@@ -626,7 +627,7 @@ export default function AdminPaymentOrders() {
             </DialogBody>
             <DialogFooter className="max-sm:[&_button]:!h-11">
               <Button
-                className="rounded-[8px]"
+                
                 variant="ghost"
                 disabled={Boolean(closeTarget && busyOrders[closeTarget.id] === 'close')}
                 onClick={dismissCloseDialog}
@@ -634,7 +635,7 @@ export default function AdminPaymentOrders() {
                 {t('common:actions.cancel')}
               </Button>
               <Button
-                className="rounded-[8px]"
+                
                 type="submit"
                 variant="destructive"
                 loading={Boolean(closeTarget && busyOrders[closeTarget.id] === 'close')}
@@ -668,7 +669,7 @@ export default function AdminPaymentOrders() {
             <DialogBody className="px-5 pb-5">
               <dl className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-[12px]">
                 <dt className="text-[var(--color-fg-subtle)]">{t('admin:paymentOrders.table.order')}</dt>
-                <dd className="break-all font-mono text-[11px] text-[var(--color-fg)]">{deleteTarget.id}</dd>
+                <dd className="break-all font-mono text-[12px] text-[var(--color-fg)]">{deleteTarget.id}</dd>
                 <dt className="text-[var(--color-fg-subtle)]">{t('admin:paymentOrders.table.user')}</dt>
                 <dd className="break-all text-[var(--color-fg)]">{deleteTarget.user_email}</dd>
                 <dt className="text-[var(--color-fg-subtle)]">{t('admin:paymentOrders.table.product')}</dt>
@@ -705,7 +706,7 @@ export default function AdminPaymentOrders() {
           ) : null}
           <DialogFooter className="max-sm:[&_button]:!h-11">
             <Button
-              className="rounded-[8px]"
+              
               variant="ghost"
               disabled={Boolean(deleteTarget && busyOrders[deleteTarget.id] === 'delete')}
               onClick={dismissDeleteDialog}
@@ -713,7 +714,7 @@ export default function AdminPaymentOrders() {
               {t('common:actions.cancel')}
             </Button>
             <Button
-              className="rounded-[8px]"
+              
               variant="destructive"
               loading={Boolean(deleteTarget && busyOrders[deleteTarget.id] === 'delete')}
               disabled={Boolean(deleteTarget?.delete_requires_gateway_confirmation && !deleteGatewayAcknowledged)}

@@ -21,6 +21,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/hooks/use-toast'
 import { PanelFallback } from '@/components/ui/panel-fallback'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
+import { SettingsBlock, SettingsSection } from '@/components/settings/settings-section'
 
 type Settings = Record<string, unknown>
 
@@ -215,16 +217,16 @@ export default function AdminTools() {
   const imageModelConfigured = readBool('image_model_configured', true)
 
   return (
-    <div className="mx-auto max-w-[76rem]">
-      <header>
-        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">{t('admin:tools.title')}</h1>
-        <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('admin:tools.lead')}</p>
-      </header>
+    <div>
+      <AdminPageHeader
+        title={t('admin:tools.title')}
+        description={t('admin:tools.lead')}
+      />
 
       {loading ? (
         <PanelFallback />
       ) : settingsLoadFailed ? (
-        <div className="mt-8 flex min-h-64 flex-col items-center justify-center rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center">
+        <div className="mt-8 flex min-h-64 flex-col items-center justify-center rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center">
           <AlertTriangle size={22} aria-hidden className="text-[var(--color-danger)]" />
           <p className="mt-3 text-sm font-medium text-[var(--color-fg)]">{t('admin:tools.loadFailed')}</p>
           <Button
@@ -239,293 +241,297 @@ export default function AdminTools() {
         </div>
       ) : (
         <section className="mt-8 flex flex-col gap-5" aria-busy={saving || Boolean(togglingMCPID)}>
-          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5">
-            <h2 className="font-serif text-lg text-[var(--color-fg)]">
-              {t('admin:tools.availabilityTitle', { defaultValue: 'Global tool availability' })}
-            </h2>
-            <p className="mt-1 text-xs text-[var(--color-fg-subtle)]">
-              {t('admin:tools.availabilityLead', {
-                defaultValue: 'A disabled tool is removed from every model, including models that explicitly allow it.',
-              })}
-            </p>
+          <SettingsSection
+            title={t('admin:tools.availabilityTitle', { defaultValue: 'Global tool availability' })}
+            description={t('admin:tools.availabilityLead', {
+              defaultValue: 'A disabled tool is removed from every model, including models that explicitly allow it.',
+            })}
+            className="mb-0"
+          >
             {builtinToolsLoadFailed ? (
-              <div className="mt-4 flex flex-col items-start gap-2 border-y border-[var(--color-divider)] py-4">
+              <SettingsBlock className="flex flex-col items-start gap-2">
                 <p className="text-sm text-[var(--color-danger)]">{t('admin:tools.builtinLoadFailed')}</p>
                 <Button size="sm" variant="ghost" leadingIcon={<RefreshCw size={14} aria-hidden />} loading={builtinToolsRefreshing} onClick={() => void retryBuiltinTools()}>
                   {t('common:actions.tryAgain')}
                 </Button>
-              </div>
+              </SettingsBlock>
             ) : builtinTools.length === 0 ? (
-              <p className="mt-4 text-sm text-[var(--color-fg-muted)]">
-                {t('admin:tools.availabilityEmpty', { defaultValue: 'No platform tools are registered.' })}
-              </p>
-            ) : (
-              <div className="mt-4 divide-y divide-[var(--color-divider)] border-y border-[var(--color-divider)]">
-                {builtinTools.map((tool) => {
-                  const requiresSandbox = tool.name === 'python_execute'
-                  const requiresImageModel = tool.name === 'image_generate'
-                  const unavailable =
-                    (requiresSandbox && !sandboxConfigured) ||
-                    (requiresImageModel && !imageModelConfigured)
-                  const enabled = !unavailable && !readStringArray('disabled_tools').includes(tool.name)
-                  return (
-                    <label key={tool.name} className="flex min-h-14 items-center gap-4 py-2.5">
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-[13px] font-medium text-[var(--color-fg)]">
-                          {t(`admin:models.builtinTools.names.${tool.name}`, { defaultValue: tool.name })}
-                        </span>
-                        <span className="mt-0.5 block text-[12px] leading-4 text-[var(--color-fg-subtle)]">
-                          {t(`admin:models.builtinTools.descriptions.${tool.name}`, { defaultValue: tool.description })}
-                        </span>
-                      </span>
-                      <span className="flex shrink-0 items-center gap-2.5">
-                        {unavailable ? (
-                          <span className="max-w-[8.5rem] text-right text-[11px] leading-4 text-[var(--color-fg-subtle)] sm:max-w-none sm:whitespace-nowrap">
-                            {requiresImageModel
-                              ? t('admin:tools.configureImageModelFirst')
-                              : t('admin:tools.configureSandboxFirst')}
-                          </span>
-                        ) : null}
-                        <Switch
-                          checked={enabled}
-                          disabled={saving || unavailable}
-                          onCheckedChange={(value) => setToolEnabled(tool.name, value)}
-                        />
-                      </span>
-                    </label>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-
-          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5">
-            <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <h2 className="font-serif text-lg text-[var(--color-fg)]">
-                  {t('admin:tools.mcpAvailabilityTitle')}
-                </h2>
-                <p className="mt-1 max-w-2xl text-xs text-[var(--color-fg-subtle)]">
-                  {t('admin:tools.mcpAvailabilityLead')}
+              <SettingsBlock>
+                <p className="text-sm text-[var(--color-fg-muted)]">
+                  {t('admin:tools.availabilityEmpty', { defaultValue: 'No platform tools are registered.' })}
                 </p>
-              </div>
+              </SettingsBlock>
+            ) : (
+              builtinTools.map((tool) => {
+                const requiresSandbox = tool.name === 'python_execute'
+                const requiresImageModel = tool.name === 'image_generate'
+                const unavailable =
+                  (requiresSandbox && !sandboxConfigured) ||
+                  (requiresImageModel && !imageModelConfigured)
+                const enabled = !unavailable && !readStringArray('disabled_tools').includes(tool.name)
+                return (
+                  <label key={tool.name} className="flex min-h-14 items-center gap-4 px-4 py-3">
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-medium text-[var(--color-fg)]">
+                        {t(`admin:models.builtinTools.names.${tool.name}`, { defaultValue: tool.name })}
+                      </span>
+                      <span className="mt-0.5 block text-xs leading-normal text-[var(--color-fg-muted)]">
+                        {t(`admin:models.builtinTools.descriptions.${tool.name}`, { defaultValue: tool.description })}
+                      </span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-2.5">
+                      {unavailable ? (
+                        <span className="max-w-[8.5rem] text-right text-xs leading-4 text-[var(--color-fg-subtle)] sm:max-w-none sm:whitespace-nowrap">
+                          {requiresImageModel
+                            ? t('admin:tools.configureImageModelFirst')
+                            : t('admin:tools.configureSandboxFirst')}
+                        </span>
+                      ) : null}
+                      <Switch
+                        checked={enabled}
+                        disabled={saving || unavailable}
+                        onCheckedChange={(value) => setToolEnabled(tool.name, value)}
+                      />
+                    </span>
+                  </label>
+                )
+              })
+            )}
+          </SettingsSection>
+
+          <SettingsSection
+            title={t('admin:tools.mcpAvailabilityTitle')}
+            description={t('admin:tools.mcpAvailabilityLead')}
+            className="mb-0"
+            actions={(
               <Button
                 asChild
                 size="sm"
                 variant="secondary"
-                leadingIcon={<Settings2 size={13} aria-hidden />}
-                className="shrink-0 max-sm:min-h-[var(--tap-min)]"
+                leadingIcon={<Settings2 size={14} aria-hidden />}
+                className="max-sm:min-h-[var(--tap-min)]"
               >
                 <Link to="/admin/mcp">{t('admin:tools.manageMCP')}</Link>
               </Button>
-            </div>
+            )}
+          >
             {mcpLoadFailed ? (
-              <div className="mt-4 flex flex-col items-start gap-2 border-y border-[var(--color-divider)] py-4">
+              <SettingsBlock className="flex flex-col items-start gap-2">
                 <p className="text-sm text-[var(--color-danger)]">{t('admin:tools.mcpLoadFailed')}</p>
                 <Button size="sm" variant="ghost" leadingIcon={<RefreshCw size={14} aria-hidden />} loading={mcpRefreshing} onClick={() => void retryMCPServers()}>
                   {t('common:actions.tryAgain')}
                 </Button>
-              </div>
+              </SettingsBlock>
             ) : mcpServers.length === 0 ? (
-              <p className="mt-4 text-sm text-[var(--color-fg-muted)]">{t('admin:tools.mcpAvailabilityEmpty')}</p>
+              <SettingsBlock>
+                <p className="text-sm text-[var(--color-fg-muted)]">{t('admin:tools.mcpAvailabilityEmpty')}</p>
+              </SettingsBlock>
             ) : (
-              <div className="mt-4 divide-y divide-[var(--color-divider)] border-y border-[var(--color-divider)]">
-                {mcpServers.map((server) => (
-                  <label key={server.id} htmlFor={`tool-mcp-${server.id}`} className="flex min-h-14 items-center gap-3 py-2.5">
-                    <span className="grid size-8 shrink-0 place-items-center rounded-[8px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
-                      <LucideGlyph name={server.icon || 'Blocks'} size={15} aria-hidden />
+              mcpServers.map((server) => (
+                <label key={server.id} htmlFor={`tool-mcp-${server.id}`} className="flex min-h-14 items-center gap-3 px-4 py-3">
+                  <span className="grid size-8 shrink-0 place-items-center rounded-[8px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
+                    <LucideGlyph name={server.icon || 'Blocks'} size={15} aria-hidden />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium text-[var(--color-fg)]">{server.name}</span>
+                    <span className="mt-0.5 block text-xs leading-normal text-[var(--color-fg-muted)]">
+                      {server.description}
                     </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-[13px] font-medium text-[var(--color-fg)]">{server.name}</span>
-                      <span className="mt-0.5 block text-[12px] leading-4 text-[var(--color-fg-subtle)]">
-                        {server.description}
+                    {server.last_error ? (
+                      <span className="mt-0.5 block text-xs leading-normal text-[var(--color-danger)]">
+                        {t('admin:tools.mcpUnavailable')}
                       </span>
-                      {server.last_error ? (
-                        <span className="mt-0.5 block text-[11px] leading-4 text-[var(--color-danger)]">
-                          {t('admin:tools.mcpUnavailable')}
-                        </span>
-                      ) : null}
-                    </span>
-                    <Switch
-                      id={`tool-mcp-${server.id}`}
-                      checked={server.enabled}
-                      disabled={Boolean(togglingMCPID) || saving}
-                      onCheckedChange={(value) => void setMCPEnabled(server, value)}
-                    />
-                  </label>
-                ))}
-              </div>
+                    ) : null}
+                  </span>
+                  <Switch
+                    id={`tool-mcp-${server.id}`}
+                    checked={server.enabled}
+                    disabled={Boolean(togglingMCPID) || saving}
+                    onCheckedChange={(value) => void setMCPEnabled(server, value)}
+                  />
+                </label>
+              ))
             )}
-          </div>
+          </SettingsSection>
 
           {/* Web search ------------------------------------------------------ */}
-          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5">
-            <h2 className="font-serif text-lg text-[var(--color-fg)]">{t('admin:settings.fields.searchSection')}</h2>
-            <p className="mt-1 text-xs text-[var(--color-fg-subtle)]">{t('admin:settings.fields.searchLead')}</p>
-            <div className="mt-4 flex flex-col gap-5">
-              <Field
-                label={t('admin:settings.fields.searchProvider')}
-                htmlFor="search-provider"
-                hint={t('admin:settings.fields.searchProviderHint')}
-              >
-                <Select
-                  value={searchProvider || 'none'}
-                  disabled={saving}
-                  onValueChange={(v) =>
-                    setDraft({ ...draft, search_provider: v === 'none' ? '' : v })
-                  }
+          <SettingsSection
+            title={t('admin:settings.fields.searchSection')}
+            description={t('admin:settings.fields.searchLead')}
+            className="mb-0"
+            bodyClassName="divide-y-0"
+          >
+            <SettingsBlock>
+              <div className="flex flex-col gap-5">
+                <Field
+                  label={t('admin:settings.fields.searchProvider')}
+                  htmlFor="search-provider"
+                  hint={t('admin:settings.fields.searchProviderHint')}
                 >
-                  <SelectTrigger id="search-provider" data-admin-tour="tools-search-provider">
-                    <SelectValue placeholder={t('admin:settings.fields.searchProviderPlaceholder')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">{t('admin:settings.fields.searchNone')}</SelectItem>
-                    <SelectItem value="duckduckgo">{t('admin:settings.fields.searchDuckduckgo')}</SelectItem>
-                    <SelectItem value="searxng">{t('admin:settings.fields.searchSearxng')}</SelectItem>
-                    <SelectItem value="serper">{t('admin:settings.fields.searchSerper')}</SelectItem>
-                    <SelectItem value="brave">{t('admin:settings.fields.searchBrave')}</SelectItem>
-                    <SelectItem value="tavily">{t('admin:settings.fields.searchTavily')}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-
-              {searchProvider === 'duckduckgo' && (
-                <div className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-4">
-                  <p className="text-xs leading-relaxed text-[var(--color-fg-subtle)]">
-                    {t('admin:settings.fields.searchDuckduckgoHint')}
-                  </p>
-                </div>
-              )}
-
-              {searchProvider === 'searxng' && (
-                <div className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-4">
-                  <Field
-                    label={t('admin:settings.fields.searchBaseUrl')}
-                    htmlFor="search-url"
-                    hint={t('admin:settings.fields.searchBaseUrlHint')}
+                  <Select
+                    value={searchProvider || 'none'}
+                    disabled={saving}
+                    onValueChange={(v) =>
+                      setDraft({ ...draft, search_provider: v === 'none' ? '' : v })
+                    }
                   >
-                    <Input
-                      id="search-url"
-                      type="url"
-                      placeholder="https://searxng.your-domain.tld"
-                      value={readString('search_base_url')}
-                      disabled={saving}
-                      onChange={(e) => setDraft({ ...draft, search_base_url: e.target.value })}
-                    />
-                  </Field>
-                  <Field
-                    label={t('admin:settings.fields.searchEngines')}
-                    htmlFor="search-engines"
-                    hint={t('admin:settings.fields.searchEnginesHint')}
-                  >
-                    <Input
-                      id="search-engines"
-                      placeholder={t('admin:settings.fields.searchEnginesPlaceholder')}
-                      value={readString('search_engines')}
-                      disabled={saving}
-                      onChange={(e) => setDraft({ ...draft, search_engines: e.target.value })}
-                    />
-                  </Field>
-                </div>
-              )}
+                    <SelectTrigger id="search-provider" data-admin-tour="tools-search-provider">
+                      <SelectValue placeholder={t('admin:settings.fields.searchProviderPlaceholder')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">{t('admin:settings.fields.searchNone')}</SelectItem>
+                      <SelectItem value="duckduckgo">{t('admin:settings.fields.searchDuckduckgo')}</SelectItem>
+                      <SelectItem value="searxng">{t('admin:settings.fields.searchSearxng')}</SelectItem>
+                      <SelectItem value="serper">{t('admin:settings.fields.searchSerper')}</SelectItem>
+                      <SelectItem value="brave">{t('admin:settings.fields.searchBrave')}</SelectItem>
+                      <SelectItem value="tavily">{t('admin:settings.fields.searchTavily')}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
 
-              {(searchProvider === 'serper' || searchProvider === 'brave' || searchProvider === 'tavily') && (
-                <div className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-4">
-                  <Field
-                    label={t('admin:settings.fields.searchApiKey')}
-                    htmlFor="search-key"
-                    hint={t('admin:settings.fields.searchApiKeyHint')}
-                  >
-                    <Input
-                      id="search-key"
-                      type="password"
-                      autoComplete="off"
-                      value={readString('search_api_key')}
-                      disabled={saving}
-                      onChange={(e) => setDraft({ ...draft, search_api_key: e.target.value })}
-                    />
-                  </Field>
-                </div>
-              )}
-            </div>
-          </div>
+                {searchProvider === 'duckduckgo' && (
+                  <div className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-4">
+                    <p className="text-xs leading-relaxed text-[var(--color-fg-subtle)]">
+                      {t('admin:settings.fields.searchDuckduckgoHint')}
+                    </p>
+                  </div>
+                )}
+
+                {searchProvider === 'searxng' && (
+                  <div className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-4">
+                    <Field
+                      label={t('admin:settings.fields.searchBaseUrl')}
+                      htmlFor="search-url"
+                      hint={t('admin:settings.fields.searchBaseUrlHint')}
+                    >
+                      <Input
+                        id="search-url"
+                        type="url"
+                        placeholder="https://searxng.your-domain.tld"
+                        value={readString('search_base_url')}
+                        disabled={saving}
+                        onChange={(e) => setDraft({ ...draft, search_base_url: e.target.value })}
+                      />
+                    </Field>
+                    <Field
+                      label={t('admin:settings.fields.searchEngines')}
+                      htmlFor="search-engines"
+                      hint={t('admin:settings.fields.searchEnginesHint')}
+                    >
+                      <Input
+                        id="search-engines"
+                        placeholder={t('admin:settings.fields.searchEnginesPlaceholder')}
+                        value={readString('search_engines')}
+                        disabled={saving}
+                        onChange={(e) => setDraft({ ...draft, search_engines: e.target.value })}
+                      />
+                    </Field>
+                  </div>
+                )}
+
+                {(searchProvider === 'serper' || searchProvider === 'brave' || searchProvider === 'tavily') && (
+                  <div className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-4">
+                    <Field
+                      label={t('admin:settings.fields.searchApiKey')}
+                      htmlFor="search-key"
+                      hint={t('admin:settings.fields.searchApiKeyHint')}
+                    >
+                      <Input
+                        id="search-key"
+                        type="password"
+                        autoComplete="off"
+                        value={readString('search_api_key')}
+                        disabled={saving}
+                        onChange={(e) => setDraft({ ...draft, search_api_key: e.target.value })}
+                      />
+                    </Field>
+                  </div>
+                )}
+              </div>
+            </SettingsBlock>
+          </SettingsSection>
 
           {/* Code sandbox ---------------------------------------------------- */}
-          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5">
-            <h2 className="font-serif text-lg text-[var(--color-fg)]">{t('admin:settings.fields.sandboxSection')}</h2>
-            {!sandboxConfigured ? (
-              <p className="mt-2 flex items-center gap-2 text-xs text-[var(--color-fg-muted)]" role="status">
-                <AlertTriangle size={14} aria-hidden className="shrink-0" />
-                <span>{t('admin:settings.fields.sandboxMissing')}</span>
-              </p>
-            ) : null}
-            <div className="mt-4 flex flex-col gap-5">
-              <Field
-                label={t('admin:settings.fields.sandboxUrl')}
-                htmlFor="sandbox-url"
-                hint={t('admin:settings.fields.sandboxUrlHint')}
-              >
-                <Input
-                  id="sandbox-url"
-                  data-admin-tour="tools-sandbox-url"
-                  name="sandbox_base_url"
-                  type="url"
-                  autoComplete="off"
-                  placeholder="http://your-server:48217"
-                  value={readString('sandbox_base_url')}
-                  disabled={saving}
-                  onChange={(e) => setDraft({ ...draft, sandbox_base_url: e.target.value })}
-                />
-              </Field>
-              <Field
-                label={t('admin:settings.fields.sandboxKey')}
-                htmlFor="sandbox-key"
-                hint={t('admin:settings.fields.sandboxKeyHint')}
-              >
-                <Input
-                  id="sandbox-key"
-                  name="sandbox_api_key"
-                  type="password"
-                  autoComplete="new-password"
-                  value={readString('sandbox_api_key')}
-                  disabled={saving}
-                  onChange={(e) => setDraft({ ...draft, sandbox_api_key: e.target.value })}
-                />
-              </Field>
-              <Field
-                label={t('admin:settings.fields.sandboxExecTimeout')}
-                htmlFor="sandbox-exec-timeout"
-                hint={t('admin:settings.fields.sandboxExecTimeoutHint')}
-              >
-                <Input
-                  id="sandbox-exec-timeout"
-                  type="number"
-                  min={10}
-                  max={600}
-                  placeholder="120"
-                  value={readString('sandbox_exec_timeout_sec')}
-                  disabled={saving}
-                  onChange={(e) => setDraft({ ...draft, sandbox_exec_timeout_sec: e.target.value })}
-                />
-              </Field>
-              <Field
-                label={t('admin:settings.fields.sandboxIdleTtl')}
-                htmlFor="sandbox-idle-ttl"
-                hint={t('admin:settings.fields.sandboxIdleTtlHint')}
-              >
-                <Input
-                  id="sandbox-idle-ttl"
-                  type="number"
-                  min={60}
-                  max={86400}
-                  placeholder="1800"
-                  value={readString('sandbox_idle_ttl_sec')}
-                  disabled={saving}
-                  onChange={(e) => setDraft({ ...draft, sandbox_idle_ttl_sec: e.target.value })}
-                />
-              </Field>
-            </div>
-          </div>
+          <SettingsSection
+            title={t('admin:settings.fields.sandboxSection')}
+            className="mb-0"
+            bodyClassName="divide-y-0"
+          >
+            <SettingsBlock>
+              {!sandboxConfigured ? (
+                <p className="mb-4 flex items-center gap-2 text-xs text-[var(--color-fg-muted)]" role="status">
+                  <AlertTriangle size={14} aria-hidden className="shrink-0" />
+                  <span>{t('admin:settings.fields.sandboxMissing')}</span>
+                </p>
+              ) : null}
+              <div className="flex flex-col gap-5">
+                <Field
+                  label={t('admin:settings.fields.sandboxUrl')}
+                  htmlFor="sandbox-url"
+                  hint={t('admin:settings.fields.sandboxUrlHint')}
+                >
+                  <Input
+                    id="sandbox-url"
+                    data-admin-tour="tools-sandbox-url"
+                    name="sandbox_base_url"
+                    type="url"
+                    autoComplete="off"
+                    placeholder="http://your-server:48217"
+                    value={readString('sandbox_base_url')}
+                    disabled={saving}
+                    onChange={(e) => setDraft({ ...draft, sandbox_base_url: e.target.value })}
+                  />
+                </Field>
+                <Field
+                  label={t('admin:settings.fields.sandboxKey')}
+                  htmlFor="sandbox-key"
+                  hint={t('admin:settings.fields.sandboxKeyHint')}
+                >
+                  <Input
+                    id="sandbox-key"
+                    name="sandbox_api_key"
+                    type="password"
+                    autoComplete="new-password"
+                    value={readString('sandbox_api_key')}
+                    disabled={saving}
+                    onChange={(e) => setDraft({ ...draft, sandbox_api_key: e.target.value })}
+                  />
+                </Field>
+                <Field
+                  label={t('admin:settings.fields.sandboxExecTimeout')}
+                  htmlFor="sandbox-exec-timeout"
+                  hint={t('admin:settings.fields.sandboxExecTimeoutHint')}
+                >
+                  <Input
+                    id="sandbox-exec-timeout"
+                    type="number"
+                    min={10}
+                    max={600}
+                    placeholder="120"
+                    value={readString('sandbox_exec_timeout_sec')}
+                    disabled={saving}
+                    onChange={(e) => setDraft({ ...draft, sandbox_exec_timeout_sec: e.target.value })}
+                  />
+                </Field>
+                <Field
+                  label={t('admin:settings.fields.sandboxIdleTtl')}
+                  htmlFor="sandbox-idle-ttl"
+                  hint={t('admin:settings.fields.sandboxIdleTtlHint')}
+                >
+                  <Input
+                    id="sandbox-idle-ttl"
+                    type="number"
+                    min={60}
+                    max={86400}
+                    placeholder="1800"
+                    value={readString('sandbox_idle_ttl_sec')}
+                    disabled={saving}
+                    onChange={(e) => setDraft({ ...draft, sandbox_idle_ttl_sec: e.target.value })}
+                  />
+                </Field>
+              </div>
+            </SettingsBlock>
+          </SettingsSection>
 
           <div className="flex justify-end">
             <Button loading={saving} onClick={() => void save()}>

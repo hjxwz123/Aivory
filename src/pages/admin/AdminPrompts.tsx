@@ -21,6 +21,7 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from '@/hooks/use-toast'
 import { AdminSortableList } from '@/components/admin/AdminSortableList'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
 
 type PromptDraft = Pick<ApiPrompt, 'name' | 'description' | 'content' | 'enabled' | 'sort_order'>
 
@@ -146,23 +147,20 @@ export default function AdminPrompts() {
 
   return (
     <div>
-      <header className="flex flex-col items-start gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">
-            {t('admin:prompts.title')}
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm text-[var(--color-fg-muted)]">
-            {t('admin:prompts.lead')}
-          </p>
-        </div>
-        <Button
-          leadingIcon={<Plus size={15} aria-hidden />}
-          onClick={openNew}
-          className="max-sm:min-h-[var(--tap-min)]"
-        >
-          {t('admin:prompts.new')}
-        </Button>
-      </header>
+      <AdminPageHeader
+        title={t('admin:prompts.title')}
+        description={t('admin:prompts.lead')}
+        actions={(
+          <Button
+            size="sm"
+            leadingIcon={<Plus size={15} aria-hidden />}
+            onClick={openNew}
+            className="max-sm:min-h-[var(--tap-min)] max-sm:flex-1"
+          >
+            {t('admin:prompts.new')}
+          </Button>
+        )}
+      />
 
       <section className="mt-8">
         {loading ? (
@@ -283,7 +281,7 @@ export default function AdminPrompts() {
               </Field>
               <label
                 htmlFor="admin-prompt-enabled"
-                className="flex items-center justify-between rounded-[10px] bg-[var(--color-bg-muted)] px-3 py-2.5"
+                className="flex items-center justify-between rounded-[8px] bg-[var(--color-bg-muted)] px-3 py-2.5"
               >
                 <span className="text-sm text-[var(--color-fg)]">{t('admin:prompts.fields.enabled')}</span>
                 <Switch

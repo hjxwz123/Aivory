@@ -218,7 +218,7 @@ function coachmarkForState({
           type="button"
           onClick={onClose}
           aria-label={closeLabel}
-          className="-mr-1 -mt-1 inline-flex size-7 shrink-0 items-center justify-center rounded-[7px] text-[var(--color-fg-subtle)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+          className="-mr-1 -mt-1 inline-flex size-7 shrink-0 items-center justify-center rounded-[6px] text-[var(--color-fg-subtle)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
         >
           <X size={15} aria-hidden />
         </button>
@@ -588,7 +588,7 @@ export function AdminOnboardingTour({ open, onOpenChange, refreshKey, onSnapshot
         <div
           aria-hidden
           className={cn(
-            'pointer-events-none fixed z-[var(--z-tour)] rounded-[10px] border-2 border-[var(--color-accent)]',
+            'pointer-events-none fixed z-[var(--z-tour)] rounded-[8px] border-2 border-[var(--color-accent)]',
             reducedMotion ? '' : 'transition-[top,left,width,height] duration-[var(--duration-fast)] ease-out',
           )}
           style={spotlightStyle(targetRect)}
@@ -616,7 +616,7 @@ export function AdminOnboardingTour({ open, onOpenChange, refreshKey, onSnapshot
             {currentStep.step.complete ? <Check size={16} strokeWidth={2.5} /> : <Icon size={16} />}
           </span>
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] leading-4">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px] leading-4">
               <span className="font-medium text-[var(--color-accent)]">{phaseLabel}</span>
               <span className="text-[var(--color-fg-subtle)]">{t(`onboarding.profile.${onboarding.deployment_profile}`)}</span>
               <span className="text-[var(--color-fg-subtle)]">
@@ -632,7 +632,7 @@ export function AdminOnboardingTour({ open, onOpenChange, refreshKey, onSnapshot
             onClick={() => { void dismiss() }}
             disabled={saving !== null}
             aria-label={closeLabel}
-            className="-mr-1 -mt-1 inline-flex size-7 shrink-0 items-center justify-center rounded-[7px] text-[var(--color-fg-subtle)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:pointer-events-none disabled:opacity-50"
+            className="-mr-1 -mt-1 inline-flex size-7 shrink-0 items-center justify-center rounded-[6px] text-[var(--color-fg-subtle)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:pointer-events-none disabled:opacity-50"
           >
             <X size={15} aria-hidden />
           </button>
@@ -643,14 +643,14 @@ export function AdminOnboardingTour({ open, onOpenChange, refreshKey, onSnapshot
         </p>
 
         <div className="mt-3 flex items-center justify-between gap-3">
-          <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-[var(--color-fg-subtle)]">
+          <span className="flex min-w-0 items-center gap-1.5 text-[12px] text-[var(--color-fg-subtle)]">
             <span className={cn(
               'size-1.5 shrink-0 rounded-full',
               currentStep.step.complete ? 'bg-[var(--color-success)]' : 'bg-[var(--color-warning)]',
             )} aria-hidden />
             {currentStep.step.complete ? t('onboarding.tour.configured') : t('onboarding.tour.needsSetup')}
           </span>
-          <span className="shrink-0 text-[11px] text-[var(--color-fg-subtle)]">
+          <span className="shrink-0 text-[12px] text-[var(--color-fg-subtle)]">
             {t('onboarding.tour.stepProgress', { current: phaseComplete, total: phaseTotal })}
           </span>
         </div>
@@ -670,12 +670,12 @@ export function AdminOnboardingTour({ open, onOpenChange, refreshKey, onSnapshot
         </div>
 
         {completionConflict ? (
-          <p className="mt-3 text-[11px] leading-4 text-[var(--color-warning)]" role="status">
+          <p className="mt-3 text-[12px] leading-4 text-[var(--color-warning)]" role="status">
             {t('onboarding.requiredChanged')}
           </p>
         ) : null}
         {loadError ? (
-          <p className="mt-3 text-[11px] leading-4 text-[var(--color-warning)]" role="status">
+          <p className="mt-3 text-[12px] leading-4 text-[var(--color-warning)]" role="status">
             {t('onboarding.loadFailed')}
           </p>
         ) : null}

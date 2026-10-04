@@ -168,14 +168,14 @@ export function ParamControlsEditor({ value, onChange }: Props) {
           renderItem={(c, i) => (
             <div className="flex min-w-0 flex-col gap-3">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <div className="inline-flex items-center gap-1 rounded-[9px] border border-[var(--color-border-subtle)] bg-[var(--color-bg-muted)] p-0.5">
+                <div className="inline-flex items-center gap-1 rounded-[8px] border border-[var(--color-border-subtle)] bg-[var(--color-bg-muted)] p-0.5">
                   {(['toggle', 'select'] as const).map((ty) => (
                     <button
                       key={ty}
                       type="button"
                       onClick={() => setAt(i, { type: ty })}
                       className={
-                        'interactive h-7 rounded-[7px] px-2.5 text-[12px] font-medium ' +
+                        'interactive h-7 rounded-[6px] px-2.5 text-[12px] font-medium ' +
                         (c.type === ty
                           ? 'bg-[var(--color-fg)] text-[var(--color-fg-inverted)]'
                           : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]')
@@ -292,7 +292,7 @@ export function ParamControlsEditor({ value, onChange }: Props) {
 function LabeledInput({ label, value, onChange, placeholder, cls, mono }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; cls?: string; mono?: boolean }) {
   return (
     <label className="flex min-w-0 flex-col gap-1">
-      <span className="text-[11.5px] text-[var(--color-fg-subtle)]">{label}</span>
+      <span className="text-[12px] text-[var(--color-fg-subtle)]">{label}</span>
       <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className={(cls ?? '') + (mono ? ' font-mono' : '')} />
     </label>
   )
@@ -302,7 +302,7 @@ function LabeledIcon({ label, value, onChange }: { label: string; value: string;
   const id = useId()
   return (
     <div className="flex min-w-0 flex-col gap-1">
-      <label htmlFor={id} className="text-[11.5px] text-[var(--color-fg-subtle)]">{label}</label>
+      <label htmlFor={id} className="text-[12px] text-[var(--color-fg-subtle)]">{label}</label>
       <IconPicker id={id} value={value} onChange={onChange} />
     </div>
   )
@@ -311,7 +311,7 @@ function LabeledIcon({ label, value, onChange }: { label: string; value: string;
 function LabeledArea({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   return (
     <label className="flex min-w-0 flex-col gap-1">
-      <span className="text-[11.5px] text-[var(--color-fg-subtle)]">{label}</span>
+      <span className="text-[12px] text-[var(--color-fg-subtle)]">{label}</span>
       <Textarea rows={4} value={value} onChange={(e) => onChange(e.target.value)} className="font-mono text-[12px]" />
     </label>
   )

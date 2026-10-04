@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { formatDateTime } from '@/lib/utils'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
 
 function statusVariant(status: ApiMemory['status']) {
   switch (status) {
@@ -79,9 +80,8 @@ export default function AdminUserMemories() {
     <div>
       <AdminDetailHeader backTo="/admin/users" backLabel={t('admin:users.backToUsers')} />
 
-      <header>
-        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl" aria-busy={pageLoading}>
-          {pageLoading ? (
+      <AdminPageHeader
+        title={pageLoading ? (
             <span className="block" role="status" aria-live="polite">
               <span className="sr-only">{t('admin:common.loading')}</span>
               <span
@@ -94,11 +94,9 @@ export default function AdminUserMemories() {
           ) : (
             t('admin:users.memoriesFallbackTitle')
           )}
-        </h1>
-        <p className="mt-2 max-w-2xl text-sm text-[var(--color-fg-muted)]">
-          {t('admin:users.memoriesLead')}
-        </p>
-      </header>
+        titleBusy={pageLoading}
+        description={t('admin:users.memoriesLead')}
+      />
 
       <section className="mt-6 sm:mt-8" aria-label={t('admin:users.viewMemories')}>
         {pageLoading ? (
@@ -123,7 +121,7 @@ export default function AdminUserMemories() {
             </Button>
           </div>
         ) : rows.length === 0 ? (
-          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)]">
+          <div className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
             <EmptyState
               icon={<Brain size={20} aria-hidden />}
               title={t('admin:users.noMemories')}
@@ -132,7 +130,7 @@ export default function AdminUserMemories() {
             />
           </div>
         ) : (
-          <ul className="flex flex-col divide-y divide-[var(--color-divider)] rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)]">
+          <ul className="flex flex-col divide-y divide-[var(--color-divider)] rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
             {rows.map((memory) => {
               const stamp = memory.updated_at || memory.created_at
               return (
@@ -145,9 +143,9 @@ export default function AdminUserMemories() {
                       {memory.memory_text}
                     </p>
                     {memory.slot || stamp ? (
-                      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] leading-4 text-[var(--color-fg-subtle)]">
+                      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] leading-4 text-[var(--color-fg-subtle)]">
                         {memory.slot ? (
-                          <code className="max-w-full break-all rounded-[5px] bg-[var(--color-bg-muted)] px-1.5 py-0.5 font-mono text-[11px] text-[var(--color-fg-muted)]">
+                          <code className="max-w-full break-all rounded-[6px] bg-[var(--color-bg-muted)] px-1.5 py-0.5 font-mono text-[12px] text-[var(--color-fg-muted)]">
                             {memory.slot}{memory.value ? ` = ${memory.value}` : ''}
                           </code>
                         ) : null}

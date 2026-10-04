@@ -30,6 +30,7 @@ import { envNum } from '@/lib/env-config'
 import { usageUserLabel } from '@/lib/admin-usage'
 import { cn } from '@/lib/utils'
 import { PanelFallback } from '@/components/ui/panel-fallback'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
 
 const RANGE_IDS = ['1', '7', '30', '90'] as const
 const ALL_MODELS = 'all'
@@ -217,23 +218,22 @@ export default function AdminUsage() {
 
   return (
     <div>
-      <header className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
-        <div>
-          <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">{t('usage.title')}</h1>
-          <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">
-            {t('usage.leadRecords', { defaultValue: 'Every API call, one row. Filter and prune the log below.' })}
-          </p>
-        </div>
-        <Button
-          variant="destructive"
-          leadingIcon={<Trash2 size={13} aria-hidden />}
-          disabled={total === 0 || loading || busy || busyId !== null}
-          onClick={() => setConfirmBulk(true)}
-          className="w-full sm:w-auto"
-        >
-          {t('usage.deleteFiltered', { defaultValue: 'Delete filtered' })}
-        </Button>
-      </header>
+      <AdminPageHeader
+        title={t('usage.title')}
+        description={t('usage.leadRecords', { defaultValue: 'Every API call, one row. Filter and prune the log below.' })}
+        actions={(
+          <Button
+            size="sm"
+            variant="secondary"
+            leadingIcon={<Trash2 size={14} aria-hidden />}
+            disabled={total === 0 || loading || busy || busyId !== null}
+            onClick={() => setConfirmBulk(true)}
+            className="text-[var(--color-danger)] hover:bg-[var(--color-danger-soft)] max-sm:min-h-[var(--tap-min)] max-sm:flex-1"
+          >
+            {t('usage.deleteFiltered', { defaultValue: 'Delete filtered' })}
+          </Button>
+        )}
+      />
 
       {/* Filters: time range · user · model */}
       <section className="mt-5 grid min-w-0 grid-cols-2 gap-3 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 sm:grid-cols-3 lg:grid-cols-5">
@@ -327,12 +327,12 @@ export default function AdminUsage() {
         {loading ? (
           <PanelFallback />
         ) : records.length === 0 ? (
-          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center text-sm text-[var(--color-fg-muted)]">
+          <div className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center text-sm text-[var(--color-fg-muted)]">
             {t('usage.empty')}
           </div>
         ) : (
           <>
-          <div className="hidden overflow-x-auto rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] xl:block">
+          <div className="hidden overflow-x-auto rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] xl:block">
             <table className="w-full min-w-[1420px] table-fixed text-sm tabular-nums">
               <colgroup>
                 <col className="w-[150px]" />
@@ -381,7 +381,7 @@ export default function AdminUsage() {
                             <span className="min-w-0 flex-1 truncate text-[var(--color-accent)] hover:underline">
                               {aipptTitle(r)}
                             </span>
-                            <span className="shrink-0 rounded-full border border-[var(--color-border)] px-1.5 text-[10px] text-[var(--color-fg-subtle)]">
+                            <span className="shrink-0 rounded-full border border-[var(--color-border)] px-1.5 text-[12px] text-[var(--color-fg-subtle)]">
                               {t('usage.aippt.tag', { defaultValue: 'PPT' })} · {aipptEventLabel(r.aippt.event)}
                             </span>
                           </button>
@@ -402,7 +402,7 @@ export default function AdminUsage() {
                         )}
                         {r.workspace_name || r.workspace_id ? (
                           <span
-                            className="max-w-[5.5rem] shrink-0 truncate rounded-full border border-[var(--color-border)] px-1.5 text-[10px] text-[var(--color-fg-subtle)]"
+                            className="max-w-[5.5rem] shrink-0 truncate rounded-full border border-[var(--color-border)] px-1.5 text-[12px] text-[var(--color-fg-subtle)]"
                             title={r.workspace_name || r.workspace_id}
                           >
                             {t('usage.workspaceTag', { defaultValue: 'WS' })} · {r.workspace_name || r.workspace_id}
@@ -417,7 +417,7 @@ export default function AdminUsage() {
                         </span>
                         {r.ttft_fallback_model ? (
                           <span
-                            className="shrink-0 rounded-full border border-[var(--color-warning)] px-1.5 text-[10px] text-[var(--color-warning)]"
+                            className="shrink-0 rounded-full border border-[var(--color-warning)] px-1.5 text-[12px] text-[var(--color-warning)]"
                             title={t('usage.ttftFallbackTitle', {
                               defaultValue:
                                 'Primary model produced no output in time; this turn was served by the fallback model {{model}}',
@@ -437,7 +437,7 @@ export default function AdminUsage() {
                           </span>
                           {r.fallback ? (
                             <span
-                              className="shrink-0 rounded-full border border-[var(--color-warning)] px-1.5 text-[10px] text-[var(--color-warning)]"
+                              className="shrink-0 rounded-full border border-[var(--color-warning)] px-1.5 text-[12px] text-[var(--color-warning)]"
                               title={t('usage.fallbackTitle', { defaultValue: 'Served by the model’s fallback channel' })}
                             >
                               {t('usage.fallbackTag', { defaultValue: 'Fallback' })}
@@ -456,7 +456,7 @@ export default function AdminUsage() {
                             type="button"
                             onClick={() => setErrorDetail(r)}
                             title={t('usage.errorDetail.view', { defaultValue: 'View error detail' })}
-                            className="inline-flex h-5 shrink-0 items-center justify-center whitespace-nowrap rounded-full bg-[var(--color-danger-soft)] px-2 text-[10px] leading-none text-[var(--color-danger)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                            className="inline-flex h-5 shrink-0 items-center justify-center whitespace-nowrap rounded-full bg-[var(--color-danger-soft)] px-2 text-[12px] leading-none text-[var(--color-danger)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                           >
                             {t('usage.statusError', { defaultValue: 'Error' })}
                           </button>
@@ -468,7 +468,7 @@ export default function AdminUsage() {
                             type="button"
                             onClick={() => setErrorDetail(r)}
                             title={t('usage.requestDetail.view', { defaultValue: 'View request detail' })}
-                            className="inline-flex h-5 shrink-0 items-center justify-center whitespace-nowrap rounded-full bg-[var(--color-bg-muted)] px-2 text-[10px] leading-none text-[var(--color-fg-muted)] interactive hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                            className="inline-flex h-5 shrink-0 items-center justify-center whitespace-nowrap rounded-full bg-[var(--color-bg-muted)] px-2 text-[12px] leading-none text-[var(--color-fg-muted)] interactive hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                           >
                             {t('usage.requestDetail.tag', { defaultValue: 'Request' })}
                           </button>
@@ -494,7 +494,7 @@ export default function AdminUsage() {
                         disabled={busy || busyId !== null}
                         aria-busy={busyId === r.id || undefined}
                         aria-label={t('usage.deleteRow', { defaultValue: 'Delete record' })}
-                        className="inline-flex items-center justify-center size-7 rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:opacity-40"
+                        className="inline-flex items-center justify-center size-7 rounded-[6px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:opacity-40"
                       >
                         {busyId === r.id ? (
                           <LoaderCircle size={13} className="animate-spin" aria-hidden />
@@ -519,7 +519,7 @@ export default function AdminUsage() {
                         <button
                           type="button"
                           onClick={() => setErrorDetail(r)}
-                          className="inline-flex h-6 items-center rounded-[6px] bg-[var(--color-danger-soft)] px-2 text-[11px] text-[var(--color-danger)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                          className="inline-flex h-6 items-center rounded-[6px] bg-[var(--color-danger-soft)] px-2 text-[12px] text-[var(--color-danger)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                         >
                           {t('usage.statusError', { defaultValue: 'Error' })}
                         </button>
@@ -527,7 +527,7 @@ export default function AdminUsage() {
                         <button
                           type="button"
                           onClick={() => setErrorDetail(r)}
-                          className="inline-flex h-6 items-center rounded-[6px] bg-[var(--color-bg-muted)] px-2 text-[11px] text-[var(--color-fg-muted)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                          className="inline-flex h-6 items-center rounded-[6px] bg-[var(--color-bg-muted)] px-2 text-[12px] text-[var(--color-fg-muted)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                         >
                           {t('usage.requestDetail.tag', { defaultValue: 'Request' })}
                         </button>
@@ -536,7 +536,7 @@ export default function AdminUsage() {
                     <p className="mt-1 truncate text-[12px] text-[var(--color-fg-muted)]" title={usageUserLabel(r)}>
                       {usageUserLabel(r)}
                     </p>
-                    <p className="mt-0.5 text-[11px] tabular-nums text-[var(--color-fg-subtle)]">
+                    <p className="mt-0.5 text-[12px] tabular-nums text-[var(--color-fg-subtle)]">
                       {timeFmt.format(new Date(r.created_at * 1000))}
                     </p>
                   </div>
@@ -558,27 +558,27 @@ export default function AdminUsage() {
 
                 <dl className="mt-3 grid min-w-0 grid-cols-2 gap-x-4 gap-y-2 text-[12px]">
                   <div className="min-w-0">
-                    <dt className="text-[11px] text-[var(--color-fg-subtle)]">{t('usage.table.model')}</dt>
+                    <dt className="text-[12px] text-[var(--color-fg-subtle)]">{t('usage.table.model')}</dt>
                     <dd className="mt-0.5 truncate text-[var(--color-fg)]">{modelLabel(r.model_id)}</dd>
                     {r.ttft_fallback_model ? (
-                      <dd className="mt-1 text-[10px] leading-4 text-[var(--color-warning)]">
+                      <dd className="mt-1 text-[12px] leading-4 text-[var(--color-warning)]">
                         {t('usage.ttftFallbackTag', { defaultValue: 'Timeout fallback → {{model}}', model: r.ttft_fallback_model })}
                       </dd>
                     ) : null}
                   </div>
                   <div className="min-w-0">
-                    <dt className="text-[11px] text-[var(--color-fg-subtle)]">{t('usage.table.channel', { defaultValue: 'Channel' })}</dt>
+                    <dt className="text-[12px] text-[var(--color-fg-subtle)]">{t('usage.table.channel', { defaultValue: 'Channel' })}</dt>
                     <dd className="mt-0.5 flex min-w-0 flex-wrap items-center gap-1 text-[var(--color-fg-muted)]">
                       <span className="max-w-full truncate">{r.channel_name || r.channel_id || '—'}</span>
                       {r.fallback ? (
-                        <span className="rounded-[5px] border border-[var(--color-warning)] px-1.5 text-[10px] text-[var(--color-warning)]">
+                        <span className="rounded-[6px] border border-[var(--color-warning)] px-1.5 text-[12px] text-[var(--color-warning)]">
                           {t('usage.fallbackTag', { defaultValue: 'Fallback' })}
                         </span>
                       ) : null}
                     </dd>
                   </div>
                   <div className="col-span-2 min-w-0">
-                    <dt className="text-[11px] text-[var(--color-fg-subtle)]">
+                    <dt className="text-[12px] text-[var(--color-fg-subtle)]">
                       {r.aippt
                         ? t('usage.aippt.subject', { defaultValue: 'PPT' })
                         : t('usage.table.conversation', { defaultValue: 'Conversation' })}
@@ -591,7 +591,7 @@ export default function AdminUsage() {
                           className="flex min-w-0 items-center gap-1.5 text-left text-[var(--color-accent)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                         >
                           <span className="min-w-0 truncate">{aipptTitle(r)}</span>
-                          <span className="shrink-0 rounded-[5px] border border-[var(--color-border)] px-1.5 text-[10px] text-[var(--color-fg-subtle)]">
+                          <span className="shrink-0 rounded-[6px] border border-[var(--color-border)] px-1.5 text-[12px] text-[var(--color-fg-subtle)]">
                             {t('usage.aippt.tag', { defaultValue: 'PPT' })} · {aipptEventLabel(r.aippt.event)}
                           </span>
                         </button>
@@ -650,7 +650,7 @@ export default function AdminUsage() {
           </DialogHeader>
           <DialogBody className="space-y-4">
             {errorDetail?.request_method || errorDetail?.request_url ? (
-              <div className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2 text-[12px] text-[var(--color-fg-muted)]">
+              <div className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2 text-[12px] text-[var(--color-fg-muted)]">
                 <span className="font-medium text-[var(--color-fg)]">{errorDetail.request_method || 'REQUEST'}</span>
                 {errorDetail.request_url ? <span className="ml-2 break-all">{errorDetail.request_url}</span> : null}
               </div>
@@ -687,17 +687,17 @@ export default function AdminUsage() {
             <DialogDescription>{aipptTitle(pptDetail)}</DialogDescription>
           </DialogHeader>
           <DialogBody>
-            <div className="flex items-center justify-between gap-3 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
+            <div className="flex items-center justify-between gap-3 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
               <span className="text-[12px] text-[var(--color-fg-muted)]">
                 {t('usage.aippt.credits', { defaultValue: 'Charged' })}
               </span>
-              <span className="font-serif text-lg tabular-nums text-[var(--color-fg)]">
+              <span className="text-lg font-semibold tabular-nums text-[var(--color-fg)]">
                 {pptDetail && pptDetail.credits > 0
                   ? t('usage.aippt.creditsValue', { defaultValue: '{{credits}} credits', credits: formatCredits(pptDetail.credits) })
                   : t('usage.aippt.free', { defaultValue: 'Free' })}
               </span>
             </div>
-            <p className="mt-2 text-[11px] leading-relaxed text-[var(--color-fg-subtle)]">
+            <p className="mt-2 text-[12px] leading-relaxed text-[var(--color-fg-subtle)]">
               {t('usage.aippt.priceNote', {
                 defaultValue:
                   'A generation is settled at the price configured in Admin → Capabilities & integrations → AI PPT; an AI rewrite or template change is charged only when its own price is above zero.',
@@ -754,7 +754,7 @@ function ErrorDetailBlock({ title, content }: { title: string; content: string }
   return (
     <section>
       <h3 className="mb-1.5 text-[12px] font-medium text-[var(--color-fg-subtle)]">{title}</h3>
-      <pre className="max-h-[34vh] overflow-auto rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-3 text-[12px] leading-relaxed text-[var(--color-fg-muted)] whitespace-pre-wrap break-words">
+      <pre className="max-h-[34vh] overflow-auto rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-3 text-[12px] leading-relaxed text-[var(--color-fg-muted)] whitespace-pre-wrap break-words">
         {content}
       </pre>
     </section>
@@ -763,9 +763,9 @@ function ErrorDetailBlock({ title, content }: { title: string; content: string }
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 sm:rounded-[12px] sm:p-4">
-      <div className="text-[11px] text-[var(--color-fg-subtle)] sm:text-[12px]">{label}</div>
-      <div className="mt-1 font-serif text-xl tabular-nums text-[var(--color-fg)] sm:text-2xl">{value}</div>
+    <div className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 sm:p-4">
+      <div className="text-[12px] text-[var(--color-fg-subtle)]">{label}</div>
+      <div className="mt-1 text-xl font-semibold tabular-nums tracking-normal text-[var(--color-fg)] sm:text-2xl">{value}</div>
     </div>
   )
 }
@@ -773,8 +773,8 @@ function Stat({ label, value }: { label: string; value: string }) {
 function UsageMetric({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0 px-1.5">
-      <div className="text-[10px] text-[var(--color-fg-subtle)]">{label}</div>
-      <div className="mt-0.5 truncate text-[11px] text-[var(--color-fg)]">{value}</div>
+      <div className="text-[12px] text-[var(--color-fg-subtle)]">{label}</div>
+      <div className="mt-0.5 truncate text-[12px] text-[var(--color-fg)]">{value}</div>
     </div>
   )
 }
@@ -783,8 +783,8 @@ function UsageMetric({ label, value }: { label: string; value: string }) {
 function DetailItem({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="min-w-0">
-      <dt className="text-[11px] text-[var(--color-fg-subtle)]">{label}</dt>
-      <dd className={cn('mt-0.5 break-all text-[var(--color-fg)]', mono && 'font-mono text-[11px]')}>{value}</dd>
+      <dt className="text-[12px] text-[var(--color-fg-subtle)]">{label}</dt>
+      <dd className={cn('mt-0.5 break-all text-[var(--color-fg)]', mono && 'font-mono text-[12px]')}>{value}</dd>
     </div>
   )
 }

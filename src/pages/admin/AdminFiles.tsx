@@ -46,6 +46,7 @@ import {
 } from '@/lib/file-preview-kind'
 import { cn } from '@/lib/utils'
 import { useConversations } from '@/store/conversations'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
 
 const PAGE_SIZE = envNum('VITE_AIVORY_PAGE_SIZE', 50)
 const ALL = 'all'
@@ -371,19 +372,17 @@ export default function AdminFiles() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex shrink-0 items-end justify-between gap-4 px-4 py-4 sm:px-6 sm:py-5 lg:px-8">
-        <div className="min-w-0">
-          <h1 className="font-serif text-2xl text-[var(--color-fg)] sm:text-3xl">
-            {t('admin:files.title')}
-          </h1>
-          <p className="mt-1.5 hidden max-w-2xl text-sm text-[var(--color-fg-muted)] sm:block">
-            {t('admin:files.lead')}
-          </p>
-        </div>
-        <span className="shrink-0 text-xs tabular-nums text-[var(--color-fg-subtle)]">
-          {t('admin:files.total', { count: total })}
-        </span>
-      </header>
+      <AdminPageHeader
+        className="shrink-0 px-4 pb-4 pt-5 sm:px-8 sm:pt-6"
+        descriptionClassName="max-sm:hidden"
+        title={t('admin:files.title')}
+        description={t('admin:files.lead')}
+        actions={(
+          <span className="text-xs tabular-nums text-[var(--color-fg-subtle)]">
+            {t('admin:files.total', { count: total })}
+          </span>
+        )}
+      />
 
       <div className="flex min-h-0 flex-1 overflow-hidden border-t border-[var(--color-divider)] bg-[var(--color-surface)]">
         <aside

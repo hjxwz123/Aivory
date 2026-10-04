@@ -145,7 +145,7 @@ export function ModelQuotaEditor({ modelId }: { modelId: string }) {
                       placeholder="0"
                     />
                   </div>
-                  <p className="col-span-4 text-[11px] text-[var(--color-fg-subtle)]">
+                  <p className="col-span-4 text-[12px] text-[var(--color-fg-subtle)]">
                     {row.limitValue <= 0 ? t('admin:quota.unlimitedHint') : t('admin:quota.capHint')}
                   </p>
                 </div>

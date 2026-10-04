@@ -12,6 +12,8 @@ import { Field } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/hooks/use-toast'
 import { PanelFallback } from '@/components/ui/panel-fallback'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
+import { SettingsBlock, SettingsSection } from '@/components/settings/settings-section'
 
 type Settings = Record<string, unknown>
 
@@ -87,242 +89,248 @@ export default function AdminSystemStorage() {
   const storageProvider = readString('storage_provider')
 
   return (
-    <div className="mx-auto max-w-[76rem]">
-      <header>
-        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">
-          {t('admin:systemStorage.title', { defaultValue: 'Storage & uploads' })}
-        </h1>
-        <p className="mt-2 max-w-2xl text-sm text-[var(--color-fg-muted)]">
-          {t('admin:systemStorage.lead', {
-            defaultValue: 'Configure platform object storage, archive retention, and upload restrictions.',
-          })}
-        </p>
-      </header>
+    <div>
+      <AdminPageHeader
+        title={t('admin:systemStorage.title', { defaultValue: 'Storage & uploads' })}
+        description={t('admin:systemStorage.lead', {
+          defaultValue: 'Configure platform object storage, archive retention, and upload restrictions.',
+        })}
+      />
 
       {loading ? (
         <PanelFallback />
       ) : (
         <section className="mt-6 flex flex-col gap-4 sm:mt-8 sm:gap-5">
-          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-4 sm:px-6 sm:py-5">
-            <h2 className="font-serif text-lg text-[var(--color-fg)]">{t('admin:settings.fields.storageSection')}</h2>
-            <p className="mt-1 text-xs text-[var(--color-fg-subtle)]">{t('admin:settings.fields.storageLead')}</p>
-            <div className="mt-4 flex flex-col gap-5">
-              <Field
-                label={t('admin:settings.fields.storageProvider')}
-                htmlFor="storage-provider"
-                hint={t('admin:settings.fields.storageProviderHint')}
-              >
-                <Select
-                  value={storageProvider || 'none'}
-                  onValueChange={(value) =>
-                    setDraft({ ...draft, storage_provider: value === 'none' ? '' : value })
-                  }
-                >
-                  <SelectTrigger id="storage-provider">
-                    <SelectValue placeholder={t('admin:settings.fields.storageProviderPlaceholder')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">{t('admin:settings.fields.storageNone')}</SelectItem>
-                    <SelectItem value="local">{t('admin:settings.fields.storageLocal')}</SelectItem>
-                    <SelectItem value="s3">{t('admin:settings.fields.storageS3')}</SelectItem>
-                    <SelectItem value="aliyun_oss">{t('admin:settings.fields.storageAliyun')}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-
-              <Field
-                label={t('admin:settings.fields.storagePrefix')}
-                htmlFor="storage-prefix"
-                hint={t('admin:settings.fields.storagePrefixHint')}
-              >
-                <Input
-                  id="storage-prefix"
-                  placeholder="workspaces/"
-                  value={readString('storage_prefix', 'workspaces/')}
-                  onChange={(e) => setDraft({ ...draft, storage_prefix: e.target.value })}
-                />
-              </Field>
-
-              {storageProvider !== '' && (
+          <SettingsSection
+            title={t('admin:settings.fields.storageSection')}
+            description={t('admin:settings.fields.storageLead')}
+            className="mb-0"
+            bodyClassName="divide-y-0"
+          >
+            <SettingsBlock>
+              <div className="flex flex-col gap-5">
                 <Field
-                  label={t('admin:settings.fields.storageArchiveTtl')}
-                  htmlFor="storage-archive-ttl"
-                  hint={t('admin:settings.fields.storageArchiveTtlHint')}
+                  label={t('admin:settings.fields.storageProvider')}
+                  htmlFor="storage-provider"
+                  hint={t('admin:settings.fields.storageProviderHint')}
+                >
+                  <Select
+                    value={storageProvider || 'none'}
+                    onValueChange={(value) =>
+                      setDraft({ ...draft, storage_provider: value === 'none' ? '' : value })
+                    }
+                  >
+                    <SelectTrigger id="storage-provider">
+                      <SelectValue placeholder={t('admin:settings.fields.storageProviderPlaceholder')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">{t('admin:settings.fields.storageNone')}</SelectItem>
+                      <SelectItem value="local">{t('admin:settings.fields.storageLocal')}</SelectItem>
+                      <SelectItem value="s3">{t('admin:settings.fields.storageS3')}</SelectItem>
+                      <SelectItem value="aliyun_oss">{t('admin:settings.fields.storageAliyun')}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+
+                <Field
+                  label={t('admin:settings.fields.storagePrefix')}
+                  htmlFor="storage-prefix"
+                  hint={t('admin:settings.fields.storagePrefixHint')}
                 >
                   <Input
-                    id="storage-archive-ttl"
-                    type="number"
-                    min={0}
-                    step={1}
-                    placeholder="0"
-                    value={readNumericString('storage_archive_ttl_days')}
-                    onChange={(e) => setDraft({ ...draft, storage_archive_ttl_days: e.target.value })}
+                    id="storage-prefix"
+                    placeholder="workspaces/"
+                    value={readString('storage_prefix', 'workspaces/')}
+                    onChange={(e) => setDraft({ ...draft, storage_prefix: e.target.value })}
                   />
                 </Field>
-              )}
 
-              {storageProvider === 'local' && (
-                <p className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-3 text-xs leading-relaxed text-[var(--color-fg-muted)] sm:p-4">
-                  {t('admin:settings.fields.storageLocalNote')}
-                </p>
-              )}
-
-              {storageProvider === 's3' && (
-                <div className="flex flex-col gap-4 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-3 sm:gap-5 sm:p-4">
-                  <Field label={t('admin:settings.fields.s3Bucket')} htmlFor="s3-bucket">
+                {storageProvider !== '' && (
+                  <Field
+                    label={t('admin:settings.fields.storageArchiveTtl')}
+                    htmlFor="storage-archive-ttl"
+                    hint={t('admin:settings.fields.storageArchiveTtlHint')}
+                  >
                     <Input
-                      id="s3-bucket"
-                      value={readString('storage_s3_bucket')}
-                      onChange={(e) => setDraft({ ...draft, storage_s3_bucket: e.target.value })}
+                      id="storage-archive-ttl"
+                      type="number"
+                      min={0}
+                      step={1}
+                      placeholder="0"
+                      value={readNumericString('storage_archive_ttl_days')}
+                      onChange={(e) => setDraft({ ...draft, storage_archive_ttl_days: e.target.value })}
                     />
                   </Field>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <Field label={t('admin:settings.fields.s3Region')} htmlFor="s3-region">
+                )}
+
+                {storageProvider === 'local' && (
+                  <p className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-3 text-xs leading-relaxed text-[var(--color-fg-muted)] sm:p-4">
+                    {t('admin:settings.fields.storageLocalNote')}
+                  </p>
+                )}
+
+                {storageProvider === 's3' && (
+                  <div className="flex flex-col gap-4 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-3 sm:gap-5 sm:p-4">
+                    <Field label={t('admin:settings.fields.s3Bucket')} htmlFor="s3-bucket">
                       <Input
-                        id="s3-region"
-                        placeholder="us-east-1"
-                        value={readString('storage_s3_region')}
-                        onChange={(e) => setDraft({ ...draft, storage_s3_region: e.target.value })}
+                        id="s3-bucket"
+                        value={readString('storage_s3_bucket')}
+                        onChange={(e) => setDraft({ ...draft, storage_s3_bucket: e.target.value })}
+                      />
+                    </Field>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <Field label={t('admin:settings.fields.s3Region')} htmlFor="s3-region">
+                        <Input
+                          id="s3-region"
+                          placeholder="us-east-1"
+                          value={readString('storage_s3_region')}
+                          onChange={(e) => setDraft({ ...draft, storage_s3_region: e.target.value })}
+                        />
+                      </Field>
+                      <Field
+                        label={t('admin:settings.fields.s3Endpoint')}
+                        htmlFor="s3-endpoint"
+                        hint={t('admin:settings.fields.s3EndpointHint')}
+                      >
+                        <Input
+                          id="s3-endpoint"
+                          placeholder="https://s3.amazonaws.com"
+                          value={readString('storage_s3_endpoint')}
+                          onChange={(e) => setDraft({ ...draft, storage_s3_endpoint: e.target.value })}
+                        />
+                      </Field>
+                    </div>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <Field label={t('admin:settings.fields.s3AccessKey')} htmlFor="s3-ak">
+                        <Input
+                          id="s3-ak"
+                          type="password"
+                          autoComplete="off"
+                          value={readString('storage_s3_access_key')}
+                          onChange={(e) => setDraft({ ...draft, storage_s3_access_key: e.target.value })}
+                        />
+                      </Field>
+                      <Field label={t('admin:settings.fields.s3SecretKey')} htmlFor="s3-sk">
+                        <Input
+                          id="s3-sk"
+                          type="password"
+                          autoComplete="off"
+                          value={readString('storage_s3_secret_key')}
+                          onChange={(e) => setDraft({ ...draft, storage_s3_secret_key: e.target.value })}
+                        />
+                      </Field>
+                    </div>
+                  </div>
+                )}
+
+                {storageProvider === 'aliyun_oss' && (
+                  <div className="flex flex-col gap-4 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-3 sm:gap-5 sm:p-4">
+                    <Field label={t('admin:settings.fields.ossBucket')} htmlFor="oss-bucket">
+                      <Input
+                        id="oss-bucket"
+                        value={readString('storage_aliyun_bucket')}
+                        onChange={(e) => setDraft({ ...draft, storage_aliyun_bucket: e.target.value })}
                       />
                     </Field>
                     <Field
-                      label={t('admin:settings.fields.s3Endpoint')}
-                      htmlFor="s3-endpoint"
-                      hint={t('admin:settings.fields.s3EndpointHint')}
+                      label={t('admin:settings.fields.ossEndpoint')}
+                      htmlFor="oss-endpoint"
+                      hint={t('admin:settings.fields.ossEndpointHint')}
                     >
                       <Input
-                        id="s3-endpoint"
-                        placeholder="https://s3.amazonaws.com"
-                        value={readString('storage_s3_endpoint')}
-                        onChange={(e) => setDraft({ ...draft, storage_s3_endpoint: e.target.value })}
+                        id="oss-endpoint"
+                        placeholder="https://oss-cn-hangzhou.aliyuncs.com"
+                        value={readString('storage_aliyun_endpoint')}
+                        onChange={(e) => setDraft({ ...draft, storage_aliyun_endpoint: e.target.value })}
                       />
                     </Field>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <Field label={t('admin:settings.fields.ossAccessKeyId')} htmlFor="oss-akid">
+                        <Input
+                          id="oss-akid"
+                          type="password"
+                          autoComplete="off"
+                          value={readString('storage_aliyun_access_key_id')}
+                          onChange={(e) => setDraft({ ...draft, storage_aliyun_access_key_id: e.target.value })}
+                        />
+                      </Field>
+                      <Field label={t('admin:settings.fields.ossAccessKeySecret')} htmlFor="oss-aks">
+                        <Input
+                          id="oss-aks"
+                          type="password"
+                          autoComplete="off"
+                          value={readString('storage_aliyun_access_key_secret')}
+                          onChange={(e) => setDraft({ ...draft, storage_aliyun_access_key_secret: e.target.value })}
+                        />
+                      </Field>
+                    </div>
                   </div>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <Field label={t('admin:settings.fields.s3AccessKey')} htmlFor="s3-ak">
-                      <Input
-                        id="s3-ak"
-                        type="password"
-                        autoComplete="off"
-                        value={readString('storage_s3_access_key')}
-                        onChange={(e) => setDraft({ ...draft, storage_s3_access_key: e.target.value })}
-                      />
-                    </Field>
-                    <Field label={t('admin:settings.fields.s3SecretKey')} htmlFor="s3-sk">
-                      <Input
-                        id="s3-sk"
-                        type="password"
-                        autoComplete="off"
-                        value={readString('storage_s3_secret_key')}
-                        onChange={(e) => setDraft({ ...draft, storage_s3_secret_key: e.target.value })}
-                      />
-                    </Field>
-                  </div>
-                </div>
-              )}
+                )}
+              </div>
+            </SettingsBlock>
+          </SettingsSection>
 
-              {storageProvider === 'aliyun_oss' && (
-                <div className="flex flex-col gap-4 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-3 sm:gap-5 sm:p-4">
-                  <Field label={t('admin:settings.fields.ossBucket')} htmlFor="oss-bucket">
-                    <Input
-                      id="oss-bucket"
-                      value={readString('storage_aliyun_bucket')}
-                      onChange={(e) => setDraft({ ...draft, storage_aliyun_bucket: e.target.value })}
-                    />
-                  </Field>
-                  <Field
-                    label={t('admin:settings.fields.ossEndpoint')}
-                    htmlFor="oss-endpoint"
-                    hint={t('admin:settings.fields.ossEndpointHint')}
-                  >
-                    <Input
-                      id="oss-endpoint"
-                      placeholder="https://oss-cn-hangzhou.aliyuncs.com"
-                      value={readString('storage_aliyun_endpoint')}
-                      onChange={(e) => setDraft({ ...draft, storage_aliyun_endpoint: e.target.value })}
-                    />
-                  </Field>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <Field label={t('admin:settings.fields.ossAccessKeyId')} htmlFor="oss-akid">
-                      <Input
-                        id="oss-akid"
-                        type="password"
-                        autoComplete="off"
-                        value={readString('storage_aliyun_access_key_id')}
-                        onChange={(e) => setDraft({ ...draft, storage_aliyun_access_key_id: e.target.value })}
-                      />
-                    </Field>
-                    <Field label={t('admin:settings.fields.ossAccessKeySecret')} htmlFor="oss-aks">
-                      <Input
-                        id="oss-aks"
-                        type="password"
-                        autoComplete="off"
-                        value={readString('storage_aliyun_access_key_secret')}
-                        onChange={(e) => setDraft({ ...draft, storage_aliyun_access_key_secret: e.target.value })}
-                      />
-                    </Field>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-4 sm:px-6 sm:py-5">
-            <h2 className="font-serif text-lg text-[var(--color-fg)]">{t('admin:settings.fields.uploadsSection')}</h2>
-            <p className="mt-1 text-xs text-[var(--color-fg-subtle)]">{t('admin:settings.fields.uploadsLead')}</p>
-            <div className="mt-4 flex flex-col gap-5">
-              <Field
-                label={t('admin:settings.fields.uploadAllowedExt')}
-                htmlFor="upload-ext"
-                hint={t('admin:settings.fields.uploadAllowedExtHint')}
-              >
-                <Input
-                  id="upload-ext"
-                  placeholder="pdf, docx, txt, png, jpg"
-                  value={readString('upload_allowed_extensions')}
-                  onChange={(e) => setDraft({ ...draft, upload_allowed_extensions: e.target.value })}
-                />
-              </Field>
-              <Field
-                label={t('admin:settings.fields.maxImageUploadMb', { defaultValue: 'Max image size (MB)' })}
-                htmlFor="max-image-mb"
-                hint={t('admin:settings.fields.maxImageUploadMbHint', {
-                  defaultValue:
-                    'Images larger than this are rejected at upload. 0 = default (5 MB). Cannot exceed the server upload ceiling.',
-                })}
-              >
-                <Input
-                  id="max-image-mb"
-                  type="number"
-                  min={0}
-                  placeholder="5"
-                  value={String(readNumber('max_image_upload_mb', 5))}
-                  onChange={(e) =>
-                    setDraft({ ...draft, max_image_upload_mb: Math.max(0, Number(e.target.value) || 0) })
-                  }
-                />
-              </Field>
-              <Field
-                label={t('admin:settings.fields.maxFileUploadMb', { defaultValue: 'Max file size (MB, non-image)' })}
-                htmlFor="max-file-mb"
-                hint={t('admin:settings.fields.maxFileUploadMbHint', {
-                  defaultValue:
-                    'Non-image files (PDF, DOCX, CSV, …) larger than this are rejected. 0 = default (server upload ceiling).',
-                })}
-              >
-                <Input
-                  id="max-file-mb"
-                  type="number"
-                  min={0}
-                  placeholder="0"
-                  value={String(readNumber('max_file_upload_mb', 0))}
-                  onChange={(e) =>
-                    setDraft({ ...draft, max_file_upload_mb: Math.max(0, Number(e.target.value) || 0) })
-                  }
-                />
-              </Field>
-            </div>
-          </div>
+          <SettingsSection
+            title={t('admin:settings.fields.uploadsSection')}
+            description={t('admin:settings.fields.uploadsLead')}
+            className="mb-0"
+            bodyClassName="divide-y-0"
+          >
+            <SettingsBlock>
+              <div className="flex flex-col gap-5">
+                <Field
+                  label={t('admin:settings.fields.uploadAllowedExt')}
+                  htmlFor="upload-ext"
+                  hint={t('admin:settings.fields.uploadAllowedExtHint')}
+                >
+                  <Input
+                    id="upload-ext"
+                    placeholder="pdf, docx, txt, png, jpg"
+                    value={readString('upload_allowed_extensions')}
+                    onChange={(e) => setDraft({ ...draft, upload_allowed_extensions: e.target.value })}
+                  />
+                </Field>
+                <Field
+                  label={t('admin:settings.fields.maxImageUploadMb', { defaultValue: 'Max image size (MB)' })}
+                  htmlFor="max-image-mb"
+                  hint={t('admin:settings.fields.maxImageUploadMbHint', {
+                    defaultValue:
+                      'Images larger than this are rejected at upload. 0 = default (5 MB). Cannot exceed the server upload ceiling.',
+                  })}
+                >
+                  <Input
+                    id="max-image-mb"
+                    type="number"
+                    min={0}
+                    placeholder="5"
+                    value={String(readNumber('max_image_upload_mb', 5))}
+                    onChange={(e) =>
+                      setDraft({ ...draft, max_image_upload_mb: Math.max(0, Number(e.target.value) || 0) })
+                    }
+                  />
+                </Field>
+                <Field
+                  label={t('admin:settings.fields.maxFileUploadMb', { defaultValue: 'Max file size (MB, non-image)' })}
+                  htmlFor="max-file-mb"
+                  hint={t('admin:settings.fields.maxFileUploadMbHint', {
+                    defaultValue:
+                      'Non-image files (PDF, DOCX, CSV, …) larger than this are rejected. 0 = default (server upload ceiling).',
+                  })}
+                >
+                  <Input
+                    id="max-file-mb"
+                    type="number"
+                    min={0}
+                    placeholder="0"
+                    value={String(readNumber('max_file_upload_mb', 0))}
+                    onChange={(e) =>
+                      setDraft({ ...draft, max_file_upload_mb: Math.max(0, Number(e.target.value) || 0) })
+                    }
+                  />
+                </Field>
+              </div>
+            </SettingsBlock>
+          </SettingsSection>
 
           <div className="flex justify-end">
             <Button className="w-full sm:w-auto" loading={saving} onClick={() => void save()}>

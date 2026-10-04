@@ -25,6 +25,7 @@ import { PanelFallback } from '@/components/ui/panel-fallback'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/hooks/use-toast'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
 
 interface MethodDraft {
   name: string
@@ -271,21 +272,21 @@ export default function AdminPaymentMethods() {
 
   return (
     <div className="min-w-0 max-w-full font-sans">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">{t('admin:paymentMethods.title')}</h1>
-          <p className="mt-1 max-w-2xl text-[13px] leading-5 text-[var(--color-fg-muted)]">{t('admin:paymentMethods.lead')}</p>
-        </div>
-        <Button
-          className="rounded-[8px] self-start max-sm:h-11 sm:self-auto"
-          size="sm"
-          leadingIcon={<Plus size={14} aria-hidden />}
-          disabled={!loading && channels.length === 0}
-          onClick={openNew}
-        >
-          {t('admin:paymentMethods.new')}
-        </Button>
-      </header>
+      <AdminPageHeader
+        title={t('admin:paymentMethods.title')}
+        description={t('admin:paymentMethods.lead')}
+        actions={(
+          <Button
+            size="sm"
+            className="max-sm:min-h-[var(--tap-min)] max-sm:flex-1"
+            leadingIcon={<Plus size={15} aria-hidden />}
+            disabled={!loading && channels.length === 0}
+            onClick={openNew}
+          >
+            {t('admin:paymentMethods.new')}
+          </Button>
+        )}
+      />
 
       {!loading && !loadError ? (
         <div className="mt-5 flex flex-col gap-2 border-y border-[var(--color-divider)] py-3 md:flex-row md:items-center md:justify-between md:gap-5">
@@ -298,13 +299,13 @@ export default function AdminPaymentMethods() {
               id="card-purchase-url"
               type="text"
               inputMode="url"
-              wrapperClassName="min-w-0 flex-1 rounded-[8px] max-md:h-11"
+              wrapperClassName="min-w-0 flex-1 max-md:h-11"
               value={cardPurchaseUrl}
               onChange={(event) => setCardPurchaseUrl(event.target.value)}
               placeholder={t('admin:paymentMethods.cardPurchase.placeholder')}
             />
             <Button
-              className="rounded-[8px] max-md:h-11"
+              className="max-md:h-11"
               variant="secondary"
               size="sm"
               loading={savingCardPurchaseUrl}
@@ -321,23 +322,23 @@ export default function AdminPaymentMethods() {
         {loading ? (
           <PanelFallback />
         ) : loadError ? (
-          <div className="flex flex-col items-start gap-3 rounded-xl border border-[var(--color-danger)]/25 bg-[var(--color-danger-soft)] px-4 py-3 text-[13px] text-[var(--color-danger)] sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col items-start gap-3 rounded-[12px] border border-[var(--color-danger)]/25 bg-[var(--color-danger-soft)] px-4 py-3 text-[13px] text-[var(--color-danger)] sm:flex-row sm:items-center sm:justify-between">
             <span>{loadError}</span>
-            <Button className="rounded-[8px]" variant="secondary" size="sm" leadingIcon={<RefreshCw size={13} aria-hidden />} onClick={() => void load()}>{t('admin:paymentMethods.retry')}</Button>
+            <Button  variant="secondary" size="sm" leadingIcon={<RefreshCw size={13} aria-hidden />} onClick={() => void load()}>{t('admin:paymentMethods.retry')}</Button>
           </div>
         ) : channels.length === 0 ? (
-          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center">
+          <div className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center">
             <p className="text-sm font-medium text-[var(--color-fg)]">{t('admin:paymentMethods.noChannelsTitle')}</p>
             <p className="mx-auto mt-1 max-w-lg text-[13px] text-[var(--color-fg-muted)]">{t('admin:paymentMethods.noChannels')}</p>
-            <Button asChild className="mt-4 rounded-[8px]" size="sm" variant="secondary">
+            <Button asChild className="mt-4" size="sm" variant="secondary">
               <Link to="/admin/payment-channels">{t('admin:paymentMethods.configureChannels')}</Link>
             </Button>
           </div>
         ) : rows.length === 0 ? (
-          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center">
+          <div className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center">
             <p className="text-sm font-medium text-[var(--color-fg)]">{t('admin:paymentMethods.emptyTitle')}</p>
             <p className="mx-auto mt-1 max-w-lg text-[13px] text-[var(--color-fg-muted)]">{t('admin:paymentMethods.empty')}</p>
-            <Button className="mt-4 rounded-[8px]" size="sm" onClick={openNew}>{t('admin:paymentMethods.new')}</Button>
+            <Button className="mt-4" size="sm" onClick={openNew}>{t('admin:paymentMethods.new')}</Button>
           </div>
         ) : (
           <AdminSortableList
@@ -370,10 +371,10 @@ export default function AdminPaymentMethods() {
                     </p>
                   </div>
                   <div className="col-span-3 row-start-2 flex items-center justify-end gap-1 sm:col-span-1 sm:col-start-auto sm:row-start-auto">
-                    <Button className="rounded-[8px] max-sm:size-11" variant="ghost" size="icon-sm" title={t('admin:common.edit')} aria-label={t('admin:common.edit')} onClick={() => openEdit(row)}>
+                    <Button className="max-sm:size-11" variant="ghost" size="icon-sm" title={t('admin:common.edit')} aria-label={t('admin:common.edit')} onClick={() => openEdit(row)}>
                       <Pencil size={14} aria-hidden />
                     </Button>
-                    <Button className="rounded-[8px] max-sm:size-11" variant="ghost" size="icon-sm" title={t('admin:common.remove')} aria-label={t('admin:common.remove')} onClick={() => setConfirmDelete(row)}>
+                    <Button className="max-sm:size-11" variant="ghost" size="icon-sm" title={t('admin:common.remove')} aria-label={t('admin:common.remove')} onClick={() => setConfirmDelete(row)}>
                       <Trash2 size={14} aria-hidden />
                     </Button>
                   </div>
@@ -400,7 +401,7 @@ export default function AdminPaymentMethods() {
             <DialogBody className="px-5 pb-4">
               <div className="grid min-w-0 gap-3.5">
               <Field className="min-w-0" label={t('admin:paymentMethods.fields.name')} htmlFor="payment-method-name">
-                <Input id="payment-method-name" required wrapperClassName="rounded-[8px] max-sm:h-11" value={editor.draft.name} onChange={(event) => setDraft({ name: event.target.value })} placeholder={t('admin:paymentMethods.fields.namePlaceholder')} />
+                <Input id="payment-method-name" required wrapperClassName="max-sm:h-11" value={editor.draft.name} onChange={(event) => setDraft({ name: event.target.value })} placeholder={t('admin:paymentMethods.fields.namePlaceholder')} />
               </Field>
               <Field label={t('admin:paymentMethods.fields.icon')} htmlFor="payment-method-icon">
                 <IconUploader
@@ -438,7 +439,7 @@ export default function AdminPaymentMethods() {
               </Field>
               {provider === 'epay' ? (
                 <Field label={t('admin:paymentMethods.fields.epayType')} htmlFor="payment-method-epay-type" hint={t('admin:paymentMethods.fields.epayTypeHint')}>
-                  <Input id="payment-method-epay-type" required wrapperClassName="rounded-[8px] max-sm:h-11" className="font-mono text-[13px]" value={configString(editor.draft.provider_method_config, 'type')} onChange={(event) => setMethodConfig('type', event.target.value)} placeholder="alipay" />
+                  <Input id="payment-method-epay-type" required wrapperClassName="max-sm:h-11" className="font-mono text-[13px]" value={configString(editor.draft.provider_method_config, 'type')} onChange={(event) => setMethodConfig('type', event.target.value)} placeholder="alipay" />
                 </Field>
               ) : null}
 
@@ -452,8 +453,8 @@ export default function AdminPaymentMethods() {
               </div>
             </DialogBody>
             <DialogFooter className="max-sm:[&_button]:!h-11">
-              <Button className="rounded-[8px]" variant="ghost" disabled={saving} onClick={() => setEditor((current) => ({ ...current, open: false }))}>{t('common:actions.cancel')}</Button>
-              <Button type="submit" className="rounded-[8px]" loading={saving}>{t('common:actions.save')}</Button>
+              <Button  variant="ghost" disabled={saving} onClick={() => setEditor((current) => ({ ...current, open: false }))}>{t('common:actions.cancel')}</Button>
+              <Button type="submit"  loading={saving}>{t('common:actions.save')}</Button>
             </DialogFooter>
           </form>
         </DialogContent>
@@ -466,8 +467,8 @@ export default function AdminPaymentMethods() {
             <DialogDescription className="mt-1 break-words text-[13px] [overflow-wrap:anywhere]">{confirmDelete ? t('admin:paymentMethods.removeBody', { name: confirmDelete.name }) : ''}</DialogDescription>
           </DialogHeader>
           <DialogFooter className="max-sm:[&_button]:!h-11">
-            <Button className="rounded-[8px]" variant="ghost" disabled={deleting} onClick={() => setConfirmDelete(null)}>{t('common:actions.cancel')}</Button>
-            <Button className="rounded-[8px]" variant="destructive" loading={deleting} onClick={() => confirmDelete && void remove(confirmDelete)}>{t('common:actions.delete')}</Button>
+            <Button  variant="ghost" disabled={deleting} onClick={() => setConfirmDelete(null)}>{t('common:actions.cancel')}</Button>
+            <Button  variant="destructive" loading={deleting} onClick={() => confirmDelete && void remove(confirmDelete)}>{t('common:actions.delete')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

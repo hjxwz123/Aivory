@@ -297,7 +297,7 @@ export function AdminModelFeedback({ days }: AdminModelFeedbackProps) {
                       onClick={() => setSelected(item)}
                       className="group grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 px-4 py-3.5 text-left interactive hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)] sm:px-5 xl:grid-cols-[9rem_10rem_minmax(12rem,1fr)_minmax(8rem,auto)_8.5rem_1.5rem] xl:items-center xl:gap-3"
                     >
-                      <span className="text-[11.5px] tabular-nums text-[var(--color-fg-subtle)] xl:text-[12px]">
+                      <span className="text-[12px] tabular-nums text-[var(--color-fg-subtle)]">
                         {formatDate(item.updated_at)}
                       </span>
                       <span className="col-start-1 row-start-2 min-w-0 truncate text-[12px] font-medium text-[var(--color-fg)] xl:col-start-2 xl:row-start-1">
@@ -311,7 +311,7 @@ export function AdminModelFeedback({ days }: AdminModelFeedbackProps) {
                           {item.question || t('analytics.feedback.list.noQuestion')}
                         </span>
                         <span
-                          className="mt-0.5 block min-w-0 max-w-full truncate text-[11.5px] leading-4 text-[var(--color-fg-muted)]"
+                          className="mt-0.5 block min-w-0 max-w-full truncate text-[12px] leading-4 text-[var(--color-fg-muted)]"
                           title={item.response || undefined}
                         >
                           {item.response || t('analytics.feedback.list.noResponse')}
@@ -329,7 +329,7 @@ export function AdminModelFeedback({ days }: AdminModelFeedbackProps) {
                         ) : null}
                       </span>
                       <span
-                        className="col-start-2 row-start-2 min-w-0 max-w-[10rem] truncate whitespace-nowrap text-right text-[11px] tabular-nums text-[var(--color-fg-subtle)] sm:max-w-[14rem] xl:col-start-5 xl:row-start-1 xl:max-w-none xl:text-[11.5px]"
+                        className="col-start-2 row-start-2 min-w-0 max-w-[10rem] truncate whitespace-nowrap text-right text-[12px] tabular-nums text-[var(--color-fg-subtle)] sm:max-w-[14rem] xl:col-start-5 xl:row-start-1 xl:max-w-none"
                         title={itemMetrics(item)}
                         aria-label={itemMetrics(item)}
                       >
@@ -386,11 +386,11 @@ function FeedbackStat({
 }) {
   return (
     <div className={cn('min-w-0 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 sm:p-4', className)}>
-      <div className="break-words text-[11px] uppercase text-[var(--color-fg-subtle)] sm:text-[12px]">
+      <div className="break-words text-[12px] uppercase text-[var(--color-fg-subtle)]">
         {label}
       </div>
-      <div className="mt-1 break-all font-serif text-xl tabular-nums text-[var(--color-fg)] sm:text-2xl">{value}</div>
-      {detail ? <p className="mt-1 truncate text-[10.5px] text-[var(--color-fg-subtle)]">{detail}</p> : null}
+      <div className="mt-1 break-all text-xl font-semibold tabular-nums tracking-normal text-[var(--color-fg)] sm:text-2xl">{value}</div>
+      {detail ? <p className="mt-1 truncate text-[12px] text-[var(--color-fg-subtle)]">{detail}</p> : null}
     </div>
   )
 }
@@ -421,7 +421,7 @@ function ModelQualityTable({
         <>
           <div className="hidden lg:block">
             <table className="w-full table-fixed text-[12.5px] tabular-nums">
-              <thead className="bg-[var(--color-bg-muted)] text-[11.5px] text-[var(--color-fg-subtle)]">
+              <thead className="bg-[var(--color-bg-muted)] text-[12px] text-[var(--color-fg-subtle)]">
                 <tr>
                   <th className="w-[27%] px-5 py-2.5 text-left font-medium">{t('analytics.feedback.quality.model')}</th>
                   <th className="w-[13%] px-3 py-2.5 text-right font-medium">{t('analytics.feedback.quality.evaluated')}</th>
@@ -444,7 +444,7 @@ function ModelQualityTable({
                     </td>
                     <td className="px-3 py-3 text-right">
                       {!(row.sample_sufficient ?? row.total >= MIN_QUALITY_SAMPLE) ? (
-                        <span className="text-[11px] text-[var(--color-fg-subtle)]">
+                        <span className="text-[12px] text-[var(--color-fg-subtle)]">
                           {t('analytics.feedback.quality.sampleInsufficient', { count: MIN_QUALITY_SAMPLE })}
                         </span>
                       ) : (
@@ -477,7 +477,7 @@ function ModelQualityTable({
                     </span>
                   )}
                 </div>
-                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-[var(--color-fg-subtle)]">
+                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-[var(--color-fg-subtle)]">
                   <span>{t('analytics.feedback.quality.evaluatedValue', { count: formatNumber(row.total) })}</span>
                   <span className="text-[var(--color-success)]">
                     {t('analytics.feedback.quality.likesValue', { count: formatNumber(row.likes) })}
@@ -487,7 +487,7 @@ function ModelQualityTable({
                   </span>
                 </div>
                 {row.top_reason ? (
-                  <p className="mt-1.5 truncate text-[11.5px] text-[var(--color-fg-muted)]">
+                  <p className="mt-1.5 truncate text-[12px] text-[var(--color-fg-muted)]">
                     {t('analytics.feedback.quality.topReasonValue', { reason: reasonLabel(row.top_reason) })}
                   </p>
                 ) : null}
@@ -627,7 +627,7 @@ function FeedbackDetail({
             </div>
             {item.comment ? (
               <div className="mt-3">
-                <h3 className="text-[11.5px] font-medium text-[var(--color-fg-subtle)]">
+                <h3 className="text-[12px] font-medium text-[var(--color-fg-subtle)]">
                   {t('analytics.feedback.detail.comment')}
                 </h3>
                 <p className="mt-1 whitespace-pre-wrap break-words text-[13px] leading-5 text-[var(--color-fg)]">
@@ -688,7 +688,7 @@ function FeedbackDetail({
             <dl className="mt-3 grid min-w-0 gap-x-5 gap-y-3 sm:grid-cols-2">
               {metadata.map(([label, value]) => (
                 <div key={label} className="min-w-0">
-                  <dt className="text-[10.5px] text-[var(--color-fg-subtle)]">{label}</dt>
+                  <dt className="text-[12px] text-[var(--color-fg-subtle)]">{label}</dt>
                   <dd className="mt-0.5 break-words text-[12px] leading-5 text-[var(--color-fg)]">{value}</dd>
                 </div>
               ))}

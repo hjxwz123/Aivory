@@ -44,6 +44,7 @@ import { formatDateTime, cn } from '@/lib/utils'
 import { envNum } from '@/lib/env-config'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { Skeleton } from '@/components/ui/skeleton'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
 
 // A user counts as online if they made an authenticated request in the last 5
 // minutes (the middleware refreshes last_seen_at at most once/min).
@@ -411,15 +412,20 @@ export default function AdminUsers() {
 
   return (
     <div>
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">{t('admin:users.title')}</h1>
-          <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('admin:users.lead')}</p>
-        </div>
-        <Button className="h-11 w-full sm:h-10 sm:w-auto" leadingIcon={<Plus size={16} aria-hidden />} onClick={openCreate}>
-          {t('admin:users.new')}
-        </Button>
-      </header>
+      <AdminPageHeader
+        title={t('admin:users.title')}
+        description={t('admin:users.lead')}
+        actions={(
+          <Button
+            size="sm"
+            className="max-sm:min-h-[var(--tap-min)] max-sm:flex-1"
+            leadingIcon={<Plus size={15} aria-hidden />}
+            onClick={openCreate}
+          >
+            {t('admin:users.new')}
+          </Button>
+        )}
+      />
 
       <div className="mt-5 sm:mt-6">
         <Input
@@ -444,7 +450,7 @@ export default function AdminUsers() {
             moveDownLabel={t('admin:common.moveDown')}
             mobileDragOnly
             listClassName="max-md:gap-2 max-md:divide-y-0 max-md:border-0 max-md:bg-transparent"
-            rowClassName="grid grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-center gap-x-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-3.5 md:grid-cols-[auto_auto_1fr_auto] md:items-center md:gap-3 md:rounded-none md:border-0 md:bg-transparent md:px-5 md:py-4"
+            rowClassName="grid grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-center gap-x-1 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-3.5 md:grid-cols-[auto_auto_1fr_auto] md:items-center md:gap-3 md:rounded-none md:border-0 md:bg-transparent md:px-5 md:py-4"
             renderItem={(u) => {
               const isMe = me?.id === u.id
               const group = groups.find((g) => g.id === u.group_id)

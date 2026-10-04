@@ -20,6 +20,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from '@/hooks/use-toast'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { availablePolicyModels } from '@/lib/admin-model-policy'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
+import { SettingsActions, SettingsBlock, SettingsSection } from '@/components/settings/settings-section'
 
 // Radix Select forbids an empty-string item value, so use a sentinel for "none".
 const NONE = '__none'
@@ -87,89 +89,93 @@ export default function AdminModeration() {
   }
 
   return (
-    <div className="mx-auto max-w-[76rem]">
-      <header>
-        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">{t('admin:moderation.title')}</h1>
-        <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('admin:moderation.lead')}</p>
-      </header>
+    <div>
+      <AdminPageHeader
+        title={t('admin:moderation.title')}
+        description={t('admin:moderation.lead')}
+      />
 
       {loading ? (
         <PanelFallback />
       ) : (
-        <section className="mt-8 flex flex-col gap-6">
-          {/* Keyword list */}
-          <Field
-            label={t('admin:moderation.keywordsLabel')}
-            htmlFor="mod-kw"
-            hint={t('admin:moderation.keywordsHint')}
-          >
-            <Textarea
-              id="mod-kw"
-              rows={10}
-              value={keywordsText}
-              onChange={(e) => setKeywordsText(e.target.value)}
-              placeholder={t('admin:moderation.keywordsPlaceholder')}
-              className="font-mono text-[13px]"
-            />
-            <p className="mt-1.5 text-[12px] text-[var(--color-fg-subtle)] tabular-nums">
-              {t('admin:moderation.keywordsCount', { count: keywordCount })}
-            </p>
-          </Field>
+        <div className="mt-8">
+          <SettingsSection bodyClassName="divide-y-0">
+            <SettingsBlock className="flex flex-col gap-6">
+              {/* Keyword list */}
+              <Field
+                label={t('admin:moderation.keywordsLabel')}
+                htmlFor="mod-kw"
+                hint={t('admin:moderation.keywordsHint')}
+              >
+                <Textarea
+                  id="mod-kw"
+                  rows={10}
+                  value={keywordsText}
+                  onChange={(e) => setKeywordsText(e.target.value)}
+                  placeholder={t('admin:moderation.keywordsPlaceholder')}
+                  className="font-mono text-[13px]"
+                />
+                <p className="mt-1.5 text-[12px] text-[var(--color-fg-subtle)] tabular-nums">
+                  {t('admin:moderation.keywordsCount', { count: keywordCount })}
+                </p>
+              </Field>
 
-          {/* Moderation model */}
-          <Field
-            label={t('admin:moderation.modelLabel')}
-            htmlFor="mod-model"
-            hint={t('admin:moderation.modelHint')}
-          >
-            <Select value={modelId || NONE} onValueChange={(v) => setModelId(v === NONE ? '' : v)}>
-              <SelectTrigger id="mod-model">
-                <SelectValue placeholder={t('admin:moderation.modelNone')} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NONE}>{t('admin:moderation.modelNone')}</SelectItem>
-                {modelId && !models.some((m) => m.id === modelId) && (
-                  <SelectItem value={modelId} disabled>{modelId} · {t('admin:settings.modelPolicy.unavailableOption')}</SelectItem>
-                )}
-                {models.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
+              {/* Moderation model */}
+              <Field
+                label={t('admin:moderation.modelLabel')}
+                htmlFor="mod-model"
+                hint={t('admin:moderation.modelHint')}
+              >
+                <Select value={modelId || NONE} onValueChange={(v) => setModelId(v === NONE ? '' : v)}>
+                  <SelectTrigger id="mod-model">
+                    <SelectValue placeholder={t('admin:moderation.modelNone')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NONE}>{t('admin:moderation.modelNone')}</SelectItem>
+                    {modelId && !models.some((m) => m.id === modelId) && (
+                      <SelectItem value={modelId} disabled>{modelId} · {t('admin:settings.modelPolicy.unavailableOption')}</SelectItem>
+                    )}
+                    {models.map((m) => (
+                      <SelectItem key={m.id} value={m.id}>
+                        {m.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
 
-          {/* Violation categories (model mode) */}
-          <Field
-            label={t('admin:moderation.categoriesLabel')}
-            htmlFor="mod-cats"
-            hint={t('admin:moderation.categoriesHint')}
-          >
-            <Textarea
-              id="mod-cats"
-              rows={6}
-              value={categoriesText}
-              onChange={(e) => setCategoriesText(e.target.value)}
-              placeholder={t('admin:moderation.categoriesPlaceholder')}
-            />
-          </Field>
+              {/* Violation categories (model mode) */}
+              <Field
+                label={t('admin:moderation.categoriesLabel')}
+                htmlFor="mod-cats"
+                hint={t('admin:moderation.categoriesHint')}
+              >
+                <Textarea
+                  id="mod-cats"
+                  rows={6}
+                  value={categoriesText}
+                  onChange={(e) => setCategoriesText(e.target.value)}
+                  placeholder={t('admin:moderation.categoriesPlaceholder')}
+                />
+              </Field>
 
-          {/* Block message */}
-          <Field
-            label={t('admin:moderation.messageLabel')}
-            htmlFor="mod-msg"
-            hint={t('admin:moderation.messageHint')}
-          >
-            <Input id="mod-msg" value={message} onChange={(e) => setMessage(e.target.value)} />
-          </Field>
+              {/* Block message */}
+              <Field
+                label={t('admin:moderation.messageLabel')}
+                htmlFor="mod-msg"
+                hint={t('admin:moderation.messageHint')}
+              >
+                <Input id="mod-msg" value={message} onChange={(e) => setMessage(e.target.value)} />
+              </Field>
+            </SettingsBlock>
+          </SettingsSection>
 
-          <div className="flex justify-end">
+          <SettingsActions>
             <Button loading={saving} onClick={() => void save()}>
               {t('common:actions.save')}
             </Button>
-          </div>
-        </section>
+          </SettingsActions>
+        </div>
       )}
     </div>
   )

@@ -243,50 +243,6 @@ export default function SettingsDialog() {
   )
 }
 
-export function SettingsSection({
-  title,
-  description,
-  children,
-}: {
-  title: string
-  description?: string
-  children: React.ReactNode
-}) {
-  return (
-    <section className="mb-8 last:mb-0">
-      <div className="mb-3">
-        <h2 className="text-lg font-medium tracking-normal text-[var(--color-fg)]">{title}</h2>
-        {description ? (
-          <p className="mt-1.5 text-sm text-[var(--color-fg-muted)]">{description}</p>
-        ) : null}
-      </div>
-      <div className="divide-y divide-[var(--color-divider)] rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-        {children}
-      </div>
-    </section>
-  )
-}
-
-export function SettingsRow({
-  label,
-  description,
-  children,
-}: {
-  label: string
-  description?: string
-  children?: React.ReactNode
-}) {
-  return (
-    <div className="flex flex-col gap-2.5 px-4 py-3 sm:flex-row sm:items-center sm:gap-4">
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium text-[var(--color-fg)]">{label}</div>
-        {description ? (
-          <p className="mt-0.5 max-w-md text-xs leading-normal text-[var(--color-fg-muted)]">
-            {description}
-          </p>
-        ) : null}
-      </div>
-      <div className="sm:shrink-0">{children}</div>
-    </div>
-  )
-}
+// The section/row primitives are shared with the admin console so both
+// settings surfaces render the same groups.
+export { SettingsRow, SettingsSection } from '@/components/settings/settings-section'

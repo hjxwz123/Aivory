@@ -26,7 +26,9 @@ describe('AdminBackup', () => {
       'backup-import-title',
     ])
     expect(html).not.toContain('<aside')
-    expect(html).toContain('max-w-[76rem]')
+    // AdminLayout owns the content width (--layout-content-max-w, shared with
+    // the app's ContentHeader pages); pages no longer hard-code their own cap.
+    expect(html).not.toMatch(/max-w-\[\d+rem\]/)
   })
 
   it('keeps backup options labeled and file pickers restricted to archives', () => {

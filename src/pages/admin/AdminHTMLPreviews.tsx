@@ -21,6 +21,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip } from '@/components/ui/tooltip'
 import { toast } from '@/hooks/use-toast'
 import { copyText } from '@/lib/utils'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
 
 const PAGE_SIZE = 50
 
@@ -126,24 +127,20 @@ export default function AdminHTMLPreviews() {
 
   return (
     <div className="min-w-0 pb-10">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="font-serif text-2xl text-[var(--color-fg)] sm:text-3xl">
-            {t('admin:htmlPreviews.title')}
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[var(--color-fg-muted)]">
-            {t('admin:htmlPreviews.lead')}
-          </p>
-        </div>
-        <Input
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          leadingIcon={<Search size={15} aria-hidden />}
-          placeholder={t('admin:htmlPreviews.searchPlaceholder')}
-          aria-label={t('admin:htmlPreviews.searchPlaceholder')}
-          wrapperClassName="w-full sm:w-80"
-        />
-      </div>
+      <AdminPageHeader
+        title={t('admin:htmlPreviews.title')}
+        description={t('admin:htmlPreviews.lead')}
+        actions={(
+          <Input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            leadingIcon={<Search size={15} aria-hidden />}
+            placeholder={t('admin:htmlPreviews.searchPlaceholder')}
+            aria-label={t('admin:htmlPreviews.searchPlaceholder')}
+            wrapperClassName="h-8 w-full max-sm:h-[var(--tap-min)] sm:w-72"
+          />
+        )}
+      />
 
       <section className="mt-7 overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]" aria-label={t('admin:htmlPreviews.title')}>
         <div className="flex min-h-11 items-center justify-between gap-3 border-b border-[var(--color-divider)] px-4 py-2.5 sm:px-5">
@@ -176,7 +173,7 @@ export default function AdminHTMLPreviews() {
         ) : data && data.items.length > 0 ? (
           <div className={loading ? 'pointer-events-none opacity-60 transition-opacity' : 'transition-opacity'}>
             <div role="table" className="hidden md:block" aria-label={t('admin:htmlPreviews.title')}>
-              <div role="row" className="grid grid-cols-[minmax(12rem,1.3fr)_minmax(13rem,1fr)_minmax(10rem,.7fr)_7rem] gap-4 border-b border-[var(--color-divider)] bg-[var(--color-bg-muted)] px-5 py-2.5 text-[11.5px] font-medium text-[var(--color-fg-muted)]">
+              <div role="row" className="grid grid-cols-[minmax(12rem,1.3fr)_minmax(13rem,1fr)_minmax(10rem,.7fr)_7rem] gap-4 border-b border-[var(--color-divider)] bg-[var(--color-bg-muted)] px-5 py-2.5 text-[12px] font-medium text-[var(--color-fg-muted)]">
                 <span role="columnheader">{t('admin:htmlPreviews.table.link')}</span>
                 <span role="columnheader">{t('admin:htmlPreviews.table.creator')}</span>
                 <span role="columnheader">{t('admin:htmlPreviews.table.created')}</span>
@@ -192,7 +189,7 @@ export default function AdminHTMLPreviews() {
                       </span>
                       <span role="cell" className="min-w-0">
                         <span className="block truncate text-[12.5px] font-medium text-[var(--color-fg)]" title={[item.user_name, item.user_email, item.user_id].filter(Boolean).join(' / ')}>{ownerLabel(item)}</span>
-                        {item.user_email && item.user_name ? <span className="mt-0.5 block truncate text-[11px] text-[var(--color-fg-subtle)]">{item.user_email}</span> : null}
+                        {item.user_email && item.user_name ? <span className="mt-0.5 block truncate text-[12px] text-[var(--color-fg-subtle)]">{item.user_email}</span> : null}
                       </span>
                       <time role="cell" className="text-[12px] tabular-nums text-[var(--color-fg-muted)]">{formatDate(item.created_at)}</time>
                       <span role="cell" className="flex items-center justify-end gap-0.5">
@@ -210,7 +207,7 @@ export default function AdminHTMLPreviews() {
                 return (
                   <li key={item.id} className="px-4 py-4">
                     <code className="block truncate font-mono text-[12px] text-[var(--color-fg)]" title={url}>{url}</code>
-                    <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-[var(--color-fg-subtle)]">
+                    <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-[var(--color-fg-subtle)]">
                       <span className="truncate font-medium text-[var(--color-fg-muted)]">{ownerLabel(item)}</span>
                       <span aria-hidden>·</span>
                       <time>{formatDate(item.created_at)}</time>

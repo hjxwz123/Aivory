@@ -16,6 +16,8 @@ import {
   modelPolicyErrorText,
   unavailablePolicyModelIDs,
 } from '@/lib/admin-model-policy'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
+import { SettingsActions, SettingsBlock, SettingsSection } from '@/components/settings/settings-section'
 
 type Settings = Record<string, unknown>
 
@@ -94,303 +96,305 @@ export default function AdminModelPolicy() {
   const unavailableModelIDs = unavailablePolicyModelIDs(draft, selectableModels, decisionModels, visionModels)
 
   return (
-    <div className="mx-auto max-w-[76rem]">
-      <header>
-        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">
-          {t('admin:menu.modelPolicy', { defaultValue: 'Model policy' })}
-        </h1>
-      </header>
+    <div>
+      <AdminPageHeader
+        title={t('admin:menu.modelPolicy', { defaultValue: 'Model policy' })}
+      />
 
       {loading ? (
         <PanelFallback />
       ) : (
-        <section className="mt-8 flex flex-col gap-5">
-          {unavailableModelIDs.length > 0 ? (
-            <div
-              role="alert"
-              className="flex items-start gap-2.5 rounded-[8px] bg-[var(--color-warning-soft)] px-3.5 py-3 text-sm leading-relaxed text-[var(--color-warning)]"
-            >
-              <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
-              <span>{t('admin:settings.modelPolicy.stale')}</span>
-            </div>
-          ) : null}
-          {selectableModels.length === 0 ? (
-            <div
-              role="status"
-              className="rounded-[8px] bg-[var(--color-bg-muted)] px-3.5 py-3 text-sm leading-relaxed text-[var(--color-fg-muted)]"
-            >
-              {t('admin:settings.modelPolicy.empty')}
-            </div>
-          ) : null}
+        <div className="mt-8">
+          <SettingsSection bodyClassName="divide-y-0">
+            <SettingsBlock className="flex flex-col gap-5">
+              {unavailableModelIDs.length > 0 ? (
+                <div
+                  role="alert"
+                  className="flex items-start gap-2.5 rounded-[8px] bg-[var(--color-warning-soft)] px-3.5 py-3 text-sm leading-relaxed text-[var(--color-warning)]"
+                >
+                  <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+                  <span>{t('admin:settings.modelPolicy.stale')}</span>
+                </div>
+              ) : null}
+              {selectableModels.length === 0 ? (
+                <div
+                  role="status"
+                  className="rounded-[8px] bg-[var(--color-bg-muted)] px-3.5 py-3 text-sm leading-relaxed text-[var(--color-fg-muted)]"
+                >
+                  {t('admin:settings.modelPolicy.empty')}
+                </div>
+              ) : null}
 
-          <Field label={t('admin:settings.fields.defaultModel')} htmlFor="default-model">
-            <Select
-              value={readString('default_model_id')}
-              onValueChange={(value) => setDraft((current) => ({ ...current, default_model_id: value }))}
-            >
-              <SelectTrigger id="default-model" data-admin-tour="model-policy-default-model">
-                <SelectValue placeholder={t('admin:settings.fields.pickModel')} />
-              </SelectTrigger>
-              <SelectContent>
-                <PolicyModelOptions
-                  currentId={readString('default_model_id')}
-                  models={models}
-                  selectableModels={selectableModels}
-                  unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
-                />
-              </SelectContent>
-            </Select>
-          </Field>
-
-          <Field
-            label={t('admin:settings.fields.taskModel')}
-            htmlFor="task-model"
-            hint={t('admin:settings.fields.taskModelHint')}
-          >
-            <Select
-              value={taskModelId || 'inherit'}
-              onValueChange={(value) =>
-                setDraft((current) => ({ ...current, task_model_id: value === 'inherit' ? '' : value }))
-              }
-            >
-              <SelectTrigger id="task-model" data-admin-tour="model-policy-task-model">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="inherit">{t('admin:settings.fields.currentConversationModel')}</SelectItem>
-                <PolicyModelOptions
-                  currentId={taskModelId}
-                  models={models}
-                  selectableModels={selectableModels}
-                  unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
-                />
-              </SelectContent>
-            </Select>
-          </Field>
-
-          <Field
-            label={t('admin:settings.fields.titleModel')}
-            htmlFor="title-model"
-            hint={t('admin:settings.fields.titleModelHint')}
-          >
-            <Select
-              value={titleModelId || 'inherit'}
-              onValueChange={(value) =>
-                setDraft((current) => ({ ...current, title_model_id: value === 'inherit' ? '' : value }))
-              }
-            >
-              <SelectTrigger id="title-model">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="inherit">{t('admin:settings.fields.inheritTaskModel')}</SelectItem>
-                <PolicyModelOptions
-                  currentId={titleModelId}
-                  models={models}
-                  selectableModels={selectableModels}
-                  unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
-                />
-              </SelectContent>
-            </Select>
-          </Field>
-
-          <Field
-            label={t('admin:settings.fields.queryRouteModel')}
-            htmlFor="tool-route-model"
-            hint={t('admin:settings.fields.queryRouteModelHint')}
-          >
-            <Select
-              value={readString('tool_route_model_id') || 'inherit'}
-              onValueChange={(value) =>
-                setDraft((current) => ({ ...current, tool_route_model_id: value === 'inherit' ? '' : value }))
-              }
-            >
-              <SelectTrigger id="tool-route-model" data-admin-tour="model-policy-tool-route-model">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="inherit">{t('admin:settings.fields.currentConversationModel')}</SelectItem>
-                <PolicyModelOptions
-                  currentId={readString('tool_route_model_id')}
-                  models={models}
-                  selectableModels={decisionModels}
-                  unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
-                />
-              </SelectContent>
-            </Select>
-          </Field>
-
-          <Field
-            label={t('admin:settings.fields.fileRouteModel')}
-            htmlFor="file-route-model"
-            hint={t('admin:settings.fields.fileRouteModelHint')}
-          >
-            <Select
-              value={fileRouteModelId || 'inherit'}
-              onValueChange={(value) =>
-                setDraft((current) => ({ ...current, file_route_model_id: value === 'inherit' ? '' : value }))
-              }
-            >
-              <SelectTrigger id="file-route-model">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="inherit">{t('admin:settings.fields.inheritTaskModel')}</SelectItem>
-                <PolicyModelOptions
-                  currentId={fileRouteModelId}
-                  models={models}
-                  selectableModels={decisionModels}
-                  unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
-                />
-              </SelectContent>
-            </Select>
-          </Field>
-
-          {([
-            ['memory_dedup_model_id', 'memoryDedupModel', 'memoryDedupModelHint'],
-            ['memory_adjudicate_model_id', 'memoryAdjudicateModel', 'memoryAdjudicateModelHint'],
-            ['moderation_model_id', 'moderationModel', 'moderationModelHint'],
-          ] as const).map(([key, label, hint]) => (
-            <Field key={key} label={t(`admin:settings.fields.${label}`)} htmlFor={key} hint={t(`admin:settings.fields.${hint}`)}>
-              <Select value={readString(key) || 'inherit'} onValueChange={(value) => setDraft((current) => ({ ...current, [key]: value === 'inherit' ? '' : value }))}>
-                <SelectTrigger id={key}><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="inherit">{t(key === 'moderation_model_id' ? 'admin:moderation.modelNone' : 'admin:settings.fields.inheritTaskModel')}</SelectItem>
-                  <PolicyModelOptions currentId={readString(key)} models={models} selectableModels={decisionModels} unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')} />
-                </SelectContent>
-              </Select>
-            </Field>
-          ))}
-
-          <Field
-            label={t('admin:settings.fields.visionModel')}
-            htmlFor="vision-model"
-            hint={t('admin:settings.fields.visionModelHint')}
-          >
-            <Select
-              value={readString('vision_model_id') || 'none'}
-              onValueChange={(value) =>
-                setDraft((current) => ({ ...current, vision_model_id: value === 'none' ? '' : value }))
-              }
-            >
-              <SelectTrigger id="vision-model">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">{t('admin:settings.fields.fallbackNone')}</SelectItem>
-                <PolicyModelOptions
-                  currentId={readString('vision_model_id')}
-                  models={models}
-                  selectableModels={visionModels}
-                  unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
-                />
-              </SelectContent>
-            </Select>
-          </Field>
-
-          <Field
-            label={t('admin:settings.fields.defaultToolMode')}
-            htmlFor="default-tool-mode"
-            hint={t('admin:settings.fields.defaultToolModeHint')}
-          >
-            <Select
-              value={readString('tool_mode_default') || 'auto'}
-              onValueChange={(value) =>
-                setDraft((current) => ({ ...current, tool_mode_default: value }))
-              }
-            >
-              <SelectTrigger id="default-tool-mode">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="auto">{t('admin:settings.fields.toolModeAuto')}</SelectItem>
-                <SelectItem value="enabled">{t('admin:settings.fields.toolModeEnabled')}</SelectItem>
-                <SelectItem value="disabled">{t('admin:settings.fields.toolModeDisabled')}</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-
-          <Field
-            label={t('admin:settings.fields.verifyModel')}
-            htmlFor="verify-model"
-            hint={t('admin:settings.fields.verifyModelHint')}
-          >
-            <Select
-              value={readString('verify_model_id') || 'none'}
-              onValueChange={(value) =>
-                setDraft((current) => ({ ...current, verify_model_id: value === 'none' ? '' : value }))
-              }
-            >
-              <SelectTrigger id="verify-model">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">{t('admin:settings.fields.fallbackNone')}</SelectItem>
-                <PolicyModelOptions
-                  currentId={readString('verify_model_id')}
-                  models={models}
-                  selectableModels={selectableModels}
-                  unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
-                />
-              </SelectContent>
-            </Select>
-          </Field>
-
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <Field
-              label={t('admin:settings.fields.fallbackModel')}
-              htmlFor="fallback-model"
-              hint={t('admin:settings.fields.fallbackModelHint')}
-            >
-              <Select
-                value={fallbackModelId || 'none'}
-                onValueChange={(value) =>
-                  setDraft((current) => ({ ...current, fallback_model_id: value === 'none' ? '' : value }))
-                }
-              >
-                <SelectTrigger id="fallback-model">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">{t('admin:settings.fields.fallbackNone')}</SelectItem>
-                  <PolicyModelOptions
-                    currentId={fallbackModelId}
-                    models={models}
-                    selectableModels={selectableModels}
-                    unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
-                  />
-                </SelectContent>
-              </Select>
-            </Field>
-
-            {fallbackModelId && (
-              <Field
-                label={t('admin:settings.fields.fallbackTtft')}
-                htmlFor="fallback-ttft"
-                hint={t('admin:settings.fields.fallbackTtftHint')}
-              >
-                <Input
-                  id="fallback-ttft"
-                  type="number"
-                  min={0}
-                  value={String(readNumber('fallback_ttft_sec'))}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      fallback_ttft_sec: Math.max(0, Number(event.target.value) || 0),
-                    }))
-                  }
-                />
+              <Field label={t('admin:settings.fields.defaultModel')} htmlFor="default-model">
+                <Select
+                  value={readString('default_model_id')}
+                  onValueChange={(value) => setDraft((current) => ({ ...current, default_model_id: value }))}
+                >
+                  <SelectTrigger id="default-model" data-admin-tour="model-policy-default-model">
+                    <SelectValue placeholder={t('admin:settings.fields.pickModel')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <PolicyModelOptions
+                      currentId={readString('default_model_id')}
+                      models={models}
+                      selectableModels={selectableModels}
+                      unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
+                    />
+                  </SelectContent>
+                </Select>
               </Field>
-            )}
-          </div>
 
-          <div className="flex justify-end">
+              <Field
+                label={t('admin:settings.fields.taskModel')}
+                htmlFor="task-model"
+                hint={t('admin:settings.fields.taskModelHint')}
+              >
+                <Select
+                  value={taskModelId || 'inherit'}
+                  onValueChange={(value) =>
+                    setDraft((current) => ({ ...current, task_model_id: value === 'inherit' ? '' : value }))
+                  }
+                >
+                  <SelectTrigger id="task-model" data-admin-tour="model-policy-task-model">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="inherit">{t('admin:settings.fields.currentConversationModel')}</SelectItem>
+                    <PolicyModelOptions
+                      currentId={taskModelId}
+                      models={models}
+                      selectableModels={selectableModels}
+                      unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
+                    />
+                  </SelectContent>
+                </Select>
+              </Field>
+
+              <Field
+                label={t('admin:settings.fields.titleModel')}
+                htmlFor="title-model"
+                hint={t('admin:settings.fields.titleModelHint')}
+              >
+                <Select
+                  value={titleModelId || 'inherit'}
+                  onValueChange={(value) =>
+                    setDraft((current) => ({ ...current, title_model_id: value === 'inherit' ? '' : value }))
+                  }
+                >
+                  <SelectTrigger id="title-model">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="inherit">{t('admin:settings.fields.inheritTaskModel')}</SelectItem>
+                    <PolicyModelOptions
+                      currentId={titleModelId}
+                      models={models}
+                      selectableModels={selectableModels}
+                      unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
+                    />
+                  </SelectContent>
+                </Select>
+              </Field>
+
+              <Field
+                label={t('admin:settings.fields.queryRouteModel')}
+                htmlFor="tool-route-model"
+                hint={t('admin:settings.fields.queryRouteModelHint')}
+              >
+                <Select
+                  value={readString('tool_route_model_id') || 'inherit'}
+                  onValueChange={(value) =>
+                    setDraft((current) => ({ ...current, tool_route_model_id: value === 'inherit' ? '' : value }))
+                  }
+                >
+                  <SelectTrigger id="tool-route-model" data-admin-tour="model-policy-tool-route-model">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="inherit">{t('admin:settings.fields.currentConversationModel')}</SelectItem>
+                    <PolicyModelOptions
+                      currentId={readString('tool_route_model_id')}
+                      models={models}
+                      selectableModels={decisionModels}
+                      unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
+                    />
+                  </SelectContent>
+                </Select>
+              </Field>
+
+              <Field
+                label={t('admin:settings.fields.fileRouteModel')}
+                htmlFor="file-route-model"
+                hint={t('admin:settings.fields.fileRouteModelHint')}
+              >
+                <Select
+                  value={fileRouteModelId || 'inherit'}
+                  onValueChange={(value) =>
+                    setDraft((current) => ({ ...current, file_route_model_id: value === 'inherit' ? '' : value }))
+                  }
+                >
+                  <SelectTrigger id="file-route-model">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="inherit">{t('admin:settings.fields.inheritTaskModel')}</SelectItem>
+                    <PolicyModelOptions
+                      currentId={fileRouteModelId}
+                      models={models}
+                      selectableModels={decisionModels}
+                      unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
+                    />
+                  </SelectContent>
+                </Select>
+              </Field>
+
+              {([
+                ['memory_dedup_model_id', 'memoryDedupModel', 'memoryDedupModelHint'],
+                ['memory_adjudicate_model_id', 'memoryAdjudicateModel', 'memoryAdjudicateModelHint'],
+                ['moderation_model_id', 'moderationModel', 'moderationModelHint'],
+              ] as const).map(([key, label, hint]) => (
+                <Field key={key} label={t(`admin:settings.fields.${label}`)} htmlFor={key} hint={t(`admin:settings.fields.${hint}`)}>
+                  <Select value={readString(key) || 'inherit'} onValueChange={(value) => setDraft((current) => ({ ...current, [key]: value === 'inherit' ? '' : value }))}>
+                    <SelectTrigger id={key}><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="inherit">{t(key === 'moderation_model_id' ? 'admin:moderation.modelNone' : 'admin:settings.fields.inheritTaskModel')}</SelectItem>
+                      <PolicyModelOptions currentId={readString(key)} models={models} selectableModels={decisionModels} unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')} />
+                    </SelectContent>
+                  </Select>
+                </Field>
+              ))}
+
+              <Field
+                label={t('admin:settings.fields.visionModel')}
+                htmlFor="vision-model"
+                hint={t('admin:settings.fields.visionModelHint')}
+              >
+                <Select
+                  value={readString('vision_model_id') || 'none'}
+                  onValueChange={(value) =>
+                    setDraft((current) => ({ ...current, vision_model_id: value === 'none' ? '' : value }))
+                  }
+                >
+                  <SelectTrigger id="vision-model">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">{t('admin:settings.fields.fallbackNone')}</SelectItem>
+                    <PolicyModelOptions
+                      currentId={readString('vision_model_id')}
+                      models={models}
+                      selectableModels={visionModels}
+                      unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
+                    />
+                  </SelectContent>
+                </Select>
+              </Field>
+
+              <Field
+                label={t('admin:settings.fields.defaultToolMode')}
+                htmlFor="default-tool-mode"
+                hint={t('admin:settings.fields.defaultToolModeHint')}
+              >
+                <Select
+                  value={readString('tool_mode_default') || 'auto'}
+                  onValueChange={(value) =>
+                    setDraft((current) => ({ ...current, tool_mode_default: value }))
+                  }
+                >
+                  <SelectTrigger id="default-tool-mode">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">{t('admin:settings.fields.toolModeAuto')}</SelectItem>
+                    <SelectItem value="enabled">{t('admin:settings.fields.toolModeEnabled')}</SelectItem>
+                    <SelectItem value="disabled">{t('admin:settings.fields.toolModeDisabled')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+
+              <Field
+                label={t('admin:settings.fields.verifyModel')}
+                htmlFor="verify-model"
+                hint={t('admin:settings.fields.verifyModelHint')}
+              >
+                <Select
+                  value={readString('verify_model_id') || 'none'}
+                  onValueChange={(value) =>
+                    setDraft((current) => ({ ...current, verify_model_id: value === 'none' ? '' : value }))
+                  }
+                >
+                  <SelectTrigger id="verify-model">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">{t('admin:settings.fields.fallbackNone')}</SelectItem>
+                    <PolicyModelOptions
+                      currentId={readString('verify_model_id')}
+                      models={models}
+                      selectableModels={selectableModels}
+                      unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
+                    />
+                  </SelectContent>
+                </Select>
+              </Field>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <Field
+                  label={t('admin:settings.fields.fallbackModel')}
+                  htmlFor="fallback-model"
+                  hint={t('admin:settings.fields.fallbackModelHint')}
+                >
+                  <Select
+                    value={fallbackModelId || 'none'}
+                    onValueChange={(value) =>
+                      setDraft((current) => ({ ...current, fallback_model_id: value === 'none' ? '' : value }))
+                    }
+                  >
+                    <SelectTrigger id="fallback-model">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">{t('admin:settings.fields.fallbackNone')}</SelectItem>
+                      <PolicyModelOptions
+                        currentId={fallbackModelId}
+                        models={models}
+                        selectableModels={selectableModels}
+                        unavailableLabel={t('admin:settings.modelPolicy.unavailableOption')}
+                      />
+                    </SelectContent>
+                  </Select>
+                </Field>
+
+                {fallbackModelId && (
+                  <Field
+                    label={t('admin:settings.fields.fallbackTtft')}
+                    htmlFor="fallback-ttft"
+                    hint={t('admin:settings.fields.fallbackTtftHint')}
+                  >
+                    <Input
+                      id="fallback-ttft"
+                      type="number"
+                      min={0}
+                      value={String(readNumber('fallback_ttft_sec'))}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          fallback_ttft_sec: Math.max(0, Number(event.target.value) || 0),
+                        }))
+                      }
+                    />
+                  </Field>
+                )}
+              </div>
+            </SettingsBlock>
+          </SettingsSection>
+
+          <SettingsActions>
             <Button loading={saving} onClick={() => void save()}>
               {t('common:actions.save')}
             </Button>
-          </div>
-        </section>
+          </SettingsActions>
+        </div>
       )}
     </div>
   )

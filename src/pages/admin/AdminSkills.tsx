@@ -27,6 +27,7 @@ import { parseSkillDocument } from '@/lib/skill-document'
 import { IconPicker } from '@/components/admin/icon-picker'
 import { AdminSortableList } from '@/components/admin/AdminSortableList'
 import { SkillIcon } from '@/components/ui/skill-icon'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
 
 type Draft = Partial<ApiSkill>
 const defaultDraft: Draft = { enabled: true, icon: '' }
@@ -182,25 +183,26 @@ export default function AdminSkills() {
 
   return (
     <div>
-      <header className="flex flex-col items-start gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">{t('admin:skills.title')}</h1>
-          <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('admin:skills.lead')}</p>
-        </div>
-        <Button
-          leadingIcon={<Plus size={15} aria-hidden />}
-          onClick={openNew}
-          className="max-sm:min-h-[var(--tap-min)]"
-        >
-          {t('admin:skills.new')}
-        </Button>
-      </header>
+      <AdminPageHeader
+        title={t('admin:skills.title')}
+        description={t('admin:skills.lead')}
+        actions={(
+          <Button
+            size="sm"
+            leadingIcon={<Plus size={15} aria-hidden />}
+            onClick={openNew}
+            className="max-sm:min-h-[var(--tap-min)] max-sm:flex-1"
+          >
+            {t('admin:skills.new')}
+          </Button>
+        )}
+      />
 
       <section className="mt-8">
         {loading ? (
           <PanelFallback />
         ) : rows.length === 0 ? (
-          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center text-sm text-[var(--color-fg-muted)]">
+          <div className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center text-sm text-[var(--color-fg-muted)]">
             {t('admin:skills.empty')}
           </div>
         ) : (
@@ -216,7 +218,7 @@ export default function AdminSkills() {
             renderItem={(s) => (
               <>
                 <div className="flex min-w-0 items-center gap-3">
-                  <span className="grid size-9 shrink-0 place-items-center rounded-[9px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
+                  <span className="grid size-9 shrink-0 place-items-center rounded-[8px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
                     <SkillIcon name={s.icon} size={16} aria-hidden />
                   </span>
                   <div className="min-w-0 flex-1">
@@ -345,13 +347,13 @@ export default function AdminSkills() {
               >
                 <div className="grid gap-2">
                   {(editor.draft.assets ?? []).length > 0 ? (
-                    <ul className="flex flex-col divide-y divide-[var(--color-divider)] rounded-[10px] border border-[var(--color-border)]">
+                    <ul className="flex flex-col divide-y divide-[var(--color-divider)] rounded-[8px] border border-[var(--color-border)]">
                       {(editor.draft.assets ?? []).map((a, i) => (
                         <li key={`${a.storage_path}-${i}`} className="flex items-center gap-2 px-3 py-2">
                           <FileText size={14} aria-hidden className="shrink-0 text-[var(--color-fg-subtle)]" />
                           <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--color-fg)]">{a.filename}</span>
                           {typeof a.size_bytes === 'number' ? (
-                            <span className="text-[11px] text-[var(--color-fg-subtle)] tabular-nums">{formatBytes(a.size_bytes)}</span>
+                            <span className="text-[12px] text-[var(--color-fg-subtle)] tabular-nums">{formatBytes(a.size_bytes)}</span>
                           ) : null}
                           <button
                             type="button"
@@ -381,7 +383,7 @@ export default function AdminSkills() {
               </Field>
               <label
                 htmlFor="admin-skill-enabled"
-                className="flex items-center justify-between rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5"
+                className="flex items-center justify-between rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5"
               >
                 <span className="text-sm">{t('admin:skills.fields.enabled')}</span>
                 <Switch

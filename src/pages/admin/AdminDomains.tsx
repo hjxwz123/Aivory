@@ -20,6 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { toast } from '@/hooks/use-toast'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
 
 function matchedDomains(rule: RegistrationDomain): string[] {
   return rule.domains?.length ? rule.domains : [rule.domain]
@@ -83,13 +84,21 @@ export default function AdminDomains() {
 
   return (
     <section>
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="font-serif text-2xl text-[var(--color-fg)] sm:text-3xl">{t('domains.title')}</h1>
-          <p className="mt-1 max-w-2xl text-sm text-[var(--color-fg-muted)]">{t('domains.subtitle')}</p>
-        </div>
-        <Button disabled={loading || !!error || !workspaces.length} onClick={() => setEditor('new')}><Plus size={15} aria-hidden />{t('domains.add')}</Button>
-      </div>
+      <AdminPageHeader
+        title={t('domains.title')}
+        description={t('domains.subtitle')}
+        actions={(
+          <Button
+            size="sm"
+            className="max-sm:min-h-[var(--tap-min)] max-sm:flex-1"
+            leadingIcon={<Plus size={15} aria-hidden />}
+            disabled={loading || !!error || !workspaces.length}
+            onClick={() => setEditor('new')}
+          >
+            {t('domains.add')}
+          </Button>
+        )}
+      />
       <p className="mt-5 max-w-3xl text-sm leading-relaxed text-[var(--color-fg-muted)]">{t('domains.scopeHint')}</p>
       {loading ? <PanelFallback /> : error ? (
         <div role="alert" className="mt-8 space-y-3"><p>{error}</p><Button variant="secondary" onClick={() => void load()}>{t('domains.retry')}</Button></div>
@@ -200,7 +209,7 @@ function DomainEditor({ rule, workspaces, groups, onClose, onSaved }: { rule: Re
         <DialogHeader><DialogTitle>{t(isNew ? 'domains.add' : 'domains.edit')}</DialogTitle><DialogDescription>{t('domains.editorHint')}</DialogDescription></DialogHeader>
         <form className="flex min-h-0 flex-1 flex-col overflow-hidden" onSubmit={(e) => { e.preventDefault(); void save() }}>
           <DialogBody className="space-y-5 overscroll-contain">
-            <aside aria-labelledby="domain-permissions-title" className="flex items-start gap-3 rounded-xl border border-[var(--color-warning)]/40 bg-[var(--color-warning)]/10 p-4">
+            <aside aria-labelledby="domain-permissions-title" className="flex items-start gap-3 rounded-[12px] border border-[var(--color-warning)]/40 bg-[var(--color-warning)]/10 p-4">
               <AlertTriangle size={20} aria-hidden className="mt-0.5 shrink-0 text-[var(--color-warning)]" />
               <div className="min-w-0 space-y-1.5 text-sm leading-6">
                 <p id="domain-permissions-title" className="font-semibold text-[var(--color-fg)]">{t('domains.permissionsNoticeTitle')}</p>

@@ -45,6 +45,7 @@ import {
 } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
 
 const PAGE_SIZE = 50
 const PROJECT_CONVERSATION_PAGE_SIZE = 20
@@ -409,19 +410,15 @@ export default function AdminResources() {
 
   return (
     <div className="min-w-0 pb-10">
-      <header>
-        <h1 className="font-serif text-2xl text-[var(--color-fg)] sm:text-3xl">
-          {t('admin:resources.title')}
-        </h1>
-        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[var(--color-fg-muted)]">
-          {t('admin:resources.lead')}
-        </p>
-      </header>
+      <AdminPageHeader
+        title={t('admin:resources.title')}
+        description={t('admin:resources.lead')}
+      />
 
       <div
         role="group"
         aria-label={t('admin:resources.title')}
-        className="mt-6 inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-[10px] border border-[var(--color-border-subtle)] bg-[var(--color-bg-muted)] p-1"
+        className="mt-6 inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-[8px] border border-[var(--color-border-subtle)] bg-[var(--color-bg-muted)] p-1"
       >
         {([
           ['knowledge-bases', BookOpen, t('admin:resources.tabs.knowledgeBases')],
@@ -674,7 +671,7 @@ function KnowledgeBaseList({
   return (
     <div className={cn('transition-opacity', state.loading && 'pointer-events-none opacity-60')}>
       {state.error ? <InlineError message={state.error} onRetry={onRetry} t={t} /> : null}
-      <div className="hidden grid-cols-[minmax(0,2fr)_minmax(0,1.25fr)_8rem_minmax(0,1fr)_10rem_1.25rem] gap-4 border-b border-[var(--color-divider)] px-5 py-2.5 text-[11px] font-medium uppercase text-[var(--color-fg-subtle)] md:grid">
+      <div className="hidden grid-cols-[minmax(0,2fr)_minmax(0,1.25fr)_8rem_minmax(0,1fr)_10rem_1.25rem] gap-4 border-b border-[var(--color-divider)] px-5 py-2.5 text-[12px] font-medium uppercase text-[var(--color-fg-subtle)] md:grid">
         <span>{t('admin:resources.table.name')}</span>
         <span>{t('admin:resources.table.user')}</span>
         <span>{t('admin:resources.table.documents')}</span>
@@ -695,7 +692,7 @@ function KnowledgeBaseList({
                 <span className="mt-1 block line-clamp-1 text-[12px] text-[var(--color-fg-subtle)]">
                   {item.description || t('admin:resources.noDescription')}
                 </span>
-                <span className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-[var(--color-fg-subtle)] md:hidden">
+                <span className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[12px] text-[var(--color-fg-subtle)] md:hidden">
                   <span>{resourceOwner(item.creator_name, item.creator_email, item.creator_id)}</span>
                   <span>{t('admin:resources.counts.documents', { count: item.document_count })}</span>
                   <span>{formatDate(item.last_activity_at)}</span>
@@ -703,12 +700,12 @@ function KnowledgeBaseList({
               </span>
               <span className="hidden min-w-0 md:block">
                 <span className="block truncate text-[12.5px] text-[var(--color-fg)]">{resourceOwner(item.creator_name, item.creator_email, item.creator_id)}</span>
-                <span className="mt-0.5 block truncate text-[11px] text-[var(--color-fg-subtle)]">{item.creator_email}</span>
+                <span className="mt-0.5 block truncate text-[12px] text-[var(--color-fg-subtle)]">{item.creator_email}</span>
               </span>
               <DocumentSummary item={item} t={t} />
               <span className="hidden min-w-0 md:block">
                 <span className="block truncate text-[12.5px] text-[var(--color-fg)]">{item.embedding_model_label || item.embedding_model_id || '-'}</span>
-                <span className="mt-0.5 block text-[11px] text-[var(--color-fg-subtle)]">{item.embedding_dim ? `${item.embedding_dim}d` : '-'}</span>
+                <span className="mt-0.5 block text-[12px] text-[var(--color-fg-subtle)]">{item.embedding_dim ? `${item.embedding_dim}d` : '-'}</span>
               </span>
               <span className="hidden text-[12px] text-[var(--color-fg-subtle)] md:block">{formatDate(item.last_activity_at)}</span>
               <ChevronRight size={16} className="text-[var(--color-fg-faint)] transition-transform group-hover:translate-x-0.5" aria-hidden />
@@ -755,7 +752,7 @@ function ProjectList({
   return (
     <div className={cn('transition-opacity', state.loading && 'pointer-events-none opacity-60')}>
       {state.error ? <InlineError message={state.error} onRetry={onRetry} t={t} /> : null}
-      <div className="hidden grid-cols-[minmax(0,2fr)_minmax(0,1.25fr)_8rem_8rem_10rem_1.25rem] gap-4 border-b border-[var(--color-divider)] px-5 py-2.5 text-[11px] font-medium uppercase text-[var(--color-fg-subtle)] md:grid">
+      <div className="hidden grid-cols-[minmax(0,2fr)_minmax(0,1.25fr)_8rem_8rem_10rem_1.25rem] gap-4 border-b border-[var(--color-divider)] px-5 py-2.5 text-[12px] font-medium uppercase text-[var(--color-fg-subtle)] md:grid">
         <span>{t('admin:resources.table.name')}</span>
         <span>{t('admin:resources.table.user')}</span>
         <span>{t('admin:resources.table.conversations')}</span>
@@ -781,7 +778,7 @@ function ProjectList({
                   <span className="mt-1 block line-clamp-1 text-[12px] text-[var(--color-fg-subtle)]">
                     {item.description || t('admin:resources.noDescription')}
                   </span>
-                  <span className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-[var(--color-fg-subtle)] md:hidden">
+                  <span className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[12px] text-[var(--color-fg-subtle)] md:hidden">
                     <span>{resourceOwner(item.creator_name, item.creator_email, item.creator_id)}</span>
                     <span>{t('admin:resources.counts.conversations', { count: item.conversation_count })}</span>
                     <span>{t('admin:resources.counts.documents', { count: item.document_count })}</span>
@@ -790,7 +787,7 @@ function ProjectList({
               </span>
               <span className="hidden min-w-0 md:block">
                 <span className="block truncate text-[12.5px] text-[var(--color-fg)]">{resourceOwner(item.creator_name, item.creator_email, item.creator_id)}</span>
-                <span className="mt-0.5 block truncate text-[11px] text-[var(--color-fg-subtle)]">{item.creator_email}</span>
+                <span className="mt-0.5 block truncate text-[12px] text-[var(--color-fg-subtle)]">{item.creator_email}</span>
               </span>
               <span className="hidden text-[12.5px] tabular-nums text-[var(--color-fg)] md:block">{item.conversation_count}</span>
               <DocumentSummary item={item} t={t} />
@@ -854,11 +851,11 @@ function ImageList({
               <span className="mt-3 line-clamp-2 h-10 overflow-hidden text-sm leading-5 text-[var(--color-fg)]">
                 {item.prompt || t('admin:resources.details.promptMissing')}
               </span>
-              <span className="mt-2 flex min-w-0 items-center justify-between gap-3 text-[11px] text-[var(--color-fg-subtle)]">
+              <span className="mt-2 flex min-w-0 items-center justify-between gap-3 text-[12px] text-[var(--color-fg-subtle)]">
                 <span className="min-w-0 truncate">{resourceOwner(item.user_name, item.user_email, item.user_id)}</span>
                 <span className="shrink-0">{formatDate(item.created_at)}</span>
               </span>
-              <span className="mt-1 block truncate text-[11px] text-[var(--color-fg-subtle)]">{item.model_label || item.model_id || '-'}</span>
+              <span className="mt-1 block truncate text-[12px] text-[var(--color-fg-subtle)]">{item.model_label || item.model_id || '-'}</span>
             </button>
           </li>
         ))}
@@ -931,7 +928,7 @@ function KnowledgeBaseDetails({
               <li key={share.user_id} className="flex items-center justify-between gap-3 py-3 text-sm">
                 <span className="min-w-0">
                   <span className="block truncate text-[var(--color-fg)]">{resourceOwner(share.name, share.email, share.user_id)}</span>
-                  <span className="mt-0.5 block truncate text-[11px] text-[var(--color-fg-subtle)]">
+                  <span className="mt-0.5 block truncate text-[12px] text-[var(--color-fg-subtle)]">
                     {[share.email, share.created_at ? formatDate(share.created_at) : ''].filter(Boolean).join(' · ')}
                   </span>
                 </span>
@@ -1058,7 +1055,7 @@ function ProjectDetails({
                       <MessageSquare size={14} className="shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm text-[var(--color-fg)]">{conversation.title || t('admin:resources.details.untitled')}</span>
-                        <span className="mt-0.5 block truncate text-[11px] text-[var(--color-fg-subtle)]">
+                        <span className="mt-0.5 block truncate text-[12px] text-[var(--color-fg-subtle)]">
                           {[conversation.model_label || conversation.model_id, resourceOwner(conversation.creator_name, conversation.creator_email, conversation.creator_id), formatDate(conversation.updated_at)].filter(Boolean).join(' · ')}
                         </span>
                       </span>
@@ -1162,7 +1159,7 @@ function DocumentList({
               <div className="flex min-w-0 items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="truncate text-sm text-[var(--color-fg)]">{document.filename}</p>
-                  <p className="mt-1 text-[11px] text-[var(--color-fg-subtle)]">
+                  <p className="mt-1 text-[12px] text-[var(--color-fg-subtle)]">
                     {[
                       document.mime_type,
                       formatBytes(document.size_bytes),
@@ -1176,7 +1173,7 @@ function DocumentList({
                 </div>
                 <DocumentStatus status={document.status} t={t} />
               </div>
-              {document.error ? <p className="mt-2 break-words text-[11px] text-[var(--color-danger)]">{document.error}</p> : null}
+              {document.error ? <p className="mt-2 break-words text-[12px] text-[var(--color-danger)]">{document.error}</p> : null}
             </li>
           ))}
         </ul>
@@ -1278,7 +1275,7 @@ function MetaRow({ label, value, mono = false }: { label: string; value: ReactNo
   return (
     <div className="grid grid-cols-[8rem_minmax(0,1fr)] gap-3 py-2.5">
       <dt className="text-[var(--color-fg-subtle)]">{label}</dt>
-      <dd className={cn('min-w-0 break-words text-right text-[var(--color-fg)]', mono && 'font-mono text-[11px]')}>{value}</dd>
+      <dd className={cn('min-w-0 break-words text-right text-[var(--color-fg)]', mono && 'font-mono text-[12px]')}>{value}</dd>
     </div>
   )
 }
@@ -1286,7 +1283,7 @@ function MetaRow({ label, value, mono = false }: { label: string; value: ReactNo
 function Stat({ label, value, tone = 'neutral' }: { label: string; value: ReactNode; tone?: 'neutral' | 'success' | 'warning' | 'danger' }) {
   return (
     <div className="min-w-0 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface-sunken)] px-3 py-2.5">
-      <p className="truncate text-[11px] text-[var(--color-fg-subtle)]">{label}</p>
+      <p className="truncate text-[12px] text-[var(--color-fg-subtle)]">{label}</p>
       <p className={cn(
         'mt-1 truncate text-base font-medium tabular-nums text-[var(--color-fg)]',
         tone === 'success' && 'text-[var(--color-success)]',

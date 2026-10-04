@@ -28,6 +28,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/hooks/use-toast'
+import { SettingsBlock, SettingsSection } from '@/components/settings/settings-section'
 
 const PAGE_KEYS = 'admin:creditSettings.docmee.templates'
 
@@ -121,13 +122,12 @@ export function DocmeeTemplateAdmin({ enabled }: { enabled: boolean }) {
   }
 
   return (
-    <div className="mt-3 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          <span className="text-xs font-medium text-[var(--color-fg)]">{t(`${PAGE_KEYS}.title`)}</span>
-          <p className="mt-0.5 text-xs text-[var(--color-fg-muted)]">{t(`${PAGE_KEYS}.lead`)}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
+    <SettingsSection
+      title={t(`${PAGE_KEYS}.title`)}
+      description={t(`${PAGE_KEYS}.lead`)}
+      bodyClassName="divide-y-0"
+      actions={(
+        <>
           <div className="flex items-center gap-1.5">
             <Switch
               id="docmee-template-share"
@@ -135,7 +135,7 @@ export function DocmeeTemplateAdmin({ enabled }: { enabled: boolean }) {
               onCheckedChange={setShareOnUpload}
               disabled={uploading}
             />
-            <Label htmlFor="docmee-template-share" className="text-xs text-[var(--color-fg-muted)]">
+            <Label htmlFor="docmee-template-share" className="text-xs font-normal text-[var(--color-fg-muted)]">
               {t(`${PAGE_KEYS}.shareOnUpload`)}
             </Label>
           </div>
@@ -149,9 +149,9 @@ export function DocmeeTemplateAdmin({ enabled }: { enabled: boolean }) {
               size="sm"
               variant="secondary"
               disabled={!enabled}
+              leadingIcon={<Upload size={14} aria-hidden />}
               onClick={() => fileRef.current?.click()}
             >
-              <Upload size={13} aria-hidden className="mr-1.5" />
               {t(`${PAGE_KEYS}.upload`)}
             </Button>
           )}
@@ -166,83 +166,85 @@ export function DocmeeTemplateAdmin({ enabled }: { enabled: boolean }) {
               if (file) void upload(file)
             }}
           />
-        </div>
-      </div>
-
-      {!enabled ? (
-        <p className="mt-2 text-xs text-[var(--color-fg-muted)]">{t(`${PAGE_KEYS}.needsKey`)}</p>
-      ) : error ? (
-        <p className="mt-2 text-xs text-[var(--color-danger)]">{error}</p>
-      ) : loading ? (
-        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, index) => (
-            <Skeleton key={index} className="h-24 rounded-[8px]" />
-          ))}
-        </div>
-      ) : templates.length === 0 ? (
-        <p className="mt-2 text-xs text-[var(--color-fg-muted)]">{t(`${PAGE_KEYS}.empty`)}</p>
-      ) : (
-        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
-          {templates.map((template) => {
-            const cover = coverURL(template)
-            const busy = busyId === template.id
-            return (
-              <div
-                key={template.id}
-                className="flex flex-col overflow-hidden rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)]"
-              >
-                <div className="aspect-[16/9] w-full bg-[var(--color-bg-muted)]">
-                  {cover ? (
-                    <img
-                      src={cover}
-                      alt=""
-                      loading="lazy"
-                      className="h-full w-full object-cover"
-                      onError={() => setBrokenCovers((current) => new Set(current).add(template.id))}
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-[var(--color-fg-muted)]">
-                      <ImageOff size={16} aria-hidden />
-                    </div>
-                  )}
-                </div>
-                <div className="flex min-w-0 items-center gap-1.5 px-2 pt-1.5">
-                  <span className="min-w-0 flex-1 truncate text-xs text-[var(--color-fg)]" title={template.name}>
-                    {template.name}
-                  </span>
-                  {template.shared ? (
-                    <Badge variant="success">
-                      <Globe size={10} aria-hidden className="mr-1" />
-                      {t(`${PAGE_KEYS}.sharedBadge`)}
-                    </Badge>
-                  ) : null}
-                </div>
-                <div className="mt-auto flex items-center gap-1 px-1.5 py-1.5">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-6 flex-1 px-1 text-[11px]"
-                    loading={busy}
-                    disabled={busy}
-                    onClick={() => void toggleShared(template)}
-                  >
-                    {t(template.shared ? `${PAGE_KEYS}.unshare` : `${PAGE_KEYS}.share`)}
-                  </Button>
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label={t(`${PAGE_KEYS}.delete`)}
-                    disabled={busy}
-                    onClick={() => setRemoving(template)}
-                  >
-                    <Trash2 size={13} aria-hidden />
-                  </Button>
-                </div>
-              </div>
-            )
-          })}
-        </div>
+        </>
       )}
+    >
+      <SettingsBlock>
+        {!enabled ? (
+          <p className="text-xs text-[var(--color-fg-muted)]">{t(`${PAGE_KEYS}.needsKey`)}</p>
+        ) : error ? (
+          <p className="text-xs text-[var(--color-danger)]">{error}</p>
+        ) : loading ? (
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <Skeleton key={index} className="h-24 rounded-[8px]" />
+            ))}
+          </div>
+        ) : templates.length === 0 ? (
+          <p className="text-xs text-[var(--color-fg-muted)]">{t(`${PAGE_KEYS}.empty`)}</p>
+        ) : (
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
+            {templates.map((template) => {
+              const cover = coverURL(template)
+              const busy = busyId === template.id
+              return (
+                <div
+                  key={template.id}
+                  className="flex flex-col overflow-hidden rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)]"
+                >
+                  <div className="aspect-[16/9] w-full bg-[var(--color-bg-muted)]">
+                    {cover ? (
+                      <img
+                        src={cover}
+                        alt=""
+                        loading="lazy"
+                        className="h-full w-full object-cover"
+                        onError={() => setBrokenCovers((current) => new Set(current).add(template.id))}
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-[var(--color-fg-muted)]">
+                        <ImageOff size={16} aria-hidden />
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex min-w-0 items-center gap-1.5 px-2 pt-1.5">
+                    <span className="min-w-0 flex-1 truncate text-xs text-[var(--color-fg)]" title={template.name}>
+                      {template.name}
+                    </span>
+                    {template.shared ? (
+                      <Badge variant="success">
+                        <Globe size={10} aria-hidden className="mr-1" />
+                        {t(`${PAGE_KEYS}.sharedBadge`)}
+                      </Badge>
+                    ) : null}
+                  </div>
+                  <div className="mt-auto flex items-center gap-1 px-1.5 py-1.5">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 flex-1 px-1 text-[12px]"
+                      loading={busy}
+                      disabled={busy}
+                      onClick={() => void toggleShared(template)}
+                    >
+                      {t(template.shared ? `${PAGE_KEYS}.unshare` : `${PAGE_KEYS}.share`)}
+                    </Button>
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label={t(`${PAGE_KEYS}.delete`)}
+                      disabled={busy}
+                      onClick={() => setRemoving(template)}
+                    >
+                      <Trash2 size={13} aria-hidden />
+                    </Button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </SettingsBlock>
 
       <Dialog open={removing !== null} onOpenChange={(open) => (!open ? setRemoving(null) : null)}>
         <DialogContent>
@@ -265,6 +267,6 @@ export function DocmeeTemplateAdmin({ enabled }: { enabled: boolean }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </SettingsSection>
   )
 }

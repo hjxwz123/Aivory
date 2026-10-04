@@ -20,6 +20,8 @@ import { Switch } from '@/components/ui/switch'
 import { toast } from '@/hooks/use-toast'
 import { embeddingGuardErrorText } from '@/lib/admin-embedding-errors'
 import { PanelFallback } from '@/components/ui/panel-fallback'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
+import { SettingsBlock, SettingsSection } from '@/components/settings/settings-section'
 
 type Settings = Record<string, unknown>
 
@@ -157,285 +159,296 @@ export default function AdminDocuments() {
       ))
 
   return (
-    <div className="mx-auto max-w-[76rem]">
-      <header>
-        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">{t('admin:documents.title')}</h1>
-        <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('admin:documents.lead')}</p>
-      </header>
+    <div>
+      <AdminPageHeader
+        title={t('admin:documents.title')}
+        description={t('admin:documents.lead')}
+      />
 
       {loading ? (
         <PanelFallback />
       ) : (
         <section className="mt-8 flex flex-col gap-5">
           {/* Embedding model ------------------------------------------------- */}
-          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5">
-            <h2 className="font-serif text-lg text-[var(--color-fg)]">{t('admin:documents.embeddingSection')}</h2>
-            <p className="mt-1 text-xs text-[var(--color-fg-subtle)]">{t('admin:documents.embeddingLead')}</p>
-            <div className="mt-4">
-              <Field
-                label={t('admin:documents.embeddingModel')}
-                htmlFor="embed-model"
-                hint={embeddingModelLocked
-                  ? t('admin:documents.embeddingModelLockedHint')
-                  : embeddingModelDangling
-                    ? t('admin:documents.embeddingModelDanglingHint', {
-                        defaultValue:
-                          'The previously selected embedding model was deleted. Pick a replacement and save to restore knowledge-base features; existing knowledge bases must be re-indexed.',
-                      })
-                    : t('admin:documents.embeddingModelHint')}
-              >
-                <Select
-                  value={readString('embedding_model_id') || 'none'}
-                  disabled={embeddingModelLocked}
-                  onValueChange={(v) =>
-                    setDraft({ ...draft, embedding_model_id: v === 'none' ? '' : v })
-                  }
+          <SettingsSection
+            title={t('admin:documents.embeddingSection')}
+            description={t('admin:documents.embeddingLead')}
+            className="mb-0"
+            bodyClassName="divide-y-0"
+          >
+            <SettingsBlock>
+              <div>
+                <Field
+                  label={t('admin:documents.embeddingModel')}
+                  htmlFor="embed-model"
+                  hint={embeddingModelLocked
+                    ? t('admin:documents.embeddingModelLockedHint')
+                    : embeddingModelDangling
+                      ? t('admin:documents.embeddingModelDanglingHint', {
+                          defaultValue:
+                            'The previously selected embedding model was deleted. Pick a replacement and save to restore knowledge-base features; existing knowledge bases must be re-indexed.',
+                        })
+                      : t('admin:documents.embeddingModelHint')}
                 >
-                  <SelectTrigger id="embed-model" data-admin-tour="documents-embedding-model">
-                    <SelectValue placeholder={t('admin:settings.fields.pickModel')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">—</SelectItem>
-                    {embeddingModels.map((m) => (
-                      <SelectItem key={m.id} value={m.id}>
-                        {m.label} (dim {m.dim})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-              {embeddingModelsLoaded && embeddingModels.length === 0 ? (
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-xs text-[var(--color-fg-subtle)]">
-                    {t('admin:documents.embeddingModelEmpty')}
-                  </p>
-                  <Button asChild variant="secondary" size="sm" className="shrink-0">
-                    <Link to="/admin/models?kind=embedding">{t('admin:documents.addEmbeddingModel')}</Link>
-                  </Button>
-                </div>
-              ) : null}
-            </div>
-          </div>
+                  <Select
+                    value={readString('embedding_model_id') || 'none'}
+                    disabled={embeddingModelLocked}
+                    onValueChange={(v) =>
+                      setDraft({ ...draft, embedding_model_id: v === 'none' ? '' : v })
+                    }
+                  >
+                    <SelectTrigger id="embed-model" data-admin-tour="documents-embedding-model">
+                      <SelectValue placeholder={t('admin:settings.fields.pickModel')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">—</SelectItem>
+                      {embeddingModels.map((m) => (
+                        <SelectItem key={m.id} value={m.id}>
+                          {m.label} (dim {m.dim})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                {embeddingModelsLoaded && embeddingModels.length === 0 ? (
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-xs text-[var(--color-fg-subtle)]">
+                      {t('admin:documents.embeddingModelEmpty')}
+                    </p>
+                    <Button asChild variant="secondary" size="sm" className="shrink-0">
+                      <Link to="/admin/models?kind=embedding">{t('admin:documents.addEmbeddingModel')}</Link>
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
+            </SettingsBlock>
+          </SettingsSection>
 
           {/* RAG retrieval & injection -------------------------------------- */}
-          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5">
-            <h2 className="font-serif text-lg text-[var(--color-fg)]">
-              {t('admin:documents.ragSection', { defaultValue: 'Retrieval & injection' })}
-            </h2>
-            <p className="mt-1 text-xs text-[var(--color-fg-subtle)]">
-              {t('admin:documents.ragLead', {
-                defaultValue:
-                  'Control when an uploaded document is injected whole vs. retrieved by relevance, and how much is injected.',
-              })}
-            </p>
-            <div className="mt-4 flex flex-col gap-5">
-              <Field
-                label={t('admin:documents.ragFullTextThreshold', { defaultValue: 'Full-inject threshold (tokens)' })}
-                htmlFor="rag-threshold"
-                hint={t('admin:documents.ragFullTextThresholdHint', {
-                  defaultValue:
-                    'A prose document (PDF / Office / Markdown / logs) at/below this estimated size is injected in full every turn; above it, the document is vectorized and only relevant chunks are retrieved.',
-                })}
-              >
-                <Input
-                  id="rag-threshold"
-                  type="number"
-                  min={0}
-                  placeholder="8000"
-                  value={String(readNumber('rag_full_text_threshold', 8000))}
-                  onChange={(e) =>
-                    setDraft({ ...draft, rag_full_text_threshold: Math.max(0, Number(e.target.value) || 0) })
-                  }
-                />
-              </Field>
-              <Field
-                label={t('admin:documents.ragCodeMaxLines', { defaultValue: 'Code / text full-inject cap (lines)' })}
-                htmlFor="rag-code-lines"
-                hint={t('admin:documents.ragCodeMaxLinesHint', {
-                  defaultValue:
-                    'Source code, config, .txt and unrecognized text formats at/below this many lines are injected in full (very long single-line files are size-scaled and may still be retrieved); above it they are vectorized and retrieved like other documents.',
-                })}
-              >
-                <Input
-                  id="rag-code-lines"
-                  type="number"
-                  min={1}
-                  placeholder="2000"
-                  value={String(readNumber('rag_code_full_text_max_lines', 2000))}
-                  onChange={(e) =>
-                    // ≥1: the backend treats 0/blank as "use the default (2000)",
-                    // so persisting a literal 0 would show 0 while acting as 2000.
-                    setDraft({ ...draft, rag_code_full_text_max_lines: Math.max(1, Number(e.target.value) || 1) })
-                  }
-                />
-              </Field>
-              <Field
-                label={t('admin:documents.ragTopK', { defaultValue: 'Retrieved chunks (Top-K)' })}
-                htmlFor="rag-topk"
-                hint={t('admin:documents.ragTopKHint', {
-                  defaultValue: 'How many chunks to retrieve for a vectorized document (when dynamic Top-K is off).',
-                })}
-              >
-                <Input
-                  id="rag-topk"
-                  type="number"
-                  min={1}
-                  placeholder="8"
-                  value={String(readNumber('rag_top_k', 8))}
-                  onChange={(e) => setDraft({ ...draft, rag_top_k: Math.max(1, Number(e.target.value) || 1) })}
-                />
-              </Field>
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <div className="text-sm text-[var(--color-fg)]">
-                    {t('admin:documents.ragDynamicTopk', { defaultValue: 'Dynamic Top-K (by similarity)' })}
-                  </div>
-                  <div className="mt-0.5 text-xs text-[var(--color-fg-subtle)]">
-                    {t('admin:documents.ragDynamicTopkHint', {
-                      defaultValue:
-                        'Instead of a fixed K, inject every retrieved chunk whose similarity clears the threshold.',
-                    })}
-                  </div>
-                </div>
-                <Switch
-                  checked={readBool('rag_dynamic_topk', false)}
-                  onCheckedChange={(v) => setDraft({ ...draft, rag_dynamic_topk: v })}
-                />
-              </div>
-              {readBool('rag_dynamic_topk', false) && (
+          <SettingsSection
+            title={t('admin:documents.ragSection', { defaultValue: 'Retrieval & injection' })}
+            description={t('admin:documents.ragLead', {
+              defaultValue:
+                'Control when an uploaded document is injected whole vs. retrieved by relevance, and how much is injected.',
+            })}
+            className="mb-0"
+            bodyClassName="divide-y-0"
+          >
+            <SettingsBlock>
+              <div className="flex flex-col gap-5">
                 <Field
-                  label={t('admin:documents.ragSimThreshold', { defaultValue: 'Similarity threshold (0–1)' })}
-                  htmlFor="rag-sim"
-                  hint={t('admin:documents.ragSimThresholdHint', {
-                    defaultValue: 'Cosine-similarity cutoff. Chunks scoring at/above this are injected.',
+                  label={t('admin:documents.ragFullTextThreshold', { defaultValue: 'Full-inject threshold (tokens)' })}
+                  htmlFor="rag-threshold"
+                  hint={t('admin:documents.ragFullTextThresholdHint', {
+                    defaultValue:
+                      'A prose document (PDF / Office / Markdown / logs) at/below this estimated size is injected in full every turn; above it, the document is vectorized and only relevant chunks are retrieved.',
                   })}
                 >
                   <Input
-                    id="rag-sim"
+                    id="rag-threshold"
                     type="number"
                     min={0}
-                    max={1}
-                    step={0.05}
-                    placeholder="0.5"
-                    value={String(readNumber('rag_similarity_threshold', 0.5))}
+                    placeholder="8000"
+                    value={String(readNumber('rag_full_text_threshold', 8000))}
                     onChange={(e) =>
-                      setDraft({
-                        ...draft,
-                        rag_similarity_threshold: Math.min(1, Math.max(0, Number(e.target.value) || 0)),
-                      })
+                      setDraft({ ...draft, rag_full_text_threshold: Math.max(0, Number(e.target.value) || 0) })
                     }
                   />
                 </Field>
-              )}
-              <div className="border-t border-[var(--color-divider)] pt-5">
+                <Field
+                  label={t('admin:documents.ragCodeMaxLines', { defaultValue: 'Code / text full-inject cap (lines)' })}
+                  htmlFor="rag-code-lines"
+                  hint={t('admin:documents.ragCodeMaxLinesHint', {
+                    defaultValue:
+                      'Source code, config, .txt and unrecognized text formats at/below this many lines are injected in full (very long single-line files are size-scaled and may still be retrieved); above it they are vectorized and retrieved like other documents.',
+                  })}
+                >
+                  <Input
+                    id="rag-code-lines"
+                    type="number"
+                    min={1}
+                    placeholder="2000"
+                    value={String(readNumber('rag_code_full_text_max_lines', 2000))}
+                    onChange={(e) =>
+                      // ≥1: the backend treats 0/blank as "use the default (2000)",
+                      // so persisting a literal 0 would show 0 while acting as 2000.
+                      setDraft({ ...draft, rag_code_full_text_max_lines: Math.max(1, Number(e.target.value) || 1) })
+                    }
+                  />
+                </Field>
+                <Field
+                  label={t('admin:documents.ragTopK', { defaultValue: 'Retrieved chunks (Top-K)' })}
+                  htmlFor="rag-topk"
+                  hint={t('admin:documents.ragTopKHint', {
+                    defaultValue: 'How many chunks to retrieve for a vectorized document (when dynamic Top-K is off).',
+                  })}
+                >
+                  <Input
+                    id="rag-topk"
+                    type="number"
+                    min={1}
+                    placeholder="8"
+                    value={String(readNumber('rag_top_k', 8))}
+                    onChange={(e) => setDraft({ ...draft, rag_top_k: Math.max(1, Number(e.target.value) || 1) })}
+                  />
+                </Field>
                 <div className="flex items-center justify-between gap-4">
-                  <div className="min-w-0">
+                  <div>
                     <div className="text-sm text-[var(--color-fg)]">
-                      {t('admin:documents.ragRerankEnabled')}
+                      {t('admin:documents.ragDynamicTopk', { defaultValue: 'Dynamic Top-K (by similarity)' })}
                     </div>
-                    <div className="mt-0.5 max-w-3xl text-xs text-[var(--color-fg-subtle)]">
-                      {t('admin:documents.ragRerankEnabledHint')}
+                    <div className="mt-0.5 text-xs text-[var(--color-fg-subtle)]">
+                      {t('admin:documents.ragDynamicTopkHint', {
+                        defaultValue:
+                          'Instead of a fixed K, inject every retrieved chunk whose similarity clears the threshold.',
+                      })}
                     </div>
                   </div>
                   <Switch
-                    aria-label={t('admin:documents.ragRerankEnabled')}
-                    checked={readBool('rag_rerank_enabled', false)}
-                    onCheckedChange={(v) => setDraft({ ...draft, rag_rerank_enabled: v })}
+                    checked={readBool('rag_dynamic_topk', false)}
+                    onCheckedChange={(v) => setDraft({ ...draft, rag_dynamic_topk: v })}
                   />
                 </div>
-                {readBool('rag_rerank_enabled', false) && (
-                  <div className="mt-5 flex flex-col gap-5">
-                    <Field
-                      label={t('admin:documents.ragRerankBaseUrl')}
-                      htmlFor="rag-rerank-url"
-                      hint={t('admin:documents.ragRerankBaseUrlHint')}
-                    >
-                      <Input
-                        id="rag-rerank-url"
-                        type="url"
-                        placeholder="https://api.example.com/v1"
-                        value={readString('rag_rerank_api_url')}
-                        onChange={(e) => setDraft({ ...draft, rag_rerank_api_url: e.target.value })}
-                      />
-                    </Field>
-                    <Field
-                      label={t('admin:documents.ragRerankApiKey')}
-                      htmlFor="rag-rerank-api-key"
-                      hint={t('admin:documents.ragRerankApiKeyHint')}
-                    >
-                      <Input
-                        id="rag-rerank-api-key"
-                        type="password"
-                        autoComplete="off"
-                        placeholder="sk-..."
-                        value={readString('rag_rerank_api_key')}
-                        onChange={(e) => setDraft({ ...draft, rag_rerank_api_key: e.target.value })}
-                      />
-                    </Field>
-                    <Field
-                      label={t('admin:documents.ragRerankModel')}
-                      htmlFor="rag-rerank-model"
-                      hint={t('admin:documents.ragRerankModelHint')}
-                    >
-                      <Input
-                        id="rag-rerank-model"
-                        placeholder="BAAI/bge-reranker-v2-m3"
-                        value={readString('rag_rerank_model')}
-                        onChange={(e) => setDraft({ ...draft, rag_rerank_model: e.target.value })}
-                      />
-                    </Field>
-                  </div>
+                {readBool('rag_dynamic_topk', false) && (
+                  <Field
+                    label={t('admin:documents.ragSimThreshold', { defaultValue: 'Similarity threshold (0–1)' })}
+                    htmlFor="rag-sim"
+                    hint={t('admin:documents.ragSimThresholdHint', {
+                      defaultValue: 'Cosine-similarity cutoff. Chunks scoring at/above this are injected.',
+                    })}
+                  >
+                    <Input
+                      id="rag-sim"
+                      type="number"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      placeholder="0.5"
+                      value={String(readNumber('rag_similarity_threshold', 0.5))}
+                      onChange={(e) =>
+                        setDraft({
+                          ...draft,
+                          rag_similarity_threshold: Math.min(1, Math.max(0, Number(e.target.value) || 0)),
+                        })
+                      }
+                    />
+                  </Field>
                 )}
+                <div className="border-t border-[var(--color-divider)] pt-5">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="text-sm text-[var(--color-fg)]">
+                        {t('admin:documents.ragRerankEnabled')}
+                      </div>
+                      <div className="mt-0.5 max-w-3xl text-xs text-[var(--color-fg-subtle)]">
+                        {t('admin:documents.ragRerankEnabledHint')}
+                      </div>
+                    </div>
+                    <Switch
+                      aria-label={t('admin:documents.ragRerankEnabled')}
+                      checked={readBool('rag_rerank_enabled', false)}
+                      onCheckedChange={(v) => setDraft({ ...draft, rag_rerank_enabled: v })}
+                    />
+                  </div>
+                  {readBool('rag_rerank_enabled', false) && (
+                    <div className="mt-5 flex flex-col gap-5">
+                      <Field
+                        label={t('admin:documents.ragRerankBaseUrl')}
+                        htmlFor="rag-rerank-url"
+                        hint={t('admin:documents.ragRerankBaseUrlHint')}
+                      >
+                        <Input
+                          id="rag-rerank-url"
+                          type="url"
+                          placeholder="https://api.example.com/v1"
+                          value={readString('rag_rerank_api_url')}
+                          onChange={(e) => setDraft({ ...draft, rag_rerank_api_url: e.target.value })}
+                        />
+                      </Field>
+                      <Field
+                        label={t('admin:documents.ragRerankApiKey')}
+                        htmlFor="rag-rerank-api-key"
+                        hint={t('admin:documents.ragRerankApiKeyHint')}
+                      >
+                        <Input
+                          id="rag-rerank-api-key"
+                          type="password"
+                          autoComplete="off"
+                          placeholder="sk-..."
+                          value={readString('rag_rerank_api_key')}
+                          onChange={(e) => setDraft({ ...draft, rag_rerank_api_key: e.target.value })}
+                        />
+                      </Field>
+                      <Field
+                        label={t('admin:documents.ragRerankModel')}
+                        htmlFor="rag-rerank-model"
+                        hint={t('admin:documents.ragRerankModelHint')}
+                      >
+                        <Input
+                          id="rag-rerank-model"
+                          placeholder="BAAI/bge-reranker-v2-m3"
+                          value={readString('rag_rerank_model')}
+                          onChange={(e) => setDraft({ ...draft, rag_rerank_model: e.target.value })}
+                        />
+                      </Field>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          </div>
+            </SettingsBlock>
+          </SettingsSection>
 
           {/* MinerU ---------------------------------------------------------- */}
-          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5">
-            <h2 className="font-serif text-lg text-[var(--color-fg)]">{t('admin:settings.fields.mineruSection')}</h2>
-            <p className="mt-1 text-xs text-[var(--color-fg-subtle)]">{t('admin:settings.fields.mineruLead')}</p>
-            {!mineruStorageReady && (
-              <div className="mt-4 flex items-center gap-3 border-y border-[var(--color-divider)] py-3 text-[12px] text-[var(--color-warning)]">
-                <AlertTriangle size={15} className="shrink-0" aria-hidden />
-                <p className="min-w-0 flex-1">
-                  {t('admin:documents.mineruStorageRequired', {
-                    defaultValue: 'MinerU requires a complete S3 or Aliyun OSS configuration.',
-                  })}
-                </p>
-                <Link to="/admin/storage" className="shrink-0 font-medium underline underline-offset-4">
-                  {t('admin:documents.configureStorage', { defaultValue: 'Configure storage' })}
-                </Link>
+          <SettingsSection
+            title={t('admin:settings.fields.mineruSection')}
+            description={t('admin:settings.fields.mineruLead')}
+            className="mb-0"
+            bodyClassName="divide-y-0"
+          >
+            <SettingsBlock>
+              {!mineruStorageReady && (
+                <div className="flex items-center gap-3 border-y border-[var(--color-divider)] py-3 text-[12px] text-[var(--color-warning)]">
+                  <AlertTriangle size={15} className="shrink-0" aria-hidden />
+                  <p className="min-w-0 flex-1">
+                    {t('admin:documents.mineruStorageRequired', {
+                      defaultValue: 'MinerU requires a complete S3 or Aliyun OSS configuration.',
+                    })}
+                  </p>
+                  <Link to="/admin/storage" className="shrink-0 font-medium underline underline-offset-4">
+                    {t('admin:documents.configureStorage', { defaultValue: 'Configure storage' })}
+                  </Link>
+                </div>
+              )}
+              <div className="mt-4 flex flex-col gap-5">
+                <Field
+                  label={t('admin:settings.fields.mineruBaseUrl')}
+                  htmlFor="mineru-url"
+                  hint={t('admin:settings.fields.mineruBaseUrlHint')}
+                >
+                  <Input
+                    id="mineru-url"
+                    type="url"
+                    placeholder="https://mineru.net"
+                    value={readString('mineru_api_url')}
+                    onChange={(e) => setDraft({ ...draft, mineru_api_url: e.target.value })}
+                  />
+                </Field>
+                <Field
+                  label={t('admin:settings.fields.mineruToken')}
+                  htmlFor="mineru-token"
+                  hint={t('admin:settings.fields.mineruTokenHint')}
+                >
+                  <Input
+                    id="mineru-token"
+                    type="password"
+                    autoComplete="off"
+                    value={readString('mineru_api_token')}
+                    onChange={(e) => setDraft({ ...draft, mineru_api_token: e.target.value })}
+                  />
+                </Field>
               </div>
-            )}
-            <div className="mt-4 flex flex-col gap-5">
-              <Field
-                label={t('admin:settings.fields.mineruBaseUrl')}
-                htmlFor="mineru-url"
-                hint={t('admin:settings.fields.mineruBaseUrlHint')}
-              >
-                <Input
-                  id="mineru-url"
-                  type="url"
-                  placeholder="https://mineru.net"
-                  value={readString('mineru_api_url')}
-                  onChange={(e) => setDraft({ ...draft, mineru_api_url: e.target.value })}
-                />
-              </Field>
-              <Field
-                label={t('admin:settings.fields.mineruToken')}
-                htmlFor="mineru-token"
-                hint={t('admin:settings.fields.mineruTokenHint')}
-              >
-                <Input
-                  id="mineru-token"
-                  type="password"
-                  autoComplete="off"
-                  value={readString('mineru_api_token')}
-                  onChange={(e) => setDraft({ ...draft, mineru_api_token: e.target.value })}
-                />
-              </Field>
-            </div>
-          </div>
+            </SettingsBlock>
+          </SettingsSection>
 
           <div className="flex justify-end">
             <Button loading={saving} onClick={() => void save()}>

@@ -15,6 +15,7 @@ import { AdminSortableList } from '@/components/admin/AdminSortableList'
 import { toast } from '@/hooks/use-toast'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { useModels } from '@/store/models'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
 
 export default function AdminModelTags() {
   const { t } = useTranslation(['admin', 'common'])
@@ -129,16 +130,16 @@ export default function AdminModelTags() {
   }
 
   return (
-    <div className="mx-auto max-w-[76rem]">
+    <div>
       {/* This page has no top-nav entry of its own (it's reached via "Manage
           tags" on the model editor), so the nav still reads "Models". Mirror the
           model-editor's back link so admins can return to the list. */}
       <AdminDetailHeader backTo="/admin/models" backLabel={t('admin:models.backToList')} />
 
-      <header>
-        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">{t('admin:modelTags.title')}</h1>
-        <p className="mt-2 max-w-2xl text-sm text-[var(--color-fg-muted)]">{t('admin:modelTags.lead')}</p>
-      </header>
+      <AdminPageHeader
+        title={t('admin:modelTags.title')}
+        description={t('admin:modelTags.lead')}
+      />
 
       <section className="mt-8">
         <div className="flex flex-col gap-2 sm:flex-row">

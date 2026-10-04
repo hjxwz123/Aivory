@@ -17,6 +17,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Pagination } from '@/components/ui/pagination'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { formatDateTime } from '@/lib/utils'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
 
 const PAGE_SIZE = 50
 
@@ -115,9 +116,8 @@ export default function AdminUserLoginHistory() {
     <div>
       <AdminDetailHeader backTo="/admin/users" backLabel={t('admin:users.backToUsers')} />
 
-      <header>
-        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl" aria-busy={firstLoad}>
-          {firstLoad ? (
+      <AdminPageHeader
+        title={firstLoad ? (
             <span className="block" role="status" aria-live="polite">
               <span className="sr-only">{t('admin:common.loading')}</span>
               <span
@@ -130,18 +130,16 @@ export default function AdminUserLoginHistory() {
           ) : (
             t('admin:users.loginHistoryFallbackTitle')
           )}
-        </h1>
-        <p className="mt-2 max-w-2xl text-sm text-[var(--color-fg-muted)]">
-          {t('admin:users.loginHistoryLead')}
-        </p>
-      </header>
+        titleBusy={firstLoad}
+        description={t('admin:users.loginHistoryLead')}
+      />
 
       <section className="mt-6 sm:mt-8" aria-label={t('admin:users.viewLoginHistory')}>
         {loading ? (
           <PanelFallback />
         ) : error ? (
           <div
-            className="flex flex-col items-start gap-3 rounded-[10px] border border-[var(--color-danger)]/25 bg-[var(--color-danger-soft)] px-4 py-4 sm:flex-row sm:items-center sm:justify-between"
+            className="flex flex-col items-start gap-3 rounded-[8px] border border-[var(--color-danger)]/25 bg-[var(--color-danger-soft)] px-4 py-4 sm:flex-row sm:items-center sm:justify-between"
             role="alert"
           >
             <div className="flex min-w-0 items-start gap-2.5 text-sm text-[var(--color-danger)]">
@@ -159,7 +157,7 @@ export default function AdminUserLoginHistory() {
             </Button>
           </div>
         ) : rows.length === 0 ? (
-          <div className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)]">
+          <div className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)]">
             <EmptyState
               icon={<History size={20} aria-hidden />}
               title={t('admin:users.noLoginHistory')}
@@ -172,11 +170,11 @@ export default function AdminUserLoginHistory() {
             <div
               role="table"
               aria-label={t('admin:users.viewLoginHistory')}
-              className="hidden overflow-hidden rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] xl:block"
+              className="hidden overflow-hidden rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] xl:block"
             >
               <div
                 role="row"
-                className="grid grid-cols-[minmax(8rem,1.1fr)_minmax(6.5rem,.85fr)_minmax(7rem,1fr)_minmax(7rem,.8fr)_minmax(11rem,1.4fr)] gap-3 border-b border-[var(--color-divider)] bg-[var(--color-bg-muted)] px-4 py-2.5 text-[11.5px] font-medium text-[var(--color-fg-muted)]"
+                className="grid grid-cols-[minmax(8rem,1.1fr)_minmax(6.5rem,.85fr)_minmax(7rem,1fr)_minmax(7rem,.8fr)_minmax(11rem,1.4fr)] gap-3 border-b border-[var(--color-divider)] bg-[var(--color-bg-muted)] px-4 py-2.5 text-[12px] font-medium text-[var(--color-fg-muted)]"
               >
                 <span role="columnheader">{t('admin:users.loginHistory.time')}</span>
                 <span role="columnheader">{t('admin:users.loginHistory.ip')}</span>
@@ -213,7 +211,7 @@ export default function AdminUserLoginHistory() {
                         <span className="min-w-0">
                           <span className="block truncate font-medium text-[var(--color-fg)]">{parsedDevice.label}</span>
                           {entry.user_agent ? (
-                            <span className="mt-0.5 block truncate text-[11px] text-[var(--color-fg-subtle)]" title={entry.user_agent}>
+                            <span className="mt-0.5 block truncate text-[12px] text-[var(--color-fg-subtle)]" title={entry.user_agent}>
                               {entry.user_agent}
                             </span>
                           ) : null}
@@ -225,7 +223,7 @@ export default function AdminUserLoginHistory() {
               </div>
             </div>
 
-            <ul className="flex flex-col divide-y divide-[var(--color-divider)] overflow-hidden rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] xl:hidden">
+            <ul className="flex flex-col divide-y divide-[var(--color-divider)] overflow-hidden rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] xl:hidden">
               {rows.map((entry) => {
                 const parsedDevice = device(entry)
                 const DeviceIcon = parsedDevice.mobile ? Smartphone : Monitor
@@ -252,7 +250,7 @@ export default function AdminUserLoginHistory() {
                         <span className="min-w-0">
                           <span className="block font-medium text-[var(--color-fg)]">{parsedDevice.label}</span>
                           {entry.user_agent ? (
-                            <span className="mt-0.5 line-clamp-2 break-all text-[11px] leading-4" title={entry.user_agent}>
+                            <span className="mt-0.5 line-clamp-2 break-all text-[12px] leading-4" title={entry.user_agent}>
                               {entry.user_agent}
                             </span>
                           ) : null}

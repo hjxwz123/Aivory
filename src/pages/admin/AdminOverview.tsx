@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button'
 import { toast } from '@/hooks/use-toast'
 import { inputOutputTokens } from '@/lib/admin-analytics'
 import { useLanguage } from '@/store/language'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
 
 interface HealthCheck {
   key: string
@@ -211,15 +212,11 @@ export default function AdminOverview() {
     : null
 
   return (
-    <div className="mx-auto max-w-[76rem]">
-      <header>
-        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">
-          {t('admin:overview.title', { defaultValue: 'Admin overview' })}
-        </h1>
-        <p className="mt-2 max-w-2xl text-sm text-[var(--color-fg-muted)]">
-          {t('admin:overview.lead', { defaultValue: 'Configuration health and the main resources managed by this deployment.' })}
-        </p>
-      </header>
+    <div>
+      <AdminPageHeader
+        title={t('admin:overview.title', { defaultValue: 'Admin overview' })}
+        description={t('admin:overview.lead', { defaultValue: 'Configuration health and the main resources managed by this deployment.' })}
+      />
 
       <div className="mt-8 grid grid-cols-2 border-y border-[var(--color-divider)] lg:grid-cols-4">
         {summary.map((item) => (

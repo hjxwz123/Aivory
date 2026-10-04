@@ -37,6 +37,7 @@ import {
   oauthProviderErrorTranslationKey,
   OAUTH_PROVIDER_KINDS,
 } from '@/lib/oauth'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
 
 type Editable = Partial<ApiOAuthProvider> & { client_secret?: string }
 
@@ -201,21 +202,26 @@ export default function AdminOAuth() {
 
   return (
     <div>
-      <header className="flex flex-col items-start gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">{t('admin:oauth.title')}</h1>
-          <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('admin:oauth.lead')}</p>
-        </div>
-        <Button className="min-h-[var(--tap-min)] w-full sm:min-h-0 sm:w-auto" leadingIcon={<Plus size={15} aria-hidden />} onClick={openNew}>
-          {t('admin:oauth.new')}
-        </Button>
-      </header>
+      <AdminPageHeader
+        title={t('admin:oauth.title')}
+        description={t('admin:oauth.lead')}
+        actions={(
+          <Button
+            size="sm"
+            className="max-sm:min-h-[var(--tap-min)] max-sm:flex-1"
+            leadingIcon={<Plus size={15} aria-hidden />}
+            onClick={openNew}
+          >
+            {t('admin:oauth.new')}
+          </Button>
+        )}
+      />
 
       <section className="mt-8">
         {loading ? (
           <PanelFallback />
         ) : rows.length === 0 ? (
-          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center text-sm text-[var(--color-fg-muted)]">
+          <div className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center text-sm text-[var(--color-fg-muted)]">
             {t('admin:oauth.empty')}
           </div>
         ) : (
@@ -518,7 +524,7 @@ export default function AdminOAuth() {
                 </>
               ) : null}
 
-              <label className="flex items-center justify-between rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
+              <label className="flex items-center justify-between rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
                 <span className="text-sm text-[var(--color-fg)]">{t('admin:oauth.fields.enabled')}</span>
                 <Switch
                   checked={editor.draft.enabled ?? true}

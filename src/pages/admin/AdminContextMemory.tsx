@@ -11,6 +11,8 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from '@/hooks/use-toast'
 import { PanelFallback } from '@/components/ui/panel-fallback'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
+import { SettingsActions, SettingsBlock, SettingsRow, SettingsSection } from '@/components/settings/settings-section'
 
 type Settings = Record<string, unknown>
 
@@ -124,12 +126,10 @@ export default function AdminContextMemory() {
   const selectedCompactionModelExists = models.some((model) => model.id === compactionModelId)
 
   return (
-    <div className="mx-auto max-w-[76rem]">
-      <header>
-        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">
-          {t('admin:menu.contextMemory', { defaultValue: 'Context and memory' })}
-        </h1>
-      </header>
+    <div>
+      <AdminPageHeader
+        title={t('admin:menu.contextMemory', { defaultValue: 'Context and memory' })}
+      />
 
       {settingsLoading ? (
         <PanelFallback />
@@ -149,261 +149,259 @@ export default function AdminContextMemory() {
           </Button>
         </section>
       ) : (
-        <section className="mt-8 flex flex-col gap-5">
-          <ToggleRow
-            label={t('admin:settings.fields.compactionEnabled')}
-            checked={compactionEnabled}
-            onChange={(value) => setDraft((current) => ({ ...current, compaction_enabled: value }))}
-          />
-
-          {compactionEnabled && (
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <Field
-                label={t('admin:settings.fields.compactionModel')}
-                htmlFor="context-compaction-model"
-                hint={modelsError ? undefined : t('admin:settings.fields.compactionModelHint')}
-                className="md:col-span-2"
-              >
-                <Select
-                  value={compactionModelId || 'inherit'}
-                  disabled={modelsLoading || Boolean(modelsError)}
-                  onValueChange={(value) =>
-                    setDraft((current) => ({
-                      ...current,
-                      context_compaction_model_id: value === 'inherit' ? '' : value,
-                    }))
-                  }
-                >
-                  <SelectTrigger
-                    id="context-compaction-model"
-                    aria-busy={modelsLoading || undefined}
+        <div className="mt-8">
+          <SettingsSection title={t('admin:settings.fields.compactionSection', { defaultValue: 'Context compaction' })}>
+            <SettingsRow label={t('admin:settings.fields.compactionEnabled')} htmlFor="compaction-enabled">
+              <Switch
+                id="compaction-enabled"
+                checked={compactionEnabled}
+                onCheckedChange={(value) => setDraft((current) => ({ ...current, compaction_enabled: value }))}
+              />
+            </SettingsRow>
+              {compactionEnabled && (
+                <SettingsBlock className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <Field
+                    label={t('admin:settings.fields.compactionModel')}
+                    htmlFor="context-compaction-model"
+                    hint={modelsError ? undefined : t('admin:settings.fields.compactionModelHint')}
+                    className="md:col-span-2"
                   >
-                    <SelectValue placeholder={t('admin:settings.fields.pickModel')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="inherit">
-                      {t('admin:settings.fields.currentConversationModel')}
-                    </SelectItem>
-                    {compactionModelId && !selectedCompactionModelExists ? (
-                      <SelectItem value={compactionModelId}>
-                        {t('admin:settings.fields.compactionModelUnavailable', { id: compactionModelId })}
-                      </SelectItem>
-                    ) : null}
-                    {models.map((model) => (
-                      <SelectItem key={model.id} value={model.id}>
-                        {model.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {modelsLoading ? (
-                  <p
-                    className="inline-flex items-center gap-2 text-xs text-[var(--color-fg-subtle)]"
-                    role="status"
-                  >
-                    <LoaderCircle size={13} className="animate-spin" aria-hidden />
-                    {t('admin:settings.fields.compactionModelsLoading')}
-                  </p>
-                ) : modelsError ? (
-                  <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between" role="alert">
-                    <p className="text-xs text-[var(--color-danger)]">{modelsError}</p>
-                    <Button
-                      variant="secondary"
-                      size="xs"
-                      leadingIcon={<RefreshCw size={13} aria-hidden />}
-                      onClick={() => void loadModels()}
+                    <Select
+                      value={compactionModelId || 'inherit'}
+                      disabled={modelsLoading || Boolean(modelsError)}
+                      onValueChange={(value) =>
+                        setDraft((current) => ({
+                          ...current,
+                          context_compaction_model_id: value === 'inherit' ? '' : value,
+                        }))
+                      }
                     >
-                      {t('common:actions.tryAgain')}
-                    </Button>
-                  </div>
-                ) : models.length === 0 ? (
-                  <p className="text-xs text-[var(--color-fg-subtle)]">
-                    {t('admin:settings.fields.compactionModelsEmpty')}
-                  </p>
-                ) : null}
-              </Field>
+                      <SelectTrigger
+                        id="context-compaction-model"
+                        aria-busy={modelsLoading || undefined}
+                      >
+                        <SelectValue placeholder={t('admin:settings.fields.pickModel')} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="inherit">
+                          {t('admin:settings.fields.currentConversationModel')}
+                        </SelectItem>
+                        {compactionModelId && !selectedCompactionModelExists ? (
+                          <SelectItem value={compactionModelId}>
+                            {t('admin:settings.fields.compactionModelUnavailable', { id: compactionModelId })}
+                          </SelectItem>
+                        ) : null}
+                        {models.map((model) => (
+                          <SelectItem key={model.id} value={model.id}>
+                            {model.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {modelsLoading ? (
+                      <p
+                        className="inline-flex items-center gap-2 text-xs text-[var(--color-fg-subtle)]"
+                        role="status"
+                      >
+                        <LoaderCircle size={13} className="animate-spin" aria-hidden />
+                        {t('admin:settings.fields.compactionModelsLoading')}
+                      </p>
+                    ) : modelsError ? (
+                      <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between" role="alert">
+                        <p className="text-xs text-[var(--color-danger)]">{modelsError}</p>
+                        <Button
+                          variant="secondary"
+                          size="xs"
+                          leadingIcon={<RefreshCw size={13} aria-hidden />}
+                          onClick={() => void loadModels()}
+                        >
+                          {t('common:actions.tryAgain')}
+                        </Button>
+                      </div>
+                    ) : models.length === 0 ? (
+                      <p className="text-xs text-[var(--color-fg-subtle)]">
+                        {t('admin:settings.fields.compactionModelsEmpty')}
+                      </p>
+                    ) : null}
+                  </Field>
 
-              <Field
-                label={t('admin:settings.fields.tokenTrigger')}
-                htmlFor="compaction-token-trigger"
-                hint={t('admin:settings.fields.tokenTriggerHint')}
-              >
-                <Input
-                  id="compaction-token-trigger"
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={String(readNumber('compaction_token_trigger', 32000))}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      compaction_token_trigger: Math.max(0, Math.floor(Number(event.target.value) || 0)),
-                    }))
-                  }
-                />
-              </Field>
-              <Field
-                label={t('admin:settings.fields.tokenTargetPercentage')}
-                htmlFor="compaction-token-target-percentage"
-                hint={t('admin:settings.fields.tokenTargetPercentageHint')}
-              >
-                <Input
-                  id="compaction-token-target-percentage"
-                  type="number"
-                  min={25}
-                  max={80}
-                  step={1}
-                  value={String(readNumber('compaction_token_target_percentage', 60))}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      compaction_token_target_percentage: Math.floor(Number(event.target.value) || 0),
-                    }))
-                  }
-                />
-              </Field>
-              <Field
-                label={t('admin:settings.fields.tokenCap')}
-                htmlFor="compaction-token-cap"
-                hint={t('admin:settings.fields.tokenCapHint')}
-              >
-                <Input
-                  id="compaction-token-cap"
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={String(readNumber('compaction_token_cap', 80000))}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      compaction_token_cap: Math.max(0, Math.floor(Number(event.target.value) || 0)),
-                    }))
-                  }
-                />
-              </Field>
+                  <Field
+                    label={t('admin:settings.fields.tokenTrigger')}
+                    htmlFor="compaction-token-trigger"
+                    hint={t('admin:settings.fields.tokenTriggerHint')}
+                  >
+                    <Input
+                      id="compaction-token-trigger"
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={String(readNumber('compaction_token_trigger', 32000))}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          compaction_token_trigger: Math.max(0, Math.floor(Number(event.target.value) || 0)),
+                        }))
+                      }
+                    />
+                  </Field>
+                  <Field
+                    label={t('admin:settings.fields.tokenTargetPercentage')}
+                    htmlFor="compaction-token-target-percentage"
+                    hint={t('admin:settings.fields.tokenTargetPercentageHint')}
+                  >
+                    <Input
+                      id="compaction-token-target-percentage"
+                      type="number"
+                      min={25}
+                      max={80}
+                      step={1}
+                      value={String(readNumber('compaction_token_target_percentage', 60))}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          compaction_token_target_percentage: Math.floor(Number(event.target.value) || 0),
+                        }))
+                      }
+                    />
+                  </Field>
+                  <Field
+                    label={t('admin:settings.fields.tokenCap')}
+                    htmlFor="compaction-token-cap"
+                    hint={t('admin:settings.fields.tokenCapHint')}
+                  >
+                    <Input
+                      id="compaction-token-cap"
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={String(readNumber('compaction_token_cap', 80000))}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          compaction_token_cap: Math.max(0, Math.floor(Number(event.target.value) || 0)),
+                        }))
+                      }
+                    />
+                  </Field>
 
-              <Field
-                label={t('admin:settings.fields.keep')}
-                htmlFor="keep-recent-rounds"
-                hint={t('admin:settings.fields.keepHint')}
-              >
-                <Input
-                  id="keep-recent-rounds"
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={String(readNumber('keep_recent_rounds', 6))}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      keep_recent_rounds: Math.max(1, Math.floor(Number(event.target.value) || 1)),
-                    }))
-                  }
-                />
-              </Field>
-              <Field
-                label={t('admin:settings.fields.retentionPercentage')}
-                htmlFor="compaction-retention-percentage"
-                hint={t('admin:settings.fields.retentionPercentageHint')}
-              >
-                <Input
-                  id="compaction-retention-percentage"
-                  type="number"
-                  min={10}
-                  max={50}
-                  step={1}
-                  value={String(readNumber('compaction_retention_percentage', 40))}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      compaction_retention_percentage: Math.floor(Number(event.target.value) || 0),
-                    }))
-                  }
-                />
-              </Field>
+                  <Field
+                    label={t('admin:settings.fields.keep')}
+                    htmlFor="keep-recent-rounds"
+                    hint={t('admin:settings.fields.keepHint')}
+                  >
+                    <Input
+                      id="keep-recent-rounds"
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={String(readNumber('keep_recent_rounds', 6))}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          keep_recent_rounds: Math.max(1, Math.floor(Number(event.target.value) || 1)),
+                        }))
+                      }
+                    />
+                  </Field>
+                  <Field
+                    label={t('admin:settings.fields.retentionPercentage')}
+                    htmlFor="compaction-retention-percentage"
+                    hint={t('admin:settings.fields.retentionPercentageHint')}
+                  >
+                    <Input
+                      id="compaction-retention-percentage"
+                      type="number"
+                      min={10}
+                      max={50}
+                      step={1}
+                      value={String(readNumber('compaction_retention_percentage', 40))}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          compaction_retention_percentage: Math.floor(Number(event.target.value) || 0),
+                        }))
+                      }
+                    />
+                  </Field>
 
-              <Field
-                label={t('admin:settings.fields.sumTokens')}
-                htmlFor="summary-max-tokens"
-                hint={t('admin:settings.fields.sumTokensHint')}
-              >
-                <Input
-                  id="summary-max-tokens"
-                  type="number"
-                  min={256}
-                  step={1}
-                  value={String(readNumber('summary_max_tokens', 8192))}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      summary_max_tokens: Math.max(256, Math.floor(Number(event.target.value) || 256)),
-                    }))
-                  }
-                />
-              </Field>
-              <Field
-                label={t('admin:settings.fields.compactionRequestTokens')}
-                htmlFor="compaction-request-max-tokens"
-                hint={t('admin:settings.fields.compactionRequestTokensHint')}
-              >
-                <Input
-                  id="compaction-request-max-tokens"
-                  type="number"
-                  min={8192}
-                  step={1024}
-                  value={String(readNumber('compaction_request_max_tokens', 32768))}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      compaction_request_max_tokens: Math.max(8192, Math.floor(Number(event.target.value) || 8192)),
-                    }))
-                  }
-                />
-              </Field>
+                  <Field
+                    label={t('admin:settings.fields.sumTokens')}
+                    htmlFor="summary-max-tokens"
+                    hint={t('admin:settings.fields.sumTokensHint')}
+                  >
+                    <Input
+                      id="summary-max-tokens"
+                      type="number"
+                      min={256}
+                      step={1}
+                      value={String(readNumber('summary_max_tokens', 8192))}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          summary_max_tokens: Math.max(256, Math.floor(Number(event.target.value) || 256)),
+                        }))
+                      }
+                    />
+                  </Field>
+                  <Field
+                    label={t('admin:settings.fields.compactionRequestTokens')}
+                    htmlFor="compaction-request-max-tokens"
+                    hint={t('admin:settings.fields.compactionRequestTokensHint')}
+                  >
+                    <Input
+                      id="compaction-request-max-tokens"
+                      type="number"
+                      min={8192}
+                      step={1024}
+                      value={String(readNumber('compaction_request_max_tokens', 32768))}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          compaction_request_max_tokens: Math.max(8192, Math.floor(Number(event.target.value) || 8192)),
+                        }))
+                      }
+                    />
+                  </Field>
 
-              <Field
-                label={t('admin:settings.fields.compactionPrompt')}
-                htmlFor="context-compaction-prompt"
-                hint={t('admin:settings.fields.compactionPromptHint')}
-                className="md:col-span-2"
-              >
-                <Textarea
-                  id="context-compaction-prompt"
-                  rows={7}
-                  maxLength={16384}
-                  value={readString('context_compaction_prompt')}
-                  onChange={(event) =>
-                    setDraft((current) => ({ ...current, context_compaction_prompt: event.target.value }))
-                  }
-                  placeholder={t('admin:settings.fields.compactionPromptPlaceholder')}
-                  className="min-h-[10rem] font-mono text-[12px] leading-relaxed"
-                />
-              </Field>
-            </div>
-          )}
+                  <Field
+                    label={t('admin:settings.fields.compactionPrompt')}
+                    htmlFor="context-compaction-prompt"
+                    hint={t('admin:settings.fields.compactionPromptHint')}
+                    className="md:col-span-2"
+                  >
+                    <Textarea
+                      id="context-compaction-prompt"
+                      rows={7}
+                      maxLength={16384}
+                      value={readString('context_compaction_prompt')}
+                      onChange={(event) =>
+                        setDraft((current) => ({ ...current, context_compaction_prompt: event.target.value }))
+                      }
+                      placeholder={t('admin:settings.fields.compactionPromptPlaceholder')}
+                      className="min-h-[10rem] font-mono text-[12px] leading-relaxed"
+                    />
+                  </Field>
+                </SettingsBlock>
+              )}
+          </SettingsSection>
 
-          <ToggleRow
-            label={t('admin:settings.fields.memoryEnabled')}
-            checked={readBool('memory_enabled', true)}
-            onChange={(value) => setDraft((current) => ({ ...current, memory_enabled: value }))}
-          />
+          <SettingsSection title={t('admin:settings.fields.memorySection', { defaultValue: 'Memory' })}>
+            <SettingsRow label={t('admin:settings.fields.memoryEnabled')} htmlFor="memory-enabled">
+              <Switch
+                id="memory-enabled"
+                checked={readBool('memory_enabled', true)}
+                onCheckedChange={(value) => setDraft((current) => ({ ...current, memory_enabled: value }))}
+              />
+            </SettingsRow>
+          </SettingsSection>
 
-          <div className="flex justify-end">
+          <SettingsActions>
             <Button loading={saving} onClick={() => void save()}>
               {t('common:actions.save')}
             </Button>
-          </div>
-        </section>
+          </SettingsActions>
+        </div>
       )}
     </div>
-  )
-}
-
-function ToggleRow({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
-  return (
-    <label className="flex items-center justify-between rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
-      <span className="text-sm">{label}</span>
-      <Switch checked={checked} onCheckedChange={onChange} />
-    </label>
   )
 }

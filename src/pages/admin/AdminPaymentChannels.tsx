@@ -27,6 +27,7 @@ import { toast } from '@/hooks/use-toast'
 import { updatePaymentProviderCurrencyConfig } from '@/lib/payment-channel-config'
 import { adminPaymentChannelErrorKey } from '@/lib/payment-errors'
 import { formatDateTime } from '@/lib/utils'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
 
 type ChannelDraft = Pick<ApiPaymentChannel, 'name' | 'provider' | 'environment' | 'config' | 'enabled'>
   & Partial<Pick<ApiPaymentChannel, 'id' | 'webhook_url'>>
@@ -447,35 +448,36 @@ export default function AdminPaymentChannels() {
 
   return (
     <div className="min-w-0 max-w-full font-sans">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">
-            {t('admin:paymentChannels.title')}
-          </h1>
-          <p className="mt-1 max-w-2xl text-[13px] leading-5 text-[var(--color-fg-muted)]">
-            {t('admin:paymentChannels.lead')}
-          </p>
-        </div>
-        <Button className="rounded-[8px] self-start max-sm:h-11 sm:self-auto" size="sm" leadingIcon={<Plus size={14} aria-hidden />} onClick={openNew}>
-          {t('admin:paymentChannels.new')}
-        </Button>
-      </header>
+      <AdminPageHeader
+        title={t('admin:paymentChannels.title')}
+        description={t('admin:paymentChannels.lead')}
+        actions={(
+          <Button
+            size="sm"
+            className="max-sm:min-h-[var(--tap-min)] max-sm:flex-1"
+            leadingIcon={<Plus size={15} aria-hidden />}
+            onClick={openNew}
+          >
+            {t('admin:paymentChannels.new')}
+          </Button>
+        )}
+      />
 
       <section className="mt-5">
         {loading ? (
           <PanelFallback />
         ) : loadError ? (
-          <div className="flex flex-col items-start gap-3 rounded-xl border border-[var(--color-danger)]/25 bg-[var(--color-danger-soft)] px-4 py-3 text-[13px] text-[var(--color-danger)] sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col items-start gap-3 rounded-[12px] border border-[var(--color-danger)]/25 bg-[var(--color-danger-soft)] px-4 py-3 text-[13px] text-[var(--color-danger)] sm:flex-row sm:items-center sm:justify-between">
             <span>{loadError}</span>
-            <Button className="rounded-[8px]" variant="secondary" size="sm" leadingIcon={<RefreshCw size={13} aria-hidden />} onClick={() => void load()}>
+            <Button  variant="secondary" size="sm" leadingIcon={<RefreshCw size={13} aria-hidden />} onClick={() => void load()}>
               {t('admin:paymentChannels.retry')}
             </Button>
           </div>
         ) : rows.length === 0 ? (
-          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center">
+          <div className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center">
             <p className="text-sm font-medium text-[var(--color-fg)]">{t('admin:paymentChannels.emptyTitle')}</p>
             <p className="mx-auto mt-1 max-w-lg text-[13px] text-[var(--color-fg-muted)]">{t('admin:paymentChannels.empty')}</p>
-            <Button className="mt-4 rounded-[8px]" size="sm" onClick={openNew}>{t('admin:paymentChannels.new')}</Button>
+            <Button className="mt-4" size="sm" onClick={openNew}>{t('admin:paymentChannels.new')}</Button>
           </div>
         ) : (
           <AdminSortableList
@@ -501,7 +503,7 @@ export default function AdminPaymentChannels() {
                     {channelSummary(row)} · {t('admin:paymentChannels.updatedAt', { date: formatDateTime(timestamp(row.updated_at)) })}
                   </p>
                   {row.webhook_url ? (
-                    <div className="mt-1 flex min-w-0 items-center gap-1 text-[11px] text-[var(--color-fg-subtle)]">
+                    <div className="mt-1 flex min-w-0 items-center gap-1 text-[12px] text-[var(--color-fg-subtle)]">
                       <code className="min-w-0 flex-1 truncate" title={row.webhook_url}>{row.webhook_url}</code>
                       <button
                         type="button"
@@ -517,7 +519,7 @@ export default function AdminPaymentChannels() {
                 </div>
                 <div className="flex items-center gap-1">
                   <Button
-                    className="rounded-[8px] max-sm:size-11"
+                    className="max-sm:size-11"
                     variant="ghost"
                     size="icon"
                     title={t('admin:common.edit')}
@@ -527,7 +529,7 @@ export default function AdminPaymentChannels() {
                     <Pencil size={14} aria-hidden />
                   </Button>
                   <Button
-                    className="rounded-[8px] max-sm:size-11"
+                    className="max-sm:size-11"
                     variant="ghost"
                     size="icon"
                     title={t('admin:common.remove')}
@@ -576,7 +578,7 @@ export default function AdminPaymentChannels() {
                   <Input
                     id="payment-channel-name"
                     required
-                    wrapperClassName="rounded-[8px] max-sm:h-11"
+                    wrapperClassName="max-sm:h-11"
                     value={editor.draft.name}
                     onChange={(event) => setDraft({ name: event.target.value })}
                     placeholder={t('admin:paymentChannels.fields.namePlaceholder')}
@@ -593,7 +595,7 @@ export default function AdminPaymentChannels() {
                       setDraft({ provider, environment: defaultEnvironment(provider), config: emptyConfig(provider) })
                     }}
                   >
-                    <SelectTrigger id="payment-channel-provider" className="rounded-[8px] max-sm:h-11">
+                    <SelectTrigger id="payment-channel-provider" className="max-sm:h-11">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -610,7 +612,7 @@ export default function AdminPaymentChannels() {
                     value={editor.draft.environment}
                     onValueChange={(value) => setEnvironment(value as ApiPaymentEnvironment)}
                   >
-                    <SelectTrigger id="payment-channel-environment" className="rounded-[8px] max-sm:h-11">
+                    <SelectTrigger id="payment-channel-environment" className="max-sm:h-11">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -626,13 +628,13 @@ export default function AdminPaymentChannels() {
                   <div className="flex min-w-0 gap-1.5">
                     <Input
                       readOnly
-                      wrapperClassName="min-w-0 flex-1 rounded-[8px] max-sm:h-11"
+                      wrapperClassName="min-w-0 flex-1 max-sm:h-11"
                       className="font-mono text-[12px]"
                       value={editor.draft.webhook_url}
                       onFocus={(event) => event.currentTarget.select()}
                     />
                     <Button
-                      className="rounded-[8px] max-sm:size-11"
+                      className="max-sm:size-11"
                       variant="secondary"
                       size="icon"
                       title={copiedWebhook === 'editor' ? t('admin:paymentChannels.copied') : t('admin:paymentChannels.copyWebhook')}
@@ -651,7 +653,7 @@ export default function AdminPaymentChannels() {
                     <span>{prepareError || t('admin:paymentChannels.errors.callbackLoadFailed')}</span>
                     <Button
                       type="button"
-                      className="shrink-0 rounded-[8px]"
+                      className="shrink-0"
                       variant="ghost"
                       size="xs"
                       leadingIcon={<RefreshCw size={12} aria-hidden />}
@@ -671,7 +673,7 @@ export default function AdminPaymentChannels() {
                       type="password"
                       required
                       autoComplete="new-password"
-                      wrapperClassName="rounded-[8px] max-sm:h-11"
+                      wrapperClassName="max-sm:h-11"
                       value={configString(editor.draft.config, 'secret_key')}
                       onChange={(event) => setConfig('secret_key', event.target.value)}
                       placeholder="sk_live_…"
@@ -687,7 +689,7 @@ export default function AdminPaymentChannels() {
                       type="password"
                       required={editor.draft.enabled}
                       autoComplete="new-password"
-                      wrapperClassName="rounded-[8px] max-sm:h-11"
+                      wrapperClassName="max-sm:h-11"
                       value={configString(editor.draft.config, 'webhook_secret')}
                       onChange={(event) => setConfig('webhook_secret', event.target.value)}
                       placeholder="whsec_…"
@@ -703,7 +705,7 @@ export default function AdminPaymentChannels() {
                       id="payment-channel-epay-url"
                       type="url"
                       required
-                      wrapperClassName="rounded-[8px] max-sm:h-11"
+                      wrapperClassName="max-sm:h-11"
                       value={configString(editor.draft.config, 'gateway_url')}
                       onChange={(event) => setConfig('gateway_url', event.target.value)}
                       placeholder="https://pay.example.com"
@@ -714,7 +716,7 @@ export default function AdminPaymentChannels() {
                       <Input
                         id="payment-channel-epay-merchant"
                         required
-                        wrapperClassName="rounded-[8px] max-sm:h-11"
+                        wrapperClassName="max-sm:h-11"
                         value={configString(editor.draft.config, 'merchant_id')}
                         onChange={(event) => setConfig('merchant_id', event.target.value)}
                       />
@@ -723,7 +725,7 @@ export default function AdminPaymentChannels() {
                       <Input
                         id="payment-channel-epay-currency"
                         required
-                        wrapperClassName="rounded-[8px] max-sm:h-11"
+                        wrapperClassName="max-sm:h-11"
                         className="uppercase"
                         maxLength={3}
                         value={configString(editor.draft.config, 'currency')}
@@ -749,7 +751,7 @@ export default function AdminPaymentChannels() {
                         type="text"
                         inputMode="decimal"
                         required
-                        wrapperClassName="rounded-[8px] max-sm:h-11"
+                        wrapperClassName="max-sm:h-11"
                         className="font-mono tabular-nums"
                         value={configString(editor.draft.config, 'conversion_rate')}
                         onChange={(event) => setConfig('conversion_rate', event.target.value)}
@@ -763,7 +765,7 @@ export default function AdminPaymentChannels() {
                       type="password"
                       required
                       autoComplete="new-password"
-                      wrapperClassName="rounded-[8px] max-sm:h-11"
+                      wrapperClassName="max-sm:h-11"
                       value={configString(editor.draft.config, 'merchant_key')}
                       onChange={(event) => setConfig('merchant_key', event.target.value)}
                     />
@@ -778,7 +780,7 @@ export default function AdminPaymentChannels() {
                       <Input
                         id="payment-channel-waffo-merchant"
                         required
-                        wrapperClassName="rounded-[8px] max-sm:h-11"
+                        wrapperClassName="max-sm:h-11"
                         value={configString(editor.draft.config, 'merchant_id')}
                         onChange={(event) => setConfig('merchant_id', event.target.value)}
                       />
@@ -787,7 +789,7 @@ export default function AdminPaymentChannels() {
                       <Input
                         id="payment-channel-waffo-store"
                         required
-                        wrapperClassName="rounded-[8px] max-sm:h-11"
+                        wrapperClassName="max-sm:h-11"
                         className="font-mono text-[13px]"
                         value={configString(editor.draft.config, 'store_id')}
                         onChange={(event) => setConfig('store_id', event.target.value)}
@@ -806,7 +808,7 @@ export default function AdminPaymentChannels() {
                       <Input
                         id="payment-channel-waffo-product"
                         required
-                        wrapperClassName="rounded-[8px] max-sm:h-11"
+                        wrapperClassName="max-sm:h-11"
                         className="font-mono text-[13px]"
                         value={configString(editor.draft.config, 'product_id')}
                         onChange={(event) => setConfig('product_id', event.target.value)}
@@ -821,7 +823,7 @@ export default function AdminPaymentChannels() {
                       <Input
                         id="payment-channel-waffo-currency"
                         required
-                        wrapperClassName="rounded-[8px] max-sm:h-11"
+                        wrapperClassName="max-sm:h-11"
                         className="uppercase"
                         maxLength={3}
                         value={configString(editor.draft.config, 'currency')}
@@ -847,7 +849,7 @@ export default function AdminPaymentChannels() {
                         type="text"
                         inputMode="decimal"
                         required
-                        wrapperClassName="rounded-[8px] max-sm:h-11"
+                        wrapperClassName="max-sm:h-11"
                         className="font-mono tabular-nums"
                         value={configString(editor.draft.config, 'conversion_rate')}
                         onChange={(event) => setConfig('conversion_rate', event.target.value)}
@@ -861,7 +863,7 @@ export default function AdminPaymentChannels() {
                         id="payment-channel-waffo-private"
                         required
                         rows={4}
-                        className="rounded-[8px] font-mono text-[12px]"
+                        className="font-mono text-[12px]"
                         value={configString(editor.draft.config, 'private_key')}
                         onChange={(event) => setConfig('private_key', event.target.value)}
                       />
@@ -870,7 +872,7 @@ export default function AdminPaymentChannels() {
                       <Textarea
                         id="payment-channel-waffo-webhook-public"
                         rows={4}
-                        className="rounded-[8px] font-mono text-[12px]"
+                        className="font-mono text-[12px]"
                         value={configString(editor.draft.config, 'webhook_public_key')}
                         onChange={(event) => setConfig('webhook_public_key', event.target.value)}
                       />
@@ -893,7 +895,7 @@ export default function AdminPaymentChannels() {
                 >
                   <span>{saveError.message}</span>
                   {saveError.code === 'payment_channel_has_pending_orders' ? (
-                    <Button asChild type="button" size="xs" variant="secondary" className="shrink-0 rounded-[8px]">
+                    <Button asChild type="button" size="xs" variant="secondary" className="shrink-0">
                       <Link to="/admin/payment-orders">{t('admin:paymentChannels.resolvePendingOrders')}</Link>
                     </Button>
                   ) : null}
@@ -905,7 +907,7 @@ export default function AdminPaymentChannels() {
               {editor.row?.enabled ? (
                 <Button
                   type="button"
-                  className="mr-auto rounded-[8px]"
+                  className="mr-auto"
                   variant="secondary"
                   leadingIcon={<PowerOff size={14} aria-hidden />}
                   loading={disabling}
@@ -915,12 +917,12 @@ export default function AdminPaymentChannels() {
                   {t('admin:paymentChannels.disableAction')}
                 </Button>
               ) : null}
-              <Button className="rounded-[8px]" variant="ghost" disabled={saving || disabling} onClick={() => setEditor((current) => ({ ...current, open: false }))}>
+              <Button  variant="ghost" disabled={saving || disabling} onClick={() => setEditor((current) => ({ ...current, open: false }))}>
                 {t('common:actions.cancel')}
               </Button>
               <Button
                 type="submit"
-                className="rounded-[8px]"
+                
                 loading={saving}
                 disabled={disabling || (!editor.row && (preparingWebhook || !editor.draft.webhook_url))}
               >
@@ -940,8 +942,8 @@ export default function AdminPaymentChannels() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="max-sm:[&_button]:!h-11">
-            <Button className="rounded-[8px]" variant="ghost" disabled={deleting} onClick={() => setConfirmDelete(null)}>{t('common:actions.cancel')}</Button>
-            <Button className="rounded-[8px]" variant="destructive" loading={deleting} onClick={() => confirmDelete && void remove(confirmDelete)}>{t('common:actions.delete')}</Button>
+            <Button  variant="ghost" disabled={deleting} onClick={() => setConfirmDelete(null)}>{t('common:actions.cancel')}</Button>
+            <Button  variant="destructive" loading={deleting} onClick={() => confirmDelete && void remove(confirmDelete)}>{t('common:actions.delete')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

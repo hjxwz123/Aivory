@@ -25,6 +25,7 @@ import { useModels } from '@/store/models'
 import { toLocalMessage } from '@/store/conversations'
 import { cn } from '@/lib/utils'
 import { PanelFallback } from '@/components/ui/panel-fallback'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
 
 function formatStamp(unixMs: number): string {
   if (!unixMs) return ''
@@ -100,26 +101,25 @@ export default function AdminUserConversation() {
         backLabel={t('users.backToConversations')}
       />
 
-      <header>
-        <div className="flex items-center gap-2 flex-wrap">
-          <h1 className="truncate font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">
-            {headerTitle}
-          </h1>
-          {conv?.archived ? (
-            <Badge size="xs" variant="neutral">{t('users.archived')}</Badge>
-          ) : null}
-        </div>
-        <p className="mt-2 text-[var(--color-fg-muted)] text-sm">
-          {[userLabel, modelName(conv?.model_id) || conv?.provider].filter(Boolean).join(' · ') || '—'}
-          {conv?.updated_at ? ` · ${formatStamp(conv.updated_at * 1000)}` : null}
-        </p>
+      <AdminPageHeader
+        title={headerTitle}
+        titleAdornment={conv?.archived ? (
+          <Badge size="xs" variant="neutral">{t('users.archived')}</Badge>
+        ) : null}
+        description={(
+          <>
+            {[userLabel, modelName(conv?.model_id) || conv?.provider].filter(Boolean).join(' · ') || '—'}
+            {conv?.updated_at ? ` · ${formatStamp(conv.updated_at * 1000)}` : null}
+          </>
+        )}
+      >
         <Link
           to="/admin/users"
-          className="mt-3 inline-block text-[12px] text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] interactive rounded-[6px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+          className="mt-3 inline-block rounded-[6px] text-[12px] text-[var(--color-fg-subtle)] interactive hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
         >
           {t('users.backToUsers')}
         </Link>
-      </header>
+      </AdminPageHeader>
 
       <SandboxPanel convId={cid} />
 
@@ -127,7 +127,7 @@ export default function AdminUserConversation() {
         {loading ? (
           <PanelFallback />
         ) : messages.length === 0 ? (
-          <div className="text-sm text-[var(--color-fg-subtle)] rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-10 text-center">
+          <div className="text-sm text-[var(--color-fg-subtle)] rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-10 text-center">
             {t('users.noMessages')}
           </div>
         ) : (
@@ -274,12 +274,12 @@ function SandboxPanel({ convId }: { convId: string }) {
   }
 
   return (
-    <section className="mt-6 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)]">
+    <section className="mt-6 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
       <button
         type="button"
         onClick={toggle}
         aria-expanded={open}
-        className="flex w-full items-center gap-2 px-5 py-3.5 text-left interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] rounded-[14px]"
+        className="flex w-full items-center gap-2 px-5 py-3.5 text-left interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] rounded-[12px]"
       >
         <HardDrive size={15} aria-hidden className="text-[var(--color-fg-muted)]" />
         <span className="font-medium text-[var(--color-fg)] text-sm">
@@ -344,7 +344,7 @@ function SandboxPanel({ convId }: { convId: string }) {
                     )}
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-mono text-[12.5px] text-[var(--color-fg)]">{f.path}</span>
-                      <span className="text-[11px] text-[var(--color-fg-subtle)]">{formatBytes(f.size)}</span>
+                      <span className="text-[12px] text-[var(--color-fg-subtle)]">{formatBytes(f.size)}</span>
                     </span>
                     <a
                       href={url}

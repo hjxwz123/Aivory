@@ -18,6 +18,7 @@ import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 import { envNum } from '@/lib/env-config'
 import { PanelFallback } from '@/components/ui/panel-fallback'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
 
 function formatStamp(unixSec: number): string {
   if (!unixSec) return ''
@@ -130,12 +131,10 @@ export default function AdminUserLibrary() {
     <div>
       <AdminDetailHeader backTo="/admin/users" backLabel={t('users.backToUsers')} />
 
-      <header>
-        <h1 className="break-words font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">
-          {t('users.libraryTitle', { name: headerName })}
-        </h1>
-        <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('users.libraryLead')}</p>
-      </header>
+      <AdminPageHeader
+        title={t('users.libraryTitle', { name: headerName })}
+        description={t('users.libraryLead')}
+      />
 
       {loading ? (
         <PanelFallback />
@@ -143,17 +142,17 @@ export default function AdminUserLibrary() {
         <>
           {/* Projects */}
           <section className="mt-8">
-            <h2 className="flex items-center gap-2 font-serif text-lg text-[var(--color-fg)]">
+            <h2 className="flex items-center gap-2 text-lg font-medium tracking-normal text-[var(--color-fg)]">
               <FolderClosed size={15} aria-hidden className="text-[var(--color-fg-subtle)]" />
               {t('users.projectsHeading')}
               <span className="text-[12px] text-[var(--color-fg-subtle)] tabular-nums">· {projects.length}</span>
             </h2>
             {projects.length === 0 ? (
-              <div className="mt-3 text-sm text-[var(--color-fg-subtle)] rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center">
+              <div className="mt-3 text-sm text-[var(--color-fg-subtle)] rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center">
                 {t('users.noProjects')}
               </div>
             ) : (
-              <ul className="mt-3 flex flex-col divide-y divide-[var(--color-divider)] rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)]">
+              <ul className="mt-3 flex flex-col divide-y divide-[var(--color-divider)] rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
                 {projects.map((p) => (
                   <li key={p.id} className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-1 px-3 py-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center sm:px-5 sm:py-4">
                     <span aria-hidden className="text-lg">{p.emoji || '📁'}</span>
@@ -166,7 +165,7 @@ export default function AdminUserLibrary() {
                         <div className="mt-0.5 line-clamp-2 text-[12px] text-[var(--color-fg-subtle)] sm:line-clamp-1">{p.description}</div>
                       ) : null}
                     </div>
-                    <span className="col-start-2 text-[11.5px] font-mono text-[var(--color-fg-subtle)] sm:col-auto sm:row-auto sm:shrink-0">
+                    <span className="col-start-2 text-[12px] font-mono text-[var(--color-fg-subtle)] sm:col-auto sm:row-auto sm:shrink-0">
                       {formatStamp(p.created_at)}
                     </span>
                   </li>
@@ -177,17 +176,17 @@ export default function AdminUserLibrary() {
 
           {/* Knowledge bases */}
           <section className="mt-10">
-            <h2 className="flex items-center gap-2 font-serif text-lg text-[var(--color-fg)]">
+            <h2 className="flex items-center gap-2 text-lg font-medium tracking-normal text-[var(--color-fg)]">
               <Library size={15} aria-hidden className="text-[var(--color-fg-subtle)]" />
               {t('users.kbsHeading')}
               <span className="text-[12px] text-[var(--color-fg-subtle)] tabular-nums">· {kbs.length}</span>
             </h2>
             {kbs.length === 0 ? (
-              <div className="mt-3 text-sm text-[var(--color-fg-subtle)] rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center">
+              <div className="mt-3 text-sm text-[var(--color-fg-subtle)] rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center">
                 {t('users.noKbs')}
               </div>
             ) : (
-              <ul className="mt-3 flex flex-col divide-y divide-[var(--color-divider)] rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)]">
+              <ul className="mt-3 flex flex-col divide-y divide-[var(--color-divider)] rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
                 {kbs.map((k) => {
                   const model = k.embedding_model_id ? getModelById(k.embedding_model_id)?.label : ''
                   const meta = [
@@ -218,7 +217,7 @@ export default function AdminUserLibrary() {
                           {k.description ? (
                             <div className="mt-0.5 line-clamp-2 text-[12px] text-[var(--color-fg-subtle)] sm:line-clamp-1">{k.description}</div>
                           ) : null}
-                          <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[11.5px] font-mono text-[var(--color-fg-subtle)] sm:mt-0.5">
+                          <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[12px] font-mono text-[var(--color-fg-subtle)] sm:mt-0.5">
                             {meta.map((part, index) => (
                               <span key={`${part}-${index}`} className="flex min-w-0 items-center gap-2 break-all sm:break-normal">
                                 {index > 0 ? <span aria-hidden className="hidden sm:inline">·</span> : null}
@@ -250,7 +249,7 @@ export default function AdminUserLibrary() {
                                       </Badge>
                                     </span>
                                   ) : null}
-                                  <span className="col-start-2 flex flex-wrap gap-x-2 text-[11px] font-mono tabular-nums text-[var(--color-fg-subtle)] sm:col-auto sm:shrink-0">
+                                  <span className="col-start-2 flex flex-wrap gap-x-2 text-[12px] font-mono tabular-nums text-[var(--color-fg-subtle)] sm:col-auto sm:shrink-0">
                                     {[doc.chunk_count ? t('users.chunks', { count: doc.chunk_count }) : '', formatBytes(doc.size_bytes)]
                                       .filter(Boolean)
                                       .map((part, index) => (
@@ -278,13 +277,13 @@ export default function AdminUserLibrary() {
           {/* Image gallery — every image the user generated (drawing mode + chat
               tool-call alike). Clicking a tile opens its source conversation. */}
           <section className="mt-10">
-            <h2 className="flex items-center gap-2 font-serif text-lg text-[var(--color-fg)]">
+            <h2 className="flex items-center gap-2 text-lg font-medium tracking-normal text-[var(--color-fg)]">
               <ImageIcon size={15} aria-hidden className="text-[var(--color-fg-subtle)]" />
               {t('users.imagesHeading', { defaultValue: 'Image gallery' })}
               <span className="text-[12px] text-[var(--color-fg-subtle)] tabular-nums">· {images.length}</span>
             </h2>
             {images.length === 0 ? (
-              <div className="mt-3 text-sm text-[var(--color-fg-subtle)] rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center">
+              <div className="mt-3 text-sm text-[var(--color-fg-subtle)] rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center">
                 {t('users.noImages', { defaultValue: 'No generated images.' })}
               </div>
             ) : (
@@ -310,7 +309,7 @@ export default function AdminUserLibrary() {
                       }}
                       className="size-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
                     />
-                    <span className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-[var(--color-overlay)] to-transparent px-2 py-1.5 text-left text-[11px] text-[var(--color-fg-inverted)]">
+                    <span className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-[var(--color-overlay)] to-transparent px-2 py-1.5 text-left text-[12px] text-[var(--color-fg-inverted)]">
                       {img.conversation_title || formatStamp(img.created_at)}
                     </span>
                   </button>

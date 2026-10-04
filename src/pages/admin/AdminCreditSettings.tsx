@@ -34,6 +34,8 @@ import {
   minorAmountToInput,
   normalizeSettlementCurrency,
 } from '@/lib/currency'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
+import { SettingsActions, SettingsBlock, SettingsRow, SettingsSection } from '@/components/settings/settings-section'
 
 type Settings = Record<string, unknown>
 
@@ -306,77 +308,69 @@ export default function AdminCreditSettings() {
   }
 
   return (
-    <div className="mx-auto max-w-[76rem]">
-      <header>
-        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">
-          {t('admin:creditSettings.title', { defaultValue: 'Credits and quotas' })}
-        </h1>
-        <p className="mt-2 max-w-2xl text-sm text-[var(--color-fg-muted)]">
-          {t('admin:creditSettings.lead', {
-            defaultValue: 'Configure billing conversion, platform-wide usage limits and permanent-credit packages.',
-          })}
-        </p>
-      </header>
+    <div>
+      <AdminPageHeader
+        title={t('admin:creditSettings.title', { defaultValue: 'Credits and quotas' })}
+        description={t('admin:creditSettings.lead', {
+          defaultValue: 'Configure billing conversion, platform-wide usage limits and permanent-credit packages.',
+        })}
+      />
 
       {loading ? (
         <PanelFallback />
       ) : (
         <>
-          <section className="mt-8">
-            <div>
-              <h2 className="font-serif text-xl tracking-tight text-[var(--color-fg)]">
-                {t('admin:creditSettings.policyTitle', { defaultValue: 'Billing policy' })}
-              </h2>
-              <p className="mt-1 text-sm text-[var(--color-fg-muted)]">
-                {t('admin:creditSettings.policyLead', {
-                  defaultValue: 'These settings apply to every member and every credit-charged model.',
-                })}
-              </p>
-            </div>
+          <SettingsSection
+            title={t('admin:creditSettings.policyTitle', { defaultValue: 'Billing policy' })}
+            description={t('admin:creditSettings.policyLead', {
+              defaultValue: 'These settings apply to every member and every credit-charged model.',
+            })}
+            className="mt-8"
+            bodyClassName="divide-y-0"
+          >
+            <SettingsBlock>
+              <div className="grid gap-5 lg:grid-cols-2">
+                <Field
+                  label={t('admin:settings.fields.settlementCurrency')}
+                  htmlFor="settlement-currency"
+                  hint={t('admin:settings.fields.settlementCurrencyHint')}
+                >
+                  <Input
+                    id="settlement-currency"
+                    value={readString('settlement_currency', packageCurrency).toUpperCase()}
+                    maxLength={3}
+                    autoCapitalize="characters"
+                    spellCheck={false}
+                    className="font-mono uppercase"
+                    onChange={(event) => setSetting('settlement_currency', event.target.value.toUpperCase())}
+                  />
+                </Field>
+                <Field
+                  label={t('admin:groups.creditsRatioLabel')}
+                  htmlFor="credits-per-usd"
+                  hint={t('admin:groups.creditsRatioHint')}
+                >
+                  <Input
+                    id="credits-per-usd"
+                    type="number"
+                    min={0}
+                    step="any"
+                    value={String(readNumber('credits_per_usd'))}
+                    onChange={(event) => setSetting('credits_per_usd', nonNegativeNumber(Number(event.target.value)))}
+                  />
+                </Field>
+              </div>
+            </SettingsBlock>
+          </SettingsSection>
 
-            <div className="mt-5 grid gap-5 lg:grid-cols-2">
-              <Field
-                label={t('admin:settings.fields.settlementCurrency')}
-                htmlFor="settlement-currency"
-                hint={t('admin:settings.fields.settlementCurrencyHint')}
-              >
-                <Input
-                  id="settlement-currency"
-                  value={readString('settlement_currency', packageCurrency).toUpperCase()}
-                  maxLength={3}
-                  autoCapitalize="characters"
-                  spellCheck={false}
-                  className="font-mono uppercase"
-                  onChange={(event) => setSetting('settlement_currency', event.target.value.toUpperCase())}
-                />
-              </Field>
-              <Field
-                label={t('admin:groups.creditsRatioLabel')}
-                htmlFor="credits-per-usd"
-                hint={t('admin:groups.creditsRatioHint')}
-              >
-                <Input
-                  id="credits-per-usd"
-                  type="number"
-                  min={0}
-                  step="any"
-                  value={String(readNumber('credits_per_usd'))}
-                  onChange={(event) => setSetting('credits_per_usd', nonNegativeNumber(Number(event.target.value)))}
-                />
-              </Field>
-            </div>
-
-            <div className="mt-8 border-t border-[var(--color-divider)] pt-6">
-              <h2 className="font-serif text-xl tracking-tight text-[var(--color-fg)]">
-                {t('admin:creditSettings.limitsTitle', { defaultValue: 'Platform limits' })}
-              </h2>
-              <p className="mt-1 text-sm text-[var(--color-fg-muted)]">
-                {t('admin:creditSettings.limitsLead', {
-                  defaultValue: 'Per-user limits. Set a numeric limit to 0 to leave that limit unrestricted.',
-                })}
-              </p>
-
-              <div className="mt-5 grid gap-5 sm:grid-cols-2">
+          <SettingsSection
+            title={t('admin:creditSettings.limitsTitle', { defaultValue: 'Platform limits' })}
+            description={t('admin:creditSettings.limitsLead', {
+              defaultValue: 'Per-user limits. Set a numeric limit to 0 to leave that limit unrestricted.',
+            })}
+          >
+            <SettingsBlock>
+              <div className="grid gap-5 sm:grid-cols-2">
                 <Field
                   label={t('admin:settings.fields.dailyMessageLimit')}
                   htmlFor="daily-message-limit"
@@ -440,20 +434,19 @@ export default function AdminCreditSettings() {
                   />
                 </Field>
               </div>
-
-              <div className="mt-5">
-                <ToggleRow
-                  label={t('admin:settings.fields.preflightEnabled')}
-                  checked={readBool('credit_preflight_enabled', true)}
-                  onChange={(enabled) => setSetting('credit_preflight_enabled', enabled)}
-                />
-                <p className="mt-2 pl-1 text-xs text-[var(--color-fg-subtle)]">
-                  {t('admin:settings.fields.preflightLead')}
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-8 border-t border-[var(--color-divider)] pt-6">
+            </SettingsBlock>
+            <SettingsRow
+              label={t('admin:settings.fields.preflightEnabled')}
+              description={t('admin:settings.fields.preflightLead')}
+              htmlFor="credit-preflight"
+            >
+              <Switch
+                id="credit-preflight"
+                checked={readBool('credit_preflight_enabled', true)}
+                onCheckedChange={(enabled) => setSetting('credit_preflight_enabled', enabled)}
+              />
+            </SettingsRow>
+            <SettingsBlock>
               <Field
                 label={t('admin:groups.quotaMsgLabel')}
                 htmlFor="quota-message"
@@ -467,31 +460,30 @@ export default function AdminCreditSettings() {
                   placeholder={t('admin:groups.quotaMsgPlaceholder')}
                 />
               </Field>
-            </div>
+            </SettingsBlock>
+          </SettingsSection>
 
-            <div className="mt-6 flex justify-end">
-              <Button loading={savingSettings} onClick={() => void saveSettings()}>
-                {t('common:actions.save')}
-              </Button>
-            </div>
-          </section>
+          <SettingsActions className="-mt-2 mb-8">
+            <Button loading={savingSettings} onClick={() => void saveSettings()}>
+              {t('common:actions.save')}
+            </Button>
+          </SettingsActions>
 
-
-          <section className="mt-10 border-t border-[var(--color-divider)] pt-8">
-            <div className="flex flex-col items-stretch gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <section aria-labelledby="credit-packages-title">
+            <div className="mb-3 flex flex-col items-stretch gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div className="min-w-0">
-                <h2 className="font-serif text-xl tracking-tight text-[var(--color-fg)]">
+                <h2 id="credit-packages-title" className="text-lg font-medium tracking-normal text-[var(--color-fg)]">
                   {t('admin:groups.creditPackages.title')}
                 </h2>
-                <p className="mt-1 text-sm text-[var(--color-fg-muted)]">
+                <p className="mt-1.5 text-sm text-[var(--color-fg-muted)]">
                   {t('admin:groups.creditPackages.lead')}
                 </p>
               </div>
               <Button
                 variant="secondary"
                 size="sm"
-                className="w-full sm:w-auto"
-                leadingIcon={<Plus size={14} aria-hidden />}
+                className="max-sm:min-h-[var(--tap-min)]"
+                leadingIcon={<Plus size={15} aria-hidden />}
                 onClick={openNewPackage}
               >
                 {t('admin:groups.creditPackages.new')}
@@ -499,7 +491,7 @@ export default function AdminCreditSettings() {
             </div>
 
             {creditPackages.length === 0 ? (
-              <p className="mt-4 rounded-[8px] border border-[var(--color-border)] px-4 py-5 text-sm text-[var(--color-fg-muted)]">
+              <p className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-5 text-sm text-[var(--color-fg-muted)]">
                 {t('admin:groups.creditPackages.empty')}
               </p>
             ) : (
@@ -511,7 +503,6 @@ export default function AdminCreditSettings() {
                 moveUpLabel={t('admin:common.moveUp')}
                 moveDownLabel={t('admin:common.moveDown')}
                 mobileDragOnly
-                listClassName="mt-4"
                 rowClassName="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1.5 px-3 py-3 md:grid-cols-[auto_auto_minmax(0,1fr)_auto] md:gap-3 md:px-4"
                 renderItem={(item) => {
                   const toggling = packageBusyIds.has(item.id)
@@ -705,14 +696,5 @@ export default function AdminCreditSettings() {
         </DialogContent>
       </Dialog>
     </div>
-  )
-}
-
-function ToggleRow({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
-  return (
-    <label className="flex items-center justify-between rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
-      <span className="text-sm">{label}</span>
-      <Switch checked={checked} onCheckedChange={onChange} />
-    </label>
   )
 }

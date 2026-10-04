@@ -21,6 +21,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/hooks/use-toast'
 import { PanelFallback } from '@/components/ui/panel-fallback'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
+import { SettingsBlock, SettingsSection } from '@/components/settings/settings-section'
 
 const STRING_KEYS = [
   'audio_transcribe_provider',
@@ -90,182 +92,202 @@ export default function AdminAudio() {
   }
 
   return (
-    <div className="mx-auto max-w-[76rem]">
-      <header>
-        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">{t('admin:audio.title')}</h1>
-        <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('admin:audio.lead')}</p>
-      </header>
+    <div>
+      <AdminPageHeader
+        title={t('admin:audio.title')}
+        description={t('admin:audio.lead')}
+      />
 
       {loading ? (
         <PanelFallback />
       ) : (
         <section className="mt-8 flex flex-col gap-5">
           {/* Provider selector -------------------------------------------- */}
-          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5">
-            <Field
-              label={t('admin:audio.provider.label')}
-              htmlFor="a-provider"
-              hint={t('admin:audio.provider.hint')}
-            >
-              <Select value={provider} onValueChange={(v) => set('audio_transcribe_provider', v)}>
-                <SelectTrigger id="a-provider">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="gpt">{t('admin:audio.provider.gpt')}</SelectItem>
-                  <SelectItem value="volcano">{t('admin:audio.provider.volcano')}</SelectItem>
-                </SelectContent>
-              </Select>
-            </Field>
-          </div>
+          <SettingsSection
+            className="mb-0"
+            bodyClassName="divide-y-0"
+          >
+            <SettingsBlock>
+              <Field
+                label={t('admin:audio.provider.label')}
+                htmlFor="a-provider"
+                hint={t('admin:audio.provider.hint')}
+              >
+                <Select value={provider} onValueChange={(v) => set('audio_transcribe_provider', v)}>
+                  <SelectTrigger id="a-provider">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="gpt">{t('admin:audio.provider.gpt')}</SelectItem>
+                    <SelectItem value="volcano">{t('admin:audio.provider.volcano')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+            </SettingsBlock>
+          </SettingsSection>
 
           {/* GPT / OpenAI-compatible -------------------------------------- */}
           {provider === 'gpt' && (
-            <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5 flex flex-col gap-5">
-              <Field label={t('admin:audio.fields.model')} htmlFor="a-model" hint={t('admin:audio.fields.modelHint')}>
-                <Input
-                  id="a-model"
-                  value={read('audio_transcribe_model')}
-                  onChange={(e) => set('audio_transcribe_model', e.target.value)}
-                  placeholder="whisper-1"
-                />
-              </Field>
-              <Field label={t('admin:audio.fields.baseUrl')} htmlFor="a-base" hint={t('admin:audio.fields.baseUrlHint')}>
-                <Input
-                  id="a-base"
-                  value={read('audio_transcribe_base_url')}
-                  onChange={(e) => set('audio_transcribe_base_url', e.target.value)}
-                  placeholder="https://api.openai.com"
-                />
-              </Field>
-              <Field label={t('admin:audio.fields.apiKey')} htmlFor="a-key" hint={t('admin:audio.fields.apiKeyHint')}>
-                <Input
-                  id="a-key"
-                  type="password"
-                  autoComplete="off"
-                  value={read('audio_transcribe_api_key')}
-                  onChange={(e) => set('audio_transcribe_api_key', e.target.value)}
-                  placeholder="sk-…"
-                />
-              </Field>
-            </div>
+            <SettingsSection
+              className="mb-0"
+              bodyClassName="divide-y-0"
+            >
+              <SettingsBlock className="flex flex-col gap-5">
+                <Field label={t('admin:audio.fields.model')} htmlFor="a-model" hint={t('admin:audio.fields.modelHint')}>
+                  <Input
+                    id="a-model"
+                    value={read('audio_transcribe_model')}
+                    onChange={(e) => set('audio_transcribe_model', e.target.value)}
+                    placeholder="whisper-1"
+                  />
+                </Field>
+                <Field label={t('admin:audio.fields.baseUrl')} htmlFor="a-base" hint={t('admin:audio.fields.baseUrlHint')}>
+                  <Input
+                    id="a-base"
+                    value={read('audio_transcribe_base_url')}
+                    onChange={(e) => set('audio_transcribe_base_url', e.target.value)}
+                    placeholder="https://api.openai.com"
+                  />
+                </Field>
+                <Field label={t('admin:audio.fields.apiKey')} htmlFor="a-key" hint={t('admin:audio.fields.apiKeyHint')}>
+                  <Input
+                    id="a-key"
+                    type="password"
+                    autoComplete="off"
+                    value={read('audio_transcribe_api_key')}
+                    onChange={(e) => set('audio_transcribe_api_key', e.target.value)}
+                    placeholder="sk-…"
+                  />
+                </Field>
+              </SettingsBlock>
+            </SettingsSection>
           )}
 
           {/* Volcano 豆包 streaming ASR ----------------------------------- */}
           {provider === 'volcano' && (
-            <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5 flex flex-col gap-5">
-              <p className="text-xs text-[var(--color-fg-subtle)]">{t('admin:audio.volcano.sectionHint')}</p>
-              <Field label={t('admin:audio.volcano.appId')} htmlFor="v-app" hint={t('admin:audio.volcano.appIdHint')}>
-                <Input
-                  id="v-app"
-                  value={read('volcano_asr_app_id')}
-                  onChange={(e) => set('volcano_asr_app_id', e.target.value)}
-                  placeholder="1234567890"
-                />
-              </Field>
-              <Field
-                label={t('admin:audio.volcano.accessToken')}
-                htmlFor="v-token"
-                hint={t('admin:audio.volcano.accessTokenHint')}
-              >
-                <Input
-                  id="v-token"
-                  type="password"
-                  autoComplete="off"
-                  value={read('volcano_asr_access_token')}
-                  onChange={(e) => set('volcano_asr_access_token', e.target.value)}
-                  placeholder="••••••"
-                />
-              </Field>
-              <Field
-                label={t('admin:audio.volcano.resourceId')}
-                htmlFor="v-res"
-                hint={t('admin:audio.volcano.resourceIdHint')}
-              >
-                <Input
-                  id="v-res"
-                  value={read('volcano_asr_resource_id')}
-                  onChange={(e) => set('volcano_asr_resource_id', e.target.value)}
-                  placeholder="volc.bigasr.sauc.duration"
-                />
-              </Field>
-              <Field label={t('admin:audio.volcano.wsUrl')} htmlFor="v-url" hint={t('admin:audio.volcano.wsUrlHint')}>
-                <Input
-                  id="v-url"
-                  type="url"
-                  value={read('volcano_asr_ws_url')}
-                  onChange={(e) => set('volcano_asr_ws_url', e.target.value)}
-                  placeholder="wss://openspeech.bytedance.com/api/v3/sauc/bigmodel"
-                />
-              </Field>
-              <Field label={t('admin:audio.volcano.model')} htmlFor="v-model" hint={t('admin:audio.volcano.modelHint')}>
-                <Input
-                  id="v-model"
-                  value={read('volcano_asr_model_name')}
-                  onChange={(e) => set('volcano_asr_model_name', e.target.value)}
-                  placeholder="bigmodel"
-                />
-              </Field>
+            <SettingsSection
+              className="mb-0"
+              bodyClassName="divide-y-0"
+            >
+              <SettingsBlock className="flex flex-col gap-5">
+                <p className="text-xs text-[var(--color-fg-subtle)]">{t('admin:audio.volcano.sectionHint')}</p>
+                <Field label={t('admin:audio.volcano.appId')} htmlFor="v-app" hint={t('admin:audio.volcano.appIdHint')}>
+                  <Input
+                    id="v-app"
+                    value={read('volcano_asr_app_id')}
+                    onChange={(e) => set('volcano_asr_app_id', e.target.value)}
+                    placeholder="1234567890"
+                  />
+                </Field>
+                <Field
+                  label={t('admin:audio.volcano.accessToken')}
+                  htmlFor="v-token"
+                  hint={t('admin:audio.volcano.accessTokenHint')}
+                >
+                  <Input
+                    id="v-token"
+                    type="password"
+                    autoComplete="off"
+                    value={read('volcano_asr_access_token')}
+                    onChange={(e) => set('volcano_asr_access_token', e.target.value)}
+                    placeholder="••••••"
+                  />
+                </Field>
+                <Field
+                  label={t('admin:audio.volcano.resourceId')}
+                  htmlFor="v-res"
+                  hint={t('admin:audio.volcano.resourceIdHint')}
+                >
+                  <Input
+                    id="v-res"
+                    value={read('volcano_asr_resource_id')}
+                    onChange={(e) => set('volcano_asr_resource_id', e.target.value)}
+                    placeholder="volc.bigasr.sauc.duration"
+                  />
+                </Field>
+                <Field label={t('admin:audio.volcano.wsUrl')} htmlFor="v-url" hint={t('admin:audio.volcano.wsUrlHint')}>
+                  <Input
+                    id="v-url"
+                    type="url"
+                    value={read('volcano_asr_ws_url')}
+                    onChange={(e) => set('volcano_asr_ws_url', e.target.value)}
+                    placeholder="wss://openspeech.bytedance.com/api/v3/sauc/bigmodel"
+                  />
+                </Field>
+                <Field label={t('admin:audio.volcano.model')} htmlFor="v-model" hint={t('admin:audio.volcano.modelHint')}>
+                  <Input
+                    id="v-model"
+                    value={read('volcano_asr_model_name')}
+                    onChange={(e) => set('volcano_asr_model_name', e.target.value)}
+                    placeholder="bigmodel"
+                  />
+                </Field>
 
-              <div className="mt-1 flex flex-col gap-3 border-t border-[var(--color-divider)] pt-4">
-                {(
-                  [
-                    ['volcano_asr_enable_punc', 'punc'],
-                    ['volcano_asr_enable_itn', 'itn'],
-                    ['volcano_asr_enable_ddc', 'ddc'],
-                  ] as const
-                ).map(([key, label]) => (
-                  <label
-                    key={key}
-                    className="flex items-center justify-between gap-4 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3"
-                  >
-                    <span>
-                      <span className="block text-sm font-medium text-[var(--color-fg)]">
-                        {t(`admin:audio.volcano.${label}`)}
+                <div className="mt-1 flex flex-col gap-3 border-t border-[var(--color-divider)] pt-4">
+                  {(
+                    [
+                      ['volcano_asr_enable_punc', 'punc'],
+                      ['volcano_asr_enable_itn', 'itn'],
+                      ['volcano_asr_enable_ddc', 'ddc'],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <label
+                      key={key}
+                      className="flex items-center justify-between gap-4 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3"
+                    >
+                      <span>
+                        <span className="block text-sm font-medium text-[var(--color-fg)]">
+                          {t(`admin:audio.volcano.${label}`)}
+                        </span>
+                        <span className="mt-0.5 block text-[12.5px] text-[var(--color-fg-muted)]">
+                          {t(`admin:audio.volcano.${label}Hint`)}
+                        </span>
                       </span>
-                      <span className="mt-0.5 block text-[12.5px] text-[var(--color-fg-muted)]">
-                        {t(`admin:audio.volcano.${label}Hint`)}
-                      </span>
-                    </span>
-                    <Switch checked={readBool(key)} onCheckedChange={(v) => set(key, v)} />
-                  </label>
-                ))}
-              </div>
-            </div>
+                      <Switch checked={readBool(key)} onCheckedChange={(v) => set(key, v)} />
+                    </label>
+                  ))}
+                </div>
+              </SettingsBlock>
+            </SettingsSection>
           )}
 
           {/* Billing (§ voice) ---------------------------------------------- */}
-          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5 flex flex-col gap-4">
-            <h2 className="text-sm font-medium text-[var(--color-fg)]">{t('admin:audio.billing.title')}</h2>
-            <Field label={t('admin:audio.billing.price')} htmlFor="a-price" hint={t('admin:audio.billing.priceHint')}>
-              <Input
-                id="a-price"
-                type="number"
-                min={0}
-                step="any"
-                inputMode="decimal"
-                value={priceInput}
-                onChange={(e) => set(PRICE_KEY, e.target.value)}
-                placeholder="0"
-              />
-            </Field>
-            {pricePerSecond > 0 && creditsPerUSD > 0 ? (
-              <p className="text-[12.5px] text-[var(--color-fg-muted)]">
-                {t('admin:audio.billing.conversion', {
-                  ratio: creditsPerUSD.toLocaleString(),
-                  credits: Number((pricePerSecond * 60 * creditsPerUSD).toFixed(4)).toLocaleString(),
-                })}
-              </p>
-            ) : null}
-            {pricePerSecond > 0 && creditsPerUSD === 0 ? (
-              <p className="text-[12.5px] text-[var(--color-warning)]">
-                {t('admin:audio.billing.creditsOff')}{' '}
-                <Link to="/admin/credits" className="font-medium underline underline-offset-2">
-                  {t('admin:creditSettings.docmee.openCredits')}
-                </Link>
-              </p>
-            ) : null}
-          </div>
+          <SettingsSection
+            title={t('admin:audio.billing.title')}
+            className="mb-0"
+            bodyClassName="divide-y-0"
+          >
+            <SettingsBlock className="flex flex-col gap-4">
+              <Field label={t('admin:audio.billing.price')} htmlFor="a-price" hint={t('admin:audio.billing.priceHint')}>
+                <Input
+                  id="a-price"
+                  type="number"
+                  min={0}
+                  step="any"
+                  inputMode="decimal"
+                  value={priceInput}
+                  onChange={(e) => set(PRICE_KEY, e.target.value)}
+                  placeholder="0"
+                />
+              </Field>
+              {pricePerSecond > 0 && creditsPerUSD > 0 ? (
+                <p className="text-[12.5px] text-[var(--color-fg-muted)]">
+                  {t('admin:audio.billing.conversion', {
+                    ratio: creditsPerUSD.toLocaleString(),
+                    credits: Number((pricePerSecond * 60 * creditsPerUSD).toFixed(4)).toLocaleString(),
+                  })}
+                </p>
+              ) : null}
+              {pricePerSecond > 0 && creditsPerUSD === 0 ? (
+                <p className="text-[12.5px] text-[var(--color-warning)]">
+                  {t('admin:audio.billing.creditsOff')}{' '}
+                  <Link to="/admin/credits" className="font-medium underline underline-offset-2">
+                    {t('admin:creditSettings.docmee.openCredits')}
+                  </Link>
+                </p>
+              ) : null}
+            </SettingsBlock>
+          </SettingsSection>
 
           <div className="flex justify-end">
             <Button loading={saving} onClick={() => void save()}>

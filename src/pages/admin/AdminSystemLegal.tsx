@@ -7,6 +7,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { Field } from '@/components/ui/label'
 import { toast } from '@/hooks/use-toast'
 import { PanelFallback } from '@/components/ui/panel-fallback'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
+import { SettingsActions, SettingsBlock, SettingsSection } from '@/components/settings/settings-section'
 
 type Settings = Record<string, unknown>
 
@@ -55,71 +57,71 @@ export default function AdminSystemLegal() {
   }
 
   return (
-    <div className="mx-auto max-w-[76rem]">
-      <header>
-        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">
-          {t('admin:menu.legalContact', { defaultValue: 'Legal and contact information' })}
-        </h1>
-        <p className="mt-2 max-w-3xl text-sm text-[var(--color-fg-muted)]">
-          {t('admin:settings.fields.legalLead')}
-        </p>
-      </header>
+    <div>
+      <AdminPageHeader
+        title={t('admin:menu.legalContact', { defaultValue: 'Legal and contact information' })}
+        description={t('admin:settings.fields.legalLead')}
+      />
 
       {loading ? (
         <PanelFallback />
       ) : (
-        <section className="mt-8 flex flex-col gap-5">
-          <Field
-            label={t('admin:settings.fields.contactEmail')}
-            htmlFor="contact-email"
-            hint={t('admin:settings.fields.contactEmailHint')}
-          >
-            <Input
-              id="contact-email"
-              type="email"
-              maxLength={320}
-              value={readString('contact_email')}
-              placeholder="admin@aivory.local"
-              onChange={(event) => setDraft((current) => ({ ...current, contact_email: event.target.value }))}
-            />
-          </Field>
+        <div className="mt-8">
+          <SettingsSection bodyClassName="divide-y-0">
+            <SettingsBlock className="flex flex-col gap-5">
+              <Field
+                label={t('admin:settings.fields.contactEmail')}
+                htmlFor="contact-email"
+                hint={t('admin:settings.fields.contactEmailHint')}
+              >
+                <Input
+                  id="contact-email"
+                  type="email"
+                  maxLength={320}
+                  value={readString('contact_email')}
+                  placeholder="admin@aivory.local"
+                  onChange={(event) => setDraft((current) => ({ ...current, contact_email: event.target.value }))}
+                />
+              </Field>
 
-          <Field
-            label={t('admin:settings.fields.termsText')}
-            htmlFor="terms-text"
-            hint={t('admin:settings.fields.termsTextHint')}
-          >
-            <Textarea
-              id="terms-text"
-              value={readString('terms_text')}
-              maxLength={100000}
-              className="min-h-56 resize-y font-mono text-[13px]"
-              placeholder={t('admin:settings.fields.policyTextPlaceholder')}
-              onChange={(event) => setDraft((current) => ({ ...current, terms_text: event.target.value }))}
-            />
-          </Field>
+              <Field
+                label={t('admin:settings.fields.termsText')}
+                htmlFor="terms-text"
+                hint={t('admin:settings.fields.termsTextHint')}
+              >
+                <Textarea
+                  id="terms-text"
+                  value={readString('terms_text')}
+                  maxLength={100000}
+                  className="min-h-56 resize-y font-mono text-[13px]"
+                  placeholder={t('admin:settings.fields.policyTextPlaceholder')}
+                  onChange={(event) => setDraft((current) => ({ ...current, terms_text: event.target.value }))}
+                />
+              </Field>
 
-          <Field
-            label={t('admin:settings.fields.privacyText')}
-            htmlFor="privacy-text"
-            hint={t('admin:settings.fields.privacyTextHint')}
-          >
-            <Textarea
-              id="privacy-text"
-              value={readString('privacy_text')}
-              maxLength={100000}
-              className="min-h-56 resize-y font-mono text-[13px]"
-              placeholder={t('admin:settings.fields.policyTextPlaceholder')}
-              onChange={(event) => setDraft((current) => ({ ...current, privacy_text: event.target.value }))}
-            />
-          </Field>
+              <Field
+                label={t('admin:settings.fields.privacyText')}
+                htmlFor="privacy-text"
+                hint={t('admin:settings.fields.privacyTextHint')}
+              >
+                <Textarea
+                  id="privacy-text"
+                  value={readString('privacy_text')}
+                  maxLength={100000}
+                  className="min-h-56 resize-y font-mono text-[13px]"
+                  placeholder={t('admin:settings.fields.policyTextPlaceholder')}
+                  onChange={(event) => setDraft((current) => ({ ...current, privacy_text: event.target.value }))}
+                />
+              </Field>
+            </SettingsBlock>
+          </SettingsSection>
 
-          <div className="flex justify-end">
+          <SettingsActions>
             <Button loading={saving} onClick={() => void save()}>
               {t('common:actions.save')}
             </Button>
-          </div>
-        </section>
+          </SettingsActions>
+        </div>
       )}
     </div>
   )

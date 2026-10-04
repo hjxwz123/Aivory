@@ -20,6 +20,8 @@ import { toast } from '@/hooks/use-toast'
 import { sanitizeHtml } from '@/lib/markdown'
 import { resizeImageForUpload } from '@/lib/resize-image'
 import { PanelFallback } from '@/components/ui/panel-fallback'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
+import { SettingsActions, SettingsBlock, SettingsRow, SettingsSection } from '@/components/settings/settings-section'
 
 interface AnnouncementConfig {
   enabled: boolean
@@ -132,130 +134,122 @@ export default function AdminAnnouncement() {
   }
 
   return (
-    <div className="mx-auto max-w-[76rem]">
-      <header>
-        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">{t('admin:announcement.title')}</h1>
-        <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('admin:announcement.lead')}</p>
-      </header>
+    <div>
+      <AdminPageHeader
+        title={t('admin:announcement.title')}
+        description={t('admin:announcement.lead')}
+      />
 
       {loading ? (
         <PanelFallback />
       ) : (
-        <section className="mt-5 flex flex-col gap-4 sm:mt-8 sm:gap-6">
-          {/* Enabled */}
-          <label className="flex items-center justify-between gap-4 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3.5">
-            <span className="min-w-0">
-              <span className="block text-sm font-medium text-[var(--color-fg)]">{t('admin:announcement.enabledLabel')}</span>
-              <span className="mt-0.5 block text-[12.5px] text-[var(--color-fg-muted)]">{t('admin:announcement.enabledHint')}</span>
-            </span>
-            <Switch checked={enabled} onCheckedChange={setEnabled} />
-          </label>
-
-          {/* Mandatory reading delay. */}
-          <label className="flex items-center justify-between gap-4 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3.5">
-            <span className="min-w-0">
-              <span className="block text-sm font-medium text-[var(--color-fg)]">{t('admin:announcement.requireReadLabel')}</span>
-              <span className="mt-0.5 block text-[12.5px] text-[var(--color-fg-muted)]">{t('admin:announcement.requireReadHint')}</span>
-            </span>
-            <Switch checked={requireRead} onCheckedChange={setRequireRead} />
-          </label>
-
-          {/* Remember dismiss */}
-          <label className="flex items-center justify-between gap-4 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3.5">
-            <span className="min-w-0">
-              <span className="block text-sm font-medium text-[var(--color-fg)]">{t('admin:announcement.rememberLabel')}</span>
-              <span className="mt-0.5 block text-[12.5px] text-[var(--color-fg-muted)]">{t('admin:announcement.rememberHint')}</span>
-            </span>
-            <Switch checked={remember} onCheckedChange={setRemember} />
-          </label>
-
-          {/* Optional plain-text title. */}
-          <Field label={t('admin:announcement.titleLabel')} htmlFor="ann-title" hint={t('admin:announcement.titleHint')}>
-            <Input
-              id="ann-title"
-              value={title}
-              maxLength={120}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder={t('admin:announcement.titlePlaceholder')}
-            />
-          </Field>
-
-          {/* Image (optional → image announcement) */}
-          <Field label={t('admin:announcement.imageLabel')} htmlFor="ann-img" hint={t('admin:announcement.imageHint')}>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <Input
-                id="ann-img"
-                wrapperClassName="flex-1 min-w-0"
-                value={imageUrl}
-                onChange={(e) => setImageUrl(e.target.value)}
-                placeholder={t('admin:announcement.imagePlaceholder')}
-              />
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/png,image/jpeg"
-                className="hidden"
-                onChange={(e) => void onPickImage(e.target.files?.[0])}
-              />
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                loading={uploading}
-                leadingIcon={<Upload size={13} aria-hidden />}
-                onClick={() => fileRef.current?.click()}
-                className="w-full sm:w-auto"
-              >
-                {t('admin:announcement.upload')}
-              </Button>
-            </div>
-            {imageUrl ? (
-              <div className="mt-2 flex items-center gap-2">
-                <img
-                  src={imageUrl}
-                  alt=""
-                  className="h-16 w-auto rounded-[8px] border border-[var(--color-border)] object-cover"
+        <div className="mt-8">
+          <SettingsSection title={t('admin:announcement.popupTitle', { defaultValue: 'Popup announcement' })}>
+            <SettingsRow
+              label={t('admin:announcement.enabledLabel')}
+              description={t('admin:announcement.enabledHint')}
+              htmlFor="ann-enabled"
+            >
+              <Switch id="ann-enabled" checked={enabled} onCheckedChange={setEnabled} />
+            </SettingsRow>
+            {/* Mandatory reading delay. */}
+            <SettingsRow
+              label={t('admin:announcement.requireReadLabel')}
+              description={t('admin:announcement.requireReadHint')}
+              htmlFor="ann-require-read"
+            >
+              <Switch id="ann-require-read" checked={requireRead} onCheckedChange={setRequireRead} />
+            </SettingsRow>
+            <SettingsRow
+              label={t('admin:announcement.rememberLabel')}
+              description={t('admin:announcement.rememberHint')}
+              htmlFor="ann-remember"
+            >
+              <Switch id="ann-remember" checked={remember} onCheckedChange={setRemember} />
+            </SettingsRow>
+            <SettingsBlock className="flex flex-col gap-5">
+              {/* Optional plain-text title. */}
+              <Field label={t('admin:announcement.titleLabel')} htmlFor="ann-title" hint={t('admin:announcement.titleHint')}>
+                <Input
+                  id="ann-title"
+                  value={title}
+                  maxLength={120}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder={t('admin:announcement.titlePlaceholder')}
                 />
-                <Button variant="ghost" size="sm" leadingIcon={<X size={13} aria-hidden />} onClick={() => setImageUrl('')}>
-                  {t('admin:announcement.removeImage')}
-                </Button>
-              </div>
-            ) : null}
-          </Field>
+              </Field>
 
-          {/* Body */}
-          <Field label={t('admin:announcement.bodyLabel')} htmlFor="ann-body" hint={t('admin:announcement.bodyHint')}>
-            <Textarea
-              id="ann-body"
-              rows={6}
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              placeholder={t('admin:announcement.bodyPlaceholder')}
-            />
-          </Field>
+              {/* Image (optional → image announcement) */}
+              <Field label={t('admin:announcement.imageLabel')} htmlFor="ann-img" hint={t('admin:announcement.imageHint')}>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <Input
+                    id="ann-img"
+                    wrapperClassName="flex-1 min-w-0"
+                    value={imageUrl}
+                    onChange={(e) => setImageUrl(e.target.value)}
+                    placeholder={t('admin:announcement.imagePlaceholder')}
+                  />
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept="image/png,image/jpeg"
+                    className="hidden"
+                    onChange={(e) => void onPickImage(e.target.files?.[0])}
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    loading={uploading}
+                    leadingIcon={<Upload size={13} aria-hidden />}
+                    onClick={() => fileRef.current?.click()}
+                    className="w-full sm:w-auto"
+                  >
+                    {t('admin:announcement.upload')}
+                  </Button>
+                </div>
+                {imageUrl ? (
+                  <div className="mt-2 flex items-center gap-2">
+                    <img
+                      src={imageUrl}
+                      alt=""
+                      className="h-16 w-auto rounded-[8px] border border-[var(--color-border)] object-cover"
+                    />
+                    <Button variant="ghost" size="sm" leadingIcon={<X size={13} aria-hidden />} onClick={() => setImageUrl('')}>
+                      {t('admin:announcement.removeImage')}
+                    </Button>
+                  </div>
+                ) : null}
+              </Field>
+
+              {/* Body */}
+              <Field label={t('admin:announcement.bodyLabel')} htmlFor="ann-body" hint={t('admin:announcement.bodyHint')}>
+                <Textarea
+                  id="ann-body"
+                  rows={6}
+                  value={body}
+                  onChange={(e) => setBody(e.target.value)}
+                  placeholder={t('admin:announcement.bodyPlaceholder')}
+                />
+              </Field>
+            </SettingsBlock>
+          </SettingsSection>
 
           {/* Pinned top bar — independent of the popup above. */}
-          <div className="border-t border-[var(--color-divider)] pt-6">
-            <h2 className="text-base font-semibold text-[var(--color-fg)]">
-              {t('admin:announcement.barTitle', { defaultValue: '置顶公告条' })}
-            </h2>
-            <p className="mt-1 text-[12.5px] text-[var(--color-fg-muted)] max-w-2xl">
-              {t('admin:announcement.barLead', {
-                defaultValue: '在主界面顶部显示一条细公告条，支持链接（<a> 标签）。与上面的弹窗公告相互独立。',
-              })}
-            </p>
-            <label className="mt-4 flex items-center justify-between gap-4 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3.5">
-              <span>
-                <span className="block text-sm font-medium text-[var(--color-fg)]">
-                  {t('admin:announcement.barEnabledLabel', { defaultValue: '启用置顶公告条' })}
-                </span>
-                <span className="mt-0.5 block text-[12.5px] text-[var(--color-fg-muted)]">
-                  {t('admin:announcement.barEnabledHint', { defaultValue: '开启后，所有用户的主界面顶部都会显示该公告条。' })}
-                </span>
-              </span>
-              <Switch checked={barEnabled} onCheckedChange={setBarEnabled} />
-            </label>
-            <div className="mt-4">
+          <SettingsSection
+            title={t('admin:announcement.barTitle', { defaultValue: '置顶公告条' })}
+            description={t('admin:announcement.barLead', {
+              defaultValue: '在主界面顶部显示一条细公告条，支持链接（<a> 标签）。与上面的弹窗公告相互独立。',
+            })}
+          >
+            <SettingsRow
+              label={t('admin:announcement.barEnabledLabel', { defaultValue: '启用置顶公告条' })}
+              description={t('admin:announcement.barEnabledHint', { defaultValue: '开启后，所有用户的主界面顶部都会显示该公告条。' })}
+              htmlFor="ann-bar-enabled"
+            >
+              <Switch id="ann-bar-enabled" checked={barEnabled} onCheckedChange={setBarEnabled} />
+            </SettingsRow>
+            <SettingsBlock className="flex flex-col gap-4">
               <Field
                 label={t('admin:announcement.barHtmlLabel', { defaultValue: '公告条内容（支持 HTML / 链接）' })}
                 htmlFor="ann-bar"
@@ -271,27 +265,27 @@ export default function AdminAnnouncement() {
                   })}
                 />
               </Field>
-            </div>
-            {barEnabled && barHtml.trim() ? (
-              <div className="mt-3">
-                <p className="mb-2 text-[12px] uppercase tracking-[0.08em] text-[var(--color-fg-subtle)]">
-                  {t('admin:announcement.preview')}
-                </p>
-                <div className="flex items-center gap-2.5 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-accent-soft)] px-4 py-2.5 text-[13px] text-[var(--color-fg)]">
-                  <Megaphone size={14} aria-hidden className="shrink-0 text-[var(--color-accent)]" />
-                  <div
-                    className="flex-1 min-w-0 break-words [&_a]:text-[var(--color-accent)] [&_a]:underline [&_a]:underline-offset-2"
-                    dangerouslySetInnerHTML={{ __html: sanitizeHtml(barHtml) }}
-                  />
+              {barEnabled && barHtml.trim() ? (
+                <div>
+                  <p className="mb-2 text-[12px] font-medium text-[var(--color-fg-subtle)]">
+                    {t('admin:announcement.preview')}
+                  </p>
+                  <div className="flex items-center gap-2.5 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-accent-soft)] px-4 py-2.5 text-[13px] text-[var(--color-fg)]">
+                    <Megaphone size={14} aria-hidden className="shrink-0 text-[var(--color-accent)]" />
+                    <div
+                      className="flex-1 min-w-0 break-words [&_a]:text-[var(--color-accent)] [&_a]:underline [&_a]:underline-offset-2"
+                      dangerouslySetInnerHTML={{ __html: sanitizeHtml(barHtml) }}
+                    />
+                  </div>
                 </div>
-              </div>
-            ) : null}
-          </div>
+              ) : null}
+            </SettingsBlock>
+          </SettingsSection>
 
           {/* Live preview */}
           {enabled && (title.trim() || body.trim() || imageUrl.trim()) ? (
-            <div>
-              <p className="mb-2 text-[12px] uppercase tracking-[0.08em] text-[var(--color-fg-subtle)]">
+            <div className="mb-8">
+              <p className="mb-2 text-[12px] font-medium text-[var(--color-fg-subtle)]">
                 {t('admin:announcement.preview')}
               </p>
               <div className="flex flex-col overflow-hidden rounded-popup border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-md)] sm:flex-row">
@@ -321,12 +315,12 @@ export default function AdminAnnouncement() {
             </div>
           ) : null}
 
-          <div className="flex items-center gap-3">
+          <SettingsActions className="justify-start sm:justify-end">
             <Button className="w-full sm:w-auto" onClick={() => void save()} loading={saving} leadingIcon={<Megaphone size={14} aria-hidden />}>
               {t('common:actions.save')}
             </Button>
-          </div>
-        </section>
+          </SettingsActions>
+        </div>
       )}
     </div>
   )

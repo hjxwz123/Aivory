@@ -41,6 +41,7 @@ import {
 } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
 import { WorkspaceAdminControls } from './workspace-admin-controls'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
 
 function fmtDate(unix: number): string {
   return new Date(unix * 1000).toLocaleDateString()
@@ -105,13 +106,11 @@ export default function AdminWorkspaces() {
 
   return (
     <section>
-      <h1 className="font-serif text-2xl text-[var(--color-fg)] sm:text-3xl">
-        {t('workspaces.title', { defaultValue: 'Workspaces' })}
-      </h1>
-      <p className="mt-1 text-sm text-[var(--color-fg-muted)]">
-        {t('workspaces.subtitle', { defaultValue: 'Every collaborative space, its owner and member count.' })}
-      </p>
-      <div className="mt-4"><WorkspaceAdminControls onSaved={() => void load()} /></div>
+      <AdminPageHeader
+        title={t('workspaces.title', { defaultValue: 'Workspaces' })}
+        description={t('workspaces.subtitle', { defaultValue: 'Every collaborative space, its owner and member count.' })}
+      />
+      <div className="mt-6"><WorkspaceAdminControls onSaved={() => void load()} /></div>
       {loading ? (
         <PanelFallback />
       ) : rows.length === 0 ? (
@@ -127,7 +126,7 @@ export default function AdminWorkspaces() {
         <div className="mt-6 hidden overflow-x-auto rounded-[12px] border border-[var(--color-border)] md:block">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-[var(--color-divider)] bg-[var(--color-bg-muted)] text-left text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)]">
+              <tr className="border-b border-[var(--color-divider)] bg-[var(--color-bg-muted)] text-left text-[12px] uppercase tracking-wide text-[var(--color-fg-subtle)]">
                 <th className="px-3 py-2 font-medium">{t('workspaces.colName', { defaultValue: 'Name' })}</th>
                 <th className="px-3 py-2 font-medium">{t('workspaces.colOwner', { defaultValue: 'Owner' })}</th>
                 <th className="px-3 py-2 font-medium">{t('workspaces.colMembers', { defaultValue: 'Members' })}</th>
@@ -142,7 +141,7 @@ export default function AdminWorkspaces() {
                     <button
                       type="button"
                       onClick={() => setSelected(w.id)}
-                      className="font-medium text-[var(--color-fg)] hover:text-[var(--color-accent)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] rounded-[4px]"
+                      className="font-medium text-[var(--color-fg)] hover:text-[var(--color-accent)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] rounded-[6px]"
                     >
                       {w.name}
                     </button>
@@ -172,7 +171,7 @@ export default function AdminWorkspaces() {
                 <span className="min-w-0">
                   <span className="block truncate text-sm font-medium text-[var(--color-fg)]">{w.name}</span>
                   <span className="mt-0.5 block truncate text-[12px] text-[var(--color-fg-muted)]">{w.owner_name || w.owner_id}</span>
-                  <span className="mt-2 flex items-center gap-3 text-[11px] text-[var(--color-fg-subtle)]">
+                  <span className="mt-2 flex items-center gap-3 text-[12px] text-[var(--color-fg-subtle)]">
                     <span className="inline-flex items-center gap-1 tabular-nums">
                       <Users size={12} aria-hidden />
                       {w.member_count ?? 0}
@@ -277,7 +276,7 @@ function WorkspaceDetail({
       </button>
       <div className="mt-3 flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h1 className="flex min-w-0 items-center gap-2 font-serif text-2xl text-[var(--color-fg)]">
+          <h1 className="flex min-w-0 items-center gap-2 text-xl font-semibold tracking-normal text-[var(--color-fg)]">
             <Briefcase size={20} aria-hidden className="text-[var(--color-fg-muted)]" />
             <span className="min-w-0 break-words">{workspace.name}</span>
           </h1>
@@ -326,7 +325,7 @@ function WorkspaceDetail({
               >
                 <div className="truncate text-[13px] text-[var(--color-fg)] hover:text-[var(--color-accent)]">{c.title || '—'}</div>
                 {c.creator_name ? (
-                  <div className="truncate text-[11px] text-[var(--color-fg-subtle)]">{c.creator_name}</div>
+                  <div className="truncate text-[12px] text-[var(--color-fg-subtle)]">{c.creator_name}</div>
                 ) : null}
               </Link>
             </li>
@@ -397,7 +396,7 @@ function WorkspaceDetail({
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="min-w-0 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 sm:rounded-[12px] sm:p-4">
+    <div className="min-w-0 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 sm:p-4">
       <h2 className="text-[12px] font-medium text-[var(--color-fg-subtle)]">{title}</h2>
       <ul className="mt-2 max-h-72 space-y-1 overflow-y-auto scrollbar-thin">{children}</ul>
     </div>
@@ -409,7 +408,7 @@ function Row({ main, sub, onClick }: { main: string; sub?: string; onClick?: () 
     <>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[13px] text-[var(--color-fg)]">{main}</span>
-        {sub ? <span className="block truncate text-[11px] text-[var(--color-fg-subtle)]">{sub}</span> : null}
+        {sub ? <span className="block truncate text-[12px] text-[var(--color-fg-subtle)]">{sub}</span> : null}
       </span>
       {onClick ? <ChevronRight size={14} className="shrink-0 text-[var(--color-fg-faint)]" aria-hidden /> : null}
     </>
@@ -484,7 +483,7 @@ function WorkspaceKnowledgeBaseDetails({
               <li key={document.id} className="flex min-w-0 items-center justify-between gap-3 py-3">
                 <span className="min-w-0">
                   <span className="block truncate text-sm text-[var(--color-fg)]">{document.filename}</span>
-                  <span className="mt-0.5 block truncate text-[11px] text-[var(--color-fg-subtle)]">
+                  <span className="mt-0.5 block truncate text-[12px] text-[var(--color-fg-subtle)]">
                     {[document.mime_type, formatBytes(document.size_bytes), fmtDate(document.created_at)].filter(Boolean).join(' · ')}
                   </span>
                 </span>
@@ -525,7 +524,7 @@ function KnowledgeBaseMetaRow({ label, value, mono = false }: { label: string; v
   return (
     <div className="grid grid-cols-[8rem_minmax(0,1fr)] gap-3 py-2.5">
       <dt className="text-[var(--color-fg-subtle)]">{label}</dt>
-      <dd className={mono ? 'min-w-0 break-words text-right font-mono text-[11px] text-[var(--color-fg)]' : 'min-w-0 break-words text-right text-[var(--color-fg)]'}>{value}</dd>
+      <dd className={mono ? 'min-w-0 break-words text-right font-mono text-[12px] text-[var(--color-fg)]' : 'min-w-0 break-words text-right text-[var(--color-fg)]'}>{value}</dd>
     </div>
   )
 }
@@ -548,7 +547,7 @@ function KnowledgeBaseStat({
         : 'text-[var(--color-fg)]'
   return (
     <div className="min-w-0 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface-sunken)] px-3 py-2.5">
-      <p className="truncate text-[11px] text-[var(--color-fg-subtle)]">{label}</p>
+      <p className="truncate text-[12px] text-[var(--color-fg-subtle)]">{label}</p>
       <p className={`mt-1 truncate text-base font-medium tabular-nums ${color}`}>{value}</p>
     </div>
   )

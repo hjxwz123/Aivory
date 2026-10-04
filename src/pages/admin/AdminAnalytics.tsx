@@ -50,6 +50,7 @@ import {
 import { cn } from '@/lib/utils'
 import { useLanguage } from '@/store/language'
 import { AdminModelFeedback } from './AdminModelFeedback'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
 
 const RANGE_IDS = ['1', '7', '30', '90', '365'] as const
 const METRICS: AnalyticsMetric[] = ['turns', 'tokens', 'cost', 'credits', 'users']
@@ -270,51 +271,53 @@ export default function AdminAnalytics() {
 
   return (
     <div>
-      <header className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-        <div className="min-w-0">
-          <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">
-            {t('admin:analytics.title')}
-          </h1>
-          <p className="mt-2 max-w-3xl text-sm text-[var(--color-fg-muted)]">
-            {t(view === 'usage' ? 'admin:analytics.lead' : 'admin:analytics.feedback.lead')}
-          </p>
-        </div>
-
-        <div className="flex w-full flex-wrap items-center gap-2 xl:w-auto xl:justify-end">
-          {view === 'usage' ? (
-            <Button asChild size="sm" variant="secondary" leadingIcon={<ExternalLink size={15} aria-hidden />}>
-              <Link to="/admin/usage">{t('admin:analytics.actions.usageRecords')}</Link>
-            </Button>
-          ) : null}
-          {view === 'usage' ? (
-            <Tooltip content={t('admin:analytics.actions.refresh')}>
+      <AdminPageHeader
+        title={t('admin:analytics.title')}
+        description={t(view === 'usage' ? 'admin:analytics.lead' : 'admin:analytics.feedback.lead')}
+        actions={(
+          <>
+            {view === 'usage' ? (
               <Button
-                size="icon"
-                variant="ghost"
-                aria-label={t('admin:analytics.actions.refresh')}
-                loading={loading && Boolean(data)}
-                onClick={() => setRefreshVersion((value) => value + 1)}
+                asChild
+                size="sm"
+                variant="secondary"
+                leadingIcon={<ExternalLink size={15} aria-hidden />}
+                className="max-sm:min-h-[var(--tap-min)]"
               >
-                <RefreshCw size={16} aria-hidden />
+                <Link to="/admin/usage">{t('admin:analytics.actions.usageRecords')}</Link>
               </Button>
-            </Tooltip>
-          ) : null}
-          <div className="min-w-[10rem] flex-1 sm:flex-none">
-            <Select value={days} onValueChange={setDays}>
-              <SelectTrigger aria-label={t('admin:usage.filters.range')}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {RANGE_IDS.map((id) => (
-                  <SelectItem key={id} value={id}>
-                    {t(`admin:usage.range.${id}`)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      </header>
+            ) : null}
+            {view === 'usage' ? (
+              <Tooltip content={t('admin:analytics.actions.refresh')}>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  aria-label={t('admin:analytics.actions.refresh')}
+                  loading={loading && Boolean(data)}
+                  onClick={() => setRefreshVersion((value) => value + 1)}
+                  className="max-sm:size-[var(--tap-min)]"
+                >
+                  <RefreshCw size={16} aria-hidden />
+                </Button>
+              </Tooltip>
+            ) : null}
+            <div className="min-w-[10rem] flex-1 sm:flex-none">
+              <Select value={days} onValueChange={setDays}>
+                <SelectTrigger aria-label={t('admin:usage.filters.range')} className="h-8 max-sm:h-[var(--tap-min)]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {RANGE_IDS.map((id) => (
+                    <SelectItem key={id} value={id}>
+                      {t(`admin:usage.range.${id}`)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </>
+        )}
+      />
 
       <div className="mt-5">
         <SegmentedControl
@@ -413,7 +416,7 @@ export default function AdminAnalytics() {
       ) : data ? (
         <main className="mt-6" aria-busy={loading || undefined}>
           {loadError ? (
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-[10px] border border-[var(--color-danger)]/30 bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-fg)]">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-[8px] border border-[var(--color-danger)]/30 bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-fg)]">
               <span>{t('admin:analytics.error.stale')}</span>
               <Button size="xs" variant="secondary" onClick={() => setRefreshVersion((value) => value + 1)}>
                 {t('admin:analytics.error.retry')}
@@ -544,7 +547,7 @@ export default function AdminAnalytics() {
             formatPercent={percentFormat.format}
           />
 
-          <p className="mt-4 text-right text-[11.5px] text-[var(--color-fg-muted)]">
+          <p className="mt-4 text-right text-[12px] text-[var(--color-fg-muted)]">
             {t('admin:analytics.updatedAt', { value: dateTimeFormat.format(new Date(data.generated_at * 1000)) })}
           </p>
         </main>
@@ -579,7 +582,7 @@ function SummaryStrip({ items, formatPercent }: { items: SummaryItemSpec[]; form
               index !== 0 && 'xl:border-l xl:border-[var(--color-divider)]',
             )}
           >
-            <div className="truncate text-[11.5px] font-medium text-[var(--color-fg-muted)]">{item.label}</div>
+            <div className="truncate text-[12px] font-medium text-[var(--color-fg-muted)]">{item.label}</div>
             <div className="mt-1.5 truncate text-xl font-medium tabular-nums text-[var(--color-fg)]">
               {item.format(item.current)}
             </div>
@@ -603,14 +606,14 @@ function PeriodDelta({
   const { t } = useTranslation('admin')
   if (value === null) {
     return (
-      <span className="mt-1 inline-flex items-center gap-1 text-[11px] text-[var(--color-fg-muted)]">
+      <span className="mt-1 inline-flex items-center gap-1 text-[12px] text-[var(--color-fg-muted)]">
         <ArrowUpRight size={12} aria-hidden />{newLabel}
       </span>
     )
   }
   const Icon = value > 0 ? ArrowUpRight : value < 0 ? ArrowDownRight : Minus
   return (
-    <span className="mt-1 inline-flex items-center gap-1 text-[11px] tabular-nums text-[var(--color-fg-muted)]">
+    <span className="mt-1 inline-flex items-center gap-1 text-[12px] tabular-nums text-[var(--color-fg-muted)]">
       <Icon size={12} aria-hidden />
       {t('analytics.comparison.delta', {
         value: formatPercent(value),
@@ -679,11 +682,11 @@ function ComparisonChart({
         <span className="text-[12px] text-[var(--color-fg-muted)]">{selected ? label(selected.bucketStart) : '—'}</span>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] tabular-nums">
           <span className="inline-flex items-center gap-1.5 text-[var(--color-fg)]">
-            <span className="size-2 rounded-[2px] bg-[var(--color-fg)]" aria-hidden />
+            <span className="size-2 rounded-xs bg-[var(--color-fg)]" aria-hidden />
             {currentLabel} <strong className="font-medium">{format(selected?.current ?? 0)}</strong>
           </span>
           <span className="inline-flex items-center gap-1.5 text-[var(--color-fg-muted)]">
-            <span className="size-2 rounded-[2px] border border-[var(--color-border-strong)]" aria-hidden />
+            <span className="size-2 rounded-xs border border-[var(--color-border-strong)]" aria-hidden />
             {previousLabel} <strong className="font-medium">{format(selected?.previous ?? 0)}</strong>
           </span>
         </div>
@@ -727,7 +730,7 @@ function ComparisonChart({
           ))}
         </div>
       </div>
-      <div className="mt-2 flex justify-between text-[11px] text-[var(--color-fg-muted)]">
+      <div className="mt-2 flex justify-between text-[12px] text-[var(--color-fg-muted)]">
         <span>{label(points[0].bucketStart)}</span>
         <span>{label(points[points.length - 1].bucketStart)}</span>
       </div>
@@ -801,7 +804,7 @@ function TokenComposition({
         <h2 className="text-sm font-medium text-[var(--color-fg)]">{t('admin:analytics.sections.tokenComposition')}</h2>
         <DefinitionPopover content={t('admin:analytics.notes.tokenDefinition')} />
       </div>
-      <div className="mt-4 h-2.5 overflow-hidden rounded-[4px] bg-[var(--color-bg-muted)]" aria-hidden>
+      <div className="mt-4 h-2.5 overflow-hidden rounded-xs bg-[var(--color-bg-muted)]" aria-hidden>
         <div className="flex h-full">
           {rows.map(([label, value, color]) => (
             <span key={label} className={color} style={{ width: `${safeRatio(value, total) * 100}%` }} />
@@ -812,7 +815,7 @@ function TokenComposition({
         {rows.map(([label, value, color]) => (
           <div key={label} className="flex items-center justify-between gap-4 border-b border-[var(--color-divider)] py-2.5">
             <dt className="inline-flex min-w-0 items-center gap-2 text-[12px] text-[var(--color-fg-muted)]">
-              <span className={cn('size-2 shrink-0 rounded-[2px]', color)} aria-hidden />{label}
+              <span className={cn('size-2 shrink-0 rounded-xs', color)} aria-hidden />{label}
             </dt>
             <dd className="shrink-0 text-[13px] font-medium tabular-nums text-[var(--color-fg)]">{formatNumber(value)}</dd>
           </div>
@@ -821,7 +824,7 @@ function TokenComposition({
       <dl className="mt-4 grid grid-cols-3 divide-x divide-[var(--color-divider)] border-t border-[var(--color-divider)] pt-4">
         {footerValues.map(([label, value]) => (
           <div key={label} className="min-w-0 px-2 text-center first:pl-0 last:pr-0">
-            <dt className="truncate text-[11px] text-[var(--color-fg-muted)]">{label}</dt>
+            <dt className="truncate text-[12px] text-[var(--color-fg-muted)]">{label}</dt>
             <dd className="mt-1 text-sm font-medium tabular-nums text-[var(--color-fg)]">{value}</dd>
           </div>
         ))}
@@ -972,7 +975,7 @@ function BreakdownSection({
         <>
           <div className="hidden overflow-x-auto lg:block">
             <table className="w-full min-w-[940px] text-[12.5px] tabular-nums">
-              <thead className="bg-[var(--color-bg-muted)] text-[11.5px] text-[var(--color-fg-muted)]">
+              <thead className="bg-[var(--color-bg-muted)] text-[12px] text-[var(--color-fg-muted)]">
                 <tr>
                   <th className="px-4 py-2.5 text-left font-medium">{t('admin:analytics.table.name')}</th>
                   <th className="px-3 py-2.5 text-right font-medium">{t('admin:analytics.table.operations')}</th>
@@ -1045,7 +1048,7 @@ function EntityLabel({
   if (dimension === 'user' && id) {
     return (
       <Link
-        className="rounded-[2px] hover:text-[var(--color-accent)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+        className="rounded-xs hover:text-[var(--color-accent)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
         to={`/admin/users/${encodeURIComponent(id)}/conversations`}
       >
         {children}
@@ -1055,7 +1058,7 @@ function EntityLabel({
   if (dimension === 'model' && id) {
     return (
       <Link
-        className="rounded-[2px] hover:text-[var(--color-accent)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+        className="rounded-xs hover:text-[var(--color-accent)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
         to={`/admin/models/${encodeURIComponent(id)}`}
       >
         {children}
@@ -1099,9 +1102,9 @@ function BreakdownDesktopRow(props: BreakdownRowProps) {
           <span className="max-w-[18rem] truncate font-medium text-[var(--color-fg)]" title={label}>
             <EntityLabel dimension={dimension} id={row.key} linkable={Boolean(row.label)}>{label}</EntityLabel>
           </span>
-          <span className="text-[11px] text-[var(--color-fg-muted)]">{formatPercent(share)}</span>
+          <span className="text-[12px] text-[var(--color-fg-muted)]">{formatPercent(share)}</span>
         </div>
-        <div className="mt-1.5 h-1 overflow-hidden rounded-[2px] bg-[var(--color-bg-muted)]">
+        <div className="mt-1.5 h-1 overflow-hidden rounded-xs bg-[var(--color-bg-muted)]">
           <div className="h-full bg-[var(--color-fg-muted)]" style={{ width: `${share * 100}%` }} />
         </div>
       </td>
@@ -1156,7 +1159,7 @@ function BreakdownMobileRow(props: BreakdownRowProps) {
       <dl className="mt-3 grid grid-cols-2 gap-x-5 gap-y-2.5">
         {pairs.map(([term, value]) => (
           <div key={term} className="flex items-baseline justify-between gap-2 border-b border-[var(--color-divider)] pb-1.5">
-            <dt className="truncate text-[11.5px] text-[var(--color-fg-muted)]">{term}</dt>
+            <dt className="truncate text-[12px] text-[var(--color-fg-muted)]">{term}</dt>
             <dd className="shrink-0 text-[12.5px] font-medium tabular-nums text-[var(--color-fg)]">{value}</dd>
           </div>
         ))}

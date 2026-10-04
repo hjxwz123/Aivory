@@ -7,6 +7,8 @@ import { Field } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/hooks/use-toast'
 import { PanelFallback } from '@/components/ui/panel-fallback'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
+import { SettingsActions, SettingsBlock, SettingsRow, SettingsSection } from '@/components/settings/settings-section'
 
 type Settings = Record<string, unknown>
 
@@ -53,116 +55,110 @@ export default function AdminSystemEmail() {
   const directTls = readBool('smtp_tls')
 
   return (
-    <div className="mx-auto max-w-[76rem]">
-      <header>
-        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">
-          {t('admin:menu.emailService', { defaultValue: 'Email service' })}
-        </h1>
-        <p className="mt-2 max-w-2xl text-sm text-[var(--color-fg-muted)]">
-          {t('admin:settings.fields.smtpLead')}
-        </p>
-      </header>
+    <div>
+      <AdminPageHeader
+        title={t('admin:menu.emailService', { defaultValue: 'Email service' })}
+        description={t('admin:settings.fields.smtpLead')}
+      />
 
       {loading ? (
         <PanelFallback />
       ) : (
-        <section className="mt-8 flex flex-col gap-5">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <Field
-              label={t('admin:settings.fields.smtpHost')}
-              htmlFor="smtp-host"
-              className="md:col-span-2"
-              hint={t('admin:settings.fields.smtpHostHint')}
-            >
-              <Input
-                id="smtp-host"
-                data-admin-tour="email-smtp-host"
-                value={readString('smtp_host')}
-                placeholder="smtp.example.com"
-                onChange={(event) => setDraft((current) => ({ ...current, smtp_host: event.target.value }))}
-              />
-            </Field>
-            <Field
-              label={t('admin:settings.fields.smtpPort')}
-              htmlFor="smtp-port"
-              hint={t('admin:settings.fields.smtpPortHint')}
-            >
-              <Input
-                id="smtp-port"
-                inputMode="numeric"
-                value={readString('smtp_port', '587')}
-                placeholder="587"
-                onChange={(event) => setDraft((current) => ({ ...current, smtp_port: event.target.value }))}
-              />
-            </Field>
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <Field label={t('admin:settings.fields.smtpUser')} htmlFor="smtp-user">
-              <Input
-                id="smtp-user"
-                autoComplete="off"
-                value={readString('smtp_user')}
-                onChange={(event) => setDraft((current) => ({ ...current, smtp_user: event.target.value }))}
-              />
-            </Field>
-            <Field
-              label={t('admin:settings.fields.smtpPassword')}
-              htmlFor="smtp-password"
-              hint={t('admin:settings.fields.smtpPasswordHint')}
-            >
-              <Input
-                id="smtp-password"
-                type="password"
-                autoComplete="new-password"
-                value={readString('smtp_password')}
-                onChange={(event) => setDraft((current) => ({ ...current, smtp_password: event.target.value }))}
-              />
-            </Field>
-          </div>
-
-          <Field
-            label={t('admin:settings.fields.smtpFrom')}
-            htmlFor="smtp-from"
-            hint={t('admin:settings.fields.smtpFromHint')}
+        <div className="mt-8">
+          <SettingsSection
+            title={t('admin:settings.fields.smtpSection', { defaultValue: 'Outgoing mail server' })}
+            bodyClassName="divide-y-0"
           >
-            <Input
-              id="smtp-from"
-              value={readString('smtp_from')}
-              placeholder="noreply@example.com"
-              onChange={(event) => setDraft((current) => ({ ...current, smtp_from: event.target.value }))}
-            />
-          </Field>
+            <SettingsBlock className="flex flex-col gap-5">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <Field
+                  label={t('admin:settings.fields.smtpHost')}
+                  htmlFor="smtp-host"
+                  className="md:col-span-2"
+                  hint={t('admin:settings.fields.smtpHostHint')}
+                >
+                  <Input
+                    id="smtp-host"
+                    data-admin-tour="email-smtp-host"
+                    value={readString('smtp_host')}
+                    placeholder="smtp.example.com"
+                    onChange={(event) => setDraft((current) => ({ ...current, smtp_host: event.target.value }))}
+                  />
+                </Field>
+                <Field
+                  label={t('admin:settings.fields.smtpPort')}
+                  htmlFor="smtp-port"
+                  hint={t('admin:settings.fields.smtpPortHint')}
+                >
+                  <Input
+                    id="smtp-port"
+                    inputMode="numeric"
+                    value={readString('smtp_port', '587')}
+                    placeholder="587"
+                    onChange={(event) => setDraft((current) => ({ ...current, smtp_port: event.target.value }))}
+                  />
+                </Field>
+              </div>
 
-          <div>
-            <ToggleRow
-              label={t('admin:settings.fields.smtpTls')}
-              checked={directTls}
-              onChange={(value) => setDraft((current) => ({ ...current, smtp_tls: value }))}
-            />
-            {directTls && (
-              <p className="mt-2 pl-1 text-xs text-[var(--color-fg-subtle)]">
-                {t('admin:settings.fields.smtpTlsHint')}
-              </p>
-            )}
-          </div>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <Field label={t('admin:settings.fields.smtpUser')} htmlFor="smtp-user">
+                  <Input
+                    id="smtp-user"
+                    autoComplete="off"
+                    value={readString('smtp_user')}
+                    onChange={(event) => setDraft((current) => ({ ...current, smtp_user: event.target.value }))}
+                  />
+                </Field>
+                <Field
+                  label={t('admin:settings.fields.smtpPassword')}
+                  htmlFor="smtp-password"
+                  hint={t('admin:settings.fields.smtpPasswordHint')}
+                >
+                  <Input
+                    id="smtp-password"
+                    type="password"
+                    autoComplete="new-password"
+                    value={readString('smtp_password')}
+                    onChange={(event) => setDraft((current) => ({ ...current, smtp_password: event.target.value }))}
+                  />
+                </Field>
+              </div>
 
-          <div className="flex justify-end">
+              <Field
+                label={t('admin:settings.fields.smtpFrom')}
+                htmlFor="smtp-from"
+                hint={t('admin:settings.fields.smtpFromHint')}
+              >
+                <Input
+                  id="smtp-from"
+                  value={readString('smtp_from')}
+                  placeholder="noreply@example.com"
+                  onChange={(event) => setDraft((current) => ({ ...current, smtp_from: event.target.value }))}
+                />
+              </Field>
+            </SettingsBlock>
+            <div className="border-t border-[var(--color-divider)]">
+              <SettingsRow
+                label={t('admin:settings.fields.smtpTls')}
+                description={directTls ? t('admin:settings.fields.smtpTlsHint') : undefined}
+                htmlFor="smtp-tls"
+              >
+                <Switch
+                  id="smtp-tls"
+                  checked={directTls}
+                  onCheckedChange={(value) => setDraft((current) => ({ ...current, smtp_tls: value }))}
+                />
+              </SettingsRow>
+            </div>
+          </SettingsSection>
+
+          <SettingsActions>
             <Button loading={saving} onClick={() => void save()}>
               {t('common:actions.save')}
             </Button>
-          </div>
-        </section>
+          </SettingsActions>
+        </div>
       )}
     </div>
-  )
-}
-
-function ToggleRow({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
-  return (
-    <label className="flex items-center justify-between rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
-      <span className="text-sm">{label}</span>
-      <Switch checked={checked} onCheckedChange={onChange} />
-    </label>
   )
 }

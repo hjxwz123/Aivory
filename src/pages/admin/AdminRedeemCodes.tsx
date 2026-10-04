@@ -54,6 +54,7 @@ import { formatRelativeDate } from '@/lib/utils'
 import { envNum } from '@/lib/env-config'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { getRedeemCodeStatus, type RedeemCodeStatus } from '@/lib/redeem-code-status'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
 
 type StatusFilter = 'all' | RedeemCodeStatus
 
@@ -260,26 +261,32 @@ export default function AdminRedeemCodes() {
 
   return (
     <div>
-      <header className="flex flex-col items-stretch gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">{t('admin:redeemCodes.title')}</h1>
-          <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('admin:redeemCodes.lead')}</p>
-        </div>
-        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:items-center">
-          <Button
-            variant="secondary"
-            className="w-full sm:w-auto"
-            leadingIcon={<Download size={15} aria-hidden />}
-            disabled={rows.length === 0}
-            onClick={exportCsv}
-          >
-            {t('admin:redeemCodes.export', { defaultValue: 'Export CSV' })}
-          </Button>
-          <Button className="w-full sm:w-auto" leadingIcon={<Plus size={15} aria-hidden />} onClick={openNew}>
-            {t('admin:redeemCodes.new')}
-          </Button>
-        </div>
-      </header>
+      <AdminPageHeader
+        title={t('admin:redeemCodes.title')}
+        description={t('admin:redeemCodes.lead')}
+        actions={(
+          <>
+            <Button
+              size="sm"
+              variant="secondary"
+              className="max-sm:min-h-[var(--tap-min)] max-sm:flex-1"
+              leadingIcon={<Download size={15} aria-hidden />}
+              disabled={rows.length === 0}
+              onClick={exportCsv}
+            >
+              {t('admin:redeemCodes.export', { defaultValue: 'Export CSV' })}
+            </Button>
+            <Button
+              size="sm"
+              className="max-sm:min-h-[var(--tap-min)] max-sm:flex-1"
+              leadingIcon={<Plus size={15} aria-hidden />}
+              onClick={openNew}
+            >
+              {t('admin:redeemCodes.new')}
+            </Button>
+          </>
+        )}
+      />
 
       {/* Filters */}
       <div className="mt-6 grid gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-2">
@@ -313,13 +320,13 @@ export default function AdminRedeemCodes() {
         {loading ? (
           <PanelFallback />
         ) : rows.length === 0 ? (
-          <div className="grid place-items-center rounded-[14px] border border-dashed border-[var(--color-border)] bg-[var(--color-bg-muted)]/30 px-4 py-10 sm:px-6 sm:py-16">
+          <div className="grid place-items-center rounded-[12px] border border-dashed border-[var(--color-border)] bg-[var(--color-bg-muted)]/30 px-4 py-10 sm:px-6 sm:py-16">
             <Ticket size={28} className="text-[var(--color-fg-faint)]" aria-hidden />
             <p className="mt-4 text-sm text-[var(--color-fg-muted)]">{t('admin:redeemCodes.empty')}</p>
           </div>
         ) : (
           <>
-            <ul className="flex flex-col divide-y divide-[var(--color-divider)] overflow-hidden rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)]">
+            <ul className="flex flex-col divide-y divide-[var(--color-divider)] overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
               {pageRows.map((rc) => (
                 <CodeRow
                   key={rc.id}
@@ -564,10 +571,10 @@ function CodeRow({
             </Badge>
           ) : null}
           {row.batch_name ? (
-            <span className="text-[11px] text-[var(--color-fg-subtle)]">{row.batch_name}</span>
+            <span className="text-[12px] text-[var(--color-fg-subtle)]">{row.batch_name}</span>
           ) : null}
         </div>
-        <div className="mt-1 text-[11.5px] text-[var(--color-fg-subtle)] tabular-nums">
+        <div className="mt-1 text-[12px] text-[var(--color-fg-subtle)] tabular-nums">
           {durationLabel}
           <span aria-hidden className="mx-1.5 opacity-50">·</span>
           {row.used_count}/{row.max_uses} {t('admin:redeemCodes.table.uses')}
@@ -649,7 +656,7 @@ function GeneratedList({ codes, onDone }: { codes: ApiRedeemCode[]; onDone: () =
           {copied ? t('admin:redeemCodes.copied') : t('admin:redeemCodes.copyAll')}
         </Button>
       </div>
-      <ul className="max-h-[40vh] overflow-y-auto rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)]/40">
+      <ul className="max-h-[40vh] overflow-y-auto rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)]/40">
         {codes.map((c) => (
           <li
             key={c.id}

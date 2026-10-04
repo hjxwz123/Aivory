@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminApi, ApiError } from '@/api'
 import { Button } from '@/components/ui/button'
-import { Field } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/hooks/use-toast'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { Switch } from '@/components/ui/switch'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
+import { SettingsActions, SettingsRow, SettingsSection } from '@/components/settings/settings-section'
 
 type LogScope = 'errors' | 'all'
 
@@ -51,65 +52,51 @@ export default function AdminSystemLogging() {
   }
 
   return (
-    <div className="mx-auto max-w-[76rem]">
-      <header>
-        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">
-          {t('admin:menu.loggingPrivacy', { defaultValue: 'Logging and privacy' })}
-        </h1>
-        <p className="mt-2 max-w-2xl text-sm text-[var(--color-fg-muted)]">
-          {t('admin:settings.fields.logFullRequestsLead')}
-        </p>
-      </header>
+    <div>
+      <AdminPageHeader
+        title={t('admin:menu.loggingPrivacy', { defaultValue: 'Logging and privacy' })}
+        description={t('admin:settings.fields.logFullRequestsLead')}
+      />
 
       {loading ? (
         <PanelFallback />
       ) : (
-        <section className="mt-8 flex flex-col gap-5">
-          <Field
-            label={t('admin:settings.fields.logFullRequests')}
-            htmlFor="request-log-scope"
-          >
-            <Select value={scope} onValueChange={(value) => setScope(value as LogScope)}>
-              <SelectTrigger id="request-log-scope">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="errors">{t('admin:usage.status.errorsOnly')}</SelectItem>
-                <SelectItem value="all">{t('admin:usage.status.all')}</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
+        <div className="mt-8">
+          <SettingsSection>
+            <SettingsRow
+              label={t('admin:settings.fields.logFullRequests')}
+              description={scope === 'all' ? t('admin:settings.fields.logErrorsOnlyHint') : undefined}
+              htmlFor="request-log-scope"
+            >
+              <Select value={scope} onValueChange={(value) => setScope(value as LogScope)}>
+                <SelectTrigger id="request-log-scope" className="w-full sm:w-56">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="errors">{t('admin:usage.status.errorsOnly')}</SelectItem>
+                  <SelectItem value="all">{t('admin:usage.status.all')}</SelectItem>
+                </SelectContent>
+              </Select>
+            </SettingsRow>
+            <SettingsRow
+              label={t('admin:settings.fields.logRequestBodies')}
+              description={t('admin:settings.fields.logRequestBodiesHint')}
+              htmlFor="request-body-logging"
+            >
+              <Switch
+                id="request-body-logging"
+                checked={requestBodies}
+                onCheckedChange={setRequestBodies}
+              />
+            </SettingsRow>
+          </SettingsSection>
 
-          {scope === 'all' && (
-            <p className="text-xs leading-5 text-[var(--color-fg-subtle)]">
-              {t('admin:settings.fields.logErrorsOnlyHint')}
-            </p>
-          )}
-
-          <div className="flex items-start justify-between gap-6 border-y border-[var(--color-divider)] py-4">
-            <label htmlFor="request-body-logging" className="min-w-0 cursor-pointer">
-              <span className="block text-sm font-medium text-[var(--color-fg)]">
-                {t('admin:settings.fields.logRequestBodies')}
-              </span>
-              <span className="mt-1 block max-w-2xl text-xs leading-5 text-[var(--color-fg-subtle)]">
-                {t('admin:settings.fields.logRequestBodiesHint')}
-              </span>
-            </label>
-            <Switch
-              id="request-body-logging"
-              checked={requestBodies}
-              onCheckedChange={setRequestBodies}
-              aria-label={t('admin:settings.fields.logRequestBodies')}
-              className="mt-0.5 shrink-0"
-            />
-          </div>
-
-          <div className="flex justify-end">
+          <SettingsActions>
             <Button loading={saving} onClick={() => void save()}>
               {t('common:actions.save')}
             </Button>
-          </div>
-        </section>
+          </SettingsActions>
+        </div>
       )}
     </div>
   )

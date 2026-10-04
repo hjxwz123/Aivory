@@ -97,7 +97,7 @@ export function IconUploader({ id, value, onChange, placeholder, preview, disabl
               type="button"
               aria-label={t('admin:icon.clear')}
               title={t('admin:icon.clear')}
-              className="-mr-1 inline-flex size-7 shrink-0 items-center justify-center rounded-[7px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+              className="-mr-1 inline-flex size-7 shrink-0 items-center justify-center rounded-[6px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
               disabled={disabled || uploading}
               onClick={() => onChange('')}
             >

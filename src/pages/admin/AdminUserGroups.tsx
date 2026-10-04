@@ -51,6 +51,7 @@ import {
   splitCreditPeriod,
   type CreditPeriodUnit,
 } from '@/lib/credit-period'
+import { AdminPageHeader } from '@/components/admin/admin-page-header'
 
 type Draft = Partial<ApiUserGroup> & {
   featuresText?: string
@@ -216,7 +217,7 @@ function ResourcePermissionEditor({
                     <span className="min-w-0">
                       <span className="block text-[13px] font-medium text-[var(--color-fg)]">{resource.name}</span>
                       {resource.description ? (
-                        <span className="mt-0.5 block text-[11.5px] leading-snug text-[var(--color-fg-subtle)]">
+                        <span className="mt-0.5 block text-[12px] leading-snug text-[var(--color-fg-subtle)]">
                           {resource.description}
                         </span>
                       ) : null}
@@ -226,7 +227,7 @@ function ResourcePermissionEditor({
               </div>
             )}
           </div>
-          <p className="border-t border-[var(--color-divider)] px-3 py-2 text-[11.5px] text-[var(--color-fg-subtle)]">
+          <p className="border-t border-[var(--color-divider)] px-3 py-2 text-[12px] text-[var(--color-fg-subtle)]">
             {t('groups.permissions.selectedCount', {
               count: policy.ids.length,
               defaultValue: '{{count}} selected',
@@ -622,15 +623,20 @@ export default function AdminUserGroups() {
 
   return (
     <div>
-      <header className="flex flex-col items-stretch gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">{t('admin:groups.title')}</h1>
-          <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('admin:groups.lead')}</p>
-        </div>
-        <Button className="w-full sm:w-auto" leadingIcon={<Plus size={15} aria-hidden />} onClick={openNew}>
-          {t('admin:groups.new')}
-        </Button>
-      </header>
+      <AdminPageHeader
+        title={t('admin:groups.title')}
+        description={t('admin:groups.lead')}
+        actions={(
+          <Button
+            size="sm"
+            className="max-sm:min-h-[var(--tap-min)] max-sm:flex-1"
+            leadingIcon={<Plus size={15} aria-hidden />}
+            onClick={openNew}
+          >
+            {t('admin:groups.new')}
+          </Button>
+        )}
+      />
 
       <section className="mt-8">
         {loading ? (
@@ -1002,7 +1008,7 @@ export default function AdminUserGroups() {
                               </span>
                               <span className="min-w-0 flex-1">
                                 <span className="block truncate text-[13px] font-medium text-[var(--color-fg)]">{groupUser.name || groupUser.email}</span>
-                                <span className="block truncate text-[11.5px] text-[var(--color-fg-subtle)]">{groupUser.email}</span>
+                                <span className="block truncate text-[12px] text-[var(--color-fg-subtle)]">{groupUser.email}</span>
                               </span>
                               {groupUser.role === 'admin' ? <Badge size="xs" variant="neutral">{t('admin:users.admin', { defaultValue: 'Admin' })}</Badge> : null}
                             </li>
