@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Plus, Trash2, Upload, FileText, AlertTriangle, MoreHorizontal, RefreshCw, Search, Share2, Eye, UserPlus, UserMinus, Users, Pencil, Lock, Unlock } from 'lucide-react'
+import { Plus, Trash2, Upload, FileText, AlertTriangle, MoreHorizontal, RefreshCw, Search, Share2, Eye, UserPlus, UserMinus, Users, Pencil, Lock, Unlock, Loader2 } from 'lucide-react'
 import { ApiError, kbsApi } from '@/api'
 import type { ApiDocument, ApiKnowledgeBase, ApiKnowledgeBaseShare, ApiKnowledgeBaseUploader, ApiWorkspaceKnowledgeBaseMemberPermission } from '@/api/types'
 import { apiUpload, apiUrl } from '@/api/client'
@@ -18,6 +18,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
@@ -34,9 +35,11 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { ContentHeader } from '@/components/layout/content-header'
+import { Tooltip } from '@/components/ui/tooltip'
 import { toast } from '@/hooks/use-toast'
 import { toastStorageQuotaFull } from '@/lib/quota-toast'
-import { formatRelativeDate, cn } from '@/lib/utils'
+import { formatRelativeDate, formatBytes, cn } from '@/lib/utils'
+import { fileTypeIcon, fileTypeTileClass } from '@/lib/file-icon'
 import { envNum } from '@/lib/env-config'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -137,10 +140,14 @@ export default function KnowledgeBaseDetail() {
   const [uploaders, setUploaders] = useState<ApiKnowledgeBaseUploader[]>([])
   const [renameDoc, setRenameDoc] = useState<ApiDocument | null>(null)
   const [renameFilename, setRenameFilename] = useState('')
+  // Removing a document drops its index data; ask once instead of deleting on
+  // a single stray click in a dense action row.
+  const [confirmRemoveDoc, setConfirmRemoveDoc] = useState<ApiDocument | null>(null)
   const [shareOpen, setShareOpen] = useState(false)
   const [workspaceMembersOpen, setWorkspaceMembersOpen] = useState(false)
   const [accessRevoked, setAccessRevoked] = useState(false)
   const loadEpochRef = useRef(0)
+  const unfilteredSummaryRef = useRef<DocumentSummary | null>(null)
   const uploadControllerRef = useRef<AbortController | null>(null)
   const uploadAttemptRef = useRef(0)
   const pasteControllerRef = useRef<AbortController | null>(null)
@@ -219,6 +226,7 @@ export default function KnowledgeBaseDetail() {
         useArtifactPanel.getState().close()
         setRenameDoc(null)
         setRenameFilename('')
+        setConfirmRemoveDoc(null)
         setConfirmDeleteKB(false)
         docOperationEpochRef.current += 1
         busyDocRef.current = null
@@ -265,6 +273,7 @@ export default function KnowledgeBaseDetail() {
     useArtifactPanel.getState().close()
     setRenameDoc(null)
     setRenameFilename('')
+    setConfirmRemoveDoc(null)
     setConfirmDeleteKB(false)
     docOperationEpochRef.current += 1
     busyDocRef.current = null
@@ -350,7 +359,10 @@ export default function KnowledgeBaseDetail() {
       setRenameDoc(null)
       setRenameFilename('')
     }
-  }, [canShareKnowledgeBases, canUploadFiles, canUseKnowledgeBases, docs, kb, renameDoc])
+    if (confirmRemoveDoc && !docs.some((doc) => doc.id === confirmRemoveDoc.id && doc.can_delete)) {
+      setConfirmRemoveDoc(null)
+    }
+  }, [canShareKnowledgeBases, canUploadFiles, canUseKnowledgeBases, confirmRemoveDoc, docs, kb, renameDoc])
 
   useEffect(() => {
     if (
@@ -478,6 +490,7 @@ export default function KnowledgeBaseDetail() {
     try {
       await kbsApi.removeDoc(id, d.id)
       if (docOperationEpochRef.current !== operationEpoch || busyDocRef.current !== operation) return
+      setConfirmRemoveDoc(null)
       toast.success(t('kb:detail.removed'))
       await load()
     } catch (e) {
@@ -547,15 +560,7 @@ export default function KnowledgeBaseDetail() {
   }
 
   if (workspacePolicyPending) {
-    return (
-      <div className="flex-1 grid place-items-center p-10">
-        <div className="w-full max-w-md space-y-3" role="status" aria-label={t('common:common.loading')}>
-          <Skeleton className="h-6 w-2/5" />
-          <Skeleton className="h-24 w-full" />
-          <Skeleton className="h-12 w-full" />
-        </div>
-      </div>
-    )
+    return <KnowledgeBaseDetailSkeleton label={t('common:common.loading')} backLabel={t('kb:title')} />
   }
 
   if (!canUseKnowledgeBases) {
@@ -604,15 +609,57 @@ export default function KnowledgeBaseDetail() {
     )
   }
 
+  // First load: keep the page frame (back link, title slot, summary, toolbar,
+  // rows) instead of a bare "…" title, so the real content lands in place.
+  if (!kb) {
+    return <KnowledgeBaseDetailSkeleton label={t('common:common.loading')} backLabel={t('kb:title')} />
+  }
+
+  const filtersActive = Boolean(debouncedSearch.trim()) || uploaderID !== 'all'
+  // The summary describes the whole library. While a filter narrows the list,
+  // keep the last unfiltered totals instead of shrinking the headline numbers.
+  if (!filtersActive) unfilteredSummaryRef.current = documentSummary(docs)
+  const summary = unfilteredSummaryRef.current ?? documentSummary(docs)
+  // An empty library is just its empty state: no all-zero summary and no
+  // search box over nothing.
+  const libraryEmpty = !loading && !filtersActive && docs.length === 0
+
+  const canUpload = Boolean(kb.can_upload && canUploadFiles)
+  const canShare = Boolean(kb.can_share && !kb.workspace_id && canShareKnowledgeBases)
+  const canToggleVisibility = Boolean(kb.workspace_id && (kb.user_id === user?.id || workspaceRole === 'admin'))
+  const canManageMembers = Boolean(kb.workspace_id && kb.can_manage_members)
+  // Secondary library actions live in one overflow menu so the bar keeps a
+  // single primary command (upload) and fits on phones.
+  const hasOverflow = canToggleVisibility || canManageMembers || Boolean(kb.can_delete)
+  const accessLabel = kb.access_role === 'read'
+    ? t('kb:access.read', { defaultValue: 'Read only' })
+    : kb.access_role === 'write'
+      ? t('kb:access.write', { defaultValue: 'Can upload' })
+      : kb.access_role === 'workspace'
+        ? t('kb:access.workspace', { defaultValue: 'Workspace' })
+        : t('kb:access.owner', { defaultValue: 'Owner' })
+
   return (
     <div className="flex-1 min-h-0 flex flex-col bg-[var(--color-bg)] text-[var(--color-fg)]">
       <ContentHeader
-        title={kb?.name ?? '…'}
+        title={kb.name}
         backTo="/kb"
         backLabel={t('kb:title')}
         actions={
-          <div className="flex items-center gap-2">
-            {kb?.can_upload && canUploadFiles ? (
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            {canShare ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                className="max-sm:size-9 max-sm:px-0"
+                aria-label={t('kb:share.action', { defaultValue: 'Share' })}
+                leadingIcon={<Share2 size={15} aria-hidden />}
+                onClick={() => setShareOpen(true)}
+              >
+                <span className="max-sm:sr-only">{t('kb:share.action', { defaultValue: 'Share' })}</span>
+              </Button>
+            ) : null}
+            {canUpload ? (
               <Button
                 size="sm"
                 leadingIcon={<Plus size={15} aria-hidden />}
@@ -621,54 +668,38 @@ export default function KnowledgeBaseDetail() {
                 {t('kb:detail.uploadButton')}
               </Button>
             ) : null}
-            {kb?.can_share && !kb.workspace_id && canShareKnowledgeBases ? (
-              <Button
-                variant="secondary"
-                size="sm"
-                leadingIcon={<Share2 size={15} aria-hidden />}
-                onClick={() => setShareOpen(true)}
-              >
-                {t('kb:share.action', { defaultValue: 'Share' })}
-              </Button>
-            ) : null}
-            {kb?.workspace_id && (kb.user_id === user?.id || workspaceRole === 'admin') ? (
-              <Button
-                variant="secondary"
-                size="sm"
-                loading={kbVisibilityBusy}
-                leadingIcon={kb.is_public !== false ? <Lock size={15} aria-hidden /> : <Unlock size={15} aria-hidden />}
-                onClick={() => void toggleKBVisibility()}
-              >
-                {kb.is_public !== false
-                  ? t('kb:detail.makePrivate', { defaultValue: 'Make private' })
-                  : t('kb:detail.makeShared', { defaultValue: 'Share with workspace' })}
-              </Button>
-            ) : null}
-            {kb?.workspace_id && kb.can_manage_members ? (
-              <Button
-                variant="secondary"
-                size="sm"
-                leadingIcon={<Users size={15} aria-hidden />}
-                onClick={() => setWorkspaceMembersOpen(true)}
-              >
-                {t('kb:workspaceMembers.action', { defaultValue: 'Member permissions' })}
-              </Button>
-            ) : null}
-            {kb?.can_delete ? (
+            {hasOverflow ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
                     aria-label={t('common:actions.more', { defaultValue: 'More' })}
-                    className="inline-flex items-center justify-center size-8 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                    className="inline-flex size-9 items-center justify-center rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] sm:size-8"
                   >
                     <MoreHorizontal size={16} aria-hidden />
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem destructive onSelect={() => setConfirmDeleteKB(true)}>
-                    <Trash2 size={13} aria-hidden /> {t('kb:deleteAction', { defaultValue: 'Delete knowledge base' })}
-                  </DropdownMenuItem>
+                <DropdownMenuContent align="end" className="min-w-[200px]">
+                  {canToggleVisibility ? (
+                    <DropdownMenuItem disabled={kbVisibilityBusy} onSelect={() => void toggleKBVisibility()}>
+                      {kb.is_public !== false ? <Lock size={13} aria-hidden /> : <Unlock size={13} aria-hidden />}
+                      {kb.is_public !== false
+                        ? t('kb:detail.makePrivate', { defaultValue: 'Make private' })
+                        : t('kb:detail.makeShared', { defaultValue: 'Share with workspace' })}
+                    </DropdownMenuItem>
+                  ) : null}
+                  {canManageMembers ? (
+                    <DropdownMenuItem onSelect={() => setWorkspaceMembersOpen(true)}>
+                      <Users size={13} aria-hidden />
+                      {t('kb:workspaceMembers.action', { defaultValue: 'Member permissions' })}
+                    </DropdownMenuItem>
+                  ) : null}
+                  {kb.can_delete && (canToggleVisibility || canManageMembers) ? <DropdownMenuSeparator /> : null}
+                  {kb.can_delete ? (
+                    <DropdownMenuItem destructive onSelect={() => setConfirmDeleteKB(true)}>
+                      <Trash2 size={13} aria-hidden /> {t('kb:deleteAction', { defaultValue: 'Delete knowledge base' })}
+                    </DropdownMenuItem>
+                  ) : null}
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : null}
@@ -676,164 +707,88 @@ export default function KnowledgeBaseDetail() {
         }
       />
       <div className="flex-1 min-h-0 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[var(--layout-content-max-w)] px-5 sm:px-8 py-8 pb-24">
-          {kb?.description ? (
-            <p className="text-[var(--color-fg-muted)] text-[15px] leading-relaxed max-w-[60ch]">{kb.description}</p>
+        <div className="mx-auto w-full max-w-[var(--layout-content-max-w)] px-5 pb-24 pt-5 sm:px-8 sm:pt-6">
+          {kb.description ? (
+            <p className="max-w-[65ch] text-[14px] leading-6 text-[var(--color-fg-muted)]">{kb.description}</p>
           ) : null}
-          {kb ? (
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] text-[var(--color-fg-subtle)]">
-              <Badge size="xs" variant="neutral">
-                {kb.access_role === 'read'
-                  ? t('kb:access.read', { defaultValue: 'Read only' })
-                  : kb.access_role === 'write'
-                    ? t('kb:access.write', { defaultValue: 'Can upload' })
-                    : kb.access_role === 'workspace'
-                      ? t('kb:access.workspace', { defaultValue: 'Workspace' })
-                      : t('kb:access.owner', { defaultValue: 'Owner' })}
-              </Badge>
-              {kb.owner_name ? (
-                <span>{t('kb:access.ownerName', { name: kb.owner_name, defaultValue: 'Owner: {{name}}' })}</span>
-              ) : null}
-            </div>
-          ) : null}
+          <div className={cn('flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-[var(--color-fg-subtle)]', kb.description && 'mt-2')}>
+            <Badge size="xs" variant="neutral">{accessLabel}</Badge>
+            {kb.owner_name ? (
+              <span>{t('kb:access.ownerName', { name: kb.owner_name, defaultValue: 'Owner: {{name}}' })}</span>
+            ) : null}
+          </div>
 
-          <section className="mt-8">
-            <div className="mb-3 flex flex-col gap-2 sm:flex-row">
-            <div className="relative min-w-0 flex-1">
-              <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-fg-faint)]" aria-hidden />
+          {libraryEmpty ? null : (
+            <DocumentSummaryStrip summary={summary} loading={loading && !unfilteredSummaryRef.current} t={t} />
+          )}
+
+          <section className={libraryEmpty ? 'mt-2' : 'mt-6'} aria-label={t('kb:detail.summary.documents')}>
+            {libraryEmpty ? null : (
+            <div className="flex flex-col gap-2.5 border-b border-[var(--color-divider)] pb-3 sm:flex-row sm:items-center">
               <Input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
+                leadingIcon={<Search size={14} aria-hidden />}
                 placeholder={t('kb:detail.searchFiles', { defaultValue: 'Search files by name' })}
                 aria-label={t('kb:detail.searchFiles', { defaultValue: 'Search files by name' })}
-                className="pl-9"
+                wrapperClassName="w-full sm:max-w-xs"
               />
+              {uploaders.length > 1 || uploaderID !== 'all' ? (
+                <Select value={uploaderID} onValueChange={setUploaderID}>
+                  <SelectTrigger className="sm:w-52" aria-label={t('kb:detail.filterUploader', { defaultValue: 'Filter by uploader' })}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t('kb:detail.allUploaders', { defaultValue: 'All uploaders' })}</SelectItem>
+                    {uploaders.map((uploader) => (
+                      <SelectItem key={uploader.user_id} value={uploader.user_id}>
+                        {uploader.name || uploader.email || uploader.user_id}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : null}
+              <span className="text-[12.5px] tabular-nums text-[var(--color-fg-subtle)] sm:ml-auto">
+                {loading ? null : t('kb:detail.docCount', { count: docs.length })}
+              </span>
             </div>
-            <Select value={uploaderID} onValueChange={setUploaderID}>
-              <SelectTrigger className="sm:w-56" aria-label={t('kb:detail.filterUploader', { defaultValue: 'Filter by uploader' })}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{t('kb:detail.allUploaders', { defaultValue: 'All uploaders' })}</SelectItem>
-                {uploaders.map((uploader) => (
-                  <SelectItem key={uploader.user_id} value={uploader.user_id}>
-                    {uploader.name || uploader.email || uploader.user_id}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            </div>
+            )}
+
             {loading ? (
-            <div className="space-y-3" role="status" aria-label={t('common:common.loading')}>
-              {Array.from({ length: 4 }, (_, index) => (
-                <div key={index} className="flex items-center gap-3 py-4">
-                  <Skeleton className="size-8 shrink-0" />
-                  <div className="flex-1 space-y-2">
-                    <Skeleton shape="line" className="w-2/5" />
-                    <Skeleton shape="line" className="h-2.5 w-3/5" />
-                  </div>
-                </div>
-              ))}
-              <span className="sr-only">{t('common:common.loading')}</span>
-            </div>
-          ) : docs.length === 0 ? (
-            <EmptyState
-              icon={<FileText size={20} aria-hidden />}
-              title={debouncedSearch.trim() || uploaderID !== 'all'
-                ? t('kb:detail.noMatches', { defaultValue: 'No matching files' })
-                : t('kb:detail.noDocs')}
-              description={debouncedSearch.trim() || uploaderID !== 'all'
-                ? t('kb:detail.noMatchesBody', { defaultValue: 'Try another file name or uploader.' })
-                : t('kb:detail.noDocsBody')}
-              action={!debouncedSearch.trim() && uploaderID === 'all' && kb?.can_upload && canUploadFiles
-                ? <Button onClick={() => setOpen(true)}>{t('kb:detail.uploadButton')}</Button>
-                : undefined}
-            />
-            ) : (
-            <ul className="flex flex-col divide-y divide-[var(--color-divider)] rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-              {docs.map((d) => (
-                <li key={d.id} className="grid grid-cols-1 items-center gap-3 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:px-5">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <FileText size={13} className="text-[var(--color-fg-subtle)] shrink-0" aria-hidden />
-                      <span className="font-medium text-[var(--color-fg)] truncate">{d.filename}</span>
-                      <StatusBadge status={d.status} label={t(`kb:detail.status.${d.status}`)} />
-                    </div>
-                    <div className="mt-1 text-[12px] text-[var(--color-fg-subtle)] font-mono">
-                      {(d.size_bytes / 1024).toFixed(1)} KB · {t('kb:detail.chunkCount', { count: d.chunk_count, defaultValue: '{{count}} chunks' })} · {t('kb:stats.created', { when: formatRelativeDate(d.created_at * 1000) })}
-                    </div>
-                    {d.uploaded_by_name || d.uploaded_by_email ? (
-                      <div className="mt-1 truncate text-[11.5px] text-[var(--color-fg-subtle)]">
-                        {t('kb:detail.uploadedBy', {
-                          name: d.uploaded_by_name || d.uploaded_by_email,
-                          defaultValue: 'Uploaded by {{name}}',
-                        })}
-                      </div>
-                    ) : null}
-                    {d.status === 'failed' ? (
-                      <p className="mt-1.5 flex items-start gap-1.5 text-[12px] text-[var(--color-danger)] leading-snug">
-                        <AlertTriangle size={12} className="mt-px shrink-0" aria-hidden />
-                        <span>
-                          {d.error_code === DOCUMENT_PARSER_NOT_CONFIGURED
-                            ? t('kb:detail.parserNotConfigured', { defaultValue: 'Indexing failed because document parsing (MinerU) is not configured. Ask an administrator to configure it, then retry.' })
-                            : t('kb:detail.failedReason')}
-                        </span>
-                      </p>
-                    ) : null}
-                    {(d.status === 'parsing' || d.status === 'embedding') ? (
-                      <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-[var(--color-bg-muted)]">
-                        <div className="h-full w-1/3 bg-[var(--color-accent)] animate-[indeterminate_1400ms_linear_infinite]" />
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-1 sm:justify-end">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      leadingIcon={<Eye size={13} aria-hidden />}
-                      onClick={() => previewDocument(d)}
-                    >
-                      {t('kb:detail.preview', { defaultValue: 'Preview' })}
+              <DocumentRowsSkeleton label={t('common:common.loading')} />
+            ) : docs.length === 0 ? (
+              <EmptyState
+                className="mt-6"
+                icon={filtersActive ? <Search size={20} aria-hidden /> : <FileText size={20} aria-hidden />}
+                title={filtersActive
+                  ? t('kb:detail.noMatches', { defaultValue: 'No matching files' })
+                  : t('kb:detail.noDocs')}
+                description={filtersActive
+                  ? t('kb:detail.noMatchesBody', { defaultValue: 'Try another file name or uploader.' })
+                  : t('kb:detail.noDocsBody')}
+                action={!filtersActive && canUpload
+                  ? (
+                    <Button variant="secondary" leadingIcon={<Upload size={15} aria-hidden />} onClick={() => setOpen(true)}>
+                      {t('kb:detail.uploadButton')}
                     </Button>
-                    {d.status === 'failed' && d.can_delete ? (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        leadingIcon={<RefreshCw size={13} aria-hidden />}
-                        loading={busyDoc?.id === d.id && busyDoc.action === 'retry'}
-                        disabled={busyDoc !== null}
-                        onClick={() => void retry(d)}
-                      >
-                        {t('kb:detail.retry')}
-                      </Button>
-                    ) : null}
-                    {d.can_delete ? (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        leadingIcon={<Pencil size={13} aria-hidden />}
-                        disabled={busyDoc !== null}
-                        onClick={() => beginRename(d)}
-                      >
-                        {t('kb:detail.renameFile', { defaultValue: 'Rename' })}
-                      </Button>
-                    ) : null}
-                    {d.can_delete ? (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        leadingIcon={<Trash2 size={13} aria-hidden />}
-                        loading={busyDoc?.id === d.id && busyDoc.action === 'delete'}
-                        disabled={busyDoc !== null}
-                        onClick={() => void remove(d)}
-                      >
-                        {t('common:actions.delete')}
-                      </Button>
-                    ) : null}
-                  </div>
-                </li>
-              ))}
-            </ul>
+                  )
+                  : undefined}
+              />
+            ) : (
+              <ul className="mt-1 flex flex-col divide-y divide-[var(--color-divider)]">
+                {docs.map((d) => (
+                  <DocumentRow
+                    key={d.id}
+                    doc={d}
+                    busy={busyDoc}
+                    onPreview={() => previewDocument(d)}
+                    onRetry={() => void retry(d)}
+                    onRename={() => beginRename(d)}
+                    onRemove={() => setConfirmRemoveDoc(d)}
+                    t={t}
+                  />
+                ))}
+              </ul>
             )}
           </section>
         </div>
@@ -995,6 +950,39 @@ export default function KnowledgeBaseDetail() {
               onClick={() => void saveRename()}
             >
               {t('common:actions.save')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={confirmRemoveDoc !== null}
+        onOpenChange={(next) => {
+          if (next || busyDoc?.action === 'delete') return
+          setConfirmRemoveDoc(null)
+        }}
+      >
+        <DialogContent size="sm" closeDisabled={busyDoc?.action === 'delete'}>
+          <DialogHeader>
+            <DialogTitle>{t('kb:detail.confirmRemoveTitle')}</DialogTitle>
+            <DialogDescription>
+              {t('kb:detail.confirmRemoveBody', { name: confirmRemoveDoc?.filename ?? '' })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              disabled={busyDoc?.action === 'delete'}
+              onClick={() => setConfirmRemoveDoc(null)}
+            >
+              {t('common:actions.cancel')}
+            </Button>
+            <Button
+              variant="destructive"
+              loading={busyDoc?.action === 'delete'}
+              onClick={() => { if (confirmRemoveDoc) void remove(confirmRemoveDoc) }}
+            >
+              {t('common:actions.delete')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1585,14 +1573,291 @@ function KnowledgeBasePermissionSwitch({
   )
 }
 
-function StatusBadge({ status, label }: { status: ApiDocument['status']; label: string }) {
+interface DocumentSummary {
+  total: number
+  ready: number
+  processing: number
+  failed: number
+  sizeBytes: number
+}
+
+function documentSummary(docs: readonly ApiDocument[]): DocumentSummary {
+  const summary: DocumentSummary = { total: docs.length, ready: 0, processing: 0, failed: 0, sizeBytes: 0 }
+  for (const doc of docs) {
+    summary.sizeBytes += doc.size_bytes
+    if (doc.status === 'ready') summary.ready += 1
+    else if (doc.status === 'failed') summary.failed += 1
+    else summary.processing += 1
+  }
+  return summary
+}
+
+/**
+ * Library health at a glance: how many documents exist, how many are actually
+ * searchable, and whether anything still needs attention.
+ */
+function DocumentSummaryStrip({
+  summary,
+  loading,
+  t,
+}: {
+  summary: DocumentSummary
+  loading: boolean
+  t: ReturnType<typeof useTranslation>['t']
+}) {
+  const items: Array<{ key: string; label: string; value: string; tone?: 'accent' | 'danger' }> = [
+    { key: 'documents', label: t('kb:detail.summary.documents'), value: String(summary.total) },
+    { key: 'ready', label: t('kb:detail.summary.ready'), value: String(summary.ready) },
+    {
+      key: 'processing',
+      label: t('kb:detail.summary.processing'),
+      value: String(summary.processing),
+      tone: summary.processing > 0 ? 'accent' : undefined,
+    },
+    {
+      key: 'failed',
+      label: t('kb:detail.summary.failed'),
+      value: String(summary.failed),
+      tone: summary.failed > 0 ? 'danger' : undefined,
+    },
+    { key: 'size', label: t('kb:detail.summary.size'), value: formatBytes(summary.sizeBytes) },
+  ]
+  return (
+    <dl className="mt-5 grid grid-cols-3 gap-px overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-divider)] sm:grid-cols-5">
+      {items.map((item, index) => (
+        <div
+          key={item.key}
+          className={cn(
+            'min-w-0 bg-[var(--color-surface)] px-3 py-2.5 sm:px-4 sm:py-3',
+            // Phones show three cells per row; total size spans the last two.
+            index === items.length - 1 && 'max-sm:col-span-2',
+          )}
+        >
+          <dt className="truncate text-[12px] text-[var(--color-fg-subtle)]">{item.label}</dt>
+          <dd
+            className={cn(
+              'mt-0.5 text-base font-semibold tabular-nums leading-6 text-[var(--color-fg)] sm:text-lg sm:leading-7',
+              item.tone === 'accent' && 'text-[var(--color-accent)]',
+              item.tone === 'danger' && 'text-[var(--color-danger)]',
+            )}
+          >
+            {loading ? <Skeleton shape="line" className="my-2 h-3.5 w-10" /> : item.value}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+/**
+ * One document: a type-tinted tile, name + status, a single metadata line, and
+ * the actions folded into a menu. Preview stays one tap away because it is the
+ * common action; destructive ones need the menu and a confirmation.
+ */
+function DocumentRow({
+  doc,
+  busy,
+  onPreview,
+  onRetry,
+  onRename,
+  onRemove,
+  t,
+}: {
+  doc: ApiDocument
+  busy: { id: string; action: 'retry' | 'rename' | 'delete' } | null
+  onPreview: () => void
+  onRetry: () => void
+  onRename: () => void
+  onRemove: () => void
+  t: ReturnType<typeof useTranslation>['t']
+}) {
+  const Icon = fileTypeIcon(doc.filename, doc.mime_type)
+  const pending = doc.status === 'pending' || doc.status === 'parsing' || doc.status === 'embedding'
+  const retrying = busy?.id === doc.id && busy.action === 'retry'
+  const uploader = doc.uploaded_by_name || doc.uploaded_by_email
+  return (
+    <li className="group/doc relative">
+      <div className="grid min-h-16 grid-cols-[2.25rem_minmax(0,1fr)_auto] items-center gap-x-3 py-2.5">
+        <span
+          className={cn('inline-flex size-9 shrink-0 items-center justify-center self-start rounded-[8px] sm:self-center', fileTypeTileClass(doc.filename, doc.mime_type))}
+          aria-hidden
+        >
+          <Icon size={17} />
+        </span>
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={onPreview}
+              title={doc.filename}
+              className="min-w-0 truncate rounded-[6px] text-left text-[14px] font-medium leading-5 text-[var(--color-fg)] interactive hover:text-[var(--color-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+            >
+              {doc.filename}
+            </button>
+            <DocumentStatus status={doc.status} label={t(`kb:detail.status.${doc.status}`)} />
+          </div>
+          <p className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 text-[12px] leading-4 tabular-nums text-[var(--color-fg-subtle)]">
+            <span>{formatBytes(doc.size_bytes)}</span>
+            {doc.status === 'ready' ? (
+              <>
+                <span aria-hidden className="opacity-50">·</span>
+                <span>{t('kb:detail.chunkCount', { count: doc.chunk_count, defaultValue: '{{count}} chunks' })}</span>
+              </>
+            ) : null}
+            <span aria-hidden className="opacity-50">·</span>
+            <time dateTime={new Date(doc.created_at * 1000).toISOString()}>
+              {t('kb:stats.created', { when: formatRelativeDate(doc.created_at * 1000) })}
+            </time>
+            {uploader ? (
+              <>
+                <span aria-hidden className="opacity-50">·</span>
+                <span className="min-w-0 truncate">
+                  {t('kb:detail.uploadedBy', { name: uploader, defaultValue: 'Uploaded by {{name}}' })}
+                </span>
+              </>
+            ) : null}
+          </p>
+          {doc.status === 'failed' ? (
+            <p className="mt-1 flex items-start gap-1.5 text-[12px] leading-snug text-[var(--color-danger)]">
+              <AlertTriangle size={12} className="mt-px shrink-0" aria-hidden />
+              <span>
+                {doc.error_code === DOCUMENT_PARSER_NOT_CONFIGURED
+                  ? t('kb:detail.parserNotConfigured', { defaultValue: 'Indexing failed because document parsing (MinerU) is not configured. Ask an administrator to configure it, then retry.' })
+                  : t('kb:detail.failedReason')}
+              </span>
+            </p>
+          ) : null}
+          {pending ? (
+            <div
+              className="mt-1.5 h-1 w-full max-w-xs overflow-hidden rounded-full bg-[var(--color-bg-muted)]"
+              role="progressbar"
+              aria-label={t('kb:detail.indexing')}
+            >
+              <div className="h-full w-1/3 bg-[var(--color-accent)] animate-[indeterminate_1400ms_linear_infinite] motion-reduce:animate-none" />
+            </div>
+          ) : null}
+        </div>
+        <div className="flex items-center gap-1">
+          {doc.status === 'failed' && doc.can_delete ? (
+            <Button
+              variant="secondary"
+              size="xs"
+              className="max-sm:hidden"
+              leadingIcon={<RefreshCw size={12} aria-hidden />}
+              loading={retrying}
+              disabled={busy !== null}
+              onClick={onRetry}
+            >
+              {t('kb:detail.retry')}
+            </Button>
+          ) : null}
+          <Tooltip content={t('kb:detail.preview', { defaultValue: 'Preview' })}>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="max-sm:size-[var(--tap-min)]"
+              aria-label={`${t('kb:detail.preview', { defaultValue: 'Preview' })}: ${doc.filename}`}
+              onClick={onPreview}
+            >
+              <Eye size={15} aria-hidden />
+            </Button>
+          </Tooltip>
+          {doc.can_delete ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="max-sm:size-[var(--tap-min)]"
+                  aria-label={t('kb:detail.moreActions', { name: doc.filename })}
+                  disabled={busy !== null && busy.id === doc.id}
+                >
+                  {busy?.id === doc.id ? (
+                    <Loader2 size={15} className="animate-spin motion-reduce:animate-none" aria-hidden />
+                  ) : (
+                    <MoreHorizontal size={15} aria-hidden />
+                  )}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-[180px]">
+                {doc.status === 'failed' ? (
+                  <DropdownMenuItem className="sm:hidden" disabled={busy !== null} onSelect={onRetry}>
+                    <RefreshCw size={13} aria-hidden /> {t('kb:detail.retry')}
+                  </DropdownMenuItem>
+                ) : null}
+                <DropdownMenuItem disabled={busy !== null} onSelect={onRename}>
+                  <Pencil size={13} aria-hidden /> {t('kb:detail.renameFile', { defaultValue: 'Rename' })}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem destructive disabled={busy !== null} onSelect={onRemove}>
+                  <Trash2 size={13} aria-hidden /> {t('common:actions.delete')}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
+        </div>
+      </div>
+    </li>
+  )
+}
+
+function DocumentStatus({ status, label }: { status: ApiDocument['status']; label: string }) {
   switch (status) {
     case 'ready':
-      return <Badge size="xs" variant="sage">{label}</Badge>
+      return <Badge size="xs" variant="success" className="shrink-0">{label}</Badge>
     case 'failed':
       // Failed must read as an error, not just "another in-progress state".
-      return <Badge size="xs" variant="danger">{label}</Badge>
+      return <Badge size="xs" variant="danger" className="shrink-0">{label}</Badge>
     default:
-      return <Badge size="xs" variant="neutral">{label}…</Badge>
+      return (
+        <Badge size="xs" variant="accent" className="shrink-0" leadingIcon={<Loader2 size={10} className="animate-spin motion-reduce:animate-none" aria-hidden />}>
+          {label}
+        </Badge>
+      )
   }
+}
+
+function DocumentRowsSkeleton({ label }: { label: string }) {
+  return (
+    <div className="mt-1 divide-y divide-[var(--color-divider)]" role="status" aria-label={label}>
+      {Array.from({ length: 5 }, (_, index) => (
+        <div key={index} className="grid min-h-16 grid-cols-[2.25rem_minmax(0,1fr)_auto] items-center gap-x-3 py-2.5">
+          <Skeleton className="size-9 rounded-[8px]" />
+          <div className="min-w-0 space-y-1.5">
+            <Skeleton shape="line" className="h-3.5 w-2/5" />
+            <Skeleton shape="line" className="h-3 w-3/5" />
+          </div>
+          <Skeleton className="size-7 rounded-[8px]" />
+        </div>
+      ))}
+      <span className="sr-only">{label}</span>
+    </div>
+  )
+}
+
+/** Full-page frame for the first load: real header chrome, skeleton content. */
+function KnowledgeBaseDetailSkeleton({ label, backLabel }: { label: string; backLabel: string }) {
+  return (
+    <div className="flex-1 min-h-0 flex flex-col bg-[var(--color-bg)] text-[var(--color-fg)]" aria-busy="true">
+      <ContentHeader title={backLabel} backTo="/kb" backLabel={backLabel} actions={<Skeleton className="h-8 w-24 rounded-[10px]" />} />
+      <div className="flex-1 min-h-0 overflow-hidden">
+        <div className="mx-auto w-full max-w-[var(--layout-content-max-w)] px-5 pt-5 sm:px-8 sm:pt-6" role="status" aria-label={label}>
+          <Skeleton shape="line" className="h-3.5 w-1/2 max-w-md" />
+          <Skeleton shape="line" className="mt-3 h-3 w-40" />
+          <div className="mt-5 grid grid-cols-3 gap-px overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-divider)] sm:grid-cols-5">
+            {Array.from({ length: 5 }, (_, index) => (
+              <div key={index} className={cn('space-y-2 bg-[var(--color-surface)] px-3 py-2.5 sm:px-4 sm:py-3', index === 4 && 'max-sm:col-span-2')}>
+                <Skeleton shape="line" className="h-3 w-12" />
+                <Skeleton shape="line" className="h-4 w-8" />
+              </div>
+            ))}
+          </div>
+          <div className="mt-6 flex items-center gap-2.5 border-b border-[var(--color-divider)] pb-3">
+            <Skeleton className="h-10 w-full max-w-xs" />
+          </div>
+          <DocumentRowsSkeleton label={label} />
+        </div>
+      </div>
+    </div>
+  )
 }

@@ -35,6 +35,9 @@ type knowledgeBaseResponse struct {
 	CanManageMembers bool   `json:"can_manage_members"`
 	ProjectID        string `json:"project_id,omitempty"`
 	CreatedAt        int64  `json:"created_at"`
+	// Stats is present on list responses only (document totals for the
+	// library overview); detail responses omit it.
+	Stats *store.KnowledgeBaseStats `json:"stats,omitempty"`
 }
 
 func userKnowledgeBase(kb store.KnowledgeBase) knowledgeBaseResponse {
@@ -43,7 +46,7 @@ func userKnowledgeBase(kb store.KnowledgeBase) knowledgeBaseResponse {
 		WorkspaceID: kb.WorkspaceID, IsPublic: kb.IsPublic, AccessRole: kb.AccessRole, OwnerName: kb.OwnerName,
 		CanShare: kb.CanShare, CanUpload: kb.CanUpload, CanDelete: kb.CanDelete,
 		CanDeleteContent: kb.CanDeleteContent, CanManageMembers: kb.CanManageMembers,
-		ProjectID: kb.ProjectID, CreatedAt: kb.CreatedAt,
+		ProjectID: kb.ProjectID, CreatedAt: kb.CreatedAt, Stats: kb.Stats,
 	}
 }
 
@@ -122,6 +125,9 @@ func listKBsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		rows, err = store.ListWorkspaceKBsForUser(r.Context(), d.DB, wsID, u.ID)
 	} else {
 		rows, err = store.ListKBs(r.Context(), d.DB, u.ID)
+	}
+	if err == nil {
+		err = store.AttachKnowledgeBaseStats(r.Context(), d.DB, rows)
 	}
 	if err != nil {
 		writeError(w, 500, err)

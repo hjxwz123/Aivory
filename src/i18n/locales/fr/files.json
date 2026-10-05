@@ -48,7 +48,9 @@
     "unsupported": "Ce type de fichier ne peut pas être prévisualisé.",
     "tooLarge": "Ce fichier est trop volumineux pour être prévisualisé.",
     "failed": "Impossible de charger l'aperçu.",
-    "metadata": "{{type}} · {{size}}"
+    "metadata": "{{type}} · {{size}}",
+    "details": "Détails",
+    "source": "Source"
   },
   "pdf": {
     "previousPage": "Page précédente",
@@ -85,7 +87,8 @@
     "loading": "Chargement des fichiers…",
     "emptyFilteredTitle": "Aucun fichier correspondant",
     "emptyFilteredBody": "Essayez une autre recherche ou un autre type de fichier.",
-    "resultCount": "{{count}} fichier(s)"
+    "resultCount": "{{count}} fichier(s)",
+    "clearFilters": "Effacer les filtres"
   },
   "selection": {
     "selected": "Sélectionné",
@@ -111,7 +114,9 @@
     "title": "Stockage",
     "usedOf": "{{used}} sur {{quota}} utilisés",
     "usedUnlimited": "{{used}} utilisés · sans limite",
-    "note": "Les documents et autres fichiers comptent dans votre stockage ; pas les images."
+    "note": "Les documents et autres fichiers comptent dans votre stockage ; pas les images.",
+    "percent": "{{percent}} % utilisé",
+    "nearFull": "Stockage presque plein"
   },
   "empty": {
     "title": "Aucun fichier",

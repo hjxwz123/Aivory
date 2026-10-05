@@ -5,16 +5,19 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Link } from 'react-router-dom'
 import {
   ArrowLeft,
   ChevronDown,
   ChevronRight,
+  Database,
   Download,
   FileQuestion,
   Folder as FolderIcon,
   FolderOpen,
   HardDrive,
   MessageSquare,
+  RefreshCw,
   Search,
   Trash2,
 } from 'lucide-react'
@@ -40,14 +43,14 @@ import { Tooltip } from '@/components/ui/tooltip'
 import { toast } from '@/hooks/use-toast'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { envNum } from '@/lib/env-config'
-import { fileIconFor } from '@/lib/file-icon'
+import { fileTypeIcon, fileTypeTileClass } from '@/lib/file-icon'
 import { fileFolderTree, type FolderTreeNode } from '@/lib/folder-attachments'
 import {
   documentPreviewByteLimit,
   documentPreviewKind,
   type FileTypeFilter,
 } from '@/lib/file-preview-kind'
-import { cn } from '@/lib/utils'
+import { cn, formatBytes } from '@/lib/utils'
 import { useConversations } from '@/store/conversations'
 
 const PAGE_SIZE = envNum('VITE_AIVORY_PAGE_SIZE', 50)
@@ -58,13 +61,6 @@ function fileTreeOf(rows: readonly ApiAdminFile[]): {
   folders: Array<FolderTreeNode<ApiAdminFile>>
 } {
   return fileFolderTree(rows, (file) => ({ relPath: file.rel_path, size: file.size_bytes }))
-}
-
-function fmtBytes(n: number): string {
-  if (n >= 1024 * 1024 * 1024) return `${(n / (1024 * 1024 * 1024)).toFixed(1)} GB`
-  if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`
-  if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`
-  return `${n} B`
 }
 
 function typeLabel(file: ApiAdminFile): string {
@@ -380,52 +376,47 @@ export default function UserFiles() {
     (fileType !== 'all' ? 1 : 0) +
     (origin !== ALL ? 1 : 0) +
     (sort !== 'created_at' || order !== 'desc' ? 1 : 0)
+  const filtersActive = Boolean(searchDebounced) || origin !== ALL || fileType !== 'all'
+  // A refetch (search, filter, page) keeps the current rows visible under a
+  // thin progress bar instead of collapsing the list back into skeletons.
+  const firstLoad = loading && rows.length === 0 && !listError
+  const refreshing = loading && !firstLoad
+  const resetFilters = () => {
+    setSearch('')
+    setFileType('all')
+    setOrigin(ALL)
+    setSort('created_at')
+    setOrder('desc')
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <ContentHeader title={t('files:title')} fluid />
-      <main className="min-h-0 flex-1 overflow-hidden">
+      <main className="min-h-0 flex-1 overflow-hidden border-t border-[var(--color-divider)]">
         <div className="flex h-full min-h-0 w-full overflow-hidden bg-[var(--color-surface)]">
           <aside
             className={cn(
-              'min-h-0 w-full flex-col bg-[var(--color-bg)] lg:flex lg:w-[20rem] lg:shrink-0 xl:w-[21rem]',
+              'min-h-0 w-full flex-col border-[var(--color-divider)] bg-[var(--color-bg)] lg:flex lg:w-[21rem] lg:shrink-0 lg:border-r xl:w-[22rem]',
               mobilePreviewOpen ? 'hidden' : 'flex',
             )}
             aria-label={t('files:accessibility.fileList')}
           >
-            <div className="px-3 pb-2 pt-3">
-              <div className="flex items-center justify-between gap-3 text-[0.8125rem]">
-                <span className="inline-flex min-w-0 items-center gap-2 font-medium text-[var(--color-fg)]">
-                  <HardDrive size={14} className="shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
-                  <span className="truncate">{t('files:storage.title')}</span>
-                </span>
-                <span className="shrink-0 tabular-nums text-[var(--color-fg-muted)]">
-                  {quota > 0
-                    ? t('files:storage.usedOf', { used: fmtBytes(used), quota: fmtBytes(quota) })
-                    : t('files:storage.usedUnlimited', { used: fmtBytes(used) })}
-                </span>
-              </div>
-              {quota > 0 ? (
-                <div
-                  className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--color-bg-muted)]"
-                  role="progressbar"
-                  aria-label={t('files:storage.title')}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={Math.round(storagePercent)}
-                >
-                  <div
-                    className={cn(
-                      'h-full rounded-full transition-[width] duration-200',
-                      storageNearFull ? 'bg-[var(--color-danger)]' : 'bg-[var(--color-accent)]',
-                    )}
-                    style={{ width: `${storagePercent}%` }}
-                  />
-                </div>
-              ) : null}
-            </div>
+            <StorageMeter
+              loaded={storage !== null}
+              quota={quota}
+              percent={storagePercent}
+              nearFull={storageNearFull}
+              labels={{
+                title: t('files:storage.title'),
+                usedOf: quota > 0
+                  ? t('files:storage.usedOf', { used: formatBytes(used), quota: formatBytes(quota) })
+                  : t('files:storage.usedUnlimited', { used: formatBytes(used) }),
+                percent: t('files:storage.percent', { percent: Math.round(storagePercent) }),
+                nearFull: t('files:storage.nearFull'),
+              }}
+            />
 
-            <div className="flex items-center gap-2 px-3 py-2">
+            <div className="flex items-center gap-2 px-3 pb-2">
               <Input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
@@ -455,55 +446,58 @@ export default function UserFiles() {
               />
             </div>
 
-            <div className="flex min-h-0 flex-1 flex-col">
-              <div className="flex h-9 shrink-0 items-center justify-between px-3 text-[0.75rem] text-[var(--color-fg-subtle)]">
+            <div className="relative flex min-h-0 flex-1 flex-col">
+              <div className="flex h-9 shrink-0 items-center justify-between border-b border-[var(--color-divider)] px-3 text-[12px] text-[var(--color-fg-subtle)]">
                 <span>{t('files:list.title')}</span>
-                <span className="tabular-nums">{t('files:total', { count: total })}</span>
+                {firstLoad ? (
+                  <Skeleton shape="line" className="h-3 w-14" />
+                ) : (
+                  <span className="tabular-nums">{t('files:total', { count: total })}</span>
+                )}
               </div>
-
-              {loading ? (
-                <div className="space-y-1 p-2" aria-label={t('common:loading', { defaultValue: 'Loading' })}>
-                  {Array.from({ length: 7 }, (_, index) => (
-                    <div key={index} className="flex items-center gap-3 px-2 py-2.5">
-                      <Skeleton className="size-9 shrink-0" />
-                      <div className="min-w-0 flex-1 space-y-2">
-                        <Skeleton shape="line" className="w-4/5" />
-                        <Skeleton shape="line" className="h-2.5 w-3/5" />
-                      </div>
-                    </div>
-                  ))}
+              {refreshing ? (
+                <div className="pointer-events-none absolute inset-x-0 top-9 z-10 h-0.5 overflow-hidden bg-[var(--color-accent-soft)]" role="progressbar" aria-label={t('files:list.loading')}>
+                  <span className="block h-full w-1/3 bg-[var(--color-accent)] animate-[indeterminate_1200ms_ease-in-out_infinite] motion-reduce:animate-none" />
                 </div>
+              ) : null}
+
+              {firstLoad ? (
+                <FileListSkeleton label={t('files:list.loading')} />
               ) : listError ? (
-                <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
-                  <FileQuestion size={24} className="text-[var(--color-danger)]" aria-hidden />
-                  <p className="mt-3 text-sm text-[var(--color-fg-muted)]">{listError}</p>
-                  <Button variant="secondary" size="sm" className="mt-4" onClick={() => void load()}>
+                <div className="flex flex-1 flex-col items-center justify-center px-6 text-center" role="alert">
+                  <span className="inline-flex size-12 items-center justify-center rounded-full bg-[var(--color-danger-soft)] text-[var(--color-danger)]">
+                    <FileQuestion size={21} aria-hidden />
+                  </span>
+                  <p className="mt-4 text-sm text-[var(--color-fg-muted)]">{listError}</p>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="mt-4"
+                    leadingIcon={<RefreshCw size={14} aria-hidden />}
+                    onClick={() => void load()}
+                  >
                     {t('common:actions.tryAgain', { defaultValue: 'Try again' })}
                   </Button>
                 </div>
               ) : rows.length === 0 ? (
-                // The list pane has three fixed toolbars above its empty area;
-                // compensate for half their height so the two-pane empty
-                // states share the same visual center on desktop. Mobile keeps
-                // the natural list-body centering.
                 <EmptyState
-                  className="my-auto py-10 lg:-translate-y-[4.5rem]"
-                  icon={<FolderOpen size={21} aria-hidden />}
-                  titleClassName="text-lg font-semibold"
-                  title={
-                    searchDebounced || origin !== ALL || fileType !== 'all'
-                      ? t('files:list.emptyFilteredTitle')
-                      : t('files:empty.title')
-                  }
-                  description={
-                    searchDebounced || origin !== ALL || fileType !== 'all'
-                      ? t('files:list.emptyFilteredBody')
-                      : t('files:empty.body')
-                  }
+                  className="my-auto py-10"
+                  icon={filtersActive ? <Search size={21} aria-hidden /> : <FolderOpen size={21} aria-hidden />}
+                  title={filtersActive ? t('files:list.emptyFilteredTitle') : t('files:empty.title')}
+                  description={filtersActive ? t('files:list.emptyFilteredBody') : t('files:empty.body')}
+                  action={filtersActive ? (
+                    <Button variant="secondary" size="sm" onClick={resetFilters}>
+                      {t('files:list.clearFilters')}
+                    </Button>
+                  ) : undefined}
                 />
               ) : (
                 <ul
-                  className="min-h-0 flex-1 overflow-y-auto p-1.5 scrollbar-thin"
+                  className={cn(
+                    'min-h-0 flex-1 overflow-y-auto p-1.5 scrollbar-thin transition-opacity duration-150',
+                    refreshing && 'opacity-60',
+                  )}
+                  aria-busy={refreshing || undefined}
                   aria-label={t('files:accessibility.fileList')}
                 >
                   {fileTree.folders.map((folder) => (
@@ -578,7 +572,7 @@ export default function UserFiles() {
           >
             {preview ? (
               <>
-                <header className="flex min-h-12 shrink-0 items-center gap-1 bg-[var(--color-surface)] px-2 sm:px-3">
+                <header className="flex min-h-14 shrink-0 items-center gap-2 border-b border-[var(--color-divider)] bg-[var(--color-surface)] px-2 sm:px-4">
                   <Button
                     variant="ghost"
                     size="icon-sm"
@@ -588,12 +582,22 @@ export default function UserFiles() {
                   >
                     <ArrowLeft size={18} aria-hidden />
                   </Button>
+                  <PreviewFileTile file={preview.file} />
                   <div className="min-w-0 flex-1">
                     <h2 className="truncate text-[0.9375rem] font-semibold text-[var(--color-fg)]" title={preview.file.filename}>
                       {preview.file.filename}
                     </h2>
-                    <p className="mt-0.5 truncate text-[0.71875rem] tabular-nums text-[var(--color-fg-subtle)]">
-                      {typeLabel(preview.file)} · {fmtBytes(preview.file.size_bytes)} · {timeFormat.format(new Date(preview.file.created_at * 1000))}
+                    <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[12px] tabular-nums text-[var(--color-fg-subtle)]">
+                      <span className="shrink-0">{typeLabel(preview.file)}</span>
+                      <span aria-hidden className="opacity-50">·</span>
+                      <span className="shrink-0">{formatBytes(preview.file.size_bytes)}</span>
+                      <span aria-hidden className="opacity-50 max-sm:hidden">·</span>
+                      <span className="truncate max-sm:hidden">{timeFormat.format(new Date(preview.file.created_at * 1000))}</span>
+                      <span aria-hidden className="opacity-50">·</span>
+                      <FileSourceLink
+                        file={preview.file}
+                        labels={{ conversation: t('files:origin.conversation'), kb: t('files:origin.kb') }}
+                      />
                     </p>
                   </div>
                   <Tooltip content={t('files:preview.download')}>
@@ -613,7 +617,7 @@ export default function UserFiles() {
                     <Button
                       variant="ghost"
                       size="icon-sm"
-                      className="text-[var(--color-danger)] [@media(pointer:coarse)]:size-11"
+                      className="text-[var(--color-fg-muted)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] [@media(pointer:coarse)]:size-11"
                       aria-label={`${t('common:actions.delete', { defaultValue: 'Delete' })}: ${preview.file.filename}`}
                       onClick={() => setConfirmDelete(preview.file)}
                     >
@@ -634,14 +638,15 @@ export default function UserFiles() {
                   />
                 </div>
               </>
+            ) : firstLoad ? (
+              <PreviewPaneSkeleton label={t('files:preview.loading')} />
             ) : (
               <div className="flex h-full items-center justify-center p-6">
                 <EmptyState
                   className="max-w-sm py-10"
                   icon={<FileQuestion size={21} aria-hidden />}
-                  titleClassName="text-lg font-semibold"
-                  title={t('files:preview.selectTitle')}
-                  description={t('files:preview.selectBody')}
+                  title={rows.length === 0 && !filtersActive ? t('files:empty.title') : t('files:preview.selectTitle')}
+                  description={rows.length === 0 && !filtersActive ? t('files:empty.body') : t('files:preview.selectBody')}
                 />
               </div>
             )}
@@ -707,6 +712,138 @@ interface FileRowLabels {
   deleteAction: string
 }
 
+/**
+ * Storage usage as a quiet header for the list pane. It renders a fixed-height
+ * placeholder until the first response so the search bar never jumps down.
+ */
+function StorageMeter({
+  loaded,
+  quota,
+  percent,
+  nearFull,
+  labels,
+}: {
+  loaded: boolean
+  quota: number
+  percent: number
+  nearFull: boolean
+  labels: { title: string; usedOf: string; percent: string; nearFull: string }
+}) {
+  return (
+    <div className="px-3 pb-3 pt-3">
+      <div className="flex min-h-5 items-center justify-between gap-3 text-[13px]">
+        <span className="inline-flex min-w-0 items-center gap-2 font-medium text-[var(--color-fg)]">
+          <HardDrive size={14} className="shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
+          <span className="truncate">{labels.title}</span>
+        </span>
+        {loaded ? (
+          <span className={cn('shrink-0 tabular-nums', nearFull ? 'text-[var(--color-danger)]' : 'text-[var(--color-fg-muted)]')}>
+            {labels.usedOf}
+          </span>
+        ) : (
+          <Skeleton shape="line" className="h-3 w-24" />
+        )}
+      </div>
+      {loaded && quota > 0 ? (
+        <>
+          <div
+            className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--color-bg-muted)]"
+            role="progressbar"
+            aria-label={labels.title}
+            aria-valuetext={labels.percent}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(percent)}
+          >
+            <div
+              className={cn(
+                'h-full rounded-full transition-[width] duration-300',
+                nearFull ? 'bg-[var(--color-danger)]' : 'bg-[var(--color-accent)]',
+              )}
+              style={{ width: `${Math.max(percent, percent > 0 ? 2 : 0)}%` }}
+            />
+          </div>
+          {nearFull ? (
+            <p className="mt-1.5 text-[12px] text-[var(--color-danger)]">{labels.nearFull}</p>
+          ) : null}
+        </>
+      ) : null}
+    </div>
+  )
+}
+
+/** "From: <knowledge base | conversation>" that jumps to where the file lives. */
+function FileSourceLink({ file, labels }: { file: ApiAdminFile; labels: { conversation: string; kb: string } }) {
+  const isKB = file.origin === 'kb'
+  const Icon = isKB ? Database : MessageSquare
+  const label = isKB ? file.kb_name || labels.kb : labels.conversation
+  const to = isKB ? (file.kb_id ? `/kb/${file.kb_id}` : '') : (file.conversation_id ? `/chat/${file.conversation_id}` : '')
+  const content = (
+    <>
+      <Icon size={11} className="shrink-0" aria-hidden />
+      <span className="truncate">{label}</span>
+    </>
+  )
+  if (!to) return <span className="inline-flex min-w-0 items-center gap-1">{content}</span>
+  return (
+    <Link
+      to={to}
+      className="inline-flex min-w-0 items-center gap-1 rounded-[4px] hover:text-[var(--color-accent)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+    >
+      {content}
+    </Link>
+  )
+}
+
+function PreviewFileTile({ file }: { file: ApiAdminFile }) {
+  const Icon = fileTypeIcon(file.filename, file.mime_type)
+  return (
+    <span
+      aria-hidden
+      className={cn('hidden size-9 shrink-0 items-center justify-center rounded-[8px] sm:inline-flex', fileTypeTileClass(file.filename, file.mime_type))}
+    >
+      <Icon size={17} />
+    </span>
+  )
+}
+
+/** Same row geometry as UserFileRow so the first paint does not shift. */
+function FileListSkeleton({ label }: { label: string }) {
+  return (
+    <div className="space-y-0.5 p-1.5" role="status" aria-label={label}>
+      {Array.from({ length: 8 }, (_, index) => (
+        <div key={index} className="flex min-h-14 items-center gap-3 px-2.5 py-2">
+          <Skeleton className="size-9 shrink-0 rounded-[8px]" />
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <Skeleton shape="line" className="h-3.5" style={{ width: `${70 - (index % 3) * 12}%` }} />
+            <Skeleton shape="line" className="h-3 w-1/2" />
+          </div>
+        </div>
+      ))}
+      <span className="sr-only">{label}</span>
+    </div>
+  )
+}
+
+/** Preview pane while the list itself is still loading. */
+function PreviewPaneSkeleton({ label }: { label: string }) {
+  return (
+    <div className="flex h-full min-h-0 flex-col" role="status" aria-label={label}>
+      <div className="flex min-h-14 shrink-0 items-center gap-3 border-b border-[var(--color-divider)] bg-[var(--color-surface)] px-4">
+        <Skeleton className="hidden size-9 rounded-[8px] sm:block" />
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <Skeleton shape="line" className="h-3.5 w-48" />
+          <Skeleton shape="line" className="h-3 w-64" />
+        </div>
+      </div>
+      <div className="flex min-h-0 flex-1 justify-center p-4 sm:p-6">
+        <Skeleton className="h-full w-full max-w-[52rem] rounded-[8px]" />
+      </div>
+      <span className="sr-only">{label}</span>
+    </div>
+  )
+}
+
 interface FolderRowLabels extends FileRowLabels {
   folderSummary: (count: number, size: string) => string
   expand: (name: string) => string
@@ -730,44 +867,43 @@ interface UserFileRowProps {
  * behave identically whether the file is loose or inside a folder.
  */
 function UserFileRow({ file, depth, selected, onOpen, onDelete, shortDateFormat, labels }: UserFileRowProps) {
-  const FileIcon = fileIconFor(file.filename)
+  const FileIcon = fileTypeIcon(file.filename, file.mime_type)
+  const SourceIcon = file.origin === 'kb' ? Database : MessageSquare
   return (
     <li
       className={cn(
-        'group/file flex min-h-16 items-stretch rounded-[8px] transition-colors',
+        'group/file relative flex min-h-14 items-stretch rounded-[8px] transition-colors',
         selected ? 'bg-[var(--color-accent-soft)]' : 'hover:bg-[var(--color-bg-muted)]',
       )}
     >
+      {selected ? (
+        <span aria-hidden className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-[var(--color-accent)]" />
+      ) : null}
       <button
         type="button"
         aria-current={selected ? 'true' : undefined}
         style={{ paddingLeft: `${0.625 + depth * 0.875}rem` }}
-        className="flex min-w-0 flex-1 items-center gap-2.5 rounded-l-[8px] py-2 pr-2.5 text-left focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)]"
+        className="flex min-w-0 flex-1 items-center gap-3 rounded-l-[8px] py-2 pr-2.5 text-left focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)]"
         onClick={onOpen}
       >
         <span
           className={cn(
             'inline-flex size-9 shrink-0 items-center justify-center rounded-[8px]',
-            selected
-              ? 'bg-[var(--color-surface)] text-[var(--color-accent)]'
-              : 'bg-[var(--color-surface-sunken)] text-[var(--color-fg-muted)]',
+            fileTypeTileClass(file.filename, file.mime_type),
           )}
         >
           <FileIcon size={17} aria-hidden />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[0.875rem] font-medium text-[var(--color-fg)]" title={file.filename}>
+          <span className="block truncate text-[0.875rem] font-medium leading-5 text-[var(--color-fg)]" title={file.filename}>
             {file.filename}
           </span>
-          <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[0.71875rem] text-[var(--color-fg-subtle)]">
-            <span className="shrink-0 font-medium">{typeLabel(file)}</span>
-            <span aria-hidden>·</span>
-            <span className="shrink-0 tabular-nums">{fmtBytes(file.size_bytes)}</span>
-            <span aria-hidden>·</span>
-            <span className="truncate">{shortDateFormat.format(new Date(file.created_at * 1000))}</span>
-          </span>
-          <span className="mt-0.5 flex min-w-0 items-center gap-1 text-[0.71875rem] text-[var(--color-fg-subtle)]">
-            {file.origin === 'kb' ? <FolderOpen size={11} className="shrink-0" aria-hidden /> : <MessageSquare size={11} className="shrink-0" aria-hidden />}
+          <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[12px] leading-4 text-[var(--color-fg-subtle)]">
+            <span className="shrink-0 tabular-nums">{formatBytes(file.size_bytes)}</span>
+            <span aria-hidden className="opacity-50">·</span>
+            <span className="shrink-0 tabular-nums">{shortDateFormat.format(new Date(file.created_at * 1000))}</span>
+            <span aria-hidden className="opacity-50">·</span>
+            <SourceIcon size={11} className="shrink-0" aria-hidden />
             <span className="truncate">
               {file.origin === 'kb' ? file.kb_name || labels.kb : labels.conversation}
             </span>
@@ -821,30 +957,30 @@ function UserFileFolderRows({
   return (
     <li className="flex flex-col">
       <div
-        style={{ paddingLeft: `${0.625 + depth * 0.875}rem` }}
-        className="group/folder flex min-h-16 items-center gap-1 rounded-[8px] pr-2.5 transition-colors hover:bg-[var(--color-bg-muted)]"
+        style={{ paddingLeft: `${0.375 + depth * 0.875}rem` }}
+        className="group/folder flex min-h-14 items-center gap-1 rounded-[8px] transition-colors hover:bg-[var(--color-bg-muted)]"
       >
         <button
           type="button"
           onClick={() => onToggle(node.path)}
           aria-expanded={open}
           aria-label={open ? labels.collapse(node.name) : labels.expand(node.name)}
-          className="flex min-w-0 flex-1 items-center gap-2.5 py-2 text-left focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)]"
+          className="flex min-w-0 flex-1 items-center gap-2 py-2 text-left focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)]"
         >
           {open ? (
-            <ChevronDown size={15} className="shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
+            <ChevronDown size={14} className="shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
           ) : (
-            <ChevronRight size={15} className="shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
+            <ChevronRight size={14} className="shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
           )}
-          <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-[8px] bg-[var(--color-surface-sunken)] text-[var(--color-fg-muted)]">
-            <FolderIcon size={17} aria-hidden />
+          <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-[8px] bg-[var(--color-warning-soft)] text-[var(--color-warning)]">
+            {open ? <FolderOpen size={17} aria-hidden /> : <FolderIcon size={17} aria-hidden />}
           </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-[0.875rem] font-medium text-[var(--color-fg)]" title={node.path}>
+          <span className="ml-1 min-w-0 flex-1">
+            <span className="block truncate text-[0.875rem] font-medium leading-5 text-[var(--color-fg)]" title={node.path}>
               {node.name}
             </span>
-            <span className="mt-0.5 block truncate text-[0.71875rem] text-[var(--color-fg-subtle)]">
-              {labels.folderSummary(node.fileCount, fmtBytes(node.size))}
+            <span className="mt-0.5 block truncate text-[12px] leading-4 tabular-nums text-[var(--color-fg-subtle)]">
+              {labels.folderSummary(node.fileCount, formatBytes(node.size))}
             </span>
           </span>
         </button>

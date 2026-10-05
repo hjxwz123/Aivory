@@ -2,10 +2,10 @@
  * KnowledgeBasesList — gallery of the user's knowledge bases.
  */
 import { activeWorkspaceId, useWorkspaces } from '@/store/workspaces'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Plus, Database, MoreHorizontal, Trash2 } from 'lucide-react'
+import { AlertTriangle, Database, Loader2, MoreHorizontal, Plus, Search, Trash2 } from 'lucide-react'
 import { ApiError, kbsApi } from '@/api'
 import type { ApiKnowledgeBase } from '@/api/types'
 import { Button } from '@/components/ui/button'
@@ -31,7 +31,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { toast } from '@/hooks/use-toast'
-import { formatRelativeDate } from '@/lib/utils'
+import { cn, formatRelativeDate } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { useAuth } from '@/store/auth'
 import { userCan } from '@/lib/user-permissions'
@@ -73,6 +73,7 @@ export default function KnowledgeBasesList() {
   const canCreateKnowledgeBase = canUseKnowledgeBases &&
     (!activeWsId || activeWorkspace?.can_create_kb === true)
   const [rows, setRows] = useState<ApiKnowledgeBase[]>([])
+  const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [open, setOpen] = useState(false)
@@ -209,6 +210,14 @@ export default function KnowledgeBasesList() {
     }
   }
 
+  const visibleRows = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return rows
+    return rows.filter((kb) =>
+      kb.name.toLowerCase().includes(q) || (kb.description ?? '').toLowerCase().includes(q),
+    )
+  }, [query, rows])
+
   return (
     <div className="flex-1 min-h-0 flex flex-col bg-[var(--color-bg)] text-[var(--color-fg)]">
       <ContentHeader
@@ -264,90 +273,50 @@ export default function KnowledgeBasesList() {
               />
             ) : rows.length === 0 ? (
               <EmptyState
+                className="mt-6"
                 icon={<Database size={20} aria-hidden />}
                 title={t('kb:emptyTitle')}
                 description={t('kb:emptyBody')}
                 action={
                   canCreateKnowledgeBase ? (
-                    <Button variant="secondary" onClick={() => setOpen(true)}>
+                    <Button variant="secondary" leadingIcon={<Plus size={15} aria-hidden />} onClick={() => setOpen(true)}>
                       {t('kb:createFirst')}
                     </Button>
                   ) : undefined
                 }
               />
             ) : (
-              <ul className="flex flex-col divide-y divide-[var(--color-divider)] border-b border-[var(--color-divider)]">
-                {rows.map((kb) => (
-                  <li key={kb.id} className="group/kb flex min-w-0 items-center gap-1 py-1">
-                    <Link
-                      to={`/kb/${kb.id}`}
-                      className="flex min-h-14 min-w-0 flex-1 items-center gap-3 rounded-[10px] px-2 py-2 interactive hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-                    >
-                      <span
-                        className="grid size-8 shrink-0 place-items-center rounded-[8px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]"
-                        aria-hidden
-                      >
-                        <Database size={15} />
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <h3
-                          title={kb.name}
-                          className="truncate text-[14.5px] font-medium leading-snug tracking-normal text-[var(--color-fg)]"
-                        >
-                          {kb.name}
-                        </h3>
-                        {kb.description ? (
-                          <p className="mt-0.5 truncate text-[12px] leading-snug text-[var(--color-fg-muted)]">
-                            {kb.description}
-                          </p>
-                        ) : null}
-                        {kb.access_role === 'read' || kb.access_role === 'write' ? (
-                          <div className="mt-1 flex items-center gap-1.5">
-                            <Badge size="xs" variant="neutral">
-                              {kb.access_role === 'write'
-                                ? t('kb:access.write', { defaultValue: 'Can upload' })
-                                : t('kb:access.read', { defaultValue: 'Read only' })}
-                            </Badge>
-                            {kb.owner_name ? (
-                              <span className="truncate text-[11px] text-[var(--color-fg-subtle)]">
-                                {t('kb:access.sharedBy', { name: kb.owner_name, defaultValue: 'Shared by {{name}}' })}
-                              </span>
-                            ) : null}
-                          </div>
-                        ) : null}
-                      </div>
-                      <time
-                        className="hidden shrink-0 text-[11px] tabular-nums text-[var(--color-fg-subtle)] sm:block"
-                        dateTime={new Date(kb.created_at * 1000).toISOString()}
-                      >
-                        {t('kb:stats.created', {
-                          when: formatRelativeDate(kb.created_at * 1000),
-                        })}
-                      </time>
-                    </Link>
-                    {kb.can_delete ? (
-                    <div className="shrink-0">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <button
-                            type="button"
-                            aria-label={`${t('common:actions.more', { defaultValue: 'More' })}: ${kb.name}`}
-                            className="inline-flex size-[var(--tap-min)] items-center justify-center rounded-[8px] text-[var(--color-fg-subtle)] opacity-100 hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] sm:size-8 sm:opacity-0 sm:group-hover/kb:opacity-100 sm:data-[state=open]:opacity-100 sm:focus-visible:opacity-100"
-                          >
-                            <MoreHorizontal size={16} aria-hidden />
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem destructive onSelect={() => setToDelete(kb)}>
-                            <Trash2 size={13} aria-hidden /> {t('common:actions.delete')}
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
+              <>
+                {/* Same control strip as Projects: search left, count right,
+                    one divider instead of a container. */}
+                <div className="flex flex-col gap-2.5 border-b border-[var(--color-divider)] pb-3 sm:flex-row sm:items-center sm:justify-between">
+                  <Input
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    leadingIcon={<Search size={14} aria-hidden />}
+                    placeholder={t('kb:list.searchPlaceholder')}
+                    aria-label={t('kb:list.searchPlaceholder')}
+                    wrapperClassName="w-full sm:max-w-xs"
+                  />
+                  <span className="text-[12.5px] tabular-nums text-[var(--color-fg-subtle)]">
+                    {t('kb:list.count', { count: rows.length })}
+                  </span>
+                </div>
+                {visibleRows.length === 0 ? (
+                  <EmptyState
+                    className="mt-6"
+                    icon={<Search size={20} aria-hidden />}
+                    title={t('kb:list.noMatchesTitle')}
+                    description={t('kb:list.noMatchesBody')}
+                  />
+                ) : (
+                  <ul className="mt-1 flex flex-col divide-y divide-[var(--color-divider)]">
+                    {visibleRows.map((kb) => (
+                      <KnowledgeBaseRow key={kb.id} kb={kb} onDelete={() => setToDelete(kb)} />
+                    ))}
+                  </ul>
+                )}
+              </>
             )}
           </section>
         </div>
@@ -421,20 +390,128 @@ export default function KnowledgeBasesList() {
   )
 }
 
+/**
+ * One library row: the same 64px two-column rhythm as ProjectRow, with
+ * document totals and indexing health on the right so the overview answers
+ * "what is in here and is it searchable" without opening each library.
+ */
+function KnowledgeBaseRow({ kb, onDelete }: { kb: ApiKnowledgeBase; onDelete: () => void }) {
+  const { t } = useTranslation(['kb', 'common'])
+  const stats = kb.stats
+  const shared = kb.access_role === 'read' || kb.access_role === 'write'
+  const updatedAt = (stats?.updated_at || kb.created_at) * 1000
+  const subtitle = kb.description || (shared && kb.owner_name
+    ? t('kb:access.sharedBy', { name: kb.owner_name, defaultValue: 'Shared by {{name}}' })
+    : '')
+  return (
+    <li className="group/kb relative">
+      <Link
+        to={`/kb/${kb.id}`}
+        className={cn(
+          'grid min-h-16 grid-cols-[2rem_minmax(0,1fr)] items-center gap-x-3 gap-y-1 rounded-[8px] py-2.5 interactive',
+          '-mx-2.5 px-2.5 sm:-mx-3 sm:grid-cols-[2rem_minmax(0,1fr)_auto] sm:px-3',
+          kb.can_delete && 'pr-12 sm:pr-12',
+          'hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+        )}
+      >
+        <span
+          className="row-span-2 inline-flex size-8 shrink-0 items-center justify-center self-start rounded-[8px] bg-[var(--color-accent-soft)] text-[var(--color-accent)] sm:row-span-1 sm:self-center"
+          aria-hidden
+        >
+          <Database size={15} />
+        </span>
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <h3 title={kb.name} className="truncate text-[14.5px] font-medium leading-[18px] tracking-normal text-[var(--color-fg)]">
+              {kb.name}
+            </h3>
+            {shared ? (
+              <Badge size="xs" variant="neutral" className="shrink-0">
+                {kb.access_role === 'write'
+                  ? t('kb:access.write', { defaultValue: 'Can upload' })
+                  : t('kb:access.read', { defaultValue: 'Read only' })}
+              </Badge>
+            ) : null}
+          </div>
+          {subtitle ? (
+            <p className="mt-0.5 truncate text-[12.5px] leading-4 text-[var(--color-fg-muted)]">{subtitle}</p>
+          ) : null}
+        </div>
+        <div className="col-start-2 flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[12px] leading-4 tabular-nums text-[var(--color-fg-subtle)] sm:col-start-3 sm:row-start-1 sm:flex-nowrap sm:justify-end sm:pl-4">
+          {stats ? (
+            <span className="whitespace-nowrap">
+              {stats.document_count > 0
+                ? t('kb:stats.documents', { count: stats.document_count })
+                : t('kb:stats.empty')}
+            </span>
+          ) : null}
+          {stats && stats.processing_document_count > 0 ? (
+            <span className="inline-flex items-center gap-1 whitespace-nowrap text-[var(--color-accent)]">
+              <Loader2 size={11} className="animate-spin motion-reduce:animate-none" aria-hidden />
+              {t('kb:stats.processing', { count: stats.processing_document_count })}
+            </span>
+          ) : null}
+          {stats && stats.failed_document_count > 0 ? (
+            <span className="inline-flex items-center gap-1 whitespace-nowrap text-[var(--color-danger)]">
+              <AlertTriangle size={11} aria-hidden />
+              {t('kb:stats.failed', { count: stats.failed_document_count })}
+            </span>
+          ) : null}
+          <time className="whitespace-nowrap" dateTime={new Date(updatedAt).toISOString()}>
+            {t('kb:stats.updated', { when: formatRelativeDate(updatedAt) })}
+          </time>
+        </div>
+      </Link>
+      {kb.can_delete ? (
+        <div className="absolute right-0 top-1/2 -translate-y-1/2 sm:-right-1">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label={t('kb:detail.moreActions', { name: kb.name })}
+                className="inline-flex size-[var(--tap-min)] items-center justify-center rounded-[8px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] sm:size-8 sm:opacity-0 sm:group-hover/kb:opacity-100 sm:group-focus-within/kb:opacity-100 sm:data-[state=open]:opacity-100"
+              >
+                <MoreHorizontal size={16} aria-hidden />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem destructive onSelect={onDelete}>
+                <Trash2 size={13} aria-hidden /> {t('kb:deleteAction', { defaultValue: 'Delete knowledge base' })}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      ) : null}
+    </li>
+  )
+}
+
+/** Mirrors the control strip and row geometry so content lands without a jump. */
 function KnowledgeBasesSkeleton({ label }: { label: string }) {
   return (
-    <div className="divide-y divide-[var(--color-divider)]" role="status" aria-label={label}>
-      {Array.from({ length: 4 }, (_, index) => (
-        <div key={index} className="flex min-h-16 items-center gap-3 px-2 py-2">
-          <Skeleton className="size-8 shrink-0 rounded-[8px]" />
-          <div className="min-w-0 flex-1 space-y-2">
-            <Skeleton shape="line" className="h-3.5 w-2/5" />
-            <Skeleton shape="line" className="w-3/5" />
+    <div role="status" aria-label={label}>
+      <div className="flex items-center justify-between border-b border-[var(--color-divider)] pb-3">
+        <Skeleton className="h-10 w-full max-w-xs" />
+        <Skeleton shape="line" className="hidden w-24 sm:block" />
+      </div>
+      <div className="mt-1 divide-y divide-[var(--color-divider)]">
+        {Array.from({ length: 4 }, (_, index) => (
+          <div
+            key={index}
+            className="grid min-h-16 grid-cols-[2rem_minmax(0,1fr)] items-center gap-x-3 gap-y-1 py-2.5 sm:grid-cols-[2rem_minmax(0,1fr)_auto]"
+          >
+            <Skeleton className="row-span-2 size-8 rounded-[8px] sm:row-span-1" />
+            <div className="min-w-0 space-y-1.5">
+              <Skeleton shape="line" className="h-3.5 w-2/5" />
+              <Skeleton shape="line" className="h-3 w-3/5" />
+            </div>
+            <div className="col-start-2 flex items-center gap-2 sm:col-start-3 sm:row-start-1 sm:pl-4">
+              <Skeleton shape="line" className="h-3 w-16" />
+              <Skeleton shape="line" className="h-3 w-24" />
+            </div>
           </div>
-          <Skeleton shape="line" className="hidden w-24 sm:block" />
-          <Skeleton className="size-8 shrink-0 rounded-[8px]" />
-        </div>
-      ))}
+        ))}
+      </div>
       <span className="sr-only">{label}</span>
     </div>
   )

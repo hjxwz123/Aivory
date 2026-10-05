@@ -7,7 +7,12 @@
   "createFirst": "创建第一个知识库",
   "stats": {
     "dim": "{{dim}} 项索引数据",
-    "created": "创建于 {{when}}"
+    "created": "创建于 {{when}}",
+    "documents": "{{count}} 个文档",
+    "updated": "更新于 {{when}}",
+    "processing": "{{count}} 个索引中",
+    "failed": "{{count}} 个失败",
+    "empty": "暂无文档"
   },
   "dialog": {
     "title": "新建知识库",
@@ -74,7 +79,19 @@
     "makeShared": "共享到工作空间",
     "visibilityPrivate": "知识库已设为私有，仅你和管理员可见。",
     "visibilityShared": "知识库已共享给工作空间全体成员。",
-    "visibilityFailed": "更新可见范围失败。"
+    "visibilityFailed": "更新可见范围失败。",
+    "summary": {
+      "documents": "文档",
+      "ready": "可检索",
+      "processing": "处理中",
+      "failed": "失败",
+      "size": "总大小"
+    },
+    "docCount": "共 {{count}} 个文档",
+    "moreActions": "{{name}} 的更多操作",
+    "confirmRemoveTitle": "移除该文档？",
+    "confirmRemoveBody": "「{{name}}」及其索引数据将从该知识库中移除。",
+    "indexing": "正在建立索引…"
   },
   "groupPermissionTitle": "知识库不可用",
   "groupPermissionRequired": "所在用户组无知识库权限。",
@@ -124,5 +141,11 @@
   "deleted": "知识库已删除",
   "deleteAction": "删除知识库",
   "deleteTitle": "删除知识库？",
-  "deleteBody": "将永久删除「{{name}}」及其全部文档与索引数据。引用它的对话会自动取消引用。此操作不可恢复。"
+  "deleteBody": "将永久删除「{{name}}」及其全部文档与索引数据。引用它的对话会自动取消引用。此操作不可恢复。",
+  "list": {
+    "searchPlaceholder": "搜索知识库",
+    "noMatchesTitle": "没有匹配的知识库",
+    "noMatchesBody": "换个名称或关键词试试。",
+    "count": "共 {{count}} 个知识库"
+  }
 }

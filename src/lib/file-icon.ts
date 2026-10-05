@@ -95,6 +95,49 @@ export function attachmentTileClass(attachment: Pick<Attachment, 'kind' | 'name'
   return 'bg-[var(--color-accent)] text-[var(--color-accent-fg)]'
 }
 
+const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'heic', 'avif'])
+const CODE_EXTENSIONS = new Set([
+  'js', 'jsx', 'ts', 'tsx', 'py', 'go', 'rs', 'java', 'kt', 'swift', 'c', 'cc', 'cpp', 'h', 'hpp',
+  'cs', 'rb', 'php', 'sh', 'sql', 'json', 'yaml', 'yml', 'toml', 'xml', 'html', 'css', 'vue',
+])
+
+/**
+ * Soft tinted tile for file rows in browsing lists (Files, knowledge bases).
+ * Same hue families as attachmentTileClass, but at "-soft" strength so a long
+ * list stays calm while PDFs, sheets, slides and images remain scannable.
+ */
+export function fileTypeTileClass(name?: string, mimeType?: string): string {
+  const ext = extOf(name)
+  const mime = (mimeType ?? '').toLowerCase()
+  if (ext === 'pdf' || mime === 'application/pdf') {
+    return 'bg-[var(--color-danger-soft)] text-[var(--color-danger)]'
+  }
+  if (['xls', 'xlsx', 'xlsm', 'csv', 'tsv', 'ods'].includes(ext)) {
+    return 'bg-[var(--color-success-soft)] text-[var(--color-success)]'
+  }
+  if (['ppt', 'pptx', 'odp', 'key'].includes(ext)) {
+    return 'bg-[var(--color-warning-soft)] text-[var(--color-warning)]'
+  }
+  if (['doc', 'docx', 'rtf', 'odt', 'pages'].includes(ext)) {
+    return 'bg-[var(--color-info-soft)] text-[var(--color-info)]'
+  }
+  if (IMAGE_EXTENSIONS.has(ext) || mime.startsWith('image/')) {
+    return 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+  }
+  if (CODE_EXTENSIONS.has(ext)) {
+    return 'bg-[var(--color-secondary-soft)] text-[var(--color-secondary)]'
+  }
+  return 'bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]'
+}
+
+/** Icon for a browsing-list row: extension first, then the MIME family. */
+export function fileTypeIcon(name?: string, mimeType?: string): LucideIcon {
+  const ext = extOf(name)
+  if (IMAGE_EXTENSIONS.has(ext) || (mimeType ?? '').toLowerCase().startsWith('image/')) return FileImage
+  if (CODE_EXTENSIONS.has(ext)) return FileCode
+  return fileIconFor(name)
+}
+
 function extOf(name?: string): string {
   if (!name) return ''
   const i = name.lastIndexOf('.')

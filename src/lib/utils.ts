@@ -44,19 +44,41 @@ export function uid(prefix = 'id'): string {
 }
 
 /**
- * Format a Date relative to now ("Today", "Yesterday", "Mon", "Mar 12").
+ * Format a date relative to now in the UI language ("今天" / "Today",
+ * "昨天" / "Yesterday", a weekday within the week, then a short date). The
+ * language comes from <html lang>, which the language store keeps in sync, so
+ * call sites that sit inside translated sentences never mix in English.
  */
 export function formatRelativeDate(date: Date | string | number): string {
   const d = typeof date === 'number' || typeof date === 'string' ? new Date(date) : date
+  const locale = uiLocale()
   const now = new Date()
-  const diffMs = now.getTime() - d.getTime()
-  const day = 24 * 60 * 60 * 1000
-  const diffDays = Math.floor(diffMs / day)
-  if (diffDays === 0) return 'Today'
-  if (diffDays === 1) return 'Yesterday'
-  if (diffDays < 7) return d.toLocaleDateString(undefined, { weekday: 'short' })
-  if (diffDays < 365) return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+  const startOf = (value: Date) => new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime()
+  const diffDays = Math.round((startOf(now) - startOf(d)) / (24 * 60 * 60 * 1000))
+  if (diffDays === 0 || diffDays === 1) {
+    return new Intl.RelativeTimeFormat(locale, { numeric: 'auto' }).format(-diffDays, 'day')
+  }
+  if (diffDays > 1 && diffDays < 7) return d.toLocaleDateString(locale, { weekday: 'short' })
+  if (d.getFullYear() === now.getFullYear()) return d.toLocaleDateString(locale, { month: 'short', day: 'numeric' })
+  return d.toLocaleDateString(locale, { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+/** Human-readable byte size (B / KB / MB / GB) with one decimal above 1 KB. */
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 1024) return `${Math.max(0, Math.round(bytes || 0))} B`
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let value = bytes / 1024
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit += 1
+  }
+  return `${value >= 100 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`
+}
+
+function uiLocale(): string | undefined {
+  if (typeof document === 'undefined') return undefined
+  return document.documentElement.lang || undefined
 }
 
 /**

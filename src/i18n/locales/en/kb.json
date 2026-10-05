@@ -7,7 +7,13 @@
   "createFirst": "Create your first library",
   "stats": {
     "dim": "{{dim}} indexed items",
-    "created": "created {{when}}"
+    "created": "created {{when}}",
+    "documents_one": "{{count}} document",
+    "documents_other": "{{count}} documents",
+    "updated": "Updated {{when}}",
+    "processing": "{{count}} indexing",
+    "failed": "{{count}} failed",
+    "empty": "No documents"
   },
   "dialog": {
     "title": "New knowledge library",
@@ -75,7 +81,20 @@
     "makeShared": "Share with workspace",
     "visibilityPrivate": "Knowledge base is now private to you and workspace admins.",
     "visibilityShared": "Knowledge base is now shared with the workspace.",
-    "visibilityFailed": "Could not update the visibility."
+    "visibilityFailed": "Could not update the visibility.",
+    "summary": {
+      "documents": "Documents",
+      "ready": "Ready",
+      "processing": "Indexing",
+      "failed": "Failed",
+      "size": "Total size"
+    },
+    "docCount_one": "{{count}} document",
+    "docCount_other": "{{count}} documents",
+    "moreActions": "More actions for {{name}}",
+    "confirmRemoveTitle": "Remove this document?",
+    "confirmRemoveBody": "“{{name}}” and its index data will be removed from this knowledge base.",
+    "indexing": "Indexing…"
   },
   "groupPermissionTitle": "Knowledge bases unavailable",
   "groupPermissionRequired": "Your user group does not have knowledge-base access.",
@@ -125,5 +144,12 @@
   "deleted": "Knowledge base deleted",
   "deleteAction": "Delete knowledge base",
   "deleteTitle": "Delete knowledge base?",
-  "deleteBody": "This permanently deletes “{{name}}” and all its documents and index data. Conversations that reference it will be unlinked. This cannot be undone."
+  "deleteBody": "This permanently deletes “{{name}}” and all its documents and index data. Conversations that reference it will be unlinked. This cannot be undone.",
+  "list": {
+    "searchPlaceholder": "Search knowledge bases",
+    "noMatchesTitle": "No matching knowledge bases",
+    "noMatchesBody": "Try another name or keyword.",
+    "count_one": "{{count}} knowledge base",
+    "count_other": "{{count}} knowledge bases"
+  }
 }

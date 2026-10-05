@@ -538,6 +538,21 @@ type KnowledgeBase struct {
 	CanDelete        bool   `json:"can_delete"`
 	CanDeleteContent bool   `json:"can_delete_content"`
 	CanManageMembers bool   `json:"can_manage_members"`
+	// Stats is transient: user-facing list queries fill it so the library
+	// overview can show contents and indexing health without N detail calls.
+	Stats *KnowledgeBaseStats `json:"stats,omitempty"`
+}
+
+// KnowledgeBaseStats summarizes one library's documents for list views.
+type KnowledgeBaseStats struct {
+	DocumentCount           int   `json:"document_count"`
+	ReadyDocumentCount      int   `json:"ready_document_count"`
+	FailedDocumentCount     int   `json:"failed_document_count"`
+	ProcessingDocumentCount int   `json:"processing_document_count"`
+	TotalSizeBytes          int64 `json:"total_size_bytes"`
+	// UpdatedAt is the latest document upload or indexing change, falling back
+	// to the library's creation time when it has no documents.
+	UpdatedAt int64 `json:"updated_at"`
 }
 
 // KnowledgeBaseShare grants another user read-only or collaborative access to

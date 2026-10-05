@@ -48,7 +48,9 @@
     "unsupported": "このファイル形式はプレビューできません。",
     "tooLarge": "ファイルが大きすぎるためプレビューできません。",
     "failed": "プレビューを読み込めませんでした。",
-    "metadata": "{{type}} · {{size}}"
+    "metadata": "{{type}} · {{size}}",
+    "details": "詳細",
+    "source": "ソース"
   },
   "pdf": {
     "previousPage": "前のページ",
@@ -85,7 +87,8 @@
     "loading": "ファイルを読み込んでいます…",
     "emptyFilteredTitle": "一致するファイルがありません",
     "emptyFilteredBody": "検索語またはファイル形式を変更してください。",
-    "resultCount": "{{count}} 件のファイル"
+    "resultCount": "{{count}} 件のファイル",
+    "clearFilters": "フィルターをクリア"
   },
   "selection": {
     "selected": "選択中",
@@ -111,7 +114,9 @@
     "title": "ストレージ",
     "usedOf": "{{quota}} 中 {{used}} 使用",
     "usedUnlimited": "{{used}} 使用 · 制限なし",
-    "note": "ドキュメントなどのファイルはストレージに計上されます。画像は計上されません。"
+    "note": "ドキュメントなどのファイルはストレージに計上されます。画像は計上されません。",
+    "percent": "{{percent}}% 使用中",
+    "nearFull": "ストレージの空きがわずかです"
   },
   "empty": {
     "title": "ファイルはまだありません",

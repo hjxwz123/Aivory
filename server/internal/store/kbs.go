@@ -276,6 +276,56 @@ func listWorkspaceKBs(ctx context.Context, db *sql.DB, workspaceID, userID strin
 	return out, nil
 }
 
+// AttachKnowledgeBaseStats fills Stats on every row with one grouped query.
+// Callers pass rows they have already authorized; the aggregate reads only
+// documents belonging to those ids.
+func AttachKnowledgeBaseStats(ctx context.Context, db *sql.DB, rows []KnowledgeBase) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	byID := make(map[string]*KnowledgeBase, len(rows))
+	ph := make([]string, 0, len(rows))
+	args := make([]any, 0, len(rows))
+	for i := range rows {
+		rows[i].Stats = &KnowledgeBaseStats{UpdatedAt: rows[i].CreatedAt}
+		byID[rows[i].ID] = &rows[i]
+		ph = append(ph, "?")
+		args = append(args, rows[i].ID)
+	}
+	result, err := db.QueryContext(ctx,
+		`SELECT kb_id,
+		        COUNT(*),
+		        SUM(CASE WHEN status='ready' THEN 1 ELSE 0 END),
+		        SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END),
+		        SUM(CASE WHEN status IN ('pending','parsing','embedding') THEN 1 ELSE 0 END),
+		        COALESCE(SUM(size_bytes),0),
+		        MAX(CASE WHEN ingest_updated_at>created_at THEN ingest_updated_at ELSE created_at END)
+		   FROM documents
+		  WHERE kb_id IN (`+strings.Join(ph, ",")+`)
+		  GROUP BY kb_id`, args...)
+	if err != nil {
+		return err
+	}
+	defer result.Close()
+	for result.Next() {
+		var id string
+		var stats KnowledgeBaseStats
+		if err := result.Scan(&id, &stats.DocumentCount, &stats.ReadyDocumentCount, &stats.FailedDocumentCount,
+			&stats.ProcessingDocumentCount, &stats.TotalSizeBytes, &stats.UpdatedAt); err != nil {
+			return err
+		}
+		kb := byID[id]
+		if kb == nil {
+			continue
+		}
+		if stats.UpdatedAt < kb.CreatedAt {
+			stats.UpdatedAt = kb.CreatedAt
+		}
+		kb.Stats = &stats
+	}
+	return result.Err()
+}
+
 // standaloneKnowledgeBasePredicate keeps project-owned libraries behind the
 // project boundary. New rows carry project_id; the reverse projects.kb_id check
 // also protects legacy libraries created before that marker was persisted.

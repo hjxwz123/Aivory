@@ -7,7 +7,12 @@
   "createFirst": "最初のライブラリを作成",
   "stats": {
     "dim": "{{dim}} 件のインデックスデータ",
-    "created": "{{when}}に作成"
+    "created": "{{when}}に作成",
+    "documents": "{{count}} 件のドキュメント",
+    "updated": "{{when}} に更新",
+    "processing": "{{count}} 件をインデックス中",
+    "failed": "{{count}} 件失敗",
+    "empty": "ドキュメントなし"
   },
   "dialog": {
     "title": "新しいナレッジライブラリ",
@@ -74,7 +79,19 @@
     "makeShared": "ワークスペースと共有",
     "visibilityPrivate": "ナレッジベースはあなたと管理者のみに非公開になりました。",
     "visibilityShared": "ナレッジベースはワークスペースと共有されました。",
-    "visibilityFailed": "公開範囲を更新できませんでした。"
+    "visibilityFailed": "公開範囲を更新できませんでした。",
+    "summary": {
+      "documents": "ドキュメント",
+      "ready": "検索可能",
+      "processing": "処理中",
+      "failed": "失敗",
+      "size": "合計サイズ"
+    },
+    "docCount": "{{count}} 件のドキュメント",
+    "moreActions": "{{name}} のその他の操作",
+    "confirmRemoveTitle": "このドキュメントを削除しますか？",
+    "confirmRemoveBody": "「{{name}}」とそのインデックスデータをこのナレッジベースから削除します。",
+    "indexing": "インデックス作成中…"
   },
   "groupPermissionTitle": "ナレッジベースを利用できません",
   "groupPermissionRequired": "所属ユーザーグループにはナレッジベース権限がありません。",
@@ -124,5 +141,11 @@
   "deleted": "ナレッジベースを削除しました",
   "deleteAction": "ナレッジベースを削除",
   "deleteTitle": "ナレッジベースを削除しますか？",
-  "deleteBody": "「{{name}}」とそのすべてのドキュメント・インデックスデータを完全に削除します。参照している会話は自動的に解除されます。元に戻せません。"
+  "deleteBody": "「{{name}}」とそのすべてのドキュメント・インデックスデータを完全に削除します。参照している会話は自動的に解除されます。元に戻せません。",
+  "list": {
+    "searchPlaceholder": "ナレッジベースを検索",
+    "noMatchesTitle": "一致するナレッジベースはありません",
+    "noMatchesBody": "別の名前やキーワードでお試しください。",
+    "count": "{{count}} 件のナレッジベース"
+  }
 }

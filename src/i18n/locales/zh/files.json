@@ -48,7 +48,9 @@
     "unsupported": "该文件类型暂不支持预览。",
     "tooLarge": "文件过大，无法预览。",
     "failed": "无法加载预览。",
-    "metadata": "{{type}} · {{size}}"
+    "metadata": "{{type}} · {{size}}",
+    "details": "详情",
+    "source": "来源"
   },
   "pdf": {
     "previousPage": "上一页",
@@ -85,7 +87,8 @@
     "loading": "正在加载文件…",
     "emptyFilteredTitle": "没有匹配的文件",
     "emptyFilteredBody": "请尝试其他搜索词或文件类型。",
-    "resultCount": "共 {{count}} 个文件"
+    "resultCount": "共 {{count}} 个文件",
+    "clearFilters": "清除筛选"
   },
   "selection": {
     "selected": "已选择",
@@ -111,7 +114,9 @@
     "title": "存储空间",
     "usedOf": "已用 {{used}} / 共 {{quota}}",
     "usedUnlimited": "已用 {{used}} · 无限制",
-    "note": "文档等文件计入存储空间;图片不计入。"
+    "note": "文档等文件计入存储空间;图片不计入。",
+    "percent": "已用 {{percent}}%",
+    "nearFull": "存储空间即将用尽"
   },
   "empty": {
     "title": "还没有文件",

@@ -48,7 +48,9 @@
     "unsupported": "此檔案類型目前不支援預覽。",
     "tooLarge": "檔案過大，無法預覽。",
     "failed": "無法載入預覽。",
-    "metadata": "{{type}} · {{size}}"
+    "metadata": "{{type}} · {{size}}",
+    "details": "詳細資料",
+    "source": "來源"
   },
   "pdf": {
     "previousPage": "上一頁",
@@ -85,7 +87,8 @@
     "loading": "正在載入檔案…",
     "emptyFilteredTitle": "沒有符合的檔案",
     "emptyFilteredBody": "請嘗試其他搜尋詞或檔案類型。",
-    "resultCount": "共 {{count}} 個檔案"
+    "resultCount": "共 {{count}} 個檔案",
+    "clearFilters": "清除篩選"
   },
   "selection": {
     "selected": "已選取",
@@ -111,7 +114,9 @@
     "title": "儲存空間",
     "usedOf": "已用 {{used}} / 共 {{quota}}",
     "usedUnlimited": "已用 {{used}} · 無限制",
-    "note": "文件等檔案計入儲存空間;圖片不計入。"
+    "note": "文件等檔案計入儲存空間;圖片不計入。",
+    "percent": "已用 {{percent}}%",
+    "nearFull": "儲存空間即將用盡"
   },
   "empty": {
     "title": "還沒有檔案",

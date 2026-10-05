@@ -48,7 +48,9 @@
     "unsupported": "This file type cannot be previewed.",
     "tooLarge": "This file is too large to preview.",
     "failed": "Could not load the preview.",
-    "metadata": "{{type}} · {{size}}"
+    "metadata": "{{type}} · {{size}}",
+    "details": "Details",
+    "source": "Source"
   },
   "pdf": {
     "previousPage": "Previous page",
@@ -85,7 +87,8 @@
     "loading": "Loading files…",
     "emptyFilteredTitle": "No matching files",
     "emptyFilteredBody": "Try another search or file type.",
-    "resultCount": "{{count}} file(s)"
+    "resultCount": "{{count}} file(s)",
+    "clearFilters": "Clear filters"
   },
   "selection": {
     "selected": "Selected",
@@ -111,7 +114,9 @@
     "title": "Storage",
     "usedOf": "{{used}} of {{quota}} used",
     "usedUnlimited": "{{used}} used · no limit",
-    "note": "Documents and other files count toward your storage; images don't."
+    "note": "Documents and other files count toward your storage; images don't.",
+    "percent": "{{percent}}% used",
+    "nearFull": "Storage is almost full"
   },
   "empty": {
     "title": "No files yet",

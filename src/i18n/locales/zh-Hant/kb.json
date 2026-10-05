@@ -7,7 +7,12 @@
   "createFirst": "建立第一個知識庫",
   "stats": {
     "dim": "{{dim}} 項索引資料",
-    "created": "建立於 {{when}}"
+    "created": "建立於 {{when}}",
+    "documents": "{{count}} 個文件",
+    "updated": "更新於 {{when}}",
+    "processing": "{{count}} 個索引中",
+    "failed": "{{count}} 個失敗",
+    "empty": "尚無文件"
   },
   "dialog": {
     "title": "新建知識庫",
@@ -74,7 +79,19 @@
     "makeShared": "共享到工作空間",
     "visibilityPrivate": "知識庫已設為私有，僅你和管理員可見。",
     "visibilityShared": "知識庫已共享給工作空間全體成員。",
-    "visibilityFailed": "更新可見範圍失敗。"
+    "visibilityFailed": "更新可見範圍失敗。",
+    "summary": {
+      "documents": "文件",
+      "ready": "可檢索",
+      "processing": "處理中",
+      "failed": "失敗",
+      "size": "總大小"
+    },
+    "docCount": "共 {{count}} 個文件",
+    "moreActions": "{{name}} 的更多操作",
+    "confirmRemoveTitle": "移除此文件？",
+    "confirmRemoveBody": "「{{name}}」及其索引資料將從此知識庫中移除。",
+    "indexing": "正在建立索引…"
   },
   "groupPermissionTitle": "知識庫不可用",
   "groupPermissionRequired": "所在使用者組無知識庫權限。",
@@ -124,5 +141,11 @@
   "deleted": "知識庫已刪除",
   "deleteAction": "刪除知識庫",
   "deleteTitle": "刪除知識庫？",
-  "deleteBody": "將永久刪除「{{name}}」及其全部文件與索引資料。引用它的對話會自動取消引用。此操作無法復原。"
+  "deleteBody": "將永久刪除「{{name}}」及其全部文件與索引資料。引用它的對話會自動取消引用。此操作無法復原。",
+  "list": {
+    "searchPlaceholder": "搜尋知識庫",
+    "noMatchesTitle": "沒有符合的知識庫",
+    "noMatchesBody": "換個名稱或關鍵字試試。",
+    "count": "共 {{count}} 個知識庫"
+  }
 }

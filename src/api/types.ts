@@ -1211,6 +1211,18 @@ export interface ApiKnowledgeBase {
   can_manage_members?: boolean
   project_id?: string
   created_at: number
+  /** Document totals; present on list responses only. */
+  stats?: ApiKnowledgeBaseStats
+}
+
+export interface ApiKnowledgeBaseStats {
+  document_count: number
+  ready_document_count: number
+  failed_document_count: number
+  processing_document_count: number
+  total_size_bytes: number
+  /** Latest upload or indexing change (unix seconds). */
+  updated_at: number
 }
 
 /** Full knowledge-base record returned only by administrator drill-down APIs. */

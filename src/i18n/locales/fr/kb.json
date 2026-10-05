@@ -7,7 +7,13 @@
   "createFirst": "Créez votre première bibliothèque",
   "stats": {
     "dim": "{{dim}} éléments indexés",
-    "created": "créée {{when}}"
+    "created": "créée {{when}}",
+    "documents_one": "{{count}} document",
+    "documents_other": "{{count}} documents",
+    "updated": "Mis à jour {{when}}",
+    "processing": "{{count}} en indexation",
+    "failed": "{{count}} en échec",
+    "empty": "Aucun document"
   },
   "dialog": {
     "title": "Nouvelle bibliothèque de connaissances",
@@ -74,7 +80,20 @@
     "makeShared": "Partager avec l'espace",
     "visibilityPrivate": "La base est désormais privée pour vous et les administrateurs.",
     "visibilityShared": "La base est désormais partagée avec l'espace.",
-    "visibilityFailed": "Impossible de mettre à jour la visibilité."
+    "visibilityFailed": "Impossible de mettre à jour la visibilité.",
+    "summary": {
+      "documents": "Documents",
+      "ready": "Prêts",
+      "processing": "En cours",
+      "failed": "Échecs",
+      "size": "Taille totale"
+    },
+    "docCount_one": "{{count}} document",
+    "docCount_other": "{{count}} documents",
+    "moreActions": "Plus d’actions pour {{name}}",
+    "confirmRemoveTitle": "Retirer ce document ?",
+    "confirmRemoveBody": "« {{name}} » et ses données d’index seront retirés de cette base.",
+    "indexing": "Indexation…"
   },
   "groupPermissionTitle": "Bases de connaissances indisponibles",
   "groupPermissionRequired": "Votre groupe d'utilisateurs n'a pas accès aux bases de connaissances.",
@@ -124,5 +143,12 @@
   "deleted": "Base de connaissances supprimée",
   "deleteAction": "Supprimer la base de connaissances",
   "deleteTitle": "Supprimer la base de connaissances ?",
-  "deleteBody": "Cela supprime définitivement « {{name}} » et ses données d’index. Les conversations qui la référencent seront dissociées. Cette action est irréversible."
+  "deleteBody": "Cela supprime définitivement « {{name}} » et ses données d’index. Les conversations qui la référencent seront dissociées. Cette action est irréversible.",
+  "list": {
+    "searchPlaceholder": "Rechercher une base",
+    "noMatchesTitle": "Aucune base correspondante",
+    "noMatchesBody": "Essayez un autre nom ou mot-clé.",
+    "count_one": "{{count}} base",
+    "count_other": "{{count}} bases"
+  }
 }
