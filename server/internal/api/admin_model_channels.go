@@ -56,10 +56,7 @@ func recoverChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 
 func recoverModelChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	modelID, channelID := pathParam(r, "id"), pathParam(r, "channel_id")
-	role := strings.TrimSpace(r.URL.Query().Get("role"))
-	if role == "" {
-		role = "regular"
-	}
+	role := "regular"
 	if _, err := store.GetModel(r.Context(), d.DB, modelID); err != nil {
 		writeError(w, http.StatusNotFound, errNotFound)
 		return
@@ -118,11 +115,8 @@ func listModelChannelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 func splitModelBindings(bindings []store.ModelChannelBinding) modelChannelBindingPayload {
 	out := modelChannelBindingPayload{}
 	for _, binding := range bindings {
-		if strings.EqualFold(binding.Role, "fallback") {
-			out.Fallback = append(out.Fallback, binding)
-		} else {
-			out.Regular = append(out.Regular, binding)
-		}
+		binding.Role = "regular"
+		out.Regular = append(out.Regular, binding)
 	}
 	return out
 }

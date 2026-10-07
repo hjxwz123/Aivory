@@ -436,11 +436,11 @@ func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opt
 	// quarantined channel out of every model request, while the legacy primary
 	// channel remains the compatibility fallback when an upgraded installation
 	// has no binding rows yet.
-	selectedChannelID, selectErr := selectRegularModelChannelID(ctx, t.db, model)
-	if selectErr != nil {
-		return "", wrapCompactionModelAttempt(fmt.Errorf("task model channel %q: %w", model.ChannelID, selectErr), kind == TaskCompact)
+	channelCandidates, candidateErr := resolveModelChannelCandidates(ctx, t.db, model, "")
+	if candidateErr != nil {
+		return "", wrapCompactionModelAttempt(fmt.Errorf("task model channel %q: %w", model.ChannelID, candidateErr), kind == TaskCompact)
 	}
-	model.ChannelID = selectedChannelID
+	model.ChannelID = channelCandidates[0].ID
 	channel, err := store.GetChannel(ctx, t.db, model.ChannelID)
 	if err != nil {
 		return "", wrapCompactionModelAttempt(err, kind == TaskCompact)
@@ -458,12 +458,12 @@ func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opt
 	if provider == nil {
 		return "", wrapCompactionModelAttempt(fmt.Errorf("%w: provider for channel %q is unavailable", ErrUnknownProvider, channel.Type), kind == TaskCompact)
 	}
-	var fallbackCreds *ChannelCreds
-	var fallbackChannelID string
-	if !toolRoute {
-		fallbackCreds, fallbackChannelID = resolveFallbackChannelForModel(ctx, t.db, t.logger, model, channel)
+	fallbackChannelID := ""
+	if len(channelCandidates) > 1 {
+		fallbackChannelID = channelCandidates[1].ID
 	}
 	var fallbackFlag atomic.Bool
+	channelIndex := new(atomic.Int64)
 
 	system := opts.SystemPrompt
 	if toolRoute || system == "" {
@@ -498,7 +498,8 @@ func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opt
 			APIKey:                     channel.APIKey,
 			Headers:                    channel.Headers,
 			APIFormat:                  channel.APIFormat,
-			Fallback:                   fallbackCreds,
+			ChannelCandidates:          channelCandidates,
+			ChannelIndex:               channelIndex,
 		},
 		// Task calls never use tools.
 		Tools:           nil,
@@ -631,8 +632,8 @@ func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opt
 	var taskTTFTTimedOut atomic.Bool
 	var taskTTFTWatchdog *providerTTFTWatchdog
 	providerCtx := streamCtx
-	if model.FallbackTTFTSec > 0 && (model.AutoDisableTimeouts > 0 || channel.AutoDisableTimeouts > 0) {
-		taskTTFTWatchdog = newProviderTTFTWatchdog(time.Duration(model.FallbackTTFTSec)*time.Second, nil, &taskTTFTTimedOut)
+	if ttftSeconds := modelTTFTSeconds(t.db, model.ID); ttftSeconds > 0 && (model.AutoDisableTimeouts > 0 || channel.AutoDisableTimeouts > 0) {
+		taskTTFTWatchdog = newProviderTTFTWatchdog(time.Duration(ttftSeconds)*time.Second, nil, &taskTTFTTimedOut)
 		providerCtx = contextWithProviderTTFTWatchdog(providerCtx, taskTTFTWatchdog)
 	}
 	result, err := provider.Stream(providerCtx, req, &noopToolRunner{}, func(ev SseEvent) {
@@ -667,7 +668,9 @@ func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opt
 				providerUsage.CacheWriteTokens, usedFallback, resultStopReason(result), compactionErrorKind(providerErr)))
 	}
 	servedChannelID := model.ChannelID
-	if usedFallback {
+	if index := int(channelIndex.Load()); index >= 0 && index < len(channelCandidates) {
+		servedChannelID = channelCandidates[index].ID
+	} else if usedFallback && fallbackChannelID != "" {
 		servedChannelID = fallbackChannelID
 	}
 	failureBase := store.UsageLog{

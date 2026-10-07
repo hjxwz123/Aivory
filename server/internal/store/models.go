@@ -164,10 +164,8 @@ type Model struct {
 	Label       string `json:"label"`
 	Description string `json:"description"`
 	Icon        string `json:"icon"`
-	// FallbackChannelID is the backup channel retried when a request on the
-	// primary channel fails (§fallback channel). '' = no fallback. The fallback
-	// channel is expected to match the primary's type/format — only the endpoint
-	// URL and API key differ.
+	// FallbackChannelID is retained for old clients and database rows. New
+	// routing stores all channels as regular bindings ordered by priority.
 	FallbackChannelID string `json:"fallback_channel_id"`
 	Enabled           bool   `json:"enabled"`
 	SortOrder         int    `json:"sort_order"`
@@ -227,11 +225,11 @@ type Model struct {
 	// use the default (no per-model cap; bounded only by the turn context).
 	// Only meaningful for kind=image models.
 	ImageTimeoutSec int `json:"image_timeout_sec"`
-	// FallbackTTFTSec is the per-model time-to-first-byte threshold used by the
-	// transparent model fallback watchdog. 0 disables the watchdog.
+	// FallbackTTFTSec is a legacy field retained for older clients and databases.
+	// Runtime TTFT behavior is controlled by the global model policy setting.
 	FallbackTTFTSec int `json:"fallback_ttft_sec"`
 	// Automatic channel quarantine policy. A zero threshold disables that trigger;
-	// the timeout trigger is only valid when FallbackTTFTSec is positive.
+	// the timeout trigger is only valid when global TTFT is enabled.
 	AutoDisableErrors   int `json:"auto_disable_errors"`
 	AutoDisableTimeouts int `json:"auto_disable_timeouts"`
 	AutoDisableMinutes  int `json:"auto_disable_minutes"`

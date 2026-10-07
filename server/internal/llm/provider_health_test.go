@@ -20,6 +20,9 @@ func TestBackgroundProviderHealthRecordsChannelAndModelOutcomes(t *testing.T) {
 	if err := store.Migrate(db); err != nil {
 		t.Fatal(err)
 	}
+	if err := store.SetSetting(db, "fallback_ttft_sec", 1); err != nil {
+		t.Fatal(err)
+	}
 
 	primary, err := store.CreateChannel(ctx, db, "Health primary", "openai", "chat", "https://primary.invalid", "primary-key")
 	if err != nil {
@@ -86,7 +89,16 @@ func TestBackgroundProviderHealthRecordsChannelAndModelOutcomes(t *testing.T) {
 		t.Fatal(err)
 	}
 	bindings, err = store.ListModelChannelBindings(ctx, db, model.ID, "regular")
-	if err != nil || len(bindings) != 1 || bindings[0].DisabledUntil <= time.Now().Unix() {
+	if err != nil || len(bindings) != 2 {
+		t.Fatalf("bindings after channel recovery = %+v, %v", bindings, err)
+	}
+	var primaryBindingDisabled bool
+	for _, binding := range bindings {
+		if binding.ChannelID == primary.ID {
+			primaryBindingDisabled = binding.DisabledUntil > time.Now().Unix()
+		}
+	}
+	if !primaryBindingDisabled {
 		t.Fatalf("channel recovery also recovered model binding: %+v, %v", bindings, err)
 	}
 	if err := store.ResetModelChannelResult(ctx, db, model.ID, primary.ID, "regular"); err != nil {
@@ -103,7 +115,13 @@ func TestBackgroundProviderHealthRecordsChannelAndModelOutcomes(t *testing.T) {
 		t.Fatalf("TTFT did not quarantine primary channel: %+v, %v", primaryAfterTimeout, err)
 	}
 	bindings, err = store.ListModelChannelBindings(ctx, db, model.ID, "regular")
-	if err != nil || len(bindings) != 1 || bindings[0].DisabledUntil <= time.Now().Unix() {
+	primaryBindingDisabled = false
+	for _, binding := range bindings {
+		if binding.ChannelID == primary.ID {
+			primaryBindingDisabled = binding.DisabledUntil > time.Now().Unix()
+		}
+	}
+	if err != nil || len(bindings) != 2 || !primaryBindingDisabled {
 		t.Fatalf("TTFT did not quarantine model binding: %+v, %v", bindings, err)
 	}
 }

@@ -236,12 +236,12 @@ func (o *Orchestrator) moderatePrivate(ctx context.Context, userID string, model
 }
 
 func (o *Orchestrator) privateCall(ctx context.Context, userID string, model *store.Model, history []UnifiedMessage, system, purpose string, maxTokens int, emit func(SseEvent)) (*UnifiedResult, float64, error) {
-	selectedChannelID, selectErr := selectRegularModelChannelID(ctx, o.db, model)
-	if selectErr != nil {
+	channelCandidates, candidateErr := resolveModelChannelCandidates(ctx, o.db, model, "")
+	if candidateErr != nil {
 		return nil, 0, errors.New("private_model_unavailable")
 	}
 	resolvedModel := *model
-	resolvedModel.ChannelID = selectedChannelID
+	resolvedModel.ChannelID = channelCandidates[0].ID
 	model = &resolvedModel
 	channel, err := store.GetChannel(ctx, o.db, model.ChannelID)
 	if err != nil || !channel.Enabled || channel.AutoDisabledUntil > time.Now().Unix() {
@@ -251,7 +251,11 @@ func (o *Orchestrator) privateCall(ctx context.Context, userID string, model *st
 	if err != nil {
 		return nil, 0, errors.New("private_model_unavailable")
 	}
-	fallbackCreds, fallbackChannelID := resolveFallbackChannelForModel(ctx, o.db, o.logger, model, channel)
+	fallbackChannelID := ""
+	if len(channelCandidates) > 1 {
+		fallbackChannelID = channelCandidates[1].ID
+	}
+	channelIndex := new(atomic.Int64)
 	// Anthropic and Google always send an explicit output cap; a zero here
 	// falls through to their envcfg default (64000), which real Claude/Gemini
 	// endpoints reject with 400 for most models. Private chat has no composer
@@ -264,7 +268,7 @@ func (o *Orchestrator) privateCall(ctx context.Context, userID string, model *st
 	}
 	req := UnifiedChatRequest{
 		Private: true, History: history, SystemPrompt: system, Stream: model.Stream,
-		Model:       ModelInfo{ID: model.ID, ChannelID: channel.ID, ChannelAutoDisableTimeouts: channel.AutoDisableTimeouts, FallbackChannelID: fallbackChannelID, RequestID: model.RequestID, Provider: channel.Type, Vision: model.Vision, BaseURL: channel.BaseURL, APIKey: channel.APIKey, APIFormat: channel.APIFormat, Headers: channel.Headers, Fallback: fallbackCreds},
+		Model:       ModelInfo{ID: model.ID, ChannelID: channel.ID, ChannelAutoDisableTimeouts: channel.AutoDisableTimeouts, FallbackChannelID: fallbackChannelID, RequestID: model.RequestID, Provider: channel.Type, Vision: model.Vision, BaseURL: channel.BaseURL, APIKey: channel.APIKey, APIFormat: channel.APIFormat, Headers: channel.Headers, ChannelCandidates: channelCandidates, ChannelIndex: channelIndex},
 		ExtraParams: model.ExtraParams, MaxOutputTokens: cappedMaxTokens, StrictMaxOutputTokens: cappedMaxTokens > 0,
 		ParamControls: model.ParamControls,
 	}
@@ -282,21 +286,23 @@ func (o *Orchestrator) privateCall(ctx context.Context, userID string, model *st
 	recorder.captureBody = false
 	providerCtx := contextWithProviderRequestRecorder(ctx, recorder)
 	providerCtx = contextWithProviderRequestChannelIDs(providerCtx, model.ChannelID, fallbackChannelID)
+	visibleOutput := new(atomic.Bool)
+	providerCtx = contextWithProviderVisibleOutput(providerCtx, visibleOutput)
 	var emittedText bool
 	var privateTTFTTimedOut atomic.Bool
 	var privateTTFTWatchdog *providerTTFTWatchdog
-	if model.FallbackTTFTSec > 0 && (model.AutoDisableTimeouts > 0 || channel.AutoDisableTimeouts > 0) {
-		privateTTFTWatchdog = newProviderTTFTWatchdog(time.Duration(model.FallbackTTFTSec)*time.Second, nil, &privateTTFTTimedOut)
+	if ttftSeconds := modelTTFTSeconds(o.db, model.ID); ttftSeconds > 0 && (model.AutoDisableTimeouts > 0 || channel.AutoDisableTimeouts > 0) {
+		privateTTFTWatchdog = newProviderTTFTWatchdog(time.Duration(ttftSeconds)*time.Second, nil, &privateTTFTTimedOut)
 		providerCtx = contextWithProviderTTFTWatchdog(providerCtx, privateTTFTWatchdog)
 	}
-	result, providerErr := provider.Stream(providerCtx, req, &noopToolRunner{}, func(event SseEvent) {
+	result, providerErr := provider.Stream(providerCtx, req, &noopToolRunner{}, observeProviderVisibleOutput(func(event SseEvent) {
 		if event.Type == "text_delta" {
 			emittedText = true
 			emit(SseEvent{Type: "text_delta", Text: event.Text})
 		} else if event.Type == "thinking_delta" {
 			emit(SseEvent{Type: "thinking_delta", Text: event.Text})
 		}
-	})
+	}, visibleOutput))
 	if privateTTFTWatchdog != nil {
 		privateTTFTWatchdog.stop()
 	}
@@ -334,6 +340,9 @@ func (o *Orchestrator) privateCall(ctx context.Context, userID string, model *st
 	}
 	if len(snapshots) > 0 {
 		last := snapshots[len(snapshots)-1]
+		if last.ChannelID != "" {
+			usage.ChannelID = last.ChannelID
+		}
 		usage.FirstByteMS = last.FirstByteMS
 		usage.DurationMS = last.DurationMS
 	}

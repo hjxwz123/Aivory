@@ -1763,7 +1763,7 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	if channel.APIKey == "" {
 		return "No API key on the image channel — ask an admin to configure it.", nil, nil
 	}
-	fallbackChannel := t.resolveImageFallbackChannel(ctx, model, channel)
+	fallbackChannels := t.resolveImageFallbackChannels(ctx, model, channel)
 
 	// §4.20 per-model image quota — shared across drawing mode and chat tool-call
 	// (both log purpose='image' against this model id), enforced here so neither
@@ -1859,12 +1859,13 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 
 	includeRequestBody := imageRequestBodyLoggingEnabled(t.db)
 	captureSuccessRequest := imageSuccessRequestLoggingEnabled(t.db)
+	ttftSeconds := llm.GlobalTTFTSeconds(t.db)
 	runAttempt := func(attemptChannel *store.Channel, role string) ([]imageBytes, llm.ProviderRequestDiagnostics, error, bool) {
 		var diagnostics llm.ProviderRequestDiagnostics
 		var ttft *imageTTFTTracker
 		attemptCtx := genCtx
-		if model.FallbackTTFTSec > 0 && (model.AutoDisableTimeouts > 0 || attemptChannel.AutoDisableTimeouts > 0) {
-			ttft = &imageTTFTTracker{threshold: time.Duration(model.FallbackTTFTSec) * time.Second}
+		if ttftSeconds > 0 && (model.AutoDisableTimeouts > 0 || attemptChannel.AutoDisableTimeouts > 0) {
+			ttft = &imageTTFTTracker{threshold: time.Duration(ttftSeconds) * time.Second}
 			attemptCtx = context.WithValue(genCtx, imageTTFTTrackerKey{}, ttft)
 		}
 		capture := func(request *http.Request) {
@@ -1903,13 +1904,17 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	usedFallback := false
 	if err != nil {
 		t.logImageProviderFailure(ctx, tc, model, channel.ID, false, requestDiagnostics, err)
-		if fallbackChannel != nil && imageFallbackAllowed(ctx, genCtx, err) {
-			servedChannel = fallbackChannel
-			usedFallback = true
-			images, requestDiagnostics, err, _ = runAttempt(fallbackChannel, "fallback")
-			if err != nil {
-				t.logImageProviderFailure(ctx, tc, model, fallbackChannel.ID, true, requestDiagnostics, err)
+		for _, nextChannel := range fallbackChannels {
+			if !imageFallbackAllowed(ctx, genCtx, err) {
+				break
 			}
+			servedChannel = nextChannel
+			usedFallback = true
+			images, requestDiagnostics, err, _ = runAttempt(nextChannel, "regular")
+			if err == nil {
+				break
+			}
+			t.logImageProviderFailure(ctx, tc, model, nextChannel.ID, true, requestDiagnostics, err)
 		}
 	}
 	if err != nil {
@@ -2042,10 +2047,10 @@ func (t *imageGenerateTool) selectImageModelChannel(ctx context.Context, model *
 	if model == nil {
 		return nil, false, nil
 	}
-	selected, err := store.SelectModelChannelID(ctx, t.db, model.ID, model.RequestID, "regular", "")
-	if err == nil && selected != "" {
+	candidates, err := store.ModelChannelCandidateIDs(ctx, t.db, model.ID, model.RequestID)
+	if err == nil && len(candidates) > 0 {
 		resolved := *model
-		resolved.ChannelID = selected
+		resolved.ChannelID = candidates[0]
 		return &resolved, true, nil
 	}
 	bindings, err := store.ListModelChannelBindings(ctx, t.db, model.ID, "regular")
@@ -2079,22 +2084,28 @@ func imageChannelFamily(channelType string) string {
 	}
 }
 
-func (t *imageGenerateTool) resolveImageFallbackChannel(ctx context.Context, model *store.Model, primary *store.Channel) *store.Channel {
-	bindings, err := store.ListModelChannelBindings(ctx, t.db, model.ID, "fallback")
-	if err != nil {
+func (t *imageGenerateTool) resolveImageFallbackChannels(ctx context.Context, model *store.Model, primary *store.Channel) []*store.Channel {
+	ids, err := store.ModelChannelCandidateIDs(ctx, t.db, model.ID, model.RequestID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
-	ids := make([]string, 0, len(bindings)+1)
-	if len(bindings) > 0 {
-		for _, binding := range bindings {
-			if binding.ChannelID != primary.ID && binding.DisabledUntil <= time.Now().Unix() {
-				ids = append(ids, binding.ChannelID)
-			}
+	if errors.Is(err, sql.ErrNoRows) {
+		ids = []string{model.ChannelID}
+		if fallbackID := strings.TrimSpace(model.FallbackChannelID); fallbackID != "" && fallbackID != model.ChannelID {
+			ids = append(ids, fallbackID)
 		}
-	} else if fallbackID := strings.TrimSpace(model.FallbackChannelID); fallbackID != "" && fallbackID != primary.ID {
-		ids = append(ids, fallbackID)
 	}
+	for i, id := range ids {
+		if id == primary.ID {
+			ids[0], ids[i] = ids[i], ids[0]
+			break
+		}
+	}
+	fallbacks := make([]*store.Channel, 0, len(ids))
 	for _, fallbackID := range ids {
+		if fallbackID == primary.ID {
+			continue
+		}
 		if supported, err := store.ChannelSupportsRequestID(ctx, t.db, fallbackID, model.RequestID); err != nil || !supported {
 			continue
 		}
@@ -2105,13 +2116,14 @@ func (t *imageGenerateTool) resolveImageFallbackChannel(ctx context.Context, mod
 		sameFamily := imageChannelFamily(primary.Type) != "" && imageChannelFamily(primary.Type) == imageChannelFamily(fallback.Type)
 		sameFormat := strings.EqualFold(strings.TrimSpace(primary.APIFormat), strings.TrimSpace(fallback.APIFormat))
 		if fallback.Enabled && fallback.AutoDisabledUntil <= time.Now().Unix() && sameFamily && sameFormat && strings.TrimSpace(fallback.APIKey) != "" {
-			return fallback
+			fallbacks = append(fallbacks, fallback)
+			continue
 		}
 		if t.logger != nil {
 			t.logger.Printf("image: model %q fallback channel %q unusable — trying next", model.ID, fallbackID)
 		}
 	}
-	return nil
+	return fallbacks
 }
 
 func imageFallbackAllowed(parentCtx, attemptCtx context.Context, err error) bool {
@@ -2177,7 +2189,7 @@ func recordImageProviderHealth(ctx context.Context, db *sql.DB, model *store.Mod
 		return
 	}
 	if ttftTimedOut {
-		if model.FallbackTTFTSec > 0 && model.AutoDisableTimeouts > 0 {
+		if llm.GlobalTTFTSeconds(db) > 0 && model.AutoDisableTimeouts > 0 {
 			_ = store.RecordModelChannelResult(ctx, db, model.ID, channelID, role, "timeout", model.AutoDisableTimeouts, model.AutoDisableMinutes)
 		}
 		_ = store.RecordChannelFailure(ctx, db, channelID, "timeout")

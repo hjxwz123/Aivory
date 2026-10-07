@@ -36,6 +36,7 @@ type providerRequestSnapshot struct {
 	Method      string
 	URL         string
 	ChannelID   string
+	ModelID     string
 	Header      string
 	Body        string
 	Attempt     int
@@ -119,17 +120,35 @@ type providerRequestRecorderKey struct{}
 
 type providerRequestChannelIDs struct{ primary, fallback string }
 type providerRequestChannelIDsKey struct{}
+type providerRequestActiveChannel struct {
+	id       string
+	modelID  string
+	fallback bool
+}
+type providerRequestActiveChannelKey struct{}
 
 func contextWithProviderRequestChannelIDs(ctx context.Context, primary, fallback string) context.Context {
 	return context.WithValue(ctx, providerRequestChannelIDsKey{}, providerRequestChannelIDs{primary: primary, fallback: fallback})
 }
 
 func providerRequestChannelID(ctx context.Context, fallback bool) string {
+	if active, ok := ctx.Value(providerRequestActiveChannelKey{}).(providerRequestActiveChannel); ok {
+		return active.id
+	}
 	channels, _ := ctx.Value(providerRequestChannelIDsKey{}).(providerRequestChannelIDs)
 	if fallback && channels.fallback != "" {
 		return channels.fallback
 	}
 	return channels.primary
+}
+
+func contextWithProviderRequestChannel(ctx context.Context, modelID, channelID string, fallback bool) context.Context {
+	return context.WithValue(ctx, providerRequestActiveChannelKey{}, providerRequestActiveChannel{id: channelID, modelID: modelID, fallback: fallback})
+}
+
+func providerRequestModelID(ctx context.Context) string {
+	active, _ := ctx.Value(providerRequestActiveChannelKey{}).(providerRequestActiveChannel)
+	return active.modelID
 }
 
 func newProviderRequestRecorder(provider ...string) *providerRequestRecorder {
@@ -169,7 +188,7 @@ func recordProviderRequestAttempt(ctx context.Context, req *http.Request, fallba
 	if rec == nil || req == nil {
 		return nil
 	}
-	return rec.recordWithChannel(req, fallback, providerRequestChannelID(ctx, fallback))
+	return rec.recordWithChannel(req, fallback, providerRequestChannelID(ctx, fallback), providerRequestModelID(ctx))
 }
 
 // attachProviderRequestUsage pins one stream's parsed usage onto the most
@@ -334,7 +353,7 @@ func recordProviderRequestBuildFailure(ctx context.Context, fallback bool, err e
 	if rec == nil {
 		return
 	}
-	rec.appendFailure(fallback, truncErr(err.Error()), providerRequestChannelID(ctx, fallback))
+	rec.appendFailure(fallback, truncErr(err.Error()), providerRequestChannelID(ctx, fallback), providerRequestModelID(ctx))
 }
 
 func (r *providerRequestRecorder) snapshot() providerRequestSnapshot {
@@ -393,7 +412,7 @@ func (r *providerRequestRecorder) record(req *http.Request, fallbackAttempt ...b
 	return r.recordWithChannel(req, fallback, "")
 }
 
-func (r *providerRequestRecorder) recordWithChannel(req *http.Request, fallback bool, channelID string) *providerRequestTiming {
+func (r *providerRequestRecorder) recordWithChannel(req *http.Request, fallback bool, channelID string, modelIDs ...string) *providerRequestTiming {
 	if r == nil || req == nil {
 		return nil
 	}
@@ -417,6 +436,9 @@ func (r *providerRequestRecorder) recordWithChannel(req *http.Request, fallback 
 		timing:               timing,
 		Fallback:             fallback,
 		EstimatedInputTokens: estimateTokens(sanitizedBody),
+	}
+	if len(modelIDs) > 0 {
+		r.last.ModelID = modelIDs[0]
 	}
 	if len(r.all) < maxProviderRequestSnapshots {
 		entry := r.last
@@ -499,6 +521,9 @@ func (r *providerRequestRecorder) attachFailure(fallback bool, message string, c
 	// Preserve a failure even if the matching request snapshot was not retained.
 	r.attempt++
 	r.last = providerRequestSnapshot{Attempt: r.attempt, ChannelID: channelID, Fallback: fallback, Error: message}
+	if len(channelIDs) > 1 {
+		r.last.ModelID = channelIDs[1]
+	}
 	if len(r.all) < maxProviderRequestSnapshots {
 		r.all = append(r.all, r.last)
 	}

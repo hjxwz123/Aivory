@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -52,11 +53,107 @@ func TestModelChannelBindingsEnforceCapabilitiesAndPriority(t *testing.T) {
 	if selected != "higher" {
 		t.Fatalf("selected regular channel = %q, want higher priority channel", selected)
 	}
+	candidates, err := ModelChannelCandidateIDs(ctx, db, model.ID, model.RequestID)
+	if err != nil {
+		t.Fatalf("list channel failover order: %v", err)
+	}
+	wantCandidates := []string{"higher", "primary", "fallback"}
+	if len(candidates) != len(wantCandidates) {
+		t.Fatalf("candidate order = %v, want %v", candidates, wantCandidates)
+	}
+	for i := range wantCandidates {
+		if candidates[i] != wantCandidates[i] {
+			t.Fatalf("candidate order = %v, want %v", candidates, wantCandidates)
+		}
+	}
 	_, err = ReplaceModelChannelBindings(ctx, db, model,
 		[]ModelChannelBinding{{ChannelID: "primary", Priority: 1, Weight: 100}},
 		[]ModelChannelBinding{{ChannelID: "unsupported", Priority: 1, Weight: 100}})
 	if !errors.Is(err, ErrUnsupportedChannelModel) {
 		t.Fatalf("unsupported fallback error = %v, want %v", err, ErrUnsupportedChannelModel)
+	}
+}
+
+func TestMigrateFallbackBindingsIntoPriorityQueue(t *testing.T) {
+	db, ctx := openModelChannelTestDB(t)
+	defer db.Close()
+	for _, channelID := range []string{"legacy-primary", "legacy-backup"} {
+		if _, err := db.ExecContext(ctx, `INSERT INTO channels(id, name, type, api_key, enabled) VALUES(?, ?, 'openai', 'key', 1)`, channelID, channelID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(ctx, `INSERT INTO channel_models(id, channel_id, request_id, label, kind, enabled) VALUES(?, ?, 'gpt-legacy', 'Legacy model', 'chat', 1)`, "cm-"+channelID, channelID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	model, err := CreateModel(ctx, db, Model{ChannelID: "legacy-primary", RequestID: "gpt-legacy", Label: "Legacy model", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO model_channel_bindings(id, model_id, channel_id, role, priority, weight, updated_at) VALUES('legacy-backup-binding', ?, 'legacy-backup', 'fallback', 1, 100, 1)`, model.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE models SET fallback_channel_id='legacy-backup' WHERE id=?`, model.ID); err != nil {
+		t.Fatal(err)
+	}
+	disabledUntil := time.Now().Unix() + 300
+	if _, err := db.ExecContext(ctx, `UPDATE model_channel_bindings SET disabled_until=? WHERE model_id=? AND role='fallback'`, disabledUntil, model.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatalf("migrate old fallback binding: %v", err)
+	}
+	bindings, err := ListModelChannelBindings(ctx, db, model.ID, "")
+	if err != nil || len(bindings) != 2 {
+		t.Fatalf("migrated bindings = %+v, err=%v", bindings, err)
+	}
+	if bindings[1].ChannelID != "legacy-backup" || bindings[1].Role != "regular" || bindings[1].Priority <= bindings[0].Priority {
+		t.Fatalf("legacy backup was not placed after regular channels: %+v", bindings)
+	}
+	if bindings[1].DisabledUntil != disabledUntil {
+		t.Fatalf("upgrade cleared the legacy binding quarantine: %+v", bindings[1])
+	}
+	var legacyID string
+	if err := db.QueryRowContext(ctx, `SELECT fallback_channel_id FROM models WHERE id=?`, model.ID).Scan(&legacyID); err != nil || legacyID != "" {
+		t.Fatalf("legacy fallback column = %q, err=%v", legacyID, err)
+	}
+}
+
+func TestMigrateLegacyModelTTFTToGlobalSetting(t *testing.T) {
+	db, ctx := openModelChannelTestDB(t)
+	defer db.Close()
+	if _, err := db.ExecContext(ctx, `INSERT INTO channels(id, name, type, api_key, enabled) VALUES('ttft-channel', 'TTFT channel', 'openai', 'key', 1)`); err != nil {
+		t.Fatal(err)
+	}
+	_, err := CreateModel(ctx, db, Model{ChannelID: "ttft-channel", RequestID: "gpt-ttft", Label: "TTFT model", FallbackTTFTSec: 9, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SetSetting(db, "fallback_ttft_sec", 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM settings WHERE key='model_ttft_global_migrated'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateModelTTFTToGlobalSetting(ctx, db); err != nil {
+		t.Fatalf("migrate global TTFT timeout: %v", err)
+	}
+	raw, err := GetSetting(db, "fallback_ttft_sec")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seconds int
+	if err := json.Unmarshal(raw, &seconds); err != nil || seconds != 9 {
+		t.Fatalf("global timeout = %s (%v), want 9 seconds", raw, err)
+	}
+	if err := SetSetting(db, "fallback_ttft_sec", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	raw, err = GetSetting(db, "fallback_ttft_sec")
+	if err != nil || string(raw) != "0" {
+		t.Fatalf("subsequent startup overrode the disabled global timeout: %s, %v", raw, err)
 	}
 }
 
@@ -266,7 +363,7 @@ func TestLegacyModelChannelsAreBackfilledOnUpgrade(t *testing.T) {
 	}
 	for _, expected := range []struct{ channelID, role string }{
 		{"legacy-primary", "regular"},
-		{"legacy-fallback", "fallback"},
+		{"legacy-fallback", "regular"},
 	} {
 		var requestID string
 		if err := db.QueryRowContext(ctx, `SELECT cm.request_id FROM channel_models cm WHERE cm.channel_id=? AND cm.enabled=1`, expected.channelID).Scan(&requestID); err != nil || requestID != "gpt-legacy" {
@@ -276,5 +373,15 @@ func TestLegacyModelChannelsAreBackfilledOnUpgrade(t *testing.T) {
 		if err := db.QueryRowContext(ctx, `SELECT COUNT(1) FROM model_channel_bindings WHERE model_id='legacy-model' AND channel_id=? AND role=?`, expected.channelID, expected.role).Scan(&count); err != nil || count != 1 {
 			t.Fatalf("legacy %s binding count = %d, err=%v", expected.role, count, err)
 		}
+	}
+	var primaryPriority, fallbackPriority int
+	if err := db.QueryRowContext(ctx, `SELECT priority FROM model_channel_bindings WHERE model_id='legacy-model' AND channel_id='legacy-primary' AND role='regular'`).Scan(&primaryPriority); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT priority FROM model_channel_bindings WHERE model_id='legacy-model' AND channel_id='legacy-fallback' AND role='regular'`).Scan(&fallbackPriority); err != nil {
+		t.Fatal(err)
+	}
+	if fallbackPriority <= primaryPriority {
+		t.Fatalf("legacy fallback priority %d must follow primary priority %d", fallbackPriority, primaryPriority)
 	}
 }

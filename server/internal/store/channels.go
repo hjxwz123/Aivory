@@ -438,9 +438,6 @@ func CreateModel(ctx context.Context, db *sql.DB, m Model) (*Model, error) {
 	if m.AutoDisableMinutes < 0 {
 		m.AutoDisableMinutes = 0
 	}
-	if m.FallbackTTFTSec == 0 {
-		m.AutoDisableTimeouts = 0
-	}
 	_, err := db.ExecContext(ctx, `INSERT INTO models(
 		id, channel_id, kind, request_id, label, description, icon, fallback_channel_id, enabled, sort_order,
 		tool_mode, vision, stream, research_enabled, system_prompt, param_controls, extra_params, official_tools, builtin_tools, mcp_server_ids, tags, moderation_enabled, moderation_mode,
@@ -472,7 +469,7 @@ func CreateModel(ctx context.Context, db *sql.DB, m Model) (*Model, error) {
 		if err := upsertChannelModel(ctx, db, m.FallbackChannelID, m.RequestID, m.Label, m.Description, m.Kind, "manual"); err != nil {
 			return nil, err
 		}
-		if err := ensureBinding(ctx, db, m.ID, m.FallbackChannelID, "fallback", 1, 100); err != nil {
+		if err := ensureBinding(ctx, db, m.ID, m.FallbackChannelID, "regular", 2, 100); err != nil {
 			return nil, err
 		}
 	}
@@ -548,9 +545,6 @@ func UpdateModel(ctx context.Context, db *sql.DB, id string, m Model) (*Model, e
 	}
 	if m.AutoDisableMinutes < 0 {
 		m.AutoDisableMinutes = 0
-	}
-	if m.FallbackTTFTSec == 0 {
-		m.AutoDisableTimeouts = 0
 	}
 	_, err := db.ExecContext(ctx, `UPDATE models SET
 		channel_id=?, label=?, description=?, icon=?, fallback_channel_id=?, request_id=?, kind=?, enabled=?, sort_order=?,

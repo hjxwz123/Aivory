@@ -3,8 +3,10 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -72,9 +74,9 @@ func ListChannelsModelHealth(ctx context.Context, db *sql.DB) (map[string][]Chan
 }
 
 func normalizeBindingRole(role string) string {
-	if strings.EqualFold(strings.TrimSpace(role), "fallback") {
-		return "fallback"
-	}
+	// The former fallback role now aliases the same priority queue. Keeping this
+	// normalization also lets old callers recover or inspect legacy bindings.
+	_ = role
 	return "regular"
 }
 
@@ -122,12 +124,80 @@ func backfillModelChannelConfiguration(ctx context.Context, db *sql.DB) error {
 			if err := ensureChannelModel(ctx, db, m.fallbackID, m.requestID, m.label, m.description, m.kind, "legacy"); err != nil {
 				return err
 			}
-			if err := ensureBinding(ctx, db, m.id, m.fallbackID, "fallback", 1, 100); err != nil {
+			var bound int
+			if err := db.QueryRowContext(ctx, `SELECT COUNT(1) FROM model_channel_bindings WHERE model_id=? AND channel_id=?`, m.id, m.fallbackID).Scan(&bound); err != nil {
+				return err
+			}
+			if bound > 0 {
+				continue
+			}
+			var priority int
+			if err := db.QueryRowContext(ctx, `SELECT COALESCE(MAX(priority), 0) + 1 FROM model_channel_bindings WHERE model_id=?`, m.id).Scan(&priority); err != nil {
+				return err
+			}
+			if err := ensureBinding(ctx, db, m.id, m.fallbackID, "regular", priority, 100); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+// migrateFallbackModelChannels folds the former fallback role into the normal
+// priority queue. Existing regular priorities stay intact; former fallback
+// channels are placed after them.
+func migrateFallbackModelChannels(ctx context.Context, db *sql.DB) error {
+	rows, err := db.QueryContext(ctx, `SELECT model_id, channel_id, priority FROM model_channel_bindings WHERE role='fallback' ORDER BY model_id, priority, id`)
+	if err != nil {
+		return err
+	}
+	type binding struct {
+		modelID, channelID string
+		priority           int
+	}
+	legacy := []binding{}
+	for rows.Next() {
+		var item binding
+		if err := rows.Scan(&item.modelID, &item.channelID, &item.priority); err != nil {
+			rows.Close()
+			return err
+		}
+		legacy = append(legacy, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	maxPriority := map[string]int{}
+	for _, item := range legacy {
+		if _, ok := maxPriority[item.modelID]; ok {
+			continue
+		}
+		var priority int
+		if err := db.QueryRowContext(ctx, `SELECT COALESCE(MAX(priority), 0) FROM model_channel_bindings WHERE model_id=? AND role='regular'`, item.modelID).Scan(&priority); err != nil {
+			return err
+		}
+		maxPriority[item.modelID] = priority
+	}
+	for _, item := range legacy {
+		var exists int
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(1) FROM model_channel_bindings WHERE model_id=? AND channel_id=? AND role='regular'`, item.modelID, item.channelID).Scan(&exists); err != nil {
+			return err
+		}
+		if exists > 0 {
+			if _, err := db.ExecContext(ctx, `DELETE FROM model_channel_bindings WHERE model_id=? AND channel_id=? AND role='fallback'`, item.modelID, item.channelID); err != nil {
+				return err
+			}
+			continue
+		}
+		priority := maxPriority[item.modelID] + max(item.priority, 1)
+		if _, err := db.ExecContext(ctx, `UPDATE model_channel_bindings SET role='regular', priority=?, updated_at=? WHERE model_id=? AND channel_id=? AND role='fallback'`, priority, time.Now().Unix(), item.modelID, item.channelID); err != nil {
+			return err
+		}
+	}
+	_, err = db.ExecContext(ctx, `UPDATE models SET fallback_channel_id='' WHERE trim(fallback_channel_id)<>''`)
+	return err
 }
 
 func migrateLegacyModelTTFT(ctx context.Context, db *sql.DB) error {
@@ -155,6 +225,39 @@ func migrateLegacyModelTTFT(ctx context.Context, db *sql.DB) error {
 		return err
 	}
 	_, err = db.ExecContext(ctx, `INSERT INTO settings(key, value) VALUES('fallback_ttft_migrated', 'true')`)
+	return err
+}
+
+func migrateModelTTFTToGlobalSetting(ctx context.Context, db *sql.DB) error {
+	var migrated string
+	if err := db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key='model_ttft_global_migrated' LIMIT 1`).Scan(&migrated); err == nil {
+		return nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	var raw string
+	if err := db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key='fallback_ttft_sec' LIMIT 1`).Scan(&raw); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	var current int
+	if json.Unmarshal([]byte(raw), &current) != nil {
+		var value string
+		if json.Unmarshal([]byte(raw), &value) == nil {
+			current, _ = strconv.Atoi(strings.TrimSpace(value))
+		}
+	}
+	if current <= 0 {
+		var legacy sql.NullInt64
+		if err := db.QueryRowContext(ctx, `SELECT MAX(fallback_ttft_sec) FROM models`).Scan(&legacy); err != nil {
+			return err
+		}
+		if legacy.Valid && legacy.Int64 > 0 {
+			if _, err := db.ExecContext(ctx, `INSERT INTO settings(key, value) VALUES('fallback_ttft_sec', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, strconv.FormatInt(legacy.Int64, 10)); err != nil {
+				return err
+			}
+		}
+	}
+	_, err := db.ExecContext(ctx, `INSERT INTO settings(key, value) VALUES('model_ttft_global_migrated', 'true')`)
 	return err
 }
 
@@ -330,42 +433,58 @@ func ChannelSupportsRequestID(ctx context.Context, db *sql.DB, channelID, reques
 	return n > 0, err
 }
 
-// ReplaceModelChannelBindings validates the request_id capability before
-// replacing both regular and fallback pools atomically.
+// ReplaceModelChannelBindings validates capabilities before replacing the
+// model's single priority-ordered channel queue. The fallback slice remains an
+// API compatibility input and is appended to regular bindings.
 func ReplaceModelChannelBindings(ctx context.Context, db *sql.DB, model *Model, regular, fallback []ModelChannelBinding) ([]ModelChannelBinding, error) {
 	if model == nil || strings.TrimSpace(model.ID) == "" {
 		return nil, ErrInvalidModelChannelBinding
 	}
 	all := make([]ModelChannelBinding, 0, len(regular)+len(fallback))
-	for _, group := range []struct {
-		role string
-		rows []ModelChannelBinding
-	}{{"regular", regular}, {"fallback", fallback}} {
-		seenChannels := map[string]struct{}{}
-		for _, b := range group.rows {
-			b.Role = group.role
-			b.ModelID = model.ID
-			if b.ChannelID == "" {
-				return nil, ErrInvalidModelChannelBinding
-			}
-			if _, exists := seenChannels[b.ChannelID]; exists {
-				return nil, fmt.Errorf("%w: duplicate channel %s", ErrInvalidModelChannelBinding, b.ChannelID)
-			}
-			seenChannels[b.ChannelID] = struct{}{}
-			if b.Priority < 1 {
-				b.Priority = 1
-			}
-			if b.Weight < 1 {
-				b.Weight = 100
-			}
-			ok, err := ChannelSupportsRequestID(ctx, db, b.ChannelID, model.RequestID)
-			if err != nil {
-				return nil, err
-			}
-			if !ok {
-				return nil, fmt.Errorf("%w: %s", ErrUnsupportedChannelModel, b.ChannelID)
-			}
-			all = append(all, b)
+	seenChannels := map[string]struct{}{}
+	maxRegularPriority := 0
+	for _, b := range regular {
+		if b.Priority > maxRegularPriority {
+			maxRegularPriority = b.Priority
+		}
+	}
+	appendBinding := func(b ModelChannelBinding, priorityOffset int) error {
+		b.Role = "regular"
+		b.ModelID = model.ID
+		if b.ChannelID == "" {
+			return ErrInvalidModelChannelBinding
+		}
+		if _, exists := seenChannels[b.ChannelID]; exists {
+			return fmt.Errorf("%w: duplicate channel %s", ErrInvalidModelChannelBinding, b.ChannelID)
+		}
+		seenChannels[b.ChannelID] = struct{}{}
+		if b.Priority < 1 {
+			b.Priority = 1
+		}
+		b.Priority += priorityOffset
+		if b.Weight < 1 {
+			b.Weight = 100
+		}
+		ok, err := ChannelSupportsRequestID(ctx, db, b.ChannelID, model.RequestID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("%w: %s", ErrUnsupportedChannelModel, b.ChannelID)
+		}
+		all = append(all, b)
+		return nil
+	}
+	for _, b := range regular {
+		if err := appendBinding(b, 0); err != nil {
+			return nil, err
+		}
+	}
+	// Older admin clients still submit a separate fallback list. Preserve its
+	// former semantics by placing it after every regular priority in this queue.
+	for _, b := range fallback {
+		if err := appendBinding(b, maxRegularPriority); err != nil {
+			return nil, err
 		}
 	}
 	tx, err := db.BeginTx(ctx, nil)
@@ -378,7 +497,7 @@ func ReplaceModelChannelBindings(ctx context.Context, db *sql.DB, model *Model, 
 	}
 	now := time.Now().Unix()
 	for _, b := range all {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO model_channel_bindings(id, model_id, channel_id, role, priority, weight, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?)`, genID("mcb"), model.ID, b.ChannelID, normalizeBindingRole(b.Role), b.Priority, b.Weight, now); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO model_channel_bindings(id, model_id, channel_id, role, priority, weight, updated_at) VALUES(?, ?, ?, 'regular', ?, ?, ?)`, genID("mcb"), model.ID, b.ChannelID, b.Priority, b.Weight, now); err != nil {
 			return nil, err
 		}
 	}
@@ -506,19 +625,105 @@ func RecordChannelFailure(ctx context.Context, db *sql.DB, channelID, kind strin
 	return err
 }
 
-// SelectModelChannelID resolves the highest-priority usable binding. Regular
-// bindings use weighted selection within that priority; fallback bindings are
-// deterministic by priority and then weight so an outage does not randomly
-// jump between backup providers.
+// ModelChannelCandidateIDs returns the currently usable channel bindings in
+// failover order. The first channel in each priority tier is selected by weight;
+// remaining channels in that tier are kept next so a failed request can advance
+// without skipping providers.
+func ModelChannelCandidateIDs(ctx context.Context, db *sql.DB, modelID, requestID string) ([]string, error) {
+	rows, err := db.QueryContext(ctx, `SELECT b.channel_id, b.priority, b.weight
+		FROM model_channel_bindings b JOIN channels c ON c.id=b.channel_id
+		JOIN channels anchor ON anchor.id=(SELECT channel_id FROM models WHERE id=b.model_id)
+		JOIN channel_models cm ON cm.channel_id=b.channel_id AND lower(trim(cm.request_id))=lower(trim(?)) AND cm.enabled=1
+		WHERE b.model_id=? AND b.role IN ('regular','fallback') AND (
+			lower(trim(c.type))=lower(trim(anchor.type))
+			OR (lower(trim(c.type)) IN ('anthropic','claude') AND lower(trim(anchor.type)) IN ('anthropic','claude'))
+			OR (lower(trim(c.type)) IN ('google','gemini') AND lower(trim(anchor.type)) IN ('google','gemini'))
+		)
+			AND lower(trim(COALESCE(c.api_format,'')))=lower(trim(COALESCE(anchor.api_format,'')))
+			AND c.enabled=1 AND trim(c.api_key)<>''
+			AND (b.disabled_until=0 OR b.disabled_until<=?)
+			AND (c.auto_disabled_until=0 OR c.auto_disabled_until<=?)
+		ORDER BY b.priority ASC, b.channel_id`, requestID, modelID, time.Now().Unix(), time.Now().Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	type candidate struct {
+		id               string
+		priority, weight int
+	}
+	all := []candidate{}
+	for rows.Next() {
+		var item candidate
+		if err := rows.Scan(&item.id, &item.priority, &item.weight); err != nil {
+			return nil, err
+		}
+		if item.priority < 1 {
+			item.priority = 1
+		}
+		if item.weight < 1 {
+			item.weight = 1
+		}
+		all = append(all, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(all) == 0 {
+		return nil, sql.ErrNoRows
+	}
+	ordered := make([]string, 0, len(all))
+	for start := 0; start < len(all); {
+		end := start + 1
+		for end < len(all) && all[end].priority == all[start].priority {
+			end++
+		}
+		pool := all[start:end]
+		total := 0
+		for _, item := range pool {
+			total += item.weight
+		}
+		bucket := rand.IntN(total)
+		selected := 0
+		for i, item := range pool {
+			if bucket < item.weight {
+				selected = i
+				break
+			}
+			bucket -= item.weight
+		}
+		for offset := range pool {
+			ordered = append(ordered, pool[(selected+offset)%len(pool)].id)
+		}
+		start = end
+	}
+	return ordered, nil
+}
+
+// SelectModelChannelID resolves the first usable binding within a role. New
+// request paths use ModelChannelCandidateIDs so all priority tiers are retained
+// for retry; role stays here for older internal callers.
 func SelectModelChannelID(ctx context.Context, db *sql.DB, modelID, requestID, role, excludeID string) (string, error) {
-	role = normalizeBindingRole(role)
+	if strings.TrimSpace(role) == "" {
+		candidates, err := ModelChannelCandidateIDs(ctx, db, modelID, requestID)
+		if err != nil {
+			return "", err
+		}
+		for _, id := range candidates {
+			if id != excludeID {
+				return id, nil
+			}
+		}
+		return "", sql.ErrNoRows
+	}
+	roleFilter := `b.role=?`
 	rows, err := db.QueryContext(ctx, `SELECT b.channel_id, b.priority, b.weight
 		FROM model_channel_bindings b JOIN channels c ON c.id=b.channel_id
 		JOIN channel_models cm ON cm.channel_id=b.channel_id AND lower(trim(cm.request_id))=lower(trim(?)) AND cm.enabled=1
-		WHERE b.model_id=? AND b.role=? AND c.enabled=1 AND trim(c.api_key)<>''
+		WHERE b.model_id=? AND `+roleFilter+` AND c.enabled=1 AND trim(c.api_key)<>''
 			AND (b.disabled_until=0 OR b.disabled_until<=?)
-			AND (c.auto_disabled_until=0 OR c.auto_disabled_until<=?)
-		ORDER BY b.priority ASC, b.weight DESC, b.id`, requestID, modelID, role, time.Now().Unix(), time.Now().Unix())
+		AND (c.auto_disabled_until=0 OR c.auto_disabled_until<=?)
+		ORDER BY b.priority ASC, b.weight DESC, b.id`, requestID, modelID, normalizeBindingRole(role), time.Now().Unix(), time.Now().Unix())
 	if err != nil {
 		return "", err
 	}

@@ -593,8 +593,14 @@ func Migrate(db *sql.DB) error {
 	if err := backfillModelChannelConfiguration(context.Background(), db); err != nil {
 		return fmt.Errorf("backfill model channel configuration: %w", err)
 	}
+	if err := migrateFallbackModelChannels(context.Background(), db); err != nil {
+		return fmt.Errorf("migrate fallback model channels: %w", err)
+	}
 	if err := migrateLegacyModelTTFT(context.Background(), db); err != nil {
 		return fmt.Errorf("migrate legacy model TTFT: %w", err)
+	}
+	if err := migrateModelTTFTToGlobalSetting(context.Background(), db); err != nil {
+		return fmt.Errorf("migrate TTFT to global model policy: %w", err)
 	}
 	if err := BackfillRegistrationDomainMatches(context.Background(), db); err != nil {
 		return fmt.Errorf("backfill registration domain matches: %w", err)

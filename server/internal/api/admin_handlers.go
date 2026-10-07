@@ -329,24 +329,25 @@ func normalizeModelExtraParams(m *store.Model) error {
 // extra_params or official_tools. Those distinctions let kind changes clear
 // inherited chat-only values while ordinary partial updates preserve existing
 // hosted-tool configuration.
-func decodeModelPatch(r *http.Request, m *store.Model) (extraParamsProvided, officialToolsProvided bool, err error) {
+func decodeModelPatch(r *http.Request, m *store.Model) (extraParamsProvided, officialToolsProvided, autoDisableTimeoutsProvided bool, err error) {
 	var raw json.RawMessage
 	if err := decodeJSON(r, &raw); err != nil {
-		return false, false, err
+		return false, false, false, err
 	}
 	if len(raw) == 0 {
-		return false, false, nil
+		return false, false, false, nil
 	}
 	if err := json.Unmarshal(raw, m); err != nil {
-		return false, false, err
+		return false, false, false, err
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil {
-		return false, false, err
+		return false, false, false, err
 	}
 	_, extraParamsProvided = fields["extra_params"]
 	_, officialToolsProvided = fields["official_tools"]
-	return extraParamsProvided, officialToolsProvided, nil
+	_, autoDisableTimeoutsProvided = fields["auto_disable_timeouts"]
+	return extraParamsProvided, officialToolsProvided, autoDisableTimeoutsProvided, nil
 }
 
 func listModelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
@@ -373,6 +374,28 @@ func listModelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, rows)
 }
 
+func globalModelTTFTSeconds(db *sql.DB) (int, error) {
+	raw, err := store.GetSetting(db, "fallback_ttft_sec")
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	var seconds int
+	if json.Unmarshal(raw, &seconds) == nil {
+		return max(seconds, 0), nil
+	}
+	var value string
+	if json.Unmarshal(raw, &value) == nil {
+		seconds, err = strconv.Atoi(strings.TrimSpace(value))
+		if err == nil {
+			return max(seconds, 0), nil
+		}
+	}
+	return 0, errInvalidInput
+}
+
 func validateModelChannelPolicy(m *store.Model) error {
 	if m == nil {
 		return errors.New("model is required")
@@ -380,8 +403,19 @@ func validateModelChannelPolicy(m *store.Model) error {
 	if m.FallbackTTFTSec < 0 || m.AutoDisableErrors < 0 || m.AutoDisableTimeouts < 0 || m.AutoDisableMinutes < 0 {
 		return errors.New("model timeout and auto-disable values must be non-negative")
 	}
-	if m.FallbackTTFTSec == 0 && m.AutoDisableTimeouts > 0 {
-		return errors.New("auto-disable timeout threshold requires a positive model TTFT timeout")
+	return nil
+}
+
+func validateModelTimeoutAutoDisable(db *sql.DB, m *store.Model) error {
+	if m == nil {
+		return errors.New("model is required")
+	}
+	globalTTFT, err := globalModelTTFTSeconds(db)
+	if err != nil {
+		return err
+	}
+	if globalTTFT == 0 && m.AutoDisableTimeouts > 0 {
+		return errors.New("auto-disable timeout threshold requires a positive global TTFT timeout")
 	}
 	return nil
 }
@@ -393,6 +427,7 @@ func createModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m := req.Model
+	m.FallbackTTFTSec = 0
 	if req.ResearchEnabled != nil {
 		m.ResearchEnabled = *req.ResearchEnabled
 		m.ResearchEnabledSet = true
@@ -408,6 +443,10 @@ func createModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validateModelChannelPolicy(&m); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := validateModelTimeoutAutoDisable(d.DB, &m); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -487,11 +526,14 @@ func updateModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m := *existing
-	extraParamsProvided, officialToolsProvided, err := decodeModelPatch(r, &m)
+	extraParamsProvided, officialToolsProvided, autoDisableTimeoutsProvided, err := decodeModelPatch(r, &m)
 	if err != nil {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
+	// Keep the legacy column available for old databases, but model edits no
+	// longer configure TTFT; only the global model policy controls it.
+	m.FallbackTTFTSec = existing.FallbackTTFTSec
 	if m.Kind != "chat" && !extraParamsProvided {
 		m.ExtraParams = json.RawMessage("{}")
 	}
@@ -508,6 +550,12 @@ func updateModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	if err := validateModelChannelPolicy(&m); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
+	}
+	if autoDisableTimeoutsProvided {
+		if err := validateModelTimeoutAutoDisable(d.DB, &m); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
 	}
 	// Omitted official_tools preserves the existing model value. An explicit
 	// value, including [], is validated and normalized to the canonical object

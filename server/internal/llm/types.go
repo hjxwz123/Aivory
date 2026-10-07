@@ -200,6 +200,8 @@ type ModelInfo struct {
 	ChannelID                  string
 	ChannelAutoDisableTimeouts int
 	FallbackChannelID          string
+	ChannelCandidates          []ChannelCreds
+	ChannelIndex               *atomic.Int64
 	RequestID                  string
 	Provider                   string
 	Vision                     bool
@@ -218,6 +220,7 @@ type ModelInfo struct {
 
 // ChannelCreds carries the fallback endpoint's own credentials and headers.
 type ChannelCreds struct {
+	ID      string
 	BaseURL string
 	APIKey  string
 	Headers requestheaders.Headers

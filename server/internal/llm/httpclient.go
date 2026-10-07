@@ -47,10 +47,9 @@ func OpenAIBaseURL(baseURL string) string {
 // minutes before the first SSE frame. The request context plus the provider
 // TTFT watchdog/admin generation cap are the right owners of that decision.
 //
-// A configured channel fallback may retry one complete upstream response before
-// that response's buffered events are committed to the client. It never replays
-// a tool that has already run: providers retry the failed HTTP/SSE round in
-// place, then keep the fallback channel sticky for the rest of the turn.
+// Channel failover retries the failed HTTP/SSE round before its user-visible
+// output is committed, then keeps the successful channel for the rest of the
+// turn. Completed tools are never replayed.
 var providerHTTPClient = &http.Client{
 	Transport: &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
@@ -62,11 +61,9 @@ var providerHTTPClient = &http.Client{
 	},
 }
 
-// doProviderRequest issues one upstream call against the model's PRIMARY channel.
-// If that fails (transport error, or ANY HTTP status other than 200 — see
-// retryableUpstreamFailure for why 4xx is included) AND the model has a fallback
-// channel, it rebuilds the request against the fallback creds and retries ONCE,
-// flagging req.FallbackUsed so the whole turn is marked fallback (§fallback channel).
+// doProviderRequest advances through the priority-ordered channel queue on a
+// transport error or non-200 response. Every retry builds a fresh request with
+// that channel's credentials and headers.
 //
 // build MUST create a fresh *http.Request each call — a request body Reader is
 // consumed once and can't be rewound for the retry. A caller cancellation
@@ -84,53 +81,41 @@ func doProviderRequest(
 	fallbackUsed *atomic.Bool,
 	build func(baseURL, apiKey string) (*http.Request, error),
 ) (*http.Response, error) {
-	primaryReq, err := buildProviderChannelRequest(m, false, build)
-	if err != nil {
-		return nil, err
+	candidates := providerChannelCandidates(m)
+	start := providerChannelIndex(m, fallbackUsed)
+	var lastResp *http.Response
+	var lastErr error
+	for index := start; index < len(candidates); index++ {
+		setProviderChannelIndex(m, index, fallbackUsed)
+		candidate := candidates[index]
+		attemptCtx := contextWithProviderRequestChannel(ctx, m.ID, candidate.ID, index > 0)
+		req, err := buildProviderChannelRequest(m, index, build)
+		if err != nil {
+			lastErr = err
+			if index+1 < len(candidates) && fallbackAllowedAfter(ctx, err) {
+				continue
+			}
+			return nil, err
+		}
+		resp, err := sendProviderRequest(attemptCtx, req, index > 0)
+		lastResp, lastErr = resp, err
+		if !retryableUpstreamFailure(resp, err) || index+1 == len(candidates) {
+			return resp, err
+		}
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
 	}
-	resp, err := sendProviderRequest(ctx, primaryReq, false)
-	if m.Fallback == nil || !retryableUpstreamFailure(resp, err) {
-		return resp, err
-	}
-	// Build the retry BEFORE releasing the primary response: if the fallback
-	// request can't be constructed (e.g. an unparseable fallback base URL), we
-	// return the primary response UNTOUCHED so the caller can still read its error
-	// body — closing it first would surface an empty upstream message.
-	fbReq, berr := buildProviderChannelRequest(m, true, build)
-	if berr != nil {
-		return resp, err // keep the original (unclosed) failure; couldn't build the retry
-	}
-	// Release the primary connection now that we're committed to the retry.
-	if resp != nil && resp.Body != nil {
-		_ = resp.Body.Close()
-	}
-	resp2, err2 := sendProviderRequest(ctx, fbReq, true)
-	// The fallback endpoint served the (final) response — mark the turn fallback
-	// whether or not it ultimately succeeded, so an error row is still attributed
-	// to the fallback channel.
-	if fallbackUsed != nil {
-		fallbackUsed.Store(true)
-	}
-	return resp2, err2
+	return lastResp, lastErr
 }
 
-// doProviderParsedRequest owns one complete upstream HTTP response, including
-// status validation and body/SSE parsing performed by consume. With a configured
-// fallback channel, primary events are buffered only until the first event that
-// is actually visible to the user. If a non-cancellation failure occurs before
-// that commit point, the buffered metadata is discarded and the same round is
-// attempted once against the fallback credentials. After the commit point,
-// events stream live and a failure is returned without replaying another channel.
-//
-// A successful switch is sticky for the rest of the provider's tool loop: later
-// rounds go directly to the fallback. This avoids mixing provider-side state or
-// signed reasoning blocks between channels. The fallback attempt itself streams
-// live because there is no third attempt that could require another rollback.
-// The commit flag is turn-scoped through ctx, so a visible tool event in one
-// round also prevents a later round from switching channels. Calls without a
-// shared flag are internal/hidden calls and retain full-response buffering.
-// Caller cancellation/deadline is not a channel failure and is never replayed;
-// buffered partial events are flushed so stop semantics remain unchanged.
+// doProviderParsedRequest owns HTTP status validation and body/SSE parsing.
+// It advances through the ordered channel queue only before this response
+// commits visible output, buffering metadata until that point. Later tool
+// rounds continue on the successful channel without replaying completed tools.
+// Hidden calls buffer a response while another candidate remains; the final
+// candidate and single-channel requests stream directly. Cancellation never
+// advances the queue, and flushes partial events to preserve stop semantics.
 func doProviderParsedRequest(
 	ctx context.Context,
 	m ModelInfo,
@@ -165,19 +150,21 @@ func doProviderParsedRequestWithRepair(
 	}
 	visibleOutput := providerVisibleOutputFromContext(ctx)
 
-	consumeAttempt := func(req *http.Request, fallback bool, emit func(SseEvent)) error {
+	consumeAttempt := func(req *http.Request, channelIndex int, emit func(SseEvent)) error {
+		candidate := providerChannelCandidates(m)[channelIndex]
+		attemptCtx := contextWithProviderRequestChannel(ctx, m.ID, candidate.ID, channelIndex > 0)
 		for attempt := 0; ; attempt++ {
-			resp, err := sendProviderRequest(ctx, req, fallback)
+			resp, err := sendProviderRequest(attemptCtx, req, channelIndex > 0)
 			if err != nil {
 				if resp != nil && resp.Body != nil {
 					_ = resp.Body.Close()
 				}
-				recordProviderRequestFailure(ctx, fallback, err)
+				recordProviderRequestFailure(attemptCtx, channelIndex > 0, err)
 				return err
 			}
 			if resp == nil {
 				err = errors.New("provider returned no HTTP response")
-				recordProviderRequestFailure(ctx, fallback, err)
+				recordProviderRequestFailure(attemptCtx, channelIndex > 0, err)
 				return err
 			}
 			if resp.Body != nil {
@@ -198,127 +185,134 @@ func doProviderParsedRequestWithRepair(
 				emit(ev)
 			}
 			err = consume(resp, trackGenerated)
-			recordProviderRequestOutputEstimate(ctx, estimateTokens(generated.String()))
+			recordProviderRequestOutputEstimate(attemptCtx, estimateTokens(generated.String()))
 			if err != nil && attempt == 0 && !emitted && ctx.Err() == nil && repair != nil && repair(err) {
 				if resp.Body != nil {
 					_ = resp.Body.Close()
 				}
-				req, err = buildProviderChannelRequest(m, fallback, build)
+				req, err = buildProviderChannelRequest(m, channelIndex, build)
 				if err != nil {
-					recordProviderRequestBuildFailure(ctx, fallback, err)
+					recordProviderRequestBuildFailure(attemptCtx, channelIndex > 0, err)
 					return err
 				}
 				continue
 			}
 			if err != nil {
-				recordProviderRequestFailure(ctx, fallback, err)
+				recordProviderRequestFailure(attemptCtx, channelIndex > 0, err)
 			}
 			return err
 		}
 	}
 
-	// Once a prior round switched channels, do not probe the failed primary
-	// again. FallbackUsed is turn-scoped and shared by every provider iteration.
-	useStickyFallback := m.Fallback != nil && (m.APIKey == "" || (fallbackUsed != nil && fallbackUsed.Load()))
-	if useStickyFallback {
-		fbReq, err := buildProviderChannelRequest(m, true, build)
+	candidates := providerChannelCandidates(m)
+	start := providerChannelIndex(m, fallbackUsed)
+	var lastErr error
+	for index := start; index < len(candidates); index++ {
+		setProviderChannelIndex(m, index, fallbackUsed)
+		candidate := candidates[index]
+		attemptCtx := contextWithProviderRequestChannel(ctx, m.ID, candidate.ID, index > 0)
+		req, err := buildProviderChannelRequest(m, index, build)
 		if err != nil {
-			recordProviderRequestBuildFailure(ctx, true, err)
+			recordProviderRequestBuildFailure(attemptCtx, index > 0, err)
+			lastErr = err
+			if index+1 < len(candidates) && fallbackAllowedAfter(ctx, err) {
+				continue
+			}
 			return err
 		}
-		if fallbackUsed != nil {
-			fallbackUsed.Store(true)
+		if index+1 == len(candidates) {
+			return consumeAttempt(req, index, onEvent)
 		}
-		return consumeAttempt(fbReq, true, onEvent)
-	}
-
-	primaryReq, err := buildProviderChannelRequest(m, false, build)
-	if err != nil && m.Fallback == nil {
-		recordProviderRequestBuildFailure(ctx, false, err)
-		return err
-	}
-	if m.Fallback == nil {
-		return consumeAttempt(primaryReq, false, onEvent)
-	}
-	buffered := make([]SseEvent, 0, 32)
-	primaryAttemptCommitted := false
-	flushBuffered := func() {
-		for _, ev := range buffered {
-			onEvent(ev)
+		buffered := make([]SseEvent, 0, 32)
+		committed := false
+		flushBuffered := func() {
+			for _, ev := range buffered {
+				onEvent(ev)
+			}
+			buffered = buffered[:0]
 		}
-		buffered = buffered[:0]
-	}
-	emitBuffered := func(ev SseEvent) {
-		// No turn-scoped marker means this is an internal/hidden provider call.
-		// Preserve the prior all-or-nothing buffering behavior for those callers.
-		if visibleOutput == nil {
-			buffered = append(buffered, ev)
-			return
-		}
-		if primaryAttemptCommitted {
+		emitBuffered := func(ev SseEvent) {
+			if visibleOutput == nil {
+				buffered = append(buffered, ev)
+				return
+			}
+			if committed {
+				flushBuffered()
+				onEvent(ev)
+				return
+			}
+			if !providerEventCommitsVisibleOutputInContext(ctx, ev) {
+				buffered = append(buffered, ev)
+				return
+			}
+			committed = true
 			flushBuffered()
 			onEvent(ev)
-			return
 		}
-		if !providerEventCommitsVisibleOutputInContext(ctx, ev) {
-			buffered = append(buffered, ev)
-			return
-		}
-
-		// Release metadata immediately before the first visible event from THIS
-		// upstream attempt. Earlier tool rounds may already be visible, but replaying
-		// only a later failed provider request is safe: completed local tools remain
-		// in history and are not executed again. Once this attempt emits content,
-		// however, switching would duplicate or mix its partial response.
-		primaryAttemptCommitted = true
-		flushBuffered()
-		onEvent(ev)
-	}
-	primaryErr := err
-	if primaryErr != nil {
-		recordProviderRequestBuildFailure(ctx, false, primaryErr)
-	}
-	if primaryErr == nil {
-		primaryErr = consumeAttempt(primaryReq, false, emitBuffered)
-	}
-	if primaryErr == nil {
-		flushBuffered()
-		return nil
-	}
-	if !fallbackAllowedAfter(ctx, primaryErr) {
-		flushBuffered()
-		return primaryErr
-	}
-	if primaryAttemptCommitted {
-		flushBuffered()
-		return primaryErr
-	}
-
-	// Build before discarding the primary's partial events. Hidden calls preserve
-	// the legacy buffered result when the fallback URL itself is invalid; a user
-	// turn that has not committed output keeps the failed primary events hidden.
-	fbReq, buildErr := buildProviderChannelRequest(m, true, build)
-	if buildErr != nil {
-		recordProviderRequestBuildFailure(ctx, true, buildErr)
-		if visibleOutput == nil {
+		lastErr = consumeAttempt(req, index, emitBuffered)
+		if lastErr == nil {
 			flushBuffered()
+			return nil
 		}
-		return primaryErr
+		if !fallbackAllowedAfter(ctx, lastErr) || committed {
+			flushBuffered()
+			return lastErr
+		}
 	}
-	if fallbackUsed != nil {
-		fallbackUsed.Store(true)
-	}
-	return consumeAttempt(fbReq, true, onEvent)
+	return lastErr
 }
 
-func buildProviderChannelRequest(m ModelInfo, fallback bool, build func(string, string) (*http.Request, error)) (*http.Request, error) {
-	baseURL, apiKey, headers := m.BaseURL, m.APIKey, m.Headers
-	if fallback && m.Fallback != nil {
-		baseURL, apiKey, headers = m.Fallback.BaseURL, m.Fallback.APIKey, m.Fallback.Headers
+func providerChannelCandidates(m ModelInfo) []ChannelCreds {
+	if len(m.ChannelCandidates) > 0 {
+		return m.ChannelCandidates
 	}
-	req, err := build(baseURL, apiKey)
+	candidates := []ChannelCreds{{ID: m.ChannelID, BaseURL: m.BaseURL, APIKey: m.APIKey, Headers: m.Headers}}
+	if m.Fallback != nil {
+		candidates = append(candidates, ChannelCreds{ID: m.FallbackChannelID, BaseURL: m.Fallback.BaseURL, APIKey: m.Fallback.APIKey, Headers: m.Fallback.Headers})
+	}
+	return candidates
+}
+
+func providerChannelIndex(m ModelInfo, fallbackUsed *atomic.Bool) int {
+	candidates := providerChannelCandidates(m)
+	if m.ChannelIndex != nil {
+		index := int(m.ChannelIndex.Load())
+		if index >= 0 && index < len(candidates) {
+			if index+1 < len(candidates) && strings.TrimSpace(candidates[index].APIKey) == "" {
+				return index + 1
+			}
+			return index
+		}
+	}
+	// Older callers only carried the sticky fallback bit. Preserve that
+	// compatibility while the new request path also carries ChannelIndex.
+	if fallbackUsed != nil && fallbackUsed.Load() && len(candidates) > 1 {
+		return 1
+	}
+	if len(candidates) > 1 && strings.TrimSpace(candidates[0].APIKey) == "" {
+		return 1
+	}
+	return 0
+}
+
+func setProviderChannelIndex(m ModelInfo, index int, fallbackUsed *atomic.Bool) {
+	if m.ChannelIndex != nil {
+		m.ChannelIndex.Store(int64(index))
+	}
+	if index > 0 && fallbackUsed != nil {
+		fallbackUsed.Store(true)
+	}
+}
+
+func buildProviderChannelRequest(m ModelInfo, index int, build func(string, string) (*http.Request, error)) (*http.Request, error) {
+	candidates := providerChannelCandidates(m)
+	if index < 0 || index >= len(candidates) {
+		return nil, errors.New("provider channel is unavailable")
+	}
+	candidate := candidates[index]
+	req, err := build(candidate.BaseURL, candidate.APIKey)
 	if err == nil {
-		requestheaders.Apply(req, headers)
+		requestheaders.Apply(req, candidate.Headers)
 	}
 	return req, err
 }

@@ -52,11 +52,18 @@ func TestImageModelUsesAvailableRegularAndFallbackBindings(t *testing.T) {
 	if err != nil || selected.ChannelID != channels["image-alt"].ID {
 		t.Fatalf("selected image channel=%v err=%v, want available alternate", selected, err)
 	}
-	fallback := tool.resolveImageFallbackChannel(ctx, selected, channels["image-alt"])
-	if fallback == nil || fallback.ID != channels["image-fallback-2"].ID {
-		t.Fatalf("fallback=%v, want next active priority binding", fallback)
+	fallbacks := tool.resolveImageFallbackChannels(ctx, selected, channels["image-alt"])
+	if len(fallbacks) != 1 || fallbacks[0].ID != channels["image-fallback-2"].ID {
+		t.Fatalf("fallbacks=%v, want next active priority binding", fallbacks)
 	}
 	if _, err := db.Exec(`UPDATE channels SET enabled=0 WHERE id=?`, channels["image-alt"].ID); err != nil {
+		t.Fatal(err)
+	}
+	selected, err = tool.resolveImageModel(ctx, &llm.ToolContext{ImageModelID: model.ID})
+	if err != nil || selected.ChannelID != channels["image-fallback-2"].ID {
+		t.Fatalf("next available image channel=%v err=%v", selected, err)
+	}
+	if _, err := db.Exec(`UPDATE channels SET enabled=0 WHERE id=?`, channels["image-fallback-2"].ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tool.resolveImageModel(ctx, &llm.ToolContext{ImageModelID: model.ID}); err == nil {
