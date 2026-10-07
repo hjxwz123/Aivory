@@ -5,6 +5,7 @@ import { Bug, ChevronRight, Image as ImageIcon, Search, X } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
 import type { ApiAdminUserFeedback, ApiAdminUserFeedbackPage } from '@/api/types'
 import { Button } from '@/components/ui/button'
+import { AdminTable } from '@/components/admin/AdminTable'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Pagination } from '@/components/ui/pagination'
@@ -153,8 +154,8 @@ export default function AdminFeedback() {
         )}
       />
 
-      <div className="mt-7 overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-        <div className="flex min-h-11 items-center justify-between gap-3 border-b border-[var(--color-divider)] px-4 py-2.5 sm:px-5">
+      <div className="mt-7 overflow-hidden rounded-[12px] bg-[var(--color-surface)]">
+        <div className="flex min-h-11 items-center justify-between gap-3 px-4 py-2.5 sm:px-5">
           <span className="text-[12.5px] tabular-nums text-[var(--color-fg-subtle)]">
             {t('admin:userFeedback.total', { count: data?.total ?? 0 })}
           </span>
@@ -184,41 +185,20 @@ export default function AdminFeedback() {
           </div>
         ) : data && data.items.length > 0 ? (
           <div className={cn('transition-opacity', loading && 'pointer-events-none opacity-60')}>
-            <ul aria-label={t('admin:userFeedback.title')} className="divide-y divide-[var(--color-divider)]">
-              {data.items.map((item) => (
-                <li key={item.id}>
-                  <button
-                    type="button"
-                    onClick={() => openDetails(item)}
-                    className="group flex min-h-24 w-full items-start gap-3 px-4 py-4 text-left interactive hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)] sm:px-5"
-                  >
-                    <span className="mt-0.5 inline-flex size-9 shrink-0 items-center justify-center rounded-[8px] bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
-                      <Bug size={16} aria-hidden />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-[var(--color-fg-subtle)]">
-                        <span className="font-medium text-[var(--color-fg)]">{displayUser(item)}</span>
-                        <span aria-hidden>·</span>
-                        <span>{formatDate(item.created_at)}</span>
-                        {item.has_screenshot ? (
-                          <span className="inline-flex items-center gap-1 text-[var(--color-secondary)]">
-                            <ImageIcon size={12} aria-hidden />
-                            {formatBytes(item.screenshot_size)}
-                          </span>
-                        ) : null}
-                      </span>
-                      <span className="mt-1.5 block line-clamp-2 text-sm leading-relaxed text-[var(--color-fg-muted)]">
-                        {item.description}
-                      </span>
-                      <span className="mt-2 block truncate text-[12px] text-[var(--color-fg-subtle)]">
-                        {item.conversation_title || item.page_path || item.conversation_id || '—'}
-                      </span>
-                    </span>
-                    <ChevronRight size={16} className="mt-2 shrink-0 text-[var(--color-fg-faint)] transition-transform group-hover:translate-x-0.5" aria-hidden />
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <AdminTable
+              items={data.items}
+              embedded
+              rowKey={(item) => item.id}
+              label={t('admin:userFeedback.title')}
+              columns={[
+                { id: 'user', header: t('admin:userFeedback.reportedBy'), width: 180, render: (item) => <span className="block truncate font-medium" title={displayUser(item)}>{displayUser(item)}</span> },
+                { id: 'description', header: t('admin:userFeedback.description'), width: 340, render: (item) => <button type="button" onClick={() => openDetails(item)} className="admin-table-link" title={item.description}>{item.description}</button> },
+                { id: 'context', header: t('admin:userFeedback.conversation'), width: 230, render: (item) => <span className="block truncate text-[var(--color-fg-muted)]" title={item.conversation_title || item.page_path || item.conversation_id}>{item.conversation_title || item.page_path || item.conversation_id || '—'}</span> },
+                { id: 'created', header: t('admin:userFeedback.reportedAt'), width: 170, render: (item) => <span className="text-[12px] tabular-nums text-[var(--color-fg-muted)]">{formatDate(item.created_at)}</span> },
+                { id: 'screenshot', header: t('admin:userFeedback.screenshot'), width: 90, render: (item) => item.has_screenshot ? <span className="inline-flex items-center gap-1"><ImageIcon size={12} aria-hidden />{formatBytes(item.screenshot_size)}</span> : '—' },
+                { id: 'actions', header: t('admin:common.actions'), width: 60, align: 'right', render: (item) => <Button variant="ghost" size="icon-sm" title={t('admin:userFeedback.details')} aria-label={t('admin:userFeedback.details')} onClick={() => openDetails(item)}><ChevronRight size={16} aria-hidden /></Button> },
+              ]}
+            />
             <Pagination page={page} pageCount={pageCount} onPage={setPage} className="pb-4" />
           </div>
         ) : (
@@ -233,7 +213,7 @@ export default function AdminFeedback() {
 
       <Sheet open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
         <SheetContent side="right" size="lg" label={t('admin:userFeedback.details')}>
-          <SheetHeader className="relative border-b border-[var(--color-divider)] pr-14">
+          <SheetHeader className="relative pr-14">
             <SheetTitle>{t('admin:userFeedback.details')}</SheetTitle>
             <SheetDescription>{selected ? formatDate(selected.created_at) : ''}</SheetDescription>
             <SheetClose asChild>
@@ -263,7 +243,7 @@ export default function AdminFeedback() {
                   <h3 className="text-xs font-medium uppercase tracking-[0.08em] text-[var(--color-fg-subtle)]">
                     {t('admin:userFeedback.screenshot')}
                   </h3>
-                  <div className="mt-2 flex min-h-36 items-center justify-center overflow-hidden rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface-sunken)]">
+                  <div className="mt-2 flex min-h-36 items-center justify-center overflow-hidden rounded-[8px] bg-[var(--color-surface-sunken)]">
                     {screenshotLoading ? (
                       <span className="flex items-center gap-2 text-sm text-[var(--color-fg-muted)]" role="status">
                         <span className="inline-block size-4 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden />
@@ -283,7 +263,7 @@ export default function AdminFeedback() {
                   <h3 className="text-xs font-medium uppercase tracking-[0.08em] text-[var(--color-fg-subtle)]">
                     {t('admin:userFeedback.metadata')}
                   </h3>
-                  <dl className="mt-2 divide-y divide-[var(--color-divider)] border-y border-[var(--color-divider)] text-[12.5px]">
+                  <dl className="mt-2 text-[12.5px]">
                     <MetaRow label={t('admin:userFeedback.reportedBy')} value={[selected.user_name, selected.user_email].filter(Boolean).join(' / ') || selected.user_id} />
                     <MetaRow label={t('admin:userFeedback.page')} value={selected.page_path || '—'} />
                     <MetaRow label={t('admin:userFeedback.viewport')} value={selected.viewport_width && selected.viewport_height ? `${selected.viewport_width} × ${selected.viewport_height}` : '—'} />
@@ -295,7 +275,7 @@ export default function AdminFeedback() {
                 {selected.conversation_id ? (
                   <Link
                     to={`/admin/users/${encodeURIComponent(selected.user_id)}/conversations/${encodeURIComponent(selected.conversation_id)}`}
-                    className="inline-flex min-h-9 items-center rounded-[8px] border border-[var(--color-border)] px-3 text-sm text-[var(--color-fg)] interactive hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                    className="inline-flex min-h-9 items-center rounded-[8px] px-3 text-sm text-[var(--color-fg)] interactive hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                   >
                     {t('admin:userFeedback.conversation')}
                     <ChevronRight size={14} className="ml-1.5" aria-hidden />

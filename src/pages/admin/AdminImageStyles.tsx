@@ -127,7 +127,7 @@ export default function AdminImageStyles() {
       />
 
       {!loading ? (
-        <section className="mt-8 flex items-end gap-3 border-y border-[var(--color-divider)] py-4 max-sm:flex-col max-sm:items-stretch">
+        <section className="mt-6 flex items-start gap-3 max-sm:flex-col max-sm:items-stretch">
           <Field
             className="min-w-0 flex-1"
             label={t('admin:settings.fields.imagePromptModel')}
@@ -151,7 +151,8 @@ export default function AdminImageStyles() {
           </Field>
           <Button
             variant="secondary"
-            className="w-full sm:w-auto"
+            size="sm"
+            className="sm:mt-6 sm:h-9 max-sm:mt-0 max-sm:h-11 max-sm:self-end"
             loading={savingPromptModel}
             onClick={() => void savePromptModel()}
           >
@@ -160,7 +161,7 @@ export default function AdminImageStyles() {
         </section>
       ) : null}
 
-      <section className="mt-8">
+      <section className="mt-6">
         <div className="flex flex-col gap-2 sm:flex-row">
           <Input
             value={newName}
@@ -176,7 +177,8 @@ export default function AdminImageStyles() {
             }}
           />
           <Button
-            className="w-full sm:w-auto"
+            size="sm"
+            className="max-sm:w-auto max-sm:self-end sm:h-9 max-sm:h-11"
             onClick={() => void create()}
             loading={creating}
             leadingIcon={<Plus size={14} aria-hidden />}
@@ -188,7 +190,7 @@ export default function AdminImageStyles() {
         {loading ? (
           <PanelFallback />
         ) : styles.length === 0 ? (
-          <div className="mt-6 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center text-sm text-[var(--color-fg-muted)]">
+          <div className="mt-6 rounded-[12px] bg-[var(--color-surface)] px-5 py-8 text-center text-sm text-[var(--color-fg-muted)]">
             {t('admin:imageStyles.empty', { defaultValue: 'No styles yet. Add one above.' })}
           </div>
         ) : (
@@ -263,7 +265,7 @@ function StyleCard({
     <div className="min-w-0">
       <div className="flex flex-col gap-4 sm:flex-row">
         {/* Example thumbnail */}
-        <div className="size-20 shrink-0 overflow-hidden rounded-[8px] border border-[var(--color-border-subtle)] bg-[var(--color-bg-muted)]">
+        <div className="size-20 shrink-0 overflow-hidden rounded-[8px] bg-[var(--color-bg-muted)]">
           {style.example_image_url ? (
             <img src={style.example_image_url} alt="" className="size-full object-cover" />
           ) : (
@@ -344,7 +346,7 @@ function StyleCard({
                 <Trash2 size={15} aria-hidden />
               )}
             </button>
-            <Button onClick={() => void save()} loading={saving} size="sm">
+            <Button onClick={() => void save()} loading={saving} size="sm" className="h-9 max-sm:h-11">
               {t('common:actions.save', { defaultValue: 'Save' })}
             </Button>
           </div>

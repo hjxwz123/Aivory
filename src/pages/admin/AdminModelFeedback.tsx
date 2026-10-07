@@ -10,6 +10,7 @@ import type {
 } from '@/api/types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { AdminTable, AdminTableFrame } from '@/components/admin/AdminTable'
 import { Pagination } from '@/components/ui/pagination'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -236,8 +237,8 @@ export function AdminModelFeedback({ days }: AdminModelFeedbackProps) {
             reasonLabel={reasonLabel}
           />
 
-          <section className="mt-6 min-w-0 overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-            <div className="border-b border-[var(--color-divider)] px-4 py-4 sm:px-5">
+          <section className="mt-6 min-w-0 overflow-hidden rounded-[12px] bg-[var(--color-surface)]">
+            <div className="px-4 py-4 sm:px-5">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <h2 className="text-sm font-medium text-[var(--color-fg)]">
                   {rating === 'dislike'
@@ -289,61 +290,20 @@ export function AdminModelFeedback({ days }: AdminModelFeedbackProps) {
                   : t('analytics.feedback.list.empty')}
               </div>
             ) : (
-              <ul className="divide-y divide-[var(--color-divider)]">
-                {data.items.map((item) => (
-                  <li key={item.id}>
-                    <button
-                      type="button"
-                      onClick={() => setSelected(item)}
-                      className="group grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 px-4 py-3.5 text-left interactive hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)] sm:px-5 xl:grid-cols-[9rem_10rem_minmax(12rem,1fr)_minmax(8rem,auto)_8.5rem_1.5rem] xl:items-center xl:gap-3"
-                    >
-                      <span className="text-[12px] tabular-nums text-[var(--color-fg-subtle)]">
-                        {formatDate(item.updated_at)}
-                      </span>
-                      <span className="col-start-1 row-start-2 min-w-0 truncate text-[12px] font-medium text-[var(--color-fg)] xl:col-start-2 xl:row-start-1">
-                        {modelLabel(item)}
-                      </span>
-                      <span className="col-span-2 col-start-1 row-start-3 min-w-0 xl:col-span-1 xl:col-start-3 xl:row-start-1">
-                        <span
-                          className="block min-w-0 max-w-full truncate text-[13px] leading-5 text-[var(--color-fg)]"
-                          title={item.question || undefined}
-                        >
-                          {item.question || t('analytics.feedback.list.noQuestion')}
-                        </span>
-                        <span
-                          className="mt-0.5 block min-w-0 max-w-full truncate text-[12px] leading-4 text-[var(--color-fg-muted)]"
-                          title={item.response || undefined}
-                        >
-                          {item.response || t('analytics.feedback.list.noResponse')}
-                        </span>
-                      </span>
-                      <span className="col-span-2 col-start-1 row-start-4 flex min-w-0 flex-wrap gap-1 xl:col-span-1 xl:col-start-4 xl:row-start-1 xl:flex-nowrap xl:overflow-hidden">
-                        <RatingBadge rating={item.rating} />
-                        {item.reasons.slice(0, 1).map((itemReason) => (
-                          <Badge key={itemReason} size="xs" variant="neutral" className="max-w-full truncate">
-                            {reasonLabel(itemReason)}
-                          </Badge>
-                        ))}
-                        {item.reasons.length > 1 ? (
-                          <Badge size="xs" variant="neutral">+{item.reasons.length - 1}</Badge>
-                        ) : null}
-                      </span>
-                      <span
-                        className="col-start-2 row-start-2 min-w-0 max-w-[10rem] truncate whitespace-nowrap text-right text-[12px] tabular-nums text-[var(--color-fg-subtle)] sm:max-w-[14rem] xl:col-start-5 xl:row-start-1 xl:max-w-none"
-                        title={itemMetrics(item)}
-                        aria-label={itemMetrics(item)}
-                      >
-                        {itemMetrics(item)}
-                      </span>
-                      <ChevronRight
-                        size={15}
-                        aria-hidden
-                        className="col-start-2 row-start-1 self-center text-[var(--color-fg-faint)] transition-transform group-hover:translate-x-0.5 group-hover:text-[var(--color-fg-muted)] xl:col-start-6"
-                      />
-                    </button>
-                  </li>
-                ))}
-              </ul>
+              <AdminTable
+                items={data.items}
+                embedded
+                rowKey={(item) => item.id}
+                label={t('analytics.feedback.list.title')}
+                columns={[
+                  { id: 'time', header: t('admin:common.lastActive'), width: 160, render: (item) => <span className="text-[12px] tabular-nums text-[var(--color-fg-muted)]">{formatDate(item.updated_at)}</span> },
+                  { id: 'model', header: t('analytics.feedback.quality.model'), width: 160, render: (item) => <span className="block truncate font-medium" title={modelLabel(item)}>{modelLabel(item)}</span> },
+                  { id: 'details', header: t('admin:common.details'), width: 330, render: (item) => <button type="button" onClick={() => setSelected(item)} className="admin-table-link"><span className="block truncate" title={item.question || undefined}>{item.question || t('analytics.feedback.list.noQuestion')}</span><span className="block truncate text-[12px] text-[var(--color-fg-muted)]" title={item.response || undefined}>{item.response || t('analytics.feedback.list.noResponse')}</span></button> },
+                  { id: 'rating', header: t('analytics.feedback.quality.sentiment'), width: 200, render: (item) => <div className="flex flex-wrap gap-1"><RatingBadge rating={item.rating} />{item.reasons.slice(0, 1).map((itemReason) => <Badge key={itemReason} size="xs">{reasonLabel(itemReason)}</Badge>)}{item.reasons.length > 1 ? <Badge size="xs">+{item.reasons.length - 1}</Badge> : null}</div> },
+                  { id: 'metrics', header: t('analytics.feedback.detail.metadata'), width: 170, render: (item) => <span className="text-[12px] tabular-nums text-[var(--color-fg-muted)]">{itemMetrics(item)}</span> },
+                  { id: 'actions', header: t('admin:common.actions'), width: 60, align: 'right', render: (item) => <Button variant="ghost" size="icon-sm" title={t('admin:common.details')} aria-label={t('admin:common.details')} onClick={() => setSelected(item)}><ChevronRight size={15} aria-hidden /></Button> },
+                ]}
+              />
             )}
           </section>
 
@@ -385,7 +345,7 @@ function FeedbackStat({
   className?: string
 }) {
   return (
-    <div className={cn('min-w-0 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 sm:p-4', className)}>
+    <div className={cn('min-w-0 rounded-[12px] bg-[var(--color-surface)] p-3 sm:p-4', className)}>
       <div className="break-words text-[12px] uppercase text-[var(--color-fg-subtle)]">
         {label}
       </div>
@@ -408,8 +368,8 @@ function ModelQualityTable({
 }) {
   const { t } = useTranslation('admin')
   return (
-    <section className="mt-6 min-w-0 overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-      <div className="border-b border-[var(--color-divider)] px-4 py-4 sm:px-5">
+    <section className="mt-6 min-w-0 overflow-hidden rounded-[12px] bg-[var(--color-surface)]">
+      <div className="px-4 py-4 sm:px-5">
         <h2 className="text-sm font-medium text-[var(--color-fg)]">{t('analytics.feedback.quality.title')}</h2>
         <p className="mt-1 text-[12px] leading-5 text-[var(--color-fg-muted)]">{t('analytics.feedback.quality.lead')}</p>
       </div>
@@ -419,18 +379,18 @@ function ModelQualityTable({
         </div>
       ) : (
         <>
-          <div className="hidden lg:block">
-            <table className="w-full table-fixed text-[12.5px] tabular-nums">
+          <AdminTableFrame embedded label={t('analytics.feedback.quality.title')}>
+            <table className="admin-data-table w-full table-fixed text-[12.5px] tabular-nums">
               <thead className="bg-[var(--color-bg-muted)] text-[12px] text-[var(--color-fg-subtle)]">
                 <tr>
-                  <th className="w-[27%] px-5 py-2.5 text-left font-medium">{t('analytics.feedback.quality.model')}</th>
-                  <th className="w-[13%] px-3 py-2.5 text-right font-medium">{t('analytics.feedback.quality.evaluated')}</th>
-                  <th className="w-[17%] px-3 py-2.5 text-right font-medium">{t('analytics.feedback.quality.sentiment')}</th>
-                  <th className="w-[18%] px-3 py-2.5 text-right font-medium">{t('analytics.feedback.quality.positiveRate')}</th>
-                  <th className="w-[25%] px-5 py-2.5 text-left font-medium">{t('analytics.feedback.quality.topReason')}</th>
+                  <th scope="col" className="w-[27%] px-5 py-2.5 text-left font-medium">{t('analytics.feedback.quality.model')}</th>
+                  <th scope="col" className="w-[13%] px-3 py-2.5 text-right font-medium">{t('analytics.feedback.quality.evaluated')}</th>
+                  <th scope="col" className="w-[17%] px-3 py-2.5 text-right font-medium">{t('analytics.feedback.quality.sentiment')}</th>
+                  <th scope="col" className="w-[18%] px-3 py-2.5 text-right font-medium">{t('analytics.feedback.quality.positiveRate')}</th>
+                  <th scope="col" className="w-[25%] px-5 py-2.5 text-left font-medium">{t('analytics.feedback.quality.topReason')}</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[var(--color-divider)]">
+              <tbody>
                 {rows.map((row) => (
                   <tr key={row.model_id}>
                     <td className="truncate px-5 py-3 font-medium text-[var(--color-fg)]" title={row.model_label || row.model_id}>
@@ -458,42 +418,7 @@ function ModelQualityTable({
                 ))}
               </tbody>
             </table>
-          </div>
-
-          <ul className="divide-y divide-[var(--color-divider)] lg:hidden">
-            {rows.map((row) => (
-              <li key={row.model_id} className="px-4 py-3.5 sm:px-5">
-                <div className="flex min-w-0 items-start justify-between gap-3">
-                  <span className="min-w-0 truncate text-[13px] font-medium text-[var(--color-fg)]">
-                    {row.model_label || row.model_id}
-                  </span>
-                  {!(row.sample_sufficient ?? row.total >= MIN_QUALITY_SAMPLE) ? (
-                    <Badge size="xs" variant="neutral">
-                      {t('analytics.feedback.quality.sampleInsufficient', { count: MIN_QUALITY_SAMPLE })}
-                    </Badge>
-                  ) : (
-                    <span className="shrink-0 text-sm font-medium tabular-nums text-[var(--color-fg)]">
-                      {formatPercent(row.positive_rate)}
-                    </span>
-                  )}
-                </div>
-                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-[var(--color-fg-subtle)]">
-                  <span>{t('analytics.feedback.quality.evaluatedValue', { count: formatNumber(row.total) })}</span>
-                  <span className="text-[var(--color-success)]">
-                    {t('analytics.feedback.quality.likesValue', { count: formatNumber(row.likes) })}
-                  </span>
-                  <span className="text-[var(--color-danger)]">
-                    {t('analytics.feedback.quality.dislikesValue', { count: formatNumber(row.dislikes) })}
-                  </span>
-                </div>
-                {row.top_reason ? (
-                  <p className="mt-1.5 truncate text-[12px] text-[var(--color-fg-muted)]">
-                    {t('analytics.feedback.quality.topReasonValue', { reason: reasonLabel(row.top_reason) })}
-                  </p>
-                ) : null}
-              </li>
-            ))}
-          </ul>
+          </AdminTableFrame>
         </>
       )}
     </section>
@@ -592,7 +517,7 @@ function FeedbackDetail({
   return (
     <Sheet open onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-[min(32rem,100vw)]">
-        <SheetHeader className="relative border-b border-[var(--color-divider)] pr-14">
+        <SheetHeader className="relative pr-14">
           <SheetTitle>{t('analytics.feedback.detail.title')}</SheetTitle>
           <SheetDescription>{t('analytics.feedback.detail.lead')}</SheetDescription>
           <SheetClose asChild>
@@ -681,7 +606,7 @@ function FeedbackDetail({
           <TextDetail title={t('analytics.feedback.detail.question')} content={item.question} />
           <TextDetail title={t('analytics.feedback.detail.response')} content={item.response} />
 
-          <section className="border-t border-[var(--color-divider)] py-4">
+          <section className="py-4">
             <h3 className="text-[12px] font-medium text-[var(--color-fg)]">
               {t('analytics.feedback.detail.metadata')}
             </h3>
@@ -696,7 +621,7 @@ function FeedbackDetail({
           </section>
 
           {conversationOwnerId && item.conversation_id ? (
-            <div className="border-t border-[var(--color-divider)] py-4">
+            <div className="py-4">
               <Button variant="secondary" size="sm" asChild trailingIcon={<ArrowUpRight size={13} aria-hidden />}>
                 <Link
                   to={`/admin/users/${encodeURIComponent(conversationOwnerId)}/conversations/${encodeURIComponent(item.conversation_id)}`}
@@ -716,7 +641,7 @@ function FeedbackDetail({
 function TextDetail({ title, content }: { title: string; content: string }) {
   const { t } = useTranslation('admin')
   return (
-    <section className="border-t border-[var(--color-divider)] py-4">
+    <section className="py-4">
       <h3 className="text-[12px] font-medium text-[var(--color-fg)]">{title}</h3>
       <p className="mt-2 whitespace-pre-wrap break-words text-[13px] leading-6 text-[var(--color-fg-muted)] [overflow-wrap:anywhere]">
         {content || t('analytics.feedback.detail.notRecorded')}

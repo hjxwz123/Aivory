@@ -474,7 +474,7 @@ export default function AdminPaymentChannels() {
             </Button>
           </div>
         ) : rows.length === 0 ? (
-          <div className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center">
+          <div className="rounded-[12px] bg-[var(--color-surface)] px-5 py-8 text-center">
             <p className="text-sm font-medium text-[var(--color-fg)]">{t('admin:paymentChannels.emptyTitle')}</p>
             <p className="mx-auto mt-1 max-w-lg text-[13px] text-[var(--color-fg-muted)]">{t('admin:paymentChannels.empty')}</p>
             <Button className="mt-4" size="sm" onClick={openNew}>{t('admin:paymentChannels.new')}</Button>
@@ -487,60 +487,25 @@ export default function AdminPaymentChannels() {
             dragHandleLabel={t('admin:common.dragHandle')}
             moveUpLabel={t('admin:common.moveUp')}
             moveDownLabel={t('admin:common.moveDown')}
-            mobileDragOnly
-            listClassName="overflow-hidden"
-            rowClassName="grid min-w-0 grid-cols-[2.75rem_minmax(0,1fr)_auto] items-center gap-x-1 px-2 py-3 sm:grid-cols-[auto_auto_minmax(0,1fr)_auto] sm:gap-3 sm:px-4"
-            renderItem={(row) => (
-              <>
+            tableLabel={t('admin:paymentChannels.title')}
+            columns={[
+              { id: 'name', header: t('admin:paymentChannels.fields.name'), width: 210, render: (row) => <div className="min-w-0"><span className="block truncate font-medium" title={row.name}>{row.name}</span><span className="block truncate text-[12px] text-[var(--color-fg-muted)]">{t('admin:paymentChannels.updatedAt', { date: formatDateTime(timestamp(row.updated_at)) })}</span></div> },
+              { id: 'provider', header: t('admin:paymentChannels.fields.provider'), width: 120, render: (row) => <Badge size="xs">{t(`admin:paymentProviders.${row.provider}`)}</Badge> },
+              { id: 'environment', header: t('admin:paymentChannels.fields.environment'), width: 100, render: (row) => <Badge size="xs" variant={row.environment === 'test' ? 'warning' : 'neutral'}>{t(row.environment === 'test' ? 'admin:paymentChannels.fields.environmentTest' : 'admin:paymentChannels.fields.environmentLive')}</Badge> },
+              { id: 'details', header: t('admin:common.details'), width: 320, render: (row) => (
                 <div className="min-w-0">
-                  <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <span className="min-w-0 break-words text-[13px] font-medium text-[var(--color-fg)] [overflow-wrap:anywhere]">{row.name}</span>
-                    <Badge size="xs" variant="info">{t(`admin:paymentProviders.${row.provider}`)}</Badge>
-                    {row.environment === 'test' ? <Badge size="xs" variant="warning">{t('admin:paymentChannels.testEnvironment')}</Badge> : null}
-                    {!row.enabled ? <Badge size="xs">{t('admin:paymentChannels.disabled')}</Badge> : null}
-                  </div>
-                  <p className="mt-1 truncate text-[12px] text-[var(--color-fg-subtle)]">
-                    {channelSummary(row)} · {t('admin:paymentChannels.updatedAt', { date: formatDateTime(timestamp(row.updated_at)) })}
-                  </p>
+                  <span className="block truncate text-[12px] text-[var(--color-fg-muted)]" title={channelSummary(row)}>{channelSummary(row)}</span>
                   {row.webhook_url ? (
-                    <div className="mt-1 flex min-w-0 items-center gap-1 text-[12px] text-[var(--color-fg-subtle)]">
+                    <div className="flex min-w-0 items-center gap-1 text-[12px] text-[var(--color-fg-muted)]">
                       <code className="min-w-0 flex-1 truncate" title={row.webhook_url}>{row.webhook_url}</code>
-                      <button
-                        type="button"
-                        className="inline-flex size-7 shrink-0 items-center justify-center rounded-[8px] text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:size-11"
-                        title={copiedWebhook === `list:${row.id}` ? t('admin:paymentChannels.copied') : t('admin:paymentChannels.copyWebhook')}
-                        aria-label={copiedWebhook === `list:${row.id}` ? t('admin:paymentChannels.copied') : t('admin:paymentChannels.copyWebhook')}
-                        onClick={() => void copyWebhook(row.webhook_url!, `list:${row.id}`)}
-                      >
-                        {copiedWebhook === `list:${row.id}` ? <Check size={12} aria-hidden /> : <Copy size={12} aria-hidden />}
-                      </button>
+                      <Button variant="ghost" size="icon-sm" title={t('admin:paymentChannels.copyWebhook')} aria-label={t('admin:paymentChannels.copyWebhook')} onClick={() => void copyWebhook(row.webhook_url!, `list:${row.id}`)}>{copiedWebhook === `list:${row.id}` ? <Check size={12} aria-hidden /> : <Copy size={12} aria-hidden />}</Button>
                     </div>
                   ) : null}
                 </div>
-                <div className="flex items-center gap-1">
-                  <Button
-                    className="max-sm:size-11"
-                    variant="ghost"
-                    size="icon"
-                    title={t('admin:common.edit')}
-                    aria-label={t('admin:common.edit')}
-                    onClick={() => openEdit(row)}
-                  >
-                    <Pencil size={14} aria-hidden />
-                  </Button>
-                  <Button
-                    className="max-sm:size-11"
-                    variant="ghost"
-                    size="icon"
-                    title={t('admin:common.remove')}
-                    aria-label={t('admin:common.remove')}
-                    onClick={() => setConfirmDelete(row)}
-                  >
-                    <Trash2 size={14} aria-hidden />
-                  </Button>
-                </div>
-              </>
-            )}
+              ) },
+              { id: 'status', header: t('admin:common.status'), width: 90, render: (row) => <Badge size="xs" variant={row.enabled ? 'success' : 'neutral'}>{t(row.enabled ? 'admin:paymentChannels.fields.enabled' : 'admin:paymentChannels.disabled')}</Badge> },
+              { id: 'actions', header: t('admin:common.actions'), width: 116, align: 'right', render: (row) => <div className="flex items-center gap-1"><Button variant="ghost" size="icon-sm" title={t('admin:common.edit')} aria-label={t('admin:common.edit')} onClick={() => openEdit(row)}><Pencil size={14} aria-hidden /></Button><Button variant="ghost" size="icon-sm" title={t('admin:common.remove')} aria-label={t('admin:common.remove')} onClick={() => setConfirmDelete(row)}><Trash2 size={14} aria-hidden /></Button></div> },
+            ]}
           />
         )}
       </section>
@@ -881,7 +846,7 @@ export default function AdminPaymentChannels() {
                 </>
               ) : null}
 
-              <label className="flex min-h-11 items-center justify-between gap-4 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2">
+              <label className="flex min-h-11 items-center justify-between gap-4 rounded-[8px] bg-[var(--color-bg-muted)] px-3 py-2">
                 <span className="min-w-0">
                   <span className="block text-[13px] font-medium text-[var(--color-fg)]">{t('admin:paymentChannels.fields.enabled')}</span>
                   <span className="block text-[12px] text-[var(--color-fg-subtle)]">{t('admin:paymentChannels.fields.enabledHint')}</span>

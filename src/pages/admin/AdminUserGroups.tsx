@@ -26,6 +26,7 @@ import { Pagination } from '@/components/ui/pagination'
 import { SegmentedControl } from '@/components/ui/segmented-control'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { AdminSortableList } from '@/components/admin/AdminSortableList'
+import { AdminTable } from '@/components/admin/AdminTable'
 import {
   Dialog,
   DialogBody,
@@ -52,6 +53,8 @@ import {
   type CreditPeriodUnit,
 } from '@/lib/credit-period'
 import { AdminPageHeader } from '@/components/admin/admin-page-header'
+import { AdminListToolbar } from '@/components/admin/admin-list-toolbar'
+import { matchesAdminSearch, mergeVisibleAdminOrder } from '@/lib/admin-list-filter'
 
 type Draft = Partial<ApiUserGroup> & {
   featuresText?: string
@@ -157,7 +160,7 @@ function ResourcePermissionEditor({
   }
 
   return (
-    <section className="border-b border-[var(--color-divider)] py-5 first:pt-0 last:border-b-0 last:pb-0">
+    <section className="py-5 first:pt-0 last:pb-0">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 max-w-[58ch]">
           <h3 className="text-sm font-medium text-[var(--color-fg)]">{title}</h3>
@@ -177,8 +180,8 @@ function ResourcePermissionEditor({
       </div>
 
       {policy.mode === 'selected' ? (
-        <div className="mt-4 overflow-hidden rounded-[8px] border border-[var(--color-border)]">
-          <div className="relative border-b border-[var(--color-divider)] p-2.5">
+        <div className="mt-4 overflow-hidden rounded-[8px]">
+          <div className="relative p-2.5">
             <Search
               size={14}
               aria-hidden
@@ -202,7 +205,7 @@ function ResourcePermissionEditor({
                 {t('groups.permissions.noResources', { defaultValue: 'No matching resources.' })}
               </p>
             ) : (
-              <div className="divide-y divide-[var(--color-divider)]">
+              <div>
                 {filtered.map((resource) => (
                   <label
                     key={resource.id}
@@ -227,7 +230,7 @@ function ResourcePermissionEditor({
               </div>
             )}
           </div>
-          <p className="border-t border-[var(--color-divider)] px-3 py-2 text-[12px] text-[var(--color-fg-subtle)]">
+          <p className="px-3 py-2 text-[12px] text-[var(--color-fg-subtle)]">
             {t('groups.permissions.selectedCount', {
               count: policy.ids.length,
               defaultValue: '{{count}} selected',
@@ -253,7 +256,7 @@ function CapabilityToggle({
   onCheckedChange: (checked: boolean) => void
 }) {
   return (
-    <div className="flex min-h-16 items-center justify-between gap-4 border-b border-[var(--color-divider)] py-3 last:border-b-0">
+    <div className="flex min-h-16 items-center justify-between gap-4 py-3">
       <div className="min-w-0 max-w-[58ch]">
         <p className="text-sm font-medium text-[var(--color-fg)]">{label}</p>
         <p className="mt-0.5 text-[12px] leading-relaxed text-[var(--color-fg-subtle)]">{description}</p>
@@ -273,6 +276,8 @@ const WORKSPACES_FEATURE = 'workspaces'
 export default function AdminUserGroups() {
   const { t, i18n } = useTranslation(['admin', 'common'])
   const [rows, setRows] = useState<ApiUserGroup[]>([])
+  const [search, setSearch] = useState('')
+  const filteredRows = useMemo(() => rows.filter((row) => matchesAdminSearch(search, [row.name, row.id, row.description, ...(row.features ?? [])])), [rows, search])
   const [loading, setLoading] = useState(true)
   const [editor, setEditor] = useState<{ open: boolean; row?: ApiUserGroup; draft: Draft }>({ open: false, draft: {} })
   const [confirmDelete, setConfirmDelete] = useState<ApiUserGroup | null>(null)
@@ -615,8 +620,8 @@ export default function AdminUserGroups() {
   }
 
   function persistOrder(next: ApiUserGroup[], prev: ApiUserGroup[]) {
-    void adminApi.reorderUserGroups(next.map((g) => g.id)).catch((e) => {
-      setRows(prev)
+    void adminApi.reorderUserGroups(mergeVisibleAdminOrder(rows, next).map((g) => g.id)).catch((e) => {
+      setRows((current) => mergeVisibleAdminOrder(current, prev))
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
     })
   }
@@ -626,10 +631,14 @@ export default function AdminUserGroups() {
       <AdminPageHeader
         title={t('admin:groups.title')}
         description={t('admin:groups.lead')}
+      />
+      <AdminListToolbar
+        search={search}
+        onSearchChange={setSearch}
+        placeholder={t('admin:listToolbar.search.groups')}
         actions={(
           <Button
             size="sm"
-            className="max-sm:min-h-[var(--tap-min)] max-sm:flex-1"
             leadingIcon={<Plus size={15} aria-hidden />}
             onClick={openNew}
           >
@@ -638,43 +647,23 @@ export default function AdminUserGroups() {
         )}
       />
 
-      <section className="mt-8">
+      <section className="mt-4">
         {loading ? (
           <PanelFallback />
         ) : (
           <AdminSortableList
-            items={rows}
-            onItemsChange={setRows}
+            items={filteredRows}
+            onItemsChange={(next) => setRows((current) => mergeVisibleAdminOrder(current, next))}
             onOrderCommit={persistOrder}
             dragHandleLabel={t('admin:common.dragHandle')}
             moveUpLabel={t('admin:common.moveUp')}
             moveDownLabel={t('admin:common.moveDown')}
-            mobileDragOnly
-            rowClassName="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1.5 px-3 py-3 md:grid-cols-[auto_auto_minmax(0,1fr)_auto] md:gap-3 md:px-5 md:py-4"
-            renderItem={(g) => (
-              <>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-medium text-[var(--color-fg)] truncate">{g.name}</span>
-                    {g.is_default ? <Badge size="xs" variant="neutral">{t('admin:groups.default')}</Badge> : null}
-                    <span className="text-[12px] text-[var(--color-fg-subtle)] tabular-nums">
-                      {g.monthly_price_amount_minor > 0
-                        ? `${formatCurrencyMinor(g.monthly_price_amount_minor, settlementCurrency, i18n.resolvedLanguage)} ${t('admin:groups.monthlyShort')}`
-                        : null}
-                      {g.monthly_price_amount_minor > 0 && g.yearly_price_amount_minor > 0 ? ' · ' : null}
-                      {g.yearly_price_amount_minor > 0
-                        ? `${formatCurrencyMinor(g.yearly_price_amount_minor, settlementCurrency, i18n.resolvedLanguage)} ${t('admin:groups.yearlyShort')}`
-                        : null}
-                      {g.monthly_price_amount_minor <= 0 && g.yearly_price_amount_minor <= 0
-                        ? t('admin:groups.freePrice')
-                        : null}
-                    </span>
-                  </div>
-                  {g.description ? (
-                    <div className="mt-0.5 text-[12px] text-[var(--color-fg-subtle)] line-clamp-1">{g.description}</div>
-                  ) : null}
-                </div>
-                <div className="flex items-center justify-end gap-1 max-md:col-start-2">
+            tableLabel={t('admin:groups.title')}
+            columns={[
+              { id: 'name', header: t('admin:groups.fields.name'), width: 200, render: (g) => <div className="flex min-w-0 items-center gap-2"><span className="truncate font-medium" title={g.name}>{g.name}</span>{g.is_default ? <Badge size="xs">{t('admin:groups.default')}</Badge> : null}</div> },
+              { id: 'description', header: t('admin:groups.fields.description'), width: 280, render: (g) => <span className="block truncate text-[var(--color-fg-muted)]" title={g.description}>{g.description || '—'}</span> },
+              { id: 'pricing', header: t('admin:common.pricing'), width: 220, render: (g) => <div className="text-[12px] tabular-nums text-[var(--color-fg-muted)]">{g.monthly_price_amount_minor > 0 ? <div>{formatCurrencyMinor(g.monthly_price_amount_minor, settlementCurrency, i18n.resolvedLanguage)} {t('admin:groups.monthlyShort')}</div> : null}{g.yearly_price_amount_minor > 0 ? <div>{formatCurrencyMinor(g.yearly_price_amount_minor, settlementCurrency, i18n.resolvedLanguage)} {t('admin:groups.yearlyShort')}</div> : null}{g.monthly_price_amount_minor <= 0 && g.yearly_price_amount_minor <= 0 ? t('admin:groups.freePrice') : null}</div> },
+              { id: 'actions', header: t('admin:common.actions'), width: 100, align: 'right', render: (g) => (<div className="flex items-center justify-end gap-1">
                   <Button
                     variant="ghost"
                     size="icon-sm"
@@ -693,9 +682,8 @@ export default function AdminUserGroups() {
                       aria-label={`${t('admin:common.remove')}: ${g.name}`}
                     />
                   ) : null}
-                </div>
-              </>
-            )}
+                </div>) },
+            ]}
           />
         )}
       </section>
@@ -718,7 +706,7 @@ export default function AdminUserGroups() {
           </DialogHeader>
           <DialogBody className="flex min-h-0 flex-col overflow-hidden px-0 pb-0">
             <Tabs value={editorTab} onValueChange={(value) => setEditorTab(value as EditorTab)} className="flex min-h-0 flex-1 flex-col">
-              <div className="shrink-0 border-b border-[var(--color-divider)] px-4 pb-3 sm:px-6">
+              <div className="shrink-0 px-4 pb-3 sm:px-6">
                 <TabsList variant="segmented" className="grid w-full grid-cols-2 sm:grid-cols-4">
                   <TabsTrigger variant="segmented" value="plan" className="min-w-0 justify-center px-2">
                     {t('admin:groups.tabs.plan', { defaultValue: 'Plan' })}
@@ -789,7 +777,7 @@ export default function AdminUserGroups() {
                       placeholder={t('admin:groups.fields.featuresPlaceholder')}
                     />
                   </Field>
-                  <div className="border-t border-[var(--color-divider)]">
+                  <div>
                     <CapabilityToggle
                       label={t('admin:groups.fields.research', { defaultValue: 'Deep Research' })}
                       description={t('admin:groups.fields.researchHint', { defaultValue: 'Allow this group to use Deep Research.' })}
@@ -842,7 +830,7 @@ export default function AdminUserGroups() {
                       <Input id="g-maxstorage" type="number" min={0} value={String(editor.draft.max_storage_mb ?? 0)} onChange={(e) => setDraft({ max_storage_mb: Number(e.target.value) })} />
                     </Field>
                   </div>
-                  <div className="border-t border-[var(--color-divider)] pt-5">
+                  <div className="pt-5">
                     <h3 className="text-sm font-medium text-[var(--color-fg)]">{t('admin:groups.fields.creditsSection')}</h3>
                     <p className="mt-1 text-[12px] text-[var(--color-fg-subtle)]">{t('admin:groups.fields.creditsLead')}</p>
                     <div className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -875,7 +863,7 @@ export default function AdminUserGroups() {
                 {catalogLoadFailed ? (
                   <div
                     role="alert"
-                    className="flex min-h-28 flex-col items-center justify-center gap-3 border-b border-[var(--color-divider)] pb-5 text-center"
+                    className="flex min-h-28 flex-col items-center justify-center gap-3 pb-5 text-center"
                   >
                     <p className="text-sm text-[var(--color-fg-muted)]">
                       {t('admin:groups.permissions.loadFailed', { defaultValue: 'Could not load the permission catalog.' })}
@@ -977,7 +965,7 @@ export default function AdminUserGroups() {
                         {t('admin:groups.users.total', { count: groupUsersTotal, defaultValue: '{{count}} users' })}
                       </p>
                     ) : null}
-                    <div className="mt-2 overflow-hidden rounded-[8px] border border-[var(--color-border)]">
+                    <div className="mt-2 overflow-hidden rounded-[8px]">
                       {groupUsersLoading || (!groupUsersLoaded && !groupUsersLoadFailed) ? (
                         <div className="space-y-1 p-2">
                           {[0, 1, 2, 3].map((item) => <div key={item} className="h-12 animate-pulse rounded-[6px] bg-[var(--color-bg-muted)]" />)}
@@ -1000,20 +988,17 @@ export default function AdminUserGroups() {
                           {t('admin:groups.users.empty', { defaultValue: 'No users found.' })}
                         </p>
                       ) : (
-                        <ul className="divide-y divide-[var(--color-divider)]">
-                          {groupUsers.map((groupUser) => (
-                            <li key={groupUser.id} className="flex min-h-14 items-center gap-3 px-3 py-2.5">
-                              <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-bg-muted)] text-[12px] font-medium text-[var(--color-fg-muted)]">
-                                {(groupUser.name || groupUser.email).slice(0, 1).toLocaleUpperCase()}
-                              </span>
-                              <span className="min-w-0 flex-1">
-                                <span className="block truncate text-[13px] font-medium text-[var(--color-fg)]">{groupUser.name || groupUser.email}</span>
-                                <span className="block truncate text-[12px] text-[var(--color-fg-subtle)]">{groupUser.email}</span>
-                              </span>
-                              {groupUser.role === 'admin' ? <Badge size="xs" variant="neutral">{t('admin:users.admin', { defaultValue: 'Admin' })}</Badge> : null}
-                            </li>
-                          ))}
-                        </ul>
+                        <AdminTable
+                          embedded
+                          items={groupUsers}
+                          rowKey={(groupUser) => groupUser.id}
+                          label={t('admin:users.title')}
+                          columns={[
+                            { id: 'name', header: t('admin:users.fields.name'), width: 200, render: (groupUser) => <span className="block truncate font-medium">{groupUser.name || groupUser.email}</span> },
+                            { id: 'email', header: t('admin:users.fields.email'), width: 240, render: (groupUser) => <span className="block truncate">{groupUser.email}</span> },
+                            { id: 'role', header: t('admin:users.fields.role'), width: 100, render: (groupUser) => <Badge size="xs" variant="neutral">{t(groupUser.role === 'admin' ? 'admin:users.roleAdmin' : 'admin:users.roleUser')}</Badge> },
+                          ]}
+                        />
                       )}
                     </div>
                     {groupUsersLoaded && groupUsersTotal > GROUP_USERS_PAGE_SIZE ? (

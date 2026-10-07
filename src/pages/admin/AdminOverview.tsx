@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
@@ -21,6 +21,7 @@ import { toast } from '@/hooks/use-toast'
 import { inputOutputTokens } from '@/lib/admin-analytics'
 import { useLanguage } from '@/store/language'
 import { AdminPageHeader } from '@/components/admin/admin-page-header'
+import { AdminOverviewTrends } from '@/components/admin/admin-overview-trends'
 
 interface HealthCheck {
   key: string
@@ -35,36 +36,44 @@ export default function AdminOverview() {
   const lang = useLanguage((state) => state.lang)
   const [data, setData] = useState<ApiAdminOverview | null>(null)
   const [loading, setLoading] = useState(true)
+  const [days, setDays] = useState('30')
+  const [loadFailed, setLoadFailed] = useState(false)
+  const requestRef = useRef(0)
   const numberFormat = useMemo(() => new Intl.NumberFormat(lang, { maximumFractionDigits: 0 }), [lang])
   const compactNumberFormat = useMemo(
     () => new Intl.NumberFormat(lang, { notation: 'compact', maximumFractionDigits: 1 }),
     [lang],
   )
 
-  async function load() {
+  const load = useCallback(async () => {
+    const request = ++requestRef.current
     setLoading(true)
+    setLoadFailed(false)
     try {
-      setData(await adminApi.overview())
+      const next = await adminApi.overview(Number(days))
+      if (request === requestRef.current) setData(next)
     } catch (error) {
+      if (request !== requestRef.current) return
+      setLoadFailed(true)
       toast.error(error instanceof ApiError ? error.message : t('admin:common.failed'))
     } finally {
-      setLoading(false)
+      if (request === requestRef.current) setLoading(false)
     }
-  }
+  }, [days, t])
 
   useEffect(() => {
     void load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    return () => { requestRef.current += 1 }
+  }, [load])
 
-  if (loading) return <PanelFallback />
+  if (loading && !data) return <PanelFallback />
 
   if (!data) {
     return (
       <div className="flex min-h-64 flex-col items-center justify-center gap-3 text-sm text-[var(--color-fg-muted)]">
         <p>{t('admin:overview.loadFailed', { defaultValue: 'Could not load the admin overview.' })}</p>
         <Button variant="secondary" size="sm" onClick={() => void load()}>
-          {t('common:actions.retry', { defaultValue: 'Retry' })}
+          {t('common:actions.tryAgain')}
         </Button>
       </div>
     )
@@ -218,12 +227,12 @@ export default function AdminOverview() {
         description={t('admin:overview.lead', { defaultValue: 'Configuration health and the main resources managed by this deployment.' })}
       />
 
-      <div className="mt-8 grid grid-cols-2 border-y border-[var(--color-divider)] lg:grid-cols-4">
+      <div className="mt-8 grid grid-cols-2 lg:grid-cols-4">
         {summary.map((item) => (
           <Link
             key={item.key}
             to={item.to}
-            className="group flex min-w-0 items-center gap-3 border-[var(--color-divider)] px-4 py-4 interactive even:border-l hover:bg-[var(--color-bg-muted)]/55 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)] lg:border-l lg:first:border-l-0"
+            className="group flex min-w-0 items-center gap-3 rounded-[8px] px-4 py-4 interactive hover:bg-[var(--color-bg-muted)]/55 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)]"
           >
             <item.icon
               size={17}
@@ -241,6 +250,7 @@ export default function AdminOverview() {
       </div>
 
       {health.all_ready ? (
+        <>
         <section className="mt-9">
           <div className="flex items-end justify-between gap-4">
             <div>
@@ -251,21 +261,15 @@ export default function AdminOverview() {
                 {t('admin:overview.todayLead', { defaultValue: 'Usage recorded over the past 24 hours.' })}
               </p>
             </div>
-            <Button asChild variant="ghost" size="sm">
-              <Link to="/admin/analytics">
-                {t('admin:overview.openAnalytics', { defaultValue: 'Open analytics' })}
-                <ArrowRight size={14} aria-hidden />
-              </Link>
-            </Button>
           </div>
 
           {todaySummary ? (
-            <div className="mt-4 grid grid-cols-2 border-y border-[var(--color-divider)] lg:grid-cols-4">
+            <div className="mt-4 grid grid-cols-2 lg:grid-cols-4">
               {todaySummary.map((item) => (
                 <Link
                   key={item.key}
                   to="/admin/analytics"
-                  className="group flex min-w-0 items-center gap-3 border-[var(--color-divider)] px-4 py-4 interactive even:border-l hover:bg-[var(--color-bg-muted)]/55 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)] lg:border-l lg:first:border-l-0"
+                  className="group flex min-w-0 items-center gap-3 rounded-[8px] px-4 py-4 interactive hover:bg-[var(--color-bg-muted)]/55 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)]"
                 >
                   <item.icon
                     size={17}
@@ -280,11 +284,20 @@ export default function AdminOverview() {
               ))}
             </div>
           ) : (
-            <div className="mt-4 border-y border-[var(--color-divider)] px-2 py-5 text-[13px] text-[var(--color-fg-muted)]" role="status">
+            <div className="mt-4 px-2 py-5 text-[13px] text-[var(--color-fg-muted)]" role="status">
               {t('admin:overview.todayLoadFailed', { defaultValue: "Today's statistics could not be loaded. Refresh to try again." })}
             </div>
           )}
         </section>
+        <AdminOverviewTrends
+          data={data.trends}
+          days={days}
+          onDaysChange={setDays}
+          onRefresh={() => void load()}
+          loading={loading}
+          failed={loadFailed}
+        />
+        </>
       ) : (
       <section className="mt-9">
         <div className="flex items-end justify-between gap-4">
@@ -297,11 +310,11 @@ export default function AdminOverview() {
             </p>
           </div>
           <Button variant="ghost" size="sm" onClick={() => void load()}>
-            {t('common:actions.refresh', { defaultValue: 'Refresh' })}
+            {t('admin:overview.trends.refresh')}
           </Button>
         </div>
 
-        <ul className="mt-4 divide-y divide-[var(--color-divider)] border-y border-[var(--color-divider)]">
+        <ul className="mt-4">
           {checks.map((check) => (
             <li key={check.key}>
               <Link to={check.to} className="group flex min-h-16 items-center gap-3 px-2 py-3 interactive hover:bg-[var(--color-bg-muted)]/55">

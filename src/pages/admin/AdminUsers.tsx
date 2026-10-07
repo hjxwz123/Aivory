@@ -3,10 +3,10 @@
  * ban / unban (realtime via the cache kill channel). Each row links to the
  * per-user conversation drill-down used for support / abuse triage (§8.1).
  */
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link, useNavigate } from 'react-router-dom'
-import { Brain, History, MessageSquare, Plus, Pencil, Trash2, Search, Info, Ban, ShieldCheck, MoreHorizontal } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Brain, History, MessageSquare, Plus, Pencil, Trash2, Search, Info, Ban, ShieldCheck, MoreHorizontal, X } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
 import type { ApiUser, ApiUserGroup } from '@/api/types'
 import { AdminSortableList } from '@/components/admin/AdminSortableList'
@@ -38,6 +38,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Sheet, SheetBody, SheetClose, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { toast } from '@/hooks/use-toast'
 import { useAuth } from '@/store/auth'
 import { formatDateTime, cn } from '@/lib/utils'
@@ -50,12 +51,21 @@ import { AdminPageHeader } from '@/components/admin/admin-page-header'
 // minutes (the middleware refreshes last_seen_at at most once/min).
 const ONLINE_WINDOW_S = envNum('VITE_AIVORY_ONLINE_WINDOW_S', 300)
 
+const AdminUserConversations = lazy(() => import('./AdminUserConversations'))
+const AdminUserLoginHistory = lazy(() => import('./AdminUserLoginHistory'))
+const AdminUserMemories = lazy(() => import('./AdminUserMemories'))
+
 type Role = 'user' | 'admin'
 type CreditOperation = 'add' | 'remove'
+type UserActivityPanel = { user: ApiUser; kind: 'conversations' | 'login-history' | 'memories' }
+const ACTIVITY_TITLE_KEYS = {
+  conversations: 'admin:users.conversationsTitle',
+  'login-history': 'admin:users.loginHistoryTitle',
+  memories: 'admin:users.memoriesTitle',
+} as const
 
 export default function AdminUsers() {
   const { t } = useTranslation(['admin', 'common'])
-  const navigate = useNavigate()
   const me = useAuth((s) => s.user)
   const [rows, setRows] = useState<ApiUser[]>([])
   const [total, setTotal] = useState(0)
@@ -90,7 +100,8 @@ export default function AdminUsers() {
   // success, so guard against re-clicks that would fire duplicate calls/toasts.
   const [resetting2fa, setResetting2fa] = useState(false)
   const resetting2faRef = useRef(false)
-  // Read-only user info dialog.
+  // Read-only user drawers.
+  const [activityPanel, setActivityPanel] = useState<UserActivityPanel | null>(null)
   const [infoRow, setInfoRow] = useState<ApiUser | null>(null)
   const [infoDetails, setInfoDetails] = useState<ApiUser | null>(null)
   const [infoLoading, setInfoLoading] = useState(false)
@@ -448,197 +459,66 @@ export default function AdminUsers() {
             dragHandleLabel={t('admin:common.dragHandle')}
             moveUpLabel={t('admin:common.moveUp')}
             moveDownLabel={t('admin:common.moveDown')}
-            mobileDragOnly
-            listClassName="max-md:gap-2 max-md:divide-y-0 max-md:border-0 max-md:bg-transparent"
-            rowClassName="grid grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-center gap-x-1 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-3.5 md:grid-cols-[auto_auto_1fr_auto] md:items-center md:gap-3 md:rounded-none md:border-0 md:bg-transparent md:px-5 md:py-4"
-            renderItem={(u) => {
-              const isMe = me?.id === u.id
-              const group = groups.find((g) => g.id === u.group_id)
-              const lastSeen = u.last_seen_at ?? 0
-              const online = lastSeen > 0 && Date.now() / 1000 - lastSeen < ONLINE_WINDOW_S
-              const avatarUrl = (u.settings as Record<string, unknown> | undefined)?.avatar_url as string | undefined
-              const presence = online
-                ? t('admin:users.online')
-                : lastSeen > 0
-                  ? t('admin:users.lastSeen', { when: formatDateTime(lastSeen * 1000) })
-                  : t('admin:users.neverSeen')
-              return (
-                <>
-                  <div className="flex min-w-0 items-center gap-2.5 md:gap-3">
-                    <Avatar size="md" className="shrink-0">
+            tableLabel={t('admin:users.title')}
+            columns={[
+              { id: 'user', header: t('admin:users.fields.name'), width: 210, render: (u) => {
+                const avatarUrl = (u.settings as Record<string, unknown> | undefined)?.avatar_url as string | undefined
+                return (
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <Avatar size="md">
                       {avatarUrl ? <AvatarImage src={avatarUrl} alt={u.name || u.email} /> : null}
                       <AvatarFallback>{initials(u.name || u.email)}</AvatarFallback>
                     </Avatar>
                     <div className="min-w-0">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <span
-                          role="img"
-                          aria-label={online ? t('admin:users.online') : t('admin:users.offline')}
-                          className={cn(
-                            'size-2 shrink-0 rounded-full',
-                            online ? 'bg-[var(--color-success)]' : 'bg-[var(--color-fg-faint)]',
-                          )}
-                        />
-                        <span className="min-w-0 truncate font-medium text-[var(--color-fg)]">
-                          {u.name || u.email}
-                        </span>
-                        <div className="hidden items-center gap-2 md:flex">
-                          <Badge size="xs">{t(`admin:users.role${u.role === 'admin' ? 'Admin' : 'User'}`)}</Badge>
-                          {group && !group.is_default ? <Badge size="xs" variant="neutral">{group.name}</Badge> : null}
-                          {u.status !== 'active' ? (
-                            <Badge
-                              size="xs"
-                              variant={u.status === 'deleting' ? 'warning' : 'neutral'}
-                              title={u.status === 'deleting' ? deletionProgress[u.id] : undefined}
-                            >
-                              {t(`admin:users.status.${u.status}`, { defaultValue: u.status })}
-                            </Badge>
-                          ) : null}
-                          {isMe ? <Badge size="xs" variant="neutral">{t('admin:users.you')}</Badge> : null}
-                        </div>
-                      </div>
-                      <p className="truncate font-mono text-[12px] text-[var(--color-fg-subtle)] md:hidden">{u.email}</p>
-                      <p className="truncate text-[12px] leading-4 text-[var(--color-fg-subtle)] md:hidden">{presence}</p>
-                      <div className="mt-1.5 flex flex-wrap gap-1 md:hidden">
-                        <Badge size="xs">{t(`admin:users.role${u.role === 'admin' ? 'Admin' : 'User'}`)}</Badge>
-                        {group && !group.is_default ? <Badge size="xs" variant="neutral">{group.name}</Badge> : null}
-                        {u.status !== 'active' ? (
-                          <Badge
-                            size="xs"
-                            variant={u.status === 'deleting' ? 'warning' : 'neutral'}
-                            title={u.status === 'deleting' ? deletionProgress[u.id] : undefined}
-                          >
-                            {t(`admin:users.status.${u.status}`, { defaultValue: u.status })}
-                          </Badge>
-                        ) : null}
-                        {isMe ? <Badge size="xs" variant="neutral">{t('admin:users.you')}</Badge> : null}
-                      </div>
-                      <div className="hidden items-center gap-2 text-[12px] text-[var(--color-fg-subtle)] md:flex">
-                        <span className="min-w-0 truncate font-mono">{u.email}</span>
-                        <span aria-hidden>·</span>
-                        <span className="shrink-0">{presence}</span>
-                      </div>
+                      <span className="block truncate font-medium" title={u.name || u.email}>{u.name || u.email}</span>
+                      {me?.id === u.id ? <Badge size="xs">{t('admin:users.you')}</Badge> : null}
                     </div>
                   </div>
-                  <div className="hidden items-center gap-0.5 md:flex">
-                    <IconAction label={t('admin:users.viewInfo')} onClick={() => openInfo(u)}>
-                      <Info size={15} aria-hidden />
-                    </IconAction>
-                    <IconAction label={t('admin:common.edit')} onClick={() => openEdit(u)}>
-                      <Pencil size={15} aria-hidden />
-                    </IconAction>
+                )
+              } },
+              { id: 'email', header: t('admin:users.fields.email'), width: 230, render: (u) => <span className="block truncate font-mono text-[12px] text-[var(--color-fg-muted)]" title={u.email}>{u.email}</span> },
+              { id: 'role', header: t('admin:users.fields.role'), width: 90, render: (u) => <Badge size="xs">{t(`admin:users.role${u.role === 'admin' ? 'Admin' : 'User'}`)}</Badge> },
+              { id: 'group', header: t('admin:users.fields.group'), width: 100, render: (u) => <span className="block truncate">{groups.find((g) => g.id === u.group_id)?.name ?? '—'}</span> },
+              { id: 'status', header: t('admin:common.status'), width: 90, render: (u) => <Badge size="xs" variant={u.status === 'active' ? 'success' : u.status === 'deleting' ? 'warning' : 'neutral'} title={u.status === 'deleting' ? deletionProgress[u.id] : undefined}>{t(`admin:users.status.${u.status}`, { defaultValue: u.status })}</Badge> },
+              { id: 'lastActive', header: t('admin:common.lastActive'), width: 170, render: (u) => {
+                const lastSeen = u.last_seen_at ?? 0
+                const online = lastSeen > 0 && Date.now() / 1000 - lastSeen < ONLINE_WINDOW_S
+                return (
+                  <div className="flex items-center gap-2 text-[12px] text-[var(--color-fg-muted)]">
+                    <span aria-hidden className={cn('size-1.5 shrink-0 rounded-full', online ? 'bg-[var(--color-success)]' : 'bg-[var(--color-fg-faint)]')} />
+                    <span className="tabular-nums">{online ? t('admin:users.online') : lastSeen > 0 ? formatDateTime(lastSeen * 1000) : t('admin:users.neverSeen')}</span>
+                  </div>
+                )
+              } },
+              { id: 'actions', header: t('admin:common.actions'), width: 144, align: 'right', render: (u) => {
+                const isMe = me?.id === u.id
+                return (
+                  <div className="flex items-center justify-end gap-0.5">
+                    <IconAction label={t('admin:users.viewInfo')} onClick={() => openInfo(u)}><Info size={15} aria-hidden /></IconAction>
+                    <IconAction label={t('admin:common.edit')} onClick={() => openEdit(u)}><Pencil size={15} aria-hidden /></IconAction>
                     <DropdownMenu>
                       <Tooltip content={t('admin:users.more')}>
-                        <DropdownMenuTrigger
-                          aria-label={t('admin:users.more')}
-                          className="inline-flex items-center justify-center size-8 rounded-[8px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-                        >
+                        <DropdownMenuTrigger aria-label={t('admin:users.more')} className="inline-flex size-8 items-center justify-center rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]">
                           <MoreHorizontal size={15} aria-hidden />
                         </DropdownMenuTrigger>
                       </Tooltip>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => navigate(`/admin/users/${encodeURIComponent(u.id)}/conversations`)}>
-                          <MessageSquare size={14} aria-hidden />
-                          {t('admin:users.viewConversations')}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => navigate(`/admin/users/${encodeURIComponent(u.id)}/memories`)}>
-                          <Brain size={14} aria-hidden />
-                          {t('admin:users.viewMemories')}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => navigate(`/admin/users/${encodeURIComponent(u.id)}/login-history`)}>
-                          <History size={14} aria-hidden />
-                          {t('admin:users.viewLoginHistory')}
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                    {u.status === 'active' ? (
-                      <IconAction
-                        label={t('admin:users.ban')}
-                        onClick={() => void ban(u)}
-                        disabled={isMe || busyId === u.id}
-                        loading={busyId === u.id}
-                      >
-                        <Ban size={15} aria-hidden />
-                      </IconAction>
-                    ) : (
-                      <IconAction
-                        label={t('admin:users.unban')}
-                        onClick={() => void unban(u)}
-                        disabled={u.status === 'deleting' || busyId === u.id}
-                        loading={busyId === u.id}
-                      >
-                        <ShieldCheck size={15} aria-hidden />
-                      </IconAction>
-                    )}
-                    <IconAction label={t('admin:common.delete')} onClick={() => setDeleteRow(u)} disabled={isMe} danger>
-                      <Trash2 size={15} aria-hidden />
-                    </IconAction>
-                  </div>
-                  <div className="flex items-start justify-end md:hidden">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        aria-label={t('admin:users.more')}
-                        className="inline-flex size-11 items-center justify-center rounded-[8px] text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-                      >
-                        <MoreHorizontal size={19} aria-hidden />
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-[min(17rem,calc(100vw-2rem))]">
-                        <DropdownMenuItem className="min-h-11" onClick={() => openInfo(u)}>
-                          <Info size={16} aria-hidden />
-                          {t('admin:users.viewInfo')}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem className="min-h-11" onClick={() => openEdit(u)}>
-                          <Pencil size={16} aria-hidden />
-                          {t('admin:common.edit')}
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem className="min-h-11" onClick={() => navigate(`/admin/users/${encodeURIComponent(u.id)}/conversations`)}>
-                          <MessageSquare size={16} aria-hidden />
-                          {t('admin:users.viewConversations')}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem className="min-h-11" onClick={() => navigate(`/admin/users/${encodeURIComponent(u.id)}/memories`)}>
-                          <Brain size={16} aria-hidden />
-                          {t('admin:users.viewMemories')}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem className="min-h-11" onClick={() => navigate(`/admin/users/${encodeURIComponent(u.id)}/login-history`)}>
-                          <History size={16} aria-hidden />
-                          {t('admin:users.viewLoginHistory')}
-                        </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => setActivityPanel({ user: u, kind: 'conversations' })}><MessageSquare size={14} aria-hidden />{t('admin:users.viewConversations')}</DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => setActivityPanel({ user: u, kind: 'memories' })}><Brain size={14} aria-hidden />{t('admin:users.viewMemories')}</DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => setActivityPanel({ user: u, kind: 'login-history' })}><History size={14} aria-hidden />{t('admin:users.viewLoginHistory')}</DropdownMenuItem>
                         <DropdownMenuSeparator />
                         {u.status === 'active' ? (
-                          <DropdownMenuItem
-                            className="min-h-11"
-                            disabled={isMe || busyId === u.id}
-                            onClick={() => void ban(u)}
-                          >
-                            <Ban size={16} aria-hidden />
-                            {t('admin:users.ban')}
-                          </DropdownMenuItem>
+                          <DropdownMenuItem disabled={isMe || busyId === u.id} onClick={() => void ban(u)}><Ban size={14} aria-hidden />{t('admin:users.ban')}</DropdownMenuItem>
                         ) : (
-                          <DropdownMenuItem
-                            className="min-h-11"
-                            disabled={u.status === 'deleting' || busyId === u.id}
-                            onClick={() => void unban(u)}
-                          >
-                            <ShieldCheck size={16} aria-hidden />
-                            {t('admin:users.unban')}
-                          </DropdownMenuItem>
+                          <DropdownMenuItem disabled={u.status === 'deleting' || busyId === u.id} onClick={() => void unban(u)}><ShieldCheck size={14} aria-hidden />{t('admin:users.unban')}</DropdownMenuItem>
                         )}
-                        <DropdownMenuItem
-                          destructive
-                          className="min-h-11"
-                          disabled={isMe}
-                          onClick={() => setDeleteRow(u)}
-                        >
-                          <Trash2 size={16} aria-hidden />
-                          {t('admin:common.delete')}
-                        </DropdownMenuItem>
+                        <DropdownMenuItem destructive disabled={isMe} onClick={() => setDeleteRow(u)}><Trash2 size={14} aria-hidden />{t('admin:common.delete')}</DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
-                </>
-              )
-            }}
+                )
+              } },
+            ]}
           />
         )}
         {!loading ? (
@@ -825,7 +705,7 @@ export default function AdminUsers() {
                   onChange={(e) => setEditCreditsAmount(e.target.value)}
                 />
               </Field>
-              <div className="flex items-center justify-between gap-4 border-t border-[var(--color-divider)] pt-4">
+              <div className="flex items-center justify-between gap-4 pt-4">
                 <label htmlFor="e-credits-notify" className="min-w-0 cursor-pointer">
                   <span className="block text-sm font-medium leading-tight text-[var(--color-fg)]">
                     {t('admin:users.fields.creditNotify')}
@@ -869,13 +749,58 @@ export default function AdminUsers() {
         </DialogContent>
       </Dialog>
 
+      <Sheet open={Boolean(activityPanel)} onOpenChange={(open) => !open && setActivityPanel(null)}>
+        <SheetContent side="right" size="lg" className="w-full max-w-[64rem] border-0 sm:w-[calc(100vw-3rem)]">
+          <SheetHeader>
+            <div className="flex min-w-0 items-start justify-between gap-4">
+              <div className="min-w-0">
+                <SheetTitle className="break-words">
+                  {activityPanel ? t(ACTIVITY_TITLE_KEYS[activityPanel.kind], {
+                    name: activityPanel.user.name || activityPanel.user.email,
+                  }) : ''}
+                </SheetTitle>
+                <p className="mt-1 break-all text-[12px] text-[var(--color-fg-muted)]">
+                  {activityPanel?.user.email}
+                </p>
+              </div>
+              <SheetClose asChild>
+                <Button variant="ghost" size="icon-sm" className="shrink-0" aria-label={t('common:actions.close')}>
+                  <X size={16} aria-hidden />
+                </Button>
+              </SheetClose>
+            </div>
+          </SheetHeader>
+          <SheetBody className="min-h-0 min-w-0 pb-5">
+            <Suspense fallback={<PanelFallback />}>
+              {activityPanel?.kind === 'conversations' ? <AdminUserConversations key={activityPanel.user.id} userId={activityPanel.user.id} embedded /> : null}
+              {activityPanel?.kind === 'login-history' ? <AdminUserLoginHistory key={activityPanel.user.id} userId={activityPanel.user.id} embedded /> : null}
+              {activityPanel?.kind === 'memories' ? <AdminUserMemories key={activityPanel.user.id} userId={activityPanel.user.id} embedded /> : null}
+            </Suspense>
+          </SheetBody>
+        </SheetContent>
+      </Sheet>
+
       {/* User info (read-only) */}
-      <Dialog open={Boolean(infoRow)} onOpenChange={(o) => !o && closeInfo()}>
-        <DialogContent size="sm">
-          <DialogHeader>
-            <DialogTitle>{infoDetails?.name || infoDetails?.email || infoRow?.name || infoRow?.email || ''}</DialogTitle>
-          </DialogHeader>
-          <DialogBody>
+      <Sheet open={Boolean(infoRow)} onOpenChange={(o) => !o && closeInfo()}>
+        <SheetContent side="right" size="lg">
+          <SheetHeader>
+            <div className="flex min-w-0 items-start justify-between gap-4">
+              <div className="min-w-0">
+                <SheetTitle className="truncate">
+                  {infoDetails?.name || infoDetails?.email || infoRow?.name || infoRow?.email || ''}
+                </SheetTitle>
+                <p className="mt-1 truncate font-mono text-[12px] text-[var(--color-fg-muted)]">
+                  {infoDetails?.email || infoRow?.email || ''}
+                </p>
+              </div>
+              <SheetClose asChild>
+                <Button variant="ghost" size="icon-sm" aria-label={t('common:actions.close', { defaultValue: 'Close' })}>
+                  <X size={16} aria-hidden />
+                </Button>
+              </SheetClose>
+            </div>
+          </SheetHeader>
+          <SheetBody className="pb-5">
             {infoLoading ? (
               <UserInfoSkeleton label={t('common:common.loading')} />
             ) : infoLoadFailed ? (
@@ -946,14 +871,9 @@ export default function AdminUsers() {
                 <InfoLine label={t('admin:users.info.created')} value={formatDateTime(infoDetails.created_at * 1000)} />
               </dl>
             ) : null}
-          </DialogBody>
-          <DialogFooter>
-            <Button variant="ghost" onClick={closeInfo}>
-              {t('common:actions.close', { defaultValue: 'Close' })}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </SheetBody>
+        </SheetContent>
+      </Sheet>
 
       {/* Delete user confirmation */}
       <Dialog open={Boolean(deleteRow)} onOpenChange={(o) => !o && setDeleteRow(null)}>

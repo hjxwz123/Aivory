@@ -4,11 +4,12 @@ import { useWorkspaces } from '@/store/workspaces'
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { AlertTriangle, ArrowLeft, Check, ChevronDown, Globe, LockKeyhole, Plus, Search, Trash2, UserPlus, Users } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Check, ChevronDown, Globe, LockKeyhole, Pencil, Plus, Search, Trash2, UserPlus, Users } from 'lucide-react'
 import { adminApi, workspacesApi } from '@/api'
 import { domainsApi, type DomainUser, type DomainUserCandidate, type RegistrationDomain } from '@/api/domains'
 import type { ApiUserGroup, ApiWorkspace } from '@/api/types'
 import { Button } from '@/components/ui/button'
+import { AdminTable } from '@/components/admin/AdminTable'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
@@ -21,6 +22,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { toast } from '@/hooks/use-toast'
 import { AdminPageHeader } from '@/components/admin/admin-page-header'
+import { AdminListToolbar } from '@/components/admin/admin-list-toolbar'
+import { matchesAdminSearch } from '@/lib/admin-list-filter'
 
 function matchedDomains(rule: RegistrationDomain): string[] {
   return rule.domains?.length ? rule.domains : [rule.domain]
@@ -46,6 +49,8 @@ function parseDomains(value: string): string[] {
 export default function AdminDomains() {
   const { t } = useTranslation('admin')
   const [rows, setRows] = useState<RegistrationDomain[]>([])
+  const [search, setSearch] = useState('')
+  const filteredRows = rows.filter((row) => matchesAdminSearch(search, [...matchedDomains(row), row.workspace_name, row.workspace_id, row.description]))
   const [workspaces, setWorkspaces] = useState<ApiWorkspace[]>([])
   const [groups, setGroups] = useState<ApiUserGroup[]>([])
   const [loading, setLoading] = useState(true)
@@ -87,10 +92,14 @@ export default function AdminDomains() {
       <AdminPageHeader
         title={t('domains.title')}
         description={t('domains.subtitle')}
+      />
+      <AdminListToolbar
+        search={search}
+        onSearchChange={setSearch}
+        placeholder={t('listToolbar.search.domains')}
         actions={(
           <Button
             size="sm"
-            className="max-sm:min-h-[var(--tap-min)] max-sm:flex-1"
             leadingIcon={<Plus size={15} aria-hidden />}
             disabled={loading || !!error || !workspaces.length}
             onClick={() => setEditor('new')}
@@ -99,7 +108,7 @@ export default function AdminDomains() {
           </Button>
         )}
       />
-      <p className="mt-5 max-w-3xl text-sm leading-relaxed text-[var(--color-fg-muted)]">{t('domains.scopeHint')}</p>
+      <p className="mt-3 max-w-3xl text-xs leading-5 text-[var(--color-fg-muted)]">{t('domains.scopeHint')}</p>
       {loading ? <PanelFallback /> : error ? (
         <div role="alert" className="mt-8 space-y-3"><p>{error}</p><Button variant="secondary" onClick={() => void load()}>{t('domains.retry')}</Button></div>
       ) : !rows.length ? (
@@ -111,49 +120,20 @@ export default function AdminDomains() {
         </div>
       ) : (
         <>
-        <div className="mt-6 hidden overflow-x-auto rounded-[12px] border border-[var(--color-border)] md:block">
-          <table className="w-full min-w-[680px] text-left text-sm">
-            <thead className="border-b border-[var(--color-divider)] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
-              <tr>{['domain', 'workspace', 'enrollment', 'access', 'members', 'actions'].map((key) => <th key={key} scope="col" className="px-4 py-3 font-medium">{t(`domains.${key}`)}</th>)}</tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row.domain} className="border-b border-[var(--color-divider)] last:border-0">
-                  <td className="px-4 py-3 font-medium"><div className="flex max-w-64 flex-wrap gap-x-2 gap-y-1">{matchedDomains(row).map((domain) => <span key={domain} className="break-all">{domain}</span>)}</div></td>
-                  <td className="max-w-56 break-words px-4 py-3"><span className="flex items-center gap-2"><WorkspaceIcon icon={row.icon_url} />{row.workspace_name}</span></td>
-                  <td className="px-4 py-3"><div className="flex flex-col items-start gap-1.5">
-                    <Badge variant={row.enabled ? 'success' : 'neutral'}>{t(row.enabled ? 'domains.enabled' : 'domains.paused')}</Badge>
-                    <span className="text-xs text-[var(--color-fg-muted)]">{t(row.email_verification_required ? 'domains.verificationRequired' : 'domains.verificationOptional')}</span>
-                    <span className="text-xs text-[var(--color-fg-muted)]">{t('domains.initialGroupSummary', { group: row.initial_group_name || t('domains.systemDefaultGroup') })}</span>
-                  </div></td>
-                  <td className="px-4 py-3"><span className="inline-flex items-center gap-1.5">{row.lock_personal && <LockKeyhole size={14} aria-hidden />}{t(row.lock_personal ? 'domains.locked' : 'domains.unlocked')}</span></td>
-                  <td className="px-4 py-3 tabular-nums">{row.member_count}</td>
-                  <td className="px-4 py-3"><div className="flex gap-1">
-                    <Button size="sm" variant="ghost" onClick={() => setMembers(row)} aria-label={`${t('domains.members')}: ${row.domain}`}><Users size={14} aria-hidden />{t('domains.members')}</Button>
-                    <Button size="sm" variant="ghost" onClick={() => setEditor(row)}>{t('domains.edit')}</Button>
-                    <Button size="sm" variant="ghost" onClick={() => setRemoving(row)}>{t('domains.remove')}</Button>
-                  </div></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <ul className="mt-6 divide-y divide-[var(--color-divider)] rounded-[12px] border border-[var(--color-border)] md:hidden">
-          {rows.map((row) => (
-            <li key={row.domain} className="min-w-0 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0"><div className="flex flex-wrap gap-x-2 gap-y-1">{matchedDomains(row).map((domain) => <span key={domain} className="break-all text-sm font-medium">{domain}</span>)}</div><p className="mt-1 break-words text-sm text-[var(--color-fg-muted)]">{row.workspace_name}</p></div>
-                <Badge className="shrink-0" variant={row.enabled ? 'success' : 'neutral'}>{t(row.enabled ? 'domains.enabled' : 'domains.paused')}</Badge>
-              </div>
-              <p className="mt-3 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-[var(--color-fg-muted)]">{row.lock_personal && <LockKeyhole size={14} aria-hidden />}{t(row.lock_personal ? 'domains.locked' : 'domains.unlocked')} · {t(row.email_verification_required ? 'domains.verificationRequired' : 'domains.verificationOptional')} · {t('domains.initialGroupSummary', { group: row.initial_group_name || t('domains.systemDefaultGroup') })} · {row.member_count} {t('domains.members')}</p>
-              <div className="mt-3 flex flex-wrap gap-1">
-                <Button size="sm" variant="secondary" onClick={() => setMembers(row)} aria-label={`${t('domains.members')}: ${row.domain}`}><Users size={14} aria-hidden />{t('domains.members')}</Button>
-                <Button size="sm" variant="ghost" onClick={() => setEditor(row)}>{t('domains.edit')}</Button>
-                <Button size="sm" variant="ghost" onClick={() => setRemoving(row)}>{t('domains.remove')}</Button>
-              </div>
-            </li>
-          ))}
-        </ul>
+        <AdminTable
+          className="mt-4"
+          items={filteredRows}
+          rowKey={(row) => row.domain}
+          label={t('domains.title')}
+          columns={[
+            { id: 'domain', header: t('domains.domain'), width: 200, render: (row) => <div className="flex flex-wrap gap-x-2 gap-y-1 font-medium">{matchedDomains(row).map((domain) => <span key={domain} className="break-all">{domain}</span>)}</div> },
+            { id: 'workspace', header: t('domains.workspace'), width: 180, render: (row) => <span className="flex min-w-0 items-center gap-2"><WorkspaceIcon icon={row.icon_url} /><span className="truncate" title={row.workspace_name}>{row.workspace_name}</span></span> },
+            { id: 'enrollment', header: t('domains.enrollment'), width: 230, render: (row) => <div className="flex flex-col items-start gap-1"><Badge size="xs" variant={row.enabled ? 'success' : 'neutral'}>{t(row.enabled ? 'domains.enabled' : 'domains.paused')}</Badge><span className="text-[12px] text-[var(--color-fg-muted)]">{t(row.email_verification_required ? 'domains.verificationRequired' : 'domains.verificationOptional')}</span><span className="text-[12px] text-[var(--color-fg-muted)]">{t('domains.initialGroupSummary', { group: row.initial_group_name || t('domains.systemDefaultGroup') })}</span></div> },
+            { id: 'access', header: t('domains.access'), width: 160, render: (row) => <span className="inline-flex items-center gap-1.5">{row.lock_personal ? <LockKeyhole size={14} aria-hidden /> : null}{t(row.lock_personal ? 'domains.locked' : 'domains.unlocked')}</span> },
+            { id: 'members', header: t('domains.members'), width: 80, align: 'right', render: (row) => <span className="tabular-nums">{row.member_count}</span> },
+            { id: 'actions', header: t('domains.actions'), width: 144, align: 'right', render: (row) => <div className="flex items-center gap-1"><Button size="icon-sm" variant="ghost" title={t('domains.members')} aria-label={`${t('domains.members')}: ${row.domain}`} onClick={() => setMembers(row)}><Users size={14} aria-hidden /></Button><Button size="icon-sm" variant="ghost" title={t('domains.edit')} aria-label={t('domains.edit')} onClick={() => setEditor(row)}><Pencil size={14} aria-hidden /></Button><Button size="icon-sm" variant="ghost" title={t('domains.remove')} aria-label={t('domains.remove')} onClick={() => setRemoving(row)}><Trash2 size={14} aria-hidden /></Button></div> },
+          ]}
+        />
         </>
       )}
       {editor && <DomainEditor key={typeof editor === 'string' ? 'new' : editor.domain} rule={editor} workspaces={workspaces} groups={groups} onClose={() => setEditor(null)} onSaved={() => { setEditor(null); void load() }} />}
@@ -350,33 +330,35 @@ function DomainMembers({ rule, onClose, onChanged }: { rule: RegistrationDomain;
         <DialogBody>
           {view === 'candidates' ? <Input wrapperClassName="mb-4 w-full" value={candidateSearch} onChange={(event) => setCandidateSearch(event.target.value)} leadingIcon={<Search size={15} aria-hidden />} placeholder={t('domains.searchUsers')} aria-label={t('domains.searchUsers')} disabled={busy} /> : null}
           {loading ? <PanelFallback /> : error ? <div role="alert"><p>{error}</p><Button className="mt-3" onClick={() => view === 'members' ? setMemberAttempt((a) => a + 1) : setCandidateAttempt((a) => a + 1)}>{t('domains.retry')}</Button></div> : view === 'members' ? !users.length ? <p className="py-8 text-sm text-[var(--color-fg-muted)]">{t('domains.noMembers')}</p> : (
-            <ul className="divide-y divide-[var(--color-divider)]">
-              {users.map((user) => <li key={user.user_id} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0"><p className="truncate text-sm font-medium">{user.name}</p><p className="truncate text-sm text-[var(--color-fg-muted)]">{user.email}</p><p className="mt-1 text-xs text-[var(--color-fg-muted)]">{t(user.locked ? 'domains.locked' : 'domains.unlocked')}</p></div>
-                <div className="flex items-center gap-2"><Select disabled={busy} value={user.lock_override === null ? 'inherit' : user.lock_override ? 'locked' : 'unlocked'} onValueChange={(v) => void change(user, v)}><SelectTrigger className="min-w-0 flex-1 sm:w-52" aria-label={`${t('domains.access')}: ${user.email}`}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="inherit">{t('domains.inherit')}</SelectItem><SelectItem value="locked">{t('domains.locked')}</SelectItem><SelectItem value="unlocked">{t('domains.unlocked')}</SelectItem></SelectContent></Select><Button size="icon" variant="ghost" disabled={busy} onClick={() => setRemovingUser(user)} aria-label={`${t('domains.removeMember')}: ${user.email}`} title={t('domains.removeMember')}><Trash2 size={16} aria-hidden /></Button></div>
-              </li>)}
-            </ul>
+            <AdminTable
+              items={users}
+              rowKey={(user) => user.user_id}
+              label={t('domains.members')}
+              columns={[
+                { id: 'user', header: t('users.fields.name'), width: 220, render: (user) => <><span className="block truncate font-medium">{user.name || user.email}</span><span className="block truncate text-[12px] text-[var(--color-fg-muted)]">{user.email}</span></> },
+                { id: 'status', header: t('common.status'), width: 120, render: (user) => t(user.locked ? 'domains.locked' : 'domains.unlocked') },
+                { id: 'access', header: t('domains.access'), width: 190, render: (user) => <Select disabled={busy} value={user.lock_override === null ? 'inherit' : user.lock_override ? 'locked' : 'unlocked'} onValueChange={(value) => void change(user, value)}><SelectTrigger aria-label={`${t('domains.access')}: ${user.email}`}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="inherit">{t('domains.inherit')}</SelectItem><SelectItem value="locked">{t('domains.locked')}</SelectItem><SelectItem value="unlocked">{t('domains.unlocked')}</SelectItem></SelectContent></Select> },
+                { id: 'actions', header: t('common.actions'), width: 60, align: 'right', render: (user) => <Button size="icon-sm" variant="ghost" disabled={busy} onClick={() => setRemovingUser(user)} aria-label={`${t('domains.removeMember')}: ${user.email}`} title={t('domains.removeMember')}><Trash2 size={16} aria-hidden /></Button> },
+              ]}
+            />
           ) : !candidates.length ? <p className="py-8 text-sm text-[var(--color-fg-muted)]">{t('domains.noCandidates')}</p> : (
             <div>
-              <label className="flex min-h-10 cursor-pointer items-center gap-3 border-b border-[var(--color-divider)] pb-3 text-sm font-medium">
+              <label className="flex min-h-10 cursor-pointer items-center gap-3 pb-3 text-sm font-medium">
                 <Checkbox checked={allSelected} onChange={(event) => setSelected(event.target.checked ? new Set(candidates.map((candidate) => candidate.user_id)) : new Set())} disabled={busy} />
                 {t('domains.selectAllCandidates', { count: candidates.length })}
               </label>
-              <ul className="divide-y divide-[var(--color-divider)]">
-                {candidates.map((candidate) => (
-                  <li key={candidate.user_id}>
-                    <label className="flex min-h-16 cursor-pointer items-start gap-3 py-3">
-                      <Checkbox className="mt-0.5" checked={selected.has(candidate.user_id)} onChange={(event) => toggleCandidate(candidate.user_id, event.target.checked)} disabled={busy} />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium text-[var(--color-fg)]">{candidate.name || candidate.email}</span>
-                        <span className="block truncate text-sm text-[var(--color-fg-muted)]">{candidate.email}</span>
-                        <span className="mt-1 block text-xs text-[var(--color-fg-subtle)]">{t('domains.personalConversationCount', { count: candidate.personal_conversation_count })}</span>
-                      </span>
-                      {candidate.status === 'pending' ? <Badge variant="warning">{t('domains.pendingVerification')}</Badge> : null}
-                    </label>
-                  </li>
-                ))}
-              </ul>
+              <AdminTable
+                className="mt-3"
+                items={candidates}
+                rowKey={(candidate) => candidate.user_id}
+                label={t('domains.addExistingTitle')}
+                columns={[
+                  { id: 'select', header: t('common.select'), width: 60, render: (candidate) => <Checkbox id={`domain-candidate-${candidate.user_id}`} aria-label={`${t('common.select')}: ${candidate.email}`} checked={selected.has(candidate.user_id)} onChange={(event) => toggleCandidate(candidate.user_id, event.target.checked)} disabled={busy} /> },
+                  { id: 'user', header: t('users.fields.name'), width: 220, render: (candidate) => <label htmlFor={`domain-candidate-${candidate.user_id}`} className="block cursor-pointer"><span className="block truncate font-medium">{candidate.name || candidate.email}</span><span className="block truncate text-[12px] text-[var(--color-fg-muted)]">{candidate.email}</span></label> },
+                  { id: 'conversations', header: t('workspaces.conversations'), width: 100, render: (candidate) => candidate.personal_conversation_count },
+                  { id: 'status', header: t('common.status'), width: 120, render: (candidate) => <Badge size="xs" variant={candidate.status === 'pending' ? 'warning' : 'success'}>{t(candidate.status === 'pending' ? 'domains.pendingVerification' : 'users.status.active')}</Badge> },
+                ]}
+              />
             </div>
           )}
         </DialogBody>

@@ -213,7 +213,7 @@ export default function AdminAnnouncement() {
                     <img
                       src={imageUrl}
                       alt=""
-                      className="h-16 w-auto rounded-[8px] border border-[var(--color-border)] object-cover"
+                      className="h-16 w-auto rounded-[8px] object-cover"
                     />
                     <Button variant="ghost" size="sm" leadingIcon={<X size={13} aria-hidden />} onClick={() => setImageUrl('')}>
                       {t('admin:announcement.removeImage')}
@@ -270,7 +270,7 @@ export default function AdminAnnouncement() {
                   <p className="mb-2 text-[12px] font-medium text-[var(--color-fg-subtle)]">
                     {t('admin:announcement.preview')}
                   </p>
-                  <div className="flex items-center gap-2.5 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-accent-soft)] px-4 py-2.5 text-[13px] text-[var(--color-fg)]">
+                  <div className="flex items-center gap-2.5 rounded-[8px] bg-[var(--color-accent-soft)] px-4 py-2.5 text-[13px] text-[var(--color-fg)]">
                     <Megaphone size={14} aria-hidden className="shrink-0 text-[var(--color-accent)]" />
                     <div
                       className="flex-1 min-w-0 break-words [&_a]:text-[var(--color-accent)] [&_a]:underline [&_a]:underline-offset-2"
@@ -288,7 +288,7 @@ export default function AdminAnnouncement() {
               <p className="mb-2 text-[12px] font-medium text-[var(--color-fg-subtle)]">
                 {t('admin:announcement.preview')}
               </p>
-              <div className="flex flex-col overflow-hidden rounded-popup border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-md)] sm:flex-row">
+              <div className="flex flex-col overflow-hidden rounded-popup bg-[var(--color-surface)] shadow-[var(--shadow-md)] sm:flex-row">
                 {imageUrl.trim() ? (
                   <div className="aspect-[16/7] w-full shrink-0 bg-[var(--color-bg-muted)] sm:aspect-auto sm:w-2/5">
                     <img src={imageUrl} alt="" className="size-full object-cover" />

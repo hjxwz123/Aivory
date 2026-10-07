@@ -4,10 +4,10 @@
  * AdminUserConversations. Bypasses the per-user ownership filter (admin gate);
  * no edit/delete — viewing only. Tokens-only, matches the rest of /admin.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { FolderClosed, Library, ChevronDown, FileText, ImageIcon } from 'lucide-react'
+import { FolderClosed, Library, ChevronDown, ImageIcon } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
 import type { ApiProject, ApiAdminKnowledgeBase, ApiDocument, ApiUser, ApiAdminImage } from '@/api/types'
 import { AdminDetailHeader } from '@/components/admin/admin-detail-header'
@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils'
 import { envNum } from '@/lib/env-config'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { AdminPageHeader } from '@/components/admin/admin-page-header'
+import { AdminTable } from '@/components/admin/AdminTable'
 
 function formatStamp(unixSec: number): string {
   if (!unixSec) return ''
@@ -148,29 +149,21 @@ export default function AdminUserLibrary() {
               <span className="text-[12px] text-[var(--color-fg-subtle)] tabular-nums">· {projects.length}</span>
             </h2>
             {projects.length === 0 ? (
-              <div className="mt-3 text-sm text-[var(--color-fg-subtle)] rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center">
+              <div className="mt-3 text-sm text-[var(--color-fg-subtle)] rounded-[12px] bg-[var(--color-surface)] px-5 py-8 text-center">
                 {t('users.noProjects')}
               </div>
             ) : (
-              <ul className="mt-3 flex flex-col divide-y divide-[var(--color-divider)] rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-                {projects.map((p) => (
-                  <li key={p.id} className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-1 px-3 py-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center sm:px-5 sm:py-4">
-                    <span aria-hidden className="text-lg">{p.emoji || '📁'}</span>
-                    <div className="min-w-0">
-                      <div className="flex min-w-0 flex-wrap items-center gap-1.5 sm:gap-2">
-                        <span className="line-clamp-2 min-w-0 break-words font-medium text-[var(--color-fg)] sm:line-clamp-1">{p.name}</span>
-                        {p.pinned ? <Badge size="xs" variant="neutral">{t('users.pinned')}</Badge> : null}
-                      </div>
-                      {p.description ? (
-                        <div className="mt-0.5 line-clamp-2 text-[12px] text-[var(--color-fg-subtle)] sm:line-clamp-1">{p.description}</div>
-                      ) : null}
-                    </div>
-                    <span className="col-start-2 text-[12px] font-mono text-[var(--color-fg-subtle)] sm:col-auto sm:row-auto sm:shrink-0">
-                      {formatStamp(p.created_at)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              <AdminTable
+                items={projects}
+                rowKey={(p) => p.id}
+                label={t('users.projectsHeading')}
+                className="mt-3"
+                columns={[
+                  { id: 'name', header: t('admin:resources.table.name'), width: 260, render: (p) => <div className="flex min-w-0 items-center gap-2"><span aria-hidden>{p.emoji || '📁'}</span><span className="truncate font-medium" title={p.name}>{p.name}</span>{p.pinned ? <Badge size="xs">{t('users.pinned')}</Badge> : null}</div> },
+                  { id: 'description', header: t('admin:groups.fields.description'), width: 320, render: (p) => <span className="block truncate text-[var(--color-fg-muted)]" title={p.description}>{p.description || '—'}</span> },
+                  { id: 'created', header: t('admin:redeemCodes.table.createdAt'), width: 170, render: (p) => <span className="text-[12px] tabular-nums text-[var(--color-fg-muted)]">{formatStamp(p.created_at)}</span> },
+                ]}
+              />
             )}
           </section>
 
@@ -182,95 +175,48 @@ export default function AdminUserLibrary() {
               <span className="text-[12px] text-[var(--color-fg-subtle)] tabular-nums">· {kbs.length}</span>
             </h2>
             {kbs.length === 0 ? (
-              <div className="mt-3 text-sm text-[var(--color-fg-subtle)] rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center">
+              <div className="mt-3 text-sm text-[var(--color-fg-subtle)] rounded-[12px] bg-[var(--color-surface)] px-5 py-8 text-center">
                 {t('users.noKbs')}
               </div>
             ) : (
-              <ul className="mt-3 flex flex-col divide-y divide-[var(--color-divider)] rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-                {kbs.map((k) => {
-                  const model = k.embedding_model_id ? getModelById(k.embedding_model_id)?.label : ''
-                  const meta = [
-                    model || k.embedding_model_id,
-                    k.embedding_dim ? `${k.embedding_dim}d` : '',
-                    formatStamp(k.created_at),
-                  ].filter(Boolean)
-                  const open = openKb === k.id
-                  const docs = kbDocs[k.id]
-                  return (
-                    <li key={k.id}>
-                      <button
-                        type="button"
-                        onClick={() => void toggleKb(k.id)}
-                        aria-expanded={open}
-                        className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-2.5 px-3 py-3 text-left interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] sm:items-center sm:gap-3 sm:px-5 sm:py-4"
-                      >
-                        <Library size={14} aria-hidden className="mt-1 text-[var(--color-fg-subtle)] sm:mt-0" />
-                        <div className="min-w-0">
-                          <div className="flex min-w-0 flex-wrap items-center gap-1.5 sm:gap-2">
-                            <span className="line-clamp-2 min-w-0 break-words font-medium text-[var(--color-fg)] sm:line-clamp-1">{k.name}</span>
-                            {k.project_id ? (
-                              <Badge size="xs" variant="neutral">
-                                {projectName(k.project_id) || t('users.inProject')}
-                              </Badge>
-                            ) : null}
-                          </div>
-                          {k.description ? (
-                            <div className="mt-0.5 line-clamp-2 text-[12px] text-[var(--color-fg-subtle)] sm:line-clamp-1">{k.description}</div>
-                          ) : null}
-                          <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[12px] font-mono text-[var(--color-fg-subtle)] sm:mt-0.5">
-                            {meta.map((part, index) => (
-                              <span key={`${part}-${index}`} className="flex min-w-0 items-center gap-2 break-all sm:break-normal">
-                                {index > 0 ? <span aria-hidden className="hidden sm:inline">·</span> : null}
-                                {part}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                        <ChevronDown
-                          size={15}
-                          aria-hidden
-                          className={cn('mt-1 text-[var(--color-fg-subtle)] transition-transform sm:mt-0', open && 'rotate-180')}
-                        />
-                      </button>
-                      {open ? (
-                        <div className="border-t border-[var(--color-divider)] bg-[var(--color-bg-muted)]/40 px-3 py-3 sm:px-5">
-                          {kbLoading === k.id ? (
-                            <PanelFallback />
-                          ) : docs && docs.length > 0 ? (
-                            <ul className="flex flex-col gap-1.5">
-                              {docs.map((doc) => (
-                                <li key={doc.id} className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2.5 gap-y-1 py-1 text-[13px] sm:grid-cols-[auto_minmax(0,1fr)_auto_auto] sm:items-center sm:py-0">
-                                  <FileText size={13} aria-hidden className="mt-0.5 shrink-0 text-[var(--color-fg-subtle)] sm:mt-0" />
-                                  <span className="line-clamp-2 min-w-0 break-all text-[var(--color-fg)] sm:line-clamp-1">{doc.filename}</span>
-                                  {doc.status !== 'ready' ? (
-                                    <span className="col-start-2 sm:col-auto">
-                                      <Badge size="xs" variant={doc.status === 'failed' ? 'danger' : 'neutral'}>
-                                        {doc.status}
-                                      </Badge>
-                                    </span>
-                                  ) : null}
-                                  <span className="col-start-2 flex flex-wrap gap-x-2 text-[12px] font-mono tabular-nums text-[var(--color-fg-subtle)] sm:col-auto sm:shrink-0">
-                                    {[doc.chunk_count ? t('users.chunks', { count: doc.chunk_count }) : '', formatBytes(doc.size_bytes)]
-                                      .filter(Boolean)
-                                      .map((part, index) => (
-                                        <span key={`${part}-${index}`} className="flex items-center gap-2">
-                                          {index > 0 ? <span aria-hidden className="hidden sm:inline">·</span> : null}
-                                          {part}
-                                        </span>
-                                      ))}
-                                  </span>
-                                </li>
-                              ))}
-                            </ul>
-                          ) : (
-                            <div className="text-[12px] text-[var(--color-fg-subtle)]">{t('users.noDocuments')}</div>
-                          )}
-                        </div>
-                      ) : null}
-                    </li>
-                  )
-                })}
-              </ul>
+              <AdminTable
+                items={kbs}
+                rowKey={(k) => k.id}
+                label={t('users.kbsHeading')}
+                className="mt-3"
+                columns={[
+                  { id: 'name', header: t('admin:resources.table.name'), width: 230, render: (k) => <button type="button" className="admin-table-link font-medium" aria-expanded={openKb === k.id} onClick={() => void toggleKb(k.id)} title={k.name}>{k.name}</button> },
+                  { id: 'description', header: t('admin:groups.fields.description'), width: 260, render: (k) => <span className="block truncate text-[var(--color-fg-muted)]" title={k.description}>{k.description || '—'}</span> },
+                  { id: 'project', header: t('users.projectsHeading'), width: 170, render: (k) => <span className="block truncate">{k.project_id ? projectName(k.project_id) || t('users.inProject') : '—'}</span> },
+                  { id: 'model', header: t('admin:resources.table.model'), width: 190, render: (k) => <div className="min-w-0"><span className="block truncate">{getModelById(k.embedding_model_id)?.label || k.embedding_model_id || '—'}</span>{k.embedding_dim ? <span className="text-[12px] text-[var(--color-fg-muted)]">{k.embedding_dim}d</span> : null}</div> },
+                  { id: 'created', header: t('admin:redeemCodes.table.createdAt'), width: 150, render: (k) => <span className="text-[12px] tabular-nums text-[var(--color-fg-muted)]">{formatStamp(k.created_at)}</span> },
+                  { id: 'actions', header: t('admin:common.actions'), width: 60, align: 'right', render: (k) => <Button variant="ghost" size="icon-sm" title={t('admin:resources.table.documents')} aria-label={t('admin:resources.table.documents')} aria-expanded={openKb === k.id} onClick={() => void toggleKb(k.id)}><ChevronDown size={15} className={cn('transition-transform', openKb === k.id && 'rotate-180')} aria-hidden /></Button> },
+                ]}
+                renderRow={(k, _index, cells) => (
+                  <Fragment key={k.id}>
+                    <tr>{cells}</tr>
+                    {openKb === k.id ? (
+                      <tr><td colSpan={6}>
+                        {kbLoading === k.id ? <PanelFallback /> : (
+                          <AdminTable
+                            items={kbDocs[k.id] ?? []}
+                            rowKey={(doc) => doc.id}
+                            label={t('admin:resources.table.documents')}
+                            embedded
+                            emptyMessage={t('users.noDocuments')}
+                            columns={[
+                              { id: 'filename', header: t('admin:files.table.filename'), width: 300, render: (doc) => <span className="block truncate" title={doc.filename}>{doc.filename}</span> },
+                              { id: 'status', header: t('admin:common.status'), width: 130, render: (doc) => <Badge size="xs" variant={doc.status === 'failed' ? 'danger' : doc.status === 'ready' ? 'success' : 'neutral'}>{t(`admin:resources.documentStatus.${doc.status}`, { defaultValue: doc.status })}</Badge> },
+                              { id: 'size', header: t('admin:files.table.size'), width: 120, render: (doc) => <span className="tabular-nums">{formatBytes(doc.size_bytes)}</span> },
+                              { id: 'chunks', header: t('admin:common.details'), width: 130, render: (doc) => t('users.chunks', { count: doc.chunk_count }) },
+                            ]}
+                          />
+                        )}
+                      </td></tr>
+                    ) : null}
+                  </Fragment>
+                )}
+              />
             )}
           </section>
 
@@ -283,7 +229,7 @@ export default function AdminUserLibrary() {
               <span className="text-[12px] text-[var(--color-fg-subtle)] tabular-nums">· {images.length}</span>
             </h2>
             {images.length === 0 ? (
-              <div className="mt-3 text-sm text-[var(--color-fg-subtle)] rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center">
+              <div className="mt-3 text-sm text-[var(--color-fg-subtle)] rounded-[12px] bg-[var(--color-surface)] px-5 py-8 text-center">
                 {t('users.noImages', { defaultValue: 'No generated images.' })}
               </div>
             ) : (
@@ -296,7 +242,7 @@ export default function AdminUserLibrary() {
                       navigate(`/admin/users/${encodeURIComponent(id)}/conversations/${encodeURIComponent(img.conversation_id)}`)
                     }
                     title={img.conversation_title || t('users.viewConversations')}
-                    className="group relative aspect-square overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                    className="group relative aspect-square overflow-hidden rounded-[12px] bg-[var(--color-bg-muted)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                   >
                     <img
                       src={img.url}

@@ -289,7 +289,7 @@ export default function AdminPaymentMethods() {
       />
 
       {!loading && !loadError ? (
-        <div className="mt-5 flex flex-col gap-2 border-y border-[var(--color-divider)] py-3 md:flex-row md:items-center md:justify-between md:gap-5">
+        <div className="mt-5 flex flex-col gap-2 py-3 md:flex-row md:items-center md:justify-between md:gap-5">
           <div className="min-w-0 md:max-w-md">
             <label htmlFor="card-purchase-url" className="text-[13px] font-medium text-[var(--color-fg)]">{t('admin:paymentMethods.cardPurchase.label')}</label>
             <p className="mt-0.5 text-[12px] leading-4 text-[var(--color-fg-subtle)]">{t('admin:paymentMethods.cardPurchase.hint')}</p>
@@ -327,7 +327,7 @@ export default function AdminPaymentMethods() {
             <Button  variant="secondary" size="sm" leadingIcon={<RefreshCw size={13} aria-hidden />} onClick={() => void load()}>{t('admin:paymentMethods.retry')}</Button>
           </div>
         ) : channels.length === 0 ? (
-          <div className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center">
+          <div className="rounded-[12px] bg-[var(--color-surface)] px-5 py-8 text-center">
             <p className="text-sm font-medium text-[var(--color-fg)]">{t('admin:paymentMethods.noChannelsTitle')}</p>
             <p className="mx-auto mt-1 max-w-lg text-[13px] text-[var(--color-fg-muted)]">{t('admin:paymentMethods.noChannels')}</p>
             <Button asChild className="mt-4" size="sm" variant="secondary">
@@ -335,7 +335,7 @@ export default function AdminPaymentMethods() {
             </Button>
           </div>
         ) : rows.length === 0 ? (
-          <div className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center">
+          <div className="rounded-[12px] bg-[var(--color-surface)] px-5 py-8 text-center">
             <p className="text-sm font-medium text-[var(--color-fg)]">{t('admin:paymentMethods.emptyTitle')}</p>
             <p className="mx-auto mt-1 max-w-lg text-[13px] text-[var(--color-fg-muted)]">{t('admin:paymentMethods.empty')}</p>
             <Button className="mt-4" size="sm" onClick={openNew}>{t('admin:paymentMethods.new')}</Button>
@@ -348,39 +348,17 @@ export default function AdminPaymentMethods() {
             dragHandleLabel={t('admin:common.dragHandle')}
             moveUpLabel={t('admin:common.moveUp')}
             moveDownLabel={t('admin:common.moveDown')}
-            mobileDragOnly
-            listClassName="overflow-hidden"
-            rowClassName="grid grid-cols-[2.75rem_auto_minmax(0,1fr)] items-center gap-x-1 gap-y-2 px-2 py-3 sm:grid-cols-[auto_auto_auto_minmax(0,1fr)_auto] sm:gap-3 sm:px-4"
-            renderItem={(row) => {
-              const channel = channelFor(row.channel_id)
-              return (
-                <>
-                  <span className="col-start-2 row-start-1 inline-flex size-8 items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)] sm:col-start-auto sm:row-start-auto">
-                    <PaymentMethodIcon icon={row.icon} size={16} />
-                  </span>
-                  <div className="col-start-3 row-start-1 min-w-0 sm:col-start-auto sm:row-start-auto">
-                    <div className="flex min-w-0 flex-wrap items-center gap-2">
-                      <span className="min-w-0 break-words text-[13px] font-medium text-[var(--color-fg)] [overflow-wrap:anywhere]">{row.name}</span>
-                      <Badge size="xs" variant="info">{t(`admin:paymentProviders.${row.provider}`)}</Badge>
-                      {!row.enabled ? <Badge size="xs">{t('admin:paymentMethods.disabled')}</Badge> : null}
-                      {channel && !channel.enabled ? <Badge size="xs" variant="warning">{t('admin:paymentMethods.channelDisabled')}</Badge> : null}
-                      {!channel ? <Badge size="xs" variant="danger">{t('admin:paymentMethods.channelMissing')}</Badge> : null}
-                    </div>
-                    <p className="mt-1 break-words text-[12px] text-[var(--color-fg-subtle)] [overflow-wrap:anywhere]">
-                      {t('admin:paymentMethods.boundChannel', { name: channel?.name ?? row.channel_id })}
-                    </p>
-                  </div>
-                  <div className="col-span-3 row-start-2 flex items-center justify-end gap-1 sm:col-span-1 sm:col-start-auto sm:row-start-auto">
-                    <Button className="max-sm:size-11" variant="ghost" size="icon-sm" title={t('admin:common.edit')} aria-label={t('admin:common.edit')} onClick={() => openEdit(row)}>
-                      <Pencil size={14} aria-hidden />
-                    </Button>
-                    <Button className="max-sm:size-11" variant="ghost" size="icon-sm" title={t('admin:common.remove')} aria-label={t('admin:common.remove')} onClick={() => setConfirmDelete(row)}>
-                      <Trash2 size={14} aria-hidden />
-                    </Button>
-                  </div>
-                </>
-              )
-            }}
+            tableLabel={t('admin:paymentMethods.title')}
+            columns={[
+              { id: 'name', header: t('admin:paymentMethods.fields.name'), width: 220, render: (row) => <div className="flex min-w-0 items-center gap-2.5"><span className="grid size-8 shrink-0 place-items-center rounded-[8px] bg-[var(--color-bg-muted)]"><PaymentMethodIcon icon={row.icon} size={16} /></span><span className="truncate font-medium" title={row.name}>{row.name}</span></div> },
+              { id: 'channel', header: t('admin:paymentMethods.fields.channel'), width: 200, render: (row) => <span className="block truncate" title={channelFor(row.channel_id)?.name}>{channelFor(row.channel_id)?.name || row.channel_id}</span> },
+              { id: 'provider', header: t('admin:paymentChannels.fields.provider'), width: 130, render: (row) => <Badge size="xs">{t(`admin:paymentProviders.${row.provider}`)}</Badge> },
+              { id: 'status', header: t('admin:common.status'), width: 230, render: (row) => {
+                const channel = channelFor(row.channel_id)
+                return <div className="flex flex-wrap gap-1"><Badge size="xs" variant={row.enabled ? 'success' : 'neutral'}>{t(row.enabled ? 'admin:paymentMethods.fields.enabled' : 'admin:paymentMethods.disabled')}</Badge>{channel && !channel.enabled ? <Badge size="xs" variant="warning">{t('admin:paymentMethods.channelDisabled')}</Badge> : null}{!channel ? <Badge size="xs" variant="danger">{t('admin:paymentMethods.channelMissing')}</Badge> : null}</div>
+              } },
+              { id: 'actions', header: t('admin:common.actions'), width: 116, align: 'right', render: (row) => <div className="flex items-center gap-1"><Button variant="ghost" size="icon-sm" title={t('admin:common.edit')} aria-label={t('admin:common.edit')} onClick={() => openEdit(row)}><Pencil size={14} aria-hidden /></Button><Button variant="ghost" size="icon-sm" title={t('admin:common.remove')} aria-label={t('admin:common.remove')} onClick={() => setConfirmDelete(row)}><Trash2 size={14} aria-hidden /></Button></div> },
+            ]}
           />
         )}
       </section>
@@ -443,7 +421,7 @@ export default function AdminPaymentMethods() {
                 </Field>
               ) : null}
 
-              <label className="flex min-h-11 items-center justify-between gap-4 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2">
+              <label className="flex min-h-11 items-center justify-between gap-4 rounded-[8px] bg-[var(--color-bg-muted)] px-3 py-2">
                 <span className="min-w-0">
                   <span className="block text-[13px] font-medium text-[var(--color-fg)]">{t('admin:paymentMethods.fields.enabled')}</span>
                   <span className="block text-[12px] text-[var(--color-fg-subtle)]">{t('admin:paymentMethods.fields.enabledHint')}</span>

@@ -164,7 +164,7 @@ export default function AdminModelTags() {
         {loading ? (
           <PanelFallback />
         ) : tags.length === 0 ? (
-          <div className="mt-6 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center text-sm text-[var(--color-fg-muted)]">
+          <div className="mt-6 rounded-[12px] bg-[var(--color-surface)] px-5 py-8 text-center text-sm text-[var(--color-fg-muted)]">
             {t('admin:modelTags.empty')}
           </div>
         ) : (
@@ -175,21 +175,18 @@ export default function AdminModelTags() {
             dragHandleLabel={t('admin:common.dragHandle')}
             moveUpLabel={t('admin:common.moveUp')}
             moveDownLabel={t('admin:common.moveDown')}
-            mobileDragOnly
+            tableLabel={t('admin:modelTags.title')}
             listClassName="mt-6"
-            rowClassName="grid grid-cols-[2.75rem_auto_minmax(0,1fr)_2.75rem] items-center gap-2 px-2 py-2.5 md:grid-cols-[auto_auto_auto_minmax(0,1fr)_auto] md:gap-3 md:px-4"
-            renderItem={(tag) => (
-              <>
-                <Tag size={14} className="shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
-                <Input
+            columns={[
+              { id: 'name', header: t('admin:modelTags.title'), width: 340, render: (tag) => <div className="flex min-w-0 items-center gap-2.5"><Tag size={14} className="shrink-0 text-[var(--color-fg-subtle)]" aria-hidden /><Input
                   defaultValue={tag.name}
                   disabled={busyId === tag.id}
                   onBlur={(e) => {
                     if (e.target.value.trim() && e.target.value !== tag.name) void rename(tag.id, e.target.value)
                   }}
                   wrapperClassName="h-8 min-w-0 max-md:h-11"
-                />
-                <Button
+                /></div> },
+              { id: 'actions', header: t('admin:common.actions'), width: 70, align: 'right', render: (tag) => (<Button
                   variant="ghost"
                   size="icon-sm"
                   loading={busyId === tag.id}
@@ -198,9 +195,8 @@ export default function AdminModelTags() {
                   aria-label={`${t('common:actions.delete', { defaultValue: 'Delete' })}: ${tag.name}`}
                   leadingIcon={<Trash2 size={14} aria-hidden />}
                   className="size-8 rounded-[8px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] max-md:size-[var(--tap-min)]"
-                />
-              </>
-            )}
+                />) },
+            ]}
           />
         )}
       </section>

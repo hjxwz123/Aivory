@@ -31,6 +31,7 @@ import { adminPaymentOrderErrorKey } from '@/lib/payment-errors'
 import { canDeletePaymentOrder } from '@/lib/payment-order-state'
 import { copyText, formatDateTime } from '@/lib/utils'
 import { AdminPageHeader } from '@/components/admin/admin-page-header'
+import { AdminTableFrame } from '@/components/admin/AdminTable'
 
 type StatusFilter = 'all' | ApiPaymentOrderStatus
 type ProviderFilter = 'all' | ApiPaymentProvider
@@ -294,33 +295,32 @@ export default function AdminPaymentOrders() {
     const deletable = canDeleteOrder(order)
     const busyAction = busyOrders[order.id]
     return (
-      <div className="mt-1.5 flex flex-wrap gap-1">
+      <div className="flex items-center justify-end gap-1">
         {active && order.provider !== 'epay' ? (
           <Button
-            
-            size="xs"
-            variant="secondary"
-            leadingIcon={<RefreshCw size={11} aria-hidden />}
+            size="icon-sm"
+            variant="ghost"
+            title={t('admin:paymentOrders.actions.reconcile')}
+            aria-label={t('admin:paymentOrders.actions.reconcile')}
             loading={busyAction === 'reconcile'}
             disabled={Boolean(busyAction)}
             onClick={() => void reconcileOrder(order)}
           >
-            {t('admin:paymentOrders.actions.reconcile')}
+            <RefreshCw size={14} aria-hidden />
           </Button>
         ) : null}
         {active ? (
           <Button
             className="text-[var(--color-danger)] hover:text-[var(--color-danger)]"
-            size="xs"
+            size="icon-sm"
             variant="ghost"
-            leadingIcon={<CircleX size={11} aria-hidden />}
+            title={t(order.provider === 'epay' ? 'admin:paymentOrders.actions.manualClose' : 'admin:paymentOrders.actions.close')}
+            aria-label={t(order.provider === 'epay' ? 'admin:paymentOrders.actions.manualClose' : 'admin:paymentOrders.actions.close')}
             loading={busyAction === 'close'}
             disabled={Boolean(busyAction)}
             onClick={() => openCloseDialog(order)}
           >
-            {order.provider === 'epay'
-              ? t('admin:paymentOrders.actions.manualClose')
-              : t('admin:paymentOrders.actions.close')}
+            <CircleX size={14} aria-hidden />
           </Button>
         ) : null}
         <Tooltip
@@ -364,7 +364,7 @@ export default function AdminPaymentOrders() {
 
       <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">{copyAnnouncement}</p>
 
-      <form className="mt-5 grid min-w-0 grid-cols-1 gap-2 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 sm:grid-cols-2 lg:grid-cols-[minmax(14rem,1fr)_minmax(9rem,10rem)_minmax(9rem,10rem)_auto]" onSubmit={applySearch}>
+      <form className="mt-5 grid min-w-0 grid-cols-1 gap-2 rounded-[12px] bg-[var(--color-surface)] p-3 sm:grid-cols-2 lg:grid-cols-[minmax(14rem,1fr)_minmax(9rem,10rem)_minmax(9rem,10rem)_auto]" onSubmit={applySearch}>
         <Input
           wrapperClassName="min-w-0 max-sm:h-11 sm:col-span-2 lg:col-span-1"
           leadingIcon={<Search size={14} aria-hidden />}
@@ -417,36 +417,38 @@ export default function AdminPaymentOrders() {
             <Button className="max-sm:h-11" variant="secondary" size="sm" leadingIcon={<RefreshCw size={13} aria-hidden />} onClick={() => setReloadKey((value) => value + 1)}>{t('admin:paymentOrders.retry')}</Button>
           </div>
         ) : orders.length === 0 ? (
-          <div className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center">
+          <div className="rounded-[12px] bg-[var(--color-surface)] px-5 py-8 text-center">
             <p className="text-sm font-medium text-[var(--color-fg)]">{filtersActive ? t('admin:paymentOrders.emptyFilteredTitle') : t('admin:paymentOrders.emptyTitle')}</p>
             <p className="mx-auto mt-1 max-w-lg text-[13px] text-[var(--color-fg-muted)]">{filtersActive ? t('admin:paymentOrders.emptyFiltered') : t('admin:paymentOrders.empty')}</p>
             {filtersActive ? <Button className="mt-4 max-sm:h-11" variant="secondary" size="sm" onClick={clearFilters}>{t('admin:paymentOrders.filters.clear')}</Button> : null}
           </div>
         ) : (
           <>
-            <div className="hidden max-w-full overflow-x-auto rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] xl:block">
-              <table className="w-full min-w-[72rem] table-fixed border-collapse text-left text-[12px]">
+            <AdminTableFrame label={t('admin:paymentOrders.title')}>
+              <table className="admin-data-table" style={{ minWidth: 1280 }}>
                 <colgroup>
                   <col className="w-[12%]" />
                   <col className="w-[12%]" />
                   <col className="w-[13%]" />
                   <col className="w-[9%]" />
                   <col className="w-[14%]" />
-                  <col className="w-[22%]" />
+                  <col className="w-[10%]" />
                   <col className="w-[18%]" />
+                  <col className="w-[12%]" />
                 </colgroup>
                 <thead className="bg-[var(--color-bg-muted)] text-[var(--color-fg-subtle)]">
                   <tr>
-                    <th className="px-3 py-2 font-medium">{t('admin:paymentOrders.table.order')}</th>
-                    <th className="px-3 py-2 font-medium">{t('admin:paymentOrders.table.user')}</th>
-                    <th className="px-3 py-2 font-medium">{t('admin:paymentOrders.table.product')}</th>
-                    <th className="px-3 py-2 font-medium">{t('admin:paymentOrders.table.amount')}</th>
-                    <th className="px-3 py-2 font-medium">{t('admin:paymentOrders.table.method')}</th>
-                    <th className="px-3 py-2 font-medium">{t('admin:paymentOrders.table.status')}</th>
-                    <th className="px-3 py-2 font-medium">{t('admin:paymentOrders.table.time')}</th>
+                    <th scope="col" className="px-3 py-2 font-medium">{t('admin:paymentOrders.table.order')}</th>
+                    <th scope="col" className="px-3 py-2 font-medium">{t('admin:paymentOrders.table.user')}</th>
+                    <th scope="col" className="px-3 py-2 font-medium">{t('admin:paymentOrders.table.product')}</th>
+                    <th scope="col" data-align="right" className="px-3 py-2 font-medium">{t('admin:paymentOrders.table.amount')}</th>
+                    <th scope="col" className="px-3 py-2 font-medium">{t('admin:paymentOrders.table.method')}</th>
+                    <th scope="col" className="px-3 py-2 font-medium">{t('admin:paymentOrders.table.status')}</th>
+                    <th scope="col" className="px-3 py-2 font-medium">{t('admin:paymentOrders.table.time')}</th>
+                    <th scope="col" data-column="actions" data-align="right">{t('admin:common.actions')}</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-[var(--color-divider)]">
+                <tbody>
                   {orders.map((order) => {
                     return (
                       <tr key={order.id} className="align-top hover:bg-[var(--color-bg-muted)]/45">
@@ -470,7 +472,7 @@ export default function AdminPaymentOrders() {
                           <span className="block break-words font-medium text-[var(--color-fg)] [overflow-wrap:anywhere]">{targetLabel(order)}</span>
                           <span className="mt-0.5 block text-[12px] text-[var(--color-fg-subtle)]">{t(`admin:paymentOrders.targets.${order.target_type}`)}</span>
                         </td>
-                        <td className="whitespace-nowrap px-3 py-2.5 font-medium tabular-nums text-[var(--color-fg)]">{formatCurrencyMinor(order.amount_minor, order.currency, i18n.resolvedLanguage)}</td>
+                        <td data-align="right" className="whitespace-nowrap px-3 py-2.5 font-medium tabular-nums text-[var(--color-fg)]">{formatCurrencyMinor(order.amount_minor, order.currency, i18n.resolvedLanguage)}</td>
                         <td className="px-3 py-2.5">
                           <span className="block break-words text-[var(--color-fg)] [overflow-wrap:anywhere]">{channelLabel(order) || '—'}</span>
                           <span className="mt-0.5 flex flex-wrap items-center gap-1 text-[12px] text-[var(--color-fg-subtle)]">
@@ -486,83 +488,18 @@ export default function AdminPaymentOrders() {
                               {t('admin:paymentOrders.reconcileError', { error: order.reconcile_error })}
                             </span>
                           ) : null}
-                          {renderOrderActions(order)}
                         </td>
                         <td className="whitespace-nowrap px-3 py-2.5 text-[12px] text-[var(--color-fg-muted)]">
                           {renderOrderTimes(order)}
                         </td>
+                        <td data-column="actions" data-align="right">{renderOrderActions(order)}</td>
                       </tr>
                     )
                   })}
                 </tbody>
               </table>
-            </div>
+            </AdminTableFrame>
 
-            <ul className="divide-y divide-[var(--color-divider)] overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] xl:hidden">
-              {orders.map((order) => {
-                return (
-                  <li key={order.id} className="px-3 py-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="break-words text-[13px] font-medium text-[var(--color-fg)] [overflow-wrap:anywhere]">{targetLabel(order)}</p>
-                        <p className="mt-0.5 break-all text-[12px] text-[var(--color-fg-muted)]">{order.user_email}</p>
-                      </div>
-                      <Badge className="shrink-0" size="xs" variant={statusVariant(order.status)}>{t(`admin:paymentOrders.status.${order.status}`)}</Badge>
-                    </div>
-
-                    <dl className="mt-3 grid min-w-0 grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
-                      <div className="min-w-0">
-                        <dt className="text-[12px] text-[var(--color-fg-subtle)]">{t('admin:paymentOrders.table.order')}</dt>
-                        <dd className="mt-0.5 flex min-w-0 items-start gap-1">
-                          <code className="min-w-0 flex-1 break-all font-mono text-[12px] leading-5 text-[var(--color-fg-muted)]">{order.id}</code>
-                          <Button
-                            className="shrink-0 max-sm:size-11"
-                            size="icon-sm"
-                            variant="ghost"
-                            title={copiedOrderId === order.id ? t('admin:paymentOrders.copied') : t('admin:paymentOrders.copyOrder')}
-                            aria-label={copiedOrderId === order.id ? t('admin:paymentOrders.copied') : t('admin:paymentOrders.copyOrder')}
-                            onClick={() => void copyOrderId(order.id)}
-                          >
-                            {copiedOrderId === order.id ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />}
-                          </Button>
-                        </dd>
-                      </div>
-                      <div className="min-w-0">
-                        <dt className="text-[12px] text-[var(--color-fg-subtle)]">{t('admin:paymentOrders.table.method')}</dt>
-                        <dd className="mt-0.5 break-words text-[12px] leading-5 text-[var(--color-fg)] [overflow-wrap:anywhere]">{channelLabel(order) || '—'}</dd>
-                        <dd className="flex flex-wrap items-center gap-1 text-[12px] text-[var(--color-fg-subtle)]">
-                          {t(`admin:paymentProviders.${order.provider}`)}
-                          <Badge size="xs" variant={order.environment === 'test' ? 'warning' : 'neutral'}>{environmentLabel(order)}</Badge>
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-[12px] text-[var(--color-fg-subtle)]">{t('admin:paymentOrders.table.amount')}</dt>
-                        <dd className="mt-0.5 text-[13px] font-semibold tabular-nums text-[var(--color-fg)]">{formatCurrencyMinor(order.amount_minor, order.currency, i18n.resolvedLanguage)}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-[12px] text-[var(--color-fg-subtle)]">{t('admin:paymentOrders.table.time')}</dt>
-                        <dd className="mt-0.5 text-[12px] leading-5 text-[var(--color-fg-muted)]">
-                          {renderOrderTimes(order)}
-                        </dd>
-                      </div>
-                      {order.failure_reason ? (
-                        <div className="min-w-0 sm:col-span-2">
-                          <dt className="text-[12px] text-[var(--color-fg-subtle)]">{t('admin:paymentOrders.failureReason')}</dt>
-                          <dd className="mt-0.5 whitespace-pre-wrap break-words text-[12px] leading-5 text-[var(--color-danger)] [overflow-wrap:anywhere]">{order.failure_reason}</dd>
-                        </div>
-                      ) : null}
-                      {order.reconcile_error ? (
-                        <div className="min-w-0 sm:col-span-2">
-                          <dt className="text-[12px] text-[var(--color-fg-subtle)]">{t('admin:paymentOrders.reconciliation')}</dt>
-                          <dd className="mt-0.5 whitespace-pre-wrap break-words text-[12px] leading-5 text-[var(--color-danger)] [overflow-wrap:anywhere]">{order.reconcile_error}</dd>
-                        </div>
-                      ) : null}
-                    </dl>
-                    {renderOrderActions(order)}
-                  </li>
-                )
-              })}
-            </ul>
             <Pagination className="max-sm:[&_button]:size-11" page={page} pageCount={pageCount} onPage={setPage} />
           </>
         )}
@@ -609,7 +546,7 @@ export default function AdminPaymentOrders() {
                 {t('admin:paymentOrders.closeDialog.reasonHint')}
               </p>
 
-              <label className="mt-4 flex cursor-pointer items-start gap-2.5 rounded-[8px] border border-[var(--color-border)] px-3 py-2.5 text-[12px] leading-5 text-[var(--color-fg-muted)]">
+              <label className="mt-4 flex cursor-pointer items-start gap-2.5 rounded-[8px] px-3 py-2.5 text-[12px] leading-5 text-[var(--color-fg-muted)]">
                 <input
                   type="checkbox"
                   className="mt-1 size-4 shrink-0 cursor-pointer accent-[var(--color-danger)]"
@@ -689,7 +626,7 @@ export default function AdminPaymentOrders() {
                     <ShieldAlert className="mt-0.5 size-4 shrink-0 text-[var(--color-warning)]" aria-hidden />
                     <p>{t('admin:paymentOrders.deleteDialog.gatewayWarning')}</p>
                   </div>
-                  <label className="mt-3 flex cursor-pointer items-start gap-2.5 rounded-[8px] border border-[var(--color-border)] px-3 py-2.5 text-[12px] leading-5 text-[var(--color-fg-muted)]">
+                  <label className="mt-3 flex cursor-pointer items-start gap-2.5 rounded-[8px] px-3 py-2.5 text-[12px] leading-5 text-[var(--color-fg-muted)]">
                     <input
                       type="checkbox"
                       className="mt-1 size-4 shrink-0 cursor-pointer accent-[var(--color-danger)]"

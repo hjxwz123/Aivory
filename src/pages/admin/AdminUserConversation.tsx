@@ -15,6 +15,7 @@ import { useTranslation } from 'react-i18next'
 import { FileText, HardDrive, RefreshCw, Trash2, ExternalLink, ChevronDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { AdminDetailHeader } from '@/components/admin/admin-detail-header'
+import { AdminTable } from '@/components/admin/AdminTable'
 import { adminApi, ApiError } from '@/api'
 import type { ApiConversation, ApiUser } from '@/api/types'
 import type { Message } from '@/types/chat'
@@ -103,6 +104,7 @@ export default function AdminUserConversation() {
 
       <AdminPageHeader
         title={headerTitle}
+        showDescription
         titleAdornment={conv?.archived ? (
           <Badge size="xs" variant="neutral">{t('users.archived')}</Badge>
         ) : null}
@@ -127,7 +129,7 @@ export default function AdminUserConversation() {
         {loading ? (
           <PanelFallback />
         ) : messages.length === 0 ? (
-          <div className="text-sm text-[var(--color-fg-subtle)] rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-10 text-center">
+          <div className="text-sm text-[var(--color-fg-subtle)] rounded-[12px] bg-[var(--color-surface)] px-5 py-10 text-center">
             {t('users.noMessages')}
           </div>
         ) : (
@@ -274,7 +276,7 @@ function SandboxPanel({ convId }: { convId: string }) {
   }
 
   return (
-    <section className="mt-6 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
+    <section className="mt-6 rounded-[12px] bg-[var(--color-surface)]">
       <button
         type="button"
         onClick={toggle}
@@ -296,7 +298,7 @@ function SandboxPanel({ convId }: { convId: string }) {
       </button>
 
       {open ? (
-        <div className="border-t border-[var(--color-divider)] px-5 py-4">
+        <div className="px-5 py-4">
           <div className="flex items-center gap-2 mb-3">
             <Button variant="ghost" size="sm" leadingIcon={<RefreshCw size={13} aria-hidden />} onClick={() => void refresh()} loading={loading}>
               {t('sandbox.refresh', { defaultValue: 'Refresh' })}
@@ -329,36 +331,17 @@ function SandboxPanel({ convId }: { convId: string }) {
               {t('sandbox.empty', { defaultValue: 'Sandbox workspace is empty.' })}
             </div>
           ) : (
-            <ul className="flex flex-col divide-y divide-[var(--color-divider)]">
-              {files.map((f) => {
-                const url = adminApi.sandboxFileUrl(convId, f.path)
-                const isImg = PREVIEWABLE.test(f.path)
-                return (
-                  <li key={f.path} className="flex items-center gap-3 py-2">
-                    {isImg ? (
-                      <img src={url} alt={f.path} className="size-9 rounded-[6px] border border-[var(--color-border-subtle)] object-cover bg-[var(--color-bg-muted)]" />
-                    ) : (
-                      <span className="inline-flex size-9 items-center justify-center rounded-[6px] bg-[var(--color-bg-muted)] text-[var(--color-fg-subtle)]">
-                        <FileText size={14} aria-hidden />
-                      </span>
-                    )}
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-mono text-[12.5px] text-[var(--color-fg)]">{f.path}</span>
-                      <span className="text-[12px] text-[var(--color-fg-subtle)]">{formatBytes(f.size)}</span>
-                    </span>
-                    <a
-                      href={url}
-                      target="_blank"
-                      rel="noreferrer noopener"
-                      className="inline-flex items-center gap-1 text-[12px] text-[var(--color-accent)] hover:underline shrink-0"
-                    >
-                      {t('sandbox.open', { defaultValue: 'Open' })}
-                      <ExternalLink size={11} aria-hidden />
-                    </a>
-                  </li>
-                )
-              })}
-            </ul>
+            <AdminTable
+              embedded
+              items={files}
+              rowKey={(file) => file.path}
+              label={t('sandbox.title')}
+              columns={[
+                { id: 'filename', header: t('admin:resources.details.filename'), width: 260, render: (file) => <span className="flex min-w-0 items-center gap-3">{PREVIEWABLE.test(file.path) ? <img src={adminApi.sandboxFileUrl(convId, file.path)} alt="" className="size-9 shrink-0 rounded-[6px] object-cover bg-[var(--color-bg-muted)]" /> : <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-[6px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]"><FileText size={14} aria-hidden /></span>}<span className="truncate font-mono text-[12.5px]" title={file.path}>{file.path}</span></span> },
+                { id: 'size', header: t('admin:resources.details.size'), width: 90, render: (file) => formatBytes(file.size) },
+                { id: 'actions', header: t('admin:common.actions'), width: 100, align: 'right', render: (file) => <a href={adminApi.sandboxFileUrl(convId, file.path)} target="_blank" rel="noreferrer noopener" className="inline-flex min-h-9 items-center gap-1 text-[12px] text-[var(--color-accent)] hover:underline">{t('sandbox.open', { defaultValue: 'Open' })}<ExternalLink size={11} aria-hidden /></a> },
+              ]}
+            />
           )}
         </div>
       ) : null}

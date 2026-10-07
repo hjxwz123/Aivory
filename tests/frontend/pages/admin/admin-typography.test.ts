@@ -35,8 +35,11 @@ describe('admin console typography and shape', () => {
     expect(tooSmall).toEqual([])
   })
 
-  it('uses the shared radius scale: 6px detail, 8px control, 12px container', () => {
-    const offScale = arbitraryPx('rounded').filter(({ value }) => ![6, 8, 12].includes(value))
+  it('uses the shared radius scale and the library switcher radii for top navigation', () => {
+    // AdminLayout shares the resource library's 9px group and 7px segment.
+    const offScale = arbitraryPx('rounded').filter(({ file, value }) =>
+      ![6, 8, 12].includes(value) && !(file === 'pages/admin/AdminLayout.tsx' && [7, 9].includes(value)),
+    )
     expect(offScale).toEqual([])
   })
 })

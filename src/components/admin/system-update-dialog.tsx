@@ -157,7 +157,7 @@ export function SystemUpdateDialog({ open, onOpenChange, onSummaryChange }: Prop
               </div>
             ) : (
               <>
-                <div className="grid grid-cols-2 gap-px overflow-hidden rounded-[8px] border border-[var(--color-border)] bg-[var(--color-divider)]">
+                <div className="grid grid-cols-2 gap-2">
                   <div className="bg-[var(--color-surface)] p-3.5">
                     <div className="text-xs text-[var(--color-fg-subtle)]">{t('userMenu.systemUpdate.current')}</div>
                     <div className="mt-1 font-mono text-sm font-semibold text-[var(--color-fg)]">v{state?.current_version ?? 'dev'}</div>
@@ -226,7 +226,7 @@ export function SystemUpdateDialog({ open, onOpenChange, onSummaryChange }: Prop
                 )}
 
                 {selectedRelease && (
-                  <div className="flex items-center justify-between gap-3 border-t border-[var(--color-divider)] pt-3">
+                  <div className="flex items-center justify-between gap-3 pt-3">
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium text-[var(--color-fg)]">{selectedRelease.name || `v${selectedRelease.version}`}</div>
                       {published && <div className="mt-0.5 text-xs text-[var(--color-fg-subtle)]">{published}</div>}

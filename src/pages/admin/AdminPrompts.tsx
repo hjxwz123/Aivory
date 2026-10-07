@@ -166,7 +166,7 @@ export default function AdminPrompts() {
         {loading ? (
           <PanelFallback />
         ) : rows.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center">
+          <div className="flex flex-col items-center gap-3 rounded-[12px] bg-[var(--color-surface)] px-6 py-10 text-center">
             <FileText size={20} className="text-[var(--color-fg-subtle)]" aria-hidden />
             <p className="text-sm text-[var(--color-fg-muted)]">{t('admin:prompts.empty')}</p>
           </div>
@@ -178,32 +178,14 @@ export default function AdminPrompts() {
             dragHandleLabel={t('admin:common.dragHandle')}
             moveUpLabel={t('admin:common.moveUp')}
             moveDownLabel={t('admin:common.moveDown')}
-            mobileDragOnly
-            rowClassName="grid grid-cols-[2.75rem_auto_minmax(0,1fr)_2.75rem_2.75rem] items-center gap-2 px-2 py-3.5 md:grid-cols-[auto_auto_auto_minmax(0,1fr)_auto_auto] md:gap-3 md:px-5"
-            renderItem={(row) => (
-              <>
-                <span className="grid size-8 shrink-0 place-items-center rounded-[8px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
+            tableLabel={t('admin:prompts.title')}
+            columns={[
+              { id: 'name', header: t('admin:prompts.fields.name'), width: 240, render: (row) => <div className="flex min-w-0 items-center gap-2.5"><span className="grid size-8 shrink-0 place-items-center rounded-[8px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
                   <FileText size={15} aria-hidden />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--color-fg)]"
-                      title={row.name}
-                    >
-                      {row.name}
-                    </span>
-                    {!row.enabled ? (
-                      <span className="shrink-0">
-                        <Badge size="xs" variant="neutral">
-                          {t('admin:prompts.disabledTag')}
-                        </Badge>
-                      </span>
-                    ) : null}
-                  </div>
-                  <p className="mt-0.5 truncate text-[12px] text-[var(--color-fg-subtle)]">{row.description}</p>
-                </div>
-                <Button
+                </span><span className="truncate font-medium" title={row.name}>{row.name}</span></div> },
+              { id: 'description', header: t('admin:prompts.fields.description'), width: 380, render: (row) => <span className="block truncate text-[var(--color-fg-muted)]" title={row.description}>{row.description || '—'}</span> },
+              { id: 'status', header: t('admin:common.status'), width: 90, render: (row) => <Badge size="xs" variant={row.enabled ? 'success' : 'neutral'}>{t(row.enabled ? 'admin:prompts.fields.enabled' : 'admin:prompts.disabledTag')}</Badge> },
+              { id: 'actions', header: t('admin:common.actions'), width: 100, align: 'right', render: (row) => <div className="flex items-center gap-1"><Button
                   variant="ghost"
                   size="icon"
                   aria-label={`${t('admin:common.edit')}: ${row.name}`}
@@ -211,8 +193,7 @@ export default function AdminPrompts() {
                   className="max-sm:size-[var(--tap-min)]"
                 >
                   <Pencil size={14} aria-hidden />
-                </Button>
-                <Button
+                </Button><Button
                   variant="ghost"
                   size="icon"
                   aria-label={`${t('admin:common.remove')}: ${row.name}`}
@@ -220,9 +201,8 @@ export default function AdminPrompts() {
                   className="max-sm:size-[var(--tap-min)]"
                 >
                   <Trash2 size={14} aria-hidden />
-                </Button>
-              </>
-            )}
+                </Button></div> },
+            ]}
           />
         )}
       </section>

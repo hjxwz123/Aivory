@@ -8,10 +8,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Plus, Pencil, RefreshCw, Search, Trash2 } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
-import type { ApiChannel, ApiChannelModelCandidate } from '@/api/types'
+import type { ApiChannel, ApiChannelHealth, ApiChannelModel, ApiChannelModelCandidate, ApiChannelModelHealth } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Field } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -31,6 +33,10 @@ import { PanelFallback } from '@/components/ui/panel-fallback'
 import { normalizeOpenAIBaseUrl } from '@/lib/channel-base-url'
 import { embeddingGuardErrorText } from '@/lib/admin-embedding-errors'
 import { AdminPageHeader } from '@/components/admin/admin-page-header'
+import { AdminListFilter, AdminListToolbar } from '@/components/admin/admin-list-toolbar'
+import { AdminAdvancedDisclosure } from '@/components/admin/admin-advanced-disclosure'
+import { matchesAdminSearch, mergeVisibleAdminOrder } from '@/lib/admin-list-filter'
+import { parseChannelHeaders } from '@/lib/channel-headers'
 
 type Editable = Partial<ApiChannel> & { api_key?: string }
 type ChannelEditor = {
@@ -46,6 +52,8 @@ type ModelDiscoveryState = {
   selected: Set<string>
   skippedUnsupported: number
 }
+
+type PendingChannelModel = ApiChannelModelCandidate & { source?: 'upstream' | 'manual' }
 
 const TYPES = ['openai', 'claude', 'gemini', 'typesafe'] as const
 
@@ -67,6 +75,15 @@ function inferManualModelKind(requestID: string): ApiChannelModelCandidate['kind
 export default function AdminChannels() {
   const { t } = useTranslation(['admin', 'common'])
   const [rows, setRows] = useState<ApiChannel[]>([])
+  const [channelHealthByID, setChannelHealthByID] = useState<Record<string, ApiChannelModelHealth[]>>({})
+  const [search, setSearch] = useState('')
+  const [typeFilter, setTypeFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const filteredRows = useMemo(() => rows.filter((row) =>
+    matchesAdminSearch(search, [row.name, row.id, row.type, row.api_format, row.base_url])
+    && (typeFilter === 'all' || row.type === typeFilter)
+    && (statusFilter === 'all' || row.enabled === (statusFilter === 'enabled')),
+  ), [rows, search, typeFilter, statusFilter])
   const [loading, setLoading] = useState(true)
   const [editor, setEditor] = useState<ChannelEditor>({
     open: false,
@@ -78,8 +95,16 @@ export default function AdminChannels() {
   const [deleting, setDeleting] = useState(false)
   const deletingRef = useRef(false)
   const [showBaseUrlError, setShowBaseUrlError] = useState(false)
+  const [headersText, setHeadersText] = useState('{}')
+  const [showHeadersError, setShowHeadersError] = useState(false)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [advancedTab, setAdvancedTab] = useState('headers')
+  const parsedHeaders = useMemo(() => parseChannelHeaders(headersText), [headersText])
   const [modelInput, setModelInput] = useState('')
-  const [pendingModels, setPendingModels] = useState<ApiChannelModelCandidate[]>([])
+  const [pendingModels, setPendingModels] = useState<PendingChannelModel[]>([])
+  const [channelModels, setChannelModels] = useState<ApiChannelModel[]>([])
+  const [channelModelsLoaded, setChannelModelsLoaded] = useState(false)
+  const [channelHealth, setChannelHealth] = useState<ApiChannelHealth | null>(null)
   const [upstreamModelsOpen, setUpstreamModelsOpen] = useState(false)
   const [modelSearch, setModelSearch] = useState('')
   const discoveryRequestRef = useRef(0)
@@ -109,11 +134,17 @@ export default function AdminChannels() {
     () => new Set(pendingModels.map((model) => model.request_id.toLowerCase())),
     [pendingModels],
   )
+  const editorModels = editor.row ? channelModels : pendingModels
 
   async function load() {
     setLoading(true)
     try {
-      setRows(await adminApi.channels())
+      const [nextRows, modelHealth] = await Promise.all([
+        adminApi.channels(),
+        adminApi.channelsModelHealth().catch(() => ({})),
+      ])
+      setRows(nextRows)
+      setChannelHealthByID(modelHealth)
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
     } finally {
@@ -146,10 +177,17 @@ export default function AdminChannels() {
   }
 
   function openNew() {
+    setAdvancedOpen(false)
+    setAdvancedTab('headers')
     setShowBaseUrlError(false)
+    setHeadersText('{}')
+    setShowHeadersError(false)
     resetModelDiscovery()
     setModelInput('')
     setPendingModels([])
+    setChannelModels([])
+    setChannelModelsLoaded(true)
+    setChannelHealth(null)
     setEditor({
       open: true,
       draft: { type: 'openai', api_format: 'chat', enabled: true, name: '', base_url: '' },
@@ -157,14 +195,36 @@ export default function AdminChannels() {
   }
 
   function openEdit(row: ApiChannel) {
+    setAdvancedOpen(false)
+    setAdvancedTab('headers')
     setShowBaseUrlError(false)
+    setHeadersText(JSON.stringify(row.headers ?? {}, null, 2))
+    setShowHeadersError(false)
     resetModelDiscovery()
     setModelInput('')
     setPendingModels([])
+    setChannelModels([])
+    setChannelModelsLoaded(false)
+    setChannelHealth(null)
     setEditor({ open: true, row, draft: { ...row, api_key: '' } })
+    void adminApi.channelHealth(row.id).then(setChannelHealth).catch(() => setChannelHealth(null))
+    void adminApi.channelModels(row.id).then((models) => { setChannelModels(models); setChannelModelsLoaded(true) }).catch(() => { setChannelModels([]); setChannelModelsLoaded(false) })
   }
 
-  function addPendingModels(models: ApiChannelModelCandidate[]) {
+  function addExistingModel() {
+    const requestID = modelInput.trim()
+    if (!requestID) return
+    setChannelModels((current) => current.some((model) => model.request_id.toLowerCase() === requestID.toLowerCase())
+      ? current
+      : [...current, { id: `new-${Date.now()}`, channel_id: editor.row?.id ?? '', request_id: requestID, label: requestID, description: '', kind: inferManualModelKind(requestID), enabled: true, source: 'manual', updated_at: 0 }])
+    setModelInput('')
+  }
+
+  function removeExistingModel(requestID: string) {
+    setChannelModels((current) => current.filter((model) => model.request_id !== requestID))
+  }
+
+  function addPendingModels(models: ApiChannelModelCandidate[], source: PendingChannelModel['source'] = 'manual') {
     setPendingModels((current) => {
       const seen = new Set(current.map((model) => model.request_id.toLowerCase()))
       const next = [...current]
@@ -178,6 +238,7 @@ export default function AdminChannels() {
           request_id: requestID,
           label: model.label.trim() || requestID,
           description: model.description.trim(),
+          source,
         })
       })
       return next
@@ -192,7 +253,7 @@ export default function AdminChannels() {
       label: requestID,
       description: '',
       kind: inferManualModelKind(requestID),
-    }])
+    }], 'manual')
     setModelInput('')
   }
 
@@ -201,6 +262,12 @@ export default function AdminChannels() {
   }
 
   async function discoverModels() {
+    if (parsedHeaders.error) {
+      setAdvancedOpen(true)
+      setAdvancedTab('headers')
+      setShowHeadersError(true)
+      return
+    }
     const d = editor.draft
     const normalizedBaseUrl = d.type === 'openai'
       ? normalizeOpenAIBaseUrl(d.base_url ?? '')
@@ -219,7 +286,7 @@ export default function AdminChannels() {
       skippedUnsupported: 0,
     })
     try {
-      const result = await adminApi.discoverChannelModels({ ...d, base_url: normalizedBaseUrl })
+      const result = await adminApi.discoverChannelModels({ ...d, base_url: normalizedBaseUrl, headers: parsedHeaders.headers })
       if (requestID !== discoveryRequestRef.current) return
       setModelDiscovery({
         loading: false,
@@ -281,12 +348,35 @@ export default function AdminChannels() {
   }
 
   function confirmUpstreamModels() {
-    addPendingModels(selectedDiscoveredModels)
+    if (editor.row) {
+      setChannelModels((current) => {
+        const seen = new Set(current.map((model) => model.request_id.toLowerCase()))
+        return [...current, ...selectedDiscoveredModels.filter((model) => !seen.has(model.request_id.toLowerCase())).map((model) => ({
+          id: `new-${model.request_id}`,
+          channel_id: editor.row?.id ?? '',
+          request_id: model.request_id,
+          label: model.label,
+          description: model.description,
+          kind: model.kind,
+          enabled: true,
+          source: 'upstream',
+          updated_at: 0,
+        }))]
+      })
+    } else {
+      addPendingModels(selectedDiscoveredModels, 'upstream')
+    }
     setUpstreamModelsOpen(false)
   }
 
   async function submit() {
     if (savingRef.current) return
+    if (parsedHeaders.error) {
+      setAdvancedOpen(true)
+      setAdvancedTab('headers')
+      setShowHeadersError(true)
+      return
+    }
     const d = editor.draft
     if (!d.name) {
       toast.error(t('admin:channels.errors.nameRequired'))
@@ -300,23 +390,36 @@ export default function AdminChannels() {
       setShowBaseUrlError(true)
       return
     }
-    const payload = { ...d, name: d.name.trim(), base_url: normalizedBaseUrl }
+    const payload = { ...d, name: d.name.trim(), base_url: normalizedBaseUrl, headers: parsedHeaders.headers }
     savingRef.current = true
     setSaving(true)
     try {
       if (editor.row) {
         await adminApi.updateChannel(editor.row.id, payload)
+        if (channelModelsLoaded) await adminApi.replaceChannelModels(editor.row.id, channelModels)
         toast.success(t('admin:channels.updated'))
       } else {
         const created = await adminApi.createChannel(payload)
         let modelBatchCreated = 0
-        let modelBatchSkipped = 0
+        const modelBatchSkipped = 0
         let modelBatchFailed = false
         if (modelsToCreate.length > 0) {
           try {
-            const result = await adminApi.createChannelModelsBatch(created.id, modelsToCreate)
-            modelBatchCreated = result.created
-            modelBatchSkipped = result.skipped_existing + result.skipped_duplicate
+            // A channel's model list is a capability registry. Do not create
+            // logical model rows here; those are created separately after an
+            // administrator enters the request_id on the Models page.
+            const result = await adminApi.replaceChannelModels(created.id, modelsToCreate.map((model) => ({
+              id: '',
+              channel_id: created.id,
+              request_id: model.request_id,
+              label: model.label,
+              description: model.description,
+              kind: model.kind,
+              enabled: true,
+              source: model.source ?? 'manual',
+              updated_at: 0,
+            })))
+            modelBatchCreated = result.length
           } catch {
             modelBatchFailed = true
           }
@@ -373,8 +476,8 @@ export default function AdminChannels() {
   }
 
   function persistOrder(next: ApiChannel[], prev: ApiChannel[]) {
-    void adminApi.reorderChannels(next.map((r) => r.id)).catch((e) => {
-      setRows(prev)
+    void adminApi.reorderChannels(mergeVisibleAdminOrder(rows, next).map((r) => r.id)).catch((e) => {
+      setRows((current) => mergeVisibleAdminOrder(current, prev))
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
     })
   }
@@ -384,11 +487,21 @@ export default function AdminChannels() {
       <AdminPageHeader
         title={t('admin:channels.title')}
         description={t('admin:channels.lead')}
+      />
+      <AdminListToolbar
+        search={search}
+        onSearchChange={setSearch}
+        placeholder={t('admin:listToolbar.search.channels')}
+        activeFilterCount={Number(typeFilter !== 'all') + Number(statusFilter !== 'all')}
+        onResetFilters={() => { setTypeFilter('all'); setStatusFilter('all') }}
+        filters={<>
+          <AdminListFilter label={t('admin:channels.fields.type')} value={typeFilter} onValueChange={setTypeFilter} options={[{ value: 'all', label: t('admin:listToolbar.allTypes') }, ...TYPES.map((type) => ({ value: type, label: type }))]} />
+          <AdminListFilter label={t('admin:common.status')} value={statusFilter} onValueChange={setStatusFilter} options={['all', 'enabled', 'disabled'].map((value) => ({ value, label: t(`admin:listToolbar.${value === 'all' ? 'allStatuses' : value}`) }))} />
+        </>}
         actions={(
           <Button
             data-admin-tour="channels-create"
             size="sm"
-            className="max-sm:min-h-[var(--tap-min)] max-sm:flex-1"
             leadingIcon={<Plus size={15} aria-hidden />}
             onClick={openNew}
           >
@@ -397,11 +510,11 @@ export default function AdminChannels() {
         )}
       />
 
-      <section className="mt-8">
-        {loading ? (
+      <section className="mt-4">
+      {loading ? (
           <PanelFallback />
         ) : rows.length === 0 ? (
-          <div className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center">
+          <div className="rounded-[12px] bg-[var(--color-surface)] px-6 py-10 text-center">
             <p className="text-[var(--color-fg-muted)] text-sm">{t('admin:channels.empty')}</p>
             <div className="mt-4">
               <Button onClick={openNew}>{t('admin:common.createFirst', { kind: t('admin:channels.title').toLowerCase() })}</Button>
@@ -409,57 +522,48 @@ export default function AdminChannels() {
           </div>
         ) : (
           <AdminSortableList
-            items={rows}
-            onItemsChange={setRows}
+            items={filteredRows}
+            onItemsChange={(next) => setRows((current) => mergeVisibleAdminOrder(current, next))}
             onOrderCommit={persistOrder}
             dragHandleLabel={t('admin:common.dragHandle')}
             moveUpLabel={t('admin:common.moveUp')}
             moveDownLabel={t('admin:common.moveDown')}
-            mobileDragOnly
-            rowClassName="grid grid-cols-[2.75rem_minmax(0,1fr)] items-start gap-x-2 gap-y-2 px-2 py-3.5 md:grid-cols-[auto_auto_minmax(0,1fr)_auto_auto] md:items-center md:gap-4 md:px-5 md:py-4"
-            renderItem={(r) => (
-              <>
-                <div className="col-start-2 row-start-1 min-w-0 md:col-start-auto md:row-start-auto">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-medium text-[var(--color-fg)] truncate">{r.name}</span>
-                    <Badge size="xs">{r.type}</Badge>
-                    {r.type === 'openai' && r.api_format ? <Badge size="xs">{r.api_format}</Badge> : null}
-                    {r.enabled ? null : <Badge size="xs" variant="neutral">{t('admin:channels.labels.disabled')}</Badge>}
-                  </div>
-                  <div className="mt-0.5 text-[12px] text-[var(--color-fg-subtle)] font-mono truncate">
-                    {r.base_url || t('admin:channels.labels.defaultEndpoint')} · {r.has_api_key ? t('admin:channels.labels.keySet') : t('admin:channels.labels.noKey')}
-                  </div>
-                </div>
-                <div className="col-span-2 row-start-2 flex items-center justify-end gap-1 md:contents">
+            tableLabel={t('admin:channels.title')}
+            columns={[
+              { id: 'name', header: t('admin:channels.fields.name'), width: 200, render: (r) => <span className="block truncate font-medium" title={r.name}>{r.name}</span> },
+              { id: 'type', header: t('admin:channels.fields.type'), width: 140, render: (r) => <div className="flex flex-wrap gap-1"><Badge size="xs">{r.type}</Badge>{r.type === 'openai' && r.api_format ? <Badge size="xs">{r.api_format}</Badge> : null}</div> },
+              { id: 'endpoint', header: t('admin:channels.fields.baseUrl'), width: 260, render: (r) => <span className="block truncate font-mono text-[12px] text-[var(--color-fg-muted)]" title={r.base_url}>{r.base_url || t('admin:channels.labels.defaultEndpoint')}</span> },
+              { id: 'key', header: t('admin:channels.fields.apiKey'), width: 100, render: (r) => <span className="text-[12px] text-[var(--color-fg-muted)]">{r.has_api_key ? t('admin:channels.labels.keySet') : t('admin:channels.labels.noKey')}</span> },
+              { id: 'status', header: t('admin:common.status'), width: 190, render: (r) => <div className="flex flex-wrap gap-1"><Badge size="xs" variant={r.enabled ? 'success' : 'neutral'}>{t(r.enabled ? 'admin:channels.fields.enabled' : 'admin:channels.labels.disabled')}</Badge>{(r.auto_disabled_until ?? 0) > Math.floor(Date.now() / 1000) ? <Badge size="xs" variant="warning">{t('admin:channels.labels.autoDisabled', { defaultValue: '自动禁用' })}</Badge> : null}{(channelHealthByID[r.id]?.some((item) => item.disabled_until > Math.floor(Date.now() / 1000))) ? <Badge size="xs" variant="warning">{t('admin:channels.labels.partialUnavailable', { defaultValue: '部分模型不可用' })}</Badge> : null}</div> },
+              { id: 'actions', header: t('admin:common.actions'), width: 100, align: 'right', render: (r) => (
+                <div className="flex items-center justify-end gap-1">
                   <Button
                     variant="ghost"
-                    size="sm"
-                    className="max-md:size-[var(--tap-min)] max-md:gap-0 max-md:px-0"
+                    size="icon-sm"
+                    title={t('admin:common.edit')}
                     aria-label={`${t('admin:common.edit')}: ${r.name}`}
                     leadingIcon={<Pencil size={13} aria-hidden />}
                     onClick={() => openEdit(r)}
                   >
-                    <span className="max-md:sr-only">{t('admin:common.edit')}</span>
                   </Button>
                   <Button
                     variant="ghost"
-                    size="sm"
-                    className="max-md:size-[var(--tap-min)] max-md:gap-0 max-md:px-0"
+                    size="icon-sm"
+                    title={t('admin:common.remove')}
                     aria-label={`${t('admin:common.remove')}: ${r.name}`}
                     leadingIcon={<Trash2 size={13} aria-hidden />}
                     onClick={() => setConfirmDelete(r)}
                   >
-                    <span className="max-md:sr-only">{t('admin:common.remove')}</span>
                   </Button>
                 </div>
-              </>
-            )}
+              ) },
+            ]}
           />
         )}
       </section>
 
       <Dialog open={editor.open} onOpenChange={(o) => !savingRef.current && setEditor({ ...editor, open: o })}>
-        <DialogContent size={editor.row ? 'md' : 'lg'}>
+        <DialogContent size="lg" className="h-[min(88dvh,760px)]">
           <DialogHeader>
             <DialogTitle>{editor.row ? t('admin:channels.editorTitle') : t('admin:channels.newTitle')}</DialogTitle>
             <DialogDescription>
@@ -570,19 +674,105 @@ export default function AdminChannels() {
                     />
                   </label>
                 </div>
+                <AdminAdvancedDisclosure
+                  title={t('admin:channels.advanced')}
+                  open={advancedOpen}
+                  onOpenChange={setAdvancedOpen}
+                >
+                  <Tabs value={advancedTab} onValueChange={setAdvancedTab} className="min-w-0">
+                    <div className="max-w-full overflow-x-auto pb-1">
+                      <TabsList variant="segmented" aria-label={t('admin:channels.advanced')} className="w-max max-w-none rounded-[8px]">
+                        {['headers', 'reliability'].map((tab) => (
+                          <TabsTrigger key={tab} value={tab} variant="segmented" className="shrink-0 whitespace-nowrap">
+                            {t(`admin:channels.advancedTabs.${tab}`)}
+                          </TabsTrigger>
+                        ))}
+                      </TabsList>
+                    </div>
+                    <TabsContent value="headers" forceMount className="mt-4 min-w-0 data-[state=inactive]:hidden">
+                      <Field
+                        label={t('admin:channels.headers.label')}
+                        htmlFor="ch-headers"
+                        hint={t('admin:channels.headers.hint')}
+                        error={showHeadersError && parsedHeaders.error ? t(`admin:channels.headers.errors.${parsedHeaders.error}`) : undefined}
+                      >
+                        <Textarea
+                          id="ch-headers"
+                          rows={4}
+                          spellCheck={false}
+                          disabled={saving}
+                          value={headersText}
+                          onChange={(event) => { setHeadersText(event.target.value); resetModelDiscovery() }}
+                          onBlur={() => setShowHeadersError(true)}
+                          invalid={showHeadersError && !!parsedHeaders.error}
+                          placeholder={'{\n  "A": "a"\n}'}
+                          className="rounded-[8px] font-mono text-[13px] leading-5"
+                        />
+                      </Field>
+                    </TabsContent>
+                    <TabsContent value="reliability" forceMount className="mt-4 min-w-0 data-[state=inactive]:hidden">
+                      <div className="rounded-[8px] bg-[var(--color-bg-muted)] p-3">
+                        <div className="mb-2 flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-medium text-[var(--color-fg)]">{t('admin:channels.autoDisable.title', { defaultValue: '渠道自动禁用' })}</p>
+                            <p className="mt-1 text-xs text-[var(--color-fg-muted)]">{t('admin:channels.autoDisable.hint', { defaultValue: '该渠道下任意模型连续失败或首字超时后暂时停止调度。首字超时使用模型策略中的阈值。' })}</p>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                          <Field label={t('admin:channels.autoDisable.errors', { defaultValue: '连续错误次数' })} htmlFor="ch-disable-errors"><Input id="ch-disable-errors" type="number" min="0" step="1" disabled={saving} value={String(editor.draft.auto_disable_errors ?? 0)} onChange={(event) => updateDraft({ auto_disable_errors: Math.max(0, Number(event.target.value) || 0) })} /></Field>
+                          <Field label={t('admin:channels.autoDisable.timeouts', { defaultValue: '连续超时次数' })} htmlFor="ch-disable-timeouts"><Input id="ch-disable-timeouts" type="number" min="0" step="1" disabled={saving} value={String(editor.draft.auto_disable_timeouts ?? 0)} onChange={(event) => updateDraft({ auto_disable_timeouts: Math.max(0, Number(event.target.value) || 0) })} /></Field>
+                          <Field label={t('admin:channels.autoDisable.minutes', { defaultValue: '禁用时长（分钟）' })} htmlFor="ch-disable-minutes"><Input id="ch-disable-minutes" type="number" min="0" step="1" disabled={saving} value={String(editor.draft.auto_disable_minutes ?? 0)} onChange={(event) => updateDraft({ auto_disable_minutes: Math.max(0, Number(event.target.value) || 0) })} /></Field>
+                        </div>
+                      </div>
+                    </TabsContent>
+                  </Tabs>
+                </AdminAdvancedDisclosure>
               </div>
 
-              {!editor.row ? (
-                <div className="grid gap-3 border-t border-[var(--color-border)] pt-5">
-                  <div>
-                    <h3 className="text-sm font-medium text-[var(--color-fg)]">{t('admin:channels.modelAdd.title')}</h3>
-                    <p className="mt-1 text-xs leading-5 text-[var(--color-fg-muted)]">{t('admin:channels.modelAdd.hint')}</p>
+              {editor.row && ((editor.draft.auto_disabled_until ?? 0) > Math.floor(Date.now() / 1000)
+                || channelHealth?.models.some((item) => item.disabled_until > Math.floor(Date.now() / 1000))) ? (
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-[8px] bg-[var(--color-bg-muted)] px-3 py-2.5">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-[var(--color-fg-muted)]">
+                    {(editor.draft.auto_disabled_until ?? 0) > Math.floor(Date.now() / 1000) ? (
+                      <Badge size="xs" variant="warning">{t('admin:channels.labels.autoDisabled')}</Badge>
+                    ) : null}
+                    {channelHealth?.models.some((item) => item.disabled_until > Math.floor(Date.now() / 1000)) ? (
+                      <span>
+                        <span className="font-medium text-[var(--color-fg)]">{t('admin:channels.autoDisable.partial', { defaultValue: '部分模型暂时不可用：' })}</span>{' '}
+                        {channelHealth.models.filter((item) => item.disabled_until > Math.floor(Date.now() / 1000)).map((item) => `${item.model_label || item.request_id} (${t(`admin:models.channels.${item.role}`)})`).join('、')}
+                      </span>
+                    ) : null}
                   </div>
+                  {(editor.draft.auto_disabled_until ?? 0) > Math.floor(Date.now() / 1000) ? (
+                    <Button type="button" size="sm" variant="secondary" disabled={saving} onClick={async () => {
+                      try {
+                        const recovered = await adminApi.recoverChannel(editor.row!.id)
+                        setEditor((current) => ({ ...current, draft: { ...current.draft, ...recovered }, row: recovered }))
+                        setRows((current) => current.map((row) => row.id === recovered.id ? recovered : row))
+                        setChannelHealth((current) => current ? { ...current, channel: recovered } : current)
+                        toast.success(t('admin:channels.autoDisable.recovered', { defaultValue: '渠道已恢复' }))
+                      } catch (error) { toast.error(error instanceof ApiError ? error.message : t('admin:common.failed')) }
+                    }}>{t('admin:channels.autoDisable.recover', { defaultValue: '恢复渠道' })}</Button>
+                  ) : null}
+                </div>
+              ) : null}
+
+              <section className="mt-2 grid gap-3" aria-labelledby="ch-models-heading">
+                <div>
+                  <h3 id="ch-models-heading" className="text-sm font-medium text-[var(--color-fg)]">
+                    {t('admin:channels.modelAdd.title')}
+                  </h3>
+                  <p className="mt-1 text-xs leading-5 text-[var(--color-fg-muted)]">
+                    {t(editor.row ? 'admin:channels.modelAdd.editHint' : 'admin:channels.modelAdd.hint')}
+                  </p>
+                </div>
+                <div className="grid gap-3">
                   <form
                     className="flex w-full flex-col gap-2 sm:flex-row"
                     onSubmit={(event) => {
                       event.preventDefault()
-                      addManualModel()
+                      if (editor.row) addExistingModel()
+                      else addManualModel()
                     }}
                   >
                     <Input
@@ -604,6 +794,7 @@ export default function AdminChannels() {
                       {t('admin:channels.modelAdd.add')}
                     </Button>
                     <Button
+                      type="button"
                       variant="outline"
                       disabled={saving}
                       leadingIcon={<RefreshCw size={14} aria-hidden />}
@@ -614,26 +805,28 @@ export default function AdminChannels() {
                     </Button>
                   </form>
 
-                  <div className="min-h-28 max-h-56 overflow-y-auto rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface-sunken)] p-1">
-                    {pendingModels.length > 0 ? pendingModels.map((model) => (
+                  <div className="min-h-28 max-h-56 overflow-y-auto rounded-[8px] bg-[var(--color-surface-sunken)] p-1">
+                    {editorModels.length > 0 ? editorModels.map((model) => (
                       <div key={model.request_id} className="flex min-h-11 items-center gap-3 rounded-[6px] px-2.5 py-2">
                         <span className="min-w-0 flex-1">
                           <span className="flex min-w-0 items-center gap-2">
-                            <span className="truncate text-sm font-medium text-[var(--color-fg)]">{model.label}</span>
+                            <span className="truncate text-sm font-medium text-[var(--color-fg)]">{model.label || model.request_id}</span>
                             <Badge size="xs">{model.kind}</Badge>
                           </span>
-                          {model.label !== model.request_id ? (
+                          {model.label && model.label !== model.request_id ? (
                             <span className="mt-0.5 block truncate font-mono text-[12px] text-[var(--color-fg-subtle)]">
                               {model.request_id}
                             </span>
                           ) : null}
                         </span>
                         <Button
+                          type="button"
                           variant="ghost"
                           size="icon-sm"
-                          aria-label={t('admin:channels.modelAdd.removeModel', { name: model.label })}
+                          disabled={saving}
+                          aria-label={t('admin:channels.modelAdd.removeModel', { name: model.label || model.request_id })}
                           title={t('admin:channels.modelAdd.remove')}
-                          onClick={() => removePendingModel(model.request_id)}
+                          onClick={() => editor.row ? removeExistingModel(model.request_id) : removePendingModel(model.request_id)}
                         >
                           <Trash2 size={14} aria-hidden />
                         </Button>
@@ -645,7 +838,7 @@ export default function AdminChannels() {
                     )}
                   </div>
                 </div>
-              ) : null}
+              </section>
             </div>
           </DialogBody>
           <DialogFooter>
@@ -715,7 +908,7 @@ export default function AdminChannels() {
                     </Button>
                   </div>
                 </div>
-                <div className="h-80 overflow-y-auto rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface-sunken)] p-1">
+                <div className="h-80 overflow-y-auto rounded-[8px] bg-[var(--color-surface-sunken)] p-1">
                   {filteredDiscoveredModels.length > 0 ? filteredDiscoveredModels.map((model) => {
                     const key = model.request_id.toLowerCase()
                     const alreadyAdded = pendingModelKeys.has(key)

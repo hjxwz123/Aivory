@@ -57,6 +57,7 @@ const AdminUserLibrary = lazy(() => import('@/pages/admin/AdminUserLibrary'))
 const AdminUserMemories = lazy(() => import('@/pages/admin/AdminUserMemories'))
 const AdminUserLoginHistory = lazy(() => import('@/pages/admin/AdminUserLoginHistory'))
 const AdminUsage = lazy(() => import('@/pages/admin/AdminUsage'))
+const AdminAuditLogs = lazy(() => import('@/pages/admin/AdminAuditLogs'))
 const AdminAnalytics = lazy(() => import('@/pages/admin/AdminAnalytics'))
 const AdminModelPolicy = lazy(() => import('@/pages/admin/AdminModelPolicy'))
 const AdminContextMemory = lazy(() => import('@/pages/admin/AdminContextMemory'))
@@ -283,7 +284,9 @@ export default function App() {
               <Route path="users/:id/memories" element={<AdminUserMemories />} />
               <Route path="users/:id/login-history" element={<AdminUserLoginHistory />} />
               <Route path="users/:id/conversations/:cid" element={<AdminUserConversation />} />
-              <Route path="usage" element={<AdminUsage />} />
+              <Route path="usage" element={<Navigate to="/admin/logs/usage" replace />} />
+              <Route path="logs/usage" element={<AdminUsage />} />
+              <Route path="logs/audit" element={<AdminAuditLogs />} />
               <Route path="analytics" element={<AdminAnalytics />} />
               <Route path="documents" element={<AdminDocuments />} />
               <Route path="resources" element={<AdminResources />} />

@@ -15,6 +15,8 @@ import { adminApi, ApiError, type ApiMCPServer, type ApiMCPServerInput } from '@
 import { IconPicker } from '@/components/admin/icon-picker'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { AdminTable } from '@/components/admin/AdminTable'
+import { Tooltip } from '@/components/ui/tooltip'
 import {
   Dialog,
   DialogBody,
@@ -333,7 +335,7 @@ export default function AdminMCP() {
         {loading ? (
           <PanelFallback />
         ) : loadFailed ? (
-          <div className="flex min-h-64 flex-col items-center justify-center rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center">
+          <div className="flex min-h-64 flex-col items-center justify-center rounded-[12px] bg-[var(--color-surface)] px-6 py-10 text-center">
             <AlertCircle size={22} aria-hidden className="text-[var(--color-danger)]" />
             <p className="mt-3 text-sm font-medium text-[var(--color-fg)]">{t('admin:mcp.loadFailed')}</p>
             <Button
@@ -347,123 +349,31 @@ export default function AdminMCP() {
             </Button>
           </div>
         ) : rows.length === 0 ? (
-          <div className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center">
+          <div className="rounded-[12px] bg-[var(--color-surface)] px-6 py-10 text-center">
             <p className="text-sm font-medium text-[var(--color-fg)]">{t('admin:mcp.emptyTitle')}</p>
             <p className="mx-auto mt-1 max-w-lg text-sm text-[var(--color-fg-muted)]">{t('admin:mcp.emptyBody')}</p>
           </div>
         ) : (
-          <div className="divide-y divide-[var(--color-divider)] overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-            {rows.map((server) => {
-              const toolCount = server.discovered_tools?.length ?? 0
-              const syncedAt = formatTimestamp(server.last_synced_at)
-              const testKey = `test:${server.id}`
-              const syncKey = `sync:${server.id}`
-              return (
-                <article key={server.id} className="px-4 py-4 sm:px-5">
-                  <div className="flex min-w-0 items-start gap-3">
-                    <span className="grid size-10 shrink-0 place-items-center rounded-[8px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
-                      <LucideGlyph name={server.icon || 'Blocks'} size={17} aria-hidden />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h2 className="min-w-0 truncate text-sm font-semibold text-[var(--color-fg)]" title={server.name}>
-                          {server.name}
-                        </h2>
-                        {server.last_error ? (
-                          <Badge size="xs" variant="danger">{t('admin:mcp.status.error')}</Badge>
-                        ) : server.last_synced_at ? (
-                          <Badge size="xs" variant="success">{t('admin:mcp.status.connected')}</Badge>
-                        ) : (
-                          <Badge size="xs" variant="neutral">{t('admin:mcp.status.notTested')}</Badge>
-                        )}
-                        {toolCount > 0 ? (
-                          <Badge size="xs" variant="neutral">
-                            {t('admin:mcp.toolCount', { count: toolCount })}
-                          </Badge>
-                        ) : null}
-                      </div>
-                      <p className="mt-1 line-clamp-2 text-[12px] leading-4 text-[var(--color-fg-subtle)]">
-                        {server.description}
-                      </p>
-                      <p
-                        className="mt-1.5 truncate font-mono text-[12px] text-[var(--color-fg-faint)]"
-                        title={server.url}
-                        dir="ltr"
-                      >
-                        {server.url}
-                      </p>
-                      {server.last_error ? (
-                        <p className="mt-2 flex items-start gap-1.5 text-[12px] leading-4 text-[var(--color-danger)]">
-                          <AlertCircle size={13} aria-hidden className="mt-0.5 shrink-0" />
-                          <span className="break-words">{server.last_error}</span>
-                        </p>
-                      ) : syncedAt ? (
-                        <p className="mt-1.5 text-[12px] text-[var(--color-fg-faint)]">
-                          {t('admin:mcp.lastSynced', { time: syncedAt })}
-                        </p>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--color-divider)] pt-3 sm:ml-[3.25rem]">
-                    <label htmlFor={`mcp-enabled-${server.id}`} className="flex min-h-8 items-center gap-2 text-[12px] font-medium text-[var(--color-fg-muted)]">
-                      <Switch
-                        id={`mcp-enabled-${server.id}`}
-                        checked={server.enabled}
-                        disabled={Boolean(togglingID) || Boolean(busyAction)}
-                        onCheckedChange={(value) => void toggleEnabled(server, value)}
-                      />
-                      {server.enabled ? t('admin:mcp.status.enabled') : t('admin:mcp.status.disabled')}
-                    </label>
-                    <div className="flex flex-wrap items-center justify-end gap-1">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        leadingIcon={<Cable size={13} aria-hidden />}
-                        loading={busyAction === testKey}
-                        disabled={Boolean(busyAction) || Boolean(togglingID)}
-                        onClick={() => void runAction(server, 'test')}
-                      >
-                        {t('admin:mcp.actions.test')}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        leadingIcon={<RefreshCw size={13} aria-hidden />}
-                        loading={busyAction === syncKey}
-                        disabled={Boolean(busyAction) || Boolean(togglingID)}
-                        onClick={() => void runAction(server, 'sync')}
-                      >
-                        {t('admin:mcp.actions.sync')}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        leadingIcon={<Pencil size={13} aria-hidden />}
-                        aria-label={`${t('admin:common.edit')}: ${server.name}`}
-                        disabled={Boolean(busyAction) || Boolean(togglingID)}
-                        onClick={() => openEdit(server)}
-                        className="max-sm:size-[var(--tap-min)] max-sm:gap-0 max-sm:px-0"
-                      >
-                        <span className="max-sm:sr-only">{t('admin:common.edit')}</span>
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        leadingIcon={<Trash2 size={13} aria-hidden />}
-                        aria-label={`${t('admin:common.remove')}: ${server.name}`}
-                        disabled={Boolean(busyAction) || Boolean(togglingID)}
-                        onClick={() => setConfirmDelete(server)}
-                        className="max-sm:size-[var(--tap-min)] max-sm:gap-0 max-sm:px-0"
-                      >
-                        <span className="max-sm:sr-only">{t('admin:common.remove')}</span>
-                      </Button>
-                    </div>
-                  </div>
-                </article>
-              )
-            })}
-          </div>
+          <AdminTable
+            items={rows}
+            rowKey={(server) => server.id}
+            label={t('admin:mcp.listLabel')}
+            columns={[
+              { id: 'name', header: t('admin:mcp.fields.name'), width: 200, render: (server) => <div className="flex min-w-0 items-center gap-2.5"><span className="grid size-8 shrink-0 place-items-center rounded-[8px] bg-[var(--color-bg-muted)]"><LucideGlyph name={server.icon || 'Blocks'} size={16} aria-hidden /></span><span className="truncate font-medium" title={server.name}>{server.name}</span></div> },
+              { id: 'url', header: t('admin:mcp.fields.url'), width: 260, render: (server) => <span className="block truncate font-mono text-[12px] text-[var(--color-fg-muted)]" title={server.url} dir="ltr">{server.url}</span> },
+              { id: 'details', header: t('admin:mcp.fields.description'), width: 250, render: (server) => <div><span className="block truncate text-[var(--color-fg-muted)]" title={server.description}>{server.description || '—'}</span>{server.last_error ? <span className="block truncate text-[12px] text-[var(--color-danger)]" title={server.last_error}>{server.last_error}</span> : server.last_synced_at ? <span className="block text-[12px] text-[var(--color-fg-muted)]">{t('admin:mcp.lastSynced', { time: formatTimestamp(server.last_synced_at) })}</span> : null}</div> },
+              { id: 'status', header: t('admin:common.status'), width: 120, render: (server) => <div className="flex flex-wrap gap-1"><Badge size="xs" variant={server.last_error ? 'danger' : server.last_synced_at ? 'success' : 'neutral'}>{t(server.last_error ? 'admin:mcp.status.error' : server.last_synced_at ? 'admin:mcp.status.connected' : 'admin:mcp.status.notTested')}</Badge><span className="text-[12px] text-[var(--color-fg-muted)]">{t('admin:mcp.toolCount', { count: server.discovered_tools?.length ?? 0 })}</span></div> },
+              { id: 'enabled', header: t('admin:mcp.fields.enabled'), width: 90, align: 'center', render: (server) => <Switch checked={server.enabled} disabled={Boolean(togglingID) || Boolean(busyAction)} onCheckedChange={(value) => void toggleEnabled(server, value)} aria-label={t('admin:mcp.fields.enabled')} /> },
+              { id: 'actions', header: t('admin:common.actions'), width: 200, align: 'right', render: (server) => (
+                <div className="flex items-center gap-1">
+                  <Tooltip content={t('admin:mcp.actions.test')}><Button size="icon-sm" variant="ghost" aria-label={t('admin:mcp.actions.test')} loading={busyAction === `test:${server.id}`} disabled={Boolean(busyAction) || Boolean(togglingID)} onClick={() => void runAction(server, 'test')}><Cable size={14} aria-hidden /></Button></Tooltip>
+                  <Tooltip content={t('admin:mcp.actions.sync')}><Button size="icon-sm" variant="ghost" aria-label={t('admin:mcp.actions.sync')} loading={busyAction === `sync:${server.id}`} disabled={Boolean(busyAction) || Boolean(togglingID)} onClick={() => void runAction(server, 'sync')}><RefreshCw size={14} aria-hidden /></Button></Tooltip>
+                  <Button size="icon-sm" variant="ghost" title={t('admin:common.edit')} aria-label={`${t('admin:common.edit')}: ${server.name}`} disabled={Boolean(busyAction) || Boolean(togglingID)} onClick={() => openEdit(server)}><Pencil size={14} aria-hidden /></Button>
+                  <Button size="icon-sm" variant="ghost" title={t('admin:common.remove')} aria-label={`${t('admin:common.remove')}: ${server.name}`} disabled={Boolean(busyAction) || Boolean(togglingID)} onClick={() => setConfirmDelete(server)}><Trash2 size={14} aria-hidden /></Button>
+                </div>
+              ) },
+            ]}
+          />
         )}
       </section>
 
@@ -552,7 +462,7 @@ export default function AdminMCP() {
                     {editor.draft.headers.map((header, index) => (
                       <div
                         key={header.id}
-                        className="relative grid gap-2 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-3 pr-12 sm:grid-cols-2"
+                        className="relative grid gap-2 rounded-[8px] bg-[var(--color-bg-muted)] p-3 pr-12 sm:grid-cols-2"
                       >
                         <Input
                           aria-label={t('admin:mcp.fields.headerNameLabel', { index: index + 1 })}
@@ -601,7 +511,7 @@ export default function AdminMCP() {
 
               <label
                 htmlFor="mcp-enabled"
-                className="flex items-center justify-between rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5 sm:col-span-2"
+                className="flex items-center justify-between rounded-[8px] bg-[var(--color-bg-muted)] px-3 py-2.5 sm:col-span-2"
               >
                 <span>
                   <span className="block text-sm font-medium text-[var(--color-fg)]">{t('admin:mcp.fields.enabled')}</span>

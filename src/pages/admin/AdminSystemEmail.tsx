@@ -137,7 +137,7 @@ export default function AdminSystemEmail() {
                 />
               </Field>
             </SettingsBlock>
-            <div className="border-t border-[var(--color-divider)]">
+            <div>
               <SettingsRow
                 label={t('admin:settings.fields.smtpTls')}
                 description={directTls ? t('admin:settings.fields.smtpTlsHint') : undefined}

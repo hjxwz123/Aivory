@@ -51,6 +51,7 @@ import { cn } from '@/lib/utils'
 import { useLanguage } from '@/store/language'
 import { AdminModelFeedback } from './AdminModelFeedback'
 import { AdminPageHeader } from '@/components/admin/admin-page-header'
+import { AdminTableFrame } from '@/components/admin/AdminTable'
 
 const RANGE_IDS = ['1', '7', '30', '90', '365'] as const
 const METRICS: AnalyticsMetric[] = ['turns', 'tokens', 'cost', 'credits', 'users']
@@ -333,7 +334,7 @@ export default function AdminAnalytics() {
       </div>
 
       {view === 'usage' ? (
-        <div className="mt-4 grid min-w-0 grid-cols-2 gap-2 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 sm:grid-cols-2 xl:grid-cols-[minmax(15rem,1fr)_repeat(4,minmax(8rem,11rem))_auto]">
+        <div className="mt-4 grid min-w-0 grid-cols-2 gap-2 rounded-[12px] bg-[var(--color-surface)] p-3 sm:grid-cols-2 xl:grid-cols-[minmax(15rem,1fr)_repeat(4,minmax(8rem,11rem))_auto]">
           <Input
             value={userQuery}
             onChange={(event) => setUserQuery(event.target.value)}
@@ -472,7 +473,7 @@ export default function AdminAnalytics() {
             ]}
           />
 
-          <section className="mt-6 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:p-5">
+          <section className="mt-6 rounded-[12px] bg-[var(--color-surface)] p-4 sm:p-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <h2 className="text-sm font-medium text-[var(--color-fg)]">{t('admin:analytics.sections.trend')}</h2>
@@ -567,20 +568,13 @@ interface SummaryItemSpec {
 function SummaryStrip({ items, formatPercent }: { items: SummaryItemSpec[]; formatPercent: (value: number) => string }) {
   const { t } = useTranslation('admin')
   return (
-    <section className="grid overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
-      {items.map((item, index) => {
+    <section className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
+      {items.map((item) => {
         const change = periodChange(item.current, item.previous)
         return (
           <div
             key={item.key}
-            className={cn(
-              'min-w-0 px-3 py-3.5 sm:px-4',
-              index % 2 !== 0 && 'border-l border-[var(--color-divider)] md:border-l-0',
-              index >= 2 && 'border-t border-[var(--color-divider)] md:border-t-0',
-              index % 3 !== 0 && 'md:border-l md:border-[var(--color-divider)]',
-              index >= 3 && 'md:border-t md:border-[var(--color-divider)] xl:border-t-0',
-              index !== 0 && 'xl:border-l xl:border-[var(--color-divider)]',
-            )}
+            className="min-w-0 rounded-[8px] bg-[var(--color-bg-muted)]/55 px-3 py-3.5 sm:px-4"
           >
             <div className="truncate text-[12px] font-medium text-[var(--color-fg-muted)]">{item.label}</div>
             <div className="mt-1.5 truncate text-xl font-medium tabular-nums text-[var(--color-fg)]">
@@ -763,14 +757,14 @@ function BillingEconomics({
     [t('admin:analytics.economics.chargedUsers'), formatNumber(totals.credit_charged_users)],
   ]
   return (
-    <div className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:p-5">
+    <div className="rounded-[12px] bg-[var(--color-surface)] p-4 sm:p-5">
       <div className="flex items-center gap-2">
         <h2 className="text-sm font-medium text-[var(--color-fg)]">{t('admin:analytics.sections.economics')}</h2>
         <DefinitionPopover content={t('admin:analytics.notes.billingDefinition')} />
       </div>
-      <dl className="mt-4 grid grid-cols-1 divide-y divide-[var(--color-divider)] sm:grid-cols-2 sm:gap-x-6 sm:divide-y-0">
+      <dl className="mt-4 grid grid-cols-1 sm:grid-cols-2 sm:gap-x-6">
         {rows.map(([label, value]) => (
-          <div key={label} className="flex items-center justify-between gap-4 border-b border-[var(--color-divider)] py-2.5 last:border-b-0 sm:last:border-b">
+          <div key={label} className="flex items-center justify-between gap-4 py-2.5">
             <dt className="text-[12px] text-[var(--color-fg-muted)]">{label}</dt>
             <dd className="shrink-0 text-[13px] font-medium tabular-nums text-[var(--color-fg)]">{value}</dd>
           </div>
@@ -799,7 +793,7 @@ function TokenComposition({
     [t('admin:analytics.details.cacheWriteTokens'), totals.cache_write_tokens, 'bg-[var(--color-fg-subtle)]'],
   ] as const
   return (
-    <div className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:p-5">
+    <div className="rounded-[12px] bg-[var(--color-surface)] p-4 sm:p-5">
       <div className="flex items-center gap-2">
         <h2 className="text-sm font-medium text-[var(--color-fg)]">{t('admin:analytics.sections.tokenComposition')}</h2>
         <DefinitionPopover content={t('admin:analytics.notes.tokenDefinition')} />
@@ -813,7 +807,7 @@ function TokenComposition({
       </div>
       <dl className="mt-3 grid gap-x-6 sm:grid-cols-2">
         {rows.map(([label, value, color]) => (
-          <div key={label} className="flex items-center justify-between gap-4 border-b border-[var(--color-divider)] py-2.5">
+          <div key={label} className="flex items-center justify-between gap-4 py-2.5">
             <dt className="inline-flex min-w-0 items-center gap-2 text-[12px] text-[var(--color-fg-muted)]">
               <span className={cn('size-2 shrink-0 rounded-xs', color)} aria-hidden />{label}
             </dt>
@@ -821,7 +815,7 @@ function TokenComposition({
           </div>
         ))}
       </dl>
-      <dl className="mt-4 grid grid-cols-3 divide-x divide-[var(--color-divider)] border-t border-[var(--color-divider)] pt-4">
+      <dl className="mt-4 grid grid-cols-3 pt-4">
         {footerValues.map(([label, value]) => (
           <div key={label} className="min-w-0 px-2 text-center first:pl-0 last:pr-0">
             <dt className="truncate text-[12px] text-[var(--color-fg-muted)]">{label}</dt>
@@ -921,8 +915,8 @@ function BreakdownSection({
   const pagedRows = visibleRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   return (
-    <section className="mt-6 overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-      <div className="border-b border-[var(--color-divider)] p-4 sm:p-5">
+    <section className="mt-6 overflow-hidden rounded-[12px] bg-[var(--color-surface)]">
+      <div className="p-4 sm:p-5">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div>
             <h2 className="text-sm font-medium text-[var(--color-fg)]">{t('admin:analytics.sections.breakdown')}</h2>
@@ -973,18 +967,19 @@ function BreakdownSection({
         <div className="px-6 py-12 text-center text-sm text-[var(--color-fg-muted)]">{t('admin:analytics.breakdown.empty')}</div>
       ) : (
         <>
-          <div className="hidden overflow-x-auto lg:block">
-            <table className="w-full min-w-[940px] text-[12.5px] tabular-nums">
+          <AdminTableFrame embedded label={t('admin:analytics.sections.breakdown')}>
+            <table className="admin-data-table tabular-nums" style={{ minWidth: 1100 }}>
+              <colgroup><col style={{ width: 260 }} /><col span={billingSafe ? 7 : 5} /></colgroup>
               <thead className="bg-[var(--color-bg-muted)] text-[12px] text-[var(--color-fg-muted)]">
                 <tr>
-                  <th className="px-4 py-2.5 text-left font-medium">{t('admin:analytics.table.name')}</th>
-                  <th className="px-3 py-2.5 text-right font-medium">{t('admin:analytics.table.operations')}</th>
-                  <th className="px-3 py-2.5 text-right font-medium">{t('admin:analytics.table.turns')}</th>
-                  <th className="px-3 py-2.5 text-right font-medium">{t('admin:analytics.table.tokens')}</th>
-                  <th className="px-3 py-2.5 text-right font-medium">{t('admin:analytics.table.cost')}</th>
-                  {billingSafe ? <th className="px-3 py-2.5 text-right font-medium">{t('admin:analytics.table.credits')}</th> : null}
-                  {billingSafe ? <th className="px-3 py-2.5 text-right font-medium">{t('admin:analytics.table.chargedTurns')}</th> : null}
-                  <th className="px-4 py-2.5 text-right font-medium">
+                  <th scope="col" className="px-4 py-2.5 text-left font-medium">{t('admin:analytics.table.name')}</th>
+                  <th scope="col" className="px-3 py-2.5 text-right font-medium">{t('admin:analytics.table.operations')}</th>
+                  <th scope="col" className="px-3 py-2.5 text-right font-medium">{t('admin:analytics.table.turns')}</th>
+                  <th scope="col" className="px-3 py-2.5 text-right font-medium">{t('admin:analytics.table.tokens')}</th>
+                  <th scope="col" className="px-3 py-2.5 text-right font-medium">{t('admin:analytics.table.cost')}</th>
+                  {billingSafe ? <th scope="col" className="px-3 py-2.5 text-right font-medium">{t('admin:analytics.table.credits')}</th> : null}
+                  {billingSafe ? <th scope="col" className="px-3 py-2.5 text-right font-medium">{t('admin:analytics.table.chargedTurns')}</th> : null}
+                  <th scope="col" className="px-4 py-2.5 text-right font-medium">
                     {t(billingSafe ? 'admin:analytics.table.avgCostTurn' : 'admin:analytics.table.avgCostOperation')}
                   </th>
                 </tr>
@@ -1007,28 +1002,10 @@ function BreakdownSection({
                 ))}
               </tbody>
             </table>
-          </div>
-
-          <div className="divide-y divide-[var(--color-divider)] lg:hidden">
-            {pagedRows.map((row) => (
-              <BreakdownMobileRow
-                key={`${dimension}:${row.key}`}
-                row={row}
-                dimension={dimension}
-                label={labelFor(row)}
-                billingSafe={billingSafe}
-                totalCost={data.totals.cost}
-                formatCost={formatCost}
-                formatNumber={formatNumber}
-                formatDecimal={formatDecimal}
-                formatCompact={formatCompact}
-                formatPercent={formatPercent}
-              />
-            ))}
-          </div>
+          </AdminTableFrame>
         </>
       )}
-      <Pagination page={page} pageCount={pageCount} onPage={setPage} className="border-t border-[var(--color-divider)] pb-4" />
+      <Pagination page={page} pageCount={pageCount} onPage={setPage} className="pb-4" />
     </section>
   )
 }
@@ -1096,7 +1073,7 @@ function BreakdownDesktopRow(props: BreakdownRowProps) {
   } = props
   const share = clampRatio(safeRatio(row.cost, totalCost))
   return (
-    <tr className="border-t border-[var(--color-divider)] hover:bg-[var(--color-bg-muted)]/60">
+    <tr className="hover:bg-[var(--color-bg-muted)]/60">
       <td className="min-w-[15rem] px-4 py-3">
         <div className="flex items-center justify-between gap-3">
           <span className="max-w-[18rem] truncate font-medium text-[var(--color-fg)]" title={label}>
@@ -1121,57 +1098,10 @@ function BreakdownDesktopRow(props: BreakdownRowProps) {
   )
 }
 
-function BreakdownMobileRow(props: BreakdownRowProps) {
-  const { t } = useTranslation('admin')
-  const {
-    row,
-    dimension,
-    label,
-    billingSafe,
-    totalCost,
-    formatCost,
-    formatNumber,
-    formatDecimal,
-    formatCompact,
-    formatPercent,
-  } = props
-  const share = clampRatio(safeRatio(row.cost, totalCost))
-  const pairs: Array<[string, string]> = [
-    [t('analytics.table.operations'), formatNumber(row.calls)],
-    [t('analytics.table.turns'), formatNumber(row.turns)],
-    [t('analytics.table.tokens'), formatCompact(row.input_tokens + row.output_tokens)],
-    [t('analytics.table.cost'), formatCost(row.cost)],
-  ]
-  if (billingSafe) {
-    pairs.push([t('analytics.table.credits'), formatDecimal(row.credits)])
-    pairs.push([t('analytics.table.chargedTurns'), formatNumber(row.credit_charged_turns)])
-  }
-  return (
-    <article className="px-4 py-4">
-      <div className="flex items-start justify-between gap-3">
-        <span className="min-w-0 truncate text-sm font-medium text-[var(--color-fg)]">
-          <EntityLabel dimension={dimension} id={row.key} linkable={Boolean(row.label)}>{label}</EntityLabel>
-        </span>
-        <span className="shrink-0 text-[12px] tabular-nums text-[var(--color-fg-muted)]">
-          {formatPercent(share)}
-        </span>
-      </div>
-      <dl className="mt-3 grid grid-cols-2 gap-x-5 gap-y-2.5">
-        {pairs.map(([term, value]) => (
-          <div key={term} className="flex items-baseline justify-between gap-2 border-b border-[var(--color-divider)] pb-1.5">
-            <dt className="truncate text-[12px] text-[var(--color-fg-muted)]">{term}</dt>
-            <dd className="shrink-0 text-[12.5px] font-medium tabular-nums text-[var(--color-fg)]">{value}</dd>
-          </div>
-        ))}
-      </dl>
-    </article>
-  )
-}
-
 function LoadError({ message, onRetry }: { message: string; onRetry: () => void }) {
   const { t } = useTranslation('admin')
   return (
-    <div className="mt-8 flex flex-col items-center border-y border-[var(--color-divider)] px-6 py-12 text-center">
+    <div className="mt-8 flex flex-col items-center px-6 py-12 text-center">
       <AlertCircle size={22} className="text-[var(--color-danger)]" aria-hidden />
       <h2 className="mt-3 text-sm font-medium text-[var(--color-fg)]">{t('analytics.error.title')}</h2>
       <p className="mt-1 max-w-lg text-sm text-[var(--color-fg-muted)]">{message}</p>

@@ -3,19 +3,18 @@
  * an admin can drill into any one of them for triage. Companion to
  * `AdminUserConversation`, which renders the message timeline of one row.
  *
- * Read-only by design: this surface bypasses the per-user ownership filter
- * (router gate is the admin role), so it stays a viewer — no edit/delete from
- * here. Style follows the rest of /admin: card list, ghost actions, tokens-only.
+ * Shared by the user-management drawer and the standalone list route.
  */
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { ChevronRight, MessageSquare, Trash2 } from 'lucide-react'
+import { AlertCircle, ChevronRight, MessageSquare, RefreshCw, Trash2 } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
 import type { ApiConversation, ApiUser } from '@/api/types'
 import { AdminDetailHeader } from '@/components/admin/admin-detail-header'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { AdminTable } from '@/components/admin/AdminTable'
 import {
   Dialog,
   DialogContent,
@@ -37,13 +36,16 @@ function formatStamp(unixSec: number): string {
   }
 }
 
-export default function AdminUserConversations() {
+export default function AdminUserConversations({ userId, embedded = false }: { userId?: string; embedded?: boolean } = {}) {
   const { t } = useTranslation(['admin', 'common'])
-  const { id = '' } = useParams<{ id: string }>()
+  const { id: routeId = '' } = useParams<{ id: string }>()
+  const id = userId ?? routeId
   const [user, setUser] = useState<ApiUser | null>(null)
   const [rows, setRows] = useState<ApiConversation[]>([])
   const [loading, setLoading] = useState(true)
   const [loadedId, setLoadedId] = useState('')
+  const [error, setError] = useState('')
+  const [reloadKey, setReloadKey] = useState(0)
   const [confirmDelete, setConfirmDelete] = useState<ApiConversation | null>(null)
   const [deleting, setDeleting] = useState(false)
 
@@ -65,18 +67,19 @@ export default function AdminUserConversations() {
     let cancelled = false
     async function load() {
       setLoading(true)
+      setError('')
       setUser(null)
       setRows([])
       try {
         const [targetUser, convs] = await Promise.all([
-          adminApi.user(id),
+          embedded ? Promise.resolve(null) : adminApi.user(id),
           adminApi.userConversations(id),
         ])
         if (cancelled) return
         setUser(targetUser)
         setRows(convs)
       } catch (e) {
-        if (!cancelled) toast.error(e instanceof ApiError ? e.message : t('common.failed'))
+        if (!cancelled) setError(e instanceof ApiError ? e.message : t('admin:common.failed'))
       } finally {
         if (!cancelled) {
           setLoadedId(id)
@@ -88,7 +91,7 @@ export default function AdminUserConversations() {
     return () => {
       cancelled = true
     }
-  }, [id, t])
+  }, [id, embedded, reloadKey, t])
 
   const currentUser = user?.id === id ? user : null
   const pageLoading = loading || loadedId !== id
@@ -96,88 +99,69 @@ export default function AdminUserConversations() {
 
   return (
     <div>
-      <AdminDetailHeader backTo="/admin/users" backLabel={t('users.backToUsers')} />
+      {!embedded ? (
+        <>
+          <AdminDetailHeader backTo="/admin/users" backLabel={t('users.backToUsers')} />
+          <AdminPageHeader
+            title={pageLoading ? (
+              <span className="block" role="status" aria-live="polite">
+                <span className="sr-only">{t('admin:common.loading')}</span>
+                <span
+                  aria-hidden
+                  className="block h-8 w-[min(16rem,70vw)] animate-pulse rounded-[8px] bg-[var(--color-bg-muted)] sm:h-9"
+                />
+              </span>
+            ) : headerName ? (
+              t('users.conversationsTitle', { name: headerName })
+            ) : (
+              t('users.conversationsFallbackTitle')
+            )}
+            titleBusy={pageLoading}
+            description={t('users.conversationsLead')}
+          />
+        </>
+      ) : null}
 
-      <AdminPageHeader
-        title={pageLoading ? (
-            <span className="block" role="status" aria-live="polite">
-              <span className="sr-only">{t('admin:common.loading')}</span>
-              <span
-                aria-hidden
-                className="block h-8 w-[min(16rem,70vw)] animate-pulse rounded-[8px] bg-[var(--color-bg-muted)] sm:h-9"
-              />
-            </span>
-          ) : headerName ? (
-            t('users.conversationsTitle', { name: headerName })
-          ) : (
-            t('users.conversationsFallbackTitle')
-          )}
-        titleBusy={pageLoading}
-        description={t('users.conversationsLead')}
-      />
-
-      <section className="mt-6 sm:mt-8">
+      <section className={embedded ? undefined : 'mt-6 sm:mt-8'} aria-label={t('admin:users.viewConversations')}>
         {pageLoading ? (
           <PanelFallback />
+        ) : error ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-[8px] bg-[var(--color-danger-soft)] p-4" role="alert">
+            <div className="flex min-w-0 items-start gap-2.5 text-sm text-[var(--color-danger)]">
+              <AlertCircle size={16} aria-hidden className="mt-0.5 shrink-0" />
+              <span className="min-w-0 break-words">{error}</span>
+            </div>
+            <Button variant="secondary" size="sm" leadingIcon={<RefreshCw size={13} aria-hidden />} onClick={() => setReloadKey((key) => key + 1)}>
+              {t('common:actions.tryAgain')}
+            </Button>
+          </div>
         ) : rows.length === 0 ? (
-          <div className="text-sm text-[var(--color-fg-subtle)] rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-10 text-center">
+          <div className="text-sm text-[var(--color-fg-subtle)] rounded-[12px] bg-[var(--color-surface)] px-5 py-10 text-center">
             {t('users.noConversations')}
           </div>
         ) : (
-          <ul className="flex flex-col divide-y divide-[var(--color-divider)] rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-            {rows.map((c) => (
-              <li key={c.id} className="grid grid-cols-[minmax(0,1fr)_3rem] items-stretch sm:flex sm:items-center">
-                <Link
-                  to={`/admin/users/${encodeURIComponent(id)}/conversations/${encodeURIComponent(c.id)}`}
-                  className="group grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-2.5 px-3 py-3 interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] sm:flex-1 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center sm:gap-3 sm:px-5 sm:py-4"
-                >
-                  <MessageSquare size={14} aria-hidden className="mt-1 text-[var(--color-fg-subtle)] sm:mt-0" />
-                  <div className="min-w-0">
-                    <div className="flex min-w-0 flex-col items-start gap-1.5 sm:flex-row sm:items-center sm:gap-2">
-                      <span className="line-clamp-2 min-w-0 break-words font-medium text-[var(--color-fg)] sm:line-clamp-1">
-                        {c.title || t('users.untitledConversation')}
-                      </span>
-                      {c.archived || c.starred ? (
-                        <span className="flex shrink-0 flex-wrap items-center gap-1">
-                          {c.archived ? (
-                            <Badge size="xs" variant="neutral">{t('users.archived')}</Badge>
-                          ) : null}
-                          {c.starred ? <Badge size="xs">{t('users.starred')}</Badge> : null}
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px] font-mono text-[var(--color-fg-subtle)] sm:mt-0.5 sm:flex-nowrap">
-                      <span className="min-w-0 break-all sm:truncate">{c.model_id || c.provider || '—'}</span>
-                      <span aria-hidden className="hidden shrink-0 sm:inline">·</span>
-                      <span className="shrink-0">{formatStamp(c.updated_at)}</span>
-                    </div>
-                  </div>
-                  <ChevronRight
-                    size={14}
-                    aria-hidden
-                    className="hidden text-[var(--color-fg-subtle)] group-hover:text-[var(--color-fg)] sm:block"
-                  />
-                </Link>
-                <Button
-                  variant="ghost"
-                  size="icon-lg"
-                  className="my-1.5 mr-1 shrink-0 self-start text-[var(--color-fg-subtle)] hover:text-[var(--color-danger)] sm:my-0 sm:mr-3 sm:size-7 sm:self-auto"
-                  aria-label={t('admin:users.deleteConversation')}
-                  onClick={() => setConfirmDelete(c)}
-                >
-                  <Trash2 size={14} aria-hidden />
-                </Button>
-              </li>
-            ))}
-          </ul>
+          <AdminTable
+            items={rows}
+            rowKey={(c) => c.id}
+            label={t('users.viewConversations')}
+            columns={[
+              { id: 'title', header: t('admin:userFeedback.conversation'), width: 360, render: (c) => <Link to={`/admin/users/${encodeURIComponent(id)}/conversations/${encodeURIComponent(c.id)}`} className="admin-table-link"><span className="flex min-w-0 items-center gap-2"><MessageSquare size={14} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden /><span className="truncate" title={c.title}>{c.title || t('users.untitledConversation')}</span></span></Link> },
+              { id: 'model', header: t('admin:resources.table.model'), width: 220, render: (c) => <span className="block truncate font-mono text-[12px] text-[var(--color-fg-muted)]" title={c.model_id || c.provider}>{c.model_id || c.provider || '—'}</span> },
+              { id: 'status', header: t('admin:common.status'), width: 150, render: (c) => <div className="flex flex-wrap gap-1">{c.archived ? <Badge size="xs">{t('users.archived')}</Badge> : null}{c.starred ? <Badge size="xs">{t('users.starred')}</Badge> : null}{!c.archived && !c.starred ? '—' : null}</div> },
+              { id: 'updated', header: t('admin:common.lastActive'), width: 180, render: (c) => <span className="text-[12px] tabular-nums text-[var(--color-fg-muted)]">{formatStamp(c.updated_at)}</span> },
+              { id: 'actions', header: t('admin:common.actions'), width: 100, align: 'right', render: (c) => <div className="flex gap-1"><Button asChild variant="ghost" size="icon-sm" title={t('admin:common.details')} aria-label={t('admin:common.details')}><Link to={`/admin/users/${encodeURIComponent(id)}/conversations/${encodeURIComponent(c.id)}`}><ChevronRight size={14} aria-hidden /></Link></Button><Button variant="ghost" size="icon-sm" title={t('admin:users.deleteConversation')} aria-label={t('admin:users.deleteConversation')} onClick={() => setConfirmDelete(c)}><Trash2 size={14} aria-hidden /></Button></div> },
+            ]}
+          />
         )}
       </section>
 
-      <p className="mt-6 text-[12px] text-[var(--color-fg-subtle)] flex items-center gap-1.5">
-        <Button asChild variant="ghost" size="sm">
-          <Link to="/admin/users">{t('users.backToUsers')}</Link>
-        </Button>
-      </p>
+      {!embedded ? (
+        <p className="mt-6 text-[12px] text-[var(--color-fg-subtle)] flex items-center gap-1.5">
+          <Button asChild variant="ghost" size="sm">
+            <Link to="/admin/users">{t('users.backToUsers')}</Link>
+          </Button>
+        </p>
+      ) : null}
 
       <Dialog open={Boolean(confirmDelete)} onOpenChange={(o) => !o && setConfirmDelete(null)}>
         <DialogContent size="sm">

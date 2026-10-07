@@ -221,7 +221,7 @@ export default function AdminOAuth() {
         {loading ? (
           <PanelFallback />
         ) : rows.length === 0 ? (
-          <div className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center text-sm text-[var(--color-fg-muted)]">
+          <div className="rounded-[12px] bg-[var(--color-surface)] px-6 py-10 text-center text-sm text-[var(--color-fg-muted)]">
             {t('admin:oauth.empty')}
           </div>
         ) : (
@@ -232,47 +232,34 @@ export default function AdminOAuth() {
             dragHandleLabel={t('admin:common.dragHandle')}
             moveUpLabel={t('admin:common.moveUp')}
             moveDownLabel={t('admin:common.moveDown')}
-            mobileDragOnly
-            rowClassName="grid grid-cols-[2.75rem_auto_minmax(0,1fr)] items-center gap-x-2 gap-y-2 px-2 py-3.5 md:grid-cols-[auto_auto_auto_minmax(0,1fr)_auto_auto] md:gap-3 md:px-5 md:py-4"
-            renderItem={(p) => (
-              <>
-                <div className="col-start-2 row-start-1 inline-flex size-9 shrink-0 items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] text-[var(--color-fg)] md:col-start-auto md:row-start-auto">
-                  <OAuthBrandGlyph kind={p.kind} icon={p.icon} size={18} />
-                </div>
-                <div className="col-start-3 row-start-1 min-w-0 md:col-start-auto md:row-start-auto">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-medium text-[var(--color-fg)] truncate">{p.name}</span>
-                    <Badge size="xs">{t(`admin:oauth.kinds.${p.kind}`)}</Badge>
-                    {p.enabled ? null : <Badge size="xs" variant="neutral">{t('admin:channels.labels.disabled')}</Badge>}
-                  </div>
-                  <div className="mt-0.5 text-[12px] text-[var(--color-fg-subtle)] font-mono truncate">
-                    {p.client_id || t('admin:oauth.noClientId')} · {p.has_secret ? t('admin:channels.labels.keySet') : t('admin:channels.labels.noKey')}
-                  </div>
-                </div>
-                <div className="col-span-3 row-start-2 flex items-center justify-end gap-1 md:contents">
+            tableLabel={t('admin:oauth.title')}
+            columns={[
+              { id: 'name', header: t('admin:oauth.fields.name'), width: 230, render: (p) => <div className="flex min-w-0 items-center gap-2.5"><span className="grid size-8 shrink-0 place-items-center rounded-[8px] bg-[var(--color-bg-muted)]"><OAuthBrandGlyph kind={p.kind} icon={p.icon} size={18} /></span><span className="truncate font-medium" title={p.name}>{p.name}</span></div> },
+              { id: 'kind', header: t('admin:oauth.fields.kind'), width: 120, render: (p) => <Badge size="xs">{t(`admin:oauth.kinds.${p.kind}`)}</Badge> },
+              { id: 'clientId', header: t('admin:oauth.fields.clientId'), width: 240, render: (p) => <span className="block truncate font-mono text-[12px] text-[var(--color-fg-muted)]" title={p.client_id}>{p.client_id || t('admin:oauth.noClientId')}</span> },
+              { id: 'key', header: t('admin:oauth.fields.clientSecret'), width: 100, render: (p) => <span className="text-[12px] text-[var(--color-fg-muted)]">{t(p.has_secret ? 'admin:channels.labels.keySet' : 'admin:channels.labels.noKey')}</span> },
+              { id: 'status', header: t('admin:common.status'), width: 90, render: (p) => <Badge size="xs" variant={p.enabled ? 'success' : 'neutral'}>{t(p.enabled ? 'admin:channels.fields.enabled' : 'admin:channels.labels.disabled')}</Badge> },
+              { id: 'actions', header: t('admin:common.actions'), width: 100, align: 'right', render: (p) => (<div className="flex items-center justify-end gap-1">
                   <Button
                     variant="ghost"
-                    size="sm"
-                    className="max-md:size-[var(--tap-min)] max-md:gap-0 max-md:px-0"
+                    size="icon-sm"
+                    title={t('admin:common.edit')}
                     aria-label={`${t('admin:common.edit')}: ${p.name}`}
                     leadingIcon={<Pencil size={13} aria-hidden />}
                     onClick={() => openEdit(p)}
                   >
-                    <span className="max-md:sr-only">{t('admin:common.edit')}</span>
                   </Button>
                   <Button
                     variant="ghost"
-                    size="sm"
-                    className="max-md:size-[var(--tap-min)] max-md:gap-0 max-md:px-0"
+                    size="icon-sm"
+                    title={t('admin:common.remove')}
                     aria-label={`${t('admin:common.remove')}: ${p.name}`}
                     leadingIcon={<Trash2 size={13} aria-hidden />}
                     onClick={() => setConfirmDelete(p)}
                   >
-                    <span className="max-md:sr-only">{t('admin:common.remove')}</span>
                   </Button>
-                </div>
-              </>
-            )}
+                </div>) },
+            ]}
           />
         )}
       </section>
@@ -324,7 +311,7 @@ export default function AdminOAuth() {
               {/* Callback/redirect URI — the value an admin must register in the
                   provider console. Hoisted to the top of the form (and styled as
                   a callout) because it's the first thing they go looking for. */}
-              <div className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-4 py-3.5">
+              <div className="rounded-[12px] bg-[var(--color-bg-muted)] px-4 py-3.5">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-sm font-medium text-[var(--color-fg)]">
                     {t('admin:oauth.fields.redirectUri')}
@@ -382,7 +369,7 @@ export default function AdminOAuth() {
                 </Field>
               ) : (
                 <Field label={t('admin:oauth.fields.icon')} hint={t('admin:oauth.fields.iconBuiltin')}>
-                  <div className="inline-flex items-center gap-2 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2 text-[var(--color-fg)]">
+                  <div className="inline-flex items-center gap-2 rounded-[8px] bg-[var(--color-bg-muted)] px-3 py-2 text-[var(--color-fg)]">
                     <OAuthBrandGlyph kind={kind} size={18} />
                     <span className="text-sm">{t(`admin:oauth.kinds.${kind}`)}</span>
                   </div>
@@ -524,7 +511,7 @@ export default function AdminOAuth() {
                 </>
               ) : null}
 
-              <label className="flex items-center justify-between rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
+              <label className="flex items-center justify-between rounded-[8px] bg-[var(--color-bg-muted)] px-3 py-2.5">
                 <span className="text-sm text-[var(--color-fg)]">{t('admin:oauth.fields.enabled')}</span>
                 <Switch
                   checked={editor.draft.enabled ?? true}

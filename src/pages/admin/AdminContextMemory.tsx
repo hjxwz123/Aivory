@@ -135,7 +135,7 @@ export default function AdminContextMemory() {
         <PanelFallback />
       ) : settingsError ? (
         <section
-          className="mt-8 flex flex-col items-start gap-3 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-4 py-4"
+          className="mt-8 flex flex-col items-start gap-3 rounded-[8px] bg-[var(--color-bg-muted)] px-4 py-4"
           role="alert"
         >
           <p className="text-sm text-[var(--color-danger)]">{settingsError}</p>

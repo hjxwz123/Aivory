@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Plus } from 'lucide-react'
 import { adminApi, workspacesApi } from '@/api'
 import type { ApiUser, ApiWorkspaceMember } from '@/api/types'
 import { Button } from '@/components/ui/button'
@@ -42,7 +43,7 @@ export function WorkspaceAdminControls({ workspaceId, members = [], ownerId, onS
   }
   const candidates = transfer ? members.filter((m) => m.user_id !== ownerId).map((m) => ({ id: m.user_id, name: m.name, email: m.email })) : users
   return <>
-    <Button size="sm" variant={transfer ? 'secondary' : 'primary'} className="max-sm:min-h-[var(--tap-min)]" onClick={() => { setError(''); setOpen(true) }}>{title}</Button>
+    <Button size="sm" variant={transfer ? 'secondary' : 'primary'} leadingIcon={transfer ? undefined : <Plus size={15} aria-hidden />} className="max-sm:min-h-[var(--tap-min)]" onClick={() => { setError(''); setOpen(true) }}>{title}</Button>
     <Dialog open={open} onOpenChange={(v) => { if (!busy) setOpen(v) }}>
       <DialogContent className="max-w-lg">
         <DialogHeader><DialogTitle>{title}</DialogTitle><DialogDescription>{t(transfer ? 'workspaces.changeAdminHint' : 'workspaces.createAdminHint')}</DialogDescription></DialogHeader>

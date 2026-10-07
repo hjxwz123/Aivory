@@ -24,10 +24,19 @@ export function availablePolicyModels(models: ApiModel[], channels: ApiChannel[]
   const enabledChannelIDs = new Set(channels.filter((channel) => channel.enabled).map((channel) => channel.id))
   const decisionChannelIDs = new Set(channels.filter((channel) => channel.enabled && channel.type === 'typesafe' && channel.has_api_key).map((channel) => channel.id))
   return models.filter(
-    (model) => model.enabled && (
-      (model.kind === 'chat' && enabledChannelIDs.has(model.channel_id) && !channels.some((c) => c.id === model.channel_id && c.type === 'typesafe'))
-      || (DECISION_POLICY_KEYS.has(policyKey) && model.kind === 'decision' && decisionChannelIDs.has(model.channel_id))
-    ),
+    (model) => {
+      if (!model.enabled) return false
+      const regularBindings = (model.channel_bindings ?? []).filter((binding) => binding.role === 'regular')
+      const usableChannelIDs = regularBindings.length > 0
+        ? regularBindings.filter((binding) => binding.channel_enabled).map((binding) => binding.channel_id)
+        : [model.channel_id]
+      const hasEnabledChannel = usableChannelIDs.some((channelID) => enabledChannelIDs.has(channelID))
+      const isTypesafe = usableChannelIDs.some((channelID) => channels.some((channel) => channel.id === channelID && channel.type === 'typesafe'))
+      return (
+        (model.kind === 'chat' && hasEnabledChannel && !isTypesafe)
+        || (DECISION_POLICY_KEYS.has(policyKey) && model.kind === 'decision' && usableChannelIDs.some((channelID) => decisionChannelIDs.has(channelID)))
+      )
+    },
   )
 }
 
@@ -65,7 +74,14 @@ export function availableVisionModels(models: ApiModel[], channels: ApiChannel[]
     channels.filter((channel) => channel.enabled && channel.type !== 'typesafe').map((channel) => channel.id),
   )
   return models.filter(
-    (model) => model.enabled && model.kind === 'chat' && model.vision === true && enabledChannelIDs.has(model.channel_id),
+    (model) => {
+      if (!model.enabled || model.kind !== 'chat' || model.vision !== true) return false
+      const regularBindings = (model.channel_bindings ?? []).filter((binding) => binding.role === 'regular')
+      const usableChannelIDs = regularBindings.length > 0
+        ? regularBindings.filter((binding) => binding.channel_enabled).map((binding) => binding.channel_id)
+        : [model.channel_id]
+      return usableChannelIDs.some((channelID) => enabledChannelIDs.has(channelID))
+    },
   )
 }
 

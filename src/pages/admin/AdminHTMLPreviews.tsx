@@ -5,6 +5,7 @@ import { AlertCircle, Check, Copy, ExternalLink, Link2, Search, Trash2 } from 'l
 import { adminApi, apiUrl, ApiError } from '@/api'
 import type { ApiAdminHTMLPreviewShare, ApiAdminHTMLPreviewSharePage } from '@/api/types'
 import { Button } from '@/components/ui/button'
+import { AdminTable } from '@/components/admin/AdminTable'
 import {
   Dialog,
   DialogBody,
@@ -142,8 +143,8 @@ export default function AdminHTMLPreviews() {
         )}
       />
 
-      <section className="mt-7 overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]" aria-label={t('admin:htmlPreviews.title')}>
-        <div className="flex min-h-11 items-center justify-between gap-3 border-b border-[var(--color-divider)] px-4 py-2.5 sm:px-5">
+      <section className="mt-7 overflow-hidden rounded-[12px] bg-[var(--color-surface)]" aria-label={t('admin:htmlPreviews.title')}>
+        <div className="flex min-h-11 items-center justify-between gap-3 px-4 py-2.5 sm:px-5">
           <span className="text-[12.5px] tabular-nums text-[var(--color-fg-subtle)]">
             {t('admin:htmlPreviews.total', { count: data?.total ?? 0 })}
           </span>
@@ -172,53 +173,19 @@ export default function AdminHTMLPreviews() {
           </div>
         ) : data && data.items.length > 0 ? (
           <div className={loading ? 'pointer-events-none opacity-60 transition-opacity' : 'transition-opacity'}>
-            <div role="table" className="hidden md:block" aria-label={t('admin:htmlPreviews.title')}>
-              <div role="row" className="grid grid-cols-[minmax(12rem,1.3fr)_minmax(13rem,1fr)_minmax(10rem,.7fr)_7rem] gap-4 border-b border-[var(--color-divider)] bg-[var(--color-bg-muted)] px-5 py-2.5 text-[12px] font-medium text-[var(--color-fg-muted)]">
-                <span role="columnheader">{t('admin:htmlPreviews.table.link')}</span>
-                <span role="columnheader">{t('admin:htmlPreviews.table.creator')}</span>
-                <span role="columnheader">{t('admin:htmlPreviews.table.created')}</span>
-                <span role="columnheader" className="text-right">{t('admin:htmlPreviews.table.actions')}</span>
-              </div>
-              <div role="rowgroup" className="divide-y divide-[var(--color-divider)]">
-                {data.items.map((item) => {
-                  const url = previewUrl(item.id)
-                  return (
-                    <div key={item.id} role="row" className="grid min-h-16 grid-cols-[minmax(12rem,1.3fr)_minmax(13rem,1fr)_minmax(10rem,.7fr)_7rem] items-center gap-4 px-5 py-3">
-                      <span role="cell" className="min-w-0">
-                        <code className="block truncate font-mono text-[12px] text-[var(--color-fg)]" title={url}>{url}</code>
-                      </span>
-                      <span role="cell" className="min-w-0">
-                        <span className="block truncate text-[12.5px] font-medium text-[var(--color-fg)]" title={[item.user_name, item.user_email, item.user_id].filter(Boolean).join(' / ')}>{ownerLabel(item)}</span>
-                        {item.user_email && item.user_name ? <span className="mt-0.5 block truncate text-[12px] text-[var(--color-fg-subtle)]">{item.user_email}</span> : null}
-                      </span>
-                      <time role="cell" className="text-[12px] tabular-nums text-[var(--color-fg-muted)]">{formatDate(item.created_at)}</time>
-                      <span role="cell" className="flex items-center justify-end gap-0.5">
-                        <RowActions item={item} url={url} copied={copiedID === item.id} onCopy={copyLink} onDelete={setDeleteTarget} t={t} />
-                      </span>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
+            <AdminTable
+              items={data.items}
+              rowKey={(item) => item.id}
+              label={t('admin:htmlPreviews.title')}
+              embedded
+              columns={[
+                { id: 'link', header: t('admin:htmlPreviews.table.link'), width: 320, render: (item) => <code className="block truncate font-mono text-[12px]" title={previewUrl(item.id)}>{previewUrl(item.id)}</code> },
+                { id: 'creator', header: t('admin:htmlPreviews.table.creator'), width: 240, render: (item) => <div className="min-w-0"><span className="block truncate font-medium" title={[item.user_name, item.user_email, item.user_id].filter(Boolean).join(' / ')}>{ownerLabel(item)}</span>{item.user_email && item.user_name ? <span className="block truncate text-[12px] text-[var(--color-fg-muted)]">{item.user_email}</span> : null}</div> },
+                { id: 'created', header: t('admin:htmlPreviews.table.created'), width: 170, render: (item) => <time className="text-[12px] tabular-nums text-[var(--color-fg-muted)]">{formatDate(item.created_at)}</time> },
+                { id: 'actions', header: t('admin:common.actions'), width: 168, align: 'right', render: (item) => <RowActions item={item} url={previewUrl(item.id)} copied={copiedID === item.id} onCopy={copyLink} onDelete={setDeleteTarget} t={t} /> },
+              ]}
+            />
 
-            <ul className="divide-y divide-[var(--color-divider)] md:hidden">
-              {data.items.map((item) => {
-                const url = previewUrl(item.id)
-                return (
-                  <li key={item.id} className="px-4 py-4">
-                    <code className="block truncate font-mono text-[12px] text-[var(--color-fg)]" title={url}>{url}</code>
-                    <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-[var(--color-fg-subtle)]">
-                      <span className="truncate font-medium text-[var(--color-fg-muted)]">{ownerLabel(item)}</span>
-                      <span aria-hidden>·</span>
-                      <time>{formatDate(item.created_at)}</time>
-                    </div>
-                    <div className="mt-3 flex items-center justify-end gap-1 border-t border-[var(--color-divider)] pt-2">
-                      <RowActions item={item} url={url} copied={copiedID === item.id} onCopy={copyLink} onDelete={setDeleteTarget} t={t} mobile />
-                    </div>
-                  </li>
-                )
-              })}
-            </ul>
             <Pagination page={page} pageCount={pageCount} onPage={setPage} className="pb-4" />
           </div>
         ) : (

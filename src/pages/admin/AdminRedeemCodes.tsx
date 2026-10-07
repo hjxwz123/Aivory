@@ -55,6 +55,8 @@ import { envNum } from '@/lib/env-config'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { getRedeemCodeStatus, type RedeemCodeStatus } from '@/lib/redeem-code-status'
 import { AdminPageHeader } from '@/components/admin/admin-page-header'
+import { AdminTable } from '@/components/admin/AdminTable'
+import { AdminListFilter, AdminListToolbar } from '@/components/admin/admin-list-toolbar'
 
 type StatusFilter = 'all' | RedeemCodeStatus
 
@@ -89,6 +91,8 @@ export default function AdminRedeemCodes() {
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState<StatusFilter>('all')
   const [batchFilter, setBatchFilter] = useState('')
+  const [search, setSearch] = useState('')
+  const loadRequestRef = useRef(0)
   const [newOpen, setNewOpen] = useState(false)
   const [draft, setDraft] = useState<BatchDraft>(EMPTY_DRAFT)
   const [submitting, setSubmitting] = useState(false)
@@ -104,32 +108,41 @@ export default function AdminRedeemCodes() {
   const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
   useEffect(() => {
     setPage(1)
-  }, [status, batchFilter, rows.length])
+  }, [status, batchFilter, search, rows.length])
 
-  async function load() {
+  async function load(requestId = ++loadRequestRef.current) {
     setLoading(true)
     try {
-      const [codes, gs] = await Promise.all([
-        adminApi.redeemCodes({
-          status: status === 'all' ? undefined : status,
-          batch: batchFilter || undefined,
-          limit: 500,
-        }),
-        adminApi.userGroups(),
-      ])
-      setRows(codes)
-      setGroups(gs)
+      const codes = await adminApi.redeemCodes({
+        search: search.trim() || undefined,
+        status: status === 'all' ? undefined : status,
+        batch: batchFilter.trim() || undefined,
+        limit: 500,
+      })
+      if (requestId === loadRequestRef.current) setRows(codes)
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+      if (requestId === loadRequestRef.current) toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
     } finally {
-      setLoading(false)
+      if (requestId === loadRequestRef.current) setLoading(false)
     }
   }
 
   useEffect(() => {
-    void load()
+    const requestId = ++loadRequestRef.current
+    setLoading(true)
+    const timer = window.setTimeout(() => void load(requestId), 250)
+    return () => { window.clearTimeout(timer); ++loadRequestRef.current }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, batchFilter])
+  }, [status, batchFilter, search])
+
+  useEffect(() => {
+    let active = true
+    void adminApi.userGroups().then((gs) => { if (active) setGroups(gs) }).catch((e) => {
+      if (active) toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+    })
+    return () => { active = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   function openNew() {
     setDraft({ ...EMPTY_DRAFT, group_id: groups.find((g) => !g.is_default)?.id ?? groups[0]?.id ?? '' })
@@ -264,12 +277,22 @@ export default function AdminRedeemCodes() {
       <AdminPageHeader
         title={t('admin:redeemCodes.title')}
         description={t('admin:redeemCodes.lead')}
+      />
+      <AdminListToolbar
+        search={search}
+        onSearchChange={setSearch}
+        placeholder={t('admin:listToolbar.search.redeemCodes')}
+        activeFilterCount={Number(status !== 'all') + Number(!!batchFilter.trim())}
+        onResetFilters={() => { setStatus('all'); setBatchFilter('') }}
+        filters={<>
+          <AdminListFilter label={t('admin:redeemCodes.table.status')} value={status} onValueChange={(value) => setStatus(value as StatusFilter)} options={(['all', 'unused', 'partial', 'used', 'invalid'] as StatusFilter[]).map((value) => ({ value, label: t(`admin:redeemCodes.filters.${value}`) }))} />
+          <Input aria-label={t('admin:redeemCodes.table.batch')} placeholder={t('admin:redeemCodes.table.batch')} value={batchFilter} onChange={(event) => setBatchFilter(event.target.value)} wrapperClassName="h-9 w-36 shrink-0 rounded-[8px] max-sm:h-11" className="min-w-0 text-[13px]" />
+        </>}
         actions={(
           <>
             <Button
               size="sm"
               variant="secondary"
-              className="max-sm:min-h-[var(--tap-min)] max-sm:flex-1"
               leadingIcon={<Download size={15} aria-hidden />}
               disabled={rows.length === 0}
               onClick={exportCsv}
@@ -278,7 +301,6 @@ export default function AdminRedeemCodes() {
             </Button>
             <Button
               size="sm"
-              className="max-sm:min-h-[var(--tap-min)] max-sm:flex-1"
               leadingIcon={<Plus size={15} aria-hidden />}
               onClick={openNew}
             >
@@ -288,56 +310,33 @@ export default function AdminRedeemCodes() {
         )}
       />
 
-      {/* Filters */}
-      <div className="mt-6 grid gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-2">
-        <div className="grid w-full grid-cols-2 gap-2 min-[420px]:grid-cols-3 sm:flex sm:w-auto sm:flex-wrap">
-          {(['all', 'unused', 'partial', 'used', 'invalid'] as StatusFilter[]).map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => setStatus(s)}
-              className={
-                'inline-flex min-h-11 items-center justify-center rounded-[8px] px-3 text-[12px] interactive last:col-span-2 sm:h-8 sm:min-h-0 ' +
-                (status === s
-                  ? 'bg-[var(--color-surface)] border border-[var(--color-border-strong)] text-[var(--color-fg)]'
-                  : 'border border-[var(--color-border)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]')
-              }
-            >
-              {t(`admin:redeemCodes.filters.${s}`)}
-            </button>
-          ))}
-        </div>
-        <div className="w-full sm:ml-auto sm:w-56">
-          <Input
-            placeholder={t('admin:redeemCodes.table.batch')}
-            value={batchFilter}
-            onChange={(e) => setBatchFilter(e.target.value)}
-          />
-        </div>
-      </div>
-
-      <section className="mt-4 sm:mt-6">
+      <section className="mt-4">
         {loading ? (
           <PanelFallback />
         ) : rows.length === 0 ? (
-          <div className="grid place-items-center rounded-[12px] border border-dashed border-[var(--color-border)] bg-[var(--color-bg-muted)]/30 px-4 py-10 sm:px-6 sm:py-16">
+          <div className="grid place-items-center rounded-[12px] bg-[var(--color-bg-muted)]/30 px-4 py-10 sm:px-6 sm:py-16">
             <Ticket size={28} className="text-[var(--color-fg-faint)]" aria-hidden />
-            <p className="mt-4 text-sm text-[var(--color-fg-muted)]">{t('admin:redeemCodes.empty')}</p>
+            <p className="mt-4 text-sm text-[var(--color-fg-muted)]">{t(search.trim() || batchFilter.trim() || status !== 'all' ? 'admin:common.noResults' : 'admin:redeemCodes.empty')}</p>
           </div>
         ) : (
           <>
-            <ul className="flex flex-col divide-y divide-[var(--color-divider)] overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-              {pageRows.map((rc) => (
-                <CodeRow
-                  key={rc.id}
-                  row={rc}
-                  group={groupByID.get(rc.group_id)}
-                  toggling={togglingId === rc.id}
-                  onToggleEnabled={() => void toggleEnabled(rc)}
-                  onDelete={() => setConfirmDelete(rc)}
-                />
-              ))}
-            </ul>
+            <AdminTable
+              items={pageRows}
+              rowKey={(rc) => rc.id}
+              label={t('admin:redeemCodes.title')}
+              columns={[
+                { id: 'code', header: t('admin:redeemCodes.table.code'), width: 220, render: (rc) => <code className="font-mono text-[12px]">{rc.code}</code> },
+                { id: 'batch', header: t('admin:redeemCodes.table.batch'), width: 140, render: (rc) => <span className="block truncate" title={rc.batch_name}>{rc.batch_name || '—'}</span> },
+                { id: 'type', header: t('admin:redeemCodes.table.group'), width: 160, render: (rc) => <span>{rc.kind === 'credits' ? t('admin:redeemCodes.creditsAmount', { count: rc.credits }) : groupByID.get(rc.group_id)?.name || '—'}</span> },
+                { id: 'duration', header: t('admin:redeemCodes.table.duration'), width: 100, render: (rc) => rc.kind === 'credits' ? '—' : rc.duration_days === 0 ? t('admin:redeemCodes.durationPermanent') : t('admin:redeemCodes.durationDays', { count: rc.duration_days }) },
+                { id: 'status', header: t('admin:redeemCodes.table.status'), width: 100, render: (rc) => <CodeStatus row={rc} /> },
+                { id: 'uses', header: t('admin:redeemCodes.table.uses'), width: 100, render: (rc) => <span className="tabular-nums">{rc.used_count}/{rc.max_uses}</span> },
+                { id: 'expires', header: t('admin:redeemCodes.table.expiresAt'), width: 150, render: (rc) => <span className="text-[12px] text-[var(--color-fg-muted)]">{rc.expires_at > 0 ? formatRelativeDate(rc.expires_at * 1000) : t('admin:redeemCodes.noExpiry')}</span> },
+                { id: 'created', header: t('admin:redeemCodes.table.createdAt'), width: 150, render: (rc) => <span className="text-[12px] text-[var(--color-fg-muted)]">{formatRelativeDate(rc.created_at * 1000)}</span> },
+                { id: 'note', header: t('admin:redeemCodes.fields.note'), width: 200, render: (rc) => <span className="block truncate text-[var(--color-fg-muted)]" title={rc.note}>{rc.note || '—'}</span> },
+                { id: 'actions', header: t('admin:common.actions'), width: 152, align: 'right', render: (rc) => <CodeActions row={rc} toggling={togglingId === rc.id} onToggleEnabled={() => void toggleEnabled(rc)} onDelete={() => setConfirmDelete(rc)} /> },
+              ]}
+            />
             <Pagination page={page} pageCount={pageCount} onPage={setPage} />
           </>
         )}
@@ -373,8 +372,8 @@ export default function AdminRedeemCodes() {
                         className={
                           'inline-flex items-center h-8 px-3 rounded-[8px] text-[12px] interactive ' +
                           (draft.kind === k
-                            ? 'bg-[var(--color-surface)] border border-[var(--color-border-strong)] text-[var(--color-fg)]'
-                            : 'border border-[var(--color-border)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]')
+                            ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-sm)]'
+                            : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]')
                         }
                       >
                         {t(`admin:redeemCodes.kinds.${k}`)}
@@ -508,88 +507,28 @@ export default function AdminRedeemCodes() {
 
 /* ───────────────────────── row ─────────────────────────── */
 
-function CodeRow({
-  row,
-  group,
-  toggling,
-  onToggleEnabled,
-  onDelete,
-}: {
+function CodeStatus({ row }: { row: ApiRedeemCode }) {
+  const { t } = useTranslation('admin')
+  const status = getRedeemCodeStatus(row)
+  const presentation = {
+    unused: { variant: 'success' as const, icon: <CircleCheck size={11} aria-hidden /> },
+    partial: { variant: 'warning' as const, icon: <CircleDotDashed size={11} aria-hidden /> },
+    used: { variant: 'neutral' as const, icon: <CheckCheck size={11} aria-hidden /> },
+    invalid: { variant: 'danger' as const, icon: <CircleX size={11} aria-hidden /> },
+  }[status]
+  return <Badge size="xs" variant={presentation.variant} leadingIcon={presentation.icon}>{t(`redeemCodes.status.${status}`)}</Badge>
+}
+
+function CodeActions({ row, toggling, onToggleEnabled, onDelete }: {
   row: ApiRedeemCode
-  group?: ApiUserGroup
   toggling: boolean
   onToggleEnabled: () => void
   onDelete: () => void
 }) {
   const { t } = useTranslation(['admin', 'common'])
   const { copied, copy } = useCopy()
-
-  const codeStatus = getRedeemCodeStatus(row)
-  const statusPresentation = {
-    unused: {
-      variant: 'success' as const,
-      icon: <CircleCheck size={11} aria-hidden />,
-    },
-    partial: {
-      variant: 'warning' as const,
-      icon: <CircleDotDashed size={11} aria-hidden />,
-    },
-    used: {
-      variant: 'neutral' as const,
-      icon: <CheckCheck size={11} aria-hidden />,
-    },
-    invalid: {
-      variant: 'danger' as const,
-      icon: <CircleX size={11} aria-hidden />,
-    },
-  }[codeStatus]
-
-  const isCredits = row.kind === 'credits'
-  const durationLabel = isCredits
-    ? t('admin:redeemCodes.creditsAmount', { count: row.credits })
-    : row.duration_days === 0
-      ? t('admin:redeemCodes.durationPermanent')
-      : t('admin:redeemCodes.durationDays', { count: row.duration_days })
-
   return (
-    <li className="grid grid-cols-1 gap-3 px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5 sm:py-4">
-      <div className="min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <code className="font-mono text-[13px] tracking-[0.08em] text-[var(--color-fg)] bg-[var(--color-bg-muted)] px-2 py-0.5 rounded-[6px]">
-            {row.code}
-          </code>
-          <Badge size="xs" variant={statusPresentation.variant} leadingIcon={statusPresentation.icon}>
-            {t(`admin:redeemCodes.status.${codeStatus}`)}
-          </Badge>
-          {isCredits ? (
-            <Badge size="xs" variant="sage">
-              {t('admin:redeemCodes.kinds.credits')}
-            </Badge>
-          ) : group ? (
-            <Badge size="xs" variant="neutral">
-              {group.name}
-            </Badge>
-          ) : null}
-          {row.batch_name ? (
-            <span className="text-[12px] text-[var(--color-fg-subtle)]">{row.batch_name}</span>
-          ) : null}
-        </div>
-        <div className="mt-1 text-[12px] text-[var(--color-fg-subtle)] tabular-nums">
-          {durationLabel}
-          <span aria-hidden className="mx-1.5 opacity-50">·</span>
-          {row.used_count}/{row.max_uses} {t('admin:redeemCodes.table.uses')}
-          <span aria-hidden className="mx-1.5 opacity-50">·</span>
-          {row.expires_at > 0
-            ? t('admin:redeemCodes.table.expiresAt') + ' ' + formatRelativeDate(row.expires_at * 1000)
-            : t('admin:redeemCodes.noExpiry')}
-          <span aria-hidden className="mx-1.5 opacity-50">·</span>
-          {t('admin:redeemCodes.table.createdAt')} {formatRelativeDate(row.created_at * 1000)}
-        </div>
-        {row.note ? (
-          <p className="mt-1 text-[12px] text-[var(--color-fg-muted)] line-clamp-1">{row.note}</p>
-        ) : null}
-      </div>
-      <div className="flex items-center justify-end gap-1 border-t border-[var(--color-divider)] pt-2 sm:border-0 sm:pt-0">
+    <div className="flex items-center justify-end gap-1">
         <Tooltip content={copied ? t('admin:redeemCodes.copied') : t('admin:redeemCodes.copy')}>
           <Button
             variant="ghost"
@@ -604,7 +543,7 @@ function CodeRow({
         <Tooltip content={row.enabled ? t('admin:redeemCodes.disable') : t('admin:redeemCodes.enable')}>
           <Button
             variant="ghost"
-            size="sm"
+            size="icon-sm"
             className="max-sm:size-11 max-sm:px-0"
             leadingIcon={<RotateCcw size={13} aria-hidden />}
             loading={toggling}
@@ -612,7 +551,7 @@ function CodeRow({
             onClick={onToggleEnabled}
             aria-label={`${row.enabled ? t('admin:redeemCodes.disable') : t('admin:redeemCodes.enable')}: ${row.code}`}
           >
-            <span className="hidden sm:inline">
+            <span className="sr-only">
               {row.enabled ? t('admin:redeemCodes.disable') : t('admin:redeemCodes.enable')}
             </span>
           </Button>
@@ -620,17 +559,16 @@ function CodeRow({
         <Tooltip content={t('common:actions.delete')}>
           <Button
             variant="ghost"
-            size="sm"
+            size="icon-sm"
             className="text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] max-sm:size-11 max-sm:px-0"
             leadingIcon={<Trash2 size={13} aria-hidden />}
             onClick={onDelete}
             aria-label={`${t('common:actions.delete')}: ${row.code}`}
           >
-            <span className="hidden sm:inline">{t('common:actions.delete')}</span>
+            <span className="sr-only">{t('common:actions.delete')}</span>
           </Button>
         </Tooltip>
       </div>
-    </li>
   )
 }
 
@@ -656,25 +594,16 @@ function GeneratedList({ codes, onDone }: { codes: ApiRedeemCode[]; onDone: () =
           {copied ? t('admin:redeemCodes.copied') : t('admin:redeemCodes.copyAll')}
         </Button>
       </div>
-      <ul className="max-h-[40vh] overflow-y-auto rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)]/40">
-        {codes.map((c) => (
-          <li
-            key={c.id}
-            className="flex min-w-0 items-center justify-between gap-2 border-b border-[var(--color-divider)] px-3 py-2 last:border-b-0"
-          >
-            <code className="min-w-0 break-all font-mono text-[13px] tracking-[0.08em] text-[var(--color-fg)]">{c.code}</code>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="shrink-0 max-sm:size-11"
-              aria-label={t('admin:redeemCodes.copy')}
-              onClick={() => void copy(c.code)}
-            >
-              <Copy size={12} aria-hidden />
-            </Button>
-          </li>
-        ))}
-      </ul>
+      <AdminTable
+        className="max-h-[40vh] overflow-y-auto"
+        items={codes}
+        rowKey={(code) => code.id}
+        label={t('admin:redeemCodes.title')}
+        columns={[
+          { id: 'code', header: t('admin:redeemCodes.table.code'), width: 260, render: (code) => <code className="break-all font-mono text-[13px]">{code.code}</code> },
+          { id: 'actions', header: t('admin:common.actions'), width: 60, align: 'right', render: (code) => <Button variant="ghost" size="icon-sm" title={t('admin:redeemCodes.copy')} aria-label={t('admin:redeemCodes.copy')} onClick={() => void copy(code.code)}><Copy size={12} aria-hidden /></Button> },
+        ]}
+      />
       <div className="flex justify-end">
         <Button onClick={onDone}>{t('common:actions.close')}</Button>
       </div>

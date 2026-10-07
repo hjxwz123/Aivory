@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/hooks/use-toast'
+import { AdminTable } from './AdminTable'
 
 interface Row {
   granted: boolean
@@ -101,59 +102,42 @@ export function ModelQuotaEditor({ modelId }: { modelId: string }) {
       <p className="text-[12px] text-[var(--color-fg-muted)]">
         {anyGranted ? t('admin:quota.restrictedHint') : t('admin:quota.openHint')}
       </p>
-      <ul className="flex flex-col divide-y divide-[var(--color-divider)] rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-        {groups.map((g) => {
-          const row = rows[g.id]
-          if (!row) return null
-          return (
-            <li key={g.id} className="px-4 py-3">
-              <label className="flex items-center justify-between gap-3">
-                <span className="text-sm font-medium text-[var(--color-fg)]">{g.name}</span>
-                <Switch checked={row.granted} onCheckedChange={(v) => patch(g.id, { granted: v })} />
-              </label>
-              {row.granted ? (
-                <div className="mt-3 grid grid-cols-[auto_5rem_7rem_1fr] items-center gap-2">
-                  <span className="text-[12px] text-[var(--color-fg-muted)]">{t('admin:quota.every')}</span>
-                  <Input
-                    type="number"
-                    value={String(row.periodValue)}
-                    onChange={(e) => patch(g.id, { periodValue: Number(e.target.value) })}
-                  />
-                  <Select value={row.periodUnit} onValueChange={(v) => patch(g.id, { periodUnit: v as Row['periodUnit'] })}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="days">{t('admin:quota.days')}</SelectItem>
-                      <SelectItem value="hours">{t('admin:quota.hours')}</SelectItem>
-                    </SelectContent>
+      <AdminTable
+        items={groups.filter((group) => rows[group.id])}
+        rowKey={(group) => group.id}
+        label={t('admin:users.fields.group')}
+        columns={[
+          { id: 'group', header: t('admin:users.fields.group'), width: 180, render: (group) => <span className="font-medium">{group.name}</span> },
+          { id: 'granted', header: t('admin:models.fields.enabled'), width: 80, render: (group) => <Switch aria-label={group.name} checked={rows[group.id].granted} onCheckedChange={(granted) => patch(group.id, { granted })} disabled={saving} /> },
+          { id: 'period', header: t('admin:quota.period'), width: 220, render: (group) => {
+            const row = rows[group.id]
+            return row.granted ? (
+              <div className="grid grid-cols-[5rem_minmax(0,1fr)] items-center gap-2">
+                <Input type="number" min={1} step={1} aria-label={`${group.name}: ${t('admin:quota.period')}`} value={String(row.periodValue)} disabled={saving} onChange={(event) => patch(group.id, { periodValue: Number(event.target.value) })} />
+                <Select disabled={saving} value={row.periodUnit} onValueChange={(value) => patch(group.id, { periodUnit: value as Row['periodUnit'] })}>
+                  <SelectTrigger aria-label={`${group.name}: ${t('admin:quota.days')} / ${t('admin:quota.hours')}`}><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="days">{t('admin:quota.days')}</SelectItem><SelectItem value="hours">{t('admin:quota.hours')}</SelectItem></SelectContent>
+                </Select>
+              </div>
+            ) : '-'
+          } },
+          { id: 'limit', header: t('admin:quota.limit'), width: 280, render: (group) => {
+            const row = rows[group.id]
+            return row.granted ? (
+              <div>
+                <div className="grid grid-cols-[7rem_minmax(0,1fr)] items-center gap-2">
+                  <Select disabled={saving} value={row.limitType} onValueChange={(value) => patch(group.id, { limitType: value as Row['limitType'] })}>
+                    <SelectTrigger aria-label={`${group.name}: ${t('admin:quota.count')} / ${t('admin:quota.cost')}`}><SelectValue /></SelectTrigger>
+                    <SelectContent><SelectItem value="count">{t('admin:quota.count')}</SelectItem><SelectItem value="cost">{t('admin:quota.cost')}</SelectItem></SelectContent>
                   </Select>
-                  <div className="flex items-center gap-2">
-                    <Select value={row.limitType} onValueChange={(v) => patch(g.id, { limitType: v as Row['limitType'] })}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="count">{t('admin:quota.count')}</SelectItem>
-                        <SelectItem value="cost">{t('admin:quota.cost')}</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Input
-                      type="number"
-                      value={String(row.limitValue)}
-                      onChange={(e) => patch(g.id, { limitValue: Number(e.target.value) })}
-                      placeholder="0"
-                    />
-                  </div>
-                  <p className="col-span-4 text-[12px] text-[var(--color-fg-subtle)]">
-                    {row.limitValue <= 0 ? t('admin:quota.unlimitedHint') : t('admin:quota.capHint')}
-                  </p>
+                  <Input type="number" min={0} step="any" aria-label={`${group.name}: ${t('admin:quota.limit')}`} value={String(row.limitValue)} disabled={saving} onChange={(event) => patch(group.id, { limitValue: Number(event.target.value) })} placeholder="0" />
                 </div>
-              ) : null}
-            </li>
-          )
-        })}
-      </ul>
+                <p className="mt-1 text-[12px] text-[var(--color-fg-muted)]">{t(row.limitValue <= 0 ? 'admin:quota.unlimitedHint' : 'admin:quota.capHint')}</p>
+              </div>
+            ) : '-'
+          } },
+        ]}
+      />
       <div className="flex justify-end">
         <Button variant="secondary" loading={saving} onClick={() => void save()}>
           {t('admin:quota.save')}

@@ -168,7 +168,7 @@ export function ParamControlsEditor({ value, onChange }: Props) {
           renderItem={(c, i) => (
             <div className="flex min-w-0 flex-col gap-3">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <div className="inline-flex items-center gap-1 rounded-[8px] border border-[var(--color-border-subtle)] bg-[var(--color-bg-muted)] p-0.5">
+                <div className="inline-flex items-center gap-1 rounded-[8px] bg-[var(--color-bg-muted)] p-0.5">
                   {(['toggle', 'select'] as const).map((ty) => (
                     <button
                       key={ty}
@@ -220,7 +220,7 @@ export function ParamControlsEditor({ value, onChange }: Props) {
                       moveUpLabel={t('common.moveUp')}
                       moveDownLabel={t('common.moveDown')}
                       mobileDragOnly
-                      listClassName="border-[var(--color-border-subtle)] bg-[var(--color-bg-muted)]"
+                      listClassName="bg-[var(--color-bg-muted)]"
                       rowClassName="grid grid-cols-[2.75rem_minmax(0,1fr)] items-start gap-2 p-2.5 md:grid-cols-[auto_auto_minmax(0,1fr)]"
                       renderItem={(op, j) => (
                         <div className="flex min-w-0 flex-col gap-2">

@@ -42,6 +42,9 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { WorkspaceAdminControls } from './workspace-admin-controls'
 import { AdminPageHeader } from '@/components/admin/admin-page-header'
+import { AdminTable } from '@/components/admin/AdminTable'
+import { AdminListToolbar } from '@/components/admin/admin-list-toolbar'
+import { matchesAdminSearch } from '@/lib/admin-list-filter'
 
 function fmtDate(unix: number): string {
   return new Date(unix * 1000).toLocaleDateString()
@@ -61,6 +64,8 @@ function workspaceOwnerName(workspace: ApiWorkspace, members: ApiWorkspaceMember
 export default function AdminWorkspaces() {
   const { t } = useTranslation('admin')
   const [rows, setRows] = useState<ApiWorkspace[]>([])
+  const [search, setSearch] = useState('')
+  const filteredRows = rows.filter((row) => matchesAdminSearch(search, [row.name, row.id, row.owner_name, row.owner_id, row.description]))
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
@@ -110,7 +115,7 @@ export default function AdminWorkspaces() {
         title={t('workspaces.title', { defaultValue: 'Workspaces' })}
         description={t('workspaces.subtitle', { defaultValue: 'Every collaborative space, its owner and member count.' })}
       />
-      <div className="mt-6"><WorkspaceAdminControls onSaved={() => void load()} /></div>
+      <AdminListToolbar search={search} onSearchChange={setSearch} placeholder={t('listToolbar.search.workspaces')} actions={<WorkspaceAdminControls onSaved={() => void load()} />} />
       {loading ? (
         <PanelFallback />
       ) : rows.length === 0 ? (
@@ -123,69 +128,19 @@ export default function AdminWorkspaces() {
         </div>
       ) : (
         <>
-        <div className="mt-6 hidden overflow-x-auto rounded-[12px] border border-[var(--color-border)] md:block">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-[var(--color-divider)] bg-[var(--color-bg-muted)] text-left text-[12px] uppercase tracking-wide text-[var(--color-fg-subtle)]">
-                <th className="px-3 py-2 font-medium">{t('workspaces.colName', { defaultValue: 'Name' })}</th>
-                <th className="px-3 py-2 font-medium">{t('workspaces.colOwner', { defaultValue: 'Owner' })}</th>
-                <th className="px-3 py-2 font-medium">{t('workspaces.colMembers', { defaultValue: 'Members' })}</th>
-                <th className="px-3 py-2 font-medium">{t('workspaces.colCreated', { defaultValue: 'Created' })}</th>
-                <th className="px-3 py-2" />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((w) => (
-                <tr key={w.id} className="border-b border-[var(--color-divider)] last:border-0 hover:bg-[var(--color-bg)]">
-                  <td className="px-3 py-2.5">
-                    <button
-                      type="button"
-                      onClick={() => setSelected(w.id)}
-                      className="font-medium text-[var(--color-fg)] hover:text-[var(--color-accent)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] rounded-[6px]"
-                    >
-                      {w.name}
-                    </button>
-                  </td>
-                  <td className="px-3 py-2.5 text-[var(--color-fg-muted)]">{w.owner_name || w.owner_id}</td>
-                  <td className="px-3 py-2.5 tabular-nums text-[var(--color-fg-muted)]">{w.member_count ?? 0}</td>
-                  <td className="px-3 py-2.5 tabular-nums text-[var(--color-fg-subtle)]">{fmtDate(w.created_at)}</td>
-                  <td className="px-3 py-2.5 text-right">
-                    <Button size="sm" variant="ghost" onClick={() => setSelected(w.id)}>
-                      {t('workspaces.view', { defaultValue: 'View' })}
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <ul className="mt-5 divide-y divide-[var(--color-divider)] overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] md:hidden">
-          {rows.map((w) => (
-            <li key={w.id}>
-              <button
-                type="button"
-                onClick={() => setSelected(w.id)}
-                aria-label={`${t('workspaces.view', { defaultValue: 'View' })}: ${w.name}`}
-                className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_2.5rem] items-center gap-2 px-3 py-3.5 text-left interactive hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)]"
-              >
-                <span className="min-w-0">
-                  <span className="block truncate text-sm font-medium text-[var(--color-fg)]">{w.name}</span>
-                  <span className="mt-0.5 block truncate text-[12px] text-[var(--color-fg-muted)]">{w.owner_name || w.owner_id}</span>
-                  <span className="mt-2 flex items-center gap-3 text-[12px] text-[var(--color-fg-subtle)]">
-                    <span className="inline-flex items-center gap-1 tabular-nums">
-                      <Users size={12} aria-hidden />
-                      {w.member_count ?? 0}
-                    </span>
-                    <span className="tabular-nums">{fmtDate(w.created_at)}</span>
-                  </span>
-                </span>
-                <span className="inline-flex size-10 items-center justify-center text-[var(--color-fg-subtle)]">
-                  <ChevronRight size={17} aria-hidden />
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
+        <AdminTable
+          className="mt-4"
+          items={filteredRows}
+          rowKey={(workspace) => workspace.id}
+          label={t('workspaces.title')}
+          columns={[
+            { id: 'name', header: t('workspaces.colName'), width: 240, render: (workspace) => <button type="button" className="admin-table-link font-medium" onClick={() => setSelected(workspace.id)}>{workspace.name}</button> },
+            { id: 'owner', header: t('workspaces.colOwner'), width: 200, render: (workspace) => <span className="block truncate">{workspace.owner_name || workspace.owner_id}</span> },
+            { id: 'members', header: t('workspaces.colMembers'), width: 100, align: 'right', render: (workspace) => <span className="tabular-nums">{workspace.member_count ?? 0}</span> },
+            { id: 'created', header: t('workspaces.colCreated'), width: 160, render: (workspace) => fmtDate(workspace.created_at) },
+            { id: 'actions', header: t('common.actions'), width: 60, align: 'right', render: (workspace) => <Button size="icon-sm" variant="ghost" title={t('workspaces.view')} aria-label={t('workspaces.view')} onClick={() => setSelected(workspace.id)}><ChevronRight size={14} aria-hidden /></Button> },
+          ]}
+        />
         </>
       )}
     </section>
@@ -274,78 +229,92 @@ function WorkspaceDetail({
         <ChevronLeft size={14} aria-hidden />
         {t('workspaces.back', { defaultValue: 'All workspaces' })}
       </button>
-      <div className="mt-3 flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="flex min-w-0 items-center gap-2 text-xl font-semibold tracking-normal text-[var(--color-fg)]">
-            <Briefcase size={20} aria-hidden className="text-[var(--color-fg-muted)]" />
+      <AdminPageHeader
+        className="mt-3"
+        title={(
+          <span className="flex min-w-0 items-center gap-2">
+            <Briefcase size={18} aria-hidden className="shrink-0 text-[var(--color-fg-muted)]" />
             <span className="min-w-0 break-words">{workspace.name}</span>
-          </h1>
-          <p className="mt-1 flex items-center gap-1.5 text-sm text-[var(--color-fg-muted)]">
+          </span>
+        )}
+        showDescription
+        description={(
+          <span className="flex items-center gap-1.5">
             <Users size={13} aria-hidden />
             {t('workspaces.detailMeta', {
               owner: ownerName,
               count: members.length,
               defaultValue: 'Owner {{owner}} · {{count}} members',
             })}
-          </p>
-        </div>
-        <Button variant="destructive" onClick={() => onDelete(id)} className="w-full sm:w-auto">
-          <Trash2 size={13} aria-hidden />
-          {t('workspaces.delete', { defaultValue: 'Delete workspace' })}
-        </Button>
-      </div>
+          </span>
+        )}
+        actions={(
+          <Button size="sm" variant="destructive" onClick={() => onDelete(id)} className="max-sm:min-h-[var(--tap-min)]">
+            <Trash2 size={13} aria-hidden />
+            {t('workspaces.delete', { defaultValue: 'Delete workspace' })}
+          </Button>
+        )}
+      />
 
       <div className="mt-4"><WorkspaceAdminControls workspaceId={id} ownerId={workspace.owner_id} members={members} onSaved={() => {
         workspacesApi.adminDetail(id).then(setData).catch((e) => toast.error(e instanceof Error ? e.message : t('domains.loadFailed')))
       }} /></div>
       <div className="mt-5 grid gap-3 sm:mt-6 sm:gap-6 lg:grid-cols-2">
         <Panel title={t('workspaces.members', { defaultValue: 'Members' })}>
-          {members.map((m) => (
-            <Row
-              key={m.user_id}
-              main={m.name || m.email}
-              sub={
-                m.is_owner
-                  ? t('workspaces.roleOwner', { defaultValue: 'Owner' })
-                  : m.role === 'admin'
-                    ? t('workspaces.roleAdmin', { defaultValue: 'Admin' })
-                    : m.role === 'guest'
-                      ? t('workspaces.roleGuest', { defaultValue: 'Guest' })
-                      : t('workspaces.roleMember', { defaultValue: 'Member' })
-              }
-            />
-          ))}
+          <AdminTable
+            className="max-h-72 overflow-y-auto"
+            items={members}
+            rowKey={(member) => member.user_id}
+            label={t('workspaces.members')}
+            columns={[
+              { id: 'name', header: t('users.fields.name'), width: 180, render: (member) => <span className="block truncate">{member.name || member.email}</span> },
+              { id: 'email', header: t('users.fields.email'), width: 220, render: (member) => <span className="block truncate">{member.email}</span> },
+              { id: 'role', header: t('users.fields.role'), width: 100, render: (member) => <Badge size="xs">{t(member.is_owner ? 'workspaces.roleOwner' : member.role === 'admin' ? 'workspaces.roleAdmin' : member.role === 'guest' ? 'workspaces.roleGuest' : 'workspaces.roleMember')}</Badge> },
+            ]}
+          />
         </Panel>
         <Panel title={`${t('workspaces.conversations', { defaultValue: 'Conversations' })} · ${conversations.length}`}>
-          {conversations.slice(0, 100).map((c) => (
-            <li key={c.id}>
-              <Link
-                to={`/admin/users/${encodeURIComponent(c.user_id)}/conversations/${encodeURIComponent(c.id)}`}
-                className="block rounded-[8px] px-2 py-1.5 hover:bg-[var(--color-bg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-              >
-                <div className="truncate text-[13px] text-[var(--color-fg)] hover:text-[var(--color-accent)]">{c.title || '—'}</div>
-                {c.creator_name ? (
-                  <div className="truncate text-[12px] text-[var(--color-fg-subtle)]">{c.creator_name}</div>
-                ) : null}
-              </Link>
-            </li>
-          ))}
+          <AdminTable
+            className="max-h-72 overflow-y-auto"
+            items={conversations.slice(0, 100)}
+            rowKey={(conversation) => conversation.id}
+            label={t('workspaces.conversations')}
+            columns={[
+              { id: 'title', header: t('workspaces.conversations'), width: 260, render: (conversation) => <Link to={`/admin/users/${encodeURIComponent(conversation.user_id)}/conversations/${encodeURIComponent(conversation.id)}`} className="admin-table-link">{conversation.title || t('resources.details.untitled')}</Link> },
+              { id: 'user', header: t('users.fields.name'), width: 180, render: (conversation) => <span className="block truncate">{conversation.creator_name || '-'}</span> },
+            ]}
+          />
         </Panel>
         <Panel title={`${t('workspaces.projects', { defaultValue: 'Projects' })} · ${projects.length}`}>
-          {projects.map((p) => (
-            <Row key={p.id} main={p.name} sub={p.description} />
-          ))}
+          <AdminTable
+            className="max-h-72 overflow-y-auto"
+            items={projects}
+            rowKey={(project) => project.id}
+            label={t('workspaces.projects')}
+            columns={[
+              { id: 'name', header: t('resources.table.name'), width: 200, render: (project) => <span className="block truncate" title={project.name}>{project.name}</span> },
+              { id: 'description', header: t('prompts.fields.description'), width: 260, render: (project) => <span className="line-clamp-2" title={project.description}>{project.description || '-'}</span> },
+            ]}
+          />
         </Panel>
         <Panel title={`${t('workspaces.kbs', { defaultValue: 'Knowledge bases' })} · ${kbs.length}`}>
-          {kbs.map((k) => (
-            <Row key={k.id} main={k.name} sub={k.description} onClick={() => void openKnowledgeBase(k)} />
-          ))}
+          <AdminTable
+            className="max-h-72 overflow-y-auto"
+            items={kbs}
+            rowKey={(knowledgeBase) => knowledgeBase.id}
+            label={t('workspaces.kbs')}
+            columns={[
+              { id: 'name', header: t('resources.table.name'), width: 200, render: (knowledgeBase) => <button type="button" className="admin-table-link" onClick={() => void openKnowledgeBase(knowledgeBase)}>{knowledgeBase.name}</button> },
+              { id: 'description', header: t('prompts.fields.description'), width: 240, render: (knowledgeBase) => <span className="line-clamp-2" title={knowledgeBase.description}>{knowledgeBase.description || '-'}</span> },
+              { id: 'actions', header: t('common.actions'), width: 60, align: 'right', render: (knowledgeBase) => <Button variant="ghost" size="icon-sm" title={t('common.details')} aria-label={t('common.details')} onClick={() => void openKnowledgeBase(knowledgeBase)}><ChevronRight size={14} aria-hidden /></Button> },
+            ]}
+          />
         </Panel>
       </div>
 
       <Sheet open={knowledgeBaseDetail !== null} onOpenChange={(open) => !open && closeKnowledgeBaseDetail()}>
         <SheetContent side="right" size="lg" label={t('resources.tabs.knowledgeBases')} className="w-[min(100vw,40rem)]">
-          <SheetHeader className="relative border-b border-[var(--color-divider)] pr-14">
+          <SheetHeader className="relative pr-14">
             <SheetTitle className="break-words">{knowledgeBaseDetail?.item?.name || knowledgeBaseDetail?.summary.name}</SheetTitle>
             <SheetDescription>{t('resources.tabs.knowledgeBases')}</SheetDescription>
             <SheetClose asChild>
@@ -396,38 +365,10 @@ function WorkspaceDetail({
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="min-w-0 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 sm:p-4">
-      <h2 className="text-[12px] font-medium text-[var(--color-fg-subtle)]">{title}</h2>
-      <ul className="mt-2 max-h-72 space-y-1 overflow-y-auto scrollbar-thin">{children}</ul>
-    </div>
-  )
-}
-
-function Row({ main, sub, onClick }: { main: string; sub?: string; onClick?: () => void }) {
-  const content = (
-    <>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[13px] text-[var(--color-fg)]">{main}</span>
-        {sub ? <span className="block truncate text-[12px] text-[var(--color-fg-subtle)]">{sub}</span> : null}
-      </span>
-      {onClick ? <ChevronRight size={14} className="shrink-0 text-[var(--color-fg-faint)]" aria-hidden /> : null}
-    </>
-  )
-
-  return (
-    <li>
-      {onClick ? (
-        <button
-          type="button"
-          onClick={onClick}
-          className="group flex w-full min-w-0 items-center gap-2 rounded-[8px] px-2 py-1.5 text-left interactive hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-        >
-          {content}
-        </button>
-      ) : (
-        <div className="flex min-w-0 items-center gap-2 rounded-[8px] px-2 py-1.5 hover:bg-[var(--color-bg)]">{content}</div>
-      )}
-    </li>
+    <section className="min-w-0">
+      <h2 className="mb-2 text-[13px] font-medium text-[var(--color-fg-muted)]">{title}</h2>
+      {children}
+    </section>
   )
 }
 
@@ -478,19 +419,17 @@ function WorkspaceKnowledgeBaseDetails({
 
       <KnowledgeBaseSection title={t('resources.details.documentList')} icon={<FileText size={14} aria-hidden />}>
         {documents.length ? (
-          <ul className="divide-y divide-[var(--color-divider)] border-y border-[var(--color-divider)]">
-            {documents.map((document) => (
-              <li key={document.id} className="flex min-w-0 items-center justify-between gap-3 py-3">
-                <span className="min-w-0">
-                  <span className="block truncate text-sm text-[var(--color-fg)]">{document.filename}</span>
-                  <span className="mt-0.5 block truncate text-[12px] text-[var(--color-fg-subtle)]">
-                    {[document.mime_type, formatBytes(document.size_bytes), fmtDate(document.created_at)].filter(Boolean).join(' · ')}
-                  </span>
-                </span>
-                <KnowledgeBaseDocumentStatus status={document.status} t={t} />
-              </li>
-            ))}
-          </ul>
+          <AdminTable
+            items={documents}
+            rowKey={(document) => document.id}
+            label={t('resources.details.documentList')}
+            columns={[
+              { id: 'filename', header: t('resources.details.filename'), width: 230, render: (document) => <><span className="block truncate" title={document.filename}>{document.filename}</span><span className="text-[12px] text-[var(--color-fg-muted)]">{document.mime_type}</span></> },
+              { id: 'status', header: t('common.status'), width: 100, render: (document) => <KnowledgeBaseDocumentStatus status={document.status} t={t} /> },
+              { id: 'size', header: t('resources.details.size'), width: 90, render: (document) => formatBytes(document.size_bytes) },
+              { id: 'created', header: t('resources.details.created'), width: 160, render: (document) => fmtDate(document.created_at) },
+            ]}
+          />
         ) : (
           <p className="text-sm text-[var(--color-fg-muted)]">{t('resources.details.noDocuments')}</p>
         )}
@@ -517,7 +456,7 @@ function KnowledgeBaseSection({ title, icon, children }: { title: string; icon?:
 }
 
 function KnowledgeBaseMetaList({ children }: { children: ReactNode }) {
-  return <dl className="mt-3 divide-y divide-[var(--color-divider)] border-y border-[var(--color-divider)] text-[12.5px]">{children}</dl>
+  return <dl className="mt-3 text-[12.5px]">{children}</dl>
 }
 
 function KnowledgeBaseMetaRow({ label, value, mono = false }: { label: string; value: ReactNode; mono?: boolean }) {
@@ -546,7 +485,7 @@ function KnowledgeBaseStat({
         ? 'text-[var(--color-danger)]'
         : 'text-[var(--color-fg)]'
   return (
-    <div className="min-w-0 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface-sunken)] px-3 py-2.5">
+    <div className="min-w-0 rounded-[8px] bg-[var(--color-surface-sunken)] px-3 py-2.5">
       <p className="truncate text-[12px] text-[var(--color-fg-subtle)]">{label}</p>
       <p className={`mt-1 truncate text-base font-medium tabular-nums ${color}`}>{value}</p>
     </div>

@@ -9,7 +9,6 @@ import { Pencil, Plus, Trash2 } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
 import type { ApiCreditPackage } from '@/api/types'
 import { AdminSortableList } from '@/components/admin/AdminSortableList'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -491,7 +490,7 @@ export default function AdminCreditSettings() {
             </div>
 
             {creditPackages.length === 0 ? (
-              <p className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-5 text-sm text-[var(--color-fg-muted)]">
+              <p className="rounded-[12px] bg-[var(--color-surface)] px-4 py-5 text-sm text-[var(--color-fg-muted)]">
                 {t('admin:groups.creditPackages.empty')}
               </p>
             ) : (
@@ -502,62 +501,15 @@ export default function AdminCreditSettings() {
                 dragHandleLabel={t('admin:common.dragHandle')}
                 moveUpLabel={t('admin:common.moveUp')}
                 moveDownLabel={t('admin:common.moveDown')}
-                mobileDragOnly
-                rowClassName="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1.5 px-3 py-3 md:grid-cols-[auto_auto_minmax(0,1fr)_auto] md:gap-3 md:px-4"
-                renderItem={(item) => {
-                  const toggling = packageBusyIds.has(item.id)
-                  return (
-                    <>
-                      <div className="min-w-0">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <span className="truncate text-sm font-medium text-[var(--color-fg)]">{item.name}</span>
-                          {!item.enabled ? (
-                            <Badge size="xs" variant="neutral">{t('admin:groups.creditPackages.disabled')}</Badge>
-                          ) : null}
-                        </div>
-                        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px] text-[var(--color-fg-subtle)]">
-                          <span>
-                            {t('admin:groups.creditPackages.creditCount', {
-                              count: item.credits.toLocaleString(i18n.resolvedLanguage),
-                            })}
-                          </span>
-                          <span aria-hidden>·</span>
-                          <span className="tabular-nums">
-                            {formatCurrencyMinor(item.price_amount_minor, packageCurrency, i18n.resolvedLanguage)}
-                          </span>
-                          {item.description ? <span className="basis-full truncate">{item.description}</span> : null}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1 max-md:col-start-2 max-md:w-full max-md:justify-between">
-                        <Switch
-                          checked={item.enabled}
-                          disabled={toggling}
-                          aria-busy={toggling || undefined}
-                          onCheckedChange={(enabled) => void togglePackage(item, enabled)}
-                          aria-label={t('admin:groups.creditPackages.enabledLabel', { name: item.name })}
-                        />
-                        <div className="flex items-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            className="max-md:size-11"
-                            leadingIcon={<Pencil size={14} aria-hidden />}
-                            onClick={() => openEditPackage(item)}
-                            aria-label={`${t('admin:common.edit')}: ${item.name}`}
-                          />
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            leadingIcon={<Trash2 size={14} aria-hidden />}
-                            onClick={() => setConfirmPackageDelete(item)}
-                            aria-label={`${t('admin:common.remove')}: ${item.name}`}
-                            className="text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] max-md:size-11"
-                          />
-                        </div>
-                      </div>
-                    </>
-                  )
-                }}
+                tableLabel={t('admin:groups.creditPackages.title')}
+                columns={[
+                  { id: 'name', header: t('admin:groups.creditPackages.fields.name'), width: 200, render: (item) => <span className="block truncate font-medium" title={item.name}>{item.name}</span> },
+                  { id: 'description', header: t('admin:groups.creditPackages.fields.description'), width: 260, render: (item) => <span className="block truncate text-[var(--color-fg-muted)]" title={item.description}>{item.description || '—'}</span> },
+                  { id: 'credits', header: t('admin:groups.creditPackages.fields.credits'), width: 130, render: (item) => <span className="tabular-nums">{item.credits.toLocaleString(i18n.resolvedLanguage)}</span> },
+                  { id: 'price', header: t('admin:common.pricing'), width: 140, render: (item) => <span className="tabular-nums">{formatCurrencyMinor(item.price_amount_minor, packageCurrency, i18n.resolvedLanguage)}</span> },
+                  { id: 'status', header: t('admin:common.status'), width: 90, align: 'center', render: (item) => <Switch checked={item.enabled} disabled={packageBusyIds.has(item.id)} aria-busy={packageBusyIds.has(item.id) || undefined} onCheckedChange={(enabled) => void togglePackage(item, enabled)} aria-label={t('admin:groups.creditPackages.enabledLabel', { name: item.name })} /> },
+                  { id: 'actions', header: t('admin:common.actions'), width: 116, align: 'right', render: (item) => <div className="flex items-center gap-1"><Button variant="ghost" size="icon-sm" title={t('admin:common.edit')} aria-label={`${t('admin:common.edit')}: ${item.name}`} onClick={() => openEditPackage(item)}><Pencil size={14} aria-hidden /></Button><Button variant="ghost" size="icon-sm" title={t('admin:common.remove')} aria-label={`${t('admin:common.remove')}: ${item.name}`} onClick={() => setConfirmPackageDelete(item)}><Trash2 size={14} aria-hidden /></Button></div> },
+                ]}
               />
             )}
           </section>
@@ -630,7 +582,7 @@ export default function AdminCreditSettings() {
                   />
                 </Field>
               </div>
-              <div className="flex items-center justify-between gap-3 rounded-[8px] border border-[var(--color-border)] px-3 py-2.5">
+              <div className="flex items-center justify-between gap-3 rounded-[8px] px-3 py-2.5">
                 <div className="min-w-0">
                   <p className="text-sm text-[var(--color-fg)]">
                     {t('admin:groups.creditPackages.fields.enabled')}

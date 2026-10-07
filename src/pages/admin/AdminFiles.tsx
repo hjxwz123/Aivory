@@ -10,10 +10,8 @@ import {
   Download,
   FileQuestion,
   FolderOpen,
-  MessageSquare,
   Search,
   Trash2,
-  UserRound,
   X,
 } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
@@ -21,6 +19,7 @@ import type { ApiAdminFile } from '@/api/types'
 import { DocumentPreview } from '@/components/files/document-preview'
 import { FileFiltersPopover } from '@/components/files/file-filters-popover'
 import { Button } from '@/components/ui/button'
+import { AdminTable } from '@/components/admin/AdminTable'
 import {
   Dialog,
   DialogBody,
@@ -373,8 +372,7 @@ export default function AdminFiles() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <AdminPageHeader
-        className="shrink-0 px-4 pb-4 pt-5 sm:px-8 sm:pt-6"
-        descriptionClassName="max-sm:hidden"
+        className="shrink-0 px-4 pb-3 pt-3 sm:px-8 sm:pt-4"
         title={t('admin:files.title')}
         description={t('admin:files.lead')}
         actions={(
@@ -384,15 +382,15 @@ export default function AdminFiles() {
         )}
       />
 
-      <div className="flex min-h-0 flex-1 overflow-hidden border-t border-[var(--color-divider)] bg-[var(--color-surface)]">
+      <div className="flex min-h-0 flex-1 overflow-hidden bg-[var(--color-surface)]">
         <aside
           className={cn(
-            'min-h-0 w-full flex-col bg-[var(--color-bg)] lg:flex lg:w-[19rem] lg:shrink-0 lg:border-r lg:border-[var(--color-border)] xl:w-[22rem] 2xl:w-[23rem]',
+            'min-h-0 w-full flex-col bg-[var(--color-bg)] lg:flex lg:w-[19rem] lg:shrink-0 xl:w-[22rem] 2xl:w-[23rem]',
             mobilePreviewOpen ? 'hidden' : 'flex',
           )}
           aria-label={t('files:accessibility.fileList')}
         >
-          <div className="flex items-center gap-2 border-b border-[var(--color-divider)] px-3 py-2">
+          <div className="flex items-center gap-2 px-3 py-2">
             <Input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -430,7 +428,7 @@ export default function AdminFiles() {
           </div>
 
           <div className="flex min-h-0 flex-1 flex-col">
-            <div className="flex min-h-11 shrink-0 items-center gap-1 border-b border-[var(--color-divider)] px-1.5 text-xs text-[var(--color-fg-subtle)]">
+            <div className="flex min-h-11 shrink-0 items-center gap-1 px-1.5 text-xs text-[var(--color-fg-subtle)]">
               <label
                 className={cn(
                   'inline-flex h-10 min-w-0 cursor-pointer items-center rounded-[8px] hover:bg-[var(--color-bg-muted)] has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50',
@@ -522,103 +520,38 @@ export default function AdminFiles() {
                 }
               />
             ) : (
-              <ul
-                className="min-h-0 flex-1 overflow-y-auto p-1.5 scrollbar-thin"
-                aria-label={t('files:accessibility.fileList')}
-              >
-                {rows.map((file) => {
-                  const key = rowKey(file)
-                  const active = key === selectedKey
-                  const checked = selected.has(key)
-                  const FileIcon = fileIconFor(file.filename)
-                  const source =
-                    file.origin === 'kb'
-                      ? file.kb_name || t('admin:files.origin.kb')
-                      : t('admin:files.origin.conversation')
-                  return (
-                    <li
-                      key={key}
-                      className={cn(
-                        'group/file flex min-h-20 items-stretch rounded-[8px] transition-colors',
-                        active
-                          ? 'bg-[var(--color-accent-soft)]'
-                          : checked
-                            ? 'bg-[var(--color-bg-muted)] ring-1 ring-inset ring-[var(--color-border)]'
-                            : 'hover:bg-[var(--color-bg-muted)]',
-                      )}
-                    >
-                      <label className="inline-flex w-11 shrink-0 cursor-pointer items-center justify-center rounded-l-[8px] focus-within:ring-2 focus-within:ring-inset focus-within:ring-[var(--color-ring)]">
-                        <input
-                          type="checkbox"
-                          className="size-4 cursor-pointer accent-[var(--color-accent)]"
-                          checked={checked}
-                          onChange={() => toggleOne(file)}
-                          aria-label={t('admin:files.selectOne', { name: file.filename })}
-                          disabled={busy}
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        aria-current={active ? 'true' : undefined}
-                        className="flex min-w-0 flex-1 items-center gap-2 py-2 pr-1 text-left focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)]"
-                        onClick={() => void openPreview(file)}
-                      >
-                        <span
-                          className={cn(
-                            'inline-flex size-9 shrink-0 items-center justify-center rounded-[8px]',
-                            active
-                              ? 'bg-[var(--color-surface)] text-[var(--color-accent)]'
-                              : 'bg-[var(--color-surface-sunken)] text-[var(--color-fg-muted)]',
-                          )}
-                        >
-                          <FileIcon size={17} aria-hidden />
-                        </span>
+              <AdminTable
+                items={rows}
+                rowKey={rowKey}
+                embedded
+                label={t('files:accessibility.fileList')}
+                className="min-h-0 flex-1 overflow-y-auto rounded-none border-0 scrollbar-thin"
+                renderRow={(file, _index, cells) => <tr key={rowKey(file)} data-active={rowKey(file) === selectedKey || selected.has(rowKey(file)) ? 'true' : undefined}>{cells}</tr>}
+                columns={[
+                  { id: 'select', header: <span className="sr-only">{t('admin:files.selectAll')}</span>, width: 44, render: (file) => <input type="checkbox" className="size-4 cursor-pointer accent-[var(--color-accent)]" checked={selected.has(rowKey(file))} onChange={() => toggleOne(file)} aria-label={t('admin:files.selectOne', { name: file.filename })} disabled={busy} /> },
+                  { id: 'file', header: t('admin:files.table.filename'), width: 240, render: (file) => {
+                    const FileIcon = fileIconFor(file.filename)
+                    const source = file.origin === 'kb' ? file.kb_name || t('admin:files.origin.kb') : t('admin:files.origin.conversation')
+                    return (
+                      <button type="button" className="admin-table-link" aria-current={rowKey(file) === selectedKey ? 'true' : undefined} onClick={() => void openPreview(file)}>
+                        <span className="flex min-w-0 items-center gap-2">
+                        <FileIcon size={17} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden />
                         <span className="min-w-0 flex-1">
-                          <span
-                            className="block truncate text-sm font-medium text-[var(--color-fg)]"
-                            title={file.filename}
-                          >
-                            {file.filename}
-                          </span>
-                          <span
-                            className="mt-0.5 flex min-w-0 items-center gap-1 text-[0.71875rem] text-[var(--color-fg-subtle)]"
-                            title={ownerTitle(file)}
-                          >
-                            <UserRound size={11} className="shrink-0" aria-hidden />
-                            <span className="truncate">{ownerLabel(file)}</span>
-                          </span>
-                          <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[0.71875rem] text-[var(--color-fg-subtle)]">
-                            {file.origin === 'kb' ? (
-                              <FolderOpen size={11} className="shrink-0" aria-hidden />
-                            ) : (
-                              <MessageSquare size={11} className="shrink-0" aria-hidden />
-                            )}
-                            <span className="min-w-0 truncate" title={source}>{source}</span>
-                            <span className="shrink-0" aria-hidden>·</span>
-                            <span className="shrink-0 tabular-nums">{fmtBytes(file.size_bytes)}</span>
-                            <span className="shrink-0" aria-hidden>·</span>
-                            <span className="min-w-0 truncate">{shortDateFormat.format(new Date(file.created_at * 1000))}</span>
-                          </span>
+                          <span className="block truncate font-medium" title={file.filename}>{file.filename}</span>
+                          <span className="block truncate text-[12px] text-[var(--color-fg-muted)]" title={ownerTitle(file)}>{ownerLabel(file)}</span>
+                          <span className="block truncate text-[12px] text-[var(--color-fg-muted)]" title={source}>{source} · {fmtBytes(file.size_bytes)} · {shortDateFormat.format(new Date(file.created_at * 1000))}</span>
+                        </span>
                         </span>
                       </button>
-                      <Tooltip content={t('common:actions.delete', { defaultValue: 'Delete' })} side="left">
-                        <button
-                          type="button"
-                          aria-label={`${t('common:actions.delete', { defaultValue: 'Delete' })}: ${file.filename}`}
-                          className="inline-flex w-11 shrink-0 items-center justify-center rounded-r-[8px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)]"
-                          onClick={() => setConfirmDelete([file])}
-                        >
-                          <Trash2 size={15} aria-hidden />
-                        </button>
-                      </Tooltip>
-                    </li>
-                  )
-                })}
-              </ul>
+                    )
+                  } },
+                  { id: 'actions', header: t('admin:common.actions'), width: 56, align: 'right', render: (file) => <Tooltip content={t('common:actions.delete')}><Button variant="ghost" size="icon-sm" aria-label={`${t('common:actions.delete')}: ${file.filename}`} onClick={() => setConfirmDelete([file])}><Trash2 size={15} aria-hidden /></Button></Tooltip> },
+                ]}
+              />
             )}
 
             {pageCount > 1 ? (
-              <div className="shrink-0 border-t border-[var(--color-divider)] px-3 pb-3">
+              <div className="shrink-0 px-3 pb-3">
                 <Pagination
                   page={page}
                   pageCount={pageCount}
@@ -639,7 +572,7 @@ export default function AdminFiles() {
         >
           {preview ? (
             <>
-              <header className="flex min-h-12 shrink-0 items-center gap-1 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-2 sm:px-3">
+              <header className="flex min-h-12 shrink-0 items-center gap-1 bg-[var(--color-surface)] px-2 sm:px-3">
                 <Button
                   variant="ghost"
                   size="icon-sm"

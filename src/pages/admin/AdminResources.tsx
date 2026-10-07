@@ -46,6 +46,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { AdminPageHeader } from '@/components/admin/admin-page-header'
+import { AdminTable } from '@/components/admin/AdminTable'
 
 const PAGE_SIZE = 50
 const PROJECT_CONVERSATION_PAGE_SIZE = 20
@@ -418,7 +419,7 @@ export default function AdminResources() {
       <div
         role="group"
         aria-label={t('admin:resources.title')}
-        className="mt-6 inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-[8px] border border-[var(--color-border-subtle)] bg-[var(--color-bg-muted)] p-1"
+        className="mt-6 inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-[8px] bg-[var(--color-bg-muted)] p-1"
       >
         {([
           ['knowledge-bases', BookOpen, t('admin:resources.tabs.knowledgeBases')],
@@ -528,8 +529,8 @@ export default function AdminResources() {
         )}
       </div>
 
-      <section className="mt-5 overflow-hidden rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-        <div className="flex min-h-11 items-center justify-between gap-3 border-b border-[var(--color-divider)] px-4 py-2.5 sm:px-5">
+      <section className="mt-5 overflow-hidden rounded-[8px] bg-[var(--color-surface)]">
+        <div className="flex min-h-11 items-center justify-between gap-3 px-4 py-2.5 sm:px-5">
           <span className="text-[12.5px] tabular-nums text-[var(--color-fg-subtle)]">
             {t('admin:resources.total', { count: currentTotal })}
           </span>
@@ -583,7 +584,7 @@ export default function AdminResources() {
           size="lg"
           className="w-[min(100vw,40rem)]"
         >
-          <SheetHeader className="relative border-b border-[var(--color-divider)] pr-14">
+          <SheetHeader className="relative pr-14">
             <SheetTitle className="break-words">{detailTitle(detail)}</SheetTitle>
             <SheetDescription>{detail ? t(`admin:resources.tabs.${detail.kind === 'knowledge-bases' ? 'knowledgeBases' : detail.kind}`) : ''}</SheetDescription>
             <SheetClose asChild>
@@ -671,48 +672,20 @@ function KnowledgeBaseList({
   return (
     <div className={cn('transition-opacity', state.loading && 'pointer-events-none opacity-60')}>
       {state.error ? <InlineError message={state.error} onRetry={onRetry} t={t} /> : null}
-      <div className="hidden grid-cols-[minmax(0,2fr)_minmax(0,1.25fr)_8rem_minmax(0,1fr)_10rem_1.25rem] gap-4 border-b border-[var(--color-divider)] px-5 py-2.5 text-[12px] font-medium uppercase text-[var(--color-fg-subtle)] md:grid">
-        <span>{t('admin:resources.table.name')}</span>
-        <span>{t('admin:resources.table.user')}</span>
-        <span>{t('admin:resources.table.documents')}</span>
-        <span>{t('admin:resources.table.model')}</span>
-        <span>{t('admin:resources.table.updated')}</span>
-        <span />
-      </div>
-      <ul className="divide-y divide-[var(--color-divider)]">
-        {state.data.items.map((item) => (
-          <li key={item.id}>
-            <button
-              type="button"
-              onClick={() => onOpen(item)}
-              className="group grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-4 text-left interactive hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)] md:grid-cols-[minmax(0,2fr)_minmax(0,1.25fr)_8rem_minmax(0,1fr)_10rem_1.25rem] md:gap-4 md:px-5"
-            >
-              <span className="min-w-0">
-                <span className="block truncate text-sm font-medium text-[var(--color-fg)]">{item.name}</span>
-                <span className="mt-1 block line-clamp-1 text-[12px] text-[var(--color-fg-subtle)]">
-                  {item.description || t('admin:resources.noDescription')}
-                </span>
-                <span className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[12px] text-[var(--color-fg-subtle)] md:hidden">
-                  <span>{resourceOwner(item.creator_name, item.creator_email, item.creator_id)}</span>
-                  <span>{t('admin:resources.counts.documents', { count: item.document_count })}</span>
-                  <span>{formatDate(item.last_activity_at)}</span>
-                </span>
-              </span>
-              <span className="hidden min-w-0 md:block">
-                <span className="block truncate text-[12.5px] text-[var(--color-fg)]">{resourceOwner(item.creator_name, item.creator_email, item.creator_id)}</span>
-                <span className="mt-0.5 block truncate text-[12px] text-[var(--color-fg-subtle)]">{item.creator_email}</span>
-              </span>
-              <DocumentSummary item={item} t={t} />
-              <span className="hidden min-w-0 md:block">
-                <span className="block truncate text-[12.5px] text-[var(--color-fg)]">{item.embedding_model_label || item.embedding_model_id || '-'}</span>
-                <span className="mt-0.5 block text-[12px] text-[var(--color-fg-subtle)]">{item.embedding_dim ? `${item.embedding_dim}d` : '-'}</span>
-              </span>
-              <span className="hidden text-[12px] text-[var(--color-fg-subtle)] md:block">{formatDate(item.last_activity_at)}</span>
-              <ChevronRight size={16} className="text-[var(--color-fg-faint)] transition-transform group-hover:translate-x-0.5" aria-hidden />
-            </button>
-          </li>
-        ))}
-      </ul>
+      <AdminTable
+        items={state.data.items}
+        rowKey={(item) => item.id}
+        label={t('admin:resources.title')}
+        embedded
+        columns={[
+          { id: 'name', header: t('admin:resources.table.name'), width: 260, render: (item) => <button type="button" className="admin-table-link" onClick={() => onOpen(item)}><span className="block truncate font-medium" title={item.name}>{item.name}</span><span className="block truncate text-[12px] text-[var(--color-fg-muted)]" title={item.description}>{item.description || t('admin:resources.noDescription')}</span></button> },
+          { id: 'owner', header: t('admin:resources.table.user'), width: 200, render: (item) => <div className="min-w-0"><span className="block truncate">{resourceOwner(item.creator_name, item.creator_email, item.creator_id)}</span><span className="block truncate text-[12px] text-[var(--color-fg-muted)]" title={item.creator_email}>{item.creator_email}</span></div> },
+          { id: 'documents', header: t('admin:resources.table.documents'), width: 100, render: (item) => <DocumentSummary item={item} t={t} /> },
+          { id: 'model', header: t('admin:resources.table.model'), width: 180, render: (item) => <div className="min-w-0"><span className="block truncate" title={item.embedding_model_label || item.embedding_model_id}>{item.embedding_model_label || item.embedding_model_id || '—'}</span><span className="block text-[12px] text-[var(--color-fg-muted)]">{item.embedding_dim ? `${item.embedding_dim}d` : '—'}</span></div> },
+          { id: 'updated', header: t('admin:resources.table.updated'), width: 160, render: (item) => <span className="text-[12px] tabular-nums text-[var(--color-fg-muted)]">{formatDate(item.last_activity_at)}</span> },
+          { id: 'actions', header: t('admin:common.actions'), width: 60, align: 'right', render: (item) => <Button size="icon-sm" variant="ghost" title={t('admin:common.details')} aria-label={t('admin:common.details')} onClick={() => onOpen(item)}><ChevronRight size={16} aria-hidden /></Button> },
+        ]}
+      />
       <Pagination page={page} pageCount={Math.ceil(state.data.total / PAGE_SIZE)} onPage={onPage} className="pb-4" />
     </div>
   )
@@ -752,51 +725,20 @@ function ProjectList({
   return (
     <div className={cn('transition-opacity', state.loading && 'pointer-events-none opacity-60')}>
       {state.error ? <InlineError message={state.error} onRetry={onRetry} t={t} /> : null}
-      <div className="hidden grid-cols-[minmax(0,2fr)_minmax(0,1.25fr)_8rem_8rem_10rem_1.25rem] gap-4 border-b border-[var(--color-divider)] px-5 py-2.5 text-[12px] font-medium uppercase text-[var(--color-fg-subtle)] md:grid">
-        <span>{t('admin:resources.table.name')}</span>
-        <span>{t('admin:resources.table.user')}</span>
-        <span>{t('admin:resources.table.conversations')}</span>
-        <span>{t('admin:resources.table.documents')}</span>
-        <span>{t('admin:resources.table.updated')}</span>
-        <span />
-      </div>
-      <ul className="divide-y divide-[var(--color-divider)]">
-        {state.data.items.map((item) => (
-          <li key={item.id}>
-            <button
-              type="button"
-              onClick={() => onOpen(item)}
-              className="group grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-4 text-left interactive hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)] md:grid-cols-[minmax(0,2fr)_minmax(0,1.25fr)_8rem_8rem_10rem_1.25rem] md:gap-4 md:px-5"
-            >
-              <span className="flex min-w-0 items-start gap-2.5">
-                <span className="shrink-0 text-lg leading-5" aria-hidden>{item.emoji || '\u{1F4C1}'}</span>
-                <span className="min-w-0">
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span className="truncate text-sm font-medium text-[var(--color-fg)]">{item.name}</span>
-                    {item.pinned ? <Badge size="xs">{t('admin:resources.details.pinned')}</Badge> : null}
-                  </span>
-                  <span className="mt-1 block line-clamp-1 text-[12px] text-[var(--color-fg-subtle)]">
-                    {item.description || t('admin:resources.noDescription')}
-                  </span>
-                  <span className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[12px] text-[var(--color-fg-subtle)] md:hidden">
-                    <span>{resourceOwner(item.creator_name, item.creator_email, item.creator_id)}</span>
-                    <span>{t('admin:resources.counts.conversations', { count: item.conversation_count })}</span>
-                    <span>{t('admin:resources.counts.documents', { count: item.document_count })}</span>
-                  </span>
-                </span>
-              </span>
-              <span className="hidden min-w-0 md:block">
-                <span className="block truncate text-[12.5px] text-[var(--color-fg)]">{resourceOwner(item.creator_name, item.creator_email, item.creator_id)}</span>
-                <span className="mt-0.5 block truncate text-[12px] text-[var(--color-fg-subtle)]">{item.creator_email}</span>
-              </span>
-              <span className="hidden text-[12.5px] tabular-nums text-[var(--color-fg)] md:block">{item.conversation_count}</span>
-              <DocumentSummary item={item} t={t} />
-              <span className="hidden text-[12px] text-[var(--color-fg-subtle)] md:block">{formatDate(item.last_activity_at)}</span>
-              <ChevronRight size={16} className="text-[var(--color-fg-faint)] transition-transform group-hover:translate-x-0.5" aria-hidden />
-            </button>
-          </li>
-        ))}
-      </ul>
+      <AdminTable
+        items={state.data.items}
+        rowKey={(item) => item.id}
+        label={t('admin:resources.title')}
+        embedded
+        columns={[
+          { id: 'name', header: t('admin:resources.table.name'), width: 260, render: (item) => <button type="button" className="admin-table-link" onClick={() => onOpen(item)}><span className="block truncate font-medium" title={item.name}>{item.emoji ? `${item.emoji} ` : ''}{item.name}</span><span className="block truncate text-[12px] text-[var(--color-fg-muted)]" title={item.description}>{item.description || t('admin:resources.noDescription')}</span>{item.pinned ? <Badge size="xs">{t('admin:resources.details.pinned')}</Badge> : null}</button> },
+          { id: 'owner', header: t('admin:resources.table.user'), width: 200, render: (item) => <div className="min-w-0"><span className="block truncate">{resourceOwner(item.creator_name, item.creator_email, item.creator_id)}</span><span className="block truncate text-[12px] text-[var(--color-fg-muted)]" title={item.creator_email}>{item.creator_email}</span></div> },
+          { id: 'conversations', header: t('admin:resources.table.conversations'), width: 110, render: (item) => <span className="tabular-nums">{item.conversation_count}</span> },
+          { id: 'documents', header: t('admin:resources.table.documents'), width: 100, render: (item) => <DocumentSummary item={item} t={t} /> },
+          { id: 'updated', header: t('admin:resources.table.updated'), width: 160, render: (item) => <span className="text-[12px] tabular-nums text-[var(--color-fg-muted)]">{formatDate(item.last_activity_at)}</span> },
+          { id: 'actions', header: t('admin:common.actions'), width: 60, align: 'right', render: (item) => <Button size="icon-sm" variant="ghost" title={t('admin:common.details')} aria-label={t('admin:common.details')} onClick={() => onOpen(item)}><ChevronRight size={16} aria-hidden /></Button> },
+        ]}
+      />
       <Pagination page={page} pageCount={Math.ceil(state.data.total / PAGE_SIZE)} onPage={onPage} className="pb-4" />
     </div>
   )
@@ -836,7 +778,7 @@ function ImageList({
   return (
     <div className={cn('transition-opacity', state.loading && 'pointer-events-none opacity-60')}>
       {state.error ? <InlineError message={state.error} onRetry={onRetry} t={t} /> : null}
-      <ul className="grid grid-cols-1 gap-px bg-[var(--color-divider)] sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+      <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
         {state.data.items.map((item) => (
           <li key={item.id} className="min-w-0 bg-[var(--color-surface)]">
             <button
@@ -923,19 +865,17 @@ function KnowledgeBaseDetails({
 
       <DetailSection title={t('admin:resources.details.sharedMembers')} icon={<Share2 size={14} aria-hidden />}>
         {item.shares.length ? (
-          <ul className="divide-y divide-[var(--color-divider)] border-y border-[var(--color-divider)]">
-            {item.shares.map((share) => (
-              <li key={share.user_id} className="flex items-center justify-between gap-3 py-3 text-sm">
-                <span className="min-w-0">
-                  <span className="block truncate text-[var(--color-fg)]">{resourceOwner(share.name, share.email, share.user_id)}</span>
-                  <span className="mt-0.5 block truncate text-[12px] text-[var(--color-fg-subtle)]">
-                    {[share.email, share.created_at ? formatDate(share.created_at) : ''].filter(Boolean).join(' · ')}
-                  </span>
-                </span>
-                <Badge size="xs">{share.role || 'read'}</Badge>
-              </li>
-            ))}
-          </ul>
+          <AdminTable
+            items={item.shares}
+            rowKey={(share) => share.user_id}
+            label={t('admin:resources.details.sharedMembers')}
+            columns={[
+              { id: 'user', header: t('admin:users.fields.name'), width: 200, render: (share) => <span className="block truncate">{resourceOwner(share.name, share.email, share.user_id)}</span> },
+              { id: 'email', header: t('admin:users.fields.email'), width: 220, render: (share) => <span className="block truncate">{share.email || '-'}</span> },
+              { id: 'role', header: t('admin:users.fields.role'), width: 100, render: (share) => <Badge size="xs">{share.role || 'read'}</Badge> },
+              { id: 'created', header: t('admin:resources.details.created'), width: 160, render: (share) => share.created_at ? formatDate(share.created_at) : '-' },
+            ]}
+          />
         ) : (
           <p className="text-sm text-[var(--color-fg-muted)]">{t('admin:resources.details.noShares')}</p>
         )}
@@ -988,7 +928,7 @@ function ProjectDetails({
       </DetailSection>
 
       <DetailSection title={t('admin:resources.details.instructions')}>
-        <div className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface-sunken)] px-3.5 py-3 text-sm leading-relaxed text-[var(--color-fg)]">
+        <div className="rounded-[8px] bg-[var(--color-surface-sunken)] px-3.5 py-3 text-sm leading-relaxed text-[var(--color-fg)]">
           <p className="whitespace-pre-wrap break-words">{item.instructions || t('admin:resources.details.noInstructions')}</p>
         </div>
       </DetailSection>
@@ -1045,26 +985,18 @@ function ProjectDetails({
           ) : conversations?.items.length ? (
             <>
               {conversationsError ? <InlineError message={conversationsError} onRetry={onRetryConversations} t={t} /> : null}
-              <ul className="divide-y divide-[var(--color-divider)] border-y border-[var(--color-divider)]">
-                {conversations.items.map((conversation) => (
-                  <li key={conversation.id}>
-                    <Link
-                      to={`/admin/users/${encodeURIComponent(conversation.creator_id)}/conversations/${encodeURIComponent(conversation.id)}`}
-                      className="group flex items-center gap-3 py-3 interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-                    >
-                      <MessageSquare size={14} className="shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm text-[var(--color-fg)]">{conversation.title || t('admin:resources.details.untitled')}</span>
-                        <span className="mt-0.5 block truncate text-[12px] text-[var(--color-fg-subtle)]">
-                          {[conversation.model_label || conversation.model_id, resourceOwner(conversation.creator_name, conversation.creator_email, conversation.creator_id), formatDate(conversation.updated_at)].filter(Boolean).join(' · ')}
-                        </span>
-                      </span>
-                      {conversation.archived ? <Badge size="xs">{t('admin:resources.details.archived')}</Badge> : null}
-                      <ChevronRight size={14} className="text-[var(--color-fg-faint)] transition-transform group-hover:translate-x-0.5" aria-hidden />
-                    </Link>
-                  </li>
-                ))}
-              </ul>
+              <AdminTable
+                items={conversations.items}
+                rowKey={(conversation) => conversation.id}
+                label={t('admin:resources.details.conversations')}
+                columns={[
+                  { id: 'title', header: t('admin:workspaces.conversations'), width: 220, render: (conversation) => <Link to={`/admin/users/${encodeURIComponent(conversation.creator_id)}/conversations/${encodeURIComponent(conversation.id)}`} className="admin-table-link">{conversation.title || t('admin:resources.details.untitled')}</Link> },
+                  { id: 'model', header: t('admin:resources.table.model'), width: 140, render: (conversation) => conversation.model_label || conversation.model_id || '-' },
+                  { id: 'user', header: t('admin:resources.table.user'), width: 180, render: (conversation) => <span className="block truncate">{resourceOwner(conversation.creator_name, conversation.creator_email, conversation.creator_id)}</span> },
+                  { id: 'status', header: t('admin:common.status'), width: 100, render: (conversation) => <Badge size="xs">{t(conversation.archived ? 'admin:resources.details.archived' : 'admin:resources.details.active')}</Badge> },
+                  { id: 'updated', header: t('admin:resources.details.updated'), width: 160, render: (conversation) => formatDate(conversation.updated_at) },
+                ]}
+              />
               <Pagination
                 page={conversationPage}
                 pageCount={Math.ceil(conversations.total / PROJECT_CONVERSATION_PAGE_SIZE)}
@@ -1101,7 +1033,7 @@ function ImageDetails({
       <button
         type="button"
         onClick={onPreview}
-        className="block aspect-[4/3] w-full overflow-hidden rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface-sunken)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+        className="block aspect-[4/3] w-full overflow-hidden rounded-[8px] bg-[var(--color-surface-sunken)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
         aria-label={t('admin:resources.details.openImage')}
       >
         <ResourceImage src={item.url} alt={item.filename} contain />
@@ -1153,30 +1085,19 @@ function DocumentList({
   return (
     <DetailSection title={t('admin:resources.details.documentList')} icon={<FileText size={14} aria-hidden />}>
       {documents.length ? (
-        <ul className="divide-y divide-[var(--color-divider)] border-y border-[var(--color-divider)]">
-          {documents.map((document) => (
-            <li key={document.id} className="py-3">
-              <div className="flex min-w-0 items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm text-[var(--color-fg)]">{document.filename}</p>
-                  <p className="mt-1 text-[12px] text-[var(--color-fg-subtle)]">
-                    {[
-                      document.mime_type,
-                      formatBytes(document.size_bytes),
-                      t('admin:resources.counts.chunks', { count: document.chunk_count }),
-                      document.uploaded_by_name || document.uploaded_by_email
-                        ? resourceOwner(document.uploaded_by_name ?? '', document.uploaded_by_email ?? '', document.uploaded_by_user_id ?? '')
-                        : '',
-                      formatDate(document.created_at),
-                    ].filter(Boolean).join(' · ')}
-                  </p>
-                </div>
-                <DocumentStatus status={document.status} t={t} />
-              </div>
-              {document.error ? <p className="mt-2 break-words text-[12px] text-[var(--color-danger)]">{document.error}</p> : null}
-            </li>
-          ))}
-        </ul>
+        <AdminTable
+          items={documents}
+          rowKey={(document) => document.id}
+          label={t('admin:resources.details.documentList')}
+          columns={[
+            { id: 'filename', header: t('admin:resources.details.filename'), width: 240, render: (document) => <><span className="block truncate" title={document.filename}>{document.filename}</span><span className="text-[12px] text-[var(--color-fg-muted)]">{document.mime_type}</span>{document.error ? <p className="mt-1 break-words text-[12px] text-[var(--color-danger)]">{document.error}</p> : null}</> },
+            { id: 'status', header: t('admin:common.status'), width: 100, render: (document) => <DocumentStatus status={document.status} t={t} /> },
+            { id: 'size', header: t('admin:resources.details.size'), width: 90, render: (document) => formatBytes(document.size_bytes) },
+            { id: 'chunks', header: t('admin:resources.details.chunks'), width: 90, render: (document) => document.chunk_count },
+            { id: 'user', header: t('admin:resources.table.user'), width: 160, render: (document) => <span className="block truncate">{resourceOwner(document.uploaded_by_name ?? '', document.uploaded_by_email ?? '', document.uploaded_by_user_id ?? '')}</span> },
+            { id: 'created', header: t('admin:resources.details.created'), width: 160, render: (document) => formatDate(document.created_at) },
+          ]}
+        />
       ) : (
         <p className="text-sm text-[var(--color-fg-muted)]">{t('admin:resources.details.noDocuments')}</p>
       )}
@@ -1239,7 +1160,7 @@ function DocumentSummary({
   t: (key: string, options?: Record<string, unknown>) => string
 }) {
   return (
-    <span className="hidden text-[12px] tabular-nums md:block">
+    <span className="block text-[12px] tabular-nums">
       <span className="text-[var(--color-fg)]">{item.document_count}</span>
       {item.failed_document_count ? (
         <span className="ml-1.5 text-[var(--color-danger)]" title={t('admin:resources.details.failed')}>+{item.failed_document_count}</span>
@@ -1268,7 +1189,7 @@ function DetailSection({ title, icon, children }: { title: string; icon?: ReactN
 }
 
 function MetaList({ children }: { children: ReactNode }) {
-  return <dl className="mt-3 divide-y divide-[var(--color-divider)] border-y border-[var(--color-divider)] text-[12.5px]">{children}</dl>
+  return <dl className="mt-3 text-[12.5px]">{children}</dl>
 }
 
 function MetaRow({ label, value, mono = false }: { label: string; value: ReactNode; mono?: boolean }) {
@@ -1282,7 +1203,7 @@ function MetaRow({ label, value, mono = false }: { label: string; value: ReactNo
 
 function Stat({ label, value, tone = 'neutral' }: { label: string; value: ReactNode; tone?: 'neutral' | 'success' | 'warning' | 'danger' }) {
   return (
-    <div className="min-w-0 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface-sunken)] px-3 py-2.5">
+    <div className="min-w-0 rounded-[8px] bg-[var(--color-surface-sunken)] px-3 py-2.5">
       <p className="truncate text-[12px] text-[var(--color-fg-subtle)]">{label}</p>
       <p className={cn(
         'mt-1 truncate text-base font-medium tabular-nums text-[var(--color-fg)]',
@@ -1313,7 +1234,7 @@ function ListSkeleton() {
 
 function ImageSkeleton() {
   return (
-    <div className="grid grid-cols-1 gap-px bg-[var(--color-divider)] p-px sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4" role="status">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4" role="status">
       {Array.from({ length: 8 }, (_, index) => (
         <div key={index} className="bg-[var(--color-surface)] p-3">
           <Skeleton className="aspect-[4/3]" />
@@ -1354,7 +1275,7 @@ function ListError({ message, onRetry, t }: { message: string; onRetry: () => vo
 
 function InlineError({ message, onRetry, t }: { message: string; onRetry: () => void; t: (key: string) => string }) {
   return (
-    <div className="flex items-center justify-between gap-3 border-b border-[var(--color-danger)]/20 bg-[var(--color-danger-soft)] px-4 py-2.5 text-xs text-[var(--color-danger)]" role="alert">
+    <div className="flex items-center justify-between gap-3 border-[var(--color-danger)]/20 bg-[var(--color-danger-soft)] px-4 py-2.5 text-xs text-[var(--color-danger)]" role="alert">
       <span className="min-w-0 break-words">{message}</span>
       <Button variant="ghost" size="xs" onClick={onRetry} className="shrink-0 text-[var(--color-danger)]">{t('admin:resources.retry')}</Button>
     </div>

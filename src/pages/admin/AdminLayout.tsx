@@ -13,6 +13,7 @@ import {
   CreditCard,
   LayoutDashboard,
   Menu,
+  ScrollText,
   Settings2,
   Sparkles,
   Users,
@@ -24,7 +25,7 @@ import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { UserMenu } from '@/components/sidebar/sidebar'
 import { Tooltip } from '@/components/ui/tooltip'
-import { LogoMark } from '@/components/brand/logo'
+import { TracedLogo } from '@/components/brand/logo'
 import { AdminOnboardingTour } from '@/components/admin/admin-onboarding-tour'
 import type { ApiAdminOnboarding } from '@/api/types'
 import { acquireStartupDialog } from '@/lib/startup-dialog-queue'
@@ -39,6 +40,7 @@ import {
 } from '@/lib/admin-navigation'
 import { cn } from '@/lib/utils'
 import { useRequestActivity } from '@/lib/request-activity'
+import { QuietSurfaceContext } from '@/contexts/quiet-surface'
 import '@/i18n/admin-resources'
 
 const NAVIGATION_MIN_VISIBLE_MS = 180
@@ -52,6 +54,7 @@ const GROUP_ICONS = {
   access: Users,
   billing: CreditCard,
   operations: BarChart3,
+  logs: ScrollText,
   platform: Settings2,
 } satisfies Record<AdminNavGroupKey, typeof Cpu>
 
@@ -68,6 +71,7 @@ export default function AdminLayout() {
   const [onboardingRefreshKey, setOnboardingRefreshKey] = useState(0)
   const [onboardingSnapshot, setOnboardingSnapshot] = useState<ApiAdminOnboarding | null>(null)
   const contentScrollRef = useRef<HTMLDivElement>(null)
+  const groupTabsRef = useRef<HTMLElement>(null)
   const onboardingStartupClaimedRef = useRef(false)
   const onboardingStartupRequestRef = useRef(0)
   const onboardingStartupReleaseRef = useRef<(() => void) | null>(null)
@@ -274,6 +278,23 @@ export default function AdminLayout() {
   }, [location.pathname])
 
   useEffect(() => {
+    const nav = groupTabsRef.current
+    if (!nav) return
+    const revealActiveTab = () => {
+      const active = nav.querySelector('[aria-current="page"]')
+      if (!active) return
+      const bounds = nav.getBoundingClientRect()
+      const tab = active.getBoundingClientRect()
+      if (tab.left < bounds.left) nav.scrollLeft -= bounds.left - tab.left
+      else if (tab.right > bounds.right) nav.scrollLeft += tab.right - bounds.right
+    }
+    revealActiveTab()
+    const observer = new ResizeObserver(revealActiveTab)
+    observer.observe(nav)
+    return () => observer.disconnect()
+  }, [location.pathname])
+
+  useEffect(() => {
     if (!navigationPendingRef.current) return
     const elapsed = Date.now() - navigationStartedAtRef.current
     const remaining = Math.max(0, NAVIGATION_MIN_VISIBLE_MS - elapsed)
@@ -346,7 +367,7 @@ export default function AdminLayout() {
           <span className="min-w-0 flex-1 truncate text-left">{t('admin:backToChat')}</span>
         </Link>
 
-        <div aria-hidden className="mx-0.5 my-1 h-px shrink-0 bg-[var(--color-divider)]/60" />
+        <div aria-hidden className="h-3 shrink-0" />
 
         <Link
           to={ADMIN_OVERVIEW.to}
@@ -392,10 +413,12 @@ export default function AdminLayout() {
         {/* Brand row mirrors the chat sidebar header: 56px tall, mark on the
             nav icons' x-line, sans name at the workspace-name size. */}
         <div className="flex h-[56px] shrink-0 items-center justify-between gap-2 px-3 max-sm:h-12 max-sm:px-2">
-          <div className="ml-1.5 flex min-w-0 items-center gap-2 max-sm:ml-2.5">
-            <LogoMark size={20} />
-            <span className="truncate font-sans text-[15px] font-semibold text-[var(--color-fg)]">
-              {t('admin:title')}
+          <div className="ml-1.5 flex min-w-0 items-center max-sm:ml-2.5">
+            <span className="relative inline-flex shrink-0 items-start pb-3">
+              <TracedLogo size="sm" />
+              <span className="absolute bottom-0 right-0 whitespace-nowrap text-xs font-medium leading-3 text-[var(--color-fg-muted)]">
+                {t('admin:title')}
+              </span>
             </span>
           </div>
           {variant === 'sheet' ? (
@@ -428,11 +451,12 @@ export default function AdminLayout() {
     const groupLabel = t(currentGroup.labelKey, { defaultValue: currentGroup.defaultLabel })
     return (
       <nav
+        ref={groupTabsRef}
         aria-label={groupLabel}
-        className="min-w-0 overflow-x-auto overscroll-x-contain scrollbar-none"
+        className="flex min-h-12 min-w-0 items-center overflow-x-auto overscroll-x-contain scrollbar-none"
       >
-        {/* Same underline treatment as the app's Tabs primitive. */}
-        <div className="flex h-10 w-max min-w-full items-end gap-6 border-b border-[var(--color-divider)] max-sm:h-11 max-sm:gap-5">
+        {/* Matches the resource library's kind switcher. */}
+        <div className="inline-flex w-max shrink-0 items-center rounded-[9px] bg-[var(--color-bg-muted)] p-1">
           {currentGroup.items.map((item) => {
             const active = adminNavItemActive(path, item)
             return (
@@ -442,15 +466,14 @@ export default function AdminLayout() {
                 aria-current={active ? 'page' : undefined}
                 aria-busy={navigationTarget === item.to || navigationTarget?.startsWith(`${item.to}?`) || undefined}
                 className={cn(
-                  '-mb-px inline-flex h-full shrink-0 items-center gap-2 whitespace-nowrap rounded-t-[6px] border-b-2 text-sm font-medium interactive',
+                  'inline-flex h-[var(--tap-min)] min-w-0 shrink-0 items-center justify-center whitespace-nowrap rounded-[7px] px-2 text-[12px] font-medium interactive sm:h-8 sm:px-2.5',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)]',
                   active
-                    ? 'border-[var(--color-fg)] text-[var(--color-fg)]'
-                    : 'border-transparent text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
+                    ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]'
+                    : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
                 )}
               >
                 {t(item.labelKey, { defaultValue: item.defaultLabel })}
-                {navigationSpinner(item.to)}
               </Link>
             )
           })}
@@ -465,131 +488,130 @@ export default function AdminLayout() {
   const groupTabs = renderGroupTabs()
 
   return (
-    <div
-      className="flex h-full w-full overflow-hidden bg-[var(--color-bg)] text-[var(--color-fg)]"
-      onClickCapture={handleAdminNavigationClick}
-    >
-      {/* Desktop rail: same width (the user's resized chat sidebar width),
-          surface and breakpoint as the chat sidebar. */}
-      <aside
-        style={{ width: `${sidebarWidth}px` }}
-        className="hidden shrink-0 border-r border-[var(--color-sidebar-border)] pt-[var(--safe-top)] lg:flex"
+    <QuietSurfaceContext.Provider value>
+      <div
+        className="flex h-full w-full overflow-hidden bg-[var(--color-bg)] text-[var(--color-fg)]"
+        onClickCapture={handleAdminNavigationClick}
       >
-        {renderSidebar('desktop')}
-      </aside>
+        {/* Desktop rail: same width (the user's resized chat sidebar width),
+            surface and breakpoint as the chat sidebar. */}
+        <aside
+          style={{ width: `${sidebarWidth}px` }}
+          className="hidden shrink-0 pt-[var(--safe-top)] lg:flex"
+        >
+          {renderSidebar('desktop')}
+        </aside>
 
-      <main
-        aria-busy={activityVisible || undefined}
-        className={cn(
-          'relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden',
-          filesWorkspace && 'overscroll-y-contain',
-        )}
-      >
-        {activityVisible ? (
-          <div className="pointer-events-none absolute inset-x-0 top-0 z-50">
-            <div className="h-0.5 overflow-hidden bg-[var(--color-accent-soft)]">
-              <span className="block h-full w-1/3 bg-[var(--color-accent)] animate-[indeterminate_1200ms_ease-in-out_infinite]" />
-            </div>
-            <div
-              role="status"
-              aria-live="polite"
-              aria-atomic="true"
-              aria-busy="true"
-              className="fixed bottom-[max(0.75rem,var(--safe-bottom))] left-1/2 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-3 py-2 text-[12px] font-medium text-[var(--color-fg-muted)] shadow-[var(--shadow-md)] md:absolute md:bottom-auto md:top-3"
-            >
-              <span
-                aria-hidden
-                className="inline-block size-3.5 shrink-0 rounded-full border-2 border-[var(--color-accent)] border-r-transparent animate-[spin_700ms_linear_infinite]"
-              />
-              <span className="min-w-0 whitespace-normal text-center">{activityMessage}</span>
-            </div>
-          </div>
-        ) : null}
-
-        {/* Page bar — the console's counterpart of ContentHeader: a fixed
-            56px row naming the current area, with the area's destinations as
-            an underline tab row beneath it. The page body scrolls below. */}
-        <header className="shrink-0 bg-[var(--color-bg)] pt-[var(--safe-top)]">
-          <div
-            className={cn(
-              'flex h-14 w-full items-center gap-2 pl-[max(.5rem,var(--safe-left))] pr-[max(.5rem,var(--safe-right))] sm:gap-3 sm:px-8',
-              !filesWorkspace && 'mx-auto max-w-[var(--layout-content-max-w)]',
-            )}
-          >
-            <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-              <SheetTrigger asChild>
-                <button
-                  type="button"
-                  aria-label={t('admin:title')}
-                  className="-ml-1 inline-flex size-[var(--tap-min)] shrink-0 items-center justify-center rounded-[8px] text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] lg:hidden"
-                >
-                  <Menu size={18} aria-hidden />
-                </button>
-              </SheetTrigger>
-              <SheetContent side="left" size="nav" label={t('admin:title')} className="bg-[var(--color-sidebar-bg)]">
-                {renderSidebar('sheet')}
-              </SheetContent>
-            </Sheet>
-            <p className="min-w-0 flex-1 truncate text-[15px] font-semibold text-[var(--color-fg)]">{areaLabel}</p>
-            <Tooltip content={t('admin:onboarding.review')}>
-              <button
-                type="button"
-                onClick={openOnboarding}
-                aria-label={t('admin:onboarding.review')}
-                className="inline-flex size-[var(--tap-min)] shrink-0 items-center justify-center rounded-[8px] text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] lg:size-9 lg:rounded-[8px]"
+        <main
+          aria-busy={activityVisible || undefined}
+          className={cn(
+            'relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden',
+            filesWorkspace && 'overscroll-y-contain',
+          )}
+        >
+          {activityVisible ? (
+            <div className="pointer-events-none absolute inset-x-0 top-0 z-50">
+              <div className="h-0.5 overflow-hidden bg-[var(--color-accent-soft)]">
+                <span className="block h-full w-1/3 bg-[var(--color-accent)] animate-[indeterminate_1200ms_ease-in-out_infinite]" />
+              </div>
+              <div
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+                aria-busy="true"
+                className="fixed bottom-[max(0.75rem,var(--safe-bottom))] left-1/2 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-[8px] bg-[var(--color-surface-raised)] px-3 py-2 text-[12px] font-medium text-[var(--color-fg-muted)] shadow-[var(--shadow-md)] md:absolute md:bottom-auto md:top-3"
               >
-                <Compass size={16} aria-hidden />
-              </button>
-            </Tooltip>
-            <div className="lg:hidden">
-              <UserMenu placement="header" />
+                <span
+                  aria-hidden
+                  className="inline-block size-3.5 shrink-0 rounded-full border-2 border-[var(--color-accent)] border-r-transparent animate-[spin_700ms_linear_infinite]"
+                />
+                <span className="min-w-0 whitespace-normal text-center">{activityMessage}</span>
+              </div>
             </div>
-          </div>
-          {groupTabs ? (
+          ) : null}
+
+          {/* The desktop rail names the area; its destinations share one toolbar. */}
+          <header className="shrink-0 bg-[var(--color-bg)] pt-[var(--safe-top)]">
             <div
               className={cn(
-                'w-full px-4 sm:px-8',
+                'grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 px-4 sm:gap-x-3 sm:px-8 lg:flex',
                 !filesWorkspace && 'mx-auto max-w-[var(--layout-content-max-w)]',
               )}
             >
-              {groupTabs}
+              <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+                <SheetTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label={t('admin:title')}
+                    className="-ml-1 inline-flex size-[var(--tap-min)] shrink-0 items-center justify-center rounded-[8px] text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] lg:hidden"
+                  >
+                    <Menu size={18} aria-hidden />
+                  </button>
+                </SheetTrigger>
+                <SheetContent side="left" size="nav" label={t('admin:title')} className="bg-[var(--color-sidebar-bg)]">
+                  {renderSidebar('sheet')}
+                </SheetContent>
+              </Sheet>
+              <p className={cn('col-start-2 row-start-1 flex h-12 min-w-0 items-center text-[13px] font-medium text-[var(--color-fg-muted)]', currentGroup ? 'lg:hidden' : 'lg:flex-1')}>
+                <span className="truncate">{areaLabel}</span>
+              </p>
+              {groupTabs ? (
+                <div className="col-span-3 row-start-2 min-w-0 lg:flex-1">
+                  {groupTabs}
+                </div>
+              ) : null}
+              <div className="col-start-3 row-start-1 flex h-12 shrink-0 items-center gap-1 lg:ml-auto">
+                <Tooltip content={t('admin:onboarding.review')}>
+                  <button
+                    type="button"
+                    onClick={openOnboarding}
+                    aria-label={t('admin:onboarding.review')}
+                    className="inline-flex size-[var(--tap-min)] shrink-0 items-center justify-center rounded-[8px] text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] lg:size-9"
+                  >
+                    <Compass size={16} aria-hidden />
+                  </button>
+                </Tooltip>
+                <div className="lg:hidden">
+                  <UserMenu placement="header" />
+                </div>
+              </div>
             </div>
-          ) : null}
-        </header>
+          </header>
 
-        {filesWorkspace ? (
-          <div className="flex min-h-0 w-full flex-1 flex-col">
-            <Suspense fallback={<PanelFallback />}>
-              <Outlet />
-            </Suspense>
-          </div>
-        ) : (
-          <div
-            ref={contentScrollRef}
-            className="min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain scrollbar-thin"
-          >
-            <div className="mx-auto w-full min-w-0 max-w-[var(--layout-content-max-w)] px-4 pb-[max(1.5rem,var(--safe-bottom))] pt-5 sm:px-8 sm:pb-12 sm:pt-6">
+          {filesWorkspace ? (
+            <div className="flex min-h-0 w-full flex-1 flex-col">
               <Suspense fallback={<PanelFallback />}>
                 <Outlet />
               </Suspense>
             </div>
-          </div>
-        )}
-      </main>
-      {(onboardingOpen || onboardingRefreshKey > 0 || (
-        onboardingAutoEligible &&
-        !['dismissed', 'completed'].includes(
-          String((user?.settings as Record<string, unknown> | undefined)?.admin_onboarding_v1 ?? ''),
-        )
-      )) ? (
-        <AdminOnboardingTour
-          open={onboardingOpen}
-          onOpenChange={handleOnboardingOpenChange}
-          refreshKey={onboardingRefreshKey}
-          onSnapshot={handleOnboardingSnapshot}
-          onPresented={handleOnboardingPresented}
-        />
-      ) : null}
-    </div>
+          ) : (
+            <div
+              ref={contentScrollRef}
+              className="min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain scrollbar-thin"
+            >
+              <div className="mx-auto w-full min-w-0 max-w-[var(--layout-content-max-w)] px-4 pb-[max(1.5rem,var(--safe-bottom))] pt-3 sm:px-8 sm:pb-12 sm:pt-4">
+                <Suspense fallback={<PanelFallback />}>
+                  <Outlet />
+                </Suspense>
+              </div>
+            </div>
+          )}
+        </main>
+        {(onboardingOpen || onboardingRefreshKey > 0 || (
+          onboardingAutoEligible &&
+          !['dismissed', 'completed'].includes(
+            String((user?.settings as Record<string, unknown> | undefined)?.admin_onboarding_v1 ?? ''),
+          )
+        )) ? (
+          <AdminOnboardingTour
+            open={onboardingOpen}
+            onOpenChange={handleOnboardingOpenChange}
+            refreshKey={onboardingRefreshKey}
+            onSnapshot={handleOnboardingSnapshot}
+            onPresented={handleOnboardingPresented}
+          />
+        ) : null}
+      </div>
+    </QuietSurfaceContext.Provider>
   )
 }

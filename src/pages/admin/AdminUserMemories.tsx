@@ -12,6 +12,7 @@ import type { ApiMemory, ApiUser } from '@/api/types'
 import { AdminDetailHeader } from '@/components/admin/admin-detail-header'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { AdminTable } from '@/components/admin/AdminTable'
 import { EmptyState } from '@/components/ui/empty-state'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { formatDateTime } from '@/lib/utils'
@@ -29,9 +30,10 @@ function statusVariant(status: ApiMemory['status']) {
   }
 }
 
-export default function AdminUserMemories() {
+export default function AdminUserMemories({ userId, embedded = false }: { userId?: string; embedded?: boolean } = {}) {
   const { t } = useTranslation(['admin', 'memory', 'common'])
-  const { id = '' } = useParams<{ id: string }>()
+  const { id: routeId = '' } = useParams<{ id: string }>()
+  const id = userId ?? routeId
   const [user, setUser] = useState<ApiUser | null>(null)
   const [rows, setRows] = useState<ApiMemory[]>([])
   const [loading, setLoading] = useState(true)
@@ -49,7 +51,7 @@ export default function AdminUserMemories() {
       setRows([])
       try {
         const [targetUser, memories] = await Promise.all([
-          adminApi.user(id),
+          embedded ? Promise.resolve(null) : adminApi.user(id),
           adminApi.userMemories(id),
         ])
         if (cancelled) return
@@ -70,7 +72,7 @@ export default function AdminUserMemories() {
     return () => {
       cancelled = true
     }
-  }, [id, reloadKey, t])
+  }, [id, embedded, reloadKey, t])
 
   const currentUser = user?.id === id ? user : null
   const pageLoading = loading || loadedId !== id
@@ -78,27 +80,30 @@ export default function AdminUserMemories() {
 
   return (
     <div>
-      <AdminDetailHeader backTo="/admin/users" backLabel={t('admin:users.backToUsers')} />
+      {!embedded ? (
+        <>
+          <AdminDetailHeader backTo="/admin/users" backLabel={t('admin:users.backToUsers')} />
+          <AdminPageHeader
+            title={pageLoading ? (
+              <span className="block" role="status" aria-live="polite">
+                <span className="sr-only">{t('admin:common.loading')}</span>
+                <span
+                  aria-hidden
+                  className="block h-9 w-[min(16rem,70vw)] animate-pulse rounded-[8px] bg-[var(--color-bg-muted)]"
+                />
+              </span>
+            ) : headerName ? (
+              t('admin:users.memoriesTitle', { name: headerName })
+            ) : (
+              t('admin:users.memoriesFallbackTitle')
+            )}
+            titleBusy={pageLoading}
+            description={t('admin:users.memoriesLead')}
+          />
+        </>
+      ) : null}
 
-      <AdminPageHeader
-        title={pageLoading ? (
-            <span className="block" role="status" aria-live="polite">
-              <span className="sr-only">{t('admin:common.loading')}</span>
-              <span
-                aria-hidden
-                className="block h-9 w-[min(16rem,70vw)] animate-pulse rounded-[8px] bg-[var(--color-bg-muted)]"
-              />
-            </span>
-          ) : headerName ? (
-            t('admin:users.memoriesTitle', { name: headerName })
-          ) : (
-            t('admin:users.memoriesFallbackTitle')
-          )}
-        titleBusy={pageLoading}
-        description={t('admin:users.memoriesLead')}
-      />
-
-      <section className="mt-6 sm:mt-8" aria-label={t('admin:users.viewMemories')}>
+      <section className={embedded ? undefined : 'mt-6 sm:mt-8'} aria-label={t('admin:users.viewMemories')}>
         {pageLoading ? (
           <PanelFallback />
         ) : error ? (
@@ -121,7 +126,7 @@ export default function AdminUserMemories() {
             </Button>
           </div>
         ) : rows.length === 0 ? (
-          <div className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
+          <div className="rounded-[12px] bg-[var(--color-surface)]">
             <EmptyState
               icon={<Brain size={20} aria-hidden />}
               title={t('admin:users.noMemories')}
@@ -130,38 +135,17 @@ export default function AdminUserMemories() {
             />
           </div>
         ) : (
-          <ul className="flex flex-col divide-y divide-[var(--color-divider)] rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-            {rows.map((memory) => {
-              const stamp = memory.updated_at || memory.created_at
-              return (
-                <li
-                  key={memory.id}
-                  className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 px-4 py-3 sm:px-5"
-                >
-                  <div className="min-w-0">
-                    <p className="text-sm leading-5 text-[var(--color-fg)] text-pretty">
-                      {memory.memory_text}
-                    </p>
-                    {memory.slot || stamp ? (
-                      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] leading-4 text-[var(--color-fg-subtle)]">
-                        {memory.slot ? (
-                          <code className="max-w-full break-all rounded-[6px] bg-[var(--color-bg-muted)] px-1.5 py-0.5 font-mono text-[12px] text-[var(--color-fg-muted)]">
-                            {memory.slot}{memory.value ? ` = ${memory.value}` : ''}
-                          </code>
-                        ) : null}
-                        {stamp ? (
-                          <span>{t('admin:users.memoryUpdatedAt', { when: formatDateTime(stamp * 1000) })}</span>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </div>
-                  <Badge size="xs" variant={statusVariant(memory.status)}>
-                    {t(`memory:status.${memory.status}`)}
-                  </Badge>
-                </li>
-              )
-            })}
-          </ul>
+          <AdminTable
+            items={rows}
+            rowKey={(memory) => memory.id}
+            label={t('admin:users.viewMemories')}
+            columns={[
+              { id: 'memory', header: t('memory:fields.text'), width: 420, render: (memory) => <p className="text-pretty">{memory.memory_text}</p> },
+              { id: 'slot', header: t('memory:fields.slot'), width: 230, render: (memory) => <code className="block break-all font-mono text-[12px] text-[var(--color-fg-muted)]">{memory.slot ? `${memory.slot}${memory.value ? ` = ${memory.value}` : ''}` : '—'}</code> },
+              { id: 'status', header: t('admin:common.status'), width: 110, render: (memory) => <Badge size="xs" variant={statusVariant(memory.status)}>{t(`memory:status.${memory.status}`)}</Badge> },
+              { id: 'updated', header: t('admin:common.lastActive'), width: 170, render: (memory) => <span className="text-[12px] tabular-nums text-[var(--color-fg-muted)]">{memory.updated_at || memory.created_at ? formatDateTime((memory.updated_at || memory.created_at) * 1000) : '—'}</span> },
+            ]}
+          />
         )}
       </section>
     </div>

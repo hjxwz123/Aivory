@@ -130,7 +130,7 @@ function BackupSection({
   children?: ReactNode
 }) {
   return (
-    <section aria-labelledby={id} className="border-b border-[var(--color-divider)] pb-8 last:border-b-0 last:pb-0">
+    <section aria-labelledby={id} className="pb-8 last:pb-0">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between lg:gap-6">
         <div className="min-w-0 max-w-2xl">
           <h2 id={id} className="text-base font-semibold text-[var(--color-fg)]">{title}</h2>
@@ -433,7 +433,7 @@ export default function AdminBackup() {
             </Button>
           }
         >
-          <label htmlFor="backup-include-files" className="flex items-center justify-between gap-4 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
+          <label htmlFor="backup-include-files" className="flex items-center justify-between gap-4 rounded-[8px] bg-[var(--color-bg-muted)] px-3 py-2.5">
             <span className="min-w-0">
               <span className="block text-sm text-[var(--color-fg)]">{t('admin:backup.export.includeFiles')}</span>
               <span id="backup-include-files-hint" className="mt-1 block text-xs leading-relaxed text-[var(--color-fg-muted)]">
@@ -486,10 +486,10 @@ export default function AdminBackup() {
                 <span className="text-xs tabular-nums text-[var(--color-fg-muted)]">({archives.length})</span>
               )}
             </div>
-            <div className="overflow-hidden rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] [&>div:first-child]:border-t-0">
+            <div className="overflow-hidden rounded-[8px] bg-[var(--color-surface)]">
               {loadingExports ? (
                 <div
-                  className="border-t border-[var(--color-border-subtle)] px-4 py-5"
+                  className="px-4 py-5"
                   role="status"
                   aria-live="polite"
                   aria-label={t('admin:backup.export.loading')}
@@ -505,12 +505,11 @@ export default function AdminBackup() {
                   </div>
                 </div>
               ) : archives.length === 0 ? (
-                <div className="flex flex-col items-center border-t border-[var(--color-border-subtle)] px-4 py-8 text-center">
+                <div className="flex flex-col items-center px-4 py-8 text-center">
                   <p className="max-w-[42ch] text-pretty text-xs leading-relaxed text-[var(--color-fg-muted)]">{t('admin:backup.export.noArchives')}</p>
                 </div>
               ) : (
                 <div
-                  className="divide-y divide-[var(--color-border-subtle)] border-t border-[var(--color-border-subtle)]"
                   role="list"
                   aria-label={t('admin:backup.export.archivesTitle')}
                 >
@@ -638,13 +637,13 @@ export default function AdminBackup() {
 
           {loadingVectors ? (
             <div
-              className="overflow-hidden rounded-[8px] border border-[var(--color-border)]"
+              className="overflow-hidden rounded-[8px]"
               role="status"
               aria-live="polite"
               aria-label={t('admin:backup.vectors.loading')}
             >
               <span className="sr-only">{t('admin:backup.vectors.loading')}</span>
-              <div className="grid grid-cols-2 gap-px bg-[var(--color-border-subtle)] sm:grid-cols-5">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
                 {[0, 1, 2, 3, 4].map((item) => (
                   <div key={item} className="min-w-0 bg-[var(--color-surface)] px-4 py-3.5 first:col-span-2 sm:first:col-span-1">
                     <Skeleton shape="line" className="h-2.5 w-16" />
@@ -652,7 +651,7 @@ export default function AdminBackup() {
                   </div>
                 ))}
               </div>
-              <div className="divide-y divide-[var(--color-border-subtle)] border-t border-[var(--color-border-subtle)]">
+              <div>
                 {[0, 1].map((item) => (
                   <div key={item} className="flex min-w-0 items-center justify-between gap-4 px-4 py-3">
                     <Skeleton shape="line" className="h-3 w-2/5 max-w-56" />
@@ -662,8 +661,8 @@ export default function AdminBackup() {
               </div>
             </div>
           ) : vectorReport ? (
-            <div className="overflow-hidden rounded-[8px] border border-[var(--color-border)]">
-              <div className="grid grid-cols-2 gap-px bg-[var(--color-border-subtle)] sm:grid-cols-5">
+            <div className="overflow-hidden rounded-[8px]">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
                 {[
                   ['total', vectorReport.total],
                   ['present', vectorReport.present],
@@ -682,7 +681,7 @@ export default function AdminBackup() {
                 ))}
               </div>
               {latestVectorJob?.type === 'rebuild' && latestVectorJob.status === 'completed' && (
-                <p className="border-t border-[var(--color-border-subtle)] px-4 py-3 text-xs leading-relaxed text-[var(--color-fg-muted)]">
+                <p className="px-4 py-3 text-xs leading-relaxed text-[var(--color-fg-muted)]">
                   {t('admin:backup.vectors.rebuildSummary', {
                     rebuilt: latestVectorJob.rebuilt ?? 0,
                     failed: latestVectorJob.failed ?? 0,
@@ -690,7 +689,7 @@ export default function AdminBackup() {
                 </p>
               )}
               {vectorReport.models.length > 0 && (
-                <div className="divide-y divide-[var(--color-border-subtle)] border-t border-[var(--color-border-subtle)]">
+                <div>
                   {vectorReport.models.slice(0, 6).map((m) => (
                     <div
                       key={`${m.embedding_model}:${m.dim}`}
@@ -713,11 +712,11 @@ export default function AdminBackup() {
                 </div>
               )}
               {vectorReport.issues.length > 0 && (
-                <div className="border-t border-[var(--color-border-subtle)]">
+                <div>
                   <p className="px-4 py-3 text-xs font-medium text-[var(--color-fg)]">
                     {t('admin:backup.vectors.issueSamples')}
                   </p>
-                  <div className="divide-y divide-[var(--color-border-subtle)] border-t border-[var(--color-border-subtle)]">
+                  <div>
                     {vectorReport.issues.slice(0, 5).map((issue) => (
                       <div key={`${issue.chunk_id}:${issue.reason}`} className="min-w-0 px-4 py-3">
                         <p className="truncate text-xs font-medium text-[var(--color-fg)]">
@@ -733,7 +732,7 @@ export default function AdminBackup() {
               )}
             </div>
           ) : (
-            <div className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-8 text-center">
+            <div className="rounded-[8px] bg-[var(--color-surface)] px-4 py-8 text-center">
               <p className="text-sm text-[var(--color-fg-muted)]">{t('admin:backup.vectors.empty')}</p>
             </div>
           )}

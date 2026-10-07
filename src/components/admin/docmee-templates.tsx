@@ -190,7 +190,7 @@ export function DocmeeTemplateAdmin({ enabled }: { enabled: boolean }) {
               return (
                 <div
                   key={template.id}
-                  className="flex flex-col overflow-hidden rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)]"
+                  className="flex flex-col overflow-hidden rounded-[8px] bg-[var(--color-surface)]"
                 >
                   <div className="aspect-[16/9] w-full bg-[var(--color-bg-muted)]">
                     {cover ? (

@@ -21,6 +21,7 @@ describe('administrator navigation', () => {
       ['access', '/admin/users'],
       ['billing', '/admin/user-groups'],
       ['operations', '/admin/analytics'],
+      ['logs', '/admin/logs/usage'],
       ['platform', '/admin/announcement'],
     ])
     expect(new Set(itemPaths).size).toBe(itemPaths.length)
@@ -39,6 +40,8 @@ describe('administrator navigation', () => {
     ['/admin/payment-methods', 'billing'],
     ['/admin/payment-orders', 'billing'],
     ['/admin/files', 'operations'],
+    ['/admin/logs/usage', 'logs'],
+    ['/admin/logs/audit', 'logs'],
     ['/admin/settings/email', 'platform'],
     ['/admin/storage', 'platform'],
     ['/admin/settings/legal', 'platform'],

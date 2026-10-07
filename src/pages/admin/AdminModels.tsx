@@ -8,7 +8,7 @@
  * icon on each row. This avoids a 15-field overflow modal on small screens
  * and matches the editorial-feel "one job per surface" rule.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Plus, RefreshCw, Search, Settings as SettingsIcon, Trash2, Tags as TagsIcon } from 'lucide-react'
@@ -38,6 +38,8 @@ import {
 import { toast } from '@/hooks/use-toast'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { AdminPageHeader } from '@/components/admin/admin-page-header'
+import { AdminListFilter, AdminListToolbar } from '@/components/admin/admin-list-toolbar'
+import { matchesAdminSearch, mergeVisibleAdminOrder } from '@/lib/admin-list-filter'
 
 const KINDS = ['chat', 'image', 'embedding', 'decision'] as const
 
@@ -88,7 +90,24 @@ export default function AdminModels() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const [channels, setChannels] = useState<ApiChannel[]>([])
+  const [creatorChannels, setCreatorChannels] = useState<ApiChannel[]>([])
   const [models, setModels] = useState<ApiModel[]>([])
+  const [search, setSearch] = useState('')
+  const [channelFilter, setChannelFilter] = useState('all')
+  const [kindFilter, setKindFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const filteredModels = useMemo(() => {
+    const channelById = new Map(channels.map((channel) => [channel.id, channel]))
+    return models.filter((model) => {
+      const channel = channelById.get(model.channel_id)
+      const bindingNames = (model.channel_bindings ?? []).map((binding) => binding.channel_name).filter(Boolean).join(' ')
+      const boundChannelIDs = (model.channel_bindings ?? []).filter((binding) => binding.role === 'regular').map((binding) => binding.channel_id)
+      return matchesAdminSearch(search, [model.label, model.request_id, model.id, model.description, channel?.name, channel?.type, bindingNames])
+        && (channelFilter === 'all' || model.channel_id === channelFilter || boundChannelIDs.includes(channelFilter))
+        && (kindFilter === 'all' || model.kind === kindFilter)
+        && (statusFilter === 'all' || model.enabled === (statusFilter === 'enabled'))
+    })
+  }, [models, channels, search, channelFilter, kindFilter, statusFilter])
   const [loading, setLoading] = useState(true)
   const [creator, setCreator] = useState<{ open: boolean; draft: CreateDraft }>({
     open: false,
@@ -127,6 +146,31 @@ export default function AdminModels() {
     void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    const requestID = creator.draft.request_id.trim()
+    if (!creator.open || !requestID) {
+      setCreatorChannels([])
+      return
+    }
+    let cancelled = false
+    void adminApi.channelCapabilities(requestID).then((rows) => { if (!cancelled) setCreatorChannels(rows) }).catch(() => { if (!cancelled) setCreatorChannels([]) })
+    return () => { cancelled = true }
+  }, [creator.open, creator.draft.request_id])
+
+  useEffect(() => {
+    if (!creator.open || !creator.draft.request_id.trim() || creatorChannels.length === 0) return
+    if (creatorChannels.some((channel) => channel.id === creator.draft.channel_id)) return
+    const next = creatorChannels[0]
+    setCreator((current) => ({
+      ...current,
+      draft: {
+        ...current.draft,
+        channel_id: next.id,
+        kind: next.type === 'typesafe' ? 'decision' : current.draft.kind === 'decision' ? 'chat' : current.draft.kind,
+      },
+    }))
+  }, [creator.open, creator.draft.request_id, creator.draft.channel_id, creatorChannels])
 
   function openNew() {
     setCreator({
@@ -229,6 +273,10 @@ export default function AdminModels() {
       toast.error(t('admin:models.errors.missingFields'))
       return
     }
+    if (creatorChannels.length === 0 || !creatorChannels.some((channel) => channel.id === d.channel_id)) {
+      toast.error(t('admin:models.channels.noCapability', { defaultValue: 'Configure this request_id in the channel model list before creating the model.' }))
+      return
+    }
     submittingRef.current = true
     setSubmitting(true)
     try {
@@ -289,8 +337,8 @@ export default function AdminModels() {
   // Reordering is optimistic: the list updates instantly (no refetch / loading
   // flash) and the new order is persisted in one PATCH. On failure we revert.
   function persistOrder(next: ApiModel[], prev: ApiModel[]) {
-    void adminApi.reorderModels(next.map((m) => m.id)).catch((e) => {
-      setModels(prev)
+    void adminApi.reorderModels(mergeVisibleAdminOrder(models, next).map((m) => m.id)).catch((e) => {
+      setModels((current) => mergeVisibleAdminOrder(current, prev))
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
     })
   }
@@ -337,30 +385,45 @@ export default function AdminModels() {
       <AdminPageHeader
         title={t('admin:models.title')}
         description={t('admin:models.lead')}
+      />
+      <AdminListToolbar
+        search={search}
+        onSearchChange={setSearch}
+        placeholder={t('admin:listToolbar.search.models')}
+        activeFilterCount={Number(channelFilter !== 'all') + Number(kindFilter !== 'all') + Number(statusFilter !== 'all')}
+        onResetFilters={() => { setChannelFilter('all'); setKindFilter('all'); setStatusFilter('all') }}
+        filters={<>
+          <AdminListFilter label={t('admin:models.fields.channel')} value={channelFilter} onValueChange={setChannelFilter} options={[{ value: 'all', label: t('admin:listToolbar.allChannels') }, ...channels.map((channel) => ({ value: channel.id, label: channel.name }))]} />
+          <AdminListFilter label={t('admin:models.fields.kind')} value={kindFilter} onValueChange={setKindFilter} options={[{ value: 'all', label: t('admin:listToolbar.allTypes') }, ...KINDS.map((kind) => ({ value: kind, label: kind }))]} />
+          <AdminListFilter label={t('admin:common.status')} value={statusFilter} onValueChange={setStatusFilter} options={['all', 'enabled', 'disabled'].map((value) => ({ value, label: t(`admin:listToolbar.${value === 'all' ? 'allStatuses' : value}`) }))} />
+        </>}
         actions={(
           <>
-            <Button
-              size="sm"
-              variant="secondary"
-              className="max-sm:min-h-[var(--tap-min)] max-sm:flex-1"
-              leadingIcon={<TagsIcon size={15} aria-hidden />}
-              onClick={() => navigate('/admin/model-tags')}
-            >
-              {t('admin:modelTags.manage', { defaultValue: 'Manage tags' })}
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              className="max-sm:min-h-[var(--tap-min)] max-sm:flex-1"
-              leadingIcon={<RefreshCw size={15} aria-hidden />}
-              onClick={openPullModels}
-            >
-              {t('admin:models.pull.action')}
-            </Button>
+            <Tooltip content={t('admin:modelTags.manage', { defaultValue: 'Manage tags' })}>
+              <Button
+                size="icon-sm"
+                variant="secondary"
+                className="size-8 max-sm:size-[var(--tap-min)]"
+                aria-label={t('admin:modelTags.manage', { defaultValue: 'Manage tags' })}
+                onClick={() => navigate('/admin/model-tags')}
+              >
+                <TagsIcon size={15} aria-hidden />
+              </Button>
+            </Tooltip>
+            <Tooltip content={t('admin:models.pull.action')}>
+              <Button
+                size="icon-sm"
+                variant="secondary"
+                className="size-8 max-sm:size-[var(--tap-min)]"
+                aria-label={t('admin:models.pull.action')}
+                onClick={openPullModels}
+              >
+                <RefreshCw size={15} aria-hidden />
+              </Button>
+            </Tooltip>
             <Button
               data-admin-tour="models-create"
               size="sm"
-              className="max-sm:min-h-[var(--tap-min)] max-sm:flex-1"
               leadingIcon={<Plus size={15} aria-hidden />}
               onClick={openNew}
             >
@@ -370,81 +433,83 @@ export default function AdminModels() {
         )}
       />
 
-      <section className="mt-8">
+      <section className="mt-4">
         {loading ? (
           <PanelFallback />
         ) : models.length === 0 ? (
-          <div className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center text-sm text-[var(--color-fg-muted)]">
+          <div className="rounded-[12px] bg-[var(--color-surface)] px-6 py-10 text-center text-sm text-[var(--color-fg-muted)]">
             {t('admin:models.empty')}
           </div>
         ) : (
           <AdminSortableList
-            items={models}
-            onItemsChange={setModels}
+            items={filteredModels}
+            onItemsChange={(next) => setModels((current) => mergeVisibleAdminOrder(current, next))}
             onOrderCommit={persistOrder}
             dragHandleLabel={t('admin:common.dragHandle')}
             moveUpLabel={t('admin:common.moveUp')}
             moveDownLabel={t('admin:common.moveDown')}
-            mobileDragOnly
-            rowClassName="grid grid-cols-[2.75rem_auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-2 px-2 py-3.5 md:grid-cols-[auto_auto_auto_minmax(0,1fr)_auto_auto_auto] md:gap-2 md:px-5 md:py-4"
-            renderItem={(m) => {
-              const ch = channels.find((c) => c.id === m.channel_id)
-              const toggling = togglingModelIds.has(m.id)
-              return (
-                <>
-                  <div className="col-start-2 row-start-1 grid size-9 shrink-0 place-items-center rounded-[12px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] md:col-start-auto md:row-start-auto">
-                    <ModelIcon icon={m.icon} size={22} />
+            tableLabel={t('admin:models.title')}
+            columns={[
+              { id: 'model', header: t('admin:models.fields.label'), width: 260, render: (m) => (
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <span className="grid size-8 shrink-0 place-items-center rounded-[8px] bg-[var(--color-bg-muted)]"><ModelIcon icon={m.icon} size={20} /></span>
+                  <div className="min-w-0">
+                    <span className="block truncate font-medium" title={m.label}>{m.label}</span>
+                    <span className="block truncate font-mono text-[12px] text-[var(--color-fg-muted)]" title={m.request_id}>{m.request_id}</span>
                   </div>
-                  <div className="col-start-3 row-start-1 min-w-0 md:col-start-auto md:row-start-auto">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-medium text-[var(--color-fg)] truncate">{m.label}</span>
-                      <Badge size="xs">{m.kind}</Badge>
-                      <Badge size="xs" variant="neutral">{m.tool_mode}</Badge>
-                      {!m.enabled ? <Badge size="xs" variant="neutral">disabled</Badge> : null}
-                    </div>
-                    <div className="mt-0.5 text-[12px] text-[var(--color-fg-subtle)] font-mono truncate">
-                      {ch?.name ?? '(unknown channel)'} · {m.request_id}
-                      {m.kind === 'chat' ? ` · in $${m.price_input}/M · out $${m.price_output}/M` : ''}
-                      {m.kind === 'image' ? ` · $${m.price_per_image}/img` : ''}
-                      {m.kind === 'embedding' ? ` · dim ${m.dim}` : ''}
-                    </div>
-                  </div>
+                </div>
+              ) },
+              { id: 'channel', header: t('admin:models.fields.channel'), width: 180, render: (m) => {
+                const regular = (m.channel_bindings ?? []).filter((binding) => binding.role === 'regular')
+                const primaryName = regular[0]?.channel_name ?? channels.find((c) => c.id === m.channel_id)?.name ?? '—'
+                return <div className="flex min-w-0 items-center gap-1.5"><span className="block min-w-0 truncate" title={regular.map((binding) => binding.channel_name).filter(Boolean).join(', ') || primaryName}>{primaryName}</span>{regular.length > 1 ? <Badge size="xs">+{regular.length - 1}</Badge> : null}</div>
+              } },
+              { id: 'kind', header: t('admin:models.fields.kind'), width: 100, render: (m) => <Badge size="xs">{m.kind}</Badge> },
+              { id: 'toolMode', header: t('admin:models.fields.toolMode'), width: 100, render: (m) => <Badge size="xs">{m.tool_mode}</Badge> },
+              { id: 'pricing', header: t('admin:common.pricing'), width: 170, render: (m) => (
+                <div className="text-[12px] tabular-nums text-[var(--color-fg-muted)]">
+                  {m.kind === 'chat' ? <><div>{t('admin:models.fields.priceIn')}: ${m.price_input}</div><div>{t('admin:models.fields.priceOut')}: ${m.price_output}</div></> : null}
+                  {m.kind === 'image' ? `$${m.price_per_image}/img` : null}
+                  {m.kind === 'embedding' ? `${t('admin:models.fields.dim')}: ${m.dim}` : null}
+                  {m.kind === 'decision' ? '—' : null}
+                </div>
+              ) },
+              { id: 'enabled', header: t('admin:common.status'), width: 80, align: 'center', render: (m) => (
                   <Tooltip content={t('admin:models.visibleToggle', { defaultValue: m.enabled ? 'Visible to users' : 'Hidden from users' })}>
-                    <span className="col-start-4 row-start-1 shrink-0 md:col-start-auto md:row-start-auto">
+                    <span className="inline-flex">
                       <Switch
                         checked={m.enabled}
-                        disabled={toggling}
-                        aria-busy={toggling || undefined}
+                        disabled={togglingModelIds.has(m.id)}
+                        aria-busy={togglingModelIds.has(m.id) || undefined}
                         onCheckedChange={() => void toggleEnabled(m)}
                         aria-label={t('admin:models.visibleToggle', { defaultValue: 'Show in app' })}
                       />
                     </span>
                   </Tooltip>
-                  <div className="col-span-4 row-start-2 flex items-center justify-end gap-1 md:contents">
+              ) },
+              { id: 'actions', header: t('admin:common.actions'), width: 100, align: 'right', render: (m) => (
+                  <div className="flex items-center justify-end gap-1">
                     <Button
                       variant="ghost"
-                      size="sm"
-                      className="max-md:size-[var(--tap-min)] max-md:gap-0 max-md:px-0"
+                      size="icon-sm"
+                      title={t('admin:models.settings')}
                       aria-label={`${t('admin:models.settings')}: ${m.label}`}
                       leadingIcon={<SettingsIcon size={13} aria-hidden />}
                       onClick={() => navigate(`/admin/models/${encodeURIComponent(m.id)}`)}
                     >
-                      <span className="max-md:sr-only">{t('admin:models.settings')}</span>
                     </Button>
                     <Button
                       variant="ghost"
-                      size="sm"
-                      className="max-md:size-[var(--tap-min)] max-md:gap-0 max-md:px-0"
+                      size="icon-sm"
+                      title={t('admin:common.remove')}
                       aria-label={`${t('admin:common.remove')}: ${m.label}`}
                       leadingIcon={<Trash2 size={13} aria-hidden />}
                       onClick={() => setConfirmDelete(m)}
                     >
-                      <span className="max-md:sr-only">{t('admin:common.remove')}</span>
                     </Button>
                   </div>
-                </>
-              )
-            }}
+              ) },
+            ]}
           />
         )}
       </section>
@@ -464,7 +529,7 @@ export default function AdminModels() {
           </DialogHeader>
           <DialogBody>
             {channels.length === 0 ? (
-              <div className="rounded-[12px] border border-dashed border-[var(--color-border)] px-5 py-8 text-center text-sm text-[var(--color-fg-muted)]">
+              <div className="rounded-[12px] bg-[var(--color-bg-muted)] px-5 py-8 text-center text-sm text-[var(--color-fg-muted)]">
                 {t('admin:models.pull.noChannels')}
               </div>
             ) : (
@@ -507,7 +572,7 @@ export default function AdminModels() {
 
                 {pullModels.fetched ? (
                   <>
-                      <div className="flex flex-col gap-3 border-y border-[var(--color-border)] py-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
                         <div>
                           <p className="text-sm text-[var(--color-fg-muted)]">
                             {t('admin:models.pull.summary', {
@@ -565,14 +630,14 @@ export default function AdminModels() {
                           {pulledAvailable.length === 0 ? (
                             <p className="mb-3 text-sm text-[var(--color-fg-muted)]">{t('admin:models.pull.allAdded')}</p>
                           ) : null}
-                          <div className="max-h-[min(42vh,24rem)] overflow-y-auto rounded-[12px] border border-[var(--color-border)]">
+                          <div className="max-h-[min(42vh,24rem)] overflow-y-auto rounded-[12px]">
                           {pulledFiltered.map((candidate) => {
                             const key = candidate.request_id.trim().toLowerCase()
                             const existing = pulledExistingKeys.has(key)
                             return (
                               <label
                                 key={key}
-                                className={`flex min-h-14 items-center gap-3 border-b border-[var(--color-border)] px-3 py-2.5 last:border-b-0 ${existing ? 'cursor-default bg-[var(--color-bg-muted)]/60' : 'cursor-pointer hover:bg-[var(--color-bg-muted)]'}`}
+                                className={`flex min-h-14 items-center gap-3 rounded-[8px] px-3 py-2.5 ${existing ? 'cursor-default bg-[var(--color-bg-muted)]/60' : 'cursor-pointer hover:bg-[var(--color-bg-muted)]'}`}
                               >
                                 <Checkbox
                                   checked={existing || pullModels.selected.has(key)}
@@ -628,6 +693,14 @@ export default function AdminModels() {
           </DialogHeader>
           <DialogBody>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field label={t('admin:models.fields.requestId')} htmlFor="m-new-req">
+                <Input
+                  id="m-new-req"
+                  value={creator.draft.request_id}
+                  onChange={(e) => setCreator({ ...creator, draft: { ...creator.draft, request_id: e.target.value } })}
+                  placeholder="gpt-4o"
+                />
+              </Field>
               <Field label={t('admin:models.fields.channel')} htmlFor="m-new-ch">
                 <Select
                   value={creator.draft.channel_id}
@@ -637,7 +710,7 @@ export default function AdminModels() {
                     <SelectValue placeholder={t('admin:settings.fields.pickModel')} />
                   </SelectTrigger>
                   <SelectContent>
-                    {channels.map((c) => (
+                    {(creator.draft.request_id.trim() ? creatorChannels : channels).map((c) => (
                       <SelectItem key={c.id} value={c.id}>
                         {c.name} ({c.type})
                       </SelectItem>
@@ -670,16 +743,6 @@ export default function AdminModels() {
                   value={creator.draft.label}
                   onChange={(e) => setCreator({ ...creator, draft: { ...creator.draft, label: e.target.value } })}
                   placeholder="Claude Opus 4.8"
-                />
-              </Field>
-              <Field label={t('admin:models.fields.requestId')} htmlFor="m-new-req">
-                <Input
-                  id="m-new-req"
-                  value={creator.draft.request_id}
-                  onChange={(e) =>
-                    setCreator({ ...creator, draft: { ...creator.draft, request_id: e.target.value } })
-                  }
-                  placeholder="claude-opus-4-8"
                 />
               </Field>
               <Field label={t('admin:models.fields.icon')} htmlFor="m-new-icon" className="sm:col-span-2">

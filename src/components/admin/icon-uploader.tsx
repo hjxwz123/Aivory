@@ -80,7 +80,7 @@ export function IconUploader({ id, value, onChange, placeholder, preview, disabl
 
   return (
     <div className="flex min-w-0 items-center gap-2">
-      <div className="shrink-0 size-9 inline-flex items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)]">
+      <div className="shrink-0 size-9 inline-flex items-center justify-center rounded-[8px] bg-[var(--color-surface)]">
         {preview ?? <ModelIcon icon={value} size={18} />}
       </div>
       <Input

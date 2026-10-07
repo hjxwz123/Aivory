@@ -1,7 +1,6 @@
 /**
  * AdminUserLoginHistory — read-only successful sign-in audit trail for one user.
- * The compact desktop table becomes field-labelled rows below xl so long user
- * agents and locations never force the admin shell to scroll horizontally.
+ * Shared by the user-management drawer and the standalone history route.
  */
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -13,6 +12,7 @@ import type { ApiAdminLoginHistoryEntry, ApiUser } from '@/api/types'
 import { AdminDetailHeader } from '@/components/admin/admin-detail-header'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { AdminTable } from '@/components/admin/AdminTable'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Pagination } from '@/components/ui/pagination'
 import { PanelFallback } from '@/components/ui/panel-fallback'
@@ -48,9 +48,10 @@ function methodVariant(method: string): 'neutral' | 'accent' | 'sage' | 'info' {
   return 'neutral'
 }
 
-export default function AdminUserLoginHistory() {
+export default function AdminUserLoginHistory({ userId, embedded = false }: { userId?: string; embedded?: boolean } = {}) {
   const { t } = useTranslation(['admin', 'common'])
-  const { id = '' } = useParams<{ id: string }>()
+  const { id: routeId = '' } = useParams<{ id: string }>()
+  const id = userId ?? routeId
   const [user, setUser] = useState<ApiUser | null>(null)
   const [rows, setRows] = useState<ApiAdminLoginHistoryEntry[]>([])
   const [total, setTotal] = useState(0)
@@ -72,7 +73,7 @@ export default function AdminUserLoginHistory() {
     setRows([])
 
     void Promise.all([
-      adminApi.user(id),
+      embedded ? Promise.resolve(null) : adminApi.user(id),
       adminApi.userLoginHistory(id, PAGE_SIZE, (page - 1) * PAGE_SIZE),
     ]).then(([targetUser, result]) => {
       if (sequence !== requestSequence.current) return
@@ -87,7 +88,10 @@ export default function AdminUserLoginHistory() {
       setLoadedId(id)
       setLoading(false)
     })
-  }, [id, page, reloadKey, t])
+    return () => {
+      requestSequence.current += 1
+    }
+  }, [id, embedded, page, reloadKey, t])
 
   const currentUser = user?.id === id ? user : null
   const firstLoad = loading && loadedId !== id
@@ -114,27 +118,30 @@ export default function AdminUserLoginHistory() {
 
   return (
     <div>
-      <AdminDetailHeader backTo="/admin/users" backLabel={t('admin:users.backToUsers')} />
+      {!embedded ? (
+        <>
+          <AdminDetailHeader backTo="/admin/users" backLabel={t('admin:users.backToUsers')} />
+          <AdminPageHeader
+            title={firstLoad ? (
+              <span className="block" role="status" aria-live="polite">
+                <span className="sr-only">{t('admin:common.loading')}</span>
+                <span
+                  aria-hidden
+                  className="block h-9 w-[min(18rem,70vw)] animate-pulse rounded-[8px] bg-[var(--color-bg-muted)]"
+                />
+              </span>
+            ) : headerName ? (
+              t('admin:users.loginHistoryTitle', { name: headerName })
+            ) : (
+              t('admin:users.loginHistoryFallbackTitle')
+            )}
+            titleBusy={firstLoad}
+            description={t('admin:users.loginHistoryLead')}
+          />
+        </>
+      ) : null}
 
-      <AdminPageHeader
-        title={firstLoad ? (
-            <span className="block" role="status" aria-live="polite">
-              <span className="sr-only">{t('admin:common.loading')}</span>
-              <span
-                aria-hidden
-                className="block h-9 w-[min(18rem,70vw)] animate-pulse rounded-[8px] bg-[var(--color-bg-muted)]"
-              />
-            </span>
-          ) : headerName ? (
-            t('admin:users.loginHistoryTitle', { name: headerName })
-          ) : (
-            t('admin:users.loginHistoryFallbackTitle')
-          )}
-        titleBusy={firstLoad}
-        description={t('admin:users.loginHistoryLead')}
-      />
-
-      <section className="mt-6 sm:mt-8" aria-label={t('admin:users.viewLoginHistory')}>
+      <section className={embedded ? undefined : 'mt-6 sm:mt-8'} aria-label={t('admin:users.viewLoginHistory')}>
         {loading ? (
           <PanelFallback />
         ) : error ? (
@@ -157,7 +164,7 @@ export default function AdminUserLoginHistory() {
             </Button>
           </div>
         ) : rows.length === 0 ? (
-          <div className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)]">
+          <div className="rounded-[8px] bg-[var(--color-surface)]">
             <EmptyState
               icon={<History size={20} aria-hidden />}
               title={t('admin:users.noLoginHistory')}
@@ -167,100 +174,23 @@ export default function AdminUserLoginHistory() {
           </div>
         ) : (
           <>
-            <div
-              role="table"
-              aria-label={t('admin:users.viewLoginHistory')}
-              className="hidden overflow-hidden rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] xl:block"
-            >
-              <div
-                role="row"
-                className="grid grid-cols-[minmax(8rem,1.1fr)_minmax(6.5rem,.85fr)_minmax(7rem,1fr)_minmax(7rem,.8fr)_minmax(11rem,1.4fr)] gap-3 border-b border-[var(--color-divider)] bg-[var(--color-bg-muted)] px-4 py-2.5 text-[12px] font-medium text-[var(--color-fg-muted)]"
-              >
-                <span role="columnheader">{t('admin:users.loginHistory.time')}</span>
-                <span role="columnheader">{t('admin:users.loginHistory.ip')}</span>
-                <span role="columnheader">{t('admin:users.loginHistory.location')}</span>
-                <span role="columnheader">{t('admin:users.loginHistory.method')}</span>
-                <span role="columnheader">{t('admin:users.loginHistory.device')}</span>
-              </div>
-              <div role="rowgroup" className="divide-y divide-[var(--color-divider)]">
-                {rows.map((entry) => {
+            <AdminTable
+              items={rows}
+              rowKey={(entry) => entry.id}
+              label={t('admin:users.viewLoginHistory')}
+              columns={[
+                { id: 'time', header: t('admin:users.loginHistory.time'), width: 170, render: (entry) => <span className="text-[12px] tabular-nums text-[var(--color-fg-muted)]">{loginTime(entry.login_at)}</span> },
+                { id: 'ip', header: t('admin:users.loginHistory.ip'), width: 180, render: (entry) => <code className="block truncate font-mono text-[12px]" title={entry.ip}>{entry.ip || '—'}</code> },
+                { id: 'location', header: t('admin:users.loginHistory.location'), width: 160, render: (entry) => <span className="block truncate text-[var(--color-fg-muted)]" title={entry.location}>{entry.location || t('admin:users.loginHistory.unknownLocation')}</span> },
+                { id: 'method', header: t('admin:users.loginHistory.method'), width: 160, render: (entry) => <Badge size="xs" variant={methodVariant(entry.method)}>{methodLabel(entry.method)}</Badge> },
+                { id: 'device', header: t('admin:users.loginHistory.device'), width: 300, render: (entry) => {
                   const parsedDevice = device(entry)
                   const DeviceIcon = parsedDevice.mobile ? Smartphone : Monitor
-                  return (
-                    <div
-                      key={entry.id}
-                      role="row"
-                      className="grid grid-cols-[minmax(8rem,1.1fr)_minmax(6.5rem,.85fr)_minmax(7rem,1fr)_minmax(7rem,.8fr)_minmax(11rem,1.4fr)] items-center gap-3 px-4 py-3 text-[12.5px]"
-                    >
-                      <span role="cell" className="min-w-0 tabular-nums text-[var(--color-fg-muted)]">
-                        {loginTime(entry.login_at)}
-                      </span>
-                      <code role="cell" className="min-w-0 truncate font-mono text-[12px] text-[var(--color-fg)]" title={entry.ip}>
-                        {entry.ip || '—'}
-                      </code>
-                      <span role="cell" className="min-w-0 truncate text-[var(--color-fg-muted)]" title={entry.location}>
-                        {entry.location || t('admin:users.loginHistory.unknownLocation')}
-                      </span>
-                      <span role="cell">
-                        <Badge size="xs" variant={methodVariant(entry.method)}>
-                          {methodLabel(entry.method)}
-                        </Badge>
-                      </span>
-                      <span role="cell" className="flex min-w-0 items-center gap-2">
-                        <DeviceIcon size={14} aria-hidden className="shrink-0 text-[var(--color-fg-subtle)]" />
-                        <span className="min-w-0">
-                          <span className="block truncate font-medium text-[var(--color-fg)]">{parsedDevice.label}</span>
-                          {entry.user_agent ? (
-                            <span className="mt-0.5 block truncate text-[12px] text-[var(--color-fg-subtle)]" title={entry.user_agent}>
-                              {entry.user_agent}
-                            </span>
-                          ) : null}
-                        </span>
-                      </span>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
+                  return <div className="flex min-w-0 items-center gap-2"><DeviceIcon size={14} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden /><span className="min-w-0"><span className="block truncate font-medium">{parsedDevice.label}</span>{entry.user_agent ? <span className="block truncate text-[12px] text-[var(--color-fg-muted)]" title={entry.user_agent}>{entry.user_agent}</span> : null}</span></div>
+                } },
+              ]}
+            />
 
-            <ul className="flex flex-col divide-y divide-[var(--color-divider)] overflow-hidden rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] xl:hidden">
-              {rows.map((entry) => {
-                const parsedDevice = device(entry)
-                const DeviceIcon = parsedDevice.mobile ? Smartphone : Monitor
-                return (
-                  <li key={entry.id} className="px-4 py-3 sm:px-5">
-                    <div className="flex min-w-0 items-center justify-between gap-3">
-                      <time className="min-w-0 text-[12.5px] tabular-nums text-[var(--color-fg)]">
-                        {loginTime(entry.login_at)}
-                      </time>
-                      <Badge size="xs" variant={methodVariant(entry.method)}>
-                        {methodLabel(entry.method)}
-                      </Badge>
-                    </div>
-                    <dl className="mt-2.5 grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-[12px] sm:grid-cols-[4.5rem_minmax(0,1fr)_4.5rem_minmax(0,1fr)]">
-                      <dt className="text-[var(--color-fg-subtle)]">{t('admin:users.loginHistory.ip')}</dt>
-                      <dd className="min-w-0 break-all font-mono text-[var(--color-fg-muted)]">{entry.ip || '—'}</dd>
-                      <dt className="text-[var(--color-fg-subtle)]">{t('admin:users.loginHistory.location')}</dt>
-                      <dd className="min-w-0 break-words text-[var(--color-fg-muted)]">
-                        {entry.location || t('admin:users.loginHistory.unknownLocation')}
-                      </dd>
-                      <dt className="text-[var(--color-fg-subtle)] sm:col-start-1">{t('admin:users.loginHistory.device')}</dt>
-                      <dd className="flex min-w-0 items-start gap-2 text-[var(--color-fg-muted)] sm:col-span-3">
-                        <DeviceIcon size={14} aria-hidden className="mt-0.5 shrink-0 text-[var(--color-fg-subtle)]" />
-                        <span className="min-w-0">
-                          <span className="block font-medium text-[var(--color-fg)]">{parsedDevice.label}</span>
-                          {entry.user_agent ? (
-                            <span className="mt-0.5 line-clamp-2 break-all text-[12px] leading-4" title={entry.user_agent}>
-                              {entry.user_agent}
-                            </span>
-                          ) : null}
-                        </span>
-                      </dd>
-                    </dl>
-                  </li>
-                )
-              })}
-            </ul>
 
             <Pagination page={page} pageCount={pageCount} onPage={setPage} />
           </>

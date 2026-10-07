@@ -4,7 +4,6 @@ import { TriangleAlert } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
 import type { ApiChannel, ApiModel } from '@/api/types'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Field } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/hooks/use-toast'
@@ -30,7 +29,6 @@ const OWNED_KEYS = [
   'tool_mode_default',
   'verify_model_id',
   'fallback_model_id',
-  'fallback_ttft_sec',
   'memory_dedup_model_id',
   'memory_adjudicate_model_id',
   'moderation_model_id',
@@ -61,10 +59,6 @@ export default function AdminModelPolicy() {
 
   function readString(key: string): string {
     return typeof draft[key] === 'string' ? draft[key] : ''
-  }
-
-  function readNumber(key: string, fallback = 0): number {
-    return typeof draft[key] === 'number' ? draft[key] : fallback
   }
 
   async function save() {
@@ -365,26 +359,6 @@ export default function AdminModelPolicy() {
                   </Select>
                 </Field>
 
-                {fallbackModelId && (
-                  <Field
-                    label={t('admin:settings.fields.fallbackTtft')}
-                    htmlFor="fallback-ttft"
-                    hint={t('admin:settings.fields.fallbackTtftHint')}
-                  >
-                    <Input
-                      id="fallback-ttft"
-                      type="number"
-                      min={0}
-                      value={String(readNumber('fallback_ttft_sec'))}
-                      onChange={(event) =>
-                        setDraft((current) => ({
-                          ...current,
-                          fallback_ttft_sec: Math.max(0, Number(event.target.value) || 0),
-                        }))
-                      }
-                    />
-                  </Field>
-                )}
               </div>
             </SettingsBlock>
           </SettingsSection>

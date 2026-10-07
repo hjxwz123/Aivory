@@ -334,7 +334,7 @@ export default function AdminDocuments() {
                     />
                   </Field>
                 )}
-                <div className="border-t border-[var(--color-divider)] pt-5">
+                <div className="pt-5">
                   <div className="flex items-center justify-between gap-4">
                     <div className="min-w-0">
                       <div className="text-sm text-[var(--color-fg)]">
@@ -407,7 +407,7 @@ export default function AdminDocuments() {
           >
             <SettingsBlock>
               {!mineruStorageReady && (
-                <div className="flex items-center gap-3 border-y border-[var(--color-divider)] py-3 text-[12px] text-[var(--color-warning)]">
+                <div className="flex items-center gap-3 py-3 text-[12px] text-[var(--color-warning)]">
                   <AlertTriangle size={15} className="shrink-0" aria-hidden />
                   <p className="min-w-0 flex-1">
                     {t('admin:documents.mineruStorageRequired', {

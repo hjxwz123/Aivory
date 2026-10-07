@@ -223,7 +223,7 @@ export default function AdminAudio() {
                   />
                 </Field>
 
-                <div className="mt-1 flex flex-col gap-3 border-t border-[var(--color-divider)] pt-4">
+                <div className="mt-1 flex flex-col gap-3 pt-4">
                   {(
                     [
                       ['volcano_asr_enable_punc', 'punc'],
@@ -233,7 +233,7 @@ export default function AdminAudio() {
                   ).map(([key, label]) => (
                     <label
                       key={key}
-                      className="flex items-center justify-between gap-4 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3"
+                      className="flex items-center justify-between gap-4 rounded-[12px] bg-[var(--color-surface)] px-4 py-3"
                     >
                       <span>
                         <span className="block text-sm font-medium text-[var(--color-fg)]">

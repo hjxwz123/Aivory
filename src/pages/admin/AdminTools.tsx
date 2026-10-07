@@ -226,7 +226,7 @@ export default function AdminTools() {
       {loading ? (
         <PanelFallback />
       ) : settingsLoadFailed ? (
-        <div className="mt-8 flex min-h-64 flex-col items-center justify-center rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center">
+        <div className="mt-8 flex min-h-64 flex-col items-center justify-center rounded-[12px] bg-[var(--color-surface)] px-6 py-10 text-center">
           <AlertTriangle size={22} aria-hidden className="text-[var(--color-danger)]" />
           <p className="mt-3 text-sm font-medium text-[var(--color-fg)]">{t('admin:tools.loadFailed')}</p>
           <Button
@@ -390,7 +390,7 @@ export default function AdminTools() {
                 </Field>
 
                 {searchProvider === 'duckduckgo' && (
-                  <div className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-4">
+                  <div className="rounded-[8px] bg-[var(--color-bg-muted)] p-4">
                     <p className="text-xs leading-relaxed text-[var(--color-fg-subtle)]">
                       {t('admin:settings.fields.searchDuckduckgoHint')}
                     </p>
@@ -398,7 +398,7 @@ export default function AdminTools() {
                 )}
 
                 {searchProvider === 'searxng' && (
-                  <div className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-4">
+                  <div className="rounded-[8px] bg-[var(--color-bg-muted)] p-4">
                     <Field
                       label={t('admin:settings.fields.searchBaseUrl')}
                       htmlFor="search-url"
@@ -430,7 +430,7 @@ export default function AdminTools() {
                 )}
 
                 {(searchProvider === 'serper' || searchProvider === 'brave' || searchProvider === 'tavily') && (
-                  <div className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-4">
+                  <div className="rounded-[8px] bg-[var(--color-bg-muted)] p-4">
                     <Field
                       label={t('admin:settings.fields.searchApiKey')}
                       htmlFor="search-key"
