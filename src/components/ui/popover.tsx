@@ -1,6 +1,7 @@
 import * as PopoverPrimitive from '@radix-ui/react-popover'
 import { forwardRef, type ComponentPropsWithoutRef, type ElementRef } from 'react'
 import { cn } from '@/lib/utils'
+import { useQuietSurface } from '@/contexts/quiet-surface'
 
 export const Popover = PopoverPrimitive.Root
 export const PopoverTrigger = PopoverPrimitive.Trigger
@@ -11,6 +12,7 @@ export const PopoverContent = forwardRef<
   ElementRef<typeof PopoverPrimitive.Content>,
   ComponentPropsWithoutRef<typeof PopoverPrimitive.Content>
 >(function PopoverContent({ className, sideOffset = 6, ...rest }, ref) {
+  const quiet = useQuietSurface()
   return (
     <PopoverPrimitive.Portal>
       <PopoverPrimitive.Content
@@ -21,6 +23,7 @@ export const PopoverContent = forwardRef<
           'rounded-popup bg-[var(--color-surface-raised)] border border-[var(--color-border)]',
           'shadow-[var(--shadow-popover)] p-2',
           'popup-motion',
+          quiet && 'border-0 shadow-[var(--shadow-popover-quiet)]',
           className,
         )}
         {...rest}

@@ -2,6 +2,7 @@ import * as SelectPrimitive from '@radix-ui/react-select'
 import { Check, ChevronDown } from 'lucide-react'
 import { forwardRef, type ComponentPropsWithoutRef, type ElementRef } from 'react'
 import { cn } from '@/lib/utils'
+import { useQuietSurface } from '@/contexts/quiet-surface'
 
 export const Select = SelectPrimitive.Root
 export const SelectGroup = SelectPrimitive.Group
@@ -11,6 +12,7 @@ export const SelectTrigger = forwardRef<
   ElementRef<typeof SelectPrimitive.Trigger>,
   ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger> & { hideChevron?: boolean }
 >(function SelectTrigger({ className, children, hideChevron = false, ...rest }, ref) {
+  const quiet = useQuietSurface()
   return (
     <SelectPrimitive.Trigger
       ref={ref}
@@ -23,6 +25,7 @@ export const SelectTrigger = forwardRef<
         // carries the state, without an outer glow around the control.
         'focus:outline-none focus:border-[var(--color-border-strong)] focus:bg-[var(--color-surface)]',
         'data-[placeholder]:text-[var(--color-fg-faint)]',
+        quiet && 'border-transparent bg-[var(--color-bg-muted)] data-[placeholder]:text-[var(--color-fg-muted)] focus:border-[var(--color-ring)]',
         'data-[disabled]:opacity-50 data-[disabled]:cursor-not-allowed',
         'w-full',
         className,
@@ -43,6 +46,7 @@ export const SelectContent = forwardRef<
   ElementRef<typeof SelectPrimitive.Content>,
   ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
 >(function SelectContent({ className, children, position = 'popper', ...rest }, ref) {
+  const quiet = useQuietSurface()
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
@@ -59,6 +63,7 @@ export const SelectContent = forwardRef<
           'rounded-popup bg-[var(--color-surface-raised)] border border-[var(--color-border)]',
           'shadow-[var(--shadow-popover)] p-1',
           'popup-motion',
+          quiet && 'border-0 shadow-[var(--shadow-popover-quiet)]',
           className,
         )}
         {...rest}

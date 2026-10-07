@@ -36,7 +36,7 @@ export function LanguageToggle({ variant = 'icon', className }: LanguageTogglePr
               variant === 'icon' &&
                 'size-8 rounded-[8px] hover:bg-[var(--color-bg-muted)]',
               variant === 'pill' &&
-                'h-9 px-3 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] text-sm font-medium',
+                'h-9 px-3 rounded-[10px] bg-[var(--color-bg-muted)] text-sm font-medium',
               variant === 'text' && 'min-h-8 rounded-[6px] px-1.5 text-[11px]',
               className,
             )}

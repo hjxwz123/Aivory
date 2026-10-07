@@ -199,7 +199,8 @@
   --shadow-2xl: 0 40px 80px -20px oklch(18% 0.04 270 / 0.24);
   --shadow-inner: inset 0 1px 2px 0 oklch(18% 0.04 270 / 0.06);
   --shadow-ring: 0 0 0 3px var(--color-ring);
-  --shadow-popover: 0 12px 32px -8px oklch(18% 0.04 270 / 0.14), 0 4px 12px -4px oklch(18% 0.04 270 / 0.09), 0 0 0 1px var(--color-border);
+  --shadow-popover: 0 12px 32px -8px oklch(18% 0.04 270 / 0.14), 0 4px 12px -4px oklch(18% 0.04 270 / 0.09);
+  --shadow-popover-quiet: 0 12px 32px -8px oklch(18% 0.04 270 / 0.14), 0 4px 12px -4px oklch(18% 0.04 270 / 0.09);
 
   /* ---------- MOTION — subtle, organic --------------------------------- */
   --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
@@ -518,7 +519,8 @@
   --shadow-xl: 0 24px 48px -12px oklch(0% 0 0 / 0.58);
   --shadow-2xl: 0 40px 80px -20px oklch(0% 0 0 / 0.72);
   --shadow-inner: inset 0 1px 2px 0 oklch(0% 0 0 / 0.32);
-  --shadow-popover: 0 12px 32px -8px oklch(0% 0 0 / 0.46), 0 4px 12px -4px oklch(0% 0 0 / 0.32), 0 0 0 1px var(--color-border);
+  --shadow-popover: 0 12px 32px -8px oklch(0% 0 0 / 0.46), 0 4px 12px -4px oklch(0% 0 0 / 0.32);
+  --shadow-popover-quiet: 0 12px 32px -8px oklch(0% 0 0 / 0.46), 0 4px 12px -4px oklch(0% 0 0 / 0.32);
 }
 
 /* ============================================================================

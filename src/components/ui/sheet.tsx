@@ -1,6 +1,7 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { forwardRef, type ComponentPropsWithoutRef, type ElementRef, type HTMLAttributes } from 'react'
 import { cn } from '@/lib/utils'
+import { useQuietSurface } from '@/contexts/quiet-surface'
 
 /**
  * Sheet — left/right/bottom slide-over. Built on Radix Dialog primitives.
@@ -56,6 +57,7 @@ const sizeForSide = (side: Side, size: 'sm' | 'md' | 'lg' | 'nav' = 'md') => {
 
 export const SheetContent = forwardRef<ElementRef<typeof DialogPrimitive.Content>, SheetContentProps>(
   function SheetContent({ side = 'right', size = 'md', label, className, children, ...rest }, ref) {
+    const quiet = useQuietSurface()
     return (
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay
@@ -77,6 +79,7 @@ export const SheetContent = forwardRef<ElementRef<typeof DialogPrimitive.Content
             side === 'right' && 'border-l',
             side === 'top' && 'rounded-b-popup border-b',
             side === 'bottom' && 'rounded-t-popup border-t',
+            quiet && 'border-0',
             'shadow-[var(--shadow-xl)] focus-visible:outline-none flex flex-col',
             className,
           )}
@@ -99,9 +102,10 @@ export function SheetBody({ className, ...rest }: HTMLAttributes<HTMLDivElement>
   return <div className={cn('flex-1 overflow-y-auto px-5 py-2', className)} {...rest} />
 }
 export function SheetFooter({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
+  const quiet = useQuietSurface()
   return (
     <div
-      className={cn('px-5 py-4 border-t border-[var(--color-divider)] flex items-center justify-end gap-2', className)}
+      className={cn('px-5 py-4 border-t border-[var(--color-divider)] flex items-center justify-end gap-2', quiet && 'border-0', className)}
       {...rest}
     />
   )

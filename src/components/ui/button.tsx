@@ -2,6 +2,8 @@ import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { Slot, Slottable } from '@radix-ui/react-slot'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
+import { useQuietSurface } from '@/contexts/quiet-surface'
+import { useButtonDensity } from '@/contexts/button-density'
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'outline' | 'destructive' | 'link'
 type Size = 'xs' | 'sm' | 'md' | 'lg' | 'icon' | 'icon-sm' | 'icon-lg'
@@ -51,10 +53,13 @@ const sizes: Record<Size, string> = {
 }
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
-  { variant = 'primary', size = 'md', leadingIcon, trailingIcon, loading, asChild, className, children, disabled, type, ...rest },
+  { variant = 'primary', size, leadingIcon, trailingIcon, loading, asChild, className, children, disabled, type, ...rest },
   ref,
 ) {
   const { t } = useTranslation('common')
+  const quiet = useQuietSurface()
+  const compact = useButtonDensity() === 'compact'
+  const resolvedSize = size ?? (compact ? 'sm' : 'md')
   const Comp = asChild ? Slot : 'button'
   const isLoading = Boolean(loading)
   // For native <button>, default type="button" so we never accidentally submit a form.
@@ -70,7 +75,17 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   return (
     <Comp
       ref={ref}
-      className={cn(base, variants[variant], sizes[size], className)}
+      className={cn(
+        base,
+        variants[variant],
+        sizes[resolvedSize],
+        quiet && (variant === 'secondary' || variant === 'outline') && 'border-transparent bg-[var(--color-bg-muted)] hover:bg-[var(--color-surface-sunken)]',
+        compact && 'gap-1.5 rounded-[8px] [&_svg]:size-3.5 [&_svg]:shrink-0 [@media(pointer:coarse)]:min-h-[var(--tap-min)] [@media(pointer:coarse)]:min-w-[var(--tap-min)]',
+        compact && resolvedSize === 'sm' && 'text-[13px] leading-5 [@media(pointer:coarse)]:text-[14px]',
+        className,
+      )}
+      data-button-density={compact ? 'compact' : undefined}
+      data-button-size={resolvedSize}
       aria-busy={isLoading || undefined}
       {...nativeProps}
       {...rest}

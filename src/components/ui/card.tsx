@@ -10,11 +10,11 @@ export function Card({ interactive, variant = 'default', className, ...rest }: C
   return (
     <div
       className={cn(
-        'rounded-2xl border',
-        variant === 'default' && 'bg-[var(--color-surface)] border-[var(--color-border)]',
-        variant === 'sunken' && 'bg-[var(--color-surface-sunken)] border-[var(--color-border-subtle)]',
-        variant === 'raised' && 'bg-[var(--color-surface-raised)] border-[var(--color-border)] shadow-[var(--shadow-md)]',
-        interactive && 'interactive cursor-pointer hover:border-[var(--color-border-strong)] hover:shadow-[var(--shadow-sm)]',
+        'rounded-2xl',
+        variant === 'default' && 'bg-[var(--color-bg-muted)]/50',
+        variant === 'sunken' && 'bg-[var(--color-surface-sunken)]',
+        variant === 'raised' && 'bg-[var(--color-surface-raised)] shadow-[var(--shadow-md)]',
+        interactive && 'interactive cursor-pointer hover:bg-[var(--color-bg-muted)] focus-within:ring-2 focus-within:ring-[var(--color-ring)]',
         className,
       )}
       {...rest}
@@ -33,7 +33,7 @@ export function CardBody({ className, ...rest }: HTMLAttributes<HTMLDivElement>)
 export function CardFooter({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn('p-5 pt-3 border-t border-[var(--color-divider)] flex items-center justify-end gap-2', className)}
+      className={cn('p-5 pt-3 flex items-center justify-end gap-2', className)}
       {...rest}
     />
   )

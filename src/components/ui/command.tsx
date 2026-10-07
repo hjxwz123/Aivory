@@ -29,7 +29,7 @@ export const CommandInput = forwardRef<
   }
 >(function CommandInput({ className, onClose, ...rest }, ref) {
   return (
-    <div className="flex items-center gap-2.5 px-4 h-12 max-sm:h-14 border-b border-[var(--color-divider)]" cmdk-input-wrapper="">
+    <div className="flex items-center gap-2.5 px-4 h-12 max-sm:h-14 bg-[var(--color-bg-muted)]/60" cmdk-input-wrapper="">
       <Search size={16} className="text-[var(--color-fg-subtle)] shrink-0" aria-hidden />
       <CommandPrimitive.Input
         ref={ref}
@@ -126,7 +126,7 @@ export const CommandSeparator = forwardRef<
   return (
     <CommandPrimitive.Separator
       ref={ref}
-      className={cn('my-1 h-px bg-[var(--color-divider)]', className)}
+      className={cn('my-1 h-1 bg-transparent', className)}
       {...rest}
     />
   )

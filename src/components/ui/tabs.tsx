@@ -13,9 +13,9 @@ export const TabsList = forwardRef<
       ref={ref}
       className={cn(
         variant === 'underline' &&
-          'inline-flex h-10 items-end gap-6 border-b border-[var(--color-divider)]',
+          'inline-flex h-10 items-end gap-6',
         variant === 'segmented' &&
-          'inline-flex items-center gap-1 rounded-[10px] bg-[var(--color-bg-muted)] p-1 border border-[var(--color-border-subtle)]',
+          'inline-flex items-center gap-1 rounded-[10px] bg-[var(--color-bg-muted)] p-1',
         className,
       )}
       {...rest}

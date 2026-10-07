@@ -2,6 +2,7 @@ import * as DropdownPrimitive from '@radix-ui/react-dropdown-menu'
 import { Check, ChevronRight } from 'lucide-react'
 import { forwardRef, type ComponentPropsWithoutRef, type ElementRef, type HTMLAttributes } from 'react'
 import { cn } from '@/lib/utils'
+import { useQuietSurface } from '@/contexts/quiet-surface'
 
 export const DropdownMenu = DropdownPrimitive.Root
 export const DropdownMenuTrigger = DropdownPrimitive.Trigger
@@ -23,6 +24,7 @@ export const DropdownMenuContent = forwardRef<
   ElementRef<typeof DropdownPrimitive.Content>,
   ComponentPropsWithoutRef<typeof DropdownPrimitive.Content>
 >(function DropdownMenuContent({ className, sideOffset = 6, collisionPadding = 8, ...rest }, ref) {
+  const quiet = useQuietSurface()
   return (
     <DropdownPrimitive.Portal>
       <DropdownPrimitive.Content
@@ -33,7 +35,7 @@ export const DropdownMenuContent = forwardRef<
         // opening upward from a bottom-anchored trigger (e.g. the sidebar avatar
         // menu) would otherwise clip past the viewport top with no way to reach
         // the hidden items. Submenus are portaled, so this scroll never clips them.
-        className={cn(menuClass, 'max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto', className)}
+        className={cn(menuClass, 'max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto', quiet && 'border-0 shadow-[var(--shadow-popover-quiet)]', className)}
         {...rest}
       />
     </DropdownPrimitive.Portal>
@@ -85,11 +87,12 @@ export const DropdownMenuSubContent = forwardRef<
   ElementRef<typeof DropdownPrimitive.SubContent>,
   ComponentPropsWithoutRef<typeof DropdownPrimitive.SubContent>
 >(function DropdownMenuSubContent({ className, ...rest }, ref) {
+  const quiet = useQuietSurface()
   return (
     <DropdownPrimitive.Portal>
       <DropdownPrimitive.SubContent
         ref={ref}
-        className={cn(menuClass, 'max-h-[min(60vh,22rem)] overflow-y-auto', className)}
+        className={cn(menuClass, 'max-h-[min(60vh,22rem)] overflow-y-auto', quiet && 'border-0 shadow-[var(--shadow-popover-quiet)]', className)}
         {...rest}
       />
     </DropdownPrimitive.Portal>
@@ -146,10 +149,11 @@ export const DropdownMenuSeparator = forwardRef<
   ElementRef<typeof DropdownPrimitive.Separator>,
   ComponentPropsWithoutRef<typeof DropdownPrimitive.Separator>
 >(function DropdownMenuSeparator({ className, ...rest }, ref) {
+  const quiet = useQuietSurface()
   return (
     <DropdownPrimitive.Separator
       ref={ref}
-      className={cn('my-1 h-px bg-[var(--color-divider)] -mx-1', className)}
+      className={cn('my-1 h-px bg-[var(--color-divider)] -mx-1', quiet && 'h-1 bg-transparent', className)}
       {...rest}
     />
   )

@@ -10,9 +10,8 @@ export function Kbd({ size = 'sm', className, children, ...rest }: KbdProps) {
     <kbd
       className={cn(
         'inline-flex items-center justify-center align-middle',
-        'rounded-[5px] border border-[var(--color-kbd-border)] bg-[var(--color-kbd-bg)]',
+        'rounded-[5px] bg-[var(--color-kbd-bg)]',
         'font-mono font-medium text-[var(--color-fg-muted)] tracking-tight',
-        'shadow-[inset_0_-1px_0_0_var(--color-border)]',
         size === 'sm' && 'h-[18px] min-w-[18px] px-1 text-[10px]',
         size === 'md' && 'h-6 min-w-[24px] px-1.5 text-[11px]',
         className,

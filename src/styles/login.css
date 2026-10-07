@@ -268,20 +268,20 @@
   height: auto;
   min-height: 45px;
   padding: 8px 12px;
-  border: 1px solid var(--color-border);
+  border: 1px solid transparent;
   border-radius: 8px;
-  background: transparent;
+  background: var(--color-bg-muted);
   color: var(--color-fg);
   font: 400 12px / 1.6 var(--login-sans);
   white-space: normal;
   overflow-wrap: anywhere;
   box-shadow: none;
 }
-.login-providers > button:hover:not(:disabled) { background: var(--color-bg-muted); border-color: var(--color-fg-muted); }
+.login-providers > button:hover:not(:disabled) { background: var(--color-surface-sunken); }
 .login-providers > button > span { margin-inline: 0; }
 .login-providers > button :is(svg, img) { width: 17px; height: 17px; flex-shrink: 0; }
 .login-divider { display: flex; align-items: center; gap: 13px; margin: 21px 0; color: var(--color-fg-muted); font-size: 11px; }
-.login-divider::before, .login-divider::after { content: ''; height: 1px; flex: 1; background: var(--color-border); opacity: .75; }
+.login-divider::before, .login-divider::after { content: ''; flex: 1; }
 .login-field { margin-bottom: 16px; }
 .login-field-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 7px; }
 .login-field label { font-size: 12px; font-weight: 500; line-height: 1.6; }
@@ -294,7 +294,7 @@
   min-width: 0;
   height: 46px;
   padding: 0 13px;
-  border: 1px solid var(--color-border);
+  border: 1px solid transparent;
   border-radius: 8px;
   background: var(--login-input);
   color: var(--color-fg);
@@ -354,7 +354,7 @@
 .login-error { margin: 0 0 14px; color: var(--color-danger); font-size: 12px; }
 .login-field-error { margin: 5px 0 0; }
 .login-delivery-hint { margin: -15px 0 27px; color: var(--color-fg-muted); font-size: 11px; }
-.login-notice { margin: 0 0 16px; padding: 12px 14px; border: 1px solid var(--color-border); border-radius: 8px; color: var(--color-fg-muted); font-size: 12px; }
+.login-notice { margin: 0 0 16px; padding: 12px 14px; border: 1px solid transparent; border-radius: 8px; background: var(--color-bg-muted); color: var(--color-fg-muted); font-size: 12px; }
 .login-notice-error { background: var(--color-danger-soft); border-color: var(--color-danger); color: var(--color-danger); }
 .login-switch { display: flex; flex-wrap: wrap; justify-content: center; gap: 7px; margin: 23px 0 0; color: var(--color-fg-muted); font-size: 12px; }
 .login-switch a { color: var(--color-fg); text-decoration: underline; text-decoration-color: var(--color-border); text-underline-offset: 4px; }

@@ -1,0 +1,185 @@
+.admin-table-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  border-radius: 8px;
+  background: transparent;
+}
+
+.admin-table-scroll[data-embedded] {
+  border: 0;
+  border-radius: 0;
+}
+
+.admin-table-scroll:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+}
+
+.admin-data-table {
+  width: 100%;
+  min-width: 680px;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  color: var(--color-fg);
+  font-size: 13px;
+  line-height: 1.5;
+  letter-spacing: 0;
+}
+
+.admin-data-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  height: 40px;
+  padding: 8px 12px;
+  background: var(--color-bg-muted);
+  color: var(--color-fg-muted);
+  text-align: left;
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: none;
+  white-space: normal;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+
+.admin-data-table th:first-child {
+  border-radius: 8px 0 0 8px;
+}
+
+.admin-data-table th:last-child {
+  border-radius: 0 8px 8px 0;
+}
+
+.admin-usage-log-table {
+  min-width: max(100%, 1857px);
+}
+
+.admin-data-table td {
+  height: 60px;
+  padding: 8px 12px;
+  vertical-align: middle;
+  background: var(--color-bg);
+  overflow-wrap: anywhere;
+}
+
+.admin-data-table tbody tr:nth-child(even) td {
+  background: color-mix(in oklch, var(--color-bg-muted) 42%, var(--color-bg));
+}
+
+.admin-data-table td:first-child {
+  border-radius: 8px 0 0 8px;
+}
+
+.admin-data-table td:last-child {
+  border-radius: 0 8px 8px 0;
+}
+
+.admin-data-table tbody tr:hover td,
+.admin-data-table tbody tr:focus-within td {
+  background: var(--color-bg-muted);
+}
+
+.admin-table-cell {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.admin-table-link {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  color: var(--color-fg);
+}
+
+.admin-table-link:hover {
+  color: var(--color-accent);
+}
+
+.admin-table-link:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.admin-data-table tr[data-active='true'] td {
+  background: var(--color-accent-soft);
+}
+
+.admin-data-table [data-align='center'],
+.admin-data-table th.text-center {
+  text-align: center;
+}
+
+.admin-data-table [data-align='right'],
+.admin-data-table th.text-right {
+  text-align: right;
+}
+
+.admin-data-table [data-align='right'] > .admin-table-cell {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.admin-table-order-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-fg-muted);
+}
+
+.admin-data-table [data-column='order'] {
+  padding-inline: 12px 8px;
+}
+
+/* Actions remain reachable while wide tables scroll on smaller screens. */
+.admin-data-table [data-column='actions'] {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+}
+
+.admin-data-table th[data-column='actions'] {
+  z-index: 3;
+}
+
+.admin-table-drag-overlay .admin-data-table td {
+  border-bottom: 0;
+}
+
+.admin-data-table .admin-table-empty {
+  height: 120px;
+  text-align: center;
+  color: var(--color-fg-muted);
+}
+
+@media (pointer: coarse) {
+  .admin-data-table td {
+    height: 68px;
+  }
+
+  .admin-table-order-controls button {
+    min-width: 28px;
+    min-height: 28px;
+  }
+
+  .admin-data-table [data-column='actions'] button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .admin-data-table [data-column='actions'] {
+    padding-inline: 4px;
+  }
+
+  .admin-data-table [data-column='order'] {
+    padding-inline: 8px;
+  }
+}

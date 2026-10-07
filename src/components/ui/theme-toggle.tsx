@@ -26,7 +26,7 @@ export function ThemeToggle({ className }: { className?: string }) {
       role="radiogroup"
       aria-label={t('common:aria.themeGroup')}
       className={cn(
-        'inline-flex items-center gap-0.5 p-0.5 rounded-[10px] bg-[var(--color-bg-muted)] border border-[var(--color-border)]',
+        'inline-flex items-center gap-0.5 p-0.5 rounded-[10px] bg-[var(--color-bg-muted)]',
         className,
       )}
     >

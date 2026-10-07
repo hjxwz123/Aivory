@@ -1,5 +1,6 @@
 import type { HTMLAttributes, ReactNode } from 'react'
 import { cn } from '@/lib/utils'
+import { useQuietSurface } from '@/contexts/quiet-surface'
 
 type Variant = 'neutral' | 'accent' | 'sage' | 'success' | 'warning' | 'danger' | 'info'
 type Size = 'xs' | 'sm'
@@ -28,11 +29,13 @@ interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
 }
 
 export function Badge({ variant = 'neutral', size = 'sm', leadingIcon, className, children, ...rest }: BadgeProps) {
+  const quiet = useQuietSurface()
   return (
     <span
       className={cn(
         'inline-flex items-center gap-1.5 rounded-full border whitespace-nowrap',
         variants[variant],
+        quiet && 'border-0',
         size === 'xs' && 'h-5 px-1.5 text-[10px] font-medium',
         size === 'sm' && 'h-6 px-2 text-xs font-medium',
         className,

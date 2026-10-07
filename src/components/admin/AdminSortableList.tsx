@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 import { ArrowDown, ArrowUp, GripVertical } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
+import { Tooltip } from '@/components/ui/tooltip'
+import { AdminTable, type AdminTableColumn } from './AdminTable'
 import { duration, easing, zIndex } from '@/lib/design-tokens'
 import { cn } from '@/lib/utils'
 
@@ -26,8 +29,11 @@ interface AdminSortableListProps<T extends SortableItem> {
   items: T[]
   onItemsChange: (items: T[]) => void
   onOrderCommit?: (next: T[], prev: T[]) => void
-  renderItem: (item: T, index: number) => ReactNode
-  rowClassName: string
+  renderItem?: (item: T, index: number) => ReactNode
+  rowClassName?: string
+  columns?: AdminTableColumn<T>[]
+  tableLabel?: string
+  emptyMessage?: ReactNode
   dragHandleLabel: string
   moveUpLabel: string
   moveDownLabel: string
@@ -46,16 +52,20 @@ export function AdminSortableList<T extends SortableItem>({
   onOrderCommit,
   renderItem,
   rowClassName,
+  columns,
+  tableLabel,
+  emptyMessage,
   dragHandleLabel,
   moveUpLabel,
   moveDownLabel,
   listClassName,
   mobileDragOnly = false,
 }: AdminSortableListProps<T>) {
+  const { t } = useTranslation('admin')
   const reduceMotion = useReducedMotion()
   const itemsRef = useRef(items)
   const dragStartItems = useRef<T[] | null>(null)
-  const rowRefs = useRef(new Map<string, HTMLLIElement>())
+  const rowRefs = useRef(new Map<string, HTMLElement>())
   const dragRef = useRef<DragState | null>(null)
   const [drag, setDrag] = useState<DragState | null>(null)
 
@@ -100,7 +110,7 @@ export function AdminSortableList<T extends SortableItem>({
     setDrag(next)
   }
 
-  function setRowRef(id: string, node: HTMLLIElement | null) {
+  function setRowRef(id: string, node: HTMLElement | null) {
     if (node) rowRefs.current.set(id, node)
     else rowRefs.current.delete(id)
   }
@@ -204,29 +214,36 @@ export function AdminSortableList<T extends SortableItem>({
     onOrderCommit?.(next, prev)
   }
 
+  function orderControls(item: T, index: number, overlay = false) {
+    return (
+      <OrderControls
+        index={index}
+        count={itemsRef.current.length}
+        overlay={overlay}
+        dragHandleLabel={dragHandleLabel}
+        moveUpLabel={moveUpLabel}
+        moveDownLabel={moveDownLabel}
+        mobileDragOnly={mobileDragOnly}
+        compact={Boolean(columns)}
+        onMoveBy={moveBy}
+        onPointerDown={(e) => startDrag(e, item)}
+        onPointerMove={updateDrag}
+        onPointerUp={(e) => finishDrag(e.pointerId)}
+        onPointerCancel={(e) => finishDrag(e.pointerId)}
+        onLostPointerCapture={(e) => {
+          if (e.pointerType !== 'mouse' || e.buttons === 0) {
+            finishDrag(e.pointerId)
+          }
+        }}
+      />
+    )
+  }
+
   function rowContent(item: T, index: number, overlay = false) {
     return (
       <>
-        <OrderControls
-          index={index}
-          count={itemsRef.current.length}
-          overlay={overlay}
-          dragHandleLabel={dragHandleLabel}
-          moveUpLabel={moveUpLabel}
-          moveDownLabel={moveDownLabel}
-          mobileDragOnly={mobileDragOnly}
-          onMoveBy={moveBy}
-          onPointerDown={(e) => startDrag(e, item)}
-          onPointerMove={updateDrag}
-          onPointerUp={(e) => finishDrag(e.pointerId)}
-          onPointerCancel={(e) => finishDrag(e.pointerId)}
-          onLostPointerCapture={(e) => {
-            if (e.pointerType !== 'mouse' || e.buttons === 0) {
-              finishDrag(e.pointerId)
-            }
-          }}
-        />
-        {renderItem(item, index)}
+        {orderControls(item, index, overlay)}
+        {renderItem?.(item, index)}
       </>
     )
   }
@@ -240,11 +257,60 @@ export function AdminSortableList<T extends SortableItem>({
   const draggedItem = drag ? itemsRef.current.find((item) => item.id === drag.id) : null
   const draggedIndex = draggedItem ? itemsRef.current.findIndex((item) => item.id === draggedItem.id) : -1
 
+  if (columns) {
+    const tableColumns = (overlay = false): AdminTableColumn<T>[] => [
+      { id: 'order', header: t('common.order'), width: 76, render: (item, index) => orderControls(item, index, overlay) },
+      ...columns,
+    ]
+
+    return (
+      <>
+        <AdminTable
+          items={items}
+          columns={tableColumns()}
+          rowKey={(item) => item.id}
+          label={tableLabel}
+          emptyMessage={emptyMessage}
+          className={cn(drag && 'select-none', listClassName)}
+          renderRow={(item, _index, cells) => (
+            <motion.tr
+              key={item.id}
+              ref={(node) => setRowRef(item.id, node)}
+              layout={reduceMotion ? false : 'position'}
+              transition={{ duration: duration.fast / 1000, ease: easing.out }}
+              data-sortable-dragging={drag?.id === item.id ? 'true' : undefined}
+              style={{ opacity: drag?.id === item.id ? 0 : 1 }}
+            >
+              {cells}
+            </motion.tr>
+          )}
+        />
+        {drag && draggedItem ? (
+          <div
+            aria-hidden
+            inert
+            className="admin-table-drag-overlay pointer-events-none fixed overflow-hidden rounded-[8px] border border-[var(--color-border-strong)] bg-[var(--color-surface)]"
+            style={{
+              left: drag.left,
+              top: drag.top,
+              width: drag.width,
+              height: drag.height,
+              transform: `translate3d(${drag.x - drag.startX}px, ${drag.y - drag.startY}px, 0)`,
+              zIndex: zIndex.popover,
+            }}
+          >
+            <AdminTable<T> items={[draggedItem]} columns={tableColumns(true).map((column) => ({ ...column, render: (item) => column.render(item, draggedIndex) }))} rowKey={(item) => item.id} framed={false} hideHeader />
+          </div>
+        ) : null}
+      </>
+    )
+  }
+
   return (
     <>
       <ul
         className={cn(
-          'flex min-w-0 max-w-full flex-col divide-y divide-[var(--color-divider)] overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]',
+          'flex min-w-0 max-w-full flex-col overflow-hidden rounded-[8px] bg-[var(--color-surface)] text-[13px]',
           drag && 'select-none',
           listClassName,
         )}
@@ -258,7 +324,7 @@ export function AdminSortableList<T extends SortableItem>({
               layout={reduceMotion ? false : 'position'}
               transition={{ duration: duration.fast / 1000, ease: easing.out }}
               className={cn(
-                'min-w-0 max-w-full',
+                'min-w-0 max-w-full hover:bg-[var(--color-bg-muted)]',
                 rowClassName,
                 isDragging ? 'opacity-0' : 'opacity-100',
               )}
@@ -303,6 +369,7 @@ interface OrderControlsProps {
   moveUpLabel: string
   moveDownLabel: string
   mobileDragOnly: boolean
+  compact: boolean
   onMoveBy: (index: number, dir: -1 | 1) => void
   onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => void
   onPointerMove: (e: React.PointerEvent<HTMLButtonElement>) => void
@@ -319,6 +386,7 @@ function OrderControls({
   moveUpLabel,
   moveDownLabel,
   mobileDragOnly,
+  compact,
   onMoveBy,
   onPointerDown,
   onPointerMove,
@@ -326,6 +394,44 @@ function OrderControls({
   onPointerCancel,
   onLostPointerCapture,
 }: OrderControlsProps) {
+  if (compact) {
+    const buttonClass = 'inline-flex items-center justify-center rounded text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] disabled:pointer-events-none disabled:opacity-25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]'
+    return (
+      <div className="admin-table-order-controls">
+        {overlay ? <span className="inline-flex size-7 items-center justify-center"><GripVertical size={14} aria-hidden /></span> : (
+          <Tooltip content={dragHandleLabel}>
+            <button
+              type="button"
+              aria-label={dragHandleLabel}
+              className={cn(buttonClass, 'size-7 touch-none cursor-grab active:cursor-grabbing')}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerCancel={onPointerCancel}
+              onLostPointerCapture={onLostPointerCapture}
+            ><GripVertical size={14} aria-hidden /></button>
+          </Tooltip>
+        )}
+        <div className="flex flex-col">
+          {([-1, 1] as const).map((dir) => {
+            const Icon = dir === -1 ? ArrowUp : ArrowDown
+            const label = dir === -1 ? moveUpLabel : moveDownLabel
+            return overlay ? <span key={dir} className="inline-flex size-5 items-center justify-center"><Icon size={12} aria-hidden /></span> : (
+              <Tooltip key={dir} content={label}>
+                <button
+                  type="button"
+                  aria-label={label}
+                  disabled={dir === -1 ? index === 0 : index === count - 1}
+                  onClick={() => onMoveBy(index, dir)}
+                  className={cn(buttonClass, 'size-5')}
+                ><Icon size={12} aria-hidden /></button>
+              </Tooltip>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
   if (overlay) {
     return (
       <>

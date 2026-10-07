@@ -16,14 +16,14 @@ describe('LogoMark', () => {
     expect(html).toContain('focusable="false"')
   })
 
-  it('combines the system mark with the traced artistic wordmark', () => {
+  it('combines the accent mark with a theme-tinted wordmark', () => {
     const html = renderToStaticMarkup(createElement(TracedLogo, { size: 'sm' }))
 
     expect(html).toContain(`d="${AIVORY_MARK_PATH}"`)
-    expect(html).toContain('aivory-mark-lockup')
-    expect(html).toContain('#466b78')
+    expect(html).toContain('stop-color="var(--color-accent)"')
     expect(html).toContain('aivory-wordmark.svg')
-    expect(html).toContain('<img')
+    expect(html).toContain('background-color:var(--color-fg)')
+    expect(html).not.toContain('<img')
     expect(html).not.toContain('>Aivory<')
   })
 

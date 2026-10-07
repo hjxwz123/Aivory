@@ -1,0 +1,35 @@
+/* Product lists and reading tables use fills and spacing to separate rows. */
+@layer components {
+  .quiet-list > li {
+    border-radius: 8px;
+    transition: background-color 150ms;
+  }
+
+  .quiet-list > li:hover,
+  .quiet-list > li:focus-within {
+    background: color-mix(in oklch, var(--color-bg-muted) 60%, transparent);
+  }
+
+  .quiet-table thead {
+    background: var(--color-bg-muted);
+  }
+
+  .quiet-table tbody > tr:nth-child(even) {
+    background: color-mix(in oklch, var(--color-bg-muted) 35%, transparent);
+  }
+
+  .quiet-table tbody > tr:hover {
+    background: color-mix(in oklch, var(--color-bg-muted) 60%, transparent);
+  }
+
+  .quiet-table th,
+  .quiet-table td {
+    border: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .quiet-list > li {
+    transition: none;
+  }
+}

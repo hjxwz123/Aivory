@@ -1,5 +1,6 @@
 import { forwardRef, type InputHTMLAttributes, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
+import { useQuietSurface } from '@/contexts/quiet-surface'
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   leadingIcon?: ReactNode
@@ -19,6 +20,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
   { leadingIcon, trailingSlot, invalid, className, wrapperClassName, ...rest },
   ref,
 ) {
+  const quiet = useQuietSurface()
   return (
     <div
       className={cn(
@@ -26,6 +28,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
         'bg-[var(--color-surface-sunken)] border border-[var(--color-border)]',
         'transition-[border-color,background-color] duration-150',
         'focus-within:border-[var(--color-border-strong)] focus-within:bg-[var(--color-surface)]',
+        quiet && 'border-transparent bg-[var(--color-bg-muted)] focus-within:border-[var(--color-ring)]',
         invalid && 'border-[var(--color-danger)] focus-within:border-[var(--color-danger)]',
         rest.disabled && 'opacity-60 pointer-events-none',
         wrapperClassName,
@@ -43,6 +46,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
           'flex-1 bg-transparent border-none outline-none',
           'text-[0.9375rem] text-[var(--color-fg)] placeholder:text-[var(--color-fg-faint)]',
           'tabular-nums',
+          quiet && 'placeholder:text-[var(--color-fg-muted)]',
           className,
         )}
         {...rest}

@@ -14,7 +14,7 @@ export const AIVORY_MARK_PATH =
 
 /**
  * Aivory mark — abstract triangular vessel suggesting attention focusing
- * to a point. Rendered as SVG with a scalable gradient fill.
+ * to a point. Its accent follows the active light/dark color preset.
  */
 export function LogoMark({ size = 24, className, tone = 'system' }: LogoMarkProps) {
   const instanceId = useId().replace(/:/g, '')
@@ -35,7 +35,10 @@ export function LogoMark({ size = 24, className, tone = 'system' }: LogoMarkProp
         <linearGradient id={gradientId} x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
           <stop offset="0" stopColor={tone === 'lockup' ? '#5a7b72' : 'var(--color-accent)'} />
           {tone === 'lockup' && <stop offset="0.5" stopColor="#466b78" />}
-          <stop offset="1" stopColor={tone === 'lockup' ? '#2a4548' : 'var(--color-secondary)'} />
+          <stop
+            offset="1"
+            stopColor={tone === 'lockup' ? '#2a4548' : 'var(--color-accent)'}
+          />
         </linearGradient>
       </defs>
       <path
@@ -55,7 +58,7 @@ interface TracedLogoProps {
   tone?: 'system' | 'lockup'
 }
 
-export function TracedLogo({ size = 'md', className, tone = 'lockup' }: TracedLogoProps) {
+export function TracedLogo({ size = 'md', className, tone = 'system' }: TracedLogoProps) {
   const wordmarkClassName = cn(
     'aivory-wordmark block shrink-0 select-none',
     size === 'sm' && 'h-4',

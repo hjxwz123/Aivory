@@ -3,6 +3,8 @@ import { X } from 'lucide-react'
 import { forwardRef, useEffect, useLayoutEffect, useRef, type ComponentPropsWithoutRef, type ElementRef, type HTMLAttributes } from 'react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
+import { useQuietSurface } from '@/contexts/quiet-surface'
+import { useButtonDensity } from '@/contexts/button-density'
 
 export const Dialog = DialogPrimitive.Root
 export const DialogTrigger = DialogPrimitive.Trigger
@@ -81,6 +83,7 @@ export const DialogContent = forwardRef<
   ElementRef<typeof DialogPrimitive.Content>,
   DialogContentProps
 >(function DialogContent({ className, size = 'md', showClose = true, closeDisabled = false, captureIgnore = false, children, ...rest }, ref) {
+  const quiet = useQuietSurface()
   const { t } = useTranslation('common')
   const contentRef = useRef<ElementRef<typeof DialogPrimitive.Content>>(null)
   const previousDimensionsRef = useRef<DialogDimensions | null>(null)
@@ -169,6 +172,7 @@ export const DialogContent = forwardRef<
           // the header/footer stay pinned (see DialogBody/DialogHeader/Footer).
           'flex min-w-0 flex-col max-h-[calc(100dvh-2rem)] overflow-x-hidden',
           'rounded-popup bg-[var(--color-surface)] border border-[var(--color-border)]',
+          quiet && 'border-0',
           'shadow-[var(--shadow-xl)]',
           'data-[state=open]:animate-[pop-in_220ms_var(--ease-out)]',
           'data-[state=closed]:animate-[fade-out_140ms_var(--ease-in)]',
@@ -265,12 +269,15 @@ export function DialogBody({ className, ...rest }: HTMLAttributes<HTMLDivElement
 }
 
 export function DialogFooter({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
+  const quiet = useQuietSurface()
+  const compact = useButtonDensity() === 'compact'
   return (
     <div
       className={cn(
         'shrink-0 border-t border-[var(--color-divider)] flex items-center justify-end gap-1.5 px-5 py-2.5 sm:px-6',
-        '[&_button]:h-8 [&_button]:px-3 [&_button]:text-sm [&_a]:h-8 [&_a]:px-3 [&_a]:text-sm',
-        'max-sm:[&_button]:h-10 max-sm:[&_a]:h-10',
+        !compact && '[&_button]:h-8 [&_button]:px-3 [&_button]:text-sm [&_a]:h-8 [&_a]:px-3 [&_a]:text-sm',
+        !compact && 'max-sm:[&_button]:h-10 max-sm:[&_a]:h-10',
+        quiet && 'border-0',
         className,
       )}
       {...rest}

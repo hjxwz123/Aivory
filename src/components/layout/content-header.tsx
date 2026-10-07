@@ -54,7 +54,6 @@ export function ContentHeader({ title, backTo, backLabel, actions, children, flu
               <ArrowLeft size={16} aria-hidden />
               {backLabel ? <span className="max-sm:hidden">{backLabel}</span> : null}
             </Link>
-            <span className="h-5 w-px bg-[var(--color-divider)]" aria-hidden />
           </>
         ) : (
           /* No back link → a hamburger opens the nav drawer (phone/tablet only). */
