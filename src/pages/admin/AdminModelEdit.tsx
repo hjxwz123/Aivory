@@ -208,6 +208,20 @@ function legacyChannelBinding(model: ApiModel, channels: ApiChannel[], role: 're
   }]
 }
 
+function unifyChannelBindings(
+  regular: ApiModelChannelBinding[],
+  fallback: ApiModelChannelBinding[],
+): { regular: ApiModelChannelBinding[]; fallback: ApiModelChannelBinding[] } {
+  const rows = regular.map((binding) => ({ ...binding, role: 'regular' as const }))
+  const used = new Set(rows.map((binding) => binding.channel_id))
+  const lastPriority = rows.reduce((highest, binding) => Math.max(highest, binding.priority), 0)
+  const legacyFallback = [...fallback]
+    .sort((a, b) => a.priority - b.priority || a.channel_id.localeCompare(b.channel_id))
+    .filter((binding) => !used.has(binding.channel_id))
+    .map((binding) => ({ ...binding, role: 'regular' as const, priority: lastPriority + Math.max(1, binding.priority) }))
+  return { regular: [...rows, ...legacyFallback], fallback: [] }
+}
+
 function ChannelRoutingHint({ label, text }: { label: string; text: string }) {
   const [open, setOpen] = useState(false)
   return (
@@ -246,6 +260,7 @@ export default function AdminModelEdit() {
   const [mcpServersLoading, setMCPServersLoading] = useState(true)
   const [mcpServersError, setMCPServersError] = useState(false)
   const [moderationModelConfigured, setModerationModelConfigured] = useState(false)
+  const [globalTTFTSeconds, setGlobalTTFTSeconds] = useState(0)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
@@ -295,6 +310,7 @@ export default function AdminModelEdit() {
         setMCPServersError(mcp.failed)
         const moderationModelId =
           typeof settingsResult.value.moderation_model_id === 'string' ? settingsResult.value.moderation_model_id.trim() : ''
+        setGlobalTTFTSeconds(Math.max(0, Number(settingsResult.value.fallback_ttft_sec) || 0))
         const hasModerationModel = availablePolicyModels(m, c, 'moderation_model_id').some(
           (model) => model.id === moderationModelId,
         )
@@ -310,11 +326,12 @@ export default function AdminModelEdit() {
           if (!cancelled) {
             // Older models may only carry the single-channel fields.
             const hasBindings = (loadedBindings?.regular?.length ?? 0) + (loadedBindings?.fallback?.length ?? 0) > 0
-            setBindings(hasBindings ? {
-              regular: loadedBindings?.regular ?? [], fallback: loadedBindings?.fallback ?? [],
-            } : {
-              regular: legacyChannelBinding(found, c, 'regular'), fallback: legacyChannelBinding(found, c, 'fallback'),
-            })
+            setBindings(hasBindings
+              ? unifyChannelBindings(loadedBindings?.regular ?? [], loadedBindings?.fallback ?? [])
+              : unifyChannelBindings(
+                  legacyChannelBinding(found, c, 'regular'),
+                  legacyChannelBinding(found, c, 'fallback'),
+                ))
           }
         }
       } catch (e) {
@@ -361,22 +378,22 @@ export default function AdminModelEdit() {
     setDraft((d) => (d ? { ...d, ...p } : d))
   }
 
-  function addChannelBinding(role: 'regular' | 'fallback') {
-    const selectedChannel = channelOptions(role)[0]
+  function addChannelBinding() {
+    const selectedChannel = channelOptions()[0]
     if (!selectedChannel) return
-    if (role === 'regular' && bindings.regular.length === 0) updateModelKindForChannel(selectedChannel)
+    if (bindings.regular.length === 0) updateModelKindForChannel(selectedChannel)
     setBindings((current) => ({
       ...current,
-      [role]: [...current[role], { id: `new-${Date.now()}`, model_id: id, channel_id: selectedChannel.id, role, priority: 1, weight: 100, channel_enabled: selectedChannel.enabled, channel_auto_disabled_until: selectedChannel.auto_disabled_until, disabled_until: 0, consecutive_errors: 0, consecutive_timeouts: 0, updated_at: 0 }],
+      regular: [...current.regular, { id: `new-${Date.now()}`, model_id: id, channel_id: selectedChannel.id, role: 'regular', priority: current.regular.length ? Math.max(...current.regular.map((binding) => binding.priority)) + 1 : 1, weight: 100, channel_enabled: selectedChannel.enabled, channel_auto_disabled_until: selectedChannel.auto_disabled_until, disabled_until: 0, consecutive_errors: 0, consecutive_timeouts: 0, updated_at: 0 }],
     }))
   }
 
-  function updateChannelBinding(role: 'regular' | 'fallback', index: number, patchValue: Partial<ApiModelChannelBinding>) {
+  function updateChannelBinding(index: number, patchValue: Partial<ApiModelChannelBinding>) {
     const selectedChannel = channels.find((candidate) => candidate.id === patchValue.channel_id)
-    if (selectedChannel && role === 'regular' && index === 0) updateModelKindForChannel(selectedChannel)
+    if (selectedChannel && index === 0) updateModelKindForChannel(selectedChannel)
     setBindings((current) => ({
       ...current,
-      [role]: current[role].map((binding, itemIndex) => itemIndex === index ? {
+      regular: current.regular.map((binding, itemIndex) => itemIndex === index ? {
         ...binding, ...patchValue,
         ...(selectedChannel ? {
           channel_name: selectedChannel.name, channel_type: selectedChannel.type,
@@ -395,14 +412,14 @@ export default function AdminModelEdit() {
     })
   }
 
-  function removeChannelBinding(role: 'regular' | 'fallback', index: number) {
-    setBindings((current) => ({ ...current, [role]: current[role].filter((_, itemIndex) => itemIndex !== index) }))
+  function removeChannelBinding(index: number) {
+    setBindings((current) => ({ ...current, regular: current.regular.filter((_, itemIndex) => itemIndex !== index) }))
   }
 
   async function recoverChannelBinding(binding: ApiModelChannelBinding) {
     try {
       const next = await adminApi.recoverModelChannel(id, binding.channel_id, binding.role)
-      setBindings({ regular: next.regular ?? [], fallback: next.fallback ?? [] })
+      setBindings(unifyChannelBindings(next.regular ?? [], next.fallback ?? []))
       toast.success(t('admin:models.channels.recovered', { defaultValue: '模型渠道已恢复' }))
     } catch (error) {
       toast.error(error instanceof ApiError ? error.message : t('admin:common.failed'))
@@ -478,16 +495,15 @@ export default function AdminModelEdit() {
         )
       : undefined
 
-  function channelOptions(role: 'regular' | 'fallback', index?: number) {
-    const otherBindings = [...bindings.regular, ...bindings.fallback].filter((binding) => binding !== bindings[role][index ?? -1])
+  function channelOptions(index?: number) {
+    const otherBindings = bindings.regular.filter((_, itemIndex) => itemIndex !== index)
     const anchor = channels.find((candidate) => candidate.id === otherBindings[0]?.channel_id)
-    const used = new Set(bindings[role].filter((_, itemIndex) => itemIndex !== index).map((binding) => binding.channel_id))
+    const used = new Set(otherBindings.map((binding) => binding.channel_id))
     const options = capabilityChannels.filter((candidate) =>
       !used.has(candidate.id)
-      && (role === 'regular' || candidate.id !== channel?.id)
       && (!anchor || (candidate.type === anchor.type && (candidate.api_format ?? '') === (anchor.api_format ?? ''))),
     )
-    const selectedChannel = channels.find((candidate) => candidate.id === bindings[role][index ?? -1]?.channel_id)
+    const selectedChannel = channels.find((candidate) => candidate.id === bindings.regular[index ?? -1]?.channel_id)
     // Keep a saved selection readable while capability discovery is pending
     // or an older model has not yet been registered in the channel's list.
     if (selectedChannel && !options.some((candidate) => candidate.id === selectedChannel.id)) {
@@ -635,6 +651,8 @@ export default function AdminModelEdit() {
         official_tools_draft: _omitOfficialToolDraft,
         official_tools_dirty: officialToolsDirty,
         official_tools: _omitOfficialTools,
+        fallback_ttft_sec: _omitLegacyTTFT,
+        auto_disable_timeouts: autoDisableTimeouts,
         builtin_tools: builtinToolsConfig,
         mcp_server_ids: mcpServerIDsConfig,
         channel_bindings: _omitChannelBindings,
@@ -646,6 +664,7 @@ export default function AdminModelEdit() {
       void _omitExtraParamsValue
       void _omitOfficialToolDraft
       void _omitOfficialTools
+      void _omitLegacyTTFT
       void _omitChannelBindings
       const payload: Partial<ApiModel> = {
         ...rest,
@@ -654,8 +673,9 @@ export default function AdminModelEdit() {
         // clear an earlier chat-model value instead of merely omitting the key.
         extra_params: parsedExtraParams?.valid ? parsedExtraParams.value : {},
       }
+      if (globalTTFTSeconds > 0) payload.auto_disable_timeouts = autoDisableTimeouts ?? 0
       payload.channel_id = bindings.regular[0].channel_id
-      payload.fallback_channel_id = bindings.fallback[0]?.channel_id ?? ''
+      payload.fallback_channel_id = ''
       if (draft.kind === 'chat') {
         payload.builtin_tools = builtinToolsConfig ?? null
         payload.mcp_server_ids = mcpServerIDsConfig ?? null
@@ -664,14 +684,14 @@ export default function AdminModelEdit() {
       const updated = await adminApi.updateModel(id, payload)
       const savedBindings = await adminApi.replaceModelChannels(id, {
         regular: bindings.regular.map(({ channel_id, priority, weight }) => ({ channel_id, priority, weight })),
-        fallback: bindings.fallback.map(({ channel_id, priority }) => ({ channel_id, priority, weight: 100 })),
+        fallback: [],
       })
       if (draft.kind === 'chat') {
         await adminApi.setModelSkills(id, skillIds ?? [])
       }
       // PATCH may not echo back skills — preserve the just-saved selection so the
       // chips don't flicker empty after save.
-      setBindings({ regular: savedBindings.regular ?? [], fallback: savedBindings.fallback ?? [] })
+      setBindings(unifyChannelBindings(savedBindings.regular ?? [], savedBindings.fallback ?? []))
       setDraft({ ...modelToDraft(updated), channel_id: bindings.regular[0]?.channel_id ?? updated.channel_id, skills: skillIds ?? [] })
       toast.success(t('admin:models.updated'))
     } catch (e) {
@@ -849,19 +869,19 @@ export default function AdminModelEdit() {
             bodyClassName="divide-y-0"
           >
             <SettingsBlock>
-              {(['regular', 'fallback'] as const).map((role) => {
+              {(['regular'] as const).map((role) => {
                 const rows = bindings[role]
                 const showRouting = rows.length > 1
                 return (
                   <div key={role} className="mb-5 last:mb-0">
                     <div className="mb-2 flex items-center justify-between gap-3">
                       <div className="flex min-w-0 items-center gap-1 text-sm font-medium">
-                        {t(`admin:models.channels.${role}`)}
+                        {t('admin:models.channels.queue')}
                         {showRouting ? (
                           <ChannelRoutingHint label={t('admin:models.channels.cacheHintLabel')} text={t('admin:models.channels.cacheHint')} />
                         ) : null}
                       </div>
-                      <Button type="button" variant="secondary" size="sm" onClick={() => addChannelBinding(role)} disabled={channelOptions(role).length === 0}>
+                      <Button type="button" variant="secondary" size="sm" onClick={addChannelBinding} disabled={channelOptions().length === 0}>
                         {t('admin:models.channels.add')}
                       </Button>
                     </div>
@@ -876,16 +896,14 @@ export default function AdminModelEdit() {
                           <div key={binding.id} className={cn(
                             'grid items-end gap-2 rounded-[8px] bg-[var(--color-bg-muted)] p-2.5 max-sm:grid-cols-[minmax(0,1fr)_32px]',
                             showRouting
-                              ? role === 'regular'
-                                ? 'grid-cols-[minmax(0,1fr)_90px_90px_auto]'
-                                : 'grid-cols-[minmax(0,1fr)_90px_auto]'
+                              ? 'grid-cols-[minmax(0,1fr)_90px_90px_auto]'
                               : 'grid-cols-[minmax(0,1fr)_auto]',
                           )}>
                             <Field label={t('admin:models.channels.channel')} htmlFor={`binding-${role}-${index}`} className="min-w-0">
-                              <Select value={binding.channel_id} onValueChange={(value) => updateChannelBinding(role, index, { channel_id: value })}>
+                              <Select value={binding.channel_id} onValueChange={(value) => updateChannelBinding(index, { channel_id: value })}>
                                 <SelectTrigger id={`binding-${role}-${index}`}><SelectValue /></SelectTrigger>
                                 <SelectContent>
-                                  {channelOptions(role, index).map((candidate) => <SelectItem key={candidate.id} value={candidate.id}>{candidate.name} ({candidate.type})</SelectItem>)}
+                                  {channelOptions(index).map((candidate) => <SelectItem key={candidate.id} value={candidate.id}>{candidate.name} ({candidate.type})</SelectItem>)}
                                 </SelectContent>
                               </Select>
                             </Field>
@@ -895,16 +913,16 @@ export default function AdminModelEdit() {
                                   <label htmlFor={`priority-${role}-${index}`} className="text-sm font-medium leading-tight">{t('admin:models.channels.priority')}</label>
                                   <ChannelRoutingHint label={t('admin:models.channels.priorityHintLabel')} text={t('admin:models.channels.priorityHint')} />
                                 </div>
-                                <Input id={`priority-${role}-${index}`} type="number" min="1" step="1" value={String(binding.priority)} onChange={(event) => updateChannelBinding(role, index, { priority: Math.max(1, Number(event.target.value) || 1) })} />
+                                <Input id={`priority-${role}-${index}`} type="number" min="1" step="1" value={String(binding.priority)} onChange={(event) => updateChannelBinding(index, { priority: Math.max(1, Number(event.target.value) || 1) })} />
                               </Field>
                             ) : null}
-                            {showRouting && role === 'regular' ? (
+                            {showRouting ? (
                               <Field label={t('admin:models.channels.weight')} htmlFor={`weight-${role}-${index}`} className="col-span-2 min-w-0 sm:col-span-1">
-                                <Input id={`weight-${role}-${index}`} type="number" min="1" step="1" value={String(binding.weight)} onChange={(event) => updateChannelBinding(role, index, { weight: Math.max(1, Number(event.target.value) || 1) })} />
+                                <Input id={`weight-${role}-${index}`} type="number" min="1" step="1" value={String(binding.weight)} onChange={(event) => updateChannelBinding(index, { weight: Math.max(1, Number(event.target.value) || 1) })} />
                               </Field>
                             ) : null}
                             <div className="col-start-2 row-start-1 flex h-10 items-center sm:col-start-auto sm:row-start-auto">
-                              <Button type="button" variant="ghost" size="icon-sm" aria-label={t('admin:models.channels.remove')} title={t('admin:models.channels.remove')} onClick={() => removeChannelBinding(role, index)}><Trash2 size={14} aria-hidden /></Button>
+                              <Button type="button" variant="ghost" size="icon-sm" aria-label={t('admin:models.channels.remove')} title={t('admin:models.channels.remove')} onClick={() => removeChannelBinding(index)}><Trash2 size={14} aria-hidden /></Button>
                             </div>
                             {!binding.channel_enabled || channelAutoDisabled || modelAutoDisabled ? (
                               <div className="col-span-full flex flex-wrap items-center gap-1 text-[11px] text-[var(--color-fg-muted)]">
@@ -951,17 +969,14 @@ export default function AdminModelEdit() {
                 >
                   <SettingsBlock>
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                      <Field label={t('admin:models.policy.ttft')} htmlFor="m-ttft" hint={t('admin:models.policy.ttftHint')}>
-                        <Input id="m-ttft" type="number" min="0" step="1" value={String(draft.fallback_ttft_sec ?? 0)} onChange={(event) => patch({ fallback_ttft_sec: Math.max(0, Number(event.target.value) || 0) })} />
-                      </Field>
                       <Field label={t('admin:models.policy.minutes')} htmlFor="m-disable-minutes">
                         <Input id="m-disable-minutes" type="number" min="0" step="1" value={String(draft.auto_disable_minutes ?? 0)} onChange={(event) => patch({ auto_disable_minutes: Math.max(0, Number(event.target.value) || 0) })} />
                       </Field>
                       <Field label={t('admin:models.policy.errors')} htmlFor="m-disable-errors">
                         <Input id="m-disable-errors" type="number" min="0" step="1" value={String(draft.auto_disable_errors ?? 0)} onChange={(event) => patch({ auto_disable_errors: Math.max(0, Number(event.target.value) || 0) })} />
                       </Field>
-                      <Field label={t('admin:models.policy.timeouts')} htmlFor="m-disable-timeouts" hint={draft.fallback_ttft_sec ? undefined : t('admin:models.policy.ttftRequired')}>
-                        <Input id="m-disable-timeouts" type="number" min="0" step="1" disabled={!draft.fallback_ttft_sec} value={String(draft.auto_disable_timeouts ?? 0)} onChange={(event) => patch({ auto_disable_timeouts: Math.max(0, Number(event.target.value) || 0) })} />
+                      <Field label={t('admin:models.policy.timeouts')} htmlFor="m-disable-timeouts" hint={globalTTFTSeconds > 0 ? undefined : t('admin:models.policy.ttftRequired')}>
+                        <Input id="m-disable-timeouts" type="number" min="0" step="1" disabled={globalTTFTSeconds <= 0} value={String(draft.auto_disable_timeouts ?? 0)} onChange={(event) => patch({ auto_disable_timeouts: Math.max(0, Number(event.target.value) || 0) })} />
                       </Field>
                       {draft.kind === 'image' && (
                         <Field

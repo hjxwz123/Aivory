@@ -14,7 +14,7 @@ const params = new URLSearchParams(location.search)
 const view = params.get('view') ?? 'users'
 const pages = import.meta.glob('../../src/pages/admin/Admin*.tsx')
 const pageName = {
-  users: 'AdminUsers', channels: 'AdminChannels', models: 'AdminModels', 'model-edit': 'AdminModelEdit', prompts: 'AdminPrompts',
+  users: 'AdminUsers', channels: 'AdminChannels', models: 'AdminModels', 'model-edit': 'AdminModelEdit', 'model-policy': 'AdminModelPolicy', prompts: 'AdminPrompts',
   skills: 'AdminSkills', oauth: 'AdminOAuth', tags: 'AdminModelTags', groups: 'AdminUserGroups',
   'payment-channels': 'AdminPaymentChannels', 'payment-methods': 'AdminPaymentMethods',
   credits: 'AdminCreditSettings', redeem: 'AdminRedeemCodes', mcp: 'AdminMCP',

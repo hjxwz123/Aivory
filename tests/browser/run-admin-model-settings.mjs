@@ -45,7 +45,7 @@ const fixtures = {
   '/admin/skills': [{ id: 's1', name: 'Research', description: 'Research workflow', enabled: true }],
   '/admin/tools/builtins': [{ name: 'aivory_web_search', label: 'Web search', enabled: true }],
   '/admin/mcp': [],
-  '/admin/settings': {},
+  '/admin/settings': { fallback_ttft_sec: 0 },
   '/admin/user-groups': [{ id: 'g1', name: 'Team' }],
 }
 const errors = []
@@ -105,6 +105,10 @@ try {
       body = { ...channels.find((channel) => channel.id === path.split('/').at(-1)), ...JSON.parse(request.postData()) }
     }
     if (request.method() !== 'GET') mutations.push({ path, method: request.method(), body: JSON.parse(request.postData() || '{}') })
+    if (path === '/admin/settings' && request.method() === 'PATCH') {
+      Object.assign(fixtures[path], JSON.parse(request.postData() || '{}'))
+      body = fixtures[path]
+    }
     if (body === undefined) {
       errors.push(`Missing fixture: ${request.method()} ${path}`)
       body = []
@@ -112,7 +116,7 @@ try {
     await request.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
   })
 
-  const visible = (selector) => page.$eval(selector, (element) => element.checkVisibility())
+  const visible = (selector) => page.$eval(selector, (element) => element.checkVisibility()).catch(() => false)
   const tabCount = () => page.$$eval('[role="tabpanel"]', (panels) => panels.filter((panel) => panel.checkVisibility()).length)
   const selectTab = async (label) => {
     const tab = await page.evaluateHandle((text) => [...document.querySelectorAll('[role="tab"]')].find((item) => item.textContent.trim() === text), label)
@@ -139,14 +143,14 @@ try {
     })
     await page.keyboard.type(value)
   }
-  const addBinding = async (role, label) => {
-    await page.evaluate((text, group) => {
+  const addBinding = async (_role, label) => {
+    await page.evaluate((text) => {
       const section = document.querySelector('#binding-regular-0')?.closest('section')
         ?? [...document.querySelectorAll('section')].find((element) => element.querySelector('button')?.textContent.trim() === text)
       const buttons = [...section.querySelectorAll('button')].filter((button) => button.textContent.trim() === text)
-      buttons[group === 'regular' ? 0 : 1].click()
-    }, label, role)
-    await page.waitForSelector(`#binding-${role}-0`, { visible: true })
+      buttons[0].click()
+    }, label)
+    await page.waitForSelector('#binding-regular-0', { visible: true })
   }
   const assertHint = async (selector, text) => {
     await page.$eval(selector, (element) => { element.scrollIntoView({ block: 'center' }); element.focus() })
@@ -175,10 +179,11 @@ try {
       })
       savedBindings.set('m-chat', {
         regular: (variant === 'multiple' ? ['c1', 'c3'] : ['c1']).map((id, index) => makeBinding('regular', id, index)),
-        fallback: (variant === 'multiple' ? ['c3', 'c4'] : ['c4']).map((id, index) => makeBinding('fallback', id, index)),
+        fallback: (variant === 'disabled' ? ['c4'] : variant === 'multiple' ? ['c3', 'c4'] : []).map((id, index) => makeBinding('fallback', id, index)),
       })
       await page.goto(`${base}tests/browser/admin-tables-harness.html?view=model-edit&model=m-chat&theme=${width === 390 ? 'dark' : 'light'}&lang=zh`, { waitUntil: 'networkidle0' })
-      await page.waitForSelector('#binding-fallback-0', { visible: true })
+      await page.waitForSelector('#binding-regular-0', { visible: true })
+      assert.equal(await page.$('#binding-fallback-0'), null, 'The legacy fallback group is still rendered')
       const alignment = await page.$$eval('[id^="binding-"]', (selectors, label) => selectors.map((selector) => {
         const row = selector.closest('.grid')
         const remove = [...row.querySelectorAll('button')].find((button) => button.getAttribute('aria-label') === label)
@@ -202,7 +207,7 @@ try {
     }
   }
   savedBindings.delete('m-chat')
-  console.log('Channel remove-button alignment passed: regular/fallback, single/multiple/disabled, desktop/mobile')
+  console.log('Channel remove-button alignment passed: unified priority queue, single/multiple/disabled, desktop/mobile')
 
   for (const locale of process.env.ADMIN_SETTINGS_LOCALES?.split(',').filter(Boolean) ?? ['zh', 'zh-Hant', 'en', 'ja', 'fr']) {
     const modelLocale = JSON.parse(readFileSync(`src/i18n/locales/${locale}/admin.json`, 'utf8')).models
@@ -219,15 +224,16 @@ try {
       await page.waitForSelector('#priority-regular-0', { visible: true })
       await addBinding('fallback', modelLocale.channels.add)
       await addBinding('fallback', modelLocale.channels.add)
-      await page.waitForSelector('#priority-fallback-0', { visible: true })
-      assert.equal(await page.$('#weight-fallback-0'), null)
+      await page.waitForSelector('#priority-regular-1', { visible: true })
+      assert.equal(await page.$('#binding-fallback-0'), null)
+      assert.ok(await page.$('#weight-regular-0'))
       assert.ok(!(await page.evaluate(() => document.body.innerText)).includes(modelLocale.channels.priorityHint), 'Routing guidance is displayed as a permanent paragraph')
       await assertHint(`button[aria-label="${modelLocale.channels.priorityHintLabel}"]`, modelLocale.channels.priorityHint)
       await assertHint(`button[aria-label="${modelLocale.channels.cacheHintLabel}"]`, modelLocale.channels.cacheHint)
       await page.click('details > summary')
       await page.waitForSelector('[role="tab"]', { visible: true })
       assert.equal(await tabCount(), 1)
-      assert.equal(await visible('#m-ttft'), true)
+      assert.equal(await visible('#m-ttft'), false)
       assert.equal(await visible('#m-extra-params'), false)
       assert.equal(await visible('#m-pi'), false)
       const actual = await page.$$eval('[role="tab"]', (tabs) => tabs.map((tab) => tab.textContent.trim()))
@@ -246,6 +252,15 @@ try {
   }
 
   await page.setViewport({ width: 1440, height: 960 })
+  await page.goto(`${base}tests/browser/admin-tables-harness.html?view=model-policy&theme=light&lang=zh`, { waitUntil: 'networkidle0' })
+  await page.waitForSelector('#fallback-ttft-sec', { visible: true })
+  await fill('#fallback-ttft-sec', '12')
+  await page.evaluate(() => [...document.querySelectorAll('button')].find((button) => button.textContent.trim() === '保存').click())
+  await page.waitForFunction(() => document.querySelector('#fallback-ttft-sec')?.value === '12')
+  assert.equal(fixtures['/admin/settings'].fallback_ttft_sec, 12, 'The global TTFT setting was not saved from Model policy')
+  console.log('Global first-byte timeout is configured in Model policy')
+
+  await page.setViewport({ width: 1440, height: 960 })
   legacyBindingsModel = 'm-embedding'
   await page.goto(`${base}tests/browser/admin-tables-harness.html?view=model-edit&model=m-embedding&theme=light&lang=zh`, { waitUntil: 'networkidle0' })
   assert.ok((await page.$eval('#binding-regular-0', (element) => element.textContent)).includes('Production OpenAI'), 'A legacy model lost its existing channel')
@@ -258,7 +273,9 @@ try {
   await addBinding('regular', '添加渠道')
   assert.ok((await page.$eval('#binding-regular-0', (element) => element.textContent)).includes('Secondary OpenAI'))
   await addBinding('regular', '添加渠道')
-  await fill('#priority-regular-0', '2')
+  await page.waitForSelector('#priority-regular-1', { visible: true })
+  await fill('#priority-regular-0', '1')
+  await fill('#priority-regular-1', '1')
   await fill('#weight-regular-0', '30')
   await fill('#weight-regular-1', '70')
   const beforeRoutingSave = mutations.length
@@ -267,7 +284,7 @@ try {
   const routingChanges = mutations.slice(beforeRoutingSave)
   assert.equal(routingChanges.find((item) => item.method === 'PATCH').body.channel_id, 'c3', 'The legacy field did not follow the selected regular channel')
   assert.deepEqual(routingChanges.find((item) => item.method === 'PUT').body.regular, [
-    { channel_id: 'c3', priority: 2, weight: 30 }, { channel_id: 'c4', priority: 1, weight: 70 },
+    { channel_id: 'c3', priority: 1, weight: 30 }, { channel_id: 'c4', priority: 1, weight: 70 },
   ])
   await fill('#m-req', 'test-decision')
   await page.waitForFunction(() => [...document.querySelectorAll('button')].some((button) => button.textContent.trim() === '添加渠道' && !button.disabled))

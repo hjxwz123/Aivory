@@ -4,6 +4,7 @@ import { TriangleAlert } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
 import type { ApiChannel, ApiModel } from '@/api/types'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Field } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/hooks/use-toast'
@@ -29,6 +30,7 @@ const OWNED_KEYS = [
   'tool_mode_default',
   'verify_model_id',
   'fallback_model_id',
+  'fallback_ttft_sec',
   'memory_dedup_model_id',
   'memory_adjudicate_model_id',
   'moderation_model_id',
@@ -333,6 +335,22 @@ export default function AdminModelPolicy() {
               </Field>
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <Field
+                  label={t('admin:settings.fields.fallbackTtft')}
+                  htmlFor="fallback-ttft-sec"
+                  hint={t('admin:settings.fields.fallbackTtftHint')}
+                >
+                  <Input
+                    id="fallback-ttft-sec"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={String(Math.max(0, Number(draft.fallback_ttft_sec) || 0))}
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, fallback_ttft_sec: Math.max(0, Number(event.target.value) || 0) }))
+                    }
+                  />
+                </Field>
                 <Field
                   label={t('admin:settings.fields.fallbackModel')}
                   htmlFor="fallback-model"
