@@ -4,7 +4,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"aivory/server/internal/store"
 )
@@ -24,15 +26,25 @@ type adminOverviewHealth struct {
 }
 
 type adminOverviewResponse struct {
-	ChannelCount        int                 `json:"channel_count"`
-	EnabledChannelCount int                 `json:"enabled_channel_count"`
-	ModelCount          int                 `json:"model_count"`
-	GroupCount          int                 `json:"group_count"`
-	PaymentChannelCount int                 `json:"payment_channel_count"`
-	PaymentMethodCount  int                 `json:"payment_method_count"`
-	UserCount           int                 `json:"user_count"`
-	Health              adminOverviewHealth `json:"health"`
-	Today               *store.UsageTotals  `json:"today"`
+	ChannelCount        int                  `json:"channel_count"`
+	EnabledChannelCount int                  `json:"enabled_channel_count"`
+	ModelCount          int                  `json:"model_count"`
+	GroupCount          int                  `json:"group_count"`
+	PaymentChannelCount int                  `json:"payment_channel_count"`
+	PaymentMethodCount  int                  `json:"payment_method_count"`
+	UserCount           int                  `json:"user_count"`
+	Health              adminOverviewHealth  `json:"health"`
+	Today               *store.UsageTotals   `json:"today"`
+	Trends              *adminOverviewTrends `json:"trends"`
+}
+
+type adminOverviewTrends struct {
+	Days          int                        `json:"days"`
+	PeriodStart   int64                      `json:"period_start"`
+	PeriodEnd     int64                      `json:"period_end"`
+	Totals        store.UsageTotals          `json:"totals"`
+	Registrations int                        `json:"registrations"`
+	Points        []store.OverviewTrendPoint `json:"points"`
 }
 
 func overviewSettingString(db *sql.DB, key string) string {
@@ -58,8 +70,7 @@ func overviewSettingBool(db *sql.DB, key string) bool {
 
 // adminOverviewHandler returns exactly the summary needed by the overview.
 // Keeping the aggregation server-side avoids seven authenticated Cloudflare
-// round trips and avoids running the full analytics dashboard query just to
-// display today's headline totals.
+// round trips and avoids running the full analytics dashboard's breakdown queries.
 func adminOverviewHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	channels, err := store.ListChannels(ctx, d.DB)
@@ -149,6 +160,31 @@ func adminOverviewHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			response.Today = &totals
 		} else if d.Logger != nil {
 			d.Logger.Printf("admin overview totals: %v", totalsErr)
+		}
+		days := 30
+		if requested, err := strconv.Atoi(r.URL.Query().Get("days")); err == nil && (requested == 7 || requested == 30 || requested == 90) {
+			days = requested
+		}
+		now := time.Now().UTC()
+		start := now.Truncate(24*time.Hour).AddDate(0, 0, -(days - 1)).Unix()
+		end := now.Unix() + 1
+		points, trendErr := store.AdminOverviewTrendBetween(ctx, d.DB, start, end)
+		if trendErr == nil {
+			var totals store.UsageTotals
+			totals, trendErr = store.AdminUsageTotalsBetween(ctx, d.DB, start, end)
+			if trendErr == nil {
+				registrations := 0
+				for _, point := range points {
+					registrations += point.Registrations
+				}
+				response.Trends = &adminOverviewTrends{
+					Days: days, PeriodStart: start, PeriodEnd: end,
+					Totals: totals, Registrations: registrations, Points: points,
+				}
+			}
+		}
+		if trendErr != nil && d.Logger != nil {
+			d.Logger.Printf("admin overview trends: %v", trendErr)
 		}
 	}
 	writeJSON(w, http.StatusOK, response)

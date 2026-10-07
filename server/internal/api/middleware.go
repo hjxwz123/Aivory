@@ -20,6 +20,7 @@ import (
 
 	"aivory/server/internal/envcfg"
 	"aivory/server/internal/store"
+	"github.com/google/uuid"
 )
 
 // Env-overridable defaults (§ config-reference); each falls back to the
@@ -126,6 +127,12 @@ func requireAuth(d Deps, h handler) http.HandlerFunc {
 		user.Role = state.Role
 		user.Status = state.Status
 		user.TokenVer = state.TokenVer
+		setAuditActor(r, user)
+		if strings.HasPrefix(auditRoute(r), "/api/workspaces") && store.AuditContextFrom(r.Context()) == nil {
+			requestID := uuid.NewString()
+			w.Header().Set("X-Request-ID", requestID)
+			r = r.WithContext(store.WithAuditContext(r.Context(), &store.AuditContext{RequestID: requestID, ActorID: user.ID, ActorName: auditText(user.Name, 160), ActorRole: user.Role, Source: "workspace", ClientIP: auditText(clientIP(r), 64), UserAgent: auditText(r.UserAgent(), 512), Method: r.Method, Route: auditRoute(r)}))
+		}
 		if !user.HasPassword && !initialPasswordSetupRequest(r) {
 			policy, policyErr := loadAuthPolicy(d)
 			if policyErr != nil {
@@ -157,14 +164,16 @@ func requireAuth(d Deps, h handler) http.HandlerFunc {
 
 // requireAdmin wraps a handler with both auth and admin-role enforcement.
 func requireAdmin(d Deps, h handler) http.HandlerFunc {
-	return requireAuth(d, func(d Deps, w http.ResponseWriter, r *http.Request) {
+	authorized := requireAuth(d, func(d Deps, w http.ResponseWriter, r *http.Request) {
 		u := authUser(r)
 		if u.Role != "admin" {
 			writeError(w, http.StatusForbidden, errAdminOnly)
 			return
 		}
+		prepareAdminAudit(d, r)
 		h(d, w, r)
 	})
+	return func(w http.ResponseWriter, r *http.Request) { auditHTTPRequest(d, w, r, authorized) }
 }
 
 // csrfOK guards cookie-authenticated, state-changing requests (§A3). Returns

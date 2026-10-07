@@ -83,7 +83,7 @@ func (w *providerTTFTWatchdog) markFirstByte() {
 }
 
 func (w *providerTTFTWatchdog) arm() {
-	if w == nil || w.timeout <= 0 || w.cancel == nil || w.stalled == nil {
+	if w == nil || w.timeout <= 0 || w.stalled == nil {
 		return
 	}
 	w.armOnce.Do(func() {
@@ -95,7 +95,12 @@ func (w *providerTTFTWatchdog) arm() {
 			case <-w.done:
 			case <-timer.C:
 				w.stalled.Store(true)
-				w.cancel()
+				// A nil cancel function enables observability-only mode: the
+				// response keeps running while the late first byte is recorded for
+				// the channel auto-disable policy.
+				if w.cancel != nil {
+					w.cancel()
+				}
 			}
 		}()
 	})

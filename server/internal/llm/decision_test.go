@@ -126,16 +126,23 @@ func TestDecisionDatabaseConfiguration(t *testing.T) {
 	db := decisionTestDB(t)
 	calls := 0
 	key := "secret"
+	header := "first"
 	served := "jev-1.13.0"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		if r.Header.Get("Authorization") != "Bearer "+key {
 			t.Error("database API key not used")
 		}
+		if r.Header.Get("A") != header {
+			t.Error("database custom header not used")
+		}
 		fmt.Fprintf(w, `{"model":%q,"answers":{"check":{"type":"noul","noul":1}},"usage":{"input_tokens":1000000,"output_tokens":1}}`, served)
 	}))
 	defer srv.Close()
 	seedDecisionModel(t, db, srv.URL, served)
+	if _, err := db.Exec(`UPDATE channels SET headers='{"A":"first"}' WHERE id='decision-channel'`); err != nil {
+		t.Fatal(err)
+	}
 	task := NewTaskLLM(db, nil, nil)
 	req := typesafe.Request{Model: "ignored-request-override", State: "text", Questions: map[string]typesafe.Question{"check": typesafe.NewNoul("q", nil)}}
 	run := func() error {
@@ -146,7 +153,8 @@ func TestDecisionDatabaseConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 	key, served = "rotated-key", "jev-2.0.0"
-	if _, err := db.Exec(`UPDATE channels SET api_key=? WHERE id='decision-channel'`, key); err != nil {
+	header = "updated"
+	if _, err := db.Exec(`UPDATE channels SET api_key=?,headers='{"A":"updated"}' WHERE id='decision-channel'`, key); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`UPDATE models SET request_id=?,price_input=0.25 WHERE id='decision-model'`, served); err != nil {

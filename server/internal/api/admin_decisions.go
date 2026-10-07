@@ -57,8 +57,18 @@ func normalizeDecisionPolicySetting(ctx context.Context, d Deps, raw json.RawMes
 	if m.Kind != "decision" {
 		return normalizeAvailableChatModelSetting(ctx, d, raw)
 	}
-	c, err := store.GetChannel(ctx, d.DB, m.ChannelID)
-	if err != nil || !c.Enabled || c.Type != "typesafe" || strings.TrimSpace(c.APIKey) == "" {
+	channels, err := regularModelPolicyChannels(ctx, d, m)
+	if err != nil {
+		return nil, err
+	}
+	available := false
+	for _, channel := range channels {
+		if channel.Enabled && channel.Type == "typesafe" && strings.TrimSpace(channel.APIKey) != "" {
+			available = true
+			break
+		}
+	}
+	if !available {
 		return nil, errModelPolicyModelUnavailable
 	}
 	return json.Marshal(id)

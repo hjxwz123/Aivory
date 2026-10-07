@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"aivory/server/internal/requestheaders"
 )
 
 // Record contains metadata only: no state, question text, answers, credentials
@@ -39,6 +41,7 @@ type Recorder func(context.Context, Record) error
 
 type Config struct {
 	APIKey  string
+	Headers requestheaders.Headers
 	BaseURL string
 	Model   string
 	Timeout time.Duration
@@ -72,6 +75,11 @@ type Client struct {
 }
 
 func New(cfg Config) (*Client, error) {
+	headers, err := requestheaders.Normalize(cfg.Headers)
+	if err != nil {
+		return nil, failure(ErrConfiguration, "invalid custom request headers")
+	}
+	cfg.Headers = headers
 	cfg.APIKey = strings.TrimSpace(cfg.APIKey)
 	if cfg.APIKey == "" {
 		return nil, failure(ErrDisabled, "API key is not configured")
@@ -195,6 +203,7 @@ func (c *Client) Evaluate(ctx context.Context, req Request, opts Options) (resul
 		hreq.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
 		hreq.Header.Set("Content-Type", "application/json")
 		hreq.Header.Set("Accept", "application/json")
+		requestheaders.Apply(hreq, c.cfg.Headers)
 		record.Attempts++
 		hresp, err := c.http.Do(hreq)
 		if err != nil {

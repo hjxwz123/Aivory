@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"aivory/server/internal/envcfg"
+	"aivory/server/internal/store"
 
 	"github.com/google/uuid"
 )
@@ -95,7 +96,10 @@ func startBackupExportAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	go runBackupExportJob(d, job)
+	if s := auditState(r); s != nil {
+		s.metadata["job_id"] = job.ID
+	}
+	go runBackupExportJob(d, job, auditJobOrigin(r))
 	writeJSON(w, http.StatusAccepted, buildBackupExportState(d))
 }
 
@@ -236,7 +240,21 @@ func cloneBackupJob(job *backupExportJob) *backupExportJob {
 	return &cp
 }
 
-func runBackupExportJob(d Deps, job *backupExportJob) {
+func runBackupExportJob(d Deps, job *backupExportJob, origins ...*store.AuditContext) {
+	started := time.Now()
+	defer func() {
+		if len(origins) == 0 {
+			return
+		}
+		adminBackupExports.mu.Lock()
+		final := cloneBackupJob(adminBackupExports.jobs[job.ID])
+		adminBackupExports.mu.Unlock()
+		result, reason := "failure", "job_failed"
+		if final != nil && final.Status == "completed" {
+			result, reason = "success", ""
+		}
+		recordAuditJobResult(d, origins[0], "admin.system.backup_export_completed", job.ID, result, reason, started, nil)
+	}()
 	ctx, cancel := context.WithTimeout(context.Background(), backupExportJobRuntime)
 	defer cancel()
 

@@ -42,6 +42,9 @@ func TestDiscoverSavedChannelModelsUsesStoredCredentialsWithoutPersistingModels(
 		if got := r.Header.Get("Authorization"); got != "Bearer stored-secret" {
 			t.Errorf("authorization = %q", got)
 		}
+		if r.Header.Get("A") != "a" {
+			t.Errorf("custom header = %q", r.Header.Get("A"))
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"data": []map[string]string{
 			{"id": "gpt-existing"},
 			{"id": "gpt-new"},
@@ -52,6 +55,9 @@ func TestDiscoverSavedChannelModelsUsesStoredCredentialsWithoutPersistingModels(
 	fx := newChannelModelImportFixture(t)
 	channel, err := store.CreateChannel(t.Context(), fx.db, "Saved", "openai", "chat", server.URL+"/v1", "stored-secret")
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fx.db.Exec(`UPDATE channels SET headers='{"A":"a"}' WHERE id=?`, channel.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.CreateModel(t.Context(), fx.db, store.Model{

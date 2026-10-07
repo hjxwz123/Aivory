@@ -115,6 +115,18 @@ export interface ApiAdminOverview {
   user_count: number
   health: ApiAdminOverviewHealth
   today: ApiUsageTotals | null
+  trends: ApiAdminOverviewTrends | null
+}
+export interface ApiAdminOverviewTrendPoint extends ApiUsageTrendPoint {
+  registrations: number
+}
+export interface ApiAdminOverviewTrends {
+  days: number
+  period_start: number
+  period_end: number
+  totals: ApiUsageTotals
+  registrations: number
+  points: ApiAdminOverviewTrendPoint[]
 }
 export interface ApiUsageTrendPoint {
   bucket_start: number
@@ -274,6 +286,20 @@ export interface ApiAdminLoginHistoryPage {
 export interface ApiShareInfo {
   id: string
   created_at: number
+}
+
+export interface ApiUserPublishedLink {
+  id: string
+  conversation_id?: string
+  title?: string
+  created_at: number
+}
+
+export interface ApiUserLinksPage {
+  items: ApiUserPublishedLink[]
+  limit: number
+  offset: number
+  has_more: boolean
 }
 
 /** One message in a public share snapshot. It is cost-stripped and carries only
@@ -448,13 +474,51 @@ export interface ApiWorkspaceUsageAnalytics {
 export interface ApiWorkspaceAuditLog {
   id: string
   workspace_id: string
+  workspace_name?: string
   actor_user_id: string
   actor_name: string
   action: string
+  type?: string
   target_type: string
   target_id: string
   metadata: Record<string, unknown>
   created_at: number
+}
+
+export interface ApiAuditChange {
+  before?: unknown
+  after?: unknown
+  redacted?: boolean
+}
+
+/** Extended evidence is optional for compatibility with older audit records. */
+export interface ApiAdminAuditLog extends ApiWorkspaceAuditLog {
+  actor_role?: string
+  target_name?: string
+  result?: 'success' | 'failure' | 'denied' | 'pending'
+  severity?: string
+  source?: string
+  client_ip?: string
+  user_agent?: string
+  request_id?: string
+  occurred_at_ms?: number
+  duration_ms?: number
+  http_status?: number
+  method?: string
+  route?: string
+  reason?: string
+  changes?: Record<string, ApiAuditChange> | null
+}
+
+export interface ApiAuditFilters {
+  search?: string
+  type?: string
+  result?: string
+  actor?: string
+  target?: string
+  action?: string
+  from?: string
+  until?: string
 }
 
 /** Membership tier (§ user groups). */
@@ -746,8 +810,15 @@ export interface ApiChannel {
   type: 'openai' | 'claude' | 'anthropic' | 'google' | 'gemini' | 'typesafe'
   api_format: 'chat' | 'responses' | ''
   base_url: string
+  headers?: Record<string, string>
   has_api_key: boolean
   enabled: boolean
+  auto_disable_errors?: number
+  auto_disable_timeouts?: number
+  auto_disable_minutes?: number
+  consecutive_errors?: number
+  consecutive_timeouts?: number
+  auto_disabled_until?: number
   sort_order: number
   updated_at: number
 }
@@ -779,6 +850,57 @@ export interface ApiChannelModelBatchResult {
   created: number
   skipped_existing: number
   skipped_duplicate: number
+}
+
+export interface ApiChannelModel {
+  id: string
+  channel_id: string
+  request_id: string
+  label: string
+  description: string
+  kind: 'chat' | 'image' | 'embedding' | 'decision'
+  enabled: boolean
+  source: string
+  updated_at: number
+}
+
+export interface ApiChannelModelHealth {
+  model_id: string
+  model_label: string
+  request_id: string
+  role: 'regular' | 'fallback'
+  disabled_until: number
+  consecutive_errors: number
+  consecutive_timeouts: number
+}
+
+export interface ApiChannelHealth {
+  channel: ApiChannel
+  models: ApiChannelModelHealth[]
+}
+
+export type ApiChannelsModelHealth = Record<string, ApiChannelModelHealth[]>
+
+export interface ApiModelChannelBinding {
+  id: string
+  model_id: string
+  channel_id: string
+  role: 'regular' | 'fallback'
+  priority: number
+  weight: number
+  channel_name?: string
+  channel_type?: string
+  channel_enabled: boolean
+  channel_auto_disable_errors?: number
+  channel_auto_disable_timeouts?: number
+  channel_auto_disable_minutes?: number
+  channel_auto_disabled_until?: number
+  channel_consecutive_errors?: number
+  channel_consecutive_timeouts?: number
+  disabled_until: number
+  consecutive_errors: number
+  consecutive_timeouts: number
+  updated_at: number
 }
 
 /** One configuration check returned by the per-administrator setup guide. */
@@ -951,6 +1073,12 @@ export interface ApiModel {
   icon: string
   /** Backup channel retried when a request on the primary channel fails; '' = none (§fallback channel). */
   fallback_channel_id?: string
+  /** Per-model first-byte timeout in seconds; zero disables the watchdog. */
+  fallback_ttft_sec?: number
+  auto_disable_errors?: number
+  auto_disable_timeouts?: number
+  auto_disable_minutes?: number
+  channel_bindings?: ApiModelChannelBinding[]
   enabled: boolean
   sort_order: number
   tool_mode: 'native' | 'prompt' | 'none'
@@ -1835,6 +1963,10 @@ export interface ApiUsageRecord {
   channel_id?: string
   channel_name?: string
   fallback?: boolean
+  /** Milliseconds from the upstream request start to its first response byte. */
+  first_byte_ms?: number
+  /** Milliseconds from the upstream request start until its response body ended. */
+  duration_ms?: number
   /** §4.6-C: display name of the model a TTFT timeout-fallback switched to for this
    *  row; '' = no model fallback. Distinct from `fallback` (same-model channel retry). */
   ttft_fallback_model?: string

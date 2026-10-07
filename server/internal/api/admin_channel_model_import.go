@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"aivory/server/internal/llm"
+	"aivory/server/internal/requestheaders"
 	"aivory/server/internal/store"
 )
 
@@ -118,6 +119,7 @@ func discoverDraftChannelModelsAdmin(d Deps, w http.ResponseWriter, r *http.Requ
 		APIFormat: req.APIFormat,
 		BaseURL:   req.BaseURL,
 		APIKey:    req.APIKey,
+		Headers:   req.Headers,
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), channelModelDiscoveryTimeout)
 	defer cancel()
@@ -519,6 +521,7 @@ func fetchChannelModelJSON(ctx context.Context, endpoint string, channel *store.
 		}
 	}
 
+	requestheaders.Apply(request, channel.Headers)
 	response, err := channelModelDiscoveryHTTPClient.Do(request)
 	if err != nil {
 		return fmt.Errorf("model discovery request failed: %w", err)

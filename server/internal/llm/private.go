@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"aivory/server/internal/store"
@@ -235,14 +236,22 @@ func (o *Orchestrator) moderatePrivate(ctx context.Context, userID string, model
 }
 
 func (o *Orchestrator) privateCall(ctx context.Context, userID string, model *store.Model, history []UnifiedMessage, system, purpose string, maxTokens int, emit func(SseEvent)) (*UnifiedResult, float64, error) {
+	selectedChannelID, selectErr := selectRegularModelChannelID(ctx, o.db, model)
+	if selectErr != nil {
+		return nil, 0, errors.New("private_model_unavailable")
+	}
+	resolvedModel := *model
+	resolvedModel.ChannelID = selectedChannelID
+	model = &resolvedModel
 	channel, err := store.GetChannel(ctx, o.db, model.ChannelID)
-	if err != nil || !channel.Enabled {
+	if err != nil || !channel.Enabled || channel.AutoDisabledUntil > time.Now().Unix() {
 		return nil, 0, errors.New("private_model_unavailable")
 	}
 	provider, err := privateProvider(o.reg, channel.Type)
 	if err != nil {
 		return nil, 0, errors.New("private_model_unavailable")
 	}
+	fallbackCreds, fallbackChannelID := resolveFallbackChannelForModel(ctx, o.db, o.logger, model, channel)
 	// Anthropic and Google always send an explicit output cap; a zero here
 	// falls through to their envcfg default (64000), which real Claude/Gemini
 	// endpoints reject with 400 for most models. Private chat has no composer
@@ -255,7 +264,7 @@ func (o *Orchestrator) privateCall(ctx context.Context, userID string, model *st
 	}
 	req := UnifiedChatRequest{
 		Private: true, History: history, SystemPrompt: system, Stream: model.Stream,
-		Model:       ModelInfo{ID: model.ID, RequestID: model.RequestID, Provider: channel.Type, Vision: model.Vision, BaseURL: channel.BaseURL, APIKey: channel.APIKey, APIFormat: channel.APIFormat},
+		Model:       ModelInfo{ID: model.ID, ChannelID: channel.ID, ChannelAutoDisableTimeouts: channel.AutoDisableTimeouts, FallbackChannelID: fallbackChannelID, RequestID: model.RequestID, Provider: channel.Type, Vision: model.Vision, BaseURL: channel.BaseURL, APIKey: channel.APIKey, APIFormat: channel.APIFormat, Headers: channel.Headers, Fallback: fallbackCreds},
 		ExtraParams: model.ExtraParams, MaxOutputTokens: cappedMaxTokens, StrictMaxOutputTokens: cappedMaxTokens > 0,
 		ParamControls: model.ParamControls,
 	}
@@ -272,7 +281,14 @@ func (o *Orchestrator) privateCall(ctx context.Context, userID string, model *st
 	recorder := newProviderRequestRecorder(channel.Type)
 	recorder.captureBody = false
 	providerCtx := contextWithProviderRequestRecorder(ctx, recorder)
+	providerCtx = contextWithProviderRequestChannelIDs(providerCtx, model.ChannelID, fallbackChannelID)
 	var emittedText bool
+	var privateTTFTTimedOut atomic.Bool
+	var privateTTFTWatchdog *providerTTFTWatchdog
+	if model.FallbackTTFTSec > 0 && (model.AutoDisableTimeouts > 0 || channel.AutoDisableTimeouts > 0) {
+		privateTTFTWatchdog = newProviderTTFTWatchdog(time.Duration(model.FallbackTTFTSec)*time.Second, nil, &privateTTFTTimedOut)
+		providerCtx = contextWithProviderTTFTWatchdog(providerCtx, privateTTFTWatchdog)
+	}
 	result, providerErr := provider.Stream(providerCtx, req, &noopToolRunner{}, func(event SseEvent) {
 		if event.Type == "text_delta" {
 			emittedText = true
@@ -281,6 +297,9 @@ func (o *Orchestrator) privateCall(ctx context.Context, userID string, model *st
 			emit(SseEvent{Type: "thinking_delta", Text: event.Text})
 		}
 	})
+	if privateTTFTWatchdog != nil {
+		privateTTFTWatchdog.stop()
+	}
 	if result == nil {
 		result = &UnifiedResult{}
 		if providerErr == nil {
@@ -299,7 +318,11 @@ func (o *Orchestrator) privateCall(ctx context.Context, userID string, model *st
 			providerErr = errors.New("empty response")
 		}
 	}
-	result.Usage = mergeProviderRequestUsage(result.Usage, recorder.snapshots())
+	snapshots := recorder.snapshots()
+	result.Usage = mergeProviderRequestUsage(result.Usage, snapshots)
+	if shouldRecordProviderHealth(providerErr, privateTTFTTimedOut.Load()) {
+		recordBackgroundProviderHealth(ctx, o.db, model, snapshots, "", privateTTFTTimedOut.Load())
+	}
 	logCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 	defer cancel()
 	usage := store.UsageLog{
@@ -308,6 +331,11 @@ func (o *Orchestrator) privateCall(ctx context.Context, userID string, model *st
 		InputTokens: result.Usage.InputTokens, OutputTokens: result.Usage.OutputTokens,
 		CacheReadTokens: result.Usage.CacheReadTokens, CacheWriteTokens: result.Usage.CacheWriteTokens,
 		Cost: computeCost(*model, result.Usage), Currency: model.Currency,
+	}
+	if len(snapshots) > 0 {
+		last := snapshots[len(snapshots)-1]
+		usage.FirstByteMS = last.FirstByteMS
+		usage.DurationMS = last.DurationMS
 	}
 	if providerErr != nil {
 		usage.Status = "error"

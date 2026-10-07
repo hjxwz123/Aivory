@@ -20,7 +20,8 @@ var jsonRequestBodySizeCap = envcfg.Int64("AIVORY_API_JSON_REQUEST_BODY_SIZE_CAP
 // mux is a tiny path-param router. Routes use the `:name` syntax which is
 // captured into the request context.
 type mux struct {
-	routes []route
+	routes    []route
+	auditDeps *Deps
 }
 
 type route struct {
@@ -38,11 +39,17 @@ func (m *mux) handle(method, pattern string, h http.HandlerFunc) {
 }
 
 type pathCtxKey struct{}
+type routePatternCtxKey struct{}
 
 // pathParam reads a captured parameter from r.Context.
 func pathParam(r *http.Request, name string) string {
 	v, _ := r.Context().Value(pathCtxKey{}).(map[string]string)
 	return v[name]
+}
+
+func routePattern(r *http.Request) string {
+	pattern, _ := r.Context().Value(routePatternCtxKey{}).(string)
+	return pattern
 }
 
 func (m *mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -61,7 +68,12 @@ func (m *mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		recordResponseRoute(w, rt.patternText)
 		ctx := context.WithValue(r.Context(), pathCtxKey{}, params)
-		rt.handler.ServeHTTP(w, r.WithContext(ctx))
+		ctx = context.WithValue(ctx, routePatternCtxKey{}, rt.patternText)
+		if m.auditDeps != nil {
+			auditHTTPRequest(*m.auditDeps, w, r.WithContext(ctx), rt.handler)
+		} else {
+			rt.handler.ServeHTTP(w, r.WithContext(ctx))
+		}
 		return
 	}
 	if methodMismatchPattern != "" {
@@ -96,6 +108,7 @@ func matchPath(pattern, actual []string) (map[string]string, bool) {
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
+	observeAuditResponse(w, status, body)
 	w.Header().Set("content-type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)

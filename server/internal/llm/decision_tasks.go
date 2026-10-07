@@ -31,11 +31,18 @@ func (t *TaskLLM) runPolicyDecision(ctx context.Context, model *store.Model, req
 	if !model.Enabled || model.Kind != "decision" {
 		return nil, fmt.Errorf("decision model unavailable")
 	}
+	selectedChannelID, selectErr := selectRegularModelChannelID(ctx, t.db, model)
+	if selectErr != nil {
+		return nil, fmt.Errorf("decision model has no available channel")
+	}
+	resolvedModel := *model
+	resolvedModel.ChannelID = selectedChannelID
+	model = &resolvedModel
 	channel, err := store.GetChannel(ctx, t.db, model.ChannelID)
 	if err != nil {
 		return nil, err
 	}
-	if !channel.Enabled || channel.Type != "typesafe" {
+	if !channel.Enabled || channel.AutoDisabledUntil > time.Now().Unix() || channel.Type != "typesafe" {
 		return nil, fmt.Errorf("decision channel unavailable")
 	}
 	if opts.Metadata.MessageID == "" {
@@ -71,6 +78,7 @@ func (t *TaskLLM) runPolicyDecision(ctx context.Context, model *store.Model, req
 	}()
 	client, err := typesafe.New(typesafe.Config{
 		APIKey: channel.APIKey, BaseURL: channel.BaseURL, Model: model.RequestID,
+		Headers: channel.Headers,
 		Timeout: 10 * time.Second, MaxRetries: 0, HTTPClient: providerHTTPClient, Logger: t.logger,
 		Recorder: func(rctx context.Context, record typesafe.Record) error {
 			if record.UsageKnown && reservation != nil {
@@ -85,6 +93,13 @@ func (t *TaskLLM) runPolicyDecision(ctx context.Context, model *store.Model, req
 			if record.ErrorKind != "" {
 				u.Status = "error"
 				u.Error = "typesafe_" + string(record.ErrorKind)
+				if model.AutoDisableErrors > 0 {
+					_ = store.RecordModelChannelResult(rctx, t.db, model.ID, channel.ID, "regular", "error", model.AutoDisableErrors, model.AutoDisableMinutes)
+				}
+				_ = store.RecordChannelFailure(rctx, t.db, channel.ID, "error")
+			} else {
+				_ = store.ResetModelChannelCounters(rctx, t.db, model.ID, channel.ID, "regular")
+				_ = store.ResetChannelCounters(rctx, t.db, channel.ID)
 			}
 			if record.UsageKnown {
 				if err := store.RecordBillingUsage(rctx, t.db, u); err != nil {

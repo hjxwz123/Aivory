@@ -37,6 +37,8 @@ import type {
   ApiWorkspacePolicy,
   ApiWorkspaceUsageAnalytics,
   ApiWorkspaceAuditLog,
+  ApiAdminAuditLog,
+  ApiAuditFilters,
   ApiAnalytics,
   ApiAiPPTConfig,
   ApiAiPPTDeck,
@@ -55,6 +57,9 @@ import type {
   ApiChannelModelCandidate,
   ApiChannelModelDiscoveryResult,
   ApiChannelModelImportResult,
+  ApiChannelModel,
+  ApiChannelHealth,
+  ApiChannelsModelHealth,
   ApiConversation,
   ApiConversationFile,
   ApiSandboxFiles,
@@ -70,6 +75,7 @@ import type {
   ApiMemory,
   ApiMessage,
   ApiModel,
+  ApiModelChannelBinding,
   ApiSelectableTool,
   ApiModelTag,
   ApiModelQuota,
@@ -920,6 +926,11 @@ export const conversationsApi = {
     }),
   update: (id: string, patch: Partial<ApiConversation>) =>
     api<ApiConversation>(`/conversations/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch }),
+  reorder: (id: string, targetId: string, position: 'before' | 'after') =>
+    api<{ conversations: { id: string; updated_at: number }[] }>(
+      `/conversations/${encodeURIComponent(id)}/reorder`,
+      { method: 'POST', body: { target_id: targetId, position } },
+    ),
   remove: (id: string) => api<{ ok: true }>(`/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   clearAll: () =>
     api<{ deleted_conversations: number }>('/conversations', { method: 'DELETE' }),
@@ -1117,12 +1128,20 @@ export const issueFeedbackApi = {
 // ----- Admin --------------------------------------------------------------
 
 export const adminApi = {
-  overview: () => api<ApiAdminOverview>('/admin/overview'),
+  overview: (days = 30) => api<ApiAdminOverview>(`/admin/overview?days=${days}`),
   onboarding: () => api<ApiAdminOnboarding>('/admin/onboarding'),
   updateOnboarding: (action: 'skip' | 'complete' | 'reset') =>
     api<ApiAdminOnboarding>('/admin/onboarding', { method: 'PATCH', body: { action } }),
 
   channels: () => api<ApiChannel[]>('/admin/channels'),
+  channelsModelHealth: () => api<ApiChannelsModelHealth>('/admin/channels/health'),
+  channelHealth: (id: string) => api<ApiChannelHealth>(`/admin/channels/${encodeURIComponent(id)}/health`),
+  recoverChannel: (id: string) => api<ApiChannel>(`/admin/channels/${encodeURIComponent(id)}/recover`, { method: 'POST' }),
+  channelCapabilities: (requestId: string) =>
+    api<ApiChannel[]>(`/admin/channels/capabilities?request_id=${encodeURIComponent(requestId)}`),
+  channelModels: (id: string) => api<ApiChannelModel[]>(`/admin/channels/${encodeURIComponent(id)}/models`),
+  replaceChannelModels: (id: string, models: ApiChannelModel[]) =>
+    api<ApiChannelModel[]>(`/admin/channels/${encodeURIComponent(id)}/models`, { method: 'PUT', body: models }),
   createChannel: (body: Partial<ApiChannel> & { api_key?: string }) =>
     api<ApiChannel>('/admin/channels', { method: 'POST', body }),
   discoverChannelModels: (body: Partial<ApiChannel> & { api_key?: string }) =>
@@ -1227,6 +1246,13 @@ export const adminApi = {
     api<{ ok: true }>('/admin/models/reorder', { method: 'PATCH', body: { ids } }),
   updateModel: (id: string, body: Partial<ApiModel>) =>
     api<ApiModel>(`/admin/models/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
+  modelChannels: (id: string) => api<{ regular: ApiModelChannelBinding[]; fallback: ApiModelChannelBinding[] }>(`/admin/models/${encodeURIComponent(id)}/channels`),
+  replaceModelChannels: (
+    id: string,
+    body: { regular: Array<Pick<ApiModelChannelBinding, 'channel_id' | 'priority' | 'weight'>>; fallback: Array<Pick<ApiModelChannelBinding, 'channel_id' | 'priority' | 'weight'>> },
+  ) => api<{ regular: ApiModelChannelBinding[]; fallback: ApiModelChannelBinding[] }>(`/admin/models/${encodeURIComponent(id)}/channels`, { method: 'PUT', body }),
+  recoverModelChannel: (modelId: string, channelId: string, role: 'regular' | 'fallback') =>
+    api<{ regular: ApiModelChannelBinding[]; fallback: ApiModelChannelBinding[] }>(`/admin/models/${encodeURIComponent(modelId)}/channels/${encodeURIComponent(channelId)}/recover?role=${encodeURIComponent(role)}`, { method: 'POST' }),
   removeModel: (id: string) => api<{ ok: true }>(`/admin/models/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   setModelSkills: (id: string, skillIds: string[]) =>
     api<{ ok: true }>(`/admin/models/${encodeURIComponent(id)}/skills`, {
@@ -1356,8 +1382,9 @@ export const adminApi = {
     api<{ ok: true }>(`/admin/models/${encodeURIComponent(id)}/quotas`, { method: 'PUT', body: { quotas } }),
 
   // Redeem codes (§ redeem codes).
-  redeemCodes: (params?: { batch?: string; status?: 'unused' | 'partial' | 'used' | 'invalid'; limit?: number; offset?: number }) => {
+  redeemCodes: (params?: { search?: string; batch?: string; status?: 'unused' | 'partial' | 'used' | 'invalid'; limit?: number; offset?: number }) => {
     const q = new URLSearchParams()
+    if (params?.search) q.set('q', params.search)
     if (params?.batch) q.set('batch', params.batch)
     if (params?.status) q.set('status', params.status)
     if (params?.limit) q.set('limit', String(params.limit))
@@ -1545,6 +1572,36 @@ export const adminApi = {
     return api<{ records: ApiUsageRecord[]; total: number; total_cost: number; page: number; page_size: number }>(
       `/admin/usage${qs.toString() ? `?${qs}` : ''}`,
     )
+  },
+  auditLogs: (params: ApiAuditFilters & { page?: number; pageSize?: number } = {}) => {
+    const qs = new URLSearchParams()
+    if (params.search) qs.set('q', params.search)
+    if (params.type) qs.set('type', params.type)
+    for (const key of ['result', 'actor', 'target', 'action', 'from', 'until'] as const) {
+      if (params[key]) qs.set(key, params[key])
+    }
+    if (params.page) qs.set('page', String(params.page))
+    if (params.pageSize) qs.set('page_size', String(params.pageSize))
+    return api<{ logs: ApiAdminAuditLog[]; total: number; page: number; page_size: number }>(
+      `/admin/audit-logs${qs.toString() ? `?${qs}` : ''}`,
+    )
+  },
+  exportAuditLogs: (params: ApiAuditFilters = {}) => {
+    const qs = new URLSearchParams()
+    if (params.search) qs.set('q', params.search)
+    for (const key of ['type', 'result', 'actor', 'target', 'action', 'from', 'until'] as const) {
+      if (params[key]) qs.set(key, params[key])
+    }
+    return api<{ logs: ApiAdminAuditLog[]; total: number; exported: number; truncated: boolean; exported_at: string }>(`/admin/audit-logs/export?${qs}`)
+  },
+  deleteAuditLog: (id: string) => api<{ ok: true }>(`/admin/audit-logs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  deleteAuditLogsFiltered: (params: ApiAuditFilters = {}) => {
+    const qs = new URLSearchParams()
+    if (params.search) qs.set('q', params.search)
+    for (const key of ['type', 'result', 'actor', 'target', 'action', 'from', 'until'] as const) {
+      if (params[key]) qs.set(key, params[key])
+    }
+    return api<{ deleted: number }>(`/admin/audit-logs${qs.toString() ? `?${qs}` : ''}`, { method: 'DELETE' })
   },
   deleteUsageRecord: (id: number) => api<{ ok: true }>(`/admin/usage/${id}`, { method: 'DELETE' }),
   deleteUsageFiltered: (params: { days?: number; user?: string; model?: string; status?: string; purpose?: string }) => {

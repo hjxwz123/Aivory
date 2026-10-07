@@ -73,7 +73,7 @@ func TestUsageChannelFallbackStatus(t *testing.T) {
 			t.Fatalf("log usage: %v", err)
 		}
 	}
-	mustLog(UsageLog{UserID: "u1", ModelID: "m1", Purpose: "chat", Cost: 0.1, Currency: "USD", ChannelID: primary.ID})
+	mustLog(UsageLog{UserID: "u1", ModelID: "m1", Purpose: "chat", Cost: 0.1, Currency: "USD", ChannelID: primary.ID, FirstByteMS: 125, DurationMS: 980})
 	mustLog(UsageLog{UserID: "u1", ModelID: "m1", Purpose: "chat", Cost: 0.2, Currency: "USD", ChannelID: backup.ID, Fallback: true})
 	mustLog(UsageLog{
 		UserID: "u1", ModelID: "m1", Purpose: "chat", Currency: "USD", ChannelID: backup.ID, Fallback: true,
@@ -97,6 +97,16 @@ func TestUsageChannelFallbackStatus(t *testing.T) {
 	}
 	if okFallback == nil || okFallback.ChannelName != "Backup" || okFallback.ChannelID != backup.ID {
 		t.Fatalf("fallback row channel join wrong: %+v", okFallback)
+	}
+	var timedRow *AdminUsageRecord
+	for i := range rows {
+		if rows[i].ChannelID == primary.ID {
+			timedRow = &rows[i]
+			break
+		}
+	}
+	if timedRow == nil || timedRow.FirstByteMS != 125 || timedRow.DurationMS != 980 {
+		t.Fatalf("usage timing round trip = %+v, want 125ms first byte and 980ms total", timedRow)
 	}
 	if errRow == nil || !errRow.Fallback || errRow.Status != "error" {
 		t.Fatalf("error row wrong: %+v", errRow)

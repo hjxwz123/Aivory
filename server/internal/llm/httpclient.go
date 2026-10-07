@@ -12,6 +12,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"aivory/server/internal/requestheaders"
 )
 
 // providerBaseURL trims a channel base URL and substitutes the vendor default
@@ -82,7 +84,7 @@ func doProviderRequest(
 	fallbackUsed *atomic.Bool,
 	build func(baseURL, apiKey string) (*http.Request, error),
 ) (*http.Response, error) {
-	primaryReq, err := build(m.BaseURL, m.APIKey)
+	primaryReq, err := buildProviderChannelRequest(m, false, build)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +96,7 @@ func doProviderRequest(
 	// request can't be constructed (e.g. an unparseable fallback base URL), we
 	// return the primary response UNTOUCHED so the caller can still read its error
 	// body — closing it first would surface an empty upstream message.
-	fbReq, berr := build(m.Fallback.BaseURL, m.Fallback.APIKey)
+	fbReq, berr := buildProviderChannelRequest(m, true, build)
 	if berr != nil {
 		return resp, err // keep the original (unclosed) failure; couldn't build the retry
 	}
@@ -201,11 +203,7 @@ func doProviderParsedRequestWithRepair(
 				if resp.Body != nil {
 					_ = resp.Body.Close()
 				}
-				baseURL, apiKey := m.BaseURL, m.APIKey
-				if fallback && m.Fallback != nil {
-					baseURL, apiKey = m.Fallback.BaseURL, m.Fallback.APIKey
-				}
-				req, err = build(baseURL, apiKey)
+				req, err = buildProviderChannelRequest(m, fallback, build)
 				if err != nil {
 					recordProviderRequestBuildFailure(ctx, fallback, err)
 					return err
@@ -223,7 +221,7 @@ func doProviderParsedRequestWithRepair(
 	// again. FallbackUsed is turn-scoped and shared by every provider iteration.
 	useStickyFallback := m.Fallback != nil && (m.APIKey == "" || (fallbackUsed != nil && fallbackUsed.Load()))
 	if useStickyFallback {
-		fbReq, err := build(m.Fallback.BaseURL, m.Fallback.APIKey)
+		fbReq, err := buildProviderChannelRequest(m, true, build)
 		if err != nil {
 			recordProviderRequestBuildFailure(ctx, true, err)
 			return err
@@ -234,7 +232,7 @@ func doProviderParsedRequestWithRepair(
 		return consumeAttempt(fbReq, true, onEvent)
 	}
 
-	primaryReq, err := build(m.BaseURL, m.APIKey)
+	primaryReq, err := buildProviderChannelRequest(m, false, build)
 	if err != nil && m.Fallback == nil {
 		recordProviderRequestBuildFailure(ctx, false, err)
 		return err
@@ -299,7 +297,7 @@ func doProviderParsedRequestWithRepair(
 	// Build before discarding the primary's partial events. Hidden calls preserve
 	// the legacy buffered result when the fallback URL itself is invalid; a user
 	// turn that has not committed output keeps the failed primary events hidden.
-	fbReq, buildErr := build(m.Fallback.BaseURL, m.Fallback.APIKey)
+	fbReq, buildErr := buildProviderChannelRequest(m, true, build)
 	if buildErr != nil {
 		recordProviderRequestBuildFailure(ctx, true, buildErr)
 		if visibleOutput == nil {
@@ -313,11 +311,29 @@ func doProviderParsedRequestWithRepair(
 	return consumeAttempt(fbReq, true, onEvent)
 }
 
+func buildProviderChannelRequest(m ModelInfo, fallback bool, build func(string, string) (*http.Request, error)) (*http.Request, error) {
+	baseURL, apiKey, headers := m.BaseURL, m.APIKey, m.Headers
+	if fallback && m.Fallback != nil {
+		baseURL, apiKey, headers = m.Fallback.BaseURL, m.Fallback.APIKey, m.Fallback.Headers
+	}
+	req, err := build(baseURL, apiKey)
+	if err == nil {
+		requestheaders.Apply(req, headers)
+	}
+	return req, err
+}
+
 func sendProviderRequest(ctx context.Context, req *http.Request, fallback bool) (*http.Response, error) {
-	recordProviderRequestAttempt(ctx, req, fallback)
+	timing := recordProviderRequestAttempt(ctx, req, fallback)
 	armProviderTTFTWatchdog(ctx)
+	if timing != nil {
+		timing.startedAt = time.Now()
+	}
 	resp, err := providerHTTPClient.Do(req)
-	wrapFirstByteBody(ctx, resp)
+	if timing != nil && (err != nil || resp == nil) {
+		timing.finish()
+	}
+	wrapFirstByteBody(ctx, resp, timing)
 	return resp, err
 }
 
@@ -383,30 +399,49 @@ func invalidProviderStream(provider, detail string) error {
 	return fmt.Errorf("%s stream protocol error: %s", provider, detail)
 }
 
-// wrapFirstByteBody wraps resp.Body (if present) so the TTFT watchdog disarms
-// on the first byte actually read from the upstream — see the doc comment on
-// providerTTFTWatchdog for why "first byte", not "first parsed content event".
-// A no-op when resp/resp.Body is nil (transport error) or no watchdog is armed
-// for this ctx (fallback_ttft_sec disabled).
-func wrapFirstByteBody(ctx context.Context, resp *http.Response) {
+// wrapFirstByteBody observes the first byte and end of the upstream response
+// body for both the TTFT watchdog and request timing. It passes bytes through
+// unchanged; timing is a no-op when this request has no recorder.
+func wrapFirstByteBody(ctx context.Context, resp *http.Response, timing *providerRequestTiming) {
 	if resp == nil || resp.Body == nil {
+		if timing != nil {
+			timing.finish()
+		}
 		return
 	}
-	resp.Body = &firstByteBody{ReadCloser: resp.Body, ctx: ctx}
+	resp.Body = &firstByteBody{ReadCloser: resp.Body, ctx: ctx, timing: timing}
 }
 
 type firstByteBody struct {
 	io.ReadCloser
-	ctx  context.Context
-	once sync.Once
+	ctx       context.Context
+	timing    *providerRequestTiming
+	firstOnce sync.Once
+	endOnce   sync.Once
 }
 
 func (b *firstByteBody) Read(p []byte) (int, error) {
 	n, err := b.ReadCloser.Read(p)
 	if n > 0 {
-		b.once.Do(func() { markProviderTTFTFirstByte(b.ctx) })
+		b.firstOnce.Do(func() {
+			markProviderTTFTFirstByte(b.ctx)
+			b.timing.markFirstByte()
+		})
+	}
+	if err != nil {
+		b.finish()
 	}
 	return n, err
+}
+
+func (b *firstByteBody) Close() error {
+	err := b.ReadCloser.Close()
+	b.finish()
+	return err
+}
+
+func (b *firstByteBody) finish() {
+	b.endOnce.Do(func() { b.timing.finish() })
 }
 
 // retryableUpstreamFailure reports whether a primary provider call failed in a

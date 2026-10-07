@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"aivory/server/internal/envcfg"
+	"aivory/server/internal/requestheaders"
 	"aivory/server/internal/store"
 )
 
@@ -157,6 +158,7 @@ func (e *httpEmbedder) buildDashScopeBody(texts []string, withDim bool) []byte {
 type httpEmbedder struct {
 	baseURL string
 	apiKey  string
+	headers requestheaders.Headers
 	model   string
 	dim     int
 }
@@ -474,6 +476,7 @@ func (e *httpEmbedder) postEmbeddings(ctx context.Context, url string, body []by
 		}
 		req.Header.Set("authorization", "Bearer "+e.apiKey)
 		req.Header.Set("content-type", "application/json")
+		requestheaders.Apply(req, e.headers)
 		release, err := e.acquireProviderSlot(ctx)
 		if err != nil {
 			cancelReq()
@@ -599,7 +602,7 @@ func (s *Service) resolveEmbedder(ctx context.Context) (Embedder, string, int) {
 				if dim <= 0 {
 					dim = defaultEmbeddingDim()
 				}
-				return &httpEmbedder{baseURL: ch.BaseURL, apiKey: ch.APIKey, model: m.RequestID, dim: dim}, "emb:" + m.ID, dim
+				return &httpEmbedder{baseURL: ch.BaseURL, apiKey: ch.APIKey, headers: ch.Headers, model: m.RequestID, dim: dim}, "emb:" + m.ID, dim
 			}
 		}
 	}
@@ -656,5 +659,5 @@ func (s *Service) resolveEmbedderForKB(ctx context.Context, kbID string) (Embedd
 	if useDim <= 0 {
 		useDim = defaultEmbeddingDim()
 	}
-	return &httpEmbedder{baseURL: ch.BaseURL, apiKey: ch.APIKey, model: m.RequestID, dim: useDim}, "emb:" + m.ID, useDim, nil
+	return &httpEmbedder{baseURL: ch.BaseURL, apiKey: ch.APIKey, headers: ch.Headers, model: m.RequestID, dim: useDim}, "emb:" + m.ID, useDim, nil
 }

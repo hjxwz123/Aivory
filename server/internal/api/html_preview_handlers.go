@@ -69,7 +69,7 @@ func publicHTMLPreviewShareHandler(d Deps, w http.ResponseWriter, r *http.Reques
 	w.Header().Set("Content-Security-Policy", csp)
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Cache-Control", "public, max-age=60")
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(share.HTML))

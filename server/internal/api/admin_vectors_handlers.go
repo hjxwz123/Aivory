@@ -9,6 +9,7 @@ import (
 
 	"aivory/server/internal/envcfg"
 	"aivory/server/internal/rag"
+	"aivory/server/internal/store"
 
 	"github.com/google/uuid"
 )
@@ -50,15 +51,15 @@ func listVectorMaintenanceAdmin(_ Deps, w http.ResponseWriter, _ *http.Request) 
 	writeJSON(w, http.StatusOK, adminVectorMaintenance.state())
 }
 
-func startVectorCheckAdmin(d Deps, w http.ResponseWriter, _ *http.Request) {
-	startVectorMaintenanceAdmin(d, w, "check")
+func startVectorCheckAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
+	startVectorMaintenanceAdmin(d, w, "check", auditJobOrigin(r))
 }
 
-func startVectorRebuildAdmin(d Deps, w http.ResponseWriter, _ *http.Request) {
-	startVectorMaintenanceAdmin(d, w, "rebuild")
+func startVectorRebuildAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
+	startVectorMaintenanceAdmin(d, w, "rebuild", auditJobOrigin(r))
 }
 
-func startVectorMaintenanceAdmin(d Deps, w http.ResponseWriter, typ string) {
+func startVectorMaintenanceAdmin(d Deps, w http.ResponseWriter, typ string, origins ...*store.AuditContext) {
 	if running := adminBackupExports.running(); running != nil {
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"error":   "backup export already running",
@@ -82,7 +83,8 @@ func startVectorMaintenanceAdmin(d Deps, w http.ResponseWriter, typ string) {
 		})
 		return
 	}
-	go runVectorMaintenanceJob(d, job.ID, typ)
+	go runVectorMaintenanceJob(d, job.ID, typ, origins...)
+	observeAuditResponse(w, http.StatusAccepted, map[string]any{"running": job})
 	writeJSON(w, http.StatusAccepted, adminVectorMaintenance.state())
 }
 
@@ -174,7 +176,27 @@ func cloneVectorJob(job *vectorMaintenanceJob) *vectorMaintenanceJob {
 	return &cp
 }
 
-func runVectorMaintenanceJob(d Deps, id, typ string) {
+func runVectorMaintenanceJob(d Deps, id, typ string, origins ...*store.AuditContext) {
+	started := time.Now()
+	defer func() {
+		if len(origins) == 0 {
+			return
+		}
+		adminVectorMaintenance.mu.Lock()
+		final := cloneVectorJob(adminVectorMaintenance.jobs[id])
+		adminVectorMaintenance.mu.Unlock()
+		result, reason := "failure", "job_failed"
+		metadata := map[string]any{}
+		if final != nil {
+			metadata["rebuilt"], metadata["failed"] = final.Rebuilt, final.Failed
+			if final.Status == "completed" && final.Failed == 0 {
+				result, reason = "success", ""
+			} else if final.Failed > 0 {
+				reason = "partial_failure"
+			}
+		}
+		recordAuditJobResult(d, origins[0], "admin.system.vector_"+typ+"_completed", id, result, reason, started, metadata)
+	}()
 	ctx, cancel := context.WithTimeout(context.Background(), vectorMaintenanceJobRuntime)
 	defer cancel()
 

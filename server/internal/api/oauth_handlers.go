@@ -242,6 +242,7 @@ func completeOAuthLoginWithGuard(
 		return
 	}
 	recordSuccessfulLogin(d, r, user.ID, store.LoginMethodOAuth)
+	setAuditActor(r, user)
 	http.Redirect(w, r, base+"/", http.StatusFound)
 }
 
@@ -525,6 +526,12 @@ func oauthCallbackHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		acct := returnBase + "/settings/account"
 		switch err := bindOAuthIdentityFromStateWithGuard(ctx, d, st, p, info, &providerGuard); {
 		case err == nil:
+			if user, err := store.FindUserByID(ctx, d.DB, st.LinkUserID); err == nil {
+				setAuditActor(r, user)
+			}
+			if s := auditState(r); s != nil {
+				s.event.Action = "auth.identity_link"
+			}
 			http.Redirect(w, r, acct+"?linked="+url.QueryEscape(p.Name), http.StatusFound)
 		case errors.Is(err, store.ErrOAuthIdentityConflict):
 			http.Redirect(w, r, acct+"?link_error=conflict", http.StatusFound)

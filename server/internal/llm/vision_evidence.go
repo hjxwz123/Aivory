@@ -238,8 +238,7 @@ func (o *Orchestrator) resolveVisionModelID(ctx context.Context) string {
 	if err != nil || model == nil || !model.Enabled || model.Kind != "chat" || !model.Vision {
 		return ""
 	}
-	channel, err := store.GetChannel(ctx, o.db, model.ChannelID)
-	if err != nil || channel == nil || !channel.Enabled {
+	if _, err := selectRegularModelChannelID(ctx, o.db, model); err != nil {
 		return ""
 	}
 	return modelID

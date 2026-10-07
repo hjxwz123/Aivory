@@ -181,6 +181,13 @@ func Migrate(db *sql.DB) error {
 	// Admin-only per-model request defaults. This must remain a JSON object so
 	// providers can deep-merge it beneath user-visible param controls.
 	addModelExtraParams := `ALTER TABLE models ADD COLUMN extra_params TEXT NOT NULL DEFAULT '{}'`
+	addChannelHeaders := `ALTER TABLE channels ADD COLUMN headers TEXT NOT NULL DEFAULT '{}'`
+	addChannelAutoDisableErrors := `ALTER TABLE channels ADD COLUMN auto_disable_errors INTEGER NOT NULL DEFAULT 0`
+	addChannelAutoDisableTimeouts := `ALTER TABLE channels ADD COLUMN auto_disable_timeouts INTEGER NOT NULL DEFAULT 0`
+	addChannelAutoDisableMinutes := `ALTER TABLE channels ADD COLUMN auto_disable_minutes INTEGER NOT NULL DEFAULT 0`
+	addChannelConsecutiveErrors := `ALTER TABLE channels ADD COLUMN consecutive_errors INTEGER NOT NULL DEFAULT 0`
+	addChannelConsecutiveTimeouts := `ALTER TABLE channels ADD COLUMN consecutive_timeouts INTEGER NOT NULL DEFAULT 0`
+	addChannelAutoDisabledUntil := `ALTER TABLE channels ADD COLUMN auto_disabled_until INTEGER NOT NULL DEFAULT 0`
 	// Per-group resource caps (§ user groups) — max projects / KBs a member may
 	// create. 0 = unlimited.
 	addGroupMaxProjects := `ALTER TABLE user_groups ADD COLUMN max_projects INTEGER NOT NULL DEFAULT 0`
@@ -207,6 +214,11 @@ func Migrate(db *sql.DB) error {
 	addMsgSearchText := `ALTER TABLE messages ADD COLUMN search_text TEXT NOT NULL DEFAULT ''`
 	// §4.20 per-model image generation timeout (seconds; 0 = default).
 	addImageTimeout := `ALTER TABLE models ADD COLUMN image_timeout_sec INTEGER NOT NULL DEFAULT 0`
+	// Per-model TTFT and channel quarantine policy.
+	addModelFallbackTTFT := `ALTER TABLE models ADD COLUMN fallback_ttft_sec INTEGER NOT NULL DEFAULT 0`
+	addModelAutoDisableErrors := `ALTER TABLE models ADD COLUMN auto_disable_errors INTEGER NOT NULL DEFAULT 0`
+	addModelAutoDisableTimeouts := `ALTER TABLE models ADD COLUMN auto_disable_timeouts INTEGER NOT NULL DEFAULT 0`
+	addModelAutoDisableMinutes := `ALTER TABLE models ADD COLUMN auto_disable_minutes INTEGER NOT NULL DEFAULT 0`
 	// Optional model-specific automatic-compaction trigger. 0 uses the global
 	// threshold; the global cap is applied when a positive override is used.
 	addModelCompactionTokenThreshold := `ALTER TABLE models ADD COLUMN compaction_token_threshold INTEGER NOT NULL DEFAULT 0`
@@ -257,6 +269,8 @@ func Migrate(db *sql.DB) error {
 	// from the same-model `fallback` channel bool); value is the fallback model's
 	// display name, surfaced on the admin usage page.
 	addUsageTTFTFallback := `ALTER TABLE usage_logs ADD COLUMN ttft_fallback_model TEXT NOT NULL DEFAULT ''`
+	addUsageFirstByteMS := `ALTER TABLE usage_logs ADD COLUMN first_byte_ms INTEGER NOT NULL DEFAULT 0`
+	addUsageDurationMS := `ALTER TABLE usage_logs ADD COLUMN duration_ms INTEGER NOT NULL DEFAULT 0`
 	// Composer uploads remain drafts until the user message carrying them is
 	// persisted. This lets the client restore only unsent attachments on refresh.
 	addFileDraft := `ALTER TABLE files ADD COLUMN draft INTEGER NOT NULL DEFAULT 0`
@@ -386,6 +400,13 @@ func Migrate(db *sql.DB) error {
 		addInlineQuote = `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS inline_quote TEXT NOT NULL DEFAULT ''`
 		addModelTags = `ALTER TABLE models ADD COLUMN IF NOT EXISTS tags TEXT NOT NULL DEFAULT '[]'`
 		addModelExtraParams = `ALTER TABLE models ADD COLUMN IF NOT EXISTS extra_params TEXT NOT NULL DEFAULT '{}'`
+		addChannelHeaders = `ALTER TABLE channels ADD COLUMN IF NOT EXISTS headers TEXT NOT NULL DEFAULT '{}'`
+		addChannelAutoDisableErrors = `ALTER TABLE channels ADD COLUMN IF NOT EXISTS auto_disable_errors INTEGER NOT NULL DEFAULT 0`
+		addChannelAutoDisableTimeouts = `ALTER TABLE channels ADD COLUMN IF NOT EXISTS auto_disable_timeouts INTEGER NOT NULL DEFAULT 0`
+		addChannelAutoDisableMinutes = `ALTER TABLE channels ADD COLUMN IF NOT EXISTS auto_disable_minutes INTEGER NOT NULL DEFAULT 0`
+		addChannelConsecutiveErrors = `ALTER TABLE channels ADD COLUMN IF NOT EXISTS consecutive_errors INTEGER NOT NULL DEFAULT 0`
+		addChannelConsecutiveTimeouts = `ALTER TABLE channels ADD COLUMN IF NOT EXISTS consecutive_timeouts INTEGER NOT NULL DEFAULT 0`
+		addChannelAutoDisabledUntil = `ALTER TABLE channels ADD COLUMN IF NOT EXISTS auto_disabled_until BIGINT NOT NULL DEFAULT 0`
 		addGroupMaxProjects = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS max_projects INTEGER NOT NULL DEFAULT 0`
 		addGroupMaxKBs = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS max_kbs INTEGER NOT NULL DEFAULT 0`
 		addGroupCreditAllowance = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS credit_allowance REAL NOT NULL DEFAULT 0`
@@ -404,6 +425,10 @@ func Migrate(db *sql.DB) error {
 		addMsgModelLabel = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS model_label TEXT NOT NULL DEFAULT ''`
 		addMsgSearchText = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS search_text TEXT NOT NULL DEFAULT ''`
 		addImageTimeout = `ALTER TABLE models ADD COLUMN IF NOT EXISTS image_timeout_sec INTEGER NOT NULL DEFAULT 0`
+		addModelFallbackTTFT = `ALTER TABLE models ADD COLUMN IF NOT EXISTS fallback_ttft_sec INTEGER NOT NULL DEFAULT 0`
+		addModelAutoDisableErrors = `ALTER TABLE models ADD COLUMN IF NOT EXISTS auto_disable_errors INTEGER NOT NULL DEFAULT 0`
+		addModelAutoDisableTimeouts = `ALTER TABLE models ADD COLUMN IF NOT EXISTS auto_disable_timeouts INTEGER NOT NULL DEFAULT 0`
+		addModelAutoDisableMinutes = `ALTER TABLE models ADD COLUMN IF NOT EXISTS auto_disable_minutes INTEGER NOT NULL DEFAULT 0`
 		addModelCompactionTokenThreshold = `ALTER TABLE models ADD COLUMN IF NOT EXISTS compaction_token_threshold INTEGER NOT NULL DEFAULT 0`
 		addArtifactSource = `ALTER TABLE artifacts ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT ''`
 		addMsgContextTokens = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS context_tokens BIGINT NOT NULL DEFAULT 0`
@@ -429,6 +454,8 @@ func Migrate(db *sql.DB) error {
 		addUsageRequestHeaders = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS request_headers TEXT NOT NULL DEFAULT ''`
 		addUsageRequestBody = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS request_body TEXT NOT NULL DEFAULT ''`
 		addUsageTTFTFallback = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS ttft_fallback_model TEXT NOT NULL DEFAULT ''`
+		addUsageFirstByteMS = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS first_byte_ms BIGINT NOT NULL DEFAULT 0`
+		addUsageDurationMS = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS duration_ms BIGINT NOT NULL DEFAULT 0`
 		addFileDraft = `ALTER TABLE files ADD COLUMN IF NOT EXISTS draft INTEGER NOT NULL DEFAULT 0`
 		addFileBranchMessage = `ALTER TABLE files ADD COLUMN IF NOT EXISTS branch_message_id TEXT NOT NULL DEFAULT ''`
 		addFileRelPath = `ALTER TABLE files ADD COLUMN IF NOT EXISTS rel_path TEXT NOT NULL DEFAULT ''`
@@ -509,6 +536,9 @@ func Migrate(db *sql.DB) error {
 	if _, err := db.Exec(schema); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
 	}
+	if err := migrateAuditColumns(db); err != nil {
+		return err
+	}
 	if _, err := db.Exec(`DELETE FROM settings WHERE key IN ('summary_target_percent','summary_merge_max_tokens')`); err != nil {
 		return fmt.Errorf("remove retired compaction settings: %w", err)
 	}
@@ -529,17 +559,20 @@ func Migrate(db *sql.DB) error {
 		addResearchEnabled,
 		addGroupExpires, addPrevGroup, addPasswordSet, addPasswordChangedAt, addLastSeen,
 		addInlineSource, addInlineParent, addInlineQuote,
-		addModelTags, addModelExtraParams,
+		addModelTags, addModelExtraParams, addChannelHeaders,
+		addChannelAutoDisableErrors, addChannelAutoDisableTimeouts, addChannelAutoDisableMinutes,
+		addChannelConsecutiveErrors, addChannelConsecutiveTimeouts, addChannelAutoDisabledUntil,
 		addGroupMaxProjects, addGroupMaxKBs,
 		addGroupCreditAllowance, addGroupCreditAllowanceMicros, addGroupCreditPeriod, addGroupMonthlyPriceAmountMinor, addGroupYearlyPriceAmountMinor,
 		addUserPermCredits, addUserPermCreditsMicros, addUserCreditCycleAnchor, addUserQuotaCycleAnchor, addCreditLedgerAmountMicros, addUserSortOrder, addUsageCredits, addMsgCredits,
 		addMsgModelLabel, addMsgSearchText,
-		addImageTimeout,
+		addImageTimeout, addModelFallbackTTFT, addModelAutoDisableErrors, addModelAutoDisableTimeouts, addModelAutoDisableMinutes,
 		addModelCompactionTokenThreshold, addMsgContextTokens, addArtifactSource,
 		addMsgVerify,
 		addConvWorkspace, addConvIsPublic, addProjWorkspace, addKBWorkspace, addMsgAuthor, addUsageWorkspace, addGroupMaxWorkspaces, addGroupMaxStorage, addGroupIsPublic, addGroupIsPurchasable, addGroupPermissions,
 		addModelFallbackChannel, addUsageChannel, addUsageFallback, addUsageStatus, addUsageError,
 		addUsageRequestMethod, addUsageRequestURL, addUsageRequestHeaders, addUsageRequestBody, addUsageTTFTFallback,
+		addUsageFirstByteMS, addUsageDurationMS,
 		addFileDraft, addFileBranchMessage, addFileRelPath, addFileVisionEvidence, addFileVisionEvidenceKey, addDocumentIngestUpdatedAt, addDocumentUploader,
 		addWorkspaceCanCreateProjects, addWorkspaceCanPrivateConversations, addWorkspaceCanCreateSkillsPrompts, addWorkspaceCanCreatePrompts, addWorkspaceCanCreateSkills, addWorkspaceCanCreateMCP, addWorkspaceCanUsePrompts, addWorkspaceCanUseSkills, addWorkspaceCanUseMCP, addWorkspaceCanCreateKB, addWorkspaceCanAddKBFiles, addWorkspaceCanDeleteKBContent, addWorkspaceCanDeleteConversations, addWorkspaceCanUseAiPPT, addAiPPTDeckWorkspace, addWorkspaceInvitePurpose, addWorkspaceDeleting, addWorkspaceIcon, addWorkspaceDescription,
 		addWorkspaceAllowToolCalling, addWorkspaceAllowDrawing, addWorkspaceAllowMCP, addWorkspaceAllowSkills, addWorkspaceAllowPrompts,
@@ -556,6 +589,12 @@ func Migrate(db *sql.DB) error {
 		addPasskeyAuthenticatorFlags, addPasskeyUserHandle,
 	} {
 		_, _ = db.Exec(ddl)
+	}
+	if err := backfillModelChannelConfiguration(context.Background(), db); err != nil {
+		return fmt.Errorf("backfill model channel configuration: %w", err)
+	}
+	if err := migrateLegacyModelTTFT(context.Background(), db); err != nil {
+		return fmt.Errorf("migrate legacy model TTFT: %w", err)
 	}
 	if err := BackfillRegistrationDomainMatches(context.Background(), db); err != nil {
 		return fmt.Errorf("backfill registration domain matches: %w", err)
@@ -681,6 +720,7 @@ func Migrate(db *sql.DB) error {
 	// fatal) instead of surfacing as broken reads later. WHERE 1=0 makes each probe
 	// O(1). If you add an ALTER above, add its column here.
 	columnChecks := map[string][]string{
+		"channels":                        {"id", "name", "type", "api_format", "base_url", "api_key", "headers", "enabled", "auto_disable_errors", "auto_disable_timeouts", "auto_disable_minutes", "consecutive_errors", "consecutive_timeouts", "auto_disabled_until", "sort_order", "updated_at"},
 		"messages":                        {"credits", "model_label", "search_text", "gen_ms", "feedback", "verify", "author_id", "fast", "selected_user_skill_ids", "context_tokens"},
 		"message_feedback":                {"id", "message_id", "conversation_id", "user_id", "workspace_id", "model_id", "channel_id", "rating", "reasons", "comment", "created_at", "updated_at"},
 		"user_feedback":                   {"id", "user_id", "message_id", "conversation_id", "conversation_title", "description", "page_path", "user_agent", "viewport_width", "viewport_height", "screenshot", "screenshot_mime", "screenshot_width", "screenshot_height", "created_at"},
@@ -698,7 +738,9 @@ func Migrate(db *sql.DB) error {
 		"quota_ledger":                    {"user_id", "scope_type", "model_id", "group_id", "cycle_anchor", "window_start", "limit_type", "reserved_micros", "actual_micros", "status", "expires_at"},
 		"billing_usage":                   {"user_id", "message_id", "model_id", "purpose", "cost_micros", "images_count", "input_tokens", "output_tokens", "currency"},
 		"artifacts":                       {"source"},
-		"models":                          {"official_tools", "builtin_tools", "mcp_server_ids", "moderation_enabled", "moderation_mode", "tags", "extra_params", "image_timeout_sec", "research_enabled", "fallback_channel_id", "fast", "compaction_token_threshold"},
+		"models":                          {"official_tools", "builtin_tools", "mcp_server_ids", "moderation_enabled", "moderation_mode", "tags", "extra_params", "image_timeout_sec", "fallback_ttft_sec", "auto_disable_errors", "auto_disable_timeouts", "auto_disable_minutes", "research_enabled", "fallback_channel_id", "fast", "compaction_token_threshold"},
+		"channel_models":                  {"id", "channel_id", "request_id", "label", "description", "kind", "enabled", "source", "updated_at"},
+		"model_channel_bindings":          {"id", "model_id", "channel_id", "role", "priority", "weight", "consecutive_errors", "consecutive_timeouts", "disabled_until", "updated_at"},
 		"mcp_servers":                     {"id", "name", "icon", "description", "url", "headers", "enabled", "discovered_tools", "protocol_version", "last_error", "last_synced_at", "created_at", "updated_at"},
 		"refresh_tokens":                  {"session_id", "user_agent", "ip", "location", "last_seen"},
 		"conversations":                   {"inline_source_conv", "inline_parent_id", "inline_quote", "workspace_id", "is_public", "fast"},

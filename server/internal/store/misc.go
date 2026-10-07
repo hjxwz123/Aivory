@@ -1121,11 +1121,12 @@ func LogUsageAnalytics(ctx context.Context, db *sql.DB, u UsageLog) error {
 		status = "ok"
 	}
 	_, err := db.ExecContext(ctx,
-		`INSERT INTO usage_logs(user_id, conversation_id, message_id, model_id, purpose, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, images_count, cost, currency, credits, workspace_id, channel_id, fallback, status, error, request_method, request_url, request_headers, request_body, ttft_fallback_model, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO usage_logs(user_id, conversation_id, message_id, model_id, purpose, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, images_count, cost, currency, credits, workspace_id, channel_id, fallback, status, error, request_method, request_url, request_headers, request_body, ttft_fallback_model, first_byte_ms, duration_ms, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		u.UserID, nullable(u.ConversationID), nullable(u.MessageID), u.ModelID, u.Purpose,
 		u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens, u.ImagesCount,
 		u.Cost, u.Currency, u.Credits, u.WorkspaceID, u.ChannelID, boolInt(u.Fallback), status, u.Error,
-		u.RequestMethod, u.RequestURL, u.RequestHeaders, u.RequestBody, u.TTFTFallbackModel, time.Now().Unix())
+		u.RequestMethod, u.RequestURL, u.RequestHeaders, u.RequestBody, u.TTFTFallbackModel,
+		u.FirstByteMS, u.DurationMS, time.Now().Unix())
 	return err
 }
 
@@ -1201,6 +1202,8 @@ type AdminUsageRecord struct {
 	ChannelName string `json:"channel_name"`
 	Fallback    bool   `json:"fallback"`
 	Status      string `json:"status"`
+	FirstByteMS int64  `json:"first_byte_ms,omitempty"`
+	DurationMS  int64  `json:"duration_ms,omitempty"`
 	// TTFTFallbackModel is the fallback model's display name when a TTFT timeout
 	// switched models mid-turn (§4.6-C); '' when no model fallback occurred.
 	TTFTFallbackModel string `json:"ttft_fallback_model,omitempty"`
@@ -1285,7 +1288,8 @@ func AdminUsageRecords(ctx context.Context, db *sql.DB, f UsageFilter, limit, of
 	             COALESCE(u.credits,0), COALESCE(u.message_id,''),
 	             COALESCE(u.workspace_id,''), COALESCE(w.name,''),
 		             COALESCE(u.channel_id,''), COALESCE(ch.name,''), COALESCE(u.fallback,0), COALESCE(u.status,'ok'), COALESCE(u.error,''),
-		             COALESCE(u.request_method,''), COALESCE(u.request_url,''), COALESCE(u.request_headers,''), COALESCE(u.request_body,''), COALESCE(u.ttft_fallback_model,'')
+		             COALESCE(u.request_method,''), COALESCE(u.request_url,''), COALESCE(u.request_headers,''), COALESCE(u.request_body,''), COALESCE(u.ttft_fallback_model,''),
+		             COALESCE(u.first_byte_ms,0), COALESCE(u.duration_ms,0)
 	      FROM usage_logs u
 	      LEFT JOIN users usr ON usr.id = u.user_id
 	      LEFT JOIN conversations c ON c.id = u.conversation_id
@@ -1306,7 +1310,8 @@ func AdminUsageRecords(ctx context.Context, db *sql.DB, f UsageFilter, limit, of
 			&r.ModelID, &r.Purpose, &r.InputTokens, &r.OutputTokens, &r.Cost, &r.Currency, &r.CreatedAt,
 			&r.Credits, &r.messageID,
 			&r.WorkspaceID, &r.WorkspaceName, &r.ChannelID, &r.ChannelName, &fb, &r.Status, &r.Error,
-			&r.RequestMethod, &r.RequestURL, &r.RequestHeaders, &r.RequestBody, &r.TTFTFallbackModel); err != nil {
+			&r.RequestMethod, &r.RequestURL, &r.RequestHeaders, &r.RequestBody, &r.TTFTFallbackModel,
+			&r.FirstByteMS, &r.DurationMS); err != nil {
 			return nil, err
 		}
 		r.ConversationDeleted = gone == 1

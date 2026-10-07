@@ -3,11 +3,13 @@ package llm
 import (
 	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestProviderRequestRecorderSanitizesHeadersBodyAndURL(t *testing.T) {
@@ -43,6 +45,20 @@ func TestProviderRequestRecorderSanitizesHeadersBodyAndURL(t *testing.T) {
 	}
 	if got.EstimatedInputTokens <= 0 {
 		t.Fatalf("input estimate = %d, want positive", got.EstimatedInputTokens)
+	}
+}
+
+func TestProviderRequestRecorderAttributesActualChannel(t *testing.T) {
+	rec := newProviderRequestRecorder()
+	ctx := contextWithProviderRequestRecorder(context.Background(), rec)
+	ctx = contextWithProviderRequestChannelIDs(ctx, "primary-channel", "fallback-channel")
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.example/v1/chat", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordProviderRequestAttempt(ctx, req, true)
+	if got := rec.snapshot().ChannelID; got != "fallback-channel" {
+		t.Fatalf("fallback snapshot channel = %q", got)
 	}
 }
 
@@ -195,5 +211,48 @@ func TestDoProviderRequestRecorderKeepsBodyReadable(t *testing.T) {
 	}
 	if got := rec.snapshot().Body; !strings.Contains(got, `"hello": "world"`) {
 		t.Fatalf("request body not captured: %s", got)
+	}
+}
+
+func TestProviderResponseBodyRecordsFirstByteAndTotalDuration(t *testing.T) {
+	rec := newProviderRequestRecorder()
+	ctx := contextWithProviderRequestRecorder(context.Background(), rec)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Error("test response writer does not support flushing")
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		flusher.Flush()
+		time.Sleep(15 * time.Millisecond)
+		_, _ = io.WriteString(w, "first\n")
+		flusher.Flush()
+		time.Sleep(15 * time.Millisecond)
+		_, _ = io.WriteString(w, "second\n")
+	}))
+	defer srv.Close()
+
+	resp, err := doProviderRequest(ctx, ModelInfo{BaseURL: srv.URL, APIKey: "k"}, new(atomic.Bool), func(baseURL, apiKey string) (*http.Request, error) {
+		return http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v1/chat", strings.NewReader(`{"hello":"world"}`))
+	})
+	if err != nil {
+		t.Fatalf("doProviderRequest: %v", err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	_ = resp.Body.Close()
+	if string(body) != "first\nsecond\n" {
+		t.Fatalf("response body = %q", body)
+	}
+
+	snapshot := rec.snapshot()
+	if snapshot.FirstByteMS <= 0 {
+		t.Fatalf("first byte duration = %dms, want positive", snapshot.FirstByteMS)
+	}
+	if snapshot.DurationMS < snapshot.FirstByteMS {
+		t.Fatalf("total duration = %dms, before first byte duration %dms", snapshot.DurationMS, snapshot.FirstByteMS)
 	}
 }

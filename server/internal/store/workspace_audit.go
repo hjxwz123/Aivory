@@ -43,15 +43,20 @@ type auditExecer interface {
 
 // WorkspaceAuditLog is one audit row enriched with the actor's display name.
 type WorkspaceAuditLog struct {
-	ID          string          `json:"id"`
-	WorkspaceID string          `json:"workspace_id"`
-	ActorUserID string          `json:"actor_user_id"`
-	ActorName   string          `json:"actor_name"`
-	Action      string          `json:"action"`
-	TargetType  string          `json:"target_type"`
-	TargetID    string          `json:"target_id"`
-	Metadata    json.RawMessage `json:"metadata"`
-	CreatedAt   int64           `json:"created_at"`
+	ID            string `json:"id"`
+	WorkspaceID   string `json:"workspace_id"`
+	WorkspaceName string `json:"workspace_name,omitempty"`
+	ActorUserID   string `json:"actor_user_id"`
+	ActorName     string `json:"actor_name"`
+	Action        string `json:"action"`
+	// Type is the high-level source/category used by the administrator audit
+	// view. Workspace-scoped entries are reported as "workspace"; it is empty
+	// when this type is returned by the workspace-specific endpoint.
+	Type       string          `json:"type,omitempty"`
+	TargetType string          `json:"target_type"`
+	TargetID   string          `json:"target_id"`
+	Metadata   json.RawMessage `json:"metadata"`
+	CreatedAt  int64           `json:"created_at"`
 }
 
 // recordWorkspaceAudit writes one audit row. Failures are returned so callers
@@ -74,10 +79,27 @@ func recordWorkspaceAudit(
 		}
 		raw = encoded
 	}
+	origin := AuditContext{ActorID: actorID, Source: "workspace"}
+	if audit := AuditContextFrom(ctx); audit != nil {
+		origin = *audit
+		if origin.ActorID != "" {
+			actorID = origin.ActorID
+		}
+	}
+	if origin.ActorName == "" {
+		if query, ok := ex.(interface {
+			QueryRowContext(context.Context, string, ...any) *sql.Row
+		}); ok {
+			_ = query.QueryRowContext(ctx, `SELECT name,role FROM users WHERE id=?`, actorID).Scan(&origin.ActorName, &origin.ActorRole)
+		}
+	}
+	now := time.Now()
 	_, err := ex.ExecContext(ctx,
-		`INSERT INTO workspace_audit_logs(id, workspace_id, actor_user_id, action, target_type, target_id, metadata, created_at)
-		 VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
-		genID("aud"), workspaceID, actorID, action, targetType, targetID, string(raw), time.Now().Unix())
+		`INSERT INTO workspace_audit_logs(id, workspace_id, actor_user_id, action, target_type, target_id, metadata, created_at,
+		 actor_name,actor_role,source,client_ip,user_agent,request_id,occurred_at_ms,method,route)
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		genID("aud"), workspaceID, actorID, action, targetType, targetID, string(raw), now.Unix(),
+		origin.ActorName, origin.ActorRole, origin.Source, origin.ClientIP, origin.UserAgent, origin.RequestID, now.UnixMilli(), origin.Method, origin.Route)
 	return err
 }
 
@@ -114,7 +136,7 @@ func ListWorkspaceAuditLogs(
 		return nil, ErrForbidden
 	}
 	rows, err := db.QueryContext(ctx,
-		`SELECT a.id, a.workspace_id, a.actor_user_id, COALESCE(u.name,''), a.action, a.target_type, a.target_id, a.metadata, a.created_at
+		`SELECT a.id, a.workspace_id, a.actor_user_id, COALESCE(NULLIF(a.actor_name,''),u.name,''), a.action, a.target_type, a.target_id, a.metadata, a.created_at
 		   FROM workspace_audit_logs a
 		   LEFT JOIN users u ON u.id=a.actor_user_id
 		  WHERE a.workspace_id=?

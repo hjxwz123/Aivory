@@ -571,6 +571,7 @@ func resetPasswordHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
+	setAuditActor(r, user)
 	invalidateAuthUser(d, user.ID)
 	if d.Cache != nil {
 		d.Cache.Publish("user:"+user.ID+":kill", "password_reset")
@@ -597,6 +598,7 @@ func loginHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
+	setAuditLoginTarget(r, req.Email)
 
 	// Slider-captcha gate (admin-toggleable, off by default). Checked BEFORE any
 	// account lookup so a captcha-less credential-stuffing run never reaches the
@@ -623,6 +625,9 @@ func loginHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		store.CheckPassword(dummyPasswordHash, req.Password)
 		writeError(w, 401, errInvalidCredentials)
 		return
+	}
+	if s := auditState(r); s != nil {
+		s.event.TargetID = user.ID
 	}
 	hash, err := store.PasswordFor(r.Context(), d.DB, user.ID)
 	if err != nil {
@@ -665,6 +670,9 @@ func logoutHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	if c, err := r.Cookie("refresh_token"); err == nil {
 		if claims, err := d.Auth.ParseRefresh(c.Value); err == nil {
+			if user, err := store.FindUserByID(r.Context(), d.DB, claims.UID); err == nil {
+				setAuditActor(r, user)
+			}
 			_, _ = store.RevokeUserSession(r.Context(), d.DB, claims.UID, claims.ID)
 		}
 	}
@@ -887,6 +895,7 @@ func finaliseSessionResponseWithOAuthGuard(
 		return
 	}
 	if loginMethod != "" {
+		setAuditActor(r, user)
 		recordSuccessfulLogin(d, r, user.ID, loginMethod)
 	}
 	// Carry the tier label + feature flags so the client renders the sidebar

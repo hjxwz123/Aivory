@@ -10,6 +10,8 @@ package llm
 import (
 	"encoding/json"
 	"sync/atomic"
+
+	"aivory/server/internal/requestheaders"
 )
 
 // UnifiedBlock is the canonical message-block shape stored in DB (§2.3-C).
@@ -194,27 +196,31 @@ type ToolAccessPolicy struct {
 
 // ModelInfo is the slim subset of store.Model the provider needs.
 type ModelInfo struct {
-	ID        string
-	RequestID string
-	Provider  string
-	Vision    bool
-	BaseURL   string
-	APIKey    string
-	APIFormat string
+	ID                         string
+	ChannelID                  string
+	ChannelAutoDisableTimeouts int
+	FallbackChannelID          string
+	RequestID                  string
+	Provider                   string
+	Vision                     bool
+	BaseURL                    string
+	APIKey                     string
+	Headers                    requestheaders.Headers
+	APIFormat                  string
 	// Fallback, when non-nil, is the backup endpoint retried when one complete
 	// primary provider request fails before that request emits user-visible output (request
 	// construction, transport, non-200 status, SSE
 	// error, malformed protocol, empty body, or interrupted body). Same provider
-	// family + format as the primary — only URL and key differ (§fallback
+	// family + format as the primary, with its own URL, key and headers (§fallback
 	// channel). nil = no fallback.
 	Fallback *ChannelCreds
 }
 
-// ChannelCreds is the alternate endpoint used for the fallback retry. Only the
-// base URL + API key differ from the primary channel.
+// ChannelCreds carries the fallback endpoint's own credentials and headers.
 type ChannelCreds struct {
 	BaseURL string
 	APIKey  string
+	Headers requestheaders.Headers
 }
 
 // UnifiedMessage is the chronological message used as conversation history.

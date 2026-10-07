@@ -42,6 +42,7 @@ import (
 	"aivory/server/internal/envcfg"
 	"aivory/server/internal/fileguard"
 	"aivory/server/internal/llm"
+	"aivory/server/internal/requestheaders"
 	"aivory/server/internal/sandbox"
 	"aivory/server/internal/store"
 	"aivory/server/internal/toolnames"
@@ -1612,6 +1613,59 @@ type imgInput struct {
 	InputImages    []string    `json:"input_images"`
 }
 
+type imageTTFTTrackerKey struct{}
+
+type imageTTFTTracker struct {
+	mu        sync.Mutex
+	threshold time.Duration
+	started   time.Time
+	received  bool
+	timedOut  bool
+}
+
+func (t *imageTTFTTracker) start() {
+	if t == nil || t.threshold <= 0 {
+		return
+	}
+	t.mu.Lock()
+	if t.started.IsZero() {
+		t.started = time.Now()
+	}
+	t.mu.Unlock()
+}
+
+func (t *imageTTFTTracker) responseReceived() {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.started.IsZero() {
+		return
+	}
+	t.received = true
+	if time.Since(t.started) >= t.threshold {
+		t.timedOut = true
+	}
+}
+
+func (t *imageTTFTTracker) timedOutResult() bool {
+	if t == nil {
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.received && !t.started.IsZero() && time.Since(t.started) >= t.threshold {
+		t.timedOut = true
+	}
+	return t.timedOut
+}
+
+func imageTTFTFromContext(ctx context.Context) *imageTTFTTracker {
+	tracker, _ := ctx.Value(imageTTFTTrackerKey{}).(*imageTTFTTracker)
+	return tracker
+}
+
 func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.ToolContext) (string, []llm.Citation, error) {
 	var in imgInput
 	_ = json.Unmarshal(input, &in)
@@ -1697,6 +1751,9 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	channel, err := store.GetChannel(ctx, t.db, model.ChannelID)
 	if err != nil {
 		return "", nil, err
+	}
+	if !channel.Enabled || channel.AutoDisabledUntil > time.Now().Unix() {
+		return "", nil, &llm.ToolUserError{Message: "the image channel is temporarily unavailable"}
 	}
 	if tc != nil && tc.ImageEdit != nil {
 		if in.Action != "edit" || llm.ValidateImageEditRequest(ctx, t.db, tc.ConvID, tc.UserID, tc.MessageID, model, tc.ImageEdit) != nil {
@@ -1802,18 +1859,28 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 
 	includeRequestBody := imageRequestBodyLoggingEnabled(t.db)
 	captureSuccessRequest := imageSuccessRequestLoggingEnabled(t.db)
-	runAttempt := func(attemptChannel *store.Channel) ([]imageBytes, llm.ProviderRequestDiagnostics, error) {
+	runAttempt := func(attemptChannel *store.Channel, role string) ([]imageBytes, llm.ProviderRequestDiagnostics, error, bool) {
 		var diagnostics llm.ProviderRequestDiagnostics
+		var ttft *imageTTFTTracker
+		attemptCtx := genCtx
+		if model.FallbackTTFTSec > 0 && (model.AutoDisableTimeouts > 0 || attemptChannel.AutoDisableTimeouts > 0) {
+			ttft = &imageTTFTTracker{threshold: time.Duration(model.FallbackTTFTSec) * time.Second}
+			attemptCtx = context.WithValue(genCtx, imageTTFTTrackerKey{}, ttft)
+		}
 		capture := func(request *http.Request) {
+			if ttft != nil {
+				ttft.start()
+			}
+			requestheaders.Apply(request, attemptChannel.Headers)
 			diagnostics = llm.CaptureProviderRequestDiagnostics(request, includeRequestBody)
 		}
 		var generated []imageBytes
 		var attemptErr error
 		switch imageChannelFamily(attemptChannel.Type) {
 		case "gemini":
-			generated, attemptErr = geminiGenerateImages(genCtx, attemptChannel.BaseURL, attemptChannel.APIKey, model.RequestID, providerInput, inputImgs, imageRequestParams, capture)
+			generated, attemptErr = geminiGenerateImages(attemptCtx, attemptChannel.BaseURL, attemptChannel.APIKey, model.RequestID, providerInput, inputImgs, imageRequestParams, capture)
 		case "openai":
-			generated, attemptErr = openaiGenerateImages(genCtx, attemptChannel.BaseURL, attemptChannel.APIKey, model.RequestID, providerInput, inputImgs, imageRequestParams, capture)
+			generated, attemptErr = openaiGenerateImages(attemptCtx, attemptChannel.BaseURL, attemptChannel.APIKey, model.RequestID, providerInput, inputImgs, imageRequestParams, capture)
 		default:
 			attemptErr = fmt.Errorf("image generation not supported for channel type %q", attemptChannel.Type)
 		}
@@ -1824,10 +1891,14 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 				attemptErr = errors.New("the image model returned no images")
 			}
 		}
-		return generated, diagnostics, attemptErr
+		timedOut := ttft != nil && ttft.timedOutResult()
+		if diagnostics.Method != "" {
+			recordImageProviderHealth(ctx, t.db, model, attemptChannel.ID, role, attemptErr, timedOut)
+		}
+		return generated, diagnostics, attemptErr, timedOut
 	}
 
-	images, requestDiagnostics, err := runAttempt(channel)
+	images, requestDiagnostics, err, _ := runAttempt(channel, "regular")
 	servedChannel := channel
 	usedFallback := false
 	if err != nil {
@@ -1835,7 +1906,7 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		if fallbackChannel != nil && imageFallbackAllowed(ctx, genCtx, err) {
 			servedChannel = fallbackChannel
 			usedFallback = true
-			images, requestDiagnostics, err = runAttempt(fallbackChannel)
+			images, requestDiagnostics, err, _ = runAttempt(fallbackChannel, "fallback")
 			if err != nil {
 				t.logImageProviderFailure(ctx, tc, model, fallbackChannel.ID, true, requestDiagnostics, err)
 			}
@@ -1946,7 +2017,10 @@ func (t *imageGenerateTool) storedImageParamPicks(ctx context.Context, tc *llm.T
 func (t *imageGenerateTool) resolveImageModel(ctx context.Context, tc *llm.ToolContext) (*store.Model, error) {
 	if tc != nil && tc.ImageModelID != "" {
 		if m, err := store.GetModel(ctx, t.db, tc.ImageModelID); err == nil && m.Enabled && m.Kind == "image" {
-			return m, nil
+			if selected, ok, err := t.selectImageModelChannel(ctx, m); err == nil && ok {
+				return selected, nil
+			}
+			return nil, &llm.ToolUserError{Message: "the selected image model has no available channel"}
 		}
 	}
 	models, err := store.ListModels(ctx, t.db, "image", true)
@@ -1956,8 +2030,37 @@ func (t *imageGenerateTool) resolveImageModel(ctx context.Context, tc *llm.ToolC
 	if len(models) == 0 {
 		return nil, &llm.ToolUserError{Message: "no image model configured — an admin must add one (kind=image)"}
 	}
-	m := models[0]
-	return &m, nil
+	for i := range models {
+		if selected, ok, err := t.selectImageModelChannel(ctx, &models[i]); err == nil && ok {
+			return selected, nil
+		}
+	}
+	return nil, &llm.ToolUserError{Message: "no image model has an available channel"}
+}
+
+func (t *imageGenerateTool) selectImageModelChannel(ctx context.Context, model *store.Model) (*store.Model, bool, error) {
+	if model == nil {
+		return nil, false, nil
+	}
+	selected, err := store.SelectModelChannelID(ctx, t.db, model.ID, model.RequestID, "regular", "")
+	if err == nil && selected != "" {
+		resolved := *model
+		resolved.ChannelID = selected
+		return &resolved, true, nil
+	}
+	bindings, err := store.ListModelChannelBindings(ctx, t.db, model.ID, "regular")
+	if err != nil {
+		return nil, false, err
+	}
+	if len(bindings) > 0 {
+		return nil, false, nil
+	}
+	channel, err := store.GetChannel(ctx, t.db, model.ChannelID)
+	if err != nil || !channel.Enabled || channel.AutoDisabledUntil > time.Now().Unix() {
+		return nil, false, err
+	}
+	resolved := *model
+	return &resolved, true, nil
 }
 
 type imageBytes struct {
@@ -1977,27 +2080,38 @@ func imageChannelFamily(channelType string) string {
 }
 
 func (t *imageGenerateTool) resolveImageFallbackChannel(ctx context.Context, model *store.Model, primary *store.Channel) *store.Channel {
-	fallbackID := strings.TrimSpace(model.FallbackChannelID)
-	if fallbackID == "" || fallbackID == primary.ID {
-		return nil
-	}
-	fallback, err := store.GetChannel(ctx, t.db, fallbackID)
+	bindings, err := store.ListModelChannelBindings(ctx, t.db, model.ID, "fallback")
 	if err != nil {
-		if t.logger != nil {
-			t.logger.Printf("image: model %q fallback channel %q not found — ignoring", model.ID, fallbackID)
-		}
 		return nil
 	}
-	sameFamily := imageChannelFamily(primary.Type) != "" && imageChannelFamily(primary.Type) == imageChannelFamily(fallback.Type)
-	sameFormat := strings.EqualFold(strings.TrimSpace(primary.APIFormat), strings.TrimSpace(fallback.APIFormat))
-	if !fallback.Enabled || !sameFamily || !sameFormat || strings.TrimSpace(fallback.APIKey) == "" {
-		if t.logger != nil {
-			t.logger.Printf("image: model %q fallback channel %q unusable (enabled=%v type=%q/%q format=%q/%q hasKey=%v) — ignoring",
-				model.ID, fallback.ID, fallback.Enabled, fallback.Type, primary.Type, fallback.APIFormat, primary.APIFormat, fallback.APIKey != "")
+	ids := make([]string, 0, len(bindings)+1)
+	if len(bindings) > 0 {
+		for _, binding := range bindings {
+			if binding.ChannelID != primary.ID && binding.DisabledUntil <= time.Now().Unix() {
+				ids = append(ids, binding.ChannelID)
+			}
 		}
-		return nil
+	} else if fallbackID := strings.TrimSpace(model.FallbackChannelID); fallbackID != "" && fallbackID != primary.ID {
+		ids = append(ids, fallbackID)
 	}
-	return fallback
+	for _, fallbackID := range ids {
+		if supported, err := store.ChannelSupportsRequestID(ctx, t.db, fallbackID, model.RequestID); err != nil || !supported {
+			continue
+		}
+		fallback, err := store.GetChannel(ctx, t.db, fallbackID)
+		if err != nil {
+			continue
+		}
+		sameFamily := imageChannelFamily(primary.Type) != "" && imageChannelFamily(primary.Type) == imageChannelFamily(fallback.Type)
+		sameFormat := strings.EqualFold(strings.TrimSpace(primary.APIFormat), strings.TrimSpace(fallback.APIFormat))
+		if fallback.Enabled && fallback.AutoDisabledUntil <= time.Now().Unix() && sameFamily && sameFormat && strings.TrimSpace(fallback.APIKey) != "" {
+			return fallback
+		}
+		if t.logger != nil {
+			t.logger.Printf("image: model %q fallback channel %q unusable — trying next", model.ID, fallbackID)
+		}
+	}
+	return nil
 }
 
 func imageFallbackAllowed(parentCtx, attemptCtx context.Context, err error) bool {
@@ -2053,6 +2167,34 @@ func (t *imageGenerateTool) logImageProviderFailure(
 	if err := store.LogUsageAnalytics(logCtx, t.db, row); err != nil && t.logger != nil {
 		t.logger.Printf("image: usage error log write failed (msg=%s channel=%s): %v", tc.MessageID, channelID, err)
 	}
+}
+
+func recordImageProviderHealth(ctx context.Context, db *sql.DB, model *store.Model, channelID, role string, requestErr error, ttftTimedOut bool) {
+	if model == nil || db == nil || channelID == "" {
+		return
+	}
+	if errors.Is(requestErr, context.Canceled) && !ttftTimedOut {
+		return
+	}
+	if ttftTimedOut {
+		if model.FallbackTTFTSec > 0 && model.AutoDisableTimeouts > 0 {
+			_ = store.RecordModelChannelResult(ctx, db, model.ID, channelID, role, "timeout", model.AutoDisableTimeouts, model.AutoDisableMinutes)
+		}
+		_ = store.RecordChannelFailure(ctx, db, channelID, "timeout")
+		return
+	}
+	if requestErr != nil {
+		if errors.Is(requestErr, context.DeadlineExceeded) {
+			return
+		}
+		if model.AutoDisableErrors > 0 {
+			_ = store.RecordModelChannelResult(ctx, db, model.ID, channelID, role, "error", model.AutoDisableErrors, model.AutoDisableMinutes)
+		}
+		_ = store.RecordChannelFailure(ctx, db, channelID, "error")
+		return
+	}
+	_ = store.ResetChannelCounters(ctx, db, channelID)
+	_ = store.ResetModelChannelCounters(ctx, db, model.ID, channelID, role)
 }
 
 func truncateImageProviderError(message string) string {
@@ -2476,6 +2618,9 @@ func geminiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 	req.Header.Set("content-type", "application/json")
 	notifyImageRequestObservers(req, requestObservers)
 	resp, err := toolHTTPClient.Do(req)
+	if resp != nil {
+		imageTTFTFromContext(ctx).responseReceived()
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -2644,6 +2789,9 @@ func openaiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 	req.Header.Set("authorization", "Bearer "+apiKey)
 	notifyImageRequestObservers(req, requestObservers)
 	resp, err := toolHTTPClient.Do(req)
+	if resp != nil {
+		imageTTFTFromContext(ctx).responseReceived()
+	}
 	if err != nil {
 		return nil, err
 	}

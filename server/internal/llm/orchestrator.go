@@ -1747,7 +1747,7 @@ type RunResult struct {
 // provider HTTP call, so it measures provider API request -> first response
 // byte and excludes RAG retrieval, context assembly, credit preflight and local
 // payload construction. If the upstream sends NO BYTES within the
-// admin-configured `fallback_ttft_sec`, the connection is cut and the SAME
+// model-configured `fallback_ttft_sec`, the connection is cut and the SAME
 // assistant message is re-generated with the admin-configured
 // `fallback_model_id` — transparently, since the user has only seen
 // `message_start` (no text yet).
@@ -1763,7 +1763,9 @@ type RunResult struct {
 // Only triggers before the first byte (never mid-stream → no visible
 // restart), and falls back at most once (the fallback runs without a
 // watchdog). Disabled — and zero overhead, a plain provider.Stream — unless
-// both settings are present.
+// the model timeout is present and either a model fallback or timeout
+// auto-disable policy is configured. With only auto-disable enabled the
+// watchdog observes the first byte without cancelling the response.
 func (o *Orchestrator) streamWithFallback(
 	ctx context.Context,
 	provReq UnifiedChatRequest,
@@ -1772,24 +1774,49 @@ func (o *Orchestrator) streamWithFallback(
 	primaryModelID string,
 	onEvent func(SseEvent),
 	servedFallbackModel *string,
+	ttftTimedOut *bool,
 ) (*UnifiedResult, error) {
 	ctx = contextWithSearchOnly(ctx, provReq.SearchOnly)
-	ttft := settingInt(o.db, "fallback_ttft_sec")
+	ctx = contextWithProviderRequestChannelIDs(ctx, provReq.Model.ChannelID, provReq.Model.FallbackChannelID)
+	ttft, autoDisableTimeouts := modelTTFTPolicy(o.db, primaryModelID)
+	// A channel may opt into timeout observation independently of the model's
+	// binding policy. The model still supplies the TTFT seconds; the channel
+	// supplies the consecutive-timeout threshold.
+	if provReq.Model.ChannelAutoDisableTimeouts > 0 {
+		autoDisableTimeouts = provReq.Model.ChannelAutoDisableTimeouts
+	}
 	fbID := settingStr(o.db, "fallback_model_id")
-	if ttft <= 0 || fbID == "" || fbID == primaryModelID {
+	if ttft <= 0 {
+		return provider.Stream(ctx, provReq, runner, onEvent)
+	}
+	modelFallbackEnabled := fbID != "" && fbID != primaryModelID
+	observeOnly := !modelFallbackEnabled && autoDisableTimeouts > 0
+	if !modelFallbackEnabled && !observeOnly {
 		return provider.Stream(ctx, provReq, runner, onEvent)
 	}
 
 	wdCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var stalled atomic.Bool
-	watchdog := newProviderTTFTWatchdog(time.Duration(ttft)*time.Second, cancel, &stalled)
+	watchdogCancel := cancel
+	if observeOnly {
+		// Without a configured model fallback, keep the current response alive
+		// and use the watchdog only to record a late first byte.
+		watchdogCancel = nil
+	}
+	watchdog := newProviderTTFTWatchdog(time.Duration(ttft)*time.Second, watchdogCancel, &stalled)
 	defer watchdog.stop()
 	wdCtx = contextWithProviderTTFTWatchdog(wdCtx, watchdog)
 
 	result, err := provider.Stream(wdCtx, provReq, runner, onEvent)
 	// Healthy completion, or a real user cancel on the PARENT ctx → return as-is.
 	if !stalled.Load() {
+		return result, err
+	}
+	if ttftTimedOut != nil {
+		*ttftTimedOut = true
+	}
+	if observeOnly {
 		return result, err
 	}
 	// Watchdog fired. Only switch when the upstream produced nothing — never
@@ -1813,7 +1840,8 @@ func (o *Orchestrator) streamWithFallback(
 	o.logger.Printf("llm: upstream model %q produced no output in %ds — switching to fallback %q", primaryModelID, ttft, fbID)
 	// Single attempt, no watchdog → no chaining. Streams into the SAME onEvent,
 	// so the frontend just keeps filling the existing (empty) message.
-	return fbProvider.Stream(ctx, fbReq, toolRunnerForModelRequest(runner, fbID, fbReq.Tools, fbReq.SystemTools), onEvent)
+	fallbackCtx := contextWithProviderRequestChannelIDs(ctx, fbReq.Model.ChannelID, fbReq.Model.FallbackChannelID)
+	return fbProvider.Stream(fallbackCtx, fbReq, toolRunnerForModelRequest(runner, fbID, fbReq.Tools, fbReq.SystemTools), onEvent)
 }
 
 // buildFallbackRequest clones the in-flight request but swaps in the fallback
@@ -1897,11 +1925,19 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 			return base, nil, "", err
 		}
 	}
+	selectedChannelID, selectErr := selectRegularModelChannelID(ctx, o.db, m)
+	if selectErr != nil {
+		if strings.Contains(selectErr.Error(), "disabled") {
+			return base, nil, "", errors.New("fallback channel is disabled")
+		}
+		return base, nil, "", errors.New("fallback model has no available channel")
+	}
+	m.ChannelID = selectedChannelID
 	ch, err := store.GetChannel(ctx, o.db, m.ChannelID)
 	if err != nil {
 		return base, nil, "", err
 	}
-	if !ch.Enabled {
+	if !ch.Enabled || ch.AutoDisabledUntil > time.Now().Unix() {
 		return base, nil, "", errors.New("fallback channel is disabled")
 	}
 	prov, err := o.reg.Get(ch.Type)
@@ -1911,8 +1947,9 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 	req := base // shallow copy; slices (history/tools/…) are read-only during the stream
 	req.ToolAccessPolicy = fallbackAccessPolicy
 	req.Model = ModelInfo{
-		ID: m.ID, RequestID: m.RequestID, Provider: ch.Type, Vision: m.Vision,
-		BaseURL: ch.BaseURL, APIKey: ch.APIKey, APIFormat: ch.APIFormat,
+		ID: m.ID, ChannelID: ch.ID, ChannelAutoDisableTimeouts: ch.AutoDisableTimeouts,
+		RequestID: m.RequestID, Provider: ch.Type, Vision: m.Vision,
+		BaseURL: ch.BaseURL, APIKey: ch.APIKey, APIFormat: ch.APIFormat, Headers: ch.Headers,
 	}
 	req.Stream = m.Stream
 	req.ParamControls = m.ParamControls
@@ -2209,27 +2246,186 @@ func (o *Orchestrator) resolveFallbackChannel(ctx context.Context, model *store.
 }
 
 func resolveFallbackChannelForModel(ctx context.Context, db *sql.DB, logger *log.Logger, model *store.Model, primary *store.Channel) (*ChannelCreds, string) {
-	fid := strings.TrimSpace(model.FallbackChannelID)
-	if fid == "" || fid == model.ChannelID {
-		return nil, ""
-	}
-	fc, err := store.GetChannel(ctx, db, fid)
-	if err != nil {
-		if logger != nil {
-			logger.Printf("llm: model %q fallback channel %q not found — ignoring", model.ID, fid)
+	bindings, _ := store.ListModelChannelBindings(ctx, db, model.ID, "fallback")
+	ids := make([]string, 0, len(bindings))
+	if len(bindings) > 0 {
+		for _, binding := range bindings {
+			if binding.ChannelID == primary.ID || (binding.DisabledUntil != 0 && binding.DisabledUntil > time.Now().Unix()) {
+				continue
+			}
+			// Bindings created before capability enforcement may still exist on
+			// upgraded installations. Keep them visible for repair, but never
+			// send a request to a channel that does not advertise this request_id.
+			if supported, err := store.ChannelSupportsRequestID(ctx, db, binding.ChannelID, model.RequestID); err != nil || !supported {
+				continue
+			}
+			ids = append(ids, binding.ChannelID)
 		}
-		return nil, ""
 	}
-	sameProvider := providerIDForChannelType(fc.Type) != "" && providerIDForChannelType(fc.Type) == providerIDForChannelType(primary.Type)
-	sameFormat := strings.EqualFold(strings.TrimSpace(fc.APIFormat), strings.TrimSpace(primary.APIFormat))
-	if !fc.Enabled || !sameProvider || !sameFormat || fc.APIKey == "" {
-		if logger != nil {
-			logger.Printf("llm: model %q fallback channel %q unusable (enabled=%v type=%q/%q format=%q/%q hasKey=%v) — ignoring",
-				model.ID, fid, fc.Enabled, fc.Type, primary.Type, fc.APIFormat, primary.APIFormat, fc.APIKey != "")
+	// Keep the legacy column as a compatibility bridge when an older client
+	// updates fallback_channel_id directly without creating a binding row. This
+	// is also safe when binding rows exist for another role.
+	if len(bindings) == 0 {
+		if fid := strings.TrimSpace(model.FallbackChannelID); fid != "" && fid != primary.ID {
+			// A model without binding rows is a legacy row created after startup
+			// migration (or imported by an older backup). Preserve its explicit
+			// fallback behavior; migrated rows get capability-checked bindings.
+			ids = append(ids, fid)
 		}
-		return nil, ""
 	}
-	return &ChannelCreds{BaseURL: fc.BaseURL, APIKey: fc.APIKey}, fc.ID
+	for _, fid := range ids {
+		fc, err := store.GetChannel(ctx, db, fid)
+		if err != nil {
+			if logger != nil {
+				logger.Printf("llm: model %q fallback channel %q not found — trying next", model.ID, fid)
+			}
+			continue
+		}
+		sameProvider := providerIDForChannelType(fc.Type) != "" && providerIDForChannelType(fc.Type) == providerIDForChannelType(primary.Type)
+		sameFormat := strings.EqualFold(strings.TrimSpace(fc.APIFormat), strings.TrimSpace(primary.APIFormat))
+		if fc.Enabled && fc.AutoDisabledUntil <= time.Now().Unix() && sameProvider && sameFormat && fc.APIKey != "" {
+			return &ChannelCreds{BaseURL: fc.BaseURL, APIKey: fc.APIKey, Headers: fc.Headers}, fc.ID
+		}
+		if logger != nil {
+			logger.Printf("llm: model %q fallback channel %q unusable — trying next", model.ID, fid)
+		}
+	}
+	return nil, ""
+}
+
+func modelTTFTSeconds(db *sql.DB, modelID string) int {
+	seconds, _ := modelTTFTPolicy(db, modelID)
+	return seconds
+}
+
+func modelAutoDisableTimeouts(db *sql.DB, modelID string) int {
+	_, count := modelTTFTPolicy(db, modelID)
+	return count
+}
+
+func modelTTFTPolicy(db *sql.DB, modelID string) (int, int) {
+	var seconds, timeoutThreshold int
+	if err := db.QueryRow(`SELECT fallback_ttft_sec, auto_disable_timeouts FROM models WHERE id=?`, modelID).Scan(&seconds, &timeoutThreshold); err != nil {
+		return 0, 0
+	}
+	if seconds < 0 {
+		seconds = 0
+	}
+	if timeoutThreshold < 0 || seconds == 0 {
+		timeoutThreshold = 0
+	}
+	return seconds, timeoutThreshold
+}
+
+// recordModelChannelHealth updates both the model binding and the channel-wide
+// health state. The recorder already distinguishes primary and fallback HTTP
+// attempts, so all writes happen after streaming and never add output delay.
+func (o *Orchestrator) recordModelChannelHealth(ctx context.Context, model *store.Model, snapshots []providerRequestSnapshot, ttftFallbackModel string, ttftTimedOut bool, requestErr error, fallbackChannelID string) {
+	if model == nil {
+		return
+	}
+	if ctx != nil && ctx.Err() != nil {
+		return
+	}
+	if (errors.Is(requestErr, context.Canceled) || errors.Is(requestErr, context.DeadlineExceeded)) && !ttftTimedOut {
+		return
+	}
+	primaryFailed := false
+	fallbackFailed := false
+	primaryAttempted := false
+	fallbackAttempted := false
+	for index, snapshot := range snapshots {
+		if strings.TrimSpace(ttftFallbackModel) != "" && index > 0 {
+			continue
+		}
+		if snapshot.Fallback {
+			fallbackAttempted = true
+		} else {
+			primaryAttempted = true
+		}
+	}
+	var timedOutFallback bool
+	timedOutIndex := -1
+	timeoutChannelID := model.ChannelID
+	if ttftTimedOut && len(snapshots) > 0 {
+		// The watchdog observes the first upstream request. A transparent model
+		// fallback may append more snapshots after the timed-out attempt.
+		timedOutIndex = 0
+		timedOutFallback = snapshots[timedOutIndex].Fallback
+		if snapshots[timedOutIndex].ChannelID != "" {
+			timeoutChannelID = snapshots[timedOutIndex].ChannelID
+		} else if timedOutFallback && fallbackChannelID != "" {
+			timeoutChannelID = fallbackChannelID
+		}
+	}
+	for index, snapshot := range snapshots {
+		if strings.TrimSpace(ttftFallbackModel) != "" && index > 0 {
+			continue
+		}
+		if strings.TrimSpace(snapshot.Error) == "" {
+			continue
+		}
+		if index == timedOutIndex {
+			continue
+		}
+		if snapshot.Fallback {
+			fallbackFailed = true
+		} else {
+			primaryFailed = true
+		}
+	}
+	if len(snapshots) == 0 && requestErr != nil && !errors.Is(requestErr, context.Canceled) && !errors.Is(requestErr, context.DeadlineExceeded) {
+		// Some provider adapters can fail before their recorder is armed. The
+		// selected model channel is still the only possible attribution, so keep
+		// channel and binding policies consistent in that case.
+		if model.AutoDisableErrors > 0 {
+			_ = store.RecordModelChannelResult(ctx, o.db, model.ID, model.ChannelID, "regular", "error", model.AutoDisableErrors, model.AutoDisableMinutes)
+		}
+		_ = store.RecordChannelFailure(ctx, o.db, model.ChannelID, "error")
+	}
+	timedOut := ttftTimedOut && model.FallbackTTFTSec > 0
+	if timedOut {
+		role := "regular"
+		if timedOutFallback {
+			role = "fallback"
+		}
+		if model.AutoDisableTimeouts > 0 {
+			_ = store.RecordModelChannelResult(ctx, o.db, model.ID, timeoutChannelID, role, "timeout", model.AutoDisableTimeouts, model.AutoDisableMinutes)
+		}
+		_ = store.RecordChannelFailure(ctx, o.db, timeoutChannelID, "timeout")
+	}
+	if primaryFailed && model.AutoDisableErrors > 0 {
+		_ = store.RecordModelChannelResult(ctx, o.db, model.ID, model.ChannelID, "regular", "error", model.AutoDisableErrors, model.AutoDisableMinutes)
+	}
+	if fallbackFailed && fallbackChannelID != "" && model.AutoDisableErrors > 0 {
+		_ = store.RecordModelChannelResult(ctx, o.db, model.ID, fallbackChannelID, "fallback", "error", model.AutoDisableErrors, model.AutoDisableMinutes)
+	}
+	// Channel policy is independent of model policy. Attribute each actual
+	// failed attempt to the channel that carried it, including failures followed
+	// by a successful fallback attempt.
+	for index, snapshot := range snapshots {
+		if index == timedOutIndex {
+			continue
+		}
+		channelID := snapshot.ChannelID
+		if channelID == "" {
+			channelID = model.ChannelID
+		}
+		if snapshot.ChannelID == "" && snapshot.Fallback && fallbackChannelID != "" {
+			channelID = fallbackChannelID
+		}
+		if strings.TrimSpace(snapshot.Error) != "" {
+			_ = store.RecordChannelFailure(ctx, o.db, channelID, "error")
+			continue
+		}
+		_ = store.ResetChannelCounters(ctx, o.db, channelID)
+	}
+	if requestErr == nil && primaryAttempted && !primaryFailed && !timedOut {
+		_ = store.ResetModelChannelCounters(ctx, o.db, model.ID, model.ChannelID, "regular")
+	}
+	if requestErr == nil && fallbackAttempted && !fallbackFailed && !(timedOut && timedOutFallback) {
+		_ = store.ResetModelChannelCounters(ctx, o.db, model.ID, fallbackChannelID, "fallback")
+	}
 }
 
 // truncErr caps a raw provider error for storage on the admin usage row — an
@@ -2353,6 +2549,8 @@ type requestUsageRow struct {
 	Usage              Usage
 	Cost               float64
 	Credits            float64
+	FirstByteMS        int64
+	DurationMS         int64
 	Method             string
 	URL                string
 	Header             string
@@ -2390,6 +2588,13 @@ func perRequestUsageRows(snaps []providerRequestSnapshot, model *store.Model, to
 			row.Fallback = last.Fallback
 			row.ChannelAttribution = true
 		}
+		if len(withUsage) > 0 {
+			row.FirstByteMS = withUsage[len(withUsage)-1].FirstByteMS
+			row.DurationMS = withUsage[len(withUsage)-1].DurationMS
+		} else {
+			row.FirstByteMS = last.FirstByteMS
+			row.DurationMS = last.DurationMS
+		}
 		if includeReq {
 			row.Method, row.URL, row.Header, row.Body = last.Method, last.URL, last.Header, last.Body
 		}
@@ -2398,7 +2603,10 @@ func perRequestUsageRows(snaps []providerRequestSnapshot, model *store.Model, to
 	rows := make([]requestUsageRow, len(withUsage))
 	summed := Usage{}
 	for i, s := range withUsage {
-		rows[i] = requestUsageRow{Usage: s.Usage, Fallback: s.Fallback, ChannelAttribution: true}
+		rows[i] = requestUsageRow{
+			Usage: s.Usage, Fallback: s.Fallback, ChannelAttribution: true,
+			FirstByteMS: s.FirstByteMS, DurationMS: s.DurationMS,
+		}
 		if includeReq {
 			rows[i].Method, rows[i].URL, rows[i].Header, rows[i].Body = s.Method, s.URL, s.Header, s.Body
 		}
@@ -2488,6 +2696,8 @@ func providerFailureUsageLogs(snaps []providerRequestSnapshot, base store.UsageL
 		row.Cost = 0
 		row.Credits = 0
 		row.Status = "error"
+		row.FirstByteMS = snap.FirstByteMS
+		row.DurationMS = snap.DurationMS
 		row.Error = snap.Error
 		row.RequestMethod = snap.Method
 		row.RequestURL = snap.URL
@@ -2685,12 +2895,23 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		// The explicit search preference belongs to the disabled/search-only mode.
 		req.ForceWebSearch = false
 	}
+	// Resolve a usable regular binding once per turn. The selected channel stays
+	// sticky through provider tool rounds; the provider's existing fallback path
+	// then handles a failed attempt without re-randomizing the request.
+	selectedChannelID, selectErr := selectRegularModelChannelID(ctx, o.db, model)
+	if selectErr != nil {
+		return nil, selectErr
+	}
+	model.ChannelID = selectedChannelID
 	channel, err := store.GetChannel(ctx, o.db, model.ChannelID)
 	if err != nil {
 		return nil, err
 	}
 	if !channel.Enabled {
 		return nil, errors.New("channel is disabled")
+	}
+	if channel.AutoDisabledUntil > time.Now().Unix() {
+		return nil, errors.New("channel is temporarily auto-disabled")
 	}
 	if req.ReuseExistingUserMessage {
 		if existing, loadErr := store.GetMessage(ctx, o.db, req.ParentID); loadErr == nil && existing.ConversationID == conv.ID {
@@ -3867,14 +4088,18 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		SystemPromptOptions: &systemOpts,
 		History:             uHist,
 		Model: ModelInfo{
-			ID:        model.ID,
-			RequestID: model.RequestID,
-			Provider:  channel.Type,
-			Vision:    model.Vision,
-			BaseURL:   channel.BaseURL,
-			APIKey:    channel.APIKey,
-			APIFormat: channel.APIFormat,
-			Fallback:  fallbackCreds,
+			ID:                         model.ID,
+			ChannelID:                  model.ChannelID,
+			ChannelAutoDisableTimeouts: channel.AutoDisableTimeouts,
+			FallbackChannelID:          fallbackChannelID,
+			RequestID:                  model.RequestID,
+			Provider:                   channel.Type,
+			Vision:                     model.Vision,
+			BaseURL:                    channel.BaseURL,
+			APIKey:                     channel.APIKey,
+			Headers:                    channel.Headers,
+			APIFormat:                  channel.APIFormat,
+			Fallback:                   fallbackCreds,
 		},
 		Tools:                   toolDefs,
 		SystemTools:             toolDefNameSet(systemToolDefs),
@@ -4027,14 +4252,16 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// models mid-turn, so every usage row for the turn can be marked "timeout
 	// fallback" in admin (distinct from the same-model backup-channel `fallback`).
 	var ttftFallbackModel string
+	var ttftTimedOut bool
 	if req.Mode == ModeDeepResearch {
 		// Deep Research: plan → multi-round web search + source reading → verify
 		// → comprehensive cited report. Returns the same UnifiedResult shape, so
 		// all finalize/persist/usage/done logic below is path-agnostic.
 		result, err = o.runDeepResearch(providerCtx, provReq, runner, provider, providerEvents, conv, assistantMsg)
 	} else {
-		result, err = o.streamWithFallback(providerCtx, provReq, providerRunner, provider, model.ID, providerEvents, &ttftFallbackModel)
+		result, err = o.streamWithFallback(providerCtx, provReq, providerRunner, provider, model.ID, providerEvents, &ttftFallbackModel, &ttftTimedOut)
 	}
+	o.recordModelChannelHealth(ctx, model, reqRecorder.snapshots(), ttftFallbackModel, ttftTimedOut, err, fallbackChannelID)
 	if result != nil && runner.ctx.citationIndexes != nil {
 		for i := range result.Citations {
 			result.Citations[i] = runner.ctx.citationIndexes.normalize(result.Citations[i])
@@ -4192,6 +4419,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 						InputTokens: rr.Usage.InputTokens, OutputTokens: rr.Usage.OutputTokens,
 						CacheReadTokens: rr.Usage.CacheReadTokens, CacheWriteTokens: rr.Usage.CacheWriteTokens,
 						Cost: rr.Cost, Currency: model.Currency,
+						FirstByteMS: rr.FirstByteMS, DurationMS: rr.DurationMS,
 					}); billingErr != nil {
 						return nil, persistStoppedBillingFailure(stopTurnTotal, fmt.Errorf("record stopped-turn billing: %w", billingErr))
 					}
@@ -4249,6 +4477,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 						Credits:           rr.Credits,
 						ChannelID:         requestChannelID,
 						Fallback:          requestFallback,
+						FirstByteMS:       rr.FirstByteMS,
+						DurationMS:        rr.DurationMS,
 						TTFTFallbackModel: ttftFallbackModel,
 						RequestMethod:     rr.Method,
 						RequestURL:        rr.URL,
@@ -4287,6 +4517,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 					MessageID: assistantMsg.ID, ModelID: model.ID, Purpose: "chat", Currency: model.Currency,
 					ChannelID: servedChannelID, Fallback: usedFallback, TTFTFallbackModel: ttftFallbackModel, Status: "error",
 					Error:         truncErr(err.Error()),
+					FirstByteMS:   reqSnapshot.FirstByteMS,
+					DurationMS:    reqSnapshot.DurationMS,
 					RequestMethod: reqSnapshot.Method, RequestURL: reqSnapshot.URL,
 					RequestHeaders: reqSnapshot.Header, RequestBody: reqSnapshot.Body,
 				})
@@ -4383,6 +4615,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 				// diagnose it on /admin/usage. It's the same detail we log server-side and
 				// deliberately withhold from the user (§B5); it's admin-only on the wire.
 				Error:          truncErr(err.Error()),
+				FirstByteMS:    reqSnapshot.FirstByteMS,
+				DurationMS:     reqSnapshot.DurationMS,
 				RequestMethod:  reqSnapshot.Method,
 				RequestURL:     reqSnapshot.URL,
 				RequestHeaders: reqSnapshot.Header,
@@ -4550,6 +4784,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			Credits:           rr.Credits,
 			ChannelID:         requestChannelID,
 			Fallback:          requestFallback,
+			FirstByteMS:       rr.FirstByteMS,
+			DurationMS:        rr.DurationMS,
 			TTFTFallbackModel: ttftFallbackModel,
 			RequestMethod:     rr.Method,
 			RequestURL:        rr.URL,

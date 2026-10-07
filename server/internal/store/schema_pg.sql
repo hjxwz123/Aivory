@@ -345,7 +345,14 @@ CREATE TABLE IF NOT EXISTS channels (
   api_format  TEXT NOT NULL DEFAULT '',
   base_url    TEXT NOT NULL DEFAULT '',
   api_key     TEXT NOT NULL DEFAULT '',
+  headers     TEXT NOT NULL DEFAULT '{}',
   enabled     INTEGER NOT NULL DEFAULT 1,
+  auto_disable_errors   INTEGER NOT NULL DEFAULT 0,
+  auto_disable_timeouts INTEGER NOT NULL DEFAULT 0,
+  auto_disable_minutes  INTEGER NOT NULL DEFAULT 0,
+  consecutive_errors    INTEGER NOT NULL DEFAULT 0,
+  consecutive_timeouts  INTEGER NOT NULL DEFAULT 0,
+  auto_disabled_until   BIGINT NOT NULL DEFAULT 0,
   sort_order  INTEGER NOT NULL DEFAULT 0,
   updated_at  BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
@@ -405,12 +412,45 @@ CREATE TABLE IF NOT EXISTS models (
   dim               INTEGER NOT NULL DEFAULT 0,
   compaction_token_threshold INTEGER NOT NULL DEFAULT 0,
   image_timeout_sec INTEGER NOT NULL DEFAULT 0,
+  fallback_ttft_sec INTEGER NOT NULL DEFAULT 0,
+  auto_disable_errors INTEGER NOT NULL DEFAULT 0,
+  auto_disable_timeouts INTEGER NOT NULL DEFAULT 0,
+  auto_disable_minutes INTEGER NOT NULL DEFAULT 0,
   updated_at        BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
 
 CREATE INDEX IF NOT EXISTS idx_models_channel ON models(channel_id);
 CREATE INDEX IF NOT EXISTS idx_models_kind ON models(kind, enabled);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_models_channel_request_unique ON models(channel_id, lower(trim(request_id)));
+
+CREATE TABLE IF NOT EXISTS channel_models (
+  id          TEXT PRIMARY KEY,
+  channel_id  TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  request_id  TEXT NOT NULL,
+  label       TEXT NOT NULL DEFAULT '',
+  description TEXT NOT NULL DEFAULT '',
+  kind        TEXT NOT NULL DEFAULT 'chat',
+  enabled     INTEGER NOT NULL DEFAULT 1,
+  source      TEXT NOT NULL DEFAULT 'manual',
+  updated_at  BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_models_request_unique ON channel_models(channel_id, lower(trim(request_id)));
+CREATE INDEX IF NOT EXISTS idx_channel_models_request ON channel_models(lower(trim(request_id)), enabled);
+
+CREATE TABLE IF NOT EXISTS model_channel_bindings (
+  id                   TEXT PRIMARY KEY,
+  model_id             TEXT NOT NULL REFERENCES models(id) ON DELETE CASCADE,
+  channel_id           TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  role                 TEXT NOT NULL DEFAULT 'regular',
+  priority             INTEGER NOT NULL DEFAULT 1,
+  weight               INTEGER NOT NULL DEFAULT 100,
+  consecutive_errors   INTEGER NOT NULL DEFAULT 0,
+  consecutive_timeouts INTEGER NOT NULL DEFAULT 0,
+  disabled_until       BIGINT NOT NULL DEFAULT 0,
+  updated_at           BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_model_channel_binding_unique ON model_channel_bindings(model_id, channel_id, role);
+CREATE INDEX IF NOT EXISTS idx_model_channel_binding_role ON model_channel_bindings(model_id, role, priority);
 
 -- Per-(model, group) free quota. Declared AFTER models because it has a FK to
 -- models(id) and Postgres resolves FK targets eagerly within the schema batch
@@ -835,6 +875,8 @@ CREATE TABLE IF NOT EXISTS usage_logs (
   request_headers    TEXT NOT NULL DEFAULT '',
   request_body       TEXT NOT NULL DEFAULT '',
   ttft_fallback_model TEXT NOT NULL DEFAULT '', -- non-empty = TTFT timeout model-fallback served this row (§4.6-C); value is the fallback model's display name
+  first_byte_ms      BIGINT NOT NULL DEFAULT 0, -- upstream request start to first response-body byte
+  duration_ms        BIGINT NOT NULL DEFAULT 0, -- upstream request start to response-body completion
   created_at         BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
 CREATE INDEX IF NOT EXISTS idx_usage_user_time ON usage_logs(user_id, created_at);
@@ -1070,6 +1112,22 @@ CREATE TABLE IF NOT EXISTS workspace_policies (
 -- invite tokens, API keys, request bodies or document content.
 CREATE TABLE IF NOT EXISTS workspace_audit_logs (
   id            TEXT PRIMARY KEY,
+  actor_name    TEXT NOT NULL DEFAULT '',
+  actor_role    TEXT NOT NULL DEFAULT '',
+  target_name   TEXT NOT NULL DEFAULT '',
+  result        TEXT NOT NULL DEFAULT 'success',
+  severity      TEXT NOT NULL DEFAULT 'info',
+  source        TEXT NOT NULL DEFAULT '',
+  client_ip     TEXT NOT NULL DEFAULT '',
+  user_agent    TEXT NOT NULL DEFAULT '',
+  request_id    TEXT NOT NULL DEFAULT '',
+  occurred_at_ms BIGINT NOT NULL DEFAULT 0,
+  duration_ms   BIGINT NOT NULL DEFAULT 0,
+  http_status   INTEGER NOT NULL DEFAULT 0,
+  method        TEXT NOT NULL DEFAULT '',
+  route         TEXT NOT NULL DEFAULT '',
+  reason        TEXT NOT NULL DEFAULT '',
+  changes       TEXT NOT NULL DEFAULT '{}',
   workspace_id  TEXT NOT NULL,
   actor_user_id TEXT NOT NULL,
   action        TEXT NOT NULL,
@@ -1079,6 +1137,37 @@ CREATE TABLE IF NOT EXISTS workspace_audit_logs (
   created_at    BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
 CREATE INDEX IF NOT EXISTS idx_ws_audit_workspace ON workspace_audit_logs(workspace_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ws_audit_created ON workspace_audit_logs(created_at DESC, id DESC);
+
+-- Administrator operations outside a workspace; see schema.sql for rationale.
+CREATE TABLE IF NOT EXISTS admin_audit_logs (
+  id            TEXT PRIMARY KEY,
+  actor_name    TEXT NOT NULL DEFAULT '',
+  actor_role    TEXT NOT NULL DEFAULT '',
+  target_name   TEXT NOT NULL DEFAULT '',
+  result        TEXT NOT NULL DEFAULT 'success',
+  severity      TEXT NOT NULL DEFAULT 'info',
+  source        TEXT NOT NULL DEFAULT '',
+  client_ip     TEXT NOT NULL DEFAULT '',
+  user_agent    TEXT NOT NULL DEFAULT '',
+  request_id    TEXT NOT NULL DEFAULT '',
+  occurred_at_ms BIGINT NOT NULL DEFAULT 0,
+  duration_ms   BIGINT NOT NULL DEFAULT 0,
+  http_status   INTEGER NOT NULL DEFAULT 0,
+  method        TEXT NOT NULL DEFAULT '',
+  route         TEXT NOT NULL DEFAULT '',
+  reason        TEXT NOT NULL DEFAULT '',
+  changes       TEXT NOT NULL DEFAULT '{}',
+  actor_user_id TEXT NOT NULL,
+  event_type    TEXT NOT NULL,
+  action        TEXT NOT NULL,
+  target_type   TEXT NOT NULL DEFAULT '',
+  target_id     TEXT NOT NULL DEFAULT '',
+  metadata      TEXT NOT NULL DEFAULT '{}',
+  created_at    BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
+);
+CREATE INDEX IF NOT EXISTS idx_admin_audit_type ON admin_audit_logs(event_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_admin_audit_created ON admin_audit_logs(created_at DESC, id DESC);
 
 -- Workspace-scoped announcement configuration. The JSON shape mirrors the
 -- global announcement setting, but is isolated by workspace and cascades when

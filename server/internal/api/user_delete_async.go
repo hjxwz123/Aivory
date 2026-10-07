@@ -125,6 +125,10 @@ func (m *userDeletionManager) list() []userDeletionJob {
 // Callers must have run their own permission guards (self-delete, last-admin,
 // password confirmation) first. Returns false when a job is already running.
 func startUserDeletion(d Deps, userID, email string, expectedPasswordHash ...string) (bool, error) {
+	return startUserDeletionWithAudit(d, userID, email, nil, expectedPasswordHash...)
+}
+
+func startUserDeletionWithAudit(d Deps, userID, email string, origin *store.AuditContext, expectedPasswordHash ...string) (bool, error) {
 	// MarkUserDeleting flips the status atomically with the last-admin guard
 	// folded into the UPDATE (closes the two-admins-delete-each-other TOCTOU)
 	// and performs the same instant lockout a ban does: token_ver bump plus
@@ -143,6 +147,7 @@ func startUserDeletion(d Deps, userID, email string, expectedPasswordHash ...str
 	invalidateAuthUser(d, userID)
 	d.Cache.Publish("user:"+userID+":kill", "1") // drop live streams immediately
 	go func() {
+		started := time.Now()
 		defer func() {
 			// Same guard as queue.runJob: a panic here would otherwise kill the
 			// process-wide goroutine silently and strand the user in 'deleting'.
@@ -150,6 +155,21 @@ func startUserDeletion(d Deps, userID, email string, expectedPasswordHash ...str
 				logStorageCleanup(d, "user delete %s: panic: %v\n%s", userID, rec, debug.Stack())
 				userDeletions.finish(userID, "failed", fmt.Sprintf("panic: %v", rec))
 			}
+			userDeletions.mu.Lock()
+			status := "failed"
+			if job := userDeletions.jobs[userID]; job != nil {
+				status = job.Status
+			}
+			userDeletions.mu.Unlock()
+			result, reason := "failure", "job_failed"
+			if status == "completed" {
+				result, reason = "success", ""
+			}
+			action := "admin.users.delete_completed"
+			if origin != nil && origin.Source == "account" {
+				action = "auth.account_delete_completed"
+			}
+			recordAuditJobResult(d, origin, action, userID, result, reason, started, map[string]any{"target_user_id": userID})
 		}()
 		runUserDeletionJob(d, userID)
 	}()

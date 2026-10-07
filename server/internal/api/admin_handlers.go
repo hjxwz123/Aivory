@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"aivory/server/internal/envcfg"
+	"aivory/server/internal/requestheaders"
 	"aivory/server/internal/store"
 )
 
@@ -42,11 +43,15 @@ func listChannelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 }
 
 type createChannelReq struct {
-	Name      string `json:"name"`
-	Type      string `json:"type"`
-	APIFormat string `json:"api_format"`
-	BaseURL   string `json:"base_url"`
-	APIKey    string `json:"api_key"`
+	Name                string                 `json:"name"`
+	Type                string                 `json:"type"`
+	APIFormat           string                 `json:"api_format"`
+	BaseURL             string                 `json:"base_url"`
+	APIKey              string                 `json:"api_key"`
+	Headers             requestheaders.Headers `json:"headers"`
+	AutoDisableErrors   int                    `json:"auto_disable_errors"`
+	AutoDisableTimeouts int                    `json:"auto_disable_timeouts"`
+	AutoDisableMinutes  int                    `json:"auto_disable_minutes"`
 }
 
 func createChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
@@ -86,7 +91,11 @@ func createChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		}
 		req.BaseURL = baseURL
 	}
-	c, err := store.CreateChannel(r.Context(), d.DB, req.Name, req.Type, req.APIFormat, req.BaseURL, req.APIKey)
+	if req.AutoDisableErrors < 0 || req.AutoDisableTimeouts < 0 || req.AutoDisableMinutes < 0 {
+		writeError(w, 400, errors.New("automatic disable settings must be non-negative"))
+		return
+	}
+	c, err := store.CreateChannel(r.Context(), d.DB, req.Name, req.Type, req.APIFormat, req.BaseURL, req.APIKey, req.Headers)
 	if err != nil {
 		if errors.Is(err, store.ErrChannelNameExists) {
 			writeError(w, 409, err)
@@ -94,6 +103,16 @@ func createChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, 500, err)
 		return
+	}
+	if req.AutoDisableErrors > 0 || req.AutoDisableTimeouts > 0 || req.AutoDisableMinutes > 0 {
+		if updated, updateErr := store.UpdateChannel(r.Context(), d.DB, c.ID, store.ChannelPatch{
+			AutoDisableErrors: &req.AutoDisableErrors, AutoDisableTimeouts: &req.AutoDisableTimeouts, AutoDisableMinutes: &req.AutoDisableMinutes,
+		}); updateErr == nil {
+			c = updated
+		} else {
+			writeError(w, 500, updateErr)
+			return
+		}
 	}
 	writeJSON(w, 201, c)
 }
@@ -178,6 +197,10 @@ func updateChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 			writeError(w, 500, err)
 			return
 		}
+	}
+	if (p.AutoDisableErrors != nil && *p.AutoDisableErrors < 0) || (p.AutoDisableTimeouts != nil && *p.AutoDisableTimeouts < 0) || (p.AutoDisableMinutes != nil && *p.AutoDisableMinutes < 0) {
+		writeError(w, 400, errors.New("automatic disable settings must be non-negative"))
+		return
 	}
 	c, err := store.UpdateChannel(r.Context(), d.DB, id, p)
 	if err != nil {
@@ -337,6 +360,9 @@ func listModelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	// skills are currently checked. Admin model lists are small, so the per-row
 	// query is cheap; a SkillsForModel failure just leaves that row's skills empty.
 	for i := range rows {
+		if bindings, bindErr := store.ListModelChannelBindings(r.Context(), d.DB, rows[i].ID, ""); bindErr == nil {
+			rows[i].ChannelBindings = bindings
+		}
 		if rows[i].Kind != "chat" {
 			continue
 		}
@@ -345,6 +371,19 @@ func listModelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, 200, rows)
+}
+
+func validateModelChannelPolicy(m *store.Model) error {
+	if m == nil {
+		return errors.New("model is required")
+	}
+	if m.FallbackTTFTSec < 0 || m.AutoDisableErrors < 0 || m.AutoDisableTimeouts < 0 || m.AutoDisableMinutes < 0 {
+		return errors.New("model timeout and auto-disable values must be non-negative")
+	}
+	if m.FallbackTTFTSec == 0 && m.AutoDisableTimeouts > 0 {
+		return errors.New("auto-disable timeout threshold requires a positive model TTFT timeout")
+	}
+	return nil
 }
 
 func createModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
@@ -366,6 +405,10 @@ func createModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	m.Label = strings.TrimSpace(m.Label)
 	if m.ChannelID == "" || m.RequestID == "" || m.Label == "" {
 		writeError(w, 400, errors.New("channel_id, request_id, label required"))
+		return
+	}
+	if err := validateModelChannelPolicy(&m); err != nil {
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	if officialTools, err := store.NormalizeOfficialTools(m.OfficialTools); err != nil {
@@ -460,6 +503,10 @@ func updateModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	m.Label = strings.TrimSpace(m.Label)
 	if m.ChannelID == "" || m.RequestID == "" || m.Label == "" {
 		writeError(w, 400, errors.New("channel_id, request_id, label required"))
+		return
+	}
+	if err := validateModelChannelPolicy(&m); err != nil {
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	// Omitted official_tools preserves the existing model value. An explicit
@@ -869,7 +916,7 @@ func deleteUserAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	if target, terr := store.FindUserByID(r.Context(), d.DB, id); terr == nil {
 		email = target.Email
 	}
-	if _, err := startUserDeletion(d, id, email); err != nil {
+	if _, err := startUserDeletionWithAudit(d, id, email, auditJobOrigin(r)); err != nil {
 		if errors.Is(err, store.ErrLastAdmin) {
 			writeError(w, 400, err)
 			return
@@ -2126,14 +2173,18 @@ func normalizeAvailableChatModelSetting(ctx context.Context, d Deps, raw json.Ra
 	if !model.Enabled || model.Kind != "chat" {
 		return nil, errModelPolicyModelUnavailable
 	}
-	channel, err := store.GetChannel(ctx, d.DB, model.ChannelID)
+	channels, err := regularModelPolicyChannels(ctx, d, model)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return nil, errModelPolicyModelUnavailable
-		}
 		return nil, err
 	}
-	if !channel.Enabled || !isSupportedContextCompactionChannelType(channel.Type) {
+	available := false
+	for _, channel := range channels {
+		if channel.Enabled && isSupportedContextCompactionChannelType(channel.Type) {
+			available = true
+			break
+		}
+	}
+	if !available {
 		return nil, errModelPolicyModelUnavailable
 	}
 	normalized, _ := json.Marshal(modelID)
@@ -2147,6 +2198,40 @@ func isSupportedContextCompactionChannelType(channelType string) bool {
 	default:
 		return false
 	}
+}
+
+// regularModelPolicyChannels resolves all regular bindings so policy settings
+// remain valid when the model's first channel is unavailable but another
+// configured channel can still serve the same request_id. Legacy models that
+// have no binding rows continue to use their original channel_id.
+func regularModelPolicyChannels(ctx context.Context, d Deps, model *store.Model) ([]store.Channel, error) {
+	if model == nil {
+		return nil, errModelPolicyModelUnavailable
+	}
+	bindings, err := store.ListModelChannelBindings(ctx, d.DB, model.ID, "regular")
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(bindings))
+	if len(bindings) == 0 {
+		ids = append(ids, model.ChannelID)
+	} else {
+		for _, binding := range bindings {
+			ids = append(ids, binding.ChannelID)
+		}
+	}
+	channels := make([]store.Channel, 0, len(ids))
+	for _, id := range ids {
+		channel, lookupErr := store.GetChannel(ctx, d.DB, id)
+		if errors.Is(lookupErr, store.ErrNotFound) {
+			continue
+		}
+		if lookupErr != nil {
+			return nil, lookupErr
+		}
+		channels = append(channels, *channel)
+	}
+	return channels, nil
 }
 
 // normalizeVisionModelSetting validates the §4.6 image-outsourcing model. An
@@ -2175,14 +2260,18 @@ func normalizeVisionModelSetting(ctx context.Context, d Deps, raw json.RawMessag
 	if !model.Enabled || model.Kind != "chat" || !model.Vision {
 		return nil, errModelPolicyModelUnavailable
 	}
-	channel, err := store.GetChannel(ctx, d.DB, model.ChannelID)
+	channels, err := regularModelPolicyChannels(ctx, d, model)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return nil, errModelPolicyModelUnavailable
-		}
 		return nil, err
 	}
-	if !channel.Enabled || !isSupportedContextCompactionChannelType(channel.Type) {
+	available := false
+	for _, channel := range channels {
+		if channel.Enabled && isSupportedContextCompactionChannelType(channel.Type) {
+			available = true
+			break
+		}
+	}
+	if !available {
 		return nil, errModelPolicyModelUnavailable
 	}
 	normalized, _ := json.Marshal(modelID)

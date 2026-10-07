@@ -9,6 +9,8 @@ import (
 	"math"
 	"strings"
 	"time"
+
+	"aivory/server/internal/requestheaders"
 )
 
 // User is the row + profile shape returned to the frontend.
@@ -131,16 +133,25 @@ type ModelGroupQuota struct {
 
 // Channel matches design.md §2.3-B.
 type Channel struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Type      string `json:"type"`
-	APIFormat string `json:"api_format"`
-	BaseURL   string `json:"base_url"`
-	APIKey    string `json:"-"`
-	HasAPIKey bool   `json:"has_api_key"`
-	Enabled   bool   `json:"enabled"`
-	SortOrder int    `json:"sort_order"`
-	UpdatedAt int64  `json:"updated_at"`
+	ID        string                 `json:"id"`
+	Name      string                 `json:"name"`
+	Type      string                 `json:"type"`
+	APIFormat string                 `json:"api_format"`
+	BaseURL   string                 `json:"base_url"`
+	APIKey    string                 `json:"-"`
+	Headers   requestheaders.Headers `json:"headers"`
+	HasAPIKey bool                   `json:"has_api_key"`
+	Enabled   bool                   `json:"enabled"`
+	// Channel-wide automatic quarantine policy and runtime state. Zero disables
+	// the corresponding trigger; auto_disabled_until is a unix timestamp.
+	AutoDisableErrors   int   `json:"auto_disable_errors"`
+	AutoDisableTimeouts int   `json:"auto_disable_timeouts"`
+	AutoDisableMinutes  int   `json:"auto_disable_minutes"`
+	ConsecutiveErrors   int   `json:"consecutive_errors"`
+	ConsecutiveTimeouts int   `json:"consecutive_timeouts"`
+	AutoDisabledUntil   int64 `json:"auto_disabled_until"`
+	SortOrder           int   `json:"sort_order"`
+	UpdatedAt           int64 `json:"updated_at"`
 }
 
 // Model mirrors design.md §2.3-B. Prices are per 1M tokens (chat/embedding)
@@ -215,8 +226,54 @@ type Model struct {
 	// ImageTimeoutSec caps a single image generation/edit request (§4.20). 0 =
 	// use the default (no per-model cap; bounded only by the turn context).
 	// Only meaningful for kind=image models.
-	ImageTimeoutSec int   `json:"image_timeout_sec"`
-	UpdatedAt       int64 `json:"updated_at"`
+	ImageTimeoutSec int `json:"image_timeout_sec"`
+	// FallbackTTFTSec is the per-model time-to-first-byte threshold used by the
+	// transparent model fallback watchdog. 0 disables the watchdog.
+	FallbackTTFTSec int `json:"fallback_ttft_sec"`
+	// Automatic channel quarantine policy. A zero threshold disables that trigger;
+	// the timeout trigger is only valid when FallbackTTFTSec is positive.
+	AutoDisableErrors   int `json:"auto_disable_errors"`
+	AutoDisableTimeouts int `json:"auto_disable_timeouts"`
+	AutoDisableMinutes  int `json:"auto_disable_minutes"`
+	// ChannelBindings is populated by the admin model API.
+	ChannelBindings []ModelChannelBinding `json:"channel_bindings,omitempty"`
+	UpdatedAt       int64                 `json:"updated_at"`
+}
+
+// ModelChannelBinding connects one logical model to a provider channel.
+type ModelChannelBinding struct {
+	ID                         string `json:"id"`
+	ModelID                    string `json:"model_id"`
+	ChannelID                  string `json:"channel_id"`
+	Role                       string `json:"role"` // regular | fallback
+	Priority                   int    `json:"priority"`
+	Weight                     int    `json:"weight"`
+	ChannelName                string `json:"channel_name,omitempty"`
+	ChannelType                string `json:"channel_type,omitempty"`
+	ChannelEnabled             bool   `json:"channel_enabled"`
+	ChannelAutoDisableErrors   int    `json:"channel_auto_disable_errors"`
+	ChannelAutoDisableTimeouts int    `json:"channel_auto_disable_timeouts"`
+	ChannelAutoDisableMinutes  int    `json:"channel_auto_disable_minutes"`
+	ChannelAutoDisabledUntil   int64  `json:"channel_auto_disabled_until"`
+	ChannelConsecutiveErrors   int    `json:"channel_consecutive_errors"`
+	ChannelConsecutiveTimeouts int    `json:"channel_consecutive_timeouts"`
+	DisabledUntil              int64  `json:"disabled_until"`
+	ConsecutiveErrors          int    `json:"consecutive_errors"`
+	ConsecutiveTimeouts        int    `json:"consecutive_timeouts"`
+	UpdatedAt                  int64  `json:"updated_at"`
+}
+
+// ChannelModel describes one upstream request_id that a channel can serve.
+type ChannelModel struct {
+	ID          string `json:"id"`
+	ChannelID   string `json:"channel_id"`
+	RequestID   string `json:"request_id"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	Kind        string `json:"kind"`
+	Enabled     bool   `json:"enabled"`
+	Source      string `json:"source"` // upstream | manual
+	UpdatedAt   int64  `json:"updated_at"`
 }
 
 var ErrInvalidModelBilling = errors.New("invalid model billing configuration")
@@ -667,9 +724,11 @@ type UsageLog struct {
 	// channel). Fallback is true when the model's backup channel was used because
 	// the primary failed. Status is "ok" | "error"; error requests are logged too
 	// so the admin usage page can count failures.
-	ChannelID string `json:"channel_id,omitempty"`
-	Fallback  bool   `json:"fallback,omitempty"`
-	Status    string `json:"status,omitempty"`
+	ChannelID   string `json:"channel_id,omitempty"`
+	Fallback    bool   `json:"fallback,omitempty"`
+	Status      string `json:"status,omitempty"`
+	FirstByteMS int64  `json:"first_byte_ms,omitempty"`
+	DurationMS  int64  `json:"duration_ms,omitempty"`
 	// TTFTFallbackModel is the display name of the model a TTFT timeout-fallback
 	// switched to for this row (§4.6-C). '' = no model fallback. Distinct from
 	// Fallback (that is the same-model backup-channel retry).

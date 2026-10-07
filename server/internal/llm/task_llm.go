@@ -431,12 +431,25 @@ func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opt
 	if len(opts.ImageBlocks) > 0 && !model.Vision {
 		return "", fmt.Errorf("task model %q does not support image input", modelID)
 	}
+	// Internal task calls (titles, compaction, routing, etc.) use the same
+	// regular channel pool as interactive turns. This keeps a temporarily
+	// quarantined channel out of every model request, while the legacy primary
+	// channel remains the compatibility fallback when an upgraded installation
+	// has no binding rows yet.
+	selectedChannelID, selectErr := selectRegularModelChannelID(ctx, t.db, model)
+	if selectErr != nil {
+		return "", wrapCompactionModelAttempt(fmt.Errorf("task model channel %q: %w", model.ChannelID, selectErr), kind == TaskCompact)
+	}
+	model.ChannelID = selectedChannelID
 	channel, err := store.GetChannel(ctx, t.db, model.ChannelID)
 	if err != nil {
 		return "", wrapCompactionModelAttempt(err, kind == TaskCompact)
 	}
 	if !channel.Enabled {
 		return "", wrapCompactionModelAttempt(fmt.Errorf("task model channel %q is disabled", channel.ID), kind == TaskCompact)
+	}
+	if channel.AutoDisabledUntil > time.Now().Unix() {
+		return "", wrapCompactionModelAttempt(fmt.Errorf("task model channel %q is temporarily auto-disabled", channel.ID), kind == TaskCompact)
 	}
 	provider, err := t.reg.Get(channel.Type)
 	if err != nil {
@@ -475,14 +488,17 @@ func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opt
 			{Role: "user", Blocks: taskUserBlocks(prompt, opts.ImageBlocks)},
 		},
 		Model: ModelInfo{
-			ID:        model.ID,
-			RequestID: model.RequestID,
-			Provider:  channel.Type,
-			Vision:    model.Vision,
-			BaseURL:   channel.BaseURL,
-			APIKey:    channel.APIKey,
-			APIFormat: channel.APIFormat,
-			Fallback:  fallbackCreds,
+			ID:                         model.ID,
+			ChannelID:                  model.ChannelID,
+			ChannelAutoDisableTimeouts: channel.AutoDisableTimeouts,
+			RequestID:                  model.RequestID,
+			Provider:                   channel.Type,
+			Vision:                     model.Vision,
+			BaseURL:                    channel.BaseURL,
+			APIKey:                     channel.APIKey,
+			Headers:                    channel.Headers,
+			APIFormat:                  channel.APIFormat,
+			Fallback:                   fallbackCreds,
 		},
 		// Task calls never use tools.
 		Tools:           nil,
@@ -601,6 +617,7 @@ func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opt
 	requestRecorder := newProviderRequestRecorder(channel.Type)
 	requestRecorder.captureBody = settingBool(t.db, "log_request_bodies", true)
 	streamCtx = contextWithProviderRequestRecorder(streamCtx, requestRecorder)
+	streamCtx = contextWithProviderRequestChannelIDs(streamCtx, model.ChannelID, fallbackChannelID)
 	// We capture deltas but only really care about the final result.
 	captured := strings.Builder{}
 	providerStarted := time.Now()
@@ -611,13 +628,29 @@ func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opt
 			fmt.Sprintf(" call_index=%d model=%q provider=%q format=%q input_tokens=%d max_output_tokens=%d",
 				providerCall, model.ID, channel.Type, channel.APIFormat, estimateRequestTokens(req), maxTok))
 	}
-	result, err := provider.Stream(streamCtx, req, &noopToolRunner{}, func(ev SseEvent) {
+	var taskTTFTTimedOut atomic.Bool
+	var taskTTFTWatchdog *providerTTFTWatchdog
+	providerCtx := streamCtx
+	if model.FallbackTTFTSec > 0 && (model.AutoDisableTimeouts > 0 || channel.AutoDisableTimeouts > 0) {
+		taskTTFTWatchdog = newProviderTTFTWatchdog(time.Duration(model.FallbackTTFTSec)*time.Second, nil, &taskTTFTTimedOut)
+		providerCtx = contextWithProviderTTFTWatchdog(providerCtx, taskTTFTWatchdog)
+	}
+	result, err := provider.Stream(providerCtx, req, &noopToolRunner{}, func(ev SseEvent) {
 		if ev.Type == "text_delta" {
 			captured.WriteString(ev.Text)
 		}
 	})
+	if taskTTFTWatchdog != nil {
+		taskTTFTWatchdog.stop()
+	}
 	providerErr := err
 	usedFallback := fallbackFlag.Load()
+	// Task and background model calls contribute to channel-wide health as well.
+	// Attribute each captured attempt to the credentials actually used; this is
+	// post-provider bookkeeping and does not affect task latency.
+	if shouldRecordProviderHealth(providerErr, taskTTFTTimedOut.Load()) {
+		recordBackgroundProviderHealth(ctx, t.db, model, requestRecorder.snapshots(), fallbackChannelID, taskTTFTTimedOut.Load())
+	}
 	if kind == TaskCompact {
 		status := "completed"
 		if providerErr != nil {
@@ -911,6 +944,8 @@ func (t *TaskLLM) logTaskUsageAnalytics(
 		row.RequestURL = requestRow.URL
 		row.RequestHeaders = requestRow.Header
 		row.RequestBody = requestRow.Body
+		row.FirstByteMS = requestRow.FirstByteMS
+		row.DurationMS = requestRow.DurationMS
 		row.ChannelID, row.Fallback = requestUsageChannel(
 			requestRow, model.ChannelID, fallbackChannelID, usedFallback,
 		)
@@ -1038,8 +1073,12 @@ func resolveCompactionModelCandidates(ctx context.Context, db *sql.DB, conversat
 		if err != nil || !model.Enabled || model.Kind != "chat" {
 			return false
 		}
-		channel, err := store.GetChannel(ctx, db, model.ChannelID)
-		return err == nil && channel.Enabled && providerIDForChannelType(channel.Type) != ""
+		channelID, err := selectRegularModelChannelID(ctx, db, model)
+		if err != nil {
+			return false
+		}
+		channel, err := store.GetChannel(ctx, db, channelID)
+		return err == nil && providerIDForChannelType(channel.Type) != ""
 	}
 
 	candidates := []string{
@@ -1107,8 +1146,7 @@ func firstUsableTaskModelID(ctx context.Context, db *sql.DB, candidates []string
 		if err != nil || !model.Enabled || model.Kind != "chat" {
 			continue
 		}
-		channel, err := store.GetChannel(ctx, db, model.ChannelID)
-		if err == nil && channel.Enabled {
+		if _, err := selectRegularModelChannelID(ctx, db, model); err == nil {
 			return candidate
 		}
 	}

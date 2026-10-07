@@ -18,13 +18,14 @@ import (
 var bulkRedeemCodeGenerationQuantity = envcfg.Int("AIVORY_API_BULK_REDEEM_CODE_GENERATION_QUANTITY", 1000)
 
 // listRedeemCodesAdmin returns redeem codes newest-first.
-// Query params: batch=<name>, status=unused|partial|used|invalid,
+// Query params: q=<search>, batch=<name>, status=unused|partial|used|invalid,
 // limit, offset.
 func listRedeemCodesAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	offset, _ := strconv.Atoi(q.Get("offset"))
 	rows, err := store.ListRedeemCodes(r.Context(), d.DB, store.RedeemCodeFilter{
+		Search:    q.Get("q"),
 		BatchName: q.Get("batch"),
 		Status:    q.Get("status"),
 		Limit:     limit,

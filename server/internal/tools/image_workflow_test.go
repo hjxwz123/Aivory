@@ -47,6 +47,9 @@ func seedImageWorkflow(t *testing.T, channelType, requestID string) (*imageGener
 
 func TestOpenAIImageContinuationUsesNearestBranchAndRegenerateIgnoresSibling(t *testing.T) {
 	tool, convID := seedImageWorkflow(t, "openai", "gpt-image-2")
+	if _, err := tool.db.Exec(`UPDATE channels SET headers='{"A":"a","Authorization":"Bearer override"}' WHERE id='ch_flow'`); err != nil {
+		t.Fatal(err)
+	}
 	for _, query := range []string{
 		`INSERT INTO messages(id,conversation_id,parent_id,role,model_id) VALUES('u_root','c_flow',NULL,'user','m_flow')`,
 		`INSERT INTO messages(id,conversation_id,parent_id,role,model_id,status) VALUES('a_old','c_flow','u_root','assistant','m_flow','complete')`,
@@ -92,6 +95,9 @@ func TestOpenAIImageContinuationUsesNearestBranchAndRegenerateIgnoresSibling(t *
 	requestCount := 0
 	useImageTestHTTPClient(t, func(req *http.Request) (*http.Response, error) {
 		requestCount++
+		if req.Header.Get("A") != "a" || req.Header.Get("Authorization") != "Bearer override" {
+			t.Fatalf("image headers = %v", req.Header)
+		}
 		switch requestCount {
 		case 1:
 			if req.URL.Path != "/v1/images/edits" {
@@ -352,6 +358,7 @@ func TestImageGenerationFallsBackOnceAndLogsBothChannelAttempts(t *testing.T) {
 	tool, convID := seedImageWorkflow(t, "openai", "gpt-image-1.5")
 	for _, query := range []string{
 		`INSERT INTO channels(id,name,type,api_format,base_url,api_key,enabled) VALUES('ch_flow_fallback','Image Fallback','openai','','https://fallback.images.test','fallback-secret',1)`,
+		`INSERT INTO channel_models(id,channel_id,request_id,label,kind,enabled) VALUES('cm_flow_fallback','ch_flow_fallback','gpt-image-1.5','Image model','image',1)`,
 		`UPDATE channels SET base_url='https://primary.images.test', api_format='' WHERE id='ch_flow'`,
 		`UPDATE models SET fallback_channel_id='ch_flow_fallback', price_per_image=0.25 WHERE id='m_flow'`,
 		`INSERT INTO messages(id,conversation_id,role,model_id,author_id,status) VALUES('a_fallback','c_flow','assistant','m_flow','u_flow','streaming')`,

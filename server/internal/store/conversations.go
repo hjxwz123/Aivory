@@ -81,7 +81,7 @@ func ListConversations(ctx context.Context, db *sql.DB, userID, projectID, archi
 	} else if archivedFilter == "archived" {
 		q += " AND archived=1"
 	}
-	q += " ORDER BY pinned DESC, updated_at DESC LIMIT ? OFFSET ?"
+	q += " ORDER BY pinned DESC, updated_at DESC, id DESC LIMIT ? OFFSET ?"
 	args = append(args, limit, offset)
 	rows, err := db.QueryContext(ctx, q, args...)
 	if err != nil {
@@ -227,7 +227,7 @@ func listWorkspaceConversations(ctx context.Context, db *sql.DB, workspaceID, pr
 	} else if archivedFilter == "archived" {
 		q += " AND c.archived=1"
 	}
-	q += " ORDER BY c.pinned DESC, c.updated_at DESC LIMIT ? OFFSET ?"
+	q += " ORDER BY c.pinned DESC, c.updated_at DESC, c.id DESC LIMIT ? OFFSET ?"
 	args = append(args, limit, offset)
 	rows, err := db.QueryContext(ctx, q, args...)
 	if err != nil {

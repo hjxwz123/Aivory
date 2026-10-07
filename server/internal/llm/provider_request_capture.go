@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 	"unicode/utf8"
 
 	"aivory/server/internal/envcfg"
@@ -31,11 +33,15 @@ var (
 const maxProviderRequestSnapshots = 64
 
 type providerRequestSnapshot struct {
-	Method  string
-	URL     string
-	Header  string
-	Body    string
-	Attempt int
+	Method      string
+	URL         string
+	ChannelID   string
+	Header      string
+	Body        string
+	Attempt     int
+	FirstByteMS int64
+	DurationMS  int64
+	timing      *providerRequestTiming
 	// Estimates are internal billing fallbacks for a canceled stream whose
 	// provider never delivered usage for this exact request. They are derived
 	// from the sanitized request and emitted provider deltas, never exposed in
@@ -56,6 +62,37 @@ type providerRequestSnapshot struct {
 	// fallback recovered the turn or the whole turn failed. Keeping it on the
 	// exact attempt preserves both channel outcomes for admin diagnostics.
 	Error string
+}
+
+type providerRequestTiming struct {
+	startedAt   time.Time
+	firstByteMS atomic.Int64
+	durationMS  atomic.Int64
+	finished    atomic.Bool
+}
+
+func (t *providerRequestTiming) markFirstByte() {
+	if t == nil {
+		return
+	}
+	ms := max(time.Since(t.startedAt).Milliseconds(), int64(1))
+	t.firstByteMS.CompareAndSwap(0, ms)
+}
+
+func (t *providerRequestTiming) finish() {
+	if t == nil || !t.finished.CompareAndSwap(false, true) {
+		return
+	}
+	t.durationMS.Store(max(time.Since(t.startedAt).Milliseconds(), int64(1)))
+}
+
+func (s providerRequestSnapshot) withTiming() providerRequestSnapshot {
+	if s.timing != nil {
+		s.FirstByteMS = s.timing.firstByteMS.Load()
+		s.DurationMS = s.timing.durationMS.Load()
+		s.timing = nil
+	}
+	return s
 }
 
 type providerRequestRecorder struct {
@@ -79,6 +116,21 @@ type providerRequestRecorder struct {
 }
 
 type providerRequestRecorderKey struct{}
+
+type providerRequestChannelIDs struct{ primary, fallback string }
+type providerRequestChannelIDsKey struct{}
+
+func contextWithProviderRequestChannelIDs(ctx context.Context, primary, fallback string) context.Context {
+	return context.WithValue(ctx, providerRequestChannelIDsKey{}, providerRequestChannelIDs{primary: primary, fallback: fallback})
+}
+
+func providerRequestChannelID(ctx context.Context, fallback bool) string {
+	channels, _ := ctx.Value(providerRequestChannelIDsKey{}).(providerRequestChannelIDs)
+	if fallback && channels.fallback != "" {
+		return channels.fallback
+	}
+	return channels.primary
+}
 
 func newProviderRequestRecorder(provider ...string) *providerRequestRecorder {
 	recorder := &providerRequestRecorder{captureBody: true}
@@ -112,12 +164,12 @@ func recordProviderRequest(ctx context.Context, req *http.Request) {
 	recordProviderRequestAttempt(ctx, req, false)
 }
 
-func recordProviderRequestAttempt(ctx context.Context, req *http.Request, fallback bool) {
+func recordProviderRequestAttempt(ctx context.Context, req *http.Request, fallback bool) *providerRequestTiming {
 	rec, _ := ctx.Value(providerRequestRecorderKey{}).(*providerRequestRecorder)
 	if rec == nil || req == nil {
-		return
+		return nil
 	}
-	rec.record(req, fallback)
+	return rec.recordWithChannel(req, fallback, providerRequestChannelID(ctx, fallback))
 }
 
 // attachProviderRequestUsage pins one stream's parsed usage onto the most
@@ -267,7 +319,7 @@ func recordProviderRequestFailure(ctx context.Context, fallback bool, err error)
 	if rec == nil {
 		return
 	}
-	rec.attachFailure(fallback, truncErr(err.Error()))
+	rec.attachFailure(fallback, truncErr(err.Error()), providerRequestChannelID(ctx, fallback))
 }
 
 // recordProviderRequestBuildFailure records an attempt that failed before an
@@ -282,7 +334,7 @@ func recordProviderRequestBuildFailure(ctx context.Context, fallback bool, err e
 	if rec == nil {
 		return
 	}
-	rec.appendFailure(fallback, truncErr(err.Error()))
+	rec.appendFailure(fallback, truncErr(err.Error()), providerRequestChannelID(ctx, fallback))
 }
 
 func (r *providerRequestRecorder) snapshot() providerRequestSnapshot {
@@ -291,7 +343,7 @@ func (r *providerRequestRecorder) snapshot() providerRequestSnapshot {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.last
+	return r.last.withTiming()
 }
 
 // snapshots returns a copy of the per-request list in request order.
@@ -303,6 +355,9 @@ func (r *providerRequestRecorder) snapshots() []providerRequestSnapshot {
 	defer r.mu.Unlock()
 	out := make([]providerRequestSnapshot, len(r.all))
 	copy(out, r.all)
+	for i := range out {
+		out[i] = out[i].withTiming()
+	}
 	return out
 }
 
@@ -333,11 +388,15 @@ func (r *providerRequestRecorder) maxContextTokens() int {
 	return maxTokens
 }
 
-func (r *providerRequestRecorder) record(req *http.Request, fallbackAttempt ...bool) {
-	if r == nil || req == nil {
-		return
-	}
+func (r *providerRequestRecorder) record(req *http.Request, fallbackAttempt ...bool) *providerRequestTiming {
 	fallback := len(fallbackAttempt) > 0 && fallbackAttempt[0]
+	return r.recordWithChannel(req, fallback, "")
+}
+
+func (r *providerRequestRecorder) recordWithChannel(req *http.Request, fallback bool, channelID string) *providerRequestTiming {
+	if r == nil || req == nil {
+		return nil
+	}
 	body := snapshotRequestBody(req)
 	sanitizedBody := sanitizeProviderRequestBodyForRequest(req, body)
 	storedBody := sanitizedBody
@@ -347,12 +406,15 @@ func (r *providerRequestRecorder) record(req *http.Request, fallbackAttempt ...b
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.attempt++
+	timing := &providerRequestTiming{}
 	r.last = providerRequestSnapshot{
 		Method:               req.Method,
 		URL:                  sanitizeProviderRequestURL(req.URL),
+		ChannelID:            channelID,
 		Header:               sanitizeProviderRequestHeaders(req.Header),
 		Body:                 storedBody,
 		Attempt:              r.attempt,
+		timing:               timing,
 		Fallback:             fallback,
 		EstimatedInputTokens: estimateTokens(sanitizedBody),
 	}
@@ -363,6 +425,7 @@ func (r *providerRequestRecorder) record(req *http.Request, fallbackAttempt ...b
 		}
 		r.all = append(r.all, entry)
 	}
+	return timing
 }
 
 func (r *providerRequestRecorder) attachUsage(u Usage) {
@@ -407,9 +470,13 @@ func (r *providerRequestRecorder) attachOutputEstimate(tokens int) {
 	}
 }
 
-func (r *providerRequestRecorder) attachFailure(fallback bool, message string) {
+func (r *providerRequestRecorder) attachFailure(fallback bool, message string, channelIDs ...string) {
 	if r == nil || strings.TrimSpace(message) == "" {
 		return
+	}
+	channelID := ""
+	if len(channelIDs) > 0 {
+		channelID = channelIDs[0]
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -420,6 +487,9 @@ func (r *providerRequestRecorder) attachFailure(fallback bool, message string) {
 	// already reflected in r.last and is never bypassed here.
 	if r.attempt > 0 && r.last.Attempt == r.attempt && r.last.Fallback == fallback && r.last.Error == "" {
 		r.last.Error = message
+		if r.last.ChannelID == "" {
+			r.last.ChannelID = channelID
+		}
 		if n := len(r.all); n > 0 && r.all[n-1].Attempt == r.attempt {
 			r.all[n-1] = r.last
 		}
@@ -428,20 +498,24 @@ func (r *providerRequestRecorder) attachFailure(fallback bool, message string) {
 
 	// Preserve a failure even if the matching request snapshot was not retained.
 	r.attempt++
-	r.last = providerRequestSnapshot{Attempt: r.attempt, Fallback: fallback, Error: message}
+	r.last = providerRequestSnapshot{Attempt: r.attempt, ChannelID: channelID, Fallback: fallback, Error: message}
 	if len(r.all) < maxProviderRequestSnapshots {
 		r.all = append(r.all, r.last)
 	}
 }
 
-func (r *providerRequestRecorder) appendFailure(fallback bool, message string) {
+func (r *providerRequestRecorder) appendFailure(fallback bool, message string, channelIDs ...string) {
 	if r == nil || strings.TrimSpace(message) == "" {
 		return
+	}
+	channelID := ""
+	if len(channelIDs) > 0 {
+		channelID = channelIDs[0]
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.attempt++
-	r.last = providerRequestSnapshot{Attempt: r.attempt, Fallback: fallback, Error: message}
+	r.last = providerRequestSnapshot{Attempt: r.attempt, ChannelID: channelID, Fallback: fallback, Error: message}
 	if len(r.all) < maxProviderRequestSnapshots {
 		r.all = append(r.all, r.last)
 	}

@@ -8,12 +8,17 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"aivory/server/internal/requestheaders"
 )
 
 // ListChannels returns every channel. Admin endpoint shape.
 func ListChannels(ctx context.Context, db *sql.DB) ([]Channel, error) {
 	rows, err := db.QueryContext(ctx,
-		`SELECT id, name, type, api_format, base_url, api_key, enabled, sort_order, updated_at FROM channels ORDER BY sort_order, name`)
+		`SELECT id, name, type, api_format, base_url, api_key, headers, enabled,
+			auto_disable_errors, auto_disable_timeouts, auto_disable_minutes,
+			consecutive_errors, consecutive_timeouts, auto_disabled_until,
+			sort_order, updated_at FROM channels ORDER BY sort_order, name`)
 	if err != nil {
 		return nil, err
 	}
@@ -22,8 +27,15 @@ func ListChannels(ctx context.Context, db *sql.DB) ([]Channel, error) {
 	for rows.Next() {
 		var c Channel
 		var en int
-		if err := rows.Scan(&c.ID, &c.Name, &c.Type, &c.APIFormat, &c.BaseURL, &c.APIKey, &en, &c.SortOrder, &c.UpdatedAt); err != nil {
+		var headers string
+		if err := rows.Scan(&c.ID, &c.Name, &c.Type, &c.APIFormat, &c.BaseURL, &c.APIKey, &headers, &en,
+			&c.AutoDisableErrors, &c.AutoDisableTimeouts, &c.AutoDisableMinutes,
+			&c.ConsecutiveErrors, &c.ConsecutiveTimeouts, &c.AutoDisabledUntil,
+			&c.SortOrder, &c.UpdatedAt); err != nil {
 			return nil, err
+		}
+		if err := json.Unmarshal([]byte(headers), &c.Headers); err != nil {
+			return nil, fmt.Errorf("decode channel headers: %w", err)
 		}
 		c.Enabled = en == 1
 		c.HasAPIKey = strings.TrimSpace(c.APIKey) != ""
@@ -38,14 +50,24 @@ func ListChannels(ctx context.Context, db *sql.DB) ([]Channel, error) {
 func GetChannel(ctx context.Context, db *sql.DB, id string) (*Channel, error) {
 	var c Channel
 	var en int
+	var headers string
 	err := db.QueryRowContext(ctx,
-		`SELECT id, name, type, api_format, base_url, api_key, enabled, sort_order, updated_at FROM channels WHERE id=?`, id,
-	).Scan(&c.ID, &c.Name, &c.Type, &c.APIFormat, &c.BaseURL, &c.APIKey, &en, &c.SortOrder, &c.UpdatedAt)
+		`SELECT id, name, type, api_format, base_url, api_key, headers, enabled,
+			auto_disable_errors, auto_disable_timeouts, auto_disable_minutes,
+			consecutive_errors, consecutive_timeouts, auto_disabled_until,
+			sort_order, updated_at FROM channels WHERE id=?`, id,
+	).Scan(&c.ID, &c.Name, &c.Type, &c.APIFormat, &c.BaseURL, &c.APIKey, &headers, &en,
+		&c.AutoDisableErrors, &c.AutoDisableTimeouts, &c.AutoDisableMinutes,
+		&c.ConsecutiveErrors, &c.ConsecutiveTimeouts, &c.AutoDisabledUntil,
+		&c.SortOrder, &c.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
+	}
+	if err := json.Unmarshal([]byte(headers), &c.Headers); err != nil {
+		return nil, fmt.Errorf("decode channel headers: %w", err)
 	}
 	c.Enabled = en == 1
 	c.HasAPIKey = strings.TrimSpace(c.APIKey) != ""
@@ -56,15 +78,25 @@ func GetChannel(ctx context.Context, db *sql.DB, id string) (*Channel, error) {
 func GetChannelByName(ctx context.Context, db *sql.DB, name string) (*Channel, error) {
 	var c Channel
 	var en int
+	var headers string
 	err := db.QueryRowContext(ctx,
-		`SELECT id, name, type, api_format, base_url, api_key, enabled, sort_order, updated_at FROM channels WHERE lower(trim(name))=lower(trim(?)) LIMIT 1`,
+		`SELECT id, name, type, api_format, base_url, api_key, headers, enabled,
+			auto_disable_errors, auto_disable_timeouts, auto_disable_minutes,
+			consecutive_errors, consecutive_timeouts, auto_disabled_until,
+			sort_order, updated_at FROM channels WHERE lower(trim(name))=lower(trim(?)) LIMIT 1`,
 		name,
-	).Scan(&c.ID, &c.Name, &c.Type, &c.APIFormat, &c.BaseURL, &c.APIKey, &en, &c.SortOrder, &c.UpdatedAt)
+	).Scan(&c.ID, &c.Name, &c.Type, &c.APIFormat, &c.BaseURL, &c.APIKey, &headers, &en,
+		&c.AutoDisableErrors, &c.AutoDisableTimeouts, &c.AutoDisableMinutes,
+		&c.ConsecutiveErrors, &c.ConsecutiveTimeouts, &c.AutoDisabledUntil,
+		&c.SortOrder, &c.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
+	}
+	if err := json.Unmarshal([]byte(headers), &c.Headers); err != nil {
+		return nil, fmt.Errorf("decode channel headers: %w", err)
 	}
 	c.Enabled = en == 1
 	c.HasAPIKey = strings.TrimSpace(c.APIKey) != ""
@@ -72,14 +104,26 @@ func GetChannelByName(ctx context.Context, db *sql.DB, name string) (*Channel, e
 }
 
 // CreateChannel inserts a row and returns it (with api_key stripped).
-func CreateChannel(ctx context.Context, db *sql.DB, name, typ, apiFormat, baseURL, apiKey string) (*Channel, error) {
+func CreateChannel(ctx context.Context, db *sql.DB, name, typ, apiFormat, baseURL, apiKey string, customHeaders ...requestheaders.Headers) (*Channel, error) {
+	headers := requestheaders.Headers{}
+	if len(customHeaders) > 0 {
+		var err error
+		headers, err = requestheaders.Normalize(customHeaders[0])
+		if err != nil {
+			return nil, err
+		}
+	}
+	headersJSON, err := json.Marshal(headers)
+	if err != nil {
+		return nil, err
+	}
 	id := genID("ch")
 	name = strings.TrimSpace(name)
 	baseURL = strings.TrimSpace(baseURL)
-	_, err := db.ExecContext(ctx,
-		`INSERT INTO channels(id, name, type, api_format, base_url, api_key, enabled, sort_order, updated_at)
-		 VALUES(?, ?, ?, ?, ?, ?, 1, 0, ?)`,
-		id, name, typ, apiFormat, baseURL, apiKey, time.Now().Unix())
+	_, err = db.ExecContext(ctx,
+		`INSERT INTO channels(id, name, type, api_format, base_url, api_key, headers, enabled, sort_order, updated_at)
+		 VALUES(?, ?, ?, ?, ?, ?, ?, 1, 0, ?)`,
+		id, name, typ, apiFormat, baseURL, apiKey, string(headersJSON), time.Now().Unix())
 	if err != nil {
 		if isUniqueIndexErr(err, "idx_channels_name_unique", "channels.name") {
 			return nil, ErrChannelNameExists
@@ -115,13 +159,17 @@ func ReorderChannels(ctx context.Context, db *sql.DB, ids []string) error {
 // stored key unchanged (so admins can edit other fields without re-entering
 // the secret).
 type ChannelPatch struct {
-	Name      *string `json:"name"`
-	Type      *string `json:"type"`
-	APIFormat *string `json:"api_format"`
-	BaseURL   *string `json:"base_url"`
-	APIKey    *string `json:"api_key"`
-	Enabled   *bool   `json:"enabled"`
-	SortOrder *int    `json:"sort_order"`
+	Name                *string                 `json:"name"`
+	Type                *string                 `json:"type"`
+	APIFormat           *string                 `json:"api_format"`
+	BaseURL             *string                 `json:"base_url"`
+	APIKey              *string                 `json:"api_key"`
+	Headers             *requestheaders.Headers `json:"headers"`
+	Enabled             *bool                   `json:"enabled"`
+	AutoDisableErrors   *int                    `json:"auto_disable_errors"`
+	AutoDisableTimeouts *int                    `json:"auto_disable_timeouts"`
+	AutoDisableMinutes  *int                    `json:"auto_disable_minutes"`
+	SortOrder           *int                    `json:"sort_order"`
 }
 
 func UpdateChannel(ctx context.Context, db *sql.DB, id string, patch ChannelPatch) (*Channel, error) {
@@ -147,6 +195,18 @@ func UpdateChannel(ctx context.Context, db *sql.DB, id string, patch ChannelPatc
 		parts = append(parts, "api_key=?")
 		args = append(args, *patch.APIKey)
 	}
+	if patch.Headers != nil {
+		headers, err := requestheaders.Normalize(*patch.Headers)
+		if err != nil {
+			return nil, err
+		}
+		raw, err := json.Marshal(headers)
+		if err != nil {
+			return nil, err
+		}
+		parts = append(parts, "headers=?")
+		args = append(args, string(raw))
+	}
 	if patch.Enabled != nil {
 		parts = append(parts, "enabled=?")
 		if *patch.Enabled {
@@ -154,6 +214,36 @@ func UpdateChannel(ctx context.Context, db *sql.DB, id string, patch ChannelPatc
 		} else {
 			args = append(args, 0)
 		}
+	}
+	if patch.AutoDisableErrors != nil {
+		parts = append(parts, "auto_disable_errors=?")
+		value := *patch.AutoDisableErrors
+		if value < 0 {
+			value = 0
+		}
+		args = append(args, value)
+		if value == 0 {
+			parts = append(parts, "consecutive_errors=0")
+		}
+	}
+	if patch.AutoDisableTimeouts != nil {
+		parts = append(parts, "auto_disable_timeouts=?")
+		value := *patch.AutoDisableTimeouts
+		if value < 0 {
+			value = 0
+		}
+		args = append(args, value)
+		if value == 0 {
+			parts = append(parts, "consecutive_timeouts=0")
+		}
+	}
+	if patch.AutoDisableMinutes != nil {
+		parts = append(parts, "auto_disable_minutes=?")
+		value := *patch.AutoDisableMinutes
+		if value < 0 {
+			value = 0
+		}
+		args = append(args, value)
 	}
 	if patch.SortOrder != nil {
 		parts = append(parts, "sort_order=?")
@@ -190,7 +280,7 @@ func DeleteChannel(ctx context.Context, db *sql.DB, id string) error {
 // ListModels returns every model with optional kind filter (empty = all).
 // onlyEnabled restricts to enabled rows.
 func ListModels(ctx context.Context, db *sql.DB, kind string, onlyEnabled bool) ([]Model, error) {
-	q := `SELECT id, channel_id, kind, request_id, label, description, icon, fallback_channel_id, enabled, sort_order, tool_mode, vision, stream, research_enabled, fast, system_prompt, param_controls, extra_params, official_tools, builtin_tools, mcp_server_ids, tags, moderation_enabled, moderation_mode, price_input, price_output, price_cache_read, price_cache_write, price_per_image, currency, dim, compaction_token_threshold, image_timeout_sec, updated_at FROM models WHERE 1=1`
+	q := `SELECT id, channel_id, kind, request_id, label, description, icon, fallback_channel_id, enabled, sort_order, tool_mode, vision, stream, research_enabled, fast, system_prompt, param_controls, extra_params, official_tools, builtin_tools, mcp_server_ids, tags, moderation_enabled, moderation_mode, price_input, price_output, price_cache_read, price_cache_write, price_per_image, currency, dim, compaction_token_threshold, image_timeout_sec, fallback_ttft_sec, auto_disable_errors, auto_disable_timeouts, auto_disable_minutes, updated_at FROM models WHERE 1=1`
 	args := []any{}
 	if kind != "" {
 		q += " AND kind=?"
@@ -219,7 +309,7 @@ func ListModels(ctx context.Context, db *sql.DB, kind string, onlyEnabled bool) 
 // GetModel returns one row.
 func GetModel(ctx context.Context, db *sql.DB, id string) (*Model, error) {
 	row := db.QueryRowContext(ctx,
-		`SELECT id, channel_id, kind, request_id, label, description, icon, fallback_channel_id, enabled, sort_order, tool_mode, vision, stream, research_enabled, fast, system_prompt, param_controls, extra_params, official_tools, builtin_tools, mcp_server_ids, tags, moderation_enabled, moderation_mode, price_input, price_output, price_cache_read, price_cache_write, price_per_image, currency, dim, compaction_token_threshold, image_timeout_sec, updated_at FROM models WHERE id=?`, id)
+		`SELECT id, channel_id, kind, request_id, label, description, icon, fallback_channel_id, enabled, sort_order, tool_mode, vision, stream, research_enabled, fast, system_prompt, param_controls, extra_params, official_tools, builtin_tools, mcp_server_ids, tags, moderation_enabled, moderation_mode, price_input, price_output, price_cache_read, price_cache_write, price_per_image, currency, dim, compaction_token_threshold, image_timeout_sec, fallback_ttft_sec, auto_disable_errors, auto_disable_timeouts, auto_disable_minutes, updated_at FROM models WHERE id=?`, id)
 	m, err := scanModel(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -237,7 +327,7 @@ func scanModel(s scanner) (Model, error) {
 	var builtinTools, mcpServerIDs sql.NullString
 	if err := s.Scan(&m.ID, &m.ChannelID, &m.Kind, &m.RequestID, &m.Label, &m.Description, &m.Icon, &m.FallbackChannelID, &en, &m.SortOrder,
 		&m.ToolMode, &vi, &st, &researchEn, &fastI, &m.SystemPrompt, &paramControls, &extraParams, &officialTools, &builtinTools, &mcpServerIDs, &tags, &modEn, &m.ModerationMode,
-		&m.PriceInput, &m.PriceOutput, &m.PriceCacheRead, &m.PriceCacheWrite, &m.PricePerImage, &m.Currency, &m.Dim, &m.CompactionTokenThreshold, &m.ImageTimeoutSec, &m.UpdatedAt); err != nil {
+		&m.PriceInput, &m.PriceOutput, &m.PriceCacheRead, &m.PriceCacheWrite, &m.PricePerImage, &m.Currency, &m.Dim, &m.CompactionTokenThreshold, &m.ImageTimeoutSec, &m.FallbackTTFTSec, &m.AutoDisableErrors, &m.AutoDisableTimeouts, &m.AutoDisableMinutes, &m.UpdatedAt); err != nil {
 		return m, err
 	}
 	m.Enabled = en == 1
@@ -336,28 +426,62 @@ func CreateModel(ctx context.Context, db *sql.DB, m Model) (*Model, error) {
 	if m.CompactionTokenThreshold < 0 {
 		m.CompactionTokenThreshold = 0
 	}
+	if m.FallbackTTFTSec < 0 {
+		m.FallbackTTFTSec = 0
+	}
+	if m.AutoDisableErrors < 0 {
+		m.AutoDisableErrors = 0
+	}
+	if m.AutoDisableTimeouts < 0 {
+		m.AutoDisableTimeouts = 0
+	}
+	if m.AutoDisableMinutes < 0 {
+		m.AutoDisableMinutes = 0
+	}
+	if m.FallbackTTFTSec == 0 {
+		m.AutoDisableTimeouts = 0
+	}
 	_, err := db.ExecContext(ctx, `INSERT INTO models(
 		id, channel_id, kind, request_id, label, description, icon, fallback_channel_id, enabled, sort_order,
 		tool_mode, vision, stream, research_enabled, system_prompt, param_controls, extra_params, official_tools, builtin_tools, mcp_server_ids, tags, moderation_enabled, moderation_mode,
 		price_input, price_output, price_cache_read, price_cache_write, price_per_image, currency,
-		dim, compaction_token_threshold, image_timeout_sec, updated_at
-	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		dim, compaction_token_threshold, image_timeout_sec, fallback_ttft_sec, auto_disable_errors, auto_disable_timeouts, auto_disable_minutes, updated_at
+	) VALUES(
+		?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+		?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+		?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+		?, ?, ?, ?, ?, ?, ?
+	)`,
 		m.ID, m.ChannelID, m.Kind, m.RequestID, m.Label, m.Description, m.Icon, m.FallbackChannelID, boolInt(m.Enabled), m.SortOrder,
 		m.ToolMode, boolInt(m.Vision), boolInt(m.Stream), boolInt(m.ResearchEnabled), m.SystemPrompt, string(m.ParamControls), string(m.ExtraParams), string(m.OfficialTools), nullableRawJSON(m.BuiltinTools), nullableRawJSON(m.MCPServerIDs), string(m.Tags), boolInt(m.ModerationEnabled), m.ModerationMode,
 		m.PriceInput, m.PriceOutput, m.PriceCacheRead, m.PriceCacheWrite, m.PricePerImage, m.Currency,
-		m.Dim, m.CompactionTokenThreshold, m.ImageTimeoutSec, time.Now().Unix())
+		m.Dim, m.CompactionTokenThreshold, m.ImageTimeoutSec, m.FallbackTTFTSec, m.AutoDisableErrors, m.AutoDisableTimeouts, m.AutoDisableMinutes, time.Now().Unix())
 	if err != nil {
 		if isUniqueIndexErr(err, "idx_models_channel_request_unique", "models.channel_id") {
 			return nil, ErrModelRequestExists
 		}
 		return nil, err
 	}
+	if err := upsertChannelModel(ctx, db, m.ChannelID, m.RequestID, m.Label, m.Description, m.Kind, "manual"); err != nil {
+		return nil, err
+	}
+	if err := ensureBinding(ctx, db, m.ID, m.ChannelID, "regular", 1, 100); err != nil {
+		return nil, err
+	}
+	if m.FallbackChannelID != "" && m.FallbackChannelID != m.ChannelID {
+		if err := upsertChannelModel(ctx, db, m.FallbackChannelID, m.RequestID, m.Label, m.Description, m.Kind, "manual"); err != nil {
+			return nil, err
+		}
+		if err := ensureBinding(ctx, db, m.ID, m.FallbackChannelID, "fallback", 1, 100); err != nil {
+			return nil, err
+		}
+	}
 	return GetModel(ctx, db, m.ID)
 }
 
 func GetModelByChannelRequestID(ctx context.Context, db *sql.DB, channelID, requestID string) (*Model, error) {
 	row := db.QueryRowContext(ctx,
-		`SELECT id, channel_id, kind, request_id, label, description, icon, fallback_channel_id, enabled, sort_order, tool_mode, vision, stream, research_enabled, fast, system_prompt, param_controls, extra_params, official_tools, builtin_tools, mcp_server_ids, tags, moderation_enabled, moderation_mode, price_input, price_output, price_cache_read, price_cache_write, price_per_image, currency, dim, compaction_token_threshold, image_timeout_sec, updated_at
+		`SELECT id, channel_id, kind, request_id, label, description, icon, fallback_channel_id, enabled, sort_order, tool_mode, vision, stream, research_enabled, fast, system_prompt, param_controls, extra_params, official_tools, builtin_tools, mcp_server_ids, tags, moderation_enabled, moderation_mode, price_input, price_output, price_cache_read, price_cache_write, price_per_image, currency, dim, compaction_token_threshold, image_timeout_sec, fallback_ttft_sec, auto_disable_errors, auto_disable_timeouts, auto_disable_minutes, updated_at
 		 FROM models WHERE channel_id=? AND lower(trim(request_id))=lower(trim(?)) LIMIT 1`,
 		channelID, requestID)
 	m, err := scanModel(row)
@@ -413,16 +537,31 @@ func UpdateModel(ctx context.Context, db *sql.DB, id string, m Model) (*Model, e
 	if m.CompactionTokenThreshold < 0 {
 		m.CompactionTokenThreshold = 0
 	}
+	if m.FallbackTTFTSec < 0 {
+		m.FallbackTTFTSec = 0
+	}
+	if m.AutoDisableErrors < 0 {
+		m.AutoDisableErrors = 0
+	}
+	if m.AutoDisableTimeouts < 0 {
+		m.AutoDisableTimeouts = 0
+	}
+	if m.AutoDisableMinutes < 0 {
+		m.AutoDisableMinutes = 0
+	}
+	if m.FallbackTTFTSec == 0 {
+		m.AutoDisableTimeouts = 0
+	}
 	_, err := db.ExecContext(ctx, `UPDATE models SET
 		channel_id=?, label=?, description=?, icon=?, fallback_channel_id=?, request_id=?, kind=?, enabled=?, sort_order=?,
 		tool_mode=?, vision=?, stream=?, research_enabled=?, system_prompt=?, param_controls=?, extra_params=?, official_tools=?, builtin_tools=?, mcp_server_ids=?, tags=?, moderation_enabled=?, moderation_mode=?,
 		price_input=?, price_output=?, price_cache_read=?, price_cache_write=?, price_per_image=?, currency=?,
-		dim=?, compaction_token_threshold=?, image_timeout_sec=?, updated_at=?
+		dim=?, compaction_token_threshold=?, image_timeout_sec=?, fallback_ttft_sec=?, auto_disable_errors=?, auto_disable_timeouts=?, auto_disable_minutes=?, updated_at=?
 		WHERE id=?`,
 		m.ChannelID, m.Label, m.Description, m.Icon, m.FallbackChannelID, m.RequestID, m.Kind, boolInt(m.Enabled), m.SortOrder,
 		m.ToolMode, boolInt(m.Vision), boolInt(m.Stream), boolInt(m.ResearchEnabled), m.SystemPrompt, string(m.ParamControls), string(m.ExtraParams), string(m.OfficialTools), nullableRawJSON(m.BuiltinTools), nullableRawJSON(m.MCPServerIDs), string(m.Tags), boolInt(m.ModerationEnabled), m.ModerationMode,
 		m.PriceInput, m.PriceOutput, m.PriceCacheRead, m.PriceCacheWrite, m.PricePerImage, m.Currency,
-		m.Dim, m.CompactionTokenThreshold, m.ImageTimeoutSec, time.Now().Unix(), id)
+		m.Dim, m.CompactionTokenThreshold, m.ImageTimeoutSec, m.FallbackTTFTSec, m.AutoDisableErrors, m.AutoDisableTimeouts, m.AutoDisableMinutes, time.Now().Unix(), id)
 	if err != nil {
 		if isUniqueIndexErr(err, "idx_models_channel_request_unique", "models.channel_id") {
 			return nil, ErrModelRequestExists

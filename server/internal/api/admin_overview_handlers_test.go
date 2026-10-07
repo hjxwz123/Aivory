@@ -10,10 +10,14 @@ import (
 	"aivory/server/internal/store"
 )
 
-func readAdminOverview(t *testing.T, d Deps) (*adminOverviewResponse, string) {
+func readAdminOverview(t *testing.T, d Deps, targets ...string) (*adminOverviewResponse, string) {
 	t.Helper()
 	recorder := httptest.NewRecorder()
-	adminOverviewHandler(d, recorder, httptest.NewRequest(http.MethodGet, "/api/admin/overview", nil))
+	target := "/api/admin/overview"
+	if len(targets) > 0 {
+		target = targets[0]
+	}
+	adminOverviewHandler(d, recorder, httptest.NewRequest(http.MethodGet, target, nil))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("overview status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
@@ -73,9 +77,32 @@ func TestAdminOverviewReturnsCountsHealthAndOnlySummaryData(t *testing.T) {
 	if response.Today == nil {
 		t.Fatal("today totals are nil for a healthy deployment")
 	}
+	if response.Trends == nil || response.Trends.Days != 30 || len(response.Trends.Points) != 30 || response.Trends.Registrations != 1 || response.Trends.PeriodStart%86400 != 0 {
+		t.Fatalf("unexpected default trends: %+v", response.Trends)
+	}
+	for _, days := range []string{"7", "90", "999999", "invalid"} {
+		result, _ := readAdminOverview(t, d, "/api/admin/overview?days="+days)
+		expected := 30
+		if days == "7" {
+			expected = 7
+		} else if days == "90" {
+			expected = 90
+		}
+		if result.Trends == nil || result.Trends.Days != expected || len(result.Trends.Points) != expected {
+			t.Fatalf("range %s: %+v", days, result.Trends)
+		}
+	}
 	for _, forbidden := range []string{"overview-secret-key", "overview-smtp-secret", "overview-storage-secret", "smtp_password", "storage_aliyun_access_key_secret"} {
 		if strings.Contains(raw, forbidden) {
 			t.Fatalf("overview response leaked %q: %s", forbidden, raw)
 		}
+	}
+}
+
+func TestAdminOverviewKeepsConfigurationChecksUntilReady(t *testing.T) {
+	d := newAuthSecurityDeps(t, "admin-overview-unready.db")
+	response, _ := readAdminOverview(t, d, "/api/admin/overview?days=7")
+	if response.Health.AllReady || response.Today != nil || response.Trends != nil {
+		t.Fatalf("unconfigured deployment must not query usage: %+v", response)
 	}
 }

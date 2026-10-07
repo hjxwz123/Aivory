@@ -34,8 +34,8 @@ const BackupVersion = 3
 var backupTableOrder = []string{
 	"settings", "users", "credit_adjustment_notifications", "login_histories", "user_groups", "workspaces", "workspace_members", "registration_domains", "registration_domain_matches", "domain_users", "credit_ledger", "credit_reservations", "quota_ledger", "billing_usage", "credit_packages",
 	"payment_channels", "payment_methods", "payment_orders", "payment_order_attempts", "payment_events",
-	"channels", "mcp_servers", "skills", "prompts", "user_skills", "user_prompts", "user_mcp_servers", "oauth_providers",
-	"models", "model_group_quotas", "model_tags", "image_styles",
+	"channels", "channel_models", "mcp_servers", "skills", "prompts", "user_skills", "user_prompts", "user_mcp_servers", "oauth_providers",
+	"models", "model_channel_bindings", "model_group_quotas", "model_tags", "image_styles",
 	"redeem_codes", "redeem_redemptions",
 	"model_skills", "knowledge_bases", "knowledge_base_shares", "workspace_kb_member_permissions", "projects", "conversations", "conversation_compaction_leases", "conversation_generation_leases", "messages", "message_feedback", "user_feedback",
 	"conversation_shares", "html_preview_shares", "files", "documents", "chunks", "vector_points", "memories",
@@ -43,7 +43,7 @@ var backupTableOrder = []string{
 	// file above, so they restore after both.
 	"aippt_decks",
 	"usage_stats", "usage_logs", "artifacts", "refresh_tokens", "oauth_identities", "passkeys",
-	"workspace_invites", "workspace_policies", "workspace_announcements", "workspace_audit_logs",
+	"workspace_invites", "workspace_policies", "workspace_announcements", "workspace_audit_logs", "admin_audit_logs",
 	"pending_storage_cleanup",
 }
 
@@ -59,6 +59,7 @@ var configTableOrder = []string{
 	"payment_channels",
 	"payment_methods",
 	"channels",
+	"channel_models",
 	"mcp_servers",
 	"skills",
 	"prompts",
@@ -66,6 +67,7 @@ var configTableOrder = []string{
 	"model_tags",
 	"image_styles",
 	"models",
+	"model_channel_bindings",
 	"model_group_quotas",
 	"model_skills",
 	"redeem_codes",
@@ -287,6 +289,9 @@ func RestoreTable(ctx context.Context, ex RowExecer, table string, r io.Reader) 
 			continue
 		}
 		q := "INSERT INTO " + table + " (" + strings.Join(cols, ", ") + ") VALUES (" + placeholders(len(cols)) + ")"
+		if isAuditTable(table) {
+			q += " ON CONFLICT(id) DO NOTHING"
+		}
 		if _, err := ex.ExecContext(ctx, q, args...); err != nil { //nolint:gosec // table+cols are schema-derived
 			return n, fmt.Errorf("insert into %s: %w", table, err)
 		}
@@ -383,6 +388,8 @@ var tablePrimaryKeys = map[string][]string{
 	"credit_adjustment_notifications": {"id"},
 	"login_histories":                 {"id"},
 	"workspaces":                      {"id"},
+	"workspace_audit_logs":            {"id"},
+	"admin_audit_logs":                {"id"},
 	"workspace_members":               {"workspace_id", "user_id"},
 	"registration_domains":            {"domain"},
 	"registration_domain_matches":     {"domain"},
@@ -400,6 +407,7 @@ var tablePrimaryKeys = map[string][]string{
 	"payment_order_attempts":          {"merchant_order_id"},
 	"payment_events":                  {"id"},
 	"channels":                        {"id"},
+	"channel_models":                  {"id"},
 	"mcp_servers":                     {"id"},
 	"skills":                          {"id"},
 	"prompts":                         {"id"},
@@ -408,6 +416,7 @@ var tablePrimaryKeys = map[string][]string{
 	"user_mcp_servers":                {"id"},
 	"oauth_providers":                 {"id"},
 	"models":                          {"id"},
+	"model_channel_bindings":          {"id"},
 	"model_group_quotas":              {"model_id", "group_id"},
 	"model_tags":                      {"id"},
 	"image_styles":                    {"id"},
@@ -496,6 +505,9 @@ func UpsertTable(ctx context.Context, ex RowExecer, table string, r io.Reader) (
 			}
 		}
 		q := "INSERT INTO " + table + " (" + strings.Join(cols, ", ") + ") VALUES (" + placeholders(len(cols)) + ") " + upsertClause(pk, cols, pkSet)
+		if isAuditTable(table) {
+			q = "INSERT INTO " + table + " (" + strings.Join(cols, ", ") + ") VALUES (" + placeholders(len(cols)) + ") ON CONFLICT(id) DO NOTHING"
+		}
 		if _, err := ex.ExecContext(ctx, q, args...); err != nil { //nolint:gosec // table+cols are schema-derived
 			return n, fmt.Errorf("upsert into %s: %w", table, err)
 		}
@@ -573,11 +585,19 @@ func decodeBackupValue(rm json.RawMessage, isBinary bool) (any, error) {
 func WipeAll(ctx context.Context, ex RowExecer) error {
 	for i := len(backupTableOrder) - 1; i >= 0; i-- {
 		t := backupTableOrder[i]
+		if isAuditTable(t) {
+			continue
+		}
 		if _, err := ex.ExecContext(ctx, "DELETE FROM "+t); err != nil { //nolint:gosec // whitelisted
 			return fmt.Errorf("wipe %s: %w", t, err)
 		}
 	}
 	return nil
+}
+
+// Restoring configuration/data must retain evidence created since the backup.
+func isAuditTable(table string) bool {
+	return table == "admin_audit_logs" || table == "workspace_audit_logs"
 }
 
 // ResetSerialSequences re-aligns Postgres serial sequences with the restored

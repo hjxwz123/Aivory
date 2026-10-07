@@ -216,6 +216,7 @@ func FindRedeemCodeByCode(ctx context.Context, db *sql.DB, code string) (*Redeem
 
 // RedeemCodeFilter narrows ListRedeemCodes.
 type RedeemCodeFilter struct {
+	Search    string
 	BatchName string // exact match if set
 	Status    string // "" | "unused" | "partial" | "used" | "invalid"
 	Limit     int
@@ -237,6 +238,17 @@ func ListRedeemCodes(ctx context.Context, db *sql.DB, f RedeemCodeFilter) ([]Red
 	}
 	q := `SELECT ` + redeemCodeCols + ` FROM redeem_codes WHERE 1=1`
 	args := []any{}
+	if search := strings.TrimSpace(f.Search); search != "" {
+		escape := strings.NewReplacer("!", "!!", "%", "!%", "_", "!_")
+		pattern := "%" + escape.Replace(strings.ToLower(search)) + "%"
+		codeSearch := strings.NewReplacer("-", "", " ", "", "\t", "", "\n", "", "\r", "").Replace(strings.ToLower(search))
+		codePattern := pattern
+		if codeSearch != "" {
+			codePattern = "%" + escape.Replace(codeSearch) + "%"
+		}
+		q += ` AND (LOWER(code) LIKE ? ESCAPE '!' OR REPLACE(LOWER(code), '-', '') LIKE ? ESCAPE '!' OR LOWER(id) LIKE ? ESCAPE '!' OR LOWER(batch_name) LIKE ? ESCAPE '!' OR LOWER(note) LIKE ? ESCAPE '!')`
+		args = append(args, pattern, codePattern, pattern, pattern, pattern)
+	}
 	if f.BatchName != "" {
 		q += ` AND batch_name=?`
 		args = append(args, f.BatchName)

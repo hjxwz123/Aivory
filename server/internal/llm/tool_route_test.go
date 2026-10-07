@@ -416,6 +416,16 @@ func TestDisabledToolRouteChannelFallsBackToConversationModel(t *testing.T) {
 	if _, err := db.Exec(`UPDATE models SET channel_id=? WHERE id=?`, disabledChannel.ID, taskModelID); err != nil {
 		t.Fatal(err)
 	}
+	var requestID string
+	if err := db.QueryRow(`SELECT request_id FROM models WHERE id=?`, taskModelID).Scan(&requestID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO channel_models(id,channel_id,request_id,label,kind,enabled) VALUES('cm-disabled-route',?,?,?, 'chat',1)`, disabledChannel.ID, requestID, requestID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE model_channel_bindings SET channel_id=? WHERE model_id=? AND role='regular'`, disabledChannel.ID, taskModelID); err != nil {
+		t.Fatal(err)
+	}
 
 	provider.routeResponse = "0"
 	runToolRouteTurn(t, orchestrator, model.ID, conv.ID, RunRequest{

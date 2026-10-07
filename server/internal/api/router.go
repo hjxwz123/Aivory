@@ -163,6 +163,7 @@ func NewRouter(d Deps) http.Handler {
 	go resumeUserDeletions(d)
 
 	mux := newMux()
+	mux.auditDeps = &d
 
 	// Public endpoints.
 	// §8 brute-force defence: tight IP-scoped rate limit on auth surfaces.
@@ -288,6 +289,10 @@ func NewRouter(d Deps) http.Handler {
 
 	mux.handle("GET", "/api/models", requireAuth(d, listModelsHandler))
 	mux.handle("POST", "/api/html-previews", requireAuth(d, createHTMLPreviewShareHandler))
+	mux.handle("GET", "/api/html-previews", requireAuth(d, listUserHTMLPreviewShares))
+	mux.handle("DELETE", "/api/html-previews/:id", requireAuth(d, deleteUserHTMLPreviewShare))
+	mux.handle("GET", "/api/conversation-shares", requireAuth(d, listUserConversationShares))
+	mux.handle("DELETE", "/api/conversation-shares/:id", requireAuth(d, deleteUserConversationShare))
 	mux.handle("GET", "/api/tools", requireAuth(d, listSelectableToolsHandler))
 	mux.handle("GET", "/api/image-models", requireAuth(d, listImageModelsHandler))
 	mux.handle("GET", "/api/skills", requireAuth(d, listSkillsPublicHandler))
@@ -403,6 +408,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("POST", "/api/conversations/import", requireAuth(d, importConversationsHandler))
 	mux.handle("GET", "/api/conversations/:id", requireAuth(d, getConversationHandler))
 	mux.handle("PATCH", "/api/conversations/:id", requireAuth(d, updateConversationHandler))
+	mux.handle("POST", "/api/conversations/:id/reorder", requireAuth(d, reorderConversationHandler))
 	mux.handle("DELETE", "/api/conversations/:id", requireAuth(d, deleteConversationHandler))
 	mux.handle("POST", "/api/conversations/:id/compact", requireAuth(d, compactConversationHandler))
 	mux.handle("GET", "/api/conversations/:id/messages", requireAuth(d, listMessagesHandler))
@@ -474,8 +480,14 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/admin/onboarding", requireAdmin(d, adminOnboardingGet))
 	mux.handle("PATCH", "/api/admin/onboarding", requireAdmin(d, adminOnboardingSet))
 	mux.handle("GET", "/api/admin/channels", requireAdmin(d, listChannelsAdmin))
+	mux.handle("GET", "/api/admin/channels/health", requireAdmin(d, channelsHealthAdmin))
+	mux.handle("GET", "/api/admin/channels/capabilities", requireAdmin(d, listChannelCapabilitiesAdmin))
 	mux.handle("POST", "/api/admin/channels/models/discover", requireAdmin(d, discoverDraftChannelModelsAdmin))
 	mux.handle("POST", "/api/admin/channels", requireAdmin(d, createChannelAdmin))
+	mux.handle("GET", "/api/admin/channels/:id/models", requireAdmin(d, listChannelModelsAdmin))
+	mux.handle("GET", "/api/admin/channels/:id/health", requireAdmin(d, channelHealthAdmin))
+	mux.handle("POST", "/api/admin/channels/:id/recover", requireAdmin(d, recoverChannelAdmin))
+	mux.handle("PUT", "/api/admin/channels/:id/models", requireAdmin(d, replaceChannelModelsAdmin))
 	mux.handle("POST", "/api/admin/channels/:id/models/discover", requireAdmin(d, discoverSavedChannelModelsAdmin))
 	mux.handle("POST", "/api/admin/channels/:id/models/import", requireAdmin(d, importChannelModelsAdmin))
 	mux.handle("POST", "/api/admin/channels/:id/models/batch", requireAdmin(d, createChannelModelsBatchAdmin))
@@ -495,6 +507,9 @@ func NewRouter(d Deps) http.Handler {
 	// picks the first match, so /reorder would otherwise hit updateModelAdmin.
 	mux.handle("PATCH", "/api/admin/models/reorder", requireAdmin(d, reorderModelsAdmin))
 	mux.handle("PATCH", "/api/admin/models/:id", requireAdmin(d, updateModelAdmin))
+	mux.handle("GET", "/api/admin/models/:id/channels", requireAdmin(d, listModelChannelsAdmin))
+	mux.handle("PUT", "/api/admin/models/:id/channels", requireAdmin(d, replaceModelChannelsAdmin))
+	mux.handle("POST", "/api/admin/models/:id/channels/:channel_id/recover", requireAdmin(d, recoverModelChannelAdmin))
 	mux.handle("DELETE", "/api/admin/models/:id", requireAdmin(d, deleteModelAdmin))
 	mux.handle("PUT", "/api/admin/models/:id/skills", requireAdmin(d, setModelSkillsAdmin))
 	mux.handle("PUT", "/api/admin/models/:id/fast", requireAdmin(d, setFastModelAdmin))
@@ -607,6 +622,10 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("DELETE", "/api/admin/workspaces/:id", requireAdmin(d, adminDeleteWorkspaceHandler))
 	mux.handle("DELETE", "/api/admin/conversations/:id", requireAdmin(d, deleteConversationAdmin))
 	mux.handle("GET", "/api/admin/usage", requireAdmin(d, usageReportAdmin))
+	mux.handle("GET", "/api/admin/audit-logs", requireAdmin(d, adminAuditLogsHandler))
+	mux.handle("GET", "/api/admin/audit-logs/export", requireAdmin(d, exportAdminAuditLogsHandler))
+	mux.handle("DELETE", "/api/admin/audit-logs", requireAdmin(d, deleteFilteredAdminAuditLogsHandler))
+	mux.handle("DELETE", "/api/admin/audit-logs/:id", requireAdmin(d, deleteAdminAuditLogHandler))
 	mux.handle("DELETE", "/api/admin/usage", requireAdmin(d, usageDeleteFilteredAdmin))
 	mux.handle("DELETE", "/api/admin/usage/:id", requireAdmin(d, usageDeleteOneAdmin))
 	mux.handle("GET", "/api/admin/analytics", requireAdmin(d, analyticsAdmin))

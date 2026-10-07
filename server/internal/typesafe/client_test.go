@@ -85,6 +85,18 @@ func TestMixedQuestionsStructuredJSONAndVersion(t *testing.T) {
 	}
 }
 
+func TestCustomHeadersOverrideDefaults(t *testing.T) {
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("A") != "a" || r.Header.Get("Authorization") != "Bearer override" {
+			t.Errorf("headers=%v", r.Header)
+		}
+		fmt.Fprint(w, noulResponse)
+	}, func(cfg *Config) { cfg.Headers = map[string]string{"A": "a", "Authorization": "Bearer override"} })
+	if _, err := c.Evaluate(context.Background(), request(), Options{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestInvalidRequestsNeverReachServer(t *testing.T) {
 	var calls atomic.Int32
 	c := testClient(t, func(w http.ResponseWriter, r *http.Request) { calls.Add(1) }, nil)

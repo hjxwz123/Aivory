@@ -69,6 +69,9 @@ func TestHTMLPreviewShareReturnsOnlySandboxedHTML(t *testing.T) {
 	if got := publicRec.Header().Get("Referrer-Policy"); got != "no-referrer" {
 		t.Fatalf("Referrer-Policy=%q", got)
 	}
+	if got := publicRec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("revocable previews must not be cached: %q", got)
+	}
 }
 
 func TestHTMLPreviewShareRejectsOversizedHTML(t *testing.T) {

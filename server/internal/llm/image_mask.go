@@ -65,7 +65,11 @@ func ValidateImageEditRequest(ctx context.Context, db *sql.DB, convID, userID, l
 	if !maskVisible {
 		return ErrImageMaskEdit
 	}
-	channel, err := store.GetChannel(ctx, db, model.ChannelID)
+	channelID, err := selectRegularModelChannelID(ctx, db, model)
+	if err != nil {
+		return ErrImageMaskEdit
+	}
+	channel, err := store.GetChannel(ctx, db, channelID)
 	if err != nil || !SupportsImageMaskEdit(model, channel) {
 		return ErrImageMaskEdit
 	}

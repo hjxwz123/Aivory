@@ -375,7 +375,7 @@ func (s *Service) resolveEmbedderForVectorChunk(ctx context.Context, ch store.Em
 		if dim <= 0 {
 			dim = 1536
 		}
-		return &httpEmbedder{baseURL: chRow.BaseURL, apiKey: chRow.APIKey, model: m.RequestID, dim: dim}, name, dim, nil
+		return &httpEmbedder{baseURL: chRow.BaseURL, apiKey: chRow.APIKey, headers: chRow.Headers, model: m.RequestID, dim: dim}, name, dim, nil
 	default:
 		return nil, name, 0, fmt.Errorf("unknown embedding model %q", name)
 	}
