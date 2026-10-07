@@ -126,10 +126,9 @@ export function ModelPicker({
   const pending = !catalogReady || (!current && !isFast && !imageModelsLoaded)
   const failed = catalogReady && Boolean(error) && !current && !isFast
   const empty = catalogReady && imageModelsLoaded && models.length === 0 && imageModels.length === 0 && !isFast
-  // Reserve the same width in every state so late model labels don't shift
-  // adjacent composer controls. The caller can still constrain it on phones.
+  // Fit the label and only truncate when the surrounding controls need space.
   const triggerClassName = cn(
-    'inline-flex h-8 w-[180px] min-w-0 max-w-[180px] items-center gap-1.5 rounded-[8px] px-2.5',
+    'inline-flex h-8 w-auto min-w-0 max-w-full shrink items-center gap-1.5 rounded-[8px] px-2.5',
     'text-[13px] font-medium text-[var(--color-fg-muted)]',
     'hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive',
     'focus-visible:outline-none focus-visible:bg-[var(--color-bg-muted)] focus-visible:text-[var(--color-fg)]',
@@ -153,7 +152,7 @@ export function ModelPicker({
       <button type="button" disabled={disabled} className={triggerClassName}
         onClick={() => void load()} aria-label={t('modelPicker.retryLoad')} title={t('modelPicker.loadFailed')}>
         <RefreshCw size={16} className="shrink-0" aria-hidden />
-        <span className="home-loading-content truncate">{t('modelPicker.retryLoad')}</span>
+        <span className="home-loading-content min-w-0 truncate">{t('modelPicker.retryLoad')}</span>
       </button>
     )
   }
@@ -175,13 +174,13 @@ export function ModelPicker({
         aria-invalid={unavailable || undefined}
       >
         {isFast ? (
-          <Zap size={16} aria-hidden />
+          <Zap size={16} className="shrink-0" aria-hidden />
         ) : unavailable ? (
           <CircleAlert size={16} className="shrink-0 text-[var(--color-danger)]" aria-hidden />
         ) : (
           <ModelIcon icon={current?.icon} size={16} />
         )}
-        <span key={isFast ? 'fast' : current?.id ?? 'empty'} className={cn('home-loading-content truncate', unavailable && 'text-[var(--color-danger)]')}>
+        <span key={isFast ? 'fast' : current?.id ?? 'empty'} className={cn('home-loading-content min-w-0 truncate', unavailable && 'text-[var(--color-danger)]')}>
           {isFast
             ? t('fastMode.label', { defaultValue: '快速' })
             : unavailable
@@ -223,7 +222,7 @@ export function ModelPicker({
               <Zap size={16} className="mt-0.5 text-[var(--color-fg-muted)]" />
               <div className="flex flex-col gap-1 flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="font-medium text-[var(--color-fg)] truncate">
+                  <span className="min-w-0 truncate font-medium text-[var(--color-fg)]">
                     {t('fastMode.label', { defaultValue: '快速' })}
                   </span>
                   {isFast && (
@@ -276,7 +275,7 @@ export function ModelPicker({
               <ModelIcon icon={m.icon} size={16} className="mt-0.5" />
               <div className="flex flex-col gap-1 flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="font-medium text-[var(--color-fg)] truncate">{m.label}</span>
+                  <span className="min-w-0 truncate font-medium text-[var(--color-fg)]">{m.label}</span>
                   {showMultiplier ? (
                     <span
                       className="ml-auto shrink-0 rounded-full bg-[var(--color-bg-muted)] px-1.5 py-0.5 text-[10.5px] font-medium tabular-nums text-[var(--color-fg-muted)]"
@@ -324,7 +323,7 @@ export function ModelPicker({
                   <ModelIcon icon={m.icon} size={16} className="mt-0.5" />
                   <div className="flex min-w-0 flex-1 flex-col gap-1">
                     <div className="flex items-center gap-2">
-                      <span className="truncate font-medium text-[var(--color-fg)]">{m.label}</span>
+                      <span className="min-w-0 truncate font-medium text-[var(--color-fg)]">{m.label}</span>
                       {showCredits ? (
                         <span
                           className="ml-auto shrink-0 rounded-full bg-[var(--color-bg-muted)] px-1.5 py-0.5 text-[10.5px] font-medium tabular-nums text-[var(--color-fg-muted)]"

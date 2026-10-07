@@ -346,7 +346,7 @@ export default function AdminLayout() {
   // the console never changes how navigation looks.
   function navRowClass(active: boolean) {
     return cn(
-      'group/nav inline-flex h-8 w-full items-center gap-2 overflow-hidden rounded-[8px] px-2.5 text-[13px] interactive max-lg:h-[var(--tap-min)] max-sm:!h-9',
+      'group/nav inline-flex h-8 w-full items-center gap-3 overflow-hidden rounded-[8px] px-2.5 text-[13px] interactive max-lg:h-[var(--tap-min)] max-sm:!h-9',
       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
       active
         ? 'bg-[var(--color-sidebar-active)] font-medium text-[var(--color-fg)] shadow-[var(--shadow-xs)]'
@@ -357,7 +357,7 @@ export default function AdminLayout() {
   function renderNavItems() {
     const overviewActive = adminNavItemActive(path, ADMIN_OVERVIEW)
     return (
-      <div className="flex flex-col gap-px">
+      <div className="flex flex-col gap-1.5">
         <Link
           to="/"
           onClick={() => setMobileOpen(false)}
@@ -456,7 +456,7 @@ export default function AdminLayout() {
         className="flex min-h-12 min-w-0 items-center overflow-x-auto overscroll-x-contain scrollbar-none"
       >
         {/* Matches the resource library's kind switcher. */}
-        <div className="inline-flex w-max shrink-0 items-center rounded-[9px] bg-[var(--color-bg-muted)] p-1">
+        <div className="inline-flex w-max shrink-0 items-center gap-1.5 rounded-[9px] bg-[var(--color-bg-muted)] p-1">
           {currentGroup.items.map((item) => {
             const active = adminNavItemActive(path, item)
             return (
@@ -466,7 +466,7 @@ export default function AdminLayout() {
                 aria-current={active ? 'page' : undefined}
                 aria-busy={navigationTarget === item.to || navigationTarget?.startsWith(`${item.to}?`) || undefined}
                 className={cn(
-                  'inline-flex h-[var(--tap-min)] min-w-0 shrink-0 items-center justify-center whitespace-nowrap rounded-[7px] px-2 text-[12px] font-medium interactive sm:h-8 sm:px-2.5',
+                  'inline-flex h-[var(--tap-min)] min-w-0 shrink-0 items-center justify-center whitespace-nowrap rounded-[7px] px-3 text-[13px] font-medium interactive sm:h-8 sm:px-4',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)]',
                   active
                     ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]'

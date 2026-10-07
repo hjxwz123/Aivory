@@ -549,6 +549,7 @@ export default function ChatThread() {
             onFastChange={handleFastChange}
             workspaceId={conversation.workspaceId ?? null}
             disabled={isWorkspaceGuest}
+            className="max-w-[50%]"
           />
           {!isWorkspaceGuest ? (
             <Tooltip content={t('chat:topbar.outlineTooltip', { defaultValue: 'Conversation outline' })}>
@@ -641,7 +642,7 @@ export default function ChatThread() {
           </DropdownMenu> : null}
         </header>
       ) : (
-        <header className="grid grid-cols-[var(--tap-min)_1fr_auto] items-center gap-1 h-[var(--layout-topbar-h-mobile)] px-2 bg-[var(--color-bg)]/85 backdrop-blur-sm">
+        <header className="grid grid-cols-[var(--tap-min)_minmax(0,1fr)_auto] items-center gap-1 h-[var(--layout-topbar-h-mobile)] px-2 bg-[var(--color-bg)]/85 backdrop-blur-sm">
           <button
             type="button"
             aria-label={t('chat:commandMenu.actions.toggleSidebar')}
@@ -664,7 +665,7 @@ export default function ChatThread() {
                 onFastChange={handleFastChange}
                 workspaceId={conversation.workspaceId ?? null}
                 menuAlign="center"
-                className="h-auto min-w-0 max-w-[52vw] gap-1 px-1.5 py-0.5 text-[11.5px] rounded-[7px]"
+                className="h-auto min-w-0 max-w-full shrink gap-1 px-1.5 py-0.5 text-[11.5px] rounded-[7px]"
                 disabled={isWorkspaceGuest}
               />
               {conversation.workspaceId ? (

@@ -4032,7 +4032,7 @@ export function Composer({
                 so we drop the composer's to keep the row uncluttered. New-chat
                 (ChatHome) has no header picker, so it keeps this one. */}
             {!modelPickerInHeader ? (
-            <ModelPicker value={modelId} onChange={onModelChange} fast={fast} onFastChange={onFastChange} workspaceId={workspaceId} menuSide={menuSide} className="min-w-0 max-w-[42vw] shrink" />
+            <ModelPicker value={modelId} onChange={onModelChange} fast={fast} onFastChange={onFastChange} workspaceId={workspaceId} menuSide={menuSide} className="min-w-0 max-w-full shrink" />
             ) : null}
           </div>
 
@@ -4229,8 +4229,8 @@ export function Composer({
             </div>
           ) : null}
           {/* Pinned — model picker + send/stop, always visible (never shrinks). */}
-          <div data-vt-part="actions" className="flex shrink-0 items-center gap-1.5 pl-1">
-            <ModelPicker value={modelId} onChange={onModelChange} fast={fast} onFastChange={onFastChange} workspaceId={workspaceId} menuSide={menuSide} />
+          <div data-vt-part="actions" className="flex min-w-0 max-w-[70%] shrink-0 items-center gap-1.5 pl-1">
+            <ModelPicker value={modelId} onChange={onModelChange} fast={fast} onFastChange={onFastChange} workspaceId={workspaceId} menuSide={menuSide} className="shrink" />
             {primaryAction}
           </div>
         </div>
