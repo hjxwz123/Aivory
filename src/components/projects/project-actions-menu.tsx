@@ -359,8 +359,8 @@ export function ProjectActionsMenu({
                           'inline-flex items-center gap-2 rounded-[10px] border px-2.5 py-1.5 text-xs interactive',
                           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                           selected
-                            ? 'border-[var(--color-border-strong)] bg-[var(--color-bg-muted)] text-[var(--color-fg)]'
-                            : 'border-[var(--color-border)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+                            ? 'border-transparent bg-[var(--color-bg-muted)] text-[var(--color-fg)]'
+                            : 'border-transparent text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
                         )}
                       >
                         <span className={cn('inline-block size-3 rounded-full', classes.bar)} aria-hidden />
@@ -383,7 +383,7 @@ export function ProjectActionsMenu({
             {canUploadProjectFiles ? (
               <label
                 htmlFor={`${fieldID}-auto-add`}
-                className="flex items-start justify-between gap-4 rounded-[12px] border border-[var(--color-border)] p-3.5"
+                className="flex items-start justify-between gap-4 rounded-[12px] p-3.5"
               >
                 <span className="min-w-0">
                   <span className="block text-[13.5px] font-medium text-[var(--color-fg)]">

@@ -204,7 +204,7 @@ export function PaymentMethodDialog({
                           disabled={busy}
                           aria-busy={submitting || undefined}
                           onClick={() => void startCheckout(method)}
-                          className="flex min-h-11 w-full items-center gap-3 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-left transition-colors hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:cursor-not-allowed disabled:opacity-55"
+                          className="flex min-h-11 w-full items-center gap-3 rounded-[8px] bg-[var(--color-surface)] px-3 py-2 text-left transition-colors hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:cursor-not-allowed disabled:opacity-55"
                         >
                           <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-[6px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
                             <PaymentMethodIcon icon={method.icon} size={18} />
@@ -240,7 +240,7 @@ export function PaymentMethodDialog({
                       disabled={busy}
                       aria-busy={submittingId === 'card-purchase' || undefined}
                       onClick={openCardPurchase}
-                      className="flex min-h-11 w-full items-center gap-3 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-left transition-colors hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:cursor-not-allowed disabled:opacity-55"
+                      className="flex min-h-11 w-full items-center gap-3 rounded-[8px] bg-[var(--color-surface)] px-3 py-2 text-left transition-colors hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:cursor-not-allowed disabled:opacity-55"
                     >
                       <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-[6px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
                         <KeyRound size={16} aria-hidden />

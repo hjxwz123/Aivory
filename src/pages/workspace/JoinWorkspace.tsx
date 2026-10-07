@@ -61,7 +61,7 @@ export default function JoinWorkspace() {
 
   return (
     <div className="min-h-svh w-full bg-[var(--color-bg)] text-[var(--color-fg)]">
-      <header className="border-b border-[var(--color-divider)]">
+      <header>
         <div className="mx-auto flex h-14 max-w-[40rem] items-center px-5">
           <Link to="/" aria-label="Aivory" className="inline-flex items-center">
             <TracedLogo />
@@ -85,7 +85,7 @@ export default function JoinWorkspace() {
             }
           />
         ) : (
-          <div className="rounded-[16px] border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
+          <div className="rounded-[16px] bg-[var(--color-surface)] p-6">
             <div className="flex items-center gap-3">
               <span className="inline-flex size-10 items-center justify-center rounded-[12px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
                 <Briefcase size={18} aria-hidden />

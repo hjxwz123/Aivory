@@ -83,7 +83,7 @@ export function DeckList({ onOpen, onCreate, refreshToken }: DeckListProps) {
     return (
       <div role="status" aria-label={t('common:common.loading')} className="min-h-0 flex-1 overflow-y-auto">
         {Array.from({ length: 6 }).map((_, index) => (
-          <div key={index} className="flex items-center gap-4 border-b border-[var(--color-divider)] py-4">
+          <div key={index} className="flex items-center gap-4 py-4">
             <Skeleton className="aspect-video w-24 shrink-0 rounded-[8px] sm:w-36" />
             <div className="flex-1 space-y-3"><Skeleton className="h-4 w-2/3" /><Skeleton className="h-3 w-1/3" /></div>
           </div>
@@ -116,7 +116,7 @@ export function DeckList({ onOpen, onCreate, refreshToken }: DeckListProps) {
     <>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <p className="mb-3 text-sm leading-6 text-[var(--color-fg-muted)]">{t('decks.lead')}</p>
-        <div className="divide-y divide-[var(--color-divider)]">
+        <div>
           {decks.map((deck) => {
             const cover = deck.cover_url && !brokenCovers.has(deck.id) ? aipptApi.resourceUrl(deck.cover_url) : null
             const title = deck.subject || t('decks.untitled')
@@ -130,7 +130,7 @@ export function DeckList({ onOpen, onCreate, refreshToken }: DeckListProps) {
                   aria-label={`${deck.status === 'ready' ? t('decks.open') : t('decks.continue')}: ${title}`}
                   className="flex min-w-0 flex-1 items-center gap-3 rounded-[10px] py-3 pr-2 text-left interactive hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] sm:gap-5 sm:pr-4"
                 >
-                  <span className="flex aspect-video w-20 shrink-0 items-center justify-center overflow-hidden rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)] sm:w-36">
+                  <span className="flex aspect-video w-20 shrink-0 items-center justify-center overflow-hidden rounded-[8px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)] sm:w-36">
                     {cover ? (
                       <img src={cover} alt="" loading="lazy" className="h-full w-full object-contain"
                         onError={() => setBrokenCovers((current) => new Set(current).add(deck.id))} />

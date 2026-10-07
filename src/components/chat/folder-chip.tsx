@@ -102,7 +102,7 @@ export function FolderChip({ folder, members, compact, onRemoveMember, onRemoveF
         compact
           ? 'w-[clamp(10rem,calc((100%_-_1.5rem)/4.5),15rem)] flex-none'
           : 'min-w-0 max-w-[min(28rem,calc(100vw-6rem))] flex-[1_1_15rem]',
-        failed.length ? 'border-[var(--color-danger)]/50' : 'border-[var(--color-border)]',
+        failed.length ? 'border-[var(--color-danger)]/50' : 'border-transparent',
       )}
     >
       <button
@@ -172,7 +172,7 @@ export function FolderChip({ folder, members, compact, onRemoveMember, onRemoveF
       {expanded ? (
         // Sits BELOW the chip and spans the rail, so a long list never makes one
         // chip absurdly tall next to its neighbours.
-        <span className="absolute left-0 right-0 top-[calc(100%+0.25rem)] z-[var(--z-raised)] max-h-56 overflow-y-auto overscroll-contain rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-1 shadow-[var(--shadow-md)] scrollbar-thin">
+        <span className="absolute left-0 right-0 top-[calc(100%+0.25rem)] z-[var(--z-raised)] max-h-56 overflow-y-auto overscroll-contain rounded-[10px] bg-[var(--color-surface-raised)] p-1 shadow-[var(--shadow-md)] scrollbar-thin">
           <span className="flex items-center justify-between gap-2 px-2 py-1 text-[0.6875rem] font-medium text-[var(--color-fg-subtle)]">
             <span>{t('composer.folderFiles', { defaultValue: '{{count}} files', count: members.length })}</span>
           </span>

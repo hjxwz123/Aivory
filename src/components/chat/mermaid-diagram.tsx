@@ -389,7 +389,7 @@ function DiagramViewport({ svg, wheelZoom = false, fullscreen = false, onFullscr
         onPointerLeave={onPointerUp}
         onDoubleClick={fit}
         className={cn(
-          'relative overflow-hidden rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)]',
+          'relative overflow-hidden rounded-[14px] bg-[var(--color-surface)]',
           dragging ? 'cursor-grabbing' : 'cursor-grab',
           // Inline: let touch scroll the page; fullscreen: capture touch for pan.
           fullscreen ? 'h-full touch-none' : 'h-[clamp(220px,42vh,460px)]',
@@ -416,7 +416,7 @@ function DiagramViewport({ svg, wheelZoom = false, fullscreen = false, onFullscr
         </div>
       </div>
 
-      <div className="absolute right-2 top-2 flex items-center gap-0.5 rounded-[9px] border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-0.5 shadow-[var(--shadow-md)]">
+      <div className="absolute right-2 top-2 flex items-center gap-0.5 rounded-[9px] bg-[var(--color-surface-raised)] p-0.5 shadow-[var(--shadow-md)]">
         <ToolbarButton label={t('diagram.zoomOut', { defaultValue: 'Zoom out' })} onClick={() => zoomCenter(1 / 1.2)}>
           <ZoomOut size={15} aria-hidden />
         </ToolbarButton>

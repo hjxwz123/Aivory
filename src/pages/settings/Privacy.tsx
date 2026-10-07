@@ -177,7 +177,7 @@ export default function Privacy() {
       </header>
 
       <SettingsSection title={t('settings:privacy.dataStorage', { defaultValue: 'Data storage' })}>
-        <div className="px-4 py-3">
+        <div className="py-3.5">
           <p className="text-sm text-[var(--color-fg-muted)] leading-relaxed">
             {t('settings:privacy.dataStorageBody', {
               defaultValue:

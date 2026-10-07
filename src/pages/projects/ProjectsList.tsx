@@ -140,7 +140,7 @@ export default function ProjectsList() {
             <>
           {/* Controls stay close to the list and use a divider instead of a container. */}
           {projects.length > 0 ? (
-            <div className="mt-5 flex flex-col gap-2.5 border-b border-[var(--color-divider)] pb-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mt-5 flex flex-col gap-2.5 pb-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="sm:max-w-xs w-full">
               <Input
                 leadingIcon={<Search size={14} aria-hidden />}
@@ -234,11 +234,11 @@ export default function ProjectsList() {
 function ProjectsListSkeleton({ label }: { label: string }) {
   return (
     <div className="mt-5" role="status" aria-label={label}>
-      <div className="flex items-center justify-between border-b border-[var(--color-divider)] pb-3">
+      <div className="flex items-center justify-between pb-3">
         <Skeleton className="h-10 w-full max-w-xs" />
         <Skeleton shape="line" className="hidden w-28 sm:block" />
       </div>
-      <div className="mt-4 divide-y divide-[var(--color-divider)]">
+      <div className="mt-4">
         {Array.from({ length: 4 }, (_, index) => (
           <div
             key={index}
@@ -279,7 +279,7 @@ function Band({ label, children }: { label?: string; children: React.ReactNode }
 
 function RowList({ children }: { children: React.ReactNode }) {
   return (
-    <ul className="flex flex-col divide-y divide-[var(--color-divider)]">
+    <ul className="quiet-list flex flex-col">
       {Array.isArray(children)
         ? children.map((c, i) => <li key={i}>{c}</li>)
         : <li>{children}</li>}

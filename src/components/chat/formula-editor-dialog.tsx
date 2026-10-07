@@ -421,7 +421,7 @@ export function FormulaEditorDialog({
             ref={fallbackFocusRef}
             tabIndex={-1}
             className={cn(
-              'formula-mathfield-host relative min-h-[6rem] min-w-0 max-w-full overflow-x-auto rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface-sunken)] p-3',
+              'formula-mathfield-host relative min-h-[6rem] min-w-0 max-w-full overflow-x-auto rounded-[10px] border border-transparent bg-[var(--color-surface-sunken)] p-3',
               'transition-[border-color,background-color] duration-150 focus-within:border-[var(--color-border-strong)] focus-within:bg-[var(--color-surface)]',
               error && 'border-[var(--color-danger)] focus-within:border-[var(--color-danger)]',
             )}

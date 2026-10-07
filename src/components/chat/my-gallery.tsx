@@ -140,7 +140,7 @@ export function MyGallery() {
         ref={reduce ? undefined : reveal}
         data-shown={reduce ? 'true' : 'false'}
         aria-hidden
-        className="h-px flex-1 origin-center scale-x-0 bg-[var(--color-divider)] transition-transform duration-[var(--duration-slower)] ease-[var(--ease-out)] data-[shown=true]:scale-x-100"
+        className="h-1 flex-1"
       />
       {!loading && images.length > 0 ? (
         <span className="shrink-0 text-[var(--text-xs)] tabular-nums text-[var(--color-fg-faint)]">
@@ -184,7 +184,7 @@ export function MyGallery() {
       ) : loading ? (
         skeletonGrid
       ) : images.length === 0 ? (
-        <div className="rounded-[var(--radius-lg)] border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-5 py-14 text-center">
+        <div className="rounded-[var(--radius-lg)] bg-[var(--color-surface)] px-5 py-14 text-center">
           <ImageIcon size={24} strokeWidth={1.5} className="mx-auto text-[var(--color-fg-faint)]" aria-hidden />
           <p className="mt-3 text-sm text-[var(--color-fg-muted)]">
             {t('gallery.empty', { defaultValue: 'No images yet — draw something above.' })}
@@ -257,7 +257,7 @@ function GalleryTile({
         type="button"
         onClick={onOpen}
         title={img.conversation_title || ''}
-        className="group relative block w-full overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border-subtle)] bg-[var(--color-bg-muted)] interactive will-change-transform transition-[transform,box-shadow,border-color] duration-[var(--duration-slow)] ease-[var(--ease-out)] hover:-translate-y-[3px] hover:border-[var(--color-border-strong)] hover:shadow-[var(--shadow-md)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+        className="group relative block w-full overflow-hidden rounded-[var(--radius-lg)] bg-[var(--color-bg-muted)] interactive will-change-transform transition-[transform,box-shadow,border-color] duration-[var(--duration-slow)] ease-[var(--ease-out)] hover:-translate-y-[3px] hover:shadow-[var(--shadow-md)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
       >
         {/* Skeleton — reserves the tile's space + shimmers until the image decodes,
             so a slow tile shows a placeholder instead of collapsing to nothing. */}

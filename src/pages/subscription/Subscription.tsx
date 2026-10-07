@@ -529,7 +529,7 @@ export default function Subscription() {
           {groupsLoading ? (
             <AccountSkeleton t={t} />
           ) : showAccount ? (
-            <section className="overflow-hidden rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)]">
+            <section className="overflow-hidden rounded-[10px] bg-[var(--color-surface)]">
               <div
                 className={cn(
                   hasCurrentGroup && showCreditsPanel &&
@@ -942,7 +942,7 @@ function Balance({
     <div
       className={cn(
         'min-w-0 bg-[var(--color-bg-muted)] p-3 sm:p-3.5',
-        hasPlanHeader && 'border-t border-[var(--color-divider)] md:border-l md:border-t-0',
+        hasPlanHeader && 'md:rounded-r-[10px]',
       )}
     >
       <div className={cn('grid gap-3', showTimed ? 'xl:grid-cols-2 xl:gap-4' : 'grid-cols-1')}>
@@ -994,7 +994,7 @@ function Balance({
           className={cn(
             'min-w-0',
             showTimed &&
-              'border-t border-[var(--color-divider)] pt-3 xl:border-l xl:border-t-0 xl:pl-4 xl:pt-0',
+              'pt-3 xl:pl-4 xl:pt-0',
           )}
         >
           <div className="flex min-w-0 items-center justify-between gap-2">
@@ -1040,7 +1040,7 @@ function BalanceState({
     <div
       className={cn(
         'min-w-0 bg-[var(--color-bg-muted)] p-3.5 sm:p-4',
-        hasPlanHeader && 'border-t border-[var(--color-divider)] md:border-l md:border-t-0',
+        hasPlanHeader && 'md:rounded-r-[10px]',
       )}
       role={loading ? 'status' : 'alert'}
     >
@@ -1078,7 +1078,7 @@ function CreditPackageCard({
   t: TFn
 }) {
   return (
-    <article className="flex min-w-0 flex-col rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+    <article className="flex min-w-0 flex-col rounded-[10px] bg-[var(--color-surface)] p-5">
       <div className="flex min-h-6 items-start justify-between gap-2">
         <h3 className="min-w-0 break-words text-[1rem] font-semibold leading-snug text-[var(--color-fg)] [overflow-wrap:anywhere]">{creditPackage.name}</h3>
         <Badge size="sm" variant="neutral" className="shrink-0">
@@ -1097,7 +1097,7 @@ function CreditPackageCard({
         </div>
         <div className="mt-1 text-[12px] text-[var(--color-fg-muted)]">{t('subscription:packages.credits')}</div>
       </div>
-      <div className="mt-4 border-t border-[var(--color-divider)] pt-4 text-[1.25rem] font-semibold leading-none tabular-nums text-[var(--color-fg)]">
+      <div className="mt-4 pt-4 text-[1.25rem] font-semibold leading-none tabular-nums text-[var(--color-fg)]">
         {formatCurrencyMinor(creditPackage.price_amount_minor, creditPackage.settlement_currency, locale)}
       </div>
 
@@ -1179,7 +1179,7 @@ function PaymentHistory({
       </div>
 
       <div
-        className="mt-3 overflow-hidden rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)]"
+        className="mt-3 overflow-hidden rounded-[10px] bg-[var(--color-surface)]"
         aria-busy={loading}
       >
         {loading ? (
@@ -1207,9 +1207,9 @@ function PaymentHistory({
           </div>
         ) : (
           <>
-            <table className="hidden w-full table-fixed border-collapse text-left text-[12px] xl:table">
+            <table className="quiet-table hidden w-full table-fixed border-collapse text-left text-[12px] xl:table">
               <caption className="sr-only">{t('subscription:history.title')}</caption>
-              <thead className="border-b border-[var(--color-divider)] bg-[var(--color-bg-muted)] text-[11px] text-[var(--color-fg-muted)]">
+              <thead className="bg-[var(--color-bg-muted)] text-[11px] text-[var(--color-fg-muted)]">
                 <tr>
                   <th className="w-[22%] px-3 py-2 font-medium">{t('subscription:history.columns.name')}</th>
                   <th className="w-[16%] px-3 py-2 font-medium">{t('subscription:history.columns.time')}</th>
@@ -1219,7 +1219,7 @@ function PaymentHistory({
                   <th className="w-[9%] px-3 py-2 text-right font-medium">{t('subscription:history.columns.details')}</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[var(--color-divider)]">
+              <tbody>
                 {orders.map((order) => (
                   <tr key={order.id}>
                     <td className="min-w-0 px-3 py-2.5 align-top">
@@ -1268,7 +1268,7 @@ function PaymentHistory({
               </tbody>
             </table>
 
-            <ul className="divide-y divide-[var(--color-divider)] xl:hidden">
+            <ul className="quiet-list xl:hidden">
               {orders.map((order) => (
                 <li key={order.id} className="px-3.5 py-3">
                   <div className="flex min-w-0 items-start justify-between gap-3">
@@ -1330,7 +1330,7 @@ function PaymentHistory({
             </ul>
 
             {totalPages > 1 ? (
-              <div className="flex min-h-12 items-center justify-between gap-3 border-t border-[var(--color-divider)] bg-[var(--color-bg-muted)] px-2 py-1.5 sm:px-3">
+              <div className="flex min-h-12 items-center justify-between gap-3 bg-[var(--color-bg-muted)] px-2 py-1.5 sm:px-3">
                 <Button
                   className="size-11 shrink-0 p-0 sm:size-8"
                   size="sm"
@@ -1539,12 +1539,12 @@ function PaymentOrderDetailFields({
   ]
 
   return (
-    <dl className="grid grid-cols-1 border-y border-[var(--color-divider)] sm:grid-cols-2">
+    <dl className="grid grid-cols-1 sm:grid-cols-2">
       {fields.map((field) => (
         <div
           key={field.label}
           className={cn(
-            'min-w-0 border-b border-[var(--color-divider)] py-3 last:border-b-0 sm:px-3 sm:first:pl-0',
+            'min-w-0 py-3 last:border-b-0 sm:px-3 sm:first:pl-0',
             field.wide && 'sm:col-span-2',
           )}
         >
@@ -1619,7 +1619,7 @@ function PaymentHistorySkeleton({ t }: { t: TFn }) {
       {Array.from({ length: 3 }).map((_, index) => (
         <div
           key={index}
-          className="grid grid-cols-[minmax(0,1fr)_5rem] gap-4 border-b border-[var(--color-divider)] py-3 last:border-b-0 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)_minmax(0,0.7fr)_minmax(0,1fr)_minmax(0,1.1fr)_4rem]"
+          className="grid grid-cols-[minmax(0,1fr)_5rem] gap-4 py-3 last:border-b-0 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)_minmax(0,0.7fr)_minmax(0,1fr)_minmax(0,1.1fr)_4rem]"
         >
           <div className="h-3.5 w-32 max-w-full rounded bg-[var(--color-bg-muted)]" />
           <div className="h-3.5 w-full rounded bg-[var(--color-bg-muted)]" />
@@ -1703,7 +1703,7 @@ function CatalogLoadError({ message, onRetry, t }: { message: string; onRetry: (
 function AccountSkeleton({ t }: { t: TFn }) {
   return (
     <div
-      className="animate-pulse overflow-hidden rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)]"
+      className="animate-pulse overflow-hidden rounded-[10px] bg-[var(--color-surface)]"
       role="status"
       aria-label={t('common:aria.loading')}
     >
@@ -1714,7 +1714,7 @@ function AccountSkeleton({ t }: { t: TFn }) {
           <div className="mt-2 h-5 w-36 rounded bg-[var(--color-bg-muted)]" />
           <div className="mt-2 h-3 w-52 max-w-full rounded bg-[var(--color-bg-muted)]" />
         </div>
-        <div className="border-t border-[var(--color-divider)] bg-[var(--color-bg-muted)] p-3 sm:p-3.5 md:border-l md:border-t-0">
+        <div className="bg-[var(--color-bg-muted)] p-3 sm:p-3.5">
           <div className="grid gap-3 sm:grid-cols-2 sm:gap-4">
             {Array.from({ length: 2 }).map((_, index) => (
               <div key={index} className="min-w-0">
@@ -1743,12 +1743,12 @@ function CardsSkeleton({ t }: { t: TFn }) {
       {Array.from({ length: 3 }).map((_, index) => (
         <div
           key={index}
-          className="animate-pulse rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5"
+          className="animate-pulse rounded-xl bg-[var(--color-surface)] p-5"
         >
           <div className="h-5 w-24 rounded bg-[var(--color-bg-muted)]" />
           <div className="mt-3 h-3.5 w-full rounded bg-[var(--color-bg-muted)]" />
           <div className="mt-4 h-7 w-28 rounded bg-[var(--color-bg-muted)]" />
-          <div className="mt-4 flex flex-col gap-2 border-t border-[var(--color-divider)] pt-4">
+          <div className="mt-4 flex flex-col gap-2 pt-4">
             <div className="h-3 w-full rounded bg-[var(--color-bg-muted)]" />
             <div className="h-3 w-5/6 rounded bg-[var(--color-bg-muted)]" />
           </div>

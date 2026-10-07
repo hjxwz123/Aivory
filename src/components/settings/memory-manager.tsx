@@ -178,9 +178,9 @@ export function MemoryManager() {
       ) : visibleRows.length === 0 ? (
         <EmptyState title={t('memory:empty')} description={t('memory:emptyBody')} />
       ) : (
-        <ul className="flex flex-col divide-y divide-[var(--color-divider)] rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)]">
+        <ul className="flex flex-col">
           {visibleRows.map((m) => (
-            <li key={m.id} className="grid grid-cols-[1fr_auto_auto] gap-2 items-center px-4 py-3">
+            <li key={m.id} className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-2 items-center py-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-sm text-[var(--color-fg)]">{m.memory_text}</span>

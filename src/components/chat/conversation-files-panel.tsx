@@ -237,7 +237,7 @@ function FileRow({ file, depth, readOnly, removing, onRemove }: FileRowProps) {
   return (
     <li
       style={{ paddingLeft: `${0.625 + depth * 0.875}rem` }}
-      className="group/file flex items-center gap-2.5 rounded-[10px] border border-transparent py-2 pr-2.5 hover:border-[var(--color-border)] hover:bg-[var(--color-surface)]"
+      className="group/file flex items-center gap-2.5 rounded-[10px] border border-transparent py-2 pr-2.5 hover:bg-[var(--color-surface)]"
     >
       <Icon size={16} className="shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
       <a href={file.url} target="_blank" rel="noreferrer" className="flex min-w-0 flex-1 flex-col">
@@ -293,7 +293,7 @@ function FolderRows({
     <li className="flex flex-col">
       <div
         style={{ paddingLeft: `${0.625 + depth * 0.875}rem` }}
-        className="group/folder flex items-center gap-1 rounded-[10px] border border-transparent py-2 pr-2.5 hover:border-[var(--color-border)] hover:bg-[var(--color-surface)]"
+        className="group/folder flex items-center gap-1 rounded-[10px] border border-transparent py-2 pr-2.5 hover:bg-[var(--color-surface)]"
       >
         <button
           type="button"

@@ -122,8 +122,8 @@ export function WorkspaceAnnouncementPopup() {
                   '[&_img]:my-3 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-lg',
                   '[&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-[var(--color-bg-muted)] [&_pre]:p-3',
                   '[&_code]:font-mono [&_code]:text-[0.9em] [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto',
-                  '[&_td]:border [&_td]:border-[var(--color-divider)] [&_td]:px-3 [&_td]:py-2',
-                  '[&_th]:border [&_th]:border-[var(--color-divider)] [&_th]:px-3 [&_th]:py-2 [&_th]:text-left',
+                  'quiet-table [&_td]:px-3 [&_td]:py-2',
+                  '[&_th]:px-3 [&_th]:py-2 [&_th]:text-left',
                   '[&_hr]:my-4 [&_hr]:border-[var(--color-divider)]',
                 )}
                 dangerouslySetInnerHTML={{ __html: sanitizeHtml(data.body) }}
@@ -181,5 +181,5 @@ export function WorkspaceAnnouncementBar() {
     localStorage.setItem(`aivory.workspace.${workspaceID}.announcement.bar.dismissed`, String(current.version))
     setClosing(true); timerRef.current = setTimeout(() => setData(null), 320)
   }
-  return <div className={cn('grid w-full shrink-0 transition-[grid-template-rows,opacity] duration-300 ease-out', closing ? 'grid-rows-[0fr] opacity-0' : 'grid-rows-[1fr] opacity-100')}><div className="overflow-hidden"><div className="relative flex w-full items-center justify-center border-b border-[var(--color-border)] bg-[var(--color-accent-soft)] px-11 py-2 text-[var(--color-fg)]"><div className="flex min-w-0 items-center justify-center gap-2 text-center text-[13px] leading-snug [&_a]:font-medium [&_a]:text-[var(--color-accent)] [&_a]:underline"><Megaphone size={14} strokeWidth={1.5} aria-hidden className="shrink-0 text-[var(--color-accent)]" /><span className="min-w-0 break-words" dangerouslySetInnerHTML={{ __html: sanitizeHtml(data.html) }} /></div><button type="button" onClick={dismiss} aria-label={t('common.close', { defaultValue: 'Close' })} className="absolute right-2 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-[7px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg)]/50 hover:text-[var(--color-fg)]"><X size={14} aria-hidden /></button></div></div></div>
+  return <div className={cn('grid w-full shrink-0 transition-[grid-template-rows,opacity] duration-300 ease-out', closing ? 'grid-rows-[0fr] opacity-0' : 'grid-rows-[1fr] opacity-100')}><div className="overflow-hidden"><div className="relative flex w-full items-center justify-center bg-[var(--color-accent-soft)] px-11 py-2 text-[var(--color-fg)]"><div className="flex min-w-0 items-center justify-center gap-2 text-center text-[13px] leading-snug [&_a]:font-medium [&_a]:text-[var(--color-accent)] [&_a]:underline"><Megaphone size={14} strokeWidth={1.5} aria-hidden className="shrink-0 text-[var(--color-accent)]" /><span className="min-w-0 break-words" dangerouslySetInnerHTML={{ __html: sanitizeHtml(data.html) }} /></div><button type="button" onClick={dismiss} aria-label={t('common.close', { defaultValue: 'Close' })} className="absolute right-2 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-[7px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg)]/50 hover:text-[var(--color-fg)]"><X size={14} aria-hidden /></button></div></div></div>
 }

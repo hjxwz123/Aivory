@@ -188,7 +188,7 @@ export function PuzzleCaptcha({ data, loading, status, onChange, onRefresh }: Pu
             ? 'border-[var(--color-success)]'
             : status === 'error'
               ? 'border-[var(--color-danger)]'
-              : 'border-[var(--color-border)]',
+              : 'border-transparent',
         )}
         style={{ aspectRatio: data ? `${data.w} / ${data.h}` : '280 / 160' }}
       >
@@ -228,7 +228,7 @@ export function PuzzleCaptcha({ data, loading, status, onChange, onRefresh }: Pu
         ref={trackRef}
         className={cn(
           'relative h-12 w-full select-none overflow-hidden rounded-[10px] border bg-[var(--color-bg-muted)]',
-          status === 'error' ? 'border-[var(--color-danger)]' : 'border-[var(--color-border)]',
+          status === 'error' ? 'border-[var(--color-danger)]' : 'border-transparent',
         )}
       >
         {/* Coloured fill trailing the handle. */}

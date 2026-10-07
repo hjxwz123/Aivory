@@ -16,7 +16,7 @@ export function RenderStage({ template, subject }: RenderStageProps) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto flex min-h-full max-w-md flex-col items-center justify-center py-8 text-center">
-        <div className="mb-7 aspect-video w-full max-w-xs overflow-hidden rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)]">
+        <div className="mb-7 aspect-video w-full max-w-xs overflow-hidden rounded-[10px] bg-[var(--color-bg-muted)]">
           {template?.coverUrl && !brokenCover ? (
             <img
               src={aipptApi.resourceUrl(template.coverUrl)}

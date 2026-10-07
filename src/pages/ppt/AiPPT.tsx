@@ -511,7 +511,7 @@ export default function AiPPT() {
       <main className="flex min-h-0 flex-1 flex-col px-5 pb-5 sm:px-8 sm:pb-6">
         <div className="mx-auto flex min-h-0 w-full max-w-[var(--layout-content-max-w)] flex-1 flex-col">
           {config?.enabled ? (
-            <div className="mb-5 flex shrink-0 flex-wrap items-center justify-between gap-x-5 gap-y-3 border-b border-[var(--color-divider)] pb-3 pt-2">
+            <div className="mb-5 flex shrink-0 flex-wrap items-center justify-between gap-x-5 gap-y-3 pb-3 pt-2">
               <fieldset disabled={busy || streaming} className="min-w-0 disabled:opacity-60">
                 <SegmentedControl
                   label={t('ppt:title')}
@@ -636,7 +636,7 @@ function StepCrumbs({
             {index < steps.length - 1 ? (
               <span
                 aria-hidden
-                className="mx-1 h-px min-w-1 flex-1 bg-[var(--color-divider)] sm:mx-4"
+                className="mx-1 min-w-1 flex-1 sm:mx-4"
               />
             ) : null}
           </li>
@@ -726,7 +726,7 @@ function StepInput(props: StepInputProps) {
             })}
           </div>
 
-          <div className="overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] focus-within:border-[var(--color-border-strong)]">
+          <div className="overflow-hidden rounded-[12px] border border-transparent bg-[var(--color-surface)] focus-within:border-[var(--color-border-strong)]">
             {inputType === 2 ? (
               <div
                 onDragOver={(event) => {
@@ -782,7 +782,7 @@ function StepInput(props: StepInputProps) {
                 className="resize-y rounded-none border-0 bg-transparent p-5 text-[15px] leading-7 placeholder:text-[var(--color-fg-muted)] focus:bg-transparent"
               />
             )}
-            <div className="flex flex-col gap-3 border-t border-[var(--color-divider)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-xs leading-5 text-[var(--color-fg-muted)]">
                 {billed ? t('input.priceHint', { price }) : t('input.freeHint')}
               </p>
@@ -817,7 +817,7 @@ function StepInput(props: StepInputProps) {
           </div>
         )}
 
-        <fieldset disabled={busy} className="mt-6 min-w-0 border-t border-[var(--color-divider)] pt-5">
+        <fieldset disabled={busy} className="mt-6 min-w-0 pt-5">
           <legend className="sr-only">{t('input.optionsTitle')}</legend>
           <div className="grid gap-5 sm:grid-cols-2">
             <div className="min-w-0">
@@ -911,8 +911,8 @@ function StepOutline(props: StepOutlineProps) {
   } = props
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto lg:grid lg:grid-cols-[minmax(0,1fr)_240px] lg:overflow-hidden">
-      <section className="flex min-h-[420px] flex-1 flex-col overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] lg:min-h-0">
-        <div className="flex flex-wrap items-center gap-2 border-b border-[var(--color-divider)] px-4 py-2.5">
+      <section className="flex min-h-[420px] flex-1 flex-col overflow-hidden rounded-[12px] bg-[var(--color-surface)] lg:min-h-0">
+        <div className="flex flex-wrap items-center gap-2 px-4 py-2.5">
           <h2 className="text-sm font-medium text-[var(--color-fg)]">{t('ppt:outline.title')}</h2>
           <span className="text-xs text-[var(--color-fg-muted)]">
             {t('ppt:outline.counts', { chapters: stats.chapters, pages: stats.pages })}
@@ -948,7 +948,7 @@ function StepOutline(props: StepOutlineProps) {
           </div>
         </div>
         {warnings.length > 0 && !streaming ? (
-          <ul className="flex flex-wrap gap-2 border-b border-[var(--color-divider)] px-4 py-2 text-xs text-[var(--color-fg-muted)]">
+          <ul className="flex flex-wrap gap-2 px-4 py-2 text-xs text-[var(--color-fg-muted)]">
             {warnings.map((warning) => (
               <li key={warning} className="rounded-full bg-[var(--color-bg-muted)] px-2 py-0.5">
                 {t(`ppt:outline.warnings.${warning}`)}
@@ -1234,8 +1234,8 @@ function StepResult(props: StepResultProps) {
       </div>
 
       <div className="flex flex-col gap-5 lg:grid lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_230px]">
-        <section className="flex h-[52svh] min-h-[320px] flex-col overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] lg:h-auto lg:min-h-0">
-          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--color-divider)] px-4 py-2">
+        <section className="flex h-[52svh] min-h-[320px] flex-col overflow-hidden rounded-[12px] bg-[var(--color-surface)] lg:h-auto lg:min-h-0">
+          <div className="flex shrink-0 items-center justify-between gap-3 px-4 py-2">
             <h3 className="text-[13px] font-medium text-[var(--color-fg)]">{t('ppt:result.previewTitle')}</h3>
             <Button size="sm" variant="ghost" disabled={!deck.file_id} onClick={() => setPreviewOpen(true)}>
               {t('ppt:result.expandPreview')}
@@ -1279,7 +1279,7 @@ function StepResult(props: StepResultProps) {
             </div>
           </dl>
           {deck.error ? <p className="mt-3 break-words text-xs leading-5 text-[var(--color-danger)]">{deck.error}</p> : null}
-          <div className="mt-5 flex flex-col items-start gap-1 border-t border-[var(--color-divider)] pt-3">
+          <div className="mt-5 flex flex-col items-start gap-1 pt-3">
             <Button size="sm" variant="ghost" disabled={busy} onClick={() => setTemplateOpen(true)} leadingIcon={<Presentation size={14} aria-hidden />}>
               {t('ppt:result.changeTemplate')}
             </Button>
@@ -1299,7 +1299,7 @@ function StepResult(props: StepResultProps) {
             <DialogTitle>{deck.subject || t('ppt:result.untitled')}</DialogTitle>
             <DialogDescription>{t('ppt:result.previewScrollHint')}</DialogDescription>
           </DialogHeader>
-          <div className="h-[70vh] overflow-hidden rounded-[10px] border border-[var(--color-border)]">
+          <div className="h-[70vh] overflow-hidden rounded-[10px]">
             <DocumentPreview
               name={`${deck.subject || 'AI PPT'}.pptx`}
               mimeType={PPTX_MIME}

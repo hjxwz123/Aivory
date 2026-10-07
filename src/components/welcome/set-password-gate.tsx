@@ -73,7 +73,7 @@ export function SetPasswordGate() {
           className="flex flex-col"
         >
           <div className="px-6 sm:px-8 pt-8 pb-2">
-            <span className="inline-flex items-center justify-center size-11 rounded-[12px] bg-[var(--color-bg-muted)] border border-[var(--color-border)] text-[var(--color-secondary)]">
+            <span className="inline-flex items-center justify-center size-11 rounded-[12px] bg-[var(--color-bg-muted)] text-[var(--color-secondary)]">
               <ShieldCheck size={20} aria-hidden />
             </span>
             <DialogTitle className="mt-5">

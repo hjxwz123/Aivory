@@ -1,6 +1,6 @@
 /**
  * PasskeySettings — the account page's "passkeys" section. Mirrors the identity
- * sources section: one bordered list, a 36px icon tile per row, title +
+ * sources section: a flat list, a 36px icon tile per row, title +
  * secondary line, and a single small action on the right.
  *
  * Registering runs a WebAuthn ceremony (begin → navigator.credentials.create →
@@ -15,6 +15,7 @@ import type { ApiPasskey } from '@/api/types'
 import { PasskeyError, createPasskeyCredential, isPasskeyAvailable } from '@/lib/passkey'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { SettingsSection } from '@/components/settings/settings-section'
 import { Field } from '@/components/ui/label'
 import {
   Dialog,
@@ -40,7 +41,7 @@ function deviceDate(unixSec: number, locale: string): string {
 
 function PasskeyTile() {
   return (
-    <div className="shrink-0 size-9 inline-flex items-center justify-center rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
+    <div className="shrink-0 size-9 inline-flex items-center justify-center rounded-[10px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
       <KeyRound size={17} aria-hidden />
     </div>
   )
@@ -115,86 +116,80 @@ export function PasskeySettings() {
   }
 
   return (
-    <section className="mb-8 last:mb-0">
-      <div className="mb-3">
-        <h2 className="text-lg font-medium tracking-normal text-[var(--color-fg)]">
-          {t('settings:account.passkey.label')}
-        </h2>
-        <p className="mt-1.5 text-sm text-[var(--color-fg-muted)]">{t('settings:account.passkey.body')}</p>
-      </div>
-
-      <div className="divide-y divide-[var(--color-divider)] rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-        {loading ? (
-          <div className="px-4 py-5 text-sm text-[var(--color-fg-subtle)]">{t('common:common.loading')}</div>
-        ) : (
-          <>
-            {passkeys.map((passkey) => (
-              <div key={passkey.id} className="flex items-center gap-3 px-4 py-3">
-                <PasskeyTile />
-                <div className="min-w-0 flex-1">
-                  <span className="text-sm font-medium text-[var(--color-fg)] truncate">
-                    {passkey.name || t('settings:account.passkey.unnamed')}
-                  </span>
-                  <div className="mt-0.5 text-[12px] text-[var(--color-fg-subtle)] truncate">
-                    {passkey.last_used_at
-                      ? t('settings:account.passkey.lastUsed', { date: deviceDate(passkey.last_used_at, lang) })
-                      : t('settings:account.passkey.neverUsed')}
-                    {' · '}
-                    {deviceDate(passkey.created_at, lang)}
-                  </div>
+    <SettingsSection
+      title={t('settings:account.passkey.label')}
+      description={t('settings:account.passkey.body')}
+    >
+      {loading ? (
+        <div className="py-5 text-sm text-[var(--color-fg-subtle)]">{t('common:common.loading')}</div>
+      ) : (
+        <>
+          {passkeys.map((passkey) => (
+            <div key={passkey.id} className="flex items-center gap-3 py-3">
+              <PasskeyTile />
+              <div className="min-w-0 flex-1">
+                <span className="text-sm font-medium text-[var(--color-fg)] truncate">
+                  {passkey.name || t('settings:account.passkey.unnamed')}
+                </span>
+                <div className="mt-0.5 text-[12px] text-[var(--color-fg-subtle)] truncate">
+                  {passkey.last_used_at
+                    ? t('settings:account.passkey.lastUsed', { date: deviceDate(passkey.last_used_at, lang) })
+                    : t('settings:account.passkey.neverUsed')}
+                  {' · '}
+                  {deviceDate(passkey.created_at, lang)}
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  loading={busy && deleteId === passkey.id}
-                  onClick={() => setDeleteId(passkey.id)}
-                  leadingIcon={<X size={14} aria-hidden />}
-                >
-                  {t('settings:account.passkey.delete')}
-                </Button>
               </div>
-            ))}
+              <Button
+                variant="ghost"
+                size="sm"
+                loading={busy && deleteId === passkey.id}
+                onClick={() => setDeleteId(passkey.id)}
+                leadingIcon={<X size={14} aria-hidden />}
+              >
+                {t('settings:account.passkey.delete')}
+              </Button>
+            </div>
+          ))}
 
-            {supported ? (
-              <div className="flex items-center gap-3 px-4 py-3">
-                <PasskeyTile />
-                <div className="min-w-0 flex-1">
-                  <span className="text-sm font-medium text-[var(--color-fg)] truncate">
-                    {t('settings:account.passkey.add')}
-                  </span>
-                  <div className="mt-0.5 text-[12px] text-[var(--color-fg-subtle)]">
-                    {passkeys.length ? t('settings:account.passkey.addHint') : t('settings:account.passkey.empty')}
-                  </div>
-                </div>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  loading={busy && addOpen}
-                  onClick={() => {
-                    setName('')
-                    setAddOpen(true)
-                  }}
-                  leadingIcon={<KeyRound size={14} aria-hidden />}
-                >
+          {supported ? (
+            <div className="flex items-center gap-3 py-3">
+              <PasskeyTile />
+              <div className="min-w-0 flex-1">
+                <span className="text-sm font-medium text-[var(--color-fg)] truncate">
                   {t('settings:account.passkey.add')}
-                </Button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-3 px-4 py-3">
-                <PasskeyTile />
-                <div className="min-w-0 flex-1">
-                  <span className="text-sm font-medium text-[var(--color-fg)] truncate">
-                    {t('settings:account.passkey.add')}
-                  </span>
-                  <div className="mt-0.5 text-[12px] text-[var(--color-fg-subtle)]">
-                    {t('settings:account.passkey.unsupported')}
-                  </div>
+                </span>
+                <div className="mt-0.5 text-[12px] text-[var(--color-fg-subtle)]">
+                  {passkeys.length ? t('settings:account.passkey.addHint') : t('settings:account.passkey.empty')}
                 </div>
               </div>
-            )}
-          </>
-        )}
-      </div>
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={busy && addOpen}
+                onClick={() => {
+                  setName('')
+                  setAddOpen(true)
+                }}
+                leadingIcon={<KeyRound size={14} aria-hidden />}
+              >
+                {t('settings:account.passkey.add')}
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-3 py-3">
+              <PasskeyTile />
+              <div className="min-w-0 flex-1">
+                <span className="text-sm font-medium text-[var(--color-fg)] truncate">
+                  {t('settings:account.passkey.add')}
+                </span>
+                <div className="mt-0.5 text-[12px] text-[var(--color-fg-subtle)]">
+                  {t('settings:account.passkey.unsupported')}
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
       {/* Add — name the device, then the browser runs the WebAuthn ceremony. */}
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
@@ -242,6 +237,6 @@ export function PasskeySettings() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </section>
+    </SettingsSection>
   )
 }

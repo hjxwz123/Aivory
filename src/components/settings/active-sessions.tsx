@@ -6,6 +6,7 @@ import type { ApiSession } from '@/api/types'
 import { useLanguage } from '@/store/language'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { SettingsSection } from '@/components/settings/settings-section'
 import { toast } from '@/hooks/use-toast'
 import { useAuth } from '@/store/auth'
 import { createKeyedResourceCache, resolveOwnedResourceView } from '@/lib/keyed-resource-cache'
@@ -152,80 +153,72 @@ export function ActiveSessions() {
   const hasOthers = visibleSessions.some((s) => s.id !== visibleCurrent)
 
   return (
-    <section className="mb-8 last:mb-0">
-      <div className="mb-3 flex items-end justify-between gap-4">
-        <div>
-          <h2 className="text-lg font-medium tracking-normal text-[var(--color-fg)]">
-            {t('settings:account.sessions.title')}
-          </h2>
-          <p className="mt-1.5 text-sm text-[var(--color-fg-muted)]">{t('settings:account.sessions.subtitle')}</p>
+    <SettingsSection
+      title={t('settings:account.sessions.title')}
+      description={t('settings:account.sessions.subtitle')}
+      actions={hasOthers ? (
+        <Button variant="ghost" size="sm" loading={busy === 'others'} onClick={() => void revokeOthers()}>
+          {t('settings:account.sessions.signOutOthers')}
+        </Button>
+      ) : null}
+    >
+      {visibleLoading ? (
+        <div className="py-5 text-sm text-[var(--color-fg-subtle)]">{t('common:common.loading')}</div>
+      ) : visibleSessions.length === 0 ? (
+        <div className="py-5 text-sm text-[var(--color-fg-subtle)]">
+          {t('settings:account.sessions.empty')}
         </div>
-        {hasOthers ? (
-          <Button variant="ghost" size="sm" loading={busy === 'others'} onClick={() => void revokeOthers()}>
-            {t('settings:account.sessions.signOutOthers')}
-          </Button>
-        ) : null}
-      </div>
-
-      <div className="divide-y divide-[var(--color-divider)] rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-        {visibleLoading ? (
-          <div className="px-4 py-5 text-sm text-[var(--color-fg-subtle)]">{t('common:common.loading')}</div>
-        ) : visibleSessions.length === 0 ? (
-          <div className="px-4 py-5 text-sm text-[var(--color-fg-subtle)]">
-            {t('settings:account.sessions.empty')}
-          </div>
-        ) : (
-          visibleSessions.map((s) => {
-            const { browser, os, mobile } = parseDevice(s.user_agent)
-            const Icon = mobile ? Smartphone : Monitor
-            const device = [browser, os].filter(Boolean).join(' · ') || t('settings:account.sessions.unknownDevice')
-            const isCurrent = s.id === visibleCurrent
-            const place = s.location || (isLocalIp(s.ip) ? t('settings:account.sessions.localNetwork') : '')
-            return (
-              <div key={s.id} className="flex items-center gap-3 px-4 py-3">
-                <div className="shrink-0 size-9 inline-flex items-center justify-center rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
-                  <Icon size={17} aria-hidden />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-medium text-[var(--color-fg)] truncate">{device}</span>
-                    {isCurrent ? (
-                      <Badge size="xs" variant="accent">
-                        {t('settings:account.sessions.thisDevice')}
-                      </Badge>
-                    ) : null}
-                  </div>
-                  <div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-[var(--color-fg-subtle)]">
-                    {place ? (
-                      <>
-                        <MapPin size={11} aria-hidden className="shrink-0" />
-                        <span className="truncate">{place}</span>
-                        <span aria-hidden>·</span>
-                      </>
-                    ) : null}
-                    <span className="font-mono truncate">{s.ip || '—'}</span>
-                    <span aria-hidden>·</span>
-                    <span className="whitespace-nowrap">
-                      {isCurrent ? t('settings:account.sessions.activeNow') : relativeTime(s.last_seen, lang)}
-                    </span>
-                  </div>
-                </div>
-                {isCurrent ? null : (
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={t('settings:account.sessions.revoke')}
-                    loading={busy === s.id}
-                    onClick={() => void revoke(s.id)}
-                  >
-                    <X size={15} aria-hidden />
-                  </Button>
-                )}
+      ) : (
+        visibleSessions.map((s) => {
+          const { browser, os, mobile } = parseDevice(s.user_agent)
+          const Icon = mobile ? Smartphone : Monitor
+          const device = [browser, os].filter(Boolean).join(' · ') || t('settings:account.sessions.unknownDevice')
+          const isCurrent = s.id === visibleCurrent
+          const place = s.location || (isLocalIp(s.ip) ? t('settings:account.sessions.localNetwork') : '')
+          return (
+            <div key={s.id} className="flex items-center gap-3 py-3">
+              <div className="shrink-0 size-9 inline-flex items-center justify-center rounded-[10px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
+                <Icon size={17} aria-hidden />
               </div>
-            )
-          })
-        )}
-      </div>
-    </section>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-medium text-[var(--color-fg)] truncate">{device}</span>
+                  {isCurrent ? (
+                    <Badge size="xs" variant="accent">
+                      {t('settings:account.sessions.thisDevice')}
+                    </Badge>
+                  ) : null}
+                </div>
+                <div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-[var(--color-fg-subtle)]">
+                  {place ? (
+                    <>
+                      <MapPin size={11} aria-hidden className="shrink-0" />
+                      <span className="truncate">{place}</span>
+                      <span aria-hidden>·</span>
+                    </>
+                  ) : null}
+                  <span className="font-mono truncate">{s.ip || '—'}</span>
+                  <span aria-hidden>·</span>
+                  <span className="whitespace-nowrap">
+                    {isCurrent ? t('settings:account.sessions.activeNow') : relativeTime(s.last_seen, lang)}
+                  </span>
+                </div>
+              </div>
+              {isCurrent ? null : (
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t('settings:account.sessions.revoke')}
+                  loading={busy === s.id}
+                  onClick={() => void revoke(s.id)}
+                >
+                  <X size={15} aria-hidden />
+                </Button>
+              )}
+            </div>
+          )
+        })
+      )}
+    </SettingsSection>
   )
 }

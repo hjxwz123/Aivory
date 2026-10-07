@@ -122,7 +122,7 @@ export function DocmeeEditorDialog({ deck, onClose, onSynced }: DocmeeEditorDial
           <DialogTitle>{deck?.subject || t('editor.title')}</DialogTitle>
         </DialogHeader>
 
-        <div className="relative mx-4 mb-4 h-[75vh] min-h-[420px] overflow-hidden rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] sm:mx-5">
+        <div className="relative mx-4 mb-4 h-[75vh] min-h-[420px] overflow-hidden rounded-[10px] bg-[var(--color-bg-muted)] sm:mx-5">
           <div ref={containerRef} className="h-full w-full" />
           {phase === 'loading' ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[var(--color-bg)]">
@@ -142,7 +142,7 @@ export function DocmeeEditorDialog({ deck, onClose, onSynced }: DocmeeEditorDial
           ) : null}
         </div>
 
-        <div className="flex justify-end border-t border-[var(--color-divider)] px-4 py-3 sm:px-5">
+        <div className="flex justify-end px-4 py-3 sm:px-5">
           <Button size="sm" loading={syncing} disabled={syncing} onClick={() => void close()}>
             {t('editor.done')}
           </Button>

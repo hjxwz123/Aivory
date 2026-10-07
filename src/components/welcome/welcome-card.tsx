@@ -273,7 +273,7 @@ export function WelcomeCard() {
         )
       case 'memory':
         return (
-          <label className="flex items-center justify-between gap-4 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-4 py-3.5">
+          <label className="flex items-center justify-between gap-4 rounded-[12px] bg-[var(--color-bg-muted)] px-4 py-3.5">
             <span className="text-sm text-[var(--color-fg)]">{t('welcome:fields.memory')}</span>
             <Switch checked={memory} onCheckedChange={(v) => setPrivacy({ memoriesEnabled: v })} />
           </label>
@@ -298,7 +298,7 @@ export function WelcomeCard() {
               curtain as the landing/auth heroes. It re-tints as the user picks
               an accent (the ramp re-resolves on data-accent changes) and falls
               back to the static bg-muted panel under reduced-motion. */}
-          <aside className="relative hidden md:flex md:w-[42%] flex-col justify-between gap-10 overflow-hidden p-8 bg-[var(--color-bg-muted)] border-r border-[var(--color-divider)]">
+          <aside className="relative hidden md:flex md:w-[42%] flex-col justify-between gap-10 overflow-hidden p-8 bg-[var(--color-bg-muted)]">
             <div
               aria-hidden
               className="pointer-events-none absolute inset-0"
@@ -353,7 +353,7 @@ export function WelcomeCard() {
                 { icon: ShieldCheck, key: 'own' },
               ].map(({ icon: Icon, key }) => (
                 <li key={key} className="flex items-center gap-3 text-sm text-[var(--color-fg)]">
-                  <span className="shrink-0 inline-flex items-center justify-center size-8 rounded-[9px] bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-secondary)]">
+                  <span className="shrink-0 inline-flex items-center justify-center size-8 rounded-[9px] bg-[var(--color-surface)] text-[var(--color-secondary)]">
                     <Icon size={15} aria-hidden />
                   </span>
                   {t(`welcome:intro.points.${key}`)}
@@ -469,7 +469,7 @@ function Seg({ active, onClick, children }: { active: boolean; onClick: () => vo
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
         active
           ? 'bg-[var(--color-fg)] text-[var(--color-fg-inverted)]'
-          : 'border border-[var(--color-border)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)]',
+          : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)]',
       )}
     >
       {children}

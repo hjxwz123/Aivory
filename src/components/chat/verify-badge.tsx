@@ -14,10 +14,10 @@ const SEVERITY_DOT: Record<VerifyFinding['severity'], string> = {
   warning: 'bg-[var(--color-warning)]',
   note: 'bg-[var(--color-secondary)]',
 }
-const SEVERITY_BORDER: Record<VerifyFinding['severity'], string> = {
-  error: 'border-[var(--color-danger)]',
-  warning: 'border-[var(--color-warning)]',
-  note: 'border-[var(--color-secondary)]',
+const SEVERITY_QUOTE: Record<VerifyFinding['severity'], string> = {
+  error: 'bg-[var(--color-danger-soft)]',
+  warning: 'bg-[var(--color-warning-soft)]',
+  note: 'bg-[var(--color-secondary-soft)]',
 }
 
 /**
@@ -120,7 +120,7 @@ export function VerifyBadge({ verify }: VerifyBadgeProps) {
             {findings.map((f, i) => (
               <li
                 key={i}
-                className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-subtle)] px-3 py-2"
+                className="rounded-[10px] bg-[var(--color-bg-subtle)] px-3 py-2"
               >
                 <div className="flex items-center gap-1.5">
                   <span className={cn('size-1.5 rounded-full', SEVERITY_DOT[f.severity])} aria-hidden />
@@ -131,8 +131,8 @@ export function VerifyBadge({ verify }: VerifyBadgeProps) {
                 {f.quote ? (
                   <p
                     className={cn(
-                      'mt-1 border-l-2 pl-2 text-[12.5px] italic text-[var(--color-fg-muted)]',
-                      SEVERITY_BORDER[f.severity],
+                      'mt-1 rounded-[6px] px-2 py-1.5 text-[12.5px] italic text-[var(--color-fg-muted)]',
+                      SEVERITY_QUOTE[f.severity],
                     )}
                   >
                     “{f.quote}”

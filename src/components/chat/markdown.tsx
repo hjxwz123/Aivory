@@ -145,7 +145,7 @@ const MarkdownBlockView = memo(
         return (
           <blockquote
             className={cn(
-              'border-l-2 border-[var(--color-border-strong)] pl-4 text-[var(--color-fg-muted)] italic',
+              'rounded-[8px] bg-[var(--color-bg-muted)] px-4 py-3 text-[var(--color-fg-muted)] italic',
               blockAnim,
             )}
           >
@@ -172,12 +172,11 @@ const MarkdownBlockView = memo(
         return (
           <div
             className={cn(
-              'my-4 overflow-x-auto rounded-[10px] border border-[var(--color-border)]',
+              'quiet-table my-4 overflow-x-auto rounded-[10px]',
               '[&_table]:w-full [&_table]:border-collapse [&_table]:text-sm',
               '[&_thead]:bg-[var(--color-bg-muted)]',
-              '[&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold [&_th]:text-[var(--color-fg)] [&_th]:border-b [&_th]:border-[var(--color-border)]',
-              '[&_td]:px-3 [&_td]:py-2 [&_td]:align-top [&_td]:text-[var(--color-fg-muted)] [&_td]:border-b [&_td]:border-[var(--color-divider)]',
-              '[&_tr:last-child_td]:border-b-0',
+              '[&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold [&_th]:text-[var(--color-fg)]',
+              '[&_td]:px-3 [&_td]:py-2 [&_td]:align-top [&_td]:text-[var(--color-fg-muted)]',
               blockAnim,
             )}
             dangerouslySetInnerHTML={{

@@ -236,7 +236,7 @@ export default function Landing() {
         <header className="sticky top-0 z-40 backdrop-blur-[1px]">
           <div
             aria-hidden
-            className="nav-bg absolute inset-0 -z-10 bg-[var(--color-bg)]/85 border-b border-[var(--color-border-subtle)]"
+            className="nav-bg absolute inset-0 -z-10 bg-[var(--color-bg)]/85"
           />
           {/* Reading-progress hairline — scaleX scrubbed by scroll (see useGSAP). */}
           <span
@@ -428,7 +428,7 @@ export default function Landing() {
           the page physically reacts to being read (§ welcome fx). Edge-faded,
           static under reduced-motion. */}
         <div
-          className="relative overflow-hidden border-y border-[var(--color-divider)] py-8"
+          className="relative overflow-hidden py-8"
           aria-hidden
           style={{
             maskImage: 'linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent)',
@@ -446,7 +446,7 @@ export default function Landing() {
         </div>
 
         {/* Capabilities */}
-        <section id="capabilities" className="py-24 sm:py-32 border-t border-[var(--color-divider)]">
+        <section id="capabilities" className="py-24 sm:py-32">
           <div className="mx-auto max-w-[76rem] px-5 sm:px-8">
             <SectionHeader
               title={t('landing:capabilities.title')}
@@ -461,9 +461,9 @@ export default function Landing() {
                 <SpotlightCard
                   key={c.key}
                   spotlightColor="color-mix(in oklch, var(--color-accent) 10%, transparent)"
-                  className="group rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] transition-transform duration-300 hover:-translate-y-1 hover:shadow-[var(--shadow-md)]"
+                  className="group rounded-2xl bg-[var(--color-surface)] transition-transform duration-300 hover:-translate-y-1 hover:shadow-[var(--shadow-md)]"
                 >
-                  <div className="h-44 overflow-hidden border-b border-[var(--color-divider)] bg-[var(--color-bg-muted)]/60">
+                  <div className="h-44 overflow-hidden bg-[var(--color-bg-muted)]/60">
                     <c.Scene />
                   </div>
                   <div className="p-6 sm:p-7">
@@ -486,7 +486,7 @@ export default function Landing() {
         </section>
 
         {/* How it feels */}
-        <section id="how" className="py-24 sm:py-32 border-t border-[var(--color-divider)]">
+        <section id="how" className="py-24 sm:py-32">
           <div className="mx-auto max-w-[76rem] px-5 sm:px-8 grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20 items-start">
             <div data-reveal>
               <h2 className="font-serif tracking-tight text-3xl sm:text-4xl text-[var(--color-fg)] text-balance">
@@ -530,7 +530,7 @@ export default function Landing() {
         </section>
 
         {/* Use cases */}
-        <section className="py-24 sm:py-32 border-t border-[var(--color-divider)]">
+        <section className="py-24 sm:py-32">
           <div className="mx-auto max-w-[76rem] px-5 sm:px-8">
             <SectionHeader title={t('landing:useCases.title')} />
             {/* Quiet, neutral cards keep the use cases readable regardless of
@@ -540,10 +540,10 @@ export default function Landing() {
                 <SpotlightCard
                   key={key}
                   spotlightColor="color-mix(in oklch, var(--color-fg) 5%, transparent)"
-                  className="group rounded-[var(--radius-md)] border border-[var(--color-border-subtle)] bg-[var(--color-surface)] p-6 shadow-[var(--shadow-xs)] transition-[transform,border-color,background-color,box-shadow] duration-[var(--duration-base)] ease-[var(--ease-out)] hover:-translate-y-0.5 hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-raised)] hover:shadow-[var(--shadow-sm)] sm:p-7"
+                  className="group rounded-[var(--radius-md)] bg-[var(--color-surface)] p-6 shadow-[var(--shadow-xs)] transition-[transform,border-color,background-color,box-shadow] duration-[var(--duration-base)] ease-[var(--ease-out)] hover:-translate-y-0.5 hover:bg-[var(--color-surface-raised)] hover:shadow-[var(--shadow-sm)] sm:p-7"
                 >
                   <div className="relative flex items-center gap-3.5">
-                    <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)] transition-[background-color,border-color,color,transform] duration-[var(--duration-base)] ease-[var(--ease-out)] group-hover:-translate-y-px group-hover:border-[var(--color-border-strong)] group-hover:bg-[var(--color-surface-sunken)] group-hover:text-[var(--color-fg)]">
+                    <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-[var(--radius-sm)] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)] transition-[background-color,border-color,color,transform] duration-[var(--duration-base)] ease-[var(--ease-out)] group-hover:-translate-y-px group-hover:bg-[var(--color-surface-sunken)] group-hover:text-[var(--color-fg)]">
                       <Icon size={16} strokeWidth={1.8} aria-hidden />
                     </span>
                     <h3 className="font-serif text-xl tracking-tight text-[var(--color-fg)]">
@@ -561,7 +561,7 @@ export default function Landing() {
 
         {/* Models — 汇集主流大模型: a type-specimen rail of the real mainstream
           models, each logo painted in the product's own ink (CSS mask). */}
-        <section id="models" className="py-24 sm:py-32 border-t border-[var(--color-divider)]">
+        <section id="models" className="py-24 sm:py-32">
           <div className="mx-auto max-w-[76rem] px-5 sm:px-8">
             <SectionHeader
               eyebrow={t('landing:models.eyebrow')}
@@ -571,7 +571,7 @@ export default function Landing() {
             {/* The section's facts, counted up as they scroll into view — serif
               numerals on a ruled band, no card chrome (§ welcome fx). */}
             <div
-              className="mt-12 grid grid-cols-3 divide-x divide-[var(--color-divider)] border-y border-[var(--color-divider)]"
+              className="mt-12 grid grid-cols-3"
               data-reveal
             >
               {([
@@ -590,7 +590,7 @@ export default function Landing() {
               ))}
             </div>
             <ul
-              className="mt-10 grid grid-cols-2 sm:grid-cols-4 gap-px overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-border)]"
+              className="mt-10 grid grid-cols-2 sm:grid-cols-4 gap-2 overflow-hidden rounded-xl"
               data-reveal-group
             >
               {MODELS.map((m) => (
@@ -622,7 +622,7 @@ export default function Landing() {
               ))}
             </ul>
             <div
-              className="mt-12 grid grid-cols-1 border-t border-[var(--color-divider)] divide-y divide-[var(--color-divider)] sm:grid-cols-3 sm:divide-y-0 sm:divide-x"
+              className="mt-12 grid grid-cols-1 sm:grid-cols-3"
               data-reveal-group
             >
               {(['switch', 'strength', 'oneSub'] as const).map((k) => (
@@ -642,7 +642,7 @@ export default function Landing() {
         <MembershipTiers />
 
         {/* Safety */}
-        <section id="safety" className="py-24 sm:py-32 border-t border-[var(--color-divider)]">
+        <section id="safety" className="py-24 sm:py-32">
           <div className="mx-auto max-w-[76rem] px-5 sm:px-8 grid grid-cols-1 md:grid-cols-2 gap-12 items-start">
             <div data-reveal>
               <Badge variant="neutral">{t('landing:safety.eyebrow')}</Badge>
@@ -714,7 +714,7 @@ export default function Landing() {
         </section>
 
         {/* Footer */}
-        <footer className="border-t border-[var(--color-divider)] py-14">
+        <footer className="py-14">
           <div className="mx-auto max-w-[76rem] px-5 sm:px-8 grid grid-cols-2 md:grid-cols-5 gap-10" data-reveal>
             <div className="col-span-2">
               <TracedLogo size="md" />
@@ -795,7 +795,7 @@ function SafetyRow({ icon: Icon, title, body }: { icon: LucideIcon; title: strin
           on the wrapper so the glow clips to its radius (§ welcome fx). */}
       <SpotlightCard
         spotlightColor="color-mix(in oklch, var(--color-accent) 11%, transparent)"
-        className="flex items-start gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5"
+        className="flex items-start gap-3 rounded-xl bg-[var(--color-surface)] p-5"
       >
         <span className="inline-flex size-9 items-center justify-center rounded-full bg-[var(--color-accent-soft)] text-[var(--color-accent)] shrink-0">
           <Icon size={15} aria-hidden />

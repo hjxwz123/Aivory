@@ -692,7 +692,7 @@ function ToolUseSelector({
           ) : null}
         </button>
       </div>
-      <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden />
+      <div className="my-1 h-1" aria-hidden />
       <div className="flex flex-col gap-0.5" role="radiogroup" aria-label={label}>
         {modeItems.map((item) => (
           <ToolModeRow key={item.mode} item={item} />
@@ -700,7 +700,7 @@ function ToolUseSelector({
       </div>
       {secondaryItems && secondaryItems.length > 0 ? (
         <>
-          <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden />
+          <div className="my-1 h-1" aria-hidden />
           <div className="flex flex-col gap-0.5">
             {secondaryItems.map((item) => (
               <FeatureRow key={item.key} item={item} onAfter={onAfter} />
@@ -3973,14 +3973,14 @@ export function Composer({
               ) : null}
               {featureMenuAvailable ? (
                 <>
-                  {toolUsePanel === 'root' ? <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden /> : null}
+                  {toolUsePanel === 'root' ? <div className="my-1 h-1" aria-hidden /> : null}
                   {featureList()}
                 </>
               ) : null}
 
               {toolUsePanel === 'root' && canUseKnowledgeBases && onKBChange && !isImageMode ? (
                 <>
-                  <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden />
+                  <div className="my-1 h-1" aria-hidden />
                   <p className="px-2.5 pb-1 pt-0.5 text-[11px] font-medium uppercase tracking-wider text-[var(--color-fg-subtle)]">
                     {t('composer.knowledgeBases')}
                   </p>
@@ -3990,7 +3990,7 @@ export function Composer({
 
               {toolUsePanel === 'root' && visibleParamControls ? (
                 <>
-                  <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden />
+                  <div className="my-1 h-1" aria-hidden />
                   <div className="px-1.5 py-1">
                     <ParamControls
                       key={modelId || 'default-model'}

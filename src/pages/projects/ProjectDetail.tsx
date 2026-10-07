@@ -572,7 +572,7 @@ export default function ProjectDetail() {
               </div>
             </section>
           ) : (
-            <section className="mt-12 border-y border-[var(--color-divider)] py-8 sm:mt-16">
+            <section className="mt-12 py-8 sm:mt-16">
               <div className="mx-auto max-w-[44rem]">
                 <h2 className="text-[15px] font-medium text-[var(--color-fg)]">
                   {t('kb:groupPermissionTitle')}
@@ -586,7 +586,7 @@ export default function ProjectDetail() {
 
           {/* Keep the instructions in one vertical reading flow: context and
               actions first, followed by the full-width content surface. */}
-          <section className="mt-14 border-t border-[var(--color-divider)] pt-8 sm:mt-16 sm:pt-10">
+          <section className="mt-14 pt-8 sm:mt-16 sm:pt-10">
             <div className="min-w-0">
               <SectionHeader
                 title={t('projects:detail.instructionsSection')}
@@ -670,7 +670,7 @@ export default function ProjectDetail() {
           </section>
 
           {canUseKnowledgeBases ? (
-          <section className="mt-12 border-t border-[var(--color-divider)] pt-8 sm:mt-14 sm:pt-10">
+          <section className="mt-12 pt-8 sm:mt-14 sm:pt-10">
             <SectionHeader
               title={t('projects:detail.filesSection')}
               count={project.files.length}
@@ -714,7 +714,7 @@ export default function ProjectDetail() {
                 </CompactEmptyState>
               )
             ) : (
-              <ul className="mt-3 flex flex-col divide-y divide-[var(--color-divider)] border-t border-[var(--color-divider)]">
+              <ul className="mt-3 flex flex-col">
                 {project.files.map((f) => {
                   const Icon = fileKindIcon(f.kind)
                   return (
@@ -795,7 +795,7 @@ export default function ProjectDetail() {
           ) : null}
 
           {/* Conversations TOC */}
-          <section className="mt-12 border-t border-[var(--color-divider)] pt-8 sm:mt-14 sm:pt-10">
+          <section className="mt-12 pt-8 sm:mt-14 sm:pt-10">
             <SectionHeader
               title={t('projects:detail.chatsSection')}
               count={projectChats.length}
@@ -803,7 +803,7 @@ export default function ProjectDetail() {
 
             {loadingProjectChats && projectChats.length === 0 ? (
               <div
-                className="mt-3 flex min-h-16 items-center gap-3 border-t border-[var(--color-divider)] py-3"
+                className="mt-3 flex min-h-16 items-center gap-3 py-3"
                 role="status"
                 aria-label={t('common:common.loading')}
               >
@@ -815,7 +815,7 @@ export default function ProjectDetail() {
                 {t('projects:detail.chatsEmptyBody')}
               </CompactEmptyState>
             ) : (
-              <ul className="mt-3 flex flex-col divide-y divide-[var(--color-divider)] border-t border-[var(--color-divider)]">
+              <ul className="mt-3 flex flex-col">
                 {projectChats.map((c) => (
                   <li key={c.id}>
                     <div className="group/chatrow relative -mx-2 rounded-[10px] interactive hover:bg-[var(--color-bg-muted)]">

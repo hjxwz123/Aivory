@@ -414,7 +414,7 @@ export function ConversationOutline({ conversation, scrollContainerRef, onClose 
             : { left: pos.x, top: pos.y, width: size.w, height: size.h }
         }
         className={cn(
-          'fixed z-[200] flex flex-col border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-xl)] select-none overflow-hidden',
+          'fixed z-[200] flex flex-col bg-[var(--color-surface)] shadow-[var(--shadow-xl)] select-none overflow-hidden',
           isPhone
             ? 'rounded-t-popup pb-[var(--safe-bottom)] animate-[sheet-in-b_280ms_var(--ease-out)]'
             : 'rounded-popup',
@@ -424,7 +424,7 @@ export function ConversationOutline({ conversation, scrollContainerRef, onClose 
       <div
         onMouseDown={isPhone ? undefined : onDragDown}
         className={cn(
-          'flex items-center gap-2 px-3 py-2 border-b border-[var(--color-divider)] shrink-0 bg-[var(--color-surface)]',
+          'flex items-center gap-2 px-3 py-2 shrink-0 bg-[var(--color-bg-muted)]/50',
           isPhone ? '' : 'cursor-grab active:cursor-grabbing',
         )}
       >
@@ -527,10 +527,10 @@ export function ConversationOutline({ conversation, scrollContainerRef, onClose 
                     className={cn(
                       'absolute flex flex-col gap-1.5 rounded-[12px] border px-3 py-2.5 text-left overflow-hidden transition-colors',
                       active
-                        ? 'border-[var(--color-border-strong)] bg-[var(--color-surface)]'
-                        : 'border-[var(--color-border-subtle)] bg-[var(--color-bg-muted)] opacity-80',
+                        ? 'border-transparent bg-[var(--color-surface-sunken)]'
+                        : 'border-transparent bg-[var(--color-bg-muted)] opacity-80',
                       current && 'ring-1 ring-[var(--color-accent)] border-[var(--color-accent)]',
-                      'hover:border-[var(--color-fg-subtle)] hover:opacity-100 interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                      'hover:opacity-100 interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                     )}
                   >
                     <span className="flex items-center gap-2 shrink-0">

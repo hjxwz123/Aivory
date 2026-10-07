@@ -83,7 +83,7 @@ export default function About() {
       </section>
 
       <footer className="mt-auto pt-6 text-xs text-[var(--color-fg-subtle)]">
-        <div className="border-t border-[var(--color-divider)] pt-4">
+        <div className="pt-4">
           <div className="flex flex-col gap-2.5 md:flex-row md:items-center md:justify-between">
             <a
               href={`mailto:${legalConfig.contactEmail}`}

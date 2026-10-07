@@ -74,7 +74,7 @@ export function AnnouncementBar() {
       )}
     >
       <div className="overflow-hidden">
-        <div className="relative flex w-full items-center justify-center border-b border-[var(--color-border)] bg-[var(--color-accent-soft)] px-11 py-2 text-[var(--color-fg)]">
+        <div className="relative flex w-full items-center justify-center bg-[var(--color-accent-soft)] px-11 py-2 text-[var(--color-fg)]">
           {/* Centered announcement — icon + sanitized HTML, centered across the
               whole bar (not just the content column). */}
           <div className="flex min-w-0 items-center justify-center gap-2 text-center text-[13px] leading-snug [&_a]:font-medium [&_a]:text-[var(--color-accent)] [&_a]:underline [&_a]:underline-offset-2">

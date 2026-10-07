@@ -21,7 +21,7 @@ export default function Shortcuts() {
           grouped[scope].length > 0 && (
             <SettingsSection key={scope} title={t(`shortcuts.groups.${scope}`)}>
               {grouped[scope].map((s) => (
-                <div key={s.id} className="flex items-center gap-4 px-4 py-3">
+                <div key={s.id} className="flex items-center gap-4 py-3.5">
                   <span className="flex-1 text-sm text-[var(--color-fg)]">
                     {t(`shortcuts.items.${s.id}` as const, { defaultValue: s.name })}
                   </span>

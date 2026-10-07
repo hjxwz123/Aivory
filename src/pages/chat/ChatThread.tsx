@@ -730,7 +730,7 @@ export default function ChatThread() {
 
       {/* Composer — a hairline separates it from the thread on phones, where it's
           a bottom-anchored bar rather than a floating card. */}
-      <div className="relative max-sm:border-t max-sm:border-[var(--color-divider)] bg-[var(--color-bg)]">
+      <div className="relative bg-[var(--color-bg)]">
         {showJump && (
           <button
             type="button"
@@ -738,7 +738,7 @@ export default function ChatThread() {
             aria-label={t('chat:thread.jumpToLatest')}
             className={cn(
               'absolute bottom-full left-1/2 mb-2 -translate-x-1/2 inline-flex items-center justify-center',
-              'size-9 max-sm:size-10 rounded-full bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-fg-muted)]',
+              'size-9 max-sm:size-10 rounded-full bg-[var(--color-surface)] text-[var(--color-fg-muted)]',
               'shadow-[var(--shadow-md)] hover:text-[var(--color-fg)] interactive',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
             )}
@@ -750,7 +750,7 @@ export default function ChatThread() {
           {/* §workspace RBAC: guests are read-only — replace the composer with
               an explainer instead of letting them type into a 404. */}
           {isWorkspaceGuest ? (
-            <div className="border-t border-[var(--color-divider)] py-4 text-center">
+            <div className="py-4 text-center">
               <p className="text-[13px] font-medium text-[var(--color-fg)]">
                 {t('chat:workspace.readOnlyTitle', { defaultValue: 'Read-only access' })}
               </p>
@@ -759,7 +759,7 @@ export default function ChatThread() {
               </p>
             </div>
           ) : conversation.archived ? (
-            <div className="border-t border-[var(--color-divider)] py-4 text-center">
+            <div className="py-4 text-center">
               <p className="text-[13px] font-medium text-[var(--color-fg)]">
                 {t('chat:thread.archivedTitle', { defaultValue: 'Conversation archived' })}
               </p>
@@ -768,7 +768,7 @@ export default function ChatThread() {
               </p>
             </div>
           ) : conversation.projectId && !canUseKnowledgeBases ? (
-            <div className="border-t border-[var(--color-divider)] py-4 text-center">
+            <div className="py-4 text-center">
               <p className="text-[13px] font-medium text-[var(--color-fg)]">
                 {t('kb:groupPermissionTitle', { defaultValue: 'Knowledge bases unavailable' })}
               </p>
@@ -921,7 +921,7 @@ export default function ChatThread() {
               <>
                 {!conversation.workspaceId ? (
                   <>
-                    <div className="my-1.5 h-px bg-[var(--color-divider)]" aria-hidden />
+                    <div className="my-1.5 h-1" aria-hidden />
                     <ThreadActionRow
                       icon={<Archive size={18} aria-hidden />}
                       label={t('chat:sidebar.archive')}

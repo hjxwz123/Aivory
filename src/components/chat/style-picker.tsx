@@ -141,7 +141,7 @@ function Swatch({
       <span
         className={cn(
           'relative aspect-square w-full overflow-hidden rounded-[6px] border',
-          active ? 'border-[var(--color-accent)]' : 'border-[var(--color-border-subtle)]',
+          active ? 'border-[var(--color-accent)]' : 'border-transparent',
         )}
       >
         {image ? (

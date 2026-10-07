@@ -22,7 +22,7 @@ export function CodeBlockFrame({ code, lang, html, className, actions, copyActio
   return (
     <div className={cn(
       'group/code relative isolate my-3.5 min-w-0 max-w-full overflow-clip not-italic',
-      'rounded-[14px] border border-[var(--color-border)]',
+      'rounded-[14px]',
       'bg-[var(--color-code-bg)] text-[var(--color-code-fg)]',
       className,
     )}>
@@ -30,7 +30,7 @@ export function CodeBlockFrame({ code, lang, html, className, actions, copyActio
         data-code-toolbar
         className={cn(
           'sticky z-[var(--z-sticky)] flex h-10 min-w-0 items-center justify-between gap-2 px-4',
-          'border-b border-[var(--color-border-subtle)] bg-[var(--color-code-bg)]',
+          'bg-[var(--color-code-bg)]',
           'max-sm:h-[var(--tap-min)] max-sm:px-3',
         )}
         style={{ top: 'var(--code-toolbar-sticky-top, 0px)' }}

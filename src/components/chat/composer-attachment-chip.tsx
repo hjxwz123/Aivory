@@ -74,7 +74,7 @@ export function AttachmentChip({
         <img
           src={a.previewUrl}
           alt={a.name}
-          className="size-14 rounded-[10px] border border-[var(--color-border-subtle)] bg-[var(--color-bg-muted)] object-cover"
+          className="size-14 rounded-[10px] bg-[var(--color-bg-muted)] object-cover"
         />
         {busy ? (
           <span className="absolute inset-0 grid place-items-center rounded-[10px] bg-[var(--color-overlay)]">
@@ -115,7 +115,7 @@ export function AttachmentChip({
             // stay readable on narrow rails.
             'w-[clamp(10rem,calc((100%_-_1.5rem)/4.5),15rem)] flex-none'
           : 'min-w-0 max-w-[min(28rem,calc(100vw-6rem))] flex-[1_1_15rem]',
-        failed ? 'border-[var(--color-danger)]/50' : 'border-[var(--color-border)]',
+        failed ? 'border-[var(--color-danger)]/50' : 'border-transparent',
       )}
     >
       <span

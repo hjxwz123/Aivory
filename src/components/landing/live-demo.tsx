@@ -136,9 +136,9 @@ export function LiveDemo() {
   return (
     <div className="relative w-full">
       {/* App frame */}
-      <div className="relative overflow-hidden rounded-[18px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-2xl)]">
+      <div className="relative overflow-hidden rounded-[18px] bg-[var(--color-surface)] shadow-[var(--shadow-2xl)]">
         {/* Title bar */}
-        <div className="flex items-center gap-2 h-10 px-4 border-b border-[var(--color-divider)] bg-[var(--color-bg-muted)]">
+        <div className="flex items-center gap-2 h-10 px-4 bg-[var(--color-bg-muted)]">
           <span className="size-2.5 rounded-full bg-[var(--color-fg-faint)]" />
           <span className="size-2.5 rounded-full bg-[var(--color-fg-faint)]" />
           <span className="size-2.5 rounded-full bg-[var(--color-fg-faint)]" />
@@ -151,7 +151,7 @@ export function LiveDemo() {
             <Message key={`s-${i}`} step={m.step} text={m.text} t={t} />
           ))}
           {switchedTo ? (
-            <div className="self-center inline-flex items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-1 text-[11.5px] text-[var(--color-fg-muted)] animate-[message-in_300ms_var(--ease-out)_both]">
+            <div className="self-center inline-flex items-center gap-1.5 rounded-full bg-[var(--color-bg-muted)] px-3 py-1 text-[11.5px] text-[var(--color-fg-muted)] animate-[message-in_300ms_var(--ease-out)_both]">
               <BrandMark slug={switchedTo.slug} className="size-3 text-[var(--color-fg-muted)]" />
               {t('demo.switched', { model: switchedTo.name })}
             </div>
@@ -161,7 +161,7 @@ export function LiveDemo() {
           ) : null}
 
           {/* Composer (decorative) pinned to the bottom of the frame */}
-          <div className="mt-auto flex items-center gap-2 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5">
+          <div className="mt-auto flex items-center gap-2 rounded-[14px] bg-[var(--color-bg-muted)] px-3 py-2.5">
             <span className="flex-1 text-[13px] text-[var(--color-fg-faint)] truncate">{t('demo.placeholder')}</span>
             <span className="inline-flex size-7 items-center justify-center rounded-[9px] bg-[var(--color-accent)] text-[var(--color-accent-fg)]">
               <ArrowUp size={13} aria-hidden />
@@ -189,7 +189,7 @@ function Message({
   if (step.role === 'user') {
     return (
       <div className="flex justify-end animate-[message-in_300ms_var(--ease-out)_both]">
-        <div className="max-w-[80%] rounded-[16px] border border-[var(--color-user-bubble-border)] bg-[var(--color-user-bubble)] px-3.5 py-2 text-[13.5px] leading-relaxed text-[var(--color-fg)]">
+        <div className="max-w-[80%] rounded-[16px] bg-[var(--color-user-bubble)] px-3.5 py-2 text-[13.5px] leading-relaxed text-[var(--color-fg)]">
           {text}
         </div>
       </div>
@@ -221,7 +221,7 @@ function Message({
         </p>
       ) : null}
       {!streaming && step.citeKey ? (
-        <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-2.5 py-1 text-[11.5px] text-[var(--color-fg-muted)]">
+        <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-[var(--color-bg-muted)] px-2.5 py-1 text-[11.5px] text-[var(--color-fg-muted)]">
           <Quote size={11} aria-hidden className="text-[var(--color-secondary)]" />
           {t(step.citeKey)}
         </span>

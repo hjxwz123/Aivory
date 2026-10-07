@@ -20,7 +20,7 @@ function renderTokens(tokens: Token[], depth = 0): ReactNode {
       case 'hr': return <hr key={index} className="border-[var(--color-divider)]" />
       case 'codespan': return <code key={index} className="rounded bg-[var(--color-bg-muted)] px-1 py-0.5 font-mono text-[0.9em]">{token.text}</code>
       case 'code': return <CodeBlockFrame key={index} code={token.text} lang={token.lang?.split(/\s+/)[0]} />
-      case 'blockquote': return <blockquote key={index} className="space-y-3 border-l-2 border-[var(--color-border-strong)] pl-4 text-[var(--color-fg-muted)]">{children}</blockquote>
+      case 'blockquote': return <blockquote key={index} className="space-y-3 rounded-[8px] bg-[var(--color-bg-muted)] px-4 py-3 text-[var(--color-fg-muted)]">{children}</blockquote>
       case 'list': {
         const items = (token as Tokens.List).items.map((item, itemIndex) => <li key={itemIndex}>{renderTokens(item.tokens, depth + 1)}</li>)
         return token.ordered
@@ -28,10 +28,10 @@ function renderTokens(tokens: Token[], depth = 0): ReactNode {
           : <ul key={index} className="list-disc space-y-2 pl-6">{items}</ul>
       }
       case 'table': return (
-        <div key={index} className="overflow-x-auto rounded-[10px] border border-[var(--color-border)]">
-          <table className="w-full border-collapse text-sm">
-            <thead className="bg-[var(--color-bg-muted)]"><tr>{(token as Tokens.Table).header.map((cell, cellIndex) => <th key={cellIndex} className="border-b border-[var(--color-border)] px-3 py-2 text-left">{renderTokens(cell.tokens, depth + 1)}</th>)}</tr></thead>
-            <tbody>{(token as Tokens.Table).rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex} className="border-b border-[var(--color-border-subtle)] px-3 py-2 align-top">{renderTokens(cell.tokens, depth + 1)}</td>)}</tr>)}</tbody>
+        <div key={index} className="overflow-x-auto rounded-[10px]">
+          <table className="quiet-table w-full border-collapse text-sm">
+            <thead className="bg-[var(--color-bg-muted)]"><tr>{(token as Tokens.Table).header.map((cell, cellIndex) => <th key={cellIndex} className="px-3 py-2 text-left">{renderTokens(cell.tokens, depth + 1)}</th>)}</tr></thead>
+            <tbody>{(token as Tokens.Table).rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex} className="px-3 py-2 align-top">{renderTokens(cell.tokens, depth + 1)}</td>)}</tr>)}</tbody>
           </table>
         </div>
       )

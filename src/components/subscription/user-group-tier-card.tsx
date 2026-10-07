@@ -51,12 +51,12 @@ export function UserGroupTierCard({
   return (
     <article
       className={cn(
-        'flex min-w-0 flex-col rounded-xl border bg-[var(--color-surface)] p-5 font-sans sm:row-span-5 sm:grid sm:grid-rows-subgrid',
+        'flex min-w-0 flex-col rounded-xl bg-[var(--color-bg-muted)]/45 p-5 font-sans sm:row-span-5 sm:grid sm:grid-rows-subgrid',
         isRecommended
-          ? 'border-[var(--color-accent)]'
+          ? 'bg-[var(--color-accent-soft)]'
           : isCurrent
-            ? 'border-[var(--color-border)] bg-[var(--color-bg-muted)]'
-            : 'border-[var(--color-border)]',
+            ? 'bg-[var(--color-bg-muted)]'
+            : undefined,
       )}
     >
       <div className="flex min-h-6 items-start justify-between gap-2">
@@ -98,7 +98,7 @@ export function UserGroupTierCard({
 
       <ul
         className={cn(
-          'mt-4 flex flex-col gap-2 border-t border-[var(--color-divider)] pt-4 sm:mt-0 sm:pt-3',
+          'mt-4 flex flex-col gap-2 pt-4 sm:mt-0 sm:pt-3',
           features.length === 0 && 'hidden sm:flex',
         )}
       >

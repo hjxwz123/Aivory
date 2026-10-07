@@ -178,7 +178,7 @@ export function TemplatePicker({ selectedId, onSelect, disabled = false, onDelet
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col gap-4">
-      <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-[var(--color-divider)] pb-3">
+      <div className="flex shrink-0 flex-wrap items-center gap-3 pb-3">
         <fieldset disabled={disabled || uploading || managing} className="min-w-0">
           <SegmentedControl
             label={t('template.title')}
@@ -265,7 +265,7 @@ export function TemplatePicker({ selectedId, onSelect, disabled = false, onDelet
                       'flex min-w-0 flex-col overflow-hidden rounded-[10px] border bg-[var(--color-surface)] interactive',
                       selected
                         ? 'border-[var(--color-accent)] ring-1 ring-[var(--color-accent)]'
-                        : 'border-[var(--color-border)] hover:border-[var(--color-border-strong)]',
+                        : 'border-transparent',
                     )}
                   >
                     <button
@@ -300,7 +300,7 @@ export function TemplatePicker({ selectedId, onSelect, disabled = false, onDelet
                     {/* The vendor also lists the deployment's shared templates
                         here; only the user's own uploads may be managed. */}
                     {template.owned ? (
-                      <div className="mt-auto flex items-center gap-0.5 border-t border-[var(--color-border)] px-1 py-0.5">
+                      <div className="mt-auto flex items-center gap-0.5 px-1 py-0.5">
                         <Button
                           size="sm"
                           variant="ghost"

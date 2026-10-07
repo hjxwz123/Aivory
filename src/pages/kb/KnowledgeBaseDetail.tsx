@@ -724,7 +724,7 @@ export default function KnowledgeBaseDetail() {
 
           <section className={libraryEmpty ? 'mt-2' : 'mt-6'} aria-label={t('kb:detail.summary.documents')}>
             {libraryEmpty ? null : (
-            <div className="flex flex-col gap-2.5 border-b border-[var(--color-divider)] pb-3 sm:flex-row sm:items-center">
+            <div className="flex flex-col gap-2.5 pb-3 sm:flex-row sm:items-center">
               <Input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
@@ -775,7 +775,7 @@ export default function KnowledgeBaseDetail() {
                   : undefined}
               />
             ) : (
-              <ul className="mt-1 flex flex-col divide-y divide-[var(--color-divider)]">
+              <ul className="quiet-list mt-1 flex flex-col">
                 {docs.map((d) => (
                   <DocumentRow
                     key={d.id}
@@ -1308,7 +1308,7 @@ function KnowledgeBaseShareDialog({
               <span className="text-[11px] tabular-nums text-[var(--color-fg-subtle)]">{shares.length}</span>
             ) : null}
           </div>
-          <div className="max-h-[min(20rem,42dvh)] overflow-y-auto border-y border-[var(--color-divider)] scrollbar-thin">
+          <div className="max-h-[min(20rem,42dvh)] overflow-y-auto scrollbar-thin">
             {sharesLoading ? (
               <div className="space-y-2 py-3">{[0, 1, 2].map((row) => <Skeleton key={row} className="h-12 w-full" />)}</div>
             ) : sharesLoadFailed ? (
@@ -1478,12 +1478,12 @@ function WorkspaceKnowledgeBaseMembersDialog({
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="min-h-0 py-0">
-          <div className="hidden grid-cols-[minmax(0,1fr)_9rem_9rem] gap-3 border-b border-[var(--color-divider)] px-1 py-2 text-[11px] font-medium text-[var(--color-fg-subtle)] sm:grid">
+          <div className="hidden grid-cols-[minmax(0,1fr)_9rem_9rem] gap-3 px-1 py-2 text-[11px] font-medium text-[var(--color-fg-subtle)] sm:grid">
             <span>{t('kb:workspaceMembers.member', { defaultValue: 'Member' })}</span>
             <span className="text-center">{t('kb:workspaceMembers.addFiles', { defaultValue: 'Add files' })}</span>
             <span className="text-center">{t('kb:workspaceMembers.deleteContent', { defaultValue: 'Delete content' })}</span>
           </div>
-          <div className="max-h-[min(27rem,62dvh)] divide-y divide-[var(--color-divider)] overflow-y-auto scrollbar-thin">
+          <div className="max-h-[min(27rem,62dvh)] overflow-y-auto scrollbar-thin">
             {loading ? (
               <div className="space-y-2 py-3">{[0, 1, 2].map((row) => <Skeleton key={row} className="h-16 w-full" />)}</div>
             ) : loadFailed ? (
@@ -1623,12 +1623,12 @@ function DocumentSummaryStrip({
     { key: 'size', label: t('kb:detail.summary.size'), value: formatBytes(summary.sizeBytes) },
   ]
   return (
-    <dl className="mt-5 grid grid-cols-3 gap-px overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-divider)] sm:grid-cols-5">
+    <dl className="mt-5 grid grid-cols-3 gap-1 overflow-hidden rounded-[12px] bg-[var(--color-bg-muted)]/60 p-1 sm:grid-cols-5">
       {items.map((item, index) => (
         <div
           key={item.key}
           className={cn(
-            'min-w-0 bg-[var(--color-surface)] px-3 py-2.5 sm:px-4 sm:py-3',
+            'min-w-0 px-3 py-2.5 sm:px-4 sm:py-3',
             // Phones show three cells per row; total size spans the last two.
             index === items.length - 1 && 'max-sm:col-span-2',
           )}
@@ -1819,7 +1819,7 @@ function DocumentStatus({ status, label }: { status: ApiDocument['status']; labe
 
 function DocumentRowsSkeleton({ label }: { label: string }) {
   return (
-    <div className="mt-1 divide-y divide-[var(--color-divider)]" role="status" aria-label={label}>
+    <div className="mt-1" role="status" aria-label={label}>
       {Array.from({ length: 5 }, (_, index) => (
         <div key={index} className="grid min-h-16 grid-cols-[2.25rem_minmax(0,1fr)_auto] items-center gap-x-3 py-2.5">
           <Skeleton className="size-9 rounded-[8px]" />
@@ -1844,15 +1844,15 @@ function KnowledgeBaseDetailSkeleton({ label, backLabel }: { label: string; back
         <div className="mx-auto w-full max-w-[var(--layout-content-max-w)] px-5 pt-5 sm:px-8 sm:pt-6" role="status" aria-label={label}>
           <Skeleton shape="line" className="h-3.5 w-1/2 max-w-md" />
           <Skeleton shape="line" className="mt-3 h-3 w-40" />
-          <div className="mt-5 grid grid-cols-3 gap-px overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-divider)] sm:grid-cols-5">
+          <div className="mt-5 grid grid-cols-3 gap-1 overflow-hidden rounded-[12px] bg-[var(--color-bg-muted)]/60 p-1 sm:grid-cols-5">
             {Array.from({ length: 5 }, (_, index) => (
-              <div key={index} className={cn('space-y-2 bg-[var(--color-surface)] px-3 py-2.5 sm:px-4 sm:py-3', index === 4 && 'max-sm:col-span-2')}>
+              <div key={index} className={cn('space-y-2 px-3 py-2.5 sm:px-4 sm:py-3', index === 4 && 'max-sm:col-span-2')}>
                 <Skeleton shape="line" className="h-3 w-12" />
                 <Skeleton shape="line" className="h-4 w-8" />
               </div>
             ))}
           </div>
-          <div className="mt-6 flex items-center gap-2.5 border-b border-[var(--color-divider)] pb-3">
+          <div className="mt-6 flex items-center gap-2.5 pb-3">
             <Skeleton className="h-10 w-full max-w-xs" />
           </div>
           <DocumentRowsSkeleton label={label} />

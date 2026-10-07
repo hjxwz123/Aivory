@@ -213,7 +213,7 @@ export function PrivateMessageRow({ message, model, isLastAssistant, locked, onR
 
         {editing ? (
           // Full-width edit well mirroring message-row.tsx's user edit surface.
-          <div className="w-full rounded-[18px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-4 py-3.5 transition-colors focus-within:border-[var(--color-border-strong)]">
+          <div className="w-full rounded-[18px] border border-transparent bg-[var(--color-bg-muted)] px-4 py-3.5 transition-colors focus-within:border-[var(--color-border-strong)]">
             {message.images?.length ? (
               <div className="mb-3 flex flex-wrap gap-2">
                 {message.images.map((image, index) => (
@@ -221,7 +221,7 @@ export function PrivateMessageRow({ message, model, isLastAssistant, locked, onR
                     key={index}
                     src={privateImageURL(image)}
                     alt={t('private.image', { index: index + 1 })}
-                    className="size-16 rounded-[10px] border border-[var(--color-border-subtle)] object-cover"
+                    className="size-16 rounded-[10px] object-cover"
                     draggable={false}
                   />
                 ))}
@@ -267,7 +267,7 @@ export function PrivateMessageRow({ message, model, isLastAssistant, locked, onR
           <div
             className={cn(
               'w-fit min-w-0 max-w-full overflow-hidden rounded-[18px] px-4 py-2.5',
-              'bg-[var(--color-user-bubble)] border border-[var(--color-user-bubble-border)]',
+              'bg-[var(--color-user-bubble)]',
               'text-[var(--color-fg)] text-[length:var(--text-chat-body)] leading-relaxed',
               'whitespace-pre-wrap break-words',
             )}
@@ -292,7 +292,7 @@ export function PrivateMessageRow({ message, model, isLastAssistant, locked, onR
                       onClick={() => setLightbox({ src: privateImageURL(image), alt: t('private.image', { index: index + 1 }) })}
                       aria-label={t('actions.viewImage', { defaultValue: 'View image' })}
                       className={cn(
-                        'block min-w-0 max-w-full overflow-hidden rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] hover:opacity-90',
+                        'block min-w-0 max-w-full overflow-hidden rounded-[10px] bg-[var(--color-surface)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] hover:opacity-90',
                         message.images!.length === 1 ? 'shrink-0' : 'aspect-square w-full',
                       )}
                     >
@@ -354,7 +354,7 @@ export function PrivateMessageRow({ message, model, isLastAssistant, locked, onR
                     <img
                       src={image}
                       alt={t('private.image', { index: index + 1 })}
-                      className="max-h-64 rounded-lg border border-[var(--color-border)] transition-opacity hover:opacity-90"
+                      className="max-h-64 rounded-lg transition-opacity hover:opacity-90"
                     />
                   </button>
                 ))}

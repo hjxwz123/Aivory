@@ -99,7 +99,7 @@ function VoiceInputSettings() {
         </Select>
       </SettingsRow>
       {capability && effective !== selected ? (
-        <p className="px-4 pb-3 text-xs text-[var(--color-warning)]">
+        <p className="pb-3 text-xs text-[var(--color-warning)]">
           {effective
             ? t('settings:models.voiceFallback', { engine: engineLabel(effective) })
             : t('settings:models.voiceUnavailable')}
@@ -293,10 +293,10 @@ export default function Models() {
 
       <SettingsSection title={t('settings:models.available')}>
         {list.length === 0 ? (
-          <div className="px-4 py-5 text-sm text-[var(--color-fg-muted)]">{t('common:common.loading')}</div>
+          <div className="py-5 text-sm text-[var(--color-fg-muted)]">{t('common:common.loading')}</div>
         ) : (
           list.map((m) => (
-            <div key={m.id} className="px-4 py-3">
+            <div key={m.id} className="py-3.5">
               <div className="flex items-start gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">

@@ -340,7 +340,7 @@ function FileBody({ file, onClose }: { file: FileSource; onClose: () => void }) 
         ) : null}
       </ChatSidePanelHeader>
 
-      <div className="min-h-0 flex-1 overflow-hidden border-t border-[var(--color-divider)] px-0 pb-0">
+      <div className="min-h-0 flex-1 overflow-hidden px-0 pb-0">
         {mode === 'edit' && editor && preview.data ? (
           // The editing surface is wrapped so a throwing editor degrades to a
           // readable notice instead of blanking the panel, and it is keyed by
@@ -355,7 +355,7 @@ function FileBody({ file, onClose }: { file: FileSource; onClose: () => void }) 
           >
             <div key={`${name}:edit`} className="flex h-full min-h-0 flex-col">
               {liveMarkup !== null ? (
-                <div className="h-[45%] min-h-0 shrink-0 border-b border-[var(--color-divider)] bg-[var(--color-preview-canvas)]">
+                <div className="h-[45%] min-h-0 shrink-0 bg-[var(--color-preview-canvas)]">
                   <SandboxedHtmlFrame doc={liveMarkup} title={name} />
                 </div>
               ) : null}
@@ -393,7 +393,7 @@ function FileBody({ file, onClose }: { file: FileSource; onClose: () => void }) 
         )}
       </div>
 
-      <div className="flex shrink-0 items-center justify-end gap-2 border-t border-[var(--color-divider)] px-4 py-3">
+      <div className="flex shrink-0 items-center justify-end gap-2 px-4 py-3">
         {actionUrl || edited ? (
           <>
             {actionUrl ? (
@@ -403,7 +403,7 @@ function FileBody({ file, onClose }: { file: FileSource; onClose: () => void }) 
                 rel="noreferrer"
                 aria-label={t('chat:filePreview.open')}
                 className={cn(
-                  'inline-flex h-9 items-center gap-1.5 rounded-[10px] border border-[var(--color-border)] px-3.5 text-sm font-medium text-[var(--color-fg-muted)] interactive',
+                  'inline-flex h-9 items-center gap-1.5 rounded-[10px] px-3.5 text-sm font-medium text-[var(--color-fg-muted)] interactive',
                   'hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                 )}
@@ -419,7 +419,7 @@ function FileBody({ file, onClose }: { file: FileSource; onClose: () => void }) 
                 disabled={saving || !currentBlob}
                 aria-label={t('chat:filePreview.saveCopy', { defaultValue: 'Save a copy' })}
                 className={cn(
-                  'inline-flex h-9 items-center gap-1.5 rounded-[10px] border border-[var(--color-border)] px-3.5 text-sm font-medium text-[var(--color-fg-muted)] interactive',
+                  'inline-flex h-9 items-center gap-1.5 rounded-[10px] px-3.5 text-sm font-medium text-[var(--color-fg-muted)] interactive',
                   'hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                   'disabled:pointer-events-none disabled:opacity-50',

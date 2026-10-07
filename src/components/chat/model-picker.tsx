@@ -238,7 +238,7 @@ export function ModelPicker({
                 </span>
               </div>
             </DropdownMenuItem>
-            <DropdownMenuLabel className="mt-1 border-t border-[var(--color-divider)] pt-2">
+            <DropdownMenuLabel className="mt-1 pt-2">
               {t('fastMode.advancedSection', { defaultValue: '进阶' })}
             </DropdownMenuLabel>
           </>
@@ -251,7 +251,7 @@ export function ModelPicker({
           // filters without closing the menu. -top-1.5/pt-2 offset the menu's
           // p-1.5 scroll padding — with top-0 the padding band stays see-through
           // and scrolled model rows peek out above the pinned chips.
-          <div className="sticky -top-1.5 z-10 -mx-1.5 mb-1 flex gap-1 overflow-x-auto border-b border-[var(--color-divider)] bg-[var(--color-surface-raised)] px-1.5 pb-2 pt-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="sticky -top-1.5 z-10 -mx-1.5 mb-1 flex gap-1 overflow-x-auto bg-[var(--color-surface-raised)] px-1.5 pb-2 pt-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <TagChip active={activeTag === null} onClick={() => setActiveTag(null)}>
               {t('modelPicker.allTags')}
             </TagChip>
@@ -309,7 +309,7 @@ export function ModelPicker({
         {/* §4.20 image models — picking one puts the conversation in drawing mode. */}
         {imageModels.length > 0 && (activeTag === null) && (
           <>
-            <DropdownMenuLabel className="mt-1 border-t border-[var(--color-divider)] pt-2">
+            <DropdownMenuLabel className="mt-1 pt-2">
               {t('modelPicker.imageSection', { defaultValue: 'Image generation' })}
             </DropdownMenuLabel>
             {imageModels.map((m) => {

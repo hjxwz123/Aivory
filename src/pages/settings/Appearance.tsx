@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { Button } from '@/components/ui/button'
 import { Sun, Moon, Monitor, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from '@/hooks/use-toast'
@@ -112,7 +113,7 @@ export default function Appearance() {
 
       <SettingsSection title={t('appearance.theme')} description={t('appearance.themeBody')}>
         <SettingsRow label={t('appearance.colorTheme')} description={t('appearance.colorThemeBody')}>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <ThemeChip current={pref} value="light" onClick={() => setPref('light')} icon={<Sun size={14} aria-hidden />} label={t('appearance.light')} />
             <ThemeChip current={pref} value="dark" onClick={() => setPref('dark')} icon={<Moon size={14} aria-hidden />} label={t('appearance.dark')} />
             <ThemeChip current={pref} value="system" onClick={() => setPref('system')} icon={<Monitor size={14} aria-hidden />} label={t('appearance.system')} />
@@ -150,7 +151,7 @@ export default function Appearance() {
 
       <SettingsSection title={t('appearance.density')} description={t('appearance.densityBody')}>
         <SettingsRow label={t('appearance.spacing')} description={t('appearance.spacingBody')}>
-          <div className="inline-flex items-center gap-1 p-0.5 rounded-[10px] bg-[var(--color-bg-muted)] border border-[var(--color-border-subtle)]">
+          <div className="inline-flex items-center gap-1 p-0.5 rounded-[10px] bg-[var(--color-bg-muted)]">
             <Segment current={appearance.density} value="cozy" onClick={() => setAppearance({ density: 'cozy' })}>
               {t('appearance.cozy')}
             </Segment>
@@ -224,7 +225,7 @@ export default function Appearance() {
           />
         </SettingsRow>
         <SettingsRow label={t('appearance.fontSize')} description={t('appearance.fontSizeBody')}>
-          <div className="inline-flex items-center gap-1 p-0.5 rounded-[10px] bg-[var(--color-bg-muted)] border border-[var(--color-border-subtle)]">
+          <div className="inline-flex items-center gap-1 p-0.5 rounded-[10px] bg-[var(--color-bg-muted)]">
             <Segment current={appearance.fontSize} value="sm" onClick={() => setAppearance({ fontSize: 'sm' })}>
               S
             </Segment>
@@ -236,7 +237,7 @@ export default function Appearance() {
             </Segment>
           </div>
         </SettingsRow>
-        <div className="px-4 py-3">
+        <div className="py-3.5">
           <div>
             <div className="text-sm font-medium text-[var(--color-fg)]">{t('appearance.font.title')}</div>
             <p className="mt-0.5 text-xs leading-normal text-[var(--color-fg-muted)]">
@@ -254,11 +255,11 @@ export default function Appearance() {
                   onClick={() => onChangeFont(opt)}
                   style={{ fontFamily: FONT_PREVIEW[opt] }}
                   className={cn(
-                    'flex min-w-0 flex-col items-start gap-1 rounded-[10px] border px-3 py-2.5 text-left interactive',
+                    'flex min-w-0 flex-col items-start gap-1 rounded-[10px] px-3 py-2.5 text-left interactive',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                     active
-                      ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)]'
-                      : 'border-[var(--color-border)] hover:border-[var(--color-border-strong)]',
+                      ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+                      : 'bg-[var(--color-bg-muted)] hover:bg-[var(--color-surface-sunken)]',
                   )}
                 >
                   <span className="text-[20px] font-medium leading-none tracking-normal text-[var(--color-fg)]">Aa 字体</span>
@@ -290,21 +291,20 @@ function ThemeChip({
 }) {
   const active = current === value
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
+      size="sm"
+      leadingIcon={icon}
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        'inline-flex items-center gap-1.5 h-9 px-3.5 rounded-[10px] text-sm font-medium interactive',
         active
-          ? 'bg-[var(--color-fg)] text-[var(--color-fg-inverted)]'
-          : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] border border-[var(--color-border)]',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+          ? 'bg-[var(--color-fg)] text-[var(--color-fg-inverted)] hover:bg-[var(--color-fg)] hover:text-[var(--color-fg-inverted)]'
+          : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
       )}
     >
-      {icon}
       {label}
-    </button>
+    </Button>
   )
 }
 
@@ -356,19 +356,18 @@ function Segment({
 }) {
   const active = current === value
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
+      size="sm"
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        'h-8 px-3 rounded-[8px] text-[13px] font-medium interactive',
         active
-          ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]'
+          ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)] hover:bg-[var(--color-surface)]'
           : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
       )}
     >
       {children}
-    </button>
+    </Button>
   )
 }

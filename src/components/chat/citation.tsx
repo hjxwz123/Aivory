@@ -35,8 +35,7 @@ export function CitationChip({ citation, className, onOpenDocument }: CitationCh
             'h-[18px] min-w-[18px] px-1 mx-0.5',
             'text-[10px] font-medium rounded-[5px]',
             'bg-[var(--color-secondary-soft)] text-[var(--color-secondary)]',
-            'border border-[var(--color-secondary)]/20',
-            'hover:bg-[var(--color-accent-soft)] hover:text-[var(--color-accent)] hover:border-[var(--color-accent)]/25',
+            'hover:bg-[var(--color-accent-soft)] hover:text-[var(--color-accent)]',
             'interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
             className,
           )}
@@ -131,7 +130,7 @@ export function CitationList({ citations, onOpenDocument }: CitationListProps) {
   if (citations.length === 0) return null
   const orderedCitations = citationsInDisplayOrder(citations)
   return (
-    <div className="mt-5 border-t border-[var(--color-divider)] pt-3.5">
+    <div className="mt-5 pt-3.5">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}

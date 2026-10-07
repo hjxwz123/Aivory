@@ -187,7 +187,7 @@ export default function SharedConversation() {
                         fastLabel={t('chat:fastMode.label')}
                       />
                       {atts.length > 0 ? (
-                        <div className={isUser ? 'mb-2 flex flex-wrap justify-end gap-2' : 'mb-2 flex flex-wrap gap-2'}>
+                        <div className={isUser ? 'mb-2 flex flex-wrap items-start justify-end gap-2' : 'mb-2 flex flex-wrap items-start gap-2'}>
                           {atts.map((a) =>
                             isImageAttachment(a) ? (
                               <img
@@ -195,7 +195,7 @@ export default function SharedConversation() {
                                 src={shareAssetUrl(token, a.url)}
                                 alt={a.filename}
                                 loading="lazy"
-                                className="max-h-64 max-w-full rounded-[12px] border border-[var(--color-border)] object-contain"
+                                className="max-h-64 max-w-full rounded-[12px] object-contain"
                               />
                             ) : (
                               <a
@@ -203,7 +203,7 @@ export default function SharedConversation() {
                                 href={shareAssetUrl(token, a.url)}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="inline-flex max-w-full items-center gap-1.5 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-[12.5px] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] [overflow-wrap:anywhere]"
+                                className="inline-flex max-w-full items-center gap-1.5 rounded-[10px] bg-[var(--color-surface)] px-2.5 py-1.5 text-[12.5px] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] [overflow-wrap:anywhere]"
                               >
                                 <FileText size={13} aria-hidden className="shrink-0 text-[var(--color-fg-subtle)]" />
                                 {a.filename}
@@ -226,7 +226,7 @@ export default function SharedConversation() {
                             </div>
                           ) : null}
                           {artifacts.length > 0 ? (
-                            <div className="flex w-full flex-wrap gap-2">
+                            <div className="flex w-full flex-wrap items-start gap-2">
                               {artifacts.map((b, j) =>
                                 isImageArtifact(b) ? (
                                   <img
@@ -234,7 +234,7 @@ export default function SharedConversation() {
                                     src={shareAssetUrl(token, b.url ?? '')}
                                     alt={b.title || 'image'}
                                     loading="lazy"
-                                    className="max-h-96 max-w-full rounded-[12px] border border-[var(--color-border)] object-contain"
+                                    className="max-h-96 max-w-full rounded-[12px] object-contain"
                                   />
                                 ) : (
                                   <a
@@ -242,7 +242,7 @@ export default function SharedConversation() {
                                     href={shareAssetUrl(token, b.url ?? '')}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="inline-flex max-w-full items-center gap-1.5 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-[12.5px] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] [overflow-wrap:anywhere]"
+                                    className="inline-flex max-w-full items-center gap-1.5 rounded-[10px] bg-[var(--color-surface)] px-2.5 py-1.5 text-[12.5px] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] [overflow-wrap:anywhere]"
                                   >
                                     <FileText size={13} aria-hidden className="shrink-0 text-[var(--color-fg-subtle)]" />
                                     {b.title || b.url}
@@ -259,7 +259,7 @@ export default function SharedConversation() {
               })}
             </div>
             <footer className="mt-14 w-full text-center text-[12px] text-[var(--color-fg-subtle)] sm:mt-16">
-              <div className="border-t border-[var(--color-divider)] pt-6">
+              <div className="pt-6">
                 {t('chat:share.footer')}
               </div>
             </footer>

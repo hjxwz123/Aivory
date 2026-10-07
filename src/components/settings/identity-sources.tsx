@@ -23,6 +23,7 @@ import { useLanguage } from '@/store/language'
 import { OAuthBrandGlyph } from '@/components/auth/oauth-glyph'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { SettingsSection } from '@/components/settings/settings-section'
 import { toast } from '@/hooks/use-toast'
 import { createKeyedResourceCache, resolveOwnedResourceView } from '@/lib/keyed-resource-cache'
 
@@ -190,92 +191,86 @@ export function IdentitySources() {
   if (!visibleLoading && visibleIdentities.length === 0 && providers.length === 0) return null
 
   return (
-    <section className="mb-8 last:mb-0">
-      <div className="mb-3">
-        <h2 className="text-lg font-medium tracking-normal text-[var(--color-fg)]">
-          {t('settings:account.identities.title')}
-        </h2>
-        <p className="mt-1.5 text-sm text-[var(--color-fg-muted)]">{t('settings:account.identities.subtitle')}</p>
-      </div>
-
-      <div className="divide-y divide-[var(--color-divider)] rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-        {visibleLoading ? (
-          <div className="px-4 py-5 text-sm text-[var(--color-fg-subtle)]">{t('common:common.loading')}</div>
-        ) : (
-          <>
-            {visibleIdentities.map((it) => {
-              const key = it.provider_id + ':' + it.subject
-              const disableUnbind = unlinkWouldLockOut(it)
-              return (
-                <div key={key} className="flex items-center gap-3 px-4 py-3">
-                  <div className="shrink-0 size-9 inline-flex items-center justify-center rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
-                    <OAuthBrandGlyph kind={it.provider_kind} icon={it.provider_icon} size={17} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-medium text-[var(--color-fg)] truncate">{it.provider_name}</span>
-                      {!it.provider_enabled ? (
-                        <Badge size="xs" variant="neutral">
-                          {t('settings:account.identities.disabled')}
-                        </Badge>
-                      ) : null}
-                    </div>
-                    <div className="mt-0.5 text-[12px] text-[var(--color-fg-subtle)] truncate">
-                      {it.email || t('settings:account.identities.noEmail')}
-                      {it.created_at ? (
-                        <>
-                          {' · '}
-                          {t('settings:account.identities.boundOn', { date: boundDate(it.created_at, lang) })}
-                        </>
-                      ) : null}
-                    </div>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={disableUnbind}
-                    title={disableUnbind ? t('settings:account.identities.lastMethod') : undefined}
-                    loading={busy === 'unlink:' + key}
-                    onClick={() => void unbind(it)}
-                    leadingIcon={<X size={14} aria-hidden />}
-                  >
-                    {t('settings:account.identities.unlink')}
-                  </Button>
-                </div>
-              )
-            })}
-
-            {available.map((p) => (
-              <div key={p.id} className="flex items-center gap-3 px-4 py-3">
-                <div className="shrink-0 size-9 inline-flex items-center justify-center rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
-                  <OAuthBrandGlyph kind={p.kind} icon={p.icon} size={17} />
+    <SettingsSection
+      title={t('settings:account.identities.title')}
+      description={t('settings:account.identities.subtitle')}
+    >
+      {visibleLoading ? (
+        <div className="py-5 text-sm text-[var(--color-fg-subtle)]">{t('common:common.loading')}</div>
+      ) : (
+        <>
+          {visibleIdentities.map((it) => {
+            const key = it.provider_id + ':' + it.subject
+            const disableUnbind = unlinkWouldLockOut(it)
+            return (
+              <div key={key} className="flex items-center gap-3 py-3">
+                <div className="shrink-0 size-9 inline-flex items-center justify-center rounded-[10px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
+                  <OAuthBrandGlyph kind={it.provider_kind} icon={it.provider_icon} size={17} />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <span className="text-sm font-medium text-[var(--color-fg)] truncate">{p.name}</span>
-                  <div className="mt-0.5 text-[12px] text-[var(--color-fg-subtle)]">
-                    {t('settings:account.identities.notLinked')}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-medium text-[var(--color-fg)] truncate">{it.provider_name}</span>
+                    {!it.provider_enabled ? (
+                      <Badge size="xs" variant="neutral">
+                        {t('settings:account.identities.disabled')}
+                      </Badge>
+                    ) : null}
+                  </div>
+                  <div className="mt-0.5 text-[12px] text-[var(--color-fg-subtle)] truncate">
+                    {it.email || t('settings:account.identities.noEmail')}
+                    {it.created_at ? (
+                      <>
+                        {' · '}
+                        {t('settings:account.identities.boundOn', { date: boundDate(it.created_at, lang) })}
+                      </>
+                    ) : null}
                   </div>
                 </div>
                 <Button
-                  variant="secondary"
+                  variant="ghost"
                   size="sm"
-                  loading={busy === 'link:' + p.id}
-                  onClick={() => void bind(p)}
-                  leadingIcon={<Link2 size={14} aria-hidden />}
+                  disabled={disableUnbind}
+                  title={disableUnbind ? t('settings:account.identities.lastMethod') : undefined}
+                  loading={busy === 'unlink:' + key}
+                  onClick={() => void unbind(it)}
+                  leadingIcon={<X size={14} aria-hidden />}
                 >
-                  {t('settings:account.identities.link')}
+                  {t('settings:account.identities.unlink')}
                 </Button>
               </div>
-            ))}
+            )
+          })}
 
-            {visibleIdentities.length === 0 && available.length === 0 ? (
-              <div className="px-4 py-5 text-sm text-[var(--color-fg-subtle)]">
-                {t('settings:account.identities.empty')}
+          {available.map((p) => (
+            <div key={p.id} className="flex items-center gap-3 py-3">
+              <div className="shrink-0 size-9 inline-flex items-center justify-center rounded-[10px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
+                <OAuthBrandGlyph kind={p.kind} icon={p.icon} size={17} />
               </div>
-            ) : null}
-          </>
-        )}
-      </div>
-    </section>
+              <div className="min-w-0 flex-1">
+                <span className="text-sm font-medium text-[var(--color-fg)] truncate">{p.name}</span>
+                <div className="mt-0.5 text-[12px] text-[var(--color-fg-subtle)]">
+                  {t('settings:account.identities.notLinked')}
+                </div>
+              </div>
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={busy === 'link:' + p.id}
+                onClick={() => void bind(p)}
+                leadingIcon={<Link2 size={14} aria-hidden />}
+              >
+                {t('settings:account.identities.link')}
+              </Button>
+            </div>
+          ))}
+
+          {visibleIdentities.length === 0 && available.length === 0 ? (
+            <div className="py-5 text-sm text-[var(--color-fg-subtle)]">
+              {t('settings:account.identities.empty')}
+            </div>
+          ) : null}
+        </>
+      )}
+    </SettingsSection>
   )
 }

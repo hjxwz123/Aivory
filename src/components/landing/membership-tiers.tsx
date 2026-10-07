@@ -41,7 +41,7 @@ export function MembershipTiers() {
         ).id
 
   return (
-    <section id="pricing" className="border-t border-[var(--color-divider)] py-24 sm:py-32">
+    <section id="pricing" className="py-24 sm:py-32">
       <div className="mx-auto max-w-[76rem] px-5 sm:px-8">
         <div className="max-w-2xl" data-reveal>
           <div className="font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--color-accent)]">
@@ -78,12 +78,12 @@ export function MembershipTiers() {
             {Array.from({ length: 3 }).map((_, index) => (
               <div
                 key={index}
-                className="animate-pulse rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5"
+                className="animate-pulse rounded-xl bg-[var(--color-bg-muted)]/45 p-5"
               >
                 <div className="h-5 w-24 rounded bg-[var(--color-bg-muted)]" />
                 <div className="mt-3 h-3.5 w-full rounded bg-[var(--color-bg-muted)]" />
                 <div className="mt-4 h-7 w-28 rounded bg-[var(--color-bg-muted)]" />
-                <div className="mt-4 flex flex-col gap-2 border-t border-[var(--color-divider)] pt-4">
+                <div className="mt-4 flex flex-col gap-2 pt-4">
                   <div className="h-3 w-full rounded bg-[var(--color-bg-muted)]" />
                   <div className="h-3 w-5/6 rounded bg-[var(--color-bg-muted)]" />
                 </div>

@@ -31,7 +31,7 @@ function renderTokens(tokens: Token[], options: NestedMarkdownProps, path: strin
           : <ul key={key}>{items}</ul>
       }
       case 'blockquote': return (
-        <blockquote key={key} className="border-l-2 border-[var(--color-border-strong)] pl-4 text-[var(--color-fg-muted)]">
+        <blockquote key={key} className="rounded-[8px] bg-[var(--color-bg-muted)] px-4 py-3 text-[var(--color-fg-muted)]">
           {renderTokens(token.tokens ?? [], options, key, depth + 1)}
         </blockquote>
       )

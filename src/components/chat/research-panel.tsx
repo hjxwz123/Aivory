@@ -42,7 +42,7 @@ export function ResearchPanel({ research, streaming = false, settled = false }: 
   const doneCount = tasks.filter((tk) => tk.status === 'done').length
 
   return (
-    <div className="mb-3 overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-bg-subtle)]">
+    <div className="mb-3 overflow-hidden rounded-[12px] bg-[var(--color-bg-subtle)]">
       <button
         type="button"
         onClick={() => {
@@ -200,8 +200,8 @@ function SourceCard({ source }: { source: ResearchSource }) {
       title={offTopic ? t('research.offTopic') : undefined}
       className={cn(
         'group flex items-start gap-2 overflow-hidden rounded-[10px] border px-2.5 py-2',
-        'border-[var(--color-border-subtle)] bg-[var(--color-surface)]',
-        'interactive hover:border-[var(--color-border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+        'border-transparent bg-[var(--color-surface)]',
+        'interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
         offTopic && 'opacity-60',
       )}
     >

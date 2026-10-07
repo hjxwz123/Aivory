@@ -120,7 +120,7 @@ export function ReasoningTrace({ reasoning, thinkingMs, streaming = false, settl
           subtree mounted preserves expanded tool details between toggles. */}
       <div id={contentId} hidden={!expanded}>
         <div className="min-w-0 max-w-full">
-          <div className="ml-[6px] mt-1.5 min-w-0 max-w-full space-y-2 border-l border-[var(--color-divider)] pl-3.5">
+          <div className="ml-[6px] mt-1.5 min-w-0 max-w-full space-y-2 pl-3.5">
             {items.map((it) => {
               if (it.kind === 'thinking' || it.kind === 'narration') {
                 // Render the model's chain-of-thought / narration as full

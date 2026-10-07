@@ -289,7 +289,7 @@ export default function KnowledgeBasesList() {
               <>
                 {/* Same control strip as Projects: search left, count right,
                     one divider instead of a container. */}
-                <div className="flex flex-col gap-2.5 border-b border-[var(--color-divider)] pb-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-col gap-2.5 pb-3 sm:flex-row sm:items-center sm:justify-between">
                   <Input
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
@@ -310,7 +310,7 @@ export default function KnowledgeBasesList() {
                     description={t('kb:list.noMatchesBody')}
                   />
                 ) : (
-                  <ul className="mt-1 flex flex-col divide-y divide-[var(--color-divider)]">
+                  <ul className="quiet-list mt-1 flex flex-col">
                     {visibleRows.map((kb) => (
                       <KnowledgeBaseRow key={kb.id} kb={kb} onDelete={() => setToDelete(kb)} />
                     ))}
@@ -490,11 +490,11 @@ function KnowledgeBaseRow({ kb, onDelete }: { kb: ApiKnowledgeBase; onDelete: ()
 function KnowledgeBasesSkeleton({ label }: { label: string }) {
   return (
     <div role="status" aria-label={label}>
-      <div className="flex items-center justify-between border-b border-[var(--color-divider)] pb-3">
+      <div className="flex items-center justify-between pb-3">
         <Skeleton className="h-10 w-full max-w-xs" />
         <Skeleton shape="line" className="hidden w-24 sm:block" />
       </div>
-      <div className="mt-1 divide-y divide-[var(--color-divider)]">
+      <div className="mt-1">
         {Array.from({ length: 4 }, (_, index) => (
           <div
             key={index}

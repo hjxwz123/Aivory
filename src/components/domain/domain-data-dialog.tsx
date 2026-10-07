@@ -114,7 +114,7 @@ export function DomainDataDialog() {
             </>
           ) : (
             <>
-              <div className="flex items-center justify-between gap-4 border-y border-[var(--color-divider)] py-4">
+              <div className="flex items-center justify-between gap-4 py-4">
                 <span className="text-sm text-[var(--color-fg-muted)]">{t('chat:domainData.personalChats')}</span>
                 <span className="text-base font-semibold tabular-nums text-[var(--color-fg)]">{currentStatus.personal_conversation_count}</span>
               </div>
@@ -128,7 +128,7 @@ export function DomainDataDialog() {
                     {t('chat:domainData.download')}
                   </Button>
                 </div>
-                <div className="border-t border-[var(--color-divider)] pt-4">
+                <div className="pt-4">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-[var(--color-fg)]">{t('chat:domainData.migrateTitle')}</p>

@@ -223,7 +223,7 @@ export function IssueFeedbackDialog({ open, messageId, onOpenChange }: IssueFeed
                 </Tooltip>
               ) : null}
             </div>
-            <div className="flex min-h-40 items-center justify-center overflow-hidden rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface-sunken)]">
+            <div className="flex min-h-40 items-center justify-center overflow-hidden rounded-[8px] bg-[var(--color-surface-sunken)]">
               {captureState === 'capturing' ? (
                 <div className="flex items-center gap-2 text-sm text-[var(--color-fg-muted)]" role="status">
                   <Loader2 size={16} className="animate-spin" aria-hidden />

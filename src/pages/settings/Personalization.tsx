@@ -98,12 +98,12 @@ export default function Personalization() {
       {/* Response style */}
       <section className="mb-8 last:mb-0">
         <div className="mb-3">
-          <h2 className="text-lg font-medium tracking-normal text-[var(--color-fg)]">
+          <h2 className="text-[15px] font-semibold tracking-normal text-[var(--color-fg)]">
             {t('settings:personalization.styleTitle')}
           </h2>
-          <p className="mt-1.5 text-sm text-[var(--color-fg-muted)]">{t('settings:personalization.styleSubtitle')}</p>
+          <p className="mt-1 text-[13px] leading-relaxed text-[var(--color-fg-muted)]">{t('settings:personalization.styleSubtitle')}</p>
         </div>
-        <div className="space-y-4 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+        <div className="space-y-5 py-3">
           <div>
             <span className="text-sm font-medium text-[var(--color-fg)]">
               {t('settings:personalization.traitsLabel')}
@@ -118,11 +118,11 @@ export default function Personalization() {
                     aria-pressed={on}
                     onClick={() => toggleTrait(key)}
                     className={cn(
-                      'rounded-full border px-3 py-1.5 text-[13px] interactive',
+                      'rounded-full px-3 py-1.5 text-[13px] interactive',
                       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                       on
-                        ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
-                        : 'border-[var(--color-border)] text-[var(--color-fg-muted)] hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg)]',
+                        ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+                        : 'bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
                     )}
                   >
                     {t(`settings:personalization.traits.${key}`)}
@@ -165,13 +165,13 @@ export default function Personalization() {
       {memoryAvailable && (
         <section className="mb-8 last:mb-0">
           <div className="mb-3">
-            <h2 className="text-lg font-medium tracking-normal text-[var(--color-fg)]">
+            <h2 className="text-[15px] font-semibold tracking-normal text-[var(--color-fg)]">
               {t('settings:personalization.memoryTitle')}
             </h2>
-            <p className="mt-1.5 text-sm text-[var(--color-fg-muted)]">{t('settings:personalization.memorySubtitle')}</p>
+            <p className="mt-1 text-[13px] leading-relaxed text-[var(--color-fg-muted)]">{t('settings:personalization.memorySubtitle')}</p>
           </div>
-          <div className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-            <div className="flex items-center justify-between gap-4 border-b border-[var(--color-divider)] px-4 py-3">
+          <div className="rounded-[10px] bg-[var(--color-surface)]">
+            <div className="flex items-center justify-between gap-4 py-3.5">
               <div className="min-w-0">
                 <div className="text-sm font-medium text-[var(--color-fg)]">
                   {t('settings:personalization.memoryToggle')}
@@ -182,7 +182,7 @@ export default function Personalization() {
               </div>
               <Switch checked={memoriesEnabled} onCheckedChange={(v) => void onToggleMemory(Boolean(v))} />
             </div>
-            <div className="p-4">
+            <div className="py-3">
               {memoriesEnabled ? (
                 <MemoryManager />
               ) : (

@@ -355,7 +355,7 @@ export function ToolSelectionDialog({
           </div>
 
           <div
-            className="min-h-0 max-h-[min(56dvh,30rem)] flex-1 overflow-y-auto overscroll-contain border-y border-[var(--color-divider)] scrollbar-thin"
+            className="min-h-0 max-h-[min(56dvh,30rem)] flex-1 overflow-y-auto overscroll-contain scrollbar-thin"
             role="region"
             aria-label={t('composer.toolSelection.title', { defaultValue: 'Choose tools' })}
           >
@@ -399,7 +399,7 @@ export function ToolSelectionDialog({
                 )}
               </div>
             ) : (
-              <div className="divide-y divide-[var(--color-divider)]">
+              <div>
                 {filtered.map((tool) => {
                   const Icon = resolveLucideIcon(tool.icon) ?? Wrench
                   const allowed = tool.allowed !== false

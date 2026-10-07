@@ -121,7 +121,7 @@ export function ConversationMinimap({ conversation, scrollContainerRef }: Conver
         // themselves stay chromeless (a border per row read as visual noise).
         'rounded-xl border border-transparent px-1 py-1',
         'transition-colors duration-fast ease-out',
-        'hover:border-[var(--color-border)] hover:bg-[var(--color-surface)] hover:shadow-[var(--shadow-md)]',
+        'hover:bg-[var(--color-surface)] hover:shadow-[var(--shadow-md)]',
         'focus-within:border-[var(--color-border)] focus-within:bg-[var(--color-surface)] focus-within:shadow-[var(--shadow-md)]',
       )}
     >

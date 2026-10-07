@@ -295,7 +295,7 @@ export function PdfNativePreview({ data, name, className, labels, onError }: Pdf
       aria-busy={status === 'loading' || isRendering || undefined}
     >
       <div
-        className="flex min-h-10 flex-nowrap items-center justify-between gap-0 border-b border-[var(--color-border)] px-1 py-0.5 sm:px-2"
+        className="flex min-h-10 flex-nowrap items-center justify-between gap-0 px-1 py-0.5 sm:px-2"
         role="group"
         aria-label={name}
       >
@@ -316,7 +316,7 @@ export function PdfNativePreview({ data, name, className, labels, onError }: Pdf
             </Button>
           </Tooltip>
 
-          <div className="flex h-7 items-center gap-0.5 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg)] px-1.5 text-xs tabular-nums transition-[border-color,background-color] duration-150 focus-within:border-[var(--color-border-strong)] focus-within:bg-[var(--color-surface)] [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:px-2 [@media(pointer:coarse)]:text-sm">
+          <div className="flex h-7 items-center gap-0.5 rounded-[8px] border border-transparent bg-[var(--color-bg)] px-1.5 text-xs tabular-nums transition-[border-color,background-color] duration-150 focus-within:border-[var(--color-border-strong)] focus-within:bg-[var(--color-surface)] [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:px-2 [@media(pointer:coarse)]:text-sm">
             <label className="sr-only" htmlFor={pageInputId}>
               {labels.page(pageNumber)}
             </label>

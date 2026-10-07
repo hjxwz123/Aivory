@@ -53,7 +53,7 @@ function WorkspaceDetails({ workspace }: { workspace: ApiWorkspace }) {
         {workspace.description?.trim() || t('settings:work.noDescription')}
       </p>
       {canLeave ? (
-        <div className="mt-6 border-t border-[var(--color-divider)] pt-4">
+        <div className="mt-6 pt-4">
           {confirmLeave ? (
             <div className="space-y-3" role="group" aria-label={t('chat:workspace.leave')}>
               <p className="text-sm text-[var(--color-fg-muted)]">{t('settings:work.leaveConfirm')}</p>

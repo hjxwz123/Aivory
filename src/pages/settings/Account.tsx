@@ -259,7 +259,7 @@ export default function Account() {
             className="w-64"
           />
         </SettingsRow>
-        <div className="flex items-center justify-end gap-2 px-4 py-3">
+        <div className="flex items-center justify-end gap-2 py-3">
           <Button variant="ghost" onClick={() => { setName(user?.name ?? ''); setEmail(user?.email ?? '') }}>
             {t('common:actions.reset')}
           </Button>
@@ -388,7 +388,7 @@ export default function Account() {
                       alt={t('settings:account.twofa.qrAlt', { defaultValue: 'Scan with authenticator app' })}
                       width={200}
                       height={200}
-                      className="rounded-[10px] border border-[var(--color-border)]"
+                      className="rounded-[10px]"
                     />
                   </div>
                 )}
@@ -396,7 +396,7 @@ export default function Account() {
                   {t('settings:account.twofa.secretLabel')}
                 </div>
                 <div className="flex items-center gap-2">
-                  <code className="flex-1 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2 font-mono text-[13px] tracking-[0.15em] break-all">
+                  <code className="flex-1 rounded-[8px] bg-[var(--color-bg-muted)] px-3 py-2 font-mono text-[13px] tracking-[0.15em] break-all">
                     {setup ? setup.secret.replace(/(.{4})/g, '$1 ').trim() : ''}
                   </code>
                   <Button

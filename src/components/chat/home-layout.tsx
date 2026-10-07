@@ -254,10 +254,10 @@ function HomeSuggestions({ onPick, layout }: { onPick: (prompt: string) => void;
             type="button"
             onClick={() => onPick(t(suggestion.promptKey))}
             className={cn(
-              'home-card group/suggestion inline-flex h-9 shrink-0 items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] pl-3 pr-3.5 text-[13px] text-[var(--color-fg-muted)]',
+              'home-card group/suggestion inline-flex h-9 shrink-0 items-center gap-2 rounded-full bg-[var(--color-surface)] pl-3 pr-3.5 text-[13px] text-[var(--color-fg-muted)]',
               // No `interactive` here: its opacity/transform transitions would
               // fight the GSAP entrance that animates those same properties.
-              'transition-[color,border-color,background-color] duration-[var(--duration-fast)] ease-[var(--ease-out)] hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg)]',
+              'transition-[color,border-color,background-color] duration-[var(--duration-fast)] ease-[var(--ease-out)] hover:text-[var(--color-fg)]',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
               shuffledOnce && 'page-enter',
             )}

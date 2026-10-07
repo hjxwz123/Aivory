@@ -730,7 +730,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
           // Full-width edit surface (spans the whole message column, like an AI
           // reply). One calm muted well holds the textarea AND the actions, with
           // the buttons docked bottom-right inside the box.
-          <div className="w-full rounded-[18px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-4 py-3.5 transition-colors focus-within:border-[var(--color-border-strong)]">
+          <div className="w-full rounded-[18px] border border-transparent bg-[var(--color-bg-muted)] px-4 py-3.5 transition-colors focus-within:border-[var(--color-border-strong)]">
             {/* Editable attachment strip — images preview as thumbnails with
                 an X hover affordance; non-images render as compact chips. */}
             {draftAtts.length > 0 ? (
@@ -827,7 +827,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
           <div
             className={cn(
               'w-fit min-w-0 max-w-full overflow-hidden rounded-[18px] px-4 py-2.5',
-              'bg-[var(--color-user-bubble)] border border-[var(--color-user-bubble-border)]',
+              'bg-[var(--color-user-bubble)]',
               'text-[var(--color-fg)] text-[length:var(--text-chat-body)] leading-relaxed',
               userMessageMarkdown || userHasMath ? 'min-w-0' : 'whitespace-pre-wrap break-words',
             )}
@@ -859,7 +859,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
                         })}
                         aria-label={t('actions.viewImage', { defaultValue: 'View image' })}
                         className={cn(
-                          'block min-w-0 max-w-full overflow-hidden rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] hover:opacity-90',
+                          'block min-w-0 max-w-full overflow-hidden rounded-[10px] bg-[var(--color-surface)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] hover:opacity-90',
                           imageAttachments.length === 1 ? 'shrink-0' : 'aspect-square w-full',
                         )}
                       >
@@ -902,7 +902,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
                             })
                           }
                           aria-label={t('actions.previewFile', { defaultValue: 'Preview file' })}
-                          className="flex h-14 min-w-0 max-w-[22rem] items-center gap-2.5 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface-raised)] py-2 pl-2.5 pr-3 text-left shadow-[var(--shadow-xs)] interactive hover:border-[var(--color-border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                          className="flex h-14 min-w-0 max-w-[22rem] items-center gap-2.5 rounded-[10px] bg-[var(--color-surface-raised)] py-2 pl-2.5 pr-3 text-left shadow-[var(--shadow-xs)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                         >
                           <span
                             className={cn(
@@ -1081,7 +1081,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
                 {message.verify ? <VerifyBadge verify={message.verify} /> : null}
                 {/* Downloadable artifacts produced by tools (§4.5/§4.12) */}
                 {message.artifacts && message.artifacts.length > 0 ? (
-                  <div className="mt-3 flex flex-wrap gap-2">
+                  <div className="mt-3 flex flex-wrap items-start gap-2">
                     {message.artifacts.map((a) => {
                       // Artifact URLs are tool/model-controlled (SSE) — vet the
                       // scheme before it reaches href/src (§ XSS E4).
@@ -1093,7 +1093,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
                           return (
                             <span
                               key={a.id}
-                              className="inline-flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-subtle)] px-3 py-2 text-sm text-[var(--color-fg-muted)]"
+                              className="inline-flex items-center gap-2 rounded-lg bg-[var(--color-bg-subtle)] px-3 py-2 text-sm text-[var(--color-fg-muted)]"
                             >
                               <Download className="size-4 text-[var(--color-fg-subtle)]" />
                               {a.filename}
@@ -1117,7 +1117,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
                             <img
                               src={href}
                               alt={a.filename}
-                              className="max-h-64 max-w-full rounded-lg border border-[var(--color-border)] object-contain transition-opacity hover:opacity-90"
+                              className="max-h-64 max-w-full rounded-lg object-contain transition-opacity hover:opacity-90"
                             />
                           </button>
                           {canEditImage(a) ? <Button variant="ghost" size="sm" leadingIcon={<Pencil size={14} />} onClick={() => onImageEdit?.(a, message.id)}>{t('imageEdit.edit')}</Button> : null}
@@ -1134,7 +1134,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
                         // preview affordance (nothing to render).
                         <div
                           key={a.id}
-                          className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-subtle)] py-1.5 pl-3 pr-1.5 text-sm text-[var(--color-fg)]"
+                          className="inline-flex max-w-full items-center gap-1.5 rounded-lg bg-[var(--color-bg-subtle)] py-1.5 pl-3 pr-1.5 text-sm text-[var(--color-fg)]"
                         >
                           <span className="min-w-0 truncate">{a.filename}</span>
                           {href ? (
@@ -1551,7 +1551,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
               ) : null}
               {onDelete && canTargetMessage ? (
                 <>
-                  <div className="my-1.5 h-px bg-[var(--color-divider)]" aria-hidden />
+                  <div className="my-1.5 h-1" aria-hidden />
                   <MsgActionRow
                     icon={<Trash2 size={18} aria-hidden />}
                     label={t('actions.delete', { defaultValue: 'Delete' })}
@@ -1642,7 +1642,7 @@ function FeedbackPanel({
     <section
       id={id}
       aria-labelledby={titleId}
-      className="mt-3 w-full max-w-[36rem] border-t border-[var(--color-divider)] pt-3"
+      className="mt-3 w-full max-w-[36rem] pt-3"
     >
       <div className="mb-2.5 flex items-baseline gap-1.5">
         <h3 id={titleId} className="text-[13px] font-medium text-[var(--color-fg)]">
@@ -1672,8 +1672,8 @@ function FeedbackPanel({
                 'inline-flex min-h-9 items-center rounded-[8px] border px-2.5 text-[12px] interactive max-sm:min-h-[var(--tap-min)] max-sm:px-3',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:pointer-events-none disabled:opacity-55',
                 selected
-                  ? 'border-[var(--color-border-strong)] bg-[var(--color-bg-muted)] text-[var(--color-fg)]'
-                  : 'border-[var(--color-border)] bg-transparent text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+                  ? 'border-transparent bg-[var(--color-bg-muted)] text-[var(--color-fg)]'
+                  : 'border-transparent bg-transparent text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
               )}
             >
               <Check
@@ -1807,7 +1807,7 @@ function BranchSwitcher({
   }
   return (
     <span
-      className="mr-1 inline-flex items-center gap-0.5 rounded-[6px] border border-[var(--color-border-subtle)] bg-[var(--color-bg-muted)] px-1 py-0.5 text-[10.5px] text-[var(--color-fg-subtle)] tabular-nums"
+      className="mr-1 inline-flex items-center gap-0.5 rounded-[6px] bg-[var(--color-bg-muted)] px-1 py-0.5 text-[10.5px] text-[var(--color-fg-subtle)] tabular-nums"
       aria-label={t('actions.branch')}
     >
       <button
@@ -1877,7 +1877,7 @@ function EditableImageChip({ att, onRemove }: { att: Attachment; onRemove: () =>
       <img
         src={att.previewUrl}
         alt={att.name}
-        className="size-16 rounded-[10px] border border-[var(--color-border-subtle)] object-cover"
+        className="size-16 rounded-[10px] object-cover"
         draggable={false}
       />
       <button
@@ -1904,7 +1904,7 @@ function EditableFileChip({ att, onRemove }: { att: Attachment; onRemove: () => 
       data-attachment-deleted={att.deleted ? 'true' : undefined}
       className={cn(
         'inline-flex max-w-[18rem] items-center gap-1.5 rounded-[10px] border bg-[var(--color-bg-muted)] px-2 py-1 text-[11.5px] text-[var(--color-fg-muted)]',
-        att.deleted ? 'border-dashed border-[var(--color-border)]' : 'border-[var(--color-border-subtle)]',
+        att.deleted ? 'border-dashed border-[var(--color-border)]' : 'border-transparent',
       )}
     >
       {att.deleted ? (

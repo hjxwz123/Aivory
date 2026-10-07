@@ -53,7 +53,7 @@ function Contents({
 
   if (mobile) {
     return (
-      <details className="group mt-8 border-y border-[var(--color-divider)] lg:hidden">
+      <details className="group mt-8 lg:hidden">
         <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 py-3 text-sm font-medium text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)] [&::-webkit-details-marker]:hidden">
           {label}
           <ChevronDown
@@ -118,7 +118,7 @@ export function LegalPage({ doc }: { doc: 'privacy' | 'terms' }) {
 
   return (
     <div className="min-h-svh overflow-x-clip bg-[var(--color-bg)] text-[var(--color-fg)]">
-      <header className="sticky top-0 z-[var(--z-sticky)] border-b border-[var(--color-divider)] bg-[var(--color-bg)]">
+      <header className="sticky top-0 z-[var(--z-sticky)] bg-[var(--color-bg)]">
         <div className="mx-auto flex h-16 max-w-[76rem] items-center justify-between gap-2 px-4 sm:gap-4 sm:px-8">
           <Link to="/" aria-label={t('common:appName')} className="shrink-0">
             <LogoMark size={22} className="sm:hidden" />
@@ -160,7 +160,7 @@ export function LegalPage({ doc }: { doc: 'privacy' | 'terms' }) {
             <p className="mt-6 max-w-[68ch] text-pretty text-base leading-7 text-[var(--color-fg)]">
               {t(`legal.${doc}.intro`)}
             </p>
-            <aside className="mt-8 border-y border-[var(--color-divider)] py-4">
+            <aside className="mt-8 py-4">
               <h2 className="text-sm font-medium text-[var(--color-fg)]">{t('legal.operatorNotice')}</h2>
               <p className="mt-2 max-w-[68ch] text-pretty text-sm leading-6 text-[var(--color-fg-muted)]">
                 {t(`legal.${doc}.notice`, { contactEmail: legalConfig.contactEmail })}
@@ -189,7 +189,7 @@ export function LegalPage({ doc }: { doc: 'privacy' | 'terms' }) {
                 <section
                   id={anchor}
                   key={anchor}
-                  className="scroll-mt-24 border-t border-[var(--color-divider)] py-9 first:pt-9 sm:py-10"
+                  className="scroll-mt-24 py-9 first:pt-9 sm:py-10"
                 >
                   <h2 className="max-w-[32ch] text-balance font-serif text-xl tracking-tight text-[var(--color-fg)] sm:text-2xl">
                     {section.heading}
@@ -219,7 +219,7 @@ export function LegalPage({ doc }: { doc: 'privacy' | 'terms' }) {
             </div>
           )}
 
-          <footer className="border-t border-[var(--color-divider)] pb-6 pt-7">
+          <footer className="pb-6 pt-7">
             <Link
               to={otherDocHref}
               className="inline-flex min-h-10 items-center gap-2 rounded-[8px] text-sm font-medium text-[var(--color-accent)] transition-colors hover:text-[var(--color-accent-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"

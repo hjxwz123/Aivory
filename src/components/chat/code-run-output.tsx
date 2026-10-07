@@ -51,7 +51,7 @@ export function CodeRunOutput({ running, phase, chunks, outcome, onClear }: Code
     outcome.images.length === 0
 
   return (
-    <div className="border-t border-[var(--color-border-subtle)] divide-y divide-[var(--color-border-subtle)]">
+    <div>
       {running ? (
         <div className="flex items-center gap-2 px-3.5 h-9 text-[11px] text-[var(--color-fg-subtle)]">
           <span
@@ -103,7 +103,7 @@ export function CodeRunOutput({ running, phase, chunks, outcome, onClear }: Code
                   key={i}
                   src={`data:image/png;base64,${b64}`}
                   alt={t('code.figureAlt', { index: i + 1 })}
-                  className="max-w-full rounded-[10px] border border-[var(--color-border)] bg-[var(--color-preview-canvas)]"
+                  className="max-w-full rounded-[10px] bg-[var(--color-preview-canvas)]"
                 />
               ))}
             </div>

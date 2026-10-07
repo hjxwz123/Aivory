@@ -213,8 +213,8 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
                       'border interactive',
                       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                       selected
-                        ? 'border-[var(--color-border-strong)] bg-[var(--color-bg-muted)] text-[var(--color-fg)]'
-                        : 'border-[var(--color-border)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+                        ? 'border-transparent bg-[var(--color-bg-muted)] text-[var(--color-fg)]'
+                        : 'border-transparent text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
                     )}
                   >
                     <span className={cn('inline-block size-3 rounded-full', cls.bar)} aria-hidden />

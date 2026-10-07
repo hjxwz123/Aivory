@@ -75,7 +75,7 @@ function SandboxFilesBody({ onClose }: { onClose: () => void }) {
         </Tooltip>
       </ChatSidePanelHeader>
 
-      <nav aria-label={t('sandbox.location')} className="flex h-10 shrink-0 items-center gap-0.5 border-y border-[var(--color-divider)] px-3">
+      <nav aria-label={t('sandbox.location')} className="flex h-10 shrink-0 items-center gap-0.5 px-3">
         <Tooltip content={t('sandbox.back')}>
           <button
             type="button"
@@ -135,7 +135,7 @@ function SandboxFilesBody({ onClose }: { onClose: () => void }) {
               return (
                 <li
                   key={entry.path}
-                  className="group/file flex items-center gap-2.5 rounded-[10px] border border-transparent px-2.5 py-2 hover:border-[var(--color-border)] hover:bg-[var(--color-surface)]"
+                  className="group/file flex items-center gap-2.5 rounded-[10px] border border-transparent px-2.5 py-2 hover:bg-[var(--color-surface)]"
                 >
                   <Icon size={16} className="shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
                   {entry.type === 'file' ? (

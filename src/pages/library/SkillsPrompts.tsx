@@ -905,7 +905,7 @@ export default function SkillsPrompts() {
               if (nextTab === 'catalog' && kindFilter === 'mcp') setKindFilter('all')
             }}
           >
-            <div className="flex flex-col gap-3 border-b border-[var(--color-divider)] pb-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex flex-col gap-3 pb-4 md:flex-row md:items-center md:justify-between">
               <TabsList variant="segmented" className="self-start border-0">
                 <TabsTrigger value="mine" variant="segmented">
                   {t('library:tabs.mine')}
@@ -1197,7 +1197,7 @@ function KindFilterControl({
 }
 
 function LibraryRows({ children }: { children: ReactNode }) {
-  return <ul className="divide-y divide-[var(--color-divider)] border-b border-[var(--color-divider)]">{children}</ul>
+  return <ul className="quiet-list">{children}</ul>
 }
 
 function UserLibraryRow({
@@ -1595,7 +1595,7 @@ function MCPEditor({
                   {editor.draft.headers.map((header, index) => (
                     <div
                       key={header.id}
-                      className="relative grid gap-2 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-3 pr-12 sm:grid-cols-2"
+                      className="relative grid gap-2 rounded-[10px] bg-[var(--color-bg-muted)] p-3 pr-12 sm:grid-cols-2"
                     >
                       <Input
                         aria-label={`${t('library:mcpEditor.headerKey')}: ${index + 1}`}
@@ -1668,7 +1668,7 @@ function MCPEditor({
 
             <label
               htmlFor="library-mcp-enabled"
-              className="flex items-center justify-between rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5 sm:col-span-2"
+              className="flex items-center justify-between rounded-[10px] bg-[var(--color-bg-muted)] px-3 py-2.5 sm:col-span-2"
             >
               <span>
                 <span className="block text-sm font-medium text-[var(--color-fg)]">
@@ -1705,7 +1705,7 @@ function MCPEditor({
 
 function LibrarySkeleton({ label }: { label: string }) {
   return (
-    <div className="divide-y divide-[var(--color-divider)]" role="status" aria-label={label}>
+    <div role="status" aria-label={label}>
       {Array.from({ length: 5 }, (_, index) => (
         <div key={index} className="flex items-center gap-3 py-3 sm:px-2">
           <Skeleton className="size-9 shrink-0 rounded-[9px]" />

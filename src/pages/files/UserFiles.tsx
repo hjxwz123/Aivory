@@ -392,11 +392,11 @@ export default function UserFiles() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <ContentHeader title={t('files:title')} fluid />
-      <main className="min-h-0 flex-1 overflow-hidden border-t border-[var(--color-divider)]">
+      <main className="min-h-0 flex-1 overflow-hidden">
         <div className="flex h-full min-h-0 w-full overflow-hidden bg-[var(--color-surface)]">
           <aside
             className={cn(
-              'min-h-0 w-full flex-col border-[var(--color-divider)] bg-[var(--color-bg)] lg:flex lg:w-[21rem] lg:shrink-0 lg:border-r xl:w-[22rem]',
+              'min-h-0 w-full flex-col bg-[var(--color-bg-muted)]/35 lg:flex lg:w-[21rem] lg:shrink-0 xl:w-[22rem]',
               mobilePreviewOpen ? 'hidden' : 'flex',
             )}
             aria-label={t('files:accessibility.fileList')}
@@ -447,7 +447,7 @@ export default function UserFiles() {
             </div>
 
             <div className="relative flex min-h-0 flex-1 flex-col">
-              <div className="flex h-9 shrink-0 items-center justify-between border-b border-[var(--color-divider)] px-3 text-[12px] text-[var(--color-fg-subtle)]">
+              <div className="flex h-9 shrink-0 items-center justify-between px-3 text-[12px] text-[var(--color-fg-subtle)]">
                 <span>{t('files:list.title')}</span>
                 {firstLoad ? (
                   <Skeleton shape="line" className="h-3 w-14" />
@@ -572,7 +572,7 @@ export default function UserFiles() {
           >
             {preview ? (
               <>
-                <header className="flex min-h-14 shrink-0 items-center gap-2 border-b border-[var(--color-divider)] bg-[var(--color-surface)] px-2 sm:px-4">
+                <header className="flex min-h-14 shrink-0 items-center gap-2 bg-[var(--color-surface)] px-2 sm:px-4">
                   <Button
                     variant="ghost"
                     size="icon-sm"
@@ -829,7 +829,7 @@ function FileListSkeleton({ label }: { label: string }) {
 function PreviewPaneSkeleton({ label }: { label: string }) {
   return (
     <div className="flex h-full min-h-0 flex-col" role="status" aria-label={label}>
-      <div className="flex min-h-14 shrink-0 items-center gap-3 border-b border-[var(--color-divider)] bg-[var(--color-surface)] px-4">
+      <div className="flex min-h-14 shrink-0 items-center gap-3 bg-[var(--color-surface)] px-4">
         <Skeleton className="hidden size-9 rounded-[8px] sm:block" />
         <div className="min-w-0 flex-1 space-y-1.5">
           <Skeleton shape="line" className="h-3.5 w-48" />
@@ -876,9 +876,6 @@ function UserFileRow({ file, depth, selected, onOpen, onDelete, shortDateFormat,
         selected ? 'bg-[var(--color-accent-soft)]' : 'hover:bg-[var(--color-bg-muted)]',
       )}
     >
-      {selected ? (
-        <span aria-hidden className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-[var(--color-accent)]" />
-      ) : null}
       <button
         type="button"
         aria-current={selected ? 'true' : undefined}
