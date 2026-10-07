@@ -6,9 +6,38 @@
     "appearance": "外观",
     "models": "模型",
     "privacy": "隐私",
+    "conversations": "对话与链接",
     "shortcuts": "快捷键",
     "about": "关于",
     "work": "工作"
+  },
+  "conversations": {
+    "title": "对话与链接",
+    "subtitle": "管理已归档的对话、对话分享和 HTML 预览链接。",
+    "descriptions": {
+      "archived": "查看已归档的对话，或将它们恢复到对话列表。",
+      "shared": "管理你发布的对话链接，撤销后他人将无法访问。",
+      "html": "管理 HTML 预览的公开链接，随时复制或撤销。"
+    },
+    "refreshLabel": "刷新",
+    "views": { "archived": "已归档对话", "shared": "已分享对话", "html": "HTML 链接" },
+    "empty": { "archived": "暂无已归档对话", "shared": "暂无已分享对话", "html": "暂无 HTML 预览链接" },
+    "refresh": "刷新列表",
+    "restore": "取消归档",
+    "delete": "删除对话",
+    "revoke": "撤销链接",
+    "openLink": "打开公开链接",
+    "copyLink": "复制链接",
+    "copied": "链接已复制",
+    "copyFailed": "无法复制链接",
+    "restored": "已取消归档",
+    "deleted": "对话已删除",
+    "revoked": "链接已撤销",
+    "loadFailed": "无法加载列表",
+    "actionFailed": "操作失败，请重试",
+    "deleteConfirm": "删除“{{title}}”？此操作将永久删除对话及其全部消息，无法撤销。",
+    "revokeConfirm": "撤销此公开链接？其他人将无法再通过该链接访问，原始内容会保留。",
+    "sharingDisabled": "账号的分享功能已禁用。"
   },
   "about": {
     "title": "关于",

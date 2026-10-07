@@ -12,6 +12,7 @@ export const SETTINGS_TABS = [
   'personalization',
   'appearance',
   'models',
+  'conversations',
   'privacy',
   'shortcuts',
   'about',

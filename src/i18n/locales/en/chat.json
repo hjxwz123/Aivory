@@ -525,6 +525,11 @@
     "canvas": "Canvas"
   },
   "sidebar": {
+    "reorderHint": "Drag to reorder; on mobile, touch and hold. Or press Alt + ↑ / ↓.",
+    "reorderSaving": "Saving conversation order",
+    "reorderFailed": "Could not save conversation order. Please try again.",
+    "dropBefore": "Place above “{{title}}”",
+    "dropAfter": "Place below “{{title}}”",
     "newChat": "New chat",
     "search": "Search",
     "resize": "Resize sidebar",

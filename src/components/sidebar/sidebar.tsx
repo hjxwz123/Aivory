@@ -22,6 +22,8 @@ import {
   Loader2,
   X,
   ArrowLeftRight,
+  ArrowUp,
+  ArrowDown,
   FolderOpen,
   LibraryBig,
   CircleHelp,
@@ -59,7 +61,6 @@ import {
 } from '@/components/ui/dropdown-menu'
 import {
   Dialog,
-  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -87,6 +88,7 @@ import { SUPPORTED_LANGUAGES } from '@/i18n'
 import { useCommandMenu } from '@/hooks/use-command-menu'
 import { useOpenSettings } from '@/hooks/use-open-settings'
 import { useMediaQuery } from '@/hooks/use-media-query'
+import { useConversationReorder, type ConversationReorderController } from '@/hooks/use-conversation-reorder'
 import { duration } from '@/lib/design-tokens'
 import { accentClasses } from '@/lib/project-helpers'
 import { partitionConversationNavigation } from '@/lib/conversation-navigation'
@@ -197,7 +199,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
           const aStreaming = isConversationStreaming(a)
           const bStreaming = isConversationStreaming(b)
           if (aStreaming !== bStreaming) return aStreaming ? -1 : 1
-          return b.updatedAt - a.updatedAt
+          return b.updatedAt - a.updatedAt || b.id.localeCompare(a.id)
         }),
     [allConversations],
   )
@@ -209,6 +211,14 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
     [activeConversations],
   )
   const conversations = navigationConversations.ordinary
+  const reorderConversation = useConversations((s) => s.reorderConversation)
+  const conversationReorder = useConversationReorder({
+    conversations: activeConversations,
+    enabled: !switching && (!activeWsId || Boolean(activeWorkspace && activeWorkspace.role !== 'guest')),
+    scope: activeWsId ?? '',
+    scrollRef: listScrollRef,
+    onReorder: reorderConversation,
+  })
   // Workspace discovery runs before the first history request. Keep one
   // loading state across both steps, then fade in the completed list. A usable
   // same-space cache stays visible during background refreshes.
@@ -481,7 +491,6 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
       }}
       className={cn(
         'relative flex h-full shrink-0 flex-col bg-[var(--color-sidebar-bg)]',
-        variant === 'desktop' && 'border-r border-[var(--color-sidebar-border)]',
         variant === 'desktop' && collapsed && 'w-[var(--layout-sidebar-w-collapsed)]',
         variant === 'sheet' && 'w-full',
         'transition-[width] duration-[var(--duration-base)] ease-[var(--ease-out)] data-[resizing=true]:transition-none',
@@ -492,8 +501,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
       <div className="flex h-full min-h-0 w-full flex-col overflow-hidden">
       <div
         className="flex h-full min-h-0 w-full shrink-0 flex-col"
-        // The desktop rail's 1px right border sits inside its width.
-        style={holdExpandedLayout ? { width: `${sidebarWidth - 1}px` } : undefined}
+        style={holdExpandedLayout ? { width: `${sidebarWidth}px` } : undefined}
       >
       {/* Header — inside a workspace the brand slot shows the WORKSPACE NAME
           (§workspaces spec: sidebar 上方原先显示 aivory 的地方显示工作空间名称).
@@ -629,7 +637,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
 
         <div
           aria-hidden
-          className="mx-2.5 my-1 h-px shrink-0 bg-[var(--color-divider)]/60"
+          className="my-1 h-1 shrink-0"
         />
 
         {/* § AI PPT — the Docmee iframe workbench. Rendered only when the
@@ -857,6 +865,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
                                   t={t}
                                   nested
                                   dense={variant === 'sheet'}
+                                  reorder={conversationReorder}
                                 />
                               ))}
                               {!loadingProjectIds.has(project.id) &&
@@ -884,6 +893,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
                 onSelect={onClose}
                 t={t}
                 dense={variant === 'sheet'}
+                reorder={conversationReorder}
               />
             )}
             {groupOrder.map(
@@ -897,9 +907,19 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
                     onSelect={onClose}
                     t={t}
                     dense={variant === 'sheet'}
+                    reorder={conversationReorder}
                   />
                 ),
             )}
+            <span className="sr-only" role="status" aria-live="polite">
+              {conversationReorder.saving
+                ? t('sidebar.reorderSaving')
+                : conversationReorder.dropTarget
+                  ? t(conversationReorder.dropTarget.position === 'before' ? 'sidebar.dropBefore' : 'sidebar.dropAfter', {
+                    title: activeConversations.find((conversation) => conversation.id === conversationReorder.dropTarget?.id)?.title,
+                  })
+                  : ''}
+            </span>
             {hasMore && (
               <div
                 ref={loadMoreRef}
@@ -1079,6 +1099,7 @@ function Group({
   onSelect,
   t,
   dense = false,
+  reorder,
 }: {
   label: string
   items: ReturnType<typeof useConversations.getState>['conversations']
@@ -1086,6 +1107,7 @@ function Group({
   onSelect?: () => void
   t: TFunction<'chat'>
   dense?: boolean
+  reorder?: ConversationReorderController
 }) {
   return (
     <div className="pt-3">
@@ -1099,6 +1121,7 @@ function Group({
             onSelect={onSelect}
             t={t}
             dense={dense}
+            reorder={reorder}
           />
         ))}
       </ul>
@@ -1182,6 +1205,7 @@ function ConversationItem({
   t,
   nested = false,
   dense = false,
+  reorder,
 }: {
   conversation: ReturnType<typeof useConversations.getState>['conversations'][number]
   active: boolean
@@ -1189,6 +1213,7 @@ function ConversationItem({
   t: TFunction<'chat'>
   nested?: boolean
   dense?: boolean
+  reorder?: ConversationReorderController
 }) {
   const user = useAuth((s) => s.user)
   const meId = user?.id
@@ -1215,6 +1240,9 @@ function ConversationItem({
   const [exporting, setExporting] = useState(false)
   const displayTitle = conversation.title || t('untitled')
   const streaming = isConversationStreaming(conversation)
+  const dragProps = isWorkspaceGuest ? undefined : reorder?.rowProps(conversation)
+  const dragging = reorder?.draggedId === conversation.id
+  const dropPosition = reorder?.dropTarget?.id === conversation.id ? reorder.dropTarget.position : null
 
   useEffect(() => {
     if (!canManageConversation) {
@@ -1242,7 +1270,7 @@ function ConversationItem({
   return (
     // data-conversation-id lets the sidebar scroll the active row into view when
     // the user arrives from outside the list (gallery, command menu, deep link).
-    <li data-conversation-id={conversation.id}>
+    <li data-conversation-id={conversation.id} data-drop-position={dropPosition ?? undefined} {...dragProps}>
       <div
         className={cn(
           'group/conv relative my-px rounded-[8px] interactive',
@@ -1250,14 +1278,20 @@ function ConversationItem({
           active
             ? 'bg-[var(--color-sidebar-active)] shadow-[var(--shadow-xs)]'
             : 'hover:bg-[var(--color-sidebar-hover)]',
+          dragging && 'opacity-40',
+          dropPosition && 'bg-[var(--color-accent-soft)]',
         )}
       >
         <Link
           to={`/chat/${conversation.id}`}
+          draggable={false}
+          title={dragProps?.draggable ? t('sidebar.reorderHint') : undefined}
+          aria-keyshortcuts={dragProps?.draggable ? 'Alt+ArrowUp Alt+ArrowDown' : undefined}
           onClick={onSelect}
           className={cn(
             'flex items-center gap-2 rounded-[8px] px-2.5 py-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
             dense ? 'min-h-9 pr-10' : 'min-h-8 pr-9',
+            dragProps?.draggable && 'cursor-grab active:cursor-grabbing',
           )}
         >
           <ConversationTitle
@@ -1305,7 +1339,12 @@ function ConversationItem({
             </span>
           ) : null}
         </Link>
-        {!isWorkspaceGuest ? <div className="absolute right-1.5 top-1/2 -translate-y-1/2">
+        {dropPosition ? (
+          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[var(--color-accent)]" aria-hidden>
+            {dropPosition === 'before' ? <ArrowUp size={14} /> : <ArrowDown size={14} />}
+          </span>
+        ) : null}
+        {!isWorkspaceGuest ? <div className={cn('absolute right-1.5 top-1/2 -translate-y-1/2', dropPosition && 'invisible')}>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -1495,7 +1534,6 @@ export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuP
   const isAdmin = user?.role === 'admin'
   const lang = useLanguage((s) => s.lang)
   const setLang = useLanguage((s) => s.setLang)
-  const [archivedOpen, setArchivedOpen] = useState(false)
   const [wsCreateOpen, setWsCreateOpen] = useState(false)
   const [wsManageId, setWsManageId] = useState<string | null>(null)
   const activeWorkspace = useWorkspaces((s) => s.workspaces.find((w) => w.id === s.activeId))
@@ -1523,7 +1561,7 @@ export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuP
             inHeader ? 'size-[var(--tap-min)]' : collapsed ? 'p-1.5' : 'w-full p-1.5',
           )}
         >
-          <Avatar size="md" tone="clay" className={cn(inHeader && 'ring-1 ring-[var(--color-border)]')}>
+          <Avatar size="md" tone="clay">
             {avatarUrl ? <AvatarImage src={avatarUrl} alt={displayName} /> : null}
             <AvatarFallback>{initials(displayName)}</AvatarFallback>
           </Avatar>
@@ -1532,7 +1570,7 @@ export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuP
               <div className="flex items-center gap-1.5">
                 <span className="text-sm font-medium text-[var(--color-fg)] truncate">{displayName}</span>
                 {user?.group_name && (
-                  <span className="shrink-0 rounded-full border border-[var(--color-border)] px-1.5 py-px text-[10px] font-medium uppercase tracking-wide text-[var(--color-fg-muted)]">
+                  <span className="shrink-0 rounded-full bg-[var(--color-bg-muted)] px-1.5 py-px text-[10px] font-medium uppercase tracking-wide text-[var(--color-fg-muted)]">
                     {user.group_name}
                   </span>
                 )}
@@ -1546,7 +1584,7 @@ export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuP
         align={inHeader ? 'end' : 'start'}
         side={inHeader ? 'bottom' : 'top'}
         className={cn(
-          'min-w-[220px]',
+          inHeader ? 'min-w-[220px]' : 'min-w-[248px]',
           // The mobile header uses the same compact item density as the desktop
           // account menu. The avatar trigger itself remains tap-sized.
           inHeader && 'w-[min(17rem,calc(100vw-1rem))]',
@@ -1559,10 +1597,6 @@ export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuP
         <DropdownMenuItem onClick={() => navigate('/subscription')}>
           <Layers size={13} aria-hidden />
           {t('chat:userMenu.subscription', { defaultValue: 'Subscription' })}
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setArchivedOpen(true)}>
-          <Archive size={13} aria-hidden />
-          {t('chat:sidebar.archivedTitle')}
         </DropdownMenuItem>
         {domainDataStatus?.needs_action ? (
           <DropdownMenuItem onClick={showDomainData}>
@@ -1653,97 +1687,6 @@ export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuP
     )}
     <CreateWorkspaceDialog open={wsCreateOpen} onOpenChange={setWsCreateOpen} />
     {canManageWorkspace ? <WorkspaceMembersDialog key={activeWorkspace.id} open={wsManageId === activeWorkspace.id} onOpenChange={(open) => setWsManageId(open ? activeWorkspace.id : null)} /> : null}
-    <ArchivedDialog open={archivedOpen} onOpenChange={setArchivedOpen} />
     </>
-  )
-}
-
-/**
- * ArchivedDialog — lists the user's archived conversations so they can be found
- * again, reopened, unarchived (back to the sidebar), or deleted. Archived chats
- * are fetched on open and live only in this dialog's local state.
- */
-function ArchivedDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
-  const { t } = useTranslation(['chat', 'common'])
-  const navigate = useNavigate()
-  const user = useAuth((s) => s.user)
-  const canDeleteConversations = userCan(user, 'allow_conversation_deletion')
-  const loadArchived = useConversations((s) => s.loadArchived)
-  const unarchive = useConversations((s) => s.unarchiveConversation)
-  const remove = useConversations((s) => s.deleteConversation)
-  const [rows, setRows] = useState<Conversation[]>([])
-  const [loading, setLoading] = useState(false)
-
-  useEffect(() => {
-    if (!open) return
-    setLoading(true)
-    void loadArchived()
-      .then(setRows)
-      .finally(() => setLoading(false))
-  }, [open, loadArchived])
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="md" className="max-h-[calc(100dvh-1rem)] sm:max-h-[min(42rem,calc(100dvh-2rem))]">
-        <DialogHeader>
-          <DialogTitle>{t('chat:sidebar.archivedTitle')}</DialogTitle>
-          <DialogDescription>{t('chat:sidebar.archivedBody')}</DialogDescription>
-        </DialogHeader>
-        <DialogBody className="overscroll-contain px-4 sm:px-6">
-          {loading ? (
-            <p className="py-4 text-sm text-[var(--color-fg-subtle)]">{t('common:common.loading')}</p>
-          ) : rows.length === 0 ? (
-            <p className="py-4 text-sm text-[var(--color-fg-muted)]">{t('chat:sidebar.archivedEmpty')}</p>
-          ) : (
-            <ul className="flex flex-col divide-y divide-[var(--color-divider)]">
-              {rows.map((c) => (
-                <li key={c.id} className="flex min-w-0 flex-wrap items-center gap-2 py-2 sm:flex-nowrap">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      navigate(`/chat/${c.id}`)
-                      onOpenChange(false)
-                    }}
-                    className="min-w-0 basis-[12rem] flex-1 truncate rounded-[6px] text-left text-sm text-[var(--color-fg)] interactive hover:text-[var(--color-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-                  >
-                    {truncate(c.title, 60)}
-                  </button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="ml-auto shrink-0"
-                    onClick={() => {
-                      void unarchive(c.id)
-                      setRows((r) => r.filter((x) => x.id !== c.id))
-                      toast.success(t('chat:sidebar.unarchived'))
-                    }}
-                  >
-                    {t('chat:sidebar.unarchive')}
-                  </Button>
-                  {canDeleteConversations ? (
-                    <button
-                      type="button"
-                      aria-label={t('chat:sidebar.delete')}
-                      onClick={() => {
-                        void remove(c.id)
-                        setRows((r) => r.filter((x) => x.id !== c.id))
-                      }}
-                      className="inline-flex size-7 items-center justify-center rounded-[7px] text-[var(--color-fg-subtle)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-                    >
-                      <Trash2 size={13} aria-hidden />
-                    </button>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          )}
-        </DialogBody>
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            {t('common:common.close', { defaultValue: 'Close' })}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   )
 }

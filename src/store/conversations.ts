@@ -298,8 +298,9 @@ interface ConversationStore {
   /** Insert a conversation created OUTSIDE the store (the home page's
    *  attachment-scoped draft, kept off the sidebar until first send). */
   adoptConversation: (row: ApiConversation) => Conversation
-  deleteConversation: (id: string) => Promise<void>
+  deleteConversation: (id: string) => Promise<boolean>
   renameConversation: (id: string, title: string) => Promise<boolean>
+  reorderConversation: (id: string, targetId: string, position: 'before' | 'after') => Promise<boolean>
   /** Change a workspace conversation's creator-controlled visibility. */
   setConversationPublic: (id: string, isPublic: boolean) => Promise<boolean>
   togglePin: (id: string) => Promise<void>
@@ -1160,10 +1161,39 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       // detached generator, leaving the per-user slot occupied until timeout.
       await Promise.all(stopRequests)
       await conversationsApi.remove(id)
+      return true
     } catch (e) {
       unmarkConversationsDeleted(doomed)
       set({ conversations: prevConversations })
       toast.error(errorMessage(e, 'Failed to delete conversation'))
+      return false
+    }
+  },
+
+  async reorderConversation(id, targetId, position) {
+    const source = get().conversations.find((conversation) => conversation.id === id)
+    const target = get().conversations.find((conversation) => conversation.id === targetId)
+    if (!source || !target || id === targetId || source.archived || target.archived ||
+      source.inline || target.inline || (source.workspaceId ?? '') !== (target.workspaceId ?? '') ||
+      (source.projectId ?? '') !== (target.projectId ?? '') ||
+      (!source.projectId && Boolean(source.starred) !== Boolean(target.starred)) ||
+      [source, target].some((conversation) => conversation.messages.some((message) => message.streaming))) return false
+    const workspace = activeWorkspaceId()
+    try {
+      const response = await conversationsApi.reorder(id, targetId, position)
+      if (workspace !== activeWorkspaceId()) return true
+      const timestamps = new Map(response.conversations.map((conversation) => [conversation.id, conversation.updated_at * 1000]))
+      set((state) => ({
+        conversations: state.conversations.map((conversation) => {
+          const timestamp = timestamps.get(conversation.id)
+          if (timestamp === undefined || conversation.messages.some((message) => message.streaming)) return conversation
+          return { ...conversation, updatedAt: timestamp }
+        }),
+      }))
+      return true
+    } catch {
+      toast.error(i18n.t('chat:sidebar.reorderFailed'))
+      return false
     }
   },
 

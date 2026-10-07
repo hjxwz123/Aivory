@@ -1,7 +1,7 @@
 import { Suspense, useEffect, useRef, type ComponentType } from 'react'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { useTranslation } from 'react-i18next'
-import { User, Briefcase, Wand2, Palette, Sparkles, ShieldCheck, Keyboard, Info, X } from 'lucide-react'
+import { User, Briefcase, Wand2, Palette, Sparkles, MessageSquareText, ShieldCheck, Keyboard, Info, X } from 'lucide-react'
 import { DialogOverlay, DialogTitle } from '@/components/ui/dialog'
 import { useSettingsModal, type SettingsTab } from '@/store/settings-modal'
 import { useWorkspaces } from '@/store/workspaces'
@@ -10,6 +10,8 @@ import { RouteFade } from '@/components/ui/route-fade'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { lazyWithPreload, type PreloadableLazy } from '@/lib/lazy-preload'
 import { cn } from '@/lib/utils'
+import { QuietSurfaceContext } from '@/contexts/quiet-surface'
+import { ButtonDensityContext } from '@/contexts/button-density'
 
 const tabDefs = [
   { key: 'account', icon: User },
@@ -17,6 +19,7 @@ const tabDefs = [
   { key: 'personalization', icon: Wand2 },
   { key: 'appearance', icon: Palette },
   { key: 'models', icon: Sparkles },
+  { key: 'conversations', icon: MessageSquareText },
   { key: 'privacy', icon: ShieldCheck },
   { key: 'shortcuts', icon: Keyboard },
   { key: 'about', icon: Info },
@@ -33,6 +36,7 @@ const tabPages: Record<SettingsTab, PreloadableLazy<ComponentType>> = {
   personalization: lazyWithPreload(() => import('./Personalization')),
   appearance: lazyWithPreload(() => import('./Appearance')),
   models: lazyWithPreload(() => import('./Models')),
+  conversations: lazyWithPreload(() => import('./Conversations')),
   privacy: lazyWithPreload(() => import('./Privacy')),
   shortcuts: lazyWithPreload(() => import('./Shortcuts')),
   about: lazyWithPreload(() => import('./About')),
@@ -85,6 +89,31 @@ export default function SettingsDialog() {
     if (tab === 'work' && !hasWorkspace) setTab('account')
   }, [tab, hasWorkspace, setTab])
 
+  const navRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (!open || !authed) return
+    let observer: ResizeObserver | undefined
+    const frame = requestAnimationFrame(() => {
+      const nav = navRef.current
+      if (!nav) return
+      const revealActiveTab = () => {
+        const active = nav.querySelector<HTMLElement>('[aria-current="page"]')
+        if (!active || nav.scrollWidth <= nav.clientWidth) return
+        const left = active.offsetLeft
+        const right = left + active.offsetWidth
+        if (left < nav.scrollLeft) nav.scrollLeft = left
+        else if (right > nav.scrollLeft + nav.clientWidth) nav.scrollLeft = right - nav.clientWidth
+      }
+      revealActiveTab()
+      observer = new ResizeObserver(revealActiveTab)
+      observer.observe(nav)
+    })
+    return () => {
+      cancelAnimationFrame(frame)
+      observer?.disconnect()
+    }
+  }, [open, authed, tab, hasWorkspace])
+
   // Each tab starts reading from the top rather than keeping the previous offset.
   const paneRef = useRef<HTMLDivElement>(null)
   // Keep tab bodies mounted after their first visit while this dialog instance
@@ -97,149 +126,153 @@ export default function SettingsDialog() {
   }, [tab])
 
   return (
-    <DialogPrimitive.Root
-      open={open && authed}
-      onOpenChange={(o) => {
-        if (!o) close()
-      }}
-    >
-      <DialogPrimitive.Portal>
-        <DialogOverlay />
-        <DialogPrimitive.Content
-          aria-describedby={undefined}
-          className={cn(
-            'fixed z-[60] bg-[var(--color-surface)] text-[var(--color-fg)] overflow-hidden',
-            'focus-visible:outline-none',
-            // Mobile: full-screen sheet. Desktop: centered panel.
-            'inset-0 flex flex-col',
-            'sm:inset-auto sm:left-1/2 sm:top-1/2 sm:[translate:-50%_-50%]',
-            'sm:h-[min(36rem,calc(100dvh-3rem))] sm:w-[min(92vw,50rem)] sm:max-h-[calc(100dvh-3rem)] sm:flex-row',
-            'sm:rounded-popup sm:border sm:border-[var(--color-border)] sm:shadow-[var(--shadow-xl)]',
-            'data-[state=open]:animate-[pop-in_220ms_var(--ease-out)]',
-            'data-[state=closed]:animate-[fade-out_140ms_var(--ease-in)]',
-          )}
+    <ButtonDensityContext.Provider value="compact">
+      <QuietSurfaceContext.Provider value>
+        <DialogPrimitive.Root
+          open={open && authed}
+          onOpenChange={(o) => {
+            if (!o) close()
+          }}
         >
-          {/* ===== Left rail ===== */}
-          <div
-            className={cn(
-              'shrink-0 flex flex-col bg-[var(--color-bg-muted)]/50',
-              'sm:w-48',
-            )}
-          >
-            <div className="flex items-center justify-between gap-2 px-4 pb-2 pt-4 sm:pb-3">
-              <DialogTitle>{t('settings:title')}</DialogTitle>
+          <DialogPrimitive.Portal>
+            <DialogOverlay />
+            <DialogPrimitive.Content
+              aria-describedby={undefined}
+              className={cn(
+                'fixed z-[60] bg-[var(--color-surface)] text-[var(--color-fg)] overflow-hidden',
+                'focus-visible:outline-none',
+                // Mobile: full-screen sheet. Desktop: centered panel.
+                'inset-0 flex flex-col',
+                'sm:inset-auto sm:left-1/2 sm:top-1/2 sm:[translate:-50%_-50%]',
+                'sm:h-[min(36rem,calc(100dvh-3rem))] sm:w-[min(92vw,50rem)] sm:max-h-[calc(100dvh-3rem)] sm:flex-row',
+                'sm:rounded-popup sm:shadow-[var(--shadow-xl)]',
+                'data-[state=open]:animate-[pop-in_220ms_var(--ease-out)]',
+                'data-[state=closed]:animate-[fade-out_140ms_var(--ease-in)]',
+              )}
+            >
+              {/* ===== Left rail ===== */}
+              <div
+                className={cn(
+                  'shrink-0 flex flex-col bg-[var(--color-bg-muted)]/50',
+                  'sm:w-48',
+                )}
+              >
+                <div className="flex items-center justify-between gap-2 px-4 pb-2 pt-4 sm:pb-3">
+                  <DialogTitle>{t('settings:title')}</DialogTitle>
+                  <DialogPrimitive.Close
+                    aria-label={t('common:aria.close', { defaultValue: 'Close' })}
+                    className={cn(
+                      'sm:hidden inline-flex items-center justify-center size-8 rounded-[8px]',
+                      'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)]',
+                      'transition-colors duration-150',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                    )}
+                  >
+                    <X size={18} aria-hidden />
+                  </DialogPrimitive.Close>
+                </div>
+                <nav
+                  ref={navRef}
+                  className={cn(
+                    'relative flex gap-1 px-2 pb-2 sm:pb-3',
+                    'flex-row overflow-x-auto scrollbar-none',
+                    'sm:flex-col sm:overflow-y-auto sm:flex-1',
+                  )}
+                  aria-label={t('settings:title')}
+                >
+                  {visibleTabs.map((def) => {
+                    const active = def.key === tab
+                    return (
+                      <button
+                        key={def.key}
+                        type="button"
+                        onClick={() => setTab(def.key)}
+                        aria-current={active ? 'page' : undefined}
+                        className={cn(
+                          'inline-flex items-center gap-2 rounded-[8px] whitespace-nowrap interactive',
+                          'px-2.5 py-1.5 text-sm font-medium',
+                          'sm:w-full',
+                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                          active
+                            ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)] sm:shadow-none sm:bg-[var(--color-bg-muted)]'
+                            : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)]/60',
+                        )}
+                      >
+                        <def.icon size={15} aria-hidden className="shrink-0" />
+                        {t(`settings:tabs.${def.key}`)}
+                      </button>
+                    )
+                  })}
+                </nav>
+              </div>
+
+              {/* ===== Right pane ===== */}
+              {/* The close button sits OUTSIDE the scrolling pane (anchored to the
+                  dialog frame) so it stays pinned top-right while the pane scrolls. */}
               <DialogPrimitive.Close
                 aria-label={t('common:aria.close', { defaultValue: 'Close' })}
                 className={cn(
-                  'sm:hidden inline-flex items-center justify-center size-8 rounded-[8px]',
+                  'max-sm:hidden absolute right-3 top-3 z-20 inline-flex items-center justify-center size-8 rounded-[8px]',
                   'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)]',
                   'transition-colors duration-150',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                 )}
               >
-                <X size={18} aria-hidden />
+                <X size={16} aria-hidden />
               </DialogPrimitive.Close>
-            </div>
-            <nav
-              className={cn(
-                'flex gap-1 px-2 pb-2 sm:pb-3',
-                'flex-row overflow-x-auto scrollbar-none',
-                'sm:flex-col sm:overflow-y-auto sm:flex-1',
-              )}
-              aria-label={t('settings:title')}
-            >
-              {visibleTabs.map((def) => {
-                const active = def.key === tab
-                return (
-                  <button
-                    key={def.key}
-                    type="button"
-                    onClick={() => setTab(def.key)}
-                    aria-current={active ? 'page' : undefined}
-                    className={cn(
-                      'inline-flex items-center gap-2 rounded-[8px] whitespace-nowrap interactive',
-                      'px-2.5 py-1.5 text-sm font-medium',
-                      'sm:w-full',
-                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                      active
-                        ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)] ring-1 ring-inset ring-[var(--color-accent)] sm:shadow-none sm:bg-[var(--color-bg-muted)]'
-                        : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)]/60',
-                    )}
-                  >
-                    <def.icon size={15} aria-hidden className="shrink-0" />
-                    {t(`settings:tabs.${def.key}`)}
-                  </button>
-                )
-              })}
-            </nav>
-          </div>
-
-          {/* ===== Right pane ===== */}
-          {/* The close button sits OUTSIDE the scrolling pane (anchored to the
-              dialog frame) so it stays pinned top-right while the pane scrolls. */}
-          <DialogPrimitive.Close
-            aria-label={t('common:aria.close', { defaultValue: 'Close' })}
-            className={cn(
-              'max-sm:hidden absolute right-3 top-3 z-20 inline-flex items-center justify-center size-8 rounded-[8px]',
-              'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)]',
-              'transition-colors duration-150',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-            )}
-          >
-            <X size={16} aria-hidden />
-          </DialogPrimitive.Close>
-          {/* scroll-padding clears the pinned page header, so focus/anchor
-              auto-scrolls land visible instead of underneath it. */}
-          <div
-            ref={paneRef}
-            className="relative min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin [scroll-padding-top:6rem]"
-          >
-            <div
-              className={cn(
-                // No top padding here — the pinned header carries it instead.
-                // With wrapper padding above it, the header would first travel
-                // that distance before sticking; owning the padding makes it
-                // pinned from the very first scrolled pixel.
-                'flex min-h-full flex-col px-5 pb-5 sm:px-6 sm:pb-6',
-                // Pin each settings page's <header> (title + lead) while the
-                // body scrolls under it. About has no header and pads itself.
-                '[&_header]:sticky [&_header]:top-0 [&_header]:z-10',
-                '[&_header]:pt-5 sm:[&_header]:pt-6',
-                '[&_header]:bg-[var(--color-surface)] [&_header]:pb-3',
-                '[&_header]:border-b [&_header]:border-[var(--color-divider)]',
-              )}
-            >
-              <RouteFade dep={tab} className="flex min-h-full flex-1 flex-col">
-                {Array.from(visitedTabsRef.current, (visitedTab) => {
-                  if (visitedTab === 'work' && !hasWorkspace) return null
-                  const TabPage = tabPages[visitedTab]
-                  const active = visitedTab === tab
-                  return (
-                    <div
-                      key={visitedTab}
-                      hidden={!active}
-                      aria-hidden={!active || undefined}
-                      // Tab pages use auto side margins with a max-width. Once
-                      // this wrapper became flex, those roots started
-                      // shrink-wrapping unless their width was explicit.
-                      className={active ? 'flex min-h-full flex-1 flex-col [&>*]:w-full' : undefined}
-                    >
-                      {/* Each first visit owns a fresh local boundary. Its chunk
-                          is normally warm from preload; on a slow connection the
-                          fallback replaces only this right pane. Visited pages
-                          stay mounted so returning never repeats initialization. */}
-                      <Suspense fallback={<PanelFallback />}>
-                        <TabPage />
-                      </Suspense>
-                    </div>
-                  )
-                })}
-              </RouteFade>
-            </div>
-          </div>
-        </DialogPrimitive.Content>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+              {/* scroll-padding clears the pinned page header, so focus/anchor
+                  auto-scrolls land visible instead of underneath it. */}
+              <div
+                ref={paneRef}
+                className="relative min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin [scroll-padding-top:6rem]"
+              >
+                <div
+                  className={cn(
+                    // No top padding here — the pinned header carries it instead.
+                    // With wrapper padding above it, the header would first travel
+                    // that distance before sticking; owning the padding makes it
+                    // pinned from the very first scrolled pixel.
+                    'flex min-h-full flex-col px-5 pb-5 sm:px-6 sm:pb-6',
+                    // Pin each settings page's <header> (title + lead) while the
+                    // body scrolls under it. About has no header and pads itself.
+                    '[&_header]:sticky [&_header]:top-0 [&_header]:z-10',
+                    '[&_header]:pt-5 sm:[&_header]:pt-6',
+                    '[&_header]:bg-[var(--color-surface)] [&_header]:pb-3',
+                  )}
+                >
+                  <RouteFade dep={tab} className="flex min-h-full flex-1 flex-col">
+                    {Array.from(visitedTabsRef.current, (visitedTab) => {
+                      if (visitedTab === 'work' && !hasWorkspace) return null
+                      const TabPage = tabPages[visitedTab]
+                      const active = visitedTab === tab
+                      return (
+                        <div
+                          key={visitedTab}
+                          hidden={!active}
+                          aria-hidden={!active || undefined}
+                          // Tab pages use auto side margins with a max-width. Once
+                          // this wrapper became flex, those roots started
+                          // shrink-wrapping unless their width was explicit.
+                          className={active ? 'flex min-h-full flex-1 flex-col [&>*]:w-full' : undefined}
+                        >
+                          {/* Each first visit owns a fresh local boundary. Its chunk
+                              is normally warm from preload; on a slow connection the
+                              fallback replaces only this right pane. Visited pages
+                              stay mounted so returning never repeats initialization. */}
+                          <Suspense fallback={<PanelFallback />}>
+                            <TabPage />
+                          </Suspense>
+                        </div>
+                      )
+                    })}
+                  </RouteFade>
+                </div>
+              </div>
+            </DialogPrimitive.Content>
+          </DialogPrimitive.Portal>
+        </DialogPrimitive.Root>
+      </QuietSurfaceContext.Provider>
+    </ButtonDensityContext.Provider>
   )
 }
 

@@ -517,6 +517,11 @@
     "canvas": "畫布"
   },
   "sidebar": {
+    "reorderHint": "拖曳排序；手機長按拖曳；也可按 Alt + ↑ / ↓ 調整順序",
+    "reorderSaving": "正在儲存對話順序",
+    "reorderFailed": "無法儲存對話順序，請稍後重試",
+    "dropBefore": "放到「{{title}}」上方",
+    "dropAfter": "放到「{{title}}」下方",
     "newChat": "新對話",
     "search": "搜尋",
     "resize": "調整側邊欄寬度",

@@ -6,9 +6,38 @@
     "appearance": "Apparence",
     "models": "Modèles",
     "privacy": "Confidentialité",
+    "conversations": "Discussions et liens",
     "shortcuts": "Raccourcis",
     "about": "À propos",
     "work": "Travail"
+  },
+  "conversations": {
+    "title": "Discussions et liens",
+    "subtitle": "Gérez vos discussions archivées, vos discussions partagées et vos liens d’aperçu HTML.",
+    "descriptions": {
+      "archived": "Consultez vos discussions archivées ou restaurez-les dans votre liste.",
+      "shared": "Gérez les liens de vos discussions partagées. Révoquez un lien pour mettre fin à l’accès public.",
+      "html": "Gérez vos liens d’aperçu HTML publics. Copiez-les ou révoquez-les à tout moment."
+    },
+    "refreshLabel": "Actualiser",
+    "views": { "archived": "Archivées", "shared": "Partagées", "html": "Liens HTML" },
+    "empty": { "archived": "Aucune discussion archivée", "shared": "Aucune discussion partagée", "html": "Aucun lien d'aperçu HTML" },
+    "refresh": "Actualiser la liste",
+    "restore": "Désarchiver",
+    "delete": "Supprimer la discussion",
+    "revoke": "Révoquer le lien",
+    "openLink": "Ouvrir le lien public",
+    "copyLink": "Copier le lien",
+    "copied": "Lien copié",
+    "copyFailed": "Impossible de copier le lien",
+    "restored": "Discussion désarchivée",
+    "deleted": "Discussion supprimée",
+    "revoked": "Lien révoqué",
+    "loadFailed": "Impossible de charger la liste",
+    "actionFailed": "L'opération a échoué. Réessayez.",
+    "deleteConfirm": "Supprimer « {{title}} » ? La discussion et tous ses messages seront définitivement supprimés.",
+    "revokeConfirm": "Révoquer ce lien public ? L'accès via ce lien sera supprimé. Le contenu original sera conservé.",
+    "sharingDisabled": "Le partage est désactivé pour ce compte."
   },
   "about": {
     "title": "À propos",

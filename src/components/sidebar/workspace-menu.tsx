@@ -637,7 +637,7 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
                 }}
                 className={`inline-flex min-h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-[8px] px-2.5 py-1.5 text-sm font-medium interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] sm:min-h-9 sm:w-full ${
                   tab === key
-                    ? 'bg-[var(--color-surface)] text-[var(--color-fg)] ring-1 ring-inset ring-[var(--color-accent)] sm:bg-[var(--color-bg-muted)]'
+                    ? 'bg-[var(--color-surface)] text-[var(--color-fg)] sm:bg-[var(--color-bg-muted)]'
                     : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)]/60 hover:text-[var(--color-fg)]'
                 }`}
               >
@@ -650,7 +650,7 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
         </div>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="shrink-0 border-b border-[var(--color-divider)] px-5 py-4 sm:px-6 sm:pr-14 sm:pt-5">
+          <div className="shrink-0 px-5 py-4 sm:px-6 sm:pr-14 sm:pt-5">
             <h2 className="text-lg font-medium text-[var(--color-fg)]">
               {t(WORKSPACE_MANAGEMENT_TABS.find((item) => item.key === (canManage ? tab : 'members'))!.label)}
             </h2>
@@ -680,7 +680,7 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
             token is only exposed to the owner, so ordinary admins see the
             fresh link after rotating. */}
         {canManage ? (
-          <div className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-2.5">
+          <div className="rounded-[10px] bg-[var(--color-bg-muted)] p-2.5">
             <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-fg-subtle)]">
               {t('workspace.inviteLink', { defaultValue: 'Invite link' })}
             </div>
@@ -992,7 +992,7 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
                 ) : null}
                 {WORKSPACE_PERMISSION_GROUPS.map((group) => (
                   <section key={group.id} aria-labelledby={`workspace-member-permissions-${group.id}`}>
-                    <div className="border-b border-[var(--color-divider)] py-3">
+                    <div className="py-3">
                       <h3 id={`workspace-member-permissions-${group.id}`} className="text-[13px] font-semibold text-[var(--color-fg)]">
                         {t(`workspace.permissions.groups.${group.id}.label`, { defaultValue: group.label })}
                       </h3>
@@ -1000,7 +1000,7 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
                         {t(`workspace.permissions.groups.${group.id}.description`, { defaultValue: group.description })}
                       </p>
                     </div>
-                    <div className="divide-y divide-[var(--color-divider)]">
+                    <div>
                       {group.rows.map((row) => (
                         <label key={row.key} className="flex min-h-14 cursor-pointer items-center gap-4 py-3">
                           <span className="min-w-0 flex-1">
@@ -1154,7 +1154,7 @@ function WorkspaceUsagePanel({ workspaceID }: { workspaceID: string }) {
     </div>
   }
   if (failed || !data) {
-    return <div role="alert" className="flex min-h-56 flex-col items-center justify-center rounded-[12px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-5 text-center">
+    return <div role="alert" className="flex min-h-56 flex-col items-center justify-center rounded-[12px] bg-[var(--color-bg-muted)] px-5 text-center">
       <AlertTriangle size={20} aria-hidden className="text-[var(--color-danger)]" />
       <p className="mt-2 text-[13px] font-medium text-[var(--color-fg)]">{t('workspace.statsLoadFailed', { defaultValue: 'Could not load workspace statistics.' })}</p>
       <Button size="sm" variant="secondary" className="mt-3" leadingIcon={<RefreshCw size={13} aria-hidden />} onClick={() => setAttempt((value) => value + 1)}>{t('actions.tryAgain', { ns: 'common', defaultValue: 'Try again' })}</Button>
@@ -1162,7 +1162,7 @@ function WorkspaceUsagePanel({ workspaceID }: { workspaceID: string }) {
   }
 
   return <div className="space-y-5">
-    <div className="flex flex-col gap-3 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-4 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-col gap-3 rounded-[12px] bg-[var(--color-bg-muted)] p-4 sm:flex-row sm:items-center sm:justify-between">
       <div>
         <h3 className="text-[15px] font-semibold text-[var(--color-fg)]">{t('workspace.statisticsTitle', { defaultValue: 'Workspace usage' })}</h3>
         <p className="mt-1 text-[12px] leading-5 text-[var(--color-fg-muted)]">{t('workspace.statisticsLead', { defaultValue: 'Usage from conversations and tools in this workspace.' })}</p>
@@ -1173,19 +1173,19 @@ function WorkspaceUsagePanel({ workspaceID }: { workspaceID: string }) {
       </Select>
     </div>
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      {metrics.map((metric) => <div key={metric.label} className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg)] p-4">
+      {metrics.map((metric) => <div key={metric.label} className="rounded-[10px] bg-[var(--color-bg)] p-4">
         <div className="text-[11px] font-medium text-[var(--color-fg-subtle)]">{metric.label}</div>
         <div className="mt-2 text-[22px] font-semibold tracking-tight text-[var(--color-fg)]">{metric.value}</div>
         <div className="mt-1 truncate text-[11px] text-[var(--color-fg-muted)]">{metric.hint}</div>
       </div>)}
     </div>
-    <section className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-bg)] p-4" aria-labelledby="workspace-statistics-trend">
+    <section className="rounded-[12px] bg-[var(--color-bg)] p-4" aria-labelledby="workspace-statistics-trend">
       <div className="flex items-baseline justify-between gap-3"><div><h3 id="workspace-statistics-trend" className="text-[13px] font-semibold text-[var(--color-fg)]">{t('workspace.statsTrend', { defaultValue: 'Token trend' })}</h3><p className="mt-1 text-[11px] text-[var(--color-fg-subtle)]">{number(totalTokens)} {t('workspace.statsTokensUsed', { defaultValue: 'tokens used' })} · {number(previousTokens)} {t('workspace.statsPreviousPeriod', { defaultValue: 'previous period' })}</p></div><BarChart3 size={16} aria-hidden className="text-[var(--color-fg-subtle)]" /></div>
       {trend.length > 0 ? <div className="mt-5 flex h-36 items-end gap-1.5 overflow-hidden" aria-label={t('workspace.statsTrend', { defaultValue: 'Token trend' })}>{trend.map((point) => { const value = point.input_tokens + point.output_tokens; const height = Math.max(4, Math.round((value / maxTrend) * 100)); return <div key={point.bucket_start} className="group flex min-w-0 flex-1 flex-col items-center justify-end gap-1" title={`${number(value)} tokens`}><div className="w-full max-w-8 rounded-t-[5px] bg-[var(--color-accent)]/75 transition-[height] duration-300 group-hover:bg-[var(--color-accent)]" style={{ height: `${height}%` }} /><span className="sr-only">{number(value)} tokens</span></div> })}</div> : <p className="mt-8 text-center text-[12px] text-[var(--color-fg-subtle)]">{t('workspace.statsNoData', { defaultValue: 'No usage in this period.' })}</p>}
     </section>
-    <section className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-bg)]" aria-labelledby="workspace-statistics-members">
-      <div className="border-b border-[var(--color-divider)] px-4 py-3"><h3 id="workspace-statistics-members" className="text-[13px] font-semibold text-[var(--color-fg)]">{t('workspace.statsMemberUsage', { defaultValue: 'Member usage' })}</h3></div>
-      <div className="overflow-x-auto"><table className="w-full min-w-[620px] text-left text-[12px]"><thead className="text-[11px] text-[var(--color-fg-subtle)]"><tr><th className="px-4 py-2.5 font-medium">{t('workspace.statsMember', { defaultValue: 'Member' })}</th><th className="px-3 py-2.5 font-medium">{t('workspace.statsTurns', { defaultValue: 'Turns' })}</th><th className="px-3 py-2.5 font-medium">{t('workspace.statsInput', { defaultValue: 'Input tokens' })}</th><th className="px-3 py-2.5 font-medium">{t('workspace.statsOutput', { defaultValue: 'Output tokens' })}</th><th className="px-3 py-2.5 font-medium">{t('workspace.statsCredits', { defaultValue: 'Credits' })}</th></tr></thead><tbody className="divide-y divide-[var(--color-divider)]">{data.usage.length > 0 ? data.usage.map((member) => <tr key={member.user_id} className="text-[var(--color-fg-muted)]"><td className="max-w-[240px] truncate px-4 py-3 font-medium text-[var(--color-fg)]">{member.name || member.email}</td><td className="px-3 py-3">{number(member.messages)}</td><td className="px-3 py-3">{number(member.input_tokens)}</td><td className="px-3 py-3">{number(member.output_tokens)}</td><td className="px-3 py-3">{decimal(member.credits)}</td></tr>) : <tr><td colSpan={5} className="px-4 py-10 text-center text-[12px] text-[var(--color-fg-subtle)]">{t('workspace.statsNoData', { defaultValue: 'No usage in this period.' })}</td></tr>}</tbody></table></div>
+    <section className="quiet-table rounded-[12px] bg-[var(--color-bg)]" aria-labelledby="workspace-statistics-members">
+      <div className="px-4 py-3"><h3 id="workspace-statistics-members" className="text-[13px] font-semibold text-[var(--color-fg)]">{t('workspace.statsMemberUsage', { defaultValue: 'Member usage' })}</h3></div>
+      <div className="overflow-x-auto"><table className="w-full min-w-[620px] text-left text-[12px]"><thead className="text-[11px] text-[var(--color-fg-subtle)]"><tr><th className="px-4 py-2.5 font-medium">{t('workspace.statsMember', { defaultValue: 'Member' })}</th><th className="px-3 py-2.5 font-medium">{t('workspace.statsTurns', { defaultValue: 'Turns' })}</th><th className="px-3 py-2.5 font-medium">{t('workspace.statsInput', { defaultValue: 'Input tokens' })}</th><th className="px-3 py-2.5 font-medium">{t('workspace.statsOutput', { defaultValue: 'Output tokens' })}</th><th className="px-3 py-2.5 font-medium">{t('workspace.statsCredits', { defaultValue: 'Credits' })}</th></tr></thead><tbody>{data.usage.length > 0 ? data.usage.map((member) => <tr key={member.user_id} className="text-[var(--color-fg-muted)]"><td className="max-w-[240px] truncate px-4 py-3 font-medium text-[var(--color-fg)]">{member.name || member.email}</td><td className="px-3 py-3">{number(member.messages)}</td><td className="px-3 py-3">{number(member.input_tokens)}</td><td className="px-3 py-3">{number(member.output_tokens)}</td><td className="px-3 py-3">{decimal(member.credits)}</td></tr>) : <tr><td colSpan={5} className="px-4 py-10 text-center text-[12px] text-[var(--color-fg-subtle)]">{t('workspace.statsNoData', { defaultValue: 'No usage in this period.' })}</td></tr>}</tbody></table></div>
     </section>
   </div>
 }
@@ -1289,7 +1289,7 @@ function WorkspaceInvitesPanel({ workspaceID, isOwner }: { workspaceID: string; 
 
   return (
     <div className="space-y-3">
-      <div className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-2">
+      <div className="rounded-[8px] bg-[var(--color-bg-muted)] p-2">
         <div className="grid min-w-0 grid-cols-[4.75rem_minmax(0,1fr)_5.25rem_2.75rem_2rem] items-center gap-1.5">
           <Select value={role} disabled={creating} onValueChange={(value) => setRole(value as ApiWorkspaceRole)}>
             <SelectTrigger
@@ -1621,12 +1621,12 @@ function WorkspacePolicyPanel({ workspaceID }: { workspaceID: string }) {
           {t('workspace.groupPermissionCeiling')}
         </p>
         {capabilityGroups.map((group) => (
-          <section key={group.id} className="rounded-[10px] border border-[var(--color-border)] px-3">
-            <div className="border-b border-[var(--color-divider)] py-3">
+          <section key={group.id} className="rounded-[10px] px-3">
+            <div className="py-3">
               <h3 className="text-[13px] font-semibold text-[var(--color-fg)]">{group.label}</h3>
               <p className="mt-0.5 text-[11.5px] leading-4 text-[var(--color-fg-subtle)]">{group.description}</p>
             </div>
-            <div className="divide-y divide-[var(--color-divider)]">
+            <div>
               {group.rows.map((row) => {
                 const capability = row.key === 'AllowToolCalling'
                   ? capabilities.toolCalling
@@ -1683,7 +1683,7 @@ function WorkspacePolicyPanel({ workspaceID }: { workspaceID: string }) {
         ))}
       </div>
 
-      <div className="rounded-[10px] border border-[var(--color-border)] p-3">
+      <div className="rounded-[10px] p-3">
         <div className="flex items-center justify-between gap-3">
           <span className="text-[13px] font-medium text-[var(--color-fg)]">
             {t('workspace.policy.modelAllowlist', { defaultValue: 'Allowed models' })}
@@ -1742,7 +1742,7 @@ function WorkspacePolicyPanel({ workspaceID }: { workspaceID: string }) {
         )}
       </div>
 
-      <div className="rounded-[10px] border border-[var(--color-border)] p-3">
+      <div className="rounded-[10px] p-3">
         <label className="block text-[13px] font-medium text-[var(--color-fg)]">
           {t('workspace.policy.creditLimit', { defaultValue: 'Member monthly credit limit' })}
         </label>

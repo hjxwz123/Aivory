@@ -517,6 +517,11 @@
     "canvas": "Canvas"
   },
   "sidebar": {
+    "reorderHint": "Glissez pour réordonner ; sur mobile, maintenez le doigt. Ou utilisez Alt + ↑ / ↓.",
+    "reorderSaving": "Enregistrement de l’ordre des conversations",
+    "reorderFailed": "Impossible d’enregistrer l’ordre des conversations. Veuillez réessayer.",
+    "dropBefore": "Placer au-dessus de « {{title}} »",
+    "dropAfter": "Placer au-dessous de « {{title}} »",
     "newChat": "Nouvelle discussion",
     "search": "Rechercher",
     "resize": "Redimensionner la barre latérale",

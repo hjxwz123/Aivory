@@ -6,9 +6,38 @@
     "appearance": "Appearance",
     "models": "Models",
     "privacy": "Privacy",
+    "conversations": "Chats & links",
     "shortcuts": "Shortcuts",
     "about": "About",
     "work": "Work"
+  },
+  "conversations": {
+    "title": "Chats & links",
+    "subtitle": "Manage archived conversations, shared chats, and HTML preview links.",
+    "descriptions": {
+      "archived": "View archived conversations or restore them to your chat list.",
+      "shared": "Manage links to your shared conversations. Revoke a link to end public access.",
+      "html": "Manage public HTML preview links. Copy or revoke them at any time."
+    },
+    "refreshLabel": "Refresh",
+    "views": { "archived": "Archived chats", "shared": "Shared chats", "html": "HTML links" },
+    "empty": { "archived": "No archived conversations", "shared": "No shared conversations", "html": "No HTML preview links" },
+    "refresh": "Refresh list",
+    "restore": "Unarchive",
+    "delete": "Delete conversation",
+    "revoke": "Revoke link",
+    "openLink": "Open public link",
+    "copyLink": "Copy link",
+    "copied": "Link copied",
+    "copyFailed": "Could not copy the link",
+    "restored": "Conversation unarchived",
+    "deleted": "Conversation deleted",
+    "revoked": "Link revoked",
+    "loadFailed": "Could not load the list",
+    "actionFailed": "The action failed. Please try again.",
+    "deleteConfirm": "Delete “{{title}}”? This permanently deletes the conversation and all its messages.",
+    "revokeConfirm": "Revoke this public link? Others will lose access through this link. The original content will be kept.",
+    "sharingDisabled": "Sharing is disabled for this account."
   },
   "about": {
     "title": "About",

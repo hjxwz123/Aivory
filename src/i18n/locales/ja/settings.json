@@ -6,9 +6,38 @@
     "appearance": "外観",
     "models": "モデル",
     "privacy": "プライバシー",
+    "conversations": "会話とリンク",
     "shortcuts": "ショートカット",
     "about": "について",
     "work": "仕事"
+  },
+  "conversations": {
+    "title": "会話とリンク",
+    "subtitle": "アーカイブした会話、共有した会話、HTML プレビューリンクを管理します。",
+    "descriptions": {
+      "archived": "アーカイブした会話を確認し、会話一覧に戻せます。",
+      "shared": "共有した会話のリンクを管理します。リンクを無効化すると公開アクセスが終了します。",
+      "html": "HTML プレビューの公開リンクを管理し、いつでもコピーや無効化ができます。"
+    },
+    "refreshLabel": "更新",
+    "views": { "archived": "アーカイブ", "shared": "共有した会話", "html": "HTML リンク" },
+    "empty": { "archived": "アーカイブした会話はありません", "shared": "共有した会話はありません", "html": "HTML プレビューリンクはありません" },
+    "refresh": "一覧を更新",
+    "restore": "アーカイブを解除",
+    "delete": "会話を削除",
+    "revoke": "リンクを無効化",
+    "openLink": "公開リンクを開く",
+    "copyLink": "リンクをコピー",
+    "copied": "リンクをコピーしました",
+    "copyFailed": "リンクをコピーできませんでした",
+    "restored": "アーカイブを解除しました",
+    "deleted": "会話を削除しました",
+    "revoked": "リンクを無効化しました",
+    "loadFailed": "一覧を読み込めませんでした",
+    "actionFailed": "操作に失敗しました。もう一度お試しください。",
+    "deleteConfirm": "「{{title}}」を削除しますか？会話とすべてのメッセージが完全に削除されます。",
+    "revokeConfirm": "この公開リンクを無効化しますか？他のユーザーはこのリンクからアクセスできなくなります。元の内容は保持されます。",
+    "sharingDisabled": "このアカウントの共有機能は無効です。"
   },
   "about": {
     "title": "について",

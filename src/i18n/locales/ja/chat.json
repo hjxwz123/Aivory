@@ -517,6 +517,11 @@
     "canvas": "キャンバス"
   },
   "sidebar": {
+    "reorderHint": "ドラッグして並べ替え。モバイルでは長押し。Alt + ↑ / ↓ でも移動できます。",
+    "reorderSaving": "会話の順序を保存中",
+    "reorderFailed": "会話の順序を保存できませんでした。しばらくしてから再試行してください。",
+    "dropBefore": "「{{title}}」の上に移動",
+    "dropAfter": "「{{title}}」の下に移動",
     "newChat": "新しいチャット",
     "search": "検索",
     "resize": "サイドバーの幅を変更",
