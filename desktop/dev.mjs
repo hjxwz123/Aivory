@@ -1,8 +1,10 @@
 import { spawn } from 'node:child_process'
 import electron from 'electron'
 import { appDir, prepareApp } from './prepare.mjs'
+import { buildFrontend } from './frontend.mjs'
 
 try {
+  await buildFrontend()
   const { baseUrl } = await prepareApp()
   console.log(`Starting Aivory desktop: ${baseUrl}`)
   const env = { ...process.env }

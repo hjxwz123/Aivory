@@ -17,13 +17,14 @@ import { toast as _sseToast } from '@/hooks/use-toast'
 import { getClientInstanceId, getDeviceId } from '@/lib/device-id'
 import { blockReload } from '@/lib/sync-guards'
 import { hmacSha256, sha256 } from '@/lib/hmac-sha256'
+import { apiFetch } from '@/lib/api-fetch'
 import {
   withRequestActivity,
   type RequestActivityMode,
 } from '@/lib/request-activity'
 
 
-const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api'
+const API_BASE = typeof window !== 'undefined' && window.aivoryDesktop ? '/api' : (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api'
 
 // Per-request HMAC proof. The server consumes every nonce once and binds the
 // proof to the HTTP method, complete request target, device id, and payload.
@@ -227,7 +228,7 @@ async function apiRequest<T>(path: string, opts: ApiOptions, retried: boolean): 
     ...opts.headers,
     ...authHeaders,
   }
-  const res = await fetch(API_BASE + path, {
+  const res = await apiFetch(API_BASE + path, {
     method,
     credentials: 'include',
     headers,
@@ -308,6 +309,8 @@ async function xhrUpload(
   const releaseReloadBlock = blockReload()
   return new Promise<{ status: number; ok: boolean; parsed: unknown }>((resolve, reject) => {
     const xhr = new XMLHttpRequest()
+    const bridge = window.aivoryDesktop
+    const requestId = opts.signal && bridge?.startApiRequest && bridge.abortApiRequest ? crypto.randomUUID() : undefined
     let settled = false
     const cleanup = () => {
       if (opts.signal) opts.signal.removeEventListener('abort', abort)
@@ -319,6 +322,7 @@ async function xhrUpload(
       reject(error)
     }
     const abort = () => {
+      if (requestId) bridge?.abortApiRequest?.(requestId)
       xhr.abort()
       finishReject(new DOMException('Upload aborted', 'AbortError'))
     }
@@ -329,6 +333,7 @@ async function xhrUpload(
     if (opts.signal) opts.signal.addEventListener('abort', abort, { once: true })
 
     xhr.open(method, API_BASE + path)
+    if (requestId) { bridge?.startApiRequest?.(requestId); xhr.setRequestHeader('x-aivory-desktop-request', requestId) }
     xhr.withCredentials = true
     for (const [key, value] of Object.entries(headers)) {
       xhr.setRequestHeader(key, value)
@@ -445,7 +450,7 @@ export async function* streamSSE(
   const open = async () => {
     assertNetworkOnline()
     const authHeaders = await authenticatedRequestHeaders(path, 'POST', serializedBody)
-    return fetch(API_BASE + path, {
+    return apiFetch(API_BASE + path, {
       method: 'POST',
       credentials: 'include',
       headers: {
@@ -516,7 +521,7 @@ export async function* streamSSEGet(
   const open = async () => {
     assertNetworkOnline()
     const authHeaders = await authenticatedRequestHeaders(path, 'GET')
-    return fetch(API_BASE + path, {
+    return apiFetch(API_BASE + path, {
       method: 'GET',
       credentials: 'include',
       headers: {

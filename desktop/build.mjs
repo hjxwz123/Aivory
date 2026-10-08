@@ -2,10 +2,12 @@ import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import { desktopDir, prepareApp } from './prepare.mjs'
+import { buildFrontend } from './frontend.mjs'
 
 const require = createRequire(import.meta.url)
 
 try {
+  await buildFrontend()
   const { baseUrl, version } = await prepareApp()
   console.log(`Building Aivory ${version} desktop for ${baseUrl || 'first-launch server setup'}`)
   const child = spawn(process.execPath, [

@@ -50,3 +50,27 @@ test('duplicate browser attempts are coalesced and cancellation stops polling', 
   assert.deepEqual(await running, { status: 'cancelled' })
   assert.equal(requests, 1)
 })
+
+test('cancellation waits for an in-flight exchange and ignores its late authorization', async () => {
+  let exchange
+  let settle
+  const exchanging = new Promise((resolve) => { exchange = resolve })
+  const responseBody = new Promise((resolve) => { settle = resolve })
+  const flow = new auth.BrowserAuth({ baseUrl: 'https://example.test',
+    fetch: async (url) => {
+      if (url.endsWith('/start')) return { ok: true, json: async () => ({ request_id: 'a'.repeat(43) }) }
+      exchange()
+      return { ok: true, json: () => responseBody }
+    }, openBrowser: async () => {}, onAuthorized: () => assert.fail('a cancelled exchange must not emit authorization'),
+  })
+  const running = flow.start()
+  await exchanging
+  let cancelled = false
+  const cancellation = flow.cancel().then(() => { cancelled = true })
+  await Promise.resolve()
+  assert.equal(cancelled, false)
+  settle({ status: 'authorized' })
+  await cancellation
+  assert.deepEqual(await running, { status: 'cancelled' })
+  assert.equal(cancelled, true)
+})

@@ -366,6 +366,15 @@
 }
 .login-content .login-submit:hover:not(:disabled) { background: color-mix(in srgb, var(--color-accent) 92%, var(--color-fg)); }
 .login-content .login-submit[aria-busy='true'] > span[aria-hidden] { order: 1; }
+.login-authorization-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.login-authorization-actions button,
+.login-authorization-actions .login-submit {
+  height: auto;
+  min-height: 44px;
+  padding: 8px 10px;
+  white-space: normal;
+  font: 400 13px / 1.4 var(--font-sans);
+}
 .login-error { margin: 0 0 14px; color: var(--color-danger); font-size: 12px; }
 .login-field-error { margin: 5px 0 0; }
 .login-delivery-hint { margin: -15px 0 27px; color: var(--color-fg-muted); font-size: 11px; }
@@ -425,6 +434,10 @@
   .login-intro { margin-bottom: 16px; }
   .login-field { margin-bottom: 12px; }
   .login-switch, .login-terms { margin-top: 16px; }
+  .login-authorization > .login-twofa-icon { display: none; }
+  .login-authorization .login-title { font-size: 1.25rem; }
+  .login-authorization .login-intro { margin-block: 8px 12px; }
+  .login-authorization-info { margin-block: 12px; }
 }
 
 @media (max-height: 650px) and (max-width: 800px) {

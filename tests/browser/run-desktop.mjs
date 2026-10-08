@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
-import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, writeFile, rm, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
@@ -8,9 +8,14 @@ import { createRequire } from 'node:module'
 import { once } from 'node:events'
 import puppeteer from 'puppeteer-core'
 import { prepareApp } from '../../desktop/prepare.mjs'
+import localWeb from '../../desktop/local-web.cjs'
+const { APP_URL } = localWeb
 
 const requireDesktop = createRequire(new URL('../../desktop/package.json', import.meta.url))
+const currentVersion = JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8')).version
+const updateVersion = currentVersion.split('-')[0].replace(/(\d+)$/, (patch) => String(Number(patch) + 1)) + '-beta.1'
 const electron = requireDesktop('electron')
+const { WebSocketServer } = requireDesktop('ws')
 const temp = await mkdtemp(path.join(tmpdir(), 'aivory-desktop-smoke-'))
 const appDirectory = path.join(temp, 'app')
 let browser
@@ -22,6 +27,9 @@ let refuseConnections = false
 let browserLoginChallenge
 const requestAgents = new Map()
 const browserRequestId = 's'.repeat(43)
+let abortedStream = false
+let voiceHeaders
+let paymentBody
 
 const fixture = createServer((req, res) => {
   requestAgents.set(req.url, req.headers['user-agent'])
@@ -50,6 +58,10 @@ const fixture = createServer((req, res) => {
   } else if (req.url === '/api/browser-session') {
     res.setHeader('Content-Type', 'application/json')
     res.end(JSON.stringify({ authorized: req.headers.cookie?.includes('browser_authorized=true') || false }))
+  } else if (req.url === '/api/init') {
+    if (!hasSession) res.setHeader('Set-Cookie', 'desktop_session=smoke; HttpOnly; SameSite=Lax; Path=/; Max-Age=3600')
+    res.setHeader('Content-Type', 'application/json')
+    res.end(JSON.stringify({ hasSession }))
   } else if (req.url === '/api/session') {
     res.setHeader('Content-Type', 'application/json')
     res.end(JSON.stringify({ hasSession }))
@@ -58,18 +70,53 @@ const fixture = createServer((req, res) => {
     res.write('data: first-visible-content\n\n')
     const timer = setTimeout(() => res.end('data: done\n\n'), 1500)
     res.on('close', () => clearTimeout(timer))
+  } else if (req.url === '/api/echo') {
+    const chunks = []
+    req.on('data', chunk => chunks.push(chunk))
+    req.on('end', () => {
+      res.setHeader('Content-Type', 'application/json')
+      res.end(JSON.stringify({ body: Buffer.concat(chunks).toString(), origin: req.headers.origin,
+        cookie: req.headers.cookie, contentType: req.headers['content-type'], signature: req.headers['x-signature'] }))
+    })
+  } else if (req.url === '/api/compressed') {
+    import('node:zlib').then(({ gzipSync }) => {
+      res.writeHead(200, { 'Content-Encoding': 'gzip', 'Content-Type': 'application/json' })
+      res.end(gzipSync(JSON.stringify({ compressed: true, hasSession })))
+    })
+  } else if (req.url === '/api/long-stream') {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+    res.write('data: started\n\n')
+    const timer = setInterval(() => res.write(': heartbeat\n\n'), 100)
+    res.on('close', () => { clearInterval(timer); abortedStream = true })
+  } else if (req.url.startsWith('/pay/checkout')) {
+    const chunks = []
+    req.on('data', chunk => chunks.push(chunk))
+    req.on('end', () => {
+      paymentBody = Buffer.concat(chunks).toString()
+      res.setHeader('Content-Type', 'text/html')
+      res.end('<html><body><a id="return" href="/subscription?payment_order=test-order">Finish checkout</a></body></html>')
+    })
   } else if (req.url === '/oauth/start') {
     res.writeHead(302, { Location: `${oauthUrl}/authorize` })
     res.end()
   } else {
     if (!hasSession) res.setHeader('Set-Cookie', 'desktop_session=smoke; HttpOnly; SameSite=Lax; Path=/; Max-Age=3600')
     res.setHeader('Content-Type', 'text/html; charset=utf-8')
-    res.end(`<!doctype html><html><head><title>Aivory Desktop Fixture</title></head>
-      <body data-had-session="${hasSession}"><h1 id="smoke">Aivory desktop</h1>
+    res.end(`<!doctype html><html><head><title>Aivory Desktop Fixture</title><style>html,body { margin:0; height:100%; } :root { --color-bg:#ffffff; } #root { height:100dvh; min-height:0; display:flow-root; }</style></head>
+      <body data-had-session="${hasSession}"><div id="root"><h1 id="smoke">Aivory desktop</h1>
       <a id="preview" href="/share/example" target="_blank" rel="noopener">Preview</a>
       <a id="blocked" href="file:///etc/passwd">Blocked navigation</a>
-      <textarea id="draft"></textarea></body></html>`)
+      <textarea id="draft"></textarea></div></body></html>`)
   }
+})
+const voiceServer = new WebSocketServer({ noServer: true })
+fixture.on('upgrade', (req, socket, head) => {
+  if (req.url !== '/api/audio/stream') { socket.destroy(); return }
+  voiceHeaders = req.headers
+  voiceServer.handleUpgrade(req, socket, head, client => {
+    client.send(JSON.stringify({ type: 'ready' }))
+    client.on('message', (data, binary) => client.send(JSON.stringify({ binary, bytes: data.length, text: binary ? '' : data.toString() })))
+  })
 })
 const oauth = createServer((_req, res) => {
   res.writeHead(302, { Location: `${baseUrl}/oauth/return` })
@@ -111,9 +158,10 @@ async function launch(expectOffline = false) {
   assert.ok(endpoint, `Electron debugger did not start: ${logs}`)
   browser = await puppeteer.connect({ browserWSEndpoint: endpoint, defaultViewport: null })
   const target = await browser.waitForTarget((target) => expectOffline
-    ? target.url().endsWith('/offline.html') : target.url().startsWith(baseUrl), { timeout: 20000 })
+    ? target.url().endsWith('/offline.html') : target.url().startsWith(APP_URL), { timeout: 20000 })
   const page = await target.page()
   await page.waitForSelector(expectOffline ? '#title' : '#smoke')
+  if (!expectOffline) await page.waitForFunction(() => document.body.dataset.ready === 'true')
   return page
 }
 
@@ -148,7 +196,18 @@ try {
   baseUrl = `http://127.0.0.1:${await listen(fixture)}`
   oauthUrl = `http://localhost:${await listen(oauth)}`
   process.env.AIVORY_DESKTOP_BASE_URL = baseUrl
-  await prepareApp(appDirectory)
+  const webDir = path.join(temp, 'web')
+  await mkdir(webDir)
+  await writeFile(path.join(webDir, 'index.html'), `<!doctype html><html><head><title>Packaged local frontend</title><style>html,body { margin:0; height:100%; } :root { --color-bg:#ffffff; } #root { height:100dvh; min-height:0; display:flow-root; }</style></head>
+    <body><div id="root"><h1 id="smoke">Aivory desktop — bundled UI</h1>
+    <a id="preview" href="/share/example" target="_blank" rel="noopener">Preview</a>
+    <a id="blocked" href="file:///etc/passwd">Blocked navigation</a>
+    <a id="external" href="${baseUrl}/oauth/start">Website</a>
+    <textarea id="draft"></textarea></div><script>
+    async function init() { const session = await fetch('/api/init').then(r=>r.json()); document.body.dataset.hadSession=String(session.hasSession); document.body.dataset.ready='true' }
+    init().catch(()=>{}); window.addEventListener('aivory:desktop-reconnected', ()=>init().catch(()=>{}));
+    </script></body></html>`)
+  await prepareApp(appDirectory, { webDir })
   await writeFile(path.join(appDirectory, 'smoke-bootstrap.cjs'), `
     const { app, BrowserWindow, ipcMain, shell, net, dialog } = require('electron')
     shell.openExternal = async (url) => {
@@ -165,7 +224,7 @@ try {
       if (new URL(url).pathname !== '/api/public/desktop-update') return originalNetFetch(url, options)
       if (url !== '${baseUrl}/api/public/desktop-update') throw new Error('Unexpected update origin')
       return { ok: true, json: async () => ({
-        enabled: true, version: '2.5.1-beta.7', downloads: {
+        enabled: true, version: '${updateVersion}', downloads: {
           [({darwin:'macos',win32:'windows',linux:'linux'}[process.platform]) + '_' + process.arch]: 'https://downloads.example.test/Aivory-installer',
         },
       }) }
@@ -201,6 +260,9 @@ try {
   assert.equal(config.baseUrl, `${baseUrl}/`)
 
   const page = await launch()
+  assert.ok(page.url().startsWith(APP_URL))
+  assert.equal(requestAgents.has('/'), false, 'Server frontend must never be requested')
+  assert.equal(await page.evaluate(() => window.aivoryDesktop.serverBaseUrl), `${baseUrl}/`)
   assert.deepEqual(await page.evaluate(() => ({
     require: typeof window.require,
     process: typeof window.process,
@@ -212,7 +274,16 @@ try {
   assert.match(logs, /NATIVE_WINDOW_TITLE:""/)
   assert.doesNotMatch(logs, /NATIVE_WINDOW_TITLE:"[^"]/)
   console.log('PASS: the native title bar does not display the website title')
-  assert.equal((await page.evaluate(() => window.aivoryDesktop.getInfo())).version, '2.5.1-beta.6')
+  assert.equal((await page.evaluate(() => window.aivoryDesktop.getInfo())).version, currentVersion)
+  if (process.platform === 'darwin') {
+    await page.waitForSelector('#aivory-window-drag')
+    assert.equal(await page.$eval('#aivory-window-drag', (element) => getComputedStyle(element).webkitAppRegion), 'drag')
+    assert.equal(await page.$eval('#root', (element) => Math.round(element.getBoundingClientRect().top)), 36)
+    await page.evaluate(() => document.documentElement.style.setProperty('--color-bg', '#111113'))
+    assert.equal(await page.$eval('#aivory-window-drag', (element) => getComputedStyle(element).backgroundColor), 'rgb(17, 17, 19)')
+    assert.equal(await page.evaluate(() => document.scrollingElement.scrollHeight <= innerHeight), true)
+    console.log('PASS: Mac window chrome is draggable, follows the page theme, and reserves space without page scrolling')
+  }
   await page.evaluate(() => { document.getElementById('draft').value = 'Draft survives window close' })
   await page.evaluate(() => window.desktopSmoke.native('focus'))
   await new Promise((resolve) => setTimeout(resolve, 500))
@@ -224,18 +295,27 @@ try {
   await waitWindowState(page, false)
   console.log('PASS: closing minimizes the window, preserves its draft, and permits restore')
   assert.equal((await page.evaluate(() => window.aivoryDesktop.checkUpdates())).status, 'available')
-  assert.match(logs, /UPDATE_PROMPT:.*2\.5\.1-beta\.7/)
+  assert.ok(logs.includes('UPDATE_PROMPT:') && logs.includes(updateVersion))
   console.log('PASS: native release checking prompts for a newer matching installer')
-  const returnedHome = page.waitForNavigation({ waitUntil: 'domcontentloaded' })
-  await page.evaluate(() => { void window.aivoryDesktop.loginInBrowser() })
-  await returnedHome
+  const authorization = await page.evaluate(async () => {
+    window.authorizationDocument = crypto.randomUUID()
+    const documentId = window.authorizationDocument
+    let emitted = false
+    window.addEventListener('aivory:desktop-authorized', () => { emitted = true }, { once: true })
+    const result = await window.aivoryDesktop.loginInBrowser()
+    return { result, emitted, sameDocument: window.authorizationDocument === documentId }
+  })
+  assert.equal(authorization.result.status, 'authorized')
+  assert.equal(authorization.emitted, true)
+  assert.equal(authorization.sameDocument, true)
+  assert.equal(await page.$eval('#draft', (element) => element.value), 'Draft survives window close')
   await page.waitForSelector('#smoke')
   assert.ok(logs.includes('EXTERNAL_URL:' + baseUrl + '/desktop/authorize?request_id=' + browserRequestId))
   assert.equal(await page.evaluate(() => fetch('/api/browser-session').then((r) => r.json()).then((r) => r.authorized)), true)
   assert.equal(await page.evaluate(() => document.cookie.includes('browser_authorized')), false)
   assert.match(requestAgents.get('/api/auth/desktop/start'), /AivoryDesktop\//)
   assert.match(requestAgents.get('/api/auth/desktop/token'), /AivoryDesktop\//)
-  console.log('PASS: browser login uses the baked URL and the exchange populates HttpOnly desktop session cookies')
+  console.log('PASS: browser login uses the selected server, retains the document/draft, emits authorization and populates HttpOnly desktop cookies')
 
   const stream = await page.evaluate(async () => {
     const response = await fetch('/api/stream')
@@ -250,7 +330,76 @@ try {
   assert.match(stream.remainingText, /done/)
   console.log('PASS: streaming content arrives before response completion')
 
-  const popupTarget = browser.waitForTarget((target) => target.url() === `${baseUrl}/share/example`)
+  const echoed = await page.evaluate(async () => {
+    const response = await fetch('/api/echo', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-signature': 'signed-payload' }, body: JSON.stringify({ text: '测试 local UI' }) })
+    return response.json()
+  })
+  assert.equal(echoed.body, JSON.stringify({ text: '测试 local UI' }))
+  assert.equal(echoed.origin, baseUrl)
+  assert.equal(echoed.signature, 'signed-payload')
+  assert.match(echoed.cookie, /desktop_session=smoke/)
+  const uploaded = await page.evaluate(() => new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    const body = new FormData()
+    body.append('file', new Blob(['Upload bytes from the local frontend']), 'test.txt')
+    xhr.open('POST', '/api/echo')
+    xhr.onload = () => resolve(JSON.parse(xhr.responseText))
+    xhr.onerror = () => reject(new Error('upload failed'))
+    xhr.send(body)
+  }))
+  assert.match(uploaded.contentType, /multipart\/form-data; boundary=/)
+  assert.match(uploaded.body, /Upload bytes from the local frontend/)
+  assert.deepEqual(await page.evaluate(() => fetch('/api/compressed').then(r=>r.json())), { compressed: true, hasSession: true })
+  await page.evaluate(async () => {
+    const controller = new AbortController()
+    const id = crypto.randomUUID()
+    window.aivoryDesktop.startApiRequest(id)
+    controller.signal.addEventListener('abort', () => window.aivoryDesktop.abortApiRequest(id), { once: true })
+    const response = await fetch('/api/long-stream', { signal: controller.signal, headers: { 'x-aivory-desktop-request': id } })
+    await response.body.getReader().read()
+    controller.abort()
+  })
+  for (let i=0; i<30 && !abortedStream; i++) await new Promise(resolve => setTimeout(resolve, 100))
+  assert.equal(abortedStream, true, 'Cancelling local streams must stop the server request')
+  console.log('PASS: signed POSTs, multipart uploads, compressed authenticated responses and upstream stream cancellation')
+
+  const voice = await page.evaluate(() => new Promise((resolve, reject) => {
+    const replies = []
+    const timer = setTimeout(() => { connection.close(); reject(new Error('Voice timeout')) }, 5000)
+    const connection = window.aivoryDesktop.connectAudioSocket(event => {
+      if (event.type === 'error') { clearTimeout(timer); reject(new Error('Voice transport failed')) }
+      if (event.type !== 'message') return
+      const message = JSON.parse(event.data)
+      if (message.type === 'ready') { connection.send(new Uint8Array([1,2,3,4]).buffer); connection.send('{"type":"end"}') }
+      else {
+        replies.push(message)
+        if (replies.length === 2) { clearTimeout(timer); connection.close(); resolve(replies) }
+      }
+    })
+  }))
+  assert.deepEqual(voice, [{ binary: true, bytes: 4, text: '' }, { binary: false, bytes: 14, text: '{"type":"end"}' }])
+  assert.equal(voiceHeaders.origin, baseUrl)
+  assert.match(voiceHeaders.cookie, /desktop_session=smoke/)
+  assert.match(voiceHeaders['user-agent'], /AivoryDesktop\//)
+  console.log('PASS: native voice WebSocket forwards authenticated binary/text frames to an HTTP API server')
+
+  for (const type of ['redirect', 'form_post']) {
+    const checkoutTarget = browser.waitForTarget(target => target.url() === baseUrl + '/pay/checkout?type=' + type)
+    await page.evaluate(async ({ url, type }) => {
+      window.paymentReturn = new Promise(resolve => window.addEventListener('aivory:desktop-payment-return', event => resolve(event.detail), { once: true }))
+      await window.aivoryDesktop.openPayment({ type, url, fields: { order: 'test-order', value: 'a&b 中文' } })
+    }, { url: baseUrl + '/pay/checkout?type=' + type, type })
+    const checkout = await (await checkoutTarget).page()
+    assert.equal(await checkout.evaluate(() => typeof window.aivoryDesktop), 'undefined')
+    assert.equal(await checkout.evaluate(() => typeof window.require), 'undefined')
+    if (type === 'form_post') assert.equal(paymentBody, 'order=test-order&value=a%26b+%E4%B8%AD%E6%96%87')
+    await checkout.click('#return')
+    assert.equal(await page.evaluate(() => window.paymentReturn), '/subscription?payment_order=test-order')
+    assert.equal(page.url(), APP_URL)
+  }
+  console.log('PASS: payment redirects/form POSTs use isolated checkout windows and return to the local app')
+
+  const popupTarget = browser.waitForTarget((target) => target.url() === `${APP_URL}share/example`)
   await page.$eval('#preview', (element) => element.click())
   const preview = await (await popupTarget).page()
   assert.equal(await preview.evaluate(() => fetch('/api/session').then((res) => res.json()).then((result) => result.hasSession)), true)
@@ -289,7 +438,7 @@ try {
   })
   assert.equal(await page.evaluate(() => typeof window.desktopStatus), 'undefined')
   await offline.$eval('#retry', (element) => element.click())
-  await offline.waitForFunction(() => !document.getElementById('retry').disabled)
+  await offline.waitForFunction(() => !document.getElementById('retry').disabled, { polling: 100 })
   assert.equal(await offline.evaluate(() => document.body.dataset.visible), 'true')
   await offline.screenshot({ path: path.join(tmpdir(), 'aivory-desktop-offline-dark.png') })
   await page.evaluate(() => {
@@ -324,14 +473,18 @@ try {
   }
   console.log('PASS: offline content adapts to short windows and stays accessible without document scrolling')
   await page.setOfflineMode(false)
-  await offline.waitForFunction(() => document.body.dataset.visible === 'false')
+  // Detached native views stop animation frames; poll their state with a timer.
+  await offline.waitForFunction(() => document.body.dataset.visible === 'false', { polling: 100 })
   assert.equal(await page.$eval('#draft', (element) => element.value), 'Unsent draft stays intact')
   console.log('PASS: localized offline UI inherits the theme and restores the page without losing drafts')
 
-  await page.goto(`${baseUrl}/oauth/start`, { waitUntil: 'domcontentloaded' })
-  assert.equal(page.url(), `${baseUrl}/oauth/return`)
+  const localBefore = page.url()
+  await page.$eval('#external', (element) => element.click())
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  assert.equal(page.url(), localBefore)
+  assert.ok(logs.includes('EXTERNAL_URL:' + baseUrl + '/oauth/start'))
   assert.equal(await page.evaluate(() => fetch('/api/session').then((res) => res.json()).then((result) => result.hasSession)), true)
-  console.log('PASS: full-page authentication redirects return with the same session')
+  console.log('PASS: server website links use the system browser and preserve the local application')
 
   await stop()
   const restarted = await launch()
@@ -345,11 +498,12 @@ try {
   await startupOffline.screenshot({ path: path.join(tmpdir(), 'aivory-desktop-server-unavailable.png') })
   refuseConnections = false
   await startupOffline.$eval('#retry', (element) => element.click())
-  const recoveredTarget = await browser.waitForTarget((target) => target.url().startsWith(baseUrl))
+  const recoveredTarget = await browser.waitForTarget((target) => target.url().startsWith(APP_URL))
   const recovered = await recoveredTarget.page()
   await recovered.waitForSelector('#smoke')
-  await startupOffline.waitForFunction(() => document.body.dataset.visible === 'false')
-  console.log('PASS: unreachable startup shows local UI and retry loads the configured server')
+  await startupOffline.waitForFunction(() => document.body.dataset.visible === 'false', { polling: 100 })
+  await recovered.waitForFunction(() => document.body.dataset.ready === 'true')
+  console.log('PASS: unreachable startup retains the local frontend and retry reconnects its API')
   const appExited = once(child, 'exit')
   await recovered.evaluate(() => window.desktopSmoke.native('quit'))
   await Promise.race([appExited, new Promise((_, reject) => setTimeout(() => reject(new Error('Explicit quit did not stop Electron')), 5000))])
@@ -360,6 +514,8 @@ try {
   throw error
 } finally {
   await stop()
+  for (const client of voiceServer.clients) client.terminate()
+  voiceServer.close()
   await Promise.all([fixture, oauth].map((server) => new Promise((resolve) => {
     server.closeAllConnections()
     server.close(resolve)

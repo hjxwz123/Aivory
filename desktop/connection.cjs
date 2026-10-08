@@ -2,13 +2,15 @@ const { app, WebContentsView, ipcMain, nativeTheme, net } = require('electron')
 const path = require('node:path')
 const { getMessages } = require('./locales.cjs')
 const { isTrustedUrl, isWebUrl } = require('./policy.cjs')
+const { APP_URL, serverUrl } = require('./local-web.cjs')
 
 class ConnectionStatus {
-  constructor(window, baseUrl, openBrowser) {
+  constructor(window, baseUrl, openBrowser, serverSession) {
     this.window = window
     this.baseUrl = baseUrl
     this.openBrowser = openBrowser
-    this.lastUrl = baseUrl
+    this.serverSession = serverSession
+    this.lastUrl = APP_URL
     this.online = net.isOnline()
     this.loaded = false
     this.visible = false
@@ -20,7 +22,7 @@ class ConnectionStatus {
     }
     this.onNetwork = (event, state) => {
       if (!this.fromMainFrame(event, window.webContents) || typeof state?.online !== 'boolean') return
-      if (isTrustedUrl(event.sender.getURL(), baseUrl)) {
+      if (isTrustedUrl(event.sender.getURL(), APP_URL)) {
         if (['light', 'dark'].includes(state.theme)) this.appearance.theme = state.theme
         if (['violet', 'lagoon', 'ember', 'moss', 'indigo', 'rose', 'mono'].includes(state.accent)) this.appearance.accent = state.accent
         if (typeof state.locale === 'string' && state.locale.length < 32 && state.locale) this.appearance.locale = state.locale
@@ -29,15 +31,14 @@ class ConnectionStatus {
       this.online = state.online
       if (!this.online) this.show('offline')
       else if (!wasOnline && this.visible) {
-        if (this.loaded) this.hide()
-        else void this.retry()
+        void this.retry()
       } else this.sendState()
     }
     this.onRetry = (event) => {
       if (this.fromMainFrame(event, this.view?.webContents)) void this.retry()
     }
     this.onOpenBrowser = (event) => {
-      if (this.fromMainFrame(event, this.view?.webContents)) openBrowser(this.lastUrl)
+      if (this.fromMainFrame(event, this.view?.webContents)) openBrowser(serverUrl(this.lastUrl, baseUrl))
     }
     ipcMain.on('desktop:network', this.onNetwork)
     ipcMain.on('desktop:retry', this.onRetry)
@@ -45,12 +46,11 @@ class ConnectionStatus {
     window.on('resize', this.resize)
     window.on('closed', () => this.dispose())
     window.webContents.on('did-navigate', (_event, url) => {
-      if (isTrustedUrl(url, baseUrl)) this.lastUrl = url
+      if (isTrustedUrl(url, APP_URL)) this.lastUrl = url
     })
     window.webContents.on('did-finish-load', () => {
-      if (isWebUrl(window.webContents.getURL())) {
+      if (isTrustedUrl(window.webContents.getURL(), APP_URL)) {
         this.loaded = true
-        if (this.online) this.hide()
       }
     })
     window.webContents.on('did-fail-load', (_event, code, _description, url, isMainFrame) => {
@@ -101,6 +101,7 @@ class ConnectionStatus {
     this.visible = false
     clearInterval(this.timer)
     this.sendState()
+    this.window.webContents.send('desktop:connection-restored')
     this.window.webContents.focus()
   }
 
@@ -114,13 +115,15 @@ class ConnectionStatus {
     this.busy = true
     this.sendState()
     try {
-      if (!this.online && !await this.window.webContents.executeJavaScript('navigator.onLine')) return
-      const response = await net.fetch(this.baseUrl, { method: 'HEAD', cache: 'no-store', signal: AbortSignal.timeout(5000) })
-      if (!response.ok) throw new Error('server_unavailable')
+      if (!this.online) return
+      const response = await this.serverSession.fetch(new URL('/api/public/needs-setup', this.baseUrl).href, {
+        cache: 'no-store', signal: AbortSignal.timeout(5000), bypassCustomProtocolHandlers: true,
+      })
+      if (response.status >= 500) throw new Error('server_unavailable')
       if (this.window.isDestroyed()) return
       this.online = true
-      if (this.loaded) this.hide()
-      else await this.window.loadURL(this.lastUrl)
+      if (!this.loaded) await this.window.loadURL(this.lastUrl)
+      this.hide()
     } catch {
       if (!this.window.isDestroyed()) this.show(this.online ? 'unreachable' : 'offline')
     } finally {

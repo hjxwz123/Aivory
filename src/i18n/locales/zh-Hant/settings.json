@@ -217,6 +217,8 @@
       "label": "通行金鑰",
       "body": "使用裝置指紋、臉部或裝置 PIN 登入，免密碼。",
       "unsupported": "通行金鑰需要 HTTPS（或 localhost）及支援 WebAuthn 的瀏覽器。",
+      "desktopHint": "請在瀏覽器中為目前伺服器新增通行金鑰，之後可透過瀏覽器授權登入 App。",
+      "openBrowser": "開啟瀏覽器",
       "add": "新增通行金鑰",
       "addTitle": "新增通行金鑰",
       "addLead": "瀏覽器將請求以 Touch ID、Windows Hello 或裝置 PIN 驗證。",

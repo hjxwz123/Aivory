@@ -99,7 +99,7 @@ export default function AdminDesktop() {
     } finally { setSaving(false) }
   }
 
-  function useVersion(version: string) {
+  function selectVersion(version: string) {
     if (version === draft.version) return
     setDraft((current) => ({ ...current, enabled: false, version,
       downloads: current.source === 'official' ? officialDownloads(version) : {},
@@ -133,7 +133,7 @@ export default function AdminDesktop() {
           {state?.latest_version ? (
             <div role="status" className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-[8px] bg-[var(--color-bg-muted)] px-4 py-3">
               <p className="min-w-0 text-sm">{t('admin:desktop.latest', { version: state.latest_version })}</p>
-              {state.latest_version !== draft.version ? <Button size="sm" variant="ghost" onClick={() => useVersion(state.latest_version!)}>{t('admin:desktop.useVersion')}</Button> : null}
+              {state.latest_version !== draft.version ? <Button size="sm" variant="ghost" onClick={() => selectVersion(state.latest_version!)}>{t('admin:desktop.useVersion')}</Button> : null}
             </div>
           ) : state?.check_error ? <p role="status" className="mb-5 text-sm text-[var(--color-fg-muted)]">{t('admin:desktop.checkFailed')}</p> : null}
           <SettingsSection title={t('admin:desktop.release')} id="desktop-release">

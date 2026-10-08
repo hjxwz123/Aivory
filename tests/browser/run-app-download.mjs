@@ -37,6 +37,7 @@ page.on('request', (request) => {
     '/api/conversations': { conversations: [], has_more: false }, '/api/library/catalog': { skills: [], prompts: [], mcp: [] },
     '/api/me/credits': { permanent: 100, available: 100, timed: { balance: 0, grants: [] } },
     '/api/me/credit-adjustment-notifications': { notifications: [] },
+    '/api/notifications': { notifications: [], total: 0 },
     '/api/public/desktop-download': download.enabled ? download : { enabled: false },
   }
   if (pathname === '/api/public/desktop-download') reads++

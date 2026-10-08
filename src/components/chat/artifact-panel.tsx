@@ -27,6 +27,7 @@ import { toast } from '@/hooks/use-toast'
 import { assertNetworkOnline, getAccessToken } from '@/api/client'
 import { authApi } from '@/api/endpoints'
 import { documentPreviewKind } from '@/lib/file-preview-kind'
+import { apiFetch } from '@/lib/api-fetch'
 import { cn } from '@/lib/utils'
 import { useArtifactPanel, type ArtifactSource } from '@/store/artifact-panel'
 
@@ -207,7 +208,7 @@ function FileBody({ file, onClose }: { file: FileSource; onClose: () => void }) 
       try {
         assertNetworkOnline()
         const token = authenticated ? getAccessToken() : null
-        const response = await fetch(url, {
+        const response = await apiFetch(url, {
           credentials: 'include',
           headers: token ? { authorization: `Bearer ${token}` } : undefined,
           signal: controller.signal,

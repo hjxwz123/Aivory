@@ -53,6 +53,24 @@ function toWsUrl(path: string): string {
   return scheme + location.host + (u.startsWith('/') ? u : '/' + u)
 }
 
+function createAudioSocket(): Pick<WebSocket, 'binaryType' | 'readyState' | 'onopen' | 'onmessage' | 'onerror' | 'onclose' | 'send' | 'close'> {
+  const connect = window.aivoryDesktop?.connectAudioSocket
+  if (!connect) return new WebSocket(toWsUrl('/audio/stream'))
+  const socket = {
+    binaryType: 'arraybuffer' as BinaryType, readyState: WebSocket.CONNECTING as number,
+    onopen: null, onmessage: null, onerror: null, onclose: null,
+    send: (data: string | ArrayBuffer) => transport.send(data),
+    close: () => { Object.assign(socket, { readyState: WebSocket.CLOSED }); transport.close() },
+  } as Pick<WebSocket, 'binaryType' | 'readyState' | 'onopen' | 'onmessage' | 'onerror' | 'onclose' | 'send' | 'close'>
+  const transport = connect((event) => {
+    if (event.type === 'open') { Object.assign(socket, { readyState: WebSocket.OPEN }); socket.onopen?.call(socket as WebSocket, new Event('open')) }
+    if (event.type === 'message') socket.onmessage?.call(socket as WebSocket, new MessageEvent('message', { data: event.data }))
+    if (event.type === 'error') socket.onerror?.call(socket as WebSocket, new Event('error'))
+    if (event.type === 'close') { Object.assign(socket, { readyState: WebSocket.CLOSED }); socket.onclose?.call(socket as WebSocket, new CloseEvent('close')) }
+  })
+  return socket
+}
+
 function audioContextCtor(): typeof AudioContext | undefined {
   if (typeof window === 'undefined') return undefined
   return window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
@@ -117,7 +135,7 @@ export async function startVoiceStream(handlers: VoiceStreamHandlers): Promise<V
   }
   const inRate = ctx.sampleRate
 
-  const ws = new WebSocket(toWsUrl('/audio/stream'))
+  const ws = createAudioSocket()
   ws.binaryType = 'arraybuffer'
 
   // Typed as the default buffer variant so appends/slices (whose backing buffer

@@ -20,6 +20,9 @@ export class PasskeyError extends Error {
 
 export function isPasskeyAvailable(): boolean {
   return typeof window !== 'undefined'
+    // The bundled app has a local origin. WebAuthn must run on the deployment's
+    // actual domain in the system browser, even when Electron exposes the API.
+    && !window.aivoryDesktop
     && window.isSecureContext
     && !!navigator.credentials
     && typeof (globalThis as { PublicKeyCredential?: unknown }).PublicKeyCredential !== 'undefined'

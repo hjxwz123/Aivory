@@ -11,6 +11,8 @@ const user = { id: 'fixture', email: 'test@example.test', name: 'Test', role: 'a
   settings: { onboarded: true, admin_onboarding_v1: 'completed', language: 'zh', theme: 'light' } }
 const policy = { password_login_enabled: true, passkey_login_enabled: true, entry_mode: 'login_page', providers: [], oauth_initial_password_policy: 'required' }
 const model = { id: 'fixture-model', label: 'Model', kind: 'chat', request_id: 'fixture-model', channel_id: 'fixture-channel', enabled: true, stream: true, tags: [] }
+let passkeys = [{ id: 'passkey-1', name: 'Browser passkey', created_at: 1720000000, last_used_at: 0 }]
+let passkeyCeremonies = 0
 const browser = await puppeteer.launch({ executablePath, headless: true, args: ['--no-sandbox'] })
 const page = await browser.newPage()
 const errors = []
@@ -19,9 +21,12 @@ await page.setRequestInterception(true)
 page.on('request', (request) => {
   const pathname = new URL(request.url()).pathname
   if (!pathname.startsWith('/api/')) { void request.continue(); return }
+  if (pathname === '/api/me/passkeys/begin') passkeyCeremonies++
+  if (request.method() === 'DELETE' && pathname.startsWith('/api/me/passkeys/')) passkeys = passkeys.filter((item) => !pathname.endsWith('/' + item.id))
   const fixtures = {
     '/api/auth/session': { authenticated: true, user, access_token: 'fixture', request_signing_key: 'fixture', auth_policy: policy },
     '/api/me': user, '/api/admin/users/fixture': user, '/api/me/settings': user.settings,
+    '/api/me/passkeys': passkeys,
     '/api/admin/users/fixture/login-history': { total: 2, items: [appAgent, webAgent].map((agent, index) => ({ id: `login-${index}`, user_id: user.id, login_at: 1720000000, ip: '127.0.0.1', location: '', user_agent: agent, method: index ? 'password' : 'desktop_browser' })) },
     '/api/admin/user-feedback': { total: 1, limit: 50, offset: 0, items: [{ id: 'feedback-app', user_id: user.id, user_email: user.email, user_name: user.name, message_id: '', conversation_id: '', conversation_title: '', description: 'App record fixture', page_path: '/chat', user_agent: appAgent, viewport_width: 1200, viewport_height: 800, has_screenshot: false, screenshot_size: 0, created_at: 1720000000 }] },
     '/api/admin/audit-logs': { total: 1, page: 1, page_size: 50, logs: [{ id: 'audit-app', actor_user_id: user.id, actor_name: user.name, action: 'settings.update', type: 'settings', target_type: 'settings', target_id: 'fixture', created_at: 1720000000, result: 'success', user_agent: appAgent, metadata: {}, changes: {} }] },
@@ -35,6 +40,7 @@ page.on('request', (request) => {
     '/api/conversations': { conversations: [], has_more: false }, '/api/library/catalog': { skills: [], prompts: [], mcp: [] },
     '/api/me/credits': { permanent: 100, available: 100, timed: { balance: 0, grants: [] } },
     '/api/me/credit-adjustment-notifications': { notifications: [] },
+    '/api/notifications': { notifications: [], total: 0 },
   }
   const arrays = ['/api/projects', '/api/skills', '/api/me/skills', '/api/me/prompts', '/api/me/mcps', '/api/model-tags', '/api/kbs', '/api/me/passkeys', '/api/me/identities', '/api/public/oauth-providers']
   void request.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(fixtures[pathname] ?? (arrays.includes(pathname) ? [] : {})) })
@@ -63,6 +69,36 @@ try {
   await page.waitForFunction(() => document.querySelector('[role="dialog"]')?.textContent.includes('App 版 · macOS'))
   assert.ok((await page.$eval('[role="dialog"]', (dialog) => dialog.textContent)).includes('Chrome · macOS'))
   console.log('PASS: active sessions distinguish App and ordinary browsers')
+
+  await page.evaluateOnNewDocument(() => {
+    window.aivoryDesktop = {
+      serverBaseUrl: 'https://configured-server.example.test/',
+      getInfo: async () => ({ version: '2.5.1-beta.7', platform: 'darwin' }),
+      checkUpdates: async () => ({ status: 'current' }),
+      loginInBrowser: async () => ({ status: 'denied' }),
+      cancelBrowserLogin: async () => ({ status: 'cancelled' }),
+    }
+    window.open = (url) => { window.openedExternalUrl = String(url); return null }
+  })
+  await page.goto(`${baseUrl}/settings/account`)
+  await page.waitForFunction(() => document.querySelector('[role="dialog"]')?.textContent.includes('Browser passkey'))
+  const openBrowser = await page.waitForSelector('[role="dialog"] button:has(svg.lucide-external-link)')
+  await openBrowser.click()
+  assert.equal(await page.evaluate(() => window.openedExternalUrl), 'https://configured-server.example.test/settings/account')
+  assert.equal(passkeyCeremonies, 0)
+  assert.equal(await page.$('#passkey-name'), null)
+  passkeys.push({ id: 'passkey-2', name: 'New browser passkey', created_at: 1720000000, last_used_at: 0 })
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await page.waitForFunction(() => document.querySelector('[role="dialog"]')?.textContent.includes('New browser passkey'))
+  await page.evaluate(() => [...document.querySelectorAll('[role="dialog"] button')].find((button) => button.closest('div.flex')?.textContent.includes('New browser passkey') && button.textContent.trim() === '删除').click())
+  await page.waitForFunction(() => [...document.querySelectorAll('[role="dialog"]')].some((dialog) => dialog.textContent.includes('删除此通行密钥')))
+  await page.evaluate(() => [...document.querySelectorAll('[role="dialog"]')].at(-1).querySelectorAll('button').forEach((button) => { if (button.textContent.trim() === '删除') button.click() }))
+  await page.waitForFunction(() => !document.querySelector('[role="dialog"]')?.textContent.includes('New browser passkey'))
+  assert.equal(passkeys.length, 1)
+  assert.equal(passkeyCeremonies, 0)
+  await page.waitForFunction(() => document.querySelectorAll('[role="dialog"]').length === 1)
+  await page.screenshot({ path: '/tmp/aivory-desktop-passkey-settings.png' })
+  console.log('PASS: local desktop opens passkey registration on its configured server, refreshes on focus and still supports removal')
   assert.deepEqual(errors, [])
 } catch (error) {
   console.error('Page:', page.url(), 'Errors:', errors)

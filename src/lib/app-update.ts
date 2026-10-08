@@ -78,7 +78,7 @@ function reloadedRecentlyFor(version: string): boolean {
 /** Compare the deployed version against this bundle; arm an upgrade on drift. */
 export async function checkForUpdate(): Promise<void> {
   // Dev builds have no version.json and reload via HMR anyway.
-  if (!import.meta.env.PROD || pending || checking) return
+  if (window.aivoryDesktop || !import.meta.env.PROD || pending || checking) return
   const now = Date.now()
   if (now - lastCheckAt < CHECK_THROTTLE_MS) return
   lastCheckAt = now
@@ -128,7 +128,7 @@ function applyReload(): void {
  * in-flight upload/recording, or unsent composer text (reload blockers).
  */
 export function maybeApplyUpdate(trigger: 'armed' | 'hidden' | 'navigation' | 'storage'): void {
-  if (!pending) return
+  if (window.aivoryDesktop || !pending) return
   if (anyStreaming() || isReloadBlocked()) return
   if (document.visibilityState === 'hidden') {
     applyReload()
@@ -141,7 +141,7 @@ export function maybeApplyUpdate(trigger: 'armed' | 'hidden' | 'navigation' | 's
 
 /** Wire the listeners once (called from App on mount). */
 export function initAppUpdate(): void {
-  if (initialized) return
+  if (window.aivoryDesktop || initialized) return
   initialized = true
 
   document.addEventListener('visibilitychange', () => {

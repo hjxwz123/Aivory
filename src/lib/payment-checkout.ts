@@ -1,5 +1,6 @@
 import type { ApiPaymentCheckoutAction } from '@/api/types'
 import { safeHref } from '@/lib/utils'
+import { publicServerUrl } from '@/lib/server-url'
 
 export const CHECKOUT_REQUEST_TIMEOUT_MS = 55_000
 
@@ -16,7 +17,7 @@ export type PaymentCheckoutRunResult =
   | { status: 'error'; error: unknown }
 
 type CheckoutActionLoader = () => Promise<ApiPaymentCheckoutAction>
-type CheckoutActionExecutor = (action: ApiPaymentCheckoutAction) => void
+type CheckoutActionExecutor = (action: ApiPaymentCheckoutAction) => void | Promise<void>
 
 /** Serializes checkout recovery clicks immediately, without waiting for a
  * React state update to disable the clicked row. */
@@ -40,7 +41,7 @@ export class PaymentCheckoutActionRunner {
     this.onBusyChange(orderId)
     try {
       const action = await loadAction()
-      executeAction(action)
+      await executeAction(action)
       return { status: 'completed' }
     } catch (error) {
       return { status: 'error', error }
@@ -66,13 +67,17 @@ export function paymentCheckoutHref(value?: string): string | undefined {
   }
 }
 
-export function executePaymentCheckoutAction(action: ApiPaymentCheckoutAction): void {
+export function executePaymentCheckoutAction(action: ApiPaymentCheckoutAction): void | Promise<void> {
   if (!action || (action.type !== 'redirect' && action.type !== 'form_post')) {
     throw new PaymentCheckoutActionError()
   }
 
   const href = paymentCheckoutHref(action.url)
   if (!href) throw new PaymentCheckoutActionError()
+
+  if (window.aivoryDesktop?.openPayment) {
+    return window.aivoryDesktop.openPayment({ ...action, url: publicServerUrl(href) })
+  }
 
   if (action.type === 'redirect') {
     window.location.assign(href)

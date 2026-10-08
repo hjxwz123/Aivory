@@ -9,6 +9,10 @@ const { ConnectionStatus } = require('./connection.cjs')
 const { UpdateChecker } = require('./updates.cjs')
 const { BrowserAuth } = require('./browser-auth.cjs')
 const { resolveServerConfig, saveServerConfig, desktopUserAgent } = require('./server-config.cjs')
+const { windowChromeOptions, attachWindowChrome } = require('./window-chrome.cjs')
+const { APP_URL, localAppUrl, createLocalHandler } = require('./local-web.cjs')
+const { registerAudioSocketBridge } = require('./audio-socket.cjs')
+const { ApiRequests } = require('./api-requests.cjs')
 
 app.setName('Aivory')
 let mainWindow
@@ -26,6 +30,8 @@ let updateStartupTimer
 let minimizeTimer
 let minimizeRequested = false
 const configuredSessions = new WeakSet()
+const paymentContents = new WeakSet()
+const apiRequests = new ApiRequests()
 
 function restoreWindow() {
   minimizeRequested = false
@@ -78,6 +84,7 @@ function openServerSettings() {
   }
   serverWindow = new BrowserWindow({
     title: '', ...windowSize(560, 460),
+    ...windowChromeOptions(),
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#111113' : '#ffffff',
     icon: path.join(app.getAppPath(), 'assets', 'icon.png'), autoHideMenuBar: true,
     webPreferences: {
@@ -85,6 +92,7 @@ function openServerSettings() {
       preload: path.join(app.getAppPath(), 'server-preload.cjs'),
     },
   })
+  attachWindowChrome(serverWindow.webContents)
   serverWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   serverWindow.webContents.on('will-navigate', (event) => event.preventDefault())
   serverWindow.on('query-session-end', () => { isQuitting = true })
@@ -122,16 +130,42 @@ function registerServerBridge() {
 }
 
 function registerDesktopBridge() {
-  const handle = (channel, callback) => ipcMain.handle(channel, (event) => {
-    if (!mainWindow || event.sender !== mainWindow.webContents
-      || event.senderFrame !== mainWindow.webContents.mainFrame
-      || !isTrustedUrl(event.senderFrame.url, baseUrl)) throw new Error('Untrusted desktop request')
-    return callback()
+  const localFrontend = (url) => localAppUrl(url) && !/^\/api(?:\/|$)/.test(new URL(url).pathname)
+  const trusted = (event) => Boolean(mainWindow && event.sender === mainWindow.webContents
+    && event.senderFrame === mainWindow.webContents.mainFrame && localFrontend(event.senderFrame.url))
+  const localTransport = (event) => event.sender.session === desktopSession
+    && event.senderFrame === event.sender.mainFrame && localFrontend(event.senderFrame?.url)
+  registerAudioSocketBridge(ipcMain, trusted, () => ({ baseUrl, session: desktopSession }))
+  ipcMain.on('desktop:api-start', (event, id) => { if (localTransport(event)) apiRequests.start(id, event.sender) })
+  ipcMain.on('desktop:api-abort', (event, id) => { if (localTransport(event)) apiRequests.abort(id, event.sender) })
+  ipcMain.on('desktop:runtime', (event) => {
+    event.returnValue = localTransport(event) ? { serverBaseUrl: baseUrl } : null
+  })
+  const handle = (channel, callback) => ipcMain.handle(channel, (event, ...args) => {
+    if (!trusted(event)) throw new Error('Untrusted desktop request')
+    return callback(...args)
   })
   handle('desktop:info', () => ({ version: app.getVersion(), platform: process.platform }))
   handle('desktop:browser-login', () => browserAuth.start())
-  handle('desktop:cancel-browser-login', () => { browserAuth.cancel(); return { status: 'cancelled' } })
+  handle('desktop:cancel-browser-login', async () => { await browserAuth.cancel(); return { status: 'cancelled' } })
   handle('desktop:check-updates', () => updateChecker.check(true))
+  handle('desktop:payment', async (action) => {
+    if (!action || !['redirect', 'form_post'].includes(action.type) || !isWebUrl(action.url)) throw new Error('Invalid checkout')
+    const fields = action.fields ?? {}
+    if (typeof fields !== 'object' || Array.isArray(fields)
+      || Object.values(fields).some((value) => typeof value !== 'string')) throw new Error('Invalid checkout fields')
+    const payment = new BrowserWindow({
+      title: '', ...windowSize(1000, 760), ...windowChromeOptions(), autoHideMenuBar: true,
+      webPreferences: { session: desktopSession, nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true },
+    })
+    paymentContents.add(payment.webContents)
+    if (action.type === 'form_post') {
+      await payment.loadURL(action.url, {
+        postData: [{ type: 'rawData', bytes: Buffer.from(new URLSearchParams(fields).toString()) }],
+        extraHeaders: 'Content-Type: application/x-www-form-urlencoded',
+      })
+    } else await payment.loadURL(action.url)
+  })
 }
 
 function windowSize(width, height) {
@@ -157,20 +191,35 @@ function openBrowser(url) {
 }
 
 function protectContents(contents) {
+  attachWindowChrome(contents)
   contents.on('page-title-updated', (event) => event.preventDefault())
   contents.setWindowOpenHandler(({ url }) => {
-    const action = popupAction(url, baseUrl)
+    const action = popupAction(url, APP_URL)
     if (action === 'external') openBrowser(url)
     return action === 'allow'
       ? { action: 'allow', overrideBrowserWindowOptions: {
         title: '', autoHideMenuBar: true, ...windowSize(1100, 800),
+        ...windowChromeOptions(),
         webPreferences: rendererOptions(),
       } }
       : { action: 'deny' }
   })
-  // Full-page OAuth and payment redirects retain the same browser session.
+  // Application routes stay local; websites open in the system browser.
   const guardNavigation = (event, url) => {
-    if (!isWebUrl(url) && !isTrustedUrl(url, baseUrl)) event.preventDefault()
+    if (paymentContents.has(contents) && isWebUrl(url)) {
+      const target = new URL(url)
+      if (target.origin === new URL(baseUrl).origin && target.pathname === '/subscription') {
+        event.preventDefault()
+        restoreWindow()
+        mainWindow.webContents.send('desktop:payment-return', target.pathname + target.search)
+        setImmediate(() => BrowserWindow.fromWebContents(contents)?.close())
+      }
+      return
+    }
+    if (!isTrustedUrl(url, APP_URL)) {
+      event.preventDefault()
+      if (isWebUrl(url)) openBrowser(url)
+    }
   }
   contents.on('will-navigate', guardNavigation)
   contents.on('will-redirect', guardNavigation)
@@ -182,7 +231,7 @@ async function loadServer() {
   const window = mainWindow
   if (!window || window.isDestroyed()) return
   try {
-    await window.loadURL(baseUrl)
+    await window.loadURL(APP_URL)
   } catch (error) {
     if (error.code !== 'ERR_ABORTED' && !window.isDestroyed()) connection.failed()
   }
@@ -191,12 +240,13 @@ async function loadServer() {
 function createWindow() {
   mainWindow = new BrowserWindow({
     title: '', ...windowSize(1320, 900),
+    ...windowChromeOptions(),
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#111113' : '#ffffff',
     icon: path.join(app.getAppPath(), 'assets', 'icon.png'),
     autoHideMenuBar: true,
     webPreferences: rendererOptions(),
   })
-  connection = new ConnectionStatus(mainWindow, baseUrl, openBrowser)
+  connection = new ConnectionStatus(mainWindow, baseUrl, openBrowser, desktopSession)
   mainWindow.on('query-session-end', () => { isQuitting = true })
   mainWindow.on('session-end', () => { isQuitting = true })
   mainWindow.on('close', (event) => {
@@ -235,15 +285,23 @@ function configureServer(address) {
   desktopSession = session.fromPartition(`persist:aivory-${serverId}`)
   desktopSession.setUserAgent(desktopUserAgent(desktopSession.getUserAgent(), app.getVersion()))
   if (!configuredSessions.has(desktopSession)) {
-    const origin = baseUrl
+    const serverAddress = baseUrl
+    const serverSession = desktopSession
+    desktopSession.protocol.handle('https', createLocalHandler({
+      webDir: path.join(app.getAppPath(), 'web'), baseUrl: serverAddress,
+      requests: apiRequests, session: serverSession,
+      fetch: (url, options) => serverSession.fetch(url, options),
+      fileFetch: (url) => net.fetch(url),
+      onFailure: () => { if (baseUrl === serverAddress) connection?.show('unreachable') },
+    }))
     desktopSession.setPermissionRequestHandler((contents, permission, callback, details) => {
-      callback(isTrustedUrl(contents.getURL(), origin)
-        && permissionAllowed(details.requestingUrl, origin, permission, details.mediaTypes))
+      callback(isTrustedUrl(contents.getURL(), APP_URL)
+        && permissionAllowed(details.requestingUrl, APP_URL, permission, details.mediaTypes))
     })
     desktopSession.setPermissionCheckHandler((contents, permission, requestingOrigin, details) => {
       const mediaTypes = [details.mediaType || 'audio']
-      return Boolean(contents && isTrustedUrl(contents.getURL(), origin)
-        && permissionAllowed(requestingOrigin, origin, permission, mediaTypes))
+      return Boolean(contents && isTrustedUrl(contents.getURL(), APP_URL)
+        && permissionAllowed(requestingOrigin, APP_URL, permission, mediaTypes))
     })
     desktopSession.on('will-download', (_event, item) => {
       item.setSaveDialogOptions({ defaultPath: path.join(app.getPath('downloads'), path.basename(item.getFilename())) })
@@ -255,7 +313,11 @@ function configureServer(address) {
   browserAuth = new BrowserAuth({
     baseUrl, fetch: (url, options) => serverSession.fetch(url, options),
     openBrowser: (url) => shell.openExternal(url),
-    onAuthorized: async () => { if (origin === baseUrl) { restoreWindow(); await loadServer() } },
+    onAuthorized: () => {
+      if (origin !== baseUrl || isQuitting) return
+      restoreWindow()
+      mainWindow.webContents.send('desktop:authorized')
+    },
   })
   updateChecker = new UpdateChecker({
     fetch: (url, options) => net.fetch(url, options),

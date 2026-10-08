@@ -217,6 +217,8 @@
       "label": "パスキー",
       "body": "デバイスの指紋、顔、またはデバイス PIN でサインイン — パスワード不要。",
       "unsupported": "パスキーには HTTPS（または localhost）と WebAuthn 対応ブラウザが必要です。",
+      "desktopHint": "このサーバーのパスキーはブラウザで追加してください。その後、アプリでブラウザ認証を使ってログインできます。",
+      "openBrowser": "ブラウザを開く",
       "add": "パスキーを追加",
       "addTitle": "パスキーを追加",
       "addLead": "ブラウザで Touch ID、Windows Hello、またはデバイス PIN による確認を求められます。",

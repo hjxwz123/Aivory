@@ -24,13 +24,14 @@ import {
 } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip } from '@/components/ui/tooltip'
+import { publicServerUrl } from '@/lib/server-url'
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
 type BusyAction = 'share' | 'revoke' | null
 
 function publicShareUrl(shareId?: string): string {
   if (!shareId || typeof window === 'undefined') return ''
-  return `${window.location.origin}/share/${encodeURIComponent(shareId)}`
+  return publicServerUrl(`/share/${encodeURIComponent(shareId)}`)
 }
 
 interface ShareConversationDialogProps {

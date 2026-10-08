@@ -23,6 +23,7 @@ import { Tooltip } from '@/components/ui/tooltip'
 import { toast } from '@/hooks/use-toast'
 import { copyText } from '@/lib/utils'
 import { AdminPageHeader } from '@/components/admin/admin-page-header'
+import { publicServerUrl } from '@/lib/server-url'
 
 const PAGE_SIZE = 50
 
@@ -31,7 +32,7 @@ function ownerLabel(item: ApiAdminHTMLPreviewShare): string {
 }
 
 function previewUrl(id: string): string {
-  return new URL(apiUrl(`/public/html-previews/${encodeURIComponent(id)}`), window.location.origin).href
+  return publicServerUrl(apiUrl(`/public/html-previews/${encodeURIComponent(id)}`))
 }
 
 export default function AdminHTMLPreviews() {

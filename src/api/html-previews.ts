@@ -1,5 +1,6 @@
 import { api, apiUrl } from './client'
 import { buildPublicHtmlPreviewDocument } from '@/lib/html-preview-document'
+import { publicServerUrl } from '@/lib/server-url'
 
 interface CreatedHTMLPreview {
   id: string
@@ -16,7 +17,7 @@ export const htmlPreviewsApi = {
     const publicPath = `/public/html-previews/${encodeURIComponent(created.id)}`
     return {
       ...created,
-      absoluteUrl: new URL(apiUrl(publicPath), window.location.origin).href,
+      absoluteUrl: publicServerUrl(apiUrl(publicPath)),
     }
   },
 }

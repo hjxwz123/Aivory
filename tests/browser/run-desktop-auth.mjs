@@ -18,6 +18,8 @@ let authenticated = false
 let authorized = null
 let loginRequires2FA = false
 let oauthStarts = 0
+let consentMetadata = true
+let consentExpiresIn = 300
 const browser = await puppeteer.launch({ executablePath, headless: true, args: ['--no-sandbox'] })
 const page = await browser.newPage()
 const errors = []
@@ -41,10 +43,19 @@ page.on('request', (request) => {
     response = { user, access_token: 'desktop-token', request_signing_key: 'desktop-key' }
   } else if (url.pathname === '/api/auth/desktop/authorize') {
     if (request.method() === 'POST') { authorized = JSON.parse(request.postData()).approve; response = { ok: true } }
-    else response = { expires_at: Math.floor(Date.now() / 1000) + 300 }
+    else response = { expires_at: Math.floor(Date.now() / 1000) + consentExpiresIn,
+      ...(consentMetadata ? { client: { user_agent: 'Mozilla/5.0 (Macintosh) AivoryDesktop/2.5.1-beta.7', ip: '203.0.113.10', location: 'SG' } } : {}) }
   } else if (url.pathname === '/api/public/legal-config') response = { contact_email: 'support@example.test' }
+  else if (url.pathname === '/api/notifications') response = { notifications: [], total: 0 }
   else if (url.pathname === '/api/me') response = user
-  else if (['/api/public/oauth-providers', '/api/workspaces', '/api/projects', '/api/skills', '/api/me/skills', '/api/me/prompts'].includes(url.pathname)) response = []
+  else if (url.pathname === '/api/workspaces') response = { workspaces: [] }
+  else if (url.pathname === '/api/models') response = { models: [], default_id: '' }
+  else if (url.pathname === '/api/image-models') response = { models: [], default_id: '' }
+  else if (url.pathname === '/api/conversations') response = { conversations: [], has_more: false }
+  else if (url.pathname === '/api/library/catalog') response = { skills: [], prompts: [], mcp: [] }
+  else if (url.pathname === '/api/me/credits') response = { permanent: 100, available: 100, timed: { balance: 0, grants: [] } }
+  else if (url.pathname === '/api/me/credit-adjustment-notifications') response = { notifications: [] }
+  else if (['/api/public/oauth-providers', '/api/projects', '/api/skills', '/api/me/skills', '/api/me/prompts', '/api/me/mcps', '/api/model-tags', '/api/kbs'].includes(url.pathname)) response = []
   void request.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(response) })
 })
 await page.evaluateOnNewDocument(() => { localStorage.setItem('aivory.lang', 'zh'); localStorage.setItem('aivory.theme', 'light') })
@@ -64,6 +75,8 @@ try {
     await page.waitForFunction(() => location.pathname === '/desktop/authorize')
     await page.waitForFunction(() => document.body.innerText.includes('授权桌面版登录'))
     assert.ok((await page.$eval('.login-content', (el) => el.innerText)).includes(user.email))
+    assert.ok((await page.$eval('.login-content', (el) => el.innerText)).includes('App 版 2.5.1-beta.7 · macOS'))
+    assert.ok((await page.$eval('.login-content', (el) => el.innerText)).includes('203.0.113.10 · SG'))
     assert.equal(authorized, null, 'Authorization must require an explicit confirmation')
     await page.$eval('.login-submit', (el) => el.click())
     await page.waitForFunction(() => document.body.innerText.includes('桌面版已授权'))
@@ -103,15 +116,39 @@ try {
       await page.waitForFunction(() => document.querySelector('.login-submit')?.textContent?.length > 3)
       assert.equal(await page.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth), true)
       assert.equal(await page.evaluate(() => document.scrollingElement.scrollHeight <= innerHeight), true)
+      const consentActionsVisible = await page.evaluate(() => {
+        const panel = document.querySelector('.login-panel').getBoundingClientRect()
+        return [...document.querySelectorAll('.login-authorization button')].every((button) => {
+          const rect = button.getBoundingClientRect()
+          return rect.top >= panel.top && rect.bottom <= panel.bottom
+        })
+      })
+      assert.equal(consentActionsVisible, true, `Consent actions must be visible in ${lang} at ${viewport.width}x${viewport.height}`)
     }
   }
   await page.screenshot({ path: path.join(tmpdir(), 'aivory-desktop-authorization.png') })
   authorized = null
-  await page.$eval('.login-submit + button', (el) => el.click())
+  await page.$eval('.login-authorization-actions button:first-child', (el) => el.click())
   await page.waitForFunction(() => document.querySelector('.login-back'))
   assert.equal(authorized, false)
   assert.deepEqual(errors, [])
   console.log('PASS: cancellation and five-language consent layout at narrow and short viewports')
+
+  consentMetadata = false
+  await page.goto(authUrl)
+  await page.waitForSelector('.login-submit')
+  assert.equal(await page.$('dl'), null)
+  await page.$eval('.login-authorization-actions button:first-child', el => el.click())
+  await page.waitForSelector('.login-back')
+  console.log('PASS: older servers without consent metadata remain usable')
+  consentMetadata = true
+  consentExpiresIn = 2
+  await page.goto(authUrl)
+  await page.waitForSelector('.login-submit')
+  await page.waitForSelector('.login-error')
+  assert.equal(await page.$('.login-submit'), null, 'Expired consent must remove the approval action without a page reload')
+  consentExpiresIn = 300
+  console.log('PASS: consent expires in place and prevents stale approval')
 
   authenticated = false
   policy.providers = [{ id: 'github-fixture', name: 'GitHub fixture', kind: 'github', icon: '' }]
@@ -142,6 +179,7 @@ try {
     assert.equal(await page.$('#login-title.login-title'), null, 'Desktop login must hide the form welcome heading')
     assert.equal(await page.$('.login-content .login-intro'), null, 'Desktop login must hide the form welcome subtitle')
     assert.ok(await page.$('#login-title.sr-only'), 'Desktop login retains an accessible section heading')
+    assert.equal(await page.$('.login-remember'), null, 'Desktop must not imply it has a browser password manager')
     assert.equal(await page.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth), true)
     assert.equal(await page.evaluate(() => document.scrollingElement.scrollHeight <= innerHeight), true)
     const overflow = await browserButton.evaluate((button) => button.scrollWidth > button.clientWidth + 1)
@@ -183,4 +221,23 @@ try {
   assert.ok(await page.$('.login-content .login-intro'), 'Desktop two-factor verification retains its instructions')
   assert.deepEqual(errors, [])
   console.log('PASS: desktop two-factor verification retains its required instructions')
+
+  loginRequires2FA = false
+  for (const destination of ['/projects', '/files']) {
+    authenticated = false
+    await page.goto(`${baseUrl}${destination}`)
+    await page.waitForSelector('#email')
+    assert.equal(new URL(page.url()).pathname, '/login')
+    const documentId = await page.evaluate(() => { window.documentMarker = crypto.randomUUID(); return window.documentMarker })
+    authenticated = true
+    await page.evaluate(() => window.dispatchEvent(new Event('aivory:desktop-authorized')))
+    await page.waitForFunction((path) => location.pathname === path, {}, destination)
+    assert.equal(await page.evaluate(() => window.documentMarker), documentId)
+  }
+  console.log('PASS: native authorization hydrates in place and retains the intended app destination')
+  assert.deepEqual(errors, [])
+} catch (error) {
+  await page.screenshot({ path: '/tmp/aivory-desktop-auth-review-failure.png' })
+  console.error({ url: page.url(), errors, content: await page.$eval('body', el => el.innerText) })
+  throw error
 } finally { await browser.close() }

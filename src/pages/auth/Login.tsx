@@ -10,6 +10,7 @@ import { OAuthButtons } from '@/components/auth/oauth-buttons'
 import { PuzzleCaptchaDialog } from '@/components/auth/puzzle-captcha-dialog'
 import { authErrorText } from '@/lib/auth-errors'
 import { isPasskeyAvailable } from '@/lib/passkey'
+import { safeAuthRedirect } from '@/lib/auth-redirect'
 import '@/lib/desktop'
 import {
   loadRememberedPassword,
@@ -17,15 +18,6 @@ import {
   setRememberPasswordPreference,
   storeRememberedPassword,
 } from '@/lib/password-credentials'
-
-/**
- * Only follow a post-login `from` when it's a root-relative internal path
- * (`/…`). Rejecting the protocol-relative `//evil.com` form (and any absolute
- * URL) blocks an open-redirect via crafted `location.state` (§ auth E2).
- */
-function safeRedirect(from: unknown): string {
-  return typeof from === 'string' && from.startsWith('/') && !from.startsWith('//') ? from : '/'
-}
 
 export default function Login() {
   const navigate = useNavigate()
@@ -67,7 +59,7 @@ export default function Login() {
   }, [desktop])
 
   async function browserLogin() {
-    if (!desktop) return
+    if (!desktop || loading) return
     const attempt = ++browserAttempt.current
     setBrowserBusy(true)
     const result = await desktop.loginInBrowser().catch(() => ({ status: 'failed' as const }))
@@ -85,6 +77,7 @@ export default function Login() {
   const handledOAuthError = useRef('')
 
   useEffect(() => {
+    if (desktop) return
     let active = true
     void loadRememberedPassword().then((credential) => {
       if (!active || !credential) return
@@ -94,7 +87,7 @@ export default function Login() {
     return () => {
       active = false
     }
-  }, [])
+  }, [desktop])
 
   // Surface a failed OAuth round-trip (the callback redirects here with
   // ?oauth_error=…), then strip the param so a refresh doesn't re-toast.
@@ -140,10 +133,13 @@ export default function Login() {
 
   async function finishLogin(token: string | null) {
     setLoading(true)
+    browserAttempt.current += 1
+    if (desktop) await desktop.cancelBrowserLogin().catch(() => {})
+    setBrowserBusy(false)
     const ok = await login(email, pw, loginCaptchaRequired ? token ?? undefined : undefined)
     setLoading(false)
     if (ok === '2fa') {
-      if (rememberPassword) void storeRememberedPassword(email, pw)
+      if (rememberPassword && !desktop) void storeRememberedPassword(email, pw)
       // Password accepted; the 2FA code form now takes over.
       setErrors({})
       setCode('')
@@ -174,9 +170,9 @@ export default function Login() {
       setErrors({ general: authErrorText(t, err, t('errors.required')) })
       return
     }
-    if (rememberPassword) void storeRememberedPassword(email, pw)
+    if (rememberPassword && !desktop) void storeRememberedPassword(email, pw)
     toast.success(t('login.welcome'), t('login.signingIn'))
-    const from = safeRedirect((location.state as { from?: string } | null)?.from)
+    const from = safeAuthRedirect((location.state as { from?: string } | null)?.from)
     navigate(from, { replace: true })
   }
 
@@ -197,7 +193,7 @@ export default function Login() {
       return
     }
     toast.success(t('login.welcome'), t('login.signingIn'))
-    const from = safeRedirect((location.state as { from?: string } | null)?.from)
+    const from = safeAuthRedirect((location.state as { from?: string } | null)?.from)
     navigate(from, { replace: true })
   }
 
@@ -215,7 +211,7 @@ export default function Login() {
       return
     }
     toast.success(t('login.welcome'), t('login.signingIn'))
-    const from = safeRedirect((location.state as { from?: string } | null)?.from)
+    const from = safeAuthRedirect((location.state as { from?: string } | null)?.from)
     navigate(from, { replace: true })
   }
 
@@ -270,7 +266,7 @@ export default function Login() {
 
       {desktop ? (
         <div className="mb-4 space-y-2">
-          <Button variant="secondary" className="w-full border-transparent bg-[var(--color-bg-muted)]" loading={browserBusy} onClick={() => void browserLogin()} leadingIcon={<ExternalLink size={16} aria-hidden />}>
+          <Button variant="secondary" className="w-full border-transparent bg-[var(--color-bg-muted)]" loading={browserBusy} disabled={loading} onClick={() => void browserLogin()} leadingIcon={<ExternalLink size={16} aria-hidden />}>
             {t('desktop.browserLogin')}
           </Button>
           {browserBusy ? (
@@ -350,7 +346,7 @@ export default function Login() {
             required
             error={errors.pw}
           />
-          <label className="login-remember">
+          {!desktop ? <label className="login-remember">
             <input
               type="checkbox"
               checked={rememberPassword}
@@ -361,7 +357,7 @@ export default function Login() {
               }}
             />
             <span>{t('login.rememberPassword')}</span>
-          </label>
+          </label> : null}
           <Button type="submit" loading={loading} disabled={passkeyBusy} className="login-submit">
             {t('login.submit')}
           </Button>

@@ -217,6 +217,8 @@
       "label": "通行密钥",
       "body": "使用设备指纹、面容或设备 PIN 登录，无需密码。",
       "unsupported": "通行密钥需要 HTTPS（或 localhost）及支持 WebAuthn 的浏览器。",
+      "desktopHint": "请在浏览器中为当前服务器添加通行密钥，之后可通过浏览器授权登录 App。",
+      "openBrowser": "打开浏览器",
       "add": "添加通行密钥",
       "addTitle": "添加通行密钥",
       "addLead": "浏览器将请求通过 Touch ID、Windows Hello 或设备 PIN 进行验证。",

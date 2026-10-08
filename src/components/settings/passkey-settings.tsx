@@ -9,7 +9,7 @@
  */
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { KeyRound, X } from 'lucide-react'
+import { ExternalLink, KeyRound, X } from 'lucide-react'
 import { authApi, ApiError } from '@/api'
 import type { ApiPasskey } from '@/api/types'
 import { PasskeyError, createPasskeyCredential, isPasskeyAvailable } from '@/lib/passkey'
@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/dialog'
 import { toast } from '@/hooks/use-toast'
 import { useLanguage } from '@/store/language'
+import { publicServerUrl } from '@/lib/server-url'
 
 function deviceDate(unixSec: number, locale: string): string {
   try {
@@ -51,8 +52,9 @@ export function PasskeySettings() {
   const { t } = useTranslation(['settings', 'common'])
   const lang = useLanguage((s) => s.lang)
   const supported = isPasskeyAvailable()
+  const desktop = Boolean(window.aivoryDesktop)
   const [passkeys, setPasskeys] = useState<ApiPasskey[]>([])
-  const [loading, setLoading] = useState(supported)
+  const [loading, setLoading] = useState(true)
   const [addOpen, setAddOpen] = useState(false)
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
@@ -60,20 +62,25 @@ export function PasskeySettings() {
 
   useEffect(() => {
     let active = true
-    if (!supported) return
-    void authApi
-      .passkeys()
-      .then((rows) => {
-        if (active) setPasskeys(rows)
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (active) setLoading(false)
-      })
+    let requestVersion = 0
+    const refresh = () => {
+      const version = ++requestVersion
+      void authApi.passkeys()
+        .then((rows) => {
+          if (active && version === requestVersion) setPasskeys(rows)
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          if (active && version === requestVersion) setLoading(false)
+        })
+    }
+    refresh()
+    if (desktop) window.addEventListener('focus', refresh)
     return () => {
       active = false
+      window.removeEventListener('focus', refresh)
     }
-  }, [supported])
+  }, [desktop])
 
   async function addPasskey() {
     setBusy(true)
@@ -183,9 +190,19 @@ export function PasskeySettings() {
                   {t('settings:account.passkey.add')}
                 </span>
                 <div className="mt-0.5 text-[12px] text-[var(--color-fg-subtle)]">
-                  {t('settings:account.passkey.unsupported')}
+                  {t(desktop ? 'settings:account.passkey.desktopHint' : 'settings:account.passkey.unsupported')}
                 </div>
               </div>
+              {desktop ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => window.open(publicServerUrl('/settings/account'), '_blank', 'noopener,noreferrer')}
+                  leadingIcon={<ExternalLink size={14} aria-hidden />}
+                >
+                  {t('settings:account.passkey.openBrowser')}
+                </Button>
+              ) : null}
             </div>
           )}
         </>

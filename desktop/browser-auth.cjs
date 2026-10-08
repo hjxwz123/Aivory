@@ -6,10 +6,20 @@ class BrowserAuth {
     Object.assign(this, { baseUrl, fetch, openBrowser, onAuthorized })
   }
 
-  cancel() { this.controller?.abort() }
+  async cancel() {
+    this.controller?.abort()
+    // Wait for any token exchange to settle before a password login can write
+    // its session cookies. A cancelled attempt must never replace that login.
+    await this.running
+  }
 
-  async start() {
-    if (this.controller) return { status: 'busy' }
+  start() {
+    if (this.controller) return Promise.resolve({ status: 'busy' })
+    this.running = this.run()
+    return this.running
+  }
+
+  async run() {
     const controller = new AbortController()
     this.controller = controller
     const timeout = setTimeout(() => controller.abort(new Error('expired')), 5 * 60 * 1000)
@@ -23,7 +33,9 @@ class BrowserAuth {
         signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]),
       })
       if (!response.ok) throw new Error(response.status === 404 && path.endsWith('/token') ? 'expired' : 'failed')
-      return response.json()
+      const result = await response.json()
+      controller.signal.throwIfAborted()
+      return result
     }
     try {
       const started = await request('/api/auth/desktop/start', { challenge })

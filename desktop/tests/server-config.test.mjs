@@ -52,8 +52,10 @@ test('empty build URL prepares a generic app with local setup and retina tray as
     if (previous === undefined) delete process.env.AIVORY_DESKTOP_BASE_URL
     else process.env.AIVORY_DESKTOP_BASE_URL = previous
   })
-  assert.equal((await prepareApp(dir)).baseUrl, '')
-  for (const file of ['server.html', 'server-preload.cjs', 'server-config.cjs', 'assets/trayTemplate.png', 'assets/trayTemplate@2x.png']) {
+  const webDir = directory(t)
+  writeFileSync(path.join(webDir, 'index.html'), '<html>Bundled frontend</html>')
+  assert.equal((await prepareApp(dir, { webDir })).baseUrl, '')
+  for (const file of ['server.html', 'server-preload.cjs', 'server-config.cjs', 'web/index.html', 'local-web.cjs', 'audio-socket.cjs', 'node_modules/ws/index.js', 'assets/trayTemplate.png', 'assets/trayTemplate@2x.png']) {
     assert.ok(readFileSync(path.join(dir, file)).length)
   }
 })

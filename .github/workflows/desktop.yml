@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       server_base_url:
-        description: 'Optional default website URL (without /api). Leave empty for a generic package with first-launch setup.'
+        description: 'Optional API server origin (without /api). Frontend is bundled locally. Leave empty for first-launch setup.'
         required: false
         default: ''
         type: string
@@ -43,7 +43,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       AIVORY_DESKTOP_BASE_URL: ${{ inputs.server_base_url }}
-      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      CSC_IDENTITY_AUTO_DISCOVERY: ${{ matrix.os == 'macos-latest' && secrets.MAC_CSC_LINK != '' && 'true' || 'false' }}
+      CSC_LINK: ${{ matrix.os == 'macos-latest' && secrets.MAC_CSC_LINK || '' }}
+      CSC_KEY_PASSWORD: ${{ matrix.os == 'macos-latest' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
+      APPLE_ID: ${{ matrix.os == 'macos-latest' && secrets.APPLE_ID || '' }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.os == 'macos-latest' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+      APPLE_TEAM_ID: ${{ matrix.os == 'macos-latest' && secrets.APPLE_TEAM_ID || '' }}
       RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
     defaults:
       run:
@@ -56,7 +61,11 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: desktop/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci
       - name: Install desktop dependencies
         run: npm ci --prefix desktop
       - name: Install Linux packaging dependencies
@@ -83,12 +92,19 @@ jobs:
             if (name !== file) renameSync(`desktop/release/${file}`, `desktop/release/${name}`)
           }
           NODE
+      - name: Verify macOS bundle signatures
+        if: runner.os == 'macOS'
+        run: node desktop/verify-mac.mjs
       - name: Verify installer files
         env:
           EXPECTED_PLATFORM: ${{ matrix.name }}
         run: |
           node --input-type=module <<'NODE'
           import { readdirSync, readFileSync, statSync } from 'node:fs'
+          import { createRequire } from 'node:module'
+          import path from 'node:path'
+          const require = createRequire(path.resolve('desktop/package.json'))
+          const asar = require('@electron/asar')
           const version = JSON.parse(readFileSync('package.json')).version
           const platform = process.env.EXPECTED_PLATFORM.replace('windows-', 'win-').replace('macos-', 'mac-')
           const extensions = platform.startsWith('win-') ? ['exe'] : platform.startsWith('mac-') ? ['dmg', 'zip'] : ['AppImage', 'deb']
@@ -99,6 +115,21 @@ jobs:
           }
           const config = JSON.parse(readFileSync('desktop/generated/app/config.json'))
           if (!process.env.AIVORY_DESKTOP_BASE_URL && config.baseUrl !== '') throw new Error('Official installers must use first-launch server setup')
+          const entry = readFileSync('desktop/generated/app/web/index.html', 'utf8')
+          if (!entry.includes('/assets/') || !readdirSync('desktop/generated/app/web/assets').some(file => file.endsWith('.js'))) throw new Error('Desktop frontend must be bundled')
+          const archives = []
+          for (const folder of readdirSync('desktop/release', { withFileTypes: true }).filter(item => item.isDirectory())) {
+            const root = `desktop/release/${folder.name}`
+            const archive = platform.startsWith('mac-') ? `${root}/Aivory.app/Contents/Resources/app.asar` : `${root}/resources/app.asar`
+            try { if (statSync(archive).isFile()) archives.push(archive) } catch { /* Other build directories. */ }
+          }
+          if (!archives.length) throw new Error('Missing packaged application archive')
+          for (const archive of archives) {
+            const files = asar.listPackage(archive).map(file => file.replaceAll('\\', '/'))
+            for (const file of ['/web/index.html', '/local-web.cjs', '/api-requests.cjs', '/audio-socket.cjs', '/node_modules/ws/index.js']) {
+              if (!files.includes(file)) throw new Error(`Missing bundled runtime: ${file}`)
+            }
+          }
           NODE
       - uses: actions/upload-artifact@v4
         with:

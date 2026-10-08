@@ -13,6 +13,7 @@ import {
   type UploadProgress,
 } from './client'
 import { withRequestActivity, type RequestActivityMode } from '@/lib/request-activity'
+import { apiFetch } from '@/lib/api-fetch'
 import type {
   ApiAdminOverview,  ApiAdminMessageFeedbackPage,
   ApiAdminOnboarding,
@@ -264,7 +265,7 @@ export const authApi = {
   myFileContentBlob: async (source: 'file' | 'document', id: string, signal?: AbortSignal): Promise<Blob> => {
     assertNetworkOnline()
     const path = `/me/files/content?source=${source}&id=${encodeURIComponent(id)}`
-    const res = await fetch(apiUrl(path), {
+    const res = await apiFetch(apiUrl(path), {
       credentials: 'include',
       headers: await authenticatedRequestHeaders(path),
       signal,
@@ -426,7 +427,7 @@ export const toolsApi = {
 export const imageApi = {
   artifactBlob: async (id: string, signal?: AbortSignal): Promise<Blob> => {
     const path = `/artifacts/${encodeURIComponent(id)}`
-    const response = await fetch(apiUrl(path), {
+    const response = await apiFetch(apiUrl(path), {
       credentials: 'include',
       headers: await authenticatedRequestHeaders(path),
       signal,
@@ -1649,7 +1650,7 @@ export const adminApi = {
     withRequestActivity(async () => {
       assertNetworkOnline()
       const path = `/admin/files/content?source=${source}&id=${encodeURIComponent(id)}`
-      const res = await fetch(apiUrl(path), {
+      const res = await apiFetch(apiUrl(path), {
         credentials: 'include',
         headers: await authenticatedRequestHeaders(path),
         signal,
@@ -1701,7 +1702,7 @@ export const adminApi = {
     withRequestActivity(async () => {
       assertNetworkOnline()
       const path = `/admin/user-feedback/${encodeURIComponent(id)}/screenshot`
-      const res = await fetch(apiUrl(path), {
+      const res = await apiFetch(apiUrl(path), {
         credentials: 'include',
         headers: await authenticatedRequestHeaders(path),
         signal,
@@ -1766,7 +1767,7 @@ export const adminApi = {
     withRequestActivity(async () => {
       assertNetworkOnline()
       const path = `/admin/backup/export${includeFiles ? '?files=1' : ''}`
-      const res = await fetch(apiUrl(path), {
+      const res = await apiFetch(apiUrl(path), {
         credentials: 'include',
         headers: await authenticatedRequestHeaders(path),
       })
@@ -1793,7 +1794,7 @@ export const adminApi = {
     withRequestActivity(async () => {
       assertNetworkOnline()
       const path = `/admin/backup/archives/${encodeURIComponent(name)}`
-      const res = await fetch(apiUrl(path), {
+      const res = await apiFetch(apiUrl(path), {
         credentials: 'include',
         headers: await authenticatedRequestHeaders(path),
       })
@@ -1827,7 +1828,7 @@ export const adminApi = {
     withRequestActivity(async () => {
       assertNetworkOnline()
       const path = '/admin/config/export'
-      const res = await fetch(apiUrl(path), {
+      const res = await apiFetch(apiUrl(path), {
         credentials: 'include',
         headers: await authenticatedRequestHeaders(path),
       })

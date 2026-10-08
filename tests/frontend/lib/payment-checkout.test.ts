@@ -22,6 +22,14 @@ function stubWindow(assign = vi.fn()) {
 }
 
 describe('executePaymentCheckoutAction', () => {
+  it('opens desktop checkout on the configured server without navigating the local app', async () => {
+    const assign = stubWindow()
+    const openPayment = vi.fn().mockResolvedValue(undefined)
+    Object.assign(window, { aivoryDesktop: { serverBaseUrl: 'https://server.example/', openPayment } })
+    await executePaymentCheckoutAction({ type: 'form_post', url: '/checkout', fields: { order: '123' } })
+    expect(openPayment).toHaveBeenCalledWith({ type: 'form_post', url: 'https://server.example/checkout', fields: { order: '123' } })
+    expect(assign).not.toHaveBeenCalled()
+  })
   it('navigates to a validated redirect checkout', () => {
     const assign = stubWindow()
 

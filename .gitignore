@@ -1,5 +1,6 @@
 node_modules
 dist
+dist-desktop
 dist-ssr
 /desktop/generated/
 /desktop/release/

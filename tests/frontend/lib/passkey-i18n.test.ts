@@ -47,6 +47,8 @@ describe('passkey translations', () => {
         'label',
         'body',
         'unsupported',
+        'desktopHint',
+        'openBrowser',
         'add',
         'addTitle',
         'addLead',

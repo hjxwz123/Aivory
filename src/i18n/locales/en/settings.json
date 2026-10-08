@@ -217,6 +217,8 @@
       "label": "Passkeys",
       "body": "Sign in with your device fingerprint, face, or device PIN — no password.",
       "unsupported": "Passkeys need HTTPS (or localhost) and a browser with WebAuthn support.",
+      "desktopHint": "Add passkeys in your browser for this server. Then use browser sign-in in the app.",
+      "openBrowser": "Open browser",
       "add": "Add passkey",
       "addTitle": "Add a passkey",
       "addLead": "Your browser will ask you to verify with Touch ID, Windows Hello, or your device PIN.",

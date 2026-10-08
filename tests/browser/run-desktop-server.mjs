@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
-import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, writeFile, rm, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
@@ -8,8 +8,11 @@ import { createRequire } from 'node:module'
 import { once } from 'node:events'
 import puppeteer from 'puppeteer-core'
 import { prepareApp } from '../../desktop/prepare.mjs'
+import localWeb from '../../desktop/local-web.cjs'
+const { APP_URL } = localWeb
 
 const requireDesktop = createRequire(new URL('../../desktop/package.json', import.meta.url))
+const currentVersion = JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8')).version
 const electron = requireDesktop('electron')
 const temp = await mkdtemp(path.join(tmpdir(), 'aivory-desktop-server-'))
 const appDirectory = path.join(temp, 'app')
@@ -26,9 +29,12 @@ const fixture = createServer((req, res) => {
     return
   }
   if (req.url === '/api/public/desktop-update') { res.end('{"enabled":false}'); return }
-  res.setHeader('Set-Cookie', 'configured_session=true; HttpOnly; SameSite=Lax; Path=/; Max-Age=3600')
-  res.setHeader('Content-Type', 'text/html')
-  res.end('<html lang="en"><body><h1 id="fixture">Server</h1><textarea id="draft"></textarea></body></html>')
+  if (req.url === '/api/init') {
+    res.setHeader('Set-Cookie', 'configured_session=true; HttpOnly; SameSite=Lax; Path=/; Max-Age=3600')
+    res.end('{}')
+    return
+  }
+  res.writeHead(404); res.end('API-only server')
 })
 const otherFixture = createServer((req, res) => {
   res.setHeader('Content-Type', 'application/json')
@@ -82,7 +88,12 @@ try {
   const baseUrl = `http://127.0.0.1:${await listen(fixture)}/`
   const otherUrl = `http://127.0.0.1:${await listen(otherFixture)}/`
   process.env.AIVORY_DESKTOP_BASE_URL = ''
-  await prepareApp(appDirectory)
+  const webDir = path.join(temp, 'web')
+  await mkdir(webDir)
+  await writeFile(path.join(webDir, 'index.html'), `<html lang="en"><body><h1 id="fixture">Bundled frontend</h1><textarea id="draft"></textarea><script>
+    fetch('/api/init').then(() => { document.body.dataset.ready='true' });
+    </script></body></html>`)
+  await prepareApp(appDirectory, { webDir })
   assert.equal(JSON.parse(await readFile(path.join(appDirectory, 'config.json'))).baseUrl, '')
   await writeFile(path.join(appDirectory, 'test-bootstrap.cjs'), `
     const { app, Menu, ipcMain, nativeTheme } = require('electron')
@@ -134,17 +145,19 @@ try {
   await setup.evaluate(() => { document.getElementById('server-url').value = 'https://example.com/api' })
   await setup.$eval('#save', (button) => button.click())
   await setup.waitForFunction(() => document.getElementById('server-url').getAttribute('aria-invalid') === 'true')
-  const target = browser.waitForTarget((target) => target.url() === baseUrl)
+  const target = browser.waitForTarget((target) => target.url() === APP_URL)
   await setup.evaluate((url) => { document.getElementById('server-url').value = url }, baseUrl)
   await setup.$eval('#save', (button) => button.click())
   let page = await (await target).page()
   await page.waitForSelector('#fixture')
+  await page.waitForFunction(() => document.body.dataset.ready === 'true')
   assert.equal(JSON.parse(await readFile(path.join(profile, 'server.json'))).baseUrl, baseUrl)
   assert.equal(await page.evaluate(() => typeof window.desktopServer), 'undefined')
   assert.equal(await page.evaluate((url) => window.serverSmoke.forbiddenSave(url).then(() => false, () => true), otherUrl), true)
-  assert.match(await page.evaluate(() => navigator.userAgent), /AivoryDesktop\/2\.5\.1-beta\.6/)
-  assert.match(await page.evaluate(() => fetch('/api/client').then((response) => response.json()).then((client) => client.agent)), /AivoryDesktop\/2\.5\.1-beta\.6/)
-  assert.match(agents.find((request) => request.url === '/')?.agent, /AivoryDesktop\//)
+  assert.ok((await page.evaluate(() => navigator.userAgent)).includes(`AivoryDesktop/${currentVersion}`))
+  assert.ok((await page.evaluate(() => fetch('/api/client').then((response) => response.json()).then((client) => client.agent))).includes(`AivoryDesktop/${currentVersion}`))
+  assert.equal(agents.some((request) => request.url === '/'), false)
+  assert.match(agents.find((request) => request.url === '/api/init')?.agent, /AivoryDesktop\//)
   console.log('PASS: empty build URL shows responsive setup; tray icon and renderer/request app identity are present; remote configuration IPC is rejected')
   await page.evaluate(() => { document.getElementById('draft').value = 'Keep this draft' })
   const settings = await openSettings(page)
@@ -154,19 +167,21 @@ try {
   assert.equal(await page.$eval('#draft', (input) => input.value), 'Keep this draft')
   await stop()
   await writeFile(path.join(appDirectory, 'config.json'), JSON.stringify({ baseUrl: 'https://invalid-default.example/' }))
-  page = await launch(`:${new URL(baseUrl).port}/`)
+  page = await launch(APP_URL)
   assert.match(await page.evaluate(() => fetch('/api/client').then((r) => r.json()).then((client) => client.cookie)), /configured_session=true/)
   await stop()
   await writeFile(path.join(appDirectory, 'config.json'), '{"baseUrl":""}')
-  page = await launch(`:${new URL(baseUrl).port}/`)
+  page = await launch(APP_URL)
   console.log('PASS: restart and generic/different-default updates reuse saved URL and cookies; opening settings preserves the draft')
   const changing = await openSettings(page)
-  const switched = browser.waitForTarget((target) => target.url() === otherUrl)
+  const oldTarget = page.target()
+  const switched = browser.waitForTarget((target) => target !== oldTarget && target.url() === APP_URL)
   await changing.evaluate((url) => { document.getElementById('server-url').value = url }, otherUrl)
   await changing.$eval('#save', (button) => button.click())
   const second = await (await switched).page()
-  await second.waitForFunction(() => document.body.textContent.includes('cookie'))
-  assert.equal(JSON.parse(await second.$eval('body', (body) => body.textContent)).cookie, '')
+  await second.waitForSelector('#fixture')
+  assert.equal(await second.evaluate(() => fetch('/api/client').then(r=>r.json()).then(r=>r.cookie)), '')
+  assert.equal(await second.evaluate(() => window.aivoryDesktop.serverBaseUrl), otherUrl)
   assert.equal(JSON.parse(await readFile(path.join(profile, 'server.json'))).baseUrl, otherUrl)
   assert.equal(page.isClosed(), true)
   console.log('PASS: changing server destroys the old renderer and isolates login cookies')

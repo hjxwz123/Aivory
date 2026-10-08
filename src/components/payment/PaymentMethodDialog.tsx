@@ -109,7 +109,7 @@ export function PaymentMethodDialog({
         target_id: targetId,
         ...(targetType === 'user_group' && billingCycle ? { billing_cycle: billingCycle } : {}),
       }, controller.signal)
-      executePaymentCheckoutAction(result.action)
+      await executePaymentCheckoutAction(result.action)
     } catch (error) {
       if (controller.signal.aborted && !timedOut) return
       setCheckoutError(timedOut ? t('payment.checkoutTimeout') : checkoutErrorMessage(error))

@@ -217,6 +217,8 @@
       "label": "Clés d'accès",
       "body": "Connectez-vous avec l'empreinte, le visage ou le code PIN de votre appareil — sans mot de passe.",
       "unsupported": "Les clés d'accès nécessitent HTTPS (ou localhost) et un navigateur compatible WebAuthn.",
+      "desktopHint": "Ajoutez une clé d'accès pour ce serveur dans votre navigateur, puis utilisez la connexion par navigateur dans l'application.",
+      "openBrowser": "Ouvrir le navigateur",
       "add": "Ajouter une clé d'accès",
       "addTitle": "Ajouter une clé d'accès",
       "addLead": "Votre navigateur demandera une vérification Touch ID, Windows Hello ou code PIN de l'appareil.",

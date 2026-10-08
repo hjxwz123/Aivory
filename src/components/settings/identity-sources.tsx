@@ -104,6 +104,13 @@ export function IdentitySources() {
     }
   }, [load, userId])
 
+  useEffect(() => {
+    if (!window.aivoryDesktop) return
+    const refreshAfterBrowser = () => { void load(true) }
+    window.addEventListener('focus', refreshAfterBrowser)
+    return () => window.removeEventListener('focus', refreshAfterBrowser)
+  }, [load])
+
   // Turn the OAuth callback's ?linked / ?link_error into a toast, then strip the
   // params so a refresh doesn't re-fire it. Runs once (StrictMode double-invoke
   // guarded by the ref).
@@ -131,7 +138,12 @@ export function IdentitySources() {
     setBusy('link:' + p.id)
     try {
       const { authorize_url } = await authApi.linkIdentityStart(p.id)
-      window.location.href = authorize_url // leaves the page; no need to reset busy
+      if (window.aivoryDesktop) {
+        window.open(authorize_url, '_blank', 'noopener,noreferrer')
+        setBusy(null)
+      } else {
+        window.location.href = authorize_url // leaves the page; no need to reset busy
+      }
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('settings:account.identities.linkFailed'))
       setBusy(null)

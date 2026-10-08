@@ -205,6 +205,30 @@ afterEach(async () => {
 }, TEST_TIMEOUT_MS)
 
 describe('startVoiceStream', () => {
+  it('uses the native desktop transport for PCM and incremental transcripts', async () => {
+    let emit!: (event: { type: 'open' | 'message' | 'error' | 'close'; data?: string }) => void
+    const send = vi.fn()
+    const close = vi.fn()
+    Object.assign(window, { aivoryDesktop: { connectAudioSocket: (listener: typeof emit) => { emit = listener; return { send, close } } } })
+    const onPartial = vi.fn()
+    const onFinal = vi.fn()
+    const { startVoiceStream } = await import('@/lib/audio-stream')
+    pendingStart = startVoiceStream({ onPartial, onFinal })
+    activeController = await pendingStart
+    expect(FakeWebSocket.instances).toHaveLength(0)
+    latestContext().processor.emit(samples(3_200, 0.2))
+    expect(send).not.toHaveBeenCalled()
+    emit({ type: 'open' })
+    emit({ type: 'message', data: '{"type":"ready"}' })
+    expect(send.mock.calls[0][0]).toBeInstanceOf(ArrayBuffer)
+    expect(send.mock.calls[0][0].byteLength).toBe(6_400)
+    emit({ type: 'message', data: '{"type":"partial","text":"hello"}' })
+    expect(onPartial).toHaveBeenCalledWith('hello')
+    emit({ type: 'message', data: '{"type":"final","text":"hello world"}' })
+    expect(onFinal).toHaveBeenCalledWith('hello world', undefined)
+    expect(close).toHaveBeenCalledOnce()
+  }, TEST_TIMEOUT_MS)
+
   it('buffers opening PCM until the backend reports ready', async () => {
     const { startVoiceStream } = await import('@/lib/audio-stream')
     pendingStart = startVoiceStream({})

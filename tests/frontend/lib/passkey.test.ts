@@ -1,8 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   bufferToBase64Url,
   base64UrlToBuffer,
   serializePasskeyCredential,
+  isPasskeyAvailable,
+  createPasskeyCredential,
 } from '@/lib/passkey'
 
 function bytes(value: number[]): ArrayBuffer {
@@ -22,6 +24,25 @@ describe('passkey base64url helpers', () => {
       const raw = bytes(Array.from({ length }, (_, index) => index * 37))
       expect(new Uint8Array(base64UrlToBuffer(bufferToBase64Url(raw)))).toEqual(new Uint8Array(raw))
     }
+  })
+})
+
+describe('passkey origin capability', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('supports a secure website but never runs WebAuthn on the bundled desktop origin', async () => {
+    const create = vi.fn()
+    vi.stubGlobal('navigator', { credentials: { create } })
+    vi.stubGlobal('PublicKeyCredential', class {})
+    vi.stubGlobal('window', { isSecureContext: true })
+    expect(isPasskeyAvailable()).toBe(true)
+    vi.stubGlobal('window', { isSecureContext: true, aivoryDesktop: {} })
+    expect(isPasskeyAvailable()).toBe(false)
+    await expect(createPasskeyCredential({ publicKey: {
+      challenge: 'AQID', rp: { id: 'server.example', name: 'Aivory' },
+      user: { id: 'AQID', name: 'user', displayName: 'User' },
+    } })).rejects.toMatchObject({ code: 'passkey_unavailable' })
+    expect(create).not.toHaveBeenCalled()
   })
 })
 

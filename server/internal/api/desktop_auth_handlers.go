@@ -19,8 +19,17 @@ const desktopAuthorizationTTL = 5 * time.Minute
 var desktopProofPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 
 type desktopAuthorization struct {
-	Challenge string `json:"challenge"`
-	ExpiresAt int64  `json:"expires_at"`
+	Challenge string                      `json:"challenge"`
+	ExpiresAt int64                       `json:"expires_at"`
+	Client    *desktopAuthorizationClient `json:"client,omitempty"`
+}
+
+// Consent describes the initiating desktop request, never the browser that
+// approves it. This metadata is informational; PKCE remains the binding proof.
+type desktopAuthorizationClient struct {
+	UserAgent string `json:"user_agent,omitempty"`
+	IP        string `json:"ip,omitempty"`
+	Location  string `json:"location,omitempty"`
 }
 
 type desktopGrant struct {
@@ -48,7 +57,14 @@ func desktopStartHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := base64.RawURLEncoding.EncodeToString(b)
-	a := desktopAuthorization{Challenge: req.Challenge, ExpiresAt: time.Now().Add(desktopAuthorizationTTL).Unix()}
+	ip := clientIP(r)
+	a := desktopAuthorization{
+		Challenge: req.Challenge, ExpiresAt: time.Now().Add(desktopAuthorizationTTL).Unix(),
+		Client: &desktopAuthorizationClient{
+			UserAgent: auditText(r.UserAgent(), 1024),
+			IP:        auditText(ip, 128), Location: auditText(sessionLocation(r, ip), 256),
+		},
+	}
 	encoded, _ := json.Marshal(a)
 	if !d.Cache.SetNX("desktop:request:"+id, string(encoded), desktopAuthorizationTTL) {
 		writeError(w, http.StatusServiceUnavailable, errors.New("authorization unavailable"))
@@ -77,7 +93,11 @@ func desktopAuthorizationInfoHandler(d Deps, w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusNotFound, errors.New("desktop authorization expired"))
 		return
 	}
-	writeSessionJSON(w, 200, map[string]any{"expires_at": a.ExpiresAt})
+	// Do not expose the cached challenge or the native client's proof verifier.
+	writeSessionJSON(w, 200, struct {
+		ExpiresAt int64                       `json:"expires_at"`
+		Client    *desktopAuthorizationClient `json:"client,omitempty"`
+	}{ExpiresAt: a.ExpiresAt, Client: a.Client})
 }
 
 func desktopAuthorizeHandler(d Deps, w http.ResponseWriter, r *http.Request) {

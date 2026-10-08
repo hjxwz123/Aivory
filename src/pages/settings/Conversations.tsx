@@ -10,6 +10,7 @@ import { useSettingsModal } from '@/store/settings-modal'
 import { useLanguage } from '@/store/language'
 import { userCan } from '@/lib/user-permissions'
 import { copyText } from '@/lib/utils'
+import { publicServerUrl } from '@/lib/server-url'
 import { toast } from '@/hooks/use-toast'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -95,7 +96,7 @@ function ConversationSection({ userId, view, revision, onConversationDeleted }: 
             : await userLinksApi.htmlPreviews(PAGE_SIZE, page * PAGE_SIZE)
           entries = result.items.map((row) => ({
             id: row.id, title: row.title || row.id, createdAt: row.created_at,
-            url: new URL(view === 'shared' ? `/share/${encodeURIComponent(row.id)}` : apiUrl(`/public/html-previews/${encodeURIComponent(row.id)}`), window.location.origin).href,
+            url: publicServerUrl(view === 'shared' ? `/share/${encodeURIComponent(row.id)}` : apiUrl(`/public/html-previews/${encodeURIComponent(row.id)}`)),
           }))
           hasMore = result.has_more
         }

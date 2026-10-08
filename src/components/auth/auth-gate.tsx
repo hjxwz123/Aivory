@@ -6,7 +6,7 @@
  * with the original location preserved in the `from` state.
  */
 import { useEffect, useRef, type ReactNode } from 'react'
-import { Navigate, useLocation } from 'react-router-dom'
+import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/store/auth'
 import { useConversations } from '@/store/conversations'
 import { useProjects } from '@/store/projects'
@@ -27,6 +27,7 @@ import { isChatShellPath } from '@/lib/app-paths'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { useUserSettingsRefresh } from '@/hooks/use-user-settings-refresh'
 import { pendingDesktopAuthorization, rememberDesktopAuthorization } from '@/lib/desktop'
+import { safeAuthRedirect } from '@/lib/auth-redirect'
 
 const PUBLIC_PATHS = ['/welcome', '/login', '/register', '/forgot-password', '/share', '/setup', '/privacy', '/terms']
 
@@ -51,6 +52,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const refreshProfile = useAuth((s) => s.refreshProfile)
   const syncUserSettings = useSettings((s) => s.syncUserSettings)
   const location = useLocation()
+  const navigate = useNavigate()
   const hydratedChatDataForUser = useRef<string | null>(null)
 
   const authQuery = new URLSearchParams(location.search)
@@ -82,6 +84,24 @@ export function AuthGate({ children }: { children: ReactNode }) {
   useEffect(() => {
     void hydrate()
   }, [hydrate])
+
+  useEffect(() => {
+    if (!window.aivoryDesktop) return
+    const recover = () => { if (useAuth.getState().status !== 'authenticated') void hydrate() }
+    const authorized = () => { void hydrate() }
+    const paymentReturn = (event: Event) => {
+      const path = (event as CustomEvent<unknown>).detail
+      if (typeof path === 'string' && /^\/subscription(?:\?|$)/.test(path)) navigate(path)
+    }
+    window.addEventListener('aivory:desktop-reconnected', recover)
+    window.addEventListener('aivory:desktop-authorized', authorized)
+    window.addEventListener('aivory:desktop-payment-return', paymentReturn)
+    return () => {
+      window.removeEventListener('aivory:desktop-reconnected', recover)
+      window.removeEventListener('aivory:desktop-authorized', authorized)
+      window.removeEventListener('aivory:desktop-payment-return', paymentReturn)
+    }
+  }, [hydrate, navigate])
 
   useEffect(() => {
     if (!shouldAutoRedirect || !authPolicy.default_provider) return
@@ -244,7 +264,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return <Navigate to={desktopAuthorization} replace />
   }
   if (user && (location.pathname === '/login' || location.pathname === '/register')) {
-    return <Navigate to="/" replace />
+    return <Navigate to={safeAuthRedirect((location.state as { from?: unknown } | null)?.from)} replace />
   }
 
   return <>{children}</>

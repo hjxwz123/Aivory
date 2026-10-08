@@ -29,7 +29,7 @@ function load(force = false) {
 /** Both web entry points share one background request; native clients skip it. */
 export function useDesktopDownload() {
   const url = useDownloadState((state) => state.url)
-  const desktop = Boolean(window.aivoryDesktop)
+  const desktop = typeof window !== 'undefined' && Boolean(window.aivoryDesktop)
   useEffect(() => {
     if (desktop) return
     void load()
