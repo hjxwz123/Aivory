@@ -1,0 +1,125 @@
+name: Build desktop app
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      server_base_url:
+        description: 'Optional default website URL (without /api). Leave empty for a generic package with first-launch setup.'
+        required: false
+        default: ''
+        type: string
+      release_tag:
+        description: 'Optional existing published Release tag. Build this tag and attach installers after all builds succeed.'
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.event.release.tag_name || inputs.release_tag || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows-x64
+            args: --win --x64
+          - os: macos-latest
+            name: macos-arm64
+            args: --mac --arm64
+          - os: macos-latest
+            name: macos-x64
+            args: --mac --x64
+          - os: ubuntu-latest
+            name: linux-x64
+            args: --linux --x64
+    runs-on: ${{ matrix.os }}
+    env:
+      AIVORY_DESKTOP_BASE_URL: ${{ inputs.server_base_url }}
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.release_tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Install desktop dependencies
+        run: npm ci --prefix desktop
+      - name: Install Linux packaging dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libfuse2t64
+      - name: Verify Release version
+        if: env.RELEASE_TAG != ''
+        run: node -e "const v = require('./package.json').version; if (process.env.RELEASE_TAG.replace(/^v/, '') !== v) throw new Error('Release tag must match package version')"
+      - name: Build desktop installers
+        run: npm run desktop:build -- ${{ matrix.args }}
+      - name: Verify installer files
+        env:
+          EXPECTED_PLATFORM: ${{ matrix.name }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readdirSync, readFileSync, statSync } from 'node:fs'
+          const version = JSON.parse(readFileSync('package.json')).version
+          const platform = process.env.EXPECTED_PLATFORM.replace('windows-', 'win-').replace('macos-', 'mac-')
+          const extensions = platform.startsWith('win-') ? ['exe'] : platform.startsWith('mac-') ? ['dmg', 'zip'] : ['AppImage', 'deb']
+          const files = readdirSync('desktop/release')
+          for (const extension of extensions) {
+            const name = `Aivory-${version}-${platform}.${extension}`
+            if (!files.includes(name) || statSync(`desktop/release/${name}`).size < 1024 * 1024) throw new Error(`Missing or empty installer: ${name}`)
+          }
+          const config = JSON.parse(readFileSync('desktop/generated/app/config.json'))
+          if (!process.env.AIVORY_DESKTOP_BASE_URL && config.baseUrl !== '') throw new Error('Official installers must use first-launch server setup')
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aivory-${{ matrix.name }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            desktop/release/*.exe
+            desktop/release/*.dmg
+            desktop/release/*.zip
+            desktop/release/*.AppImage
+            desktop/release/*.deb
+
+  attach-release:
+    if: ${{ github.event_name == 'release' || inputs.release_tag != '' }}
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: aivory-*
+          path: installers
+          merge-multiple: true
+      - name: Attach installers and checksums to published Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft' > is-draft.txt
+          test "$(cat is-draft.txt)" = false
+          cd installers
+          sha256sum Aivory-* > SHA256SUMS.txt
+          gh release upload "$RELEASE_TAG" Aivory-* SHA256SUMS.txt --clobber
+          echo "Desktop installers published: https://github.com/$GH_REPO/releases/tag/$RELEASE_TAG" >> "$GITHUB_STEP_SUMMARY"
