@@ -1,7 +1,7 @@
 {
   "name": "aivory",
   "private": true,
-  "version": "2.5.1-beta.7",
+  "version": "2.5.1-beta.8",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -27,7 +27,8 @@
     "test:preview": "node tests/browser/run-preview.mjs",
     "test:panel": "node tests/browser/run-panel.mjs",
     "test:code-wrap": "node tests/browser/run-code-wrap.mjs",
-    "test:layout": "node tests/browser/run-layout.mjs"
+    "test:layout": "node tests/browser/run-layout.mjs",
+    "test:generative-ui": "node tests/browser/run-generative-ui.mjs"
   },
   "dependencies": {
     "@aiden0z/pptx-renderer": "^1.2.4",
