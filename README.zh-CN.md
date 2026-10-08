@@ -183,6 +183,25 @@ docker compose --env-file .env -f docker-compose.prod.yml up -d
 
 **数据持久化**：Postgres / Redis / Qdrant 数据落在命名卷（`pgdata` / `redisdata` / `qdrantdata`）。上传文件、生成产物以及头像等 API 本地对象绑定挂载到**宿主机**目录（`DATA_DIR`，默认 `./data`），文件直接落在宿主机文件系统，不进容器，方便查看与备份。本地对象默认保存在 `UPLOAD_DIR/object-storage`，需要时可通过 `AIVORY_LOCAL_STORAGE_DIR` 覆盖。备份时把命名卷和 `DATA_DIR` 一起打包，保证数据库行、向量和磁盘文件三者一致。管理员后台也可以异步生成全量迁移 ZIP，包含数据库行、文件和 Qdrant 向量；生成后的归档位于 `BACKUP_DIR`（默认 `DATA_DIR/backups`）。
 
+## 桌面版（Electron）
+
+桌面版直接连接已有的 Aivory 网站，功能与网页版一致。构建者通过
+`AIVORY_DESKTOP_BASE_URL` 指定首次启动的默认服务器地址，也可以留空构建通用包，
+由用户首次启动时填写。地址会保存在本地，后续更新及安装官方包时自动沿用。
+
+```bash
+# Node.js 22.12+；在仓库根目录运行
+npm run desktop:install
+AIVORY_DESKTOP_BASE_URL=https://chat.example.com npm run desktop:dev
+AIVORY_DESKTOP_BASE_URL=https://chat.example.com npm run desktop:build
+```
+
+支持 Windows 安装程序、macOS DMG/ZIP、Linux AppImage/DEB。安装包输出到
+`desktop/release/`。也可以在 GitHub Actions 中手动运行 **Build desktop app**，填写
+网站地址后下载各平台构建产物。发布 Release 时会自动构建通用安装包，并将各平台
+安装包及校验文件上传至 Release。详细配置、PowerShell 命令和签名说明见
+[桌面版构建指南](desktop/README.zh-CN.md)。
+
 ## 多轮工具调用与 Python 沙箱
 
 编排器在一次对话中最多执行 **48 次工具调用，跨越 12 个模型循环**。网络搜索、网页内容、Python 结果和生成文件都可以成为下一次调用的输入，无需用户在中间手动接力。RAG 由编排器单独路由，并在相关时自动注入知识库内容。

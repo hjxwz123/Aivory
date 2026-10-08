@@ -55,6 +55,28 @@ Bring multi-model chat, research, code execution, and team collaboration togethe
 
 </details>
 
+## Desktop App (Electron)
+
+The desktop shell connects to an existing Aivory website and uses the same
+features as the web app. Builders may set `AIVORY_DESKTOP_BASE_URL` as a
+first-launch default or leave it empty for a generic installer. Users enter a
+server when no default is provided. The address is saved locally and retained
+through updates, including official packages.
+
+```bash
+# Node.js 22.12+; run from the repository root
+npm run desktop:install
+AIVORY_DESKTOP_BASE_URL=https://chat.example.com npm run desktop:dev
+AIVORY_DESKTOP_BASE_URL=https://chat.example.com npm run desktop:build
+```
+
+Builds produce Windows installers, macOS DMG/ZIP files, or Linux AppImage/DEB
+files in `desktop/release/`. The **Build desktop app** GitHub Actions workflow
+also builds all platforms on demand from a website URL. Publishing a Release
+automatically builds generic installers and uploads them with checksums. See the
+[desktop build guide](desktop/README.md) for configuration, PowerShell commands,
+and signing information.
+
 ## Quick start
 
 Requires Docker 24+ with the Compose plugin.
