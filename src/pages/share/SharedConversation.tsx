@@ -99,8 +99,8 @@ export default function SharedConversation() {
   }
 
   return (
-    <div className="min-h-svh w-full bg-[var(--color-bg)] text-[var(--color-fg)] [--code-toolbar-sticky-top:0rem]">
-      <header className="w-full">
+    <div className="app-viewport flex flex-col w-full bg-[var(--color-bg)] text-[var(--color-fg)] [--code-toolbar-sticky-top:0rem]">
+      <header className="shrink-0 w-full">
         <div className="mx-auto flex min-h-14 w-full max-w-[var(--layout-message-max-w)] items-center justify-between gap-3 px-[var(--layout-gutter-mobile)] py-3 sm:px-6 lg:px-8">
           <Link
             to={isAuthenticated ? '/' : '/welcome'}
@@ -136,7 +136,7 @@ export default function SharedConversation() {
         </div>
       </header>
 
-      <main className="w-full pb-20 sm:pb-24">
+      <main data-page-scroll className="app-scroll flex-1 w-full pb-20 sm:pb-24">
         {status === 'loading' ? (
           <div className="mx-auto w-full max-w-[var(--layout-message-max-w)] px-[var(--layout-gutter-mobile)] py-8 text-sm text-[var(--color-fg-subtle)] sm:px-6 lg:px-8">
             {t('common:common.loading')}

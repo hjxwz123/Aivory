@@ -524,7 +524,7 @@ export default function Subscription() {
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-[var(--color-bg)] font-sans text-[var(--color-fg)]">
       <ContentHeader title={t('subscription:title')} backTo="/" backLabel={t('subscription:back')} />
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="relative min-h-0 flex-1 overflow-y-auto">
         <main className="mx-auto w-full max-w-[var(--layout-content-max-w)] px-4 py-4 pb-16 sm:px-8 sm:py-6 sm:pb-20">
           {groupsLoading ? (
             <AccountSkeleton t={t} />

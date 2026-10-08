@@ -12,14 +12,14 @@ export default function NotFound() {
   useEffect(() => syncSystem(), [syncSystem])
 
   return (
-    <div className="relative min-h-svh bg-[var(--color-bg)] text-[var(--color-fg)] flex flex-col">
-      <header className="px-5 sm:px-8 h-16 flex items-center">
+    <div className="app-viewport relative bg-[var(--color-bg)] text-[var(--color-fg)] flex flex-col">
+      <header className="shrink-0 px-5 sm:px-8 h-16 flex items-center">
         <Link to="/" aria-label={t('common:appName')}>
           <TracedLogo size="md" />
         </Link>
       </header>
-      <main className="flex-1 grid place-items-center px-5">
-        <div className="max-w-md text-center">
+      <main data-page-scroll className="app-scroll flex flex-1 px-5 py-6">
+        <div className="m-auto max-w-md text-center">
           <p className="font-mono text-[11px] tracking-wider text-[var(--color-fg-subtle)] uppercase">
             {t('errors:notFound.kicker')}
           </p>
@@ -29,7 +29,7 @@ export default function NotFound() {
           <p className="mt-5 text-[var(--color-fg-muted)] leading-relaxed text-pretty">
             {t('errors:notFound.body')}
           </p>
-          <div className="mt-9 flex items-center justify-center gap-2">
+          <div className="mt-9 flex flex-wrap items-center justify-center gap-2">
             <Link to="/chat">
               <Button trailingIcon={<ArrowRight size={14} aria-hidden />}>
                 {t('common:actions.openAivory')}

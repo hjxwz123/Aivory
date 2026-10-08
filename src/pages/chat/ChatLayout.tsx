@@ -94,7 +94,7 @@ export default function ChatLayout() {
   return (
     <div
       className={cn(
-        'flex flex-col h-svh w-full overflow-hidden bg-[var(--color-bg)] text-[var(--color-fg)]',
+        'app-viewport flex flex-col w-full bg-[var(--color-bg)] text-[var(--color-fg)]',
         // Keep the top/side notch inset, but intentionally let phone layouts
         // run to the visual bottom edge. The composer owns a small regular
         // padding instead of reserving iPhone's home-indicator safe area.
@@ -117,8 +117,8 @@ export default function ChatLayout() {
         </Sheet>
       )}
 
-      <main className="relative flex-1 min-w-0 flex">
-        <div className="flex-1 min-w-0 flex flex-col">
+      <main className="relative flex-1 min-h-0 min-w-0 flex">
+        <div className="flex-1 min-h-0 min-w-0 flex flex-col">
           {/* Pinned announcement bar — spans only the chat/content column (NOT the
               sidebar), pinned to the top of the content area; null when inactive. */}
           <AnnouncementBar />
@@ -126,7 +126,7 @@ export default function ChatLayout() {
           {/* Mobile top bar — suppressed when the page renders its own combined
               header (e.g. a chat thread) so the two don't stack into two rows. */}
           {!isDesktop && !pageOwnsTopBar && !privateChat && (
-            <div className="flex items-center justify-between h-[var(--layout-topbar-h-mobile)] px-2 bg-[var(--color-bg)]/85 backdrop-blur-sm">
+            <div className="flex shrink-0 items-center justify-between h-[var(--layout-topbar-h-mobile)] px-2 bg-[var(--color-bg)]/85 backdrop-blur-sm">
               <button
                 type="button"
                 aria-label={t('commandMenu.actions.toggleSidebar')}

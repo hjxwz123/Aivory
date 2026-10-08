@@ -494,7 +494,7 @@ export default function UserFiles() {
               ) : (
                 <ul
                   className={cn(
-                    'min-h-0 flex-1 overflow-y-auto p-1.5 scrollbar-thin transition-opacity duration-150',
+                    'relative min-h-0 flex-1 overflow-y-auto p-1.5 scrollbar-thin transition-opacity duration-150',
                     refreshing && 'opacity-60',
                   )}
                   aria-busy={refreshing || undefined}

@@ -123,6 +123,7 @@ export function SplitText({
                 ease,
                 stagger: delay / 1000,
                 scrollTrigger: {
+                  scroller: el.closest<HTMLElement>('[data-page-scroll]') ?? undefined,
                   trigger: el,
                   start,
                   once: true,

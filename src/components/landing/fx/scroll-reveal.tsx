@@ -68,7 +68,7 @@ export function ScrollReveal({
               opacity: 1,
               ease: 'none',
               stagger: 0.05,
-              scrollTrigger: { trigger: el, start: 'top bottom-=20%', end: wordAnimationEnd, scrub: true },
+              scrollTrigger: { scroller: el.closest<HTMLElement>('[data-page-scroll]') ?? undefined, trigger: el, start: 'top bottom-=20%', end: wordAnimationEnd, scrub: true },
             },
           ),
         ]
@@ -81,7 +81,7 @@ export function ScrollReveal({
                 filter: 'blur(0px)',
                 ease: 'none',
                 stagger: 0.05,
-                scrollTrigger: { trigger: el, start: 'top bottom-=20%', end: wordAnimationEnd, scrub: true },
+                scrollTrigger: { scroller: el.closest<HTMLElement>('[data-page-scroll]') ?? undefined, trigger: el, start: 'top bottom-=20%', end: wordAnimationEnd, scrub: true },
               },
             ),
           )

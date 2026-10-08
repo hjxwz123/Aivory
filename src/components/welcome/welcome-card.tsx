@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Pencil, BookOpen, ShieldCheck, Check } from 'lucide-react'
 import { authApi } from '@/api'
@@ -58,6 +59,7 @@ const WELCOME_CELEBRATION_EXIT_MS = 200
  */
 export function WelcomeCard() {
   const { t } = useTranslation(['welcome', 'settings', 'common'])
+  const location = useLocation()
   const user = useAuth((s) => s.user)
   const status = useAuth((s) => s.status)
   const setUser = useAuth((s) => s.setUser)
@@ -81,7 +83,7 @@ export function WelcomeCard() {
   // back until they have, so the two mandatory dialogs don't stack.
   const passwordPolicy = user?.oauth_initial_password_policy ?? authPolicy.oauth_initial_password_policy
   const needsPassword = user?.has_password === false && passwordPolicy === 'required'
-  const eligible = status === 'authenticated' && Boolean(user) && !onboarded && !needsPassword
+  const eligible = status === 'authenticated' && Boolean(user) && !onboarded && !needsPassword && location.pathname !== '/desktop/authorize'
 
   const [mounted, setMounted] = useState(false)
   const [open, setOpen] = useState(false)

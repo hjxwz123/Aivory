@@ -60,15 +60,15 @@ export default function JoinWorkspace() {
   }
 
   return (
-    <div className="min-h-svh w-full bg-[var(--color-bg)] text-[var(--color-fg)]">
-      <header>
+    <div className="app-viewport flex flex-col w-full bg-[var(--color-bg)] text-[var(--color-fg)]">
+      <header className="shrink-0">
         <div className="mx-auto flex h-14 max-w-[40rem] items-center px-5">
           <Link to="/" aria-label="Aivory" className="inline-flex items-center">
             <TracedLogo />
           </Link>
         </div>
       </header>
-      <main className="mx-auto w-full max-w-[40rem] px-5 pt-16">
+      <main data-page-scroll className="app-scroll mx-auto flex-1 w-full max-w-[40rem] px-5 py-6 sm:py-12">
         {state === 'loading' ? (
           <p className="text-sm text-[var(--color-fg-subtle)]">{t('common:common.loading')}</p>
         ) : state === 'missing' || !info ? (

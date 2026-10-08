@@ -90,6 +90,7 @@ export function ScrollFloat({
             ease,
             stagger,
             scrollTrigger: {
+              scroller: el.closest<HTMLElement>('[data-page-scroll]') ?? undefined,
               trigger: el,
               start: scrollStart,
               end: scrollEnd,

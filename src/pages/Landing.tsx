@@ -87,6 +87,7 @@ export default function Landing() {
   const { t } = useTranslation(['landing', 'common', 'nav'])
 
   const root = useRef<HTMLDivElement>(null)
+  const scroller = useRef<HTMLDivElement>(null)
   const topBtn = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
@@ -120,26 +121,26 @@ export default function Landing() {
         // Nav backdrop fades in over the first bit of scroll.
         gsap.fromTo('.nav-bg', { autoAlpha: 0 }, {
           autoAlpha: 1, ease: 'none',
-          scrollTrigger: { start: 8, end: 96, scrub: true },
+          scrollTrigger: { scroller: scroller.current, start: 8, end: 96, scrub: true },
         })
         // Reading-progress hairline along the nav's bottom edge.
         gsap.fromTo('.nav-progress', { scaleX: 0 }, {
           scaleX: 1, ease: 'none', transformOrigin: 'left center',
-          scrollTrigger: { start: 0, end: 'max', scrub: 0.3 },
+          scrollTrigger: { scroller: scroller.current, start: 0, end: 'max', scrub: 0.3 },
         })
 
         // Section reveals — single elements rise as they enter the viewport.
         gsap.utils.toArray<HTMLElement>('[data-reveal]').forEach((el) => {
           gsap.from(el, {
             y: 30, autoAlpha: 0, duration: 0.8, ease: 'power3.out',
-            scrollTrigger: { trigger: el, start: 'top 86%', once: true },
+            scrollTrigger: { scroller: scroller.current, trigger: el, start: 'top 86%', once: true },
           })
         })
         // Grid reveals — children stagger in.
         gsap.utils.toArray<HTMLElement>('[data-reveal-group]').forEach((group) => {
           gsap.from(Array.from(group.children), {
             y: 26, autoAlpha: 0, duration: 0.7, stagger: 0.09, ease: 'power3.out',
-            scrollTrigger: { trigger: group, start: 'top 84%', once: true },
+            scrollTrigger: { scroller: scroller.current, trigger: group, start: 'top 84%', once: true },
           })
         })
 
@@ -211,6 +212,7 @@ export default function Landing() {
 
       // Scroll-to-top visibility (no React state, no window scroll listener).
       ScrollTrigger.create({
+        scroller: scroller.current,
         start: 760,
         end: 'max',
         onToggle: (self) => {
@@ -225,15 +227,15 @@ export default function Landing() {
     // `isolate` scopes the -z-10 ornament (orbs/grain) to THIS element's
     // stacking context so it paints above the opaque page background instead
     // of being buried beneath it at the root context.
-    <div ref={root} className="relative isolate min-h-svh overflow-x-clip bg-[var(--color-bg)] text-[var(--color-fg)]">
+    <div ref={root} className="app-viewport relative isolate bg-[var(--color-bg)] text-[var(--color-fg)]">
       {/* Every click anywhere on the page bursts a small ring of accent sparks —
           one shared canvas overlay, reduced-motion silent (§ welcome fx). */}
-      <ClickSpark sparkSize={9} sparkRadius={18} sparkCount={8} duration={450}>
+      <ClickSpark className="flex h-full min-h-0 flex-col" sparkSize={9} sparkRadius={18} sparkCount={8} duration={450}>
         {/* Background accents */}
         <BackgroundOrnament />
 
         {/* Nav */}
-        <header className="sticky top-0 z-40 backdrop-blur-[1px]">
+        <header className="relative shrink-0 z-40 backdrop-blur-[1px]">
           <div
             aria-hidden
             className="nav-bg absolute inset-0 -z-10 bg-[var(--color-bg)]/85"
@@ -270,6 +272,8 @@ export default function Landing() {
             </div>
           </div>
         </header>
+
+        <div ref={scroller} data-page-scroll className="app-scroll flex-1 overflow-x-hidden">
 
         {/* Hero — left-anchored editorial split; the second headline line carries
           a violet ink-wash (dual-layer masked real text, scrubbed by GSAP).
@@ -436,6 +440,7 @@ export default function Landing() {
           }}
         >
           <ScrollVelocity
+            scrollContainerRef={scroller}
             texts={[
               MODELS.map((m) => m.name).join('  ·  ') + '  ·  ',
               MODELS.map((m) => m.maker).join('  ·  ') + '  ·  ',
@@ -749,12 +754,13 @@ export default function Landing() {
             <span>© {new Date().getFullYear()} Aivory</span>
           </div>
         </footer>
+        </div>
 
         {/* Scroll-to-top — visibility driven by ScrollTrigger (see useGSAP). */}
         <button
           ref={topBtn}
           type="button"
-          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          onClick={() => scroller.current?.scrollTo({ top: 0, behavior: 'smooth' })}
           aria-label={t('common:aria.backToTop')}
           className={cn(
             'fixed bottom-6 right-6 z-30 inline-flex items-center justify-center size-10 rounded-full',

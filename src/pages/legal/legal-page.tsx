@@ -70,7 +70,7 @@ function Contents({
   }
 
   return (
-    <aside className="scrollbar-thin sticky top-24 hidden max-h-[calc(100svh-8rem)] self-start overflow-y-auto pr-4 lg:block">
+    <aside className="scrollbar-thin sticky top-0 hidden max-h-[calc(var(--app-height,100dvh)-6rem)] self-start overflow-y-auto pr-4 lg:block">
       <nav aria-label={label}>
         <h2 className="text-sm font-medium text-[var(--color-fg)]">{label}</h2>
         {links}
@@ -117,8 +117,8 @@ export function LegalPage({ doc }: { doc: 'privacy' | 'terms' }) {
   }, [hash, sections.length])
 
   return (
-    <div className="min-h-svh overflow-x-clip bg-[var(--color-bg)] text-[var(--color-fg)]">
-      <header className="sticky top-0 z-[var(--z-sticky)] bg-[var(--color-bg)]">
+    <div className="app-viewport flex flex-col bg-[var(--color-bg)] text-[var(--color-fg)]">
+      <header className="shrink-0 z-[var(--z-sticky)] bg-[var(--color-bg)]">
         <div className="mx-auto flex h-16 max-w-[76rem] items-center justify-between gap-2 px-4 sm:gap-4 sm:px-8">
           <Link to="/" aria-label={t('common:appName')} className="shrink-0">
             <LogoMark size={22} className="sm:hidden" />
@@ -139,6 +139,7 @@ export function LegalPage({ doc }: { doc: 'privacy' | 'terms' }) {
         </div>
       </header>
 
+      <div data-page-scroll className="app-scroll flex-1">
       <main
         className={
           customText
@@ -230,6 +231,7 @@ export function LegalPage({ doc }: { doc: 'privacy' | 'terms' }) {
           </footer>
         </article>
       </main>
+      </div>
     </div>
   )
 }

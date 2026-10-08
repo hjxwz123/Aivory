@@ -512,7 +512,7 @@ export default function ChatThread() {
       {/* Topbar — desktop keeps the full inline toolbar; mobile is a calm
           three-zone bar (menu • title+model • one overflow) like ChatGPT/Gemini. */}
       {isDesktop ? (
-        <header className="flex items-center gap-3 h-[var(--layout-topbar-h)] px-4 sm:px-6 bg-[var(--color-bg)]/85 backdrop-blur-sm">
+        <header className="flex shrink-0 items-center gap-3 h-[var(--layout-topbar-h)] px-4 sm:px-6 bg-[var(--color-bg)]/85 backdrop-blur-sm">
           <div className="flex-1 min-w-0 flex flex-col">
             <h1 className="font-medium text-[var(--color-fg)] text-[15px] truncate">
               {truncate(conversation.title || t('untitled'), 80)}
@@ -706,7 +706,7 @@ export default function ChatThread() {
           // overflow-x-hidden: wide message content (code / tables / math)
           // scrolls inside its own block — the thread itself must never grow a
           // horizontal scrollbar.
-          className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden scrollbar-thin"
+          className="relative flex-1 min-h-0 overflow-y-auto overflow-x-hidden scrollbar-thin"
         >
           {/* First load with nothing yet in the store (slow network / long thread):
               show a spinner instead of a blank thread. Once any message is present

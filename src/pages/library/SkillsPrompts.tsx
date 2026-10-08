@@ -895,7 +895,7 @@ export default function SkillsPrompts() {
         }
       />
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="relative min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[var(--layout-content-max-w)] px-4 pb-24 pt-4 sm:px-8 sm:pt-6">
           <Tabs
             value={tab}

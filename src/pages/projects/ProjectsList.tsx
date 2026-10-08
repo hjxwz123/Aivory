@@ -107,7 +107,7 @@ export default function ProjectsList() {
           </Button>
         ) : null}
       />
-      <div className="flex-1 min-h-0 overflow-y-auto">
+      <div className="relative flex-1 min-h-0 overflow-y-auto">
         <div className="mx-auto w-full max-w-[var(--layout-content-max-w)] px-5 py-5 pb-16 sm:px-8 sm:py-6 sm:pb-20">
           <p className="max-w-[60ch] text-[14px] leading-6 text-[var(--color-fg-muted)]">
             {t('projects:list.subtitle')}
