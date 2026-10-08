@@ -1162,7 +1162,7 @@ function WorkspaceUsagePanel({ workspaceID }: { workspaceID: string }) {
   }
 
   return <div className="space-y-5">
-    <div className="flex flex-col gap-3 rounded-[12px] bg-[var(--color-bg-muted)] p-4 sm:flex-row sm:items-center sm:justify-between">
+    <div className="quiet-field-group flex flex-col gap-3 rounded-[12px] bg-[var(--color-bg-muted)] p-4 sm:flex-row sm:items-center sm:justify-between">
       <div>
         <h3 className="text-[15px] font-semibold text-[var(--color-fg)]">{t('workspace.statisticsTitle', { defaultValue: 'Workspace usage' })}</h3>
         <p className="mt-1 text-[12px] leading-5 text-[var(--color-fg-muted)]">{t('workspace.statisticsLead', { defaultValue: 'Usage from conversations and tools in this workspace.' })}</p>
@@ -1289,7 +1289,7 @@ function WorkspaceInvitesPanel({ workspaceID, isOwner }: { workspaceID: string; 
 
   return (
     <div className="space-y-3">
-      <div className="rounded-[8px] bg-[var(--color-bg-muted)] p-2">
+      <div className="quiet-field-group rounded-[8px] bg-[var(--color-bg-muted)] p-2">
         <div className="grid min-w-0 grid-cols-[4.75rem_minmax(0,1fr)_5.25rem_2.75rem_2rem] items-center gap-1.5">
           <Select value={role} disabled={creating} onValueChange={(value) => setRole(value as ApiWorkspaceRole)}>
             <SelectTrigger

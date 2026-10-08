@@ -1595,7 +1595,7 @@ function MCPEditor({
                   {editor.draft.headers.map((header, index) => (
                     <div
                       key={header.id}
-                      className="relative grid gap-2 rounded-[10px] bg-[var(--color-bg-muted)] p-3 pr-12 sm:grid-cols-2"
+                      className="quiet-field-group relative grid gap-2 rounded-[10px] bg-[var(--color-bg-muted)] p-3 pr-12 sm:grid-cols-2"
                     >
                       <Input
                         aria-label={`${t('library:mcpEditor.headerKey')}: ${index + 1}`}

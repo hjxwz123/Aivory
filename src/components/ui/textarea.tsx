@@ -21,7 +21,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function 
         'text-[0.9375rem] leading-[1.55] text-[var(--color-fg)] placeholder:text-[var(--color-fg-faint)]',
         'resize-none outline-none transition-[border-color,background-color] duration-150',
         'focus:border-[var(--color-border-strong)] focus:bg-[var(--color-surface)]',
-        quiet && 'border-transparent bg-[var(--color-bg-muted)] placeholder:text-[var(--color-fg-muted)] focus:border-[var(--color-ring)]',
+        quiet && 'border-transparent bg-[var(--quiet-field-bg,var(--color-bg-muted))] placeholder:text-[var(--color-fg-muted)] focus:border-[var(--color-ring)] focus:bg-[var(--quiet-field-focus,var(--color-surface))]',
         invalid && 'border-[var(--color-danger)] focus:border-[var(--color-danger)]',
         rest.disabled && 'opacity-60 pointer-events-none',
         className,

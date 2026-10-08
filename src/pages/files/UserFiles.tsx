@@ -416,7 +416,7 @@ export default function UserFiles() {
               }}
             />
 
-            <div className="flex items-center gap-2 px-3 pb-2">
+            <div className="quiet-field-group flex items-center gap-2 px-3 pb-2">
               <Input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}

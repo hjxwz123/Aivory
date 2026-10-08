@@ -894,7 +894,7 @@ export default function AdminModelEdit() {
                           const modelAutoDisabled = (binding.disabled_until ?? 0) > Math.floor(Date.now() / 1000)
                           return (
                           <div key={binding.id} className={cn(
-                            'grid items-end gap-2 rounded-[8px] bg-[var(--color-bg-muted)] p-2.5 max-sm:grid-cols-[minmax(0,1fr)_32px]',
+                            'quiet-field-group grid items-end gap-2 rounded-[8px] bg-[var(--color-bg-muted)] p-2.5 max-sm:grid-cols-[minmax(0,1fr)_32px]',
                             showRouting
                               ? 'grid-cols-[minmax(0,1fr)_90px_90px_auto]'
                               : 'grid-cols-[minmax(0,1fr)_auto]',
@@ -1478,7 +1478,7 @@ export default function AdminModelEdit() {
                                   moveDownLabel={t('admin:common.moveDown')}
                                   mobileDragOnly
                                   listClassName="bg-[var(--color-bg-muted)]"
-                                  rowClassName="grid grid-cols-[2.75rem_minmax(0,1fr)] items-start gap-2 p-3 md:grid-cols-[auto_auto_minmax(0,1fr)]"
+                                  rowClassName="quiet-field-group grid grid-cols-[2.75rem_minmax(0,1fr)] items-start gap-2 p-3 md:grid-cols-[auto_auto_minmax(0,1fr)]"
                                   renderItem={(tool, index) => {
                                     const parsed = parseExtraParams(tool.request_text)
                                     const setTool = (next: Partial<OfficialToolDraft>) => {
@@ -1705,7 +1705,7 @@ export default function AdminModelEdit() {
                           />
                         </Field>
                         <Field label={t('admin:models.fields.moderationLabel')} className="sm:col-span-2">
-                          <div className="rounded-[8px] bg-[var(--color-bg-muted)] px-3 py-2.5">
+                          <div className="quiet-field-group rounded-[8px] bg-[var(--color-bg-muted)] px-3 py-2.5">
                             <label className="flex items-center justify-between">
                               <span className="text-sm">{t('admin:models.fields.moderationEnable')}</span>
                               <Switch

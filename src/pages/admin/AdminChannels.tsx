@@ -711,7 +711,7 @@ export default function AdminChannels() {
                       </Field>
                     </TabsContent>
                     <TabsContent value="reliability" forceMount className="mt-4 min-w-0 data-[state=inactive]:hidden">
-                      <div className="rounded-[8px] bg-[var(--color-bg-muted)] p-3">
+                      <div className="quiet-field-group rounded-[8px] bg-[var(--color-bg-muted)] p-3">
                         <div className="mb-2 flex items-center justify-between gap-3">
                           <div>
                             <p className="text-sm font-medium text-[var(--color-fg)]">{t('admin:channels.autoDisable.title', { defaultValue: '渠道自动禁用' })}</p>

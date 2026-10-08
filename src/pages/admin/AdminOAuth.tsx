@@ -311,7 +311,7 @@ export default function AdminOAuth() {
               {/* Callback/redirect URI — the value an admin must register in the
                   provider console. Hoisted to the top of the form (and styled as
                   a callout) because it's the first thing they go looking for. */}
-              <div className="rounded-[12px] bg-[var(--color-bg-muted)] px-4 py-3.5">
+              <div className="quiet-field-group rounded-[12px] bg-[var(--color-bg-muted)] px-4 py-3.5">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-sm font-medium text-[var(--color-fg)]">
                     {t('admin:oauth.fields.redirectUri')}

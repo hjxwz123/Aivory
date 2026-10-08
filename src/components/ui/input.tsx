@@ -28,7 +28,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
         'bg-[var(--color-surface-sunken)] border border-[var(--color-border)]',
         'transition-[border-color,background-color] duration-150',
         'focus-within:border-[var(--color-border-strong)] focus-within:bg-[var(--color-surface)]',
-        quiet && 'border-transparent bg-[var(--color-bg-muted)] focus-within:border-[var(--color-ring)]',
+        quiet && 'border-transparent bg-[var(--quiet-field-bg,var(--color-bg-muted))] focus-within:border-[var(--color-ring)] focus-within:bg-[var(--quiet-field-focus,var(--color-surface))]',
         invalid && 'border-[var(--color-danger)] focus-within:border-[var(--color-danger)]',
         rest.disabled && 'opacity-60 pointer-events-none',
         wrapperClassName,
@@ -43,7 +43,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
         ref={ref}
         aria-invalid={invalid || undefined}
         className={cn(
-          'flex-1 bg-transparent border-none outline-none',
+          'min-w-0 flex-1 bg-transparent border-none outline-none',
           'text-[0.9375rem] text-[var(--color-fg)] placeholder:text-[var(--color-fg-faint)]',
           'tabular-nums',
           quiet && 'placeholder:text-[var(--color-fg-muted)]',

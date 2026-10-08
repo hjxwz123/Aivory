@@ -170,7 +170,7 @@ export default function AdminSystemStorage() {
                 )}
 
                 {storageProvider === 's3' && (
-                  <div className="flex flex-col gap-4 rounded-[8px] bg-[var(--color-bg-muted)] p-3 sm:gap-5 sm:p-4">
+                  <div className="quiet-field-group flex flex-col gap-4 rounded-[8px] bg-[var(--color-bg-muted)] p-3 sm:gap-5 sm:p-4">
                     <Field label={t('admin:settings.fields.s3Bucket')} htmlFor="s3-bucket">
                       <Input
                         id="s3-bucket"
@@ -224,7 +224,7 @@ export default function AdminSystemStorage() {
                 )}
 
                 {storageProvider === 'aliyun_oss' && (
-                  <div className="flex flex-col gap-4 rounded-[8px] bg-[var(--color-bg-muted)] p-3 sm:gap-5 sm:p-4">
+                  <div className="quiet-field-group flex flex-col gap-4 rounded-[8px] bg-[var(--color-bg-muted)] p-3 sm:gap-5 sm:p-4">
                     <Field label={t('admin:settings.fields.ossBucket')} htmlFor="oss-bucket">
                       <Input
                         id="oss-bucket"

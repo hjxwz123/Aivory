@@ -202,8 +202,8 @@ export default function AdminImageStyles() {
             moveUpLabel={t('admin:common.moveUp')}
             moveDownLabel={t('admin:common.moveDown')}
             mobileDragOnly
-            listClassName="mt-6"
-            rowClassName="grid grid-cols-[2.75rem_minmax(0,1fr)] items-start gap-2 p-3 md:grid-cols-[auto_auto_minmax(0,1fr)] md:gap-3 md:p-4"
+            listClassName="mt-6 bg-[var(--color-bg-muted)]"
+            rowClassName="quiet-field-group grid grid-cols-[2.75rem_minmax(0,1fr)] items-start gap-2 p-3 md:grid-cols-[auto_auto_minmax(0,1fr)] md:gap-3 md:p-4"
             renderItem={(st) => (
               <StyleCard
                 style={st}
@@ -283,7 +283,7 @@ function StyleCard({
                 id={`name-${style.id}`}
                 value={style.name}
                 onChange={(e) => onPatch({ name: e.target.value })}
-                className="mt-1 h-9"
+                wrapperClassName="mt-1 h-9"
               />
             </div>
             <div className="flex items-center gap-2 pb-1.5">

@@ -1,5 +1,17 @@
 /* Product lists and reading tables use fills and spacing to separate rows. */
 @layer components {
+  /* Filled editors need a separate control surface to keep fields visible. */
+  .quiet-field-group,
+  .admin-data-table tbody tr:is(:hover, :focus-within) {
+    --quiet-field-bg: var(--color-surface-raised);
+    --quiet-field-focus: color-mix(in oklch, var(--color-accent-soft) 35%, var(--quiet-field-bg));
+  }
+
+  .dark .quiet-field-group,
+  .dark .admin-data-table tbody tr:is(:hover, :focus-within) {
+    --quiet-field-bg: color-mix(in oklch, var(--color-surface-raised) 94%, var(--color-fg));
+  }
+
   .quiet-list > li {
     border-radius: 8px;
     transition: background-color 150ms;

@@ -69,7 +69,7 @@ export function IconPicker({ id, value, onChange, className, 'aria-label': ariaL
             type="button"
             aria-label={ariaLabel}
             className={cn(
-              'flex h-9 w-full items-center gap-2 rounded-[8px] bg-[var(--color-bg)] px-2.5 text-left text-[13px] text-[var(--color-fg)] interactive hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+              'flex h-9 w-full items-center gap-2 rounded-[8px] bg-[var(--quiet-field-bg,var(--color-bg))] px-2.5 text-left text-[13px] text-[var(--color-fg)] interactive hover:bg-[var(--quiet-field-focus,var(--color-bg-muted))] focus-visible:bg-[var(--quiet-field-focus,var(--color-bg-muted))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
               value && 'pr-12',
               className,
             )}

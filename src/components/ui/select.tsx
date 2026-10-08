@@ -25,7 +25,7 @@ export const SelectTrigger = forwardRef<
         // carries the state, without an outer glow around the control.
         'focus:outline-none focus:border-[var(--color-border-strong)] focus:bg-[var(--color-surface)]',
         'data-[placeholder]:text-[var(--color-fg-faint)]',
-        quiet && 'border-transparent bg-[var(--color-bg-muted)] data-[placeholder]:text-[var(--color-fg-muted)] focus:border-[var(--color-ring)]',
+        quiet && 'border-transparent bg-[var(--quiet-field-bg,var(--color-bg-muted))] data-[placeholder]:text-[var(--color-fg-muted)] focus:border-[var(--color-ring)] focus:bg-[var(--quiet-field-focus,var(--color-surface))]',
         'data-[disabled]:opacity-50 data-[disabled]:cursor-not-allowed',
         'w-full',
         className,

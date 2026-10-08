@@ -398,7 +398,7 @@ export default function AdminTools() {
                 )}
 
                 {searchProvider === 'searxng' && (
-                  <div className="rounded-[8px] bg-[var(--color-bg-muted)] p-4">
+                  <div className="quiet-field-group rounded-[8px] bg-[var(--color-bg-muted)] p-4">
                     <Field
                       label={t('admin:settings.fields.searchBaseUrl')}
                       htmlFor="search-url"
@@ -430,7 +430,7 @@ export default function AdminTools() {
                 )}
 
                 {(searchProvider === 'serper' || searchProvider === 'brave' || searchProvider === 'tavily') && (
-                  <div className="rounded-[8px] bg-[var(--color-bg-muted)] p-4">
+                  <div className="quiet-field-group rounded-[8px] bg-[var(--color-bg-muted)] p-4">
                     <Field
                       label={t('admin:settings.fields.searchApiKey')}
                       htmlFor="search-key"

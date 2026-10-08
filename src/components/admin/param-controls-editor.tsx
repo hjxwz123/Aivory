@@ -152,7 +152,7 @@ export function ParamControlsEditor({ value, onChange }: Props) {
     commit(controls.map((c, idx) => (idx === i ? { ...c, ...patch } : c)))
 
   const tt = (k: string) => t(`models.pc.${k}`)
-  const inputCls = 'h-8 text-[13px]'
+  const inputCls = 'text-[13px]'
 
   return (
     <div className="flex flex-col gap-3">
@@ -164,7 +164,8 @@ export function ParamControlsEditor({ value, onChange }: Props) {
           moveUpLabel={t('common.moveUp')}
           moveDownLabel={t('common.moveDown')}
           mobileDragOnly
-          rowClassName="grid grid-cols-[2.75rem_minmax(0,1fr)] items-start gap-2 p-3 md:grid-cols-[auto_auto_minmax(0,1fr)] md:p-3.5"
+          listClassName="bg-[var(--color-bg-muted)]"
+          rowClassName="quiet-field-group grid grid-cols-[2.75rem_minmax(0,1fr)] items-start gap-2 p-3 md:grid-cols-[auto_auto_minmax(0,1fr)] md:p-3.5"
           renderItem={(c, i) => (
             <div className="flex min-w-0 flex-col gap-3">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -211,7 +212,7 @@ export function ParamControlsEditor({ value, onChange }: Props) {
                 </div>
               ) : (
                 <div className="flex flex-col gap-2">
-                  <span className="text-[12px] text-[var(--color-fg-subtle)]">{tt('options')}</span>
+                  <span className="text-[12px] text-[var(--color-fg-muted)]">{tt('options')}</span>
                   {c.options.length > 0 ? (
                     <AdminSortableList
                       items={c.options}
@@ -221,7 +222,7 @@ export function ParamControlsEditor({ value, onChange }: Props) {
                       moveDownLabel={t('common.moveDown')}
                       mobileDragOnly
                       listClassName="bg-[var(--color-bg-muted)]"
-                      rowClassName="grid grid-cols-[2.75rem_minmax(0,1fr)] items-start gap-2 p-2.5 md:grid-cols-[auto_auto_minmax(0,1fr)]"
+                      rowClassName="quiet-field-group grid grid-cols-[2.75rem_minmax(0,1fr)] items-start gap-2 p-2.5 md:grid-cols-[auto_auto_minmax(0,1fr)]"
                       renderItem={(op, j) => (
                         <div className="flex min-w-0 flex-col gap-2">
                           <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end">
@@ -292,8 +293,8 @@ export function ParamControlsEditor({ value, onChange }: Props) {
 function LabeledInput({ label, value, onChange, placeholder, cls, mono }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; cls?: string; mono?: boolean }) {
   return (
     <label className="flex min-w-0 flex-col gap-1">
-      <span className="text-[12px] text-[var(--color-fg-subtle)]">{label}</span>
-      <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className={(cls ?? '') + (mono ? ' font-mono' : '')} />
+      <span className="text-[12px] text-[var(--color-fg-muted)]">{label}</span>
+      <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} wrapperClassName="h-9 rounded-[8px] px-2.5" className={(cls ?? '') + (mono ? ' font-mono' : '')} />
     </label>
   )
 }
@@ -302,7 +303,7 @@ function LabeledIcon({ label, value, onChange }: { label: string; value: string;
   const id = useId()
   return (
     <div className="flex min-w-0 flex-col gap-1">
-      <label htmlFor={id} className="text-[12px] text-[var(--color-fg-subtle)]">{label}</label>
+      <label htmlFor={id} className="text-[12px] text-[var(--color-fg-muted)]">{label}</label>
       <IconPicker id={id} value={value} onChange={onChange} />
     </div>
   )
@@ -311,8 +312,8 @@ function LabeledIcon({ label, value, onChange }: { label: string; value: string;
 function LabeledArea({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   return (
     <label className="flex min-w-0 flex-col gap-1">
-      <span className="text-[12px] text-[var(--color-fg-subtle)]">{label}</span>
-      <Textarea rows={4} value={value} onChange={(e) => onChange(e.target.value)} className="font-mono text-[12px]" />
+      <span className="text-[12px] text-[var(--color-fg-muted)]">{label}</span>
+      <Textarea rows={4} value={value} onChange={(e) => onChange(e.target.value)} className="rounded-[8px] font-mono text-[12px]" />
     </label>
   )
 }
