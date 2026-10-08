@@ -68,7 +68,21 @@ jobs:
         if: env.RELEASE_TAG != ''
         run: node -e "const v = require('./package.json').version; if (process.env.RELEASE_TAG.replace(/^v/, '') !== v) throw new Error('Release tag must match package version')"
       - name: Build desktop installers
-        run: npm run desktop:build -- ${{ matrix.args }}
+        # Debian packaging requires homepage metadata. It is the project's
+        # homepage, independent of the deployment-specific server address.
+        run: npm run desktop:build -- ${{ matrix.args }} --config.extraMetadata.homepage=https://github.com/hjxwz123/Aivory
+      - name: Normalize Linux installer filenames
+        if: runner.os == 'Linux'
+        run: |
+          node --input-type=module <<'NODE'
+          import { readdirSync, renameSync } from 'node:fs'
+          // electron-builder expands x64 to x86_64 for AppImage and amd64 for
+          // Debian. The official update catalog uses one x64 filename scheme.
+          for (const file of readdirSync('desktop/release')) {
+            const name = file.replace(/-linux-x86_64\.AppImage$/, '-linux-x64.AppImage').replace(/-linux-amd64\.deb$/, '-linux-x64.deb')
+            if (name !== file) renameSync(`desktop/release/${file}`, `desktop/release/${name}`)
+          }
+          NODE
       - name: Verify installer files
         env:
           EXPECTED_PLATFORM: ${{ matrix.name }}
