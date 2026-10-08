@@ -108,5 +108,20 @@
     "closeOverlay": "Close any overlay",
     "showShortcuts": "Show keyboard shortcuts",
     "focusComposer": "Focus composer"
+  },
+  "popupMessage": {
+    "title": "Popup message"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "history": "History",
+    "unread": "Unread",
+    "empty": "No notifications yet.",
+    "choose": "Select a notification to read it.",
+    "loadMore": "Load more",
+    "dismiss": "Don’t show these again",
+    "dismissHint": "Hide this version on future visits. New or edited notifications will still appear.",
+    "failed": "Could not load notifications. Please try again.",
+    "unavailable": "This notification could not be opened. It may have been updated or removed."
   }
 }

@@ -7,6 +7,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle, ArrowLeftRight, BarChart3, Briefcase, Check, Copy, FileClock, Home, LockKeyhole, KeyRound, LogOut, Megaphone, Plus, RefreshCw, Settings2, ShieldCheck, SlidersHorizontal, Trash2, UserPlus, UserX, Users } from 'lucide-react'
 import { workspacesApi } from '@/api'
+import { publicServerUrl } from '@/lib/server-url'
 import type { ApiAnnouncement } from '@/api/endpoints'
 import type {
   ApiModel,
@@ -403,7 +404,7 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
   )
 
   if (!ws || !activeId || !canManage) return null
-  const inviteURL = inviteToken ? `${window.location.origin}/workspace/join/${inviteToken}` : ''
+  const inviteURL = inviteToken ? publicServerUrl(`/workspace/join/${inviteToken}`) : ''
 
   async function kick(uid: string) {
     if (busyUidRef.current) return
@@ -1376,7 +1377,7 @@ function WorkspaceInvitesPanel({ workspaceID, isOwner }: { workspaceID: string; 
         <ul className="space-y-1">
           {invites.map((invite) => {
             const status = inviteStatus(invite)
-            const url = `${window.location.origin}/workspace/join/${invite.token}`
+            const url = publicServerUrl(`/workspace/join/${invite.token}`)
             return (
               <li key={invite.id} className="flex items-center gap-2.5 rounded-[8px] px-1.5 py-1.5">
                 <KeyRound size={14} aria-hidden className="shrink-0 text-[var(--color-fg-subtle)]" />

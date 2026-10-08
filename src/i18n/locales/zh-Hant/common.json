@@ -108,5 +108,20 @@
     "closeOverlay": "關閉任意浮層",
     "showShortcuts": "檢視快捷鍵",
     "focusComposer": "聚焦輸入框"
+  },
+  "popupMessage": {
+    "title": "彈窗訊息"
+  },
+  "notifications": {
+    "title": "通知",
+    "history": "歷史通知",
+    "unread": "未讀",
+    "empty": "暫無通知",
+    "choose": "選擇一則通知查看內容",
+    "loadMore": "載入更多",
+    "dismiss": "本次不再彈出",
+    "dismissHint": "下次造訪不再提示目前版本；發布新通知或更新內容後仍會提示。",
+    "failed": "通知載入失敗，請重試。",
+    "unavailable": "暫時無法開啟這則通知，內容可能已更新或刪除。"
   }
 }

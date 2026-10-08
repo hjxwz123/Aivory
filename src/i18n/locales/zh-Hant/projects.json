@@ -5,7 +5,11 @@
     "pinned": "已置頂",
     "recent": "最近",
     "newProject": "新建專案",
-    "empty": "暫無專案。"
+    "empty": "暫無專案。",
+    "expandProjects": "展開專案清單",
+    "collapseProjects": "收起專案清單",
+    "expandChats": "展開「{{name}}」的對話",
+    "collapseChats": "收起「{{name}}」的對話"
   },
   "list": {
     "title": "專案",

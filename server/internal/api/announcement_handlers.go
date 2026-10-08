@@ -3,6 +3,9 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
+	"strings"
+	"unicode/utf8"
 
 	"aivory/server/internal/store"
 )
@@ -21,6 +24,8 @@ type announcement struct {
 	RememberDismiss bool   `json:"remember_dismiss"`
 	RequireRead     bool   `json:"require_read"`
 	UpdatedAt       int64  `json:"updated_at"`
+	ButtonText      string `json:"button_text,omitempty"`
+	ButtonURL       string `json:"button_url,omitempty"`
 	// Pinned top bar (§ announcement bar) — a thin strip pinned to the top of the
 	// app, independent of the popup. BarHTML is sanitized client-side before
 	// render (links allowed). BarUpdatedAt is the dismiss version: editing the bar
@@ -28,6 +33,25 @@ type announcement struct {
 	BarEnabled   bool   `json:"bar_enabled"`
 	BarHTML      string `json:"bar_html"`
 	BarUpdatedAt int64  `json:"bar_updated_at"`
+}
+
+func normalizePopupMessage(raw json.RawMessage) (announcement, error) {
+	var a announcement
+	if json.Unmarshal(raw, &a) != nil || strings.TrimSpace(string(raw)) == "null" {
+		return a, errInvalidInput
+	}
+	a.ButtonText, a.ButtonURL = strings.TrimSpace(a.ButtonText), strings.TrimSpace(a.ButtonURL)
+	if utf8.RuneCountInString(a.ButtonText) > 80 || len(a.ButtonURL) > 2048 {
+		return a, errInvalidInput
+	}
+	if a.ButtonURL != "" {
+		u, err := url.Parse(a.ButtonURL)
+		internal := strings.HasPrefix(a.ButtonURL, "/") && !strings.HasPrefix(a.ButtonURL, "//") && !strings.Contains(a.ButtonURL, "\\")
+		if err != nil || u.User != nil || strings.Contains(a.ButtonURL, "\\") || (!internal && ((u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "")) {
+			return a, errInvalidInput
+		}
+	}
+	return a, nil
 }
 
 // announcementHandler returns the active announcement for the client to render.

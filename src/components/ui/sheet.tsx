@@ -69,6 +69,8 @@ export const SheetContent = forwardRef<ElementRef<typeof DialogPrimitive.Content
         />
         <DialogPrimitive.Content
           ref={ref}
+          data-slot="sheet-content"
+          data-side={side}
           aria-describedby={undefined}
           className={cn(
             'fixed z-[50] bg-[var(--color-surface)] border-[var(--color-border)]',

@@ -204,6 +204,14 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/public/legal-config", wrap(d, legalConfigPublicHandler))
 	mux.handle("GET", "/api/public/desktop-update", wrap(d, desktopUpdatePublicHandler))
 	mux.handle("GET", "/api/public/desktop-download", wrap(d, desktopDownloadPublicHandler))
+	mux.handle("GET", "/api/notifications", requireAuth(d, listSiteNotifications))
+	mux.handle("GET", "/api/notifications/:id", requireAuth(d, getSiteNotification))
+	mux.handle("POST", "/api/notifications/:id/read", requireAuth(d, readSiteNotification))
+	mux.handle("GET", "/api/admin/notifications", requireAdmin(d, listSiteNotificationsAdmin))
+	mux.handle("GET", "/api/admin/notifications/:id", requireAdmin(d, getSiteNotificationAdmin))
+	mux.handle("POST", "/api/admin/notifications", requireAdmin(d, saveSiteNotificationAdmin))
+	mux.handle("PUT", "/api/admin/notifications/:id", requireAdmin(d, saveSiteNotificationAdmin))
+	mux.handle("DELETE", "/api/admin/notifications/:id", requireAdmin(d, deleteSiteNotificationAdmin))
 	// Membership tiers for the public landing page (§ user groups) — read-only,
 	// marketing info (names / prices / features / allowances), no secrets.
 	mux.handle("GET", "/api/public/user-groups", wrap(d, listUserGroupsPublic))

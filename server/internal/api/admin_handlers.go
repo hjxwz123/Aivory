@@ -1777,6 +1777,12 @@ func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.R
 			// §4.7 numeric limits must be non-negative. Individual compaction
 			// settings below enforce their stricter runtime minimums as well.
 			switch k {
+			case "announcement":
+				cfg, err := normalizePopupMessage(v)
+				if err != nil {
+					return 0, err
+				}
+				v, _ = json.Marshal(cfg)
 			case desktopDownloadSettingKey:
 				cfg, err := normalizeDesktopDownloadConfig(v)
 				if err != nil {

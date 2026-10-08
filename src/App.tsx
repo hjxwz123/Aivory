@@ -21,6 +21,7 @@ import { initRealtime, setRealtimeEnabled } from '@/lib/realtime'
 import { isChatShellPath } from '@/lib/app-paths'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { DomainDataDialog } from '@/components/domain/domain-data-dialog'
+import { NotificationCenter } from '@/components/notifications/notification-center'
 
 const Landing = lazy(() => import('@/pages/Landing'))
 const ChatLayout = lazy(() => import('@/pages/chat/ChatLayout'))
@@ -74,6 +75,7 @@ const AdminAiPPT = lazy(() => import('@/pages/admin/AdminAiPPT'))
 const AdminBackup = lazy(() => import('@/pages/admin/AdminBackup'))
 const AdminModeration = lazy(() => import('@/pages/admin/AdminModeration'))
 const AdminAnnouncement = lazy(() => import('@/pages/admin/AdminAnnouncement'))
+const AdminNotifications = lazy(() => import('@/pages/admin/AdminNotifications'))
 const AdminDocuments = lazy(() => import('@/pages/admin/AdminDocuments'))
 const AdminFiles = lazy(() => import('@/pages/admin/AdminFiles'))
 const AdminHTMLPreviews = lazy(() => import('@/pages/admin/AdminHTMLPreviews'))
@@ -221,6 +223,7 @@ export default function App() {
       <AuthGate>
         <GlobalShortcuts />
         <DomainDataDialog />
+        <NotificationCenter />
         <Suspense fallback={<PanelFallback scope="screen" />}>
           <Routes>
             <Route path="/welcome" element={<Landing />} />
@@ -306,6 +309,7 @@ export default function App() {
               <Route path="oauth" element={<AdminOAuth />} />
               <Route path="moderation" element={<AdminModeration />} />
               <Route path="announcement" element={<AdminAnnouncement />} />
+              <Route path="notifications" element={<AdminNotifications />} />
               <Route path="settings" element={<Navigate to="/admin/settings/model-policy" replace />} />
               <Route path="settings/model-policy" element={<AdminModelPolicy />} />
               <Route path="settings/context-memory" element={<AdminContextMemory />} />

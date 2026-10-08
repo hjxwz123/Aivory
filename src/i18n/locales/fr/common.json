@@ -108,5 +108,20 @@
     "closeOverlay": "Fermer toute fenêtre superposée",
     "showShortcuts": "Afficher les raccourcis clavier",
     "focusComposer": "Activer la zone de saisie"
+  },
+  "popupMessage": {
+    "title": "Message contextuel"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "history": "Historique",
+    "unread": "Non lu",
+    "empty": "Aucune notification pour le moment.",
+    "choose": "Sélectionnez une notification pour la lire.",
+    "loadMore": "Afficher plus",
+    "dismiss": "Ne plus afficher ces notifications",
+    "dismissHint": "Masque cette version lors des prochaines visites. Les nouvelles notifications et les modifications restent affichées.",
+    "failed": "Impossible de charger les notifications. Réessayez.",
+    "unavailable": "Impossible d’ouvrir cette notification. Elle a peut-être été modifiée ou supprimée."
   }
 }

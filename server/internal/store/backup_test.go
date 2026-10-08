@@ -32,6 +32,8 @@ func TestBackupRoundTrip(t *testing.T) {
 	}{
 		{`INSERT INTO settings(key,value) VALUES('default_model_id','"m_x"')`, nil},
 		{`INSERT INTO users(id,email,password_hash,name,role) VALUES('u1','a@b.c','h','A','user')`, nil},
+		{`INSERT INTO site_notifications(id,title,body,enabled,version,created_at,updated_at) VALUES('ntf1','Site notice','<p>Notice body</p>',1,'nv1',123,124)`, nil},
+		{`INSERT INTO site_notification_states(user_id,notification_id,read_version,dismissed_version) VALUES('u1','ntf1','nv1','nv1')`, nil},
 		{`INSERT INTO credit_adjustment_notifications(id,user_id,direction,amount_micros,reason,created_at) VALUES('can1','u1','add',2500000,'Backup notice',123)`, nil},
 		{`INSERT INTO credit_ledger(id,user_id,group_id,cycle_anchor,cycle_start,kind,amount) VALUES('cl1','u1','ug_free',100,100,'timed_debit',3.5)`, nil},
 		{`INSERT INTO credit_reservations(id,user_id,amount_micros,actual_micros,source_type,source_id,status,expires_at) VALUES('cr1','u1',2000000,1500000,'chat','msg1','settled',9999999999)`, nil},
@@ -124,6 +126,7 @@ func TestBackupRoundTrip(t *testing.T) {
 	// Row counts.
 	for tbl, want := range map[string]int{
 		"users": 1, "credit_adjustment_notifications": 1, "credit_ledger": 1, "credit_reservations": 1, "quota_ledger": 1, "billing_usage": 1,
+		"site_notifications": 1, "site_notification_states": 1,
 		"payment_orders": 1, "payment_order_attempts": 1, "payment_events": 1,
 		"workspaces": 1, "workspace_members": 1, "conversations": 1, "conversation_compaction_leases": 0, "conversation_generation_leases": 0, "messages": 2, "chunks": 1, "vector_points": 1, "documents": 1,
 	} {

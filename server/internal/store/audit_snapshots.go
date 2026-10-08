@@ -21,6 +21,7 @@ type auditSnapshotSpec struct{ table, key, name, visible, hidden string }
 // Only these columns can enter the audit store. Credential/content columns
 // are compared using transient hashes and produce a redacted change marker.
 var auditSnapshotSpecs = map[string]auditSnapshotSpec{
+	"notifications":    {"site_notifications", "id", "title", "title,enabled,version", "body"},
 	"users":            {"users", "id", "name", "name,email,role,status,group_id,totp_enabled,password_set,credits_permanent_micros,sort_order", "password_hash"},
 	"channels":         {"channels", "id", "name", "name,type,api_format,enabled,sort_order", "api_key,base_url,headers"},
 	"models":           {"models", "id", "label", "label,channel_id,kind,request_id,enabled,sort_order,fallback_channel_id,tool_mode,vision,stream,research_enabled,fast,moderation_enabled,moderation_mode,price_input,price_output,price_cache_read,price_cache_write,price_per_image,currency,dim,compaction_token_threshold,image_timeout_sec", "system_prompt,extra_params,official_tools,param_controls,builtin_tools,mcp_server_ids,tags"},

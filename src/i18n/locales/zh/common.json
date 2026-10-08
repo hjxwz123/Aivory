@@ -108,5 +108,20 @@
     "closeOverlay": "关闭任意浮层",
     "showShortcuts": "查看快捷键",
     "focusComposer": "聚焦输入框"
+  },
+  "popupMessage": {
+    "title": "弹窗消息"
+  },
+  "notifications": {
+    "title": "通知",
+    "history": "历史通知",
+    "unread": "未读",
+    "empty": "暂无通知",
+    "choose": "选择一条通知查看内容",
+    "loadMore": "加载更多",
+    "dismiss": "本次不再弹出",
+    "dismissHint": "下次访问不再提示当前版本；发布新通知或更新内容后仍会提示。",
+    "failed": "通知加载失败，请重试。",
+    "unavailable": "暂时无法打开这条通知，内容可能已更新或删除。"
   }
 }

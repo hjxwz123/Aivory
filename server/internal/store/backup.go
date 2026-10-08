@@ -44,7 +44,7 @@ var backupTableOrder = []string{
 	"aippt_decks",
 	"usage_stats", "usage_logs", "artifacts", "refresh_tokens", "oauth_identities", "passkeys",
 	"workspace_invites", "workspace_policies", "workspace_announcements", "workspace_audit_logs", "admin_audit_logs",
-	"pending_storage_cleanup",
+	"site_notifications", "site_notification_states", "pending_storage_cleanup",
 }
 
 // configTableOrder is the non-user, non-conversation admin configuration slice.
@@ -53,6 +53,7 @@ var backupTableOrder = []string{
 // intact. The order still follows FK dependencies: groups/channels/skills before
 // models, models before model join tables, groups before redeem codes.
 var configTableOrder = []string{
+	"site_notifications",
 	"settings",
 	"user_groups",
 	"credit_packages",
@@ -419,6 +420,8 @@ var tablePrimaryKeys = map[string][]string{
 	"model_channel_bindings":          {"id"},
 	"model_group_quotas":              {"model_id", "group_id"},
 	"model_tags":                      {"id"},
+	"site_notifications":              {"id"},
+	"site_notification_states":        {"user_id", "notification_id"},
 	"image_styles":                    {"id"},
 	"redeem_codes":                    {"id"},
 	"redeem_redemptions":              {"id"},

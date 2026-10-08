@@ -27,8 +27,7 @@ import {
   ArrowDown,
   FolderOpen,
   LibraryBig,
-  CircleHelp,
-  FileText,
+  Bell,
   UserRound,
   Download,
   PackageCheck,
@@ -80,9 +79,11 @@ import { ShareConversationDialog } from '@/components/chat/share-conversation-di
 import { useConversations, sameConvListShape } from '@/store/conversations'
 import { resetComposerForNewConversation } from '@/store/composer-prefs'
 import { useProjects } from '@/store/projects'
+import { DEFAULT_PROJECT_NAVIGATION, useSidebarProjects } from '@/store/sidebar-projects'
 import { useModels } from '@/store/models'
 import { useSettings } from '@/store/settings'
 import { useAuth } from '@/store/auth'
+import { useNotificationCenter } from '@/store/notification-center'
 import { useAiPPT } from '@/store/aippt'
 import { useLanguage } from '@/store/language'
 import { SUPPORTED_LANGUAGES } from '@/i18n'
@@ -324,11 +325,16 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
     if (listContentRef.current) observer.observe(listContentRef.current)
     return () => observer.disconnect()
   }, [compact, measureListEdges])
-  const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(() => new Set())
+  const projectNavigationScope = JSON.stringify([user?.id ?? '', activeWsId ?? ''])
+  const projectNavigation = useSidebarProjects((s) => s.preferences[projectNavigationScope] ?? DEFAULT_PROJECT_NAVIGATION)
+  const setProjectsCollapsed = useSidebarProjects((s) => s.setCollapsed)
+  const setProjectExpanded = useSidebarProjects((s) => s.setExpanded)
+  const projectsCollapsed = projectNavigation.collapsed
+  const projectListId = `${sidebarId}-projects`
   const [loadingProjectIds, setLoadingProjectIds] = useState<Set<string>>(() => new Set())
   const loadedProjectIdsRef = useRef<Set<string>>(new Set())
   const loadingProjectIdsRef = useRef<Set<string>>(new Set())
-  const expandedWorkspaceIdRef = useRef(activeWsId)
+  const projectLoadEpochRef = useRef(0)
   const activeProjectId = useMemo(() => {
     if (!currentId) return undefined
     if (location.pathname.startsWith('/projects/')) {
@@ -340,33 +346,21 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
     return undefined
   }, [activeConversations, currentId, location.pathname, projects])
 
-  // Expansion belongs to the current workspace. Prune deleted projects and
-  // always reveal whichever project owns the active route/conversation.
-  useEffect(() => {
-    setExpandedProjectIds((previous) => {
-      const workspaceChanged = expandedWorkspaceIdRef.current !== activeWsId
-      expandedWorkspaceIdRef.current = activeWsId
-      const availableIds = new Set(projects.map((project) => project.id))
-      const next = workspaceChanged
-        ? new Set<string>()
-        : new Set([...previous].filter((projectId) => availableIds.has(projectId)))
-      if (activeProjectId && availableIds.has(activeProjectId)) next.add(activeProjectId)
-      if (
-        !workspaceChanged &&
-        next.size === previous.size &&
-        [...next].every((projectId) => previous.has(projectId))
-      ) {
-        return previous
-      }
-      return next
-    })
-  }, [activeProjectId, activeWsId, projects])
+  // An untouched active project opens by default; an explicit choice always
+  // wins, including when navigating or refreshing the active project's data.
+  const expandedProjectIds = useMemo(
+    () => new Set(projects
+      .filter((project) => projectNavigation.expanded[project.id] ?? (project.id === activeProjectId))
+      .map((project) => project.id)),
+    [activeProjectId, projectNavigation.expanded, projects],
+  )
 
   useEffect(() => {
+    projectLoadEpochRef.current++
     loadedProjectIdsRef.current = new Set()
     loadingProjectIdsRef.current = new Set()
     setLoadingProjectIds(new Set())
-  }, [activeWsId])
+  }, [projectNavigationScope])
 
   // § AI PPT: one cached config read decides whether the entry exists. The store
   // de-duplicates concurrent loads, so mounting several sidebars is harmless.
@@ -376,11 +370,13 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
 
   useEffect(() => subscribeAccessInvalidation(() => { void loadAiPPTConfig(true) }), [loadAiPPTConfig])
 
-  function ensureProjectConversations(projectId: string) {
+  const ensureProjectConversations = useCallback((projectId: string) => {
     if (loadedProjectIdsRef.current.has(projectId) || loadingProjectIdsRef.current.has(projectId)) return
+    const epoch = projectLoadEpochRef.current
     loadingProjectIdsRef.current.add(projectId)
     setLoadingProjectIds((previous) => new Set(previous).add(projectId))
     void loadProjectConversations(projectId).then((loaded) => {
+      if (epoch !== projectLoadEpochRef.current) return
       if (loaded) loadedProjectIdsRef.current.add(projectId)
       loadingProjectIdsRef.current.delete(projectId)
       setLoadingProjectIds((previous) => {
@@ -389,36 +385,16 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
         return next
       })
     })
-  }
+  }, [loadProjectConversations])
 
   function toggleProject(projectId: string, expanded: boolean) {
-    setExpandedProjectIds((previous) => {
-      const next = new Set(previous)
-      if (expanded) next.delete(projectId)
-      else next.add(projectId)
-      return next
-    })
-    if (!expanded) ensureProjectConversations(projectId)
+    setProjectExpanded(projectNavigationScope, projectId, !expanded)
   }
 
   useEffect(() => {
-    if (!activeProjectId) return
-    if (loadedProjectIdsRef.current.has(activeProjectId) || loadingProjectIdsRef.current.has(activeProjectId)) {
-      return
-    }
-    const projectId = activeProjectId
-    loadingProjectIdsRef.current.add(projectId)
-    setLoadingProjectIds((previous) => new Set(previous).add(projectId))
-    void loadProjectConversations(projectId).then((loaded) => {
-      if (loaded) loadedProjectIdsRef.current.add(projectId)
-      loadingProjectIdsRef.current.delete(projectId)
-      setLoadingProjectIds((previous) => {
-        const next = new Set(previous)
-        next.delete(projectId)
-        return next
-      })
-    })
-  }, [activeProjectId, loadProjectConversations])
+    if (projectsCollapsed || !canUseKnowledgeBases) return
+    for (const projectId of expandedProjectIds) ensureProjectConversations(projectId)
+  }, [canUseKnowledgeBases, ensureProjectConversations, expandedProjectIds, projectNavigationScope, projectsCollapsed])
 
   // Reveal the ACTIVE conversation in the history list whenever the user lands
   // on one that isn't already visible — arriving via a gallery tile, the command
@@ -431,7 +407,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
   // O(1) once handled). Resets on collapse so re-expanding re-centers it.
   const scrolledForIdRef = useRef<string | undefined>(undefined)
   useEffect(() => {
-    if (compact) {
+    if (compact || (activeProjectId && (projectsCollapsed || !expandedProjectIds.has(activeProjectId)))) {
       scrolledForIdRef.current = undefined
       return
     }
@@ -451,7 +427,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
       container.scrollTo({ top: target, behavior: !reducedMotion && near ? 'smooth' : 'auto' })
     }
     scrolledForIdRef.current = currentId
-  }, [activeConversations, compact, currentId, expandedProjectIds, reducedMotion])
+  }, [activeConversations, activeProjectId, compact, currentId, expandedProjectIds, projectsCollapsed, reducedMotion])
 
   function startNewChat() {
     // A new chat starts from model defaults, never a prior conversation's
@@ -711,19 +687,42 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             )}
           >
             <div ref={listContentRef} className="pb-2">
-            {canUseKnowledgeBases ? <section className="pt-2">
-              <div className="flex items-center pr-3.5">
-                <SidebarSectionLabel className="min-w-0 flex-1">
-                  <Link
-                    to="/projects"
-                    onClick={onClose}
-                    aria-current={location.pathname === '/projects' ? 'page' : undefined}
-                    className="rounded-[5px] interactive hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-                  >
-                    {tNav('projects')}
-                  </Link>
+            {canUseKnowledgeBases ? <section className="pt-2" data-sidebar-projects>
+              <div className="flex items-center gap-1 pr-3.5">
+                <SidebarSectionLabel className="min-w-0 flex-1 px-2.5">
+                  <Tooltip content={tProjects(projectsCollapsed ? 'nav.expandProjects' : 'nav.collapseProjects')}>
+                    <button
+                      type="button"
+                      data-sidebar-projects-toggle
+                      aria-label={tProjects(projectsCollapsed ? 'nav.expandProjects' : 'nav.collapseProjects')}
+                      aria-expanded={!projectsCollapsed}
+                      aria-controls={projectListId}
+                      onClick={() => setProjectsCollapsed(projectNavigationScope, !projectsCollapsed)}
+                      className="flex min-h-6 w-full min-w-0 items-center gap-2 rounded-[6px] px-2 text-left hover:bg-[var(--color-sidebar-hover)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-lg:min-h-8"
+                    >
+                      <span>{tNav('projects')}</span>
+                      <ChevronRight
+                        size={14}
+                        aria-hidden
+                        className={cn('shrink-0 text-[var(--color-fg-muted)] transition-transform duration-[var(--duration-base)] ease-[var(--ease-out)] motion-reduce:transition-none', !projectsCollapsed && 'rotate-90')}
+                      />
+                    </button>
+                  </Tooltip>
                 </SidebarSectionLabel>
-                {canCreateProject ? (
+                {!projectsCollapsed ? (
+                  <Tooltip content={tProjects('nav.all')}>
+                    <Link
+                      to="/projects"
+                      onClick={onClose}
+                      aria-label={tProjects('nav.all')}
+                      aria-current={location.pathname === '/projects' ? 'page' : undefined}
+                      className="-mt-1 inline-flex size-6 shrink-0 items-center justify-center rounded-[6px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-sidebar-hover)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-lg:size-8"
+                    >
+                      <FolderOpen size={13} aria-hidden />
+                    </Link>
+                  </Tooltip>
+                ) : null}
+                {canCreateProject && !projectsCollapsed ? (
                   <Tooltip content={tProjects('nav.newProject')}>
                     <button
                       type="button"
@@ -737,153 +736,139 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
                 ) : null}
               </div>
 
-              {sortedProjects.length === 0 ? (
-                <p className="px-[18px] py-1.5 text-[12px] text-[var(--color-fg-subtle)]">
-                  {tProjects('nav.empty')}
-                </p>
-              ) : (
-                <ul>
-                  {sortedProjects.map((project) => {
-                    const accent = accentClasses(project.accent)
-                    const expanded = expandedProjectIds.has(project.id)
-                    const projectConversations = projectConversationsById.get(project.id) ?? []
-                    const childListId = `${sidebarId}-project-${project.id}`
-                    const projectActive = activeProjectId === project.id
-                    const chip = (className?: string) => (
-                      <span
-                        className={cn(
-                          'inline-flex size-5 shrink-0 items-center justify-center rounded-[6px] text-[11px] font-medium',
-                          accent.chip,
-                          className,
-                        )}
-                        aria-hidden
-                      >
-                        {project.emoji?.trim() || project.name.trim().slice(0, 1).toUpperCase()}
-                      </span>
-                    )
-                    const chevron = (
-                      <ChevronRight
-                        size={13}
-                        aria-hidden
-                        className={cn(
-                          'transition-transform duration-[var(--duration-base)] ease-[var(--ease-out)]',
-                          expanded && 'rotate-90',
-                        )}
-                      />
-                    )
-                    return (
-                      <li key={project.id}>
-                        <div
+              <SidebarDisclosure id={projectListId} expanded={!projectsCollapsed}>
+                {() => sortedProjects.length === 0 ? (
+                  <p className="px-[18px] py-1.5 text-[12px] text-[var(--color-fg-subtle)]">
+                    {tProjects('nav.empty')}
+                  </p>
+                ) : (
+                  <ul>
+                    {sortedProjects.map((project) => {
+                      const accent = accentClasses(project.accent)
+                      const expanded = expandedProjectIds.has(project.id)
+                      const projectConversations = projectConversationsById.get(project.id) ?? []
+                      const childListId = `${sidebarId}-project-${project.id}`
+                      const projectActive = activeProjectId === project.id
+                      const chip = (className?: string) => (
+                        <span
                           className={cn(
-                            'group/project relative mx-2 my-px flex min-h-8 items-center gap-2 rounded-[8px] pl-2.5 pr-1.5 interactive max-lg:min-h-[var(--tap-min)] max-sm:!min-h-9',
-                            projectActive
-                              ? 'bg-[var(--color-sidebar-active)] shadow-[var(--shadow-xs)]'
-                              : 'hover:bg-[var(--color-sidebar-hover)]',
+                            'inline-flex size-5 shrink-0 items-center justify-center rounded-[6px] text-[11px] font-medium',
+                            accent.chip,
+                            className,
                           )}
+                          aria-hidden
                         >
-                          {/* Desktop: the project chip doubles as the disclosure
-                              toggle and turns into a chevron while the row is
-                              hovered or focused, keeping the chip on the same
-                              x-line as every other row icon. */}
-                          <button
-                            type="button"
-                            aria-label={project.name}
-                            aria-expanded={expanded}
-                            aria-controls={childListId}
-                            onClick={() => toggleProject(project.id, expanded)}
-                            className="relative inline-flex size-5 shrink-0 items-center justify-center rounded-[6px] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-lg:hidden"
-                          >
-                            {chip('transition-opacity duration-[var(--duration-fast)] group-hover/project:opacity-0 group-focus-within/project:opacity-0')}
-                            <span className="absolute inset-0 inline-flex items-center justify-center opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover/project:opacity-100 group-focus-within/project:opacity-100">
-                              {chevron}
-                            </span>
-                          </button>
-                          {chip('lg:hidden')}
-                          <Link
-                            to={`/projects/${project.id}`}
-                            onClick={onClose}
-                            aria-current={location.pathname === `/projects/${project.id}` ? 'page' : undefined}
-                            title={project.name}
+                          {project.emoji?.trim() || project.name.trim().slice(0, 1).toUpperCase()}
+                        </span>
+                      )
+                      const chevron = (
+                        <ChevronRight
+                          size={13}
+                          aria-hidden
+                          className={cn(
+                            'transition-transform duration-[var(--duration-base)] ease-[var(--ease-out)] motion-reduce:transition-none',
+                            expanded && 'rotate-90',
+                          )}
+                        />
+                      )
+                      return (
+                        <li key={project.id}>
+                          <div
                             className={cn(
-                              'flex min-w-0 flex-1 items-center self-stretch rounded-[6px] text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                              'group/project relative mx-2 my-px flex min-h-8 items-center gap-2 rounded-[8px] pl-2.5 pr-1.5 interactive max-lg:min-h-[var(--tap-min)] max-sm:!min-h-9',
                               projectActive
-                                ? 'font-medium text-[var(--color-fg)]'
-                                : 'text-[var(--color-fg-muted)] group-hover/project:text-[var(--color-fg)]',
+                                ? 'bg-[var(--color-sidebar-active)] shadow-[var(--shadow-xs)]'
+                                : 'hover:bg-[var(--color-sidebar-hover)]',
                             )}
                           >
-                            <span className="min-w-0 flex-1 truncate">{truncate(project.name, 30)}</span>
-                          </Link>
-                          {/* Touch has no hover to reveal the chip's chevron, so
-                              the drawer keeps an explicit disclosure control. */}
-                          <button
-                            type="button"
-                            aria-label={project.name}
-                            aria-expanded={expanded}
-                            aria-controls={childListId}
-                            onClick={() => toggleProject(project.id, expanded)}
-                            className="inline-flex size-8 shrink-0 items-center justify-center rounded-[6px] text-[var(--color-fg-faint)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] lg:hidden"
-                          >
-                            {chevron}
-                          </button>
-                          <ProjectActionsMenu
-                            project={project}
-                            canUseKnowledgeBases={canUseKnowledgeBases}
-                            canManageProject={project.canDelete ?? (
-                              project.userId === user?.id || activeWorkspace?.role === 'admin'
-                            )}
-                            canChangeProjectVisibility={Boolean(
-                              project.workspaceId && (
+                            {chip()}
+                            <Link
+                              to={`/projects/${project.id}`}
+                              onClick={onClose}
+                              aria-current={location.pathname === `/projects/${project.id}` ? 'page' : undefined}
+                              title={project.name}
+                              className={cn(
+                                'flex min-w-0 flex-1 items-center self-stretch rounded-[6px] text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                                projectActive
+                                  ? 'font-medium text-[var(--color-fg)]'
+                                  : 'text-[var(--color-fg-muted)] group-hover/project:text-[var(--color-fg)]',
+                              )}
+                            >
+                              <span className="min-w-0 flex-1 truncate">{truncate(project.name, 30)}</span>
+                            </Link>
+                            <Tooltip content={tProjects(expanded ? 'nav.collapseChats' : 'nav.expandChats', { name: project.name })}>
+                              <button
+                                type="button"
+                                data-project-disclosure={project.id}
+                                aria-label={tProjects(expanded ? 'nav.collapseChats' : 'nav.expandChats', { name: project.name })}
+                                aria-expanded={expanded}
+                                aria-controls={childListId}
+                                onClick={() => toggleProject(project.id, expanded)}
+                                className="inline-flex size-6 shrink-0 items-center justify-center rounded-[6px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-sidebar-hover)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-lg:size-8"
+                              >
+                                {chevron}
+                              </button>
+                            </Tooltip>
+                            <ProjectActionsMenu
+                              project={project}
+                              canUseKnowledgeBases={canUseKnowledgeBases}
+                              canManageProject={project.canDelete ?? (
                                 project.userId === user?.id || activeWorkspace?.role === 'admin'
-                              ),
+                              )}
+                              canChangeProjectVisibility={Boolean(
+                                project.workspaceId && (
+                                  project.userId === user?.id || activeWorkspace?.role === 'admin'
+                                ),
+                              )}
+                              canDeleteConversations={userCan(user, 'allow_conversation_deletion') && (
+                                !project.workspaceId || activeWorkspace?.can_delete_conversations === true
+                              )}
+                              placement="sidebar"
+                            />
+                          </div>
+                          <SidebarDisclosure
+                            id={childListId}
+                            expanded={expanded}
+                          >
+                            {() => (
+                              <ul>
+                                {loadingProjectIds.has(project.id) && projectConversations.length === 0 ? (
+                                  <li
+                                    role="status"
+                                    aria-label={tCommon('common.loading')}
+                                    className="flex min-h-8 items-center pl-[46px] text-[var(--color-fg-subtle)]"
+                                  >
+                                    <Loader2 size={12} className="animate-spin" aria-hidden />
+                                  </li>
+                                ) : null}
+                                {projectConversations.map((conversation) => (
+                                  <ConversationItem
+                                    key={conversation.id}
+                                    conversation={conversation}
+                                    active={conversation.id === currentId}
+                                    onSelect={onClose}
+                                    t={t}
+                                    nested
+                                    dense={variant === 'sheet'}
+                                    reorder={conversationReorder}
+                                  />
+                                ))}
+                                {!loadingProjectIds.has(project.id) &&
+                                  loadedProjectIdsRef.current.has(project.id) &&
+                                  projectConversations.length === 0 ? (
+                                  <li className="flex min-h-8 items-center pl-[46px] pr-2 text-[12px] text-[var(--color-fg-subtle)]">
+                                    {tProjects('detail.chatsEmpty')}
+                                  </li>
+                                ) : null}
+                              </ul>
                             )}
-                            canDeleteConversations={userCan(user, 'allow_conversation_deletion') && (
-                              !project.workspaceId || activeWorkspace?.can_delete_conversations === true
-                            )}
-                            placement="sidebar"
-                          />
-                        </div>
-                        <ProjectConversationDisclosure
-                          id={childListId}
-                          expanded={expanded}
-                        >
-                          {() => (
-                            <ul>
-                              {loadingProjectIds.has(project.id) && projectConversations.length === 0 ? (
-                                <li
-                                  role="status"
-                                  aria-label={tCommon('common.loading')}
-                                  className="flex min-h-8 items-center pl-[46px] text-[var(--color-fg-subtle)]"
-                                >
-                                  <Loader2 size={12} className="animate-spin" aria-hidden />
-                                </li>
-                              ) : null}
-                              {projectConversations.map((conversation) => (
-                                <ConversationItem
-                                  key={conversation.id}
-                                  conversation={conversation}
-                                  active={conversation.id === currentId}
-                                  onSelect={onClose}
-                                  t={t}
-                                  nested
-                                  dense={variant === 'sheet'}
-                                  reorder={conversationReorder}
-                                />
-                              ))}
-                              {!loadingProjectIds.has(project.id) &&
-                                loadedProjectIdsRef.current.has(project.id) &&
-                                projectConversations.length === 0 ? (
-                                <li className="flex min-h-8 items-center pl-[46px] pr-2 text-[12px] text-[var(--color-fg-subtle)]">
-                                  {tProjects('detail.chatsEmpty')}
-                                </li>
-                              ) : null}
-                            </ul>
-                          )}
-                        </ProjectConversationDisclosure>
-                      </li>
-                    )
-                  })}
-                </ul>
-              )}
+                          </SidebarDisclosure>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+              </SidebarDisclosure>
             </section> : null}
 
             {starred.length > 0 && (
@@ -1130,7 +1115,7 @@ function Group({
   )
 }
 
-function ProjectConversationDisclosure({
+function SidebarDisclosure({
   id,
   expanded,
   children,
@@ -1188,7 +1173,7 @@ function ProjectConversationDisclosure({
         setRendered(false)
       }}
       className={cn(
-        'grid transition-[grid-template-rows,opacity] duration-[var(--duration-base)] ease-[var(--ease-out)]',
+        'grid transition-[grid-template-rows,opacity] duration-[var(--duration-base)] ease-[var(--ease-out)] motion-reduce:transition-none',
         visible
           ? 'grid-rows-[1fr] opacity-100'
           : 'pointer-events-none grid-rows-[0fr] opacity-0',
@@ -1596,6 +1581,10 @@ export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuP
           <Settings size={13} aria-hidden />
           {t('settings:user.settings')}
         </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => useNotificationCenter.getState().openNotifications()}>
+          <Bell size={13} aria-hidden />
+          {t('common:notifications.title')}
+        </DropdownMenuItem>
         {downloadUrl ? <DropdownMenuItem asChild>
           <a href={downloadUrl} target="_blank" rel="noopener noreferrer" data-app-download="menu">
             <Download size={13} aria-hidden />{t('common:downloadApp')}
@@ -1650,22 +1639,6 @@ export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuP
                 </DropdownMenuRadioItem>
               ))}
             </DropdownMenuRadioGroup>
-          </DropdownMenuSubContent>
-        </DropdownMenuSub>
-        <DropdownMenuSub>
-          <DropdownMenuSubTrigger>
-            <CircleHelp size={13} aria-hidden />
-            {t('chat:userMenu.help', { defaultValue: 'Help' })}
-          </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent>
-            <DropdownMenuItem onClick={() => window.open('/terms', '_blank', 'noopener,noreferrer')}>
-              <FileText size={13} aria-hidden />
-              {t('chat:userMenu.terms', { defaultValue: 'Terms of Service' })}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => window.open('/privacy', '_blank', 'noopener,noreferrer')}>
-              <ShieldCheck size={13} aria-hidden />
-              {t('chat:userMenu.privacyPolicy', { defaultValue: 'Privacy Policy' })}
-            </DropdownMenuItem>
           </DropdownMenuSubContent>
         </DropdownMenuSub>
         <DropdownMenuSeparator />

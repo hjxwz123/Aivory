@@ -10,6 +10,17 @@
 -- them through `int` locals (`x == 1`) and writes them via boolInt()/literals,
 -- never binding a Go bool, so INTEGER is the portable choice.
 
+CREATE TABLE IF NOT EXISTS site_notifications (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  version TEXT NOT NULL,
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_site_notifications_published ON site_notifications(enabled, updated_at DESC, id DESC);
+
 CREATE TABLE IF NOT EXISTS settings (
   key        TEXT PRIMARY KEY,
   value      TEXT NOT NULL,
@@ -37,6 +48,14 @@ CREATE TABLE IF NOT EXISTS users (
   quota_cycle_anchor BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint),
   sort_order    INTEGER NOT NULL DEFAULT 0,
   created_at    BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
+);
+
+CREATE TABLE IF NOT EXISTS site_notification_states (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  notification_id TEXT NOT NULL REFERENCES site_notifications(id) ON DELETE CASCADE,
+  read_version TEXT NOT NULL DEFAULT '',
+  dismissed_version TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY(user_id, notification_id)
 );
 
 CREATE TABLE IF NOT EXISTS credit_adjustment_notifications (

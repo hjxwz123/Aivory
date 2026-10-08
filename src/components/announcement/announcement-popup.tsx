@@ -15,6 +15,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Clock3 } from 'lucide-react'
+import { serverOrigin } from '@/lib/server-url'
 import { authApi } from '@/api'
 import { useAuth } from '@/store/auth'
 import {
@@ -37,6 +38,8 @@ interface AnnouncementData {
   remember_dismiss: boolean
   require_read: boolean
   updated_at: number
+  button_text: string
+  button_url: string
 }
 
 const DISMISS_KEY = 'aivory.announcement.dismissed'
@@ -77,6 +80,8 @@ export function AnnouncementPopup() {
           remember_dismiss: a.remember_dismiss,
           require_read: requireRead,
           updated_at: a.updated_at,
+          button_text: a.button_text ?? '',
+          button_url: a.button_url ?? '',
         }
         void acquireStartupDialog().then((release) => {
           if (cancelled) {
@@ -172,7 +177,7 @@ export function AnnouncementPopup() {
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             <DialogHeader>
               <DialogTitle className="break-words pr-10">
-                {title || t('announcement.title', { defaultValue: 'Announcement' })}
+                {title || t('popupMessage.title')}
               </DialogTitle>
             </DialogHeader>
             <DialogBody className="min-w-0 overflow-x-hidden">
@@ -206,14 +211,22 @@ export function AnnouncementPopup() {
                 </span>
               ) : null}
               <Button
-                variant={data.remember_dismiss ? 'secondary' : 'primary'}
+                variant="primary"
                 disabled={closeLocked}
-                onClick={close}
+                onClick={() => {
+                  if (data.button_url) {
+                    try {
+                      const url = new URL(data.button_url, serverOrigin())
+                      if (['http:', 'https:'].includes(url.protocol) && !url.username && !url.password) window.open(url.href, '_blank', 'noopener,noreferrer')
+                    } catch { /* A malformed legacy URL falls back to closing. */ }
+                  }
+                  close()
+                }}
               >
-                {t('actions.close')}
+                {data.button_text || t('actions.close')}
               </Button>
               {data.remember_dismiss ? (
-                <Button disabled={closeLocked} onClick={dismissVersion}>
+                <Button variant="secondary" disabled={closeLocked} onClick={dismissVersion}>
                   {t('announcement.dontShowAgain', { defaultValue: "Don't show this again" })}
                 </Button>
               ) : null}

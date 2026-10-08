@@ -161,6 +161,7 @@ export const DialogContent = forwardRef<
       <DialogOverlay data-feedback-capture-ignore={captureIgnore ? '' : undefined} />
       <DialogPrimitive.Content
         ref={setContentRef}
+        data-slot="dialog-content"
         data-feedback-capture-ignore={captureIgnore ? '' : undefined}
         className={cn(
           // Positioning uses the independent `translate` property. Entrance

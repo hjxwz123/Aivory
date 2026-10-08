@@ -760,6 +760,8 @@ func Migrate(db *sql.DB) error {
 		"aippt_decks":                     {"workspace_id"},
 		"workspace_policies":              {"workspace_id", "allowed_model_ids", "allowed_tool_ids", "allowed_mcp_server_ids", "allow_sandbox", "allow_image_generation", "allow_tool_calling", "allow_drawing", "allow_mcp", "allow_skills", "allow_prompts", "allow_private_chat", "allow_ai_ppt", "allow_knowledge_bases", "allow_file_upload", "member_monthly_credit_limit", "updated_by", "updated_at"},
 		"workspace_announcements":         {"workspace_id", "config", "updated_by", "updated_at"},
+		"site_notifications":              {"id", "title", "body", "enabled", "version", "created_at", "updated_at"},
+		"site_notification_states":        {"user_id", "notification_id", "read_version", "dismissed_version"},
 		"domain_users":                    {"user_id", "domain", "lock_override", "personal_data_prompt_dismissed", "workspace_membership_created"},
 		"workspace_invites":               {"id", "workspace_id", "token", "email", "role", "expires_at", "max_uses", "used_count", "created_by", "purpose", "revoked_at", "created_at"},
 		"workspaces":                      {"id", "name", "owner_id", "invite_token", "deleting", "created_at"},

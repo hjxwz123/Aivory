@@ -5,6 +5,17 @@
 
 PRAGMA foreign_keys = ON;
 
+CREATE TABLE IF NOT EXISTS site_notifications (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  version TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_site_notifications_published ON site_notifications(enabled, updated_at DESC, id DESC);
+
 CREATE TABLE IF NOT EXISTS settings (
   key        TEXT PRIMARY KEY,
   value      TEXT NOT NULL,                  -- JSON-encoded
@@ -32,6 +43,15 @@ CREATE TABLE IF NOT EXISTS users (
   quota_cycle_anchor INTEGER NOT NULL DEFAULT (strftime('%s','now')), -- current group's model-quota cycle origin
   sort_order    INTEGER NOT NULL DEFAULT 0,        -- admin-defined display order
   created_at    INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+
+-- Per-user read and popup suppression versions for published site notices.
+CREATE TABLE IF NOT EXISTS site_notification_states (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  notification_id TEXT NOT NULL REFERENCES site_notifications(id) ON DELETE CASCADE,
+  read_version TEXT NOT NULL DEFAULT '',
+  dismissed_version TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY(user_id, notification_id)
 );
 
 -- One-time notices created by administrator permanent-credit adjustments.

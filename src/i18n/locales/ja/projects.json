@@ -5,7 +5,11 @@
     "pinned": "ピン留め",
     "recent": "最近",
     "newProject": "新しいプロジェクト",
-    "empty": "プロジェクトはまだありません。"
+    "empty": "プロジェクトはまだありません。",
+    "expandProjects": "プロジェクト一覧を展開",
+    "collapseProjects": "プロジェクト一覧を折りたたむ",
+    "expandChats": "「{{name}}」のチャットを展開",
+    "collapseChats": "「{{name}}」のチャットを折りたたむ"
   },
   "list": {
     "title": "プロジェクト",

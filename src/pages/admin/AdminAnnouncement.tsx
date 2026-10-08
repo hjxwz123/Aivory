@@ -10,6 +10,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Megaphone, Upload, X } from 'lucide-react'
+import { serverOrigin } from '@/lib/server-url'
 import { adminApi, ApiError, invalidateAnnouncementCache } from '@/api'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -35,6 +36,8 @@ interface AnnouncementConfig {
   bar_enabled: boolean
   bar_html: string
   bar_updated_at: number
+  button_text: string
+  button_url: string
 }
 
 export default function AdminAnnouncement() {
@@ -43,6 +46,8 @@ export default function AdminAnnouncement() {
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [imageUrl, setImageUrl] = useState('')
+  const [buttonText, setButtonText] = useState('')
+  const [buttonUrl, setButtonUrl] = useState('')
   const [remember, setRemember] = useState(true)
   const [requireRead, setRequireRead] = useState(false)
   // Pinned top bar.
@@ -66,6 +71,8 @@ export default function AdminAnnouncement() {
       setTitle(typeof a.title === 'string' ? a.title : '')
       setBody(typeof a.body === 'string' ? a.body : '')
       setImageUrl(typeof a.image_url === 'string' ? a.image_url : '')
+      setButtonText(a.button_text ?? '')
+      setButtonUrl(a.button_url ?? '')
       setRemember(a.remember_dismiss !== false)
       setRequireRead(Boolean(a.require_read))
       const bEnabled = Boolean(a.bar_enabled)
@@ -102,6 +109,17 @@ export default function AdminAnnouncement() {
   }
 
   async function save() {
+    const target = buttonUrl.trim()
+    if (target) {
+      try {
+        const internal = target.startsWith('/') && !target.startsWith('//') && !target.includes('\\')
+        const url = new URL(target, serverOrigin())
+        if ((!internal && !/^https?:\/\//i.test(target)) || !['http:', 'https:'].includes(url.protocol) || url.username || url.password || target.includes('\\')) throw new Error('invalid URL')
+      } catch {
+        toast.error(t('admin:announcement.invalidButtonUrl'))
+        return
+      }
+    }
     setSaving(true)
     try {
       const now = Math.floor(Date.now() / 1000)
@@ -113,6 +131,8 @@ export default function AdminAnnouncement() {
         title: title.trim(),
         body: body.trim(),
         image_url: imageUrl.trim(),
+        button_text: buttonText.trim(),
+        button_url: buttonUrl.trim(),
         remember_dismiss: remember,
         require_read: requireRead,
         // Bump the version so an edited notice re-shows for users who dismissed
@@ -144,7 +164,7 @@ export default function AdminAnnouncement() {
         <PanelFallback />
       ) : (
         <div className="mt-8">
-          <SettingsSection title={t('admin:announcement.popupTitle', { defaultValue: 'Popup announcement' })}>
+          <SettingsSection title={t('admin:announcement.popupTitle')}>
             <SettingsRow
               label={t('admin:announcement.enabledLabel')}
               description={t('admin:announcement.enabledHint')}
@@ -168,6 +188,14 @@ export default function AdminAnnouncement() {
               <Switch id="ann-remember" checked={remember} onCheckedChange={setRemember} />
             </SettingsRow>
             <SettingsBlock className="flex flex-col gap-5">
+              <div className="grid gap-5 sm:grid-cols-2">
+                <Field label={t('admin:announcement.buttonText')} htmlFor="ann-button-text" hint={t('admin:announcement.buttonTextHint')}>
+                  <Input id="ann-button-text" value={buttonText} maxLength={80} onChange={(e) => setButtonText(e.target.value)} placeholder={t('common:actions.close')} />
+                </Field>
+                <Field label={t('admin:announcement.buttonUrl')} htmlFor="ann-button-url" hint={t('admin:announcement.buttonUrlHint')}>
+                  <Input id="ann-button-url" value={buttonUrl} maxLength={2048} onChange={(e) => setButtonUrl(e.target.value)} placeholder="https://" />
+                </Field>
+              </div>
               {/* Optional plain-text title. */}
               <Field label={t('admin:announcement.titleLabel')} htmlFor="ann-title" hint={t('admin:announcement.titleHint')}>
                 <Input
@@ -293,9 +321,7 @@ export default function AdminAnnouncement() {
                   <div className="aspect-[16/7] w-full shrink-0 bg-[var(--color-bg-muted)] sm:aspect-auto sm:w-2/5">
                     <img src={imageUrl} alt="" className="size-full object-cover" />
                   </div>
-                ) : (
-                  <span aria-hidden className="block w-1 shrink-0 self-stretch bg-[var(--color-accent)]" />
-                )}
+                ) : null}
                 <div className="min-w-0 flex-1 space-y-2 p-4 sm:p-5">
                   {title.trim() ? (
                     <h3 className="break-words text-lg font-semibold leading-6 text-[var(--color-fg)]">
@@ -310,6 +336,7 @@ export default function AdminAnnouncement() {
                   ) : title.trim() ? null : (
                     <div className="text-[14px] text-[var(--color-fg-subtle)]">{t('admin:announcement.bodyPlaceholder')}</div>
                   )}
+                  <div className="flex justify-end pt-3"><Button size="sm" type="button">{buttonText.trim() || t('common:actions.close')}</Button></div>
                 </div>
               </div>
             </div>

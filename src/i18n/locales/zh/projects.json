@@ -5,7 +5,11 @@
     "pinned": "已置顶",
     "recent": "最近",
     "newProject": "新建项目",
-    "empty": "暂无项目。"
+    "empty": "暂无项目。",
+    "expandProjects": "展开项目列表",
+    "collapseProjects": "收起项目列表",
+    "expandChats": "展开「{{name}}」的对话",
+    "collapseChats": "收起「{{name}}」的对话"
   },
   "list": {
     "title": "项目",

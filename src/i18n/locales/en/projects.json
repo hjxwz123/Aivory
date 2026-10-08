@@ -5,7 +5,11 @@
     "pinned": "Pinned",
     "recent": "Recent",
     "newProject": "New project",
-    "empty": "No projects yet."
+    "empty": "No projects yet.",
+    "expandProjects": "Expand projects",
+    "collapseProjects": "Collapse projects",
+    "expandChats": "Expand chats in {{name}}",
+    "collapseChats": "Collapse chats in {{name}}"
   },
   "list": {
     "title": "Projects",

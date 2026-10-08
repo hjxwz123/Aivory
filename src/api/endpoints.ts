@@ -172,6 +172,8 @@ export interface ApiAnnouncement {
   bar_enabled: boolean
   bar_html: string
   bar_updated_at: number
+  button_text?: string
+  button_url?: string
 }
 
 const ANNOUNCEMENT_CACHE_MS = 15_000

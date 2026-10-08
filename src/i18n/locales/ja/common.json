@@ -108,5 +108,20 @@
     "closeOverlay": "オーバーレイを閉じる",
     "showShortcuts": "キーボードショートカットを表示",
     "focusComposer": "入力欄にフォーカス"
+  },
+  "popupMessage": {
+    "title": "ポップアップメッセージ"
+  },
+  "notifications": {
+    "title": "通知",
+    "history": "通知履歴",
+    "unread": "未読",
+    "empty": "通知はまだありません。",
+    "choose": "通知を選択して内容をご覧ください。",
+    "loadMore": "さらに読み込む",
+    "dismiss": "今回は次回から表示しない",
+    "dismissHint": "現在の内容を次回以降非表示にします。新しい通知や更新された内容は表示されます。",
+    "failed": "通知を読み込めませんでした。もう一度お試しください。",
+    "unavailable": "通知を開けませんでした。更新または削除された可能性があります。"
   }
 }

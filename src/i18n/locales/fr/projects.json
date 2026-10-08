@@ -5,7 +5,11 @@
     "pinned": "Épinglés",
     "recent": "Récents",
     "newProject": "Nouveau projet",
-    "empty": "Aucun projet pour l'instant."
+    "empty": "Aucun projet pour l'instant.",
+    "expandProjects": "Déplier les projets",
+    "collapseProjects": "Replier les projets",
+    "expandChats": "Déplier les discussions de {{name}}",
+    "collapseChats": "Replier les discussions de {{name}}"
   },
   "list": {
     "title": "Projets",
