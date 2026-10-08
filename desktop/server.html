@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+    <title>Aivory</title>
+    <link rel="stylesheet" href="assets/tokens.css">
+    <link rel="stylesheet" href="offline.css">
+    <link rel="stylesheet" href="server.css">
+    <script src="server.js" defer></script>
+  </head>
+  <body>
+    <header class="brand" aria-label="Aivory">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-wordmark" aria-hidden="true"></span>
+    </header>
+    <main>
+      <section class="server" aria-labelledby="title">
+        <h1 id="title">Connect to Aivory</h1>
+        <form id="server-form" novalidate>
+          <label id="server-label" for="server-url">Server address</label>
+          <input id="server-url" type="url" inputmode="url" maxlength="2048" autocomplete="url" spellcheck="false" placeholder="https://chat.example.com" aria-describedby="server-error" required>
+          <p id="server-error" role="alert"></p>
+          <button id="save" class="primary" type="submit"><span class="connect-icon" aria-hidden="true"></span><span id="save-label">Connect</span></button>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>

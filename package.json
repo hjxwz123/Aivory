@@ -8,6 +8,17 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "desktop:install": "npm install --prefix desktop",
+    "desktop:dev": "node desktop/dev.mjs",
+    "desktop:build": "node desktop/build.mjs",
+    "desktop:pack": "node desktop/build.mjs --dir",
+    "desktop:test": "node --test desktop/tests/*.test.mjs",
+    "desktop:test:smoke": "node tests/browser/run-desktop.mjs",
+    "desktop:test:auth": "node tests/browser/run-desktop-auth.mjs",
+    "desktop:test:updates": "node tests/browser/run-desktop-updates.mjs",
+    "desktop:test:server": "node tests/browser/run-desktop-server.mjs",
+    "desktop:test:records": "node tests/browser/run-desktop-records.mjs",
+    "desktop:test:download": "node tests/browser/run-app-download.mjs",
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run --dir tests/frontend",
     "test:sandbox": "python3 -m unittest discover -s tests/sandbox-service -p 'test_*.py'",
@@ -15,7 +26,8 @@
     "test:browser": "node tests/browser/run-editors.mjs",
     "test:preview": "node tests/browser/run-preview.mjs",
     "test:panel": "node tests/browser/run-panel.mjs",
-    "test:code-wrap": "node tests/browser/run-code-wrap.mjs"
+    "test:code-wrap": "node tests/browser/run-code-wrap.mjs",
+    "test:layout": "node tests/browser/run-layout.mjs"
   },
   "dependencies": {
     "@aiden0z/pptx-renderer": "^1.2.4",

@@ -1,6 +1,8 @@
 node_modules
 dist
 dist-ssr
+/desktop/generated/
+/desktop/release/
 .cache
 .vite
 *.local

@@ -178,6 +178,10 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("POST", "/api/auth/logout", rateLimitedIP(d, "auth", rlLogoutMax, rlLogoutWindow, wrap(d, logoutHandler)))
 	mux.handle("POST", "/api/auth/refresh", rateLimitedIP(d, "auth", rlRefreshMax, rlRefreshWindow, wrap(d, refreshHandler)))
 	mux.handle("POST", "/api/auth/session", rateLimitedIP(d, "auth", rlRefreshMax, rlRefreshWindow, wrap(d, sessionHandler)))
+	mux.handle("POST", "/api/auth/desktop/start", rateLimitedIP(d, "desktop-start", 10, time.Minute, wrap(d, desktopStartHandler)))
+	mux.handle("POST", "/api/auth/desktop/token", rateLimitedIP(d, "desktop-token", 180, time.Minute, wrap(d, desktopTokenHandler)))
+	mux.handle("GET", "/api/auth/desktop/authorize", requireAuth(d, desktopAuthorizationInfoHandler))
+	mux.handle("POST", "/api/auth/desktop/authorize", requireAuth(d, desktopAuthorizeHandler))
 	mux.handle("POST", "/api/auth/verify-email", rateLimitedIP(d, "verify-email", rlVerifyEmailMax, rlVerifyEmailWindow, wrap(d, verifyEmailHandler)))
 	mux.handle("POST", "/api/auth/send-code", rateLimitedIP(d, "auth", rlSendCodeMax, rlSendCodeWindow, wrap(d, sendCodeHandler)))
 	mux.handle("POST", "/api/auth/forgot-password", rateLimitedIP(d, "forgot-password", rlForgotPasswordMax, rlForgotPasswordWindow, wrap(d, forgotPasswordHandler)))
@@ -198,6 +202,8 @@ func NewRouter(d Deps) http.Handler {
 	// Public operator contact + optional policy overrides. The handler exposes a
 	// strict three-field DTO rather than the administrator settings map.
 	mux.handle("GET", "/api/public/legal-config", wrap(d, legalConfigPublicHandler))
+	mux.handle("GET", "/api/public/desktop-update", wrap(d, desktopUpdatePublicHandler))
+	mux.handle("GET", "/api/public/desktop-download", wrap(d, desktopDownloadPublicHandler))
 	// Membership tiers for the public landing page (§ user groups) — read-only,
 	// marketing info (names / prices / features / allowances), no secrets.
 	mux.handle("GET", "/api/public/user-groups", wrap(d, listUserGroupsPublic))
@@ -661,6 +667,8 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("POST", "/api/admin/backup/export-jobs", requireAdmin(d, startBackupExportAdmin))
 	mux.handle("GET", "/api/admin/backup/export-jobs", requireAdmin(d, listBackupExportsAdmin))
 	mux.handle("GET", "/api/admin/system-update", requireAdmin(d, getSystemUpdateAdmin))
+	mux.handle("GET", "/api/admin/desktop-update", requireAdmin(d, getDesktopUpdateAdmin))
+	mux.handle("POST", "/api/admin/desktop-update/check", requireAdmin(d, checkDesktopUpdateAdmin))
 	mux.handle("POST", "/api/admin/system-update/check", requireAdmin(d, checkSystemUpdateAdmin))
 	mux.handle("POST", "/api/admin/system-update/start", requireAdmin(d, startSystemUpdateAdmin))
 	mux.handle("GET", "/api/admin/backup/archives/:name", requireAdmin(d, downloadBackupArchiveAdmin))

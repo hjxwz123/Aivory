@@ -28,13 +28,21 @@ type systemUpdateJob struct {
 }
 
 type systemUpdateRelease struct {
-	TagName     string `json:"tag_name"`
-	Name        string `json:"name"`
-	Body        string `json:"body"`
-	HTMLURL     string `json:"html_url"`
-	PublishedAt string `json:"published_at"`
-	Draft       bool   `json:"draft"`
-	Prerelease  bool   `json:"prerelease"`
+	TagName     string                     `json:"tag_name"`
+	Name        string                     `json:"name"`
+	Body        string                     `json:"body"`
+	HTMLURL     string                     `json:"html_url"`
+	PublishedAt string                     `json:"published_at"`
+	Draft       bool                       `json:"draft"`
+	Prerelease  bool                       `json:"prerelease"`
+	Assets      []systemUpdateReleaseAsset `json:"assets"`
+}
+
+type systemUpdateReleaseAsset struct {
+	Name  string `json:"name"`
+	URL   string `json:"browser_download_url"`
+	Size  int64  `json:"size"`
+	State string `json:"state"`
 }
 
 type systemUpdateReleaseState struct {

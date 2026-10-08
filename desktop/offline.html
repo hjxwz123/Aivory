@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+    <title>Aivory</title>
+    <link rel="stylesheet" href="assets/tokens.css">
+    <link rel="stylesheet" href="offline.css">
+    <script src="offline.js" defer></script>
+  </head>
+  <body>
+    <header class="brand" aria-label="Aivory">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-wordmark" aria-hidden="true"></span>
+    </header>
+    <main>
+      <section class="connection" aria-labelledby="title" aria-describedby="description">
+        <span class="status-icon" aria-hidden="true"></span>
+        <h1 id="title">No network connection</h1>
+        <p id="description">Check your connection and try again.</p>
+        <div class="actions">
+          <button id="retry" class="primary" type="button"><span class="retry-icon" aria-hidden="true"></span><span id="retry-label">Retry</span></button>
+          <button id="open-browser" class="secondary" type="button"><span class="browser-icon" aria-hidden="true"></span><span id="browser-label">Open in Browser</span></button>
+        </div>
+        <p id="progress" class="progress" role="status" aria-live="polite"></p>
+      </section>
+    </main>
+  </body>
+</html>

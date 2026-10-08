@@ -9,13 +9,14 @@ import (
 )
 
 const (
-	LoginMethodPassword     = "password"
-	LoginMethodPassword2FA  = "password_2fa"
-	LoginMethodOAuth        = "oauth"
-	LoginMethodOAuth2FA     = "oauth_2fa"
-	LoginMethodPasskey      = "passkey"
-	loginHistoryDefaultPage = 50
-	loginHistoryMaxPage     = 200
+	LoginMethodPassword       = "password"
+	LoginMethodPassword2FA    = "password_2fa"
+	LoginMethodOAuth          = "oauth"
+	LoginMethodOAuth2FA       = "oauth_2fa"
+	LoginMethodPasskey        = "passkey"
+	LoginMethodDesktopBrowser = "desktop_browser"
+	loginHistoryDefaultPage   = 50
+	loginHistoryMaxPage       = 200
 )
 
 // LoginHistory is one immutable successful-login audit event. It is separate
@@ -38,7 +39,7 @@ func RecordLoginHistory(ctx context.Context, db *sql.DB, userID, method string, 
 		return nil, errors.New("login history user id required")
 	}
 	switch method {
-	case LoginMethodPassword, LoginMethodPassword2FA, LoginMethodOAuth, LoginMethodOAuth2FA, LoginMethodPasskey:
+	case LoginMethodPassword, LoginMethodPassword2FA, LoginMethodOAuth, LoginMethodOAuth2FA, LoginMethodPasskey, LoginMethodDesktopBrowser:
 	default:
 		return nil, errors.New("invalid login method")
 	}

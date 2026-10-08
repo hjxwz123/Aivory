@@ -1,0 +1,24 @@
+{
+  "name": "aivory-desktop-tooling",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Build tools for the Aivory Electron desktop shell",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "node dev.mjs",
+    "build": "node build.mjs",
+    "pack": "node build.mjs --dir",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "dotenv": "^18.0.6",
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3",
+    "lucide": "^1.52.0",
+    "semver": "^7.7.3"
+  }
+}

@@ -1487,6 +1487,8 @@ var settingsKeys = []string{
 	// its complete localized default; a blank contact email falls back to the
 	// project default in legalConfigPublicHandler.
 	"contact_email", "terms_text", "privacy_text",
+	desktopUpdateSettingKey,
+	desktopDownloadSettingKey,
 	// §credits / settlement pricing: credits_per_usd remains the internal model
 	// cost conversion. User-facing group and permanent-credit prices share one
 	// deployment-wide settlement currency; card_purchase_url is the only external
@@ -1775,6 +1777,18 @@ func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.R
 			// §4.7 numeric limits must be non-negative. Individual compaction
 			// settings below enforce their stricter runtime minimums as well.
 			switch k {
+			case desktopDownloadSettingKey:
+				cfg, err := normalizeDesktopDownloadConfig(v)
+				if err != nil {
+					return 0, err
+				}
+				v, _ = json.Marshal(cfg)
+			case desktopUpdateSettingKey:
+				cfg, err := normalizeDesktopUpdateConfig(v)
+				if err != nil {
+					return 0, err
+				}
+				v, _ = json.Marshal(cfg)
 			case "keep_recent_rounds", "summary_max_tokens", "compaction_request_max_tokens", "compaction_token_trigger", "compaction_token_cap", "compaction_token_target_percentage", "compaction_retention_percentage",
 				"daily_message_limit", "daily_image_limit", "daily_token_limit",
 				"max_concurrent_generations", "register_ip_daily_limit", "fallback_ttft_sec":

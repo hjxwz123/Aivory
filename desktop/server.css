@@ -1,0 +1,15 @@
+.server { width: 100%; max-width: 400px; margin: auto; }
+.server h1 { font-size: 22px; }
+form { display: flow-root; margin-top: 28px; }
+label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 8px; }
+input {
+  display: block; width: 100%; min-width: 0; height: 42px; padding: 10px 12px;
+  border: 0; border-radius: 8px; background: var(--color-bg-muted); color: var(--color-fg);
+  font: inherit; font-size: 14px; letter-spacing: 0;
+}
+input::placeholder { color: var(--color-fg-muted); }
+input:focus-visible { outline: 2px solid var(--color-ring); outline-offset: 2px; }
+#server-error { min-height: 40px; margin-top: 8px; color: var(--color-danger); font-size: 12px; }
+.connect-icon { mask: url('assets/arrow-right.svg') center / contain no-repeat; }
+#save { min-width: 100px; float: right; }
+@media (max-height: 400px) { form { margin-top: 16px; } }
