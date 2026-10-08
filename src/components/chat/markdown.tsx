@@ -8,6 +8,8 @@ import {
   type MathCopyLabels,
   type MarkdownBlock,
 } from '@/lib/markdown'
+import { GenerativeUI } from './generative-ui'
+import { generativeLanguage } from '@/lib/generative-ui'
 import { CodeBlock } from './code-block'
 import { MermaidDiagram } from './mermaid-diagram'
 import { NestedMarkdown } from './nested-markdown'
@@ -30,6 +32,7 @@ interface MarkdownProps {
   /** Stable prefix (message id) so code blocks keep their identity across remounts. */
   blockKeyPrefix?: string
   /** Allow completed assistant HTML blocks to create anonymous preview links. */
+  allowGenerativeUI?: boolean
   allowHtmlShare?: boolean
   /** Citations for this turn — inline `[n]` markers become source links. */
   citations?: Citation[]
@@ -68,6 +71,7 @@ interface MarkdownBlockViewProps {
   index: number
   live: boolean
   blockKeyPrefix?: string
+  allowGenerativeUI: boolean
   allowHtmlShare: boolean
   cites: CiteRef[]
   breaks: boolean
@@ -88,6 +92,7 @@ const MarkdownBlockView = memo(
     live,
     blockKeyPrefix,
     allowHtmlShare,
+    allowGenerativeUI,
     cites,
     breaks,
     mathCopyLabels,
@@ -124,10 +129,11 @@ const MarkdownBlockView = memo(
               blockAnim,
             )}
           >
-            <NestedMarkdown content={b.content} pathPrefix={`${blockKeyPrefix ?? 'markdown'}#${index}`} cites={cites} breaks={breaks} mathCopyLabels={mathCopyLabels} />
+            <NestedMarkdown content={b.content} pathPrefix={`${blockKeyPrefix ?? 'markdown'}#${index}`} allowGenerativeUI={allowGenerativeUI} live={live} cites={cites} breaks={breaks} mathCopyLabels={mathCopyLabels} />
           </div>
         )
       case 'code':
+        if (allowGenerativeUI && generativeLanguage(b.lang)) return <GenerativeUI code={b.content} lang={generativeLanguage(b.lang)!} live={live} />
         if ((b.lang ?? '').toLowerCase() === 'mermaid') {
           return <MermaidDiagram code={b.content} live={live} className={blockAnim} />
         }
@@ -149,7 +155,7 @@ const MarkdownBlockView = memo(
               blockAnim,
             )}
           >
-            <NestedMarkdown content={b.content} pathPrefix={`${blockKeyPrefix ?? 'markdown'}#${index}`} cites={cites} breaks={breaks} mathCopyLabels={mathCopyLabels} />
+            <NestedMarkdown content={b.content} pathPrefix={`${blockKeyPrefix ?? 'markdown'}#${index}`} allowGenerativeUI={allowGenerativeUI} live={live} cites={cites} breaks={breaks} mathCopyLabels={mathCopyLabels} />
           </blockquote>
         )
       case 'math':
@@ -193,6 +199,7 @@ const MarkdownBlockView = memo(
     prev.live === next.live &&
     prev.blockKeyPrefix === next.blockKeyPrefix &&
     prev.allowHtmlShare === next.allowHtmlShare &&
+    prev.allowGenerativeUI === next.allowGenerativeUI &&
     prev.cites === next.cites &&
     prev.breaks === next.breaks &&
     prev.mathCopyLabels === next.mathCopyLabels &&
@@ -228,6 +235,7 @@ export const Markdown = memo(function Markdown({
   live = false,
   blockKeyPrefix,
   allowHtmlShare = false,
+  allowGenerativeUI = false,
   citations,
   artifacts,
   onOpenDocumentCitation,
@@ -292,6 +300,7 @@ export const Markdown = memo(function Markdown({
           live={live}
           blockKeyPrefix={blockKeyPrefix}
           allowHtmlShare={allowHtmlShare}
+          allowGenerativeUI={allowGenerativeUI}
           cites={cites}
           breaks={breaks}
           mathCopyLabels={mathCopyLabels}

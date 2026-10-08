@@ -128,3 +128,23 @@ func TestUseSkillRechecksCurrentGroupSkillSelection(t *testing.T) {
 		t.Fatalf("all policy should expose built-in document skill: output=%q err=%v", docGenOutput, err)
 	}
 }
+
+func TestExplicitSkillToolDoesNotLoadInstructionsTwice(t *testing.T) {
+	db := openToolsTestDB(t)
+	if _, err := db.Exec(`INSERT INTO channels(id,name,type) VALUES('explicit-channel','Channel','openai'); INSERT INTO models(id,channel_id,request_id,label) VALUES('explicit-model','explicit-channel','model','Model'); INSERT INTO skills(id,name,description,instructions,assets,enabled) VALUES('explicit-skill','explicit-test','test','DUPLICATE_BODY','[]',1)`); err != nil {
+		t.Fatal(err)
+	}
+	tool := &useSkillTool{db: db}
+	tc := &llm.ToolContext{ModelID: "explicit-model", SelectedAdminSkillIDs: map[string]bool{"explicit-skill": true}}
+	out, _, err := tool.Execute(t.Context(), []byte(`{"name":"explicit-test"}`), tc)
+	if err != nil || strings.Contains(out, "DUPLICATE_BODY") || !strings.Contains(out, "already applied") {
+		t.Fatalf("output=%q err=%v", out, err)
+	}
+	if _, err := db.Exec(`UPDATE skills SET enabled=0 WHERE id='explicit-skill'`); err != nil {
+		t.Fatal(err)
+	}
+	out, _, err = tool.Execute(t.Context(), []byte(`{"name":"explicit-test"}`), tc)
+	if err != nil || strings.Contains(out, "already applied") {
+		t.Fatalf("disabled skill bypass=%q err=%v", out, err)
+	}
+}

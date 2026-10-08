@@ -674,9 +674,35 @@ func ResolveUserSkillSelectionScoped(ctx context.Context, db *sql.DB, userID, wo
 		return nil, nil, err
 	}
 
+	rows.Close()
+	// Catalog commands are direct references, not editable library rows. Keep
+	// WorkspaceID empty so the administrator catalog policy still applies.
+	for _, id := range normalized {
+		if !strings.HasPrefix(id, CatalogSkillCommandPrefix) {
+			continue
+		}
+		skill, err := GetSkill(ctx, db, strings.TrimPrefix(id, CatalogSkillCommandPrefix))
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				continue
+			}
+			return nil, nil, err
+		}
+		if skill.Enabled {
+			byID[id] = UserSkill{ID: id, UserID: userID, Name: skill.Name, Description: skill.Description, Icon: skill.Icon, Instructions: skill.Instructions, SourceSkillID: skill.ID}
+		}
+	}
 	resolved := make([]UserSkill, 0, len(normalized))
 	resolvedIDs := make([]string, 0, len(normalized))
 	total := 0
+	seenSources := map[string]bool{}
+	// A private edited copy takes precedence if both forms were submitted.
+	for _, id := range normalized {
+		if sk, ok := byID[id]; ok && !strings.HasPrefix(id, CatalogSkillCommandPrefix) && sk.SourceSkillID != "" {
+			seenSources[sk.SourceSkillID] = true
+		}
+	}
+	usedSources := map[string]bool{}
 	for _, id := range normalized {
 		skill, ok := byID[id]
 		if !ok {
@@ -684,6 +710,12 @@ func ResolveUserSkillSelectionScoped(ctx context.Context, db *sql.DB, userID, wo
 				return nil, nil, ErrInvalidUserSkillSelection
 			}
 			continue
+		}
+		if skill.SourceSkillID != "" {
+			if usedSources[skill.SourceSkillID] || (strings.HasPrefix(id, CatalogSkillCommandPrefix) && seenSources[skill.SourceSkillID]) {
+				continue
+			}
+			usedSources[skill.SourceSkillID] = true
 		}
 		total += len(skill.Instructions)
 		if total > MaxSelectedUserSkillInstructionBytes {

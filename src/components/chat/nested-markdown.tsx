@@ -1,9 +1,13 @@
 import { useMemo, type ReactNode } from 'react'
 import { marked, type Token, type Tokens } from 'marked'
 import { blockMarkdownToHtml, inlineMarkdownToHtml, type CiteRef, type MathCopyLabels } from '@/lib/markdown'
+import { GenerativeUI } from './generative-ui'
+import { generativeLanguage } from '@/lib/generative-ui'
 import { PlainCodeBlock } from './plain-code-block'
 
 interface NestedMarkdownProps {
+  allowGenerativeUI?: boolean
+  live?: boolean
   content: string
   pathPrefix: string
   cites: CiteRef[]
@@ -17,7 +21,7 @@ function renderTokens(tokens: Token[], options: NestedMarkdownProps, path: strin
     const key = `${path}/${index}`
     switch (token.type) {
       case 'space': return null
-      case 'code': return <PlainCodeBlock key={key} code={token.text} lang={token.lang?.split(/\s+/)[0]} />
+      case 'code': if (options.allowGenerativeUI && generativeLanguage(token.lang)) return <GenerativeUI key={key} code={token.text} lang={generativeLanguage(token.lang)!} live={options.live} />; return <PlainCodeBlock key={key} code={token.text} lang={token.lang?.split(/\s+/)[0]} />
       case 'list': {
         const list = token as Tokens.List
         const items = list.items.map((item, itemIndex) => (

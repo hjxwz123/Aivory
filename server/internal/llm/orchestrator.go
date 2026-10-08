@@ -148,6 +148,8 @@ type ToolContext struct {
 	// AdminSkillIDs is the user-group ceiling for administrator-managed skills.
 	// nil permits every model-bound skill; a non-nil map permits only listed IDs.
 	AdminSkillIDs map[string]bool
+	// Explicit instructions already applied once to this turn (catalog IDs).
+	SelectedAdminSkillIDs map[string]bool
 	// ImageModelID is the user's pre-selected image model (§4.12-B).
 	ImageModelID string
 	// DirectImageTurn marks the internal image-model pipeline's call to
@@ -1913,6 +1915,7 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 			fallbackAccessPolicy, workspaceToolAccessPolicy(policy),
 		)
 	}
+	var fallbackSelectedSkills []store.UserSkill
 	if len(base.SelectedUserSkillIDs) > 0 {
 		if err := validateWorkspaceUserSkillAccess(ctx, o.db, base.WorkspaceID, base.UserID, base.SelectedUserSkillIDs); err != nil {
 			return base, nil, "", err
@@ -1921,6 +1924,7 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 		if err != nil {
 			return base, nil, "", err
 		}
+		fallbackSelectedSkills = skills
 		if err := validateUserSkillAccessPolicy(fallbackAccessPolicy, skills); err != nil {
 			return base, nil, "", err
 		}
@@ -2087,7 +2091,7 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 			fallbackAllowsSkills = fallbackAllowsSkills && (fallbackBuiltinTools == nil || fallbackBuiltinTools["use_skill"])
 		}
 		if fallbackOpts.SkillsAllowed && fallbackAllowsSkills && !globalDisabledTools["use_skill"] {
-			fallbackOpts.Skills, fallbackOpts.SkillsFull = loadEnabledModelSkills(ctx, o.db, m.ID, fallbackAccessPolicy)
+			fallbackOpts.Skills, fallbackOpts.SkillsFull = loadEnabledModelSkills(ctx, o.db, m.ID, fallbackAccessPolicy, fallbackSelectedSkills)
 		}
 		fallbackOpts.SkillsAllowed = fallbackOpts.SkillsAllowed && fallbackAllowsSkills && !globalDisabledTools["use_skill"]
 
@@ -3278,7 +3282,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		skillsAllowed = skillsAllowed && (builtinTools == nil || builtinTools["use_skill"])
 	}
 	if skillsAllowed {
-		availableSkillIdx, availableSkillFull = loadEnabledModelSkills(ctx, o.db, model.ID, req.ToolAccessPolicy)
+		availableSkillIdx, availableSkillFull = loadEnabledModelSkills(ctx, o.db, model.ID, req.ToolAccessPolicy, selectedUserSkills)
 	}
 
 	// 5. Resolve tools for this model BEFORE composing the system prompt so the
@@ -3753,6 +3757,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		ProjectInstructions: projectInstructions,
 		Skills:              skillIdx,
 		SkillsFull:          skillFull,
+		SelectedSkillNames:  selectedSkillNames(selectedUserSkills),
 		Memories:            activeMemories,
 		ProjectFiles:        projectFiles,
 		SandboxFiles:        sandboxFilesForPrompt,
@@ -4126,9 +4131,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			// includes model policy, global disabled_tools, fast local-tool limits,
 			// official/no-tools state, and prevents an unsolicited provider call from
 			// bypassing declaration filtering.
-			BuiltinTools:  toolDefNameSet(toolDefs),
-			SystemTools:   toolDefNameSet(systemToolDefs),
-			AdminSkillIDs: adminSkillIDSet(req.ToolAccessPolicy),
+			BuiltinTools:          toolDefNameSet(toolDefs),
+			SystemTools:           toolDefNameSet(systemToolDefs),
+			AdminSkillIDs:         adminSkillIDSet(req.ToolAccessPolicy),
+			SelectedAdminSkillIDs: selectedAdminSkillIDs(selectedUserSkills),
 			citationIndexes: func() *citationIndexAllocator {
 				if !hasAttachedKnowledgeBase {
 					return nil

@@ -1198,5 +1198,16 @@
       "private_stream_interrupted": "Réponse interrompue. Le texte déjà affiché reste uniquement dans cet onglet.",
       "private_stopped": "Génération arrêtée. Le texte déjà affiché reste uniquement dans cet onglet."
     }
+  },
+  "generative": {
+    "generating": "Préparation de la visualisation…",
+    "invalid": "Cette visualisation ne peut pas être affichée. Le code source est disponible ci-dessous.",
+    "source": "Voir le code",
+    "hideSource": "Masquer le code",
+    "interactive": "Réponse interactive",
+    "chart": "Graphique",
+    "showData": "Voir les données",
+    "hideData": "Masquer les données",
+    "label": "Nom"
   }
 }

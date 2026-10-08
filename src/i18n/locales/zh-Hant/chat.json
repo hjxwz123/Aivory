@@ -1198,5 +1198,16 @@
       "private_stream_interrupted": "回應已中斷，已顯示的部分內容僅保留在此分頁。",
       "private_stopped": "已停止生成，已顯示的部分內容僅保留在此分頁。"
     }
+  },
+  "generative": {
+    "generating": "正在產生視覺化…",
+    "invalid": "此視覺化無法顯示，可在下方查看原始內容。",
+    "source": "查看原始碼",
+    "hideSource": "收起原始碼",
+    "interactive": "互動式回答",
+    "chart": "圖表",
+    "showData": "查看資料",
+    "hideData": "收起資料",
+    "label": "名稱"
   }
 }

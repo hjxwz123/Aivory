@@ -709,10 +709,10 @@ func formatSelectedUserSkills(skills []store.UserSkill) string {
 	}
 	var b strings.Builder
 	b.WriteString("\n\n<user-selected-skills>\n")
-	b.WriteString("Apply the following private skills as user-provided instructions for this request.\n")
+	b.WriteString("Apply the following explicitly selected skills once for this request. They take precedence over the same administrator skill loaded automatically.\n")
 	for _, skill := range skills {
 		b.WriteString("\n<user-selected-skill name=\"")
-		b.WriteString(skill.Name)
+		b.WriteString(strings.NewReplacer("&", "&amp;", "\"", "&quot;", "<", "&lt;", ">", "&gt;").Replace(skill.Name))
 		b.WriteString("\">\nDescription: ")
 		b.WriteString(skill.Description)
 		b.WriteString("\n\n")
@@ -966,30 +966,31 @@ func toolRunnerForModelRequest(runner ToolRunner, modelID string, definitions []
 			}
 		}
 		fallbackContext := &ToolContext{
-			UserID:               source.UserID,
-			ConvID:               source.ConvID,
-			MessageID:            source.MessageID,
-			WorkspaceID:          source.WorkspaceID,
-			ModelID:              modelID,
-			ProjectID:            source.ProjectID,
-			ProjectName:          source.ProjectName,
-			DB:                   source.DB,
-			WorkspaceAccessCheck: source.WorkspaceAccessCheck,
-			DeepResearch:         source.DeepResearch,
-			Fast:                 source.Fast,
-			BuiltinTools:         toolDefNameSet(definitions),
-			SystemTools:          cloneBoolMap(systemTools),
-			AdminSkillIDs:        cloneBoolMap(source.AdminSkillIDs),
-			ImageModelID:         source.ImageModelID,
-			ImageRequestParams:   params,
-			ImageInputIDs:        append([]string(nil), source.ImageInputIDs...),
-			ImageUserPrompt:      source.ImageUserPrompt,
-			SkipImageQuota:       source.SkipImageQuota,
-			ImageBilling:         source.ImageBilling,
-			OnArtifact:           source.OnArtifact,
-			counts:               map[string]int{},
-			toolState:            source.requestToolExecutionState(),
-			citationIndexes:      source.citationIndexes,
+			UserID:                source.UserID,
+			ConvID:                source.ConvID,
+			MessageID:             source.MessageID,
+			WorkspaceID:           source.WorkspaceID,
+			ModelID:               modelID,
+			ProjectID:             source.ProjectID,
+			ProjectName:           source.ProjectName,
+			DB:                    source.DB,
+			WorkspaceAccessCheck:  source.WorkspaceAccessCheck,
+			DeepResearch:          source.DeepResearch,
+			Fast:                  source.Fast,
+			BuiltinTools:          toolDefNameSet(definitions),
+			SystemTools:           cloneBoolMap(systemTools),
+			AdminSkillIDs:         cloneBoolMap(source.AdminSkillIDs),
+			SelectedAdminSkillIDs: cloneBoolMap(source.SelectedAdminSkillIDs),
+			ImageModelID:          source.ImageModelID,
+			ImageRequestParams:    params,
+			ImageInputIDs:         append([]string(nil), source.ImageInputIDs...),
+			ImageUserPrompt:       source.ImageUserPrompt,
+			SkipImageQuota:        source.SkipImageQuota,
+			ImageBilling:          source.ImageBilling,
+			OnArtifact:            source.OnArtifact,
+			counts:                map[string]int{},
+			toolState:             source.requestToolExecutionState(),
+			citationIndexes:       source.citationIndexes,
 		}
 		base = &orchToolRunner{orch: current.orch, ctx: fallbackContext, onEvent: current.onEvent}
 	}

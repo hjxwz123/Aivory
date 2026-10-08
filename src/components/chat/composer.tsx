@@ -951,7 +951,7 @@ export function Composer({
     try {
       const [skills, prompts] = await Promise.all([
         canUseWorkspaceSkills
-          ? libraryApi.skills(requestedWorkspaceID)
+          ? libraryApi.skillCommands(requestedWorkspaceID)
           : Promise.resolve([] as ApiUserSkill[]),
         canUseWorkspacePrompts
           ? libraryApi.prompts(requestedWorkspaceID)

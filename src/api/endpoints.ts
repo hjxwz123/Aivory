@@ -450,6 +450,15 @@ export const skillsApi = {
 }
 
 export const libraryApi = {
+  skillCommands: async (workspaceId?: string): Promise<ApiUserSkill[]> => {
+    try {
+      const rows = await api<ApiUserSkill[]>(`/me/skill-commands${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`)
+      if (Array.isArray(rows)) return rows
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.status !== 404) throw error
+    }
+    return libraryApi.skills(workspaceId)
+  },
   catalog: (workspaceId?: string) =>
     api<ApiLibraryCatalog>(`/library/catalog${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`),
   skills: (workspaceId?: string) =>

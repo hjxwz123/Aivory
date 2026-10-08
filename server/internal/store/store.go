@@ -1227,6 +1227,9 @@ func isMissingColumnErr(err error) bool {
 // ships with NO mock provider — an admin must configure a real channel + model
 // and set the default/task model before chat works.
 func Seed(db *sql.DB, cfg config.Config) error {
+	if err := seedBuiltinSkills(db); err != nil {
+		return fmt.Errorf("seed builtin skills: %w", err)
+	}
 	// No admin is seeded from the environment. A brand-new deployment starts with
 	// ZERO users; the first account is created through the first-run setup flow
 	// (POST /api/setup) and becomes the admin (§ first-run setup).

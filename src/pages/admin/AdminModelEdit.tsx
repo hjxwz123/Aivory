@@ -925,11 +925,11 @@ export default function AdminModelEdit() {
                               <Button type="button" variant="ghost" size="icon-sm" aria-label={t('admin:models.channels.remove')} title={t('admin:models.channels.remove')} onClick={() => removeChannelBinding(index)}><Trash2 size={14} aria-hidden /></Button>
                             </div>
                             {!binding.channel_enabled || channelAutoDisabled || modelAutoDisabled ? (
-                              <div className="col-span-full flex flex-wrap items-center gap-1 text-[11px] text-[var(--color-fg-muted)]">
+                              <div className="col-span-full flex flex-wrap items-center gap-1 text-xs text-[var(--color-fg-muted)]">
                                 {!binding.channel_enabled ? <Badge size="xs" variant="neutral">{t('admin:models.channels.closed', { defaultValue: '渠道已关闭' })}</Badge> : null}
                                 {channelAutoDisabled ? <Badge size="xs" variant="warning">{t('admin:models.channels.channelAutoDisabled', { defaultValue: '渠道自动禁用' })}</Badge> : null}
                                 {modelAutoDisabled ? <Badge size="xs" variant="warning">{t('admin:models.channels.bindingAutoDisabled', { defaultValue: '此模型暂时禁用' })}</Badge> : null}
-                                {modelAutoDisabled ? <Button type="button" variant="ghost" size="sm" className="h-6 px-1.5 text-[11px]" onClick={() => void recoverChannelBinding(binding)}>{t('admin:models.channels.recover', { defaultValue: '恢复' })}</Button> : null}
+                                {modelAutoDisabled ? <Button type="button" variant="ghost" size="sm" className="h-6 px-1.5 text-xs" onClick={() => void recoverChannelBinding(binding)}>{t('admin:models.channels.recover', { defaultValue: '恢复' })}</Button> : null}
                               </div>
                             ) : null}
                           </div>

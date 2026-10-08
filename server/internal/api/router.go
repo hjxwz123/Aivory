@@ -313,6 +313,7 @@ func NewRouter(d Deps) http.Handler {
 	// User skill/prompt library. The catalog exposes display metadata only;
 	// copying an item creates an independent user-owned row.
 	mux.handle("GET", "/api/library/catalog", requireAuth(d, listLibraryCatalogHandler))
+	mux.handle("GET", "/api/me/skill-commands", requireAuth(d, listSkillCommandsHandler))
 	mux.handle("GET", "/api/me/skills", requireAuth(d, listMySkillsHandler))
 	mux.handle("POST", "/api/me/skills", requireAuth(d, createMySkillHandler))
 	mux.handle("POST", "/api/me/skills/from-catalog", requireAuth(d, copySkillFromCatalogHandler))

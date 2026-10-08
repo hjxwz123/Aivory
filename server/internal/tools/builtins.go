@@ -1205,7 +1205,15 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		// (model_skills) — the same set use_skill can load and the index advertises.
 		if tc.DB != nil && tc.ModelID != "" && tc.AllowsBuiltinTool("use_skill") {
 			if skillIDs, err := store.SkillsForModel(ctx, tc.DB, tc.ModelID); err == nil {
+				for id := range tc.SelectedAdminSkillIDs {
+					skillIDs = append(skillIDs, id)
+				}
+				seenSkills := map[string]bool{}
 				for _, sid2 := range skillIDs {
+					if seenSkills[sid2] {
+						continue
+					}
+					seenSkills[sid2] = true
 					if !tc.AllowsAdminSkill(sid2) {
 						continue
 					}
@@ -3521,7 +3529,15 @@ func (t *useSkillTool) Execute(ctx context.Context, input []byte, tc *llm.ToolCo
 		if err != nil {
 			return "", nil, err
 		}
+		for id := range tc.SelectedAdminSkillIDs {
+			ids = append(ids, id)
+		}
+		seen := map[string]bool{}
 		for _, id := range ids {
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
 			if !tc.AllowsAdminSkill(id) {
 				continue
 			}
@@ -3541,6 +3557,9 @@ func (t *useSkillTool) Execute(ctx context.Context, input []byte, tc *llm.ToolCo
 	}
 	for _, s := range skills {
 		if strings.EqualFold(s.Name, in.Name) {
+			if tc != nil && tc.SelectedAdminSkillIDs[s.ID] {
+				return "Skill " + s.Name + " is already applied to this turn through the user selection. Use those instructions; do not load a second copy.", nil, nil
+			}
 			return "Skill: " + s.Name + "\n\n" + s.Instructions, nil, nil
 		}
 	}

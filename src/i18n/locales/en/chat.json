@@ -1206,5 +1206,16 @@
       "private_stream_interrupted": "The response was interrupted. Any visible partial text is kept only in this tab.",
       "private_stopped": "Response stopped. Any visible partial text is kept only in this tab."
     }
+  },
+  "generative": {
+    "generating": "Preparing visualization…",
+    "invalid": "This visualization could not be rendered. The source is available below.",
+    "source": "View source",
+    "hideSource": "Hide source",
+    "interactive": "Interactive response",
+    "chart": "Chart",
+    "showData": "View data",
+    "hideData": "Hide data",
+    "label": "Label"
   }
 }

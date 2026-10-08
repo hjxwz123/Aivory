@@ -1198,5 +1198,16 @@
       "private_stream_interrupted": "响应已中断，已显示的部分内容仅保留在此标签页。",
       "private_stopped": "已停止生成，已显示的部分内容仅保留在此标签页。"
     }
+  },
+  "generative": {
+    "generating": "正在生成可视化…",
+    "invalid": "此可视化无法显示，可在下方查看原始内容。",
+    "source": "查看源码",
+    "hideSource": "收起源码",
+    "interactive": "交互式回答",
+    "chart": "图表",
+    "showData": "查看数据",
+    "hideData": "收起数据",
+    "label": "名称"
   }
 }

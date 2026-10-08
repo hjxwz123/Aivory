@@ -211,3 +211,48 @@ func TestSelectedUserSkillsAppendOnlyToLastUserHistoryEntry(t *testing.T) {
 		t.Fatal("skill was not appended to the last user message")
 	}
 }
+
+func TestExplicitCatalogSkillIsAppliedOnceAndRestoredOnRegeneration(t *testing.T) {
+	o, provider, model, conversation, _, db := setupToolRouteTest(t)
+	sk, err := store.CreateSkill(t.Context(), db, store.Skill{Name: "test-visual", Description: "Visual output", Instructions: "CATALOG_VISUAL_BODY", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO model_skills(model_id,skill_id) VALUES(?,?)`, model.ID, sk.ID); err != nil {
+		t.Fatal(err)
+	}
+	explicit := []store.UserSkill{{SourceSkillID: sk.ID, Name: sk.Name, Instructions: sk.Instructions}}
+	index, full := loadEnabledModelSkills(t.Context(), db, model.ID, nil, explicit)
+	if len(index) != 0 || len(full) != 0 {
+		t.Fatal("explicit skill still included in automatic prompt")
+	}
+	index, full = loadEnabledModelSkills(t.Context(), db, model.ID, nil)
+	if len(index) != 1 || len(full) != 1 {
+		t.Fatal("ordinary model binding removed")
+	}
+	result, err := o.Run(t.Context(), RunRequest{UserID: "u1", ConversationID: conversation.ID, ModelID: model.ID, UserText: "Visualize", ToolMode: ToolModeDisabled, SelectedUserSkillIDs: []string{store.CatalogSkillCommandPrefix + sk.ID}}, func(SseEvent) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := provider.mainRequests[0]
+	if strings.Contains(request.SystemPrompt, "CATALOG_VISUAL_BODY") || strings.Count(renderBlocksAsText(request.History[len(request.History)-1].Blocks), "CATALOG_VISUAL_BODY") != 1 {
+		t.Fatal("skill not applied exactly once")
+	}
+	_, err = o.Run(t.Context(), RunRequest{UserID: "u1", ConversationID: conversation.ID, ModelID: model.ID, UserText: "Visualize", ToolMode: ToolModeDisabled, ParentID: result.UserMessage.ID, ReuseExistingUserMessage: true}, func(SseEvent) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	history := provider.mainRequests[1].History
+	if strings.Count(renderBlocksAsText(history[len(history)-1].Blocks), "CATALOG_VISUAL_BODY") != 1 {
+		t.Fatal("catalog reference lost on regeneration")
+	}
+}
+
+func TestExplicitDocumentSkillShadowsCodeDefinedRecipes(t *testing.T) {
+	for _, available := range []bool{true, false} {
+		prompt := composeSystemPrompt(systemPromptOpts{ToolMode: "native", ToolNames: []string{"python_execute", "use_skill"}, SkillsAllowed: true, SkillToolAvailable: available, SelectedSkillNames: []string{DocGenSkillName}})
+		if strings.Contains(prompt, DocGenRecipes) || strings.Contains(prompt, "- "+DocGenSkillName+":") {
+			t.Fatal("code-defined skill duplicated explicit selection")
+		}
+	}
+}

@@ -15,7 +15,7 @@ export function parseChannelHeaders(text: string): HeaderResult {
   let size = 0
   for (const [name, content] of entries) {
     if (!/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name)) return { error: 'invalidName' }
-    if (typeof content !== 'string' || /[\x00-\x08\x0a-\x1f\x7f]/.test(content)) return { error: 'invalidValue' }
+    if (typeof content !== 'string' || Array.from(content).some(char => { const code = char.charCodeAt(0); return (code < 32 && code !== 9) || code === 127 })) return { error: 'invalidValue' }
     const key = name.toLowerCase()
     if (names.has(key)) return { error: 'duplicateName' }
     if (['content-length', 'transfer-encoding', 'trailer'].includes(key)) return { error: 'transportManaged' }

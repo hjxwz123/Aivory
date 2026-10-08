@@ -332,7 +332,7 @@ export function PrivateMessageRow({ message, model, isLastAssistant, locked, onR
               </div>
             ) : message.text ? (
               <>
-                <PrivateMarkdown text={message.text} />
+                <PrivateMarkdown text={message.text} allowGenerativeUI live={Boolean(message.streaming)} />
                 {message.streaming ? (
                   <span
                     aria-hidden

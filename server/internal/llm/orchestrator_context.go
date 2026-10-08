@@ -678,12 +678,20 @@ type SkillFull struct {
 	Instructions string
 }
 
-func loadEnabledModelSkills(ctx context.Context, db *sql.DB, modelID string, policy *ToolAccessPolicy) ([]SkillIndex, []SkillFull) {
+func loadEnabledModelSkills(ctx context.Context, db *sql.DB, modelID string, policy *ToolAccessPolicy, selected ...[]store.UserSkill) ([]SkillIndex, []SkillFull) {
 	indexes := []SkillIndex{}
 	full := []SkillFull{}
+	explicit := map[string]bool{}
+	for _, list := range selected {
+		for _, skill := range list {
+			if skill.SourceSkillID != "" {
+				explicit[skill.SourceSkillID] = true
+			}
+		}
+	}
 	skillIDs, _ := store.SkillsForModel(ctx, db, modelID)
 	for _, skillID := range skillIDs {
-		if !skillAccessPolicyAllows(policy, skillID) {
+		if explicit[skillID] || !skillAccessPolicyAllows(policy, skillID) {
 			continue
 		}
 		skill, err := store.GetSkill(ctx, db, skillID)
@@ -712,6 +720,7 @@ type systemPromptOpts struct {
 	ProjectInstructions string
 	Skills              []SkillIndex
 	SkillsFull          []SkillFull
+	SelectedSkillNames  []string
 	Memories            []store.Memory
 	ProjectFiles        []ProjectFileSummary
 	// SandboxFiles are the original conversation uploads staged at
@@ -847,6 +856,12 @@ func titleLanguageDirective(locale string) string {
 // order. Stable = cache-friendly (§4.9).
 func composeSystemPrompt(o systemPromptOpts) string {
 	var b strings.Builder
+	explicitDocGen := false
+	for _, name := range o.SelectedSkillNames {
+		if strings.EqualFold(name, DocGenSkillName) {
+			explicitDocGen = true
+		}
+	}
 	// §4.8-L10N: the WHOLE authored prompt renders in the user's UI language via
 	// `l` (English is the default/fallback). Because the prompt itself is in the
 	// target language, a separate "always reply in X" directive is no longer
@@ -982,7 +997,7 @@ func composeSystemPrompt(o systemPromptOpts) string {
 		// produces a document is dead weight. Models that can't call use_skill
 		// still get them inline.
 		if has["python_execute"] {
-			if o.SkillsAllowed && !o.SkillToolAvailable && skillModeAllowsBuiltinDocGen(o.SkillMode) {
+			if o.SkillsAllowed && !o.SkillToolAvailable && !explicitDocGen && skillModeAllowsBuiltinDocGen(o.SkillMode) {
 				b.WriteString("\n")
 				b.WriteString(DocGenRecipes)
 			}
@@ -1012,7 +1027,7 @@ func composeSystemPrompt(o systemPromptOpts) string {
 		skillIdx = o.Skills
 	}
 	if o.SkillsAllowed && o.SkillToolAvailable && o.ToolMode != "none" && has["python_execute"] && skillModeAllowsBuiltinDocGen(o.SkillMode) {
-		shadowed := false
+		shadowed := explicitDocGen
 		for _, s := range o.Skills {
 			if strings.EqualFold(s.Name, DocGenSkillName) {
 				shadowed = true
