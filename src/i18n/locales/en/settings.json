@@ -40,6 +40,8 @@
     "sharingDisabled": "Sharing is disabled for this account."
   },
   "about": {
+    "desktopVersion": "Desktop app",
+    "checkUpdates": "Check for updates",
     "title": "About",
     "tagline": "A self-hosted, open-source AI workspace for individuals and teams",
     "description": "Aivory brings multi-model chat, file analysis, web research, code execution, image generation, and knowledge retrieval into one continuous workflow.",

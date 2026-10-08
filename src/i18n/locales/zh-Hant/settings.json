@@ -40,6 +40,8 @@
     "sharingDisabled": "此帳號的分享功能已停用。"
   },
   "about": {
+    "desktopVersion": "桌面應用程式",
+    "checkUpdates": "檢查更新",
     "title": "關於",
     "tagline": "面向個人與團隊的自托管開源 AI 工作空間",
     "description": "Aivory 將多模型對話、檔案分析、網頁搜尋、程式碼執行、圖像生成和知識庫檢索集中在同一個持續的工作流程中。",

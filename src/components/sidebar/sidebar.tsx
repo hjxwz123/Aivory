@@ -1,4 +1,5 @@
 import { WorkspaceIcon } from '@/components/workspace/workspace-icon'
+import { useDesktopDownload } from '@/hooks/use-desktop-download'
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
@@ -705,7 +706,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             inert={historyPending}
             aria-hidden={historyPending || undefined}
             className={cn(
-              'h-full overflow-y-auto scrollbar-thin transition-opacity duration-200 motion-reduce:transition-none',
+              'relative h-full overflow-y-auto scrollbar-thin transition-opacity duration-200 motion-reduce:transition-none',
               historyPending && 'opacity-0 pointer-events-none',
             )}
           >
@@ -1526,6 +1527,7 @@ export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuP
   const openSettings = useOpenSettings()
   const { t } = useTranslation(['chat', 'common', 'settings'])
   const user = useAuth((s) => s.user)
+  const downloadUrl = useDesktopDownload()
   const logout = useAuth((s) => s.logout)
   const domainDataStatus = useDomainData((s) => s.status)
   const showDomainData = useDomainData((s) => s.show)
@@ -1594,6 +1596,11 @@ export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuP
           <Settings size={13} aria-hidden />
           {t('settings:user.settings')}
         </DropdownMenuItem>
+        {downloadUrl ? <DropdownMenuItem asChild>
+          <a href={downloadUrl} target="_blank" rel="noopener noreferrer" data-app-download="menu">
+            <Download size={13} aria-hidden />{t('common:downloadApp')}
+          </a>
+        </DropdownMenuItem> : null}
         <DropdownMenuItem onClick={() => navigate('/subscription')}>
           <Layers size={13} aria-hidden />
           {t('chat:userMenu.subscription', { defaultValue: 'Subscription' })}

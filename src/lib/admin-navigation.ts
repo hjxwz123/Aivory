@@ -159,6 +159,7 @@ export const ADMIN_NAV_GROUPS: readonly AdminNavGroup[] = [
         defaultLabel: 'Logging & privacy',
       },
       { to: '/admin/backup', labelKey: 'admin:backup.title', defaultLabel: 'Backup & migration' },
+      { to: '/admin/settings/desktop', labelKey: 'admin:desktop.title', defaultLabel: 'Desktop client' },
     ],
   },
 ]

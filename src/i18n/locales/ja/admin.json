@@ -1,6 +1,40 @@
 {
   "title": "管理",
   "backToChat": "チャットに戻る",
+  "desktop": {
+    "downloadEntry": "アプリのダウンロード入口",
+    "showDownload": "ダウンロード案内を表示",
+    "showDownloadHint": "ウェブ版の新規チャット画面とアバターメニューに表示します。デスクトップ版には表示しません。",
+    "downloadUrl": "ダウンロードURL",
+    "downloadUrlHint": "ダウンロードページまたはインストーラーの直接リンクを指定できます。",
+    "invalidDownloadUrl": "有効な HTTP または HTTPS のダウンロードURLを入力してください。",
+    "downloadIncomplete": "ダウンロード案内を有効にする前にURLを入力してください。",
+    "source": "インストーラーの提供元",
+    "customPackages": "独自インストーラー",
+    "officialPackages": "公式インストーラー",
+    "officialServerHint": "公式版は初回起動時にサーバーアドレスを設定します。更新後は保存済みのアドレスを使用します。",
+    "officialUnavailable": "このバージョンの公式インストーラーはまだありません。アップロード後に再確認してください。",
+    "notAvailable": "未提供",
+    "title": "デスクトップアプリ",
+    "check": "更新を確認",
+    "latest": "最新バージョン：v{{version}}",
+    "notice": "デスクトップ版 v{{version}} が利用可能です。",
+    "configure": "インストーラーを設定",
+    "useVersion": "このバージョンを使用",
+    "release": "リリース",
+    "published": "ユーザーに更新を公開",
+    "version": "インストーラーのバージョン",
+    "downloads": "インストーラーのダウンロードURL",
+    "checkFailed": "新しいバージョンを確認できません。後でもう一度お試しください。",
+    "invalidUrl": "有効なHTTPまたはHTTPSのダウンロードURLを入力してください。",
+    "publishIncomplete": "公開するにはバージョンとインストーラーのURLを1つ以上入力してください。",
+    "invalidConfig": "バージョン番号とダウンロードURLを確認してください。",
+    "platforms": {
+      "windows_x64": "Windows（x64）", "windows_arm64": "Windows（ARM64）",
+      "macos_arm64": "macOS（Apple Silicon）", "macos_x64": "macOS（Intel）",
+      "linux_x64": "Linux（x64）", "linux_arm64": "Linux（ARM64）"
+    }
+  },
   "listToolbar": {
     "filter": "絞り込み",
     "clearSearch": "検索をクリア",
@@ -739,6 +773,7 @@
       "unknownDevice": "不明なデバイス",
       "unknownMethod": "不明な方法",
       "methods": {
+        "desktop_browser": "ブラウザー認証",
         "password": "パスワード",
         "password_2fa": "パスワード + 2要素認証",
         "oauth": "OAuth",

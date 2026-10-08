@@ -27,6 +27,7 @@ import { UserMenu } from '@/components/sidebar/sidebar'
 import { Tooltip } from '@/components/ui/tooltip'
 import { TracedLogo } from '@/components/brand/logo'
 import { AdminOnboardingTour } from '@/components/admin/admin-onboarding-tour'
+import { DesktopUpdateNotice } from '@/components/admin/desktop-update-notice'
 import type { ApiAdminOnboarding } from '@/api/types'
 import { acquireStartupDialog } from '@/lib/startup-dialog-queue'
 import {
@@ -490,7 +491,7 @@ export default function AdminLayout() {
   return (
     <QuietSurfaceContext.Provider value>
       <div
-        className="flex h-full w-full overflow-hidden bg-[var(--color-bg)] text-[var(--color-fg)]"
+        className="app-viewport flex w-full bg-[var(--color-bg)] text-[var(--color-fg)]"
         onClickCapture={handleAdminNavigationClick}
       >
         {/* Desktop rail: same width (the user's resized chat sidebar width),
@@ -578,6 +579,8 @@ export default function AdminLayout() {
             </div>
           </header>
 
+          <DesktopUpdateNotice />
+
           {filesWorkspace ? (
             <div className="flex min-h-0 w-full flex-1 flex-col">
               <Suspense fallback={<PanelFallback />}>
@@ -587,7 +590,7 @@ export default function AdminLayout() {
           ) : (
             <div
               ref={contentScrollRef}
-              className="min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain scrollbar-thin"
+              className="relative min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain scrollbar-thin"
             >
               <div className="mx-auto w-full min-w-0 max-w-[var(--layout-content-max-w)] px-4 pb-[max(1.5rem,var(--safe-bottom))] pt-3 sm:px-8 sm:pb-12 sm:pt-4">
                 <Suspense fallback={<PanelFallback />}>

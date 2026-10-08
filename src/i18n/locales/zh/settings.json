@@ -40,6 +40,8 @@
     "sharingDisabled": "账号的分享功能已禁用。"
   },
   "about": {
+    "desktopVersion": "桌面应用",
+    "checkUpdates": "检查更新",
     "title": "关于",
     "tagline": "面向个人与团队的自托管开源 AI 工作空间",
     "description": "Aivory 将多模型对话、文件分析、网页搜索、代码执行、图像生成和知识库检索集中在同一个持续的工作流中。",

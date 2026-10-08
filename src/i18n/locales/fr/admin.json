@@ -1,6 +1,40 @@
 {
   "title": "Administration",
   "backToChat": "Retour au chat",
+  "desktop": {
+    "downloadEntry": "Accès au téléchargement de l’app",
+    "showDownload": "Afficher Télécharger l’app",
+    "showDownloadHint": "Affiché sur l’accueil d’une nouvelle conversation et dans le menu de l’avatar du site. Masqué dans l’application de bureau.",
+    "downloadUrl": "URL de téléchargement",
+    "downloadUrlHint": "Indiquez une page de téléchargement ou un lien direct vers l’installateur.",
+    "invalidDownloadUrl": "Saisissez une URL de téléchargement HTTP ou HTTPS valide.",
+    "downloadIncomplete": "Saisissez une URL avant d’activer l’accès au téléchargement.",
+    "source": "Source des installateurs",
+    "customPackages": "Installateurs personnalisés",
+    "officialPackages": "Installateurs officiels",
+    "officialServerHint": "Les installateurs officiels demandent une adresse de serveur au premier lancement. Les mises à jour réutilisent l’adresse enregistrée localement.",
+    "officialUnavailable": "Aucun installateur officiel disponible pour cette version. Vérifiez à nouveau après leur publication.",
+    "notAvailable": "Indisponible",
+    "title": "Application de bureau",
+    "check": "Rechercher des mises à jour",
+    "latest": "Dernière version : v{{version}}",
+    "notice": "La version de bureau v{{version}} est disponible.",
+    "configure": "Configurer les installateurs",
+    "useVersion": "Utiliser cette version",
+    "release": "Publication",
+    "published": "Publier les mises à jour pour les utilisateurs",
+    "version": "Version des installateurs",
+    "downloads": "Liens de téléchargement des installateurs",
+    "checkFailed": "Impossible de rechercher une nouvelle version. Réessayez plus tard.",
+    "invalidUrl": "Saisissez un lien de téléchargement HTTP ou HTTPS valide.",
+    "publishIncomplete": "Saisissez une version et au moins un lien avant de publier.",
+    "invalidConfig": "Vérifiez le numéro de version et les liens de téléchargement.",
+    "platforms": {
+      "windows_x64": "Windows (x64)", "windows_arm64": "Windows (ARM64)",
+      "macos_arm64": "macOS (Apple Silicon)", "macos_x64": "macOS (Intel)",
+      "linux_x64": "Linux (x64)", "linux_arm64": "Linux (ARM64)"
+    }
+  },
   "listToolbar": {
     "filter": "Filtres",
     "clearSearch": "Effacer la recherche",
@@ -739,6 +773,7 @@
       "unknownDevice": "Appareil inconnu",
       "unknownMethod": "Méthode inconnue",
       "methods": {
+        "desktop_browser": "Autorisation du navigateur",
         "password": "Mot de passe",
         "password_2fa": "Mot de passe + A2F",
         "oauth": "OAuth",

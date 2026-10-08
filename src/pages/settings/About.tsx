@@ -1,7 +1,10 @@
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ArrowUpRight, BookOpen, FileText, Github, Mail, Scale, ShieldCheck } from 'lucide-react'
 import { TracedLogo } from '@/components/brand/logo'
 import { useLegalConfig } from '@/hooks/use-legal-config'
+import { Button } from '@/components/ui/button'
+import '@/lib/desktop'
 
 const APP_VERSION = '2.5.1-beta.6'
 const DOCS_URL = 'https://docs.aivorygo.com'
@@ -51,6 +54,14 @@ function ResourceCard({
 export default function About() {
   const { t } = useTranslation('settings')
   const legalConfig = useLegalConfig()
+  const desktop = window.aivoryDesktop
+  const [desktopVersion, setDesktopVersion] = useState<string>()
+  const [checking, setChecking] = useState(false)
+  useEffect(() => {
+    let active = true
+    void desktop?.getInfo().then((info) => { if (active) setDesktopVersion(info.version) }).catch(() => {})
+    return () => { active = false }
+  }, [desktop])
 
   return (
     // About has no pinned page header, so it owns the equivalent top padding.
@@ -59,10 +70,17 @@ export default function About() {
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <TracedLogo size="lg" />
           <span className="shrink-0 rounded-full bg-[var(--color-bg-muted)] px-2.5 py-1 font-mono text-[11px] tabular-nums text-[var(--color-fg-muted)]">
-            v{APP_VERSION}
+            v{desktopVersion || APP_VERSION}
           </span>
         </div>
         <p className="mt-1 text-xs font-medium text-[var(--color-fg-subtle)]">{t('about.tagline')}</p>
+        {desktop ? <div className="mt-3 flex items-center gap-3">
+          <span className="text-xs text-[var(--color-fg-muted)]">{t('about.desktopVersion')}</span>
+          <Button size="sm" variant="secondary" className="border-transparent bg-[var(--color-bg-muted)]" loading={checking} onClick={() => {
+            setChecking(true)
+            void desktop.checkUpdates().catch(() => {}).finally(() => setChecking(false))
+          }}>{t('about.checkUpdates')}</Button>
+        </div> : null}
         <div className="mt-4 space-y-2.5 text-sm leading-relaxed text-[var(--color-fg-muted)]">
           <p>{t('about.description')}</p>
           <p className="text-[13px] text-[var(--color-fg-subtle)]">{t('about.descriptionDetail')}</p>

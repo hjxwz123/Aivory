@@ -40,6 +40,8 @@
     "sharingDisabled": "Le partage est désactivé pour ce compte."
   },
   "about": {
+    "desktopVersion": "Application pour ordinateur",
+    "checkUpdates": "Rechercher des mises à jour",
     "title": "À propos",
     "tagline": "Un espace de travail IA auto-hébergé et open source pour les particuliers et les équipes",
     "description": "Aivory réunit le chat multi-modèles, l'analyse de fichiers, la recherche web, l'exécution de code, la génération d'images et la recherche documentaire dans un même flux de travail continu.",

@@ -26,6 +26,7 @@ import { oauthStartPath } from '@/lib/oauth'
 import { isChatShellPath } from '@/lib/app-paths'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { useUserSettingsRefresh } from '@/hooks/use-user-settings-refresh'
+import { pendingDesktopAuthorization, rememberDesktopAuthorization } from '@/lib/desktop'
 
 const PUBLIC_PATHS = ['/welcome', '/login', '/register', '/forgot-password', '/share', '/setup', '/privacy', '/terms']
 
@@ -64,6 +65,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     !needsSetup &&
     authPolicyLoaded &&
     !user &&
+    !window.aivoryDesktop &&
     authPolicy.entry_mode === 'auto_redirect' &&
     Boolean(authPolicy.default_provider) &&
     !pendingTwoFactor &&
@@ -72,6 +74,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
       (path) => location.pathname === path || location.pathname.startsWith(path + '/'),
     ) &&
     !location.pathname.startsWith('/share/')
+
+  useEffect(() => {
+    rememberDesktopAuthorization(location.pathname, location.search)
+  }, [location.pathname, location.search])
 
   useEffect(() => {
     void hydrate()
@@ -128,6 +134,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       return
     }
     if (!isChatShellPath(location.pathname)) return
+    if (pendingDesktopAuthorization()) return
     const passwordPolicy = user.oauth_initial_password_policy ?? authPolicy.oauth_initial_password_policy
     if (user.has_password === false && passwordPolicy === 'required') {
       hydratedChatDataForUser.current = null
@@ -221,7 +228,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   if (!user) {
     if (
-      (!authPolicy.password_login_enabled || authPolicy.entry_mode !== 'login_page') &&
+      (!authPolicy.password_login_enabled || (!window.aivoryDesktop && authPolicy.entry_mode !== 'login_page')) &&
       ((location.pathname === '/register' && !emailVerificationInProgress) ||
         location.pathname === '/forgot-password')
     ) {
@@ -232,6 +239,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }
 
   // Authenticated user trying to access auth pages → redirect home.
+  const desktopAuthorization = user ? pendingDesktopAuthorization() : null
+  if (desktopAuthorization && location.pathname !== '/desktop/authorize') {
+    return <Navigate to={desktopAuthorization} replace />
+  }
   if (user && (location.pathname === '/login' || location.pathname === '/register')) {
     return <Navigate to="/" replace />
   }

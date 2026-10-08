@@ -1,5 +1,7 @@
 {
   "appName": "Aivory",
+  "desktopApp": "Application",
+  "downloadApp": "Télécharger l’app",
   "tagline": "Un compagnon IA réfléchi",
   "actions": {
     "send": "Envoyer",

@@ -1,6 +1,40 @@
 {
   "title": "管理后台",
   "backToChat": "返回聊天",
+  "desktop": {
+    "downloadEntry": "下载 App 入口",
+    "showDownload": "显示下载 App 提示",
+    "showDownloadHint": "显示在网页版新对话首页和头像菜单中，桌面客户端不显示。",
+    "downloadUrl": "下载网址",
+    "downloadUrlHint": "可以填写下载页面网址或安装包直接下载链接。",
+    "invalidDownloadUrl": "请输入有效的 HTTP 或 HTTPS 下载网址。",
+    "downloadIncomplete": "请先填写下载网址，再开启下载提示。",
+    "source": "安装包来源",
+    "customPackages": "自建安装包",
+    "officialPackages": "官方安装包",
+    "officialServerHint": "首次使用官方包需要填写服务器地址；更新后会沿用本地保存的地址。",
+    "officialUnavailable": "该版本尚未发布可用的官方安装包。上传后请重新检查更新。",
+    "notAvailable": "尚未提供",
+    "title": "桌面客户端",
+    "check": "检查更新",
+    "latest": "最新版本：v{{version}}",
+    "notice": "发现桌面版新版本 v{{version}}。",
+    "configure": "配置安装包",
+    "useVersion": "使用此版本",
+    "release": "版本发布",
+    "published": "向用户发布更新",
+    "version": "安装包版本号",
+    "downloads": "安装包下载地址",
+    "checkFailed": "暂时无法检查新版本，请稍后重试。",
+    "invalidUrl": "请输入有效的 HTTP 或 HTTPS 下载地址。",
+    "publishIncomplete": "请填写版本号和至少一个安装包地址后再发布。",
+    "invalidConfig": "请检查版本号和安装包下载地址。",
+    "platforms": {
+      "windows_x64": "Windows（x64）", "windows_arm64": "Windows（ARM64）",
+      "macos_arm64": "macOS（Apple Silicon）", "macos_x64": "macOS（Intel）",
+      "linux_x64": "Linux（x64）", "linux_arm64": "Linux（ARM64）"
+    }
+  },
   "listToolbar": {
     "filter": "筛选",
     "clearSearch": "清除搜索",
@@ -743,6 +777,7 @@
       "unknownDevice": "未知设备",
       "unknownMethod": "未知方式",
       "methods": {
+        "desktop_browser": "浏览器授权",
         "password": "密码",
         "password_2fa": "密码 + 两步验证",
         "oauth": "OAuth",

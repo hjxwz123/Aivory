@@ -18,28 +18,9 @@ import { Pagination } from '@/components/ui/pagination'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { formatDateTime } from '@/lib/utils'
 import { AdminPageHeader } from '@/components/admin/admin-page-header'
+import { formatRecordedClient, parseClientDevice } from '@/lib/client-device'
 
 const PAGE_SIZE = 50
-
-function parseDevice(userAgent: string): { label: string; mobile: boolean } {
-  const mobile = /Mobile|Android|iPhone|iPad|iPod/i.test(userAgent)
-  let os = ''
-  if (/iPhone|iPad|iPod/i.test(userAgent)) os = 'iOS'
-  else if (/Android/i.test(userAgent)) os = 'Android'
-  else if (/Windows/i.test(userAgent)) os = 'Windows'
-  else if (/Mac OS X|Macintosh/i.test(userAgent)) os = 'macOS'
-  else if (/CrOS/i.test(userAgent)) os = 'ChromeOS'
-  else if (/Linux/i.test(userAgent)) os = 'Linux'
-
-  let browser = ''
-  if (/Edg\//i.test(userAgent)) browser = 'Edge'
-  else if (/OPR\/|Opera/i.test(userAgent)) browser = 'Opera'
-  else if (/Firefox\//i.test(userAgent)) browser = 'Firefox'
-  else if (/Chrome\//i.test(userAgent)) browser = 'Chrome'
-  else if (/Safari\//i.test(userAgent)) browser = 'Safari'
-
-  return { label: [browser, os].filter(Boolean).join(' · '), mobile }
-}
 
 function methodVariant(method: string): 'neutral' | 'accent' | 'sage' | 'info' {
   if (method === 'password_2fa') return 'sage'
@@ -109,7 +90,7 @@ export default function AdminUserLoginHistory({ userId, embedded = false }: { us
   }
 
   function device(entry: ApiAdminLoginHistoryEntry) {
-    const parsed = parseDevice(entry.user_agent)
+    const parsed = parseClientDevice(entry.user_agent, t('common:desktopApp'))
     return {
       ...parsed,
       label: parsed.label || t('admin:users.loginHistory.unknownDevice'),
@@ -186,7 +167,7 @@ export default function AdminUserLoginHistory({ userId, embedded = false }: { us
                 { id: 'device', header: t('admin:users.loginHistory.device'), width: 300, render: (entry) => {
                   const parsedDevice = device(entry)
                   const DeviceIcon = parsedDevice.mobile ? Smartphone : Monitor
-                  return <div className="flex min-w-0 items-center gap-2"><DeviceIcon size={14} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden /><span className="min-w-0"><span className="block truncate font-medium">{parsedDevice.label}</span>{entry.user_agent ? <span className="block truncate text-[12px] text-[var(--color-fg-muted)]" title={entry.user_agent}>{entry.user_agent}</span> : null}</span></div>
+                  return <div className="flex min-w-0 items-center gap-2"><DeviceIcon size={14} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden /><span className="min-w-0"><span className="block truncate font-medium">{parsedDevice.label}</span>{entry.user_agent ? <span className="block truncate text-[12px] text-[var(--color-fg-muted)]" title={entry.user_agent}>{formatRecordedClient(entry.user_agent, t('common:desktopApp'))}</span> : null}</span></div>
                 } },
               ]}
             />

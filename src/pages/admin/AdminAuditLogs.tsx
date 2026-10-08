@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Sheet, SheetBody, SheetClose, SheetContent, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Tooltip } from '@/components/ui/tooltip'
 import { toast } from '@/hooks/use-toast'
+import { formatRecordedClient } from '@/lib/client-device'
 
 const PAGE_SIZE = 50
 const AUDIT_TYPES = ['authentication', 'workspace', 'users', 'models', 'channels', 'billing', 'settings', 'access', 'integrations', 'content', 'logs', 'system', 'other'] as const
@@ -230,7 +231,7 @@ export default function AdminAuditLogs() {
               <DetailItem label={t('logs.duration')} value={selectedLog.duration_ms === undefined ? '-' : `${selectedLog.duration_ms} ms`} />
               <DetailItem label={t('logs.route')} value={selectedLog.route ? `${selectedLog.method || ''} ${selectedLog.route}` : '-'} mono />
               <DetailItem label={t('logs.reason')} value={selectedLog.reason ? t(`logs.reasons.${selectedLog.reason}`, { defaultValue: selectedLog.reason }) : '-'} />
-              <div className="col-span-full"><DetailItem label={t('logs.userAgent')} value={selectedLog.user_agent || '-'} /></div>
+              <div className="col-span-full"><DetailItem label={t('logs.userAgent')} value={formatRecordedClient(selectedLog.user_agent || '', t('common:desktopApp')) || '-'} /></div>
             </dl>
             {!!Object.keys(selectedLog.changes || {}).length && <section>
               <h3 className="mb-3 text-sm font-medium">{t('logs.changes')}</h3>

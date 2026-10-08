@@ -1,6 +1,40 @@
 {
   "title": "管理後臺",
   "backToChat": "返回聊天",
+  "desktop": {
+    "downloadEntry": "下載 App 入口",
+    "showDownload": "顯示下載 App 提示",
+    "showDownloadHint": "顯示在網頁版新對話首頁及頭像選單中，桌面用戶端不顯示。",
+    "downloadUrl": "下載網址",
+    "downloadUrlHint": "可以填寫下載頁面網址或安裝程式的直接下載連結。",
+    "invalidDownloadUrl": "請輸入有效的 HTTP 或 HTTPS 下載網址。",
+    "downloadIncomplete": "請先填寫下載網址，再開啟下載提示。",
+    "source": "安裝程式來源",
+    "customPackages": "自建安裝程式",
+    "officialPackages": "官方安裝程式",
+    "officialServerHint": "首次使用官方版本需填寫伺服器位址；更新後會沿用本機儲存的位址。",
+    "officialUnavailable": "此版本尚未發佈可用的官方安裝程式。上傳後請重新檢查更新。",
+    "notAvailable": "尚未提供",
+    "title": "桌面用戶端",
+    "check": "檢查更新",
+    "latest": "最新版本：v{{version}}",
+    "notice": "發現桌面版新版本 v{{version}}。",
+    "configure": "設定安裝程式",
+    "useVersion": "使用此版本",
+    "release": "版本發佈",
+    "published": "向使用者發佈更新",
+    "version": "安裝程式版本號",
+    "downloads": "安裝程式下載網址",
+    "checkFailed": "暫時無法檢查新版本，請稍後再試。",
+    "invalidUrl": "請輸入有效的 HTTP 或 HTTPS 下載網址。",
+    "publishIncomplete": "請填寫版本號及至少一個安裝程式網址後再發佈。",
+    "invalidConfig": "請檢查版本號及安裝程式下載網址。",
+    "platforms": {
+      "windows_x64": "Windows（x64）", "windows_arm64": "Windows（ARM64）",
+      "macos_arm64": "macOS（Apple Silicon）", "macos_x64": "macOS（Intel）",
+      "linux_x64": "Linux（x64）", "linux_arm64": "Linux（ARM64）"
+    }
+  },
   "listToolbar": {
     "filter": "篩選",
     "clearSearch": "清除搜尋",
@@ -739,6 +773,7 @@
       "unknownDevice": "未知裝置",
       "unknownMethod": "未知方式",
       "methods": {
+        "desktop_browser": "瀏覽器授權",
         "password": "密碼",
         "password_2fa": "密碼 + 兩步驗證",
         "oauth": "OAuth",

@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
 import { AdminPageHeader } from '@/components/admin/admin-page-header'
+import { formatRecordedClient } from '@/lib/client-device'
 
 const PAGE_SIZE = 50
 
@@ -267,7 +268,7 @@ export default function AdminFeedback() {
                     <MetaRow label={t('admin:userFeedback.reportedBy')} value={[selected.user_name, selected.user_email].filter(Boolean).join(' / ') || selected.user_id} />
                     <MetaRow label={t('admin:userFeedback.page')} value={selected.page_path || '—'} />
                     <MetaRow label={t('admin:userFeedback.viewport')} value={selected.viewport_width && selected.viewport_height ? `${selected.viewport_width} × ${selected.viewport_height}` : '—'} />
-                    <MetaRow label={t('admin:userFeedback.userAgent')} value={selected.user_agent || '—'} />
+                    <MetaRow label={t('admin:userFeedback.userAgent')} value={formatRecordedClient(selected.user_agent, t('common:desktopApp')) || '—'} />
                     <MetaRow label={t('admin:userFeedback.message')} value={selected.message_id || '—'} mono />
                   </dl>
                 </section>

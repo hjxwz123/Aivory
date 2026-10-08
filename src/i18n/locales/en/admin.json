@@ -1,6 +1,40 @@
 {
   "title": "Administration",
   "backToChat": "Back to chat",
+  "desktop": {
+    "downloadEntry": "App download entry",
+    "showDownload": "Show Download App",
+    "showDownloadHint": "Shown on the web app’s new-chat home and avatar menu. Hidden in the desktop app.",
+    "downloadUrl": "Download URL",
+    "downloadUrlHint": "Use a download page or a direct installer download link.",
+    "invalidDownloadUrl": "Enter a valid HTTP or HTTPS download URL.",
+    "downloadIncomplete": "Enter a download URL before enabling the download entry.",
+    "source": "Package source",
+    "customPackages": "Custom packages",
+    "officialPackages": "Official packages",
+    "officialServerHint": "Official packages ask for a server address on first launch. Updates reuse the address saved locally.",
+    "officialUnavailable": "No official installers are available for this version. Check again after they are uploaded.",
+    "notAvailable": "Not available",
+    "title": "Desktop client",
+    "check": "Check for updates",
+    "latest": "Latest version: v{{version}}",
+    "notice": "Desktop version v{{version}} is available.",
+    "configure": "Configure installers",
+    "useVersion": "Use this version",
+    "release": "Release",
+    "published": "Publish updates to users",
+    "version": "Installer version",
+    "downloads": "Installer download URLs",
+    "checkFailed": "Could not check for new versions. Try again later.",
+    "invalidUrl": "Enter a valid HTTP or HTTPS download URL.",
+    "publishIncomplete": "Enter a version and at least one installer URL before publishing.",
+    "invalidConfig": "Check the version number and installer URLs.",
+    "platforms": {
+      "windows_x64": "Windows (x64)", "windows_arm64": "Windows (ARM64)",
+      "macos_arm64": "macOS (Apple Silicon)", "macos_x64": "macOS (Intel)",
+      "linux_x64": "Linux (x64)", "linux_arm64": "Linux (ARM64)"
+    }
+  },
   "listToolbar": {
     "filter": "Filters",
     "clearSearch": "Clear search",
@@ -739,6 +773,7 @@
       "unknownDevice": "Unknown device",
       "unknownMethod": "Unknown method",
       "methods": {
+        "desktop_browser": "Browser authorization",
         "password": "Password",
         "password_2fa": "Password + 2FA",
         "oauth": "OAuth",

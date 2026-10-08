@@ -4,7 +4,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { gsap } from 'gsap'
 import { useGSAP } from '@gsap/react'
-import { ArrowRight, ChevronDown, Menu, MessageSquare, RefreshCw, ShieldOff } from 'lucide-react'
+import { ArrowRight, ChevronDown, Download, Menu, MessageSquare, RefreshCw, ShieldOff } from 'lucide-react'
 import { Tooltip } from '@/components/ui/tooltip'
 import { UserMenu } from '@/components/sidebar/sidebar'
 import { MyGallery } from '@/components/chat/my-gallery'
@@ -18,6 +18,7 @@ import { useMediaQuery } from '@/hooks/use-media-query'
 import { mediaQuery } from '@/lib/design-tokens'
 import { cn, formatTimeAgo } from '@/lib/utils'
 import { runViewTransition } from '@/lib/view-transition'
+import { useDesktopDownload } from '@/hooks/use-desktop-download'
 
 gsap.registerPlugin(useGSAP)
 
@@ -401,6 +402,7 @@ export function HomeLayout({ variant, composer, notice, onSuggestion }: HomeLayo
   const navigate = useNavigate()
   const location = useLocation()
   const user = useAuth((s) => s.user)
+  const downloadUrl = useDesktopDownload()
   const { allowed: canUsePrivateChat } = usePrivateChatPermission()
   const isPhone = useMediaQuery(mediaQuery.phone)
   const drawMode = variant === 'draw'
@@ -471,50 +473,63 @@ export function HomeLayout({ variant, composer, notice, onSuggestion }: HomeLayo
   return (
     <div
       ref={root}
-      className={cn(
-        'relative flex-1 flex flex-col overflow-hidden sm:overflow-y-auto sm:overflow-x-hidden',
-        // Drawing keeps its existing scrollable gallery on phones. The normal
-        // chat home below is a fixed-height mobile workspace instead.
-        drawMode && 'max-sm:overflow-y-auto',
-      )}
+      className="relative min-h-0 flex-1 flex flex-col overflow-y-auto overflow-x-hidden"
     >
-      {/* Mobile home: a compact, direct way to reach the navigation drawer. */}
-      <button
-        type="button"
-        aria-label={t('commandMenu.actions.toggleSidebar')}
-        onClick={() => useUI.getState().setNavOpen(true)}
-        className="lg:hidden absolute left-3 top-3 z-20 inline-flex size-[var(--tap-min)] items-center justify-center rounded-[10px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:left-2 max-sm:top-2 max-sm:size-10 max-sm:rounded-[8px]"
-      >
-        <Menu size={17} aria-hidden />
-      </button>
-      {/* Top-right: the private-mode toggle (engaged while private) and, on
-          mobile, the account avatar that opens the sidebar footer's menu. */}
-      <div className="absolute right-3 top-3 z-20 flex items-center gap-2 max-sm:right-2 max-sm:top-2">
-        {canUsePrivateChat && (
-          <Tooltip content={privateLabel}>
-            <button
-              type="button"
-              aria-label={privateLabel}
-              aria-pressed={privateMode}
-              // Only the composer differs between the two screens, so the swap
-              // runs as a view transition that cross-fades it in place.
-              onClick={() => {
-                void runViewTransition('private', () =>
-                  flushSync(() => navigate(privateMode ? '/' : '/private-chat', { state: HOME_SWAP_STATE })),
-                )
-              }}
-              className={cn(
-                'inline-flex size-11 items-center justify-center rounded-[10px] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                privateMode
-                  ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)] hover:bg-[var(--color-accent-soft)] hover:text-[var(--color-accent-hover)]'
-                  : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-              )}
+      <div className="absolute inset-x-3 top-3 z-20 flex items-center justify-between gap-2 max-sm:inset-x-2 max-sm:top-2">
+        <div className="flex min-w-0 items-center gap-1">
+          {/* Mobile home: a compact, direct way to reach the navigation drawer. */}
+          <button
+            type="button"
+            aria-label={t('commandMenu.actions.toggleSidebar')}
+            onClick={() => useUI.getState().setNavOpen(true)}
+            className="lg:hidden inline-flex size-[var(--tap-min)] shrink-0 items-center justify-center rounded-[10px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:size-10 max-sm:rounded-[8px]"
+          >
+            <Menu size={17} aria-hidden />
+          </button>
+          {downloadUrl ? (
+            <a
+              href={downloadUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              data-app-download="home"
+              aria-label={t('common:downloadApp')}
+              title={t('common:downloadApp')}
+              className="inline-flex h-11 min-w-0 items-center gap-1.5 whitespace-nowrap rounded-[8px] px-2.5 text-[13px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:h-10 max-sm:px-2"
             >
-              <ShieldOff size={19} aria-hidden />
-            </button>
-          </Tooltip>
-        )}
-        <div className="lg:hidden"><UserMenu placement="header" /></div>
+              <Download size={15} aria-hidden className="shrink-0" />
+              <span className="truncate">{t('common:downloadApp')}</span>
+            </a>
+          ) : null}
+        </div>
+        {/* Top-right: the private-mode toggle (engaged while private) and, on
+            mobile, the account avatar that opens the sidebar footer's menu. */}
+        <div className="flex shrink-0 items-center gap-2">
+          {canUsePrivateChat && (
+            <Tooltip content={privateLabel}>
+              <button
+                type="button"
+                aria-label={privateLabel}
+                aria-pressed={privateMode}
+                // Only the composer differs between the two screens, so the swap
+                // runs as a view transition that cross-fades it in place.
+                onClick={() => {
+                  void runViewTransition('private', () =>
+                    flushSync(() => navigate(privateMode ? '/' : '/private-chat', { state: HOME_SWAP_STATE })),
+                  )
+                }}
+                className={cn(
+                  'inline-flex size-11 items-center justify-center rounded-[10px] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                  privateMode
+                    ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)] hover:bg-[var(--color-accent-soft)] hover:text-[var(--color-accent-hover)]'
+                    : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+                )}
+              >
+                <ShieldOff size={19} aria-hidden />
+              </button>
+            </Tooltip>
+          )}
+          <div className="lg:hidden"><UserMenu placement="header" /></div>
+        </div>
       </div>
       {/* Desktop-only ambient depth; the phone layout stays deliberately direct. */}
       <div
@@ -525,8 +540,8 @@ export function HomeLayout({ variant, composer, notice, onSuggestion }: HomeLayo
       {/* Phone chat home: welcome copy occupies the available center space while
           the suggestions and composer remain in a dedicated bottom work area. */}
       {!drawMode && isPhone && (
-        <div className="relative z-10 flex min-h-0 flex-1 flex-col px-3 sm:hidden">
-          <header className="flex min-h-0 flex-1 flex-col items-center justify-center pb-8 pt-12 text-center">
+        <div className="relative z-10 flex min-h-full shrink-0 flex-col px-3 sm:hidden">
+          <header className="flex min-h-28 flex-1 flex-col items-center justify-center pb-[min(2rem,4dvh)] pt-12 text-center">
             {greetingHeading('home-rise max-w-[18rem] text-balance font-sans text-[1.6rem] font-semibold leading-[1.14] tracking-tight text-[var(--color-fg)]')}
           </header>
           <div className="home-rise shrink-0 pb-2">

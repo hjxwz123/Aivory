@@ -10,6 +10,7 @@ import { SettingsSection } from '@/components/settings/settings-section'
 import { toast } from '@/hooks/use-toast'
 import { useAuth } from '@/store/auth'
 import { createKeyedResourceCache, resolveOwnedResourceView } from '@/lib/keyed-resource-cache'
+import { parseClientDevice } from '@/lib/client-device'
 
 type SessionSnapshot = { sessions: ApiSession[]; current: string }
 const EMPTY_SESSION_SNAPSHOT: SessionSnapshot = { sessions: [], current: '' }
@@ -17,25 +18,6 @@ const sessionsCache = createKeyedResourceCache<SessionSnapshot>()
 useAuth.subscribe((state, previous) => {
   if (state.user?.id !== previous.user?.id) sessionsCache.clear()
 })
-
-/** Parse a User-Agent into a short "Browser · OS" label and a mobile flag. */
-function parseDevice(ua: string): { browser: string; os: string; mobile: boolean } {
-  const mobile = /Mobile|Android|iPhone|iPad|iPod/i.test(ua)
-  let os = ''
-  if (/iPhone|iPad|iPod/i.test(ua)) os = 'iOS'
-  else if (/Android/i.test(ua)) os = 'Android'
-  else if (/Windows/i.test(ua)) os = 'Windows'
-  else if (/Mac OS X|Macintosh/i.test(ua)) os = 'macOS'
-  else if (/CrOS/i.test(ua)) os = 'ChromeOS'
-  else if (/Linux/i.test(ua)) os = 'Linux'
-  let browser = ''
-  if (/Edg\//i.test(ua)) browser = 'Edge'
-  else if (/OPR\/|Opera/i.test(ua)) browser = 'Opera'
-  else if (/Firefox\//i.test(ua)) browser = 'Firefox'
-  else if (/Chrome\//i.test(ua)) browser = 'Chrome'
-  else if (/Safari\//i.test(ua)) browser = 'Safari'
-  return { browser, os, mobile }
-}
 
 /** Private/loopback ranges — used to label local sessions when geo is absent. */
 function isLocalIp(ip: string): boolean {
@@ -170,7 +152,7 @@ export function ActiveSessions() {
         </div>
       ) : (
         visibleSessions.map((s) => {
-          const { browser, os, mobile } = parseDevice(s.user_agent)
+          const { browser, os, mobile } = parseClientDevice(s.user_agent, t('common:desktopApp'))
           const Icon = mobile ? Smartphone : Monitor
           const device = [browser, os].filter(Boolean).join(' · ') || t('settings:account.sessions.unknownDevice')
           const isCurrent = s.id === visibleCurrent

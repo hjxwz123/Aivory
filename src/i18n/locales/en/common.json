@@ -1,5 +1,7 @@
 {
   "appName": "Aivory",
+  "desktopApp": "Desktop app",
+  "downloadApp": "Download App",
   "tagline": "A thoughtful AI companion",
   "actions": {
     "send": "Send",

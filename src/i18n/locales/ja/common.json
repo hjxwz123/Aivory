@@ -1,5 +1,7 @@
 {
   "appName": "Aivory",
+  "desktopApp": "アプリ版",
+  "downloadApp": "アプリをダウンロード",
   "tagline": "思慮深い AI のパートナー",
   "actions": {
     "send": "送信",

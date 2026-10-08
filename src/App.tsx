@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useOpenSettings } from '@/hooks/use-open-settings'
+import { useAppViewport } from '@/hooks/use-app-viewport'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/toaster'
 import { NetworkStatusBanner } from '@/components/network-status-banner'
@@ -29,6 +30,7 @@ const ProjectDetail = lazy(() => import('@/pages/projects/ProjectDetail'))
 const KnowledgeBasesList = lazy(() => import('@/pages/kb/KnowledgeBasesList'))
 const KnowledgeBaseDetail = lazy(() => import('@/pages/kb/KnowledgeBaseDetail'))
 const AuthLayout = lazy(() => import('@/pages/auth/AuthLayout'))
+const DesktopAuthorize = lazy(() => import('@/pages/auth/DesktopAuthorize'))
 const Login = lazy(() => import('@/pages/auth/Login'))
 const Register = lazy(() => import('@/pages/auth/Register'))
 const Setup = lazy(() => import('@/pages/auth/Setup'))
@@ -65,6 +67,7 @@ const AdminRegistration = lazy(() => import('@/pages/admin/AdminRegistration'))
 const AdminSystemEmail = lazy(() => import('@/pages/admin/AdminSystemEmail'))
 const AdminSystemLegal = lazy(() => import('@/pages/admin/AdminSystemLegal'))
 const AdminSystemLogging = lazy(() => import('@/pages/admin/AdminSystemLogging'))
+const AdminDesktop = lazy(() => import('@/pages/admin/AdminDesktop'))
 const AdminSystemStorage = lazy(() => import('@/pages/admin/AdminSystemStorage'))
 const AdminCreditSettings = lazy(() => import('@/pages/admin/AdminCreditSettings'))
 const AdminAiPPT = lazy(() => import('@/pages/admin/AdminAiPPT'))
@@ -132,6 +135,7 @@ function ScrollToTop() {
   const { pathname } = useLocation()
   useEffect(() => {
     window.scrollTo(0, 0)
+    document.querySelectorAll<HTMLElement>('[data-page-scroll]').forEach((pane) => pane.scrollTo(0, 0))
   }, [pathname])
   return null
 }
@@ -188,6 +192,7 @@ function SettingsRedirect() {
 }
 
 export default function App() {
+  useAppViewport()
   const location = useLocation()
   // §23: realtime notify stream (multi-device sync) + invisible version
   // upgrades. Both are idempotent singletons; the realtime loop follows the
@@ -252,6 +257,7 @@ export default function App() {
               <Route index element={<Subscription />} />
             </Route>
             <Route element={<AuthLayout />}>
+              <Route path="/desktop/authorize" element={<DesktopAuthorize />} />
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
               <Route path="/setup" element={<Setup />} />
@@ -307,6 +313,7 @@ export default function App() {
               <Route path="settings/email" element={<AdminSystemEmail />} />
               <Route path="settings/legal" element={<AdminSystemLegal />} />
               <Route path="settings/logging" element={<AdminSystemLogging />} />
+              <Route path="settings/desktop" element={<AdminDesktop />} />
               <Route path="storage" element={<AdminSystemStorage />} />
               <Route path="credits" element={<AdminCreditSettings />} />
               <Route path="backup" element={<AdminBackup />} />

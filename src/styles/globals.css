@@ -190,6 +190,7 @@
   }
 
   html {
+    height: 100%;
     -webkit-text-size-adjust: 100%;
     -webkit-tap-highlight-color: transparent;
     text-rendering: optimizeLegibility;
@@ -197,6 +198,8 @@
   }
 
   body {
+    height: 100%;
+    margin: 0;
     background-color: var(--color-bg);
     color: var(--color-fg);
     font-family: var(--font-sans);
@@ -281,6 +284,25 @@
     font-family: var(--font-mono);
     font-size: 0.92em;
   }
+}
+
+/* Shells own the viewport; only their content panes grow and scroll. */
+#root {
+  height: min(var(--app-height, 100dvh), 100dvh);
+  min-height: 0;
+}
+
+.app-viewport {
+  height: 100%;
+  min-height: 0;
+}
+
+.app-scroll {
+  position: relative;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 /* ============================================================================

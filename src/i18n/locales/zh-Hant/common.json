@@ -1,5 +1,7 @@
 {
   "appName": "Aivory",
+  "desktopApp": "App 版",
+  "downloadApp": "下載 App",
   "tagline": "一位剋制而細膩的 AI 夥伴",
   "actions": {
     "send": "傳送",

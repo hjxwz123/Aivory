@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { Trans, useTranslation } from 'react-i18next'
-import { ShieldCheck, ArrowLeft, Fingerprint } from 'lucide-react'
+import { ShieldCheck, ArrowLeft, Fingerprint, ExternalLink } from 'lucide-react'
 import { AuthField } from '@/components/auth/auth-field'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/hooks/use-toast'
@@ -10,6 +10,7 @@ import { OAuthButtons } from '@/components/auth/oauth-buttons'
 import { PuzzleCaptchaDialog } from '@/components/auth/puzzle-captcha-dialog'
 import { authErrorText } from '@/lib/auth-errors'
 import { isPasskeyAvailable } from '@/lib/passkey'
+import '@/lib/desktop'
 import {
   loadRememberedPassword,
   rememberPasswordPreference,
@@ -41,21 +42,40 @@ export default function Login() {
   const registrationCaptchaRequired = useAuth((s) => s.captchaRequired)
   const authPolicy = useAuth((s) => s.authPolicy)
   const authPolicyLoaded = useAuth((s) => s.authPolicyLoaded)
-  const providers = authPolicy.providers
+  const providers = window.aivoryDesktop ? [] : authPolicy.providers
   const [searchParams, setSearchParams] = useSearchParams()
   const [email, setEmail] = useState('')
   const [pw, setPw] = useState('')
   const [rememberPassword, setRememberPassword] = useState(rememberPasswordPreference)
   const [loading, setLoading] = useState(false)
+  const [browserBusy, setBrowserBusy] = useState(false)
+  const browserAttempt = useRef(0)
+  const desktop = window.aivoryDesktop
   const [errors, setErrors] = useState<{ email?: string; pw?: string; general?: string }>({})
   const [code, setCode] = useState('')
   const [passkeyBusy, setPasskeyBusy] = useState(false)
   const show2fa = Boolean(pendingTwoFactor)
-  const showPasswordLogin = authPolicy.entry_mode === 'login_page' && authPolicy.password_login_enabled
+  const showPasswordLogin = (Boolean(desktop) || authPolicy.entry_mode === 'login_page') && authPolicy.password_login_enabled
   // Admin policy + browser capability gate the passkey button; an absent
   // policy field (older server) means enabled.
-  const showPasskey = authPolicy.passkey_login_enabled !== false && isPasskeyAvailable()
-  const providerRequired = !showPasswordLogin && !showPasskey
+  const showPasskey = !desktop && authPolicy.passkey_login_enabled !== false && isPasskeyAvailable()
+  const providerRequired = !desktop && !showPasswordLogin && !showPasskey
+
+  useEffect(() => () => {
+    browserAttempt.current += 1
+    void desktop?.cancelBrowserLogin().catch(() => {})
+  }, [desktop])
+
+  async function browserLogin() {
+    if (!desktop) return
+    const attempt = ++browserAttempt.current
+    setBrowserBusy(true)
+    const result = await desktop.loginInBrowser().catch(() => ({ status: 'failed' as const }))
+    if (attempt !== browserAttempt.current) return
+    setBrowserBusy(false)
+    if (result.status === 'failed' || result.status === 'expired') setErrors({ general: t(`desktop.${result.status}`) })
+    else if (result.status === 'denied') toast.info(t('desktop.deniedTitle'))
+  }
 
   // Slider-puzzle captcha (only when the admin requires it on sign-in) — same
   // modal + single-use pass token flow as the register form (§ anti
@@ -245,8 +265,22 @@ export default function Login() {
 
   return (
     <div className="login-content">
-      <h1 id="login-title" className="login-title">{t('login.title')}</h1>
-      <p className="login-intro">{t('login.subtitle')}</p>
+      <h1 id="login-title" className={desktop ? 'sr-only' : 'login-title'}>{t(desktop ? 'login.submit' : 'login.title')}</h1>
+      {!desktop && <p className="login-intro">{t('login.subtitle')}</p>}
+
+      {desktop ? (
+        <div className="mb-4 space-y-2">
+          <Button variant="secondary" className="w-full border-transparent bg-[var(--color-bg-muted)]" loading={browserBusy} onClick={() => void browserLogin()} leadingIcon={<ExternalLink size={16} aria-hidden />}>
+            {t('desktop.browserLogin')}
+          </Button>
+          {browserBusy ? (
+            <div className="flex items-center justify-between gap-3 text-xs text-[var(--color-fg-muted)]" role="status">
+              <span>{t('desktop.waiting')}</span>
+              <button className="shrink-0 text-[var(--color-accent)]" onClick={() => void desktop.cancelBrowserLogin()}>{t('desktop.cancel')}</button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {providers.length > 0 || showPasskey ? (
         <div className="login-providers">
@@ -268,7 +302,7 @@ export default function Login() {
         <p className="login-notice" role="alert">{t('login.noProviders')}</p>
       ) : null}
 
-      {(providers.length > 0 || showPasskey) && showPasswordLogin ? (
+      {(desktop || providers.length > 0 || showPasskey) && showPasswordLogin ? (
         <div className="login-divider">{t('login.emailDivider')}</div>
       ) : null}
 

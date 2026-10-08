@@ -236,7 +236,7 @@ export default function Register() {
     )
   }
 
-  const showProviders = providers.length > 0 && oauthSignupOpen
+  const showProviders = !window.aivoryDesktop && providers.length > 0 && oauthSignupOpen
 
   return (
     <div className="login-content">

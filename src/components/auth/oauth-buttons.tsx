@@ -27,7 +27,7 @@ export function OAuthButtons({ providers, captchaRequired = false }: OAuthButton
     window.location.href = apiUrl(oauthStartPath(provider.id, captchaToken))
   }
 
-  if (providers.length === 0) return null
+  if (window.aivoryDesktop || providers.length === 0) return null
   return (
     <>
       {providers.map((p) => (
