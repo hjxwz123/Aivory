@@ -151,11 +151,7 @@ func buildAdminOnboardingResponse(r *http.Request, d Deps, userSettings json.Raw
 			usableChatModels[model.ID] = true
 			chatModelReady = true
 		case "decision":
-			for _, channel := range channels {
-				if channel.ID == model.ChannelID && channel.Type == "typesafe" {
-					usableDecisionModels[model.ID] = true
-				}
-			}
+			usableDecisionModels[model.ID] = model.Protocol == "typesafe.decisions"
 		case "embedding":
 			usableEmbeddingModels[model.ID] = true
 		}
@@ -241,12 +237,7 @@ func onboardingChannelUsable(channel store.Channel) bool {
 	// The runtime switches behavior from these persisted values without
 	// normalizing their case. Do not report an old malformed row as usable when
 	// it would dispatch to a different provider path at request time.
-	channelType := strings.TrimSpace(channel.Type)
-	apiFormat := strings.TrimSpace(channel.APIFormat)
-	if validateChannelType(channelType, apiFormat) != nil {
-		return false
-	}
-	return (channelType != "openai" && channelType != "typesafe") || onboardingOpenAIBaseURLUsable(channel.BaseURL)
+	return onboardingOpenAIBaseURLUsable(channel.BaseURL)
 }
 
 // onboardingOpenAIBaseURLUsable accepts the historical host-only shape that

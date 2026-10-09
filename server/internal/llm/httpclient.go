@@ -38,6 +38,20 @@ func OpenAIBaseURL(baseURL string) string {
 	return base
 }
 
+// VendorAPIBaseURL accepts both legacy host roots and explicit version roots.
+func VendorAPIBaseURL(baseURL, vendorDefault, version string) string {
+	base := providerBaseURL(baseURL, vendorDefault)
+	parsed, err := url.Parse(base)
+	if err == nil {
+		segments := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+		last := segments[len(segments)-1]
+		if len(last) > 1 && last[0] == 'v' && last[1] >= '0' && last[1] <= '9' {
+			return base
+		}
+	}
+	return base + "/" + version
+}
+
 // providerHTTPClient is the shared client for all upstream model-provider calls
 // (§B2). It deliberately has NO overall Timeout — generation responses stream
 // for a long time and the request *context* bounds the total. Instead it bounds

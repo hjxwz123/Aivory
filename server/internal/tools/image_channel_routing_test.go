@@ -30,6 +30,9 @@ func TestImageModelUsesAvailableRegularAndFallbackBindings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := db.Exec(`UPDATE channels SET type='claude',api_format='responses' WHERE id=?`, channels["image-fallback-2"].ID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := store.ReplaceModelChannelBindings(ctx, db, model,
 		[]store.ModelChannelBinding{
 			{ChannelID: channels["image-primary"].ID, Priority: 1, Weight: 100},

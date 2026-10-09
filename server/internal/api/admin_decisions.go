@@ -11,18 +11,30 @@ import (
 )
 
 func normalizeDecisionModel(ctx context.Context, db *sql.DB, m *store.Model) error {
-	channel, err := store.GetChannel(ctx, db, m.ChannelID)
-	if err != nil {
+	if strings.TrimSpace(m.Protocol) != "" {
+		if _, err := store.GetChannel(ctx, db, m.ChannelID); err != nil {
+			return err
+		}
+	}
+	if err := store.NormalizeModelProtocol(ctx, db, m); err != nil {
 		return err
 	}
-	if channel.Type != "typesafe" && m.Kind != "decision" {
+	if m.Kind == "embedding" {
+		m.ToolMode = "none"
+		m.Stream, m.Vision, m.ResearchEnabled, m.ModerationEnabled = false, false, false, false
+		m.ResearchEnabledSet = true
+		m.ExtraParams, m.OfficialTools = json.RawMessage("{}"), json.RawMessage("[]")
+		m.PriceOutput, m.PriceCacheRead, m.PriceCacheWrite, m.PricePerImage = 0, 0, 0, 0
 		return nil
 	}
-	if channel.Type != "typesafe" {
-		return errors.New("decision models require a typesafe channel")
+	if m.Protocol != "typesafe.decisions" && m.Kind != "decision" {
+		return nil
+	}
+	if m.Protocol != "typesafe.decisions" {
+		return errors.New("decision models require the TypeSafe Decisions protocol")
 	}
 	if m.Kind != "decision" && m.Kind != "chat" && m.Kind != "" {
-		return errors.New("typesafe channels support decision models only")
+		return errors.New("TypeSafe Decisions supports decision models only")
 	}
 	m.Kind = "decision"
 	m.ToolMode = "none"
@@ -63,7 +75,7 @@ func normalizeDecisionPolicySetting(ctx context.Context, d Deps, raw json.RawMes
 	}
 	available := false
 	for _, channel := range channels {
-		if channel.Enabled && channel.Type == "typesafe" && strings.TrimSpace(channel.APIKey) != "" {
+		if channel.Enabled && m.Protocol == "typesafe.decisions" && strings.TrimSpace(channel.APIKey) != "" {
 			available = true
 			break
 		}

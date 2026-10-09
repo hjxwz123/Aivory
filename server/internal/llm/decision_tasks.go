@@ -38,7 +38,7 @@ func (t *TaskLLM) runPolicyDecision(ctx context.Context, model *store.Model, req
 	resolvedModel := *model
 	resolvedModel.ChannelID = selectedChannelID
 	model = &resolvedModel
-	channel, err := store.GetChannel(ctx, t.db, model.ChannelID)
+	channel, err := store.GetModelChannel(ctx, t.db, model, model.ChannelID)
 	if err != nil {
 		return nil, err
 	}

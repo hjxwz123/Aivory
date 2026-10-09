@@ -221,7 +221,7 @@
       }
     },
     "title": "渠道",
-    "lead": "上游 API 通道:base URL + 驗證 + 協定。",
+    "lead": "上游 API 通道：位址、驗證和支援的模型。",
     "new": "新建渠道",
     "empty": "暫無渠道。",
     "fields": {
@@ -239,7 +239,7 @@
     },
     "editorTitle": "編輯渠道",
     "newTitle": "新建渠道",
-    "editorDescriptionNew": "把一種廠商格式路由到指定 base URL。",
+    "editorDescriptionNew": "設定上游位址與金鑰。請求協定在模型中設定。",
     "editorDescriptionEdit": "更新渠道。留空 API Key 保持原金鑰。",
     "removeTitle": "刪除渠道?",
     "removeBody": "將刪除「{{name}}」及其下所有模型。",
@@ -300,6 +300,8 @@
     }
   },
   "models": {
+    "protocol": { "label": "請求協定", "discovery": "取得模型使用的格式", "pickChannel": "選擇渠道" },
+    "kinds": { "chat": "對話", "image": "圖像", "embedding": "向量", "decision": "決策" },
     "advanced": "進階設定",
     "advancedTabs": {
       "policy": "調度策略",
@@ -310,7 +312,7 @@
       "pricing": "計費"
     },
     "title": "模型",
-    "lead": "模型選擇器裡的模型(chat / image / embedding)。",
+    "lead": "對話、圖像、向量與決策模型。",
     "new": "新建模型",
     "empty": "暫無模型 — 請先建一個渠道,再在渠道下新增模型。",
     "settings": "設定",

@@ -221,7 +221,7 @@
       }
     },
     "title": "Channels",
-    "lead": "Upstream API channels: base URL, auth, protocol.",
+    "lead": "Upstream API channels: endpoints, credentials, and supported models.",
     "new": "New channel",
     "empty": "No channels yet.",
     "fields": {
@@ -239,7 +239,7 @@
     },
     "editorTitle": "Edit channel",
     "newTitle": "New channel",
-    "editorDescriptionNew": "Routes a vendor format to a base URL.",
+    "editorDescriptionNew": "Configure the upstream endpoint and credentials. Request protocols are configured per model.",
     "editorDescriptionEdit": "Update the channel. Leave the API key blank to keep the existing secret.",
     "removeTitle": "Remove channel?",
     "removeBody": "Deletes “{{name}}” and all its models.",
@@ -300,6 +300,8 @@
     }
   },
   "models": {
+    "protocol": { "label": "Request protocol", "discovery": "Model discovery format", "pickChannel": "Select a channel" },
+    "kinds": { "chat": "Chat", "image": "Image", "embedding": "Embedding", "decision": "Decision" },
     "advanced": "Advanced settings",
     "advancedTabs": {
       "policy": "Routing policy",
@@ -310,7 +312,7 @@
       "pricing": "Pricing"
     },
     "title": "Models",
-    "lead": "Models shown in the picker (chat / image / embedding).",
+    "lead": "Chat, image, embedding, and decision models.",
     "new": "New model",
     "empty": "No models yet — create a channel first, then add models that hang off it.",
     "settings": "Settings",

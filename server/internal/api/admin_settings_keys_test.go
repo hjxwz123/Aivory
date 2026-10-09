@@ -621,6 +621,9 @@ func TestAdminSettingsValidateContextCompactionModel(t *testing.T) {
 	embeddingModel := createModel("summary-embedding", "embedding", enabledChannel.ID, true)
 	disabledChannelModel := createModel("summary-channel-disabled", "chat", disabledChannel.ID, true)
 	unsupportedChannelModel := createModel("summary-channel-unsupported", "chat", unsupportedChannel.ID, true)
+	if _, err := db.Exec(`UPDATE models SET protocol='unsupported' WHERE id=?`, unsupportedChannelModel.ID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.Exec(`UPDATE channels SET enabled=0 WHERE id=?`, disabledChannel.ID); err != nil {
 		t.Fatal(err)
 	}

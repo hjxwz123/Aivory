@@ -833,6 +833,7 @@ export interface ApiChannelModelImportResult {
 export type ApiChannelModelKind = 'chat' | 'image' | 'embedding' | 'decision'
 
 export interface ApiChannelModelCandidate {
+	protocol?: ApiModelProtocol
   request_id: string
   label: string
   description: string
@@ -1061,7 +1062,10 @@ export interface ApiBuiltinTool {
   globally_enabled?: boolean
 }
 
+export type ApiModelProtocol = 'openai.chat' | 'openai.responses' | 'anthropic.messages' | 'gemini.generateContent' | 'openai.images' | 'openai.embeddings' | 'dashscope.embeddings' | 'typesafe.decisions'
+
 export interface ApiModel {
+	protocol?: ApiModelProtocol
 	/** Supports the OpenAI Images API mask-edit workflow. */
 	mask_edit?: boolean
   id: string

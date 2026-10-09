@@ -884,6 +884,9 @@ func restoreInto(ctx context.Context, ex store.RowExecer, zr *zip.Reader, man ba
 	if err := store.BackfillRegistrationDomainMatches(ctx, ex); err != nil {
 		return nil, fmt.Errorf("backfill registration domain matches: %w", err)
 	}
+	if err := store.BackfillModelProtocols(ctx, ex); err != nil {
+		return nil, err
+	}
 	if err := validateImportedContextCompactionModel(ctx, ex); err != nil {
 		return nil, err
 	}
@@ -1539,6 +1542,10 @@ func mergeConfigArchive(ctx context.Context, d Deps, zr *zip.Reader, man configM
 	if !active {
 		return nil, errConfigImportAdminUnauthorized
 	}
+	// Preserve protocols on rows written by older binaries before merging channels.
+	if err := store.BackfillModelProtocols(ctx, tx); err != nil {
+		return nil, err
+	}
 
 	counts := make(map[string]int64)
 	for _, t := range store.ConfigTableOrder() {
@@ -1579,6 +1586,9 @@ func mergeConfigArchive(ctx context.Context, d Deps, zr *zip.Reader, man configM
 	// include the setting itself. A config import can still disable or mutate
 	// the currently selected model/channel and would otherwise leave a broken
 	// compaction model reference behind.
+	if err := store.BackfillModelProtocols(ctx, tx); err != nil {
+		return nil, err
+	}
 	if err := validateImportedContextCompactionModel(ctx, tx); err != nil {
 		return nil, err
 	}
@@ -2373,13 +2383,13 @@ func validateImportedContextCompactionModel(ctx context.Context, ex store.RowExe
 	if modelID == "" {
 		return nil
 	}
-	var kind, channelType string
+	var kind, channelType, protocol string
 	var modelEnabled, channelEnabled int
 	err = ex.QueryRowContext(ctx, `
-		SELECT m.kind, m.enabled, c.type, c.enabled
+		SELECT m.kind, m.enabled, c.type, c.enabled, m.protocol
 		  FROM models m
 		  JOIN channels c ON c.id=m.channel_id
-		 WHERE m.id=?`, modelID).Scan(&kind, &modelEnabled, &channelType, &channelEnabled)
+		 WHERE m.id=?`, modelID).Scan(&kind, &modelEnabled, &channelType, &channelEnabled, &protocol)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("%w: context compaction model %q does not exist with a channel", errInvalidCompactionConfigArchive, modelID)
 	}
@@ -2389,6 +2399,7 @@ func validateImportedContextCompactionModel(ctx context.Context, ex store.RowExe
 	if modelEnabled != 1 || kind != "chat" {
 		return fmt.Errorf("%w: context compaction model %q must be an enabled chat model", errInvalidCompactionConfigArchive, modelID)
 	}
+	channelType = store.ChannelForModel(&store.Model{Kind: kind, Protocol: protocol}, &store.Channel{Type: channelType}).Type
 	if channelEnabled != 1 || !isSupportedContextCompactionChannelType(channelType) {
 		return fmt.Errorf("%w: context compaction model %q must use an enabled supported channel", errInvalidCompactionConfigArchive, modelID)
 	}

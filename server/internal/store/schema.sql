@@ -448,6 +448,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_servers_name_unique ON mcp_servers(low
 CREATE INDEX IF NOT EXISTS idx_mcp_servers_enabled ON mcp_servers(enabled, name);
 
 CREATE TABLE IF NOT EXISTS models (
+	protocol TEXT NOT NULL DEFAULT '',
   id                TEXT PRIMARY KEY,
   channel_id        TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
   kind              TEXT NOT NULL DEFAULT 'chat',   -- chat | image | embedding

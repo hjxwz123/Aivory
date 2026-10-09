@@ -1,7 +1,7 @@
 /**
  * AdminChannels — list, create and edit upstream channels.
- * Channels carry the (type + base_url + api_key + api_format) tuple from
- * design.md §2.3-B. The api_key column is never re-displayed; admins can leave
+ * Channels carry endpoint credentials and supported request IDs.
+ * The api_key column is never re-displayed; admins can leave
  * the field blank when editing to keep the existing secret.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -16,7 +16,6 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Field } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { AdminSortableList } from '@/components/admin/AdminSortableList'
 import {
   Dialog,
@@ -37,6 +36,8 @@ import { AdminListFilter, AdminListToolbar } from '@/components/admin/admin-list
 import { AdminAdvancedDisclosure } from '@/components/admin/admin-advanced-disclosure'
 import { matchesAdminSearch, mergeVisibleAdminOrder } from '@/lib/admin-list-filter'
 import { parseChannelHeaders } from '@/lib/channel-headers'
+import { ModelProtocolSelect } from '@/components/admin/model-protocol-select'
+import type { ApiModelProtocol } from '@/api/types'
 
 type Editable = Partial<ApiChannel> & { api_key?: string }
 type ChannelEditor = {
@@ -54,8 +55,6 @@ type ModelDiscoveryState = {
 }
 
 type PendingChannelModel = ApiChannelModelCandidate & { source?: 'upstream' | 'manual' }
-
-const TYPES = ['openai', 'claude', 'gemini', 'typesafe'] as const
 
 function inferManualModelKind(requestID: string): ApiChannelModelCandidate['kind'] {
   const id = requestID.toLowerCase()
@@ -77,17 +76,16 @@ export default function AdminChannels() {
   const [rows, setRows] = useState<ApiChannel[]>([])
   const [channelHealthByID, setChannelHealthByID] = useState<Record<string, ApiChannelModelHealth[]>>({})
   const [search, setSearch] = useState('')
-  const [typeFilter, setTypeFilter] = useState('all')
+  const [discoveryProtocol, setDiscoveryProtocol] = useState<ApiModelProtocol>('openai.chat')
   const [statusFilter, setStatusFilter] = useState('all')
   const filteredRows = useMemo(() => rows.filter((row) =>
-    matchesAdminSearch(search, [row.name, row.id, row.type, row.api_format, row.base_url])
-    && (typeFilter === 'all' || row.type === typeFilter)
+    matchesAdminSearch(search, [row.name, row.id, row.base_url])
     && (statusFilter === 'all' || row.enabled === (statusFilter === 'enabled')),
-  ), [rows, search, typeFilter, statusFilter])
+  ), [rows, search, statusFilter])
   const [loading, setLoading] = useState(true)
   const [editor, setEditor] = useState<ChannelEditor>({
     open: false,
-    draft: { type: 'openai', api_format: 'chat', enabled: true },
+    draft: { enabled: true },
   })
   const [confirmDelete, setConfirmDelete] = useState<ApiChannel | null>(null)
   const [saving, setSaving] = useState(false)
@@ -190,7 +188,7 @@ export default function AdminChannels() {
     setChannelHealth(null)
     setEditor({
       open: true,
-      draft: { type: 'openai', api_format: 'chat', enabled: true, name: '', base_url: '' },
+      draft: { enabled: true, name: '', base_url: '' },
     })
   }
 
@@ -269,9 +267,7 @@ export default function AdminChannels() {
       return
     }
     const d = editor.draft
-    const normalizedBaseUrl = d.type === 'openai'
-      ? normalizeOpenAIBaseUrl(d.base_url ?? '')
-      : (d.base_url ?? '').trim()
+    const normalizedBaseUrl = normalizeOpenAIBaseUrl(d.base_url ?? '')
     if (normalizedBaseUrl === null) {
       setShowBaseUrlError(true)
       return
@@ -286,7 +282,7 @@ export default function AdminChannels() {
       skippedUnsupported: 0,
     })
     try {
-      const result = await adminApi.discoverChannelModels({ ...d, base_url: normalizedBaseUrl, headers: parsedHeaders.headers })
+      const result = await adminApi.discoverChannelModels({ channel_id: editor.row?.id, base_url: normalizedBaseUrl, api_key: d.api_key, headers: parsedHeaders.headers, protocol: discoveryProtocol })
       if (requestID !== discoveryRequestRef.current) return
       setModelDiscovery({
         loading: false,
@@ -335,16 +331,13 @@ export default function AdminChannels() {
   }
 
   function openUpstreamModels() {
-    const normalizedBaseUrl = editor.draft.type === 'openai'
-      ? normalizeOpenAIBaseUrl(editor.draft.base_url ?? '')
-      : (editor.draft.base_url ?? '').trim()
+    const normalizedBaseUrl = normalizeOpenAIBaseUrl(editor.draft.base_url ?? '')
     if (normalizedBaseUrl === null) {
       setShowBaseUrlError(true)
       return
     }
     setModelSearch('')
     setUpstreamModelsOpen(true)
-    void discoverModels()
   }
 
   function confirmUpstreamModels() {
@@ -383,14 +376,15 @@ export default function AdminChannels() {
       return
     }
     const modelsToCreate = editor.row ? [] : pendingModels
-    const normalizedBaseUrl = d.type === 'openai'
-      ? normalizeOpenAIBaseUrl(d.base_url ?? '')
-      : (d.base_url ?? '').trim()
+    const normalizedBaseUrl = normalizeOpenAIBaseUrl(d.base_url ?? '')
     if (normalizedBaseUrl === null) {
       setShowBaseUrlError(true)
       return
     }
-    const payload = { ...d, name: d.name.trim(), base_url: normalizedBaseUrl, headers: parsedHeaders.headers }
+    const { type: legacyType, api_format: legacyFormat, ...credentials } = d
+    void legacyType
+    void legacyFormat
+    const payload = { ...credentials, name: d.name.trim(), base_url: normalizedBaseUrl, headers: parsedHeaders.headers }
     savingRef.current = true
     setSaving(true)
     try {
@@ -492,10 +486,9 @@ export default function AdminChannels() {
         search={search}
         onSearchChange={setSearch}
         placeholder={t('admin:listToolbar.search.channels')}
-        activeFilterCount={Number(typeFilter !== 'all') + Number(statusFilter !== 'all')}
-        onResetFilters={() => { setTypeFilter('all'); setStatusFilter('all') }}
+        activeFilterCount={Number(statusFilter !== 'all')}
+        onResetFilters={() => { setStatusFilter('all') }}
         filters={<>
-          <AdminListFilter label={t('admin:channels.fields.type')} value={typeFilter} onValueChange={setTypeFilter} options={[{ value: 'all', label: t('admin:listToolbar.allTypes') }, ...TYPES.map((type) => ({ value: type, label: type }))]} />
           <AdminListFilter label={t('admin:common.status')} value={statusFilter} onValueChange={setStatusFilter} options={['all', 'enabled', 'disabled'].map((value) => ({ value, label: t(`admin:listToolbar.${value === 'all' ? 'allStatuses' : value}`) }))} />
         </>}
         actions={(
@@ -531,7 +524,6 @@ export default function AdminChannels() {
             tableLabel={t('admin:channels.title')}
             columns={[
               { id: 'name', header: t('admin:channels.fields.name'), width: 200, render: (r) => <span className="block truncate font-medium" title={r.name}>{r.name}</span> },
-              { id: 'type', header: t('admin:channels.fields.type'), width: 140, render: (r) => <div className="flex flex-wrap gap-1"><Badge size="xs">{r.type}</Badge>{r.type === 'openai' && r.api_format ? <Badge size="xs">{r.api_format}</Badge> : null}</div> },
               { id: 'endpoint', header: t('admin:channels.fields.baseUrl'), width: 260, render: (r) => <span className="block truncate font-mono text-[12px] text-[var(--color-fg-muted)]" title={r.base_url}>{r.base_url || t('admin:channels.labels.defaultEndpoint')}</span> },
               { id: 'key', header: t('admin:channels.fields.apiKey'), width: 100, render: (r) => <span className="text-[12px] text-[var(--color-fg-muted)]">{r.has_api_key ? t('admin:channels.labels.keySet') : t('admin:channels.labels.noKey')}</span> },
               { id: 'status', header: t('admin:common.status'), width: 190, render: (r) => <div className="flex flex-wrap gap-1"><Badge size="xs" variant={r.enabled ? 'success' : 'neutral'}>{t(r.enabled ? 'admin:channels.fields.enabled' : 'admin:channels.labels.disabled')}</Badge>{(r.auto_disabled_until ?? 0) > Math.floor(Date.now() / 1000) ? <Badge size="xs" variant="warning">{t('admin:channels.labels.autoDisabled', { defaultValue: '自动禁用' })}</Badge> : null}{(channelHealthByID[r.id]?.some((item) => item.disabled_until > Math.floor(Date.now() / 1000))) ? <Badge size="xs" variant="warning">{t('admin:channels.labels.partialUnavailable', { defaultValue: '部分模型不可用' })}</Badge> : null}</div> },
@@ -582,58 +574,11 @@ export default function AdminChannels() {
                     placeholder="Anthropic production"
                   />
                 </Field>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <Field label={t('admin:channels.fields.type')} htmlFor="ch-type">
-                    <Select
-                      disabled={saving}
-                      value={editor.draft.type ?? 'openai'}
-                      onValueChange={(v) => {
-                        const type = v as ApiChannel['type']
-                        setShowBaseUrlError(false)
-                        updateDraft({
-                          type,
-                          api_format: type === 'openai' ? (editor.draft.api_format || 'chat') : '',
-                        }, true)
-                      }}
-                    >
-                      <SelectTrigger id="ch-type">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {TYPES.map((tp) => (
-                          <SelectItem key={tp} value={tp}>
-                            {tp}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                  {editor.draft.type === 'openai' ? (
-                    <Field label={t('admin:channels.fields.apiFormat')} htmlFor="ch-fmt" hint={t('admin:channels.fields.apiFormatHint')}>
-                      <Select
-                        disabled={saving}
-                        value={editor.draft.api_format ?? 'chat'}
-                        onValueChange={(v) => updateDraft({ api_format: v as ApiChannel['api_format'] }, true)}
-                      >
-                        <SelectTrigger id="ch-fmt">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="chat">chat</SelectItem>
-                          <SelectItem value="responses">responses</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                  ) : null}
-                </div>
                 <Field
                   label={t('admin:channels.fields.baseUrl')}
                   htmlFor="ch-url"
-                  hint={t(editor.draft.type === 'openai'
-                    ? 'admin:channels.fields.openAIBaseUrlHint'
-                    : 'admin:channels.fields.baseUrlHint')}
-                  error={editor.draft.type === 'openai'
-                    && showBaseUrlError
+                  hint={t('admin:channels.fields.openAIBaseUrlHint')}
+                  error={showBaseUrlError
                     && normalizeOpenAIBaseUrl(editor.draft.base_url ?? '') === null
                     ? t('admin:channels.errors.openAIBaseUrlInvalid')
                     : undefined}
@@ -643,11 +588,10 @@ export default function AdminChannels() {
                     disabled={saving}
                     value={editor.draft.base_url ?? ''}
                     onChange={(e) => updateDraft({ base_url: e.target.value }, true)}
-                    onBlur={() => editor.draft.type === 'openai' && setShowBaseUrlError(true)}
-                    invalid={editor.draft.type === 'openai'
-                      && showBaseUrlError
+                    onBlur={() => setShowBaseUrlError(true)}
+                    invalid={showBaseUrlError
                       && normalizeOpenAIBaseUrl(editor.draft.base_url ?? '') === null}
-                    placeholder={editor.draft.type === 'openai' ? 'https://api.openai.com/v1' : editor.draft.type === 'typesafe' ? 'https://api.typesafe.ai/v1' : 'https://api.example.com'}
+                    placeholder="https://api.example.com/v1"
                   />
                 </Field>
                 <Field
@@ -811,7 +755,7 @@ export default function AdminChannels() {
                         <span className="min-w-0 flex-1">
                           <span className="flex min-w-0 items-center gap-2">
                             <span className="truncate text-sm font-medium text-[var(--color-fg)]">{model.label || model.request_id}</span>
-                            <Badge size="xs">{model.kind}</Badge>
+                            <Badge size="xs">{t(`admin:models.kinds.${model.kind}`)}</Badge>
                           </span>
                           {model.label && model.label !== model.request_id ? (
                             <span className="mt-0.5 block truncate font-mono text-[12px] text-[var(--color-fg-subtle)]">
@@ -863,6 +807,16 @@ export default function AdminChannels() {
             <DialogDescription>{t('admin:channels.modelAdd.upstreamDescription')}</DialogDescription>
           </DialogHeader>
           <DialogBody>
+            <div className="mb-5 grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+              <ModelProtocolSelect id="ch-discovery-protocol" discovery value={discoveryProtocol} disabled={modelDiscovery.loading} onChange={(protocol) => {
+                discoveryRequestRef.current++
+                setDiscoveryProtocol(protocol)
+                setModelDiscovery({ loading: false, fetched: false, error: null, models: [], selected: new Set(), skippedUnsupported: 0 })
+              }} />
+              <Button size="sm" variant="secondary" leadingIcon={<RefreshCw size={14} aria-hidden />} disabled={modelDiscovery.loading} onClick={() => void discoverModels()}>
+                {t('admin:models.pull.fetch')}
+              </Button>
+            </div>
             {modelDiscovery.loading ? (
               <div className="flex h-72 items-center justify-center text-sm text-[var(--color-fg-muted)]">
                 <span className="mr-2 inline-block size-4 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden />

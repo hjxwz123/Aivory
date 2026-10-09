@@ -441,7 +441,7 @@ func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opt
 		return "", wrapCompactionModelAttempt(fmt.Errorf("task model channel %q: %w", model.ChannelID, candidateErr), kind == TaskCompact)
 	}
 	model.ChannelID = channelCandidates[0].ID
-	channel, err := store.GetChannel(ctx, t.db, model.ChannelID)
+	channel, err := store.GetModelChannel(ctx, t.db, model, model.ChannelID)
 	if err != nil {
 		return "", wrapCompactionModelAttempt(err, kind == TaskCompact)
 	}
@@ -1080,7 +1080,7 @@ func resolveCompactionModelCandidates(ctx context.Context, db *sql.DB, conversat
 		if err != nil {
 			return false
 		}
-		channel, err := store.GetChannel(ctx, db, channelID)
+		channel, err := store.GetModelChannel(ctx, db, model, channelID)
 		return err == nil && providerIDForChannelType(channel.Type) != ""
 	}
 

@@ -1,4 +1,6 @@
 import { availablePolicyModels } from '@/lib/admin-model-policy'
+import { effectiveModelProtocol, protocolForKind } from '@/lib/model-protocol'
+import { ModelProtocolSelect } from '@/components/admin/model-protocol-select'
 /**
  * AdminModelEdit — full settings page for one model.
  *
@@ -170,7 +172,7 @@ function legacyOfficialToolDraft(value: unknown): OfficialToolDraft | null {
   }
 }
 
-function modelToDraft(m: ApiModel): Draft {
+function modelToDraft(m: ApiModel, channel?: ApiChannel): Draft {
   const officialTools = Array.isArray(m.official_tools)
     ? (m.official_tools as unknown[]).flatMap((tool) => {
         const legacy = legacyOfficialToolDraft(tool)
@@ -189,6 +191,7 @@ function modelToDraft(m: ApiModel): Draft {
     : []
   return {
     ...m,
+    protocol: effectiveModelProtocol(m, channel),
     param_controls_text: pcToText(m.param_controls),
     extra_params_text: extraParamsToText(m.extra_params),
     official_tools_draft: officialTools,
@@ -321,7 +324,7 @@ export default function AdminModelEdit() {
           setDraft(null)
         } else {
           setNotFound(false)
-          setDraft(modelToDraft(found))
+          setDraft(modelToDraft(found, c.find((channel) => channel.id === found.channel_id)))
           const loadedBindings = await adminApi.modelChannels(id).catch(() => null)
           if (!cancelled) {
             // Older models may only carry the single-channel fields.
@@ -381,7 +384,6 @@ export default function AdminModelEdit() {
   function addChannelBinding() {
     const selectedChannel = channelOptions()[0]
     if (!selectedChannel) return
-    if (bindings.regular.length === 0) updateModelKindForChannel(selectedChannel)
     setBindings((current) => ({
       ...current,
       regular: [...current.regular, { id: `new-${Date.now()}`, model_id: id, channel_id: selectedChannel.id, role: 'regular', priority: current.regular.length ? Math.max(...current.regular.map((binding) => binding.priority)) + 1 : 1, weight: 100, channel_enabled: selectedChannel.enabled, channel_auto_disabled_until: selectedChannel.auto_disabled_until, disabled_until: 0, consecutive_errors: 0, consecutive_timeouts: 0, updated_at: 0 }],
@@ -390,7 +392,6 @@ export default function AdminModelEdit() {
 
   function updateChannelBinding(index: number, patchValue: Partial<ApiModelChannelBinding>) {
     const selectedChannel = channels.find((candidate) => candidate.id === patchValue.channel_id)
-    if (selectedChannel && index === 0) updateModelKindForChannel(selectedChannel)
     setBindings((current) => ({
       ...current,
       regular: current.regular.map((binding, itemIndex) => itemIndex === index ? {
@@ -402,14 +403,6 @@ export default function AdminModelEdit() {
         } : {}),
       } : binding),
     }))
-  }
-
-  function updateModelKindForChannel(selectedChannel: ApiChannel) {
-    const decision = selectedChannel.type === 'typesafe'
-    patch({
-      kind: decision ? 'decision' : draft?.kind === 'decision' ? 'chat' : draft?.kind,
-      ...(decision ? { extra_params_text: '{}', price_output: 0, price_cache_read: 0, price_cache_write: 0 } : {}),
-    })
   }
 
   function removeChannelBinding(index: number) {
@@ -484,7 +477,6 @@ export default function AdminModelEdit() {
     }
   }
 
-  const channel = channels.find((c) => c.id === bindings.regular[0]?.channel_id)
   const extraParamsValidation = draft?.kind === 'chat' ? parseExtraParams(draft.extra_params_text) : null
   const extraParamsError =
     extraParamsValidation && !extraParamsValidation.valid
@@ -497,11 +489,9 @@ export default function AdminModelEdit() {
 
   function channelOptions(index?: number) {
     const otherBindings = bindings.regular.filter((_, itemIndex) => itemIndex !== index)
-    const anchor = channels.find((candidate) => candidate.id === otherBindings[0]?.channel_id)
     const used = new Set(otherBindings.map((binding) => binding.channel_id))
     const options = capabilityChannels.filter((candidate) =>
-      !used.has(candidate.id)
-      && (!anchor || (candidate.type === anchor.type && (candidate.api_format ?? '') === (anchor.api_format ?? ''))),
+      !used.has(candidate.id),
     )
     const selectedChannel = channels.find((candidate) => candidate.id === bindings.regular[index ?? -1]?.channel_id)
     // Keep a saved selection readable while capability discovery is pending
@@ -814,21 +804,22 @@ export default function AdminModelEdit() {
                       // extra_params are supported only for chat models. Clear a
                       // previous chat value before an image/embedding save so the
                       // backend never receives stale unsupported configuration.
-                      patch(kind === 'chat' ? { kind } : { kind, extra_params_text: '{}' })
+                      patch({ kind, protocol: protocolForKind(kind, draft.protocol), ...(kind !== 'chat' ? { extra_params_text: '{}' } : {}) })
                     }}
                   >
                     <SelectTrigger id="m-kind">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {KINDS.filter((k) => channel ? channel.type === 'typesafe' ? k === 'decision' : k !== 'decision' : true).map((k) => (
+                      {KINDS.map((k) => (
                         <SelectItem key={k} value={k}>
-                          {k === 'decision' ? t('admin:models.fields.decisionKind') : k}
+                          {t(`admin:models.kinds.${k}`)}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </Field>
+                <ModelProtocolSelect id="m-protocol" kind={draft.kind} value={draft.protocol} onChange={(protocol) => patch({ protocol })} />
                 <Field label={t('admin:models.fields.label')} htmlFor="m-label">
                   <Input
                     id="m-label"
@@ -903,7 +894,7 @@ export default function AdminModelEdit() {
                               <Select value={binding.channel_id} onValueChange={(value) => updateChannelBinding(index, { channel_id: value })}>
                                 <SelectTrigger id={`binding-${role}-${index}`}><SelectValue /></SelectTrigger>
                                 <SelectContent>
-                                  {channelOptions(index).map((candidate) => <SelectItem key={candidate.id} value={candidate.id}>{candidate.name} ({candidate.type})</SelectItem>)}
+                                  {channelOptions(index).map((candidate) => <SelectItem key={candidate.id} value={candidate.id}>{candidate.name}</SelectItem>)}
                                 </SelectContent>
                               </Select>
                             </Field>
@@ -1862,10 +1853,10 @@ export default function AdminModelEdit() {
                               onChange={(e) => patch({ price_input: Number(e.target.value) })}
                             />
                           </Field>
+                          {draft.kind === 'chat' && <>
                           <Field label={t('admin:models.fields.priceOut')} htmlFor="m-po">
                             <Input
                               id="m-po"
-                              disabled={draft.kind === 'decision'}
                               type="number"
                               step="0.0001"
                               value={String(draft.price_output ?? 0)}
@@ -1875,7 +1866,6 @@ export default function AdminModelEdit() {
                           <Field label={t('admin:models.fields.priceCacheRead')} htmlFor="m-pcr">
                             <Input
                               id="m-pcr"
-                              disabled={draft.kind === 'decision'}
                               type="number"
                               step="0.0001"
                               value={String(draft.price_cache_read ?? 0)}
@@ -1885,13 +1875,13 @@ export default function AdminModelEdit() {
                           <Field label={t('admin:models.fields.priceCacheWrite')} htmlFor="m-pcw">
                             <Input
                               id="m-pcw"
-                              disabled={draft.kind === 'decision'}
                               type="number"
                               step="0.0001"
                               value={String(draft.price_cache_write ?? 0)}
                               onChange={(e) => patch({ price_cache_write: Number(e.target.value) })}
                             />
                           </Field>
+                          </>}
                         </>
                       )}
                       {(draft.kind === 'image' || hasOfficialImageGeneration) && (

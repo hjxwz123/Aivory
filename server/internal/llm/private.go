@@ -243,7 +243,7 @@ func (o *Orchestrator) privateCall(ctx context.Context, userID string, model *st
 	resolvedModel := *model
 	resolvedModel.ChannelID = channelCandidates[0].ID
 	model = &resolvedModel
-	channel, err := store.GetChannel(ctx, o.db, model.ChannelID)
+	channel, err := store.GetModelChannel(ctx, o.db, model, model.ChannelID)
 	if err != nil || !channel.Enabled || channel.AutoDisabledUntil > time.Now().Unix() {
 		return nil, 0, errors.New("private_model_unavailable")
 	}

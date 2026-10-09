@@ -221,7 +221,7 @@
       }
     },
     "title": "渠道",
-    "lead": "上游 API 渠道:base URL + 鉴权 + 协议。",
+    "lead": "上游 API 渠道：地址、鉴权和支持的模型。",
     "new": "新建渠道",
     "empty": "暂无渠道。",
     "fields": {
@@ -239,7 +239,7 @@
     },
     "editorTitle": "编辑渠道",
     "newTitle": "新建渠道",
-    "editorDescriptionNew": "把一种厂商格式路由到指定 base URL。",
+    "editorDescriptionNew": "配置上游地址与密钥。请求协议在模型中设置。",
     "editorDescriptionEdit": "更新渠道。留空 API Key 保持原密钥。",
     "removeTitle": "删除渠道?",
     "removeBody": "将删除“{{name}}”及其下所有模型。",
@@ -300,6 +300,8 @@
     }
   },
   "models": {
+    "protocol": { "label": "请求协议", "discovery": "拉取模型使用的格式", "pickChannel": "选择渠道" },
+    "kinds": { "chat": "对话", "image": "图像", "embedding": "向量", "decision": "决策" },
     "advanced": "高级配置",
     "advancedTabs": {
       "policy": "调度策略",
@@ -310,7 +312,7 @@
       "pricing": "计费"
     },
     "title": "模型",
-    "lead": "模型选择器里的模型(chat / image / embedding)。",
+    "lead": "对话、图像、向量与决策模型。",
     "new": "新建模型",
     "empty": "暂无模型 — 请先建一个渠道,再在渠道下添加模型。",
     "settings": "设置",

@@ -163,7 +163,7 @@ func listChannelModelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 
 func replaceChannelModelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	channelID := pathParam(r, "id")
-	channel, err := store.GetChannel(r.Context(), d.DB, channelID)
+	_, err := store.GetChannel(r.Context(), d.DB, channelID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, errNotFound)
 		return
@@ -187,13 +187,6 @@ func replaceChannelModelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		}
 		if rows[i].Kind == "" {
 			rows[i].Kind = "chat"
-		}
-		if channel.Type == "typesafe" {
-			rows[i].Kind = "decision"
-		}
-		if rows[i].Kind == "decision" && channel.Type != "typesafe" {
-			writeError(w, http.StatusBadRequest, errors.New("decision models require a typesafe channel"))
-			return
 		}
 		if rows[i].Kind != "chat" && rows[i].Kind != "image" && rows[i].Kind != "embedding" && rows[i].Kind != "decision" {
 			writeError(w, http.StatusBadRequest, errInvalidInput)

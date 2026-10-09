@@ -20,6 +20,7 @@ type ImageEditRequest struct {
 var ErrImageMaskEdit = errors.New("invalid_image_mask_edit")
 
 func SupportsImageMaskEdit(model *store.Model, channel *store.Channel) bool {
+	channel = store.ChannelForModel(model, channel)
 	return model != nil && channel != nil && model.Kind == "image" && model.Enabled && channel.Enabled &&
 		strings.EqualFold(channel.Type, "openai") && !strings.Contains(strings.ToLower(model.RequestID), "dall-e-3")
 }

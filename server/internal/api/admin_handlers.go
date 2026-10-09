@@ -62,8 +62,8 @@ func createChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	req.Name = strings.TrimSpace(req.Name)
 	req.BaseURL = strings.TrimSpace(req.BaseURL)
-	if req.Name == "" || req.Type == "" {
-		writeError(w, 400, errors.New("name and type required"))
+	if req.Name == "" {
+		writeError(w, 400, errors.New("name required"))
 		return
 	}
 	if existing, err := store.GetChannelByName(r.Context(), d.DB, req.Name); err == nil && existing != nil {
@@ -72,6 +72,9 @@ func createChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
 		writeError(w, 500, err)
 		return
+	}
+	if req.Type == "" {
+		req.Type = "openai"
 	}
 	// api_format only applies to OpenAI channels — drop it for other types
 	// instead of rejecting, so adding a Claude/Gemini channel never errors on a
@@ -83,14 +86,12 @@ func createChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err)
 		return
 	}
-	if req.Type == "openai" || req.Type == "typesafe" {
-		baseURL, err := normalizeOpenAIChannelBaseURL(req.BaseURL)
-		if err != nil {
-			writeError(w, 400, err)
-			return
-		}
-		req.BaseURL = baseURL
+	baseURL, err := normalizeOpenAIChannelBaseURL(req.BaseURL)
+	if err != nil {
+		writeError(w, 400, err)
+		return
 	}
+	req.BaseURL = baseURL
 	if req.AutoDisableErrors < 0 || req.AutoDisableTimeouts < 0 || req.AutoDisableMinutes < 0 {
 		writeError(w, 400, errors.New("automatic disable settings must be non-negative"))
 		return
@@ -171,9 +172,8 @@ func updateChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err)
 		return
 	}
-	// Validate the effective OpenAI URL whenever the channel type or base URL is
-	// being configured. The upstream API root may use any version or custom path.
-	if (effType == "openai" || effType == "typesafe") && (p.Type != nil || p.BaseURL != nil) {
+	// Channels share the same URL validation regardless of model protocols.
+	if p.BaseURL != nil {
 		baseURL, err := normalizeOpenAIChannelBaseURL(effBaseURL)
 		if err != nil {
 			writeError(w, 400, err)
@@ -337,6 +337,7 @@ func decodeModelPatch(r *http.Request, m *store.Model) (extraParamsProvided, off
 	if len(raw) == 0 {
 		return false, false, false, nil
 	}
+	previousKind := m.Kind
 	if err := json.Unmarshal(raw, m); err != nil {
 		return false, false, false, err
 	}
@@ -347,6 +348,9 @@ func decodeModelPatch(r *http.Request, m *store.Model) (extraParamsProvided, off
 	_, extraParamsProvided = fields["extra_params"]
 	_, officialToolsProvided = fields["official_tools"]
 	_, autoDisableTimeoutsProvided = fields["auto_disable_timeouts"]
+	if _, provided := fields["protocol"]; !provided && m.Kind != previousKind {
+		m.Protocol = ""
+	}
 	return extraParamsProvided, officialToolsProvided, autoDisableTimeoutsProvided, nil
 }
 
@@ -2205,7 +2209,7 @@ func normalizeContextCompactionModelSetting(ctx context.Context, d Deps, raw jso
 	if !model.Enabled || model.Kind != "chat" {
 		return nil, errInvalidInput
 	}
-	channel, err := store.GetChannel(ctx, d.DB, model.ChannelID)
+	channel, err := store.GetModelChannel(ctx, d.DB, model, model.ChannelID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, errInvalidInput
@@ -2290,7 +2294,7 @@ func regularModelPolicyChannels(ctx context.Context, d Deps, model *store.Model)
 	}
 	channels := make([]store.Channel, 0, len(ids))
 	for _, id := range ids {
-		channel, lookupErr := store.GetChannel(ctx, d.DB, id)
+		channel, lookupErr := store.GetModelChannel(ctx, d.DB, model, id)
 		if errors.Is(lookupErr, store.ErrNotFound) {
 			continue
 		}
@@ -2454,6 +2458,7 @@ func ensureLockedEmbeddingModelCanUpdate(ctx context.Context, d Deps, before, af
 		return err
 	}
 	if before.Kind != after.Kind ||
+		before.Protocol != after.Protocol ||
 		before.ChannelID != after.ChannelID ||
 		before.RequestID != after.RequestID ||
 		before.Dim != after.Dim ||
@@ -2468,6 +2473,11 @@ func ensureLockedEmbeddingModelCanDelete(ctx context.Context, d Deps, id string)
 }
 
 func lockedEmbeddingModelFieldChanged(existing store.Model, row map[string]json.RawMessage) (bool, error) {
+	if v, ok, err := backupStringField(row, "protocol"); err != nil {
+		return false, err
+	} else if ok && v != "" && v != existing.Protocol {
+		return true, nil
+	}
 	if v, ok, err := backupStringField(row, "kind"); err != nil {
 		return false, err
 	} else if ok && v != existing.Kind {

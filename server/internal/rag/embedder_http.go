@@ -11,6 +11,7 @@ import (
 	"math/rand/v2"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -156,11 +157,12 @@ func (e *httpEmbedder) buildDashScopeBody(texts []string, withDim bool) []byte {
 // native DashScope text embedding endpoint. Admins configure base_url + key +
 // model via a channel/model of kind=embedding, or via EMBEDDING_* env vars.
 type httpEmbedder struct {
-	baseURL string
-	apiKey  string
-	headers requestheaders.Headers
-	model   string
-	dim     int
+	protocol string
+	baseURL  string
+	apiKey   string
+	headers  requestheaders.Headers
+	model    string
+	dim      int
 }
 
 const (
@@ -308,6 +310,25 @@ func (e *httpEmbedder) endpoint() string {
 	base := strings.TrimRight(e.baseURL, "/")
 	if base == "" {
 		base = "https://api.openai.com/v1"
+		if e.protocol == "dashscope.embeddings" {
+			base = "https://dashscope.aliyuncs.com/api/v1"
+		}
+	}
+	if e.protocol == "dashscope.embeddings" {
+		if strings.Contains(base, "/services/embeddings/") {
+			return base
+		}
+		return base + "/services/embeddings/text-embedding/text-embedding"
+	}
+	if e.protocol == "openai.embeddings" {
+		if strings.HasSuffix(base, "/embeddings") {
+			return base
+		}
+		parsed, err := url.Parse(base)
+		if err == nil && (parsed.Path == "" || parsed.Path == "/" || strings.HasSuffix(parsed.Path, "/compatible-mode")) {
+			base += "/v1"
+		}
+		return base + "/embeddings"
 	}
 	if strings.Contains(base, "dashscope.aliyuncs.com/compatible-mode") {
 		// DashScope compatible embedding models are served from the Bailian
@@ -338,6 +359,9 @@ func (e *httpEmbedder) buildBody(texts []string, withDim bool) []byte {
 }
 
 func (e *httpEmbedder) nativeDashScope() bool {
+	if e.protocol != "" {
+		return e.protocol == "dashscope.embeddings"
+	}
 	base := strings.TrimRight(e.baseURL, "/")
 	return strings.Contains(base, "/services/embeddings/text-embedding/") ||
 		strings.HasSuffix(base, "/api/v1") ||
@@ -602,7 +626,7 @@ func (s *Service) resolveEmbedder(ctx context.Context) (Embedder, string, int) {
 				if dim <= 0 {
 					dim = defaultEmbeddingDim()
 				}
-				return &httpEmbedder{baseURL: ch.BaseURL, apiKey: ch.APIKey, headers: ch.Headers, model: m.RequestID, dim: dim}, "emb:" + m.ID, dim
+				return &httpEmbedder{protocol: m.Protocol, baseURL: ch.BaseURL, apiKey: ch.APIKey, headers: ch.Headers, model: m.RequestID, dim: dim}, "emb:" + m.ID, dim
 			}
 		}
 	}
@@ -659,5 +683,5 @@ func (s *Service) resolveEmbedderForKB(ctx context.Context, kbID string) (Embedd
 	if useDim <= 0 {
 		useDim = defaultEmbeddingDim()
 	}
-	return &httpEmbedder{baseURL: ch.BaseURL, apiKey: ch.APIKey, headers: ch.Headers, model: m.RequestID, dim: useDim}, "emb:" + m.ID, useDim, nil
+	return &httpEmbedder{protocol: m.Protocol, baseURL: ch.BaseURL, apiKey: ch.APIKey, headers: ch.Headers, model: m.RequestID, dim: useDim}, "emb:" + m.ID, useDim, nil
 }

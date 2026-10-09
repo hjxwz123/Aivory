@@ -40,10 +40,13 @@ import { PanelFallback } from '@/components/ui/panel-fallback'
 import { AdminPageHeader } from '@/components/admin/admin-page-header'
 import { AdminListFilter, AdminListToolbar } from '@/components/admin/admin-list-toolbar'
 import { matchesAdminSearch, mergeVisibleAdminOrder } from '@/lib/admin-list-filter'
+import { ModelProtocolSelect } from '@/components/admin/model-protocol-select'
+import { modelProtocolLabel, protocolForKind } from '@/lib/model-protocol'
 
 const KINDS = ['chat', 'image', 'embedding', 'decision'] as const
 
 type CreateDraft = {
+  protocol: NonNullable<ApiModel['protocol']>
   channel_id: string
   kind: ApiModel['kind']
   label: string
@@ -53,6 +56,7 @@ type CreateDraft = {
 }
 
 type PullModelsState = {
+  protocol: NonNullable<ApiModel['protocol']>
   open: boolean
   channelId: string
   loading: boolean
@@ -65,6 +69,7 @@ type PullModelsState = {
 }
 
 const emptyCreate: CreateDraft = {
+  protocol: 'openai.chat',
   channel_id: '',
   kind: 'chat',
   label: '',
@@ -74,6 +79,7 @@ const emptyCreate: CreateDraft = {
 }
 
 const emptyPullModels: PullModelsState = {
+  protocol: 'openai.chat',
   open: false,
   channelId: '',
   loading: false,
@@ -102,7 +108,7 @@ export default function AdminModels() {
       const channel = channelById.get(model.channel_id)
       const bindingNames = (model.channel_bindings ?? []).map((binding) => binding.channel_name).filter(Boolean).join(' ')
       const boundChannelIDs = (model.channel_bindings ?? []).filter((binding) => binding.role === 'regular').map((binding) => binding.channel_id)
-      return matchesAdminSearch(search, [model.label, model.request_id, model.id, model.description, channel?.name, channel?.type, bindingNames])
+      return matchesAdminSearch(search, [model.label, model.request_id, model.id, model.description, channel?.name, modelProtocolLabel(model, channel), bindingNames])
         && (channelFilter === 'all' || model.channel_id === channelFilter || boundChannelIDs.includes(channelFilter))
         && (kindFilter === 'all' || model.kind === kindFilter)
         && (statusFilter === 'all' || model.enabled === (statusFilter === 'enabled'))
@@ -167,7 +173,6 @@ export default function AdminModels() {
       draft: {
         ...current.draft,
         channel_id: next.id,
-        kind: next.type === 'typesafe' ? 'decision' : current.draft.kind === 'decision' ? 'chat' : current.draft.kind,
       },
     }))
   }, [creator.open, creator.draft.request_id, creator.draft.channel_id, creatorChannels])
@@ -175,7 +180,7 @@ export default function AdminModels() {
   function openNew() {
     setCreator({
       open: true,
-      draft: { ...emptyCreate, kind: channels[0]?.type === 'typesafe' ? 'decision' : createKind === 'decision' ? 'chat' : createKind, channel_id: channels[0]?.id ?? '' },
+      draft: { ...emptyCreate, kind: createKind, protocol: protocolForKind(createKind), channel_id: channels[0]?.id ?? '' },
     })
   }
 
@@ -210,7 +215,7 @@ export default function AdminModels() {
       selected: new Set(),
     }))
     try {
-      const result = await adminApi.discoverSavedChannelModels(pullModels.channelId)
+      const result = await adminApi.discoverSavedChannelModels(pullModels.channelId, pullModels.protocol)
       if (requestID !== pullRequestRef.current) return
       setPullModels((current) => ({
         ...current,
@@ -286,6 +291,7 @@ export default function AdminModels() {
       const created = await adminApi.createModel({
         channel_id: d.channel_id,
         kind: d.kind,
+        protocol: d.protocol,
         label: d.label.trim(),
         request_id: d.request_id.trim(),
         icon: d.icon.trim(),
@@ -297,7 +303,7 @@ export default function AdminModels() {
         research_enabled: true,
         param_controls: [],
         currency: 'USD',
-        price_input: d.kind === 'decision' || channels.find((c) => c.id === d.channel_id)?.type === 'typesafe' ? 0.042 : 0,
+        price_input: d.kind === 'decision' ? 0.042 : 0,
       })
       toast.success(t('admin:models.created'))
       setCreator({ open: false, draft: emptyCreate })
@@ -394,7 +400,7 @@ export default function AdminModels() {
         onResetFilters={() => { setChannelFilter('all'); setKindFilter('all'); setStatusFilter('all') }}
         filters={<>
           <AdminListFilter label={t('admin:models.fields.channel')} value={channelFilter} onValueChange={setChannelFilter} options={[{ value: 'all', label: t('admin:listToolbar.allChannels') }, ...channels.map((channel) => ({ value: channel.id, label: channel.name }))]} />
-          <AdminListFilter label={t('admin:models.fields.kind')} value={kindFilter} onValueChange={setKindFilter} options={[{ value: 'all', label: t('admin:listToolbar.allTypes') }, ...KINDS.map((kind) => ({ value: kind, label: kind }))]} />
+          <AdminListFilter label={t('admin:models.fields.kind')} value={kindFilter} onValueChange={setKindFilter} options={[{ value: 'all', label: t('admin:listToolbar.allTypes') }, ...KINDS.map((kind) => ({ value: kind, label: t(`admin:models.kinds.${kind}`) }))]} />
           <AdminListFilter label={t('admin:common.status')} value={statusFilter} onValueChange={setStatusFilter} options={['all', 'enabled', 'disabled'].map((value) => ({ value, label: t(`admin:listToolbar.${value === 'all' ? 'allStatuses' : value}`) }))} />
         </>}
         actions={(
@@ -464,7 +470,8 @@ export default function AdminModels() {
                 const primaryName = regular[0]?.channel_name ?? channels.find((c) => c.id === m.channel_id)?.name ?? '—'
                 return <div className="flex min-w-0 items-center gap-1.5"><span className="block min-w-0 truncate" title={regular.map((binding) => binding.channel_name).filter(Boolean).join(', ') || primaryName}>{primaryName}</span>{regular.length > 1 ? <Badge size="xs">+{regular.length - 1}</Badge> : null}</div>
               } },
-              { id: 'kind', header: t('admin:models.fields.kind'), width: 100, render: (m) => <Badge size="xs">{m.kind}</Badge> },
+              { id: 'kind', header: t('admin:models.fields.kind'), width: 100, render: (m) => <Badge size="xs">{t(`admin:models.kinds.${m.kind}`)}</Badge> },
+              { id: 'protocol', header: t('admin:models.protocol.label'), width: 230, render: (m) => <span className="text-xs">{modelProtocolLabel(m, channels.find((channel) => channel.id === m.channel_id))}</span> },
               { id: 'toolMode', header: t('admin:models.fields.toolMode'), width: 100, render: (m) => <Badge size="xs">{m.tool_mode}</Badge> },
               { id: 'pricing', header: t('admin:common.pricing'), width: 170, render: (m) => (
                 <div className="text-[12px] tabular-nums text-[var(--color-fg-muted)]">
@@ -534,7 +541,7 @@ export default function AdminModels() {
               </div>
             ) : (
               <div className="grid gap-4">
-                <div className="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+                <div className="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
                   <Field label={t('admin:models.pull.channel')} htmlFor="pull-model-channel">
                     <Select value={pullModels.channelId} onValueChange={selectPullChannel} disabled={pullModels.loading || addingPulledModels}>
                       <SelectTrigger id="pull-model-channel">
@@ -543,15 +550,19 @@ export default function AdminModels() {
                       <SelectContent>
                         {channels.map((channel) => (
                           <SelectItem key={channel.id} value={channel.id}>
-                            {channel.name} ({channel.type})
+                            {channel.name}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </Field>
+                  <ModelProtocolSelect id="pull-model-protocol" discovery value={pullModels.protocol} disabled={pullModels.loading || addingPulledModels} onChange={(protocol) => {
+                    pullRequestRef.current++
+                    setPullModels((current) => ({ ...current, protocol, candidates: [], selected: new Set(), fetched: false, error: false }))
+                  }} />
                   <Button
                     variant="secondary"
-                    className="min-h-[var(--tap-min)] sm:min-h-0"
+                    className="min-h-[var(--tap-min)] sm:col-span-2 sm:justify-self-end sm:min-h-0"
                     leadingIcon={<RefreshCw size={15} aria-hidden />}
                     onClick={() => void discoverSavedModels()}
                     loading={pullModels.loading}
@@ -648,7 +659,7 @@ export default function AdminModels() {
                                 <span className="min-w-0 flex-1">
                                   <span className="flex flex-wrap items-center gap-2">
                                     <span className="truncate text-sm font-medium text-[var(--color-fg)]">{candidate.label}</span>
-                                    <Badge size="xs" variant="neutral">{candidate.kind}</Badge>
+                                    <Badge size="xs" variant="neutral">{t(`admin:models.kinds.${candidate.kind}`)}</Badge>
                                   </span>
                                   <span className="mt-0.5 block truncate font-mono text-xs text-[var(--color-fg-subtle)]">{candidate.request_id}</span>
                                 </span>
@@ -701,43 +712,41 @@ export default function AdminModels() {
                   placeholder="gpt-4o"
                 />
               </Field>
-              <Field label={t('admin:models.fields.channel')} htmlFor="m-new-ch">
-                <Select
-                  value={creator.draft.channel_id}
-                  onValueChange={(v) => setCreator({ ...creator, draft: { ...creator.draft, channel_id: v, kind: channels.find((c) => c.id === v)?.type === 'typesafe' ? 'decision' : creator.draft.kind === 'decision' ? 'chat' : creator.draft.kind } })}
-                >
-                  <SelectTrigger id="m-new-ch">
-                    <SelectValue placeholder={t('admin:settings.fields.pickModel')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(creator.draft.request_id.trim() ? creatorChannels : channels).map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.name} ({c.type})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
               <Field label={t('admin:models.fields.kind')} htmlFor="m-new-kind">
                 <Select
                   value={creator.draft.kind}
                   onValueChange={(v) =>
-                    setCreator({ ...creator, draft: { ...creator.draft, kind: v as ApiModel['kind'] } })
+                    setCreator({ ...creator, draft: { ...creator.draft, kind: v as ApiModel['kind'], protocol: protocolForKind(v as ApiModel['kind'], creator.draft.protocol) } })
                   }
                 >
                   <SelectTrigger id="m-new-kind">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {KINDS.filter((k) => channels.find((c) => c.id === creator.draft.channel_id)?.type === 'typesafe' ? k === 'decision' : k !== 'decision').map((k) => (
+                    {KINDS.map((k) => (
                       <SelectItem key={k} value={k}>
-                        {k === 'decision' ? t('admin:models.fields.decisionKind') : k}
+                        {t(`admin:models.kinds.${k}`)}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </Field>
-              <Field label={t('admin:models.fields.label')} htmlFor="m-new-label">
+              <ModelProtocolSelect id="m-new-protocol" kind={creator.draft.kind} value={creator.draft.protocol} onChange={(protocol) => setCreator((current) => ({ ...current, draft: { ...current.draft, protocol } }))} />
+              <Field label={t('admin:models.fields.channel')} htmlFor="m-new-ch">
+                <Select
+                  value={creator.draft.channel_id}
+                  disabled={!creator.draft.request_id.trim() || creatorChannels.length === 0}
+                  onValueChange={(v) => setCreator({ ...creator, draft: { ...creator.draft, channel_id: v } })}
+                >
+                  <SelectTrigger id="m-new-ch">
+                    <SelectValue placeholder={t('admin:models.protocol.pickChannel')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {creatorChannels.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label={t('admin:models.fields.label')} htmlFor="m-new-label" className="sm:col-span-2">
                 <Input
                   id="m-new-label"
                   value={creator.draft.label}

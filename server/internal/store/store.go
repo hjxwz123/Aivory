@@ -593,6 +593,14 @@ func Migrate(db *sql.DB) error {
 	if err := backfillModelChannelConfiguration(context.Background(), db); err != nil {
 		return fmt.Errorf("backfill model channel configuration: %w", err)
 	}
+	protocolDDL := `ALTER TABLE models ADD COLUMN protocol TEXT NOT NULL DEFAULT ''`
+	if usePostgres {
+		protocolDDL = `ALTER TABLE models ADD COLUMN IF NOT EXISTS protocol TEXT NOT NULL DEFAULT ''`
+	}
+	_, _ = db.Exec(protocolDDL)
+	if err := BackfillModelProtocols(context.Background(), db); err != nil {
+		return fmt.Errorf("migrate model protocols: %w", err)
+	}
 	if err := migrateFallbackModelChannels(context.Background(), db); err != nil {
 		return fmt.Errorf("migrate fallback model channels: %w", err)
 	}
@@ -775,6 +783,7 @@ func Migrate(db *sql.DB) error {
 		"registration_domain_matches":     {"domain", "rule_domain"},
 		"passkeys":                        {"authenticator_flags", "user_handle"},
 	}
+	columnChecks["models"] = append(columnChecks["models"], "protocol")
 	for table, cols := range columnChecks {
 		if _, err := db.Exec(fmt.Sprintf(`SELECT %s FROM %s WHERE 1=0`, strings.Join(cols, ", "), table)); err != nil {
 			return fmt.Errorf("schema column check failed for %q (an additive migration may have silently failed): %w", table, err)

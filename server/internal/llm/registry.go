@@ -37,7 +37,7 @@ type Registry struct {
 }
 
 // NewRegistry builds the default registry of real providers. The orchestrator
-// picks one based on the model's channel type; a channel must carry real
+// picks one based on the model's protocol; a channel must carry real
 // credentials to function.
 func NewRegistry(logger *log.Logger) *Registry {
 	r := &Registry{

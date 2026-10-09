@@ -103,16 +103,10 @@ func resolveModelChannelCandidates(ctx context.Context, db *sql.DB, model *store
 		}
 	}
 	out := make([]ChannelCreds, 0, len(ids))
-	var anchor *store.Channel
 	for _, id := range ids {
 		channel, err := store.GetChannel(ctx, db, id)
 		if err != nil || !channel.Enabled || channel.AutoDisabledUntil > time.Now().Unix() ||
 			(strings.TrimSpace(channel.APIKey) == "" && !(legacyRouting && id == model.ChannelID)) {
-			continue
-		}
-		if anchor == nil {
-			anchor = channel
-		} else if providerIDForChannelType(channel.Type) != providerIDForChannelType(anchor.Type) || !strings.EqualFold(strings.TrimSpace(channel.APIFormat), strings.TrimSpace(anchor.APIFormat)) {
 			continue
 		}
 		out = append(out, ChannelCreds{ID: channel.ID, BaseURL: channel.BaseURL, APIKey: channel.APIKey, Headers: channel.Headers})

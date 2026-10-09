@@ -221,7 +221,7 @@
       }
     },
     "title": "Canaux",
-    "lead": "Canaux API amont : base URL, auth, protocole.",
+    "lead": "Canaux API amont : adresses, identifiants et modèles disponibles.",
     "new": "Nouveau canal",
     "empty": "Aucun canal pour l'instant.",
     "fields": {
@@ -239,7 +239,7 @@
     },
     "editorTitle": "Modifier le canal",
     "newTitle": "Nouveau canal",
-    "editorDescriptionNew": "Achemine un format fournisseur vers une base URL.",
+    "editorDescriptionNew": "Configurez l’adresse et les identifiants du service. Le protocole se configure pour chaque modèle.",
     "editorDescriptionEdit": "Mettez à jour le canal. Laissez la clé d'API vide pour conserver le secret existant.",
     "removeTitle": "Retirer le canal ?",
     "removeBody": "Supprime « {{name}} » et tous ses modèles.",
@@ -300,6 +300,8 @@
     }
   },
   "models": {
+    "protocol": { "label": "Protocole de requête", "discovery": "Format de découverte des modèles", "pickChannel": "Sélectionner un canal" },
+    "kinds": { "chat": "Conversation", "image": "Image", "embedding": "Vectorisation", "decision": "Décision" },
     "advanced": "Paramètres avancés",
     "advancedTabs": {
       "policy": "Politique de routage",
@@ -310,7 +312,7 @@
       "pricing": "Tarification"
     },
     "title": "Modèles",
-    "lead": "Modèles du sélecteur (chat / image / embedding).",
+    "lead": "Modèles de conversation, d’image, de vectorisation et de décision.",
     "new": "Nouveau modèle",
     "empty": "Aucun modèle pour l'instant — créez d'abord un canal, puis ajoutez des modèles qui en dépendent.",
     "settings": "Paramètres",

@@ -1939,7 +1939,7 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 		return base, nil, "", fmt.Errorf("fallback model has no available channel: %w", candidateErr)
 	}
 	m.ChannelID = channelCandidates[0].ID
-	ch, err := store.GetChannel(ctx, o.db, m.ChannelID)
+	ch, err := store.GetModelChannel(ctx, o.db, m, m.ChannelID)
 	if err != nil {
 		return base, nil, "", err
 	}
@@ -2853,7 +2853,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		return nil, candidateErr
 	}
 	model.ChannelID = channelCandidates[0].ID
-	channel, err := store.GetChannel(ctx, o.db, model.ChannelID)
+	channel, err := store.GetModelChannel(ctx, o.db, model, model.ChannelID)
 	if err != nil {
 		return nil, err
 	}

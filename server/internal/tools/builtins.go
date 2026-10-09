@@ -1756,7 +1756,7 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 			}
 		}()
 	}
-	channel, err := store.GetChannel(ctx, t.db, model.ChannelID)
+	channel, err := store.GetModelChannel(ctx, t.db, model, model.ChannelID)
 	if err != nil {
 		return "", nil, err
 	}
@@ -2117,13 +2117,11 @@ func (t *imageGenerateTool) resolveImageFallbackChannels(ctx context.Context, mo
 		if supported, err := store.ChannelSupportsRequestID(ctx, t.db, fallbackID, model.RequestID); err != nil || !supported {
 			continue
 		}
-		fallback, err := store.GetChannel(ctx, t.db, fallbackID)
+		fallback, err := store.GetModelChannel(ctx, t.db, model, fallbackID)
 		if err != nil {
 			continue
 		}
-		sameFamily := imageChannelFamily(primary.Type) != "" && imageChannelFamily(primary.Type) == imageChannelFamily(fallback.Type)
-		sameFormat := strings.EqualFold(strings.TrimSpace(primary.APIFormat), strings.TrimSpace(fallback.APIFormat))
-		if fallback.Enabled && fallback.AutoDisabledUntil <= time.Now().Unix() && sameFamily && sameFormat && strings.TrimSpace(fallback.APIKey) != "" {
+		if fallback.Enabled && fallback.AutoDisabledUntil <= time.Now().Unix() && strings.TrimSpace(fallback.APIKey) != "" {
 			fallbacks = append(fallbacks, fallback)
 			continue
 		}
@@ -2630,7 +2628,7 @@ func geminiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 	if err != nil {
 		return nil, err
 	}
-	url := fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s", base, requestID, apiKey)
+	url := fmt.Sprintf("%s/models/%s:generateContent?key=%s", llm.VendorAPIBaseURL(base, "https://generativelanguage.googleapis.com", "v1beta"), requestID, apiKey)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(raw))
 	if err != nil {
 		return nil, err

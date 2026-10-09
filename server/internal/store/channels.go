@@ -280,7 +280,7 @@ func DeleteChannel(ctx context.Context, db *sql.DB, id string) error {
 // ListModels returns every model with optional kind filter (empty = all).
 // onlyEnabled restricts to enabled rows.
 func ListModels(ctx context.Context, db *sql.DB, kind string, onlyEnabled bool) ([]Model, error) {
-	q := `SELECT id, channel_id, kind, request_id, label, description, icon, fallback_channel_id, enabled, sort_order, tool_mode, vision, stream, research_enabled, fast, system_prompt, param_controls, extra_params, official_tools, builtin_tools, mcp_server_ids, tags, moderation_enabled, moderation_mode, price_input, price_output, price_cache_read, price_cache_write, price_per_image, currency, dim, compaction_token_threshold, image_timeout_sec, fallback_ttft_sec, auto_disable_errors, auto_disable_timeouts, auto_disable_minutes, updated_at FROM models WHERE 1=1`
+	q := `SELECT id, channel_id, kind, request_id, label, description, icon, fallback_channel_id, enabled, sort_order, tool_mode, vision, stream, research_enabled, fast, system_prompt, param_controls, extra_params, official_tools, builtin_tools, mcp_server_ids, tags, moderation_enabled, moderation_mode, price_input, price_output, price_cache_read, price_cache_write, price_per_image, currency, dim, compaction_token_threshold, image_timeout_sec, fallback_ttft_sec, auto_disable_errors, auto_disable_timeouts, auto_disable_minutes, updated_at, ` + modelProtocolSelect + ` FROM models WHERE 1=1`
 	args := []any{}
 	if kind != "" {
 		q += " AND kind=?"
@@ -309,7 +309,7 @@ func ListModels(ctx context.Context, db *sql.DB, kind string, onlyEnabled bool) 
 // GetModel returns one row.
 func GetModel(ctx context.Context, db *sql.DB, id string) (*Model, error) {
 	row := db.QueryRowContext(ctx,
-		`SELECT id, channel_id, kind, request_id, label, description, icon, fallback_channel_id, enabled, sort_order, tool_mode, vision, stream, research_enabled, fast, system_prompt, param_controls, extra_params, official_tools, builtin_tools, mcp_server_ids, tags, moderation_enabled, moderation_mode, price_input, price_output, price_cache_read, price_cache_write, price_per_image, currency, dim, compaction_token_threshold, image_timeout_sec, fallback_ttft_sec, auto_disable_errors, auto_disable_timeouts, auto_disable_minutes, updated_at FROM models WHERE id=?`, id)
+		`SELECT id, channel_id, kind, request_id, label, description, icon, fallback_channel_id, enabled, sort_order, tool_mode, vision, stream, research_enabled, fast, system_prompt, param_controls, extra_params, official_tools, builtin_tools, mcp_server_ids, tags, moderation_enabled, moderation_mode, price_input, price_output, price_cache_read, price_cache_write, price_per_image, currency, dim, compaction_token_threshold, image_timeout_sec, fallback_ttft_sec, auto_disable_errors, auto_disable_timeouts, auto_disable_minutes, updated_at, `+modelProtocolSelect+` FROM models WHERE id=?`, id)
 	m, err := scanModel(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -327,7 +327,7 @@ func scanModel(s scanner) (Model, error) {
 	var builtinTools, mcpServerIDs sql.NullString
 	if err := s.Scan(&m.ID, &m.ChannelID, &m.Kind, &m.RequestID, &m.Label, &m.Description, &m.Icon, &m.FallbackChannelID, &en, &m.SortOrder,
 		&m.ToolMode, &vi, &st, &researchEn, &fastI, &m.SystemPrompt, &paramControls, &extraParams, &officialTools, &builtinTools, &mcpServerIDs, &tags, &modEn, &m.ModerationMode,
-		&m.PriceInput, &m.PriceOutput, &m.PriceCacheRead, &m.PriceCacheWrite, &m.PricePerImage, &m.Currency, &m.Dim, &m.CompactionTokenThreshold, &m.ImageTimeoutSec, &m.FallbackTTFTSec, &m.AutoDisableErrors, &m.AutoDisableTimeouts, &m.AutoDisableMinutes, &m.UpdatedAt); err != nil {
+		&m.PriceInput, &m.PriceOutput, &m.PriceCacheRead, &m.PriceCacheWrite, &m.PricePerImage, &m.Currency, &m.Dim, &m.CompactionTokenThreshold, &m.ImageTimeoutSec, &m.FallbackTTFTSec, &m.AutoDisableErrors, &m.AutoDisableTimeouts, &m.AutoDisableMinutes, &m.UpdatedAt, &m.Protocol); err != nil {
 		return m, err
 	}
 	m.Enabled = en == 1
@@ -367,6 +367,9 @@ type scanner interface {
 
 // CreateModel inserts a row.
 func CreateModel(ctx context.Context, db *sql.DB, m Model) (*Model, error) {
+	if err := NormalizeModelProtocol(ctx, db, &m); err != nil {
+		return nil, err
+	}
 	m.RequestID = strings.TrimSpace(m.RequestID)
 	m.Label = strings.TrimSpace(m.Label)
 	m.Description = strings.TrimSpace(m.Description)
@@ -442,17 +445,17 @@ func CreateModel(ctx context.Context, db *sql.DB, m Model) (*Model, error) {
 		id, channel_id, kind, request_id, label, description, icon, fallback_channel_id, enabled, sort_order,
 		tool_mode, vision, stream, research_enabled, system_prompt, param_controls, extra_params, official_tools, builtin_tools, mcp_server_ids, tags, moderation_enabled, moderation_mode,
 		price_input, price_output, price_cache_read, price_cache_write, price_per_image, currency,
-		dim, compaction_token_threshold, image_timeout_sec, fallback_ttft_sec, auto_disable_errors, auto_disable_timeouts, auto_disable_minutes, updated_at
+		dim, compaction_token_threshold, image_timeout_sec, fallback_ttft_sec, auto_disable_errors, auto_disable_timeouts, auto_disable_minutes, updated_at, protocol
 	) VALUES(
 		?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 		?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 		?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-		?, ?, ?, ?, ?, ?, ?
+		?, ?, ?, ?, ?, ?, ?, ?
 	)`,
 		m.ID, m.ChannelID, m.Kind, m.RequestID, m.Label, m.Description, m.Icon, m.FallbackChannelID, boolInt(m.Enabled), m.SortOrder,
 		m.ToolMode, boolInt(m.Vision), boolInt(m.Stream), boolInt(m.ResearchEnabled), m.SystemPrompt, string(m.ParamControls), string(m.ExtraParams), string(m.OfficialTools), nullableRawJSON(m.BuiltinTools), nullableRawJSON(m.MCPServerIDs), string(m.Tags), boolInt(m.ModerationEnabled), m.ModerationMode,
 		m.PriceInput, m.PriceOutput, m.PriceCacheRead, m.PriceCacheWrite, m.PricePerImage, m.Currency,
-		m.Dim, m.CompactionTokenThreshold, m.ImageTimeoutSec, m.FallbackTTFTSec, m.AutoDisableErrors, m.AutoDisableTimeouts, m.AutoDisableMinutes, time.Now().Unix())
+		m.Dim, m.CompactionTokenThreshold, m.ImageTimeoutSec, m.FallbackTTFTSec, m.AutoDisableErrors, m.AutoDisableTimeouts, m.AutoDisableMinutes, time.Now().Unix(), m.Protocol)
 	if err != nil {
 		if isUniqueIndexErr(err, "idx_models_channel_request_unique", "models.channel_id") {
 			return nil, ErrModelRequestExists
@@ -478,7 +481,7 @@ func CreateModel(ctx context.Context, db *sql.DB, m Model) (*Model, error) {
 
 func GetModelByChannelRequestID(ctx context.Context, db *sql.DB, channelID, requestID string) (*Model, error) {
 	row := db.QueryRowContext(ctx,
-		`SELECT id, channel_id, kind, request_id, label, description, icon, fallback_channel_id, enabled, sort_order, tool_mode, vision, stream, research_enabled, fast, system_prompt, param_controls, extra_params, official_tools, builtin_tools, mcp_server_ids, tags, moderation_enabled, moderation_mode, price_input, price_output, price_cache_read, price_cache_write, price_per_image, currency, dim, compaction_token_threshold, image_timeout_sec, fallback_ttft_sec, auto_disable_errors, auto_disable_timeouts, auto_disable_minutes, updated_at
+		`SELECT id, channel_id, kind, request_id, label, description, icon, fallback_channel_id, enabled, sort_order, tool_mode, vision, stream, research_enabled, fast, system_prompt, param_controls, extra_params, official_tools, builtin_tools, mcp_server_ids, tags, moderation_enabled, moderation_mode, price_input, price_output, price_cache_read, price_cache_write, price_per_image, currency, dim, compaction_token_threshold, image_timeout_sec, fallback_ttft_sec, auto_disable_errors, auto_disable_timeouts, auto_disable_minutes, updated_at, `+modelProtocolSelect+`
 		 FROM models WHERE channel_id=? AND lower(trim(request_id))=lower(trim(?)) LIMIT 1`,
 		channelID, requestID)
 	m, err := scanModel(row)
@@ -493,6 +496,9 @@ func GetModelByChannelRequestID(ctx context.Context, db *sql.DB, channelID, requ
 
 // UpdateModel writes selective fields.
 func UpdateModel(ctx context.Context, db *sql.DB, id string, m Model) (*Model, error) {
+	if err := NormalizeModelProtocol(ctx, db, &m); err != nil {
+		return nil, err
+	}
 	m.RequestID = strings.TrimSpace(m.RequestID)
 	m.Label = strings.TrimSpace(m.Label)
 	m.Description = strings.TrimSpace(m.Description)
@@ -550,12 +556,12 @@ func UpdateModel(ctx context.Context, db *sql.DB, id string, m Model) (*Model, e
 		channel_id=?, label=?, description=?, icon=?, fallback_channel_id=?, request_id=?, kind=?, enabled=?, sort_order=?,
 		tool_mode=?, vision=?, stream=?, research_enabled=?, system_prompt=?, param_controls=?, extra_params=?, official_tools=?, builtin_tools=?, mcp_server_ids=?, tags=?, moderation_enabled=?, moderation_mode=?,
 		price_input=?, price_output=?, price_cache_read=?, price_cache_write=?, price_per_image=?, currency=?,
-		dim=?, compaction_token_threshold=?, image_timeout_sec=?, fallback_ttft_sec=?, auto_disable_errors=?, auto_disable_timeouts=?, auto_disable_minutes=?, updated_at=?
+		dim=?, compaction_token_threshold=?, image_timeout_sec=?, fallback_ttft_sec=?, auto_disable_errors=?, auto_disable_timeouts=?, auto_disable_minutes=?, updated_at=?, protocol=?
 		WHERE id=?`,
 		m.ChannelID, m.Label, m.Description, m.Icon, m.FallbackChannelID, m.RequestID, m.Kind, boolInt(m.Enabled), m.SortOrder,
 		m.ToolMode, boolInt(m.Vision), boolInt(m.Stream), boolInt(m.ResearchEnabled), m.SystemPrompt, string(m.ParamControls), string(m.ExtraParams), string(m.OfficialTools), nullableRawJSON(m.BuiltinTools), nullableRawJSON(m.MCPServerIDs), string(m.Tags), boolInt(m.ModerationEnabled), m.ModerationMode,
 		m.PriceInput, m.PriceOutput, m.PriceCacheRead, m.PriceCacheWrite, m.PricePerImage, m.Currency,
-		m.Dim, m.CompactionTokenThreshold, m.ImageTimeoutSec, m.FallbackTTFTSec, m.AutoDisableErrors, m.AutoDisableTimeouts, m.AutoDisableMinutes, time.Now().Unix(), id)
+		m.Dim, m.CompactionTokenThreshold, m.ImageTimeoutSec, m.FallbackTTFTSec, m.AutoDisableErrors, m.AutoDisableTimeouts, m.AutoDisableMinutes, time.Now().Unix(), m.Protocol, id)
 	if err != nil {
 		if isUniqueIndexErr(err, "idx_models_channel_request_unique", "models.channel_id") {
 			return nil, ErrModelRequestExists

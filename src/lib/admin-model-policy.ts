@@ -1,6 +1,7 @@
 import type { TFunction } from 'i18next'
 import { ApiError } from '@/api'
 import type { ApiChannel, ApiModel } from '@/api/types'
+import { effectiveModelProtocol } from '@/lib/model-protocol'
 
 export const MODEL_POLICY_MODEL_KEYS = [
   'default_model_id',
@@ -22,7 +23,7 @@ export const DECISION_POLICY_KEYS = new Set<string>([
 
 export function availablePolicyModels(models: ApiModel[], channels: ApiChannel[], policyKey = ''): ApiModel[] {
   const enabledChannelIDs = new Set(channels.filter((channel) => channel.enabled).map((channel) => channel.id))
-  const decisionChannelIDs = new Set(channels.filter((channel) => channel.enabled && channel.type === 'typesafe' && channel.has_api_key).map((channel) => channel.id))
+  const decisionChannelIDs = new Set(channels.filter((channel) => channel.enabled && channel.has_api_key).map((channel) => channel.id))
   return models.filter(
     (model) => {
       if (!model.enabled) return false
@@ -31,10 +32,10 @@ export function availablePolicyModels(models: ApiModel[], channels: ApiChannel[]
         ? regularBindings.filter((binding) => binding.channel_enabled).map((binding) => binding.channel_id)
         : [model.channel_id]
       const hasEnabledChannel = usableChannelIDs.some((channelID) => enabledChannelIDs.has(channelID))
-      const isTypesafe = usableChannelIDs.some((channelID) => channels.some((channel) => channel.id === channelID && channel.type === 'typesafe'))
+      const isTypesafe = effectiveModelProtocol(model, channels.find((channel) => channel.id === model.channel_id)) === 'typesafe.decisions'
       return (
         (model.kind === 'chat' && hasEnabledChannel && !isTypesafe)
-        || (DECISION_POLICY_KEYS.has(policyKey) && model.kind === 'decision' && usableChannelIDs.some((channelID) => decisionChannelIDs.has(channelID)))
+        || (DECISION_POLICY_KEYS.has(policyKey) && model.kind === 'decision' && isTypesafe && usableChannelIDs.some((channelID) => decisionChannelIDs.has(channelID)))
       )
     },
   )
@@ -71,11 +72,12 @@ export function unavailablePolicyModelIDs(
  */
 export function availableVisionModels(models: ApiModel[], channels: ApiChannel[]): ApiModel[] {
   const enabledChannelIDs = new Set(
-    channels.filter((channel) => channel.enabled && channel.type !== 'typesafe').map((channel) => channel.id),
+    channels.filter((channel) => channel.enabled).map((channel) => channel.id),
   )
   return models.filter(
     (model) => {
       if (!model.enabled || model.kind !== 'chat' || model.vision !== true) return false
+      if (effectiveModelProtocol(model, channels.find((channel) => channel.id === model.channel_id)) === 'typesafe.decisions') return false
       const regularBindings = (model.channel_bindings ?? []).filter((binding) => binding.role === 'regular')
       const usableChannelIDs = regularBindings.length > 0
         ? regularBindings.filter((binding) => binding.channel_enabled).map((binding) => binding.channel_id)

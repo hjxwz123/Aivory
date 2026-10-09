@@ -31,6 +31,7 @@ var (
 )
 
 type discoveredChannelModel struct {
+	Protocol    string `json:"protocol"`
 	RequestID   string `json:"request_id"`
 	Label       string `json:"label"`
 	Description string `json:"description"`
@@ -55,6 +56,12 @@ type channelModelBatchResponse struct {
 	Created          int `json:"created"`
 	SkippedExisting  int `json:"skipped_existing"`
 	SkippedDuplicate int `json:"skipped_duplicate"`
+}
+
+type draftChannelModelDiscoveryReq struct {
+	createChannelReq
+	ChannelID string `json:"channel_id"`
+	Protocol  string `json:"protocol"`
 }
 
 func newChannelModelDiscoveryHTTPClient() *http.Client {
@@ -90,12 +97,15 @@ func newChannelModelDiscoveryHTTPClient() *http.Client {
 // that have not been saved yet. The temporary channel is never persisted and
 // its API key is never included in the response.
 func discoverDraftChannelModelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
-	var req createChannelReq
+	var req draftChannelModelDiscoveryReq
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, errInvalidInput)
 		return
 	}
 	req.Type = strings.TrimSpace(req.Type)
+	if req.Type == "" {
+		req.Type = "openai"
+	}
 	req.APIFormat = strings.TrimSpace(req.APIFormat)
 	req.BaseURL = strings.TrimSpace(req.BaseURL)
 	if req.Type != "openai" {
@@ -120,6 +130,18 @@ func discoverDraftChannelModelsAdmin(d Deps, w http.ResponseWriter, r *http.Requ
 		BaseURL:   req.BaseURL,
 		APIKey:    req.APIKey,
 		Headers:   req.Headers,
+	}
+	if req.ChannelID != "" && strings.TrimSpace(req.APIKey) == "" {
+		saved, err := store.GetChannel(r.Context(), d.DB, req.ChannelID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, errNotFound)
+			return
+		}
+		channel.APIKey = saved.APIKey
+	}
+	if err := applyDiscoveryProtocol(channel, req.Protocol); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), channelModelDiscoveryTimeout)
 	defer cancel()
@@ -148,6 +170,10 @@ func discoverSavedChannelModelsAdmin(d Deps, w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if err := applyDiscoveryProtocol(channel, r.URL.Query().Get("protocol")); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), channelModelDiscoveryTimeout)
 	defer cancel()
 	discovery, err := discoverChannelModels(ctx, channel)
@@ -172,6 +198,10 @@ func importChannelModelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := applyDiscoveryProtocol(channel, r.URL.Query().Get("protocol")); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), channelModelDiscoveryTimeout)
 	defer cancel()
 	discovery, err := discoverChannelModels(ctx, channel)
@@ -241,17 +271,23 @@ func createChannelModelsBatchAdmin(d Deps, w http.ResponseWriter, r *http.Reques
 		if candidate.Kind == "" {
 			candidate.Kind = "chat"
 		}
-		if channel.Type == "typesafe" {
-			candidate.Kind = "decision"
-		}
-		if candidate.Kind == "decision" && channel.Type != "typesafe" {
-			writeError(w, 400, errInvalidInput)
-			return
-		}
 		if candidate.Kind != "chat" && candidate.Kind != "image" && candidate.Kind != "embedding" && candidate.Kind != "decision" {
 			writeError(w, http.StatusBadRequest, errInvalidInput)
 			return
 		}
+		model := newDiscoveredChannelModel(channelID, candidate)
+		if candidate.Protocol == "" {
+			model.Protocol = store.LegacyModelProtocol(candidate.Kind, channel)
+			if model.Protocol == "typesafe.decisions" {
+				model.Kind = "decision"
+			}
+		}
+		if err := store.ValidateModelProtocol(&model); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		candidate.Protocol = model.Protocol
+		candidate.Kind = model.Kind
 		key := strings.ToLower(candidate.RequestID)
 		if _, exists := seen[key]; exists {
 			result.SkippedDuplicate++
@@ -277,6 +313,7 @@ func createChannelModelsBatchAdmin(d Deps, w http.ResponseWriter, r *http.Reques
 
 func newDiscoveredChannelModel(channelID string, found discoveredChannelModel) store.Model {
 	m := store.Model{
+		Protocol:    found.Protocol,
 		ChannelID:   channelID,
 		Kind:        found.Kind,
 		RequestID:   found.RequestID,
@@ -297,7 +334,12 @@ func newDiscoveredChannelModel(channelID string, found discoveredChannelModel) s
 	return m
 }
 
-func discoverChannelModels(ctx context.Context, channel *store.Channel) (channelModelDiscovery, error) {
+func discoverChannelModels(ctx context.Context, channel *store.Channel) (result channelModelDiscovery, err error) {
+	defer func() {
+		for i := range result.Models {
+			result.Models[i].Protocol = store.LegacyModelProtocol(result.Models[i].Kind, channel)
+		}
+	}()
 	if channel == nil {
 		return channelModelDiscovery{}, errors.New("channel required")
 	}
@@ -333,6 +375,31 @@ func discoverChannelModels(ctx context.Context, channel *store.Channel) (channel
 	default:
 		return channelModelDiscovery{}, errors.New("unsupported channel type")
 	}
+}
+
+// Discovery uses a temporary format, never a channel-level request policy.
+func applyDiscoveryProtocol(channel *store.Channel, protocol string) error {
+	if protocol == "" {
+		return nil
+	}
+	kind := "chat"
+	switch protocol {
+	case "openai.images":
+		kind = "image"
+	case "openai.embeddings", "dashscope.embeddings":
+		kind = "embedding"
+	case "typesafe.decisions":
+		kind = "decision"
+	}
+	m := store.Model{Kind: kind, Protocol: protocol}
+	if err := store.ValidateModelProtocol(&m); err != nil {
+		return err
+	}
+	*channel = *store.ChannelForModel(&m, channel)
+	if channel.Type == "dashscope" {
+		channel.Type = "openai"
+	}
+	return nil
 }
 
 type channelModelAccumulator struct {
@@ -407,7 +474,7 @@ func discoverAnthropicChannelModels(ctx context.Context, channel *store.Channel)
 	nextAfterID := ""
 	accumulator := newChannelModelAccumulator()
 	for page := 0; page < channelModelDiscoveryPageLimit; page++ {
-		endpoint, err := channelModelEndpoint(baseURL+"/v1/models", map[string]string{
+		endpoint, err := channelModelEndpoint(llm.VendorAPIBaseURL(baseURL, "https://api.anthropic.com", "v1")+"/models", map[string]string{
 			"limit":    "1000",
 			"after_id": nextAfterID,
 		})
@@ -449,7 +516,7 @@ func discoverGeminiChannelModels(ctx context.Context, channel *store.Channel) (c
 	nextPageToken := ""
 	accumulator := newChannelModelAccumulator()
 	for page := 0; page < channelModelDiscoveryPageLimit; page++ {
-		endpoint, err := channelModelEndpoint(baseURL+"/v1beta/models", map[string]string{
+		endpoint, err := channelModelEndpoint(llm.VendorAPIBaseURL(baseURL, "https://generativelanguage.googleapis.com", "v1beta")+"/models", map[string]string{
 			"pageSize":  "1000",
 			"pageToken": nextPageToken,
 		})
@@ -580,7 +647,7 @@ func classifyGeminiModel(requestID string, methods []string) (string, bool) {
 	}
 	isImage := strings.HasPrefix(id, "imagen-") || strings.Contains(id, "-image-") ||
 		strings.HasSuffix(id, "-image") || strings.Contains(id, "image-generation")
-	if isImage && (methodSet["generatecontent"] || methodSet["predict"]) {
+	if isImage && methodSet["generatecontent"] {
 		return "image", true
 	}
 	if methodSet["generatecontent"] {

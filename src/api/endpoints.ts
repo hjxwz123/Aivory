@@ -1156,10 +1156,10 @@ export const adminApi = {
     api<ApiChannelModel[]>(`/admin/channels/${encodeURIComponent(id)}/models`, { method: 'PUT', body: models }),
   createChannel: (body: Partial<ApiChannel> & { api_key?: string }) =>
     api<ApiChannel>('/admin/channels', { method: 'POST', body }),
-  discoverChannelModels: (body: Partial<ApiChannel> & { api_key?: string }) =>
+  discoverChannelModels: (body: Partial<ApiChannel> & { api_key?: string; channel_id?: string; protocol?: ApiModel['protocol'] }) =>
     api<ApiChannelModelDiscoveryResult>('/admin/channels/models/discover', { method: 'POST', body }),
-  discoverSavedChannelModels: (id: string) =>
-    api<ApiChannelModelDiscoveryResult>(`/admin/channels/${encodeURIComponent(id)}/models/discover`, { method: 'POST' }),
+  discoverSavedChannelModels: (id: string, protocol?: ApiModel['protocol']) =>
+    api<ApiChannelModelDiscoveryResult>(`/admin/channels/${encodeURIComponent(id)}/models/discover${protocol ? `?protocol=${encodeURIComponent(protocol)}` : ''}`, { method: 'POST' }),
   createChannelModelsBatch: (id: string, models: ApiChannelModelCandidate[]) =>
     api<ApiChannelModelBatchResult>(`/admin/channels/${encodeURIComponent(id)}/models/batch`, {
       method: 'POST',

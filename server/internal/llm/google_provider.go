@@ -129,7 +129,7 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 			u            Usage
 		)
 		err := doProviderParsedRequest(ctx, roundModel, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
-			streamURL := fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent?alt=sse", providerBaseURL(baseURL, "https://generativelanguage.googleapis.com"), req.Model.RequestID)
+			streamURL := fmt.Sprintf("%s/models/%s:streamGenerateContent?alt=sse", VendorAPIBaseURL(baseURL, "https://generativelanguage.googleapis.com", "v1beta"), req.Model.RequestID)
 			hr, e := http.NewRequestWithContext(ctx, "POST", streamURL, bytes.NewReader(raw))
 			if e != nil {
 				return nil, e
@@ -985,7 +985,7 @@ func (p *GoogleProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner 
 			usage Usage
 		)
 		err := doProviderParsedRequest(ctx, roundModel, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
-			url := fmt.Sprintf("%s/v1beta/models/%s:generateContent", providerBaseURL(baseURL, "https://generativelanguage.googleapis.com"), req.Model.RequestID)
+			url := fmt.Sprintf("%s/models/%s:generateContent", VendorAPIBaseURL(baseURL, "https://generativelanguage.googleapis.com", "v1beta"), req.Model.RequestID)
 			hr, e := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(raw))
 			if e != nil {
 				return nil, e

@@ -402,7 +402,7 @@ func TestTaskLLMFinalFailureLogsBothChannelErrors(t *testing.T) {
 	}
 }
 
-func TestResolveFallbackChannelForModelProviderAliasesAndWireFormat(t *testing.T) {
+func TestResolveFallbackChannelIgnoresLegacyChannelProtocol(t *testing.T) {
 	tests := []struct {
 		name         string
 		primaryType  string
@@ -415,8 +415,8 @@ func TestResolveFallbackChannelForModelProviderAliasesAndWireFormat(t *testing.T
 		{name: "claude to anthropic alias", primaryType: "claude", fallbackType: "anthropic", primaryFmt: "chat", fallbackFmt: "chat", wantAccepted: true},
 		{name: "google to gemini alias", primaryType: "google", fallbackType: "gemini", primaryFmt: "chat", fallbackFmt: "chat", wantAccepted: true},
 		{name: "gemini to google alias", primaryType: "gemini", fallbackType: "google", primaryFmt: "chat", fallbackFmt: "chat", wantAccepted: true},
-		{name: "cross provider rejected", primaryType: "anthropic", fallbackType: "google", primaryFmt: "chat", fallbackFmt: "chat"},
-		{name: "different api format rejected", primaryType: "google", fallbackType: "gemini", primaryFmt: "chat", fallbackFmt: "responses"},
+		{name: "different legacy providers accepted", primaryType: "anthropic", fallbackType: "google", primaryFmt: "chat", fallbackFmt: "chat", wantAccepted: true},
+		{name: "different legacy formats accepted", primaryType: "google", fallbackType: "gemini", primaryFmt: "chat", fallbackFmt: "responses", wantAccepted: true},
 	}
 
 	for _, tt := range tests {
@@ -435,7 +435,7 @@ func TestResolveFallbackChannelForModelProviderAliasesAndWireFormat(t *testing.T
 			if err != nil {
 				t.Fatalf("load primary channel: %v", err)
 			}
-			model := &store.Model{ID: "alias-model", ChannelID: primary.ID, FallbackChannelID: fallback.ID}
+			model := &store.Model{ID: "alias-model", Kind: "chat", Protocol: "openai.responses", ChannelID: primary.ID, FallbackChannelID: fallback.ID}
 
 			creds, channelID := resolveFallbackChannelForModel(ctx, db, log.New(io.Discard, "", 0), model, primaryWithKey)
 			if !tt.wantAccepted {

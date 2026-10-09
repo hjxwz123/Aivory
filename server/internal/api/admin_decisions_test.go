@@ -19,6 +19,7 @@ func TestAdminDecisionPoliciesAndModels(t *testing.T) {
 	defer db.Close()
 	mustExec(t, db, `INSERT INTO channels(id,name,type,api_key,enabled) VALUES ('ts','TypeSafe','typesafe','key',1),('nokey','No key','typesafe','',1),('chat','Chat','openai','key',1),('off','Disabled','typesafe','key',0)`)
 	mustExec(t, db, `INSERT INTO models(id,channel_id,kind,request_id,label,enabled) VALUES ('jev','ts','decision','jev-1.13.0','Jev',1),('disabled','ts','decision','jev-disabled','Disabled',0),('nokey','nokey','decision','jev','No key',1),('wrong','chat','decision','jev','Wrong channel',1),('off','off','decision','jev','Disabled channel',1)`)
+	mustExec(t, db, `UPDATE models SET protocol='openai.chat' WHERE id='wrong'`)
 	patch := func(key, id string) *httptest.ResponseRecorder {
 		body, _ := json.Marshal(map[string]string{key: id})
 		req := httptest.NewRequest(http.MethodPatch, "/api/admin/settings", strings.NewReader(string(body)))

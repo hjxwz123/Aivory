@@ -1717,6 +1717,28 @@ func TestNormalizeSettingsArchiveDropsRetiredCompactionSettings(t *testing.T) {
 }
 
 func TestConfigImportValidatesContextCompactionFinalState(t *testing.T) {
+	t.Run("channel import preserves an existing legacy model protocol", func(t *testing.T) {
+		db := openMigrated(t, filepath.Join(t.TempDir(), "compaction-config-model-protocol.db"))
+		defer db.Close()
+		mustExec(t, db, `INSERT INTO channels(id,name,type,enabled) VALUES('ch_summary','Summary','gemini',1)`)
+		mustExec(t, db, `INSERT INTO models(id,channel_id,kind,request_id,label,enabled) VALUES('summary','ch_summary','chat','summary','Summary',1)`)
+		if err := store.SetSetting(db, "context_compaction_model_id", "summary"); err != nil {
+			t.Fatal(err)
+		}
+		d := Deps{DB: db, Config: config.Config{UploadDir: t.TempDir(), ArtifactDir: t.TempDir()}, Logger: log.New(io.Discard, "", 0)}
+		archive := paymentConfigArchiveForTest(t, map[string][]map[string]any{
+			"channels": {{"id": "ch_summary", "name": "Summary", "type": "typesafe", "enabled": 1}},
+		})
+		rec := importPaymentConfigArchiveForTest(t, d, archive)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("channel import: %d %s", rec.Code, rec.Body)
+		}
+		model, err := store.GetModel(t.Context(), db, "summary")
+		if err != nil || model.Protocol != "gemini.generateContent" || model.Kind != "chat" {
+			t.Fatalf("channel import changed model protocol: %+v %v", model, err)
+		}
+	})
+
 	t.Run("unrelated import rejects invalid existing model setting and rolls back", func(t *testing.T) {
 		db := openMigrated(t, filepath.Join(t.TempDir(), "compaction-config-unrelated.db"))
 		defer db.Close()
@@ -1815,8 +1837,9 @@ func TestConfigImportValidatesContextCompactionFinalState(t *testing.T) {
 			"id": "existing-summary", "channel_id": "ch_existing_summary", "kind": "embedding",
 			"request_id": "existing-summary", "label": "Existing summary", "enabled": 1,
 		}},
-		{name: "archive changes selected channel type without setting", table: "channels", row: map[string]any{
-			"id": "ch_existing_summary", "name": "Existing summary", "type": "unsupported", "enabled": 1,
+		{name: "archive changes selected model protocol without setting", table: "models", row: map[string]any{
+			"id": "existing-summary", "protocol": "unsupported", "channel_id": "ch_existing_summary", "kind": "chat",
+			"request_id": "existing-summary", "label": "Existing summary", "enabled": 1,
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1904,7 +1927,7 @@ func TestFullBackupRestoreValidatesContextCompactionFinalState(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects unsupported channel and rolls back", func(t *testing.T) {
+	t.Run("rejects unsupported model protocol and rolls back", func(t *testing.T) {
 		db := openMigrated(t, filepath.Join(t.TempDir(), "compaction-backup-invalid.db"))
 		defer db.Close()
 		if err := store.SetSetting(db, "site_title", "Original"); err != nil {
@@ -1916,9 +1939,9 @@ func TestFullBackupRestoreValidatesContextCompactionFinalState(t *testing.T) {
 				{"key": "site_title", "value": `"Changed"`, "updated_at": 2},
 				{"key": "context_compaction_model_id", "value": `"backup-summary"`, "updated_at": 2},
 			},
-			"channels": {{"id": "ch_backup_summary", "name": "Backup summary", "type": "unsupported", "enabled": 1}},
+			"channels": {{"id": "ch_backup_summary", "name": "Backup summary", "type": "openai", "enabled": 1}},
 			"models": {{
-				"id": "backup-summary", "channel_id": "ch_backup_summary", "kind": "chat",
+				"id": "backup-summary", "channel_id": "ch_backup_summary", "kind": "chat", "protocol": "unsupported",
 				"request_id": "backup-summary", "label": "Backup summary", "enabled": 1,
 			}},
 		})

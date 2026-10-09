@@ -32,7 +32,7 @@ const (
 )
 
 // OpenAIProvider supports both the Chat Completions ("chat") and Responses
-// API ("responses") formats — the channel's api_format decides at request
+// API ("responses") formats — the model's protocol decides at request
 // time. When no api_key is set the implementation falls back to the mock
 // provider so the orchestrator never errors mid-stream because of missing
 // credentials.

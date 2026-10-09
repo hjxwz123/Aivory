@@ -360,7 +360,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 			nativeContent = nil
 			usage = Usage{}
 			return doProviderParsedRequest(ctx, roundModel, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
-				hr, e := http.NewRequestWithContext(ctx, "POST", providerBaseURL(baseURL, "https://api.anthropic.com")+"/v1/messages", bytes.NewReader(buf))
+				hr, e := http.NewRequestWithContext(ctx, "POST", VendorAPIBaseURL(baseURL, "https://api.anthropic.com", "v1")+"/messages", bytes.NewReader(buf))
 				if e != nil {
 					return nil, e
 				}
@@ -633,7 +633,7 @@ func (p *AnthropicProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunn
 			usage Usage
 		)
 		err := doProviderParsedRequest(ctx, roundModel, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
-			hr, e := http.NewRequestWithContext(ctx, "POST", providerBaseURL(baseURL, "https://api.anthropic.com")+"/v1/messages", bytes.NewReader(buf))
+			hr, e := http.NewRequestWithContext(ctx, "POST", VendorAPIBaseURL(baseURL, "https://api.anthropic.com", "v1")+"/messages", bytes.NewReader(buf))
 			if e != nil {
 				return nil, e
 			}

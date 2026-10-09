@@ -632,14 +632,8 @@ func RecordChannelFailure(ctx context.Context, db *sql.DB, channelID, kind strin
 func ModelChannelCandidateIDs(ctx context.Context, db *sql.DB, modelID, requestID string) ([]string, error) {
 	rows, err := db.QueryContext(ctx, `SELECT b.channel_id, b.priority, b.weight
 		FROM model_channel_bindings b JOIN channels c ON c.id=b.channel_id
-		JOIN channels anchor ON anchor.id=(SELECT channel_id FROM models WHERE id=b.model_id)
 		JOIN channel_models cm ON cm.channel_id=b.channel_id AND lower(trim(cm.request_id))=lower(trim(?)) AND cm.enabled=1
-		WHERE b.model_id=? AND b.role IN ('regular','fallback') AND (
-			lower(trim(c.type))=lower(trim(anchor.type))
-			OR (lower(trim(c.type)) IN ('anthropic','claude') AND lower(trim(anchor.type)) IN ('anthropic','claude'))
-			OR (lower(trim(c.type)) IN ('google','gemini') AND lower(trim(anchor.type)) IN ('google','gemini'))
-		)
-			AND lower(trim(COALESCE(c.api_format,'')))=lower(trim(COALESCE(anchor.api_format,'')))
+		WHERE b.model_id=? AND b.role IN ('regular','fallback')
 			AND c.enabled=1 AND trim(c.api_key)<>''
 			AND (b.disabled_until=0 OR b.disabled_until<=?)
 			AND (c.auto_disabled_until=0 OR c.auto_disabled_until<=?)

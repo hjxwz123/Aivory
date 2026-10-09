@@ -221,7 +221,7 @@
       }
     },
     "title": "チャネル",
-    "lead": "上流 API チャネル:base URL・認証・プロトコル。",
+    "lead": "上流 API チャネル：接続先・認証情報・対応モデル。",
     "new": "新規チャネル",
     "empty": "チャネルはまだありません。",
     "fields": {
@@ -239,7 +239,7 @@
     },
     "editorTitle": "チャネルを編集",
     "newTitle": "新規チャネル",
-    "editorDescriptionNew": "ベンダー形式を base URL にルーティング。",
+    "editorDescriptionNew": "上流の接続先と認証情報を設定します。リクエストプロトコルはモデルごとに設定します。",
     "editorDescriptionEdit": "チャネルを更新します。APIキーを空欄にすると既存のシークレットを保持します。",
     "removeTitle": "チャネルを削除しますか？",
     "removeBody": "「{{name}}」とその全モデルを削除します。",
@@ -300,6 +300,8 @@
     }
   },
   "models": {
+    "protocol": { "label": "リクエストプロトコル", "discovery": "モデル取得の形式", "pickChannel": "チャネルを選択" },
+    "kinds": { "chat": "チャット", "image": "画像", "embedding": "埋め込み", "decision": "判定" },
     "advanced": "詳細設定",
     "advancedTabs": {
       "policy": "ルーティング方針",
@@ -310,7 +312,7 @@
       "pricing": "料金"
     },
     "title": "モデル",
-    "lead": "選択メニューに出るモデル(chat / image / embedding)。",
+    "lead": "チャット・画像・埋め込み・判定モデル。",
     "new": "新規モデル",
     "empty": "モデルはまだありません。まずチャネルを作成し、それにぶら下がるモデルを追加してください。",
     "settings": "設定",

@@ -160,6 +160,7 @@ type Model struct {
 	ID          string `json:"id"`
 	ChannelID   string `json:"channel_id"`
 	Kind        string `json:"kind"`
+	Protocol    string `json:"protocol"`
 	RequestID   string `json:"request_id"`
 	Label       string `json:"label"`
 	Description string `json:"description"`
