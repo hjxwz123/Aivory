@@ -133,3 +133,48 @@ func TestGetUserAdmin(t *testing.T) {
 		}
 	})
 }
+
+func TestAdminUserConversationsModelLabels(t *testing.T) {
+	d, token, userToken := newAuditEvidenceFixture(t)
+	mustExec(t, d.DB, `INSERT INTO channels(id,name,type) VALUES('label-channel','Label channel','openai')`)
+	mustExec(t, d.DB, `INSERT INTO models(id,channel_id,request_id,label,enabled,system_prompt) VALUES
+		('m_b5a4a207e2be','label-channel','gpt-5.4','GPT-5.4',0,'private-system-prompt'),
+		('unnamed-model','label-channel','upstream-model','',1,'')`)
+	mustExec(t, d.DB, `INSERT INTO conversations(id,user_id,title,model_id) VALUES
+		('named-conv','audit-member','Named model','m_b5a4a207e2be'),
+		('unnamed-conv','audit-member','Unnamed model','unnamed-model'),
+		('removed-conv','audit-member','Deleted model','deleted-model'),
+		('another-user-conv','audit-admin','Other user','m_b5a4a207e2be')`)
+	mx := newMux()
+	mx.handle(http.MethodGet, "/api/admin/users/:id/conversations", requireAdmin(d, listUserConversationsAdmin))
+	rec := auditEvidenceRequest(mx, http.MethodGet, "/api/admin/users/audit-member/conversations", token, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var rows []struct {
+		ID         string `json:"id"`
+		ModelID    string `json:"model_id"`
+		ModelLabel string `json:"model_label"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &rows); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("got %d conversations, want 3", len(rows))
+	}
+	want := map[string]string{"named-conv": "GPT-5.4", "unnamed-conv": "upstream-model", "removed-conv": ""}
+	for _, row := range rows {
+		if label, ok := want[row.ID]; !ok || label != row.ModelLabel {
+			t.Fatalf("unexpected model label: %+v", row)
+		}
+	}
+	if strings.Contains(rec.Body.String(), "private-system-prompt") || strings.Contains(rec.Body.String(), "channel_id") {
+		t.Fatal("conversation listing exposed unrelated model configuration")
+	}
+	if rec := auditEvidenceRequest(mx, http.MethodGet, "/api/admin/users/audit-member/conversations", userToken, ""); rec.Code != http.StatusForbidden {
+		t.Fatalf("non-admin status=%d, want 403", rec.Code)
+	}
+	if rec := auditEvidenceRequest(mx, http.MethodGet, "/api/admin/users/missing/conversations", token, ""); rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "[]" {
+		t.Fatalf("empty listing status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}

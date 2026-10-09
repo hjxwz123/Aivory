@@ -122,6 +122,7 @@
     "dismiss": "Ne plus afficher ces notifications",
     "dismissHint": "Masque cette version lors des prochaines visites. Les nouvelles notifications et les modifications restent affichées.",
     "failed": "Impossible de charger les notifications. Réessayez.",
-    "unavailable": "Impossible d’ouvrir cette notification. Elle a peut-être été modifiée ou supprimée."
+    "unavailable": "Impossible d’ouvrir cette notification. Elle a peut-être été modifiée ou supprimée.",
+    "dismissFailed": "Impossible d’enregistrer votre préférence. Veuillez réessayer."
   }
 }

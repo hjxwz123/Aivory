@@ -9,7 +9,6 @@ import { sanitizeHtml } from '@/lib/markdown'
 import { cn } from '@/lib/utils'
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 
 export function NotificationCenter() {
@@ -30,7 +29,6 @@ function UserNotificationCenter() {
   const [selected, setSelected] = useState<SiteNotification | null>(null)
   const [detail, setDetail] = useState<SiteNotification | null>(null)
   const [detailError, setDetailError] = useState(false)
-  const [dismiss, setDismiss] = useState(false)
   const [saving, setSaving] = useState(false)
   const [dismissError, setDismissError] = useState(false)
   const active = useRef(true)
@@ -77,7 +75,6 @@ function UserNotificationCenter() {
       const current = itemsRef.current
       current.filter((item) => item.should_popup).forEach((item) => seen.current.add(item.version))
       openRef.current = true
-      setDismiss(false)
       setDismissError(false)
       setOpen(true)
       const first = current.find((item) => item.unread) ?? current[0]
@@ -148,17 +145,16 @@ function UserNotificationCenter() {
   async function close() {
     if (busy.current) return
     busy.current = true
-    if (dismiss) {
-      setSaving(true)
-      setDismissError(false)
-      try {
-        // Suppress this publication without marking unviewed messages as read.
-        await Promise.all(items.filter((item) => item.should_popup).map((item) => notificationsApi.read(item.id, item.version, true, false)))
-      } catch {
-        if (active.current) { setDismissError(true); setSaving(false) }
-        busy.current = false
-        return
-      }
+    setSaving(true)
+    setDismissError(false)
+    try {
+      // Every dismissal path suppresses this publication, without marking
+      // unviewed notifications as read. New publication versions still prompt.
+      await Promise.all(itemsRef.current.filter((item) => item.should_popup).map((item) => notificationsApi.read(item.id, item.version, true, false)))
+    } catch {
+      if (active.current) { setDismissError(true); setSaving(false) }
+      busy.current = false
+      return
     }
     if (!active.current) return
     setSaving(false)
@@ -173,7 +169,7 @@ function UserNotificationCenter() {
 
   const date = (value: number) => new Date(value * 1000).toLocaleDateString(i18n.language, { year: 'numeric', month: 'short', day: 'numeric' })
   return <Dialog open={open} onOpenChange={(value) => { if (!value) void close() }}>
-    <DialogContent size="xl" className="border-0 p-0" aria-describedby={undefined} closeDisabled={saving} data-notification-center>
+    <DialogContent size="xl" className="border-0 p-0" aria-describedby={undefined} showClose={false} closeDisabled={saving} data-notification-center>
       <DialogHeader><DialogTitle className="flex items-center gap-2"><Bell size={17} aria-hidden />{t('notifications.title')}</DialogTitle></DialogHeader>
       <DialogBody className="flex h-[min(30rem,60dvh)] flex-none gap-5 p-0 pb-0">
         <nav aria-label={t('notifications.history')} className={cn('w-full shrink-0 overflow-y-auto px-3 pb-4 sm:w-60 sm:bg-[var(--color-bg-muted)] sm:pt-3', selected && 'hidden sm:block')}>
@@ -198,9 +194,8 @@ function UserNotificationCenter() {
         </article>
       </DialogBody>
       <DialogFooter className="flex-wrap justify-end gap-y-3 border-0">
-        {dismissError ? <p role="alert" className="w-full text-xs text-[var(--color-danger)]">{t('notifications.failed')}</p> : null}
-        <label className="mr-auto flex cursor-pointer items-center gap-2 text-xs text-[var(--color-fg-muted)]" title={t('notifications.dismissHint')}><Checkbox checked={dismiss} disabled={saving || !items.length} onChange={(event) => setDismiss(event.target.checked)} />{t('notifications.dismiss')}</label>
-        <Button size="sm" loading={saving} onClick={() => void close()}>{t('actions.close')}</Button>
+        {dismissError ? <p role="alert" className="w-full text-xs text-[var(--color-danger)]">{t('notifications.dismissFailed')}</p> : null}
+        <Button size="sm" loading={saving} title={t('notifications.dismissHint')} data-notification-dismiss onClick={() => void close()}>{t('notifications.dismiss')}</Button>
       </DialogFooter>
     </DialogContent>
   </Dialog>

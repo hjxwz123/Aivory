@@ -77,7 +77,14 @@ export default function AdminUserConversations({ userId, embedded = false }: { u
         ])
         if (cancelled) return
         setUser(targetUser)
-        setRows(convs)
+        // Older servers return IDs only. Resolve those in one catalog request;
+        // new servers provide labels without an additional round trip.
+        const models = convs.some((conv) => conv.model_label === undefined && conv.model_id)
+          ? await adminApi.models()
+          : []
+        if (cancelled) return
+        const labels = new Map(models.map((model) => [model.id, model.label.trim() || model.request_id]))
+        setRows(convs.map((conv) => ({ ...conv, model_label: conv.model_label ?? labels.get(conv.model_id) ?? '' })))
       } catch (e) {
         if (!cancelled) setError(e instanceof ApiError ? e.message : t('admin:common.failed'))
       } finally {
@@ -146,7 +153,7 @@ export default function AdminUserConversations({ userId, embedded = false }: { u
             label={t('users.viewConversations')}
             columns={[
               { id: 'title', header: t('admin:userFeedback.conversation'), width: 360, render: (c) => <Link to={`/admin/users/${encodeURIComponent(id)}/conversations/${encodeURIComponent(c.id)}`} className="admin-table-link"><span className="flex min-w-0 items-center gap-2"><MessageSquare size={14} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden /><span className="truncate" title={c.title}>{c.title || t('users.untitledConversation')}</span></span></Link> },
-              { id: 'model', header: t('admin:resources.table.model'), width: 220, render: (c) => <span className="block truncate font-mono text-[12px] text-[var(--color-fg-muted)]" title={c.model_id || c.provider}>{c.model_id || c.provider || '—'}</span> },
+              { id: 'model', header: t('admin:resources.table.model'), width: 220, render: (c) => <span className="block truncate text-[12px] text-[var(--color-fg-muted)]" title={c.model_label || (c.model_id ? t('users.modelUnavailable') : c.provider)}>{c.model_label || (c.model_id ? t('users.modelUnavailable') : c.provider || '—')}</span> },
               { id: 'status', header: t('admin:common.status'), width: 150, render: (c) => <div className="flex flex-wrap gap-1">{c.archived ? <Badge size="xs">{t('users.archived')}</Badge> : null}{c.starred ? <Badge size="xs">{t('users.starred')}</Badge> : null}{!c.archived && !c.starred ? '—' : null}</div> },
               { id: 'updated', header: t('admin:common.lastActive'), width: 180, render: (c) => <span className="text-[12px] tabular-nums text-[var(--color-fg-muted)]">{formatStamp(c.updated_at)}</span> },
               { id: 'actions', header: t('admin:common.actions'), width: 100, align: 'right', render: (c) => <div className="flex gap-1"><Button asChild variant="ghost" size="icon-sm" title={t('admin:common.details')} aria-label={t('admin:common.details')}><Link to={`/admin/users/${encodeURIComponent(id)}/conversations/${encodeURIComponent(c.id)}`}><ChevronRight size={14} aria-hidden /></Link></Button><Button variant="ghost" size="icon-sm" title={t('admin:users.deleteConversation')} aria-label={t('admin:users.deleteConversation')} onClick={() => setConfirmDelete(c)}><Trash2 size={14} aria-hidden /></Button></div> },

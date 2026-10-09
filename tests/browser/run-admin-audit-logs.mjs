@@ -89,14 +89,17 @@ try {
     const translations = JSON.parse(readFileSync(`src/i18n/locales/${locale}/admin.json`, 'utf8'))
     const labels = translations.logs
     for (const [width, theme] of [[1440, 'light'], [390, 'dark']]) {
-      records = [makeLog('workspace-log', 'workspace'), makeLog('admin-log'), makeLog('channel-log', 'channels')]
+      records = [makeLog('workspace-log', 'workspace'), { ...makeLog('admin-log', 'models'), action: 'admin.models.skills' }, { ...makeLog('channel-log', 'models'), action: 'admin.models.channels' }]
       await page.setViewport({ width, height: 960, isMobile: width === 390, hasTouch: width === 390 })
       await page.goto(`${base}tests/browser/admin-tables-harness.html?view=audit&theme=${theme}&lang=${locale}`, { waitUntil: 'networkidle0' })
       await page.waitForSelector('tbody tr', { visible: true })
       await checkViewport()
       assert.ok(!(await page.$eval('tbody', (element) => element.innerText)).includes('127.0.0.1'))
+      const actionCells = await page.$$eval('td[data-column="action"]', (elements) => elements.map((element) => element.innerText.trim()))
+      assert.deepEqual(actionCells, [labels.actions.update, labels.actions.skills, labels.actions.channels])
       await page.click('tbody tr:first-child')
       await page.waitForSelector('[role="dialog"]', { visible: true })
+      assert.ok((await page.$eval('[role="dialog"]', (element) => element.innerText)).includes('admin.users.update'), 'Action identifier should remain available in the detail drawer')
       const beforeCancel = mutations.length
       await clickCommand(labels.deleteRow)
       await page.waitForFunction(() => document.querySelectorAll('[role="dialog"]').length === 2)

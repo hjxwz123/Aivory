@@ -18,7 +18,7 @@ const users = Array.from({ length: 21 }, (_, index) => ({
   group_id: 'g1', created_at: now, last_seen_at: now, settings: {},
 }))
 const conversations = (id) => [{
-  id: `conv-${id}`, user_id: id, title: `Conversation ${id}`, model_id: 'gpt-5', provider: 'openai',
+  id: `conv-${id}`, user_id: id, title: `Conversation ${id}`, model_id: 'm_b5a4a207e2be', model_label: 'GPT-5.4', provider: 'openai',
   updated_at: now, archived: true, starred: true,
 }]
 const memories = (id) => [{
@@ -38,6 +38,7 @@ let failNext = ''
 let emptyKind = ''
 let deferredRequest = null
 let deferNext = ''
+let legacyModels = false
 const server = await createServer({ server: { port: 5196, strictPort: false }, logLevel: 'error' })
 let browser
 
@@ -63,6 +64,8 @@ try {
       body = { users: filtered.slice(offset, offset + limit), total: filtered.length }
     } else if (path === '/admin/user-groups') {
       body = [{ id: 'g1', name: 'Team', is_default: true }]
+    } else if (path === '/admin/models') {
+      body = [{ id: 'm_b5a4a207e2be', label: 'GPT-5.4', request_id: 'gpt-5.4', enabled: false }]
     } else if (/^\/admin\/users\/u\d+$/.test(path)) {
       body = users.find((user) => path.endsWith(`/${user.id}`))
     } else if (/^\/admin\/users\/u\d+\/(conversations|memories|login-history)$/.test(path)) {
@@ -78,6 +81,7 @@ try {
         body = { items: rows.slice(offset, offset + limit), total: rows.length }
       } else {
         body = emptyKind === kind ? [] : kind === 'memories' ? memories(id) : conversations(id).filter((row) => !deletedConversations.has(row.id))
+        if (kind === 'conversations' && legacyModels) body = body.map(({ model_label: _label, ...row }) => row)
       }
       if (deferNext === kind) {
         deferNext = ''
@@ -109,7 +113,8 @@ try {
   const waitForAnimations = () => page.waitForFunction(() => [...document.querySelectorAll('[role="dialog"]')].every((element) => element.getAnimations().every((animation) => animation.playState === 'finished')))
   const open = async (label, more) => {
     const trigger = await page.$(`main tbody tr:first-child button[aria-label="${more}"]`)
-    await trigger.evaluate((element) => element.scrollIntoView({ block: 'center', inline: 'center' }))
+    await trigger.evaluate((element) => element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }))
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
     await trigger.click()
     await trigger.dispose()
     await page.waitForSelector('[role="menuitem"]', { visible: true })
@@ -176,6 +181,11 @@ try {
         assert.ok(facts.left >= 0 && facts.height === 960, `${kind}: drawer exceeds viewport`)
         assert.equal(facts.columns, columns, `${kind}: missing columns`)
         assert.ok(facts.text.includes(`${rowText} u21`), `${kind}: wrong user's records`)
+        if (kind === 'conversations') {
+          assert.ok(facts.text.includes('GPT-5.4'), 'Conversation list did not show the model label')
+          assert.ok(!facts.text.includes('m_b5a4a207e2be'), 'Conversation list displayed the internal model ID')
+          assert.ok(!requests.slice(before).some((request) => request.path === '/admin/models'), 'Enriched conversation list fetched the model catalog again')
+        }
         assert.ok(!facts.text.includes(admin.users.backToUsers), `${kind}: standalone page header leaked into drawer`)
         assert.equal(facts.headerOverlap, false, `${kind}: title overlaps close control`)
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), 0)
@@ -262,10 +272,16 @@ try {
   assert.ok(requests.some((request) => request.path === '/admin/conversations/conv-u21/messages' && request.query.mode === 'tree'), 'Conversation details did not request the full context tree')
 
   for (const view of ['conversations', 'logins', 'memories']) {
+    legacyModels = view === 'conversations'
+    const before = requests.length
     await page.goto(`${base}tests/browser/admin-tables-harness.html?view=${view}&theme=light&lang=en`, { waitUntil: 'networkidle0' })
     await page.waitForSelector('main table', { visible: true })
     assert.ok(await page.$('main h1'), `${view}: legacy standalone page lost its header`)
     assert.equal(await page.$('[role="dialog"]'), null)
+    if (view === 'conversations') {
+      assert.ok((await page.$eval('main table', (element) => element.innerText)).includes('GPT-5.4'), 'Older server model IDs were not resolved to labels')
+      assert.equal(requests.slice(before).filter((request) => request.path === '/admin/models').length, 1)
+    }
   }
   assert.deepEqual(errors, [])
   console.log(`User drawer browser checks passed; screenshots: ${output}`)

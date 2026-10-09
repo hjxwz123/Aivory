@@ -15,6 +15,7 @@ import { Sheet, SheetBody, SheetClose, SheetContent, SheetFooter, SheetHeader, S
 import { Tooltip } from '@/components/ui/tooltip'
 import { toast } from '@/hooks/use-toast'
 import { formatRecordedClient } from '@/lib/client-device'
+import { auditActionLabel, auditTargetLabel } from '@/lib/audit-labels'
 
 const PAGE_SIZE = 50
 const AUDIT_TYPES = ['authentication', 'workspace', 'users', 'models', 'channels', 'billing', 'settings', 'access', 'integrations', 'content', 'logs', 'system', 'other'] as const
@@ -82,11 +83,8 @@ export default function AdminAuditLogs() {
 
   const timeFmt = useMemo(() => new Intl.DateTimeFormat(i18n.language || undefined, { dateStyle: 'medium', timeStyle: 'medium' }), [i18n.language])
   const formatTime = (log: ApiAdminAuditLog) => timeFmt.format(new Date(log.occurred_at_ms || log.created_at * 1000))
-  const typeLabel = (log: ApiAdminAuditLog) => t(`logs.types.${log.type || 'workspace'}`)
-  const actionLabel = (log: ApiAdminAuditLog) => {
-    const key = log.action.startsWith('auth.') ? log.action : log.action.split('.').at(-1) || log.action
-    return t(`logs.actions.${key}`, { defaultValue: log.action })
-  }
+  const typeLabel = (log: ApiAdminAuditLog) => t(`logs.types.${log.type || 'workspace'}`, { defaultValue: t('logs.types.other') })
+  const actionLabel = (log: ApiAdminAuditLog) => auditActionLabel(log.action, t)
   const changeValue = (value: unknown) => value === null || value === undefined ? t('logs.unset') : typeof value === 'object' ? JSON.stringify(value) : String(value)
   const updateFilter = (key: keyof typeof EMPTY_FILTERS, value: string) => setFilters((current) => ({ ...current, [key]: value }))
   const refresh = () => setRequest((current) => ({ ...current, revision: current.revision + 1 }))
@@ -145,8 +143,8 @@ export default function AdminAuditLogs() {
     { id: 'type', header: t('logs.table.type'), width: 135, render: (log) => <span className="text-[12px] text-[var(--color-fg-muted)]">{typeLabel(log)}</span> },
     { id: 'result', header: t('logs.result'), width: 100, render: (log) => <AuditResult result={log.result || 'success'} label={t(`logs.results.${log.result || 'success'}`)} /> },
     { id: 'actor', header: t('logs.table.actor'), width: 200, render: (log) => <AuditIdentity primary={log.actor_name || log.actor_user_id || t('logs.anonymous')} secondary={log.actor_name ? log.actor_user_id : ''} /> },
-    { id: 'action', header: t('logs.table.action'), width: 220, render: (log) => <AuditIdentity primary={actionLabel(log)} secondary={log.action} /> },
-    { id: 'target', header: t('logs.table.target'), width: 215, render: (log) => <AuditIdentity primary={log.target_name || log.target_type || '-'} secondary={log.target_id} /> },
+    { id: 'action', header: t('logs.table.action'), width: 220, render: (log) => <AuditIdentity primary={actionLabel(log)} /> },
+    { id: 'target', header: t('logs.table.target'), width: 215, render: (log) => <AuditIdentity primary={log.target_name || auditTargetLabel(log.target_type, t)} secondary={log.target_id} /> },
     { id: 'workspace', header: t('logs.table.workspace'), width: 200, render: (log) => <AuditIdentity primary={log.workspace_name || log.workspace_id || '-'} secondary={log.workspace_name ? log.workspace_id : ''} /> },
     { id: 'id', header: t('logs.table.id'), width: 210, render: (log) => <span className="font-mono text-[12px]">{log.id}</span> },
     { id: 'actions', header: t('common.actions'), width: 80, align: 'right', render: (log) => (
@@ -218,10 +216,11 @@ export default function AdminAuditLogs() {
               <DetailItem label={t('logs.table.type')} value={typeLabel(selectedLog)} />
               <DetailItem label={t('logs.table.actor')} value={selectedLog.actor_name || t('logs.anonymous')} />
               <DetailItem label={t('logs.detail.actorId')} value={selectedLog.actor_user_id || '-'} mono />
-              <DetailItem label={t('logs.actorRole')} value={selectedLog.actor_role || '-'} />
+              <DetailItem label={t('logs.actorRole')} value={selectedLog.actor_role ? t(`logs.roles.${selectedLog.actor_role}`, { defaultValue: t('logs.roles.other') }) : '-'} />
               <DetailItem label={t('logs.source')} value={selectedLog.source ? t(`logs.sources.${selectedLog.source}`, { defaultValue: selectedLog.source }) : '-'} />
-              <DetailItem label={t('logs.table.action')} value={selectedLog.action} mono />
-              <DetailItem label={t('logs.detail.targetType')} value={selectedLog.target_type || '-'} />
+              <DetailItem label={t('logs.table.action')} value={actionLabel(selectedLog)} />
+              <DetailItem label={t('logs.filters.action')} value={selectedLog.action} mono />
+              <DetailItem label={t('logs.detail.targetType')} value={auditTargetLabel(selectedLog.target_type, t)} />
               <DetailItem label={t('logs.table.target')} value={selectedLog.target_name || '-'} />
               <DetailItem label={t('logs.detail.targetId')} value={selectedLog.target_id || '-'} mono />
               {selectedLog.workspace_id && <><DetailItem label={t('logs.table.workspace')} value={selectedLog.workspace_name || selectedLog.workspace_id} /><DetailItem label={t('logs.detail.workspaceId')} value={selectedLog.workspace_id} mono /></>}

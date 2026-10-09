@@ -1156,7 +1156,42 @@ func listUserConversationsAdmin(d Deps, w http.ResponseWriter, r *http.Request) 
 		writeError(w, 500, err)
 		return
 	}
-	writeJSON(w, 200, rows)
+	// Enrich only this administrator response. One lightweight query resolves
+	// disabled models as well, without adding work to chat or public listings.
+	type conversationRow struct {
+		store.Conversation
+		ModelLabel string `json:"model_label"`
+	}
+	result := make([]conversationRow, 0, len(rows))
+	labels := map[string]string{}
+	if len(rows) > 0 {
+		models, err := d.DB.QueryContext(r.Context(), `SELECT id,label,request_id FROM models
+			WHERE id IN (SELECT model_id FROM conversations WHERE user_id=?)`, userID)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		defer models.Close()
+		for models.Next() {
+			var id, label, requestID string
+			if err := models.Scan(&id, &label, &requestID); err != nil {
+				writeError(w, 500, err)
+				return
+			}
+			if label = strings.TrimSpace(label); label == "" {
+				label = requestID
+			}
+			labels[id] = label
+		}
+		if err := models.Err(); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+	}
+	for _, conversation := range rows {
+		result = append(result, conversationRow{Conversation: conversation, ModelLabel: labels[conversation.ModelID]})
+	}
+	writeJSON(w, 200, result)
 }
 
 // listUserProjectsAdmin / listUserKBsAdmin — read-only drill-down into a target

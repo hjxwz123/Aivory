@@ -1714,6 +1714,8 @@ export interface ApiConversation {
   title: string
   provider: string
   model_id: string
+  /** Enriched on administrator listings. Absent on older servers; empty if the model was removed. */
+  model_label?: string
   /** §fast-mode: conversation runs in fast mode (model hidden). */
   fast?: boolean
   kb_ids: string[]

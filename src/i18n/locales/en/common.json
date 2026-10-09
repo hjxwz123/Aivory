@@ -122,6 +122,7 @@
     "dismiss": "Don’t show these again",
     "dismissHint": "Hide this version on future visits. New or edited notifications will still appear.",
     "failed": "Could not load notifications. Please try again.",
-    "unavailable": "This notification could not be opened. It may have been updated or removed."
+    "unavailable": "This notification could not be opened. It may have been updated or removed.",
+    "dismissFailed": "Could not save your preference. Please try again."
   }
 }

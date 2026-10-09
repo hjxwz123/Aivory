@@ -18,6 +18,7 @@ let notifications = [
 ]
 const states = new Map()
 let mutation = 0
+let failDismiss = false
 let popup = { enabled: true, title: 'Campaign', body: '<p>Promotion</p>', remember_dismiss: false, require_read: false, updated_at: 100, button_text: 'Explore offer', button_url: 'https://example.test/offer' }
 const browser = await puppeteer.launch({ executablePath, headless: true, args: ['--no-sandbox'] })
 const page = await browser.newPage()
@@ -38,7 +39,8 @@ page.on('request', (request) => {
     const item = notifications.find((entry) => entry.id === id)
     const body = request.postData() ? JSON.parse(request.postData()) : {}
     if (match[3]) {
-      if (!item || item.version !== body.version) { status = 409; response = { error: 'changed' } }
+      if (body.dismiss && failDismiss) { failDismiss = false; status = 500; response = { error: 'Failed to save dismissal' } }
+      else if (!item || item.version !== body.version) { status = 409; response = { error: 'changed' } }
       else {
         const key = `${user.id}:${id}`
         const state = states.get(key) ?? {}
@@ -82,9 +84,9 @@ page.on('request', (request) => {
   void request.respond({ status, contentType: 'application/json', body: JSON.stringify(response) })
 })
 const center = '[data-notification-center][data-state="open"]'
-async function closeCenter(dismiss = false) {
-  if (dismiss) await page.click(`${center} input[type="checkbox"]`)
-  await page.$eval(`${center} [data-button-size="sm"]:last-child`, (button) => button.click())
+async function closeCenter() {
+  assert.equal(await page.$$eval(`${center} input[type="checkbox"], ${center} button[aria-label="Close"], ${center} button[aria-label="关闭"]`, (elements) => elements.length), 0)
+  await page.click(`${center} [data-notification-dismiss]`)
   await page.waitForFunction(() => !document.querySelector('[data-notification-center]'))
 }
 async function menu() {
@@ -134,13 +136,11 @@ try {
   assert.equal(shown.size, 2)
   console.log('PASS: startup dialogs are serialized; custom promotional CTA, sanitized content, and published-only history work')
   popup.enabled = false
-  await page.reload()
-  await page.waitForSelector(center)
-  await closeCenter(true)
   assert.equal(states.get('notice-user:notice-unviewed').read, undefined)
   assert.equal(states.get('notice-user:notice-unviewed').dismissed, 'unviewed-v1')
   await page.reload()
   await page.waitForSelector('[contenteditable="true"]')
+  assert.equal(await page.$(center), null)
   await openManually('通知')
   await page.$eval(`${center} nav button:nth-of-type(2)`, (button) => button.click())
   await page.waitForFunction(() => document.querySelector('[data-notification-center] article')?.innerText.includes('Earlier notification content.'))
@@ -150,8 +150,14 @@ try {
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
   await page.waitForSelector(center)
   await page.waitForFunction(() => document.querySelector('[data-notification-center] article')?.innerText.includes('Updated publication.'))
-  await closeCenter(true)
-  console.log('PASS: ordinary close permits a later visit; suppression preserves unread history; edited notifications prompt again; avatar Help is removed')
+  failDismiss = true
+  await page.click(`${center} [data-notification-dismiss]`)
+  await page.waitForSelector(`${center} [role="alert"]`)
+  assert.ok(await page.$(center), 'Failed dismissal closed the notification center')
+  assert.equal(states.get('notice-user:notice-new').dismissed, 'new-v1')
+  await closeCenter()
+  assert.equal(states.get('notice-user:notice-new').dismissed, 'new-v2')
+  console.log('PASS: one dismissal button suppresses the current publication, preserves unread history, retries failed saves, and lets edited notifications prompt again')
   for (const language of ['en', 'zh', 'zh-Hant', 'ja', 'fr']) {
     const common = JSON.parse(await readFile(new URL(`../../src/i18n/locales/${language}/common.json`, import.meta.url), 'utf8'))
     user.settings.language = language
@@ -198,6 +204,9 @@ try {
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
   await page.evaluate(() => document.querySelectorAll('[class*="group/toast"] button[aria-label]').forEach((button) => button.click()))
   await page.waitForFunction(() => !document.querySelector('[class*="group/toast"]'))
+  // Editor actions follow the form instead of using a pinned footer.
+  await page.$eval('[data-slot="sheet-content"] button[type="submit"]', (button) => button.scrollIntoView({ block: 'center' }))
+  await page.waitForFunction(() => { const r = document.querySelector('[data-slot="sheet-content"] button[type="submit"]').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight })
   await page.screenshot({ path: `${screenshots}/admin-notification-drawer-mobile.png` })
   assert.deepEqual(await bounds(), { pageFits: true, modalFits: true })
   assert.equal(await page.$eval('[data-slot="sheet-content"] button[type="submit"]', (button) => { const r = button.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight }), true)
