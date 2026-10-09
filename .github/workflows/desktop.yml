@@ -132,7 +132,7 @@ jobs:
           if (!archives.length) throw new Error('Missing packaged application archive')
           for (const archive of archives) {
             const files = asar.listPackage(archive).map(file => file.replaceAll('\\', '/'))
-            for (const file of ['/web/index.html', '/local-web.cjs', '/api-requests.cjs', '/audio-socket.cjs', '/node_modules/ws/index.js']) {
+            for (const file of ['/web/index.html', '/local-web.cjs', '/window-lifecycle.cjs', '/api-requests.cjs', '/audio-socket.cjs', '/node_modules/ws/index.js']) {
               if (!files.includes(file)) throw new Error(`Missing bundled runtime: ${file}`)
             }
           }

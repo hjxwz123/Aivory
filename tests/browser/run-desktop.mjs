@@ -181,7 +181,7 @@ async function stop() {
 }
 
 async function waitWindowState(page, minimized) {
-  const deadline = Date.now() + 3000
+  const deadline = Date.now() + 15000
   let state
   do {
     state = await page.evaluate(() => window.desktopSmoke.native('state'))
@@ -214,6 +214,7 @@ try {
       console.log('EXTERNAL_URL:' + url)
     }
     let updatePrompts = 0
+    const windowActions = new WeakMap()
     dialog.showMessageBox = async (_window, options) => {
       console.log('UPDATE_PROMPT:' + options.message)
       updatePrompts++
@@ -232,19 +233,30 @@ try {
     ipcMain.handle('smoke:native', (event, action) => {
       const window = BrowserWindow.fromWebContents(event.sender)
       if (action === 'close') window.close()
-      if (action === 'restore') { window.restore(); window.show() }
+      if (action === 'restore') app.emit('activate')
+      if (action === 'close-and-restore') { window.close(); app.emit('activate') }
       if (action === 'focus') { app.focus({ steal: true }); window.show(); window.focus() }
       if (action === 'fullscreen') window.setFullScreen(true)
       if (action === 'windowed') window.setFullScreen(false)
       if (action === 'quit') setTimeout(() => app.quit(), 100)
-      return { minimized: window.isMinimized(), destroyed: window.isDestroyed(), visible: window.isVisible(), minimizable: window.isMinimizable(), fullscreen: window.isFullScreen(), prompts: updatePrompts }
+      return { minimized: window.isMinimized(), destroyed: window.isDestroyed(), visible: window.isVisible(), minimizable: window.isMinimizable(), fullscreen: window.isFullScreen(), prompts: updatePrompts, actions: windowActions.get(window) }
     })
     app.on('browser-window-created', (_event, window) => {
+      const actions = []
+      windowActions.set(window, actions)
+      for (const method of ['minimize', 'hide']) {
+        const original = window[method].bind(window)
+        window[method] = () => {
+          actions.push({ action: method, fullscreen: window.isFullScreen() })
+          return original()
+        }
+      }
       window.on('close', () => console.log('NATIVE_CLOSE_REQUEST'))
       window.on('minimize', () => console.log('NATIVE_MINIMIZED'))
       window.on('restore', () => console.log('NATIVE_RESTORED'))
       window.on('enter-full-screen', () => console.log('NATIVE_FULLSCREEN_ENTER'))
-      window.on('leave-full-screen', () => console.log('NATIVE_FULLSCREEN_LEAVE'))
+      window.on('leave-full-screen', () => { console.log('NATIVE_FULLSCREEN_LEAVE'); actions.push({ action: 'leave-fullscreen' }) })
+      window.webContents.on('leave-html-full-screen', () => actions.push({ action: 'leave-html-fullscreen' }))
       window.webContents.on('did-finish-load', () => {
         console.log('NATIVE_WINDOW_TITLE:' + JSON.stringify(window.getTitle()))
       })
@@ -340,6 +352,46 @@ try {
     await checkFullscreenLayout(false)
     await page.$eval('#html-fullscreen', (element) => element.remove())
     console.log('PASS: HTML fullscreen uses the same zero-inset layout and restores the ordinary window')
+
+    await page.evaluate(() => { document.getElementById('draft').value = 'Fullscreen draft stays intact' })
+    for (const mode of ['native', 'html']) {
+      await page.evaluate(() => window.desktopSmoke.native('focus'))
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      const before = (await page.evaluate(() => window.desktopSmoke.native('state'))).actions.length
+      if (mode === 'native') await page.evaluate(() => window.desktopSmoke.native('fullscreen'))
+      else {
+        await page.evaluate(() => {
+          const button = document.createElement('button')
+          button.id = 'close-html-fullscreen'
+          button.textContent = 'Fullscreen'
+          button.onclick = () => document.documentElement.requestFullscreen()
+          document.getElementById('root').append(button)
+        })
+        await page.click('#close-html-fullscreen')
+        await page.waitForFunction(() => Boolean(document.fullscreenElement))
+      }
+      await checkFullscreenLayout(true)
+      await page.evaluate(() => window.desktopSmoke.native('close'))
+      const state = await waitWindowState(page, true)
+      assert.equal(state.fullscreen, false, 'Closing must vacate the Mac fullscreen Space')
+      const actions = state.actions.slice(before)
+      const leave = actions.findIndex(event => event.action === (mode === 'native' ? 'leave-fullscreen' : 'leave-html-fullscreen'))
+      const minimized = actions.findIndex(event => event.action === 'minimize')
+      assert.ok(leave >= 0 && minimized > leave, JSON.stringify(actions))
+      assert.ok(actions.filter(event => ['minimize', 'hide'].includes(event.action)).every(event => !event.fullscreen), 'Never minimize or hide in fullscreen')
+      await page.evaluate(() => window.desktopSmoke.native('restore'))
+      await waitWindowState(page, false)
+      await checkFullscreenLayout(false)
+      await page.waitForFunction(() => !document.fullscreenElement)
+      assert.equal(await page.$eval('#draft', element => element.value), 'Fullscreen draft stays intact')
+      await page.screenshot({ path: path.join(tmpdir(), 'aivory-desktop-close-' + mode + '.png') })
+      if (mode === 'html') await page.$eval('#close-html-fullscreen', element => element.remove())
+    }
+    console.log('PASS: closing native/HTML fullscreen exits the Space before minimize/hide; Dock activation restores the original page and draft')
+    await page.evaluate(() => window.desktopSmoke.native('close-and-restore'))
+    await new Promise(resolve => setTimeout(resolve, 800))
+    await waitWindowState(page, false)
+    console.log('PASS: immediate Dock activation cancels pending close actions')
   }
   await page.evaluate(() => { document.getElementById('draft').value = 'Draft survives window close' })
   await page.evaluate(() => window.desktopSmoke.native('focus'))

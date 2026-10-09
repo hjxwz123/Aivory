@@ -19,7 +19,7 @@ export async function prepareApp(outputDir = appDir, { webDir = path.join(deskto
   await mkdir(path.join(outputDir, 'assets'), { recursive: true })
   for (const file of ['main.cjs', 'policy.cjs', 'locales.cjs', 'connection.cjs',
     'preload.cjs', 'offline-preload.cjs', 'offline.html', 'offline.css', 'offline.js', 'updates.cjs', 'browser-auth.cjs',
-    'server-config.cjs', 'server-preload.cjs', 'server.html', 'server.css', 'server.js', 'window-chrome.cjs', 'local-web.cjs', 'audio-socket.cjs', 'api-requests.cjs']) {
+    'server-config.cjs', 'server-preload.cjs', 'server.html', 'server.css', 'server.js', 'window-chrome.cjs', 'window-lifecycle.cjs', 'local-web.cjs', 'audio-socket.cjs', 'api-requests.cjs']) {
     await copyFile(path.join(desktopDir, file), path.join(outputDir, file))
   }
   // Installers always carry the frontend. Never fall back to a server website.

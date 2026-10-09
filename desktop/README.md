@@ -173,8 +173,11 @@ Keep credentials out of tracked files.
   Quit from these menus or the macOS Dock menu. Packaged
   Windows builds also provide a taskbar Quit task. Normal application Quit and
   system shutdown still exit the process.
+  On macOS, closing a fullscreen window first waits for HTML/native fullscreen
+  exit, then minimizes it. Restoring from the Dock/menu cancels pending close
+  actions so a late timer cannot hide the restored window.
   If native minimization is unavailable on macOS, the window hides while the
-  Dock icon stays available to restore it.
+  Dock icon stays available to restore it, only after fullscreen has ended.
 - Cookies and local storage persist across restarts and are isolated by server.
 - Desktop requests append `AivoryDesktop/{version}` to the User-Agent. Feedback,
   login history, active sessions, and audit records identify these as the desktop

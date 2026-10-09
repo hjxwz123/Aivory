@@ -10,6 +10,7 @@ const { UpdateChecker } = require('./updates.cjs')
 const { BrowserAuth } = require('./browser-auth.cjs')
 const { resolveServerConfig, saveServerConfig, desktopUserAgent } = require('./server-config.cjs')
 const { windowChromeOptions, attachWindowChrome } = require('./window-chrome.cjs')
+const { attachCloseToMinimize } = require('./window-lifecycle.cjs')
 const { APP_URL, localAppUrl, createLocalHandler } = require('./local-web.cjs')
 const { registerAudioSocketBridge } = require('./audio-socket.cjs')
 const { ApiRequests } = require('./api-requests.cjs')
@@ -27,20 +28,15 @@ let browserAuth
 let updateChecker
 let updateTimer
 let updateStartupTimer
-let minimizeTimer
-let minimizeRequested = false
+const windowLifecycles = new WeakMap()
 const configuredSessions = new WeakSet()
 const paymentContents = new WeakSet()
 const apiRequests = new ApiRequests()
 
 function restoreWindow() {
-  minimizeRequested = false
-  clearTimeout(minimizeTimer)
   if (!desktopSession) { openServerSettings(); return }
   if (!mainWindow) createWindow()
-  if (mainWindow.isMinimized()) mainWindow.restore()
-  mainWindow.show()
-  mainWindow.focus()
+  windowLifecycles.get(mainWindow)?.restore()
 }
 
 function nativeMessages() { return getMessages(connection?.appearance.locale || app.getLocale()) }
@@ -77,9 +73,7 @@ function installIconMenu() {
 
 function openServerSettings() {
   if (serverWindow && !serverWindow.isDestroyed()) {
-    if (serverWindow.isMinimized()) serverWindow.restore()
-    serverWindow.show()
-    serverWindow.focus()
+    windowLifecycles.get(serverWindow)?.restore()
     return
   }
   serverWindow = new BrowserWindow({
@@ -96,9 +90,7 @@ function openServerSettings() {
   serverWindow.webContents.on('will-navigate', (event) => event.preventDefault())
   serverWindow.on('query-session-end', () => { isQuitting = true })
   serverWindow.on('session-end', () => { isQuitting = true })
-  serverWindow.on('close', (event) => {
-    if (!baseUrl && !isQuitting) { event.preventDefault(); serverWindow.minimize() }
-  })
+  windowLifecycles.set(serverWindow, attachCloseToMinimize(serverWindow, { shouldMinimize: () => !baseUrl && !isQuitting }))
   serverWindow.on('closed', () => { serverWindow = undefined })
   void serverWindow.loadFile(path.join(app.getAppPath(), 'server.html'))
 }
@@ -247,25 +239,7 @@ function createWindow() {
   connection = new ConnectionStatus(mainWindow, baseUrl, openBrowser, desktopSession)
   mainWindow.on('query-session-end', () => { isQuitting = true })
   mainWindow.on('session-end', () => { isQuitting = true })
-  mainWindow.on('close', (event) => {
-    if (isQuitting) return
-    event.preventDefault()
-    // Return from the cancelled native close before changing window state.
-    const window = mainWindow
-    minimizeRequested = true
-    setImmediate(() => {
-      if (isQuitting || !minimizeRequested || window.isDestroyed()) return
-      window.minimize()
-      // Some macOS window environments ignore miniaturization. Hiding only
-      // this window still retains its renderer and the Dock icon.
-      if (process.platform === 'darwin') {
-        clearTimeout(minimizeTimer)
-        minimizeTimer = setTimeout(() => {
-          if (minimizeRequested && !isQuitting && !window.isDestroyed() && !window.isMinimized()) window.hide()
-        }, 500)
-      }
-    })
-  })
+  windowLifecycles.set(mainWindow, attachCloseToMinimize(mainWindow, { shouldMinimize: () => !isQuitting }))
   mainWindow.on('closed', () => { mainWindow = undefined; connection = undefined })
   void loadServer()
 }
@@ -274,7 +248,6 @@ function configureServer(address) {
   browserAuth?.cancel()
   clearTimeout(updateStartupTimer)
   clearInterval(updateTimer)
-  clearTimeout(minimizeTimer)
   for (const window of BrowserWindow.getAllWindows()) {
     if (window !== serverWindow) window.destroy()
   }
@@ -412,7 +385,7 @@ if (!app.requestSingleInstanceLock()) {
     browserAuth?.cancel()
     clearTimeout(updateStartupTimer)
     clearInterval(updateTimer)
-    clearTimeout(minimizeTimer)
+    for (const window of BrowserWindow.getAllWindows()) windowLifecycles.get(window)?.cancel()
     tray?.destroy()
   })
 }
