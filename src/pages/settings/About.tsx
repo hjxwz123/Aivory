@@ -6,7 +6,7 @@ import { useLegalConfig } from '@/hooks/use-legal-config'
 import { Button } from '@/components/ui/button'
 import '@/lib/desktop'
 
-const APP_VERSION = '2.5.1-beta.7'
+const APP_VERSION = '2.5.1-beta.11'
 const DOCS_URL = 'https://docs.aivorygo.com'
 const GITHUB_URL = 'https://github.com/hjxwz123/Aivory'
 const TERMS_URL = '/terms'
