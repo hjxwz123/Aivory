@@ -364,9 +364,9 @@ export default function AdminPaymentMethods() {
       </section>
 
       <Dialog open={editor.open} onOpenChange={(open) => !savingRef.current && setEditor((current) => ({ ...current, open }))}>
-        <DialogContent size="md" className="rounded-[8px] font-sans max-sm:[&>button]:size-11">
+        <DialogContent presentation="drawer" size="md" className="font-sans max-sm:[&>button]:size-11">
           <form
-            className="flex min-h-0 flex-1 flex-col"
+            className="flex min-h-0 flex-none flex-col"
             onSubmit={(event) => {
               event.preventDefault()
               void submit()

@@ -344,7 +344,7 @@ export default function AdminRedeemCodes() {
 
       {/* New-batch dialog */}
       <Dialog open={newOpen} onOpenChange={(next) => !submittingRef.current && setNewOpen(next)}>
-        <DialogContent size="md">
+        <DialogContent presentation="drawer" size="md">
           <DialogHeader>
             <DialogTitle>{t('admin:redeemCodes.newTitle')}</DialogTitle>
             <DialogDescription>{t('admin:redeemCodes.newLead')}</DialogDescription>

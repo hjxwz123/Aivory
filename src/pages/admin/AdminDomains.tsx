@@ -185,9 +185,9 @@ function DomainEditor({ rule, workspaces, groups, onClose, onSaved }: { rule: Re
   }
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose() }}>
-      <DialogContent className="h-[min(48rem,calc(100dvh-2rem))] overflow-hidden">
+      <DialogContent presentation="drawer" className="w-[min(100vw,42rem)]">
         <DialogHeader><DialogTitle>{t(isNew ? 'domains.add' : 'domains.edit')}</DialogTitle><DialogDescription>{t('domains.editorHint')}</DialogDescription></DialogHeader>
-        <form className="flex min-h-0 flex-1 flex-col overflow-hidden" onSubmit={(e) => { e.preventDefault(); void save() }}>
+        <form className="flex min-h-0 flex-none flex-col" onSubmit={(e) => { e.preventDefault(); void save() }}>
           <DialogBody className="space-y-5 overscroll-contain">
             <aside aria-labelledby="domain-permissions-title" className="flex items-start gap-3 rounded-[12px] border border-[var(--color-warning)]/40 bg-[var(--color-warning)]/10 p-4">
               <AlertTriangle size={20} aria-hidden className="mt-0.5 shrink-0 text-[var(--color-warning)]" />
@@ -325,7 +325,7 @@ function DomainMembers({ rule, onClose, onChanged }: { rule: RegistrationDomain;
   const allSelected = candidates.length > 0 && candidates.every((candidate) => selected.has(candidate.user_id))
   return <>
     <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose() }}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent presentation="drawer" className="w-[min(100vw,48rem)]">
         <DialogHeader><DialogTitle>{domainRuleLabel(rule)} · {t(view === 'members' ? 'domains.members' : 'domains.addExistingTitle')}</DialogTitle><DialogDescription>{t(view === 'members' ? 'domains.memberHint' : 'domains.addExistingHint')}</DialogDescription></DialogHeader>
         <DialogBody>
           {view === 'candidates' ? <Input wrapperClassName="mb-4 w-full" value={candidateSearch} onChange={(event) => setCandidateSearch(event.target.value)} leadingIcon={<Search size={15} aria-hidden />} placeholder={t('domains.searchUsers')} aria-label={t('domains.searchUsers')} disabled={busy} /> : null}

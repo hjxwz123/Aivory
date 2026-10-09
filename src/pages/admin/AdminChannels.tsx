@@ -563,7 +563,7 @@ export default function AdminChannels() {
       </section>
 
       <Dialog open={editor.open} onOpenChange={(o) => !savingRef.current && setEditor({ ...editor, open: o })}>
-        <DialogContent size="lg" className="h-[min(88dvh,760px)]">
+        <DialogContent presentation="drawer" size="lg" className="w-[min(100vw,42rem)]">
           <DialogHeader>
             <DialogTitle>{editor.row ? t('admin:channels.editorTitle') : t('admin:channels.newTitle')}</DialogTitle>
             <DialogDescription>
@@ -857,7 +857,7 @@ export default function AdminChannels() {
       </Dialog>
 
       <Dialog open={upstreamModelsOpen && editor.open} onOpenChange={setUpstreamModelsOpen}>
-        <DialogContent size="lg">
+        <DialogContent presentation="drawer" size="lg" className="w-[min(100vw,42rem)]">
           <DialogHeader>
             <DialogTitle>{t('admin:channels.modelAdd.upstreamTitle')}</DialogTitle>
             <DialogDescription>{t('admin:channels.modelAdd.upstreamDescription')}</DialogDescription>

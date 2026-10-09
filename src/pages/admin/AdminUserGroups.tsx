@@ -696,16 +696,17 @@ export default function AdminUserGroups() {
         }}
       >
         <DialogContent
+          presentation="drawer"
           size="xl"
-          className="h-[min(50rem,calc(100dvh-2rem))] max-sm:h-[calc(100dvh-1rem)] max-sm:max-h-[calc(100dvh-1rem)] max-sm:w-[calc(100vw-1rem)]"
+          className="w-[min(100vw,48rem)]"
           closeDisabled={saving}
         >
           <DialogHeader>
             <DialogTitle>{editor.row ? t('admin:groups.editorTitle') : t('admin:groups.newTitle')}</DialogTitle>
             <DialogDescription>{t('admin:groups.editorLead')}</DialogDescription>
           </DialogHeader>
-          <DialogBody className="flex min-h-0 flex-col overflow-hidden px-0 pb-0">
-            <Tabs value={editorTab} onValueChange={(value) => setEditorTab(value as EditorTab)} className="flex min-h-0 flex-1 flex-col">
+          <DialogBody className="flex min-h-0 flex-col px-0 pb-0">
+            <Tabs value={editorTab} onValueChange={(value) => setEditorTab(value as EditorTab)} className="flex min-h-0 flex-col">
               <div className="shrink-0 px-4 pb-3 sm:px-6">
                 <TabsList variant="segmented" className="grid w-full grid-cols-2 sm:grid-cols-4">
                   <TabsTrigger variant="segmented" value="plan" className="min-w-0 justify-center px-2">
@@ -723,7 +724,7 @@ export default function AdminUserGroups() {
                 </TabsList>
               </div>
 
-              <TabsContent value="plan" className="mt-0 min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+              <TabsContent value="plan" className="mt-0 min-h-0 px-4 py-5 sm:px-6">
                 <div className="grid gap-4">
                   <div className="grid gap-4 sm:grid-cols-2">
                     <Field label={t('admin:groups.fields.name')} htmlFor="g-name">
@@ -806,7 +807,7 @@ export default function AdminUserGroups() {
                 </div>
               </TabsContent>
 
-              <TabsContent value="quota" className="mt-0 min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+              <TabsContent value="quota" className="mt-0 min-h-0 px-4 py-5 sm:px-6">
                 <div className="grid gap-5">
                   <div>
                     <h3 className="text-sm font-medium text-[var(--color-fg)]">
@@ -856,7 +857,7 @@ export default function AdminUserGroups() {
                 </div>
               </TabsContent>
 
-              <TabsContent value="permissions" className="mt-0 min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+              <TabsContent value="permissions" className="mt-0 min-h-0 px-4 py-5 sm:px-6">
                 <p className="mb-5 text-sm leading-6 text-[var(--color-fg-muted)]">
                   {t('admin:groups.permissions.hierarchyHint')}
                 </p>
@@ -928,7 +929,7 @@ export default function AdminUserGroups() {
                 </section>
               </TabsContent>
 
-              <TabsContent value="users" className="mt-0 min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+              <TabsContent value="users" className="mt-0 min-h-0 px-4 py-5 sm:px-6">
                 {!editor.row ? (
                   <div className="grid min-h-64 place-items-center text-center">
                     <div className="max-w-sm">

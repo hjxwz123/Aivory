@@ -522,7 +522,7 @@ export default function AdminModels() {
           setPullModels((current) => ({ ...current, open }))
         }}
       >
-        <DialogContent size="lg" closeDisabled={addingPulledModels}>
+        <DialogContent presentation="drawer" size="lg" className="w-[min(100vw,42rem)]" closeDisabled={addingPulledModels}>
           <DialogHeader>
             <DialogTitle>{t('admin:models.pull.title')}</DialogTitle>
             <DialogDescription>{t('admin:models.pull.description')}</DialogDescription>
@@ -686,7 +686,7 @@ export default function AdminModels() {
       {/* Quick-create dialog — only the six fields needed to register a row.
           Everything else lives on /admin/models/:id. */}
       <Dialog open={creator.open} onOpenChange={(o) => !submittingRef.current && setCreator({ ...creator, open: o })}>
-        <DialogContent size="md">
+        <DialogContent presentation="drawer" size="md">
           <DialogHeader>
             <DialogTitle>{t('admin:models.newTitle')}</DialogTitle>
             <DialogDescription>{t('admin:models.newDialogLead')}</DialogDescription>

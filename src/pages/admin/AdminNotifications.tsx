@@ -108,10 +108,10 @@ export default function AdminNotifications() {
       <Pagination page={request.page} pageCount={Math.ceil(total / 50)} onPage={(page) => setRequest((current) => ({ ...current, page }))} />
     </>}
     <Sheet open={Boolean(editor)} onOpenChange={(value) => { if (!value) close() }}>
-      <SheetContent side="right" size="lg" className="w-[min(38rem,100vw)] border-0" label={t(editor?.id ? 'notifications.edit' : 'notifications.create')} onEscapeKeyDown={(event) => { if (busy) event.preventDefault() }} onInteractOutside={(event) => { if (busy) event.preventDefault() }}>
-        <SheetHeader className="flex items-center justify-between gap-3"><h2 className="text-base font-semibold">{t(editor?.id ? 'notifications.edit' : 'notifications.create')}</h2><Button variant="ghost" size="icon-sm" disabled={busy} aria-label={t('common:actions.close')} onClick={close}><X size={16} aria-hidden /></Button></SheetHeader>
-        <form onSubmit={(event) => void save(event)} className="flex min-h-0 flex-1 flex-col">
-          <SheetBody className="min-h-0 space-y-5">
+      <SheetContent side="right" size="lg" className="w-[min(38rem,100vw)] overflow-y-auto overscroll-contain border-0" label={t(editor?.id ? 'notifications.edit' : 'notifications.create')} onEscapeKeyDown={(event) => { if (busy) event.preventDefault() }} onInteractOutside={(event) => { if (busy) event.preventDefault() }}>
+        <SheetHeader className="flex shrink-0 items-center justify-between gap-3"><h2 className="text-base font-semibold">{t(editor?.id ? 'notifications.edit' : 'notifications.create')}</h2><Button variant="ghost" size="icon-sm" disabled={busy} aria-label={t('common:actions.close')} onClick={close}><X size={16} aria-hidden /></Button></SheetHeader>
+        <form onSubmit={(event) => void save(event)} className="flex min-h-0 flex-none flex-col">
+          <SheetBody className="min-h-0 flex-none space-y-5 overflow-y-visible">
             {detailLoading ? <PanelFallback /> : detailError ? <div role="alert" className="text-sm"><p>{t('common.failed')}</p><Button variant="secondary" size="sm" className="mt-3" onClick={() => edit(items.find((item) => item.id === editor?.id))}>{t('common:actions.tryAgain')}</Button></div> : <>
               <Field label={t('notifications.subject')} htmlFor="notification-title"><Input id="notification-title" value={draft.title} maxLength={120} required disabled={busy} onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))} /></Field>
               <Field label={t('notifications.body')} htmlFor="notification-body" hint={t('notifications.bodyHint')}><Textarea id="notification-body" value={draft.body} rows={12} maxLength={256 * 1024} required disabled={busy} onChange={(event) => setDraft((current) => ({ ...current, body: event.target.value }))} /></Field>
@@ -119,10 +119,10 @@ export default function AdminNotifications() {
               {draft.body.trim() ? <details className="pb-3 text-sm"><summary className="cursor-pointer text-[var(--color-fg-muted)]">{t('notifications.preview')}</summary><div className="prose-announcement mt-3 break-words leading-7 [&_img]:max-w-full [&_a]:text-[var(--color-accent)] [&_a]:underline" dangerouslySetInnerHTML={{ __html: sanitizeHtml(draft.body) }} /></details> : null}
             </>}
           </SheetBody>
-          <SheetFooter className="flex-wrap border-0">
+          <SheetFooter className="flex-wrap border-0 px-5 pb-6 pt-2">
             {confirmDelete ? <p role="alert" className="w-full text-xs text-[var(--color-danger)]">{t('notifications.deleteHint')}</p> : null}
             {editor?.id ? <Button type="button" variant="ghost" size="sm" className="mr-auto text-[var(--color-danger)]" disabled={busy} leadingIcon={<Trash2 size={14} aria-hidden />} onClick={() => void remove()}>{t(confirmDelete ? 'notifications.confirmDelete' : 'common:actions.delete')}</Button> : null}
-            {confirmDelete ? <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => setConfirmDelete(false)}>{t('common:actions.cancel')}</Button> : <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={close}>{t('common:actions.cancel')}</Button>}
+            {confirmDelete ? <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => setConfirmDelete(false)}>{t('common:actions.cancel')}</Button> : null}
             <Button type="submit" size="sm" loading={busy} disabled={detailLoading || detailError || !draft.title.trim() || !draft.body.trim()}>{t('common:actions.save')}</Button>
           </SheetFooter>
         </form>

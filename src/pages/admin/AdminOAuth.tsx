@@ -276,7 +276,7 @@ export default function AdminOAuth() {
           setEditor((current) => ({ ...current, open }))
         }}
       >
-        <DialogContent size="md">
+        <DialogContent presentation="drawer" size="md">
           <DialogHeader>
             <DialogTitle>{editor.row ? t('admin:oauth.editorTitle') : t('admin:oauth.newTitle')}</DialogTitle>
             <DialogDescription>{t(`admin:oauth.hints.${kind}`)}</DialogDescription>

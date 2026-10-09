@@ -494,7 +494,7 @@ export function HomeLayout({ variant, composer, notice, onSuggestion }: HomeLayo
               data-app-download="home"
               aria-label={t('common:downloadApp')}
               title={t('common:downloadApp')}
-              className="inline-flex h-11 min-w-0 items-center gap-1.5 whitespace-nowrap rounded-[8px] px-2.5 text-[13px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:h-10 max-sm:px-2"
+              className="inline-flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[13px] text-[var(--color-fg-muted)] underline-offset-4 hover:text-[var(--color-fg)] hover:underline interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
             >
               <Download size={15} aria-hidden className="shrink-0" />
               <span className="truncate">{t('common:downloadApp')}</span>

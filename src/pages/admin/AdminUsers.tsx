@@ -528,7 +528,7 @@ export default function AdminUsers() {
 
       {/* New user */}
       <Dialog open={createOpen} onOpenChange={(next) => !creatingRef.current && setCreateOpen(next)}>
-        <DialogContent size="sm">
+        <DialogContent presentation="drawer" size="sm">
           <DialogHeader>
             <DialogTitle>{t('admin:users.newTitle')}</DialogTitle>
             <DialogDescription>{t('admin:users.newLead')}</DialogDescription>
@@ -587,7 +587,7 @@ export default function AdminUsers() {
 
       {/* Edit user — email, role + reset password */}
       <Dialog open={Boolean(editRow)} onOpenChange={(o) => !o && setEditRow(null)}>
-        <DialogContent size="sm">
+        <DialogContent presentation="drawer" size="sm">
           <DialogHeader>
             <DialogTitle>{editRow ? t('admin:users.editTitle', { name: editRow.name || editRow.email }) : ''}</DialogTitle>
           </DialogHeader>

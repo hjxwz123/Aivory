@@ -213,7 +213,7 @@ export default function AdminPrompts() {
           if (!savingRef.current) setEditor((current) => ({ ...current, open }))
         }}
       >
-        <DialogContent size="md">
+        <DialogContent presentation="drawer" size="md">
           <DialogHeader>
             <DialogTitle>
               {editor.row ? t('admin:prompts.editorTitle') : t('admin:prompts.newTitle')}

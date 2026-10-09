@@ -522,9 +522,9 @@ export default function AdminPaymentChannels() {
           setEditor((current) => ({ ...current, open }))
         }}
       >
-        <DialogContent size="lg" className="rounded-[8px] font-sans max-sm:[&>button]:size-11">
+        <DialogContent presentation="drawer" size="lg" className="w-[min(100vw,42rem)] font-sans max-sm:[&>button]:size-11">
           <form
-            className="flex min-h-0 flex-1 flex-col"
+            className="flex min-h-0 flex-none flex-col"
             onSubmit={(event) => {
               event.preventDefault()
               void submit()

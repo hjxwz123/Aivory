@@ -1,6 +1,6 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { X } from 'lucide-react'
-import { forwardRef, useEffect, useLayoutEffect, useRef, type ComponentPropsWithoutRef, type ElementRef, type HTMLAttributes } from 'react'
+import { createContext, forwardRef, useContext, useEffect, useLayoutEffect, useRef, type ComponentPropsWithoutRef, type ElementRef, type HTMLAttributes } from 'react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { useQuietSurface } from '@/contexts/quiet-surface'
@@ -30,10 +30,15 @@ export const DialogOverlay = forwardRef<
 })
 
 type DialogSize = 'sm' | 'md' | 'lg' | 'xl' | 'full'
+type DialogPresentation = 'modal' | 'drawer'
+
+const dialogPresentationContext = createContext<DialogPresentation>('modal')
 
 export interface DialogContentProps
   extends ComponentPropsWithoutRef<typeof DialogPrimitive.Content> {
   size?: DialogSize
+  /** Opens this content as a right-side editor drawer instead of a centered modal. */
+  presentation?: DialogPresentation
   showClose?: boolean
   closeDisabled?: boolean
   /** Exclude this dialog and its overlay from page-feedback screenshots. */
@@ -82,7 +87,7 @@ function animateDialogResize(
 export const DialogContent = forwardRef<
   ElementRef<typeof DialogPrimitive.Content>,
   DialogContentProps
->(function DialogContent({ className, size = 'md', showClose = true, closeDisabled = false, captureIgnore = false, children, ...rest }, ref) {
+>(function DialogContent({ className, size = 'md', presentation = 'modal', showClose = true, closeDisabled = false, captureIgnore = false, children, ...rest }, ref) {
   const quiet = useQuietSurface()
   const { t } = useTranslation('common')
   const contentRef = useRef<ElementRef<typeof DialogPrimitive.Content>>(null)
@@ -127,7 +132,7 @@ export const DialogContent = forwardRef<
   // ResizeObserver alone only reports after the new geometry is already live.
   useLayoutEffect(() => {
     const node = contentRef.current
-    if (!node) return
+    if (!node || presentation === 'drawer') return
     reducedMotionRef.current ??= window.matchMedia('(prefers-reduced-motion: reduce)')
     transitionFromPreviousSize(node, readDialogDimensions(node))
   })
@@ -137,7 +142,7 @@ export const DialogContent = forwardRef<
   // second path for those changes, while the layout effect handles tab swaps.
   useLayoutEffect(() => {
     const node = contentRef.current
-    if (!node || typeof ResizeObserver === 'undefined') return
+    if (!node || presentation === 'drawer' || typeof ResizeObserver === 'undefined') return
     reducedMotionRef.current ??= window.matchMedia('(prefers-reduced-motion: reduce)')
     const observer = new ResizeObserver(() => {
       transitionFromPreviousSize(node, readDialogDimensions(node))
@@ -148,7 +153,7 @@ export const DialogContent = forwardRef<
       resizeAnimationRef.current?.cancel()
       resizeAnimationRef.current = null
     }
-  }, [])
+  }, [presentation])
 
   function setContentRef(node: ElementRef<typeof DialogPrimitive.Content> | null) {
     contentRef.current = node
@@ -162,6 +167,7 @@ export const DialogContent = forwardRef<
       <DialogPrimitive.Content
         ref={setContentRef}
         data-slot="dialog-content"
+        data-dialog-presentation={presentation}
         data-feedback-capture-ignore={captureIgnore ? '' : undefined}
         className={cn(
           // Positioning uses the independent `translate` property. Entrance
@@ -169,15 +175,25 @@ export const DialogContent = forwardRef<
           // replacing the transform responsible for keeping it centered.
           'fixed left-1/2 top-1/2 z-[60] [translate:-50%_-50%] w-[min(96vw,calc(100vw-2rem))]',
           sizeMap[size],
-          // Never exceed the viewport: cap height and let the body scroll while
-          // the header/footer stay pinned (see DialogBody/DialogHeader/Footer).
+          // Never exceed the viewport. Modal bodies scroll independently; a
+          // drawer overrides this below so the complete editor flows as one
+          // document and its actions are reached after the form content.
           'flex min-w-0 flex-col max-h-[calc(100dvh-2rem)] overflow-x-hidden',
-          'rounded-popup bg-[var(--color-surface)] border border-[var(--color-border)]',
+          'bg-[var(--color-surface)]',
+          presentation === 'modal' && 'rounded-popup border border-[var(--color-border)]',
           quiet && 'border-0',
           'shadow-[var(--shadow-xl)]',
           'data-[state=open]:animate-[pop-in_220ms_var(--ease-out)]',
           'data-[state=closed]:animate-[fade-out_140ms_var(--ease-in)]',
           'focus-visible:outline-none',
+          // Drawer overrides come last so the base modal dimensions and
+          // centered transform cannot win in Tailwind's class merge.
+          presentation === 'drawer' && [
+            'right-0 left-auto top-0 h-dvh w-[min(100vw,40rem)] max-w-none max-h-none [translate:0_0] rounded-none border-0',
+            'overflow-y-auto overscroll-contain',
+            'data-[state=open]:animate-[sheet-in-r_280ms_var(--ease-out)]',
+            'data-[state=closed]:animate-[sheet-out-r_180ms_var(--ease-in)]',
+          ],
           className,
         )}
         {...rest}
@@ -197,19 +213,23 @@ export const DialogContent = forwardRef<
             <X size={16} aria-hidden />
           </DialogPrimitive.Close>
         )}
-        {children}
+        <dialogPresentationContext.Provider value={presentation}>
+          {children}
+        </dialogPresentationContext.Provider>
       </DialogPrimitive.Content>
     </DialogPortal>
   )
 })
 
 export function DialogHeader({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('shrink-0 px-6 pt-4 pb-3', className)} {...rest} />
+  const presentation = useContext(dialogPresentationContext)
+  return <div className={cn('shrink-0 px-6 pt-4 pb-3', presentation === 'drawer' && 'pr-14', className)} {...rest} />
 }
 
 export function DialogBody({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
-  // The scroll region: takes the slack between header/footer and the capped
-  // content height, scrolling its own overflow so tall forms stay reachable.
+  // Modal bodies take the slack between header/footer and scroll independently.
+  // Drawers deliberately use the root surface as the scroll container: form
+  // actions remain in document order instead of becoming a fixed action bar.
   const bodyRef = useRef<HTMLDivElement>(null)
   const contentAnimationRef = useRef<Animation | null>(null)
 
@@ -266,20 +286,28 @@ export function DialogBody({ className, ...rest }: HTMLAttributes<HTMLDivElement
     }
   }, [])
 
-  return <div ref={bodyRef} className={cn('min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-6 pb-4', className)} {...rest} />
+  const presentation = useContext(dialogPresentationContext)
+  return <div ref={bodyRef} data-slot="dialog-body" className={cn(
+    'min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-6 pb-4',
+    className,
+    presentation === 'drawer' && 'flex-none overflow-visible',
+  )} {...rest} />
 }
 
 export function DialogFooter({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
   const quiet = useQuietSurface()
   const compact = useButtonDensity() === 'compact'
+  const presentation = useContext(dialogPresentationContext)
   return (
     <div
+      data-slot="dialog-footer"
       className={cn(
         'shrink-0 border-t border-[var(--color-divider)] flex items-center justify-end gap-1.5 px-5 py-2.5 sm:px-6',
         !compact && '[&_button]:h-8 [&_button]:px-3 [&_button]:text-sm [&_a]:h-8 [&_a]:px-3 [&_a]:text-sm',
         !compact && 'max-sm:[&_button]:h-10 max-sm:[&_a]:h-10',
         quiet && 'border-0',
         className,
+        presentation === 'drawer' && 'flex-wrap border-0 px-6 pb-6 pt-2',
       )}
       {...rest}
     />

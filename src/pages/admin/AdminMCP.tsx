@@ -383,7 +383,7 @@ export default function AdminMCP() {
           if (!savingRef.current) setEditor((current) => ({ ...current, open }))
         }}
       >
-        <DialogContent size="lg" closeDisabled={saving}>
+        <DialogContent presentation="drawer" size="lg" closeDisabled={saving}>
           <DialogHeader>
             <DialogTitle>{editor.row ? t('admin:mcp.editorTitle') : t('admin:mcp.newTitle')}</DialogTitle>
             <DialogDescription>

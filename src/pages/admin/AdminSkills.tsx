@@ -244,7 +244,7 @@ export default function AdminSkills() {
       </section>
 
       <Dialog open={editor.open} onOpenChange={(o) => !savingRef.current && setEditor({ ...editor, open: o })}>
-        <DialogContent size="md">
+        <DialogContent presentation="drawer" size="md">
           <DialogHeader>
             <DialogTitle>{editor.row ? t('admin:skills.editorTitle') : t('admin:skills.newTitle')}</DialogTitle>
           </DialogHeader>

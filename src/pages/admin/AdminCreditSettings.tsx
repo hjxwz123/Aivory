@@ -522,7 +522,7 @@ export default function AdminCreditSettings() {
           if (!packageSavingRef.current) setPackageEditor((current) => ({ ...current, open }))
         }}
       >
-        <DialogContent size="md">
+        <DialogContent presentation="drawer" size="md">
           <DialogHeader>
             <DialogTitle>
               {packageEditor.row

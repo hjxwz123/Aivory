@@ -45,7 +45,7 @@ export function WorkspaceAdminControls({ workspaceId, members = [], ownerId, onS
   return <>
     <Button size="sm" variant={transfer ? 'secondary' : 'primary'} leadingIcon={transfer ? undefined : <Plus size={15} aria-hidden />} className="max-sm:min-h-[var(--tap-min)]" onClick={() => { setError(''); setOpen(true) }}>{title}</Button>
     <Dialog open={open} onOpenChange={(v) => { if (!busy) setOpen(v) }}>
-      <DialogContent className="max-w-lg">
+      <DialogContent presentation="drawer" className="w-[min(100vw,36rem)]">
         <DialogHeader><DialogTitle>{title}</DialogTitle><DialogDescription>{t(transfer ? 'workspaces.changeAdminHint' : 'workspaces.createAdminHint')}</DialogDescription></DialogHeader>
         <form onSubmit={(e) => { e.preventDefault(); void save() }}>
           <DialogBody className="space-y-5">
