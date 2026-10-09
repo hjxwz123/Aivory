@@ -80,6 +80,7 @@ func (t *TaskLLM) runPolicyDecision(ctx context.Context, model *store.Model, req
 		APIKey: channel.APIKey, BaseURL: channel.BaseURL, Model: model.RequestID,
 		Headers: channel.Headers,
 		Timeout: 10 * time.Second, MaxRetries: 0, HTTPClient: providerHTTPClient, Logger: t.logger,
+		CaptureDiagnostics: !strings.HasPrefix(opts.Metadata.MessageID, "private_"),
 		Recorder: func(rctx context.Context, record typesafe.Record) error {
 			if record.UsageKnown && reservation != nil {
 				finalized = true // retain the reservation if settlement fails
@@ -89,10 +90,16 @@ func (t *TaskLLM) runPolicyDecision(ctx context.Context, model *store.Model, req
 			}
 			u := store.UsageLog{UserID: record.UserID, ConversationID: record.ConversationID, MessageID: record.MessageID, WorkspaceID: record.WorkspaceID,
 				ModelID: model.ID, ChannelID: channel.ID, Purpose: record.Purpose, InputTokens: record.Usage.InputTokens, OutputTokens: record.Usage.OutputTokens,
-				Currency: model.Currency, Cost: float64(record.Usage.InputTokens) * model.PriceInput / 1e6, Status: "ok"}
+				Currency: model.Currency, Cost: float64(record.Usage.InputTokens) * model.PriceInput / 1e6, Status: "ok", DurationMS: record.Duration.Milliseconds()}
 			if record.ErrorKind != "" {
 				u.Status = "error"
-				u.Error = "typesafe_" + string(record.ErrorKind)
+				u.Error = record.ErrorMessage
+				if u.Error == "" {
+					u.Error = "typesafe_" + string(record.ErrorKind)
+				}
+				if record.ResponseBody != "" {
+					u.Error += "\n\nUpstream response:\n" + sanitizeProviderRequestBody([]byte(record.ResponseBody))
+				}
 				if model.AutoDisableErrors > 0 {
 					_ = store.RecordModelChannelResult(rctx, t.db, model.ID, channel.ID, "regular", "error", model.AutoDisableErrors, model.AutoDisableMinutes)
 				}
@@ -100,6 +107,11 @@ func (t *TaskLLM) runPolicyDecision(ctx context.Context, model *store.Model, req
 			} else {
 				_ = store.ResetModelChannelCounters(rctx, t.db, model.ID, channel.ID, "regular")
 				_ = store.ResetChannelCounters(rctx, t.db, channel.ID)
+			}
+			if u.Status == "error" || (settingBool(t.db, "log_full_requests", false) && !settingBool(t.db, "log_errors_only", true)) {
+				diagnostics := CaptureProviderRequestDiagnostics(record.Request, settingBool(t.db, "log_request_bodies", true))
+				u.RequestMethod, u.RequestURL = diagnostics.Method, diagnostics.URL
+				u.RequestHeaders, u.RequestBody = diagnostics.Headers, diagnostics.Body
 			}
 			if record.UsageKnown {
 				if err := store.RecordBillingUsage(rctx, t.db, u); err != nil {

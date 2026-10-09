@@ -97,6 +97,41 @@ func TestCustomHeadersOverrideDefaults(t *testing.T) {
 	}
 }
 
+func TestDiagnosticsAreOptInAndExcludedFromLogger(t *testing.T) {
+	for _, capture := range []bool{false, true} {
+		t.Run(fmt.Sprint(capture), func(t *testing.T) {
+			var record Record
+			var logs bytes.Buffer
+			c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				fmt.Fprint(w, `{"detail":"private response"}`)
+			}, func(cfg *Config) {
+				cfg.CaptureDiagnostics = capture
+				cfg.Logger = log.New(&logs, "", 0)
+				cfg.Recorder = func(_ context.Context, r Record) error { record = r; return nil }
+			})
+			_, err := c.Evaluate(context.Background(), request(), Options{})
+			if KindOf(err) != ErrValidation || (record.Request != nil) != capture || (record.ResponseBody != "") != capture {
+				t.Fatalf("wrong diagnostic capture: error=%v record=%+v", err, record)
+			}
+			if capture {
+				body, readErr := record.Request.GetBody()
+				if readErr != nil {
+					t.Fatal(readErr)
+				}
+				raw, _ := io.ReadAll(body)
+				body.Close()
+				if !strings.Contains(string(raw), "private user text") || !strings.Contains(record.ResponseBody, "private response") {
+					t.Fatal("exact request/response not retained for recorder")
+				}
+			}
+			if strings.Contains(logs.String()+err.Error(), "private response") || strings.Contains(logs.String(), "private user text") || strings.Contains(logs.String(), "secret-key") {
+				t.Fatal("transport diagnostics leaked to logger or returned error")
+			}
+		})
+	}
+}
+
 func TestInvalidRequestsNeverReachServer(t *testing.T) {
 	var calls atomic.Int32
 	c := testClient(t, func(w http.ResponseWriter, r *http.Request) { calls.Add(1) }, nil)

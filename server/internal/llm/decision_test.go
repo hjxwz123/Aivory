@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -82,7 +83,8 @@ func TestDecisionAccountingAndPrivacy(t *testing.T) {
 				if err := db.QueryRow(`SELECT request_body,request_headers,status,cost FROM usage_logs WHERE purpose='task.test_decision'`).Scan(&body, &headers, &status, &rowCost); err != nil {
 					t.Fatal(err)
 				}
-				if body != "" || headers != "" || (status == "error") != test.wantErr || math.Abs(rowCost-float64(wantCost)/1e6) > 1e-10 {
+				wantDiagnostics := test.wantErr && !strings.HasPrefix(test.message, "private_")
+				if (body != "") != wantDiagnostics || (headers != "") != wantDiagnostics || (status == "error") != test.wantErr || math.Abs(rowCost-float64(wantCost)/1e6) > 1e-10 {
 					t.Fatalf("wrong diagnostic record: %s %f", status, rowCost)
 				}
 			}
@@ -109,6 +111,58 @@ func TestDecisionAccountingFailureNotSilenced(t *testing.T) {
 	_, err := task.RunDecision(context.Background(), "decision-model", typesafe.Request{State: "text", Questions: map[string]typesafe.Question{"check": typesafe.NewNoul("q", nil)}}, typesafe.Options{})
 	if !errors.Is(err, ErrTaskBillingRecord) || typesafe.KindOf(err) != typesafe.ErrRecording {
 		t.Fatalf("accounting error lost: %v", err)
+	}
+}
+
+func TestDecisionErrorDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		name, message string
+		captureBody   bool
+		status        int
+		response      string
+	}{
+		{"HTTP validation", "message", true, 422, `{"detail":"invalid questions","api_key":"upstream-secret"}`},
+		{"invalid response", "message", true, 200, `{"model":"jev-latest","answers":{},"usage":{"input_tokens":10,"output_tokens":1}}`},
+		{"bodies disabled", "message", false, 401, `{"error":"invalid credentials"}`},
+		{"private", "private_decision", true, 422, `{"detail":"sensitive input"}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db := decisionTestDB(t)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(test.status)
+				fmt.Fprint(w, test.response)
+			}))
+			defer srv.Close()
+			seedDecisionModel(t, db, srv.URL, "jev-latest")
+			if err := store.SetSetting(db, "log_request_bodies", json.RawMessage(fmt.Sprint(test.captureBody))); err != nil {
+				t.Fatal(err)
+			}
+			var logs bytes.Buffer
+			task := NewTaskLLM(db, nil, log.New(&logs, "", 0))
+			_, err := task.RunDecision(context.Background(), "decision-model", typesafe.Request{State: "diagnostic input", Questions: map[string]typesafe.Question{"check": typesafe.NewNoul("Check request", nil)}}, typesafe.Options{Metadata: typesafe.Metadata{UserID: "decision-user", MessageID: test.message}})
+			if err == nil {
+				t.Fatal("expected failure")
+			}
+			var method, endpoint, headers, body, detail string
+			if err := db.QueryRow(`SELECT request_method,request_url,request_headers,request_body,error FROM usage_logs`).Scan(&method, &endpoint, &headers, &body, &detail); err != nil {
+				t.Fatal(err)
+			}
+			if strings.HasPrefix(test.message, "private_") {
+				if method+endpoint+headers+body != "" || strings.Contains(detail, "sensitive") {
+					t.Fatal("private diagnostic payload retained")
+				}
+			} else {
+				if method != "POST" || !strings.HasSuffix(endpoint, "/v1/systemone") || !strings.Contains(headers, "[redacted]") || strings.Contains(headers, "Bearer secret") {
+					t.Fatalf("wrong request diagnostics: %s %s %s", method, endpoint, headers)
+				}
+				if strings.Contains(body, "diagnostic input") != test.captureBody || !strings.Contains(detail, "Upstream response:") || strings.Contains(detail, "upstream-secret") {
+					t.Fatalf("wrong body/response diagnostics: %s %s", body, detail)
+				}
+			}
+			if strings.Contains(logs.String(), "diagnostic input") || strings.Contains(logs.String(), "invalid questions") || strings.Contains(err.Error(), "invalid questions") {
+				t.Fatal("diagnostics leaked to ordinary logger/returned error")
+			}
+		})
 	}
 }
 

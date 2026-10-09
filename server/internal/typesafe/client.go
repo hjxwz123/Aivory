@@ -18,9 +18,8 @@ import (
 	"aivory/server/internal/requestheaders"
 )
 
-// Record contains metadata only: no state, question text, answers, credentials
-// or upstream error bodies. UsageKnown=false means consumption is unknown,
-// not that the provider necessarily charged zero tokens.
+// Diagnostic fields are opt-in and excluded from JSON/console logs. Recorders
+// must sanitize them before persistence. Unknown usage does not imply zero cost.
 type Record struct {
 	Metadata
 	RequestedModel string        `json:"requested_model"`
@@ -33,6 +32,9 @@ type Record struct {
 	ErrorKind      ErrorKind     `json:"error_kind,omitempty"`
 	Usage          Usage         `json:"usage"`
 	UsageKnown     bool          `json:"usage_known"`
+	Request        *http.Request `json:"-"`
+	ResponseBody   string        `json:"-"`
+	ErrorMessage   string        `json:"-"`
 }
 
 // Recorder must be concurrency-safe and respect its context. A recording error
@@ -53,6 +55,8 @@ type Config struct {
 	HTTPClient       *http.Client
 	Logger           *log.Logger
 	Recorder         Recorder
+	// CaptureDiagnostics exposes transport details only to Recorder, never Logger.
+	CaptureDiagnostics bool
 }
 
 type Stats struct {
@@ -147,6 +151,9 @@ func (c *Client) Evaluate(ctx context.Context, req Request, opts Options) (resul
 	defer func() {
 		record.Duration = time.Since(started)
 		record.ErrorKind = KindOf(returnErr)
+		if returnErr != nil {
+			record.ErrorMessage = returnErr.Error()
+		}
 		if record.Attempts > 0 && c.cfg.Recorder != nil {
 			// A canceled inference must not discard already-reported consumption.
 			rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.cfg.RecordTimeout)
@@ -204,6 +211,11 @@ func (c *Client) Evaluate(ctx context.Context, req Request, opts Options) (resul
 		hreq.Header.Set("Content-Type", "application/json")
 		hreq.Header.Set("Accept", "application/json")
 		requestheaders.Apply(hreq, c.cfg.Headers)
+		if c.cfg.CaptureDiagnostics {
+			record.Request = hreq
+			record.ResponseBody = ""
+		}
+		record.StatusCode, record.RequestID = 0, ""
 		record.Attempts++
 		hresp, err := c.http.Do(hreq)
 		if err != nil {
@@ -213,6 +225,10 @@ func (c *Client) Evaluate(ctx context.Context, req Request, opts Options) (resul
 		record.StatusCode = hresp.StatusCode
 		record.RequestID = safeRequestID(hresp.Header.Get("X-Request-ID"))
 		if hresp.StatusCode != http.StatusOK {
+			if c.cfg.CaptureDiagnostics {
+				raw, _ := io.ReadAll(io.LimitReader(hresp.Body, c.cfg.MaxResponseBytes+1))
+				record.ResponseBody = string(raw)
+			}
 			_ = hresp.Body.Close()
 			apiErr := httpError(hresp.StatusCode, record.RequestID)
 			if retryable(hresp.StatusCode) && attempt < c.cfg.MaxRetries {
@@ -228,6 +244,9 @@ func (c *Client) Evaluate(ctx context.Context, req Request, opts Options) (resul
 		}
 		raw, readErr := io.ReadAll(io.LimitReader(hresp.Body, c.cfg.MaxResponseBytes+1))
 		_ = hresp.Body.Close()
+		if c.cfg.CaptureDiagnostics {
+			record.ResponseBody = string(raw)
+		}
 		if readErr != nil {
 			if callCtx.Err() != nil {
 				return nil, contextError(callCtx.Err())
