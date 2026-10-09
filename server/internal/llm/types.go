@@ -60,6 +60,13 @@ type Citation struct {
 	URL     string `json:"url"`
 	Snippet string `json:"snippet"`
 	Source  string `json:"source"` // web | kb | document
+	// Image search keeps the source page in URL; these optional fields carry
+	// the original image and a lightweight preview without changing old data.
+	ImageURL     string `json:"image_url,omitempty"`
+	ThumbnailURL string `json:"thumbnail_url,omitempty"`
+	// nil preserves the gallery behavior of older image-search messages.
+	// false keeps ordinary result thumbnails available without auto-displaying.
+	ImageDisplay *bool `json:"image_display,omitempty"`
 	// GlobalIndex marks citations whose inline markers already use the turn-wide
 	// namespace. It is transient orchestration metadata and is never persisted.
 	GlobalIndex bool `json:"-"`

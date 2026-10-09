@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -36,6 +38,49 @@ func TestTrackedToolNormalizesAndCachesReadOnlyRequest(t *testing.T) {
 	}
 	if executions.Load() != 1 {
 		t.Fatalf("executions = %d, want 1", executions.Load())
+	}
+}
+
+func TestSearchRequestKeyIncludesFiltersAndPage(t *testing.T) {
+	base := normalizedToolRequestKey("aivory_web_search", []byte(`{"query":"news"}`))
+	for _, input := range []string{
+		`{"query":"news","categories":["news"]}`, `{"query":"news","time_range":"day"}`,
+		`{"query":"news","language":"zh-CN"}`, `{"query":"news","pageno":2}`,
+		`{"query":"news","engines":["bing"]}`, `{"query":"news","safesearch":0}`,
+	} {
+		if got := normalizedToolRequestKey("aivory_web_search", []byte(input)); got == base {
+			t.Errorf("filter refinement was treated as a duplicate: %s", input)
+		}
+	}
+	defaultInput := `{"queries":[" NEWS "],"categories":[],"time_range":"","language":null,"pageno":1,"safesearch":1}`
+	if got := normalizedToolRequestKey("aivory_web_search", []byte(defaultInput)); got != base {
+		t.Errorf("explicit defaults changed the request key")
+	}
+	first := `{"query":"news","categories":["News","general"],"language":"ZH_cn","engines":["bing","wikipedia"]}`
+	second := `{"queries":["news"],"categories":["general"," news ","news"],"language":"zh-CN","engines":["Wikipedia","BING"]}`
+	if normalizedToolRequestKey("aivory_web_search", []byte(first)) != normalizedToolRequestKey("aivory_web_search", []byte(second)) {
+		t.Errorf("equivalent filters did not share a request key")
+	}
+}
+
+func TestTrackedSearchCanRefineFiltersAndReadNextPage(t *testing.T) {
+	tc := &ToolContext{}
+	var calls int
+	for _, input := range []string{
+		`{"query":"news","categories":["news"],"time_range":"day"}`,
+		`{"query":"news","categories":["general"],"time_range":"day"}`,
+		`{"query":"news","categories":["general"],"time_range":"day","pageno":2}`,
+	} {
+		_, _, err := tc.executeTrackedTool(context.Background(), "aivory_web_search", []byte(input), func() (string, []Citation, error) {
+			calls++
+			return input, nil, nil // distinct evidence for each simulated page
+		})
+		if err != nil {
+			t.Fatalf("fresh filter/page request was skipped: %s: %v", input, err)
+		}
+	}
+	if calls != 3 {
+		t.Fatalf("executed %d searches, want 3", calls)
 	}
 }
 
@@ -132,6 +177,58 @@ func TestTrackedToolStopsWhenDifferentRequestAddsNoEvidence(t *testing.T) {
 	}
 	if executions.Load() != 2 {
 		t.Fatalf("executions = %d, want 2 distinct requests", executions.Load())
+	}
+}
+
+func TestTrackedImageSearchRecognizesAnotherImageOnTheSamePage(t *testing.T) {
+	tc := &ToolContext{}
+	for index, image := range []string{"one", "two", "two"} {
+		_, _, err := tc.executeTrackedTool(context.Background(), "aivory_web_search", []byte(`{"query":"`+image+`"}`), func() (string, []Citation, error) {
+			return "same page", []Citation{{URL: "https://source.test/gallery", ImageURL: "https://images.test/" + image + ".jpg"}}, nil
+		})
+		if index < 2 && err != nil {
+			t.Fatalf("distinct image was not progress: %v", err)
+		}
+		if index == 2 && !IsToolNoProgress(err) {
+			t.Fatalf("identical image search was not stopped: %v", err)
+		}
+	}
+}
+
+func TestImageDisplayOptionsHaveDistinctButNormalizedRequests(t *testing.T) {
+	for _, test := range []struct {
+		name, first, second string
+		equal               bool
+	}{
+		{"search display change", `{"query":"Kyoto"}`, `{"query":"Kyoto","show_images":true}`, false},
+		{"search default false", `{"query":"Kyoto"}`, `{"query":"Kyoto","show_images":false}`, true},
+		{"image category default true", `{"query":"Kyoto","categories":["images"]}`, `{"query":"Kyoto","categories":["images"],"show_images":true}`, true},
+		{"fetch display change", `{"url":"https://example.test/page"}`, `{"url":"https://example.test/page","show_images":true}`, false},
+		{"fetch default false", `{"url":"https://example.test/page"}`, `{"url":"https://example.test/page","show_images":false}`, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			name := "aivory_web_search"
+			if strings.HasPrefix(test.name, "fetch") {
+				name = "web_fetch"
+			}
+			first, second := canonicalToolInput(name, []byte(test.first)), canonicalToolInput(name, []byte(test.second))
+			if (string(first) == string(second)) != test.equal {
+				t.Fatalf("canonical requests: %s / %s", first, second)
+			}
+		})
+	}
+}
+
+func TestShowingPreviouslyRetainedImagesCountsAsToolProgress(t *testing.T) {
+	tc := &ToolContext{}
+	for index, show := range []bool{false, true} {
+		input := []byte(fmt.Sprintf(`{"query":"Kyoto","show_images":%t}`, show))
+		_, _, err := tc.executeTrackedTool(context.Background(), "aivory_web_search", input, func() (string, []Citation, error) {
+			return "same image", []Citation{{URL: "https://source.test/page", ImageURL: "https://images.test/photo.jpg", ImageDisplay: &show}}, nil
+		})
+		if err != nil {
+			t.Fatalf("display step %d was blocked as duplicate evidence: %v", index, err)
+		}
 	}
 }
 

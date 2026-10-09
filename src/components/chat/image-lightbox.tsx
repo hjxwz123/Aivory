@@ -9,6 +9,7 @@
  * alt are the only required inputs.
  */
 import { Download, ExternalLink, Pencil, X } from 'lucide-react'
+import { useState, type HTMLAttributeReferrerPolicy } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Dialog, DialogClose, DialogOverlay, DialogPortal } from '@/components/ui/dialog'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
@@ -24,9 +25,34 @@ interface ImageLightboxProps {
   downloadUrl?: string
   filename?: string
   onEdit?: () => void
+  fallbackSrc?: string
+  sourceUrl?: string
+  referrerPolicy?: HTMLAttributeReferrerPolicy
+  onCloseAutoFocus?: (event: Event) => void
 }
 
-export function ImageLightbox({ open, onOpenChange, src, alt, downloadUrl, filename, onEdit }: ImageLightboxProps) {
+function LightboxImage({ src, fallbackSrc, alt, referrerPolicy }: Pick<ImageLightboxProps, 'src' | 'fallbackSrc' | 'alt' | 'referrerPolicy'>) {
+  const { t } = useTranslation('chat')
+  const [currentSrc, setCurrentSrc] = useState(src)
+  const [failed, setFailed] = useState(false)
+  return failed ? (
+    <p role="status" className="rounded-[10px] bg-[var(--color-surface)] px-5 py-4 text-sm text-[var(--color-fg)]">{t('sources.imageUnavailable')}</p>
+  ) : (
+    <img
+      src={currentSrc}
+      alt={alt ?? ''}
+      referrerPolicy={referrerPolicy}
+      onError={() => {
+        if (fallbackSrc && currentSrc !== fallbackSrc) setCurrentSrc(fallbackSrc)
+        else setFailed(true)
+      }}
+      className="max-w-[96vw] max-h-[90vh] object-contain rounded-[10px] shadow-[var(--shadow-lg)]"
+      draggable={false}
+    />
+  )
+}
+
+export function ImageLightbox({ open, onOpenChange, src, alt, downloadUrl, filename, onEdit, fallbackSrc, sourceUrl, referrerPolicy, onCloseAutoFocus }: ImageLightboxProps) {
   const { t } = useTranslation('common')
   const href = downloadUrl ?? src
   return (
@@ -34,6 +60,7 @@ export function ImageLightbox({ open, onOpenChange, src, alt, downloadUrl, filen
       <DialogPortal>
         <DialogOverlay className="bg-[color-mix(in_oklab,var(--color-fg)_85%,transparent)] backdrop-blur-[4px]" />
         <DialogPrimitive.Content
+          onCloseAutoFocus={onCloseAutoFocus}
           className={cn(
             'fixed inset-0 z-[70] grid place-items-center p-4 sm:p-8',
             'data-[state=open]:animate-[fade-in_220ms_var(--ease-out)]',
@@ -44,14 +71,15 @@ export function ImageLightbox({ open, onOpenChange, src, alt, downloadUrl, filen
         >
           <DialogPrimitive.Title className="sr-only">{alt || 'Image'}</DialogPrimitive.Title>
           <DialogPrimitive.Description className="sr-only">{alt || ''}</DialogPrimitive.Description>
-          <img
-            src={src}
-            alt={alt ?? ''}
-            className="max-w-[96vw] max-h-[90vh] object-contain rounded-[10px] shadow-[var(--shadow-lg)]"
-            draggable={false}
-          />
+          <LightboxImage key={`${src}|${fallbackSrc ?? ''}`} src={src} fallbackSrc={fallbackSrc} alt={alt} referrerPolicy={referrerPolicy} />
           {/* Top-right control cluster */}
           <div className="absolute top-3 right-3 sm:top-5 sm:right-5 flex items-center gap-1.5">
+            {sourceUrl ? (
+              <a href={sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-full bg-[var(--color-surface)] px-3 py-2 text-xs text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]">
+                {t('sources.open', { ns: 'chat' })}
+                <ExternalLink size={13} aria-hidden />
+              </a>
+            ) : null}
             {onEdit ? <Tooltip content={t('imageEdit.title', { ns: 'chat' })}>
               <button type="button" onClick={onEdit} aria-label={t('imageEdit.title', { ns: 'chat' })} className="inline-flex size-11 items-center justify-center rounded-full bg-[var(--color-surface)] text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"><Pencil size={17} aria-hidden /></button>
             </Tooltip> : null}

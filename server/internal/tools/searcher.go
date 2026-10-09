@@ -96,10 +96,15 @@ func (s *serperSearcher) Search(ctx context.Context, query string, topK int) (st
 		snippetRaw, _ := rm["snippet"].(string)
 		snippet := cleanSnippet(snippetRaw)
 		date, _ := rm["date"].(string)
+		imageURL, _ := rm["imageUrl"].(string)
+		thumbnailURL, _ := rm["thumbnailUrl"].(string)
+		imageURL, thumbnailURL = searchImageURL(imageURL), searchImageURL(thumbnailURL)
 		citations = append(citations, llm.Citation{
 			ID: fmt.Sprintf("w_%d", i+1), Index: i + 1, Title: title, URL: link, Snippet: snippet, Source: "web",
+			ImageURL: imageURL, ThumbnailURL: thumbnailURL,
 		})
 		fmt.Fprintf(&out, "[%d] %s\n%s\n%s\n", i+1, title, link, snippet)
+		writeSearchImageURLs(&out, imageURL, thumbnailURL)
 		if date != "" {
 			fmt.Fprintf(&out, "(date: %s)\n", date)
 		}
@@ -132,6 +137,10 @@ func (b *braveSearcher) Search(ctx context.Context, query string, topK int) (str
 				URL         string `json:"url"`
 				Description string `json:"description"`
 				PageAge     string `json:"page_age"`
+				Thumbnail   struct {
+					Src      string `json:"src"`
+					Original string `json:"original"`
+				} `json:"thumbnail"`
 			} `json:"results"`
 		} `json:"web"`
 	}
@@ -142,11 +151,14 @@ func (b *braveSearcher) Search(ctx context.Context, query string, topK int) (str
 	out := strings.Builder{}
 	for i, r := range parsed.Web.Results {
 		snippet := cleanSnippet(r.Description)
+		imageURL, thumbnailURL := searchImageURL(r.Thumbnail.Original), searchImageURL(r.Thumbnail.Src)
 		citations = append(citations, llm.Citation{
 			ID: fmt.Sprintf("w_%d", i+1), Index: i + 1,
 			Title: r.Title, URL: r.URL, Snippet: snippet, Source: "web",
+			ImageURL: imageURL, ThumbnailURL: thumbnailURL,
 		})
 		fmt.Fprintf(&out, "[%d] %s\n%s\n%s\n", i+1, r.Title, r.URL, snippet)
+		writeSearchImageURLs(&out, imageURL, thumbnailURL)
 		if r.PageAge != "" {
 			fmt.Fprintf(&out, "(date: %s)\n", r.PageAge)
 		}
@@ -213,8 +225,25 @@ func (t *tavilySearcher) Search(ctx context.Context, query string, topK int) (st
 
 // searxngSearcher queries a self-hosted SearXNG instance over JSON.
 type searxngSearcher struct {
-	baseURL string
-	engines []string
+	baseURL     string
+	engines     []string
+	resultCount int // Explicit admin setting; zero preserves legacy top_k/single-page behavior.
+}
+
+type searxngResult struct {
+	Title        string `json:"title"`
+	URL          string `json:"url"`
+	Content      string `json:"content"`
+	PublishedAt  string `json:"publishedDate"`
+	ImageURL     string `json:"img_src"`
+	ThumbnailURL string `json:"thumbnail_src"`
+	Thumbnail    string `json:"thumbnail"`
+}
+
+type searxngPage struct {
+	Results []searxngResult `json:"results"`
+	// Failed engines explain an empty response on self-hosted instances.
+	UnresponsiveEngines [][]any `json:"unresponsive_engines"`
 }
 
 func firstEngineSelection(selections [][]string) []string {
@@ -250,6 +279,14 @@ func parseSearchEngines(value string) []string {
 }
 
 func (s *searxngSearcher) Search(ctx context.Context, query string, topK int) (string, []llm.Citation, error) {
+	return s.SearchWithOptions(ctx, query, topK, webSearchOptions{})
+}
+
+func (s *searxngSearcher) SearchWithOptions(ctx context.Context, query string, topK int, options webSearchOptions) (string, []llm.Citation, error) {
+	options, err := normalizeWebSearchOptions(options)
+	if err != nil {
+		return "", nil, err
+	}
 	// baseURL is used verbatim (an instance may legitimately be MOUNTED under a
 	// /search subpath, so stripping the suffix would break it); an admin who
 	// pasted the endpoint by mistake gets a targeted hint on the resulting 404.
@@ -261,17 +298,167 @@ func (s *searxngSearcher) Search(ctx context.Context, query string, topK int) (s
 	if len(s.engines) > 0 {
 		params.Set("engines", strings.Join(s.engines, ","))
 	}
+	if len(options.Engines) > 0 {
+		// A per-call choice may narrow the administrator's configured engine
+		// set, but must never replace it with an unconfigured engine.
+		for _, requested := range options.Engines {
+			if len(s.engines) == 0 {
+				break
+			}
+			allowed := false
+			for _, configured := range s.engines {
+				if requested == strings.ToLower(strings.Join(strings.Fields(configured), " ")) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				return "", nil, &llm.ToolUserError{Message: "requested engine is outside the administrator's configured search engines; choose from the tool schema or omit engines"}
+			}
+		}
+		params.Set("engines", strings.Join(options.Engines, ","))
+	}
+	if len(options.Categories) > 0 {
+		params.Set("categories", strings.Join(options.Categories, ","))
+	}
+	if options.TimeRange != "" {
+		params.Set("time_range", options.TimeRange)
+	}
+	if options.Language != "" {
+		params.Set("language", options.Language)
+	}
+	if options.PageNo != nil {
+		params.Set("pageno", fmt.Sprint(*options.PageNo))
+	}
+	if options.SafeSearch != nil {
+		params.Set("safesearch", fmt.Sprint(*options.SafeSearch))
+	}
+	if s.resultCount > 0 {
+		topK = s.resultCount
+	}
+	if topK <= 0 {
+		topK = 5
+	}
+	pageNo := 1
+	if options.PageNo != nil {
+		pageNo = *options.PageNo
+	}
+	results := make([]searxngResult, 0, topK)
+	seen := make(map[string]bool, topK)
+	partialReason := ""
+	for {
+		page, err := s.searchPage(ctx, params, options.Language)
+		if err != nil {
+			if len(results) == 0 || ctx.Err() == context.Canceled {
+				return "", nil, err
+			}
+			partialReason = "a later results page could not be fetched"
+			break
+		}
+		if len(page.Results) == 0 && len(results) == 0 {
+			if failed := formatUnresponsiveEngines(page.UnresponsiveEngines); failed != "" {
+				return "", nil, fmt.Errorf("searxng: 0 results because its search engines did not respond: %s. The instance reached its engines but they failed — commonly the upstream engine (Google/Bing/…) blocks the server's IP, the engine is rate-limited, or it's misconfigured. Check the instance's outbound network and engine settings; try a different engine in settings.yml", failed)
+			}
+			if len(options.Categories) > 0 || options.TimeRange != "" || options.Language != "" || len(options.Engines) > 0 {
+				return "No web results found for this query with the selected filters. If another search is needed, refine the keywords or broaden optional categories/language/engine filters while preserving the user's explicit source and date constraints. Do not present older sources as current news.", nil, nil
+			}
+			return "No web results found for this query.", nil, nil
+		}
+		added := 0
+		for _, result := range page.Results {
+			key := canonicalBatchURL(result.URL)
+			// Multiple images may legitimately share one source page.
+			if imageURL := searchImageURL(result.ImageURL); imageURL != "" {
+				key += "|image:" + canonicalBatchURL(imageURL)
+			} else if thumbnailURL := searchImageURL(result.ThumbnailURL); thumbnailURL != "" {
+				key += "|image:" + canonicalBatchURL(thumbnailURL)
+			} else if thumbnailURL := searchImageURL(result.Thumbnail); thumbnailURL != "" {
+				key += "|image:" + canonicalBatchURL(thumbnailURL)
+			}
+			if strings.TrimSpace(result.URL) == "" && strings.TrimSpace(result.ImageURL) == "" {
+				key = result.Title + "|" + result.Content
+			}
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			results = append(results, result)
+			added++
+			if len(results) == topK {
+				break
+			}
+		}
+		// Only an explicitly configured count enables automatic pagination.
+		// Never retry empty/repeated pages or escape the existing call deadline.
+		if len(results) >= topK || s.resultCount == 0 {
+			break
+		}
+		if added == 0 {
+			partialReason = "the instance returned no more unique results"
+			break
+		}
+		if pageNo >= 10 {
+			partialReason = "the search reached the page limit"
+			break
+		}
+		if ctx.Err() != nil {
+			if ctx.Err() == context.Canceled {
+				return "", nil, ctx.Err()
+			}
+			partialReason = "the search time budget was reached"
+			break
+		}
+		pageNo++
+		params.Set("pageno", fmt.Sprint(pageNo))
+	}
+	citations := make([]llm.Citation, 0, len(results))
+	var out strings.Builder
+	for i, r := range results {
+		// Preserve the full engine-provided excerpt; this is still a search
+		// snippet, not a fetched page body.
+		snippet := normalizeSnippet(r.Content)
+		imageURL := searchImageURL(r.ImageURL)
+		thumbnailURL := searchImageURL(r.ThumbnailURL)
+		if thumbnailURL == "" {
+			thumbnailURL = searchImageURL(r.Thumbnail)
+		}
+		citations = append(citations, llm.Citation{
+			ID: fmt.Sprintf("w_%d", i+1), Index: i + 1,
+			Title: r.Title, URL: r.URL, Snippet: snippet, Source: "web",
+			ImageURL: imageURL, ThumbnailURL: thumbnailURL,
+		})
+		fmt.Fprintf(&out, "[%d] %s\n%s\n%s\n", i+1, r.Title, r.URL, snippet)
+		writeSearchImageURLs(&out, imageURL, thumbnailURL)
+		if r.PublishedAt != "" {
+			fmt.Fprintf(&out, "(date: %s)\n", r.PublishedAt)
+		}
+		out.WriteString("\n")
+	}
+	if partialReason != "" {
+		fmt.Fprintf(&out, "Returned %d of %d requested results: %s.\n", len(results), topK, partialReason)
+	}
+	return out.String(), citations, nil
+}
+
+func (s *searxngSearcher) searchPage(ctx context.Context, params url.Values, language string) (searxngPage, error) {
+	var parsed searxngPage
 	u := fmt.Sprintf("%s/search?%s", s.baseURL, params.Encode())
-	req, _ := http.NewRequestWithContext(ctx, "GET", u, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
+	if err != nil {
+		return parsed, err
+	}
 	req.Header.Set("Accept", "application/json")
 	// SearXNG's default bot limiter blocks user agents that match bot/crawler
 	// patterns and requests without an Accept-Language — identify plainly but
 	// without tripping either check.
 	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; Aivory/1.0)")
 	req.Header.Set("Accept-Language", "en")
+	if language != "" && !strings.EqualFold(language, "all") {
+		req.Header.Set("Accept-Language", language)
+	}
 	resp, err := toolHTTPClient.Do(req)
 	if err != nil {
-		return "", nil, err
+		return parsed, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
@@ -291,64 +478,45 @@ func (s *searxngSearcher) Search(ctx context.Context, query string, topK int) (s
 			// and would misdiagnose the far more common formats-disabled 403.
 			if strings.Contains(body, "challenges.cloudflare.com") || strings.Contains(body, "Just a moment") ||
 				strings.EqualFold(resp.Header.Get("cf-mitigated"), "challenge") {
-				return "", nil, fmt.Errorf("searxng: HTTP 403 — the domain is behind a Cloudflare challenge that server-side requests cannot pass; point search_base_url at the origin directly (internal address), set the DNS record to DNS-only, or add a Cloudflare WAF skip rule for this host")
+				return parsed, fmt.Errorf("searxng: HTTP 403 — the domain is behind a Cloudflare challenge that server-side requests cannot pass; point search_base_url at the origin directly (internal address), set the DNS record to DNS-only, or add a Cloudflare WAF skip rule for this host")
 			}
-			return "", nil, fmt.Errorf("searxng: HTTP 403 — the instance likely has the JSON API disabled; add \"json\" to search.formats in settings.yml (formats: [html, json]) and restart SearXNG")
+			return parsed, fmt.Errorf("searxng: HTTP 403 — the instance likely has the JSON API disabled; add \"json\" to search.formats in settings.yml (formats: [html, json]) and restart SearXNG")
 		case http.StatusTooManyRequests:
-			return "", nil, fmt.Errorf("searxng: HTTP 429 — the instance's bot limiter is blocking server-side requests; disable the limiter or allowlist this server in limiter.toml")
+			return parsed, fmt.Errorf("searxng: HTTP 429 — the instance's bot limiter is blocking server-side requests; disable the limiter or allowlist this server in limiter.toml")
 		case http.StatusNotFound:
-			return "", nil, fmt.Errorf("searxng: HTTP 404 — check that search_base_url points at the instance root (it should not include the /search path itself)")
+			return parsed, fmt.Errorf("searxng: HTTP 404 — check that search_base_url points at the instance root (it should not include the /search path itself)")
 		}
-		return "", nil, fmt.Errorf("searxng: HTTP %d: %s", resp.StatusCode, body)
-	}
-	var parsed struct {
-		Results []struct {
-			Title       string `json:"title"`
-			URL         string `json:"url"`
-			Content     string `json:"content"`
-			PublishedAt string `json:"publishedDate"`
-		} `json:"results"`
-		// SearXNG always reports which engines failed to answer this query as
-		// [[engine, reason], …]. When results are empty this is the real cause
-		// (self-hosted instances routinely have their engines blocked/rate-
-		// limited/misconfigured), so we surface it instead of a bland "no results".
-		UnresponsiveEngines [][]any `json:"unresponsive_engines"`
+		return parsed, fmt.Errorf("searxng: HTTP %d: %s", resp.StatusCode, body)
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
 		// A 200 with a non-JSON body means the instance answered with an HTML
 		// page (JSON format disabled, or a reverse proxy error page).
-		return "", nil, fmt.Errorf("searxng: response was not JSON (%v) — verify format=json is enabled on the instance (search.formats in settings.yml)", err)
+		return parsed, fmt.Errorf("searxng: response was not JSON (%v) — verify format=json is enabled on the instance (search.formats in settings.yml)", err)
 	}
-	if len(parsed.Results) > topK {
-		parsed.Results = parsed.Results[:topK]
+	return parsed, nil
+}
+
+// Image URLs are rendered by the client, never fetched by the search server.
+// Accept only absolute web URLs, excluding credentials and active/local schemes.
+func searchImageURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Hostname() == "" || parsed.User != nil || parsed.Opaque != "" {
+		return ""
 	}
-	if len(parsed.Results) == 0 {
-		// Empty results + failed engines = the engines that could have answered
-		// didn't (blocked IP, rate limit, bad config) — a real failure, not a
-		// query with genuinely no matches. Report which engines failed so the
-		// admin can fix them (visible in /admin/usage error detail).
-		if failed := formatUnresponsiveEngines(parsed.UnresponsiveEngines); failed != "" {
-			return "", nil, fmt.Errorf("searxng: 0 results because its search engines did not respond: %s. The instance reached its engines but they failed — commonly the upstream engine (Google/Bing/…) blocks the server's IP, the engine is rate-limited, or it's misconfigured. Check the instance's outbound network and engine settings; try a different engine in settings.yml", failed)
-		}
-		// An explicit empty-result message keeps the model from reading an
-		// empty tool payload as a backend failure.
-		return "No web results found for this query.", nil, nil
+	if parsed.Scheme != "https" && parsed.Scheme != "http" {
+		return ""
 	}
-	citations := []llm.Citation{}
-	out := strings.Builder{}
-	for i, r := range parsed.Results {
-		snippet := cleanSnippet(r.Content)
-		citations = append(citations, llm.Citation{
-			ID: fmt.Sprintf("w_%d", i+1), Index: i + 1,
-			Title: r.Title, URL: r.URL, Snippet: snippet, Source: "web",
-		})
-		fmt.Fprintf(&out, "[%d] %s\n%s\n%s\n", i+1, r.Title, r.URL, snippet)
-		if r.PublishedAt != "" {
-			fmt.Fprintf(&out, "(date: %s)\n", r.PublishedAt)
-		}
-		out.WriteString("\n")
+	return raw
+}
+
+func writeSearchImageURLs(out *strings.Builder, imageURL, thumbnailURL string) {
+	if imageURL != "" {
+		fmt.Fprintf(out, "image_url: %s\n", imageURL)
 	}
-	return out.String(), citations, nil
+	if thumbnailURL != "" {
+		fmt.Fprintf(out, "thumbnail_url: %s\n", thumbnailURL)
+	}
 }
 
 // --- DuckDuckGo (free, keyless) -------------------------------------------
@@ -616,12 +784,16 @@ func formatDDGResults(results []ddgResult) (string, []llm.Citation, error) {
 // snippets are what make weaker models echo the raw result instead of
 // synthesising; a tight one-line snippet is easier to reason over and cheaper.
 func cleanSnippet(s string) string {
-	s = strings.Join(strings.Fields(s), " ")
+	s = normalizeSnippet(s)
 	const maxRunes = 320
 	if r := []rune(s); len(r) > maxRunes {
 		s = strings.TrimSpace(string(r[:maxRunes])) + "…"
 	}
 	return s
+}
+
+func normalizeSnippet(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // formatUnresponsiveEngines renders SearXNG's unresponsive_engines

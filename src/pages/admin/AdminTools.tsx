@@ -32,6 +32,7 @@ const OWNED_KEYS = [
   'search_base_url',
   'search_api_key',
   'search_engines',
+  'search_result_count',
   'sandbox_base_url',
   'sandbox_api_key',
   'sandbox_exec_timeout_sec',
@@ -142,13 +143,23 @@ export default function AdminTools() {
 
   async function save() {
     if (savingRef.current) return
+    const searchResultCount = draft.search_result_count ?? 5
+    if (readString('search_provider') === 'searxng' && (
+      typeof searchResultCount !== 'number' || !Number.isInteger(searchResultCount) ||
+      searchResultCount < 1 || searchResultCount > 50
+    )) {
+      toast.error(t('admin:settings.fields.searchResultCountInvalid'))
+      return
+    }
     savingRef.current = true
     setSaving(true)
     try {
       const patch: Settings = {}
       for (const k of OWNED_KEYS) {
+        if (k === 'search_result_count') continue
         if (k in draft) patch[k] = draft[k]
       }
+      if (readString('search_provider') === 'searxng') patch.search_result_count = searchResultCount
       const saved = await adminApi.updateSettings(patch)
       setDraft((current) => {
         const next = { ...current }
@@ -424,6 +435,27 @@ export default function AdminTools() {
                         value={readString('search_engines')}
                         disabled={saving}
                         onChange={(e) => setDraft({ ...draft, search_engines: e.target.value })}
+                      />
+                    </Field>
+                    <Field
+                      label={t('admin:settings.fields.searchResultCount')}
+                      htmlFor="search-result-count"
+                      hint={t('admin:settings.fields.searchResultCountHint')}
+                    >
+                      <Input
+                        id="search-result-count"
+                        type="number"
+                        min={1}
+                        max={50}
+                        step={1}
+                        className="max-w-32"
+                        value={typeof draft.search_result_count === 'number' || draft.search_result_count === ''
+                          ? draft.search_result_count : 5}
+                        disabled={saving}
+                        onChange={(e) => setDraft({
+                          ...draft,
+                          search_result_count: e.target.value === '' ? '' : Number(e.target.value),
+                        })}
                       />
                     </Field>
                   </div>

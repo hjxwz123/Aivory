@@ -256,6 +256,13 @@ func (a *citationIndexAllocator) normalize(citation Citation) Citation {
 }
 
 func citationIdentity(citation Citation) string {
+	imageURL := strings.TrimSpace(citation.ImageURL)
+	if imageURL == "" {
+		imageURL = strings.TrimSpace(citation.ThumbnailURL)
+	}
+	if imageURL != "" {
+		return "image:" + strings.TrimSpace(citation.URL) + "|" + imageURL
+	}
 	if value := strings.TrimSpace(citation.URL); value != "" {
 		return "url:" + value
 	}

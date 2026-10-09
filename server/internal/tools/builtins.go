@@ -108,19 +108,53 @@ type webSearchTool struct {
 
 func (t *webSearchTool) Name() string { return toolnames.AivoryWebSearch }
 func (t *webSearchTool) Description() string {
-	return "Search the public web for current information. Use query for one search or queries to batch several known searches into one tool call. Returns titled snippets with URLs."
+	return "Search the public web for information or existing photos. Use query for one search or queries to batch searches sharing the same filters. Returns titled snippets with source URLs, not full page bodies, preserving image_url/thumbnail_url when supplied by the backend. When categories is available, use images for photos, portraits, places, products, or visual references; image-category results are displayed automatically in chat. Ordinary search keeps thumbnail metadata without automatically displaying a gallery; set show_images=true when visuals help the user's task. Adapt filters to the topic, freshness, and source-language needs; today's news benefits from news category and day time range. Leave unnecessary filters unset. For insufficient results refine keywords, optional filters, or page within the call budget; preserve explicit constraints and verify dates."
 }
 func (t *webSearchTool) InputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"One search query. Use either query or queries."},"queries":{"type":"array","items":{"type":"string"},"maxItems":5,"description":"Up to 5 independent search queries. Prefer this when several searches are known in advance."},"top_k":{"type":"integer","minimum":1,"maximum":10,"description":"Maximum results per query."}}}`)
+	searcher := t.resolvedSearcher()
+	properties := map[string]any{
+		"query":       map[string]any{"type": "string", "description": "One search query. Use either query or queries. Use precise keywords and, where supported by the engine, site:, quoted phrases, exclusions, or filetype: to match the user's requested sources."},
+		"queries":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 5, "description": "Up to 5 independent search queries sharing the same optional filters. Use separate calls when source languages, categories, or date requirements differ."},
+		"top_k":       map[string]any{"type": "integer", "minimum": 1, "maximum": 10, "description": "Maximum results per query, default 5."},
+		"show_images": map[string]any{"type": "boolean", "description": "Display returned images/thumbnails as a chat gallery when useful. Defaults to true for categories containing images, false for ordinary searches. Image metadata is retained regardless; this does not fetch extra pages or create an image search on unsupported backends."},
+	}
+	if configurable, ok := searcher.(searcherWithOptions); ok {
+		for name, property := range configurable.searchOptionsProperties() {
+			properties[name] = property
+		}
+	}
+	if searxng, ok := searcher.(*searxngSearcher); ok && searxng.resultCount > 0 {
+		// The administrator owns this value. Accept old callers' top_k at
+		// execution time, but do not invite the model to override the setting.
+		delete(properties, "top_k")
+	}
+	schema, _ := json.Marshal(map[string]any{"type": "object", "properties": properties})
+	return schema
+}
+
+func (t *webSearchTool) resolvedSearcher() Searcher {
+	if live, ok := t.searcher.(*settingsSearcher); ok {
+		if backend := live.backend(); backend != nil {
+			return backend
+		}
+	}
+	return t.searcher
 }
 
 type webSearchInput struct {
-	Query   string   `json:"query"`
-	Queries []string `json:"queries"`
-	TopK    int      `json:"top_k"`
+	Query      string   `json:"query"`
+	Queries    []string `json:"queries"`
+	TopK       int      `json:"top_k"`
+	ShowImages *bool    `json:"show_images,omitempty"`
+	webSearchOptions
 }
 
 func (t *webSearchTool) Execute(ctx context.Context, input []byte, _ *llm.ToolContext) (string, []llm.Citation, error) {
+	// Resolve once per invocation so a batch shares one configuration, without
+	// repeated settings reads for every keyword or page.
+	active := *t
+	active.searcher = t.resolvedSearcher()
+	t = &active
 	var in webSearchInput
 	if err := json.Unmarshal(input, &in); err != nil {
 		return "", nil, &llm.ToolUserError{Message: "invalid search input"}
@@ -131,19 +165,43 @@ func (t *webSearchTool) Execute(ctx context.Context, input []byte, _ *llm.ToolCo
 	if err != nil {
 		return "", nil, err
 	}
-	if in.TopK <= 0 {
-		in.TopK = inTopK
+	if searxng, ok := t.searcher.(*searxngSearcher); ok && searxng.resultCount > 0 {
+		in.TopK = searxng.resultCount
+	} else {
+		if in.TopK <= 0 {
+			in.TopK = inTopK
+		}
+		if in.TopK > 10 {
+			return "", nil, &llm.ToolUserError{Message: "top_k must not exceed 10"}
+		}
 	}
-	if in.TopK > 10 {
-		return "", nil, &llm.ToolUserError{Message: "top_k must not exceed 10"}
+	options, err := normalizeWebSearchOptions(in.webSearchOptions)
+	if err != nil {
+		return "", nil, err
 	}
+	var output string
+	var citations []llm.Citation
 	if len(queries) == 1 {
-		return t.searchOne(ctx, queries[0], in.TopK)
+		output, citations, err = t.searchOne(ctx, queries[0], in.TopK, options)
+	} else {
+		output, citations, err = t.searchBatch(ctx, queries, in.TopK, options)
 	}
-	return t.searchBatch(ctx, queries, in.TopK)
+	showImages := false
+	for _, category := range options.Categories {
+		showImages = showImages || category == "images"
+	}
+	if in.ShowImages != nil {
+		showImages = *in.ShowImages
+	}
+	for i := range citations {
+		if citations[i].ImageURL != "" || citations[i].ThumbnailURL != "" {
+			citations[i].ImageDisplay = &showImages
+		}
+	}
+	return output, citations, err
 }
 
-func (t *webSearchTool) searchOne(ctx context.Context, query string, topK int) (string, []llm.Citation, error) {
+func (t *webSearchTool) searchOne(ctx context.Context, query string, topK int, options webSearchOptions) (string, []llm.Citation, error) {
 	if t.searcher == nil {
 		// Fallback "result" so the model can still respond gracefully.
 		fake := []llm.Citation{
@@ -151,7 +209,7 @@ func (t *webSearchTool) searchOne(ctx context.Context, query string, topK int) (
 		}
 		return "Search not yet configured. Reply based on training knowledge or ask the user to configure SEARCH_API_KEY.", fake, nil
 	}
-	return t.searcher.Search(ctx, query, topK)
+	return searchWithOptions(ctx, t.searcher, query, topK, options)
 }
 
 type webSearchBatchItem struct {
@@ -167,7 +225,7 @@ type webSearchBatchResult struct {
 	Items  []webSearchBatchItem `json:"items"`
 }
 
-func (t *webSearchTool) searchBatch(ctx context.Context, queries []string, topK int) (string, []llm.Citation, error) {
+func (t *webSearchTool) searchBatch(ctx context.Context, queries []string, topK int, options webSearchOptions) (string, []llm.Citation, error) {
 	type searchResult struct {
 		text      string
 		citations []llm.Citation
@@ -180,7 +238,7 @@ func (t *webSearchTool) searchBatch(ctx context.Context, queries []string, topK 
 				results[index].err = fmt.Errorf("batch search panicked: %v", recovered)
 			}
 		}()
-		text, citations, err := t.searchOne(ctx, queries[index], topK)
+		text, citations, err := t.searchOne(ctx, queries[index], topK, options)
 		results[index] = searchResult{text: text, citations: citations, err: err}
 	})
 
@@ -205,6 +263,11 @@ func (t *webSearchTool) searchBatch(ctx context.Context, queries []string, topK 
 		var content strings.Builder
 		for _, citation := range result.citations {
 			key := canonicalBatchURL(citation.URL)
+			if imageURL := citation.ImageURL; imageURL != "" {
+				key += "|image:" + canonicalBatchURL(imageURL)
+			} else if citation.ThumbnailURL != "" {
+				key += "|image:" + canonicalBatchURL(citation.ThumbnailURL)
+			}
 			citationIndex, exists := citationIndexes[key]
 			if !exists {
 				citationIndex = len(allCitations) + 1
@@ -214,7 +277,9 @@ func (t *webSearchTool) searchBatch(ctx context.Context, queries []string, topK 
 				citationIndexes[key] = citationIndex
 			}
 			item.CitationIndexes = append(item.CitationIndexes, citationIndex)
-			fmt.Fprintf(&content, "[%d] %s\n%s\n%s\n\n", citationIndex, citation.Title, citation.URL, citation.Snippet)
+			fmt.Fprintf(&content, "[%d] %s\n%s\n%s\n", citationIndex, citation.Title, citation.URL, citation.Snippet)
+			writeSearchImageURLs(&content, citation.ImageURL, citation.ThumbnailURL)
+			content.WriteString("\n")
 		}
 		if content.Len() > 0 {
 			item.Content = strings.TrimSpace(content.String())
@@ -284,15 +349,16 @@ func (t *webFetchTool) directAttemptTimeout() time.Duration {
 
 func (t *webFetchTool) Name() string { return "web_fetch" }
 func (t *webFetchTool) Description() string {
-	return "Fetch the main text content of web pages. Use url for one page or urls to batch several known pages into one tool call. SSRF-guarded: internal IPs are blocked."
+	return "Fetch web-page text and available image metadata (URLs, captions and source page), via direct HTML or a Jina-compatible reader fallback. Use url for one page or urls to batch pages. Set show_images=true when the page's images help the user's request to display them as a chat gallery; otherwise metadata remains available without automatically showing images. Does not download image bytes or visually inspect them. SSRF-guarded: internal IPs are blocked."
 }
 func (t *webFetchTool) InputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"url":{"type":"string","description":"One web URL. Use either url or urls."},"urls":{"type":"array","items":{"type":"string"},"maxItems":4,"description":"Up to 4 web URLs to fetch in one tool call."}}}`)
+	return json.RawMessage(`{"type":"object","properties":{"url":{"type":"string","description":"One web URL. Use either url or urls."},"urls":{"type":"array","items":{"type":"string"},"maxItems":4,"description":"Up to 4 web URLs to fetch in one tool call."},"show_images":{"type":"boolean","description":"Display available page images as a chat gallery when relevant to the user's task. Default false; image metadata is retained regardless. Only URLs/captions are extracted, not image bytes."}}}`)
 }
 
 type webFetchInput struct {
-	URL  string   `json:"url"`
-	URLs []string `json:"urls"`
+	URL        string   `json:"url"`
+	URLs       []string `json:"urls"`
+	ShowImages bool     `json:"show_images,omitempty"`
 }
 
 func (t *webFetchTool) Execute(ctx context.Context, input []byte, _ *llm.ToolContext) (string, []llm.Citation, error) {
@@ -305,44 +371,57 @@ func (t *webFetchTool) Execute(ctx context.Context, input []byte, _ *llm.ToolCon
 		return "", nil, err
 	}
 	if len(urls) == 1 {
-		text, err := t.fetchOne(ctx, urls[0])
-		return text, nil, err
+		page, err := t.fetchOne(ctx, urls[0])
+		if err != nil {
+			return "", nil, err
+		}
+		text, citations := fetchedPageOutput(page, urls[0], in.ShowImages, 0)
+		return text, citations, nil
 	}
-	return t.fetchBatch(ctx, urls)
+	return t.fetchBatch(ctx, urls, in.ShowImages)
 }
 
-func (t *webFetchTool) fetchOne(ctx context.Context, rawURL string) (string, error) {
+func (t *webFetchTool) fetchOne(ctx context.Context, rawURL string) (fetchedPage, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-		return "", &llm.ToolUserError{Message: "invalid URL"}
+		return fetchedPage{}, &llm.ToolUserError{Message: "invalid URL"}
 	}
 	// Reject non-web ports up-front (defence in depth — the dialer re-checks
 	// the resolved IP + port on every hop, defeating redirects/rebinding).
 	if p := u.Port(); p != "" && p != "80" && p != "443" {
-		return "", &llm.ToolUserError{Message: "blocked non-web port"}
+		return fetchedPage{}, &llm.ToolUserError{Message: "blocked non-web port"}
 	}
 
 	// Direct attempt first, on its own short deadline: an unreachable origin
 	// (black-holed/filtered network) otherwise hangs until the whole tool budget
 	// is spent and leaves nothing for the Jina fallback below.
 	directCtx, cancel := context.WithTimeout(ctx, t.directAttemptTimeout())
-	text, err := t.attemptDirect(directCtx, u.String())
+	page, err := t.attemptDirect(directCtx, u.String())
 	cancel()
-	if err == nil && strings.TrimSpace(text) != "" {
-		return text, nil
+	if err == nil && strings.TrimSpace(page.Text) != "" {
+		return page, nil
 	}
+	directPage, directErr := page, err
 
 	// § web_fetch Jina fallback: retry through a reader service when the origin
 	// can't be read from this server (network failure, bot-blocked 4xx, or a
 	// JS-only page that yields no text). The target is re-validated for the
 	// reader hop — see jinaTargetAllowed.
 	if webFetchJinaFallbackOn() && jinaTargetAllowed(u) {
-		text, err = t.attemptJina(ctx, u.String())
-		if err == nil && strings.TrimSpace(text) != "" {
-			return text, nil
+		page, err = t.attemptJina(ctx, u.String())
+		if err == nil && (strings.TrimSpace(page.Text) != "" || len(page.Images) > 0) {
+			return page, nil
 		}
 	}
-	return "", err
+	// An image-only origin may still be useful if the reader cannot extract
+	// text, but a decorative image must not suppress the existing JS-page fallback.
+	if directErr == nil && len(directPage.Images) > 0 {
+		return directPage, nil
+	}
+	if err == nil {
+		err = errors.New("page fetch returned no readable content")
+	}
+	return fetchedPage{}, err
 }
 
 type webFetchBatchItem struct {
@@ -357,9 +436,9 @@ type webFetchBatchResult struct {
 	Items  []webFetchBatchItem `json:"items"`
 }
 
-func (t *webFetchTool) fetchBatch(ctx context.Context, urls []string) (string, []llm.Citation, error) {
+func (t *webFetchTool) fetchBatch(ctx context.Context, urls []string, showImages bool) (string, []llm.Citation, error) {
 	type fetchResult struct {
-		text string
+		page fetchedPage
 		err  error
 	}
 	results := make([]fetchResult, len(urls))
@@ -369,15 +448,16 @@ func (t *webFetchTool) fetchBatch(ctx context.Context, urls []string) (string, [
 				results[index].err = fmt.Errorf("batch fetch panicked: %v", recovered)
 			}
 		}()
-		text, err := t.fetchOne(ctx, urls[index])
-		results[index] = fetchResult{text: text, err: err}
+		page, err := t.fetchOne(ctx, urls[index])
+		results[index] = fetchResult{page: page, err: err}
 	})
 	items := make([]webFetchBatchItem, len(urls))
 	successes := 0
 	var firstErr error
+	var citations []llm.Citation
 	for index, result := range results {
 		item := webFetchBatchItem{URL: urls[index]}
-		if result.err != nil || strings.TrimSpace(result.text) == "" {
+		if result.err != nil || (strings.TrimSpace(result.page.Text) == "" && len(result.page.Images) == 0) {
 			item.Status = "error"
 			item.Error = "page fetch failed"
 			if firstErr == nil {
@@ -389,7 +469,9 @@ func (t *webFetchTool) fetchBatch(ctx context.Context, urls []string) (string, [
 		} else {
 			successes++
 			item.Status = "success"
-			item.Content = result.text
+			var pageCitations []llm.Citation
+			item.Content, pageCitations = fetchedPageOutput(result.page, urls[index], showImages, len(citations))
+			citations = append(citations, pageCitations...)
 		}
 		items[index] = item
 	}
@@ -404,7 +486,7 @@ func (t *webFetchTool) fetchBatch(ctx context.Context, urls []string) (string, [
 	if err != nil {
 		return "", nil, err
 	}
-	return string(encoded), nil, nil
+	return string(encoded), citations, nil
 }
 
 func mergeBatchStrings(single string, multiple []string, maxItems int, requiredMessage string, key func(string) string) ([]string, error) {
@@ -491,52 +573,57 @@ func runBoundedBatch(ctx context.Context, count int, run func(index int)) {
 
 // attemptDirect fetches the origin HTML, extracts readable text, and fails on
 // transport errors, non-2xx status, or an empty extraction.
-func (t *webFetchTool) attemptDirect(ctx context.Context, rawURL string) (string, error) {
+func (t *webFetchTool) attemptDirect(ctx context.Context, rawURL string) (fetchedPage, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
 	if err != nil {
-		return "", err
+		return fetchedPage{}, err
 	}
 	req.Header.Set("user-agent", "AivoryBot/1.0")
 	resp, err := t.directClient().Do(req)
 	if err != nil {
-		return "", err
+		return fetchedPage{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("origin returned status %d", resp.StatusCode)
+		return fetchedPage{}, fmt.Errorf("origin returned status %d", resp.StatusCode)
 	}
 	// Truncate after 256 KB — keeps tokens bounded.
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, webFetchResponseBodyReadCap))
-	return capExtractedText(stripHTML(string(body))), nil
+	sourceURL := rawURL
+	if resp.Request != nil && resp.Request.URL != nil {
+		sourceURL = resp.Request.URL.String()
+	}
+	return fetchedPage{Text: capExtractedText(stripHTML(string(body))), Images: htmlPageImages(string(body), sourceURL)}, nil
 }
 
 // attemptJina reads the page through the configured reader service (default
 // https://r.jina.ai/<url>), which renders content server-side (JS included)
 // and returns extracted text/markdown instead of raw HTML.
-func (t *webFetchTool) attemptJina(ctx context.Context, target string) (string, error) {
+func (t *webFetchTool) attemptJina(ctx context.Context, target string) (fetchedPage, error) {
 	base := strings.TrimSpace(webFetchJinaBase())
 	if base == "" {
-		return "", errors.New("jina fallback disabled")
+		return fetchedPage{}, errors.New("jina fallback disabled")
 	}
 	readerURL, err := jinaReaderURL(base, target)
 	if err != nil {
-		return "", err
+		return fetchedPage{}, err
 	}
 	req, err := http.NewRequestWithContext(ctx, "GET", readerURL, nil)
 	if err != nil {
-		return "", err
+		return fetchedPage{}, err
 	}
 	req.Header.Set("user-agent", "AivoryBot/1.0")
 	resp, err := t.readerClient().Do(req)
 	if err != nil {
-		return "", err
+		return fetchedPage{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("reader returned status %d", resp.StatusCode)
+		return fetchedPage{}, fmt.Errorf("reader returned status %d", resp.StatusCode)
 	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, webFetchResponseBodyReadCap))
-	return capExtractedText(strings.TrimSpace(string(body))), nil
+	text := capExtractedText(strings.TrimSpace(string(body)))
+	return fetchedPage{Text: text, Images: markdownPageImages(string(body), target)}, nil
 }
 
 // capExtractedText clips text to the per-§4.4 character budget on a rune
@@ -608,11 +695,7 @@ var htmlEntities = strings.NewReplacer(
 // path for the web_fetch tool — boilerplate (cookie banners, sidebars,
 // "related articles") now disappears and the model sees a cleaner article.
 func stripHTML(s string) string {
-	s = scriptStyleRe.ReplaceAllString(s, " ")
-	// Prefer the main article body when present.
-	if m := readabilityContainerRe.FindStringSubmatch(s); len(m) >= 3 {
-		s = m[2]
-	}
+	s = readablePageHTML(s)
 	out := strings.Builder{}
 	inTag := false
 	for _, c := range s {

@@ -126,3 +126,14 @@ func TestHostedCitationEventsAndResultsShareGlobalIndex(t *testing.T) {
 		t.Fatalf("hosted citation indexes live=%+v result=%+v next=%+v", live, resultCopy, next)
 	}
 }
+
+func TestImageCitationIndexesDistinguishImagesOnTheSamePage(t *testing.T) {
+	allocator := &citationIndexAllocator{}
+	first := allocator.normalize(Citation{URL: "https://source.test/gallery", ImageURL: "https://images.test/one.jpg"})
+	second := allocator.normalize(Citation{URL: "https://source.test/gallery", ImageURL: "https://images.test/two.jpg"})
+	replay := allocator.normalize(Citation{URL: first.URL, ImageURL: first.ImageURL})
+	page := allocator.normalize(Citation{URL: first.URL})
+	if first.Index != 1 || second.Index != 2 || replay.Index != 1 || page.Index != 3 {
+		t.Fatalf("images and page collided: first=%+v second=%+v replay=%+v page=%+v", first, second, replay, page)
+	}
+}

@@ -1787,6 +1787,9 @@ export interface ApiCitation {
   url: string
   snippet: string
   source: 'web' | 'kb' | 'document'
+  image_url?: string
+  thumbnail_url?: string
+  image_display?: boolean
 }
 
 export interface ApiMessage {

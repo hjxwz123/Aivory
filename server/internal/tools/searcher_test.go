@@ -73,6 +73,107 @@ func TestSearxngSearchUsesSelectedEngines(t *testing.T) {
 	}
 }
 
+func TestSearxngImageSearchPreservesImagesAndSourcePages(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("categories") != "images" || r.URL.Query().Get("q") != "京都 照片" {
+			t.Errorf("unexpected image search request: %s", r.URL)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[
+			{"title":"Temple","url":"https://example.test/temple","img_src":"https://images.test/temple.jpg","thumbnail_src":"https://images.test/thumb.jpg","content":"Temple photo"},
+			{"title":"Thumbnail only","url":"https://example.test/gallery","thumbnail_src":"https://images.test/preview.jpg"},
+			{"title":"Unsafe image","url":"https://example.test/unsafe","img_src":"javascript:alert(1)","thumbnail_src":"data:image/svg+xml,unsafe"},
+			{"title":"Normal page","url":"https://example.test/page","content":"page excerpt","publishedDate":"2026-10-09"}
+		]}`))
+	}))
+	defer srv.Close()
+	searcher := &searxngSearcher{baseURL: srv.URL}
+	out, citations, err := searcher.SearchWithOptions(context.Background(), "京都 照片", 5, webSearchOptions{Categories: []string{"images"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(citations) != 4 || citations[0].URL != "https://example.test/temple" || citations[0].Source != "web" ||
+		citations[0].ImageURL != "https://images.test/temple.jpg" || citations[0].ThumbnailURL != "https://images.test/thumb.jpg" {
+		t.Fatalf("image/source metadata lost: %+v", citations)
+	}
+	if citations[1].ImageURL != "" || citations[1].ThumbnailURL != "https://images.test/preview.jpg" ||
+		citations[2].ImageURL != "" || citations[2].ThumbnailURL != "" || citations[3].ImageURL != "" {
+		t.Fatalf("optional or unsafe image metadata: %+v", citations)
+	}
+	for _, expected := range []string{"image_url: https://images.test/temple.jpg", "thumbnail_url: https://images.test/thumb.jpg", "[4] Normal page", "(date: 2026-10-09)"} {
+		if !strings.Contains(out, expected) {
+			t.Errorf("model output missing %q: %s", expected, out)
+		}
+	}
+	if strings.Contains(out, "javascript:") || strings.Contains(out, "data:image") {
+		t.Fatalf("unsafe image URL reached model output: %s", out)
+	}
+}
+
+func TestSearchImageURL(t *testing.T) {
+	for _, raw := range []string{"", "//images.test/photo.jpg", "/photo.jpg", "data:image/png;base64,eA==", "file:///tmp/photo.jpg", "javascript:alert(1)", "mailto:test@example.test", "https://user:password@images.test/photo.jpg", "https:///photo.jpg", "https://images.test/\nphoto.jpg"} {
+		if got := searchImageURL(raw); got != "" {
+			t.Errorf("accepted unsafe image URL %q: %q", raw, got)
+		}
+	}
+	if got := searchImageURL(" https://images.test/photo.jpg?width=320&token=a%2Fb "); got != "https://images.test/photo.jpg?width=320&token=a%2Fb" {
+		t.Fatalf("altered valid external image URL: %q", got)
+	}
+}
+
+func TestOrdinarySearchKeepsThumbnailsAndControlsGalleryDisplay(t *testing.T) {
+	previous := toolHTTPClient
+	toolHTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return statusTransport{code: 200, body: `{"results":[{"title":"Travel article","url":"https://source.test/article","content":"Article excerpt","thumbnail":"https://images.test/preview.jpg"}]}`}.RoundTrip(req)
+	})}
+	t.Cleanup(func() { toolHTTPClient = previous })
+	tool := &webSearchTool{searcher: &searxngSearcher{baseURL: "https://search.test"}}
+	for _, test := range []struct {
+		input string
+		show  bool
+	}{
+		{`{"query":"Kyoto travel"}`, false},
+		{`{"query":"Kyoto travel","show_images":true}`, true},
+		{`{"query":"Kyoto travel","categories":["images"]}`, true},
+		{`{"query":"Kyoto travel","categories":["images"],"show_images":false}`, false},
+		{`{"queries":["Kyoto travel","Kyoto photos"]}`, false},
+	} {
+		out, citations, err := tool.Execute(context.Background(), []byte(test.input), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(citations) != 1 || citations[0].ThumbnailURL != "https://images.test/preview.jpg" || citations[0].ImageDisplay == nil || *citations[0].ImageDisplay != test.show || !strings.Contains(out, "thumbnail_url: https://images.test/preview.jpg") {
+			t.Fatalf("thumbnail/display lost for %s: %s / %+v", test.input, out, citations)
+		}
+	}
+}
+
+func TestBraveAndSerperKeepOrdinaryResultImageMetadata(t *testing.T) {
+	previous := toolHTTPClient
+	t.Cleanup(func() { toolHTTPClient = previous })
+	for _, test := range []struct {
+		name, body string
+		searcher   Searcher
+	}{
+		{"brave", `{"web":{"results":[{"title":"Page","url":"https://source.test/page","thumbnail":{"src":"https://images.test/thumb.jpg","original":"https://images.test/original.jpg"}}]}}`, &braveSearcher{apiKey: "test"}},
+		{"serper", `{"organic":[{"title":"Page","link":"https://source.test/page","thumbnailUrl":"https://images.test/thumb.jpg","imageUrl":"https://images.test/original.jpg"}]}`, &serperSearcher{apiKey: "test"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			toolHTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				return statusTransport{code: 200, body: test.body}.RoundTrip(req)
+			})}
+			tool := &webSearchTool{searcher: test.searcher}
+			out, citations, err := tool.Execute(context.Background(), []byte(`{"query":"page"}`), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(citations) != 1 || citations[0].ImageURL != "https://images.test/original.jpg" || citations[0].ThumbnailURL != "https://images.test/thumb.jpg" || citations[0].ImageDisplay == nil || *citations[0].ImageDisplay || !strings.Contains(out, "image_url: https://images.test/original.jpg") {
+				t.Fatalf("ordinary search metadata: %s / %+v", out, citations)
+			}
+		})
+	}
+}
+
 // A 200 with empty results but failed engines is a real failure (self-hosted
 // SearXNG's engines are routinely IP-blocked / rate-limited) — surface WHICH
 // engines failed instead of a bland "no results" the model reads as a genuine

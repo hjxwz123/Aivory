@@ -524,6 +524,16 @@ func toolEvidenceKeys(name string, input []byte, output string, citations []Cita
 		appendKey(fmt.Sprintf("content:%x", digest[:]))
 	}
 	for _, citation := range citations {
+		imageURL := citation.ImageURL
+		if imageURL == "" {
+			imageURL = citation.ThumbnailURL
+		}
+		if normalized := normalizeToolURL(imageURL); normalized != "" {
+			appendKey("image:" + normalized)
+			if citation.ImageDisplay != nil && *citation.ImageDisplay {
+				appendKey("display-image:" + normalized)
+			}
+		}
 		normalized := normalizeToolURL(citation.URL)
 		if normalized != "" {
 			appendKey("url:" + normalized)
@@ -645,13 +655,58 @@ func canonicalSearchInput(object map[string]any) []byte {
 	if topK, ok := object["top_k"]; ok {
 		canonical["top_k"] = normalizeJSONValue(topK)
 	}
+	// Page/filter refinements are fresh requests, even when the keywords are
+	// unchanged. Equivalent list order/casing still coalesces into one call.
+	for _, field := range []string{"categories", "engines"} {
+		values := normalizedStringList(nil, object[field], func(value string) string {
+			return strings.ToLower(strings.Join(strings.Fields(value), " "))
+		})
+		if len(values) > 0 {
+			canonical[field] = values
+		}
+	}
+	if showImages, ok := object["show_images"].(bool); ok {
+		defaultShow := false
+		if categories, ok := canonical["categories"].([]string); ok {
+			for _, category := range categories {
+				defaultShow = defaultShow || category == "images"
+			}
+		}
+		if showImages != defaultShow {
+			canonical["show_images"] = showImages
+		}
+	}
+	for _, field := range []string{"time_range", "language"} {
+		if value, ok := object[field].(string); ok {
+			value = strings.ToLower(strings.TrimSpace(value))
+			if field == "language" {
+				value = strings.ReplaceAll(value, "_", "-")
+			}
+			if value != "" {
+				canonical[field] = value
+			}
+		}
+	}
+	for _, field := range []string{"pageno", "safesearch"} {
+		if value, ok := object[field]; ok && value != nil {
+			// An explicit default is the same request as an omitted default.
+			if number, ok := value.(json.Number); ok && number.String() == "1" {
+				continue
+			}
+			canonical[field] = normalizeJSONValue(value)
+		}
+	}
 	encoded, _ := json.Marshal(canonical)
 	return encoded
 }
 
 func canonicalFetchInput(object map[string]any) []byte {
 	urls := normalizedStringList(object["url"], object["urls"], normalizeToolURL)
-	encoded, _ := json.Marshal(map[string]any{"urls": urls})
+	canonical := map[string]any{"urls": urls}
+	if showImages, _ := object["show_images"].(bool); showImages {
+		canonical["show_images"] = true
+	}
+	encoded, _ := json.Marshal(canonical)
 	return encoded
 }
 

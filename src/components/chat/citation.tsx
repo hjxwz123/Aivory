@@ -11,6 +11,7 @@ import {
   isDocumentCitation,
   isKnowledgeBaseCitation,
 } from '@/lib/citations'
+import { ImageSearchGallery } from './image-search-gallery'
 
 interface CitationChipProps {
   citation: Citation
@@ -131,6 +132,7 @@ export function CitationList({ citations, onOpenDocument }: CitationListProps) {
   const orderedCitations = citationsInDisplayOrder(citations)
   return (
     <div className="mt-5 pt-3.5">
+      <ImageSearchGallery citations={orderedCitations} />
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}

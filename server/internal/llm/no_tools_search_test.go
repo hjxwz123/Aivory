@@ -13,6 +13,33 @@ import (
 	"aivory/server/internal/store"
 )
 
+func TestSearchFilterGuidanceAcrossModesAndLocales(t *testing.T) {
+	for _, locale := range []string{"en", "zh", "zh-Hant", "ja", "fr"} {
+		for _, mode := range []string{"native", "prompt", "search-only"} {
+			t.Run(locale+"/"+mode, func(t *testing.T) {
+				opts := systemPromptOpts{ModelLabel: "X", Locale: locale, ToolMode: mode, ToolNames: []string{"aivory_web_search"}}
+				if mode == "search-only" {
+					opts.ToolMode, opts.SearchOnly = "native", true
+				}
+				prompt := composeSystemPrompt(opts)
+				for _, field := range []string{"categories", "time_range", "language", "pageno", `categories=["images"]`, "show_images", "web_fetch"} {
+					if !strings.Contains(prompt, field) {
+						t.Errorf("prompt lacks adaptive guidance for %s", field)
+					}
+				}
+			})
+		}
+	}
+	withoutSearch := composeSystemPrompt(systemPromptOpts{ModelLabel: "X", ToolMode: "native", ToolNames: []string{"python_execute"}})
+	if strings.Contains(withoutSearch, "time_range") {
+		t.Fatal("search guidance leaked into a turn without search")
+	}
+	withFetch := composeSystemPrompt(systemPromptOpts{ModelLabel: "X", ToolMode: "native", ToolNames: []string{"web_fetch"}})
+	if !strings.Contains(withFetch, "show_images=true") {
+		t.Fatal("page-only tool set lost image display guidance")
+	}
+}
+
 // §4.13-B: forcing tool_mode=none drops the whole tool-guidance segment from
 // the system prompt (the same gate the orchestrator relies on when NoTools is
 // set), while a normal turn with tools keeps it.

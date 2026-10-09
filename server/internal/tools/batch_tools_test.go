@@ -102,6 +102,30 @@ func TestWebSearchBatchPreservesPartialSuccess(t *testing.T) {
 	}
 }
 
+func TestWebSearchBatchKeepsDistinctImagesFromTheSamePage(t *testing.T) {
+	searcher := &batchTestSearcher{search: func(query string) (string, []llm.Citation, error) {
+		return "images", []llm.Citation{
+			{Index: 1, URL: "https://example.test/gallery", ImageURL: "https://images.test/shared.jpg", ThumbnailURL: "https://images.test/thumb.jpg"},
+			{Index: 2, URL: "https://example.test/gallery", ImageURL: "https://images.test/" + query + ".jpg"},
+		}, nil
+	}}
+	tool := &webSearchTool{searcher: searcher}
+	out, citations, err := tool.Execute(context.Background(), []byte(`{"queries":["a","b"]}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(citations) != 3 || citations[0].ThumbnailURL != "https://images.test/thumb.jpg" || citations[1].ImageURL != "https://images.test/a.jpg" || citations[2].ImageURL != "https://images.test/b.jpg" {
+		t.Fatalf("batch dropped images or did not deduplicate identical images: %+v", citations)
+	}
+	var result webSearchBatchResult
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Items[1].Content, "[3]") || !strings.Contains(result.Items[1].Content, "image_url: https://images.test/b.jpg") || !strings.Contains(result.Items[0].Content, "thumbnail_url: https://images.test/thumb.jpg") {
+		t.Fatalf("model batch lost image metadata or citation indexes: %s", out)
+	}
+}
+
 func TestWebSearchBatchRejectsOversizedInput(t *testing.T) {
 	searcher := &batchTestSearcher{search: func(string) (string, []llm.Citation, error) {
 		return "unexpected", nil, nil

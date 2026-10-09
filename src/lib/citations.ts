@@ -1,5 +1,20 @@
 import type { Citation } from '@/types/chat'
 import { apiUrl } from '@/api/client'
+import { safeHref } from '@/lib/utils'
+
+/** Search media must be absolute web URLs, including on the bundled desktop. */
+export function safeSearchImageUrl(value?: string): string | undefined {
+  const safe = safeHref(value)
+  if (!safe) return undefined
+  try {
+    const url = new URL(safe)
+    return (url.protocol === 'https:' || url.protocol === 'http:') && !url.username && !url.password
+      ? safe
+      : undefined
+  } catch {
+    return undefined
+  }
+}
 
 const DOCUMENT_CITATION_PREFIX = 'doc://'
 const KNOWLEDGE_BASE_CITATION_PREFIX = 'kbdoc://'

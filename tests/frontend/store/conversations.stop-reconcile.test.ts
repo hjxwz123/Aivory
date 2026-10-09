@@ -992,6 +992,26 @@ describe('stopped turn optimistic-id reconciliation', () => {
     })
   })
 
+  it('preserves image-search citations during streaming and historical message mapping', async () => {
+    const citation = {
+      id: 'w_1', index: 1, title: 'Kyoto temple', url: 'https://source.test/gallery', snippet: 'Temple photo', source: 'web' as const,
+      image_url: 'https://images.test/temple.jpg', thumbnail_url: 'https://images.test/thumbnail.jpg',
+      image_display: false,
+    }
+    const expected = { imageUrl: citation.image_url, thumbnailUrl: citation.thumbnail_url, imageDisplay: false, domain: 'source.test', url: citation.url }
+    apiMocks.streamSSE.mockReturnValue(events(
+      { type: 'message_start', message_id: 'msg_image_search' },
+      { type: 'citation', citation },
+      { type: 'error', message: 'Interrupted' },
+    ))
+    await useConversations.getState().sendMessage({ conversationId: 'conv_stop', text: 'Find photos of Kyoto', modelId: 'model_1', toolMode: 'enabled' })
+    const message = useConversations.getState().conversations[0].messages.at(-1)
+    expect(message?.citations).toEqual([expect.objectContaining(expected)])
+    const saved = apiMessage('msg_image_search', 'assistant', '', 'complete', 'Photos [1]')
+    saved.citations = [citation]
+    expect(toLocalMessage(saved).citations).toEqual([expect.objectContaining(expected)])
+  })
+
   it('keeps identical pre-tool text from repeating the preceding thought live or after reload', async () => {
     const thought = 'I will inspect the animation before changing the layout.'
     apiMocks.streamSSE.mockReturnValue(

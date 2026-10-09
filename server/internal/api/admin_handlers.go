@@ -1601,7 +1601,7 @@ var settingsKeys = []string{
 	// placeholder.
 	// search_engines is a comma/space-separated list of SearXNG engine names or
 	// shortcuts. Empty means that SearXNG chooses its enabled defaults.
-	"search_provider", "search_base_url", "search_api_key", "search_engines",
+	"search_provider", "search_base_url", "search_api_key", "search_engines", "search_result_count",
 	// §4.6 upload safety — extension allowlist. Stored as a single
 	// comma-separated string (e.g. "pdf,docx,txt,png,jpg"). Empty string means
 	// "use the safe default allowlist" (see api.defaultUploadExtensions).
@@ -2079,6 +2079,12 @@ func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.R
 					return 0, errInvalidInput
 				}
 				v, _ = json.Marshal(enabled)
+			case "search_result_count":
+				var count int
+				if json.Unmarshal(v, &count) != nil || count < 1 || count > 50 {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(count)
 			case "search_engines":
 				var raw string
 				if json.Unmarshal(v, &raw) != nil {

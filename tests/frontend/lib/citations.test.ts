@@ -6,6 +6,7 @@ import {
   documentIdFromCitationUrl,
   isDocumentCitation,
   isKnowledgeBaseCitation,
+  safeSearchImageUrl,
 } from '@/lib/citations'
 import { linkifyCitations } from '@/lib/markdown'
 
@@ -73,5 +74,15 @@ describe('knowledge-base citations', () => {
 
     expect(openable).toContain('button type="button" data-doc-citation-index="1"')
     expect(staticMarker).not.toContain('<button')
+  })
+})
+
+describe('search image URL guard', () => {
+  it('allows external HTTP(S) URLs without credentials and rejects other sources', () => {
+    expect(safeSearchImageUrl(' https://images.test/photo.jpg?size=320 ')).toBe('https://images.test/photo.jpg?size=320')
+    expect(safeSearchImageUrl('http://images.test/photo.jpg')).toBe('http://images.test/photo.jpg')
+    for (const url of [undefined, '', '/api/files/image', '//images.test/photo.jpg', 'data:image/png,aaa', 'javascript:alert(1)', 'file:///photo.jpg', 'mailto:a@b.test', 'https://user:password@images.test/photo.jpg']) {
+      expect(safeSearchImageUrl(url)).toBeUndefined()
+    }
   })
 })

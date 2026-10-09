@@ -82,6 +82,9 @@ export interface Citation {
   url: string
   domain: string
   snippet?: string
+  imageUrl?: string
+  thumbnailUrl?: string
+  imageDisplay?: boolean
   /** Origin of the citation: 'web' for an external page, 'kb' for an attached
    *  knowledge base, and 'document' for a file uploaded directly to a chat. */
   source?: 'web' | 'kb' | 'document'

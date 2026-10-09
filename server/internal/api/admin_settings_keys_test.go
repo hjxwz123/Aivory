@@ -200,6 +200,45 @@ func TestSearchEngineSettingNormalizesAndRejectsUnsafeNames(t *testing.T) {
 	}
 }
 
+func TestSearchResultCountSettingPersistsAndRejectsInvalidValues(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "search-result-count-settings.db"))
+	defer db.Close()
+	d := Deps{DB: db}
+	patch := func(value string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPatch, "/api/admin/settings", strings.NewReader(`{"search_result_count":`+value+`}`))
+		rec := httptest.NewRecorder()
+		adminSettingsSet(d, rec, req)
+		return rec
+	}
+	for _, value := range []string{"1", "20", "50"} {
+		if rec := patch(value); rec.Code != http.StatusOK {
+			t.Fatalf("valid count %s: status=%d body=%s", value, rec.Code, rec.Body.String())
+		}
+		var stored string
+		if err := db.QueryRow(`SELECT value FROM settings WHERE key=?`, "search_result_count").Scan(&stored); err != nil || stored != value {
+			t.Fatalf("count not persisted: stored=%q err=%v", stored, err)
+		}
+	}
+	for _, value := range []string{"0", "-1", "51", "1.5", `"20"`, `""`, "true", "[]"} {
+		if rec := patch(value); rec.Code != http.StatusBadRequest {
+			t.Fatalf("invalid count %s: status=%d body=%s", value, rec.Code, rec.Body.String())
+		}
+		var stored string
+		if err := db.QueryRow(`SELECT value FROM settings WHERE key=?`, "search_result_count").Scan(&stored); err != nil || stored != "50" {
+			t.Fatalf("invalid count changed setting: stored=%q err=%v", stored, err)
+		}
+	}
+	// Like all optional settings, null in a PATCH leaves the saved value alone.
+	if rec := patch("null"); rec.Code != http.StatusOK {
+		t.Fatalf("null no-op status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var stored string
+	if err := db.QueryRow(`SELECT value FROM settings WHERE key=?`, "search_result_count").Scan(&stored); err != nil || stored != "50" {
+		t.Fatalf("null changed setting: stored=%q err=%v", stored, err)
+	}
+}
+
 func TestRerankSettingsSeedDisabled(t *testing.T) {
 	db := openMigrated(t, filepath.Join(t.TempDir(), "rerank-seed-settings.db"))
 	defer db.Close()

@@ -43,11 +43,35 @@ func newSettingsSearcher(db *sql.DB, provider, apiKey, baseURL string) *settings
 // when nothing is configured anywhere. Errors from the backend bubble up
 // untouched.
 func (s *settingsSearcher) Search(ctx context.Context, query string, topK int) (string, []llm.Citation, error) {
+	return s.SearchWithOptions(ctx, query, topK, webSearchOptions{})
+}
+
+func (s *settingsSearcher) backend() Searcher {
 	provider := s.settingString("search_provider", s.fallbackPv)
 	baseURL := s.settingString("search_base_url", s.fallbackURL)
 	apiKey := s.settingString("search_api_key", s.fallbackKey)
 	engines := parseSearchEngines(s.settingString("search_engines", ""))
-	b := newSearcher(provider, apiKey, baseURL, engines)
+	backend := newSearcher(provider, apiKey, baseURL, engines)
+	if searxng, ok := backend.(*searxngSearcher); ok && s.db != nil {
+		if raw, err := store.GetSetting(s.db, "search_result_count"); err == nil {
+			var count int
+			if json.Unmarshal(raw, &count) == nil && count >= 1 && count <= 50 {
+				searxng.resultCount = count
+			}
+		}
+	}
+	return backend
+}
+
+func (s *settingsSearcher) searchOptionsProperties() map[string]any {
+	if configurable, ok := s.backend().(searcherWithOptions); ok {
+		return configurable.searchOptionsProperties()
+	}
+	return nil
+}
+
+func (s *settingsSearcher) SearchWithOptions(ctx context.Context, query string, topK int, options webSearchOptions) (string, []llm.Citation, error) {
+	b := s.backend()
 	if b == nil {
 		// Mirror the original webSearchTool fallback so the model sees a
 		// consistent "search not configured" reply regardless of which leg of
@@ -60,7 +84,7 @@ func (s *settingsSearcher) Search(ctx context.Context, query string, topK int) (
 				Source:  "web",
 			}}, nil
 	}
-	return b.Search(ctx, query, topK)
+	return searchWithOptions(ctx, b, query, topK, options)
 }
 
 func (s *settingsSearcher) settingString(key, fallback string) string {

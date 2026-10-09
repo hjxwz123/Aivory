@@ -1012,6 +1012,15 @@ func composeSystemPrompt(o systemPromptOpts) string {
 			}
 		}
 
+		if has[toolnames.AivoryWebSearch] {
+			// Applies to native, prompt, and search-only modes. The live tool
+			// schema decides which provider-specific filters are available.
+			b.WriteString(l.toolSearchFilters)
+		}
+		if has[toolnames.AivoryWebSearch] || has["web_fetch"] {
+			b.WriteString(l.toolSearchImages)
+		}
+
 		// §4.5.1 "quality watershed": when the user asks for a downloadable
 		// document (PDF / PPT / DOCX / XLSX), the model MUST follow the DocGen
 		// recipes rather than improvise. Without them, the output looks like

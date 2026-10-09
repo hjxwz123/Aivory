@@ -2286,6 +2286,9 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
               domain: safeDomain(c.url),
               snippet: c.snippet,
               source: c.source,
+              imageUrl: c.image_url,
+              thumbnailUrl: c.thumbnail_url,
+              imageDisplay: c.image_display,
             }
             lastCitations = [...lastCitations, cit]
             updateAssistant(set, input.conversationId, serverAssistantId, (m) => ({
@@ -2644,7 +2647,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
             const c = ev.citation
             lastCitations = [
               ...lastCitations,
-              { id: c.id, index: c.index, title: c.title, url: c.url, domain: safeDomain(c.url), snippet: c.snippet, source: c.source },
+              { id: c.id, index: c.index, title: c.title, url: c.url, domain: safeDomain(c.url), snippet: c.snippet, source: c.source, imageUrl: c.image_url, thumbnailUrl: c.thumbnail_url, imageDisplay: c.image_display },
             ]
             updateAssistant(set, conversationId, serverAssistantId, (m) => ({
               ...m,
@@ -3191,7 +3194,7 @@ function applyReplayEvent(
       const c = ev.citation
       state.lastCitations = [
         ...state.lastCitations,
-        { id: c.id, index: c.index, title: c.title, url: c.url, domain: safeDomain(c.url), snippet: c.snippet, source: c.source },
+        { id: c.id, index: c.index, title: c.title, url: c.url, domain: safeDomain(c.url), snippet: c.snippet, source: c.source, imageUrl: c.image_url, thumbnailUrl: c.thumbnail_url, imageDisplay: c.image_display },
       ]
       updateAssistant(set, conversationId, assistantId, (m) => ({ ...m, citations: state.lastCitations }))
       break
@@ -3566,6 +3569,9 @@ export function toLocalMessage(m: ApiMessage): Message {
             domain: safeDomain(c.url),
             snippet: c.snippet,
             source: c.source,
+            imageUrl: c.image_url,
+            thumbnailUrl: c.thumbnail_url,
+            imageDisplay: c.image_display,
           }))
         : undefined,
     attachments:
