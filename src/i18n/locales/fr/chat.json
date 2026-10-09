@@ -1200,10 +1200,11 @@
     }
   },
   "generative": {
+    "loading": "Chargement de la visualisation…",
+    "failed": "Cette visualisation n’a pas pu être affichée.",
+    "retry": "Recharger",
     "generating": "Préparation de la visualisation…",
-    "invalid": "Cette visualisation ne peut pas être affichée. Le code source est disponible ci-dessous.",
-    "source": "Voir le code",
-    "hideSource": "Masquer le code",
+    "invalid": "Cette visualisation ne peut pas être affichée.",
     "interactive": "Réponse interactive",
     "chart": "Graphique",
     "showData": "Voir les données",

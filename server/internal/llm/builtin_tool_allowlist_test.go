@@ -913,13 +913,19 @@ func TestFallbackToolRunnerUsesFallbackModelContext(t *testing.T) {
 		orch: orchestrator,
 		ctx: &ToolContext{
 			ModelID: "primary-model", BuiltinTools: map[string]bool{"use_skill": true},
-			AdminSkillIDs: map[string]bool{"allowed-skill": true},
+			AdminSkillIDs:          map[string]bool{"allowed-skill": true},
+			PreloadedAdminSkillIDs: map[string]bool{"primary-visual": true},
 		},
 	}
 	runner := toolDefAllowlistRunner{next: primary, allowed: map[string]bool{"use_skill": true}}
 	fallbackRunner := toolRunnerForModelRequest(
 		runner, "fallback-model", []ToolDef{{Name: "use_skill"}}, map[string]bool{"use_skill": true},
+		&systemPromptOpts{PresentationSkillsAllowed: true, PresentationSkills: []SkillFull{{ID: "fallback-visual"}}},
 	)
+	fallbackContext := fallbackRunner.(toolDefAllowlistRunner).next.(*orchToolRunner).ctx
+	if fallbackContext.PreloadedAdminSkillIDs["primary-visual"] || !fallbackContext.PreloadedAdminSkillIDs["fallback-visual"] {
+		t.Fatal("fallback retained stale presentation deduplication markers")
+	}
 	if _, _, err := fallbackRunner.Run(context.Background(), "use_skill", nil); err != nil {
 		t.Fatal(err)
 	}

@@ -148,3 +148,27 @@ func TestExplicitSkillToolDoesNotLoadInstructionsTwice(t *testing.T) {
 		t.Fatalf("disabled skill bypass=%q err=%v", out, err)
 	}
 }
+
+func TestPreloadedPresentationSkillToolDoesNotLoadInstructionsTwice(t *testing.T) {
+	db := openToolsTestDB(t)
+	if _, err := db.Exec(`INSERT INTO channels(id,name,type) VALUES('visual-channel','Channel','openai');
+		INSERT INTO models(id,channel_id,request_id,label) VALUES('visual-model','visual-channel','model','Model');
+		INSERT INTO skills(id,name,description,instructions,assets,enabled) VALUES('visual-skill','generative-ui','Visual answers','PRELOADED_VISUAL_BODY','[]',1);
+		INSERT INTO model_skills(model_id,skill_id) VALUES('visual-model','visual-skill')`); err != nil {
+		t.Fatal(err)
+	}
+	tool := &useSkillTool{db: db}
+	tc := &llm.ToolContext{ModelID: "visual-model", PreloadedAdminSkillIDs: map[string]bool{"visual-skill": true}}
+	input := []byte(`{"name":"generative-ui"}`)
+	out, _, err := tool.Execute(t.Context(), input, tc)
+	if err != nil || strings.Contains(out, "PRELOADED_VISUAL_BODY") || !strings.Contains(out, "already applied") {
+		t.Fatalf("output=%q err=%v", out, err)
+	}
+	if _, err := db.Exec(`DELETE FROM model_skills WHERE model_id='visual-model'`); err != nil {
+		t.Fatal(err)
+	}
+	out, _, err = tool.Execute(t.Context(), input, tc)
+	if err != nil || strings.Contains(out, "already applied") {
+		t.Fatalf("preload marker bypassed current model bindings: output=%q err=%v", out, err)
+	}
+}

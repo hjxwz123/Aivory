@@ -1208,10 +1208,11 @@
     }
   },
   "generative": {
+    "loading": "Loading visualization…",
+    "failed": "This visualization could not be displayed.",
+    "retry": "Reload",
     "generating": "Preparing visualization…",
-    "invalid": "This visualization could not be rendered. The source is available below.",
-    "source": "View source",
-    "hideSource": "Hide source",
+    "invalid": "This visualization could not be rendered.",
     "interactive": "Interactive response",
     "chart": "Chart",
     "showData": "View data",

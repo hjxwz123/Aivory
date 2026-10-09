@@ -1,6 +1,31 @@
 # Generative UI
 
-Use a visualization when it helps the user's task: comparing data, exploring a scenario, showing a process, or using a small calculator. Choose normal prose for simple answers. Never invent numerical data. Match the user's language. Explain assumptions briefly outside the visualization.
+Choose the answer's presentation proactively, using the whole conversation, supplied data, and the answer you are about to give. Users do not need to say "visualize", "chart", "interactive", or name this Skill. A vague request can still warrant a visual answer if it makes the substance easier to understand, compare, explore, or act on. When a visualization clearly helps, include it directly rather than asking whether the user wants one.
+
+## Decide before answering
+
+1. Identify the user's actual task from the conversation, not just keywords in the latest message. "What do you think?", "Help me make sense of this", "How should I arrange it?", or "What happens if I change this?" may refer to data, options, a plan, or a formula in earlier messages.
+2. Ask whether a small visual or interactive view would materially reduce reading effort, reveal a pattern, clarify a sequence, or let the user explore alternatives. If yes, use the smallest appropriate component alongside a brief direct answer. Do not wait for an explicit visualization request.
+3. Prefer the presets for comparisons and organized information. Use inline HTML when adjusting inputs, manipulating a diagram, or exploring cause and effect adds value that a static component cannot provide.
+4. Use prose when a short explanation already answers the question, or when visualization would mainly decorate the answer. Respect requests for plain text, code only, a specific format, or no visualization. Never replace an essential explanation or requested deliverable with an interface.
+
+### Match the substance to a component
+
+- Several comparable choices or repeated attributes: a compact table, even when the user only asks "Which should I choose?". Explain the recommendation outside it. Tabs are useful for substantial alternative scenarios, not two short sentences.
+- Reliable values across periods or categories: a line or bar chart with meaningful units; metrics only for genuinely useful totals or headline values. A request to "look at these numbers" is sufficient. Charts require actual data from the conversation, tools, or an explicit formula, not plausible-looking invented values.
+- A plan, workflow, tutorial, or ordered troubleshooting sequence: steps. Use tabs or accordions when substantial independent sections would otherwise be difficult to scan. Do not manufacture a timeline or extra sections to fill a component.
+- Changing inputs can answer "what if": a small inline HTML calculator or simulation with labeled inputs, units, stated assumptions, and immediate results. Use neutral editable example values only when they are clearly marked as examples; ask for missing critical facts when a real answer depends on them.
+- An explanation of a spatial, geometric, or mechanical relationship: a compact interactive diagram if manipulation helps understanding. A definition or short conceptual answer usually needs only prose.
+
+### Implicit-intent examples
+
+- Earlier message: monthly token counts. Latest request: "Does this look normal?" → explain the change and include a trend chart. Do not claim statistical normality without a relevant baseline.
+- Earlier message: two deployment options and costs. Latest request: "Help me decide." → compare actual attributes in a table and give a recommendation.
+- Request: "I have two weeks to prepare; how do I get started?" → show a concise sequence of steps based on the stated goal, with prose for key priorities.
+- Earlier message: loan principal, rate, and term. Latest request: "What if I repay earlier?" → offer an inline repayment calculator using an explicit formula and assumptions.
+- Request: "Thanks", a one-line factual question, translation, or "just give me the code" → follow the requested ordinary response format.
+
+Keep the first useful conclusion visible before a larger visualization. Usually use one small visualization per answer, not a dashboard of every supported component. Match the user's language. Explain uncertainty and assumptions; do not silently turn qualitative judgments into numerical scores. Do not announce that you are invoking a Skill or ask the user to learn the output protocol.
 
 ## Preset UI (preferred)
 
@@ -40,4 +65,4 @@ Example:
 <script>const quantity=document.getElementById('quantity');const result=document.getElementById('result');function update(){result.textContent='Total: $'+(Number(quantity.value)*12)}quantity.addEventListener('input',update);update()</script>
 ```
 
-Do not wrap these fences in another code block. Do not use ordinary `json` or `html` fences when the user asks for inline generative UI. Do not expose protocol details in the rendered title or body. The user can inspect source separately.
+Do not wrap these fences in another code block. When you choose a visual or interactive answer, use `aivory-ui` or `aivory-html` even if the user did not explicitly request it; ordinary `json` or `html` will display code rather than the intended inline interface. Do not expose protocol details in the rendered title or body.

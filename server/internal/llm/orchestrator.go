@@ -150,6 +150,8 @@ type ToolContext struct {
 	AdminSkillIDs map[string]bool
 	// Explicit instructions already applied once to this turn (catalog IDs).
 	SelectedAdminSkillIDs map[string]bool
+	// Presentation instructions already applied in the current model request.
+	PreloadedAdminSkillIDs map[string]bool
 	// ImageModelID is the user's pre-selected image model (§4.12-B).
 	ImageModelID string
 	// DirectImageTurn marks the internal image-model pipeline's call to
@@ -1843,7 +1845,7 @@ func (o *Orchestrator) streamWithFallback(
 	// Single attempt, no watchdog → no chaining. Streams into the SAME onEvent,
 	// so the frontend just keeps filling the existing (empty) message.
 	fallbackCtx := contextWithProviderRequestChannelIDs(ctx, fbReq.Model.ChannelID, fbReq.Model.FallbackChannelID)
-	return fbProvider.Stream(fallbackCtx, fbReq, toolRunnerForModelRequest(runner, fbID, fbReq.Tools, fbReq.SystemTools), onEvent)
+	return fbProvider.Stream(fallbackCtx, fbReq, toolRunnerForModelRequest(runner, fbID, fbReq.Tools, fbReq.SystemTools, fbReq.SystemPromptOptions), onEvent)
 }
 
 // buildFallbackRequest clones the in-flight request but swaps in the fallback
@@ -2083,17 +2085,27 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 		// primary/global/per-turn policy that excluded use_skill.
 		fallbackOpts.Skills = nil
 		fallbackOpts.SkillsFull = nil
+		fallbackOpts.PresentationSkills = nil
 		selectedTools := selectedToolIDSet(base.SelectedToolIDs, base.SelectedToolsConfigured)
-		fallbackAllowsSkills := !req.SearchOnly && toolAccessPolicyAllows(fallbackAccessPolicy, "builtin:use_skill")
+		fallbackAllowsSkills := toolAccessPolicyAllows(fallbackAccessPolicy, "builtin:use_skill")
 		if base.SelectedToolsConfigured {
 			fallbackAllowsSkills = fallbackAllowsSkills && selectedTools["builtin:use_skill"]
 		} else {
 			fallbackAllowsSkills = fallbackAllowsSkills && (fallbackBuiltinTools == nil || fallbackBuiltinTools["use_skill"])
 		}
-		if fallbackOpts.SkillsAllowed && fallbackAllowsSkills && !globalDisabledTools["use_skill"] {
-			fallbackOpts.Skills, fallbackOpts.SkillsFull = loadEnabledModelSkills(ctx, o.db, m.ID, fallbackAccessPolicy, fallbackSelectedSkills)
+		fallbackAllowsSkills = fallbackAllowsSkills && !globalDisabledTools["use_skill"]
+		fallbackOpts.SkillsAllowed = fallbackOpts.SkillsAllowed && !req.SearchOnly && fallbackAllowsSkills
+		fallbackOpts.PresentationSkillsAllowed = fallbackOpts.PresentationSkillsAllowed && fallbackAllowsSkills &&
+			fallbackToolMode != "none" && toolCallingAllowed(fallbackAccessPolicy)
+		if fallbackOpts.SkillsAllowed || fallbackOpts.PresentationSkillsAllowed {
+			indexes, full, presentation := loadEnabledModelSkills(ctx, o.db, m.ID, fallbackAccessPolicy, fallbackSelectedSkills)
+			if fallbackOpts.SkillsAllowed {
+				fallbackOpts.Skills, fallbackOpts.SkillsFull = indexes, full
+			}
+			if fallbackOpts.PresentationSkillsAllowed {
+				fallbackOpts.PresentationSkills = presentation
+			}
 		}
-		fallbackOpts.SkillsAllowed = fallbackOpts.SkillsAllowed && fallbackAllowsSkills && !globalDisabledTools["use_skill"]
 
 		req.SystemPrompt = composeSystemPrompt(fallbackOpts)
 		req.SystemPromptOptions = &fallbackOpts
@@ -3274,6 +3286,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// request.
 	availableSkillIdx := []SkillIndex{}
 	availableSkillFull := []SkillFull{}
+	presentationSkills := []SkillFull{}
 	skillsAllowed := !globalDisabledTools["use_skill"] &&
 		toolAccessPolicyAllows(req.ToolAccessPolicy, "builtin:use_skill")
 	if req.SelectedToolsConfigured {
@@ -3282,7 +3295,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		skillsAllowed = skillsAllowed && (builtinTools == nil || builtinTools["use_skill"])
 	}
 	if skillsAllowed {
-		availableSkillIdx, availableSkillFull = loadEnabledModelSkills(ctx, o.db, model.ID, req.ToolAccessPolicy, selectedUserSkills)
+		availableSkillIdx, availableSkillFull, presentationSkills = loadEnabledModelSkills(ctx, o.db, model.ID, req.ToolAccessPolicy, selectedUserSkills)
 	}
 
 	// 5. Resolve tools for this model BEFORE composing the system prompt so the
@@ -3301,6 +3314,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		toolMode = "none"
 		req.NoTools = true
 	}
+	presentationSkillsAllowed := skillsAllowed && req.ToolMode != ToolModeDisabled && !req.NoTools && toolMode != "none"
 	hostedToolNames := []string(nil)
 	hostedToolRequests := []json.RawMessage(nil)
 	toolDefs := []ToolDef{}
@@ -3603,8 +3617,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// 8. Skills for this model (§4.17). Native models get the slim index plus
 	//    the use_skill tool (progressive disclosure); prompt/none models can't
 	//    call a tool, so the full instructions are injected inline.
-	//    Search-only turns do not load administrator skill instructions or
-	//    advertise use_skill; RAG and spreadsheet previews remain available.
+	//    Automatic search-only turns retain permitted presentation instructions;
+	//    ordinary tool skills remain withheld.
 	skillIdx := []SkillIndex{}
 	skillFull := []SkillFull{}
 	if !req.NoTools && !searchOnly {
@@ -3746,26 +3760,28 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		promptModelLabel = fastModeLabel(req.Locale)
 	}
 	systemOpts := systemPromptOpts{
-		ModelSystem:         model.SystemPrompt,
-		ModelLabel:          promptModelLabel,
-		Locale:              req.Locale,
-		ToolMode:            toolMode,
-		SearchOnly:          searchOnly,
-		ForceWebSearch:      searchOnly && req.ForceWebSearch,
-		ToolNames:           toolNames,
-		ProjectName:         projectName,
-		ProjectInstructions: projectInstructions,
-		Skills:              skillIdx,
-		SkillsFull:          skillFull,
-		SelectedSkillNames:  selectedSkillNames(selectedUserSkills),
-		Memories:            activeMemories,
-		ProjectFiles:        projectFiles,
-		SandboxFiles:        sandboxFilesForPrompt,
-		Persona:             persona,
-		InlineQuote:         conv.InlineQuote,
-		InlineSource:        inlineSource,
-		SkillToolAvailable:  skillToolAvailable,
-		SkillsAllowed:       skillsAllowed && !req.NoTools && !searchOnly,
+		ModelSystem:               model.SystemPrompt,
+		ModelLabel:                promptModelLabel,
+		Locale:                    req.Locale,
+		ToolMode:                  toolMode,
+		SearchOnly:                searchOnly,
+		ForceWebSearch:            searchOnly && req.ForceWebSearch,
+		ToolNames:                 toolNames,
+		ProjectName:               projectName,
+		ProjectInstructions:       projectInstructions,
+		Skills:                    skillIdx,
+		SkillsFull:                skillFull,
+		PresentationSkills:        presentationSkills,
+		SelectedSkillNames:        selectedSkillNames(selectedUserSkills),
+		Memories:                  activeMemories,
+		ProjectFiles:              projectFiles,
+		SandboxFiles:              sandboxFilesForPrompt,
+		Persona:                   persona,
+		InlineQuote:               conv.InlineQuote,
+		InlineSource:              inlineSource,
+		SkillToolAvailable:        skillToolAvailable,
+		SkillsAllowed:             skillsAllowed && !req.NoTools && !searchOnly,
+		PresentationSkillsAllowed: presentationSkillsAllowed,
 		SkillMode: func() string {
 			if req.ToolAccessPolicy == nil {
 				return ""
@@ -4131,10 +4147,11 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			// includes model policy, global disabled_tools, fast local-tool limits,
 			// official/no-tools state, and prevents an unsolicited provider call from
 			// bypassing declaration filtering.
-			BuiltinTools:          toolDefNameSet(toolDefs),
-			SystemTools:           toolDefNameSet(systemToolDefs),
-			AdminSkillIDs:         adminSkillIDSet(req.ToolAccessPolicy),
-			SelectedAdminSkillIDs: selectedAdminSkillIDs(selectedUserSkills),
+			BuiltinTools:           toolDefNameSet(toolDefs),
+			SystemTools:            toolDefNameSet(systemToolDefs),
+			AdminSkillIDs:          adminSkillIDSet(req.ToolAccessPolicy),
+			SelectedAdminSkillIDs:  selectedAdminSkillIDs(selectedUserSkills),
+			PreloadedAdminSkillIDs: preloadedSkillIDs(&systemOpts),
 			citationIndexes: func() *citationIndexAllocator {
 				if !hasAttachedKnowledgeBase {
 					return nil

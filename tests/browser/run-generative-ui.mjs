@@ -60,6 +60,30 @@ try {
   await inner('#stream')
   await page.evaluate(() => { window.__GUI__.setHTML('<p id="finished">Complete content</p>'); window.__GUI__.setLive(false) })
   await inner('#finished')
+  await page.waitForSelector('[data-case="inline"] iframe:not([aria-hidden="true"])')
+  assert.doesNotMatch(await page.$eval('[data-case="inline"]', e => e.textContent), /View source|查看源码/)
+  // An unfinished streamed script must not destroy the last useful document.
+  await page.evaluate(() => { window.__GUI__.setLive(true); window.__GUI__.setHTML('<p id="finished">Complete content</p><script>const value =') })
+  await new Promise(r => setTimeout(r, 1100))
+  content = await inner('#finished')
+  assert.equal(await content.$eval('#finished', e => e.textContent), 'Complete content')
+  await page.evaluate(() => { window.__GUI__.setHTML('<div id="delayed"></div><script>setTimeout(()=>document.getElementById("delayed").textContent="Async content",300)</script>'); window.__GUI__.setLive(false) })
+  await inner('#delayed')
+  await page.waitForSelector('[data-case="inline"] iframe:not([aria-hidden="true"])')
+  content = await inner('#delayed')
+  assert.equal(await content.$eval('#delayed', e => e.textContent), 'Async content')
+  // Script failures and completely empty answers expose a compact recovery action.
+  await page.evaluate(() => window.__GUI__.setHTML('<script>throw new Error("render failure")</script>'))
+  await page.waitForFunction(() => document.querySelector('[data-case="inline"]')?.textContent.includes('could not be displayed'))
+  assert.equal(await page.$eval('[data-case="inline"] button', e => e.textContent), 'Reload')
+  await page.click('[data-case="inline"] button')
+  await page.waitForFunction(() => document.querySelector('[data-case="inline"]')?.textContent.includes('could not be displayed'))
+  assert.deepEqual(errors.splice(0), ['Error: render failure', 'Error: render failure'], 'expected sandboxed rendering errors')
+  await page.evaluate(() => window.__GUI__.setHTML('<div></div>'))
+  await page.waitForFunction(() => document.querySelector('[data-case="inline"]')?.textContent.includes('could not be displayed'), { timeout: 12000 })
+  await page.evaluate(() => window.__GUI__.setHTML('<p id="recovered">Recovered</p>'))
+  await inner('#recovered')
+  await page.waitForSelector('[data-case="inline"] iframe:not([aria-hidden="true"])')
   // Successful child rendering never grants parent DOM, storage, or native API.
   await page.evaluate(origin => window.__GUI__.setHTML(`<pre id="security"></pre><script>
     const results={};for(const [name,fn] of Object.entries({parent:()=>parent.document.body,storage:()=>localStorage.length,cookie:()=>document.cookie,native:()=>top.aivoryDesktop})){try{fn();results[name]='allowed'}catch{results[name]='blocked'}}
@@ -118,5 +142,5 @@ try {
     }
   }
   assert.deepEqual(errors, [])
-  console.log('PASS: preset interactions, private/user boundaries, streaming HTML, network/navigation/storage/native isolation, administrator slash command, 30 responsive/theme/language combinations')
+  console.log('PASS: preset interactions, private/user boundaries, incomplete/async streaming HTML, blank/error recovery, network/navigation/storage/native isolation, administrator slash command, 30 responsive/theme/language combinations')
 } finally { await browser?.close(); await server.close() }

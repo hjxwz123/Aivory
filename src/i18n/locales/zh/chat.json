@@ -1200,10 +1200,11 @@
     }
   },
   "generative": {
+    "loading": "正在加载可视化…",
+    "failed": "此可视化暂时无法显示。",
+    "retry": "重新加载",
     "generating": "正在生成可视化…",
-    "invalid": "此可视化无法显示，可在下方查看原始内容。",
-    "source": "查看源码",
-    "hideSource": "收起源码",
+    "invalid": "此可视化无法显示。",
     "interactive": "交互式回答",
     "chart": "图表",
     "showData": "查看数据",

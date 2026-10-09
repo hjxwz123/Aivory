@@ -951,7 +951,7 @@ func (r toolDefAllowlistRunner) Run(ctx context.Context, name string, input []by
 // toolRunnerForModelRequest retargets the concrete orchestrator runner during a
 // TTFT model switch. In particular, use_skill must query bindings for the
 // fallback model, not the primary model whose context built the first request.
-func toolRunnerForModelRequest(runner ToolRunner, modelID string, definitions []ToolDef, systemTools map[string]bool) ToolRunner {
+func toolRunnerForModelRequest(runner ToolRunner, modelID string, definitions []ToolDef, systemTools map[string]bool, promptOpts *systemPromptOpts) ToolRunner {
 	base := runner
 	if restricted, ok := runner.(toolDefAllowlistRunner); ok {
 		base = restricted.next
@@ -966,31 +966,32 @@ func toolRunnerForModelRequest(runner ToolRunner, modelID string, definitions []
 			}
 		}
 		fallbackContext := &ToolContext{
-			UserID:                source.UserID,
-			ConvID:                source.ConvID,
-			MessageID:             source.MessageID,
-			WorkspaceID:           source.WorkspaceID,
-			ModelID:               modelID,
-			ProjectID:             source.ProjectID,
-			ProjectName:           source.ProjectName,
-			DB:                    source.DB,
-			WorkspaceAccessCheck:  source.WorkspaceAccessCheck,
-			DeepResearch:          source.DeepResearch,
-			Fast:                  source.Fast,
-			BuiltinTools:          toolDefNameSet(definitions),
-			SystemTools:           cloneBoolMap(systemTools),
-			AdminSkillIDs:         cloneBoolMap(source.AdminSkillIDs),
-			SelectedAdminSkillIDs: cloneBoolMap(source.SelectedAdminSkillIDs),
-			ImageModelID:          source.ImageModelID,
-			ImageRequestParams:    params,
-			ImageInputIDs:         append([]string(nil), source.ImageInputIDs...),
-			ImageUserPrompt:       source.ImageUserPrompt,
-			SkipImageQuota:        source.SkipImageQuota,
-			ImageBilling:          source.ImageBilling,
-			OnArtifact:            source.OnArtifact,
-			counts:                map[string]int{},
-			toolState:             source.requestToolExecutionState(),
-			citationIndexes:       source.citationIndexes,
+			UserID:                 source.UserID,
+			ConvID:                 source.ConvID,
+			MessageID:              source.MessageID,
+			WorkspaceID:            source.WorkspaceID,
+			ModelID:                modelID,
+			ProjectID:              source.ProjectID,
+			ProjectName:            source.ProjectName,
+			DB:                     source.DB,
+			WorkspaceAccessCheck:   source.WorkspaceAccessCheck,
+			DeepResearch:           source.DeepResearch,
+			Fast:                   source.Fast,
+			BuiltinTools:           toolDefNameSet(definitions),
+			SystemTools:            cloneBoolMap(systemTools),
+			AdminSkillIDs:          cloneBoolMap(source.AdminSkillIDs),
+			SelectedAdminSkillIDs:  cloneBoolMap(source.SelectedAdminSkillIDs),
+			PreloadedAdminSkillIDs: preloadedSkillIDs(promptOpts),
+			ImageModelID:           source.ImageModelID,
+			ImageRequestParams:     params,
+			ImageInputIDs:          append([]string(nil), source.ImageInputIDs...),
+			ImageUserPrompt:        source.ImageUserPrompt,
+			SkipImageQuota:         source.SkipImageQuota,
+			ImageBilling:           source.ImageBilling,
+			OnArtifact:             source.OnArtifact,
+			counts:                 map[string]int{},
+			toolState:              source.requestToolExecutionState(),
+			citationIndexes:        source.citationIndexes,
 		}
 		base = &orchToolRunner{orch: current.orch, ctx: fallbackContext, onEvent: current.onEvent}
 	}

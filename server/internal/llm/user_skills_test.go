@@ -222,11 +222,11 @@ func TestExplicitCatalogSkillIsAppliedOnceAndRestoredOnRegeneration(t *testing.T
 		t.Fatal(err)
 	}
 	explicit := []store.UserSkill{{SourceSkillID: sk.ID, Name: sk.Name, Instructions: sk.Instructions}}
-	index, full := loadEnabledModelSkills(t.Context(), db, model.ID, nil, explicit)
+	index, full, _ := loadEnabledModelSkills(t.Context(), db, model.ID, nil, explicit)
 	if len(index) != 0 || len(full) != 0 {
 		t.Fatal("explicit skill still included in automatic prompt")
 	}
-	index, full = loadEnabledModelSkills(t.Context(), db, model.ID, nil)
+	index, full, _ = loadEnabledModelSkills(t.Context(), db, model.ID, nil)
 	if len(index) != 1 || len(full) != 1 {
 		t.Fatal("ordinary model binding removed")
 	}

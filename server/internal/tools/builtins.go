@@ -3560,6 +3560,9 @@ func (t *useSkillTool) Execute(ctx context.Context, input []byte, tc *llm.ToolCo
 			if tc != nil && tc.SelectedAdminSkillIDs[s.ID] {
 				return "Skill " + s.Name + " is already applied to this turn through the user selection. Use those instructions; do not load a second copy.", nil, nil
 			}
+			if tc != nil && tc.PreloadedAdminSkillIDs[s.ID] {
+				return "Skill " + s.Name + " is already applied to this request in the system instructions. Use those instructions; do not load a second copy.", nil, nil
+			}
 			return "Skill: " + s.Name + "\n\n" + s.Instructions, nil, nil
 		}
 	}

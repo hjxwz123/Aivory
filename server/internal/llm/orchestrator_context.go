@@ -671,16 +671,17 @@ type SkillIndex struct {
 	When string
 }
 
-// SkillFull carries a skill's full instructions, injected inline for
-// prompt/none tool-mode models that can't call use_skill (§4.17).
+// SkillFull carries instructions for skills applied without a use_skill call.
 type SkillFull struct {
+	ID           string
 	Name         string
 	Instructions string
 }
 
-func loadEnabledModelSkills(ctx context.Context, db *sql.DB, modelID string, policy *ToolAccessPolicy, selected ...[]store.UserSkill) ([]SkillIndex, []SkillFull) {
+func loadEnabledModelSkills(ctx context.Context, db *sql.DB, modelID string, policy *ToolAccessPolicy, selected ...[]store.UserSkill) ([]SkillIndex, []SkillFull, []SkillFull) {
 	indexes := []SkillIndex{}
 	full := []SkillFull{}
+	presentation := []SkillFull{}
 	explicit := map[string]bool{}
 	for _, list := range selected {
 		for _, skill := range list {
@@ -698,10 +699,29 @@ func loadEnabledModelSkills(ctx context.Context, db *sql.DB, modelID string, pol
 		if err != nil || !skill.Enabled {
 			continue
 		}
+		instructions := SkillFull{ID: skill.ID, Name: skill.Name, Instructions: skill.Instructions}
+		// Presentation needs no tool execution. Preload it so vague requests and
+		// automatic no-tools turns can still produce useful visual answers.
+		if skill.ID == store.GenerativeUISkillID || strings.EqualFold(skill.Name, "generative-ui") {
+			presentation = append(presentation, instructions)
+			continue
+		}
 		indexes = append(indexes, SkillIndex{Name: skill.Name, When: skill.Description})
-		full = append(full, SkillFull{Name: skill.Name, Instructions: skill.Instructions})
+		full = append(full, instructions)
 	}
-	return indexes, full
+	return indexes, full, presentation
+}
+
+func preloadedSkillIDs(opts *systemPromptOpts) map[string]bool {
+	ids := map[string]bool{}
+	if opts != nil && opts.PresentationSkillsAllowed {
+		for _, skill := range opts.PresentationSkills {
+			if skill.ID != "" {
+				ids[skill.ID] = true
+			}
+		}
+	}
+	return ids
 }
 
 type systemPromptOpts struct {
@@ -720,6 +740,7 @@ type systemPromptOpts struct {
 	ProjectInstructions string
 	Skills              []SkillIndex
 	SkillsFull          []SkillFull
+	PresentationSkills  []SkillFull
 	SelectedSkillNames  []string
 	Memories            []store.Memory
 	ProjectFiles        []ProjectFileSummary
@@ -745,6 +766,10 @@ type systemPromptOpts struct {
 	// that inline skills, but false for a per-turn disable or model/global policy.
 	// TTFT fallback uses it to avoid broadening the original request policy.
 	SkillsAllowed bool
+	// PresentationSkillsAllowed retains the pre-routing permission ceiling when
+	// automatic routing withholds tools. Explicit off and administrator denial
+	// still exclude automatic presentation instructions.
+	PresentationSkillsAllowed bool
 	// SkillMode carries the effective administrator/per-turn skill policy into
 	// prompt composition. Selected policies may expose database skills while
 	// still excluding code-defined skills without catalog IDs.
@@ -1048,6 +1073,13 @@ func composeSystemPrompt(o systemPromptOpts) string {
 		b.WriteString(l.skillsInlineHeader)
 		b.WriteString(l.skillsInlineBody)
 		for _, s := range o.SkillsFull {
+			fmt.Fprintf(&b, "\n### %s\n%s\n", s.Name, s.Instructions)
+		}
+	}
+	if o.PresentationSkillsAllowed && len(o.PresentationSkills) > 0 {
+		b.WriteString(l.presentationHeader)
+		b.WriteString(l.presentationBody)
+		for _, s := range o.PresentationSkills {
 			fmt.Fprintf(&b, "\n### %s\n%s\n", s.Name, s.Instructions)
 		}
 	}

@@ -1,8 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ChevronDown, Code2 } from 'lucide-react'
+import { ChevronDown } from 'lucide-react'
 import { parseUIDocument, type UIBlock } from '@/lib/generative-ui'
-import { CodeBlockFrame } from './code-block-frame'
 import { InlineHTML } from './inline-html'
 
 const palette = ['var(--color-accent)', 'var(--color-fg)', '#8874c7', '#b97838', '#388c9f', '#ac547d']
@@ -88,7 +87,6 @@ function Blocks({ blocks }: { blocks: UIBlock[] }) { return <div className="min-
 
 export function GenerativeUI({ code, lang, live = false }: { code: string; lang: 'aivory-ui' | 'aivory-html'; live?: boolean }) {
   const { t } = useTranslation('chat')
-  const [source, setSource] = useState(false)
   const doc = useMemo(() => lang === 'aivory-ui' ? parseUIDocument(code) : null, [code, lang])
   const invalid = lang === 'aivory-ui' && !doc
   return <section data-generative-ui={lang} className="my-4 min-w-0 max-w-full rounded-xl bg-[var(--color-surface)] p-4 text-[var(--color-fg)] sm:p-5 [overflow-wrap:anywhere]">
@@ -96,7 +94,5 @@ export function GenerativeUI({ code, lang, live = false }: { code: string; lang:
       {(doc.title || doc.description) && <div className="mb-5 space-y-1"><div className="text-base font-semibold">{doc.title}</div>{doc.description && <p className="m-0 text-sm text-[var(--color-fg-muted)]">{doc.description}</p>}</div>}
       <Blocks blocks={doc.blocks} />
     </>}
-    <div className="mt-3 flex justify-end"><button type="button" onClick={() => setSource(!source)} aria-expanded={source || (invalid && !live)} className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] ${focus}`}><Code2 size={13} />{t(source ? 'generative.hideSource' : 'generative.source')}</button></div>
-    {(source || (invalid && !live)) && <CodeBlockFrame code={code} lang={lang === 'aivory-ui' ? 'json' : 'html'} />}
   </section>
 }

@@ -42,6 +42,8 @@ type promptL10n struct {
 	skillsAvailBody    string
 	skillsInlineHeader string
 	skillsInlineBody   string
+	presentationHeader string
+	presentationBody   string
 	projectHeader      string // 1×%s (project name)
 	memoryHeader       string
 	memoryRules        string
@@ -123,6 +125,8 @@ var promptL10nTable = map[string]promptL10n{
 		skillsAvailBody:    "When the user's request matches one of these skills, you MUST call use_skill(name) to load its full instructions before answering, then follow them.\n",
 		skillsInlineHeader: "\n## Skills\n",
 		skillsInlineBody:   "Apply the following skill instructions when relevant to the user's request.\n",
+		presentationHeader: "\n## Answer presentation\n",
+		presentationBody:   "The following instructions are already loaded; do not call use_skill to load them again. Infer useful presentation from the whole conversation and your planned answer, even for vague requests. Include a compact visual or interactive view directly when it meaningfully improves understanding; external tools are not required for presentation. Keep simple answers as prose and respect the user's requested format.\n",
 		projectHeader:      "\n## Project (\"%s\")\n",
 		memoryHeader:       "\n## Current memory about the user\n",
 		memoryRules:        "Memory rules: only treat [CURRENT] as present facts; weigh [CONTEXT-DEPENDENT] against the current question; correct the user politely if they assume an outdated fact.\n",
@@ -156,6 +160,8 @@ var promptL10nTable = map[string]promptL10n{
 		skillsAvailBody:    "当用户的请求匹配下列某个技能时，你必须先调用 use_skill(name) 加载它的完整说明，然后遵循它。\n",
 		skillsInlineHeader: "\n## 技能\n",
 		skillsInlineBody:   "在与用户请求相关时，应用以下技能说明。\n",
+		presentationHeader: "\n## 回答展示\n",
+		presentationBody:   "以下说明已经加载，不要再调用 use_skill 加载。结合整个对话和准备回答的内容判断适合的展示形式，即使用户的请求模糊，也应在有助于理解时直接加入紧凑的可视化或交互界面。展示本身不需要外部工具；简单问题使用文字，并尊重用户指定的输出格式。\n",
 		projectHeader:      "\n## 项目（“%s”）\n",
 		memoryHeader:       "\n## 关于用户的当前记忆\n",
 		memoryRules:        "记忆规则：只把 [CURRENT] 当作当前事实；把 [CONTEXT-DEPENDENT] 与当前问题权衡；若用户基于过时事实做出假设，请礼貌纠正。\n",
@@ -189,6 +195,8 @@ var promptL10nTable = map[string]promptL10n{
 		skillsAvailBody:    "當使用者的請求匹配下列某個技能時，你必須先呼叫 use_skill(name) 載入它的完整說明，然後遵循它。\n",
 		skillsInlineHeader: "\n## 技能\n",
 		skillsInlineBody:   "在與使用者請求相關時，套用以下技能說明。\n",
+		presentationHeader: "\n## 回答呈現\n",
+		presentationBody:   "以下說明已經載入，不要再呼叫 use_skill 載入。結合整個對話和準備回答的內容判斷適合的呈現形式，即使使用者的請求模糊，也應在有助於理解時直接加入精簡的視覺化或互動介面。呈現本身不需要外部工具；簡單問題使用文字，並尊重使用者指定的輸出格式。\n",
 		projectHeader:      "\n## 專案（「%s」）\n",
 		memoryHeader:       "\n## 關於使用者的目前記憶\n",
 		memoryRules:        "記憶規則：只把 [CURRENT] 當作當前事實；把 [CONTEXT-DEPENDENT] 與當前問題權衡；若使用者基於過時事實做出假設，請禮貌糾正。\n",
@@ -222,6 +230,8 @@ var promptL10nTable = map[string]promptL10n{
 		skillsAvailBody:    "ユーザーのリクエストが次のいずれかのスキルに一致する場合は、回答する前に必ず use_skill(name) を呼び出して完全な指示を読み込み、それに従ってください。\n",
 		skillsInlineHeader: "\n## スキル\n",
 		skillsInlineBody:   "ユーザーのリクエストに関連する場合は、次のスキル指示を適用してください。\n",
+		presentationHeader: "\n## 回答の表示\n",
+		presentationBody:   "以下の指示は読み込み済みです。use_skill で再読み込みしないでください。曖昧な依頼でも会話全体と回答内容から適切な表示形式を判断し、理解を助ける場合は簡潔な図表や対話的な表示を直接含めてください。表示自体に外部ツールは不要です。簡単な質問には文章で答え、指定された出力形式を尊重してください。\n",
 		projectHeader:      "\n## プロジェクト（「%s」）\n",
 		memoryHeader:       "\n## ユーザーに関する現在の記憶\n",
 		memoryRules:        "記憶ルール：[CURRENT] だけを現在の事実として扱い、[CONTEXT-DEPENDENT] は現在の質問と照らして判断し、ユーザーが古い事実を前提にしていたら丁寧に訂正してください。\n",
@@ -255,6 +265,8 @@ var promptL10nTable = map[string]promptL10n{
 		skillsAvailBody:    "Lorsque la demande de l'utilisateur correspond à l'une de ces compétences, tu DOIS appeler use_skill(name) pour charger ses instructions complètes avant de répondre, puis les suivre.\n",
 		skillsInlineHeader: "\n## Compétences\n",
 		skillsInlineBody:   "Applique les instructions de compétence suivantes lorsqu'elles sont pertinentes pour la demande de l'utilisateur.\n",
+		presentationHeader: "\n## Présentation de la réponse\n",
+		presentationBody:   "Les instructions suivantes sont déjà chargées ; ne les recharge pas avec use_skill. Déduis la présentation utile de toute la conversation et de la réponse prévue, même pour une demande vague. Ajoute directement une visualisation compacte ou une vue interactive lorsqu'elle facilite la compréhension ; la présentation ne nécessite aucun outil externe. Réponds en prose aux questions simples et respecte le format demandé.\n",
 		projectHeader:      "\n## Projet (« %s »)\n",
 		memoryHeader:       "\n## Mémoire actuelle sur l'utilisateur\n",
 		memoryRules:        "Règles de mémoire : ne traite que [CURRENT] comme des faits présents ; pèse [CONTEXT-DEPENDENT] au regard de la question actuelle ; corrige poliment l'utilisateur s'il suppose un fait périmé.\n",
