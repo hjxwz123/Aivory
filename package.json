@@ -14,6 +14,7 @@
     "desktop:pack": "node desktop/build.mjs --dir",
     "desktop:test": "node --test desktop/tests/*.test.mjs",
     "desktop:test:smoke": "node tests/browser/run-desktop.mjs",
+    "desktop:test:drawers": "node tests/browser/run-desktop-drawers.mjs",
     "desktop:test:auth": "node tests/browser/run-desktop-auth.mjs",
     "desktop:test:updates": "node tests/browser/run-desktop-updates.mjs",
     "desktop:test:server": "node tests/browser/run-desktop-server.mjs",

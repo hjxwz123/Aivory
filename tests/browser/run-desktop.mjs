@@ -234,6 +234,8 @@ try {
       if (action === 'close') window.close()
       if (action === 'restore') { window.restore(); window.show() }
       if (action === 'focus') { app.focus({ steal: true }); window.show(); window.focus() }
+      if (action === 'fullscreen') window.setFullScreen(true)
+      if (action === 'windowed') window.setFullScreen(false)
       if (action === 'quit') setTimeout(() => app.quit(), 100)
       return { minimized: window.isMinimized(), destroyed: window.isDestroyed(), visible: window.isVisible(), minimizable: window.isMinimizable(), fullscreen: window.isFullScreen(), prompts: updatePrompts }
     })
@@ -241,6 +243,8 @@ try {
       window.on('close', () => console.log('NATIVE_CLOSE_REQUEST'))
       window.on('minimize', () => console.log('NATIVE_MINIMIZED'))
       window.on('restore', () => console.log('NATIVE_RESTORED'))
+      window.on('enter-full-screen', () => console.log('NATIVE_FULLSCREEN_ENTER'))
+      window.on('leave-full-screen', () => console.log('NATIVE_FULLSCREEN_LEAVE'))
       window.webContents.on('did-finish-load', () => {
         console.log('NATIVE_WINDOW_TITLE:' + JSON.stringify(window.getTitle()))
       })
@@ -283,6 +287,59 @@ try {
     assert.equal(await page.$eval('#aivory-window-drag', (element) => getComputedStyle(element).backgroundColor), 'rgb(17, 17, 19)')
     assert.equal(await page.evaluate(() => document.scrollingElement.scrollHeight <= innerHeight), true)
     console.log('PASS: Mac window chrome is draggable, follows the page theme, and reserves space without page scrolling')
+
+    await page.evaluate(() => {
+      document.documentElement.style.setProperty('--color-sidebar-bg', '#202024')
+      const sidebar = document.createElement('aside')
+      sidebar.dataset.windowSidebar = ''
+      sidebar.style.width = '280px'
+      document.getElementById('root').prepend(sidebar)
+    })
+    await page.waitForFunction(() => document.documentElement.style.getPropertyValue('--aivory-chrome-sidebar-width') === '280px')
+    assert.match(await page.$eval('#aivory-window-drag', (element) => getComputedStyle(element).backgroundImage), /rgb\(32, 32, 36\).*280px/)
+    await page.$eval('aside', (element) => { element.style.width = '320px' })
+    await page.waitForFunction(() => document.documentElement.style.getPropertyValue('--aivory-chrome-sidebar-width') === '320px')
+    await page.$eval('aside', (element) => element.remove())
+    await page.waitForFunction(() => document.documentElement.style.getPropertyValue('--aivory-chrome-sidebar-width') === '0px')
+    console.log('PASS: Mac title area follows the sidebar surface, resizing and removal')
+
+    const checkFullscreenLayout = async (fullscreen) => {
+      await page.waitForFunction((fullscreen) => document.documentElement.hasAttribute('data-aivory-fullscreen') === fullscreen, { timeout: 15000 }, fullscreen)
+      await page.waitForFunction((inset) => {
+        const rect = document.getElementById('root').getBoundingClientRect()
+        return Math.abs(rect.top - inset) < 1 && Math.abs(rect.bottom - innerHeight) < 1
+          && document.scrollingElement.scrollHeight <= innerHeight
+      }, { timeout: 15000 }, fullscreen ? 0 : 36)
+      assert.equal(await page.$eval('#aivory-window-drag', (element) => getComputedStyle(element).display), fullscreen ? 'none' : 'block')
+    }
+    await page.evaluate(() => window.desktopSmoke.native('focus'))
+    // Let macOS finish showing/activating the initial window before asking it
+    // to animate into a new fullscreen Space.
+    await new Promise(resolve => setTimeout(resolve, 1000))
+    await page.evaluate(() => window.desktopSmoke.native('fullscreen'))
+    await checkFullscreenLayout(true)
+    assert.equal((await page.evaluate(() => window.desktopSmoke.native('state'))).fullscreen, true)
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.waitForSelector('#smoke')
+    await checkFullscreenLayout(true)
+    await page.evaluate(() => window.desktopSmoke.native('windowed'))
+    await checkFullscreenLayout(false)
+    console.log('PASS: native Mac fullscreen and reload remove the title inset; leaving restores it without page scrolling')
+
+    await page.evaluate(() => {
+      const trigger = document.createElement('button')
+      trigger.id = 'html-fullscreen'
+      trigger.textContent = 'Fullscreen'
+      trigger.onclick = () => document.documentElement.requestFullscreen()
+      document.getElementById('root').append(trigger)
+    })
+    await page.click('#html-fullscreen')
+    await page.waitForFunction(() => Boolean(document.fullscreenElement))
+    await checkFullscreenLayout(true)
+    await page.evaluate(() => document.exitFullscreen())
+    await checkFullscreenLayout(false)
+    await page.$eval('#html-fullscreen', (element) => element.remove())
+    console.log('PASS: HTML fullscreen uses the same zero-inset layout and restores the ordinary window')
   }
   await page.evaluate(() => { document.getElementById('draft').value = 'Draft survives window close' })
   await page.evaluate(() => window.desktopSmoke.native('focus'))

@@ -497,6 +497,7 @@ export default function AdminLayout() {
         {/* Desktop rail: same width (the user's resized chat sidebar width),
             surface and breakpoint as the chat sidebar. */}
         <aside
+          data-window-sidebar
           style={{ width: `${sidebarWidth}px` }}
           className="hidden shrink-0 pt-[var(--safe-top)] lg:flex"
         >

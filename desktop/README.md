@@ -163,8 +163,10 @@ Keep credentials out of tracked files.
 ## Runtime Behavior
 
 - macOS uses native traffic lights in a compact, draggable area that follows the
-  page theme. It reserves space above the app, so window controls do not
-  cover page navigation, setup, or offline recovery.
+  page and sidebar surfaces. It reserves space above the app in ordinary
+  windows and removes that space in native or HTML fullscreen. Modal overlays
+  cover the title area; side drawers remain pinned to the content's top/right
+  edges instead of inheriting centered-dialog positioning.
 - Closing the main window minimizes it, preserving content and its taskbar/Dock
   icon. The macOS menu bar and Windows/Linux system tray show the Aivory icon;
   the macOS template icon adapts to light/dark system appearance.

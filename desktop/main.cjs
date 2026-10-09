@@ -92,7 +92,6 @@ function openServerSettings() {
       preload: path.join(app.getAppPath(), 'server-preload.cjs'),
     },
   })
-  attachWindowChrome(serverWindow.webContents)
   serverWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   serverWindow.webContents.on('will-navigate', (event) => event.preventDefault())
   serverWindow.on('query-session-end', () => { isQuitting = true })
@@ -191,7 +190,6 @@ function openBrowser(url) {
 }
 
 function protectContents(contents) {
-  attachWindowChrome(contents)
   contents.on('page-title-updated', (event) => event.preventDefault())
   contents.setWindowOpenHandler(({ url }) => {
     const action = popupAction(url, APP_URL)
@@ -391,6 +389,9 @@ if (!app.requestSingleInstanceLock()) {
     registerServerBridge()
     app.on('web-contents-created', (_event, contents) => protectContents(contents))
     app.on('browser-window-created', (_event, window) => {
+      // web-contents-created fires before the native owner is available.
+      // Attach here so every window also receives native fullscreen events.
+      attachWindowChrome(window.webContents, window)
       window.setTitle('')
       window.on('page-title-updated', (event) => {
         event.preventDefault()
