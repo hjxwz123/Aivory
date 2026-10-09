@@ -392,6 +392,10 @@
     "save_memory": "今後の会話に役立つ情報を保存します"
   },
   "sources": {
+    "images": "画像検索結果",
+    "previewImage": "画像をプレビュー：{{title}}",
+    "imageUnavailable": "画像を読み込めません",
+    "openImageSource": "画像の出典を開く：{{title}}",
     "label": "ソース",
     "open": "ソースを開く",
     "openDocument": "ドキュメントをプレビュー",
@@ -1209,6 +1213,10 @@
     "chart": "グラフ",
     "showData": "データを表示",
     "hideData": "データを隠す",
-    "label": "名前"
+    "label": "名前",
+    "table": "表",
+    "image": "画像",
+    "openImage": "元の画像を開く",
+    "imageFailed": "画像を表示できません"
   }
 }

@@ -1,0 +1,41 @@
+/* Preset tables keep their layout inside Markdown's prose container. */
+[data-generative-ui] [data-generative-table] th,
+[data-generative-ui] [data-generative-table] td {
+  padding: 12px;
+  border: 0;
+  vertical-align: top;
+}
+
+[data-generative-ui] [data-generative-table] th {
+  padding-block: 10px;
+  font-weight: 500;
+}
+
+[data-generative-table] [data-align='left'] {
+  text-align: left;
+}
+
+[data-generative-table] [data-align='center'] {
+  text-align: center;
+}
+
+[data-generative-table] [data-align='right'] {
+  text-align: right;
+}
+
+[data-generative-ui] [data-generative-table] ul {
+  margin: 0;
+  padding-left: 1rem;
+}
+
+[data-generative-ui] [data-generative-table] li {
+  margin: 0;
+}
+
+[data-generative-ui] [data-generative-table] li + li {
+  margin-top: 4px;
+}
+
+[data-generative-ui] [data-generative-table] figure > a {
+  text-decoration: none;
+}

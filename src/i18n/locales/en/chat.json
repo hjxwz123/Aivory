@@ -397,6 +397,10 @@
     "save_memory": "Remember useful information for future conversations"
   },
   "sources": {
+    "images": "Image search results",
+    "previewImage": "Preview image: {{title}}",
+    "imageUnavailable": "Image unavailable",
+    "openImageSource": "Open image source: {{title}}",
     "label": "Sources",
     "open": "Open source",
     "openDocument": "Preview document",
@@ -1217,6 +1221,10 @@
     "chart": "Chart",
     "showData": "View data",
     "hideData": "Hide data",
-    "label": "Label"
+    "label": "Label",
+    "table": "Table",
+    "image": "Image",
+    "openImage": "Open full image",
+    "imageFailed": "Image unavailable"
   }
 }

@@ -392,6 +392,10 @@
     "save_memory": "保存对后续对话有帮助的信息"
   },
   "sources": {
+    "images": "图片搜索结果",
+    "previewImage": "预览图片：{{title}}",
+    "imageUnavailable": "图片无法加载",
+    "openImageSource": "打开图片来源：{{title}}",
     "label": "来源",
     "open": "打开来源",
     "openDocument": "预览文档",
@@ -1209,6 +1213,10 @@
     "chart": "图表",
     "showData": "查看数据",
     "hideData": "收起数据",
-    "label": "名称"
+    "label": "名称",
+    "table": "表格",
+    "image": "图片",
+    "openImage": "查看原图",
+    "imageFailed": "图片加载失败"
   }
 }

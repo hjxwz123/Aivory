@@ -35,6 +35,13 @@ func TestBuiltinSkillSeedUpgradesOnlyUntouchedLegacyFields(t *testing.T) {
 		{"custom description", "CUSTOM_DESCRIPTION", legacyGenerativeUIInstructions},
 		{"custom instructions", legacyGenerativeUIDescription, "CUSTOM_INSTRUCTIONS"},
 		{"both customized", "CUSTOM_DESCRIPTION", "CUSTOM_INSTRUCTIONS"},
+		{"previous original", previousGenerativeUIDescription, previousGenerativeUIInstructions},
+		{"previous custom description", "CUSTOM_DESCRIPTION", previousGenerativeUIInstructions},
+		{"previous custom instructions", previousGenerativeUIDescription, "CUSTOM_INSTRUCTIONS"},
+		{"legacy description previous instructions", legacyGenerativeUIDescription, previousGenerativeUIInstructions},
+		{"previous description legacy instructions", previousGenerativeUIDescription, legacyGenerativeUIInstructions},
+		{"current description previous instructions", generativeUIDescription, previousGenerativeUIInstructions},
+		{"previous description current instructions", previousGenerativeUIDescription, generativeUIInstructions},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db, ctx := openLibraryTestDB(t)
@@ -57,10 +64,10 @@ func TestBuiltinSkillSeedUpgradesOnlyUntouchedLegacyFields(t *testing.T) {
 				t.Fatal(err)
 			}
 			wantDescription, wantInstructions := tc.description, tc.instructions
-			if wantDescription == legacyGenerativeUIDescription {
+			if wantDescription == legacyGenerativeUIDescription || wantDescription == previousGenerativeUIDescription {
 				wantDescription = generativeUIDescription
 			}
-			if wantInstructions == legacyGenerativeUIInstructions {
+			if wantInstructions == legacyGenerativeUIInstructions || wantInstructions == previousGenerativeUIInstructions {
 				wantInstructions = generativeUIInstructions
 			}
 			if skill.Description != wantDescription || skill.Instructions != wantInstructions || skill.Enabled || skill.Name != "my-visuals" || skill.Icon != "custom-icon" {

@@ -1,11 +1,54 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ChevronDown } from 'lucide-react'
-import { parseUIDocument, type UIBlock } from '@/lib/generative-ui'
+import { ChevronDown, Image as ImageIcon, ImageOff } from 'lucide-react'
+import { parseUIDocument, type UIBlock, type UITableCell, type UITableColumn } from '@/lib/generative-ui'
 import { InlineHTML } from './inline-html'
+import '@/styles/generative-ui.css'
 
 const palette = ['var(--color-accent)', 'var(--color-fg)', '#8874c7', '#b97838', '#388c9f', '#ac547d']
 const focus = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]'
+
+function TableImage({ cell }: { cell: Extract<UITableCell, { type: 'image' }> }) {
+  const { t } = useTranslation('chat')
+  const [state, setState] = useState<'loading' | 'loaded' | 'error'>('loading')
+  const alt = cell.alt || cell.caption || t('generative.image')
+  return <figure className="m-0 inline-block w-24 max-w-full align-top sm:w-[120px]">
+    <a href={cell.url} target="_blank" rel="noopener noreferrer" title={t('generative.openImage')} aria-label={`${t('generative.openImage')}: ${alt}`} className={`relative flex aspect-[4/3] w-full items-center justify-center overflow-hidden rounded-md bg-[var(--color-bg-muted)] ${focus}`}>
+      {state !== 'error' && <img src={cell.url} alt={alt} loading="lazy" decoding="async" referrerPolicy="no-referrer" onLoad={() => setState('loaded')} onError={() => setState('error')} className={`absolute inset-0 h-full w-full object-contain ${state === 'loaded' ? '' : 'invisible'}`} />}
+      {state === 'loading' && <ImageIcon aria-hidden size={20} className="text-[var(--color-fg-muted)]" />}
+      {state === 'error' && <span role="status" className="flex flex-col items-center gap-1 px-2 text-center text-xs text-[var(--color-fg-muted)]"><ImageOff aria-hidden size={18} />{t('generative.imageFailed')}</span>}
+    </a>
+    {cell.caption && <figcaption className="mt-1.5 whitespace-pre-wrap text-xs leading-relaxed text-[var(--color-fg-muted)]">{cell.caption}</figcaption>}
+  </figure>
+}
+
+function TableCell({ value }: { value: UITableCell }) {
+  if (value === null) return <span className="text-[var(--color-fg-muted)]">—</span>
+  if (typeof value !== 'object') return <span className="whitespace-pre-wrap">{String(value)}</span>
+  switch (value.type) {
+    case 'text': return <div className="space-y-1 whitespace-pre-wrap"><div className="font-medium">{value.text}</div>{value.description && <div className="text-xs leading-relaxed text-[var(--color-fg-muted)]">{value.description}</div>}</div>
+    case 'image': return <TableImage key={value.url} cell={value} />
+    case 'link': return <a href={value.url} target="_blank" rel="noopener noreferrer" className={`rounded-sm text-[var(--color-accent)] underline decoration-current/40 underline-offset-4 hover:decoration-current ${focus}`}>{value.text}</a>
+    case 'list': return <ul className="m-0 list-disc space-y-1 pl-4 marker:text-[var(--color-fg-muted)]">{value.items.map((item, i) => <li key={i} className="whitespace-pre-wrap">{item}</li>)}</ul>
+  }
+}
+
+function tableColumnClasses(column: UITableColumn) {
+  const width = typeof column === 'string' ? 'normal' : column.width || 'normal'
+  return { compact: 'min-w-28 max-w-40', normal: 'min-w-36 max-w-64', wide: 'min-w-56 max-w-96' }[width]
+}
+
+function Table({ block }: { block: Extract<UIBlock, { type: 'table' }> }) {
+  const { t } = useTranslation('chat')
+  const columns = block.columns.map(column => typeof column === 'string' ? { label: column } : column)
+  return <div role="region" aria-label={block.title || t('generative.table')} tabIndex={0} data-generative-table className={`max-h-[480px] max-w-full overflow-auto rounded-lg ${focus}`}>
+    <table className="quiet-table w-full border-collapse text-sm leading-relaxed">
+      {block.title && <caption className="pb-3 text-left text-sm font-medium">{block.title}</caption>}
+      <thead className="sticky top-0 z-10 bg-[var(--color-bg-muted)]"><tr>{columns.map((column, i) => <th key={i} scope="col" data-align={column.align || 'left'} className={tableColumnClasses(column)}>{column.label}</th>)}</tr></thead>
+      <tbody>{block.rows.map((row, i) => <tr key={i}>{row.map((value, j) => <td key={j} data-align={columns[j].align || 'left'} className={`[overflow-wrap:anywhere] ${tableColumnClasses(columns[j])}`}><TableCell value={value} /></td>)}</tr>)}</tbody>
+    </table>
+  </div>
+}
 
 function Chart({ block }: { block: Extract<UIBlock, { type: 'chart' }> }) {
   const { t } = useTranslation('chat')
@@ -78,7 +121,7 @@ function Block({ block }: { block: UIBlock }) {
     case 'text': return <p className="m-0 whitespace-pre-wrap text-sm leading-relaxed">{block.text}</p>
     case 'metrics': return <dl className="m-0 flex flex-wrap gap-x-8 gap-y-5">{block.items.map((item, i) => <div key={i} className="min-w-24 flex-1"><dt className="text-xs text-[var(--color-fg-muted)]">{item.label}</dt><dd className="m-0 mt-1 text-xl font-semibold tabular-nums [overflow-wrap:anywhere]">{item.value}</dd>{item.hint && <dd className="m-0 mt-1 text-xs text-[var(--color-fg-muted)]">{item.hint}</dd>}</div>)}</dl>
     case 'chart': return <Chart block={block} />
-    case 'table': return <div className="max-h-[360px] overflow-auto rounded-lg"><table className="quiet-table w-full border-collapse text-sm"><thead className="sticky top-0 bg-[var(--color-bg-muted)]"><tr>{block.columns.map((c, i) => <th key={i} className="whitespace-nowrap px-3 py-2.5 text-left font-medium">{c}</th>)}</tr></thead><tbody>{block.rows.map((row, i) => <tr key={i} className={i % 2 ? 'bg-[var(--color-bg-muted)]/40' : ''}>{row.map((value, j) => <td key={j} className="min-w-24 px-3 py-2.5 align-top">{value === null ? '—' : String(value)}</td>)}</tr>)}</tbody></table></div>
+    case 'table': return <Table block={block} />
     case 'steps': return <ol className="m-0 list-none space-y-4 p-0">{block.items.map((item, i) => <li key={i} className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--color-bg-muted)] text-xs tabular-nums">{i + 1}</span><div className="min-w-0"><div className="text-sm font-medium">{item.title}</div>{item.description && <p className="m-0 mt-1 text-sm text-[var(--color-fg-muted)]">{item.description}</p>}</div></li>)}</ol>
     case 'tabs': case 'accordion': return <Sections block={block} />
   }

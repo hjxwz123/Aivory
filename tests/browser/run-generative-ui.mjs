@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
-import { mkdir } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import { createServer } from 'vite'
 import puppeteer from 'puppeteer-core'
 const executablePath = [process.env.CHROME_PATH, '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/usr/bin/google-chrome', '/usr/bin/chromium'].find(p => p && existsSync(p))
@@ -22,9 +22,18 @@ try {
   const origin = `http://127.0.0.1:${server.httpServer.address().port}`
   browser = await puppeteer.launch({ executablePath, headless: true, args: ['--no-sandbox', '--disable-background-networking'] })
   const page = await browser.newPage()
+  const image = await readFile(new URL('../../public/icon-512.png', import.meta.url))
+  const imageRequests = []
   await page.setRequestInterception(true)
   page.on('request', req => {
     const url = new URL(req.url())
+    if (url.hostname === 'images.example.test') {
+      imageRequests.push({ url: req.url(), headers: req.headers() })
+      req.respond(url.pathname === '/missing.png'
+        ? { status: 404, contentType: 'text/plain', body: 'Missing image' }
+        : { status: 200, contentType: 'image/png', body: image })
+      return
+    }
     if (!url.pathname.startsWith('/api/')) { req.continue(); return }
     const body = url.pathname.startsWith('/api/me/skill-commands') ? JSON.stringify([{ id: 'catalog:sk_visual', name: 'generative-ui', description: 'Visual answers', source_skill_id: 'sk_visual', instructions: '', can_manage: false, created_at: 0, updated_at: 0 }]) : url.pathname.startsWith('/api/notifications') ? '{"notifications":[],"total":0}' : '[]'
     req.respond({ status: 200, contentType: 'application/json', body })
@@ -35,6 +44,14 @@ try {
   await page.setViewport({ width: 1024, height: 900 })
   await page.goto(`${origin}/tests/browser/generative-ui-harness.html`)
   await page.waitForSelector('[data-case="presets"] [role="tab"]')
+  await page.$eval('[data-case="rich-table"]', e => e.scrollIntoView({ block: 'start' }))
+  await page.waitForFunction(() => [...document.querySelectorAll('[data-case="rich-table"] img')].length === 2 && [...document.querySelectorAll('[data-case="rich-table"] img')].every(e => e.complete && e.naturalWidth > 0) && document.querySelector('[data-case="rich-table"] [role="status"]')?.textContent === 'Image unavailable')
+  assert.equal(await page.$$eval('[data-case="rich-table"] th', e => e.length), 5)
+  assert.match(await page.$eval('[data-case="rich-table"]', e => e.textContent), /Bundled frontend|Native window controls/)
+  assert.equal(await page.$eval('[data-case="rich-table"] tbody td:nth-child(4)', e => getComputedStyle(e).textAlign), 'right')
+  assert.equal(await page.$eval('[data-case="rich-table"] tbody td:nth-child(5) a', e => e.target), '_blank')
+  assert.equal(await page.$$eval('[data-case="markdown-table"] [data-generative-ui]', e => e.length), 0)
+  assert.equal(await page.$$eval('[data-case="markdown-table"] table', e => e.length), 1)
   assert.equal(await page.$$eval('[data-case="user"] [data-generative-ui], [data-case="ordinary"] [data-generative-ui]', e => e.length), 0)
   assert.match(await page.$eval('[data-case="incomplete"]', e => e.textContent), /Preparing visualization/)
   await page.click('[data-case="presets"] [role="tab"]:nth-child(2)')
@@ -133,6 +150,25 @@ try {
         await page.evaluate(locale => window.__GUI__.setLanguage(locale), locale)
         assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `${width}/${theme}/${locale} overflows`)
       }
+      await page.$eval('[data-case="rich-table"]', e => e.scrollIntoView({ block: 'start' }))
+      const table = await page.$eval('[data-case="rich-table"] [data-generative-table]', e => ({ width: e.clientWidth, scrollWidth: e.scrollWidth }))
+      assert(table.scrollWidth > table.width, 'Wide rich table must scroll internally')
+      for (const selector of ['[data-case="rich-table"]', '[data-case="private-table"]']) {
+        await page.$eval(selector, e => e.scrollIntoView({ block: 'start' }))
+        await page.waitForFunction(sel => [...document.querySelectorAll(`${sel} img`)].every(e => e.complete && e.naturalWidth > 0), {}, selector)
+        const sizes = await page.$$eval(`${selector} img`, images => images.map(e => {
+          const image = e.getBoundingClientRect(), cell = e.closest('td').getBoundingClientRect()
+          return { width: image.width, height: image.height, cellWidth: cell.width, fit: getComputedStyle(e).objectFit, referrer: e.referrerPolicy, lazy: e.loading }
+        }))
+        for (const size of sizes) {
+          assert(size.width > 0 && size.width <= 120 && size.height <= 90 && size.width <= size.cellWidth, JSON.stringify(size))
+          assert.equal(size.fit, 'contain')
+          assert.equal(size.referrer, 'no-referrer')
+          assert.equal(size.lazy, 'lazy')
+        }
+      }
+      await page.$eval('[data-case="rich-table"]', e => e.scrollIntoView({ block: 'start' }))
+      await page.screenshot({ path: `/tmp/aivory-generative-ui/table-${width}-${theme}.png` })
       await new Promise(r => setTimeout(r, 400))
       const themedFrame = await inner('#n')
       assert(await themedFrame.$eval('#n', e => e.getBoundingClientRect().width > 0))
@@ -141,6 +177,8 @@ try {
       await page.screenshot({ path: `/tmp/aivory-generative-ui/${width}-${theme}.png`, fullPage: true })
     }
   }
+  assert(imageRequests.some(req => req.url.endsWith('/app.png')), 'External table image was never requested')
+  assert(imageRequests.every(req => !req.headers.referer), 'External table images must not receive the conversation referrer')
   assert.deepEqual(errors, [])
-  console.log('PASS: preset interactions, private/user boundaries, incomplete/async streaming HTML, blank/error recovery, network/navigation/storage/native isolation, administrator slash command, 30 responsive/theme/language combinations')
+  console.log('PASS: rich/legacy/Markdown tables, external image sizing/failure/referrer handling, preset interactions, private/user boundaries, incomplete/async streaming HTML, blank/error recovery, HTML network/navigation/storage/native isolation, administrator slash command, 30 responsive/theme/language combinations')
 } finally { await browser?.close(); await server.close() }

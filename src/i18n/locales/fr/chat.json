@@ -392,6 +392,10 @@
     "save_memory": "Mémoriser des informations utiles pour les prochaines conversations"
   },
   "sources": {
+    "images": "Résultats de recherche d’images",
+    "previewImage": "Afficher l’image : {{title}}",
+    "imageUnavailable": "Image indisponible",
+    "openImageSource": "Ouvrir la source de l’image : {{title}}",
     "label": "Sources",
     "open": "Ouvrir la source",
     "openDocument": "Prévisualiser le document",
@@ -1209,6 +1213,10 @@
     "chart": "Graphique",
     "showData": "Voir les données",
     "hideData": "Masquer les données",
-    "label": "Nom"
+    "label": "Nom",
+    "table": "Tableau",
+    "image": "Image",
+    "openImage": "Ouvrir l’image originale",
+    "imageFailed": "Image indisponible"
   }
 }

@@ -392,6 +392,10 @@
     "save_memory": "儲存對後續對話有幫助的資訊"
   },
   "sources": {
+    "images": "圖片搜尋結果",
+    "previewImage": "預覽圖片：{{title}}",
+    "imageUnavailable": "圖片無法載入",
+    "openImageSource": "開啟圖片來源：{{title}}",
     "label": "來源",
     "open": "開啟來源",
     "openDocument": "預覽文件",
@@ -1209,6 +1213,10 @@
     "chart": "圖表",
     "showData": "查看資料",
     "hideData": "收起資料",
-    "label": "名稱"
+    "label": "名稱",
+    "table": "表格",
+    "image": "圖片",
+    "openImage": "查看原圖",
+    "imageFailed": "圖片載入失敗"
   }
 }
