@@ -1,18 +1,28 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 const runtime = ipcRenderer.sendSync('desktop:runtime')
-function connectAudioSocket(listener) {
+function connectAudioSocket(listener, options) {
   const id = crypto.randomUUID()
+  let bufferedAmount = 0
   const onEvent = (_event, message) => {
     if (message.id !== id) return
+    if (message.type === 'sent') {
+      bufferedAmount = Math.max(0, bufferedAmount - message.data)
+      return
+    }
+    if (message.type === 'close') bufferedAmount = 0
     listener({ type: message.type, data: message.data })
     if (message.type === 'close') ipcRenderer.removeListener('desktop:audio-event', onEvent)
   }
   ipcRenderer.on('desktop:audio-event', onEvent)
-  ipcRenderer.send('desktop:audio-open', id)
+  ipcRenderer.send('desktop:audio-open', id, { segmented: options?.segmented === true })
   return {
-    send: (data) => ipcRenderer.send('desktop:audio-send', id, data),
-    close: () => { ipcRenderer.removeListener('desktop:audio-event', onEvent); ipcRenderer.send('desktop:audio-close', id) },
+    send: (data) => {
+      bufferedAmount += typeof data === 'string' ? new TextEncoder().encode(data).byteLength : data.byteLength
+      ipcRenderer.send('desktop:audio-send', id, data)
+    },
+    getBufferedAmount: () => bufferedAmount,
+    close: () => { bufferedAmount = 0; ipcRenderer.removeListener('desktop:audio-event', onEvent); ipcRenderer.send('desktop:audio-close', id) },
   }
 }
 if (runtime) contextBridge.exposeInMainWorld('aivoryDesktop', Object.freeze({

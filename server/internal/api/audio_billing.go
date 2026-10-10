@@ -197,37 +197,50 @@ func wavDurationSeconds(data []byte) (seconds float64, ok bool) {
 		return 0, false
 	}
 	var byteRate uint32
+	var sampleBlockAlign uint16
+	var dataBytes int
 	offset := 12
 	for offset+8 <= len(data) {
 		id := string(data[offset : offset+4])
 		size := int(binary.LittleEndian.Uint32(data[offset+4 : offset+8]))
 		body := offset + 8
+		if size < 0 || size > len(data)-body {
+			return 0, false
+		}
 		switch id {
 		case "fmt ":
-			if size < 16 || body+16 > len(data) {
+			if byteRate != 0 || size < 16 || body+16 > len(data) {
 				return 0, false
 			}
 			channels := binary.LittleEndian.Uint16(data[body+2 : body+4])
+			format := binary.LittleEndian.Uint16(data[body : body+2])
+			bits := binary.LittleEndian.Uint16(data[body+14 : body+16])
 			sampleRate := binary.LittleEndian.Uint32(data[body+4 : body+8])
 			byteRate = binary.LittleEndian.Uint32(data[body+8 : body+12])
 			blockAlign := binary.LittleEndian.Uint16(data[body+12 : body+14])
+			sampleBlockAlign = blockAlign
 			// Reject inconsistent formats: a header claiming a huge byte rate over
 			// ordinary samples would otherwise make long audio look short.
-			if channels == 0 || sampleRate < 8000 || sampleRate > 192000 || blockAlign == 0 ||
+			if (format != 1 && format != 3) || channels == 0 || channels > 8 ||
+				(bits != 8 && bits != 16 && bits != 24 && bits != 32 && bits != 64) ||
+				(format == 3 && bits != 32 && bits != 64) ||
+				blockAlign != channels*(bits/8) || sampleRate < 8000 || sampleRate > 192000 ||
 				byteRate != sampleRate*uint32(blockAlign) {
 				return 0, false
 			}
 		case "data":
-			if byteRate == 0 {
+			if byteRate == 0 || size%int(sampleBlockAlign) != 0 {
 				return 0, false
 			}
-			present := min(len(data)-body, size)
-			return float64(present) / float64(byteRate), true
+			dataBytes += size
 		}
 		// Chunks are word-aligned.
 		offset = body + size + size%2
 	}
-	return 0, false
+	if byteRate == 0 || dataBytes == 0 {
+		return 0, false
+	}
+	return float64(dataBytes) / float64(byteRate), true
 }
 
 // upstreamAudioSeconds reads the audio length an OpenAI-compatible

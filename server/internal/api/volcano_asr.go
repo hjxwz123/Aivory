@@ -58,6 +58,8 @@ const (
 	// server keys off the message-type nibble, not this one.
 	volcSerializationJSON = 0b0001
 	volcCompressionGzip   = 0b0001
+	volcResponseMaxBytes  = 2 * 1024 * 1024
+	volcWriteTimeout      = 10 * time.Second
 )
 
 // volcanoConfig is the admin-configured Volcano credential + behaviour set.
@@ -88,7 +90,14 @@ func volcGunzip(in []byte) ([]byte, error) {
 		return nil, err
 	}
 	defer r.Close()
-	return io.ReadAll(r)
+	out, err := io.ReadAll(io.LimitReader(r, volcResponseMaxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(out) > volcResponseMaxBytes {
+		return nil, fmt.Errorf("volcano: response exceeds limit")
+	}
+	return out, nil
 }
 
 // volcHeader assembles the 4-byte frame header.
@@ -189,6 +198,9 @@ type volcResponse struct {
 // parseVolcResponse decodes one server frame. It is defensive about truncated
 // payloads because the upstream is untrusted at the byte level.
 func parseVolcResponse(msg []byte) (*volcResponse, error) {
+	if len(msg) > volcResponseMaxBytes {
+		return nil, fmt.Errorf("volcano: frame exceeds limit")
+	}
 	if len(msg) < 4 {
 		return nil, fmt.Errorf("volcano: short frame (%d bytes)", len(msg))
 	}
@@ -228,6 +240,9 @@ func parseVolcResponse(msg []byte) (*volcResponse, error) {
 		}
 		size := binary.BigEndian.Uint32(payload[:4])
 		payload = payload[4:]
+		if uint64(size) > uint64(len(payload)) {
+			return nil, fmt.Errorf("volcano: truncated response payload")
+		}
 		if int(size) < len(payload) {
 			payload = payload[:size]
 		}
@@ -238,6 +253,9 @@ func parseVolcResponse(msg []byte) (*volcResponse, error) {
 		res.Code = int(binary.BigEndian.Uint32(payload[:4]))
 		size := binary.BigEndian.Uint32(payload[4:8])
 		payload = payload[8:]
+		if uint64(size) > uint64(len(payload)) {
+			return nil, fmt.Errorf("volcano: truncated error payload")
+		}
 		if int(size) < len(payload) {
 			payload = payload[:size]
 		}
@@ -348,10 +366,11 @@ func dialVolcano(ctx context.Context, cfg volcanoConfig) (*volcanoSession, error
 	}
 
 	s := &volcanoSession{conn: conn, seq: 1}
+	conn.SetReadLimit(volcResponseMaxBytes)
 	if resp != nil {
 		s.logID = resp.Header.Get("X-Tt-Logid")
 	}
-	if err := conn.WriteMessage(websocket.BinaryMessage, newVolcFullClientRequest(cfg)); err != nil {
+	if err := s.writeMessage(websocket.BinaryMessage, newVolcFullClientRequest(cfg)); err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("volcano send config: %w", err)
 	}
@@ -369,7 +388,7 @@ func dialVolcano(ctx context.Context, cfg volcanoConfig) (*volcanoSession, error
 func (s *volcanoSession) sendAudio(chunk []byte) error {
 	frame := newVolcAudioRequest(s.seq, chunk, false)
 	s.seq++
-	return s.conn.WriteMessage(websocket.TextMessage, frame)
+	return s.writeMessage(websocket.TextMessage, frame)
 }
 
 // sendLast forwards the final packet (negative seq) so the server flushes and
@@ -377,7 +396,14 @@ func (s *volcanoSession) sendAudio(chunk []byte) error {
 func (s *volcanoSession) sendLast(chunk []byte) error {
 	frame := newVolcAudioRequest(-s.seq, chunk, true)
 	s.seq++
-	return s.conn.WriteMessage(websocket.TextMessage, frame)
+	return s.writeMessage(websocket.TextMessage, frame)
+}
+
+func (s *volcanoSession) writeMessage(kind int, frame []byte) error {
+	if err := s.conn.SetWriteDeadline(time.Now().Add(volcWriteTimeout)); err != nil {
+		return err
+	}
+	return s.conn.WriteMessage(kind, frame)
 }
 
 // readResponse blocks for the next server frame. Each read refreshes the read

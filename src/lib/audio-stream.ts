@@ -12,14 +12,17 @@
 // secure context (navigator.mediaDevices), the same gate the Whisper path uses.
 
 import { apiUrl } from '@/api/client'
+import { joinTranscript } from '@/lib/browser-speech'
 
 /** Target wire format — must match the backend's full-client-request config. */
 const TARGET_RATE = 16_000
 /** ~200 ms per packet at 16 kHz — Volcano's recommended packet size. */
 const FRAME_SAMPLES = 3_200
-/** Keep the user's opening phrase while the backend establishes the ASR link. */
-const PRE_READY_BUFFER_SECONDS = 10
-const PRE_READY_BUFFER_MAX_BYTES = TARGET_RATE * 2 * PRE_READY_BUFFER_SECONDS
+/** Keep recent unsent audio across handshakes and network backpressure. */
+const AUDIO_BUFFER_MAX_BYTES = TARGET_RATE * 2 * 30
+const SOCKET_BUFFER_MAX_BYTES = TARGET_RATE * 2
+
+type AudioSocket = Pick<WebSocket, 'binaryType' | 'readyState' | 'bufferedAmount' | 'onopen' | 'onmessage' | 'onerror' | 'onclose' | 'send' | 'close'>
 
 export interface VoiceStreamHandlers {
   /** Backend connected to Volcano and is ready for audio. */
@@ -53,21 +56,22 @@ function toWsUrl(path: string): string {
   return scheme + location.host + (u.startsWith('/') ? u : '/' + u)
 }
 
-function createAudioSocket(): Pick<WebSocket, 'binaryType' | 'readyState' | 'onopen' | 'onmessage' | 'onerror' | 'onclose' | 'send' | 'close'> {
+function createAudioSocket(): AudioSocket {
   const connect = window.aivoryDesktop?.connectAudioSocket
-  if (!connect) return new WebSocket(toWsUrl('/audio/stream'))
+  if (!connect) return new WebSocket(toWsUrl('/audio/stream?segmented=1'))
   const socket = {
     binaryType: 'arraybuffer' as BinaryType, readyState: WebSocket.CONNECTING as number,
+    get bufferedAmount() { return transport.getBufferedAmount?.() ?? 0 },
     onopen: null, onmessage: null, onerror: null, onclose: null,
     send: (data: string | ArrayBuffer) => transport.send(data),
     close: () => { Object.assign(socket, { readyState: WebSocket.CLOSED }); transport.close() },
-  } as Pick<WebSocket, 'binaryType' | 'readyState' | 'onopen' | 'onmessage' | 'onerror' | 'onclose' | 'send' | 'close'>
+  } as AudioSocket
   const transport = connect((event) => {
     if (event.type === 'open') { Object.assign(socket, { readyState: WebSocket.OPEN }); socket.onopen?.call(socket as WebSocket, new Event('open')) }
     if (event.type === 'message') socket.onmessage?.call(socket as WebSocket, new MessageEvent('message', { data: event.data }))
     if (event.type === 'error') socket.onerror?.call(socket as WebSocket, new Event('error'))
     if (event.type === 'close') { Object.assign(socket, { readyState: WebSocket.CLOSED }); socket.onclose?.call(socket as WebSocket, new CloseEvent('close')) }
-  })
+  }, { segmented: true })
   return socket
 }
 
@@ -135,20 +139,30 @@ export async function startVoiceStream(handlers: VoiceStreamHandlers): Promise<V
   }
   const inRate = ctx.sampleRate
 
-  const ws = createAudioSocket()
+  let ws: AudioSocket
+  try {
+    ws = createAudioSocket()
+  } catch (error) {
+    stream.getTracks().forEach((track) => track.stop())
+    void ctx.close()
+    throw error
+  }
   ws.binaryType = 'arraybuffer'
 
   // Typed as the default buffer variant so appends/slices (whose backing buffer
   // TS widens to ArrayBufferLike) assign back cleanly.
   let pending: Float32Array = new Float32Array(0)
-  let preReadyFrames: ArrayBuffer[] = []
-  let preReadyBytes = 0
+  let queuedFrames: ArrayBuffer[] = []
+  let queuedBytes = 0
+  let committedText = ''
+  let currentText = ''
   let capturing = false
   let upstreamReady = false
   let stopRequested = false
   let endSent = false
   let closed = false
   let finalTimer: ReturnType<typeof setTimeout> | null = null
+  let flushTimer: ReturnType<typeof setInterval> | null = null
 
   const source = ctx.createMediaStreamSource(stream)
   const processor = ctx.createScriptProcessor(4096, 1, 1)
@@ -172,23 +186,24 @@ export async function startVoiceStream(handlers: VoiceStreamHandlers): Promise<V
 
   function clearBufferedAudio() {
     pending = new Float32Array(0)
-    preReadyFrames = []
-    preReadyBytes = 0
+    queuedFrames = []
+    queuedBytes = 0
   }
 
-  function bufferPreReadyFrame(frame: ArrayBuffer) {
-    // A slow or unavailable upstream must not turn an active microphone into
-    // unbounded memory use. Preserve the earliest audio first: it is the part
-    // users most often lose while waiting for a cold upstream connection.
-    if (preReadyBytes + frame.byteLength > PRE_READY_BUFFER_MAX_BYTES) return
-    preReadyFrames.push(frame)
-    preReadyBytes += frame.byteLength
+  function bufferFrame(frame: ArrayBuffer) {
+    if (frame.byteLength > AUDIO_BUFFER_MAX_BYTES) frame = frame.slice(-AUDIO_BUFFER_MAX_BYTES)
+    while (queuedFrames.length && queuedBytes + frame.byteLength > AUDIO_BUFFER_MAX_BYTES) {
+      queuedBytes -= queuedFrames.shift()!.byteLength
+    }
+    queuedFrames.push(frame)
+    queuedBytes += frame.byteLength
   }
 
   function cleanup() {
     if (closed) return
     closed = true
     if (finalTimer) clearTimeout(finalTimer)
+    if (flushTimer) clearInterval(flushTimer)
     clearBufferedAudio()
     teardownCapture()
     try {
@@ -217,21 +232,21 @@ export async function startVoiceStream(handlers: VoiceStreamHandlers): Promise<V
 
   function queueOrSendFrame(frame: ArrayBuffer): boolean {
     if (closed) return false
-    if (!upstreamReady || ws.readyState !== WebSocket.OPEN) {
-      bufferPreReadyFrame(frame)
-      return true
-    }
-    return sendFrame(frame)
+    bufferFrame(frame)
+    return flushBufferedFrames()
   }
 
-  function flushPreReadyFrames(): boolean {
-    if (ws.readyState !== WebSocket.OPEN) return false
-    const frames = preReadyFrames
-    preReadyFrames = []
-    preReadyBytes = 0
-    for (const frame of frames) {
+  function flushBufferedFrames(): boolean {
+    if (closed) return false
+    if (!upstreamReady || ws.readyState !== WebSocket.OPEN) return true
+    // Keep the transport queue short; older frames in our own FIFO can still
+    // be discarded if the network stalls. Already-sent frames cannot be removed.
+    while (queuedFrames.length && (ws.bufferedAmount || 0) < SOCKET_BUFFER_MAX_BYTES) {
+      const frame = queuedFrames.shift()!
+      queuedBytes -= frame.byteLength
       if (!sendFrame(frame)) return false
     }
+    if (stopRequested && queuedFrames.length === 0) sendEnd()
     return true
   }
 
@@ -243,7 +258,7 @@ export async function startVoiceStream(handlers: VoiceStreamHandlers): Promise<V
   }
 
   function sendEnd(): boolean {
-    if (endSent || !upstreamReady || ws.readyState !== WebSocket.OPEN) return false
+    if (endSent || queuedFrames.length || !upstreamReady || ws.readyState !== WebSocket.OPEN) return false
     try {
       ws.send(JSON.stringify({ type: 'end' }))
       endSent = true
@@ -274,12 +289,14 @@ export async function startVoiceStream(handlers: VoiceStreamHandlers): Promise<V
     void ctx.resume()
   }
 
-  /** Flush the final PCM tail; before ready it joins the local FIFO buffer. */
+  /** Queue the final PCM tail before sending the end control. */
   function flushAndEnd() {
     if (!flushPendingTail()) return
-    if (!upstreamReady || ws.readyState !== WebSocket.OPEN) return
-    if (!flushPreReadyFrames()) return
-    sendEnd()
+    flushBufferedFrames()
+  }
+
+  function transcript(text: string): string {
+    return joinTranscript(committedText, text)
   }
 
   ws.onopen = () => {
@@ -288,7 +305,7 @@ export async function startVoiceStream(handlers: VoiceStreamHandlers): Promise<V
   }
 
   ws.onmessage = (e) => {
-    if (typeof e.data !== 'string') return
+    if (closed || typeof e.data !== 'string') return
     let msg: { type?: string; text?: string; message?: string; code?: string }
     try {
       msg = JSON.parse(e.data)
@@ -301,7 +318,7 @@ export async function startVoiceStream(handlers: VoiceStreamHandlers): Promise<V
         upstreamReady = true
         // Preserve chronology: complete frames captured while connecting, then
         // the short current tail, then subsequent live frames.
-        if (!flushPreReadyFrames() || !flushPendingTail()) break
+        if (!flushPendingTail() || !flushBufferedFrames()) break
         if (stopRequested) {
           sendEnd()
           break
@@ -309,10 +326,16 @@ export async function startVoiceStream(handlers: VoiceStreamHandlers): Promise<V
         handlers.onReady?.()
         break
       case 'partial':
-        handlers.onPartial?.(msg.text ?? '')
+        currentText = msg.text ?? ''
+        handlers.onPartial?.(transcript(currentText))
+        break
+      case 'segment':
+        committedText = transcript(msg.text || currentText)
+        currentText = ''
+        handlers.onPartial?.(committedText)
         break
       case 'final':
-        handlers.onFinal?.(msg.text ?? '', msg.code)
+        handlers.onFinal?.(transcript(msg.text || currentText), msg.code)
         cleanup()
         break
       case 'error':
@@ -334,15 +357,17 @@ export async function startVoiceStream(handlers: VoiceStreamHandlers): Promise<V
   // socket/upstream handshake can take seconds; samples stay in the bounded
   // local FIFO until the server explicitly says it can relay them.
   startCapture()
+  flushTimer = setInterval(flushBufferedFrames, 100)
 
   return {
     stop() {
       if (closed || stopRequested) return
       stopRequested = true
+      // Renewal may be flushing a prior segment while the remaining bounded
+      // audio waits for the next upstream connection.
+      finalTimer = setTimeout(cleanup, 90_000)
       teardownCapture() // stop the mic immediately; keep the socket for the final
       flushAndEnd()
-      // Safety net: if the backend never sends a final packet, close anyway.
-      finalTimer = setTimeout(cleanup, 8_000)
     },
     cancel() {
       cleanup()

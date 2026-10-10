@@ -69,10 +69,12 @@ func transcribeAudioHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxAudioBytes+(1<<20))
 	if err := r.ParseMultipartForm(maxAudioBytes + 1024); err != nil {
 		writeError(w, 400, err)
 		return
 	}
+	defer r.MultipartForm.RemoveAll()
 	file, header, err := r.FormFile("file")
 	if err != nil {
 		writeError(w, 400, errors.New("audio file required (field 'file')"))
@@ -80,25 +82,24 @@ func transcribeAudioHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 	// Read through a capped reader so an oversized upload can't balloon memory.
-	audio, err := io.ReadAll(io.LimitReader(file, maxAudioBytes))
+	audio, err := io.ReadAll(io.LimitReader(file, maxAudioBytes+1))
 	if err != nil {
 		writeError(w, 400, errors.New("audio file could not be read"))
 		return
 	}
+	if len(audio) == 0 || len(audio) > maxAudioBytes {
+		writeError(w, http.StatusRequestEntityTooLarge, errors.New("audio upload is empty or exceeds the size limit"))
+		return
+	}
 
-	// § voice billing: measure the clip, then hold its price before any upstream
-	// spend. A WAV upload (what the composer sends) is measured exactly from its
-	// samples; anything else uses the recorder's reported duration, or a
-	// conservative size-based estimate, and is trued up against the length the
-	// upstream reports.
+	// Measure actual audio samples on the server before reserving credit.
+	// Client-reported duration can never reduce the reservation or final charge.
 	billing := audioBillingFor(d, u)
 	sourceID := store.GenID("asr")
-	seconds, exact := wavDurationSeconds(audio)
-	if !exact {
-		seconds = reportedAudioSeconds(r.FormValue("duration_ms"))
-		if seconds <= 0 {
-			seconds = float64(len(audio)) / audioFallbackBytesPerSecond
-		}
+	seconds, err := measuredAudioSeconds(r.Context(), audio)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
 	}
 	settled := false
 	if billing != nil {
@@ -187,31 +188,31 @@ func transcribeAudioHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, errVoiceGroupPermission)
 		return
 	}
-	if !exact {
-		seconds = math.Max(seconds, upstreamAudioSeconds(respBytes))
-	}
+	seconds = math.Max(seconds, upstreamAudioSeconds(respBytes))
 	billed := billableSeconds(seconds)
 	credits := 0.0
 	if billing != nil {
-		settled = true
 		debit, err := billing.settle(r.Context(), d, sourceID, billed)
 		if err != nil {
-			// The transcript was already produced; deliver it and leave the
-			// shortfall in the log rather than discarding the user's speech.
 			if d.Logger != nil {
 				d.Logger.Printf("voice charge failed (user=%s source=%s seconds=%d): %v", u.ID, sourceID, billed, err)
 			}
-		} else {
-			credits = debit.Total
+			if errors.Is(err, store.ErrInsufficientCredits) || errors.Is(err, errAudioInsufficientCredits) {
+				writeJSON(w, http.StatusPaymentRequired, map[string]string{"error": errAudioInsufficientCredits.Error(), "code": "insufficient_credits"})
+			} else {
+				writeError(w, http.StatusInternalServerError, errors.New("voice transcription billing failed"))
+			}
+			return
 		}
+		settled = true
+		credits = debit.Total
 	}
 	recordAudioUsage(r.Context(), d, u.ID, sourceID, billed, billing, credits)
 	writeJSON(w, 200, map[string]string{"text": strings.TrimSpace(parsed.Text)})
 }
 
-// reportedAudioSeconds parses the recorder's duration hint (milliseconds) for a
-// non-WAV upload. It only ever raises the bill (the upstream-reported length is
-// taken when larger) and is capped so a bogus value cannot block a balance.
+// reportedAudioSeconds is a legacy hint parser. Billing uses independently
+// measured samples instead; the hint must never authorize or price a request.
 func reportedAudioSeconds(raw string) float64 {
 	ms, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
 	if err != nil || ms <= 0 || math.IsNaN(ms) || math.IsInf(ms, 0) {

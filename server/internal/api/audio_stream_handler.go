@@ -28,10 +28,13 @@ import (
 // Tunables (env-overridable, § config-reference).
 var (
 	audioStreamUserRateLimit = envcfg.Int("AIVORY_API_AUDIO_STREAM_USER_RATE_LIMIT", 30)
-	// Hard ceiling on relayed audio per session: 16 kHz·mono·16-bit = 32 KB/s,
-	// so 24 MB ≈ 12.5 min — a runaway-tab backstop, not a normal limit.
-	audioStreamMaxBytes = envcfg.Int64("AIVORY_API_AUDIO_STREAM_MAX_BYTES", 24*1024*1024)
-	audioStreamMaxDur   = envcfg.Dur("AIVORY_API_AUDIO_STREAM_MAX_SESSION", 15*time.Minute)
+	// Segmented clients renew the upstream connection at this byte threshold.
+	// Audio is forwarded and discarded; this is not an in-memory recording size.
+	audioStreamMaxBytes = envcfg.Int64("AIVORY_API_AUDIO_STREAM_MAX_BYTES", 64*1024*1024)
+	// Zero disables the total recording deadline for segmented clients.
+	audioStreamMaxDur        = envcfg.Dur("AIVORY_API_AUDIO_STREAM_MAX_SESSION", 0)
+	audioStreamBufferSeconds = envcfg.Int("AIVORY_API_AUDIO_STREAM_BUFFER_SECONDS", 30)
+	audioStreamSegmentDur    = envcfg.Dur("AIVORY_API_AUDIO_STREAM_SEGMENT_SESSION", 5*time.Minute)
 
 	// Set AIVORY_ASR_DEBUG=1 to log every decoded Volcano frame (message code,
 	// last-package marker, transcript length, raw JSON). Off by default — the
@@ -55,8 +58,8 @@ func sameOriginWS(r *http.Request) bool {
 
 // streamEvent is the browser-facing JSON frame (backend → browser).
 type streamEvent struct {
-	Type    string `json:"type"`              // ready | partial | final | error
-	Text    string `json:"text,omitempty"`    // cumulative transcript
+	Type    string `json:"type"`              // ready | partial | segment | final | error
+	Text    string `json:"text,omitempty"`    // cumulative transcript within this segment
 	Message string `json:"message,omitempty"` // error detail
 	// Code is machine-readable: "insufficient_credits" on an error that refused
 	// the session, "credits_exhausted" on a final cut short by the balance.
@@ -139,8 +142,21 @@ func audioStreamHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return // Upgrade already wrote an error response
 	}
 	defer bconn.Close()
+	// ReadMessage allocates the entire message, including text frames. Enforce
+	// the wire limit before the first read, not after allocating the payload.
+	bconn.SetReadLimit(256 * 1024)
+	if r.URL.Query().Get("segmented") == "1" {
+		relaySegmentedAudio(d, r, bconn, cfg)
+		return
+	}
 
-	ctx, cancel := context.WithTimeout(watcher.Context(), audioStreamMaxDur)
+	// Older clients only understand cumulative results and one final event.
+	// Retain their bounded single-upstream behavior until the app is updated.
+	maxDuration := audioStreamMaxDur
+	if maxDuration <= 0 {
+		maxDuration = 15 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(watcher.Context(), maxDuration)
 	defer cancel()
 
 	// § voice billing: the session length is unknown up front, so hold what the
@@ -148,7 +164,7 @@ func audioStreamHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// at that length; settlement charges only the seconds actually relayed.
 	billing := audioBillingFor(d, u)
 	sourceID := store.GenID("asr")
-	maxBytes := audioStreamMaxBytes
+	maxBytes := audioStreamByteLimit()
 	creditCapped := false
 	if billing != nil {
 		affordable, err := billing.affordableSeconds(ctx, d)
@@ -160,7 +176,7 @@ func audioStreamHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			writeStreamEvent(bconn, streamEvent{Type: "error", Code: "insufficient_credits", Message: errAudioInsufficientCredits.Error()})
 			return
 		}
-		maxSeconds := min(affordable, int64(audioStreamMaxDur/time.Second))
+		maxSeconds := min(affordable, int64(maxDuration/time.Second))
 		if err := billing.reserve(ctx, d, sourceID, maxSeconds); err != nil {
 			event := streamEvent{Type: "error", Message: "couldn't reserve credits"}
 			if errors.Is(err, errAudioInsufficientCredits) {
@@ -312,9 +328,16 @@ func audioStreamHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 
 // writeStreamEvent sends one JSON event to the browser with a short write
 // deadline so a dead peer can't wedge the writer.
-func writeStreamEvent(conn *websocket.Conn, ev streamEvent) {
+func writeStreamEvent(conn *websocket.Conn, ev streamEvent) error {
 	_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	_ = conn.WriteJSON(ev)
+	return conn.WriteJSON(ev)
+}
+
+func audioStreamByteLimit() int64 {
+	if audioStreamMaxBytes < 2 {
+		return 64 * 1024 * 1024
+	}
+	return audioStreamMaxBytes - audioStreamMaxBytes%2
 }
 
 // isEndControl reports whether a browser text frame is the {"type":"end"} signal

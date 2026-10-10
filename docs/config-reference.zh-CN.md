@@ -385,8 +385,10 @@ SSE 心跳、流恢复窗口、生成时长上限、分页与搜索上限、消�
 | `AIVORY_API_AUDIO_TRANSCRIPTION_USER_RATE_LIMIT` | `int` | `20` | `api/audio_handlers.go:26` | 单个用户每分钟可发起的音频转写请求数上限。 |
 | `AIVORY_API_TRANSCRIPTION_UPSTREAM_RESPONSE_READ_CAP` | `int64` | `1<<20` | `api/audio_handlers.go:27` | 读取上游转写响应到内存的字节上限。 |
 | `AIVORY_API_AUDIO_STREAM_USER_RATE_LIMIT` | `int` | `30` | `api/audio_stream_handler.go:30` | 单个用户每分钟可发起的实时语音流式（WebSocket）会话数上限。 |
-| `AIVORY_API_AUDIO_STREAM_MAX_BYTES` | `int64` | `24*1024*1024` | `api/audio_stream_handler.go:33` | 单次实时语音流式会话允许中继的音频字节数上限，超出即断开连接。 |
-| `AIVORY_API_AUDIO_STREAM_MAX_SESSION` | `duration` | `15*time.Minute` | `api/audio_stream_handler.go:34` | 单次实时语音流式会话（麦克风 → 火山 ASR 中继）的硬性时长上限。 |
+| `AIVORY_API_AUDIO_STREAM_MAX_BYTES` | `int64` | `64*1024*1024` | `api/audio_stream_handler.go` | 分段客户端每段上游连接的 PCM 字节阈值，到达后自动续接，录音不中止。这是流量计数，不是保存的音频大小。小于 2 时使用默认值。旧客户端仍在达到此阈值时结束会话。 |
+| `AIVORY_API_AUDIO_STREAM_MAX_SESSION` | `duration` | `0` | `api/audio_stream_handler.go` | 整次录音的总时长限制，`0` 表示分段客户端不限总时长；配置 `1h` 等正数仍会限制总时长。旧客户端在此值非正数时沿用 15 分钟上限。 |
+| `AIVORY_API_AUDIO_STREAM_SEGMENT_SESSION` | `duration` | `5*time.Minute` | `api/audio_stream_segments.go` | 单段上游连接的最大墙钟时长及 PCM 时长，限定在 1 秒至 10 分钟之间。每段独立结算，结束后自动续接。时长或字节阈值先到达者触发续接。 |
+| `AIVORY_API_AUDIO_STREAM_BUFFER_SECONDS` | `int` | `30` | `api/audio_stream_segments.go` | 上游缓慢或续接时，服务端最多保留最近多少秒未发送的 PCM，限定在 1 至 120 秒之间；满后丢弃最早的未发送音频，保留已识别文字。浏览器和桌面端另有固定 30 秒的待发送 PCM 缓冲。 |
 | `AIVORY_ASR_DEBUG` | `bool` | `false` | `api/audio_stream_handler.go:39` | 记录每个解码后的火山 ASR 返回帧（消息码、末包标记、转写文本长度、原始 JSON 负载），用于排查实时转写问题。默认关闭——原始负载含用户语音内容，需显式开启。 |
 | `AIVORY_API_UPLOAD_RATE_LIMIT_MAX` | `int` | `20` | `api/files_handlers.go:25` | 上传限流窗口内单个用户可进行的文件上传次数上限。 |
 | `AIVORY_API_UPLOAD_RATE_LIMIT_WINDOW` | `duration` | `time.Minute` | `api/files_handlers.go:26` | 对用户文件上传进行限流计数的时间窗口。 |

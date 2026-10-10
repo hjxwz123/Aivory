@@ -9,8 +9,9 @@ declare global {
       cancelBrowserLogin: () => Promise<{ status: 'cancelled' }>
       checkUpdates: () => Promise<{ status: 'available' | 'current' | 'failed'; version?: string }>
       openPayment?: (action: { type: 'redirect' | 'form_post'; url: string; fields?: Record<string, string> }) => Promise<void>
-      connectAudioSocket?: (listener: (event: { type: 'open' | 'message' | 'error' | 'close'; data?: string }) => void) => {
+      connectAudioSocket?: (listener: (event: { type: 'open' | 'message' | 'error' | 'close'; data?: string }) => void, options?: { segmented?: boolean }) => {
         send: (data: string | ArrayBuffer) => void
+        getBufferedAmount?: () => number
         close: () => void
       }
       startApiRequest?: (id: string) => void
