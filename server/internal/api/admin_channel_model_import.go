@@ -15,6 +15,7 @@ import (
 	"aivory/server/internal/llm"
 	"aivory/server/internal/requestheaders"
 	"aivory/server/internal/store"
+	"aivory/server/internal/typesafe"
 )
 
 const (
@@ -145,7 +146,7 @@ func discoverDraftChannelModelsAdmin(d Deps, w http.ResponseWriter, r *http.Requ
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), channelModelDiscoveryTimeout)
 	defer cancel()
-	discovery, err := discoverChannelModels(ctx, channel)
+	discovery, err := discoverChannelModels(ctx, channel, req.Protocol)
 	if err != nil {
 		if d.Logger != nil {
 			d.Logger.Printf("admin: draft channel model discovery failed (type=%s): %v", channel.Type, err)
@@ -176,7 +177,7 @@ func discoverSavedChannelModelsAdmin(d Deps, w http.ResponseWriter, r *http.Requ
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), channelModelDiscoveryTimeout)
 	defer cancel()
-	discovery, err := discoverChannelModels(ctx, channel)
+	discovery, err := discoverChannelModels(ctx, channel, r.URL.Query().Get("protocol"))
 	if err != nil {
 		if d.Logger != nil {
 			d.Logger.Printf("admin: saved channel model discovery failed (channel=%s type=%s): %v", channel.ID, channel.Type, err)
@@ -204,7 +205,7 @@ func importChannelModelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), channelModelDiscoveryTimeout)
 	defer cancel()
-	discovery, err := discoverChannelModels(ctx, channel)
+	discovery, err := discoverChannelModels(ctx, channel, r.URL.Query().Get("protocol"))
 	if err != nil {
 		if d.Logger != nil {
 			d.Logger.Printf("admin: channel model discovery failed (channel=%s type=%s): %v", channel.ID, channel.Type, err)
@@ -278,7 +279,7 @@ func createChannelModelsBatchAdmin(d Deps, w http.ResponseWriter, r *http.Reques
 		model := newDiscoveredChannelModel(channelID, candidate)
 		if candidate.Protocol == "" {
 			model.Protocol = store.LegacyModelProtocol(candidate.Kind, channel)
-			if model.Protocol == "typesafe.decisions" {
+			if store.IsDecisionProtocol(model.Protocol) {
 				model.Kind = "decision"
 			}
 		}
@@ -334,16 +335,31 @@ func newDiscoveredChannelModel(channelID string, found discoveredChannelModel) s
 	return m
 }
 
-func discoverChannelModels(ctx context.Context, channel *store.Channel) (result channelModelDiscovery, err error) {
+func discoverChannelModels(ctx context.Context, channel *store.Channel, selectedProtocol ...string) (result channelModelDiscovery, err error) {
 	defer func() {
 		for i := range result.Models {
-			result.Models[i].Protocol = store.LegacyModelProtocol(result.Models[i].Kind, channel)
+			// An explicitly selected discovery format is authoritative for models
+			// of the matching kind. Transport URLs cannot overwrite this choice.
+			if len(selectedProtocol) > 0 && selectedProtocol[0] != "" {
+				m := store.Model{Kind: result.Models[i].Kind, Protocol: selectedProtocol[0]}
+				if store.ValidateModelProtocol(&m) == nil {
+					result.Models[i].Protocol = m.Protocol
+					continue
+				}
+			}
+			if channel != nil && channel.Type == "openrouter" {
+				result.Models[i].Protocol = typesafe.OpenRouterDecisionsProtocol
+			} else {
+				result.Models[i].Protocol = store.LegacyModelProtocol(result.Models[i].Kind, channel)
+			}
 		}
 	}()
 	if channel == nil {
 		return channelModelDiscovery{}, errors.New("channel required")
 	}
 	switch strings.ToLower(strings.TrimSpace(channel.Type)) {
+	case "openrouter":
+		return discoverOpenRouterDecisionModels(ctx, channel)
 	case "typesafe":
 		base := strings.TrimRight(channel.BaseURL, "/")
 		if base == "" {
@@ -388,7 +404,7 @@ func applyDiscoveryProtocol(channel *store.Channel, protocol string) error {
 		kind = "image"
 	case "openai.embeddings", "dashscope.embeddings":
 		kind = "embedding"
-	case "typesafe.decisions":
+	case "typesafe.decisions", "openrouter.decisions":
 		kind = "decision"
 	}
 	m := store.Model{Kind: kind, Protocol: protocol}
@@ -396,6 +412,10 @@ func applyDiscoveryProtocol(channel *store.Channel, protocol string) error {
 		return err
 	}
 	*channel = *store.ChannelForModel(&m, channel)
+	if protocol == typesafe.OpenRouterDecisionsProtocol {
+		// Only this temporary discovery copy gets a vendor-specific catalog type.
+		channel.Type = "openrouter"
+	}
 	if channel.Type == "dashscope" {
 		channel.Type = "openai"
 	}
@@ -443,6 +463,42 @@ func (a *channelModelAccumulator) add(requestID, label, description, kind string
 		Kind:        kind,
 	})
 	return nil
+}
+
+func discoverOpenRouterDecisionModels(ctx context.Context, channel *store.Channel) (channelModelDiscovery, error) {
+	endpoint, err := typesafe.OpenRouterModelsEndpoint(channel.BaseURL)
+	if err != nil {
+		return channelModelDiscovery{}, err
+	}
+	var response struct {
+		Data []struct {
+			ID          string `json:"id"`
+			Name        string `json:"name"`
+			Description string `json:"description"`
+		} `json:"data"`
+	}
+	if err := fetchChannelModelJSON(ctx, endpoint, channel, &response); err != nil {
+		return channelModelDiscovery{}, err
+	}
+	acc := newChannelModelAccumulator()
+	for _, item := range response.Data {
+		if err := acc.add(item.ID, item.Name, item.Description, "decision", isDecisionRequestID(item.ID)); err != nil {
+			return channelModelDiscovery{}, err
+		}
+	}
+	return acc.result, nil
+}
+
+func isDecisionRequestID(requestID string) bool {
+	id := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(requestID)), "~")
+	id = strings.TrimPrefix(id, "typesafe/")
+	if strings.Contains(id, "decision") {
+		return true
+	}
+	if strings.HasPrefix(id, "jev-") && !strings.HasPrefix(id, "jev-router") {
+		return true
+	}
+	return false
 }
 
 func discoverOpenAIChannelModels(ctx context.Context, channel *store.Channel) (channelModelDiscovery, error) {
@@ -614,6 +670,9 @@ func classifyOpenAIModel(requestID string) (string, bool) {
 	id := strings.ToLower(strings.TrimSpace(requestID))
 	if id == "" {
 		return "", false
+	}
+	if isDecisionRequestID(id) {
+		return "decision", true
 	}
 	for _, marker := range []string{
 		"moderation", "whisper", "transcri", "realtime", "speech", "tts", "audio", "sora", "video",

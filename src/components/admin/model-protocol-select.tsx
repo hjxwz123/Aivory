@@ -14,10 +14,14 @@ export function ModelProtocolSelect({ id, kind, value, onChange, disabled, disco
 }) {
   const { t } = useTranslation('admin')
   const options = MODEL_PROTOCOLS.filter((option) => discovery
-    ? ['openai.chat', 'openai.responses', 'anthropic.messages', 'gemini.generateContent', 'typesafe.decisions'].includes(option.value)
+    ? ['openai.chat', 'openai.responses', 'anthropic.messages', 'gemini.generateContent', 'typesafe.decisions', 'openrouter.decisions'].includes(option.value)
     : !kind || option.kinds.includes(kind))
   return (
-    <Field label={t(discovery ? 'models.protocol.discovery' : 'models.protocol.label')} htmlFor={id}>
+    <Field
+      label={t(discovery ? 'models.protocol.discovery' : 'models.protocol.label')}
+      htmlFor={id}
+      hint={value === 'openrouter.decisions' ? t('models.protocol.openRouterHint') : undefined}
+    >
       <Select value={value ?? protocolForKind(kind ?? 'chat')} onValueChange={(next) => onChange(next as ApiModelProtocol)} disabled={disabled}>
         <SelectTrigger id={id}><SelectValue /></SelectTrigger>
         <SelectContent>

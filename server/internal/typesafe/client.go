@@ -46,7 +46,9 @@ type Config struct {
 	Headers requestheaders.Headers
 	BaseURL string
 	Model   string
-	Timeout time.Duration
+	// Empty preserves the existing TypeSafe System One endpoint behavior.
+	Protocol string
+	Timeout  time.Duration
 	// MaxRetries is the number of additional HTTP attempts; zero disables them.
 	MaxRetries       int
 	RetryBaseDelay   time.Duration
@@ -80,6 +82,16 @@ type Client struct {
 }
 
 func New(cfg Config) (*Client, error) {
+	if cfg.Protocol != "" && cfg.Protocol != "typesafe.decisions" && cfg.Protocol != OpenRouterDecisionsProtocol {
+		return nil, failure(ErrConfiguration, "unsupported Decisions protocol")
+	}
+	if cfg.Protocol == OpenRouterDecisionsProtocol {
+		endpoint, err := OpenRouterDecisionsEndpoint(cfg.BaseURL)
+		if err != nil {
+			return nil, err
+		}
+		cfg.BaseURL = endpoint
+	}
 	headers, err := requestheaders.Normalize(cfg.Headers)
 	if err != nil {
 		return nil, failure(ErrConfiguration, "invalid custom request headers")
@@ -137,7 +149,7 @@ func New(cfg Config) (*Client, error) {
 	}
 	// Never redirect a credential-bearing POST, including same-host redirects.
 	hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &Client{cfg: cfg, endpoint: u.String(), openRouterModels: openRouter || strings.HasSuffix(u.Path, "/decisions"), http: hc}, nil
+	return &Client{cfg: cfg, endpoint: u.String(), openRouterModels: cfg.Protocol == OpenRouterDecisionsProtocol || openRouter || strings.HasSuffix(u.Path, "/decisions"), http: hc}, nil
 }
 
 func (c *Client) Stats() Stats {
@@ -268,22 +280,28 @@ func (c *Client) Evaluate(ctx context.Context, req Request, opts Options) (resul
 		}
 		// Decode envelope/usage first so invalid answers do not erase known costs.
 		var envelope struct {
-			Model   string          `json:"model"`
-			Answers json.RawMessage `json:"answers"`
-			Usage   *struct {
-				Input  *int `json:"input_tokens"`
-				Output *int `json:"output_tokens"`
+			ID       string          `json:"id"`
+			Provider string          `json:"provider"`
+			Model    string          `json:"model"`
+			Answers  json.RawMessage `json:"answers"`
+			Usage    *struct {
+				Input  *int     `json:"input_tokens"`
+				Output *int     `json:"output_tokens"`
+				Cost   *float64 `json:"cost"`
 			} `json:"usage"`
 		}
 		if json.Unmarshal(raw, &envelope) != nil {
 			return nil, failure(ErrResponse, "response is not valid JSON")
 		}
 		record.ServedModel = envelope.Model
-		result = &Response{Model: envelope.Model, RequestedModel: req.Model, RequestID: record.RequestID}
+		if record.RequestID == "" {
+			record.RequestID = safeRequestID(envelope.ID)
+		}
+		result = &Response{ID: envelope.ID, Provider: envelope.Provider, Model: envelope.Model, RequestedModel: req.Model, RequestID: record.RequestID}
 		if envelope.Usage == nil || envelope.Usage.Input == nil || envelope.Usage.Output == nil || *envelope.Usage.Input < 0 || *envelope.Usage.Output < 0 {
 			return result, failure(ErrResponse, "missing or invalid token usage")
 		}
-		result.Usage = Usage{InputTokens: *envelope.Usage.Input, OutputTokens: *envelope.Usage.Output}
+		result.Usage = Usage{InputTokens: *envelope.Usage.Input, OutputTokens: *envelope.Usage.Output, Cost: envelope.Usage.Cost}
 		record.Usage, record.UsageKnown = result.Usage, true
 		if json.Unmarshal(envelope.Answers, &result.Answers) != nil {
 			result.Answers = nil
@@ -297,7 +315,7 @@ func (c *Client) Evaluate(ctx context.Context, req Request, opts Options) (resul
 			}
 			validationExpected = ""
 		}
-		if err := validateResponse(snapshot, result, validationExpected); err != nil {
+		if err := validateDecisionResponse(snapshot, result, validationExpected, c.cfg.Protocol == OpenRouterDecisionsProtocol); err != nil {
 			// Preserve usage/version for accounting, but never expose invalid judgments.
 			result.Answers = nil
 			return result, err

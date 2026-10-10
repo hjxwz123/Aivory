@@ -9,7 +9,12 @@ export const MODEL_PROTOCOLS: { value: ApiModelProtocol; label: string; kinds: A
   { value: 'openai.embeddings', label: 'OpenAI · Embeddings', kinds: ['embedding'] },
   { value: 'dashscope.embeddings', label: 'DashScope · Embeddings', kinds: ['embedding'] },
   { value: 'typesafe.decisions', label: 'TypeSafe · Decisions', kinds: ['decision'] },
+  { value: 'openrouter.decisions', label: 'OpenRouter · Decisions', kinds: ['decision'] },
 ]
+
+export function isDecisionProtocol(protocol: ApiModelProtocol): boolean {
+  return protocol === 'typesafe.decisions' || protocol === 'openrouter.decisions'
+}
 
 export function protocolForKind(kind: ApiModel['kind'], current?: ApiModelProtocol): ApiModelProtocol {
   return MODEL_PROTOCOLS.find((option) => option.value === current && option.kinds.includes(kind))?.value

@@ -86,6 +86,12 @@ func probability(v float64) bool {
 }
 
 func validateResponse(req Request, result *Response, expected string) error {
+	return validateDecisionResponse(req, result, expected, false)
+}
+
+// OpenRouter declares confidence, probabilities and score legends optional.
+// Missing confidence must remain conservative for callers' existing thresholds.
+func validateDecisionResponse(req Request, result *Response, expected string, optionalMetadata bool) error {
 	if strings.TrimSpace(result.Model) == "" {
 		return failure(ErrResponse, "missing response model")
 	}
@@ -106,7 +112,7 @@ func validateResponse(req Request, result *Response, expected string) error {
 			}
 			continue
 		}
-		if a.Confidence == nil || !probability(*a.Confidence) || a.Noul != nil {
+		if (!optionalMetadata && a.Confidence == nil) || (a.Confidence != nil && !probability(*a.Confidence)) || a.Noul != nil {
 			return failure(ErrResponse, "missing or invalid confidence")
 		}
 		var keys []string
@@ -123,6 +129,12 @@ func validateResponse(req Request, result *Response, expected string) error {
 			}
 		} else {
 			levels := q.Criteria.([]any)
+			if optionalMetadata && a.Legend == nil {
+				a.Legend = make(map[string]json.RawMessage, len(levels))
+				for i, level := range levels {
+					a.Legend[strconv.Itoa(i)], _ = json.Marshal(level)
+				}
+			}
 			if a.Score == nil || a.Choice != nil || math.IsNaN(*a.Score) || math.IsInf(*a.Score, 0) || *a.Score < 0 || *a.Score > float64(len(levels)-1) || len(a.Legend) != len(levels) {
 				return failure(ErrResponse, "invalid score or legend")
 			}
@@ -133,6 +145,14 @@ func validateResponse(req Request, result *Response, expected string) error {
 				}
 				keys = append(keys, k)
 			}
+		}
+		if optionalMetadata && a.Confidence == nil {
+			zero := 0.0
+			a.Confidence = &zero
+		}
+		result.Answers[id] = a
+		if optionalMetadata && a.Probabilities == nil {
+			continue
 		}
 		if len(a.Probabilities) != len(keys) {
 			return failure(ErrResponse, "probability options do not match criteria")

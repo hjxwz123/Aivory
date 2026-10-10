@@ -304,6 +304,7 @@
   },
   "models": {
     "protocol": {
+      "openRouterHint": "Les requêtes utilisent /api/alpha/decisions. Définissez le Base URL du canal sur https://openrouter.ai/api/v1 ou l’URL complète de Decisions. Utilisez un identifiant de modèle pris en charge par le service amont.",
       "label": "Protocole de requête",
       "discovery": "Format de découverte des modèles",
       "pickChannel": "Sélectionner un canal"

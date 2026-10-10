@@ -92,14 +92,17 @@ func (a *Answer) UnmarshalJSON(data []byte) error {
 }
 
 type Usage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	InputTokens  int      `json:"input_tokens"`
+	OutputTokens int      `json:"output_tokens"`
+	Cost         *float64 `json:"cost,omitempty"`
 }
 
 type Response struct {
-	Model   string            `json:"model"`
-	Answers map[string]Answer `json:"answers"`
-	Usage   Usage             `json:"usage"`
+	ID       string            `json:"id,omitempty"`
+	Provider string            `json:"provider,omitempty"`
+	Model    string            `json:"model"`
+	Answers  map[string]Answer `json:"answers"`
+	Usage    Usage             `json:"usage"`
 	// RequestID is the upstream x-request-id, when provided. RequestedModel
 	// preserves an alias even when Model reports a concrete release.
 	RequestID      string `json:"-"`

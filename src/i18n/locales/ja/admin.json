@@ -304,6 +304,7 @@
   },
   "models": {
     "protocol": {
+      "openRouterHint": "リクエストは /api/alpha/decisions に送信されます。チャンネルの Base URL は https://openrouter.ai/api/v1 または Decisions の完全な URL を指定できます。上流サービスが対応するモデル ID を使用してください。",
       "label": "リクエストプロトコル",
       "discovery": "モデル取得の形式",
       "pickChannel": "チャネルを選択"

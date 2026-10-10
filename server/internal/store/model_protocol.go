@@ -4,12 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"strings"
 )
 
 // The model owns the wire protocol; channels only provide transport credentials.
 const legacyModelProtocolSQL = `CASE
-	WHEN kind='embedding' THEN CASE WHEN (SELECT rtrim(base_url,'/') FROM channels WHERE id=models.channel_id) LIKE '%/api/v1' OR (SELECT base_url FROM channels WHERE id=models.channel_id) LIKE '%/services/embeddings/%' THEN 'dashscope.embeddings' ELSE 'openai.embeddings' END
+	WHEN kind='embedding' THEN CASE WHEN (SELECT lower(trim(type)) FROM channels WHERE id=models.channel_id)='dashscope'
+	 OR (SELECT lower(rtrim(base_url,'/')) FROM channels WHERE id=models.channel_id) IN ('https://dashscope.aliyuncs.com/api/v1','https://dashscope-intl.aliyuncs.com/api/v1','https://dashscope-us.aliyuncs.com/api/v1')
+	 OR (SELECT base_url FROM channels WHERE id=models.channel_id) LIKE '%/services/embeddings/%' THEN 'dashscope.embeddings' ELSE 'openai.embeddings' END
 	WHEN kind='decision' THEN 'typesafe.decisions'
 	WHEN kind='image' THEN CASE WHEN (SELECT lower(trim(type)) FROM channels WHERE id=models.channel_id) IN ('google','gemini') THEN 'gemini.generateContent' ELSE 'openai.images' END
 	WHEN (SELECT lower(trim(type)) FROM channels WHERE id=models.channel_id) IN ('anthropic','claude') THEN 'anthropic.messages'
@@ -19,6 +22,10 @@ const legacyModelProtocolSQL = `CASE
 	ELSE 'openai.chat' END`
 
 const modelProtocolSelect = `COALESCE(NULLIF(protocol,''), ` + legacyModelProtocolSQL + `)`
+
+func IsDecisionProtocol(protocol string) bool {
+	return protocol == "typesafe.decisions" || protocol == "openrouter.decisions"
+}
 
 func BackfillModelProtocols(ctx context.Context, db RowExecer) error {
 	_, err := db.ExecContext(ctx, `UPDATE models SET protocol=`+legacyModelProtocolSQL+` WHERE protocol=''`)
@@ -32,8 +39,9 @@ func BackfillModelProtocols(ctx context.Context, db RowExecer) error {
 func LegacyModelProtocol(kind string, channel *Channel) string {
 	if kind == "embedding" {
 		if channel != nil {
-			base := strings.TrimRight(channel.BaseURL, "/")
-			if strings.HasSuffix(base, "/api/v1") || strings.Contains(base, "/services/embeddings/") {
+			base, _ := url.Parse(strings.TrimSpace(channel.BaseURL))
+			if strings.EqualFold(strings.TrimSpace(channel.Type), "dashscope") || (base != nil && (strings.Contains(base.Path, "/services/embeddings/") ||
+				(strings.TrimRight(base.Path, "/") == "/api/v1" && (base.Hostname() == "dashscope.aliyuncs.com" || base.Hostname() == "dashscope-intl.aliyuncs.com" || base.Hostname() == "dashscope-us.aliyuncs.com")))) {
 				return "dashscope.embeddings"
 			}
 		}
@@ -76,7 +84,7 @@ func ValidateModelProtocol(m *Model) error {
 		valid = m.Kind == "image"
 	case "openai.embeddings", "dashscope.embeddings":
 		valid = m.Kind == "embedding"
-	case "typesafe.decisions":
+	case "typesafe.decisions", "openrouter.decisions":
 		valid = m.Kind == "decision"
 	}
 	if !valid {
@@ -124,7 +132,7 @@ func ChannelForModel(m *Model, channel *Channel) *Channel {
 		resolved.Type = "anthropic"
 	case "gemini.generateContent":
 		resolved.Type = "google"
-	case "typesafe.decisions":
+	case "typesafe.decisions", "openrouter.decisions":
 		resolved.Type = "typesafe"
 	default:
 		resolved.Type = ""

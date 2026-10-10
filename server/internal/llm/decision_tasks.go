@@ -28,7 +28,7 @@ func (t *TaskLLM) policyDecisionModel(ctx context.Context, key string) *store.Mo
 // pricing. Reloading them each call makes disable/key/price changes immediate.
 // HTTP connections are pooled by the shared transport, not by credential cache.
 func (t *TaskLLM) runPolicyDecision(ctx context.Context, model *store.Model, req typesafe.Request, opts typesafe.Options) (*typesafe.Response, error) {
-	if !model.Enabled || model.Kind != "decision" {
+	if !model.Enabled || model.Kind != "decision" || !store.IsDecisionProtocol(model.Protocol) {
 		return nil, fmt.Errorf("decision model unavailable")
 	}
 	selectedChannelID, selectErr := selectRegularModelChannelID(ctx, t.db, model)
@@ -78,8 +78,9 @@ func (t *TaskLLM) runPolicyDecision(ctx context.Context, model *store.Model, req
 	}()
 	client, err := typesafe.New(typesafe.Config{
 		APIKey: channel.APIKey, BaseURL: channel.BaseURL, Model: model.RequestID,
-		Headers: channel.Headers,
-		Timeout: 10 * time.Second, MaxRetries: 0, HTTPClient: providerHTTPClient, Logger: t.logger,
+		Protocol: model.Protocol,
+		Headers:  channel.Headers,
+		Timeout:  10 * time.Second, MaxRetries: 0, HTTPClient: providerHTTPClient, Logger: t.logger,
 		CaptureDiagnostics: !strings.HasPrefix(opts.Metadata.MessageID, "private_"),
 		Recorder: func(rctx context.Context, record typesafe.Record) error {
 			if record.UsageKnown && reservation != nil {

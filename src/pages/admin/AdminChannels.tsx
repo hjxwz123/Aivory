@@ -57,8 +57,8 @@ type ModelDiscoveryState = {
 type PendingChannelModel = ApiChannelModelCandidate & { source?: 'upstream' | 'manual' }
 
 function inferManualModelKind(requestID: string): ApiChannelModelCandidate['kind'] {
-  const id = requestID.toLowerCase()
-  if (id.startsWith('jev-')) return 'decision'
+  const id = requestID.toLowerCase().replace(/^~/, '').replace(/^typesafe\//, '')
+  if (id.includes('decision') || (id.startsWith('jev-') && !id.startsWith('jev-router'))) return 'decision'
   if (id.includes('embedding') || id.startsWith('embed-')) return 'embedding'
   if (
     id.startsWith('dall-e')
@@ -881,7 +881,7 @@ export default function AdminChannels() {
                         <span className="min-w-0 flex-1">
                           <span className="flex min-w-0 items-center gap-2">
                             <span className="truncate text-sm font-medium text-[var(--color-fg)]">{model.label}</span>
-                            <Badge size="xs">{model.kind}</Badge>
+                            <Badge size="xs">{t(`admin:models.kinds.${model.kind}`)}</Badge>
                             {alreadyAdded ? <Badge size="xs" variant="success">{t('admin:channels.modelAdd.added')}</Badge> : null}
                           </span>
                           <span className="mt-0.5 block truncate font-mono text-[12px] text-[var(--color-fg-subtle)]">

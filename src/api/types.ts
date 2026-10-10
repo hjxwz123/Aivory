@@ -1113,7 +1113,7 @@ export interface ApiBuiltinTool {
   globally_enabled?: boolean
 }
 
-export type ApiModelProtocol = 'openai.chat' | 'openai.responses' | 'anthropic.messages' | 'gemini.generateContent' | 'openai.images' | 'openai.embeddings' | 'dashscope.embeddings' | 'typesafe.decisions'
+export type ApiModelProtocol = 'openai.chat' | 'openai.responses' | 'anthropic.messages' | 'gemini.generateContent' | 'openai.images' | 'openai.embeddings' | 'dashscope.embeddings' | 'typesafe.decisions' | 'openrouter.decisions'
 
 export interface ApiModel {
 	protocol?: ApiModelProtocol
@@ -1759,6 +1759,8 @@ export interface ApiSandboxFiles {
 }
 
 export interface ApiConversation {
+  /** True only when an upload reservation request reused an existing draft. */
+  draft_reused?: boolean
   id: string
   user_id: string
   project_id: string

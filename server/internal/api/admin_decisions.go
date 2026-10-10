@@ -27,14 +27,14 @@ func normalizeDecisionModel(ctx context.Context, db *sql.DB, m *store.Model) err
 		m.PriceOutput, m.PriceCacheRead, m.PriceCacheWrite, m.PricePerImage = 0, 0, 0, 0
 		return nil
 	}
-	if m.Protocol != "typesafe.decisions" && m.Kind != "decision" {
+	if !store.IsDecisionProtocol(m.Protocol) && m.Kind != "decision" {
 		return nil
 	}
-	if m.Protocol != "typesafe.decisions" {
-		return errors.New("decision models require the TypeSafe Decisions protocol")
+	if !store.IsDecisionProtocol(m.Protocol) {
+		return errors.New("decision models require a Decisions protocol")
 	}
 	if m.Kind != "decision" && m.Kind != "chat" && m.Kind != "" {
-		return errors.New("TypeSafe Decisions supports decision models only")
+		return errors.New("Decisions protocols support decision models only")
 	}
 	m.Kind = "decision"
 	m.ToolMode = "none"
@@ -75,7 +75,7 @@ func normalizeDecisionPolicySetting(ctx context.Context, d Deps, raw json.RawMes
 	}
 	available := false
 	for _, channel := range channels {
-		if channel.Enabled && m.Protocol == "typesafe.decisions" && strings.TrimSpace(channel.APIKey) != "" {
+		if channel.Enabled && store.IsDecisionProtocol(m.Protocol) && strings.TrimSpace(channel.APIKey) != "" {
 			available = true
 			break
 		}

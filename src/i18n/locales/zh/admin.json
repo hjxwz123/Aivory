@@ -304,6 +304,7 @@
   },
   "models": {
     "protocol": {
+      "openRouterHint": "请求发送到 /api/alpha/decisions。渠道 Base URL 可填 https://openrouter.ai/api/v1 或完整 Decisions 地址。实际请求 ID 请使用上游支持的模型 ID。",
       "label": "请求协议",
       "discovery": "拉取模型使用的格式",
       "pickChannel": "选择渠道"

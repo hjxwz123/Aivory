@@ -151,7 +151,7 @@ func buildAdminOnboardingResponse(r *http.Request, d Deps, userSettings json.Raw
 			usableChatModels[model.ID] = true
 			chatModelReady = true
 		case "decision":
-			usableDecisionModels[model.ID] = model.Protocol == "typesafe.decisions"
+			usableDecisionModels[model.ID] = store.IsDecisionProtocol(model.Protocol)
 		case "embedding":
 			usableEmbeddingModels[model.ID] = true
 		}

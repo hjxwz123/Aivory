@@ -304,6 +304,7 @@
   },
   "models": {
     "protocol": {
+      "openRouterHint": "Requests use /api/alpha/decisions. Set the channel Base URL to https://openrouter.ai/api/v1 or the full Decisions endpoint. Use a model ID supported by the upstream service.",
       "label": "Request protocol",
       "discovery": "Model discovery format",
       "pickChannel": "Select a channel"

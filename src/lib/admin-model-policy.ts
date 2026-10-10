@@ -1,7 +1,7 @@
 import type { TFunction } from 'i18next'
 import { ApiError } from '@/api'
 import type { ApiChannel, ApiModel } from '@/api/types'
-import { effectiveModelProtocol } from '@/lib/model-protocol'
+import { effectiveModelProtocol, isDecisionProtocol } from '@/lib/model-protocol'
 
 export const MODEL_POLICY_MODEL_KEYS = [
   'default_model_id',
@@ -32,10 +32,10 @@ export function availablePolicyModels(models: ApiModel[], channels: ApiChannel[]
         ? regularBindings.filter((binding) => binding.channel_enabled).map((binding) => binding.channel_id)
         : [model.channel_id]
       const hasEnabledChannel = usableChannelIDs.some((channelID) => enabledChannelIDs.has(channelID))
-      const isTypesafe = effectiveModelProtocol(model, channels.find((channel) => channel.id === model.channel_id)) === 'typesafe.decisions'
+      const isDecision = isDecisionProtocol(effectiveModelProtocol(model, channels.find((channel) => channel.id === model.channel_id)))
       return (
-        (model.kind === 'chat' && hasEnabledChannel && !isTypesafe)
-        || (DECISION_POLICY_KEYS.has(policyKey) && model.kind === 'decision' && isTypesafe && usableChannelIDs.some((channelID) => decisionChannelIDs.has(channelID)))
+        (model.kind === 'chat' && hasEnabledChannel && !isDecision)
+        || (DECISION_POLICY_KEYS.has(policyKey) && model.kind === 'decision' && isDecision && usableChannelIDs.some((channelID) => decisionChannelIDs.has(channelID)))
       )
     },
   )
@@ -77,7 +77,7 @@ export function availableVisionModels(models: ApiModel[], channels: ApiChannel[]
   return models.filter(
     (model) => {
       if (!model.enabled || model.kind !== 'chat' || model.vision !== true) return false
-      if (effectiveModelProtocol(model, channels.find((channel) => channel.id === model.channel_id)) === 'typesafe.decisions') return false
+      if (isDecisionProtocol(effectiveModelProtocol(model, channels.find((channel) => channel.id === model.channel_id)))) return false
       const regularBindings = (model.channel_bindings ?? []).filter((binding) => binding.role === 'regular')
       const usableChannelIDs = regularBindings.length > 0
         ? regularBindings.filter((binding) => binding.channel_enabled).map((binding) => binding.channel_id)
