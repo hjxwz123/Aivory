@@ -6,7 +6,6 @@
     "appearance": "外观",
     "models": "模型",
     "privacy": "隐私",
-    "conversations": "对话与链接",
     "shortcuts": "快捷键",
     "about": "关于",
     "work": "工作"
@@ -341,6 +340,16 @@
     "voiceUnavailable": "当前环境没有可用的语音识别方式。"
   },
   "privacy": {
+    "management": {
+      "title": "对话与分享",
+      "manage": "管理",
+      "archivedTitle": "归档的对话",
+      "archivedDescription": "查看、取消归档或删除已归档的对话。",
+      "linksTitle": "分享的链接",
+      "linksDescription": "管理对话分享链接和 HTML 分享链接。",
+      "conversationLinks": "对话分享链接",
+      "htmlLinks": "HTML 分享链接"
+    },
     "title": "隐私与数据",
     "subtitle": "你的对话归你所有。",
     "controls": "数据控制",

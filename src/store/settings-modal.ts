@@ -12,7 +12,6 @@ export const SETTINGS_TABS = [
   'personalization',
   'appearance',
   'models',
-  'conversations',
   'privacy',
   'shortcuts',
   'about',
@@ -22,6 +21,7 @@ export type SettingsTab = (typeof SETTINGS_TABS)[number]
 
 /** Deep links / callers may hand us any string — fall back to the first tab. */
 export function normalizeSettingsTab(tab: string | null | undefined): SettingsTab {
+  if (tab === 'conversations') return 'privacy'
   return (SETTINGS_TABS as readonly string[]).includes(tab ?? '') ? (tab as SettingsTab) : 'account'
 }
 

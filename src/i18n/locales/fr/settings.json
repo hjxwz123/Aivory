@@ -6,7 +6,6 @@
     "appearance": "Apparence",
     "models": "Modèles",
     "privacy": "Confidentialité",
-    "conversations": "Discussions et liens",
     "shortcuts": "Raccourcis",
     "about": "À propos",
     "work": "Travail"
@@ -341,6 +340,16 @@
     "voiceUnavailable": "Aucune reconnaissance vocale n'est disponible ici."
   },
   "privacy": {
+    "management": {
+      "title": "Conversations et partage",
+      "manage": "Gérer",
+      "archivedTitle": "Conversations archivées",
+      "archivedDescription": "Consultez, désarchivez ou supprimez vos conversations archivées.",
+      "linksTitle": "Liens partagés",
+      "linksDescription": "Gérez les liens de partage des conversations et du HTML.",
+      "conversationLinks": "Liens de conversation",
+      "htmlLinks": "Liens HTML"
+    },
     "title": "Confidentialité et données",
     "subtitle": "Vos conversations vous appartiennent.",
     "controls": "Contrôles des données",

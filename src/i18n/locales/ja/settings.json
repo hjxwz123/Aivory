@@ -6,7 +6,6 @@
     "appearance": "外観",
     "models": "モデル",
     "privacy": "プライバシー",
-    "conversations": "会話とリンク",
     "shortcuts": "ショートカット",
     "about": "について",
     "work": "仕事"
@@ -341,6 +340,16 @@
     "voiceUnavailable": "この環境で使える音声認識はありません。"
   },
   "privacy": {
+    "management": {
+      "title": "会話と共有",
+      "manage": "管理",
+      "archivedTitle": "アーカイブした会話",
+      "archivedDescription": "アーカイブした会話の確認、復元、削除ができます。",
+      "linksTitle": "共有リンク",
+      "linksDescription": "会話と HTML の共有リンクを管理します。",
+      "conversationLinks": "会話の共有リンク",
+      "htmlLinks": "HTML の共有リンク"
+    },
     "title": "プライバシーとデータ",
     "subtitle": "あなたの会話はあなたのものです。",
     "controls": "データ管理",

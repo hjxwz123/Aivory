@@ -32,10 +32,10 @@
   margin: 0;
 }
 
-[data-generative-ui] [data-generative-table] li + li {
+[data-generative-ui] [data-generative-table] li+li {
   margin-top: 4px;
 }
 
-[data-generative-ui] [data-generative-table] figure > a {
+[data-generative-ui] [data-generative-table] figure>a {
   text-decoration: none;
 }

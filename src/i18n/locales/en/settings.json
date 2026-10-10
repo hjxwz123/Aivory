@@ -6,7 +6,6 @@
     "appearance": "Appearance",
     "models": "Models",
     "privacy": "Privacy",
-    "conversations": "Chats & links",
     "shortcuts": "Shortcuts",
     "about": "About",
     "work": "Work"
@@ -341,6 +340,16 @@
     "voiceUnavailable": "No speech recognition is available here."
   },
   "privacy": {
+    "management": {
+      "title": "Conversations and sharing",
+      "manage": "Manage",
+      "archivedTitle": "Archived conversations",
+      "archivedDescription": "View, unarchive, or delete archived conversations.",
+      "linksTitle": "Shared links",
+      "linksDescription": "Manage conversation and HTML sharing links.",
+      "conversationLinks": "Conversation links",
+      "htmlLinks": "HTML links"
+    },
     "title": "Privacy & data",
     "subtitle": "Your conversations are yours.",
     "controls": "Data controls",

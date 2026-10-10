@@ -123,7 +123,7 @@
   text-align: right;
 }
 
-.admin-data-table [data-align='right'] > .admin-table-cell {
+.admin-data-table [data-align='right']>.admin-table-cell {
   display: flex;
   justify-content: flex-end;
 }

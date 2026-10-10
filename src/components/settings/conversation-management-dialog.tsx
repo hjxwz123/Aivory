@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { ArchiveRestore, ChevronLeft, ChevronRight, Copy, ExternalLink, RefreshCw, Trash2, Unlink } from 'lucide-react'
@@ -16,47 +16,79 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip } from '@/components/ui/tooltip'
 import { SettingsBlock, SettingsRow, SettingsSection } from '@/components/settings/settings-section'
+import { Dialog, DialogBody, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 type View = 'archived' | 'shared' | 'html'
 type Entry = { id: string; title: string; createdAt: number; url?: string }
 type Confirmation = { row: Entry; action: 'delete' | 'revoke' }
 const PAGE_SIZE = 20
-const VIEWS: readonly View[] = ['archived', 'shared', 'html']
 
-export default function Conversations() {
+export function ConversationManagementDialog({ open, mode, onOpenChange, returnFocus }: {
+  open: boolean
+  mode: 'archived' | 'links'
+  onOpenChange: (open: boolean) => void
+  returnFocus?: RefObject<HTMLButtonElement | null>
+}) {
+  const { t } = useTranslation('settings')
   const userId = useAuth((state) => state.user?.id)
-  return userId ? <ConversationManager key={userId} userId={userId} /> : null
+  return (
+    <Dialog open={open && Boolean(userId)} onOpenChange={onOpenChange}>
+      <DialogContent size="lg" className="min-h-[min(18rem,calc(100dvh-2rem))] max-h-[min(34rem,calc(100dvh-2rem))]" onCloseAutoFocus={(event) => {
+        event.preventDefault()
+        const settings = useSettingsModal.getState()
+        if (settings.open && settings.tab === 'privacy') returnFocus?.current?.focus()
+      }}>
+        <DialogHeader className="pr-14">
+          <DialogTitle>{t(`privacy.management.${mode === 'archived' ? 'archivedTitle' : 'linksTitle'}`)}</DialogTitle>
+          <DialogDescription>{t(`privacy.management.${mode === 'archived' ? 'archivedDescription' : 'linksDescription'}`)}</DialogDescription>
+        </DialogHeader>
+        <DialogBody>
+          {open && userId ? (
+            <ConversationManager key={`${userId}:${mode}`} userId={userId} mode={mode} onClose={() => onOpenChange(false)} />
+          ) : null}
+        </DialogBody>
+      </DialogContent>
+    </Dialog>
+  )
 }
 
-function ConversationManager({ userId }: { userId: string }) {
+function ConversationManager({ userId, mode, onClose }: { userId: string; mode: 'archived' | 'links'; onClose: () => void }) {
   const { t } = useTranslation('settings')
   const [revision, setRevision] = useState(0)
   const onConversationDeleted = useCallback(() => setRevision((value) => value + 1), [])
 
   return (
-    <div className="mx-auto min-w-0 max-w-[60rem]">
-      <header className="mb-6">
-        <h1 className="text-xl font-semibold tracking-normal text-[var(--color-fg)]">{t('conversations.title')}</h1>
-        <p className="mt-1.5 text-sm text-[var(--color-fg-muted)]">{t('conversations.subtitle')}</p>
-      </header>
-
-      {VIEWS.map((view) => (
-        <ConversationSection key={view} userId={userId} view={view} revision={revision} onConversationDeleted={onConversationDeleted} />
-      ))}
+    <div className="min-w-0">
+      {mode === 'archived' ? (
+        <ConversationSection userId={userId} view="archived" revision={revision} onConversationDeleted={onConversationDeleted} onClose={onClose} />
+      ) : (
+        <Tabs defaultValue="shared">
+          <TabsList variant="segmented" className="w-full sm:w-auto" aria-label={t('privacy.management.linksTitle')}>
+            <TabsTrigger variant="segmented" value="shared" className="h-auto min-h-8 flex-1 justify-center whitespace-normal py-1.5 sm:flex-none">{t('privacy.management.conversationLinks')}</TabsTrigger>
+            <TabsTrigger variant="segmented" value="html" className="h-auto min-h-8 flex-1 justify-center whitespace-normal py-1.5 sm:flex-none">{t('privacy.management.htmlLinks')}</TabsTrigger>
+          </TabsList>
+          {(['shared', 'html'] as const).map((view) => (
+            <TabsContent key={view} value={view}>
+              <ConversationSection userId={userId} view={view} revision={revision} onConversationDeleted={onConversationDeleted} onClose={onClose} />
+            </TabsContent>
+          ))}
+        </Tabs>
+      )}
     </div>
   )
 }
 
-function ConversationSection({ userId, view, revision, onConversationDeleted }: {
+function ConversationSection({ userId, view, revision, onConversationDeleted, onClose }: {
   userId: string
   view: View
   revision: number
   onConversationDeleted: () => void
+  onClose: () => void
 }) {
   const { t } = useTranslation(['settings', 'chat', 'common'])
   const navigate = useNavigate()
   const user = useAuth((state) => state.user)
-  const visible = useSettingsModal((state) => state.open && state.tab === 'conversations')
   const lang = useLanguage((state) => state.lang)
   const dateFormat = useMemo(() => new Intl.DateTimeFormat(lang, { dateStyle: 'medium' }), [lang])
   const [page, setPage] = useState(0)
@@ -79,7 +111,6 @@ function ConversationSection({ userId, view, revision, onConversationDeleted }: 
 
   useEffect(() => {
     const request = ++requestRef.current
-    if (!visible) return
     setStatus('loading')
     const stillCurrent = () => requestRef.current === request && useAuth.getState().user?.id === userId
     const load = async () => {
@@ -115,7 +146,7 @@ function ConversationSection({ userId, view, revision, onConversationDeleted }: 
     }
     void load()
     return () => { requestRef.current += 1 }
-  }, [key, page, revision, userId, version, view, visible])
+  }, [key, page, revision, userId, version, view])
 
   async function mutate(row: Entry, action: 'restore' | 'delete' | 'revoke') {
     if (busyRef.current) return
@@ -157,8 +188,6 @@ function ConversationSection({ userId, view, revision, onConversationDeleted }: 
   return (
     <SettingsSection
       id={`settings-conversations-${view}`}
-      title={t(`settings:conversations.views.${view}`)}
-      description={t(`settings:conversations.descriptions.${view}`)}
       actions={
         <Button
           variant="secondary"
@@ -171,7 +200,7 @@ function ConversationSection({ userId, view, revision, onConversationDeleted }: 
         </Button>
       }
     >
-      <div aria-busy={loading || Boolean(busy) || undefined}>
+      <div data-conversation-view={view} aria-busy={loading || Boolean(busy) || undefined}>
         {confirmation && (
           <div className="mb-3 rounded-[10px] bg-[var(--color-bg-muted)] px-4 py-4" role="alert">
             <p className="break-words text-sm leading-relaxed">
@@ -227,6 +256,7 @@ function ConversationSection({ userId, view, revision, onConversationDeleted }: 
                       className="block max-w-full truncate rounded-[4px] text-left hover:text-[var(--color-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                       title={row.title}
                       onClick={() => {
+                        onClose()
                         useSettingsModal.getState().close()
                         navigate(`/chat/${encodeURIComponent(row.id)}`)
                       }}

@@ -337,12 +337,15 @@
 [data-chat-width='narrow'] {
   --layout-message-max-w: 44rem;
 }
+
 [data-chat-width='wide'] {
   --layout-message-max-w: min(56rem, 100%);
 }
+
 [data-chat-width='full'] {
   --layout-message-max-w: min(62rem, 100%);
 }
+
 /* "max" — wider than full, but a PERCENTAGE cap keeps a proportional gutter on
  * every pane (never edge-to-edge); ~92% leaves roughly half the whitespace
  * "full" leaves on a typical desktop. The rem ceiling stops it running away on

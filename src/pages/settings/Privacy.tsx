@@ -17,6 +17,8 @@ import { conversationsApi } from '@/api'
 import { useConversations } from '@/store/conversations'
 import { useAuth } from '@/store/auth'
 import { userCan } from '@/lib/user-permissions'
+import { useSettingsModal } from '@/store/settings-modal'
+import { ConversationManagementDialog } from '@/components/settings/conversation-management-dialog'
 import {
   exportAllConversationZip,
   readConversationExportFile,
@@ -24,6 +26,9 @@ import {
 
 export default function Privacy() {
   const user = useAuth((s) => s.user)
+  const visible = useSettingsModal((s) => s.open && s.tab === 'privacy')
+  const [management, setManagement] = useState<'archived' | 'links' | null>(null)
+  const managementTriggerRef = useRef<HTMLButtonElement | null>(null)
   const canExportConversations = userCan(user, 'allow_conversation_export')
   const canUseMemory = userCan(user, 'allow_memory') && user?.memory_available !== false
   const [confirmClear, setConfirmClear] = useState(false)
@@ -36,6 +41,10 @@ export default function Privacy() {
   const importRef = useRef<HTMLInputElement>(null)
   const { t } = useTranslation(['settings', 'common'])
   const reloadConvs = useConversations((s) => s.load)
+
+  useEffect(() => {
+    if (!visible) setManagement(null)
+  }, [visible])
 
   useEffect(() => {
     if (!canExportConversations) {
@@ -187,6 +196,19 @@ export default function Privacy() {
         </div>
       </SettingsSection>
 
+      <SettingsSection title={t('settings:privacy.management.title')}>
+        <SettingsRow className="flex-row items-center" label={t('settings:privacy.management.archivedTitle')} description={t('settings:privacy.management.archivedDescription')}>
+          <Button variant="secondary" aria-haspopup="dialog" aria-label={`${t('settings:privacy.management.manage')} ${t('settings:privacy.management.archivedTitle')}`} onClick={(event) => { managementTriggerRef.current = event.currentTarget; setManagement('archived') }}>
+            {t('settings:privacy.management.manage')}
+          </Button>
+        </SettingsRow>
+        <SettingsRow className="flex-row items-center" label={t('settings:privacy.management.linksTitle')} description={t('settings:privacy.management.linksDescription')}>
+          <Button variant="secondary" aria-haspopup="dialog" aria-label={`${t('settings:privacy.management.manage')} ${t('settings:privacy.management.linksTitle')}`} onClick={(event) => { managementTriggerRef.current = event.currentTarget; setManagement('links') }}>
+            {t('settings:privacy.management.manage')}
+          </Button>
+        </SettingsRow>
+      </SettingsSection>
+
       <SettingsSection title={t('settings:privacy.exportPurge')}>
         <SettingsRow
           label={t('settings:privacy.import', { defaultValue: 'Import conversations' })}
@@ -255,6 +277,8 @@ export default function Privacy() {
           </Button>
         </SettingsRow>
       </SettingsSection>
+
+      <ConversationManagementDialog open={visible && management !== null} mode={management ?? 'archived'} returnFocus={managementTriggerRef} onOpenChange={(open) => { if (!open) setManagement(null) }} />
 
       <Dialog open={confirmArchive} onOpenChange={(open) => !archiving && setConfirmArchive(open)}>
         <DialogContent size="sm" closeDisabled={archiving}>

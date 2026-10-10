@@ -510,16 +510,29 @@
 }
 
 @keyframes home-content-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes home-placeholder-breathe {
-  0%, 100% { opacity: 0.65; }
-  50% { opacity: 1; }
+
+  0%,
+  100% {
+    opacity: 0.65;
+  }
+
+  50% {
+    opacity: 1;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
+
   .home-loading-content,
   .home-loading-placeholder {
     animation: none;
@@ -1090,14 +1103,17 @@ html[data-view-transition='private']::view-transition-new(root) {
     scrollbar-width: thin;
     scrollbar-color: transparent transparent;
   }
+
   .scrollbar-hover:hover {
     scrollbar-color: color-mix(in oklch, var(--color-fg-faint) 30%, transparent) transparent;
   }
+
   .scrollbar-hover::-webkit-scrollbar-thumb {
     background: transparent;
     border: 2px solid transparent;
     background-clip: padding-box;
   }
+
   .scrollbar-hover:hover::-webkit-scrollbar-thumb {
     background: color-mix(in oklch, var(--color-fg-faint) 30%, transparent);
     background-clip: padding-box;
@@ -1451,6 +1467,7 @@ mark.inline-thread-mark:hover {
   color: var(--color-fg-muted);
   font-style: italic;
 }
+
 /* Wide unbreakable content must scroll inside its own box instead of widening
    the thread. The top-level CodeBlock/table/math wrappers already do this via
    utilities; these rules catch the same elements when marked emits them NESTED
@@ -1459,6 +1476,7 @@ mark.inline-thread-mark:hover {
   overflow-x: auto;
   max-width: 100%;
 }
+
 .prose-aivory .katex-display {
   overflow-x: auto;
   overflow-y: hidden;
@@ -1552,7 +1570,13 @@ mark.inline-thread-mark:hover {
   left: auto;
   transform: none;
 }
-.prose-aivory hr { border: none; border-top: 1px solid var(--color-divider); margin: 2em 0; }
+
+.prose-aivory hr {
+  border: none;
+  border-top: 1px solid var(--color-divider);
+  margin: 2em 0;
+}
+
 .prose-aivory table {
   width: 100%;
   border-collapse: collapse;
@@ -1566,7 +1590,7 @@ mark.inline-thread-mark:hover {
   border: 0;
 }
 
-.prose-aivory tbody > tr:nth-child(even) {
+.prose-aivory tbody>tr:nth-child(even) {
   background: color-mix(in oklch, var(--color-bg-muted) 35%, transparent);
 }
 
@@ -1662,14 +1686,14 @@ mark.inline-thread-mark:hover {
 /* Shiki final-render tokens. The worker uses Shiki's CSS-variable theme so
    token colors stay bound to Aivory design tokens instead of bundled themes. */
 [data-code-body][data-wrap='false'],
-[data-code-body][data-wrap='false'] > code {
+[data-code-body][data-wrap='false']>code {
   white-space: pre;
   overflow-wrap: normal;
   word-break: normal;
 }
 
 [data-code-body][data-wrap='true'],
-[data-code-body][data-wrap='true'] > code {
+[data-code-body][data-wrap='true']>code {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: normal;
@@ -1903,11 +1927,12 @@ body {
   font-size: 1.05em;
 }
 
-.formula-symbol-button > span:not(.sr-only) {
+.formula-symbol-button>span:not(.sr-only) {
   max-width: 100%;
 }
 
-@media (max-width: 639px), (max-height: 520px) {
+@media (max-width: 639px),
+(max-height: 520px) {
   .formula-editor-dialog {
     top: var(--safe-top);
     right: var(--safe-right);
@@ -1923,7 +1948,7 @@ body {
     border-radius: 0;
   }
 
-  .formula-editor-dialog > button[aria-label] {
+  .formula-editor-dialog>button[aria-label] {
     width: var(--tap-min);
     height: var(--tap-min);
   }
@@ -1931,11 +1956,11 @@ body {
   .formula-editor-dialog .formula-symbol-button,
   .formula-editor-dialog [role='tab'],
   .formula-editor-dialog .formula-editor-retry,
-  .formula-editor-dialog .formula-editor-footer > button {
+  .formula-editor-dialog .formula-editor-footer>button {
     min-height: var(--tap-min);
   }
 
-  .formula-editor-dialog[data-keyboard-open='true'] > button[aria-label],
+  .formula-editor-dialog[data-keyboard-open='true']>button[aria-label],
   .formula-editor-dialog[data-keyboard-open='true'] .formula-editor-header,
   .formula-editor-dialog[data-keyboard-open='true'] .formula-editor-error,
   .formula-editor-dialog[data-keyboard-open='true'] .formula-template-library {

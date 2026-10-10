@@ -1,5 +1,6 @@
 /* Product lists and reading tables use fills and spacing to separate rows. */
 @layer components {
+
   /* Filled editors need a separate control surface to keep fields visible. */
   .quiet-field-group,
   .admin-data-table tbody tr:is(:hover, :focus-within) {
@@ -12,13 +13,13 @@
     --quiet-field-bg: color-mix(in oklch, var(--color-surface-raised) 94%, var(--color-fg));
   }
 
-  .quiet-list > li {
+  .quiet-list>li {
     border-radius: 8px;
     transition: background-color 150ms;
   }
 
-  .quiet-list > li:hover,
-  .quiet-list > li:focus-within {
+  .quiet-list>li:hover,
+  .quiet-list>li:focus-within {
     background: color-mix(in oklch, var(--color-bg-muted) 60%, transparent);
   }
 
@@ -26,11 +27,11 @@
     background: var(--color-bg-muted);
   }
 
-  .quiet-table tbody > tr:nth-child(even) {
+  .quiet-table tbody>tr:nth-child(even) {
     background: color-mix(in oklch, var(--color-bg-muted) 35%, transparent);
   }
 
-  .quiet-table tbody > tr:hover {
+  .quiet-table tbody>tr:hover {
     background: color-mix(in oklch, var(--color-bg-muted) 60%, transparent);
   }
 
@@ -41,7 +42,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .quiet-list > li {
+  .quiet-list>li {
     transition: none;
   }
 }

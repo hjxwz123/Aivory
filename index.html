@@ -53,9 +53,70 @@
         } catch (_) {}
       })()
     </script>
+    <!-- A local, dependency-free loading state before the JavaScript bundle boots. -->
+    <style>
+      .aivory-startup {
+        --startup-bg: #f8f7fb;
+        --startup-fg: #251f39;
+        --startup-accent: #7654d9;
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 24px;
+        background: var(--color-bg, var(--startup-bg));
+        color: var(--color-fg, var(--startup-fg));
+      }
+      [data-theme='dark'] .aivory-startup {
+        --startup-bg: #17131e;
+        --startup-fg: #eeeaf5;
+        --startup-accent: #b894fa;
+      }
+      [data-accent='lagoon'] .aivory-startup { --startup-accent: oklch(58% 0.130 200); }
+      [data-accent='ember'] .aivory-startup { --startup-accent: oklch(62% 0.170 40); }
+      [data-accent='moss'] .aivory-startup { --startup-accent: oklch(54% 0.125 145); }
+      [data-accent='indigo'] .aivory-startup { --startup-accent: oklch(54% 0.180 260); }
+      [data-accent='rose'] .aivory-startup { --startup-accent: oklch(60% 0.180 5); }
+      [data-accent='mono'] .aivory-startup { --startup-accent: oklch(26% 0 0); }
+      [data-theme='dark'][data-accent='lagoon'] .aivory-startup { --startup-accent: oklch(74% 0.130 200); }
+      [data-theme='dark'][data-accent='ember'] .aivory-startup { --startup-accent: oklch(74% 0.165 40); }
+      [data-theme='dark'][data-accent='moss'] .aivory-startup { --startup-accent: oklch(72% 0.130 145); }
+      [data-theme='dark'][data-accent='indigo'] .aivory-startup { --startup-accent: oklch(72% 0.165 260); }
+      [data-theme='dark'][data-accent='rose'] .aivory-startup { --startup-accent: oklch(74% 0.175 5); }
+      [data-theme='dark'][data-accent='mono'] .aivory-startup { --startup-accent: oklch(96% 0 0); }
+      .aivory-startup-brand { display: flex; align-items: center; gap: 12px; }
+      .aivory-startup-brand svg { width: 40px; height: 40px; fill: var(--color-accent, var(--startup-accent)); }
+      .aivory-startup-wordmark {
+        display: block;
+        width: 112px;
+        height: 34px;
+        background: currentColor;
+        mask: url('/src/assets/brand/aivory-wordmark.svg') center / contain no-repeat;
+        -webkit-mask: url('/src/assets/brand/aivory-wordmark.svg') center / contain no-repeat;
+      }
+      .aivory-startup-dots { display: flex; gap: 4px; color: var(--color-fg-muted, currentColor); }
+      .aivory-startup-dots span { width: 4px; height: 4px; border-radius: 50%; background: currentColor; animation: aivory-startup-pulse 1.4s ease-in-out infinite; }
+      .aivory-startup-dots span:nth-child(2) { animation-delay: 160ms; }
+      .aivory-startup-dots span:nth-child(3) { animation-delay: 320ms; }
+      @keyframes aivory-startup-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+      @media (prefers-reduced-motion: reduce) { .aivory-startup-dots span { animation: none; } }
+    </style>
   </head>
   <body class="h-full">
-    <div id="root" class="h-full"></div>
+    <div id="root" class="h-full">
+      <div class="aivory-startup" role="status" aria-busy="true" aria-label="Aivory">
+        <div class="aivory-startup-brand" aria-hidden="true">
+          <svg viewBox="0 0 32 32" focusable="false">
+            <path d="M16 4.5c-1.05 0-2.01.61-2.45 1.56L4.78 24.5c-.7 1.5.4 3.2 2.05 3.2h18.34c1.65 0 2.75-1.7 2.05-3.2L18.45 6.06A2.7 2.7 0 0 0 16 4.5Zm0 4.55 7.15 15.15H8.85L16 9.05Z" fill-rule="evenodd" />
+            <circle cx="16" cy="20.9" r="1.4" />
+          </svg>
+          <span class="aivory-startup-wordmark"></span>
+        </div>
+        <div class="aivory-startup-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+      </div>
+    </div>
     <noscript>
       <div style="font-family: ui-serif, Georgia, serif; padding: 4rem 2rem; max-width: 32rem; margin: 0 auto; text-align: center; color: #1B1830;">
         <h1 style="font-size: 1.75rem; font-weight: 400; margin: 0 0 1rem;">Aivory needs JavaScript.</h1>
