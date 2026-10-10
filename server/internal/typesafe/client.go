@@ -71,11 +71,12 @@ type Stats struct {
 // Client is safe for concurrent evaluations. Configuration is immutable after
 // New; callers must not mutate request maps while Evaluate snapshots them.
 type Client struct {
-	cfg      Config
-	endpoint string
-	http     *http.Client
-	mu       sync.Mutex
-	stats    Stats
+	cfg              Config
+	endpoint         string
+	openRouterModels bool
+	http             *http.Client
+	mu               sync.Mutex
+	stats            Stats
 }
 
 func New(cfg Config) (*Client, error) {
@@ -96,13 +97,20 @@ func New(cfg Config) (*Client, error) {
 	}
 	u, err := url.Parse(strings.TrimSpace(cfg.BaseURL))
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
-		return nil, failure(ErrConfiguration, "base URL must be an HTTP(S) API root without credentials, query or fragment")
+		return nil, failure(ErrConfiguration, "base URL must be an HTTP(S) API root or decision endpoint without credentials, query or fragment")
 	}
 	u.Path = strings.TrimRight(u.Path, "/")
-	if u.Path == "" {
-		u.Path = "/v1"
+	openRouter := strings.EqualFold(u.Hostname(), "openrouter.ai")
+	switch {
+	case strings.HasSuffix(u.Path, "/systemone"), strings.HasSuffix(u.Path, "/decisions"):
+		// A complete resource URL must not acquire a second resource suffix.
+	case openRouter && (u.Path == "" || u.Path == "/api"):
+		u.Path = "/api/v1/systemone"
+	case u.Path == "":
+		u.Path = "/v1/systemone"
+	default:
+		u.Path += "/systemone"
 	}
-	u.Path += "/systemone"
 	u.RawPath = ""
 	cfg.Model = strings.TrimSpace(cfg.Model)
 	if cfg.Model == "" {
@@ -129,7 +137,7 @@ func New(cfg Config) (*Client, error) {
 	}
 	// Never redirect a credential-bearing POST, including same-host redirects.
 	hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &Client{cfg: cfg, endpoint: u.String(), http: hc}, nil
+	return &Client{cfg: cfg, endpoint: u.String(), openRouterModels: openRouter || strings.HasSuffix(u.Path, "/decisions"), http: hc}, nil
 }
 
 func (c *Client) Stats() Stats {
@@ -193,11 +201,13 @@ func (c *Client) Evaluate(ctx context.Context, req Request, opts Options) (resul
 		return nil, err
 	}
 	expected := strings.TrimSpace(opts.ExpectedModel)
-	if req.Model != "jev-latest" && req.Model != "jev-preview" {
-		if expected != "" && expected != req.Model {
+	if !isFloatingDecisionModel(req.Model, c.openRouterModels) {
+		if expected != "" && !decisionModelsMatch(req.Model, expected, c.openRouterModels, true) {
 			return nil, failure(ErrValidation, "expected release conflicts with pinned request model")
 		}
-		expected = req.Model
+		if expected == "" {
+			expected = req.Model
+		}
 	}
 	for attempt := 0; ; attempt++ {
 		if err := callCtx.Err(); err != nil {
@@ -279,7 +289,15 @@ func (c *Client) Evaluate(ctx context.Context, req Request, opts Options) (resul
 			result.Answers = nil
 			return result, failure(ErrResponse, "invalid answers JSON")
 		}
-		if err := validateResponse(snapshot, result, expected); err != nil {
+		validationExpected := expected
+		if c.openRouterModels && expected != "" {
+			if !decisionModelsMatch(expected, result.Model, true, strings.TrimSpace(opts.ExpectedModel) == "") {
+				result.Answers = nil
+				return result, failure(ErrModelVersion, "served model does not match expected release")
+			}
+			validationExpected = ""
+		}
+		if err := validateResponse(snapshot, result, validationExpected); err != nil {
 			// Preserve usage/version for accounting, but never expose invalid judgments.
 			result.Answers = nil
 			return result, err
