@@ -851,6 +851,12 @@ func (s *Service) runPipeline(ctx context.Context, docID string, cache *parseCac
 		} else {
 			em, emName, dim = s.resolveEmbedder(ctx)
 		}
+		// Protected OCR/table/code atoms can exceed the normal chunk target.
+		// Bound the final inputs before flattening so stored children and vectors
+		// retain the same order and cardinality.
+		if extra := limitEmbeddingChildren(parents, em); extra > 0 && s.logger != nil {
+			s.logger.Printf("rag: split oversized embedding chunks doc=%s file=%q extra_children=%d model=%s", docID, d.Filename, extra, emName)
+		}
 	}
 	// (Old chunks/vectors were already cleared at the top of runPipeline, so a
 	// failure between there and here never leaves stale rows.)
