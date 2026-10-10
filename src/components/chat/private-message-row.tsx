@@ -1,8 +1,8 @@
 /*
  * PrivateMessageRow — the private-chat row that visually mirrors message-row.tsx
  * (bubble geometry, headers, action bar, error card) while honoring the private
- * contract from docs/private-chat.md: assistant text renders through
- * PrivateMarkdown (no remote images / HTML / Mermaid), images are in-memory
+ * private-chat contract: assistant text renders through PrivateMarkdown
+ * (no remote images / HTML / Mermaid), images are in-memory
  * data: URLs, and every action (copy / regenerate / edit-resend) operates on
  * React state only — nothing here may call server APIs.
  */
