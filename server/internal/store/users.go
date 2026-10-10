@@ -1646,6 +1646,7 @@ func DeleteUser(ctx context.Context, db *sql.DB, userID string, storageRoots ...
 		`DELETE FROM memories WHERE user_id=?`,
 		`DELETE FROM refresh_tokens WHERE user_id=?`,
 		`DELETE FROM usage_logs WHERE user_id=?`,
+		`DELETE FROM tool_call_logs WHERE user_id=?`,
 		`DELETE FROM files WHERE user_id=?`,
 		`DELETE FROM users WHERE id=?`,
 	} {

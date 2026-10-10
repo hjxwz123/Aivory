@@ -929,6 +929,36 @@ CREATE TABLE IF NOT EXISTS memories (
 CREATE INDEX IF NOT EXISTS idx_memories_user_status ON memories(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_memories_user_slot ON memories(user_id, slot);
 
+CREATE TABLE IF NOT EXISTS tool_call_logs (
+  id TEXT PRIMARY KEY,
+  call_id TEXT NOT NULL DEFAULT '',
+  tool_name TEXT NOT NULL,
+  tool_kind TEXT NOT NULL,
+  server_id TEXT NOT NULL DEFAULT '',
+  server_name TEXT NOT NULL DEFAULT '',
+  remote_name TEXT NOT NULL DEFAULT '',
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  conversation_id TEXT NOT NULL DEFAULT '',
+  message_id TEXT NOT NULL DEFAULT '',
+  workspace_id TEXT NOT NULL DEFAULT '',
+  model_id TEXT NOT NULL DEFAULT '',
+  summary TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL,
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  created_at_ms INTEGER NOT NULL,
+  error TEXT NOT NULL DEFAULT '',
+  input TEXT NOT NULL DEFAULT '',
+  output TEXT NOT NULL DEFAULT '',
+  input_truncated INTEGER NOT NULL DEFAULT 0,
+  output_truncated INTEGER NOT NULL DEFAULT 0,
+  bodies_recorded INTEGER NOT NULL DEFAULT 1,
+  requests TEXT NOT NULL DEFAULT '[]',
+  issues TEXT NOT NULL DEFAULT '[]'
+);
+CREATE INDEX IF NOT EXISTS idx_tool_logs_time ON tool_call_logs(created_at_ms DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_tool_logs_status_time ON tool_call_logs(status, created_at_ms DESC);
+CREATE INDEX IF NOT EXISTS idx_tool_logs_user_time ON tool_call_logs(user_id, created_at_ms DESC);
+
 CREATE TABLE IF NOT EXISTS usage_logs (
   id                 INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id            TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

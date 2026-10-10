@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"aivory/server/internal/tooldiagnostics"
 )
 
 type rpcRequest struct {
@@ -116,7 +118,7 @@ func (c *Client) post(
 		}
 	}
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := tooldiagnostics.Do(c.httpClient, req)
 	if err != nil {
 		return nil, "", responseMeta{}, fmt.Errorf("send MCP HTTP request: %w", err)
 	}

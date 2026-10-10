@@ -253,6 +253,17 @@ func runUserDeletionJob(d Deps, userID string) {
 		userDeletions.progress(userID, fmt.Sprintf("usage logs: %d deleted", deletedUsage))
 	}
 
+	for {
+		n, err := store.DeleteToolLogsBatch(ctx, d.DB, userID, userDeleteUsageBatch)
+		if err != nil {
+			userDeletions.finish(userID, "failed", err.Error())
+			return
+		}
+		if n == 0 {
+			break
+		}
+	}
+
 	// Final sweep: files, documents, memories, tokens, the users row and its
 	// cascades. The big tables are already empty, so this transaction is small.
 	userDeletions.progress(userID, "finalizing")

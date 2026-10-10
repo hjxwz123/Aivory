@@ -28,6 +28,7 @@ import (
 	"strings"
 
 	"aivory/server/internal/envcfg"
+	"aivory/server/internal/tooldiagnostics"
 )
 
 const promptStopToken = "</tool_call>"
@@ -395,7 +396,7 @@ func RunPromptToolLoopWithRaw(
 			if !reserveSearchOnlyCall(ctx) {
 				runErr = errSearchRoundComplete
 			} else {
-				output, cites, runErr = toolRunner.Run(ctx, call.Name, call.Arguments)
+				output, cites, runErr = toolRunner.Run(tooldiagnostics.WithCallID(ctx, toolID), call.Name, call.Arguments)
 			}
 			if runErr == nil || isSearchOnly(ctx) || !promptToolErrorRetryable(runErr) {
 				break

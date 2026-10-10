@@ -18,6 +18,7 @@ import (
 	"aivory/server/internal/fileguard"
 	"aivory/server/internal/rag"
 	"aivory/server/internal/store"
+	"aivory/server/internal/tooldiagnostics"
 	"aivory/server/internal/toolnames"
 	"aivory/server/internal/typesafe"
 )
@@ -464,7 +465,7 @@ func (o *Orchestrator) forcedWebSearch(ctx context.Context, req RunRequest, conv
 		onEvent(SseEvent{Type: "tool_start", Name: toolnames.AivoryWebSearch, ID: id, Input: input})
 		// Bound each search with the same per-call timeout orchToolRunner applies
 		// (§4.3) so a stalled search backend can't hang the turn pre-first-token.
-		sctx, cancel := context.WithTimeout(ctx, searchTimeout)
+		sctx, cancel := context.WithTimeout(tooldiagnostics.WithCallID(ctx, id), searchTimeout)
 		out, qcites, err := o.tools.Run(sctx, toolnames.AivoryWebSearch, input, tc)
 		cancel()
 		if err != nil {

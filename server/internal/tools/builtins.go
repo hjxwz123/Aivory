@@ -45,6 +45,7 @@ import (
 	"aivory/server/internal/requestheaders"
 	"aivory/server/internal/sandbox"
 	"aivory/server/internal/store"
+	"aivory/server/internal/tooldiagnostics"
 	"aivory/server/internal/toolnames"
 )
 
@@ -250,6 +251,7 @@ func (t *webSearchTool) searchBatch(ctx context.Context, queries []string, topK 
 	for index, result := range results {
 		item := webSearchBatchItem{Query: queries[index]}
 		if result.err != nil {
+			tooldiagnostics.Note(ctx, queries[index], result.err)
 			item.Status = "error"
 			item.Error = "search failed"
 			if firstErr == nil {
@@ -458,6 +460,11 @@ func (t *webFetchTool) fetchBatch(ctx context.Context, urls []string, showImages
 	for index, result := range results {
 		item := webFetchBatchItem{URL: urls[index]}
 		if result.err != nil || (strings.TrimSpace(result.page.Text) == "" && len(result.page.Images) == 0) {
+			issue := result.err
+			if issue == nil {
+				issue = errors.New("page fetch returned no content")
+			}
+			tooldiagnostics.Note(ctx, urls[index], issue)
 			item.Status = "error"
 			item.Error = "page fetch failed"
 			if firstErr == nil {
@@ -579,7 +586,7 @@ func (t *webFetchTool) attemptDirect(ctx context.Context, rawURL string) (fetche
 		return fetchedPage{}, err
 	}
 	req.Header.Set("user-agent", "AivoryBot/1.0")
-	resp, err := t.directClient().Do(req)
+	resp, err := tooldiagnostics.Do(t.directClient(), req)
 	if err != nil {
 		return fetchedPage{}, err
 	}
@@ -613,7 +620,7 @@ func (t *webFetchTool) attemptJina(ctx context.Context, target string) (fetchedP
 		return fetchedPage{}, err
 	}
 	req.Header.Set("user-agent", "AivoryBot/1.0")
-	resp, err := t.readerClient().Do(req)
+	resp, err := tooldiagnostics.Do(t.readerClient(), req)
 	if err != nil {
 		return fetchedPage{}, err
 	}
@@ -768,7 +775,7 @@ func (t *fetchImageTool) Execute(ctx context.Context, input []byte, tc *llm.Tool
 	if client == nil {
 		client = ssrfSafeClient()
 	}
-	resp, err := client.Do(req)
+	resp, err := tooldiagnostics.Do(client, req)
 	if err != nil {
 		return "", nil, fmt.Errorf("download public image: %w", err)
 	}
@@ -1394,6 +1401,9 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		return "", nil, pythonSandboxPublicError(err)
 	}
 
+	if res.ExitCode != 0 {
+		tooldiagnostics.Note(ctx, "python_execute", fmt.Errorf("python exited with code %d: %s", res.ExitCode, truncateOutput(res.Stderr, pythonExecuteStdoutStderrTruncationCap)))
+	}
 	// Persist produced files as artifacts + surface them to the orchestrator.
 	for _, f := range res.Files {
 		if _, err := saveArtifact(ctx, tc, t.artifactDir, f.Name, f.MimeType, store.ArtifactSourcePythonExecute, f.Data); err != nil {
@@ -2718,7 +2728,7 @@ func geminiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 	}
 	req.Header.Set("content-type", "application/json")
 	notifyImageRequestObservers(req, requestObservers)
-	resp, err := toolHTTPClient.Do(req)
+	resp, err := tooldiagnostics.Do(toolHTTPClient, req)
 	if resp != nil {
 		imageTTFTFromContext(ctx).responseReceived()
 	}
@@ -2889,7 +2899,7 @@ func openaiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 	}
 	req.Header.Set("authorization", "Bearer "+apiKey)
 	notifyImageRequestObservers(req, requestObservers)
-	resp, err := toolHTTPClient.Do(req)
+	resp, err := tooldiagnostics.Do(toolHTTPClient, req)
 	if resp != nil {
 		imageTTFTFromContext(ctx).responseReceived()
 	}
@@ -3474,7 +3484,7 @@ func fetchRemoteImage(ctx context.Context, rawURL string) ([]byte, string) {
 	if err != nil {
 		return nil, ""
 	}
-	resp, err := ssrfSafeClient().Do(req)
+	resp, err := tooldiagnostics.Do(ssrfSafeClient(), req)
 	if err != nil {
 		return nil, ""
 	}

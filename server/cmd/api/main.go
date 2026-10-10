@@ -234,6 +234,9 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		logger.Printf("shutdown: %v", err)
 	}
+	if err := toolRegistry.CloseToolLogs(ctx); err != nil {
+		logger.Printf("tool log shutdown: %v", err)
+	}
 }
 
 // redactURL hides credentials in a connection URL before it reaches the log.

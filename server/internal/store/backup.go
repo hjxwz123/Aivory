@@ -42,7 +42,7 @@ var backupTableOrder = []string{
 	// AI PPT decks reference users and (via file_id, without a FK) the mirrored
 	// file above, so they restore after both.
 	"aippt_decks",
-	"usage_stats", "usage_logs", "artifacts", "refresh_tokens", "oauth_identities", "passkeys",
+	"usage_stats", "usage_logs", "tool_call_logs", "artifacts", "refresh_tokens", "oauth_identities", "passkeys",
 	"workspace_invites", "workspace_policies", "workspace_announcements", "workspace_audit_logs", "admin_audit_logs",
 	"site_notifications", "site_notification_states", "pending_storage_cleanup",
 }
@@ -391,6 +391,7 @@ var tablePrimaryKeys = map[string][]string{
 	"workspaces":                      {"id"},
 	"workspace_audit_logs":            {"id"},
 	"admin_audit_logs":                {"id"},
+	"tool_call_logs":                  {"id"},
 	"workspace_members":               {"workspace_id", "user_id"},
 	"registration_domains":            {"domain"},
 	"registration_domain_matches":     {"domain"},

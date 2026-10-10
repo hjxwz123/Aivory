@@ -1640,7 +1640,7 @@ var settingsKeys = []string{
 	// §B5 request logging: log_full_requests + log_errors_only select which
 	// requests expose diagnostics. log_request_bodies is an independent privacy
 	// boundary: false keeps method/URL/headers/error while omitting every body.
-	"log_full_requests", "log_errors_only", "log_request_bodies",
+	"log_full_requests", "log_errors_only", "log_request_bodies", "log_tool_errors_only",
 	// § AI PPT (Docmee / 文多多, API mode). docmee_api_key is used server-side only
 	// and is masked as a secret on GET; the browser never receives it. An unset
 	// docmee_enabled follows the key's presence. docmee_price_per_ppt_usd is the
@@ -2073,7 +2073,7 @@ func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.R
 					return 0, errInvalidInput
 				}
 				v, _ = json.Marshal(strings.TrimSpace(value))
-			case "log_full_requests", "log_errors_only", "log_request_bodies":
+			case "log_full_requests", "log_errors_only", "log_request_bodies", "log_tool_errors_only":
 				var enabled bool
 				if json.Unmarshal(v, &enabled) != nil {
 					return 0, errInvalidInput

@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"aivory/server/internal/envcfg"
+	"aivory/server/internal/tooldiagnostics"
 )
 
 // ErrSessionGone is returned when a sidecar reports that the idle reaper has
@@ -266,7 +267,7 @@ func (s *HTTPSandbox) doMethod(ctx context.Context, method, path string, payload
 	if s.APIKey != "" {
 		req.Header.Set("authorization", "Bearer "+s.APIKey)
 	}
-	resp, err := s.client.Do(req)
+	resp, err := tooldiagnostics.Do(s.client, req)
 	if err != nil {
 		return err
 	}

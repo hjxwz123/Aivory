@@ -25,6 +25,7 @@ import (
 	"aivory/server/internal/netsafe"
 	"aivory/server/internal/sandbox"
 	"aivory/server/internal/store"
+	"aivory/server/internal/tooldiagnostics"
 )
 
 // Tool is the contract every self-built tool implements.
@@ -56,6 +57,11 @@ type Registry struct {
 	// the registry also lets package tests inject a loopback transport without
 	// weakening production discovery or execution.
 	userMCPHTTPClient *http.Client
+	toolLogOnce       sync.Once
+	toolLogs          chan pendingToolLog
+	toolLogMu         sync.Mutex
+	toolLogClosed     bool
+	toolLogDone       chan struct{}
 }
 
 type mcpBinding struct {
@@ -563,7 +569,7 @@ func validMCPInputSchema(raw json.RawMessage) bool {
 }
 
 // Run executes a tool by name.
-func (r *Registry) Run(ctx context.Context, name string, input []byte, tc *llm.ToolContext) (string, []llm.Citation, error) {
+func (r *Registry) run(ctx context.Context, name string, input []byte, tc *llm.ToolContext) (string, []llm.Citation, error) {
 	// A nil context has no authenticated user, workspace, model declaration, or
 	// budget. Treat it as an invalid execution request instead of allowing a
 	// direct caller to accidentally run a private MCP endpoint (or panic while
@@ -790,6 +796,15 @@ func (r *Registry) runMCP(ctx context.Context, binding mcpBinding, input []byte,
 	server, callerUserID, err := r.loadRuntimeMCPServer(ctx, binding, tc)
 	if err != nil {
 		return "", nil, err
+	}
+	if collector := tooldiagnostics.From(ctx); collector != nil {
+		collector.ServerName = server.Name
+		for _, value := range server.Headers {
+			collector.AddSecrets(value)
+			if parts := strings.Fields(value); len(parts) == 2 {
+				collector.AddSecrets(parts[1])
+			}
+		}
 	}
 	if !server.Enabled {
 		return "", nil, errors.New("MCP service is disabled")

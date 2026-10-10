@@ -12,6 +12,7 @@ import (
 	"unicode"
 
 	"aivory/server/internal/llm"
+	"aivory/server/internal/tooldiagnostics"
 )
 
 // Searcher is the pluggable web-search backend abstraction (§4.4). Swap Serper
@@ -73,7 +74,7 @@ func (s *serperSearcher) Search(ctx context.Context, query string, topK int) (st
 	req, _ := http.NewRequestWithContext(ctx, "POST", "https://google.serper.dev/search", strings.NewReader(string(body)))
 	req.Header.Set("x-api-key", s.apiKey)
 	req.Header.Set("content-type", "application/json")
-	resp, err := toolHTTPClient.Do(req)
+	resp, err := tooldiagnostics.Do(toolHTTPClient, req)
 	if err != nil {
 		return "", nil, err
 	}
@@ -121,7 +122,7 @@ func (b *braveSearcher) Search(ctx context.Context, query string, topK int) (str
 	req, _ := http.NewRequestWithContext(ctx, "GET", u, nil)
 	req.Header.Set("X-Subscription-Token", b.apiKey)
 	req.Header.Set("Accept", "application/json")
-	resp, err := toolHTTPClient.Do(req)
+	resp, err := tooldiagnostics.Do(toolHTTPClient, req)
 	if err != nil {
 		return "", nil, err
 	}
@@ -182,7 +183,7 @@ func (t *tavilySearcher) Search(ctx context.Context, query string, topK int) (st
 	req.Header.Set("Authorization", "Bearer "+t.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	resp, err := toolHTTPClient.Do(req)
+	resp, err := tooldiagnostics.Do(toolHTTPClient, req)
 	if err != nil {
 		return "", nil, err
 	}
@@ -349,11 +350,15 @@ func (s *searxngSearcher) SearchWithOptions(ctx context.Context, query string, t
 	for {
 		page, err := s.searchPage(ctx, params, options.Language)
 		if err != nil {
+			tooldiagnostics.Note(ctx, query, err)
 			if len(results) == 0 || ctx.Err() == context.Canceled {
 				return "", nil, err
 			}
 			partialReason = "a later results page could not be fetched"
 			break
+		}
+		if failed := formatUnresponsiveEngines(page.UnresponsiveEngines); failed != "" {
+			tooldiagnostics.Note(ctx, query, fmt.Errorf("searxng unresponsive engines: %s", failed))
 		}
 		if len(page.Results) == 0 && len(results) == 0 {
 			if failed := formatUnresponsiveEngines(page.UnresponsiveEngines); failed != "" {
@@ -456,7 +461,7 @@ func (s *searxngSearcher) searchPage(ctx context.Context, params url.Values, lan
 	if language != "" && !strings.EqualFold(language, "all") {
 		req.Header.Set("Accept-Language", language)
 	}
-	resp, err := toolHTTPClient.Do(req)
+	resp, err := tooldiagnostics.Do(toolHTTPClient, req)
 	if err != nil {
 		return parsed, err
 	}
@@ -616,7 +621,7 @@ func ddgGet(ctx context.Context, endpoint, query string) (body string, status in
 	}
 	req.Header.Set("User-Agent", ddgUserAgent)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml")
-	resp, err := toolHTTPClient.Do(req)
+	resp, err := tooldiagnostics.Do(toolHTTPClient, req)
 	if err != nil {
 		return "", 0, err
 	}

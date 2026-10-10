@@ -172,7 +172,7 @@ func adminAuditClassification(r *http.Request) (eventType, action, targetType, t
 		eventType = "integrations"
 	case "skills", "prompts", "image-styles", "files", "html-previews", "aippt", "notifications":
 		eventType = "content"
-	case "usage", "audit-logs":
+	case "usage", "audit-logs", "tool-logs":
 		eventType = "logs"
 	case "backup", "config", "system-update", "desktop-update", "vectors":
 		eventType = "system"

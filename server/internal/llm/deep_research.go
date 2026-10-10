@@ -49,6 +49,7 @@ import (
 
 	"aivory/server/internal/envcfg"
 	"aivory/server/internal/store"
+	"aivory/server/internal/tooldiagnostics"
 	"aivory/server/internal/toolnames"
 )
 
@@ -1384,7 +1385,7 @@ func (rs *researcher) execToolsConcurrent(ctx context.Context, specs []toolCallS
 						timeout = remaining
 					}
 				}
-				cctx, cancel := context.WithTimeout(ctx, timeout)
+				cctx, cancel := context.WithTimeout(tooldiagnostics.WithCallID(ctx, c.ID), timeout)
 				defer cancel()
 				result, resultCitations, runErr := rs.o.tools.Run(cctx, c.Name, c.Input, rs.tc)
 				if runErr != nil && ctx.Err() == nil && rs.tc.toolTimeBudgetExceeded() {

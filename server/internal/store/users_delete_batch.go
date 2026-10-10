@@ -114,6 +114,14 @@ func DeleteUsageLogsBatch(ctx context.Context, db *sql.DB, userID string, limit 
 	return res.RowsAffected()
 }
 
+func DeleteToolLogsBatch(ctx context.Context, db *sql.DB, userID string, limit int) (int64, error) {
+	res, err := db.ExecContext(ctx, `DELETE FROM tool_call_logs WHERE id IN (SELECT id FROM tool_call_logs WHERE user_id=? LIMIT ?)`, userID, limit)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // UsersMarkedDeleting lists accounts stuck in status='deleting' — used on
 // startup to resume deletion jobs that died with the previous process.
 func UsersMarkedDeleting(ctx context.Context, db *sql.DB) ([]User, error) {

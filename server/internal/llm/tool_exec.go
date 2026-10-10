@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"aivory/server/internal/envcfg"
+	"aivory/server/internal/tooldiagnostics"
 )
 
 // toolCallSpec is a provider-agnostic tool invocation.
@@ -882,7 +883,7 @@ func runToolsConcurrent(ctx context.Context, runner ToolRunner, calls []toolCall
 					results[i] = toolCallResult{Err: fmt.Errorf("tool %q panicked: %v", c.Name, r)}
 				}
 			}()
-			out, cites, err := runner.Run(ctx, c.Name, c.Input)
+			out, cites, err := runner.Run(tooldiagnostics.WithCallID(ctx, c.ID), c.Name, c.Input)
 			results[i] = toolCallResult{Output: out, Citations: cites, Err: err}
 		}(i, c)
 	}
