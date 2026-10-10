@@ -55,6 +55,7 @@ import {
   visibleToolModes,
 } from '@/lib/tool-mode'
 import { DOCUMENT_PARSER_NOT_CONFIGURED } from '@/lib/document-errors'
+import { conversationDraftErrorMessage } from '@/lib/pending-conversation'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { kbsApi, audioApi, conversationsApi, libraryApi } from '@/api/endpoints'
@@ -204,6 +205,8 @@ interface ComposerProps {
   viewTransitionAnchor?: boolean
   /** Optional local draft cache scope. Used by the new-chat composer only. */
   draftScope?: string
+  /** Keep the input intact while the owning page resolves its draft scope. */
+  scopeReady?: boolean
   /** Conversation id (so uploads carry the right scope). */
   conversationId?: string
   /**
@@ -728,6 +731,7 @@ export function Composer({
   menuSide = 'top',
   viewTransitionAnchor = false,
   draftScope,
+  scopeReady = true,
   conversationId,
   workspaceId: scopedWorkspaceId,
   commandsEnabled = false,
@@ -1853,6 +1857,7 @@ export function Composer({
   }, [hasUnsupportedImageAttachment, t])
   const voiceActive = recording || streamConnecting || transcribing || voiceStarting
   const draftReady =
+    scopeReady &&
     hasSendableMessageContent(value, attachments, isImageMode) &&
     (canUploadFiles || attachments.length === 0) &&
     !voiceActive &&
@@ -1921,7 +1926,7 @@ export function Composer({
     // A workspace switch clears and reloads the scoped model catalog. Ignore a
     // stale keyboard/click submit until the catalog represents this workspace
     // and policy; loading is not the same as a revoked model and stays silent.
-    if (!modelCatalogReady) return
+    if (!scopeReady || !modelCatalogReady) return
     if (imagePermissionDenied) {
       toast.error(
         t('messages.error.drawingPermission', {
@@ -2468,13 +2473,21 @@ export function Composer({
     // Upload immediately so parsing/ingestion starts the moment the file is
     // attached (the user sees progress and can't send until it's ready). On the
     // home screen ensureConversationId lazily creates the scope WITHOUT navigating
-    // away; without a scope we fall back to a plain (non-RAG) attachment upload.
+    // away. A failed reservation must stop every upload, including images.
     let scopeId = conversationId
     if (!scopeId && ensureConversationId) {
       try {
         scopeId = await ensureConversationId()
-      } catch {
-        scopeId = undefined
+        if (!scopeId) throw new Error(t('composer.documentScopeRequired'))
+      } catch (error) {
+        const rejected = new Set(accepted.map(({ attachment }) => attachment.id))
+        for (const { attachment } of accepted) {
+          removedAttachmentIds.current.delete(attachment.id)
+          if (attachment.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(attachment.previewUrl)
+        }
+        setAttachments((current) => current.filter((attachment) => !rejected.has(attachment.id)))
+        toast.error(t('composer.uploadFailed'), conversationDraftErrorMessage(error))
+        return 0
       }
     }
     const results: Array<PendingAttachment | null> = []
@@ -2603,8 +2616,9 @@ export function Composer({
     if (!scopeId && ensureConversationId) {
       try {
         scopeId = await ensureConversationId()
-      } catch {
-        scopeId = undefined
+      } catch (error) {
+        toast.error(t('composer.folderSandboxUploadFailed'), conversationDraftErrorMessage(error))
+        return 0
       }
     }
     if (!scopeId) {

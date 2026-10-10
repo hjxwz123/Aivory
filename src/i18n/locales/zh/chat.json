@@ -152,6 +152,7 @@
     "attachedMultiple": "已选择 {{count}} 个文件",
     "attachedHint": "本版本中附件仅用于视觉展示。",
     "uploadFailed": "上传失败",
+    "draftLimitReached": "每个账号只能保留一份未发送的对话草稿。请先发送或删除已有草稿，再开始新的草稿。",
     "uploadingPercent": "上传中 {{percent}}%",
     "imageTooLarge": "图片不能超过 {{mb}} MB",
     "fileTooLarge": "文件不能超过 {{mb}} MB",

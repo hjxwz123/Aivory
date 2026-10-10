@@ -2,6 +2,12 @@ import type { ApiConversation, ApiMemory, ApiMessage } from '@/api/types'
 import { conversationsApi, memoriesApi } from '@/api'
 import { domainDataApi } from '@/api/domains'
 import JSZip from 'jszip'
+import { captureAccountRequestGuard } from '@/api/client'
+
+function exportAccountGuard(): () => void {
+  const current = captureAccountRequestGuard()
+  return () => { if (!current()) throw new DOMException('Account changed', 'AbortError') }
+}
 
 /** The import parser accepts this envelope and deliberately keeps only the
  * conversation tree. Non-text blocks are retained in the export so a user can
@@ -46,10 +52,12 @@ function triggerJsonDownload(value: unknown, filename: string): void {
 }
 
 export async function exportConversation(conversationID: string): Promise<void> {
+  const assertAccount = exportAccountGuard()
   const [{ conversation }, messages] = await Promise.all([
     conversationsApi.get(conversationID),
     conversationsApi.messages(conversationID, 'tree'),
   ])
+  assertAccount()
   const envelope: ConversationExportEnvelope = {
     format: 'aivory-conversations',
     version: 2,
@@ -59,6 +67,9 @@ export async function exportConversation(conversationID: string): Promise<void> 
       title: conversation.title,
       model_id: conversation.model_id || undefined,
       active_leaf_id: conversation.active_leaf_id,
+      inline_source_conv: conversation.inline_source_conv || undefined,
+      inline_parent_id: conversation.inline_parent_id || undefined,
+      inline_quote: conversation.inline_quote || undefined,
       messages,
     }],
   }
@@ -67,14 +78,14 @@ export async function exportConversation(conversationID: string): Promise<void> 
 }
 
 async function listAllConversations(): Promise<ApiConversation[]> {
+  const assertAccount = exportAccountGuard()
   const all: ApiConversation[] = []
   const seen = new Set<string>()
-  async function collect(archived: boolean) {
+  async function collect() {
     let offset = 0
     for (;;) {
-      const page = archived
-        ? await conversationsApi.listArchived(100, offset)
-        : await conversationsApi.list(undefined, 100, offset)
+      const page = await conversationsApi.listForExport(100, offset)
+      assertAccount()
       for (const conversation of page.conversations) {
         if (!seen.has(conversation.id)) {
           seen.add(conversation.id)
@@ -85,8 +96,7 @@ async function listAllConversations(): Promise<ApiConversation[]> {
       offset += page.conversations.length
     }
   }
-  await collect(false)
-  await collect(true)
+  await collect()
   return all
 }
 
@@ -97,10 +107,12 @@ export interface ConversationExportPlan {
 }
 
 export async function prepareConversationExport(includeMemories: boolean): Promise<ConversationExportPlan> {
+  const assertAccount = exportAccountGuard()
   const [conversations, memories] = await Promise.all([
     listAllConversations(),
     includeMemories ? memoriesApi.list() : Promise.resolve(undefined),
   ])
+  assertAccount()
   return {
     conversations,
     memories,
@@ -111,7 +123,9 @@ export async function prepareConversationExport(includeMemories: boolean): Promi
 /** Build one portable ZIP containing bounded JSON parts. The parts remain plain
  * JSON so each can be imported independently after extracting the archive. */
 export async function exportAllConversationZip(includeMemories: boolean): Promise<{ batches: number; conversations: number }> {
+  const assertAccount = exportAccountGuard()
   const plan = await prepareConversationExport(includeMemories)
+  assertAccount()
   const zip = new JSZip()
   zip.file('manifest.json', JSON.stringify({
     format: 'aivory-conversations-archive',
@@ -127,12 +141,20 @@ export async function exportAllConversationZip(includeMemories: boolean): Promis
     const batchConversations = plan.conversations.slice(start, start + CONVERSATION_EXPORT_BATCH_SIZE)
     const detailed = []
     for (const conversation of batchConversations) {
+      assertAccount()
       const messages = await conversationsApi.messages(conversation.id, 'tree')
+      assertAccount()
       detailed.push({
         id: conversation.id,
         title: conversation.title,
         model_id: conversation.model_id || undefined,
         active_leaf_id: conversation.active_leaf_id,
+        inline_source_conv: conversation.inline_source_conv || undefined,
+        inline_parent_id: conversation.inline_parent_id || undefined,
+        inline_quote: conversation.inline_quote || undefined,
+        pinned: conversation.pinned,
+        archived: conversation.archived,
+        starred: conversation.starred,
         messages,
       })
     }
@@ -147,6 +169,7 @@ export async function exportAllConversationZip(includeMemories: boolean): Promis
     zip.file(`conversations-${String(index).padStart(4, '0')}.json`, JSON.stringify(envelope, null, 2))
   }
   const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } })
+  assertAccount()
   triggerDownload(blob, `aivory-export-${date}.zip`)
   return { batches: plan.total, conversations: plan.conversations.length }
 }

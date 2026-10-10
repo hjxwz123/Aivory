@@ -14,6 +14,7 @@
  */
 import { createWithEqualityFn } from 'zustand/traditional'
 import { ApiError, conversationsApi, streamSSE, streamSSEGet } from '@/api'
+import { captureAccountRequestGuard } from '@/api/client'
 import type {
   ApiAttachment,
   ApiConversation,
@@ -39,6 +40,7 @@ import { GENERATION_INTERRUPTED_ERROR_CODE } from '@/types/chat'
 import { uid } from '@/lib/utils'
 import { isKnownLocalMessageId, persistedMessageReference } from '@/lib/message-ids'
 import { envNum } from '@/lib/env-config'
+import { conversationDraftErrorMessage, isConversationDraftLimit } from '@/lib/pending-conversation'
 import { markConversationsDeleted, unmarkConversationsDeleted } from '@/lib/sync-guards'
 import { toast } from '@/hooks/use-toast'
 import { activeWorkspaceId, useWorkspaces } from '@/store/workspaces'
@@ -271,6 +273,7 @@ function scheduleGeneratedTitleReconcile(
 export const MSG_PAGE = envNum('VITE_AIVORY_MSG_PAGE', 40)
 
 interface ConversationStore {
+  accountId: string | null
   conversations: Conversation[]
   loaded: boolean
   loading: boolean
@@ -854,6 +857,7 @@ function stopConversationStreams(convId: string, messages: Message[]): Promise<v
 }
 
 export const useConversations = createWithEqualityFn<ConversationStore>((set, get) => ({
+  accountId: useAuth.getState().user?.id ?? null,
   conversations: [],
   loaded: false,
   loading: false,
@@ -920,6 +924,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
   },
 
   async loadProjectConversations(projectId) {
+    const accountCurrent = captureAccountRequestGuard()
     const normalizedProjectId = projectId.trim()
     if (!normalizedProjectId) return false
     const ws = activeWorkspaceId()
@@ -933,7 +938,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       )
       // A workspace switch can finish while this project request is in flight.
       // Its rows must never leak into the newly active space.
-      if (activeWorkspaceId() !== ws) return false
+      if (!accountCurrent() || activeWorkspaceId() !== ws) return false
       const incoming = mergeStreamingSummaries(
         get().conversations,
         rows.map(toLocalConversation),
@@ -955,6 +960,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
   },
 
   async loadOne(id, opts) {
+    const accountCurrent = captureAccountRequestGuard()
     if (optimisticConversationIds.has(id)) {
       return get().conversations.find((conversation) => conversation.id === id)
     }
@@ -968,6 +974,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       // Paginate by default (latest MSG_PAGE messages); load the whole path when
       // a caller needs every message present up front (e.g. jump-to-message).
       const resp = await conversationsApi.get(id, opts?.full ? undefined : { limit: MSG_PAGE })
+      if (!accountCurrent()) return undefined
       const conv = toLocalConversation(resp.conversation)
       conv.messages = resp.messages.map(toLocalMessage)
       conv.hasOlder = !opts?.full && Boolean(resp.has_more)
@@ -1011,7 +1018,15 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       if (!hadStreaming) get().resumeStreamingMessages(id)
       if (hasBranches(conv.messages)) void prefetchConversationTree(id)
       return conv
-    } catch {
+    } catch (error) {
+      if (!accountCurrent()) return undefined
+      if (error instanceof ApiError && [401, 403, 404].includes(error.status)) {
+        for (const [messageId, conversationId] of streamConversationIds) {
+          if (conversationId === id) streamControllers.get(messageId)?.abort()
+        }
+        set((state) => ({ conversations: state.conversations.filter((conversation) => conversation.id !== id) }))
+        conversationTreeCache.delete(id)
+      }
       return undefined
     }
   },
@@ -1044,6 +1059,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
   },
 
   async createConversation(modelId, projectId, fast) {
+    const accountCurrent = captureAccountRequestGuard()
     const models = useModels.getState()
     const resolvedModelId = modelId || models.defaultId
     const resolvedFast =
@@ -1062,12 +1078,16 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         workspace_id: activeWorkspaceId(),
         fast: resolvedFast,
       })
+      if (!accountCurrent()) throw new DOMException('Account changed', 'AbortError')
       const conv = toLocalConversation(created)
       // replaceOrPrepend, not a raw prepend: a §23 background list sync may
       // have inserted this row already (duplicate-id guard).
       set((s) => ({ conversations: replaceOrPrepend(s.conversations, conv) }))
       return conv
     } catch (e) {
+      if (!accountCurrent()) throw new DOMException('Account changed', 'AbortError')
+      if (e instanceof DOMException && e.name === 'AbortError') throw e
+      if (isConversationDraftLimit(e)) throw e
       // Fall back to optimistic local conversation so the UI never blocks.
       const now = Date.now()
       const workspaceId = activeWorkspaceId()
@@ -1305,12 +1325,14 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
   },
 
   async loadArchived() {
+    const accountCurrent = captureAccountRequestGuard()
     try {
       const pageSize = 200
       const archived: ApiConversation[] = []
       let offset = 0
       for (;;) {
         const page = await conversationsApi.listArchived(pageSize, offset)
+        if (!accountCurrent()) return []
         archived.push(...page.conversations)
         if (!page.has_more || page.conversations.length === 0) break
         offset += page.conversations.length
@@ -1333,6 +1355,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
   },
 
   async setActiveLeaf(id, leafId) {
+    const accountCurrent = captureAccountRequestGuard()
     // §4.15 R4: switching branches must NOT interrupt a sibling that is still
     // generating. The server-side generation is detached (context.WithoutCancel)
     // and active_leaf is only written at message creation, so a switch can never
@@ -1386,7 +1409,10 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     const previousTail = branchSwitchTails.get(id) ?? Promise.resolve()
     const operation = previousTail
       .catch(() => undefined)
-      .then(() => conversationsApi.setActiveLeaf(id, leafId))
+      .then(() => {
+        if (!accountCurrent()) throw new DOMException('Account changed', 'AbortError')
+        return conversationsApi.setActiveLeaf(id, leafId)
+      })
     const tail = operation.then(
       () => undefined,
       () => undefined,
@@ -1431,6 +1457,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
   },
 
   async deleteMessage(conversationId, messageId) {
+    const accountCurrent = captureAccountRequestGuard()
     // Deleting under a live stream would race the writer — stop it first.
     const cur = get().conversations.find((c) => c.id === conversationId)
     if (!cur) return
@@ -1459,7 +1486,9 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     // deletes and can therefore authoritatively reconcile the latest local path.
     const previousTail = messageDeleteTails.get(conversationId)
     const executeDelete = async () => {
+      if (!accountCurrent()) throw new DOMException('Account changed', 'AbortError')
       await stopConversationStreams(conversationId, cur.messages)
+      if (!accountCurrent()) throw new DOMException('Account changed', 'AbortError')
       return conversationsApi.deleteMessage(conversationId, messageId)
     }
     const operation = previousTail
@@ -1518,8 +1547,10 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
   },
 
   async fork(id, leafId, title) {
+    const accountCurrent = captureAccountRequestGuard()
     try {
       const created = await conversationsApi.fork(id, { leaf_id: leafId, title })
+      if (!accountCurrent()) return null
       const conv = toLocalConversation(created)
       set((s) => ({ conversations: [conv, ...s.conversations] }))
       return conv
@@ -1529,9 +1560,11 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
   },
 
   async loadInlineThreads(sourceConvId) {
+    const accountCurrent = captureAccountRequestGuard()
     if (optimisticConversationIds.has(sourceConvId)) return
     try {
       const rows = await conversationsApi.inlineThreads(sourceConvId)
+      if (!accountCurrent()) return
       const threads = rows.map(toLocalConversation)
       set((s) => {
         let list = s.conversations
@@ -1549,15 +1582,18 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
   },
 
   async createInlineThread(sourceConvId, messageId, quote) {
+    const accountCurrent = captureAccountRequestGuard()
     try {
       const created = await conversationsApi.createInlineThread(sourceConvId, {
         message_id: messageId,
         quote,
       })
+      if (!accountCurrent()) return undefined
       const conv = toLocalConversation(created)
       set((s) => ({ conversations: [conv, ...s.conversations] }))
       return conv
     } catch (e) {
+      if (!accountCurrent()) return undefined
       toast.error(errorMessage(e, 'Failed to start sub-conversation'))
       return undefined
     }
@@ -1663,6 +1699,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
   },
 
   async setKBs(id, kbIds) {
+    const accountCurrent = captureAccountRequestGuard()
     const desired = Array.from(new Set(kbIds.map((kbId) => kbId.trim()).filter(Boolean)))
     if (optimisticConversationIds.has(id)) {
       set((state) => ({
@@ -1696,8 +1733,10 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     const operation = previous
       .catch(() => undefined)
       .then(async () => {
+        if (!accountCurrent()) return
         try {
           const updated = await conversationsApi.update(id, { kb_ids: desired })
+          if (!accountCurrent()) return
           sync!.committed = [...(updated.kb_ids ?? desired)]
           if (sync!.revision === revision) {
             set((state) => ({
@@ -1709,6 +1748,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
             }))
           }
         } catch (e) {
+          if (!accountCurrent()) return
           if (sync!.revision === revision) {
             set((state) => ({
               conversations: state.conversations.map((conversation) =>
@@ -1762,6 +1802,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
   },
 
   async sendMessage(input) {
+    const accountCurrent = captureAccountRequestGuard()
     // Capture selection before any stop/path reconciliation await. The request
     // carries this exact turn snapshot, so a KB toggle made after Send belongs
     // to the next turn and a slow conversation PATCH cannot invert the scope.
@@ -1779,6 +1820,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     )
     const stoppedReconcile = pendingStoppedPathWork(input.conversationId)
     if (stoppedReconcile) await stoppedReconcile
+    if (!accountCurrent()) return
 
     // The composer normally enforces this, but store actions can also be
     // triggered by stale renders, another component, or a realtime race. Keep
@@ -1962,6 +2004,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       try {
         if (input.preparedConversation) {
           created = await input.preparedConversation.catch(() => undefined)
+          if (!accountCurrent()) return
           reusedPreparedConversation = Boolean(created)
         }
         if (!created) {
@@ -1970,15 +2013,19 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
             workspace_id: activeWorkspaceId(),
             fast: input.fast === true,
           })
+          if (!accountCurrent()) return
         }
-      } catch {
+      } catch (error) {
+        if (!accountCurrent()) return
         // Create failed — settle the optimistic turn as an error (the SSE would
         // 404 against the temp id anyway) and stop. The user keeps their message
         // with a retry affordance.
         updateAssistant(set, input.conversationId, assistantId, (m) => ({
           ...m,
           streaming: false,
-          error: 'Could not start the conversation. Please try again.',
+          error: isConversationDraftLimit(error)
+            ? conversationDraftErrorMessage(error)
+            : 'Could not start the conversation. Please try again.',
         }))
         streamControllers.delete(assistantId)
         streamGenerationIds.delete(assistantId)
@@ -2106,6 +2153,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         },
         transportAbort.signal,
       )) {
+        if (!accountCurrent()) return
         const ev = frame.data as ApiSseEvent
         switch (ev.type) {
           case 'message_start':
@@ -2369,11 +2417,13 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         })
       } else if (!errored) {
         await get().reloadActivePath(input.conversationId)
+        if (!accountCurrent()) return
         if (expectsGeneratedTitle) {
           scheduleGeneratedTitleReconcile(input.conversationId, generatedTitleFallback, optimisticSeedTitle)
         }
       }
     } catch (e) {
+      if (!accountCurrent()) return
       if (abort.signal.aborted && streamHandoffs.delete(abort)) return
       if (
         !abort.signal.aborted &&
@@ -2446,6 +2496,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
   },
 
   async regenerate(conversationId, assistantId, modelId) {
+    const accountCurrent = captureAccountRequestGuard()
     const turnKnowledgeBaseIds = [
       ...(get().conversations.find((conversation) => conversation.id === conversationId)?.kbIds ?? []),
     ]
@@ -2456,6 +2507,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     )
     const stoppedReconcile = pendingStoppedPathWork(conversationId)
     if (stoppedReconcile) await stoppedReconcile
+    if (!accountCurrent()) return
     if (assistantWasLocal) {
       toast.info('Conversation is still syncing. Please try again.')
       return
@@ -2582,6 +2634,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         },
         abort.signal,
       )) {
+        if (!accountCurrent()) return
         const ev = frame.data as ApiSseEvent
         switch (ev.type) {
           case 'tool_start': {
@@ -2783,6 +2836,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         await get().reloadActivePath(conversationId)
       }
     } catch (e) {
+      if (!accountCurrent()) return
       if (abort.signal.aborted && streamHandoffs.delete(abort)) return
       if (!abort.signal.aborted && serverAssistantId !== placeholderId) {
         beginMessageStreamReplay(set, get, conversationId, serverAssistantId, abort)
@@ -3015,6 +3069,40 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
   },
 }))
 
+// Account boundaries are stronger than workspace boundaries. Abort all local
+// readers and invalidate pending list work before another identity can hydrate.
+useAuth.subscribe((state, previous) => {
+  if (state.user?.id === previous.user?.id) return
+  convLoadEpoch += 1
+  convServerOffset = 0
+  for (const controller of streamControllers.values()) {
+    streamHandoffs.add(controller)
+    controller.abort()
+  }
+  streamControllers.clear()
+  streamGenerationIds.clear()
+  streamConversationIds.clear()
+  generatedLocalMessageIds.clear()
+  optimisticConversationIds.clear()
+  conversationTreeCache.clear()
+  conversationTreeLoads.clear()
+  conversationTreeEpochs.clear()
+  knowledgeBaseSelectionSync.clear()
+  titleReconcileGeneration.clear()
+  branchSwitchTails.clear()
+  branchSwitchRevisions.clear()
+  branchSwitchConfirmedPaths.clear()
+  messageDeleteTails.clear()
+  messageDeleteRevisions.clear()
+  messageDeleteConfirmedPaths.clear()
+  stoppedPathReconciles.clear()
+  stoppedPathReconcileEpochs.clear()
+  for (const barrier of stoppedPathBarriers.values()) barrier.resolve()
+  stoppedPathBarriers.clear()
+  useConversations.setState({ accountId: state.user?.id ?? null, conversations: [], loaded: false,
+    loading: false, loadingMore: false, hasMore: false, error: null })
+})
+
 type StreamApplyState = {
   lastCitations: Citation[]
   toolCallsById: Map<string, ToolCall>
@@ -3028,6 +3116,7 @@ async function consumeReplayStream(
   assistantId: string,
   abort: AbortController,
 ): Promise<void> {
+  const accountCurrent = captureAccountRequestGuard()
   const state: StreamApplyState = {
     lastCitations: [],
     toolCallsById: new Map(),
@@ -3038,6 +3127,7 @@ async function consumeReplayStream(
       `/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(assistantId)}/stream`,
       abort.signal,
     )) {
+      if (!accountCurrent()) return
       const ev = frame.data as ApiSseEvent
       applyReplayEvent(set, conversationId, assistantId, ev, state)
       if (ev.type === 'done') {
@@ -3048,6 +3138,7 @@ async function consumeReplayStream(
     }
     await get().reloadActivePath(conversationId)
   } catch (e) {
+    if (!accountCurrent()) return
     if (abort.signal.aborted) {
       streamHandoffs.delete(abort)
       return
@@ -3718,8 +3809,12 @@ function mergeStreamingSummaries(
   incoming: Conversation[],
   kbSelectionGuards?: Map<string, KnowledgeBaseSelectionRequestGuard>,
 ): Conversation[] {
-  const byID = new Map(existing.map((c) => [c.id, c]))
-  return incoming.map((remote) => {
+  const userId = useAuth.getState().user?.id
+  const accountRows = existing.filter((conversation) => Boolean(userId) && (
+    conversation.workspaceId || conversation.creatorId === userId || optimisticConversationIds.has(conversation.id)
+  ))
+  const byID = new Map(accountRows.map((c) => [c.id, c]))
+  const merged = incoming.map((remote) => {
     let next = remote
     const cur = byID.get(next.id)
     next = preservePendingKnowledgeBaseSelection(
@@ -3743,6 +3838,14 @@ function mergeStreamingSummaries(
       title: streaming ? next.title || cur.title : next.title,
     }
   })
+  // A fresh history response excludes upload-only drafts and can race the
+  // first message commit. Keep the user's optimistic send visible while that
+  // round trip is in flight, including the temp-to-server ID handoff.
+  const incomingIDs = new Set(incoming.map((conversation) => conversation.id))
+  const workspaceId = activeWorkspaceId() ?? ''
+  const sending = accountRows.filter((conversation) => (conversation.workspaceId ?? '') === workspaceId && !incomingIDs.has(conversation.id)
+    && (optimisticConversationIds.has(conversation.id) || conversation.messages.some((message) => message.streaming)))
+  return sending.length > 0 ? [...sending, ...merged].sort((a, b) => b.updatedAt - a.updatedAt) : merged
 }
 
 function safeDomain(u: string): string {

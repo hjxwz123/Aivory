@@ -5,6 +5,7 @@ import { sandboxParentPath } from '@/lib/sandbox-browser'
 import { useConversationFiles } from './conversation-files'
 import { useArtifactPanel } from './artifact-panel'
 import { useInlineThreadDrawer } from './inline-thread'
+import { useAuth } from './auth'
 
 interface SandboxFilesStore {
   open: boolean
@@ -81,3 +82,9 @@ export const useSandboxFiles = create<SandboxFilesStore>((set, get) => ({
     set((state) => ({ currentPath: sandboxParentPath(state.currentPath) }))
   },
 }))
+
+useAuth.subscribe((state, previous) => {
+  if (state.user?.id === previous.user?.id) return
+  useSandboxFiles.setState({ open: false, conversationId: null, files: [], session: '',
+    currentPath: '', loading: false, unavailable: false, error: false })
+})

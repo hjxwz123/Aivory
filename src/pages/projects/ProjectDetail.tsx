@@ -54,11 +54,14 @@ import { cn, formatRelativeDate, truncate } from '@/lib/utils'
 import { persistUserSettings } from '@/lib/user-settings'
 import {
   clearPendingConversation,
+  conversationDraftErrorMessage,
+  discardPendingConversation,
+  recoverPendingConversation,
+  reservePendingConversation,
   pendingConversationKey,
   readPendingConversation,
   writePendingConversation,
 } from '@/lib/pending-conversation'
-import { conversationsApi } from '@/api/endpoints'
 import type { ApiConversation } from '@/api/types'
 import { resolveNewConversationFastMode } from '@/lib/chat-defaults'
 import { userCan } from '@/lib/user-permissions'
@@ -206,6 +209,8 @@ export default function ProjectDetail() {
   const pendingConvRef = useRef<ApiConversation | null>(null)
   const pendingCreateRef = useRef<Promise<string | undefined> | null>(null)
   const pendingConsumedRef = useRef(false)
+  const pendingDiscardRef = useRef<Promise<void> | null>(null)
+  const mountedRef = useRef(true)
   // Set when the composer drains its last attachment while the lazy create is
   // still in flight — the create then discards its own conversation on landing
   // ("Untitled ghost" fix, same as ChatHome).
@@ -216,6 +221,12 @@ export default function ProjectDetail() {
     () => pendingConversationKey(userId, `project:${project?.id || id || 'unknown'}`, workspaceId),
     [id, project?.id, userId, workspaceId],
   )
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
   const toolModeDraftScope = useMemo(() => `project:${project?.id || id || 'unknown'}`, [id, project?.id])
   const [pendingConversationId, setPendingConversationId] = useState<string | undefined>(() =>
     readPendingConversation(pendingStorageKey),
@@ -286,9 +297,8 @@ export default function ProjectDetail() {
     setSelectedKnowledgeBaseIds([])
     const pending = pendingConvRef.current
     pendingConvRef.current = null
-    clearPendingConversation(pendingStorageKey)
     setPendingConversationId(undefined)
-    if (pending) void conversationsApi.remove(pending.id).catch(() => {})
+    if (pending) void discardPendingConversation(pendingStorageKey, pending.id).catch(() => {})
   }, [canUseKnowledgeBases, pendingStorageKey])
 
   useEffect(() => {
@@ -307,23 +317,20 @@ export default function ProjectDetail() {
     if (!project?.id || !canUseKnowledgeBases) return
     const savedID = readPendingConversation(pendingStorageKey)
     setPendingConversationId(savedID)
-    if (!savedID) return
+    if (!userId) return
     let cancelled = false
     const recovery = (async () => {
       try {
-        const loaded = await conversationsApi.get(savedID, { limit: 1 })
-        if (loaded.messages.length > 0 || loaded.conversation.project_id !== project.id) {
-          clearPendingConversation(pendingStorageKey)
-          if (!cancelled) setPendingConversationId(undefined)
-          return undefined
+        const conversation = await recoverPendingConversation(pendingStorageKey, {
+          userId, workspaceId, projectId: project.id, scope: 'chat',
+        }, () => !cancelled)
+        if (!cancelled) {
+          pendingConvRef.current = conversation ?? null
+          setPendingConversationId(conversation?.id)
         }
-        if (cancelled) return savedID
-        pendingConvRef.current = loaded.conversation
-        setPendingConversationId(savedID)
-        return savedID
+        return conversation?.id
       } catch {
-        clearPendingConversation(pendingStorageKey)
-        if (!cancelled) setPendingConversationId(undefined)
+        if (!cancelled) setPendingConversationId(savedID)
         return undefined
       }
     })()
@@ -334,63 +341,74 @@ export default function ProjectDetail() {
     return () => {
       cancelled = true
     }
-  }, [canUseKnowledgeBases, pendingStorageKey, project?.id])
+  }, [canUseKnowledgeBases, pendingStorageKey, project?.id, userId, workspaceId])
 
-  function ensureProjectConversation(): Promise<string | undefined> {
+  async function ensureProjectConversation(): Promise<string | undefined> {
+    const storageKey = pendingStorageKey
+    await pendingDiscardRef.current
+    if (!mountedRef.current || pendingStorageKeyRef.current !== storageKey) return undefined
     if (!project || !canUseKnowledgeBasesRef.current) return Promise.resolve(undefined)
     // A fresh attach revives an abandoned draft scope (see discardDraftConversation).
     draftAbandonedRef.current = false
-    if (pendingConvRef.current) return Promise.resolve(pendingConvRef.current.id)
+    if (pendingConvRef.current) return pendingConvRef.current.id
+    if (pendingCreateRef.current) {
+      const existing = pendingCreateRef.current
+      const id = await existing
+      if (!mountedRef.current || pendingStorageKeyRef.current !== storageKey) return undefined
+      if (id) return id
+      if (pendingCreateRef.current === existing) pendingCreateRef.current = null
+    }
     if (!pendingCreateRef.current) {
       const projectId = project.id
-      const storageKey = pendingStorageKey
       const creation = (async () => {
-        try {
-          const created = await conversationsApi.create({
-            model_id: effectiveProjectModelId || undefined,
-            project_id: projectId,
-            workspace_id: workspaceId,
-            fast: projectFast,
-          })
-          if (
-            pendingConsumedRef.current ||
-            draftAbandonedRef.current ||
-            !canUseKnowledgeBasesRef.current ||
-            activeProjectIdRef.current !== projectId ||
-            pendingStorageKeyRef.current !== storageKey
-          ) {
-            void conversationsApi.remove(created.id).catch(() => {})
-            return undefined
-          }
-          // Preserve a mode selected before the first attachment created this
-          // hidden project conversation.
-          useComposerPrefs.getState().moveToolModeScope(toolModeDraftScope, created.id)
-          writePendingConversation(storageKey, created.id)
-          pendingConvRef.current = created
-          setPendingConversationId(created.id)
-          return created.id
-        } catch {
+        const created = await reservePendingConversation(userId, {
+          model_id: effectiveProjectModelId || undefined,
+          project_id: projectId,
+          workspace_id: workspaceId,
+          fast: projectFast,
+        }, () => mountedRef.current && pendingStorageKeyRef.current === storageKey && activeProjectIdRef.current === projectId && !draftAbandonedRef.current)
+        if (!created) return undefined
+        if (
+          !mountedRef.current ||
+          pendingConsumedRef.current ||
+          draftAbandonedRef.current ||
+          !canUseKnowledgeBasesRef.current ||
+          activeProjectIdRef.current !== projectId ||
+          pendingStorageKeyRef.current !== storageKey
+        ) {
+          if (created.draft_reused) writePendingConversation(storageKey, created.id)
+          else void discardPendingConversation(storageKey, created.id).catch(() => {})
           return undefined
         }
+        // Preserve a mode selected before the first attachment created this
+        // hidden project conversation.
+        useComposerPrefs.getState().moveToolModeScope(toolModeDraftScope, created.id)
+        writePendingConversation(storageKey, created.id)
+        pendingConvRef.current = created
+        setPendingConversationId(created.id)
+        return created.id
       })()
       pendingCreateRef.current = creation
       void creation.finally(() => {
         if (pendingCreateRef.current === creation) pendingCreateRef.current = null
-      })
+      }).catch(() => {})
     }
     return pendingCreateRef.current
   }
 
-  // Same "Untitled ghost" cleanup as ChatHome: the last attachment left the
-  // composer, so the upload-scoped draft conversation has no reason to exist.
+  // As in ChatHome, discard the upload reservation when its last attachment
+  // leaves the composer, without touching a draft another tab has already sent.
   function discardDraftConversation() {
     if (pendingConsumedRef.current) return
     draftAbandonedRef.current = true
-    const pending = pendingConvRef.current
+    const id = pendingConvRef.current?.id ?? pendingConversationId
     pendingConvRef.current = null
-    clearPendingConversation(pendingStorageKey)
     setPendingConversationId(undefined)
-    if (pending) void conversationsApi.remove(pending.id).catch(() => {})
+    if (id) {
+      // A new upload waits for this explicit deletion to settle. A failure
+      // keeps the recovery id; the server will reuse the same reservation.
+      pendingDiscardRef.current = discardPendingConversation(pendingStorageKey, id).catch(() => {})
+    }
   }
 
   if (!project && resolvingProject) {
@@ -471,9 +489,16 @@ export default function ProjectDetail() {
     pendingConvRef.current = null
     setPendingConversationId(undefined)
     clearPendingConversation(pendingStorageKey)
-    const conv = pending
-      ? adoptConversation(pending)
-      : await createConversation(effectiveProjectModelId, project.id, opts.fast === true)
+    let conv: Conversation | undefined
+    try {
+      conv = pending
+        ? adoptConversation(pending)
+        : await createConversation(effectiveProjectModelId, project.id, opts.fast === true)
+    } catch (error) {
+      pendingConsumedRef.current = false
+      toast.error(conversationDraftErrorMessage(error))
+      return
+    }
     if (!conv) {
       pendingConsumedRef.current = false
       return

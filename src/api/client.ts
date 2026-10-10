@@ -77,6 +77,22 @@ function _canonicalTarget(path: string): string {
 
 let memoryToken: string | null = null
 let memoryRequestSigningKey: string | null = null
+let accountRequestEpoch = 0
+
+/** Identity changes invalidate replies/reconnects from the previous account. */
+export function invalidateAccountRequests(): void {
+  accountRequestEpoch += 1
+}
+
+function assertAccountRequestCurrent(epoch: number): void {
+  if (epoch !== accountRequestEpoch) throw new DOMException('Account changed', 'AbortError')
+}
+
+/** Retain the identity boundary across an entire multi-request store action. */
+export function captureAccountRequestGuard(): () => boolean {
+  const epoch = accountRequestEpoch
+  return () => epoch === accountRequestEpoch
+}
 
 /** Set or clear the in-memory access token. */
 export function setAccessToken(token: string | null, requestSigningKey?: string): void {
@@ -217,11 +233,14 @@ function isAuthPath(path: string): boolean {
 }
 
 async function apiRequest<T>(path: string, opts: ApiOptions, retried: boolean): Promise<T> {
+  const epoch = accountRequestEpoch
+  const assertCurrent = () => { if (!isAuthPath(path)) assertAccountRequestCurrent(epoch) }
   assertNetworkOnline()
   const isForm = opts.body instanceof FormData
   const method = opts.method ?? 'GET'
   const serializedBody = isForm || !opts.body ? '' : JSON.stringify(opts.body)
   const authHeaders = await authenticatedRequestHeaders(path, method, serializedBody, isForm)
+  assertCurrent()
   const headers: Record<string, string> = {
     accept: 'application/json',
     ...(isForm ? {} : { 'content-type': 'application/json' }),
@@ -236,14 +255,18 @@ async function apiRequest<T>(path: string, opts: ApiOptions, retried: boolean): 
     signal: opts.signal,
     keepalive: opts.keepalive,
   })
+  assertCurrent()
   // The access token is short-lived (2h). When it expires an open tab would
   // start 401-ing "auth required" out of nowhere — silently refresh once via the
   // long-lived refresh cookie and retry, so the session keeps working.
   if (res.status === 401 && !retried && !isAuthPath(path)) {
-    if (await tryRefresh()) return apiRequest<T>(path, opts, true)
+    const refreshed = await tryRefresh()
+    assertCurrent()
+    if (refreshed) return apiRequest<T>(path, opts, true)
   }
   let parsed: unknown = undefined
   const text = await res.text()
+  assertCurrent()
   if (text.length > 0) {
     try {
       parsed = JSON.parse(text)
@@ -273,10 +296,14 @@ async function apiUploadRequest<T>(
   opts: UploadOptions,
   retried: boolean,
 ): Promise<T> {
+  const epoch = accountRequestEpoch
   assertNetworkOnline()
   const res = await xhrUpload(path, body, opts)
+  assertAccountRequestCurrent(epoch)
   if (res.status === 401 && !retried && !isAuthPath(path)) {
-    if (await tryRefresh()) return apiUploadRequest<T>(path, body, opts, true)
+    const refreshed = await tryRefresh()
+    assertAccountRequestCurrent(epoch)
+    if (refreshed) return apiUploadRequest<T>(path, body, opts, true)
   }
   if (!res.ok) {
     const errBody = res.parsed as ApiErrorShape | undefined
@@ -296,8 +323,10 @@ async function xhrUpload(
   body: FormData,
   opts: UploadOptions,
 ): Promise<{ status: number; ok: boolean; parsed: unknown }> {
+  const epoch = accountRequestEpoch
   const method = opts.method ?? 'POST'
   const authHeaders = await authenticatedRequestHeaders(path, method, '', true)
+  assertAccountRequestCurrent(epoch)
   const headers: Record<string, string> = {
     accept: 'application/json',
     ...opts.headers,
@@ -445,11 +474,14 @@ export async function* streamSSE(
   body: unknown,
   signal?: AbortSignal,
 ): AsyncGenerator<{ event: string; data: unknown; id?: string }> {
+  const epoch = accountRequestEpoch
   assertNetworkOnline()
   const serializedBody = JSON.stringify(body)
   const open = async () => {
+    assertAccountRequestCurrent(epoch)
     assertNetworkOnline()
     const authHeaders = await authenticatedRequestHeaders(path, 'POST', serializedBody)
+    assertAccountRequestCurrent(epoch)
     return apiFetch(API_BASE + path, {
       method: 'POST',
       credentials: 'include',
@@ -463,10 +495,12 @@ export async function* streamSSE(
     })
   }
   let res = await open()
+  assertAccountRequestCurrent(epoch)
   // Same refresh-on-401 as api(): an expired access token shouldn't fail a send.
   if (res.status === 401 && !isAuthPath(path) && (await tryRefresh())) {
     res = await open()
   }
+  assertAccountRequestCurrent(epoch)
   if (!res.ok || !res.body) {
     let text = ''
     try {
@@ -474,6 +508,7 @@ export async function* streamSSE(
     } catch {
       /* ignore */
     }
+    assertAccountRequestCurrent(epoch)
     let parsed: unknown
     try {
       parsed = JSON.parse(text)
@@ -490,6 +525,7 @@ export async function* streamSSE(
   let buf = ''
   while (true) {
     const { done, value } = await reader.read()
+    assertAccountRequestCurrent(epoch)
     if (done) break
     buf += decoder.decode(value, { stream: true })
     // SSE frames are separated by \n\n.
@@ -498,12 +534,16 @@ export async function* streamSSE(
       const raw = buf.slice(0, idx)
       buf = buf.slice(idx + 2)
       const frame = parseSSEFrame(raw)
-      if (frame) yield frame
+      if (frame) {
+        assertAccountRequestCurrent(epoch)
+        yield frame
+      }
       idx = buf.indexOf('\n\n')
     }
   }
   // Tail frame without trailing blank line.
   if (buf.trim().length > 0) {
+    assertAccountRequestCurrent(epoch)
     const frame = parseSSEFrame(buf)
     if (frame) yield frame
   }
@@ -515,12 +555,15 @@ export async function* streamSSEGet(
   lastEventId?: string,
   sseOpts?: { silentReconnect?: boolean },
 ): AsyncGenerator<{ event: string; data: unknown; id?: string }> {
+  const epoch = accountRequestEpoch
   let currentLastId = lastEventId ?? ''
   let retryCount = 0
   let reconnectToastShown = false
   const open = async () => {
+    assertAccountRequestCurrent(epoch)
     assertNetworkOnline()
     const authHeaders = await authenticatedRequestHeaders(path, 'GET')
+    assertAccountRequestCurrent(epoch)
     return apiFetch(API_BASE + path, {
       method: 'GET',
       credentials: 'include',
@@ -535,9 +578,11 @@ export async function* streamSSEGet(
 
   while (true) {
     let res = await open()
+    assertAccountRequestCurrent(epoch)
     if (res.status === 401 && !isAuthPath(path) && (await tryRefresh())) {
       res = await open()
     }
+    assertAccountRequestCurrent(epoch)
     if (!res.ok || !res.body) {
       let text = ''
       try {
@@ -545,6 +590,7 @@ export async function* streamSSEGet(
       } catch {
         /* ignore */
       }
+      assertAccountRequestCurrent(epoch)
       let parsed: unknown
       try {
         parsed = JSON.parse(text)
@@ -558,6 +604,7 @@ export async function* streamSSEGet(
     }
     try {
       for await (const frame of readSSEBody(res.body)) {
+        assertAccountRequestCurrent(epoch)
         if (frame.id) currentLastId = frame.id
         retryCount = 0
         yield frame
@@ -566,6 +613,7 @@ export async function* streamSSEGet(
       }
       return
     } catch (readErr) {
+      assertAccountRequestCurrent(epoch)
       if (signal?.aborted || retryCount >= MAX_SSE_RETRIES) throw readErr
       retryCount++
       const delay = Math.pow(SSE_RECONNECT_BACKOFF_FACTOR, retryCount - 1) * SSE_RECONNECT_BACKOFF_BASE_MS

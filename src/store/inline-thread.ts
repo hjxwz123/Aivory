@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { useArtifactPanel } from './artifact-panel'
 import { useConversationFiles } from './conversation-files'
 import { useSandboxFiles } from './sandbox-files'
+import { useAuth } from './auth'
 
 /**
  * inline-thread — drives the right-side drawer that shows a text-selection
@@ -34,3 +35,8 @@ export const useInlineThreadDrawer = create<InlineThreadDrawerStore>((set) => ({
     set({ open: false })
   },
 }))
+
+useAuth.subscribe((state, previous) => {
+  if (state.user?.id === previous.user?.id) return
+  useInlineThreadDrawer.setState({ open: false, childId: null, quote: '' })
+})

@@ -11,6 +11,8 @@ import { authApi, ApiError, resetAuthFailureState, setAccessToken } from '@/api'
 import { PasskeyError, requestPasskeyAssertion } from '@/lib/passkey'
 import {
   isAuthRefreshSuppressed,
+  captureAccountRequestGuard,
+  invalidateAccountRequests,
   setAuthLostHandler,
   setBannedHandler,
   setInitialPasswordRequiredHandler,
@@ -417,22 +419,42 @@ export const useAuth = create<AuthState>((set, get) => ({
   },
 
   async logout() {
-    beginAuthOp()
+    const seq = beginAuthOp()
+    const logout = authApi.logout()
+    // Clear the local identity immediately. The server request already holds
+    // A's credentials; a slow logout must not keep A's transcript visible.
+    setAccessToken(null)
+    set({ user: null, status: 'unauthenticated', pendingTwoFactor: null, authPolicyLoaded: false })
     try {
-      await authApi.logout()
+      await logout
     } catch {
       /* ignore */
     }
-    setAccessToken(null)
-    set({ user: null, status: 'unauthenticated', pendingTwoFactor: null, authPolicyLoaded: false })
+    if (!isLatestAuthOp(seq)) return
     await get().refreshAuthPolicy()
   },
 
   async updateProfile(patch) {
+    const accountCurrent = captureAccountRequestGuard()
     const updated = await authApi.updateProfile(patch)
+    if (!accountCurrent()) throw new DOMException('Account changed', 'AbortError')
     set({ user: updated })
   },
 }))
+
+async function clearPrivateImageCaches(): Promise<void> {
+  if (typeof caches === 'undefined') return
+  const names = await caches.keys()
+  await Promise.all(names.filter((name) => name.startsWith('aivory-img-')).map((name) => caches.delete(name)))
+}
+
+useAuth.subscribe((state, previous) => {
+  if (state.user?.id === previous.user?.id) return
+  invalidateAccountRequests()
+  void clearPrivateImageCaches().catch(() => {})
+})
+// Clear legacy Cache API entries even before the new service worker activates.
+void clearPrivateImageCaches().catch(() => {})
 
 // Live ban: an admin banning a signed-in user makes their very next request
 // 403 with `account_suspended`. The api client calls this once — sign the user

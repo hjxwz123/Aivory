@@ -886,6 +886,8 @@ export interface ConversationCompactionResult {
 }
 
 export const conversationsApi = {
+  listForExport: (limit = 100, offset = 0) =>
+    api<{ conversations: ApiConversation[]; has_more: boolean }>(`/conversations?export=all&limit=${limit}&offset=${offset}`),
   sandboxUploadAvailability: () => api<{ available: boolean }>('/sandbox/availability'),
   uploadSandboxFolder: (
     id: string,
@@ -919,8 +921,20 @@ export const conversationsApi = {
       `/conversations/${encodeURIComponent(id)}${q ? `?${q}` : ''}`,
     )
   },
-  create: (body: { model_id?: string; project_id?: string; title?: string; workspace_id?: string; fast?: boolean }) =>
+  create: (body: { model_id?: string; project_id?: string; title?: string; workspace_id?: string; fast?: boolean; draft?: boolean }) =>
     api<ApiConversation>('/conversations', { method: 'POST', body }),
+  findDraft: (scope: { workspace_id?: string; project_id?: string; draft_scope: 'chat' | 'draw' }) => {
+    const query = new URLSearchParams({ draft: 'only', draft_scope: scope.draft_scope, limit: '1' })
+    if (scope.workspace_id) query.set('workspace_id', scope.workspace_id)
+    if (scope.project_id) query.set('project_id', scope.project_id)
+    return api<{ conversations: ApiConversation[] }>(`/conversations?${query.toString()}`)
+  },
+  switchDraftScope: (scope: { workspace_id?: string; project_id?: string; draft_scope: 'chat' | 'draw' }) =>
+    api<{ conversation: ApiConversation | null; deleted_ids: string[] }>('/conversations/draft-scope', {
+      method: 'POST', body: scope,
+    }),
+  discardDraft: (id: string) =>
+    api<{ ok: true }>(`/conversations/${encodeURIComponent(id)}?draft=1`, { method: 'DELETE' }),
   compact: (id: string) =>
     api<ConversationCompactionResult>(`/conversations/${encodeURIComponent(id)}/compact`, { method: 'POST' }),
   // Bulk-import conversation trees from another platform's export OR our own

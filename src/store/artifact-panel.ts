@@ -3,6 +3,7 @@ import { useInlineThreadDrawer } from './inline-thread'
 import { useConversationFiles } from './conversation-files'
 import { useSandboxFiles } from './sandbox-files'
 import type { Attachment } from '@/types/chat'
+import { useAuth } from './auth'
 
 /**
  * One right-edge Artifact panel, two kinds of source.
@@ -71,6 +72,12 @@ export const useArtifactPanel = create<ArtifactPanelStore>((set, get) => ({
  * each streaming HTML block auto-opens at most once per session.
  */
 const autoOpened = new Set<string>()
+
+useAuth.subscribe((state, previous) => {
+  if (state.user?.id === previous.user?.id) return
+  autoOpened.clear()
+  useArtifactPanel.setState({ open: false, source: null })
+})
 
 export function autoOpenPreview(sourceKey: string, html: string): void {
   if (autoOpened.has(sourceKey)) {

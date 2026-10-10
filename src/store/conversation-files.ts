@@ -5,6 +5,7 @@ import type { ApiConversationFile } from '@/api/types'
 import { useArtifactPanel } from './artifact-panel'
 import { useInlineThreadDrawer } from './inline-thread'
 import { useSandboxFiles } from './sandbox-files'
+import { useAuth } from './auth'
 
 /**
  * conversation-files — drives the right-side drawer that lists every file the
@@ -104,3 +105,9 @@ export const useConversationFiles = create<ConversationFilesStore>((set, get) =>
     }
   },
 }))
+
+useAuth.subscribe((state, previous) => {
+  if (state.user?.id === previous.user?.id) return
+  useConversationFiles.setState({ open: false, conversationId: null, files: [],
+    loading: false, uploading: false, uploadJob: null })
+})

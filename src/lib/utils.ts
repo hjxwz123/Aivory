@@ -107,13 +107,21 @@ export function formatAbsoluteDate(date: Date | string | number): string {
 }
 
 /**
- * Group conversations by relative date bucket.
+ * Group conversations by the user's local calendar date.
+ *
+ * Converting the local year/month/day to a UTC midnight timestamp avoids
+ * daylight-saving transitions changing the result for a calendar-day
+ * comparison. The Date getters intentionally use the browser's local
+ * timezone, so a conversation changes groups at the user's local midnight.
  */
 export type DateBucket = 'today' | 'yesterday' | 'last_7' | 'last_30' | 'older'
-export function bucketFor(date: Date | string | number): DateBucket {
+export function bucketFor(date: Date | string | number, now = new Date()): DateBucket {
   const d = typeof date === 'number' || typeof date === 'string' ? new Date(date) : date
-  const now = new Date()
-  const diff = Math.floor((now.getTime() - d.getTime()) / (24 * 60 * 60 * 1000))
+  if (Number.isNaN(d.getTime())) return 'older'
+
+  const localCalendarDay = (value: Date) =>
+    Date.UTC(value.getFullYear(), value.getMonth(), value.getDate())
+  const diff = Math.round((localCalendarDay(now) - localCalendarDay(d)) / (24 * 60 * 60 * 1000))
   if (diff === 0) return 'today'
   if (diff === 1) return 'yesterday'
   if (diff < 7) return 'last_7'

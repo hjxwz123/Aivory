@@ -55,7 +55,9 @@ export default function ChatThread() {
   const jumpKey = searchParams.get('j') || undefined
   const navigate = useNavigate()
   const { t } = useTranslation(['chat', 'common', 'projects', 'kb'])
-  const conversation = useConversations((s) => s.conversations.find((c) => c.id === id))
+  const currentAccountId = useAuth((s) => s.user?.id ?? null)
+  const conversation = useConversations((s) => s.accountId === currentAccountId
+    ? s.conversations.find((c) => c.id === id) : undefined)
   useDocumentTitle(
     conversation
       ? formatDocumentTitle(conversation.title.trim() || t('untitled'), t('common:appName'))
@@ -200,14 +202,16 @@ export default function ChatThread() {
   // the id changes — and again after a workspace switch settles (the switch
   // replaced this conversation's cache entry with a message-less summary row).
   useEffect(() => {
-    if (!id || wsSwitching) return
+    if (!id || !currentAccountId || wsSwitching) return
+    let active = true
     setLoadStatus('loading')
     // Jumping to a specific message needs the whole path loaded so the target is
     // present; a normal open paginates (latest page, older on scroll-up).
     Promise.all([loadOne(id, { full: Boolean(jumpTo) }), loadInlineThreads(id)]).finally(() => {
-      setLoadStatus('done')
+      if (active) setLoadStatus('done')
     })
-  }, [id, jumpTo, wsSwitching, loadOne, loadInlineThreads])
+    return () => { active = false }
+  }, [id, currentAccountId, jumpTo, wsSwitching, loadOne, loadInlineThreads])
 
   useEffect(() => {
     // When jumping to a specific message, don't auto-follow/pin to the bottom —

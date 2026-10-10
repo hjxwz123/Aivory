@@ -13,6 +13,7 @@ import type { ApiDocument, ApiProject } from '@/api/types'
 import type { UploadProgress } from '@/api/client'
 import type { Project, ProjectAccent, ProjectFile, ProjectFileKind } from '@/types/project'
 import { toast } from '@/hooks/use-toast'
+import { useAuth } from './auth'
 
 interface ProjectStore {
   projects: Project[]
@@ -301,6 +302,13 @@ async function toLocalProject(p: ApiProject, docs: ApiDocument[]): Promise<Proje
     updatedAt: p.updated_at * 1000,
   }
 }
+
+useAuth.subscribe((state, previous) => {
+  if (state.user?.id === previous.user?.id) return
+  projLoadEpoch += 1
+  projectDetailEpoch.clear()
+  useProjects.setState({ projects: [], loaded: false, loading: false, error: null })
+})
 
 function mergeApiProject(project: Project, updated: ApiProject): Project {
   return {

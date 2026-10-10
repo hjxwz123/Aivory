@@ -90,6 +90,7 @@ import { SUPPORTED_LANGUAGES } from '@/i18n'
 import { useCommandMenu } from '@/hooks/use-command-menu'
 import { useOpenSettings } from '@/hooks/use-open-settings'
 import { useMediaQuery } from '@/hooks/use-media-query'
+import { useLocalCalendarDay } from '@/hooks/use-local-calendar-day'
 import { useConversationReorder, type ConversationReorderController } from '@/hooks/use-conversation-reorder'
 import { duration } from '@/lib/design-tokens'
 import { accentClasses } from '@/lib/project-helpers'
@@ -117,6 +118,7 @@ function isConversationStreaming(conversation: Conversation): boolean {
 }
 
 export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
+  const calendarDay = useLocalCalendarDay()
   const user = useAuth((s) => s.user)
   const activeWsId = useWorkspaces((s) => s.activeId)
   const activeWorkspacePolicy = useWorkspaces((s) =>
@@ -450,8 +452,10 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
     last_30: [],
     older: [],
   }
-  const now = Date.now()
-  for (const c of others) grouped[bucketFor(isConversationStreaming(c) ? now : c.updatedAt)].push(c)
+  for (const c of others) {
+    const bucket = isConversationStreaming(c) ? 'today' : bucketFor(c.updatedAt, calendarDay)
+    grouped[bucket].push(c)
+  }
 
   return (
     <aside

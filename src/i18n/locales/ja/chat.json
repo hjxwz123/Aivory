@@ -152,6 +152,7 @@
     "attachedMultiple": "{{count}} 件のファイルを選択しました",
     "attachedHint": "このビルドでは添付ファイルは表示のみです。",
     "uploadFailed": "アップロードに失敗しました",
+    "draftLimitReached": "アカウントごとに保存できる未送信の会話の下書きは1件のみです。新しい下書きを作成する前に、既存の下書きを送信または削除してください。",
     "uploadingPercent": "アップロード中 {{percent}}%",
     "imageTooLarge": "画像は {{mb}} MB 未満にしてください",
     "fileTooLarge": "ファイルは {{mb}} MB 未満にしてください",

@@ -12,7 +12,6 @@ import { AuthGate } from '@/components/auth/auth-gate'
 import SettingsDialog from '@/pages/settings/SettingsLayout'
 import { useCommandMenu } from '@/hooks/use-command-menu'
 import { useHotkeys } from '@/hooks/use-hotkeys'
-import { useConversations } from '@/store/conversations'
 import { resetComposerForNewConversation } from '@/store/composer-prefs'
 import { useUI } from '@/store/ui'
 import { useSettingsModal } from '@/store/settings-modal'
@@ -98,7 +97,6 @@ const NotFound = lazy(() => import('@/pages/NotFound'))
 function GlobalShortcuts() {
   const toggle = useCommandMenu((s) => s.toggle)
   const setOpen = useCommandMenu((s) => s.setOpen)
-  const createConversation = useConversations((s) => s.createConversation)
   const navigate = useNavigate()
   const openSettings = useOpenSettings()
 
@@ -111,11 +109,8 @@ function GlobalShortcuts() {
       // when the composer currently owns focus.
       whenInputFocused: true,
       handler: () => {
-        void (async () => {
-          resetComposerForNewConversation()
-          const c = await createConversation()
-          if (c) navigate(`/chat/${c.id}`)
-        })()
+        resetComposerForNewConversation()
+        navigate('/')
       },
     },
     {

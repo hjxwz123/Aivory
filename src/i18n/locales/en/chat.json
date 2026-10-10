@@ -152,6 +152,7 @@
     "attachedMultiple": "{{count}} files selected",
     "attachedHint": "Attachments are visual-only in this build.",
     "uploadFailed": "Upload failed",
+    "draftLimitReached": "Each account can keep only one unsent conversation draft. Send or delete the existing draft before starting another.",
     "uploadingPercent": "Uploading {{percent}}%",
     "imageTooLarge": "Images must be under {{mb}} MB",
     "fileTooLarge": "Files must be under {{mb}} MB",

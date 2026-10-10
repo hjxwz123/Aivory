@@ -12,6 +12,8 @@ import { create } from 'zustand'
 import { workspacesApi } from '@/api'
 import type { ApiWorkspace, ApiWorkspacePolicy } from '@/api/types'
 import { useComposerPrefs } from '@/store/composer-prefs'
+import { useAuth } from './auth'
+import { captureAccountRequestGuard } from '@/api/client'
 
 const ACTIVE_KEY = 'aivory.workspace'
 
@@ -78,11 +80,13 @@ interface WorkspacesState {
 // (conversations store ← workspaces store ← conversations store). The model
 // catalog is workspace-scoped too (§workspace RBAC policy filter).
 async function reloadSpaceData() {
+  const accountCurrent = captureAccountRequestGuard()
   const [{ useConversations }, { useProjects }, { useModels }] = await Promise.all([
     import('./conversations'),
     import('./projects'),
     import('./models'),
   ])
+  if (!accountCurrent()) return
   await Promise.all([
     useConversations.getState().load(),
     useProjects.getState().load(),
@@ -277,6 +281,19 @@ export const useWorkspaces = create<WorkspacesState>((set, get) => ({
     return activeId ? workspaces.find((w) => w.id === activeId) : undefined
   },
 }))
+
+useAuth.subscribe((state, previous) => {
+  if (state.user?.id === previous.user?.id) return
+  loadSeq += 1
+  switchSeq += 1
+  policyRequestSeq.clear()
+  useWorkspaces.setState({ workspaces: [], policies: {}, policyLoading: {}, policyErrors: {},
+    domainAccess: null, lockedWorkspaceId: null, loaded: false, switching: false,
+    ...(previous.user ? { activeId: null } : {}) })
+  if (previous.user) {
+    try { localStorage.removeItem(ACTIVE_KEY) } catch { /* storage unavailable */ }
+  }
+})
 
 /** The active workspace id for API scoping ('' when personal). Non-hook helper
  *  for stores/api call sites. */

@@ -152,6 +152,7 @@
     "attachedMultiple": "{{count}} fichiers sélectionnés",
     "attachedHint": "Les pièces jointes sont uniquement visuelles dans cette version.",
     "uploadFailed": "Échec du téléversement",
+    "draftLimitReached": "Chaque compte ne peut conserver qu’un seul brouillon de conversation non envoyé. Envoyez ou supprimez le brouillon existant avant d’en créer un autre.",
     "uploadingPercent": "Envoi {{percent}} %",
     "imageTooLarge": "Les images doivent faire moins de {{mb}} Mo",
     "fileTooLarge": "Les fichiers doivent faire moins de {{mb}} Mo",

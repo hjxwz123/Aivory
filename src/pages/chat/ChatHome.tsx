@@ -9,9 +9,11 @@ import { useModels } from '@/store/models'
 import { useUI } from '@/store/ui'
 import { useComposerPrefs } from '@/store/composer-prefs'
 import { useWorkspaces } from '@/store/workspaces'
-import { conversationsApi } from '@/api'
 import {
   clearPendingConversation,
+  discardPendingConversation,
+  recoverPendingConversation,
+  reservePendingConversation,
   pendingConversationKey,
   readPendingConversation,
   writePendingConversation,
@@ -81,7 +83,11 @@ export default function ChatHome() {
   const [searchParams] = useSearchParams()
   const drawRequested = searchParams.get('mode') === 'draw'
   const drawMode = drawRequested && canDraw && imageModels.length > 0
-  const draftScope = drawMode ? 'new-draw' : 'new-chat'
+  const draftScope = drawRequested ? 'new-draw' : 'new-chat'
+  // Scope selection can discard the previous upload reservation. Wait for the
+  // persisted workspace and draw catalog before deciding which scope is active.
+  const draftScopeReady = workspacesLoaded && !workspaceSwitching && modelCatalogReady &&
+    !workspacePolicyPending && (!drawRequested || (drawMode && imageModelsLoaded))
   const savedImageModelId =
     typeof user?.settings?.image_model_id === 'string' ? user.settings.image_model_id : ''
   const savedImageModelAvailable = imageModels.some((model) => model.id === savedImageModelId)
@@ -145,6 +151,7 @@ export default function ChatHome() {
   const pendingConvRef = useRef<ApiConversation | null>(null)
   const pendingCreateRef = useRef<Promise<ApiConversation | undefined> | null>(null)
   const pendingConsumedRef = useRef(false)
+  const pendingDiscardRef = useRef<Promise<void> | null>(null)
   // Set when the composer drains its last attachment while the lazy create is
   // still in flight — the create then discards its own conversation on landing
   // instead of installing a draft nobody references ("Untitled ghost").
@@ -177,27 +184,22 @@ export default function ChatHome() {
     pendingConsumedRef.current = false
     const savedID = readPendingConversation(pendingStorageKey)
     setPendingConversationId(savedID)
-    if (!savedID) return
+    if (!user?.id || !draftScopeReady) return
     let cancelled = false
     const recovery = (async () => {
       try {
-        const loaded = await conversationsApi.get(savedID, { limit: 1 })
-        if (loaded.messages.length > 0) {
-          clearPendingConversation(pendingStorageKey)
-          if (!cancelled) setPendingConversationId(undefined)
-          return undefined
-        }
-        // A send can claim this recovery promise before the request settles.
-        // Return the row to that background handoff without reinstalling the
-        // draft state or storage entry after the home route has gone away.
+        const conversation = await recoverPendingConversation(pendingStorageKey, {
+          userId: user?.id, workspaceId, scope: drawMode ? 'draw' : 'chat',
+        }, () => !cancelled)
         if (!cancelled && !pendingConsumedRef.current) {
-          pendingConvRef.current = loaded.conversation
-          setPendingConversationId(savedID)
+          pendingConvRef.current = conversation ?? null
+          setPendingConversationId(conversation?.id)
         }
-        return loaded.conversation
+        return conversation
       } catch {
-        clearPendingConversation(pendingStorageKey)
-        if (!cancelled) setPendingConversationId(undefined)
+        // Retain the local recovery id through transient errors. The next
+        // upload reserves this same server scope rather than another draft.
+        if (!cancelled) setPendingConversationId(savedID)
         return undefined
       }
     })()
@@ -208,73 +210,85 @@ export default function ChatHome() {
     return () => {
       cancelled = true
     }
-  }, [pendingStorageKey])
+  }, [draftScopeReady, drawMode, pendingStorageKey, user?.id, workspaceId])
 
   // Lazily create (once) the conversation the first attachment will be scoped
   // to. Idempotent: repeat attaches in the same draft reuse the same id — the
   // in-flight promise is memoized so two quick attaches share ONE create. Does
   // NOT navigate — that happens on send, so attaching a file doesn't yank the
-  // user off the home screen mid-compose. Returning undefined on failure lets
-  // the composer fall back to a scope-less (non-RAG) upload instead of
-  // uploading against a fabricated id the server would reject.
-  function ensureConversation(): Promise<string | undefined> {
+  // user off the home screen mid-compose. Reservation failures stop the
+  // upload instead of leaving an unscoped file without a recovery entry.
+  async function ensureConversation(): Promise<string | undefined> {
+    if (!draftScopeReady) return undefined
+    const storageKey = pendingStorageKey
+    await pendingDiscardRef.current
+    if (!mountedRef.current || pendingStorageKeyRef.current !== storageKey) return undefined
     // A fresh attach revives an abandoned draft scope (see discardDraftConversation).
     draftAbandonedRef.current = false
-    if (pendingConvRef.current) return Promise.resolve(pendingConvRef.current.id)
+    if (pendingConvRef.current) return pendingConvRef.current.id
+    if (pendingCreateRef.current) {
+      const existing = pendingCreateRef.current
+      const conversation = await existing
+      if (!mountedRef.current || pendingStorageKeyRef.current !== storageKey) return undefined
+      if (conversation) return conversation.id
+      if (pendingCreateRef.current === existing) pendingCreateRef.current = null
+    }
     if (!pendingCreateRef.current) {
-      const storageKey = pendingStorageKey
       const creation = (async () => {
-        try {
-          const created = await conversationsApi.create({
-            model_id: modelId || undefined,
-            workspace_id: workspaceId,
-            fast,
-          })
-          // A mode/workspace switch invalidates this scope before any upload
-          // starts. So does removing every attachment before the create lands
-          // (draft abandoned).
-          if (draftAbandonedRef.current || pendingStorageKeyRef.current !== storageKey) {
-            void conversationsApi.remove(created.id).catch(() => {})
-            return undefined
-          }
-          // Keep a tool-mode choice made before the first attachment attached
-          // to the hidden conversation that now owns that upload.
-          useComposerPrefs.getState().moveToolModeScope(draftScope, created.id)
-          // startNew claimed this in-flight reservation. Hand the row to the
-          // optimistic send, but do not recreate a pending-draft storage entry
-          // after navigation has already consumed it.
-          if (pendingConsumedRef.current) return created
-          writePendingConversation(storageKey, created.id)
-          if (!mountedRef.current) return created
-          pendingConvRef.current = created
-          setPendingConversationId(created.id)
-          return created
-        } catch {
+        const created = await reservePendingConversation(user?.id, {
+          model_id: modelId || undefined,
+          workspace_id: workspaceId,
+          fast,
+        }, () => mountedRef.current && pendingStorageKeyRef.current === storageKey && !draftAbandonedRef.current)
+        if (!created) return undefined
+        // A mode/workspace switch invalidates this scope before any upload
+        // starts. So does removing every attachment before the create lands
+        // (draft abandoned).
+        if (!mountedRef.current || draftAbandonedRef.current || pendingStorageKeyRef.current !== storageKey) {
+          // A reused reservation may contain files from an earlier session.
+          // Cancelling this attach cannot erase those recovered contents.
+          if (created.draft_reused) writePendingConversation(storageKey, created.id)
+          else void discardPendingConversation(storageKey, created.id).catch(() => {})
           return undefined
         }
+        // Keep a tool-mode choice made before the first attachment attached
+        // to the hidden conversation that now owns that upload.
+        useComposerPrefs.getState().moveToolModeScope(draftScope, created.id)
+        // startNew claimed this in-flight reservation. Hand the row to the
+        // optimistic send, but do not recreate a pending-draft storage entry
+        // after navigation has already consumed it.
+        if (pendingConsumedRef.current) return created
+        writePendingConversation(storageKey, created.id)
+        if (!mountedRef.current) return created
+        pendingConvRef.current = created
+        setPendingConversationId(created.id)
+        return created
       })()
       pendingCreateRef.current = creation
       void creation.finally(() => {
         if (pendingCreateRef.current === creation) pendingCreateRef.current = null
-      })
+      }).catch(() => {})
     }
     return pendingCreateRef.current.then((conversation) => conversation?.id)
   }
 
   // The composer removed its LAST attachment: the draft conversation existed
-  // purely to scope those uploads, so delete it — otherwise it lingers
-  // server-side forever and surfaces as an "Untitled" row on the next sidebar
-  // load. A create still in flight is flagged instead (it self-discards on
-  // landing); a subsequent attach simply creates a fresh scope.
+  // purely to scope those uploads, so discard it immediately rather than
+  // leaving an unused reservation. A create still in flight is flagged instead
+  // (it self-discards on landing); a subsequent attach creates a fresh scope.
   function discardDraftConversation() {
     if (pendingConsumedRef.current) return
     draftAbandonedRef.current = true
-    const pending = pendingConvRef.current
+    const id = pendingConvRef.current?.id ?? pendingConversationId
     pendingConvRef.current = null
-    clearPendingConversation(pendingStorageKey)
     setPendingConversationId(undefined)
-    if (pending) void conversationsApi.remove(pending.id).catch(() => {})
+    if (id) {
+      // A new upload waits for this explicit deletion to settle. A failure
+      // keeps the recovery id; the server will reuse the same reservation.
+      pendingDiscardRef.current = discardPendingConversation(pendingStorageKey, id).catch(() => {})
+    }
   }
+
 
   // A suggestion is placed in the composer for the user to finish; the id makes
   // picking the same suggestion twice still refill a draft edited since.
@@ -297,7 +311,7 @@ export default function ChatHome() {
       fast?: boolean
     },
   ) {
-    if (!modelCatalogReady) return
+    if (!draftScopeReady) return
     if (startedRef.current) return
     startedRef.current = true
 
@@ -369,7 +383,6 @@ export default function ChatHome() {
       })),
     })
   }
-
   const composer = (
     <Composer
       modelId={modelId}
@@ -378,6 +391,7 @@ export default function ChatHome() {
       onFastChange={setPickedFast}
       onSubmit={(text, atts, opts) => void startNew(text, atts, opts)}
       draftScope={draftScope}
+      scopeReady={draftScopeReady}
       conversationId={pendingConversationId}
       ensureConversationId={ensureConversation}
       onAttachmentsDrained={discardDraftConversation}
