@@ -274,7 +274,7 @@ func upsertChannelModel(ctx context.Context, db execer, channelID, requestID, la
 	}
 	_, err := db.ExecContext(ctx, `INSERT INTO channel_models(id, channel_id, request_id, label, description, kind, enabled, source, updated_at)
 		VALUES(?, ?, ?, ?, ?, ?, 1, ?, ?)
-		ON CONFLICT DO UPDATE SET label=excluded.label, description=excluded.description, kind=excluded.kind, enabled=1, source=excluded.source, updated_at=excluded.updated_at`,
+		ON CONFLICT(channel_id, lower(trim(request_id))) DO UPDATE SET label=excluded.label, description=excluded.description, kind=excluded.kind, enabled=1, source=excluded.source, updated_at=excluded.updated_at`,
 		genID("cm"), channelID, requestID, strings.TrimSpace(label), strings.TrimSpace(description), kind, source, time.Now().Unix())
 	return err
 }
@@ -374,7 +374,7 @@ func ReplaceChannelModels(ctx context.Context, db *sql.DB, channelID string, mod
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO channel_models(id, channel_id, request_id, label, description, kind, enabled, source, updated_at)
 			VALUES(?, ?, ?, ?, ?, ?, 1, ?, ?)
-			ON CONFLICT DO UPDATE SET label=excluded.label, description=excluded.description, kind=excluded.kind, enabled=1, source=excluded.source, updated_at=excluded.updated_at`,
+			ON CONFLICT(channel_id, lower(trim(request_id))) DO UPDATE SET label=excluded.label, description=excluded.description, kind=excluded.kind, enabled=1, source=excluded.source, updated_at=excluded.updated_at`,
 			model.IDOrNew(), channelID, requestID, strings.TrimSpace(model.Label), strings.TrimSpace(model.Description), model.Kind, model.Source, time.Now().Unix()); err != nil {
 			return nil, err
 		}
