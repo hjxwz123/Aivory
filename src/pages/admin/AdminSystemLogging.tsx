@@ -19,6 +19,7 @@ export default function AdminSystemLogging() {
   const { t } = useTranslation(['admin', 'common'])
   const [scope, setScope] = useState<LogScope>('errors')
   const [requestBodies, setRequestBodies] = useState(true)
+  const [toolErrorsOnly, setToolErrorsOnly] = useState(true)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
@@ -29,6 +30,7 @@ export default function AdminSystemLogging() {
           readBool(settings, 'log_full_requests', false) && !readBool(settings, 'log_errors_only', true)
         setScope(logsAllRequests ? 'all' : 'errors')
         setRequestBodies(readBool(settings, 'log_request_bodies', true))
+        setToolErrorsOnly(readBool(settings, 'log_tool_errors_only', true))
       })
       .catch((error) => toast.error(error instanceof ApiError ? error.message : t('admin:common.failed')))
       .finally(() => setLoading(false))
@@ -42,6 +44,7 @@ export default function AdminSystemLogging() {
         log_full_requests: scope === 'all',
         log_errors_only: scope === 'errors',
         log_request_bodies: requestBodies,
+        log_tool_errors_only: toolErrorsOnly,
       })
       toast.success(t('admin:settings.saved'))
     } catch (error) {
@@ -88,6 +91,13 @@ export default function AdminSystemLogging() {
                 checked={requestBodies}
                 onCheckedChange={setRequestBodies}
               />
+            </SettingsRow>
+            <SettingsRow
+              label={t('admin:toolLogs.errorsOnly')}
+              description={t('admin:toolLogs.errorsOnlyHint')}
+              htmlFor="tool-error-logging"
+            >
+              <Switch id="tool-error-logging" checked={toolErrorsOnly} onCheckedChange={setToolErrorsOnly} />
             </SettingsRow>
           </SettingsSection>
 

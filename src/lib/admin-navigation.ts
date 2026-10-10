@@ -133,6 +133,7 @@ export const ADMIN_NAV_GROUPS: readonly AdminNavGroup[] = [
     items: [
       { to: '/admin/logs/usage', labelKey: 'admin:logs.callLogs', defaultLabel: 'Call logs' },
       { to: '/admin/logs/audit', labelKey: 'admin:logs.auditLogs', defaultLabel: 'Audit logs' },
+      { to: '/admin/logs/tools', labelKey: 'admin:toolLogs.title', defaultLabel: 'Tool (MCP) calls' },
     ],
   },
   {

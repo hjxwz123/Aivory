@@ -521,6 +521,57 @@ export interface ApiAuditFilters {
   until?: string
 }
 
+export interface ApiToolLogRequest {
+  method: string
+  url: string
+  status_code?: number
+  duration_ms: number
+  request_body?: string
+  response_body?: string
+  error?: string
+  request_truncated?: boolean
+  response_truncated?: boolean
+}
+
+export interface ApiToolCallLog {
+  id: string
+  call_id: string
+  tool_name: string
+  tool_kind: 'builtin' | 'mcp'
+  server_id: string
+  server_name: string
+  remote_name: string
+  user_id: string
+  user_name: string
+  conversation_id: string
+  message_id: string
+  workspace_id: string
+  model_id: string
+  model_label: string
+  summary: string
+  status: 'success' | 'error' | 'partial' | 'timeout' | 'canceled'
+  duration_ms: number
+  created_at_ms: number
+  error?: string
+  input?: string
+  output?: string
+  input_truncated?: boolean
+  output_truncated?: boolean
+  bodies_recorded: boolean
+  requests?: ApiToolLogRequest[]
+  issues?: { scope: string; error: string }[]
+}
+
+export interface ApiToolLogFilters {
+  search?: string
+  kind?: string
+  status?: string
+  user?: string
+  tool?: string
+  from?: string
+  until?: string
+}
+
 /** Membership tier (§ user groups). */
 export interface ApiUserGroup {
   id: string

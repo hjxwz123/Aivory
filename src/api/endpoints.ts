@@ -40,6 +40,8 @@ import type {
   ApiWorkspaceAuditLog,
   ApiAdminAuditLog,
   ApiAuditFilters,
+  ApiToolCallLog,
+  ApiToolLogFilters,
   ApiAnalytics,
   ApiAiPPTConfig,
   ApiAiPPTDeck,
@@ -1139,6 +1141,15 @@ export const issueFeedbackApi = {
 
 // ----- Admin --------------------------------------------------------------
 
+function toolLogQuery(params: ApiToolLogFilters): URLSearchParams {
+  const qs = new URLSearchParams()
+  if (params.search) qs.set('q', params.search)
+  for (const key of ['kind', 'status', 'user', 'tool', 'from', 'until'] as const) {
+    if (params[key]) qs.set(key, params[key])
+  }
+  return qs
+}
+
 export const adminApi = {
   overview: (days = 30) => api<ApiAdminOverview>(`/admin/overview?days=${days}`),
   onboarding: () => api<ApiAdminOnboarding>('/admin/onboarding'),
@@ -1598,6 +1609,15 @@ export const adminApi = {
       `/admin/audit-logs${qs.toString() ? `?${qs}` : ''}`,
     )
   },
+  toolLogs: (params: ApiToolLogFilters & { page?: number; pageSize?: number } = {}) => {
+    const qs = toolLogQuery(params)
+    if (params.page) qs.set('page', String(params.page))
+    if (params.pageSize) qs.set('page_size', String(params.pageSize))
+    return api<{ logs: ApiToolCallLog[]; total: number; page: number; page_size: number }>(`/admin/tool-logs?${qs}`)
+  },
+  toolLogDetail: (id: string) => api<ApiToolCallLog>(`/admin/tool-logs/${encodeURIComponent(id)}`),
+  deleteToolLog: (id: string) => api<{ ok: true }>(`/admin/tool-logs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  deleteToolLogsFiltered: (params: ApiToolLogFilters = {}) => api<{ deleted: number }>(`/admin/tool-logs?${toolLogQuery(params)}`, { method: 'DELETE' }),
   exportAuditLogs: (params: ApiAuditFilters = {}) => {
     const qs = new URLSearchParams()
     if (params.search) qs.set('q', params.search)

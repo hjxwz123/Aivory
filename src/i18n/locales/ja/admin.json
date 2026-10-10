@@ -2740,12 +2740,57 @@
       "redeem_batche": "引き換えコードのバッチ",
       "usage": "呼び出しログ",
       "audit_log": "監査ログ",
+      "tool_log": "ツール呼び出しログ",
       "backup": "バックアップ",
       "config": "設定アーカイブ",
       "system_update": "システム更新",
       "desktop_update": "デスクトップアプリの更新",
       "vector": "ベクトルインデックス",
       "other": "その他のリソース"
+    }
+  },
+  "toolLogs": {
+    "title": "ツール（MCP）呼び出しログ",
+    "detailTitle": "ツール呼び出しの詳細",
+    "tool": "ツール",
+    "status": "状態",
+    "user": "ユーザー",
+    "server": "MCP サービス",
+    "serverId": "MCP サービス ID",
+    "modelId": "モデル ID",
+    "callId": "ツール呼び出し ID",
+    "conversationId": "会話 ID",
+    "messageId": "メッセージ ID",
+    "summary": "キーワード / 対象 URL",
+    "search": "キーワード、ツール、ユーザー、ログ ID を検索",
+    "input": "呼び出し引数",
+    "output": "ツールの返却内容",
+    "requests": "HTTP リクエスト",
+    "requestUrl": "リクエスト URL",
+    "requestBody": "リクエストボディ",
+    "responseBody": "レスポンスボディ",
+    "error": "エラー詳細",
+    "issues": "個別のエラーと診断",
+    "truncated": "長い内容のため、長さを制限したログの抜粋を表示しています。",
+    "bodiesDisabled": "リクエストボディの記録が無効のため、引数と返却内容は記録されていません。",
+    "errorsOnly": "失敗したツール呼び出しのみ記録",
+    "errorsOnlyHint": "有効時は失敗、タイムアウト、キャンセル、一部失敗を含む呼び出しのみ記録します。無効時はすべての組み込みツールと MCP 呼び出しを記録します。モデル呼び出しログの範囲とは独立しています。",
+    "kinds": {
+      "all": "すべてのツール",
+      "builtin": "組み込み",
+      "mcp": "MCP"
+    },
+    "statuses": {
+      "all": "すべての状態",
+      "success": "成功",
+      "error": "失敗",
+      "partial": "一部失敗",
+      "timeout": "タイムアウト",
+      "canceled": "キャンセル"
+    },
+    "filters": {
+      "user": "ユーザー ID",
+      "tool": "ツール名（完全一致）"
     }
   },
   "imageStyles": {

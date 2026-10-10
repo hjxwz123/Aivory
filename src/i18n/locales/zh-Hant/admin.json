@@ -2740,12 +2740,57 @@
       "redeem_batche": "兌換碼批次",
       "usage": "呼叫日誌",
       "audit_log": "稽核日誌",
+      "tool_log": "工具呼叫日誌",
       "backup": "備份",
       "config": "設定封存",
       "system_update": "系統更新",
       "desktop_update": "桌面應用程式更新",
       "vector": "向量索引",
       "other": "其他資源"
+    }
+  },
+  "toolLogs": {
+    "title": "工具（MCP）呼叫日誌",
+    "detailTitle": "工具呼叫詳情",
+    "tool": "工具",
+    "status": "狀態",
+    "user": "使用者",
+    "server": "MCP 服務",
+    "serverId": "MCP 服務 ID",
+    "modelId": "模型 ID",
+    "callId": "工具呼叫 ID",
+    "conversationId": "對話 ID",
+    "messageId": "訊息 ID",
+    "summary": "關鍵字 / 目標網址",
+    "search": "搜尋關鍵字、工具、使用者或日誌 ID",
+    "input": "呼叫參數",
+    "output": "工具回傳內容",
+    "requests": "HTTP 請求記錄",
+    "requestUrl": "請求 URL",
+    "requestBody": "請求主體",
+    "responseBody": "回傳內容",
+    "error": "具體錯誤",
+    "issues": "分項錯誤與診斷",
+    "truncated": "內容較長，僅保留有長度限制的日誌片段。",
+    "bodiesDisabled": "未記錄呼叫參數與回傳內容：管理員已關閉請求主體記錄。",
+    "errorsOnly": "僅記錄錯誤工具呼叫",
+    "errorsOnlyHint": "開啟後僅記錄失敗、逾時、取消及包含部分失敗的工具呼叫；關閉後記錄所有內建工具與 MCP 呼叫。獨立於模型呼叫日誌範圍。",
+    "kinds": {
+      "all": "全部工具",
+      "builtin": "內建工具",
+      "mcp": "MCP 工具"
+    },
+    "statuses": {
+      "all": "全部狀態",
+      "success": "成功",
+      "error": "失敗",
+      "partial": "部分失敗",
+      "timeout": "逾時",
+      "canceled": "已取消"
+    },
+    "filters": {
+      "user": "使用者 ID",
+      "tool": "工具名稱（精確比對）"
     }
   },
   "imageStyles": {

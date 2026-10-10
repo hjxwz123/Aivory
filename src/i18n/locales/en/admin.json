@@ -2742,12 +2742,57 @@
       "redeem_batche": "Redemption batch",
       "usage": "Call log",
       "audit_log": "Audit log",
+      "tool_log": "Tool call log",
       "backup": "Backup",
       "config": "Configuration archive",
       "system_update": "System update",
       "desktop_update": "Desktop update",
       "vector": "Vector index",
       "other": "Other resource"
+    }
+  },
+  "toolLogs": {
+    "title": "Tool (MCP) calls",
+    "detailTitle": "Tool call details",
+    "tool": "Tool",
+    "status": "Status",
+    "user": "User",
+    "server": "MCP service",
+    "serverId": "MCP service ID",
+    "modelId": "Model ID",
+    "callId": "Tool call ID",
+    "conversationId": "Conversation ID",
+    "messageId": "Message ID",
+    "summary": "Keywords / target URL",
+    "search": "Search keywords, tools, users or log IDs",
+    "input": "Call arguments",
+    "output": "Tool output",
+    "requests": "HTTP requests",
+    "requestUrl": "Request URL",
+    "requestBody": "Request body",
+    "responseBody": "Response body",
+    "error": "Error details",
+    "issues": "Individual errors and diagnostics",
+    "truncated": "This log contains a bounded excerpt of a longer payload.",
+    "bodiesDisabled": "Arguments and outputs were not recorded because request body logging is disabled.",
+    "errorsOnly": "Record only failed tool calls",
+    "errorsOnlyHint": "When enabled, records failures, timeouts, cancellations and calls with partial failures. When disabled, records all built-in and MCP calls. Independent of the model call log scope.",
+    "kinds": {
+      "all": "All tools",
+      "builtin": "Built-in",
+      "mcp": "MCP"
+    },
+    "statuses": {
+      "all": "All statuses",
+      "success": "Success",
+      "error": "Failed",
+      "partial": "Partial failure",
+      "timeout": "Timed out",
+      "canceled": "Canceled"
+    },
+    "filters": {
+      "user": "User ID",
+      "tool": "Tool name (exact match)"
     }
   },
   "imageStyles": {

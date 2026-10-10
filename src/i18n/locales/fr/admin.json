@@ -2741,13 +2741,58 @@
       "redeem_code": "Code d’échange",
       "redeem_batche": "Lot de codes d’échange",
       "usage": "Journal d’appels",
-      "audit_log": "Journal d’audit",
+      "audit_log": "Journal d'audit",
+      "tool_log": "Journal d'appels d'outils",
       "backup": "Sauvegarde",
       "config": "Archive de configuration",
       "system_update": "Mise à jour du système",
       "desktop_update": "Mise à jour de l’application de bureau",
       "vector": "Index vectoriel",
       "other": "Autre ressource"
+    }
+  },
+  "toolLogs": {
+    "title": "Appels d'outils (MCP)",
+    "detailTitle": "Détails de l'appel d'outil",
+    "tool": "Outil",
+    "status": "État",
+    "user": "Utilisateur",
+    "server": "Service MCP",
+    "serverId": "ID du service MCP",
+    "modelId": "ID du modèle",
+    "callId": "ID de l'appel d'outil",
+    "conversationId": "ID de la conversation",
+    "messageId": "ID du message",
+    "summary": "Mots-clés / URL cible",
+    "search": "Rechercher un mot-clé, un outil, un utilisateur ou un ID",
+    "input": "Arguments de l'appel",
+    "output": "Résultat de l'outil",
+    "requests": "Requêtes HTTP",
+    "requestUrl": "URL de la requête",
+    "requestBody": "Corps de la requête",
+    "responseBody": "Corps de la réponse",
+    "error": "Détails de l'erreur",
+    "issues": "Erreurs individuelles et diagnostics",
+    "truncated": "Ce journal contient un extrait limité d'un contenu plus long.",
+    "bodiesDisabled": "Les arguments et résultats n'ont pas été enregistrés car la journalisation des corps est désactivée.",
+    "errorsOnly": "Enregistrer uniquement les appels d'outils en échec",
+    "errorsOnlyHint": "Activé : enregistre les échecs, délais dépassés, annulations et échecs partiels. Désactivé : enregistre tous les appels d'outils intégrés et MCP. Indépendant des journaux d'appels de modèles.",
+    "kinds": {
+      "all": "Tous les outils",
+      "builtin": "Intégré",
+      "mcp": "MCP"
+    },
+    "statuses": {
+      "all": "Tous les états",
+      "success": "Réussi",
+      "error": "Échec",
+      "partial": "Échec partiel",
+      "timeout": "Délai dépassé",
+      "canceled": "Annulé"
+    },
+    "filters": {
+      "user": "ID utilisateur",
+      "tool": "Nom de l'outil (correspondance exacte)"
     }
   },
   "imageStyles": {

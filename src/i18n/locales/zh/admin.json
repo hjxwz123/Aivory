@@ -2744,12 +2744,57 @@
       "redeem_batche": "兑换码批次",
       "usage": "调用日志",
       "audit_log": "审计日志",
+      "tool_log": "工具调用日志",
       "backup": "备份",
       "config": "配置归档",
       "system_update": "系统更新",
       "desktop_update": "桌面应用更新",
       "vector": "向量索引",
       "other": "其他资源"
+    }
+  },
+  "toolLogs": {
+    "title": "工具（MCP）调用日志",
+    "detailTitle": "工具调用详情",
+    "tool": "工具",
+    "status": "状态",
+    "user": "用户",
+    "server": "MCP 服务",
+    "serverId": "MCP 服务 ID",
+    "modelId": "模型 ID",
+    "callId": "工具调用 ID",
+    "conversationId": "对话 ID",
+    "messageId": "消息 ID",
+    "summary": "关键词 / 目标地址",
+    "search": "搜索关键词、工具、用户或日志 ID",
+    "input": "调用参数",
+    "output": "工具返回内容",
+    "requests": "HTTP 请求记录",
+    "requestUrl": "请求 URL",
+    "requestBody": "请求体",
+    "responseBody": "返回内容",
+    "error": "具体错误",
+    "issues": "分项错误与诊断",
+    "truncated": "内容较长，仅保留有长度限制的日志片段。",
+    "bodiesDisabled": "调用参数和返回内容未记录：管理员已关闭请求体记录。",
+    "errorsOnly": "仅记录错误工具调用",
+    "errorsOnlyHint": "开启后仅记录失败、超时、取消以及包含部分失败的工具调用；关闭后记录所有内置工具和 MCP 调用。独立于模型调用日志范围。",
+    "kinds": {
+      "all": "全部工具",
+      "builtin": "内置工具",
+      "mcp": "MCP 工具"
+    },
+    "statuses": {
+      "all": "全部状态",
+      "success": "成功",
+      "error": "失败",
+      "partial": "部分失败",
+      "timeout": "超时",
+      "canceled": "已取消"
+    },
+    "filters": {
+      "user": "用户 ID",
+      "tool": "工具名称（精确匹配）"
     }
   },
   "imageStyles": {
