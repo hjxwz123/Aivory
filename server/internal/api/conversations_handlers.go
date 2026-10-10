@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"aivory/server/internal/envcfg"
 	"aivory/server/internal/llm"
@@ -19,6 +20,14 @@ import (
 // Query params: project_id, archived=only, limit (default 20, max 500), offset (default 0).
 func listConversationsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
+	if r.URL.Query().Get("export") == "all" {
+		listConversationExportHandler(d, w, r)
+		return
+	}
+	if r.URL.Query().Get("draft") == "only" {
+		findConversationDraftHandler(d, w, r)
+		return
+	}
 	projectID := r.URL.Query().Get("project_id")
 	// ?archived=only returns the archived chats (for the "Archived" view); the
 	// default hides them.
@@ -164,6 +173,7 @@ type createConversationReq struct {
 	ModelID   string `json:"model_id"`
 	ProjectID string `json:"project_id"`
 	Title     string `json:"title"`
+	Draft     bool   `json:"draft"`
 	// Nil lets the server apply the account default for old clients and direct
 	// API calls. An explicit value always represents a user's picker choice.
 	Fast *bool `json:"fast"`
@@ -178,6 +188,10 @@ func createConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	var req createConversationReq
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, 400, errInvalidInput)
+		return
+	}
+	if req.Draft && strings.TrimSpace(req.Title) != "" {
+		writeError(w, http.StatusBadRequest, errInvalidInput)
 		return
 	}
 	permissions, permissionErr := requestPermissions(d, r)
@@ -239,7 +253,11 @@ func createConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	conv, err := store.CreateConversation(r.Context(), d.DB, store.Conversation{
+	create := store.CreateConversation
+	if req.Draft {
+		create = store.ReserveConversationDraft
+	}
+	conv, err := create(r.Context(), d.DB, store.Conversation{
 		UserID:      u.ID,
 		ProjectID:   req.ProjectID,
 		Title:       strings.TrimSpace(req.Title),
@@ -248,10 +266,21 @@ func createConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: req.WorkspaceID,
 	})
 	if err != nil {
+		if errors.Is(err, store.ErrConversationDraftLimit) {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error": err.Error(), "code": "conversation_draft_limit", "limit": store.MaxConversationDrafts,
+			})
+			return
+		}
 		writeError(w, 500, err)
 		return
 	}
-	publishUserEvent(d, r, u.ID, "conversation.created", conv.ID)
+	if conv.ReplacedDrafts != nil && len(conv.ReplacedDrafts.ConversationIDs) > 0 {
+		go finishConversationDraftDeletion(r.Context(), d, r, u.ID, conv.ReplacedDrafts)
+	}
+	if !conv.DraftReused {
+		publishUserEvent(d, r, u.ID, "conversation.created", conv.ID)
+	}
 	writeJSON(w, 201, conv)
 }
 
@@ -767,6 +796,23 @@ func publishWorkspaceConversationVisibility(d Deps, r *http.Request, workspaceID
 func deleteConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	id := pathParam(r, "id")
+	if r.URL.Query().Get("draft") == "1" {
+		// Cancelling an unsent upload is permitted even when this account cannot
+		// delete saved history. The store's locked, owner-only draft predicate
+		// cannot delete a conversation another tab has already sent or saved.
+		deletion, err := store.DeleteConversationDraftWithState(r.Context(), d.DB, id, u.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		finishConversationDraftDeletion(r.Context(), d, r, u.ID, deletion)
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		return
+	}
 	permissions, permissionErr := requestPermissions(d, r)
 	if permissionErr != nil || !permissions.AllowConversationDeletion {
 		writeError(w, http.StatusForbidden, errForbidden)
@@ -1168,6 +1214,11 @@ func forkConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errors.New("leaf_id required"))
 		return
 	}
+	leaf, leafErr := store.GetMessage(r.Context(), d.DB, body.LeafID)
+	if leafErr != nil || leaf.ConversationID != conv.ID {
+		writeError(w, http.StatusNotFound, errNotFound)
+		return
+	}
 	path, err := msgcache.ListMessages(r.Context(), d.Cache, d.DB, conv.ID, body.LeafID)
 	if err != nil {
 		writeError(w, 500, err)
@@ -1177,6 +1228,16 @@ func forkConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if title == "" {
 		title = conv.Title + " (fork)"
 	}
+	var copyVectors func(context.Context, string, map[string]string) error
+	releaseVectors := func() {}
+	if d.RAG != nil {
+		copyVectors, releaseVectors, err = d.RAG.PrepareConversationForkVectors()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+	}
+	defer releaseVectors()
 	newConv, err := store.CreateConversation(r.Context(), d.DB, store.Conversation{
 		UserID:      u.ID,
 		ProjectID:   conv.ProjectID,
@@ -1185,6 +1246,7 @@ func forkConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		ModelID:     conv.ModelID,
 		Fast:        conv.Fast, // §fast-mode: a fork of a fast conversation stays fast
 		KBIDs:       conv.KBIDs,
+		RAGMode:     conv.RAGMode,
 		WorkspaceID: conv.WorkspaceID,
 		// Forks are new conversations, so workspace forks follow the new
 		// creator-private default instead of inheriting the source's visibility.
@@ -1194,7 +1256,7 @@ func forkConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
-	// Copy the whole chain in ONE transaction (store.CreateMessagePath). The old
+	// Copy messages and resource ownership in one transaction. The old
 	// per-message CreateMessage loop paid a commit+fsync per copied message —
 	// forking a long conversation took seconds, users assumed it failed and
 	// clicked again, forking twice.
@@ -1235,11 +1297,32 @@ func forkConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	if len(copies) > 0 {
-		if _, err := store.CreateMessagePath(r.Context(), d.DB, copies); err != nil {
-			writeError(w, 500, err)
+		if _, err := store.ForkMessagePathWithResources(r.Context(), d.DB, conv.ID, newConv.ID, u.ID, body.LeafID, path, copies, copyVectors); err != nil {
+			releaseVectors()
+			cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
+			defer cancelCleanup()
+			// The copy transaction rolled back, so only an unpublished empty row
+			// and possible partial Qdrant points remain. Never delete source files.
+			_, _ = d.DB.ExecContext(cleanupCtx, `DELETE FROM conversations WHERE id=? AND user_id=? AND NOT EXISTS (SELECT 1 FROM messages WHERE conversation_id=?)`, newConv.ID, u.ID, newConv.ID)
+			cleanupRAGConversation(cleanupCtx, d, newConv.ID, "failed conversation fork")
+			status := http.StatusInternalServerError
+			if errors.Is(err, store.ErrForkAttachmentsProcessing) {
+				status = http.StatusConflict
+			} else if errors.Is(err, store.ErrStorageQuotaExceeded) {
+				status = http.StatusForbidden
+			} else if errors.Is(err, store.ErrNotFound) {
+				status = http.StatusNotFound
+			}
+			writeError(w, status, err)
 			return
 		}
 	}
+	newConv, err = store.GetConversation(r.Context(), d.DB, newConv.ID, u.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	stripServerConvFields(newConv)
 	publishUserEvent(d, r, u.ID, "conversation.created", newConv.ID)
 	writeJSON(w, 201, newConv)
 }

@@ -631,6 +631,7 @@ CREATE TABLE IF NOT EXISTS conversations (
   user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   project_id      TEXT REFERENCES projects(id) ON DELETE SET NULL,
   title           TEXT NOT NULL DEFAULT '新对话',
+  draft_scope     TEXT NOT NULL DEFAULT '', -- upload reservation: chat/draw; empty for legacy or ordinary first sends
   provider        TEXT NOT NULL DEFAULT '',
   model_id        TEXT NOT NULL DEFAULT '',
   fast            INTEGER NOT NULL DEFAULT 0, -- §fast-mode: conversation runs in fast mode (model resolved server-side from the admin's fast model; name hidden from the user)
@@ -958,6 +959,7 @@ CREATE TABLE IF NOT EXISTS usage_stats (
 );
 CREATE INDEX IF NOT EXISTS idx_usage_stats_time ON usage_stats(created_at);
 CREATE INDEX IF NOT EXISTS idx_usage_stats_user_time ON usage_stats(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_usage_stats_workspace_user_time ON usage_stats(workspace_id, user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_usage_stats_model_time ON usage_stats(model_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_usage_stats_message ON usage_stats(message_id, purpose, source_log_id);
 

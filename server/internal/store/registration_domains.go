@@ -557,7 +557,8 @@ func DismissDomainPersonalDataPrompt(ctx context.Context, db *sql.DB, userID str
 
 // ListDomainPersonalConversations returns every personal conversation retained
 // behind a domain lock, including inline descendants that normal sidebar lists
-// intentionally hide. It is used only by the dedicated preservation export.
+// intentionally hide. Both the normal backup and domain preservation export
+// use it; ordinary personal-space middleware still applies to the normal route.
 func ListDomainPersonalConversations(ctx context.Context, db *sql.DB, userID string, limit, offset int) ([]Conversation, error) {
 	if limit <= 0 {
 		limit = 100

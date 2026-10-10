@@ -26,8 +26,6 @@ var errFileTooLarge = errors.New("file exceeds the maximum upload size")
 var (
 	uploadRateLimitMax    = envcfg.Int("AIVORY_API_UPLOAD_RATE_LIMIT_MAX", 20)
 	uploadRateLimitWindow = envcfg.Dur("AIVORY_API_UPLOAD_RATE_LIMIT_WINDOW", time.Minute)
-	artifactCacheTTL      = 31536000 * time.Second
-	uploadedFileCacheTTL  = 86400 * time.Second
 )
 
 // uploadLimitBytes returns the byte ceiling for a file of the given kind, read
@@ -749,6 +747,7 @@ func asciiFilenameFallback(s string) string {
 // is wired so real generated files can be served once the tools are
 // integrated. Returns 404 when the row is missing or the file is gone.
 func downloadArtifactHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "private, no-store")
 	u := authUser(r)
 	id := pathParam(r, "id")
 	owner := u.ID
@@ -790,12 +789,9 @@ func serveStoredArtifact(d Deps, w http.ResponseWriter, a *store.Artifact) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("content-type", contentType)
 	w.Header().Set("content-length", strconv.FormatInt(info.Size(), 10))
-	// Artifacts are immutable — an id maps to one generated file (image-model /
-	// image_generate output, etc.) that never changes — so cache hard. The gallery
-	// and chat re-render the same generated images constantly; without this every
-	// <img> re-streams from the server (slow first paint, wasted bandwidth).
-	// Private because artifacts are owner-scoped. (§ image caching)
-	w.Header().Set("cache-control", fmt.Sprintf("private, max-age=%d, immutable", int(artifactCacheTTL.Seconds())))
+	// Private access can change without changing the URL. Require authorization
+	// on every read; immutable browser caches otherwise survive an account switch.
+	w.Header().Set("cache-control", "private, no-store")
 	// Disposition: inline for browser-previewable, XSS-safe types (images, PDF,
 	// plain text); attachment for everything else. RFC 6266 encoding keeps
 	// non-ASCII names intact.
@@ -813,6 +809,7 @@ func serveStoredArtifact(d Deps, w http.ResponseWriter, a *store.Artifact) {
 // the previous behaviour leaned on the local blob URL, which was revoked once
 // the composer cleared its draft, leaving the gallery broken.
 func downloadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "private, no-store")
 	u := authUser(r)
 	id := pathParam(r, "id")
 	// Admins may view any user's files (§ admin conversation triage); regular
@@ -856,7 +853,7 @@ func documentContentHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 // headers. ACCESS CONTROL IS THE CALLER'S JOB — owner/admin auth on the private
 // route, share-snapshot membership on the public share route (§ sharing).
 func serveStoredFile(d Deps, w http.ResponseWriter, f *store.File) {
-	serveStoredFileWithCacheControl(d, w, f, fmt.Sprintf("private, max-age=%d", int(uploadedFileCacheTTL.Seconds())))
+	serveStoredFileWithCacheControl(d, w, f, "private, no-store")
 }
 
 func serveStoredFileWithCacheControl(d Deps, w http.ResponseWriter, f *store.File, cacheControl string) {
@@ -883,9 +880,7 @@ func serveStoredFileWithCacheControl(d Deps, w http.ResponseWriter, f *store.Fil
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("content-type", contentType)
 	w.Header().Set("content-length", strconv.FormatInt(info.Size(), 10))
-	// Cache so a single conversation page's repeated image-tag fetches don't
-	// re-stream the same file on every navigation. The file_id never collides,
-	// so a long TTL is safe; we keep it private since the file is owner-scoped.
+	// Private reads must reach authorization again after a logout or revocation.
 	w.Header().Set("cache-control", cacheControl)
 	disp := "attachment"
 	if previewableInline(contentType) {

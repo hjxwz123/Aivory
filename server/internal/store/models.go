@@ -513,6 +513,10 @@ type Conversation struct {
 	// the sidebar can label who started each shared conversation.
 	CreatorName   string `json:"creator_name,omitempty"`
 	CreatorAvatar string `json:"creator_avatar,omitempty"`
+	// Response-only marker: cancelling a new attachment must not discard an
+	// older reservation (and its restored files) reused by this create request.
+	DraftReused    bool                       `json:"draft_reused,omitempty"`
+	ReplacedDrafts *ConversationDeletionState `json:"-"`
 }
 
 // Message — flat record over §5 messages. blocks/raw/attachments/citations are

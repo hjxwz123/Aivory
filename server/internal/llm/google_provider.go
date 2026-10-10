@@ -742,7 +742,7 @@ func readGeminiStream(body io.Reader, onEvent func(SseEvent)) (string, string, [
 			if json.Unmarshal([]byte(payload), &trailer) == nil {
 				if u, ok := trailer["usageMetadata"].(map[string]any); ok {
 					usage.InputTokens = intOf(u["promptTokenCount"])
-					usage.OutputTokens = intOf(u["candidatesTokenCount"])
+					usage.OutputTokens = intOf(u["candidatesTokenCount"]) + intOf(u["thoughtsTokenCount"])
 				}
 			}
 			continue
@@ -834,7 +834,7 @@ func readGeminiStream(body io.Reader, onEvent func(SseEvent)) (string, string, [
 		if u, ok := parsed["usageMetadata"].(map[string]any); ok {
 			sawEvent = true
 			usage.InputTokens = intOf(u["promptTokenCount"])
-			usage.OutputTokens = intOf(u["candidatesTokenCount"])
+			usage.OutputTokens = intOf(u["candidatesTokenCount"]) + intOf(u["thoughtsTokenCount"])
 		}
 		if feedback, ok := parsed["promptFeedback"].(map[string]any); ok {
 			sawEvent = true
@@ -1027,7 +1027,7 @@ func (p *GoogleProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner 
 			usage = Usage{}
 			if u, ok := parsed["usageMetadata"].(map[string]any); ok {
 				usage.InputTokens = intOf(u["promptTokenCount"])
-				usage.OutputTokens = intOf(u["candidatesTokenCount"])
+				usage.OutputTokens = intOf(u["candidatesTokenCount"]) + intOf(u["thoughtsTokenCount"])
 			}
 			if (!hasCandidates || len(cs) == 0) && parsed["promptFeedback"] == nil {
 				return invalidProviderStream("google", "response contained no candidates")

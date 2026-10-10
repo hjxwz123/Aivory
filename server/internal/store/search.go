@@ -122,6 +122,7 @@ func SearchConversations(ctx context.Context, db *sql.DB, userID, workspaceID, q
 	tRows, err := db.QueryContext(ctx,
 		`SELECT id, title, updated_at FROM conversations
 		 WHERE `+scope+` AND archived=0 AND inline_source_conv='' AND LOWER(title) LIKE ? ESCAPE '\'
+		 AND `+conversationHistoryPredicate("conversations")+`
 		 ORDER BY updated_at DESC LIMIT ?`, titleArgs...)
 	if err != nil {
 		return nil, nil, err

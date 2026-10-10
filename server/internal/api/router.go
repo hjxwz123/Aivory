@@ -418,6 +418,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/search", requireAuth(d, searchHandler))
 	mux.handle("GET", "/api/conversations", requireAuth(d, listConversationsHandler))
 	mux.handle("POST", "/api/conversations", requireAuth(d, createConversationHandler))
+	mux.handle("POST", "/api/conversations/draft-scope", requireAuth(d, switchConversationDraftScopeHandler))
 	mux.handle("DELETE", "/api/conversations", requireAuth(d, clearAllConversationsHandler))
 	mux.handle("POST", "/api/conversations/archive-all", requireAuth(d, archiveAllConversationsHandler))
 	mux.handle("POST", "/api/conversations/import", requireAuth(d, importConversationsHandler))

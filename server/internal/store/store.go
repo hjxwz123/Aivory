@@ -274,6 +274,7 @@ func Migrate(db *sql.DB) error {
 	// Composer uploads remain drafts until the user message carrying them is
 	// persisted. This lets the client restore only unsent attachments on refresh.
 	addFileDraft := `ALTER TABLE files ADD COLUMN draft INTEGER NOT NULL DEFAULT 0`
+	addConversationDraftScope := `ALTER TABLE conversations ADD COLUMN draft_scope TEXT NOT NULL DEFAULT ''`
 	// Conversation uploads inherit only along the message branch where they were
 	// created. An empty value is retained for legacy rows and root uploads.
 	addFileBranchMessage := `ALTER TABLE files ADD COLUMN branch_message_id TEXT NOT NULL DEFAULT ''`
@@ -457,6 +458,7 @@ func Migrate(db *sql.DB) error {
 		addUsageFirstByteMS = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS first_byte_ms BIGINT NOT NULL DEFAULT 0`
 		addUsageDurationMS = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS duration_ms BIGINT NOT NULL DEFAULT 0`
 		addFileDraft = `ALTER TABLE files ADD COLUMN IF NOT EXISTS draft INTEGER NOT NULL DEFAULT 0`
+		addConversationDraftScope = `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS draft_scope TEXT NOT NULL DEFAULT ''`
 		addFileBranchMessage = `ALTER TABLE files ADD COLUMN IF NOT EXISTS branch_message_id TEXT NOT NULL DEFAULT ''`
 		addFileRelPath = `ALTER TABLE files ADD COLUMN IF NOT EXISTS rel_path TEXT NOT NULL DEFAULT ''`
 		addFileVisionEvidence = `ALTER TABLE files ADD COLUMN IF NOT EXISTS vision_evidence TEXT NOT NULL DEFAULT ''`
@@ -573,7 +575,7 @@ func Migrate(db *sql.DB) error {
 		addModelFallbackChannel, addUsageChannel, addUsageFallback, addUsageStatus, addUsageError,
 		addUsageRequestMethod, addUsageRequestURL, addUsageRequestHeaders, addUsageRequestBody, addUsageTTFTFallback,
 		addUsageFirstByteMS, addUsageDurationMS,
-		addFileDraft, addFileBranchMessage, addFileRelPath, addFileVisionEvidence, addFileVisionEvidenceKey, addDocumentIngestUpdatedAt, addDocumentUploader,
+		addFileDraft, addConversationDraftScope, addFileBranchMessage, addFileRelPath, addFileVisionEvidence, addFileVisionEvidenceKey, addDocumentIngestUpdatedAt, addDocumentUploader,
 		addWorkspaceCanCreateProjects, addWorkspaceCanPrivateConversations, addWorkspaceCanCreateSkillsPrompts, addWorkspaceCanCreatePrompts, addWorkspaceCanCreateSkills, addWorkspaceCanCreateMCP, addWorkspaceCanUsePrompts, addWorkspaceCanUseSkills, addWorkspaceCanUseMCP, addWorkspaceCanCreateKB, addWorkspaceCanAddKBFiles, addWorkspaceCanDeleteKBContent, addWorkspaceCanDeleteConversations, addWorkspaceCanUseAiPPT, addAiPPTDeckWorkspace, addWorkspaceInvitePurpose, addWorkspaceDeleting, addWorkspaceIcon, addWorkspaceDescription,
 		addWorkspaceAllowToolCalling, addWorkspaceAllowDrawing, addWorkspaceAllowMCP, addWorkspaceAllowSkills, addWorkspaceAllowPrompts,
 		addWorkspaceAllowPrivateChat, addWorkspaceAllowAiPPT,
@@ -678,6 +680,8 @@ func Migrate(db *sql.DB) error {
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_docs_ingest_state ON documents(status, ingest_updated_at)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_messages_conv_created ON messages(conversation_id, created_at)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_conv_user_updated ON conversations(user_id, archived, pinned DESC, updated_at DESC)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_conversation_drafts_owner ON conversations(user_id, workspace_id, project_id, draft_scope, updated_at DESC, id DESC)
+		WHERE title='' AND pinned=0 AND starred=0 AND archived=0 AND COALESCE(inline_source_conv,'')=''`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_users_sort_order ON users(sort_order, created_at DESC)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_credit_ledger_timed ON credit_ledger(user_id, group_id, cycle_anchor, cycle_start, kind)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_credit_ledger_user_time ON credit_ledger(user_id, created_at)`)

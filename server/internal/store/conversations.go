@@ -58,6 +58,8 @@ func SetConvProviderStateKey(ctx context.Context, db *sql.DB, convID, key, value
 
 // ListConversations returns conversations for a user, optionally filtered by
 // project. archivedFilter "any" returns all; "active" hides archived.
+// User-facing active/archived history excludes unused upload-only drafts;
+// upload-scoped drafts remain accessible by ID until their first send.
 // limit controls the page size (default 20, max 500); offset is the row offset.
 func ListConversations(ctx context.Context, db *sql.DB, userID, projectID, archivedFilter string, limit, offset int) ([]Conversation, error) {
 	if limit <= 0 {
@@ -70,6 +72,9 @@ func ListConversations(ctx context.Context, db *sql.DB, userID, projectID, archi
 	// personal space (§workspaces) and are listed via ListWorkspaceConversations.
 	q := `SELECT id, user_id, COALESCE(project_id, ''), title, provider, model_id, fast, kb_ids, rag_mode, summary_blocks, COALESCE(active_leaf_id, ''), provider_state, pinned, archived, starred, created_at, updated_at, COALESCE(inline_source_conv, ''), COALESCE(inline_parent_id, ''), COALESCE(inline_quote, ''), COALESCE(workspace_id, ''), is_public FROM conversations WHERE user_id=? AND COALESCE(inline_source_conv,'')='' AND COALESCE(workspace_id,'')=''`
 	args := []any{userID}
+	if archivedFilter == "active" || archivedFilter == "archived" {
+		q += " AND " + conversationHistoryPredicate("conversations")
+	}
 	if projectID == "_none_" {
 		q += " AND project_id IS NULL"
 	} else if projectID != "" {
@@ -146,6 +151,7 @@ func ArchiveAllPersonalConversations(ctx context.Context, db *sql.DB, userID str
 		  AND archived=0
 		  AND COALESCE(inline_source_conv,'')=''
 		  AND COALESCE(workspace_id,'')=''
+		  AND `+conversationHistoryPredicate("conversations")+`
 		ORDER BY id`, userID)
 	if err != nil {
 		return nil, err
@@ -215,6 +221,7 @@ func listWorkspaceConversations(ctx context.Context, db *sql.DB, workspaceID, pr
 	if userID != "" {
 		q += " AND " + conversationResourceAccessPredicate("c")
 		args = append(args, workspaceResourceAccessArgs(userID)...)
+		q += " AND " + conversationHistoryPredicate("c")
 	}
 	if projectID == "_none_" {
 		q += " AND c.project_id IS NULL"
@@ -370,8 +377,13 @@ func orDefault(s, def string) string {
 	return s
 }
 
-// CreateConversation inserts a new row.
+// CreateConversation inserts a new row. Blank unsent rows are bounded per
+// account, including requests from older clients that do not mark uploads.
 func CreateConversation(ctx context.Context, db *sql.DB, c Conversation) (*Conversation, error) {
+	return createConversation(ctx, db, c, false)
+}
+
+func createConversation(ctx context.Context, db *sql.DB, c Conversation, reserveDraft bool) (*Conversation, error) {
 	if c.ID == "" {
 		c.ID = genID("conv")
 	}
@@ -385,39 +397,35 @@ func CreateConversation(ctx context.Context, db *sql.DB, c Conversation) (*Conve
 		c.ProviderState = json.RawMessage("{}")
 	}
 	c.RAGMode = NormalizeConversationRAGMode(c.RAGMode)
-	now := time.Now().Unix()
-	var projectID any
-	if c.ProjectID == "" {
-		projectID = nil
-	} else {
-		projectID = c.ProjectID
+	blank := c.Title == "" && c.InlineSourceConv == "" && !c.Pinned && !c.Archived && !c.Starred
+	var tx *sql.Tx
+	var err error
+	if c.WorkspaceID != "" {
+		tx, err = beginWorkspaceMutationTx(ctx, db, c.WorkspaceID)
+	} else if blank {
+		tx, err = db.BeginTx(ctx, nil)
 	}
-	insertColumns := `INSERT INTO conversations(
-		id, user_id, project_id, title, provider, model_id, fast, kb_ids, rag_mode, summary_blocks, active_leaf_id, provider_state, pinned, archived, starred, created_at, updated_at, inline_source_conv, inline_parent_id, inline_quote, workspace_id, is_public
-	)`
-	insertArgs := []any{
-		c.ID, c.UserID, projectID, c.Title, c.Provider, c.ModelID, boolInt(c.Fast),
-		string(c.KBIDs), c.RAGMode, string(c.SummaryBlocks), string(c.ProviderState),
-		boolInt(c.Pinned), boolInt(c.Archived), boolInt(c.Starred), now, now,
-		c.InlineSourceConv, c.InlineParentID, c.InlineQuote, c.WorkspaceID, boolInt(c.IsPublic),
+	if err != nil {
+		return nil, err
 	}
-	var (
-		res sql.Result
-		err error
-	)
-	if c.WorkspaceID == "" {
-		res, err = db.ExecContext(ctx, insertColumns+`
-			 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, insertArgs...)
-	} else {
-		tx, txErr := beginWorkspaceMutationTx(ctx, db, c.WorkspaceID)
-		if txErr != nil {
-			return nil, txErr
-		}
+	if tx != nil {
 		defer tx.Rollback() //nolint:errcheck
+	}
+	if c.WorkspaceID != "" {
+		var allowed int
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM workspaces create_workspace
+			WHERE create_workspace.id=? AND `+workspaceAcceptsResourceCreationPredicate("create_workspace")+`
+			AND (create_workspace.owner_id=? OR EXISTS (
+				SELECT 1 FROM workspace_members create_member
+				WHERE create_member.workspace_id=create_workspace.id AND create_member.user_id=?
+				AND `+isCollaboratorRoleSQL("create_member.role")+`
+			))`, c.WorkspaceID, c.UserID, c.UserID, c.UserID).Scan(&allowed); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, ErrNotFound
+			}
+			return nil, err
+		}
 		if !c.IsPublic {
-			// Admins are not subject to member capability limits; ordinary
-			// members need the private-conversation capability. Guests cannot
-			// create conversations at all (guarded below).
 			var canPrivate int
 			if err := tx.QueryRowContext(ctx, `SELECT CASE WHEN w.owner_id=? OR `+isAdminRoleSQL("m.role")+` THEN 1 ELSE COALESCE(m.can_private_conversations,0) END
 				FROM workspaces w LEFT JOIN workspace_members m ON m.workspace_id=w.id AND m.user_id=?
@@ -428,51 +436,96 @@ func CreateConversation(ctx context.Context, db *sql.DB, c Conversation) (*Conve
 				}
 				return nil, err
 			}
-			if canPrivate != 1 {
-				c.IsPublic = true
-				insertArgs[len(insertArgs)-1] = boolInt(true)
+			c.IsPublic = canPrivate != 1
+		}
+	}
+	draftScope := ""
+	if blank {
+		if err := lockConversationDraftCreation(ctx, tx, c.UserID); err != nil {
+			return nil, err
+		}
+		if reserveDraft {
+			draftScope = "chat"
+			if err := tx.QueryRowContext(ctx, `SELECT CASE WHEN EXISTS (SELECT 1 FROM models WHERE id=? AND kind='image') THEN 'draw' ELSE 'chat' END`, c.ModelID).Scan(&draftScope); err != nil {
+				return nil, err
+			}
+			c.ReplacedDrafts, err = discardOtherConversationDraftScopes(ctx, tx, c.UserID, c.WorkspaceID, c.ProjectID, draftScope)
+			if err != nil {
+				return nil, err
+			}
+			id, err := findConversationDraftID(ctx, tx, c.UserID, c.WorkspaceID, c.ProjectID, draftScope)
+			if err != nil {
+				return nil, err
+			}
+			if id != "" {
+				// Use the same row lock as the first-message commit, then recheck
+				// the draft predicate with a fresh snapshot after acquiring it.
+				if _, err := tx.ExecContext(ctx, `UPDATE conversations SET id=id WHERE id=? AND user_id=?`, id, c.UserID); err != nil {
+					return nil, err
+				}
+				result, err := tx.ExecContext(ctx, `UPDATE conversations SET draft_scope=? WHERE id IN (
+					SELECT c.id FROM conversations c WHERE c.id=? AND c.user_id=? AND `+unusedConversationDraftSQL+`
+				)`, draftScope, id, c.UserID)
+				if err != nil {
+					return nil, err
+				}
+				if n, err := result.RowsAffected(); err != nil {
+					return nil, err
+				} else if n == 1 {
+					reused, err := finishConversationCreation(ctx, tx, id)
+					if err == nil {
+						reused.DraftReused = true
+						reused.ReplacedDrafts = c.ReplacedDrafts
+					}
+					return reused, err
+				}
 			}
 		}
-		res, err = tx.ExecContext(ctx, insertColumns+`
-			 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-			   FROM workspaces create_workspace
-			  WHERE create_workspace.id=?
-			    AND `+workspaceAcceptsResourceCreationPredicate("create_workspace")+`
-			    AND (
-			        create_workspace.owner_id=? OR EXISTS (
-			          SELECT 1 FROM workspace_members create_member
-			           WHERE create_member.workspace_id=create_workspace.id AND create_member.user_id=?
-			             AND `+isCollaboratorRoleSQL("create_member.role")+`
-			        )
-			    )`, append(insertArgs, c.WorkspaceID, c.UserID, c.UserID, c.UserID)...)
-		if err != nil {
+		if err := checkConversationDraftLimit(ctx, tx, c.UserID); err != nil {
 			return nil, err
 		}
-		if n, rowsErr := res.RowsAffected(); rowsErr != nil {
-			return nil, rowsErr
-		} else if n != 1 {
-			return nil, ErrNotFound
-		}
-		created, scanErr := scanConversationWithCreator(tx.QueryRowContext(ctx,
-			`SELECT c.id, c.user_id, COALESCE(c.project_id, ''), c.title, c.provider, c.model_id, c.fast, c.kb_ids, c.rag_mode, c.summary_blocks, COALESCE(c.active_leaf_id, ''), c.provider_state, c.pinned, c.archived, c.starred, c.created_at, c.updated_at, COALESCE(c.inline_source_conv, ''), COALESCE(c.inline_parent_id, ''), COALESCE(c.inline_quote, ''), COALESCE(c.workspace_id, ''), c.is_public, COALESCE(u.name,''), COALESCE(u.settings,'')
-			   FROM conversations c LEFT JOIN users u ON u.id=c.user_id WHERE c.id=?`, c.ID))
-		if scanErr != nil {
-			return nil, scanErr
-		}
-		if err := tx.Commit(); err != nil {
-			return nil, err
-		}
-		return &created, nil
 	}
+	var projectID any
+	if c.ProjectID != "" {
+		projectID = c.ProjectID
+	}
+	now := time.Now().Unix()
+	query := `INSERT INTO conversations(
+		id, user_id, project_id, title, provider, model_id, fast, kb_ids, rag_mode, summary_blocks, active_leaf_id, provider_state, pinned, archived, starred, created_at, updated_at, inline_source_conv, inline_parent_id, inline_quote, workspace_id, is_public, draft_scope
+	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	args := []any{
+		c.ID, c.UserID, projectID, c.Title, c.Provider, c.ModelID, boolInt(c.Fast),
+		string(c.KBIDs), c.RAGMode, string(c.SummaryBlocks), string(c.ProviderState),
+		boolInt(c.Pinned), boolInt(c.Archived), boolInt(c.Starred), now, now,
+		c.InlineSourceConv, c.InlineParentID, c.InlineQuote, c.WorkspaceID, boolInt(c.IsPublic), draftScope,
+	}
+	if tx != nil {
+		if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+			return nil, err
+		}
+		created, err := finishConversationCreation(ctx, tx, c.ID)
+		if err == nil {
+			created.ReplacedDrafts = c.ReplacedDrafts
+		}
+		return created, err
+	}
+	if _, err := db.ExecContext(ctx, query, args...); err != nil {
+		return nil, err
+	}
+	return GetConversation(ctx, db, c.ID, c.UserID)
+}
+
+func finishConversationCreation(ctx context.Context, tx *sql.Tx, id string) (*Conversation, error) {
+	created, err := scanConversationWithCreator(tx.QueryRowContext(ctx,
+		`SELECT c.id, c.user_id, COALESCE(c.project_id, ''), c.title, c.provider, c.model_id, c.fast, c.kb_ids, c.rag_mode, c.summary_blocks, COALESCE(c.active_leaf_id, ''), c.provider_state, c.pinned, c.archived, c.starred, c.created_at, c.updated_at, COALESCE(c.inline_source_conv, ''), COALESCE(c.inline_parent_id, ''), COALESCE(c.inline_quote, ''), COALESCE(c.workspace_id, ''), c.is_public, COALESCE(u.name,''), COALESCE(u.settings,'')
+		 FROM conversations c LEFT JOIN users u ON u.id=c.user_id WHERE c.id=?`, id))
 	if err != nil {
 		return nil, err
 	}
-	if n, rowsErr := res.RowsAffected(); rowsErr != nil {
-		return nil, rowsErr
-	} else if n != 1 {
-		return nil, ErrNotFound
+	if err := tx.Commit(); err != nil {
+		return nil, err
 	}
-	return GetConversation(ctx, db, c.ID, c.UserID)
+	return &created, nil
 }
 
 // UpdateConversation writes selected fields.
@@ -748,6 +801,14 @@ func ConversationTreeIDs(ctx context.Context, db *sql.DB, rootID string) ([]stri
 type ConversationDeletionState struct {
 	ConversationIDs []string
 	StoragePaths    []string
+	SandboxDiscards []ConversationSandboxDiscard
+}
+
+// A discard must purge the stable conversation archive as well as its active
+// session, so detached cleanup keeps both identifiers from the transaction.
+type ConversationSandboxDiscard struct {
+	ConversationID string
+	SessionID      string
 }
 
 // DeleteConversationWithState removes a user-owned conversation and every
@@ -1308,6 +1369,17 @@ func CreateMessagePath(ctx context.Context, db *sql.DB, msgs []Message) (string,
 		return "", err
 	}
 	defer tx.Rollback() //nolint:errcheck
+	last, err := createMessagePathTx(ctx, tx, msgs)
+	if err != nil {
+		return "", err
+	}
+	if err := tx.Commit(); err != nil {
+		return "", err
+	}
+	return last, nil
+}
+
+func createMessagePathTx(ctx context.Context, tx *sql.Tx, msgs []Message) (string, error) {
 	stmt, err := tx.PrepareContext(ctx, `INSERT INTO messages(
 		id, conversation_id, parent_id, role, provider, model_id, model_label, fast, blocks, raw, stop_reason, attachments, selected_user_skill_ids, citations,
 		input_tokens, context_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, currency, status, error, search_text, author_id, created_at
@@ -1320,7 +1392,9 @@ func CreateMessagePath(ctx context.Context, db *sql.DB, msgs []Message) (string,
 	parent := msgs[0].ParentID
 	last := ""
 	for _, m := range msgs {
-		m.ID = genID("msg")
+		if m.ID == "" {
+			m.ID = genID("msg")
+		}
 		if len(m.Blocks) == 0 {
 			m.Blocks = json.RawMessage("[]")
 		}
@@ -1365,9 +1439,6 @@ func CreateMessagePath(ctx context.Context, db *sql.DB, msgs []Message) (string,
 		last = m.ID
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE conversations SET active_leaf_id=?, updated_at=? WHERE id=?`, last, now, msgs[0].ConversationID); err != nil {
-		return "", err
-	}
-	if err := tx.Commit(); err != nil {
 		return "", err
 	}
 	return last, nil

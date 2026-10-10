@@ -2136,9 +2136,8 @@ func streamMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
-	accessRevocation := newGenerationAccessRevocationWatcher(d, ctx, cancel, convID, conv.WorkspaceID, nil, nil, nil)
-	defer accessRevocation.close()
-	accessRevocation.watchMessage(msgID)
+	closeReadWatcher := watchConversationReadAccess(d, ctx, cancel, convID, conv.WorkspaceID, u.ID)
+	defer closeReadWatcher()
 
 	lastID := r.Header.Get("Last-Event-ID")
 	if lastID == "" {
@@ -2146,6 +2145,9 @@ func streamMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	terminal := false
 	flush := func() (done, revoked bool) {
+		if ctx.Err() != nil {
+			return true, true
+		}
 		events, available, streamRevoked := genstream.Read(
 			d.Cache, msgID, lastID, streamReplayBatchSize,
 			generationStreamDenyKeys(conv.WorkspaceID)...,
@@ -2158,6 +2160,9 @@ func streamMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			return true, false
 		}
 		for _, ev := range events {
+			if ctx.Err() != nil {
+				return true, true
+			}
 			lastID = ev.ID
 			if genstream.Terminal(ev.Value) {
 				terminal = true

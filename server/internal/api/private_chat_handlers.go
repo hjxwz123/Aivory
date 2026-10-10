@@ -175,6 +175,18 @@ func privateChatHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	// Private and persisted chats share the same account limits. Reserve before
+	// consuming a daily message or calling the vision/provider APIs.
+	release, ok := reserveConcurrentGen(d, authUser(r).ID)
+	if !ok {
+		writeError(w, http.StatusTooManyRequests, errors.New("too many concurrent generations — wait for the current one to finish or stop it"))
+		return
+	}
+	defer release()
+	if authUser(r).Role != "admin" && !checkDailyMessageLimit(d, authUser(r).ID) {
+		writeError(w, http.StatusTooManyRequests, errors.New("daily message limit reached"))
+		return
+	}
 	// §4.6 image outsourcing: private chat stores nothing, so a text-only model
 	// gets the newest turn's images read by the configured vision model and every
 	// earlier image replaced by a placeholder. See OutsourcedPrivateImages.

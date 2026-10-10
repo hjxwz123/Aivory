@@ -480,7 +480,7 @@ func WorkspaceMemberMonthlyUsage(ctx context.Context, db *sql.DB, workspaceID, u
 	monthStart = time.Date(monthStart.Year(), monthStart.Month(), 1, 0, 0, 0, 0, time.UTC)
 	var total sql.NullFloat64
 	err := db.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(credits),0) FROM usage_logs
+		`SELECT COALESCE(SUM(credits),0) FROM usage_stats
 		  WHERE workspace_id=? AND user_id=? AND created_at>=?`,
 		workspaceID, userID, monthStart.Unix()).Scan(&total)
 	return total.Float64, err
@@ -497,7 +497,7 @@ type WorkspaceUsageRow struct {
 	Credits      float64 `json:"credits"`
 }
 
-// SumWorkspaceUsageByMember rolls up usage_logs per member for the last N
+// SumWorkspaceUsageByMember rolls up durable usage_stats per member for the last N
 // days (admins' usage view, §workspace RBAC phase 4).
 func SumWorkspaceUsageByMember(ctx context.Context, db *sql.DB, workspaceID string, days int) ([]WorkspaceUsageRow, error) {
 	if days <= 0 {
@@ -508,7 +508,7 @@ func SumWorkspaceUsageByMember(ctx context.Context, db *sql.DB, workspaceID stri
 		`SELECT u.user_id, COALESCE(users.name,''), COALESCE(users.email,''),
 		        COUNT(*), COALESCE(SUM(u.input_tokens),0), COALESCE(SUM(u.output_tokens),0),
 		        COALESCE(SUM(u.credits),0)
-		   FROM usage_logs u
+		   FROM usage_stats u
 		   JOIN workspace_members m ON m.workspace_id=u.workspace_id AND m.user_id=u.user_id
 		   LEFT JOIN users ON users.id=u.user_id
 		  WHERE u.workspace_id=? AND u.created_at>=?
