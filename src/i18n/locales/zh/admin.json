@@ -3150,7 +3150,7 @@
     "close": "关闭",
     "removeTitle": "删除 {{domain}} 的规则？",
     "removeHint": "新注册用户将不再自动加入，已绑定该规则的所有用户将恢复个人空间权限。已有工作空间成员关系和数据会保留。",
-    "editorHint": "匹配域名可以随时修改，目标工作空间创建后不可更换。请填写 example.com 形式的域名，国际化域名使用 Punycode。",
+    "editorHint": "匹配域名可以随时修改。请填写 example.com 形式的域名，国际化域名使用 Punycode。",
     "chooseWorkspace": "选择工作空间",
     "startsEnabledHint": "规则创建后立即生效。新注册的匹配账号遵循此规则；选择工作空间时会自动加入。",
     "stopEnrollment": "停止自动加入",
@@ -3158,7 +3158,7 @@
     "verifyEmailLabel": "注册时验证邮箱",
     "verifyEmailHint": "密码注册命中任一匹配域名时，必须先完成邮箱验证码验证。第三方登录不受此项限制。",
     "initialGroupLabel": "注册后的初始用户组",
-    "initialGroupHint": "命中任一匹配域名的新账号会直接加入所选用户组，适用于密码注册和第三方登录。",
+    "initialGroupHint": "命中任一匹配域名的新账号会直接加入所选用户组，适用于密码注册和第三方登录。修改仅影响之后注册的新账号，已有用户的用户组保持不变。",
     "initialGroupSummary": "初始组：{{group}}",
     "systemDefaultGroup": "系统默认用户组",
     "lockLabel": "锁定个人空间",
@@ -3190,7 +3190,8 @@
     "noGroupsFound": "未找到匹配的用户组",
     "workspaceOptional": "工作空间（可选）",
     "noWorkspace": "不加入工作空间",
-    "workspaceHint": "不选择时，新账号保留个人空间。目标工作空间创建后不可更换。",
+    "workspaceHint": "不选择时，新账号保留个人空间。没有成员时可更换、补选或清空目标工作空间。",
+    "workspaceLockedHint": "已有用户加入此规则，目标工作空间不可更换。",
     "lockRequiresWorkspace": "选择工作空间后，才能锁定个人空间。"
   },
   "notifications": {

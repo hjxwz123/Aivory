@@ -83,7 +83,7 @@ func TestRegistrationDomainWithoutWorkspace(t *testing.T) {
 		t.Fatalf("list unassigned rule = %+v, %v", rules, err)
 	}
 	rule.WorkspaceID = fx.workspaceID
-	if err := SaveRegistrationDomain(ctx, fx.db, rule, false); !errors.Is(err, ErrNotFound) {
+	if err := SaveRegistrationDomain(ctx, fx.db, rule, false); !errors.Is(err, ErrDomainWorkspaceHasMembers) {
 		t.Fatalf("existing target workspace must remain immutable: %v", err)
 	}
 	if removed, err := RemoveDomainUser(ctx, fx.db, rule.Domain, user.ID); err != nil || removed.WorkspaceMembershipRemoved || removed.WorkspaceID != "" {
@@ -91,6 +91,117 @@ func TestRegistrationDomainWithoutWorkspace(t *testing.T) {
 	}
 	if conversations, err := ListConversations(ctx, fx.db, user.ID, "", "", 10, 0); err != nil || len(conversations) != 1 {
 		t.Fatalf("removing domain member changed personal data: %+v, %v", conversations, err)
+	}
+}
+
+func TestRegistrationDomainWorkspaceChangesWithoutMembers(t *testing.T) {
+	fx := newRBACFixture(t)
+	ctx := t.Context()
+	other, err := CreateWorkspace(ctx, fx.db, "owner", "Other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := RegistrationDomain{Domain: "company.example", Enabled: true}
+	if err := SaveRegistrationDomain(ctx, fx.db, rule, true); err != nil {
+		t.Fatal(err)
+	}
+	for _, workspaceID := range []string{fx.workspaceID, other.ID, "", fx.workspaceID} {
+		rule.WorkspaceID = workspaceID
+		rule.LockPersonal = workspaceID != ""
+		if err := SaveRegistrationDomain(ctx, fx.db, rule, false); err != nil {
+			t.Fatalf("change empty rule to workspace %q: %v", workspaceID, err)
+		}
+		rules, err := ListRegistrationDomains(ctx, fx.db)
+		if err != nil || len(rules) != 1 || rules[0].WorkspaceID != workspaceID || rules[0].LockPersonal != rule.LockPersonal || rules[0].MemberCount != 0 {
+			t.Fatalf("updated workspace %q: rules=%+v err=%v", workspaceID, rules, err)
+		}
+	}
+	user, err := CreateRegisteredUser(ctx, fx.db, "new@company.example", "New", "hash", "active")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if access, err := GetDomainAccess(ctx, fx.db, user.ID); err != nil || access == nil || access.WorkspaceID != fx.workspaceID || !access.Locked {
+		t.Fatalf("signup did not use the updated target: %+v, %v", access, err)
+	}
+	if role, err := IsWorkspaceMember(ctx, fx.db, fx.workspaceID, user.ID); err != nil || role != WorkspaceRoleMember {
+		t.Fatalf("updated target membership = %q, %v", role, err)
+	}
+	if role, err := IsWorkspaceMember(ctx, fx.db, other.ID, user.ID); err != nil || role != "" {
+		t.Fatalf("signup joined a previous target: %q, %v", role, err)
+	}
+}
+
+func TestRegistrationDomainWorkspaceCannotChangeWithMembers(t *testing.T) {
+	for _, assigned := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unassigned", true: "assigned"}[assigned], func(t *testing.T) {
+			fx := newRBACFixture(t)
+			ctx := t.Context()
+			rule := RegistrationDomain{Domain: "company.example", Enabled: true}
+			if assigned {
+				rule.WorkspaceID = fx.workspaceID
+			}
+			if err := SaveRegistrationDomain(ctx, fx.db, rule, true); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := EnrollExistingDomainUsers(ctx, fx.db, rule.Domain, []string{"member"}); err != nil {
+				t.Fatal(err)
+			}
+			changed := rule
+			if assigned {
+				changed.WorkspaceID = ""
+			} else {
+				changed.WorkspaceID = fx.workspaceID
+			}
+			changed.Domains = []string{"changed.example"}
+			changed.SubscriptionPurchaseDisabled = true
+			changed.Enabled = false
+			if err := SaveRegistrationDomain(ctx, fx.db, changed, false); !errors.Is(err, ErrDomainWorkspaceHasMembers) {
+				t.Fatalf("changing a populated rule = %v", err)
+			}
+			rules, err := ListRegistrationDomains(ctx, fx.db)
+			if err != nil || len(rules) != 1 || rules[0].WorkspaceID != rule.WorkspaceID || rules[0].Domains[0] != rule.Domain || rules[0].SubscriptionPurchaseDisabled || !rules[0].Enabled {
+				t.Fatalf("rejected change partially saved: %+v, %v", rules, err)
+			}
+			rule.Enabled = false
+			if err := SaveRegistrationDomain(ctx, fx.db, rule, false); err != nil {
+				t.Fatalf("policy edit with unchanged workspace: %v", err)
+			}
+			if _, err := RemoveDomainUser(ctx, fx.db, rule.Domain, "member"); err != nil {
+				t.Fatal(err)
+			}
+			if err := SaveRegistrationDomain(ctx, fx.db, changed, false); err != nil {
+				t.Fatalf("changing a rule after its last member is removed: %v", err)
+			}
+		})
+	}
+}
+
+func TestRegistrationDomainInitialGroupChangesOnlyAffectFutureSignups(t *testing.T) {
+	fx := newRBACFixture(t)
+	ctx := t.Context()
+	rule := RegistrationDomain{Domain: "company.example", Enabled: true}
+	if err := SaveRegistrationDomain(ctx, fx.db, rule, true); err != nil {
+		t.Fatal(err)
+	}
+	before, err := CreateRegisteredUser(ctx, fx.db, "before@company.example", "Before", "hash", "active")
+	if err != nil {
+		t.Fatal(err)
+	}
+	group, err := CreateUserGroup(ctx, fx.db, UserGroup{Name: "Later signup group"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule.InitialGroupID = group.ID
+	if err := SaveRegistrationDomain(ctx, fx.db, rule, false); err != nil {
+		t.Fatal(err)
+	}
+	refreshed, err := FindUserByID(ctx, fx.db, before.ID)
+	if err != nil || refreshed.GroupID != before.GroupID {
+		t.Fatalf("adding an initial group changed an existing user: %+v, %v", refreshed, err)
+	}
+	after, err := CreateRegisteredUser(ctx, fx.db, "after@company.example", "After", "hash", "active")
+	if err != nil || after.GroupID != group.ID {
+		t.Fatalf("future signup did not use the new initial group: %+v, %v", after, err)
 	}
 }
 

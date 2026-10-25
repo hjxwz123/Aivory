@@ -10,6 +10,7 @@ import (
 var ErrWorkspaceDomainBound = errors.New("workspace is assigned to an email domain; remove its domain rules first")
 var ErrInvalidDomain = errors.New("invalid email domain")
 var ErrDomainWorkspaceRequired = errors.New("choose a workspace before locking personal space")
+var ErrDomainWorkspaceHasMembers = errors.New("domain_workspace_has_members")
 
 const (
 	MaxDomainUserEnrollmentBatch = 500
@@ -126,6 +127,22 @@ func enrollDomainUser(ctx context.Context, ex RowExecer, userID, email string) e
 		if n != 1 {
 			return ErrNotFound
 		}
+	}
+	if err := lockRegistrationDomain(ctx, ex, ruleDomain); err != nil {
+		return err
+	}
+	// A rule can change while registration is waiting for its locks. Read the
+	// current policies under the rule lock and never enroll into a stale target.
+	var currentWorkspaceID string
+	var enabled bool
+	if err := ex.QueryRowContext(ctx, `SELECT COALESCE(workspace_id,''),initial_group_id,enabled FROM registration_domains WHERE domain=?`, ruleDomain).Scan(&currentWorkspaceID, &initialGroupID, &enabled); err != nil {
+		return err
+	}
+	if currentWorkspaceID != workspaceID {
+		return ErrNotFound
+	}
+	if !enabled {
+		return nil
 	}
 	res, err := ex.ExecContext(ctx, `INSERT INTO domain_users(user_id,domain)
 		SELECT ?,d.domain FROM registration_domains d
@@ -255,8 +272,8 @@ func BackfillRegistrationDomainMatches(ctx context.Context, ex RowExecer) error 
 	return err
 }
 
-// The stable rule key and target workspace are immutable. The email domains
-// matched by the rule may be replaced without disturbing existing bindings.
+// The stable rule key is immutable. The target workspace may change only while
+// the rule has no members; matching domains may change with existing bindings.
 func SaveRegistrationDomain(ctx context.Context, db *sql.DB, d RegistrationDomain, create bool) error {
 	d.WorkspaceID = strings.TrimSpace(d.WorkspaceID)
 	if d.WorkspaceID == "" && d.LockPersonal {
@@ -284,6 +301,24 @@ func SaveRegistrationDomain(ctx context.Context, db *sql.DB, d RegistrationDomai
 		return err
 	}
 	defer tx.Rollback()
+	if !create {
+		if err := lockRegistrationDomain(ctx, tx, domain); err != nil {
+			return err
+		}
+		var currentWorkspaceID string
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(workspace_id,'') FROM registration_domains WHERE domain=?`, domain).Scan(&currentWorkspaceID); err != nil {
+			return err
+		}
+		if currentWorkspaceID != d.WorkspaceID {
+			var members int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM domain_users WHERE domain=?`, domain).Scan(&members); err != nil {
+				return err
+			}
+			if members != 0 {
+				return ErrDomainWorkspaceHasMembers
+			}
+		}
+	}
 	var initialGroupID any
 	d.InitialGroupID = strings.TrimSpace(d.InitialGroupID)
 	if d.InitialGroupID != "" {
@@ -303,7 +338,7 @@ func SaveRegistrationDomain(ctx context.Context, db *sql.DB, d RegistrationDomai
 		_, err = tx.ExecContext(ctx, `INSERT INTO registration_domains(domain,workspace_id,lock_personal,email_verification_required,initial_group_id,enabled,subscription_purchase_disabled) VALUES(?,?,?,?,?,?,?)`, domain, nullable(d.WorkspaceID), boolInt(d.LockPersonal), boolInt(d.EmailVerificationRequired), initialGroupID, boolInt(d.Enabled), boolInt(d.SubscriptionPurchaseDisabled))
 	} else {
 		var res sql.Result
-		res, err = tx.ExecContext(ctx, `UPDATE registration_domains SET lock_personal=?,email_verification_required=?,initial_group_id=?,enabled=?,subscription_purchase_disabled=? WHERE domain=? AND COALESCE(workspace_id,'')=?`, boolInt(d.LockPersonal), boolInt(d.EmailVerificationRequired), initialGroupID, boolInt(d.Enabled), boolInt(d.SubscriptionPurchaseDisabled), domain, d.WorkspaceID)
+		res, err = tx.ExecContext(ctx, `UPDATE registration_domains SET workspace_id=?,lock_personal=?,email_verification_required=?,initial_group_id=?,enabled=?,subscription_purchase_disabled=? WHERE domain=?`, nullable(d.WorkspaceID), boolInt(d.LockPersonal), boolInt(d.EmailVerificationRequired), initialGroupID, boolInt(d.Enabled), boolInt(d.SubscriptionPurchaseDisabled), domain)
 		if err == nil {
 			if n, _ := res.RowsAffected(); n != 1 {
 				return ErrNotFound
@@ -349,6 +384,24 @@ func SaveRegistrationDomain(ctx context.Context, db *sql.DB, d RegistrationDomai
 		return err
 	}
 	return tx.Commit()
+}
+
+// Share the same row lock between rule edits and both enrollment paths. In
+// particular, a workspace change must see any enrollment that committed while
+// it waited for this lock, including on PostgreSQL.
+func lockRegistrationDomain(ctx context.Context, ex RowExecer, domain string) error {
+	res, err := ex.ExecContext(ctx, `UPDATE registration_domains SET enabled=enabled WHERE domain=?`, domain)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // Rules without a workspace still use a transaction for their domain bindings
@@ -466,6 +519,9 @@ func EnrollExistingDomainUsers(ctx context.Context, db *sql.DB, value string, us
 		return nil, err
 	}
 	defer tx.Rollback()
+	if err := lockRegistrationDomain(ctx, tx, domain); err != nil {
+		return nil, err
+	}
 	seen := make(map[string]struct{}, len(userIDs))
 	added := make([]string, 0, len(userIDs))
 	for _, userID := range userIDs {

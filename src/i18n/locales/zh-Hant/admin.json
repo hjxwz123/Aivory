@@ -3146,7 +3146,7 @@
     "close": "關閉",
     "removeTitle": "刪除 {{domain}} 的規則？",
     "removeHint": "新註冊使用者將不再自動加入，已綁定此規則的所有使用者將恢復個人空間權限。現有工作空間成員關係與資料會保留。",
-    "editorHint": "比對網域可隨時修改，目標工作空間建立後不可更換。請輸入 example.com 格式的網域，國際化網域使用 Punycode。",
+    "editorHint": "比對網域可隨時修改。請輸入 example.com 格式的網域，國際化網域使用 Punycode。",
     "chooseWorkspace": "選擇工作空間",
     "startsEnabledHint": "規則建立後立即生效。新註冊的符合帳號遵循此規則；選擇工作空間時會自動加入。",
     "stopEnrollment": "停止自動加入",
@@ -3154,7 +3154,7 @@
     "verifyEmailLabel": "註冊時驗證郵件",
     "verifyEmailHint": "密碼註冊符合此網域時，必須先完成郵件驗證碼驗證。第三方登入不受此設定限制。",
     "initialGroupLabel": "註冊後的初始使用者群組",
-    "initialGroupHint": "符合此網域的新帳號會直接加入所選群組，適用於密碼註冊及第三方登入。",
+    "initialGroupHint": "符合任一比對網域的新帳號會直接加入所選群組，適用於密碼註冊及第三方登入。修改僅影響之後註冊的新帳號，既有使用者的群組維持不變。",
     "initialGroupSummary": "初始群組：{{group}}",
     "systemDefaultGroup": "系統預設使用者群組",
     "lockLabel": "鎖定個人空間",
@@ -3186,7 +3186,8 @@
     "noGroupsFound": "找不到符合的使用者群組",
     "workspaceOptional": "工作空間（選填）",
     "noWorkspace": "不加入工作空間",
-    "workspaceHint": "不選擇時，新帳號保留個人空間。目標工作空間建立後無法更換。",
+    "workspaceHint": "不選擇時，新帳號保留個人空間。沒有成員時可更換、補選或清空目標工作空間。",
+    "workspaceLockedHint": "已有使用者加入此規則，目標工作空間無法更換。",
     "lockRequiresWorkspace": "選擇工作空間後，才能鎖定個人空間。"
   },
   "notifications": {

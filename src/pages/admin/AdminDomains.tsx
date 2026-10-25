@@ -149,6 +149,7 @@ export default function AdminDomains() {
 function DomainEditor({ rule, workspaces, groups, onClose, onSaved }: { rule: RegistrationDomain | 'new'; workspaces: ApiWorkspace[]; groups: ApiUserGroup[]; onClose: () => void; onSaved: () => void }) {
   const { t } = useTranslation('admin')
   const isNew = rule === 'new'
+  const [hasMembers, setHasMembers] = useState(!isNew && rule.member_count > 0)
   const [domainsText, setDomainsText] = useState(isNew ? '' : matchedDomains(rule).join('\n'))
   const [workspace, setWorkspace] = useState(isNew ? '' : rule.workspace_id)
   const [locked, setLocked] = useState(isNew ? false : rule.lock_personal)
@@ -174,7 +175,17 @@ function DomainEditor({ rule, workspaces, groups, onClose, onSaved }: { rule: Re
       }
       void useWorkspaces.getState().load()
       toast.success(t('domains.saved')); onSaved()
-    } catch (e) { setError(e instanceof Error ? e.message : t('domains.saveFailed')) }
+    } catch (e) {
+      if (!isNew && e instanceof Error && e.message === 'domain_workspace_has_members') {
+        const current = await domainsApi.list().then(({ domains }) => domains.find((row) => row.domain === rule.domain)).catch(() => undefined)
+        setHasMembers(true)
+        setWorkspace(current?.workspace_id ?? rule.workspace_id)
+        setLocked(current?.lock_personal ?? rule.lock_personal)
+        setError(t('domains.workspaceLockedHint'))
+      } else {
+        setError(e instanceof Error ? e.message : t('domains.saveFailed'))
+      }
+    }
     finally { mutation.current = false; setBusy(false) }
   }
   return (
@@ -193,8 +204,8 @@ function DomainEditor({ rule, workspaces, groups, onClose, onSaved }: { rule: Re
             </aside> : null}
             <div className="space-y-2"><label htmlFor="domain-names" className="text-sm font-medium">{t('domains.domain')}</label><Textarea id="domain-names" autoFocus disabled={busy} rows={4} value={domainsText} onChange={(e) => setDomainsText(e.target.value)} placeholder={'example.com\nexample.org'} maxLength={12699} required aria-describedby="domain-names-hint" /><p id="domain-names-hint" className="text-sm text-[var(--color-fg-muted)]">{t('domains.domainsHint')}</p></div>
             <div className="space-y-2"><label id="domain-workspace-label" className="text-sm font-medium">{t('domains.workspaceOptional')}</label>
-              <Select value={workspace || NO_WORKSPACE} onValueChange={(id) => { const next = id === NO_WORKSPACE ? '' : id; setWorkspace(next); if (!next) setLocked(false) }} disabled={!isNew || busy}><SelectTrigger aria-labelledby="domain-workspace-label" aria-describedby="domain-workspace-hint"><SelectValue /></SelectTrigger><SelectContent><SelectItem value={NO_WORKSPACE}>{t('domains.noWorkspace')}</SelectItem>{workspaces.map((w) => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent></Select>
-              <p id="domain-workspace-hint" className="text-sm text-[var(--color-fg-muted)]">{t('domains.workspaceHint')}</p>
+              <Select value={workspace || NO_WORKSPACE} onValueChange={(id) => { const next = id === NO_WORKSPACE ? '' : id; setWorkspace(next); if (!next) setLocked(false) }} disabled={hasMembers || busy}><SelectTrigger aria-labelledby="domain-workspace-label" aria-describedby="domain-workspace-hint"><SelectValue /></SelectTrigger><SelectContent><SelectItem value={NO_WORKSPACE}>{t('domains.noWorkspace')}</SelectItem>{workspaces.map((w) => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent></Select>
+              <p id="domain-workspace-hint" className="text-sm text-[var(--color-fg-muted)]">{t(hasMembers ? 'domains.workspaceLockedHint' : 'domains.workspaceHint')}</p>
             </div>
             {isNew ? (
               <p className="text-sm leading-6 text-[var(--color-fg-muted)]">{t('domains.startsEnabledHint')}</p>

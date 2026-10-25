@@ -3148,7 +3148,7 @@
     "close": "Close",
     "removeTitle": "Remove {{domain}}?",
     "removeHint": "New accounts will no longer join automatically. All users bound to this rule will regain personal space access. Their existing workspace membership and data are kept.",
-    "editorHint": "Matching domains can be edited at any time. The target workspace cannot be changed after creation. Use plain domains such as example.com; international domains use Punycode.",
+    "editorHint": "Matching domains can be edited at any time. Use plain domains such as example.com; international domains use Punycode.",
     "chooseWorkspace": "Choose a workspace",
     "startsEnabledHint": "The rule starts running immediately. New matching accounts follow its policies and join the workspace if one is selected.",
     "stopEnrollment": "Stop automatic enrollment",
@@ -3156,7 +3156,7 @@
     "verifyEmailLabel": "Verify email at signup",
     "verifyEmailHint": "Password signups matching any configured domain must complete email-code verification first. Third-party login is exempt.",
     "initialGroupLabel": "Initial user group",
-    "initialGroupHint": "New accounts matching any configured domain join the selected group, for both password signup and third-party login.",
+    "initialGroupHint": "New accounts matching any configured domain join the selected group, for both password signup and third-party login. Changes apply only to future registrations; existing users keep their current group.",
     "initialGroupSummary": "Initial group: {{group}}",
     "systemDefaultGroup": "System default group",
     "lockLabel": "Lock personal space",
@@ -3188,7 +3188,8 @@
     "noGroupsFound": "No matching user groups",
     "workspaceOptional": "Workspace (optional)",
     "noWorkspace": "Do not join a workspace",
-    "workspaceHint": "Leave this unassigned to keep new accounts in personal space. The target workspace cannot be changed after creation.",
+    "workspaceHint": "Leave this unassigned to keep new accounts in personal space. You can change, assign or clear the target workspace while the rule has no members.",
+    "workspaceLockedHint": "Users have joined this rule, so its target workspace can no longer be changed.",
     "lockRequiresWorkspace": "Choose a workspace before locking personal space."
   },
   "notifications": {

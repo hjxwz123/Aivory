@@ -15,6 +15,7 @@ await mkdir(output, { recursive: true })
 const cacheDir = await mkdtemp(path.join(tmpdir(), 'aivory-domain-cache-'))
 const server = await createServer({ cacheDir, server: { host: '127.0.0.1', port: 5205, strictPort: true }, logLevel: 'error' })
 const workspace = { id: 'ws1', name: '测试团队', icon_url: '/workspace-logo.png', description: '这里不应出现工作空间介绍' }
+const otherWorkspace = { id: 'ws2', name: '另一个团队' }
 const existingRule = {
   domain: 'existing.example', domains: ['existing.example'], workspace_id: workspace.id, workspace_name: workspace.name,
   icon_url: workspace.icon_url, description: workspace.description, lock_personal: true,
@@ -25,6 +26,7 @@ let spaces = []
 let domains = []
 const writes = []
 const errors = []
+let rejectWorkspaceChange = false
 let browser
 try {
   await server.listen()
@@ -37,6 +39,10 @@ try {
     if (!route.startsWith('/api/')) return request.continue()
     if (route.startsWith('/api/admin/domains') && ['POST', 'PATCH'].includes(request.method())) {
       writes.push({ method: request.method(), body: JSON.parse(request.postData()) })
+      if (rejectWorkspaceChange) {
+        rejectWorkspaceChange = false
+        return request.respond({ status: 409, contentType: 'application/json', body: '{"error":"domain_workspace_has_members"}' })
+      }
       return request.respond({ status: 200, contentType: 'application/json', body: '{"ok":true}' })
     }
     const fixtures = {
@@ -55,6 +61,12 @@ try {
   async function open(theme = 'light') {
     await page.goto(`http://127.0.0.1:5205/tests/browser/admin-tables-harness.html?view=domains&theme=${theme}&lang=zh`, { waitUntil: 'networkidle0' })
     await clickButton('添加域规则')
+    await page.waitForSelector('#domain-names')
+    await page.waitForFunction(() => document.querySelector('[role="dialog"]')?.getAnimations().every((animation) => animation.playState !== 'running'))
+  }
+  async function edit(theme = 'light') {
+    await page.goto(`http://127.0.0.1:5205/tests/browser/admin-tables-harness.html?view=domains&theme=${theme}&lang=zh`, { waitUntil: 'networkidle0' })
+    await page.click('button[aria-label="编辑规则"]')
     await page.waitForSelector('#domain-names')
     await page.waitForFunction(() => document.querySelector('[role="dialog"]')?.getAnimations().every((animation) => animation.playState !== 'running'))
   }
@@ -106,10 +118,9 @@ try {
   await save()
 
   domains = [existingRule]
-  await page.goto('http://127.0.0.1:5205/tests/browser/admin-tables-harness.html?view=domains&theme=light&lang=zh', { waitUntil: 'networkidle0' })
-  await page.click('button[aria-label="编辑规则"]')
-  await page.waitForSelector('#domain-names')
+  await edit()
   assert.equal(await page.$eval('[aria-labelledby="domain-workspace-label"]', (button) => button.disabled), true)
+  assert.match(await page.$eval('#domain-workspace-hint', (hint) => hint.textContent), /已有用户/)
   assert.equal(await isLocked(), true)
   await page.$eval('#domain-names', (input) => { input.select() })
   await page.type('#domain-names', 'changed.example')
@@ -119,6 +130,58 @@ try {
   assert.deepEqual(update.body.domains, ['changed.example'])
   assert.equal(update.body.workspace_id, workspace.id)
   assert.equal(update.body.lock_personal, true)
+
+  spaces = [workspace, otherWorkspace]
+  domains = [{ ...existingRule, member_count: 0, workspace_id: '', workspace_name: '', lock_personal: false }]
+  await edit()
+  assert.equal(await page.$eval('[aria-labelledby="domain-workspace-label"]', (button) => button.disabled), false)
+  assert.equal(await lockDisabled(), true)
+  assert.match(await page.$eval('[role="dialog"]', (dialog) => dialog.textContent), /已有用户的用户组保持不变/)
+  await choose(workspace.name)
+  await page.click('#domain-lock')
+  await screenshot('desktop-edit-empty-rule')
+  let changed = await save()
+  assert.equal(changed.method, 'PATCH')
+  assert.equal(changed.body.workspace_id, workspace.id)
+  assert.equal(changed.body.lock_personal, true)
+
+  domains = [{ ...existingRule, member_count: 0 }]
+  await edit()
+  await choose(otherWorkspace.name)
+  changed = await save()
+  assert.equal(changed.body.workspace_id, otherWorkspace.id)
+
+  await edit()
+  await choose('不加入工作空间')
+  assert.equal(await lockDisabled(), true)
+  assert.equal(await isLocked(), false)
+  changed = await save()
+  assert.equal(changed.body.workspace_id, '')
+  assert.equal(changed.body.lock_personal, false)
+
+  domains = [{ ...existingRule, workspace_id: '', workspace_name: '', lock_personal: false }]
+  await edit()
+  assert.equal(await page.$eval('[aria-labelledby="domain-workspace-label"]', (button) => button.disabled), true)
+  assert.equal(await lockDisabled(), true)
+  assert.match(await page.$eval('#domain-workspace-hint', (hint) => hint.textContent), /已有用户/)
+  await save()
+
+  domains = [{ ...existingRule, member_count: 0 }]
+  await edit()
+  await choose(otherWorkspace.name)
+  // Another administrator cleared the target before the first user joined.
+  // Recover the current server target, rather than the editor's old snapshot.
+  domains = [{ ...existingRule, workspace_id: '', workspace_name: '', lock_personal: false }]
+  rejectWorkspaceChange = true
+  await clickButton('保存')
+  await page.waitForSelector('[role="alert"]')
+  assert.equal(await page.$eval('[aria-labelledby="domain-workspace-label"]', (button) => button.disabled), true)
+  assert.match(await page.$eval('[aria-labelledby="domain-workspace-label"]', (button) => button.textContent), /不加入工作空间/)
+  assert.equal(await lockDisabled(), true)
+  assert.match(await page.$eval('[role="alert"]', (alert) => alert.textContent), /已有用户/)
+  changed = await save()
+  assert.equal(changed.body.workspace_id, '')
+  assert.equal(changed.body.lock_personal, false)
 
   domains = []
   spaces = []
@@ -135,7 +198,7 @@ try {
     await save()
   }
   assert.deepEqual(errors, [], 'Browser runtime errors')
-  console.log(`PASS: 5 domain-rule scenarios; screenshots: ${output}`)
+  console.log(`PASS: 10 domain-rule scenarios; screenshots: ${output}`)
 } finally {
   await browser?.close()
   await server.close()

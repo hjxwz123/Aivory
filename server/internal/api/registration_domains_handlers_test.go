@@ -52,6 +52,50 @@ func TestAdminDomainWithoutWorkspaceAndPersonalAccess(t *testing.T) {
 	}
 }
 
+func TestAdminDomainWorkspaceChangeRequiresNoMembers(t *testing.T) {
+	d, adminToken, _ := newAuditEvidenceFixture(t)
+	workspace, err := store.CreateWorkspace(t.Context(), d.DB, "audit-admin", "Target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mx := newMux()
+	mx.handle(http.MethodPost, "/api/admin/domains", requireAdmin(d, adminSaveDomainHandler))
+	mx.handle(http.MethodPatch, "/api/admin/domains/:domain", requireAdmin(d, adminSaveDomainHandler))
+	mx.handle(http.MethodPost, "/api/admin/domains/:domain/users", requireAdmin(d, adminEnrollDomainUsersHandler))
+	request := func(method, path, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		return auditEvidenceRequest(mx, method, path, adminToken, body)
+	}
+	if response := request(http.MethodPost, "/api/admin/domains", `{"domain":"company.example"}`); response.Code != http.StatusOK {
+		t.Fatalf("create: %d %s", response.Code, response.Body.String())
+	}
+	for _, workspaceID := range []string{workspace.ID, "", workspace.ID} {
+		body, err := json.Marshal(map[string]any{"workspace_id": workspaceID, "enabled": true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response := request(http.MethodPatch, "/api/admin/domains/company.example", string(body)); response.Code != http.StatusOK {
+			t.Fatalf("change empty rule to %q: %d %s", workspaceID, response.Code, response.Body.String())
+		}
+	}
+	if response := request(http.MethodPost, "/api/admin/domains/company.example/users", `{"user_ids":["audit-member"]}`); response.Code != http.StatusOK {
+		t.Fatalf("enroll: %d %s", response.Code, response.Body.String())
+	}
+	// The server must check actual membership, even if the editor loaded before
+	// enrollment or a caller supplies an inaccurate member_count.
+	response := request(http.MethodPatch, "/api/admin/domains/company.example", `{"workspace_id":"","member_count":0,"enabled":false}`)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "domain_workspace_has_members") {
+		t.Fatalf("change populated rule: %d %s", response.Code, response.Body.String())
+	}
+	rules, err := store.ListRegistrationDomains(t.Context(), d.DB)
+	if err != nil || len(rules) != 1 || rules[0].WorkspaceID != workspace.ID || !rules[0].Enabled || rules[0].MemberCount != 1 {
+		t.Fatalf("rejected update changed rule: %+v, %v", rules, err)
+	}
+	if response := request(http.MethodPatch, "/api/admin/domains/company.example", `{"workspace_id":"`+workspace.ID+`","enabled":true,"lock_personal":true}`); response.Code != http.StatusOK {
+		t.Fatalf("edit other policies: %d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestAdminDomainMemberSearchAddAndRemoveRoutes(t *testing.T) {
 	d := newAuthSecurityDeps(t, "domain-member-admin.db")
 	ctx := t.Context()

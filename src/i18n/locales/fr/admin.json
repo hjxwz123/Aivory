@@ -3148,7 +3148,7 @@
     "close": "Fermer",
     "removeTitle": "Supprimer {{domain}} ?",
     "removeHint": "L’inscription automatique cessera. Tous les utilisateurs rattachés retrouveront leur espace personnel. Les membres actuels et leurs données seront conservés.",
-    "editorHint": "Les domaines correspondants restent modifiables. L’espace cible ne peut plus être changé après la création. Utilisez des domaines comme example.com et Punycode pour les domaines internationaux.",
+    "editorHint": "Les domaines correspondants restent modifiables. Utilisez des domaines comme example.com et Punycode pour les domaines internationaux.",
     "chooseWorkspace": "Choisir un espace",
     "startsEnabledHint": "La règle s’applique immédiatement aux nouveaux comptes correspondants. Ils rejoignent l’espace de travail si vous en sélectionnez un.",
     "stopEnrollment": "Arrêter l'inscription automatique",
@@ -3156,7 +3156,7 @@
     "verifyEmailLabel": "Vérifier l’e-mail à l’inscription",
     "verifyEmailHint": "Les inscriptions par mot de passe correspondant à ce domaine doivent valider un code e-mail. Les connexions tierces sont exemptées.",
     "initialGroupLabel": "Groupe utilisateur initial",
-    "initialGroupHint": "Les nouveaux comptes de ce domaine rejoignent le groupe sélectionné, par inscription avec mot de passe ou connexion tierce.",
+    "initialGroupHint": "Les nouveaux comptes correspondant à l’un des domaines configurés rejoignent le groupe sélectionné, par inscription avec mot de passe ou connexion tierce. Les modifications concernent uniquement les futures inscriptions ; les utilisateurs existants conservent leur groupe.",
     "initialGroupSummary": "Groupe initial : {{group}}",
     "systemDefaultGroup": "Groupe système par défaut",
     "lockLabel": "Verrouiller l’espace personnel",
@@ -3188,7 +3188,8 @@
     "noGroupsFound": "Aucun groupe correspondant",
     "workspaceOptional": "Espace de travail (facultatif)",
     "noWorkspace": "Ne rejoindre aucun espace de travail",
-    "workspaceHint": "Sans sélection, les nouveaux comptes conservent leur espace personnel. L’espace cible ne peut plus être modifié après la création.",
+    "workspaceHint": "Sans sélection, les nouveaux comptes conservent leur espace personnel. Vous pouvez modifier, attribuer ou retirer l’espace cible tant que la règle n’a aucun membre.",
+    "workspaceLockedHint": "Des utilisateurs ont déjà rejoint cette règle ; son espace cible ne peut plus être modifié.",
     "lockRequiresWorkspace": "Sélectionnez un espace de travail pour verrouiller l’espace personnel."
   },
   "notifications": {
