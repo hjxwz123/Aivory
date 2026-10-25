@@ -31,6 +31,7 @@
     "test:code-wrap": "node tests/browser/run-code-wrap.mjs",
     "test:layout": "node tests/browser/run-layout.mjs",
     "test:ui-states": "node tests/browser/run-ui-states.mjs",
+    "test:reply-wait": "node tests/browser/run-reply-wait.mjs",
     "test:site-access": "node tests/browser/run-site-access.mjs",
     "test:share": "node tests/browser/run-share.mjs",
     "test:composer-formula-upload": "node tests/browser/run-composer-formula-upload.mjs",

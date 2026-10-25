@@ -412,43 +412,6 @@
   }
 }
 
-/* AI "thinking" label — a soft highlight sweeps across the word while the model
-   works. Neutral fg gradient so it reads in both themes; the global
-   prefers-reduced-motion rule freezes it to a plain filled gradient (still
-   legible, never invisible). */
-@keyframes text-shimmer {
-  to {
-    background-position: 200% center;
-  }
-}
-
-.thinking-shimmer {
-  background: linear-gradient(90deg,
-      var(--color-fg-subtle) 0%,
-      var(--color-fg) 50%,
-      var(--color-fg-subtle) 100%);
-  background-size: 200% auto;
-  background-clip: text;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
-  animation: text-shimmer 2s linear infinite;
-}
-
-/* Brand "thinking" mark — keep the small SVG on whole-pixel geometry while its
-   opacity breathes. Scaling or blurring this 24px mark softens its edges. */
-@keyframes core-breathe {
-
-  0%,
-  100% {
-    opacity: 0.72;
-  }
-
-  50% {
-    opacity: 1;
-  }
-}
-
 /* Indeterminate progress bar (used by KB document processing status). */
 @keyframes indeterminate {
   0% {

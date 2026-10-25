@@ -37,6 +37,18 @@ It starts Vite on port 5205 and accepts `CHROME_PATH` and
 `AIVORY_DOMAIN_SCREENSHOTS`. Screenshots default to `aivory-domain-rules` in the
 OS temporary directory.
 
+The reply-wait suite exercises the real composer, animation-only waiting,
+handoff to content/reasoning/tools, stopped and failed turns, private chat,
+inline threads, mobile layouts in five languages, and reduced motion:
+
+```sh
+npm run test:reply-wait
+```
+
+It starts Vite on port 5206 and accepts `CHROME_PATH` and
+`AIVORY_REPLY_WAIT_SCREENSHOTS`. Screenshots default to `aivory-reply-wait` in
+the OS temporary directory.
+
 Four Puppeteer suites drive real headless Chrome against a local Chrome/Edge
 binary. They exist because `tsc` and the unit suite cannot prove that a
 third-party widget actually mounts, and several shipped bugs were exactly that:

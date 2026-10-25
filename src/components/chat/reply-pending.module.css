@@ -1,0 +1,62 @@
+.root {
+  display: flex;
+  align-items: center;
+  min-block-size: 44px;
+  padding-block: 6px;
+}
+
+.activity {
+  --reply-track-width: 64px;
+  --reply-track-height: 3px;
+
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 var(--reply-track-width);
+  align-items: center;
+  inline-size: var(--reply-track-width);
+  block-size: 24px;
+  overflow: hidden;
+  color: var(--color-secondary);
+}
+
+.activity::before {
+  position: absolute;
+  inset-inline: 0;
+  block-size: var(--reply-track-height);
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.14;
+  content: '';
+}
+
+.activity > span {
+  position: absolute;
+  inset-inline-start: 0;
+  display: block;
+  inline-size: 50%;
+  block-size: var(--reply-track-height);
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, currentColor 50%, transparent);
+  transform: translateX(-100%);
+  animation: reply-light-flow 1500ms ease-in-out infinite;
+}
+
+.small {
+  --reply-track-width: 16px;
+  --reply-track-height: 2px;
+
+  block-size: 14px;
+}
+
+@keyframes reply-light-flow {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(var(--reply-track-width)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .activity > span {
+    animation: none;
+    opacity: 0.8;
+    transform: translateX(50%);
+  }
+}

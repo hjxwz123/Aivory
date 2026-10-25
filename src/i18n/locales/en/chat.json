@@ -1,4 +1,7 @@
 {
+  "replyPending": {
+    "preparing": "Preparing a reply"
+  },
   "imageEdit": {
     "edit": "Edit",
     "title": "Edit image",

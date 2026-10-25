@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { PrivateMessageRow, type PrivateDisplayMessage } from '@/components/chat/private-message-row'
 
 vi.mock('react-i18next', () => ({
+  initReactI18next: { type: '3rdParty', init: vi.fn() },
   useTranslation: () => ({
     t: (key: string) => key,
     i18n: { language: 'en' },

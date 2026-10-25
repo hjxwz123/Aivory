@@ -12,6 +12,8 @@ import { useWorkspaces } from '@/store/workspaces'
 import { cn } from '@/lib/utils'
 import { hasMathContent } from '@/lib/math-content'
 import { GenerativeReplyProvider } from './generative-reply'
+import { ReplyPending } from './reply-pending'
+import { ReasoningTrace } from './reasoning-trace'
 import { useConversationGenerativeReply } from '@/hooks/use-conversation-generative-reply'
 
 /**
@@ -147,6 +149,7 @@ function ThreadBody({ quote, childId, onClose }: { quote: string; childId: strin
                   onReply={handleGenerativeReply}
                   status={isWorkspaceGuest || conv?.archived ? 'readonly' : m.streaming ? 'streaming' : messages.at(-1)?.id !== m.id ? 'answered' : 'ready'}
                 >
+                  <ReasoningTrace reasoning={m.reasoning} thinkingMs={m.thinkingMs} streaming={m.streaming} settled={Boolean(m.content)} />
                   <Markdown
                     allowGenerativeUI
                     content={m.content}
@@ -155,8 +158,8 @@ function ThreadBody({ quote, childId, onClose }: { quote: string; childId: strin
                     blockKeyPrefix={m.id}
                   />
                 </GenerativeReplyProvider>
-                {m.streaming && !m.content ? (
-                  <span className="text-[12px] text-[var(--color-fg-subtle)]">{t('common:common.thinking', { defaultValue: 'Thinking' })}…</span>
+                {m.streaming && !m.content && !m.reasoning?.length && !m.artifacts?.length ? (
+                  <ReplyPending />
                 ) : null}
               </div>
             ),

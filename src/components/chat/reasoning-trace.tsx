@@ -16,6 +16,7 @@ import {
 import type { ReasoningItem, ToolCall } from '@/types/chat'
 import { normalizeThinkingMarkdown } from '@/lib/markdown'
 import { Markdown } from './markdown'
+import { ReplyActivityMark } from './reply-pending'
 import { cn } from '@/lib/utils'
 import {
   createReasoningDisclosure,
@@ -101,13 +102,13 @@ export function ReasoningTrace({ reasoning, thinkingMs, streaming = false, settl
         aria-expanded={expanded}
         aria-controls={contentId}
         onClick={() => setDisclosure(toggleReasoningDisclosure)}
-        className="-ml-1 flex max-w-full min-w-0 items-center gap-1.5 rounded-[6px] px-1 py-0.5 text-left text-[var(--color-fg-subtle)] interactive hover:text-[var(--color-fg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+        className="-ml-1 flex max-w-full min-w-0 items-center gap-1.5 rounded-[6px] px-1 py-0.5 text-left text-[var(--color-fg-muted)] interactive hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
       >
-        <Lightbulb
-          size={13}
-          aria-hidden
-          className="shrink-0 text-[var(--color-fg-muted)]"
-        />
+        {active ? (
+          <ReplyActivityMark small />
+        ) : (
+          <Lightbulb size={13} aria-hidden className="shrink-0 text-[var(--color-fg-muted)]" />
+        )}
         <span className="min-w-0 truncate text-[12.5px]">{headline}</span>
         <ChevronRight
           size={12}

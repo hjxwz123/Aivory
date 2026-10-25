@@ -14,7 +14,7 @@ import { ModelIcon } from '@/components/chat/model-icon'
 import { PrivateMarkdown } from '@/components/chat/private-markdown'
 import { ReasoningTrace } from '@/components/chat/reasoning-trace'
 import { ImageLightbox } from '@/components/chat/image-lightbox'
-import { LogoMark } from '@/components/brand/logo'
+import { ReplyPending } from '@/components/chat/reply-pending'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
@@ -60,20 +60,6 @@ function formatTurnTime(timestamp: number, locale: string): { label: string; iso
     minute: '2-digit',
   })
   return { label: formatter.format(timestamp), iso: new Date(timestamp).toISOString() }
-}
-
-/** Mirrors message-row.tsx's ThinkingLogo (the pre-token brand breathing mark). */
-function ThinkingLogo() {
-  return (
-    <div
-      className="relative grid size-11 cursor-default select-none place-items-center caret-transparent"
-      aria-hidden
-      onMouseDown={(event) => event.preventDefault()}
-    >
-      <span className="absolute inset-0 rounded-full border border-[var(--color-border)] [border-top-color:var(--color-secondary)] animate-[spin_1200ms_cubic-bezier(0.6,0.1,0.4,0.9)_infinite]" />
-      <LogoMark size={24} className="animate-[core-breathe_2400ms_ease-in-out_infinite]" />
-    </div>
-  )
 }
 
 /** Mirrors message-row.tsx's MsgActionRow (the phone Sheet action rows). */
@@ -203,11 +189,6 @@ export function PrivateMessageRow({ message, model, isLastAssistant, locked, onR
             >
               {turnTime.label}
             </time>
-            {message.streaming ? (
-              <span className="thinking-shimmer ml-1 text-[11px] font-medium tracking-[0.04em]">
-                {t('thinking')}…
-              </span>
-            ) : null}
           </div>
         )}
 
@@ -321,10 +302,8 @@ export function PrivateMessageRow({ message, model, isLastAssistant, locked, onR
               streaming={message.streaming}
               settled={Boolean(message.text)}
             />
-            {message.streaming && !message.text && !message.reasoning ? (
-              <div className="py-1">
-                <ThinkingLogo />
-              </div>
+            {message.streaming && !message.text && !message.reasoning && !message.generatedImages?.length ? (
+              <ReplyPending />
             ) : message.stopped && !message.text && !message.error ? (
               <div role="status" className="my-1 inline-flex items-center gap-2 text-sm text-[var(--color-fg-muted)]">
                 <Square size={11} className="shrink-0 fill-current" aria-hidden />

@@ -42,7 +42,6 @@ import {
   type MessageFeedbackInput,
 } from '@/types/chat'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { LogoMark } from '@/components/brand/logo'
 import { ModelIcon } from '@/components/chat/model-icon'
 import { Tooltip } from '@/components/ui/tooltip'
 import {
@@ -73,6 +72,7 @@ import {
 } from './rich-composer-editor'
 import { FormulaEditorDialog } from './formula-editor-dialog'
 import { ReasoningTrace } from './reasoning-trace'
+import { ReplyPending } from './reply-pending'
 import { ImageGenerating } from './image-generating'
 import { ResearchPanel } from './research-panel'
 import { CitationList } from './citation'
@@ -95,24 +95,6 @@ const RUNTIME_PERMISSION_ERROR_CODES = new Set([
   'drawing_group_permission_required',
   'knowledge_base_group_permission_required',
 ])
-
-/**
- * ThinkingLogo — the "still forming a reply" indicator shown before the first
- * token: the Aivory mark breathing inside a slow scan ring. The global
- * prefers-reduced-motion rule holds it static.
- */
-function ThinkingLogo() {
-  return (
-    <div
-      className="relative grid size-11 cursor-default select-none place-items-center caret-transparent"
-      aria-hidden
-      onMouseDown={(event) => event.preventDefault()}
-    >
-      <span className="absolute inset-0 rounded-full border border-[var(--color-border)] [border-top-color:var(--color-secondary)] animate-[spin_1200ms_cubic-bezier(0.6,0.1,0.4,0.9)_infinite]" />
-      <LogoMark size={24} className="animate-[core-breathe_2400ms_ease-in-out_infinite]" />
-    </div>
-  )
-}
 
 function RagInjectionStatus({ injection }: { injection: NonNullable<Message['ragInjection']> }) {
   const { t } = useTranslation('chat')
@@ -718,11 +700,6 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
             >
               {turnTime.label}
             </time>
-            {message.streaming && !imagePhase && (message.fast || model?.kind !== 'image') ? (
-              <span className="thinking-shimmer ml-1 text-[11px] font-medium tracking-[0.04em]">
-                {t('thinking')}…
-              </span>
-            ) : null}
           </div>
         )}
 
@@ -974,12 +951,10 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
                 chat thinking/tool-call trace) while no image artifact exists yet. */}
             {imagePhase ? (
               <ImageGenerating phase={imagePhase} startedAt={message.createdAt} />
-            ) : /* Streaming placeholder while empty — the brand thinking mark */
-            message.streaming && !message.content && !message.artifacts?.length && (!message.reasoning || message.reasoning.length === 0) ? (
+            ) : /* Give way to real research, reasoning, artifacts and first-token content immediately. */
+            message.streaming && !message.content && !message.artifacts?.length && !message.research && (!message.reasoning || message.reasoning.length === 0) ? (
               ragInjection?.strategy === 'document_searching' || ragInjection?.strategy === 'document_found' ? null : (
-                <div className="py-1">
-                  <ThinkingLogo />
-                </div>
+                <ReplyPending />
               )
             ) : emptyStopped ? (
               <div role="status" className="my-1 inline-flex items-center gap-2 text-sm text-[var(--color-fg-muted)]">

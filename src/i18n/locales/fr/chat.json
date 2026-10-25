@@ -1,4 +1,7 @@
 {
+  "replyPending": {
+    "preparing": "Préparation de la réponse"
+  },
   "imageEdit": {
     "showSelection": "Afficher la sélection",
     "edit": "Modifier",

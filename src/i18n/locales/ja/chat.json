@@ -1,4 +1,7 @@
 {
+  "replyPending": {
+    "preparing": "返信を準備しています"
+  },
   "imageEdit": {
     "showSelection": "選択範囲を表示",
     "edit": "編集",

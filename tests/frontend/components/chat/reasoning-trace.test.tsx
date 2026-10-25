@@ -5,6 +5,7 @@ import type { ReasoningItem } from '@/types/chat'
 import { ReasoningTrace } from '@/components/chat/reasoning-trace'
 
 vi.mock('react-i18next', () => ({
+  initReactI18next: { type: '3rdParty', init: vi.fn() },
   useTranslation: () => ({
     t: (key: string, options?: { defaultValue?: string; count?: number; duration?: string }) => {
       if (key === 'reasoning.durationSeconds') return `${options?.count} seconds`
