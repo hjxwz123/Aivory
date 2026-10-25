@@ -205,6 +205,7 @@ var settingsAllowlist = map[string]bool{
 	"code_theme":            true,
 	"code_block_wrap":       true,
 	"user_message_markdown": true,
+	"reply_animation":       true,
 	"onboarded":             true,
 	// Default speech recognition: "model" (the administrator's server-side
 	// service), "browser" (the browser's own engine) or "" (automatic).
@@ -223,6 +224,13 @@ func updateMeSettingsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	if value, exists := patch["code_block_wrap"]; exists {
 		if _, valid := value.(bool); !valid {
+			writeError(w, http.StatusBadRequest, errInvalidInput)
+			return
+		}
+	}
+	if value, exists := patch["reply_animation"]; exists {
+		animation, valid := value.(string)
+		if !valid || (animation != "paper-plane" && animation != "origami" && animation != "ink" && animation != "sprout" && animation != "orbit" && animation != "prism") {
 			writeError(w, http.StatusBadRequest, errInvalidInput)
 			return
 		}

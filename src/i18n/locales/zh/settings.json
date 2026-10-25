@@ -319,6 +319,19 @@
         "rounded": "圆体",
         "serif": "Fraunces（衬线）"
       }
+    },
+    "replyAnimation": {
+      "title": "AI 等待动画",
+      "body": "AI 开始回复前，播放你喜欢的动画。",
+      "default": "默认",
+      "options": {
+        "paper-plane": "纸飞机",
+        "origami": "折纸舒展",
+        "ink": "游动墨线",
+        "sprout": "花芽呼吸",
+        "orbit": "星环漫游",
+        "prism": "灵感棱镜"
+      }
     }
   },
   "models": {

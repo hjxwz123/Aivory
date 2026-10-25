@@ -1,0 +1,42 @@
+.picker {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  container-type: inline-size;
+}
+
+.option { position: relative; grid-column: span 3; min-inline-size: 0; cursor: pointer; }
+.tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-block-size: 112px;
+  padding: 13px 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-bg);
+  transition: background 160ms, border-color 160ms;
+}
+.preview { display: flex; align-items: center; justify-content: center; min-block-size: 55px; }
+.caption { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px 6px; font-size: 12px; line-height: 1.5; text-align: center; color: var(--color-fg); overflow-wrap: anywhere; }
+.defaultLabel { font-size: 10px; color: var(--color-fg-muted); }
+.selection { position: absolute; inset-block-start: 8px; inset-inline-end: 8px; display: flex; align-items: center; justify-content: center; inline-size: 17px; block-size: 17px; border-radius: 50%; background: var(--color-accent); color: var(--color-accent-fg); opacity: 0; }
+.option:hover .tile { background: var(--color-bg-muted); }
+.option input:checked + .tile { border-color: var(--color-accent); background: var(--color-accent-soft); }
+.option input:checked + .tile .selection { opacity: 1; }
+.option input:focus-visible + .tile { outline: 2px solid var(--color-ring); outline-offset: 3px; }
+.picker:disabled .option { cursor: wait; }
+.picker:disabled .tile { opacity: .75; }
+
+/* The settings modal and welcome panel have different widths on desktop. */
+@container (min-width: 450px) {
+  .option { grid-column: span 2; }
+}
+
+@media (prefers-reduced-motion: reduce) { .tile { transition: none; } }

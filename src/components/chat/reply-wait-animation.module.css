@@ -1,0 +1,81 @@
+.art {
+  --paper-light: color-mix(in oklch, var(--color-secondary) 12%, var(--color-bg));
+  --paper-mid: color-mix(in oklch, var(--color-secondary) 32%, var(--color-bg));
+  --paper-dark: color-mix(in oklch, var(--color-secondary) 58%, var(--color-bg));
+
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 56px;
+  align-items: center;
+  justify-content: center;
+  inline-size: 56px;
+  block-size: 52px;
+  color: var(--color-secondary);
+  pointer-events: none;
+}
+
+:global(.dark) .art {
+  --paper-light: color-mix(in oklch, var(--color-secondary) 48%, var(--color-fg));
+  --paper-mid: color-mix(in oklch, var(--color-secondary) 85%, var(--color-fg));
+  --paper-dark: color-mix(in oklch, var(--color-secondary) 78%, var(--color-bg));
+}
+
+.art > svg { inline-size: 100%; block-size: 100%; overflow: visible; }
+
+.plane { transform-origin: 32px 28px; animation: plane-glide 3200ms ease-in-out infinite; }
+.flightTrail { animation: trail-breathe 3200ms ease-in-out infinite; }
+
+@keyframes plane-glide {
+  0%, 100% { transform: translate(-3px, 2px) rotate(-6deg); }
+  35% { transform: translate(3px, -3px) rotate(4deg); }
+  65% { transform: translate(1px, -1px) rotate(-1deg); }
+}
+@keyframes trail-breathe {
+  0%, 100% { opacity: .15; transform: translate(-2px, 1px); }
+  40% { opacity: .65; transform: translate(1px, -1px); }
+}
+
+.paperStage { position: relative; inline-size: 46px; block-size: 46px; perspective: 145px; }
+.paperObject { position: absolute; inset: 0; transform: rotateZ(-9deg); transform-style: preserve-3d; }
+.paperObject svg { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; overflow: visible; }
+.paperBase { transform: translateZ(-.2px); }
+.foldingHalf { position: absolute; inset: 0; transform-style: preserve-3d; transform-origin: 50% 50%; animation: fold-sheet 3000ms ease-in-out infinite; }
+.paperFront, .paperBack { backface-visibility: hidden; }
+.paperFront { transform: translateZ(.1px); }
+.paperBack { transform: rotate3d(1, -1, 0, 180deg) translateZ(.1px); }
+.paperCrease { transform: translateZ(.25px); }
+@keyframes fold-sheet {
+  0%, 10%, 92%, 100% { transform: rotate3d(1, -1, 0, 0deg); }
+  48%, 64% { transform: rotate3d(1, -1, 0, 158deg); }
+}
+
+.inkStroke { stroke-dasharray: 32 68; animation: ink-flow 2600ms linear infinite; }
+@keyframes ink-flow { to { stroke-dashoffset: -100; } }
+
+.stem { transform-origin: 32px 44px; animation: stem-sway 3200ms ease-in-out infinite; }
+.leafLeft { transform-origin: 32px 33px; animation: leaf-open-left 3200ms ease-in-out infinite; }
+.leafRight { transform-origin: 32px 28px; animation: leaf-open-right 3200ms ease-in-out infinite; }
+.ground { transform-origin: 32px 46px; animation: ground-breathe 3200ms ease-in-out infinite; }
+@keyframes stem-sway { 0%, 100% { transform: rotate(-5deg); } 50% { transform: rotate(5deg); } }
+@keyframes leaf-open-left { 0%, 100% { transform: rotate(10deg) scale(.94); } 50% { transform: rotate(-6deg) scale(1); } }
+@keyframes leaf-open-right { 0%, 100% { transform: rotate(-8deg) scale(.96); } 50% { transform: rotate(8deg) scale(1); } }
+@keyframes ground-breathe { 0%, 100% { transform: scaleX(.85); } 50% { transform: scaleX(1); } }
+
+.comet { transform-origin: 32px 28px; animation: orbit-travel 4200ms linear infinite; }
+.orbitStar { transform-origin: 32px 28px; animation: star-breathe 2800ms ease-in-out infinite; }
+@keyframes orbit-travel { to { transform: rotate(360deg); } }
+@keyframes star-breathe { 0%, 100% { transform: scale(.82); opacity: .65; } 50% { transform: scale(1.06); opacity: 1; } }
+
+.prismShape { transform-origin: 32px 28px; animation: prism-turn 3600ms ease-in-out infinite; }
+.prismGlint { transform-origin: 53px 13px; animation: prism-glint 3600ms ease-in-out infinite; }
+@keyframes prism-turn {
+  0%, 100% { transform: translateY(2px) rotate(-7deg) scaleX(.86); }
+  50% { transform: translateY(-2px) rotate(7deg) scaleX(1); }
+}
+@keyframes prism-glint { 0%, 15%, 85%, 100% { opacity: .15; transform: scale(.65); } 50% { opacity: .85; transform: scale(1); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .art, .art *, .art *::before, .art *::after { animation: none !important; }
+  .foldingHalf { transform: rotate3d(1, -1, 0, 24deg); }
+  .flightTrail { opacity: .4; }
+}

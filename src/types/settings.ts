@@ -10,6 +10,16 @@ export type FontPref = 'default' | 'humanist' | 'rounded' | 'serif'
  *  step down from there. */
 export type ChatWidthPref = 'narrow' | 'comfortable' | 'wide' | 'full' | 'max'
 
+export const REPLY_ANIMATION_PRESETS = ['paper-plane', 'origami', 'ink', 'sprout', 'orbit', 'prism'] as const
+export type ReplyAnimationPref = (typeof REPLY_ANIMATION_PRESETS)[number]
+export const DEFAULT_REPLY_ANIMATION: ReplyAnimationPref = 'paper-plane'
+
+export function normalizeReplyAnimationPref(value: unknown): ReplyAnimationPref | undefined {
+  return typeof value === 'string' && (REPLY_ANIMATION_PRESETS as readonly string[]).includes(value)
+    ? value as ReplyAnimationPref
+    : undefined
+}
+
 export const ACCENT_PRESETS: readonly AccentPref[] = ['violet', 'lagoon', 'ember', 'moss', 'indigo', 'rose', 'mono']
 export const FONT_PRESETS: readonly FontPref[] = ['default', 'humanist', 'rounded', 'serif']
 
@@ -31,6 +41,7 @@ export interface AppearanceSettings {
   /** When true, user-authored message bubbles render through the same markdown pipeline as assistant messages. */
   userMessageMarkdown: boolean
   codeBlockWrap: boolean
+  replyAnimation: ReplyAnimationPref
 }
 
 export interface ModelSettings {

@@ -38,7 +38,8 @@
     "chatStyle": "Style de réponse",
     "chatStyleBody": "Quel niveau de détail les réponses doivent-elles avoir par défaut ?",
     "memory": "Mémoire",
-    "memoryBody": "Laissez Aivory retenir des détails utiles au fil de vos discussions."
+    "memoryBody": "Laissez Aivory retenir des détails utiles au fil de vos discussions.",
+    "replyAnimation": "Animation d’attente"
   },
   "theme": {
     "light": "Clair",
@@ -62,6 +63,7 @@
     "accent": "Choisissez une couleur d'accent.",
     "layout": "Centrer le chat ou utiliser toute la largeur.",
     "style": "Niveau de détail des réponses par défaut.",
-    "memory": "Laissez Aivory mémoriser des détails utiles entre les conversations."
+    "memory": "Laissez Aivory mémoriser des détails utiles entre les conversations.",
+    "replyAnimation": "Choisissez votre animation. Chaque style s’anime en aperçu."
   }
 }

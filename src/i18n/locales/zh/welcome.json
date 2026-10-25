@@ -38,7 +38,8 @@
     "chatStyle": "回复风格",
     "chatStyleBody": "默认回答的详细程度。",
     "memory": "记忆",
-    "memoryBody": "让 Aivory 跨对话记住有用的信息。"
+    "memoryBody": "让 Aivory 跨对话记住有用的信息。",
+    "replyAnimation": "等待动画"
   },
   "theme": {
     "light": "浅色",
@@ -62,6 +63,7 @@
     "accent": "选择应用的强调色。",
     "layout": "聊天内容居中，或占满整个宽度。",
     "style": "默认回复的详细程度。",
-    "memory": "让 Aivory 跨对话记住有用的信息。"
+    "memory": "让 Aivory 跨对话记住有用的信息。",
+    "replyAnimation": "选一个喜欢的动画，每种都可以直接预览。"
   }
 }

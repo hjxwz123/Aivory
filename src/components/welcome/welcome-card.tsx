@@ -10,7 +10,8 @@ import { useTheme } from '@/store/theme'
 import { useSettings } from '@/store/settings'
 import { toast } from '@/hooks/use-toast'
 import { SUPPORTED_LANGUAGES, type LanguageCode } from '@/i18n'
-import { ACCENT_PRESETS, type AccentPref, type ChatWidthPref, type ThemePref } from '@/types/settings'
+import { ACCENT_PRESETS, DEFAULT_REPLY_ANIMATION, type AccentPref, type ChatWidthPref, type ThemePref, type ReplyAnimationPref } from '@/types/settings'
+import { ReplyAnimationPicker } from '@/components/settings/reply-animation-picker'
 import { TracedLogo } from '@/components/brand/logo'
 import { Aurora } from '@/components/landing/fx/aurora'
 import { BlurText } from '@/components/landing/fx/blur-text'
@@ -28,9 +29,9 @@ import { acquireStartupDialog } from '@/lib/startup-dialog-queue'
 
 // No chat-preference step on purpose: a new account keeps NO reply-style
 // preference (neutral default) unless the user actively picks one later in
-// Settings — the wizard covers appearance/language/memory only.
-type StepKey = 'language' | 'theme' | 'accent' | 'layout' | 'memory'
-const STEPS: StepKey[] = ['language', 'theme', 'accent', 'layout', 'memory']
+// Settings — the wizard covers visual preferences, language and memory.
+type StepKey = 'language' | 'theme' | 'accent' | 'layout' | 'replyAnimation' | 'memory'
+const STEPS: StepKey[] = ['language', 'theme', 'accent', 'layout', 'replyAnimation', 'memory']
 const CHAT_WIDTH_OPTS: ChatWidthPref[] = ['comfortable', 'full']
 
 // Static hue per accent preset, mirrored from the Appearance picker so the
@@ -53,7 +54,7 @@ const WELCOME_CELEBRATION_EXIT_MS = 200
  * account (gated on a server-side `onboarded` flag in user settings). The left
  * panel is an editorial intro with a slow accent-tinted aurora that re-tints
  * live as the user picks an accent; the right steps through language → theme →
- * accent → layout → memory. Choices apply live for instant preview; "Skip"
+ * accent → layout → waiting animation → memory. Choices show instant previews; "Skip"
  * restores whatever was set before so it's truly non-committal, while the final
  * "Get started" persists. Either path marks the account onboarded.
  */
@@ -92,6 +93,9 @@ export function WelcomeCard() {
   const [welcomeOpen, setWelcomeOpen] = useState(false)
   const [step, setStep] = useState(0)
   const [saving, setSaving] = useState(false)
+  // Keep this preview as a draft until completion, so a profile refresh or a
+  // theme change cannot erase it and skipping never saves an unwanted choice.
+  const [replyAnimation, setReplyAnimation] = useState<ReplyAnimationPref>(DEFAULT_REPLY_ANIMATION)
   const initial = useRef<{
     lang: LanguageCode
     accent: AccentPref
@@ -116,6 +120,7 @@ export function WelcomeCard() {
       }
       startupReleaseRef.current = release
       initial.current = { lang, accent, theme: themePref, chatWidth, memory }
+      setReplyAnimation(useSettings.getState().appearance.replyAnimation)
       setMounted(true)
       setOpen(true)
     })
@@ -166,8 +171,10 @@ export function WelcomeCard() {
         theme: themePref,
         accent_color: accent,
         chat_width: chatWidth,
+        reply_animation: replyAnimation,
         memory_enabled: memoryAvailable ? memory : false,
       })
+      setAppearance({ replyAnimation })
       // Close the wizard (plays the zoom-out), then hand off to the welcome
       // dialog once the exit animation finishes.
       setOpen(false)
@@ -273,6 +280,8 @@ export function WelcomeCard() {
             ))}
           </div>
         )
+      case 'replyAnimation':
+        return <ReplyAnimationPicker value={replyAnimation} onChange={setReplyAnimation} disabled={saving} />
       case 'memory':
         return (
           <label className="flex items-center justify-between gap-4 rounded-[12px] bg-[var(--color-bg-muted)] px-4 py-3.5">
@@ -390,7 +399,7 @@ export function WelcomeCard() {
 
               {/* Step content — re-keyed so it animates in on each change; the
                   step title drifts into focus with it (BlurText replays per key). */}
-              <div key={step} className="mt-7 animate-[welcome-step_300ms_var(--ease-out)]">
+              <div key={step} data-welcome-step={current} className="mt-7 animate-[welcome-step_300ms_var(--ease-out)]">
                 <h3 className="font-serif text-xl tracking-normal text-[var(--color-fg)]">
                   <BlurText text={t(`welcome:fields.${current}`)} delay={90} />
                 </h3>

@@ -130,6 +130,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       syncUserSettings(user.settings ?? {}, user.id)
     } else if (status === 'unauthenticated') {
       useSettings.getState().cancelCodeBlockWrapSave()
+      useSettings.getState().cancelReplyAnimationSave()
     }
     if (status !== 'authenticated' || !user?.settings) {
       return

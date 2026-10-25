@@ -319,6 +319,19 @@
         "rounded": "丸ゴシック",
         "serif": "Fraunces（セリフ）"
       }
+    },
+    "replyAnimation": {
+      "title": "AI の待機アニメーション",
+      "body": "AI が返答を始めるまでのアニメーションを選びます。",
+      "default": "デフォルト",
+      "options": {
+        "paper-plane": "紙飛行機",
+        "origami": "ひらく折り紙",
+        "ink": "流れるインク",
+        "sprout": "芽吹きの呼吸",
+        "orbit": "星の軌道",
+        "prism": "ひらめきのプリズム"
+      }
     }
   },
   "models": {

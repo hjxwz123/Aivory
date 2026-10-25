@@ -13,6 +13,12 @@ import { useAuth } from '@/store/auth'
 import { useConversations } from '@/store/conversations'
 import { useModels } from '@/store/models'
 import { useInlineThreadDrawer } from '@/store/inline-thread'
+import { useSettings } from '@/store/settings'
+import { useSettingsModal } from '@/store/settings-modal'
+import SettingsDialog from '@/pages/settings/SettingsLayout'
+import { WelcomeCard } from '@/components/welcome/welcome-card'
+import { ReplyAnimationPicker } from '@/components/settings/reply-animation-picker'
+import { normalizeReplyAnimationPref } from '@/types/settings'
 import type { Conversation, Message } from '@/types/chat'
 
 const query = new URLSearchParams(location.search)
@@ -61,19 +67,27 @@ function phase(name: string, age = 0) {
   fixture = { ...fixture, messages: fixture.messages.map((message) => message.id === current.id ? { ...message, ...patch } : message) }
   publish()
 }
-useAuth.setState({ user: { id: 'wait-user', name: 'Test', role: 'admin', email: 'wait@example.test', settings: { onboarded: true } } as never, status: 'authenticated' })
+const animation = normalizeReplyAnimationPref(query.get('animation')) ?? useSettings.getState().appearance.replyAnimation
+const settings = { onboarded: view !== 'welcome', reply_animation: animation }
+useSettings.getState().syncUserSettings(settings, 'wait-user')
+useAuth.setState({ user: { id: 'wait-user', name: 'Test', role: 'admin', email: 'wait@example.test', settings } as never, status: 'authenticated' })
+// Mirror AuthGate's profile synchronization without mounting the full router.
+useAuth.subscribe((state) => {
+  if (state.status === 'authenticated' && state.user) useSettings.getState().syncUserSettings(state.user.settings ?? {}, state.user.id)
+})
 useModels.setState({ loaded: true, loading: false, loadedScope: null, loadedPolicyKey: 'personal', models: [model] as never })
 useConversations.setState({
   accountId: 'wait-user', conversations: [fixture],
   loadOne: async () => {}, loadInlineThreads: async () => {},
   sendMessage: async ({ text }) => send(text), abortStream: () => phase('stopped'),
 })
-if (view !== 'main') send()
+if (view === 'private' || view === 'thread') send()
 if (view === 'thread') useInlineThreadDrawer.setState({ open: true, childId: fixture.id, quote: '选择交通方便的小城，留出不用赶路的时间。' })
+if (view === 'settings') useSettingsModal.getState().openSettings('appearance')
 await i18n.changeLanguage(query.get('lang') || 'zh')
 document.documentElement.dataset.theme = query.get('theme') || 'light'
 document.documentElement.classList.toggle('dark', query.get('theme') === 'dark')
-Reflect.set(window, '__REPLY_WAIT__', { phase, send })
+Reflect.set(window, '__REPLY_WAIT__', { phase, send, settings: useSettings, auth: useAuth })
 
 function PrivateRows() {
   const conversation = useConversations((state) => state.conversations[0])
@@ -90,7 +104,10 @@ function PrivateRows() {
 createRoot(document.getElementById('root')!).render(
   <TooltipProvider><MemoryRouter initialEntries={['/chat/reply-wait']}>
     <div className="flex h-dvh w-full overflow-hidden bg-[var(--color-bg)]">
-      {view === 'private' ? <div className="w-full overflow-y-auto"><PrivateRows /></div> : view === 'thread' ? <>
+      {view === 'settings' ? <SettingsDialog /> : view === 'welcome' ? <WelcomeCard /> : view === 'gallery' ? <main className="m-auto w-full max-w-[680px] px-6 py-8">
+        <h1 className="mb-5 text-lg font-medium text-[var(--color-fg)]">{i18n.t('settings:appearance.replyAnimation.title')}</h1>
+        <ReplyAnimationPicker value={animation} onChange={(value) => useSettings.getState().setAppearance({ replyAnimation: value })} />
+      </main> : view === 'private' ? <div className="w-full overflow-y-auto"><PrivateRows /></div> : view === 'thread' ? <>
         <div className="hidden min-w-0 flex-1 p-10 lg:block"><MessageRow message={baseMessages[1]} /></div>
         <InlineThreadPanel />
       </> : <Routes><Route path="/chat/:id" element={<ChatThread />} /></Routes>}

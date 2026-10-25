@@ -38,7 +38,8 @@
     "chatStyle": "Reply style",
     "chatStyleBody": "How detailed should answers be by default?",
     "memory": "Memory",
-    "memoryBody": "Let Aivory remember useful details across your chats."
+    "memoryBody": "Let Aivory remember useful details across your chats.",
+    "replyAnimation": "Waiting animation"
   },
   "theme": {
     "light": "Light",
@@ -62,6 +63,7 @@
     "accent": "Pick an accent color for the app.",
     "layout": "Center the chat or use the full width.",
     "style": "How detailed should replies be by default?",
-    "memory": "Let Aivory remember useful details across your chats."
+    "memory": "Let Aivory remember useful details across your chats.",
+    "replyAnimation": "Pick your favorite. Every style has a live preview."
   }
 }

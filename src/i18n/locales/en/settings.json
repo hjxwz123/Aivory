@@ -319,6 +319,19 @@
         "rounded": "Rounded",
         "serif": "Fraunces (serif)"
       }
+    },
+    "replyAnimation": {
+      "title": "AI waiting animation",
+      "body": "Choose what plays before the AI starts replying.",
+      "default": "Default",
+      "options": {
+        "paper-plane": "Paper plane",
+        "origami": "Unfolding paper",
+        "ink": "Flowing ink",
+        "sprout": "Breathing sprout",
+        "orbit": "Star orbit",
+        "prism": "Inspiration prism"
+      }
     }
   },
   "models": {

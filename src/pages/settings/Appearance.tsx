@@ -22,6 +22,9 @@ import { toast } from '@/hooks/use-toast'
 import { persistUserSettings } from '@/lib/user-settings'
 import { useAuth } from '@/store/auth'
 import { saveCodeBlockWrapPreference } from '@/lib/code-block-wrap-preference'
+import { saveReplyAnimationPreference } from '@/lib/reply-animation-preference'
+import { ReplyAnimationPicker } from '@/components/settings/reply-animation-picker'
+import type { ReplyAnimationPref } from '@/types/settings'
 
 // Slider stops, narrow → full. Order defines the slider's left-to-right axis;
 // widths live in tokens.css ([data-chat-width=…] → --layout-message-max-w).
@@ -63,6 +66,7 @@ export default function Appearance() {
   const appearance = useSettings((s) => s.appearance)
   const setAppearance = useSettings((s) => s.setAppearance)
   const codeBlockWrapSaving = useSettings((state) => state.codeBlockWrapPending !== null)
+  const replyAnimationSaving = useSettings((state) => state.replyAnimationPending !== null)
   const lang = useLanguage((s) => s.lang)
   const setLang = useLanguage((s) => s.setLang)
   const { t } = useTranslation(['settings', 'common'])
@@ -75,6 +79,11 @@ export default function Appearance() {
   function onToggleCodeBlockWrap(enabled: boolean) {
     void saveCodeBlockWrapPreference(enabled).catch((error) => {
       toast.error(t('common:actions.failed', { defaultValue: 'Failed to save' }), error instanceof Error ? error.message : undefined)
+    })
+  }
+  function onChangeReplyAnimation(value: ReplyAnimationPref) {
+    void saveReplyAnimationPreference(value).catch((error) => {
+      toast.error(t('common:actions.failed'), error instanceof Error ? error.message : undefined)
     })
   }
   function onChangeAccent(preset: AccentPref) {
@@ -147,6 +156,12 @@ export default function Appearance() {
             </SelectContent>
           </Select>
         </SettingsRow>
+      </SettingsSection>
+
+      <SettingsSection title={t('appearance.replyAnimation.title')} description={t('appearance.replyAnimation.body')}>
+        <div className="py-3.5">
+          <ReplyAnimationPicker value={appearance.replyAnimation} onChange={onChangeReplyAnimation} disabled={replyAnimationSaving} />
+        </div>
       </SettingsSection>
 
       <SettingsSection title={t('appearance.density')} description={t('appearance.densityBody')}>

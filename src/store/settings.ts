@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import {
   normalizeFontPref,
+  normalizeReplyAnimationPref,
+  DEFAULT_REPLY_ANIMATION,
   type AppearanceSettings,
   type ChatWidthPref,
   type DensityPref,
@@ -8,6 +10,7 @@ import {
   type FontSizePref,
   type ModelSettings,
   type PrivacySettings,
+  type ReplyAnimationPref,
 } from '@/types/settings'
 import { clampSidebarWidth } from '@/lib/sidebar-width'
 import { clampArtifactPanelWidth } from '@/lib/artifact-panel-width'
@@ -39,6 +42,10 @@ interface SettingsState {
   beginCodeBlockWrapSave: (value: boolean, userId: string | null) => number
   finishCodeBlockWrapSave: (requestId: number, value: boolean) => void
   cancelCodeBlockWrapSave: () => void
+  replyAnimationPending: { requestId: number; userId: string | null; value: ReplyAnimationPref; previousValue: ReplyAnimationPref } | null
+  beginReplyAnimationSave: (value: ReplyAnimationPref, userId: string | null) => number
+  finishReplyAnimationSave: (requestId: number, value: ReplyAnimationPref) => void
+  cancelReplyAnimationSave: () => void
   setModels: (patch: Partial<ModelSettings>) => void
   setPrivacy: (patch: Partial<PrivacySettings>) => void
   setSidebarCollapsed: (v: boolean) => void
@@ -79,6 +86,7 @@ function persist(s: Pick<SettingsState, 'appearance' | 'models' | 'privacy' | 's
 
 const initial = load()
 let codeBlockWrapRequestId = 0
+let replyAnimationRequestId = 0
 
 export const useSettings = create<SettingsState>((set) => ({
   appearance: {
@@ -90,6 +98,7 @@ export const useSettings = create<SettingsState>((set) => ({
     ...(initial.appearance ?? {}),
     codeBlockWrap: initial.appearance?.codeBlockWrap === true,
     font: normalizeFontPref(initial.appearance?.font) ?? 'default',
+    replyAnimation: normalizeReplyAnimationPref(initial.appearance?.replyAnimation) ?? DEFAULT_REPLY_ANIMATION,
   },
   models: {
     defaultModelId: '',
@@ -150,6 +159,41 @@ export const useSettings = create<SettingsState>((set) => ({
       return next
     })
   },
+  replyAnimationPending: null,
+  beginReplyAnimationSave(value, userId) {
+    const requestId = ++replyAnimationRequestId
+    set((state) => {
+      if (state.replyAnimationPending) throw new Error('A reply animation preference is already being saved')
+      const next = {
+        ...state,
+        appearance: { ...state.appearance, replyAnimation: value },
+        replyAnimationPending: { requestId, userId, value, previousValue: state.appearance.replyAnimation },
+      }
+      persist(next)
+      return next
+    })
+    return requestId
+  },
+  finishReplyAnimationSave(requestId, value) {
+    set((state) => {
+      if (state.replyAnimationPending?.requestId !== requestId) return state
+      const next = { ...state, replyAnimationPending: null, appearance: { ...state.appearance, replyAnimation: value } }
+      persist(next)
+      return next
+    })
+  },
+  cancelReplyAnimationSave() {
+    set((state) => {
+      if (!state.replyAnimationPending) return state
+      const next = {
+        ...state,
+        appearance: { ...state.appearance, replyAnimation: state.replyAnimationPending.previousValue },
+        replyAnimationPending: null,
+      }
+      persist(next)
+      return next
+    })
+  },
   syncUserSettings(settings, userId) {
     set((s) => {
       const appearancePatch: Partial<AppearanceSettings> = {}
@@ -159,6 +203,8 @@ export const useSettings = create<SettingsState>((set) => ({
       appearancePatch.userMessageMarkdown = settings.user_message_markdown === true
       const pending = s.codeBlockWrapPending?.userId === userId ? s.codeBlockWrapPending : null
       appearancePatch.codeBlockWrap = pending?.value ?? (settings.code_block_wrap === true)
+      const pendingAnimation = s.replyAnimationPending?.userId === userId ? s.replyAnimationPending : null
+      appearancePatch.replyAnimation = pendingAnimation?.value ?? normalizeReplyAnimationPref(settings.reply_animation) ?? DEFAULT_REPLY_ANIMATION
       const font = normalizeFontPref(settings.font_family)
       if (font) appearancePatch.font = font
       if (typeof settings.chat_width === 'string' && (CHAT_WIDTHS as readonly string[]).includes(settings.chat_width)) {
@@ -185,6 +231,7 @@ export const useSettings = create<SettingsState>((set) => ({
         ...s,
         codeBlockWrapPending: pending,
         codeBlockWrapAccountId: userId,
+        replyAnimationPending: pendingAnimation,
         appearance: { ...s.appearance, ...appearancePatch },
         models: { ...s.models, ...modelsPatch },
         privacy: { ...s.privacy, ...privacyPatch },

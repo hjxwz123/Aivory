@@ -37,8 +37,8 @@ try {
     }
     return request.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(fixtures[route] ?? {}) })
   })
-  async function open(view = 'main', theme = 'light', lang = 'zh') {
-    await page.goto(`http://127.0.0.1:5206/tests/browser/reply-wait-harness.html?view=${view}&theme=${theme}&lang=${lang}`, { waitUntil: 'networkidle0' })
+  async function open(view = 'main', theme = 'light', lang = 'zh', animation = 'paper-plane') {
+    await page.goto(`http://127.0.0.1:5206/tests/browser/reply-wait-harness.html?view=${view}&theme=${theme}&lang=${lang}&animation=${animation}`, { waitUntil: 'networkidle0' })
     await page.waitForFunction(() => Boolean(window.__REPLY_WAIT__))
     if (view === 'main') await page.evaluate(() => window.__REPLY_WAIT__.send())
     await page.waitForSelector('[data-reply-pending]')
@@ -93,9 +93,9 @@ try {
   assert.equal(await page.$$('.thinking-shimmer').then((nodes) => nodes.length), 0)
   await bounded()
   await screenshot('desktop-light')
-  const initial = await page.$$eval('[data-reply-pending] [data-reply-activity] > span', (nodes) => nodes.map((node) => getComputedStyle(node).transform))
+  const initial = await page.$$eval('[data-reply-pending] [data-motion-part]', (nodes) => nodes.map((node) => getComputedStyle(node).transform))
   await new Promise((resolve) => setTimeout(resolve, 180))
-  const later = await page.$$eval('[data-reply-pending] [data-reply-activity] > span', (nodes) => nodes.map((node) => getComputedStyle(node).transform))
+  const later = await page.$$eval('[data-reply-pending] [data-motion-part]', (nodes) => nodes.map((node) => getComputedStyle(node).transform))
   assert.notDeepEqual(initial, later, 'The activity rhythm must visibly animate')
   checks++
 
@@ -160,13 +160,28 @@ try {
     checks++
   }
 
-  await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }])
-  await open('main', 'dark')
-  const animations = await page.$$eval('[data-reply-pending] [data-reply-activity] > span', (nodes) => nodes.map((node) => getComputedStyle(node).animationName))
-  assert.ok(animations.every((name) => name === 'none'), animations.join(', '))
-  await animationOnly()
-  await screenshot('reduced-motion')
-  checks++
+  for (const variant of ['paper-plane', 'origami', 'ink', 'sprout', 'orbit', 'prism']) {
+    await open('main', 'dark', 'zh', variant)
+    await page.waitForSelector(`[data-reply-pending] [data-reply-animation="${variant}"]`)
+    await animationOnly()
+    await bounded()
+    const state = () => page.$$eval('[data-reply-pending] [data-motion-part]', (nodes) => nodes.map((node) => {
+      const style = getComputedStyle(node)
+      return [style.transform, style.strokeDashoffset]
+    }))
+    const before = await state()
+    await new Promise((resolve) => setTimeout(resolve, 240))
+    assert.notDeepEqual(before, await state(), `${variant} must animate in real chat`)
+    checks++
+
+    await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }])
+    const animations = await page.$$eval('[data-reply-pending] [data-reply-animation] *', (nodes) => nodes.map((node) => getComputedStyle(node).animationName))
+    assert.ok(animations.every((name) => name === 'none'), `${variant}: ${animations.join(', ')}`)
+    await animationOnly()
+    if (variant === 'paper-plane') await screenshot('reduced-motion')
+    await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }])
+    checks++
+  }
 
   assert.deepEqual(errors, [])
   console.log(`Reply wait browser checks passed (${checks} scenarios). Screenshots: ${output}`)

@@ -319,6 +319,19 @@
         "rounded": "Arrondie",
         "serif": "Fraunces (serif)"
       }
+    },
+    "replyAnimation": {
+      "title": "Animation d’attente de l’IA",
+      "body": "Choisissez une animation avant le début de la réponse.",
+      "default": "Par défaut",
+      "options": {
+        "paper-plane": "Avion en papier",
+        "origami": "Origami",
+        "ink": "Trait d’encre",
+        "sprout": "Jeune pousse",
+        "orbit": "Orbite étoilée",
+        "prism": "Prisme d’inspiration"
+      }
     }
   },
   "models": {
