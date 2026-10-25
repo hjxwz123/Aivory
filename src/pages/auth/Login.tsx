@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { Trans, useTranslation } from 'react-i18next'
-import { ShieldCheck, ArrowLeft, Fingerprint, ExternalLink } from 'lucide-react'
+import { ShieldCheck, ArrowLeft, KeyRound, ExternalLink } from 'lucide-react'
 import { AuthField } from '@/components/auth/auth-field'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/hooks/use-toast'
@@ -24,7 +24,7 @@ export default function Login() {
   const navigate = useNavigate()
   const location = useLocation()
   const { t } = useTranslation('auth')
-  const { compact, split, short } = useAuthFormLayout()
+  const { split, short } = useAuthFormLayout()
   const login = useAuth((s) => s.login)
   const loginTwoFactor = useAuth((s) => s.loginTwoFactor)
   const loginWithPasskey = useAuth((s) => s.loginWithPasskey)
@@ -298,27 +298,15 @@ export default function Login() {
         </div>
       ) : null}
 
-      {providers.length > 0 || showPasskey ? (
+      {providers.length > 0 ? (
         <div className="login-providers">
-          <OAuthButtons providers={providers} captchaRequired={registrationCaptchaRequired} compact={compact} />
-          {showPasskey ? (
-            <Button
-              type="button"
-              variant="secondary"
-              loading={passkeyBusy}
-              disabled={loading}
-              onClick={() => void passkeyLogin()}
-              leadingIcon={<Fingerprint size={17} strokeWidth={1.6} aria-hidden />}
-            >
-              {t('login.passkeyLabel')}
-            </Button>
-          ) : null}
+          <OAuthButtons providers={providers} captchaRequired={registrationCaptchaRequired} disabled={loading || passkeyBusy} />
         </div>
       ) : providerRequired ? (
         <p className="login-notice" role="alert">{t('login.noProviders')}</p>
       ) : null}
 
-      {(desktop || providers.length > 0 || showPasskey) && showPasswordLogin ? (
+      {(desktop || providers.length > 0) && showPasswordLogin ? (
         <div className="login-divider">{t('login.emailDivider')}</div>
       ) : null}
 
@@ -366,6 +354,20 @@ export default function Login() {
             {t('login.submit')}
           </Button>
         </form>
+      ) : null}
+
+      {showPasskey ? (
+        <Button
+          type="button"
+          variant="secondary"
+          className="login-passkey"
+          loading={passkeyBusy}
+          disabled={loading}
+          onClick={() => void passkeyLogin()}
+          leadingIcon={<KeyRound size={17} strokeWidth={1.6} aria-hidden />}
+        >
+          {t('login.passkey')}
+        </Button>
       ) : null}
 
       {showPasswordLogin ? (

@@ -81,6 +81,8 @@ async function check(label, screenshot = false) {
       document: [doc.scrollWidth, doc.clientWidth, doc.scrollHeight, doc.clientHeight],
       panel: [panel.scrollWidth, panel.clientWidth, panel.scrollHeight, panel.clientHeight],
       bounds: [contentRect.top, contentRect.bottom, panelRect.top, panelRect.bottom],
+      panelScrollTop: panel.scrollTop,
+      allowsPanelScroll: Boolean(content.querySelector('.login-oauth-row, .login-passkey')),
       contentWidth: contentRect.width,
       overflowingButtons: [...content.querySelectorAll('button')].filter((button) => button.getBoundingClientRect().height > 0 && (button.scrollWidth > button.clientWidth + 1 || button.scrollHeight > button.clientHeight + 1)).map((button) => button.textContent.trim()),
     }
@@ -90,8 +92,13 @@ async function check(label, screenshot = false) {
   const [top, bottom, panelTop, panelBottom] = result.bounds
   try {
     assert.ok(dw <= vw + 1 && dh <= vh + 1, `${label}: document scrolls ${JSON.stringify(result)}`)
-    assert.ok(pw <= pcw + 1 && ph <= pch + 1, `${label}: form scrolls ${JSON.stringify(result)}`)
-    assert.ok(top >= panelTop - 1 && bottom <= panelBottom + 1, `${label}: form is clipped ${JSON.stringify(result)}`)
+    assert.ok(pw <= pcw + 1, `${label}: form scrolls horizontally ${JSON.stringify(result)}`)
+    if (ph > pch + 1) {
+      assert.ok(result.allowsPanelScroll, `${label}: unexpected form scrolling ${JSON.stringify(result)}`)
+      assert.ok(top + result.panelScrollTop >= panelTop - 1 && bottom + result.panelScrollTop <= panelTop + ph + 1, `${label}: scrolling must reach the entire form ${JSON.stringify(result)}`)
+    } else {
+      assert.ok(top >= panelTop - 1 && bottom <= panelBottom + 1, `${label}: form is clipped ${JSON.stringify(result)}`)
+    }
     assert.deepEqual(errors, [], `${label}: rendering errors`)
     assert.deepEqual(result.overflowingButtons, [], `${label}: button labels must fit`)
   } catch (error) {
@@ -100,6 +107,43 @@ async function check(label, screenshot = false) {
   }
   if (screenshot) await page.screenshot({ path: path.join(outputDir, `${label.replace(/[^a-z0-9-]/gi, '-')}.png`) })
   return result.contentWidth
+}
+
+async function checkProviders(label) {
+  const layout = await page.$eval('.login-oauth-row', (row) => {
+    const bounds = row.getBoundingClientRect()
+    const buttons = [...row.querySelectorAll('.login-provider-button')]
+    const boxes = buttons.map((button) => button.getBoundingClientRect())
+    const rows = [...new Set(boxes.map((box) => Math.round(box.top)))].map((top) => boxes.filter((box) => Math.round(box.top) === top))
+    return {
+      iconsOnly: row.dataset.iconsOnly === 'true',
+      rows: new Set(boxes.map((box) => Math.round(box.top))).size,
+      width: bounds.width,
+      gap: parseFloat(getComputedStyle(row).columnGap),
+      count: buttons.length,
+      fits: boxes.every((box) => box.width >= 44 && box.height >= 44 && box.left >= bounds.left - 1 && box.right <= bounds.right + 1),
+      names: buttons.map((button) => button.getAttribute('aria-label')),
+      counts: rows.map((row) => row.length),
+      centered: rows.every((row) => Math.abs((row[0].left + row.at(-1).right) / 2 - (bounds.left + bounds.right) / 2) < 1),
+      equalWidths: Math.max(...boxes.map((box) => box.width)) - Math.min(...boxes.map((box) => box.width)) < 1,
+    }
+  })
+  assert.equal(await page.$('.login-provider-picker'), null, `${label}: providers must remain directly accessible`)
+  assert.equal(layout.count, providers.length, `${label}: no providers may disappear`)
+  assert.deepEqual(layout.names, providers.map((provider) => provider.name), `${label}: icons retain accessible names`)
+  assert.ok(layout.fits, `${label}: provider buttons must fit and preserve 44px targets`)
+  assert.ok(Math.max(...layout.counts) - Math.min(...layout.counts) <= 1, `${label}: distribute providers evenly between rows`)
+  assert.ok(layout.centered, `${label}: center every provider row`)
+  if (layout.iconsOnly) assert.ok(layout.equalWidths, `${label}: keep icon buttons the same width between rows`)
+  if (!layout.iconsOnly || providers.length * 44 + (providers.length - 1) * layout.gap <= layout.width) {
+    assert.equal(layout.rows, 1, `${label}: wrap only when icons cannot fit on one line`)
+  } else {
+    assert.ok(layout.rows > 1, `${label}: icons must wrap instead of shrinking or overflowing`)
+  }
+  if (providers.length === 2 && providers.every((provider) => provider.name.startsWith('Provider'))) {
+    assert.equal(layout.iconsOnly, false, `${label}: keep names when they fit`)
+  }
+  return layout
 }
 
 async function visit(route) {
@@ -259,30 +303,47 @@ try {
   passkeyEnabled = true
   for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 720 }, { width: 320, height: 360 }]) {
     await page.setViewport(viewport)
-    for (const count of [2, 4, 6]) {
+    for (const count of [2, 4, 6, 7, 8, 10, 13]) {
       providers = Array.from({ length: count }, (_, index) => ({ id: `provider-${index}`, kind: 'oidc', name: `Provider ${index + 1}` }))
       for (const route of ['/login', '/register']) {
         const label = `${route.slice(1)}-${count}-providers-${viewport.height}`
         await visit(route)
-        await check(label)
-        if (await page.$('.login-provider-picker')) {
-          await page.click('.login-provider-picker')
-          await page.waitForSelector('[role="menu"]')
-          assert.equal((await page.$$('[role="menuitem"]')).length, providers.length, 'All providers must remain accessible')
-          const menuFits = await page.$eval('[role="menu"]', (menu) => {
-            const bounds = menu.getBoundingClientRect()
-            return bounds.top >= 0 && bounds.bottom <= innerHeight && menu.scrollHeight <= menu.clientHeight + 1 && menu.scrollWidth <= menu.clientWidth + 1
-          })
-          assert.ok(menuFits, 'Provider menu must fit without scrolling')
-          await page.keyboard.press('Escape')
-          await page.waitForFunction(() => !document.querySelector('[role="menu"]'))
-        }
+        await check(label, true)
+        await checkProviders(label)
+        if (route === '/login') assert.match(await page.$eval('.login-passkey', (button) => button.textContent), /.+/)
         await page.click('.login-submit')
         await checkError(`${label}-errors`)
       }
     }
   }
-  console.log('PASS: multiple providers and passkeys fit without scrolling')
+  providers = [{ id: 'google', kind: 'google', name: 'Google' }, { id: 'github', kind: 'github', name: 'GitHub' }, { id: 'apple', kind: 'apple', name: 'Apple' }]
+  await page.setViewport({ width: 1440, height: 900 })
+  await visit('/login')
+  assert.equal((await checkProviders('wide labels')).iconsOnly, false)
+  // Resize the actual row to cross the text and icon thresholds, then restore
+  // it. This also catches label measurements that oscillate in icon mode.
+  for (const width of [190, 140, 420]) {
+    await page.$eval('.login-content', (content, width) => { content.style.maxWidth = `${width}px` }, width)
+    await page.waitForFunction(({ iconsOnly, rows }) => {
+      const row = document.querySelector('.login-oauth-row')
+      const tops = [...(row?.querySelectorAll('.login-provider-button') ?? [])].map((button) => Math.round(button.getBoundingClientRect().top))
+      return row?.dataset.iconsOnly === String(iconsOnly) && new Set(tops).size === rows
+    }, {}, { iconsOnly: width < 420, rows: width === 140 ? 2 : 1 })
+    const layout = await checkProviders(`resized row ${width}`)
+    assert.equal(layout.rows, width === 140 ? 2 : 1)
+  }
+  await page.focus('.login-provider-button')
+  await page.keyboard.press('Tab')
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), 'GitHub')
+
+  providers = [{ id: 'enterprise', kind: 'oidc', name: 'Enterprise single sign-on with a very long organization name across international departments and regional subsidiaries', icon: '🔐' }]
+  await visit('/login')
+  assert.equal((await checkProviders('long enterprise name')).iconsOnly, true)
+  await page.focus('.login-provider-button')
+  await page.waitForSelector('[role="tooltip"]')
+  assert.equal(await page.$eval('[role="tooltip"]', (tooltip) => tooltip.textContent), providers[0].name)
+  await check('long enterprise name', true)
+  console.log('PASS: provider names, icons, wrapping, resize recovery and keyboard access')
   await page.evaluate(() => localStorage.setItem('aivory.layout.desktop', 'true'))
   for (const language of ['en', 'zh', 'zh-Hant', 'ja', 'fr']) {
     await page.evaluate((code) => localStorage.setItem('aivory.lang', code), language)

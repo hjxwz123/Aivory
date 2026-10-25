@@ -319,12 +319,16 @@
   align-items: center;
   justify-content: center;
   padding: 6px;
+  overflow: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-width: thin;
 }
 
 .login-content {
   width: 100%;
   min-width: 0;
   max-width: var(--login-form-width);
+  margin-block: auto;
 }
 
 .login-title {
@@ -368,47 +372,86 @@
 }
 
 .login-providers {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.login-oauth-row {
+  display: flex;
   gap: 10px;
+  min-width: 0;
+}
+
+.login-oauth-row[data-icons-only='true'] {
+  display: grid;
+  grid-template-columns: repeat(var(--login-oauth-tracks), minmax(0, 1fr));
 }
 
 .login-providers+ :is(.login-notice, .login-error) {
   margin-top: 21px;
 }
 
-.login-providers>button:only-of-type {
-  grid-column: 1 / -1;
-}
-
-.login-providers>button {
+.login-provider-button,
+.login-passkey {
+  position: relative;
+  flex: 1 0 auto;
   gap: 8px;
-  min-width: 0;
+  min-width: 44px;
   height: auto;
-  min-height: 45px;
+  min-height: 44px;
   padding: 8px 12px;
   border: 1px solid transparent;
   border-radius: 8px;
   background: var(--color-bg-muted);
   color: var(--color-fg);
   font: 400 12px / 1.6 var(--login-sans);
-  white-space: normal;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
   box-shadow: none;
 }
 
-.login-providers>button:hover:not(:disabled) {
+.login-provider-button:hover:not(:disabled),
+.login-passkey:hover:not(:disabled) {
   background: var(--color-surface-sunken);
 }
 
-.login-providers>button>span {
+.login-provider-button>span,
+.login-passkey>span {
   margin-inline: 0;
 }
 
-.login-providers>button :is(svg, img) {
+.login-provider-button :is(svg, img),
+.login-passkey :is(svg, img) {
   width: 17px;
   height: 17px;
   flex-shrink: 0;
+}
+
+.login-provider-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+}
+
+.login-provider-label {
+  display: block;
+  white-space: nowrap;
+}
+
+.login-oauth-row[data-icons-only='true'] .login-provider-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.login-passkey {
+  width: 100%;
+  margin-top: 10px;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .login-divider {
@@ -1015,7 +1058,7 @@
   height: 40px;
 }
 
-.login-panel[data-short='true'] :is(.login-submit, .login-providers>button) {
+.login-panel[data-short='true'] .login-submit {
   min-height: 40px;
   height: auto;
 }

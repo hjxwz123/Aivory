@@ -17,7 +17,7 @@ import { useAuthFormLayout } from '@/hooks/use-auth-form-layout'
 export default function Register() {
   const navigate = useNavigate()
   const { t } = useTranslation(['auth', 'common'])
-  const { compact, split, passwordStep, showIdentity, showPassword, setPasswordStep } = useAuthFormLayout()
+  const { split, passwordStep, showIdentity, showPassword, setPasswordStep } = useAuthFormLayout()
   const register = useAuth((s) => s.register)
   const signupOpen = useAuth((s) => s.signupOpen)
   const oauthSignupOpen = useAuth((s) => s.authPolicy.oauth_auto_provision_enabled)
@@ -256,7 +256,7 @@ export default function Register() {
       <p className="login-intro" data-auth-intro="optional">{t('register.subtitle')}</p>
       {showProviders && showIdentity ? (
         <div className="login-providers">
-          <OAuthButtons providers={providers} captchaRequired={captchaRequired} compact={compact} />
+          <OAuthButtons providers={providers} captchaRequired={captchaRequired} />
         </div>
       ) : null}
       {showProviders && showIdentity && signupOpen ? <div className="login-divider">{t('login.emailDivider')}</div> : null}
