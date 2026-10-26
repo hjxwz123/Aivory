@@ -1378,7 +1378,7 @@ function LibraryEditor({
   const skill = editor.kind === 'skill'
   return (
     <Dialog open={editor.open} onOpenChange={(open) => !saving && setEditor((current) => ({ ...current, open }))}>
-      <DialogContent size="md">
+      <DialogContent size="md" mobilePresentation="fullscreen">
         <DialogHeader>
           <DialogTitle>
             {editor.id
@@ -1510,7 +1510,7 @@ function MCPEditor({
         if (!saving) setEditor((current) => ({ ...current, open }))
       }}
     >
-      <DialogContent size="lg" closeDisabled={saving}>
+      <DialogContent size="lg" closeDisabled={saving} mobilePresentation="fullscreen">
         <DialogHeader>
           <DialogTitle>{editor.row ? t('library:mcpEditor.editTitle') : t('library:mcpEditor.newTitle')}</DialogTitle>
         </DialogHeader>

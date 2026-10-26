@@ -6,6 +6,8 @@ import { cn } from '@/lib/utils'
 import { useQuietSurface } from '@/contexts/quiet-surface'
 import { useButtonDensity } from '@/contexts/button-density'
 import { useSurfaceViewport } from '@/hooks/use-app-viewport'
+import { useMobileLayout } from '@/hooks/use-mobile-layout'
+import { MobilePanelSurface, type MobilePanelPresentation } from './mobile-panel'
 
 export const Dialog = DialogPrimitive.Root
 export const DialogTrigger = DialogPrimitive.Trigger
@@ -42,6 +44,8 @@ export interface DialogContentProps
   presentation?: DialogPresentation
   /** Use the full safe visible area on narrow screens. */
   mobileFullscreen?: boolean
+  /** Dedicated touch surface; editor drawers use fullscreen automatically. */
+  mobilePresentation?: MobilePanelPresentation | 'modal'
   /** Explicitly choose the scroll owner; omitted preserves existing layouts. */
   scrollMode?: 'body' | 'content'
   showClose?: boolean
@@ -92,11 +96,15 @@ function animateDialogResize(
 export const DialogContent = forwardRef<
   ElementRef<typeof DialogPrimitive.Content>,
   DialogContentProps
->(function DialogContent({ className, size = 'md', presentation = 'modal', mobileFullscreen = false, scrollMode, showClose = true, closeDisabled = false, captureIgnore = false, children, ...rest }, ref) {
+>(function DialogContent({ className, size = 'md', presentation = 'modal', mobileFullscreen = false, mobilePresentation, scrollMode, showClose = true, closeDisabled = false, captureIgnore = false, children, ...rest }, ref) {
   const quiet = useQuietSurface()
   const { t } = useTranslation('common')
   const viewport = useSurfaceViewport()
-  const effectivePresentation = mobileFullscreen && viewport.width < 640 ? 'fullscreen' : presentation
+  const mobile = useMobileLayout()
+  const mobilePanel = mobile && mobilePresentation !== 'modal'
+    ? mobilePresentation ?? (mobileFullscreen || presentation === 'drawer' ? 'fullscreen' : undefined)
+    : undefined
+  const effectivePresentation = mobilePanel ? 'fullscreen' : presentation
   const contentRef = useRef<ElementRef<typeof DialogPrimitive.Content>>(null)
   const previousDimensionsRef = useRef<DialogDimensions | null>(null)
   const reducedMotionRef = useRef<MediaQueryList | null>(null)
@@ -179,8 +187,9 @@ export const DialogContent = forwardRef<
   return (
     <DialogPortal>
       <DialogOverlay data-feedback-capture-ignore={captureIgnore ? '' : undefined} />
-      <DialogPrimitive.Content
+      <MobilePanelSurface
         ref={setContentRef}
+        mobilePresentation={mobilePanel}
         data-slot="dialog-content"
         data-dialog-presentation={effectivePresentation}
         data-viewport-narrow={viewport.width < 640 ? 'true' : undefined}
@@ -235,14 +244,14 @@ export const DialogContent = forwardRef<
         <dialogPresentationContext.Provider value={effectivePresentation}>
           {children}
         </dialogPresentationContext.Provider>
-      </DialogPrimitive.Content>
+      </MobilePanelSurface>
     </DialogPortal>
   )
 })
 
 export function DialogHeader({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
   const presentation = useContext(dialogPresentationContext)
-  return <div className={cn('shrink-0 px-6 pt-4 pb-3', presentation === 'drawer' && 'pr-14', className)} {...rest} />
+  return <div data-slot="dialog-header" className={cn('shrink-0 min-w-0 px-6 pt-4 pb-3', presentation === 'drawer' && 'pr-14', className)} {...rest} />
 }
 
 export function DialogBody({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
@@ -321,7 +330,7 @@ export function DialogFooter({ className, ...rest }: HTMLAttributes<HTMLDivEleme
     <div
       data-slot="dialog-footer"
       className={cn(
-        'shrink-0 border-t border-[var(--color-divider)] flex items-center justify-end gap-1.5 px-5 py-2.5 sm:px-6',
+        'shrink-0 min-w-0 border-t border-[var(--color-divider)] flex items-center justify-end gap-1.5 px-5 py-2.5 sm:px-6',
         !compact && '[&_button]:h-8 [&_button]:px-3 [&_button]:text-sm [&_a]:h-8 [&_a]:px-3 [&_a]:text-sm',
         !compact && 'max-sm:[&_button]:h-10 max-sm:[&_a]:h-10',
         quiet && 'border-0',
@@ -340,7 +349,7 @@ export const DialogTitle = forwardRef<
   return (
     <DialogPrimitive.Title
       ref={ref}
-      className={cn('text-[1rem] font-semibold leading-6 tracking-normal text-[var(--color-fg)]', className)}
+      className={cn('text-[1rem] font-semibold leading-6 tracking-normal text-[var(--color-fg)] [overflow-wrap:anywhere]', className)}
       {...rest}
     />
   )

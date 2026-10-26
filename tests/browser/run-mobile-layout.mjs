@@ -55,7 +55,8 @@ async function record(name, run) {
 }
 
 async function open(mode, viewport, file) {
-  await page.setViewport(viewport)
+  const mobile = viewport.width < 1024 && (viewport.width < 640 || viewport.height <= 520)
+  await page.setViewport({ ...viewport, isMobile: mobile, hasTouch: mobile })
   const params = new URLSearchParams({ mode, ...(file ? { file } : {}) })
   await page.goto(`${origin}/tests/browser/mobile-layout-harness.html?${params}`, { waitUntil: 'domcontentloaded', timeout: 180000 })
   for (let attempt = 0; attempt < 4; attempt++) {
@@ -172,6 +173,32 @@ try {
     }
   }
 
+  for (const viewport of [{ width: 320, height: 568 }, { width: 390, height: 844 }, { width: 844, height: 390 }, { width: 1280, height: 900 }]) {
+    await record(`select-${viewport.width}x${viewport.height}`, async () => {
+      await open('select', viewport)
+      await page.click('[data-slot="select-trigger"]')
+      await page.waitForSelector('[role="listbox"] [role="option"]')
+      await settle()
+      const mobile = viewport.width < 640 || viewport.height <= 520
+      const surfaceSelector = mobile ? '[data-mobile-choice]' : '[role="listbox"]'
+      const surface = await rectangle(surfaceSelector)
+      visible(surface, await bounds(), 'choice panel')
+      if (mobile) {
+        assert.ok(await page.$('[data-radix-popper-content-wrapper]:has(> [data-mobile-choice])'), 'mobile choices should use their dedicated bottom panel')
+        await page.screenshot({ path: join(output, `select-${viewport.width}x${viewport.height}-open.png`) })
+        await page.$eval('[data-mobile-choice] [data-radix-select-viewport]', (el) => { el.scrollTop = el.scrollHeight })
+        const last = await rectangle('[role="option"]:last-child')
+        visible(last, await rectangle('[data-mobile-choice] [data-radix-select-viewport]'), 'last mobile choice')
+        await page.click('[role="option"]:last-child')
+        assert.equal(await page.evaluate(() => window.__MOBILE_LAYOUT__.selectedChoice), 'choice-24')
+      } else {
+        await page.click('[role="option"]:last-child')
+        assert.equal(await page.evaluate(() => window.__MOBILE_LAYOUT__.selectedChoice), 'choice-24')
+      }
+      return { surface, mobile }
+    })
+  }
+
   for (const mode of ['sheet', 'password', 'command', 'fullscreen']) {
     await record(`${mode}-keyboard-offset-safe`, async () => {
       await open(mode, { width: 390, height: 844 })
@@ -283,7 +310,7 @@ try {
       const pane = '[data-workspace-management-scroll]'
       const dialog = await rectangle(root)
       visible(dialog, await bounds(), 'workspace')
-      if (viewport.height < 360) {
+      if (viewport.height < 520) {
         assert.equal(await page.$eval(root, (el) => getComputedStyle(el).overflowY), 'auto')
         assert.equal(await page.$eval('[role="tablist"]', (el) => el.getAttribute('aria-orientation')), 'horizontal')
         await page.$eval(`${pane} li:last-child`, (el) => el.scrollIntoView({ block: 'end' }))
@@ -292,8 +319,8 @@ try {
       }
       await settle()
       const last = await rectangle(`${pane} li:last-child`)
-      visible(last, viewport.height < 360 ? await rectangle(root) : await rectangle(pane), 'last workspace member')
-      if (viewport.height < 360) await page.$eval(root, (el) => { el.scrollTop = el.scrollHeight })
+      visible(last, viewport.height < 520 ? await rectangle(root) : await rectangle(pane), 'last workspace member')
+      if (viewport.height < 520) await page.$eval(root, (el) => { el.scrollTop = el.scrollHeight })
       const close = await page.$$eval(`${root} [data-slot="dialog-footer"] button`, (buttons) => {
         const r = buttons.at(-1).getBoundingClientRect()
         return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height }

@@ -813,7 +813,7 @@ export default function KnowledgeBaseDetail() {
           setOpen(next)
         }}
       >
-        <DialogContent size="md" closeDisabled={saving || uploading}>
+        <DialogContent size="md" closeDisabled={saving || uploading} mobilePresentation="fullscreen">
           <DialogHeader>
             <DialogTitle>{t('kb:detail.uploadButton')}</DialogTitle>
             <DialogDescription>{t('kb:detail.noDocsBody')}</DialogDescription>

@@ -96,6 +96,7 @@
     "close": "关闭",
     "dismiss": "关闭",
     "loading": "加载中",
+    "selectOption": "选择选项",
     "themeGroup": "主题",
     "themeValue": "主题：{{label}}",
     "languageValue": "语言：{{label}}",

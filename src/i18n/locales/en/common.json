@@ -96,6 +96,7 @@
     "close": "Close",
     "dismiss": "Dismiss",
     "loading": "Loading",
+    "selectOption": "Select option",
     "themeGroup": "Theme",
     "themeValue": "Theme: {{label}}",
     "languageValue": "Language: {{label}}",

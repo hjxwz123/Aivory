@@ -1,0 +1,202 @@
+/* Dedicated mobile form surfaces. Geometry follows visualViewport, including
+   keyboards and safe areas; no offscreen content is hidden to mask overflow. */
+[data-mobile-panel] {
+  position: fixed;
+  left: var(--surface-viewport-left);
+  right: auto;
+  top: var(--surface-viewport-top);
+  bottom: auto;
+  width: var(--surface-viewport-width);
+  max-width: var(--surface-viewport-width);
+  height: var(--surface-viewport-height);
+  max-height: var(--surface-viewport-height);
+  min-width: 0;
+  min-height: 0;
+  translate: none;
+  border: 0;
+  border-radius: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+[data-mobile-panel='sheet'] {
+  top: auto;
+  bottom: calc(100dvh - var(--surface-viewport-top) - var(--surface-viewport-height));
+  height: auto;
+  max-height: min(42rem, var(--surface-viewport-height));
+  border-radius: 16px 16px 0 0;
+}
+
+.viewport-dialog[data-mobile-panel='sheet'] {
+  top: auto;
+  bottom: calc(100dvh - var(--surface-viewport-top) - var(--surface-viewport-height));
+  height: auto;
+  max-height: min(42rem, var(--surface-viewport-height));
+  border-radius: 16px 16px 0 0;
+}
+
+[data-mobile-panel][data-state='open'] {
+  animation: sheet-in-b 220ms var(--ease-out);
+}
+
+[data-mobile-panel][data-state='closed'] {
+  animation: sheet-out-b 160ms var(--ease-in);
+}
+
+[data-mobile-panel] > form,
+[data-mobile-panel] [data-slot='dialog-form'] {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+[data-mobile-panel] [data-slot='dialog-header'] {
+  flex: none;
+  min-width: 0;
+  padding: 1rem 4rem 1rem 1rem;
+  overflow-wrap: anywhere;
+}
+
+[data-mobile-panel] [data-slot='dialog-body'] {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-block: 1rem;
+  padding-inline: 1rem;
+}
+
+[data-mobile-panel] [data-slot='dialog-footer'] {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  padding: .75rem 1rem;
+  border-top: 1px solid var(--color-divider);
+  background: var(--color-surface);
+}
+
+[data-admin-list-actions] button {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+[data-mobile-panel] [data-slot='dialog-footer'] > button,
+[data-mobile-panel] [data-slot='dialog-footer'] > a {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 2.75rem;
+  height: auto;
+  padding-block: .625rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* With a large keyboard, header + actions may exceed the visible region.
+   Let the whole form scroll in that case, including its close/save controls. */
+[data-mobile-panel][data-mobile-compact='true'] {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+[data-mobile-panel][data-mobile-compact='true'] > form,
+[data-mobile-panel][data-mobile-compact='true'] [data-slot='dialog-form'],
+[data-mobile-panel][data-mobile-compact='true'] [data-slot='dialog-body'] {
+  flex: none;
+  overflow: visible;
+}
+
+/* Radix keeps its listbox, focus restoration, typeahead, and selection logic.
+   Only the mobile presentation escapes the anchored desktop popper geometry. */
+[data-radix-popper-content-wrapper]:has(> [data-mobile-choice]) {
+  position: fixed !important;
+  inset: auto !important;
+  left: var(--surface-viewport-left) !important;
+  top: calc(var(--surface-viewport-top) + var(--surface-viewport-height)) !important;
+  transform: translateY(-100%) !important;
+  width: var(--surface-viewport-width) !important;
+  min-width: 0 !important;
+  z-index: 70 !important;
+}
+
+[data-mobile-choice] {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  max-height: min(32rem, calc(var(--surface-viewport-height) - 1rem));
+  padding: .5rem;
+  border: 0;
+  border-radius: 16px 16px 0 0;
+  transform-origin: bottom center;
+  overflow: hidden;
+}
+
+.mobile-choice-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  flex: none;
+  min-height: 3.25rem;
+  display: flex;
+  align-items: center;
+  padding: .75rem 1rem;
+  border-bottom: 1px solid var(--color-divider);
+  border-radius: 16px 16px 0 0;
+  background: var(--color-surface-raised);
+  color: var(--color-fg);
+  font-size: .875rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+[data-mobile-choice] [data-radix-select-viewport] {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  padding: 0;
+  overscroll-behavior: contain;
+}
+
+[data-mobile-choice] [role='option'] {
+  min-height: 3rem;
+  padding-block: .75rem;
+  padding-right: 1rem;
+  font-size: .9375rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+[data-mobile-choice] [role='option'][data-state='checked'] {
+  background: var(--color-bg-muted);
+  font-weight: 500;
+}
+
+.viewport-popover {
+  min-width: min(260px, calc(var(--surface-viewport-width) - 1rem));
+  max-width: min(var(--radix-popover-content-available-width), calc(var(--surface-viewport-width) - 1rem));
+  max-height: min(var(--radix-popover-content-available-height), calc(var(--surface-viewport-height) - 1rem));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 639px), (pointer: coarse) and (max-width: 1023px) and (max-height: 520px) {
+  [data-slot='input-wrapper'], [data-slot='select-trigger'] { min-height: 2.75rem; }
+  [data-slot='input-wrapper'] input, [data-slot='textarea'] { font-size: 16px; }
+  [data-slot='tabs-list'] { max-width: 100%; overflow-x: auto; }
+  [data-slot='tabs-list'] > button { min-height: 2.75rem; flex-shrink: 0; }
+  .settings-row > :last-child { min-width: 0; max-width: 100%; }
+  .settings-row [data-slot='select-trigger'] { width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-mobile-panel][data-state] { animation: none; }
+}

@@ -23,8 +23,9 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
   const quiet = useQuietSurface()
   return (
     <div
+      data-slot="input-wrapper"
       className={cn(
-        'group/input flex items-center gap-2.5 h-10 rounded-[10px] px-3.5',
+        'group/input flex min-w-0 max-w-full items-center gap-2.5 h-10 rounded-[10px] px-3.5',
         'bg-[var(--color-surface-sunken)] border border-[var(--color-border)]',
         'transition-[border-color,background-color] duration-150',
         'focus-within:border-[var(--color-border-strong)] focus-within:bg-[var(--color-surface)]',

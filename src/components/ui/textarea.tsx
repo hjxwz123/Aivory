@@ -13,10 +13,11 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function 
   const quiet = useQuietSurface()
   return (
     <textarea
+      data-slot="textarea"
       ref={ref}
       aria-invalid={invalid || undefined}
       className={cn(
-        'block w-full min-h-[88px] rounded-[10px] p-3',
+        'block w-full min-w-0 max-w-full min-h-[88px] rounded-[10px] p-3',
         'bg-[var(--color-surface-sunken)] border border-[var(--color-border)]',
         'text-[0.9375rem] leading-[1.55] text-[var(--color-fg)] placeholder:text-[var(--color-fg-faint)]',
         'resize-none outline-none transition-[border-color,background-color] duration-150',

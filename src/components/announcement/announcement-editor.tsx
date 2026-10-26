@@ -144,7 +144,7 @@ export function AnnouncementEditor({
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <Input id="workspace-ann-image" wrapperClassName="min-w-0 flex-1" value={value.image_url} onChange={(e) => update('image_url', e.target.value)} placeholder={label('imagePlaceholder', 'https://...')} />
             <input ref={fileRef} type="file" accept="image/png,image/jpeg" className="hidden" onChange={(e) => void onPickImage(e.target.files?.[0])} />
-            <Button type="button" variant="secondary" size="sm" loading={uploading} leadingIcon={<Upload size={13} aria-hidden />} onClick={() => fileRef.current?.click()} className="w-full sm:w-auto">{label('upload', 'Upload')}</Button>
+            <Button type="button" variant="secondary" size="md" loading={uploading} leadingIcon={<Upload size={13} aria-hidden />} onClick={() => fileRef.current?.click()} className="w-full sm:w-auto">{label('upload', 'Upload')}</Button>
           </div>
           {value.image_url ? <div className="mt-2 flex items-center gap-2"><img src={value.image_url} alt="" className="h-14 w-auto rounded-[7px] object-cover" /><Button variant="ghost" size="sm" leadingIcon={<X size={13} aria-hidden />} onClick={() => update('image_url', '')}>{label('removeImage', 'Remove image')}</Button></div> : null}
         </Field>

@@ -11,6 +11,7 @@ export const TabsList = forwardRef<
   return (
     <TabsPrimitive.List
       ref={ref}
+      data-slot="tabs-list"
       className={cn(
         variant === 'underline' &&
           'inline-flex h-10 items-end gap-6',
@@ -62,7 +63,7 @@ export const TabsContent = forwardRef<
   return (
     <TabsPrimitive.Content
       ref={ref}
-      className={cn('mt-4 outline-none', className)}
+      className={cn('mt-4 min-w-0 outline-none', className)}
       {...rest}
     />
   )

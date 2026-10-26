@@ -26,7 +26,7 @@ interface FieldProps {
 
 export function Field({ label, hint, error, htmlFor, children, className }: FieldProps) {
   return (
-    <div className={cn('flex flex-col gap-1.5', className)}>
+    <div className={cn('flex min-w-0 flex-col gap-1.5 [overflow-wrap:anywhere]', className)}>
       {label ? (
         <label
           htmlFor={htmlFor}

@@ -13,6 +13,8 @@ import { cn } from '@/lib/utils'
 import { QuietSurfaceContext } from '@/contexts/quiet-surface'
 import { ButtonDensityContext } from '@/contexts/button-density'
 import { useSurfaceViewport } from '@/hooks/use-app-viewport'
+import { useMobileLayout } from '@/hooks/use-mobile-layout'
+import { MobilePanelSurface } from '@/components/ui/mobile-panel'
 import styles from './settings-layout.module.css'
 
 const tabDefs = [
@@ -72,6 +74,7 @@ export default function SettingsDialog() {
   const close = useSettingsModal((s) => s.close)
   const { t } = useTranslation(['settings', 'common'])
   const viewport = useSurfaceViewport()
+  const mobile = useMobileLayout()
   const compact = viewport.height < 240
   const dialogRef = useRef<HTMLDivElement>(null)
 
@@ -142,8 +145,9 @@ export default function SettingsDialog() {
         >
           <DialogPrimitive.Portal>
             <DialogOverlay />
-            <DialogPrimitive.Content
+            <MobilePanelSurface
               ref={dialogRef}
+              mobilePresentation={mobile ? 'fullscreen' : undefined}
               aria-describedby={undefined}
               data-settings-dialog=""
               data-settings-compact={compact ? 'true' : undefined}
@@ -281,7 +285,7 @@ export default function SettingsDialog() {
                   </RouteFade>
                 </div>
               </div>
-            </DialogPrimitive.Content>
+            </MobilePanelSurface>
           </DialogPrimitive.Portal>
         </DialogPrimitive.Root>
       </QuietSurfaceContext.Provider>

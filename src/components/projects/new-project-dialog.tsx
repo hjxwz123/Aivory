@@ -147,7 +147,7 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
 
   return (
     <Dialog open={open && canCreateProject} onOpenChange={(next) => !creatingRef.current && onOpenChange(next)}>
-      <DialogContent size="lg">
+      <DialogContent size="lg" mobilePresentation="fullscreen">
         <DialogHeader>
           <DialogTitle>{t('projects:create.title')}</DialogTitle>
           <DialogDescription>{t('projects:create.description')}</DialogDescription>

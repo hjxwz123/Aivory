@@ -319,7 +319,10 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
   // the capability policy; management is restricted to workspace admins.
   const [tab, setTab] = useState<'profile' | 'members' | 'invites' | 'policy' | 'announcement' | 'audit' | 'statistics'>('members')
   const viewport = useSurfaceViewport()
-  const compact = viewport.height < 360
+  // Landscape phones have plenty of width but very little vertical room for
+  // the rail, title, member list, and actions at once. Use the mobile
+  // document flow before the list is compressed into an unusable strip.
+  const compact = viewport.height < 520
   const wideNavigation = useMediaQuery('(min-width: 640px)')
   const desktopNavigation = wideNavigation && !compact
   const dialogRef = useRef<HTMLDivElement>(null)

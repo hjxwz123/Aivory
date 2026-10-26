@@ -316,7 +316,7 @@ export default function KnowledgeBasesList() {
       </div>
 
       <Dialog open={open && canUseKnowledgeBases && canCreateKnowledgeBase} onOpenChange={(next) => !creatingRef.current && setOpen(next)}>
-        <DialogContent size="md">
+        <DialogContent size="md" mobilePresentation="fullscreen">
           <DialogHeader>
             <DialogTitle>{t('kb:dialog.title')}</DialogTitle>
             <DialogDescription>{t('kb:dialog.body')}</DialogDescription>

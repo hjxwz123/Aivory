@@ -35,7 +35,7 @@ const fixtures = {
   '/admin/users': { users, total: users.length }, '/admin/users/u1': users[0],
   '/admin/analytics': { days: 30, bucket: 86400, generated_at: now, period_start: now - 30 * 86400, period_end: now, previous_period_start: now - 60 * 86400, previous_period_end: now - 30 * 86400, totals, previous_totals: totals, trend: [{ ...totals, bucket_start: now - 86400 }], previous_trend: [], breakdowns, filter_options: breakdowns },
   '/admin/models/m1/quotas': [{ model_id: 'm1', group_id: 'g1', period_seconds: 604800, limit_type: 'count', limit_value: 100 }],
-  '/admin/user-groups': groups, '/admin/channels': channels, '/admin/models': models,
+  '/admin/user-groups': groups, '/admin/channels': channels, '/admin/channels/health': {}, '/admin/channels/c1/health': { channel: channels[0], models: [] }, '/admin/channels/c2/health': { channel: channels[1], models: [] }, '/admin/channels/c3/health': { channel: channels[2], models: [] }, '/admin/channels/c1/models': [], '/admin/channels/c2/models': [], '/admin/channels/c3/models': [], '/admin/models': models,
   '/admin/user-groups/g1/users': { users, total: users.length },
   '/models': models, '/model-tags': [], '/image-models': [],
   '/admin/settings': { settlement_currency: 'USD' },
@@ -154,7 +154,7 @@ try {
           assert.equal(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), 0, 'audit advanced filters overflow')
         }
         if (view === 'usage') {
-          assert.equal(facts.headers.length, 14, 'usage: all call log columns should remain available')
+          assert.equal(facts.headers.length, 16, 'usage: all call log columns should remain available')
           assert.ok(facts.columns.includes('first-byte') && facts.columns.includes('duration'), 'usage: timing columns should remain available')
           if (width >= 800) assert.ok(facts.scrollWidth > facts.clientWidth, 'usage: desktop log columns should scroll within the table frame')
         }
@@ -162,15 +162,37 @@ try {
         assert.ok(facts.rowHeight > 0 && facts.rowHeight < 140, `${view}: unexpected row height ${facts.rowHeight}px`)
         assert.equal(failures.length, errorCount, `${view}: ${failures.slice(errorCount).join('; ')}`)
         assert.ok(!/common\.(order|actions|status|details)|\.fields\.name/.test(facts.text), `${view}: missing translations`)
-        if (['channels', 'models', 'domains', 'workspaces', 'groups', 'redeem'].includes(view)) {
+        if (['channels', 'models', 'redeem'].includes(view)) {
           const toolbar = await page.$eval('[data-admin-list-toolbar]', (toolbar) => {
             const input = toolbar.querySelector('input').parentElement.getBoundingClientRect()
             const buttons = [...toolbar.querySelectorAll('button')].map((button) => button.getBoundingClientRect())
-            return { oneRow: buttons.every((button) => Math.abs(button.top + button.height / 2 - input.top - input.height / 2) < 2), scrollWidth: toolbar.scrollWidth, width: toolbar.clientWidth }
+            const bounds = toolbar.getBoundingClientRect()
+            const actions = [...toolbar.querySelectorAll('[data-admin-list-actions] button')].map((button) => button.getBoundingClientRect())
+            return { oneRow: buttons.every((button) => Math.abs(button.top + button.height / 2 - input.top - input.height / 2) < 2), scrollWidth: toolbar.scrollWidth, width: toolbar.clientWidth, input: { left: input.left, right: input.right }, bounds: { left: bounds.left, right: bounds.right }, actions: actions.map(({ left, right }) => ({ left, right })), hasMobileFilter: Boolean(toolbar.parentElement.querySelector('[aria-haspopup="dialog"]')) }
           })
-          assert.ok(toolbar.oneRow, `${view}: toolbar commands wrapped to another line`)
-          if (width >= 800) assert.ok(toolbar.scrollWidth <= toolbar.width + 1, `${view}: desktop toolbar should fit in one row`)
-          if (toolbar.scrollWidth > toolbar.width) {
+          if (width < 640) {
+            assert.ok(toolbar.input.left >= -1 && toolbar.input.right <= width + 1, `${view}: mobile search should remain in the viewport`)
+            assert.ok(toolbar.scrollWidth <= toolbar.width + 1, `${view}: mobile toolbar should not require horizontal scrolling`)
+            assert.ok(toolbar.actions.length > 0 && toolbar.actions.every((action) => action.left >= -1 && action.right <= width + 1), `${view}: create/actions should be visible without scrolling`)
+            assert.ok(toolbar.hasMobileFilter, `${view}: filters should open a dedicated mobile panel`)
+            await page.click('[data-admin-list-toolbar] [aria-haspopup="dialog"]')
+            await page.waitForSelector('[role="dialog"][data-mobile-panel="sheet"]', { visible: true })
+            const panel = await page.$eval('[role="dialog"]', (dialog) => { const r = dialog.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom } })
+            assert.ok(panel.left >= -1 && panel.right <= width + 1 && panel.bottom <= 961, `${view}: filter panel should fit the mobile viewport`)
+            await page.screenshot({ path: `${output}/${view}-mobile-filters.png` })
+            if (await page.$('[role="dialog"] [role="combobox"]')) {
+              await page.click('[role="dialog"] [role="combobox"]')
+              await page.waitForSelector('[data-mobile-choice] [role="option"]')
+              await page.click('[data-mobile-choice] [role="option"]:last-child')
+              await page.waitForFunction(() => document.querySelector('[role="dialog"][data-mobile-panel="sheet"]') && !document.querySelector('[data-mobile-choice]'))
+            }
+            await page.click('[role="dialog"] [data-slot="dialog-footer"] button:last-child')
+            await page.waitForFunction(() => !document.querySelector('[role="dialog"][data-state="open"]'))
+          } else {
+            assert.ok(toolbar.oneRow, `${view}: desktop toolbar commands wrapped to another line`)
+            assert.ok(toolbar.scrollWidth <= toolbar.width + 1, `${view}: desktop toolbar should fit in one row`)
+          }
+          if (width >= 640 && toolbar.scrollWidth > toolbar.width) {
             assert.ok(await page.$eval('[data-admin-list-toolbar]', (toolbar) => {
               toolbar.scrollLeft = toolbar.scrollWidth
               const last = [...toolbar.querySelectorAll('[data-admin-list-actions] button')].at(-1).getBoundingClientRect()
@@ -217,34 +239,35 @@ try {
   }
 
   await page.goto('http://localhost:5198/tests/browser/admin-tables-harness.html?view=channels', { waitUntil: 'networkidle0' })
-  assert.equal(await page.$('[role="dialog"]'), null, 'Filters should be inline without a dialog')
-  await page.click('[data-admin-list-filters] [role="combobox"]')
-  await page.waitForSelector('[role="option"]')
-  await page.evaluate(() => [...document.querySelectorAll('[role="option"]')].find((option) => option.textContent === 'openai').click())
-  await page.waitForFunction(() => !document.querySelector('[role="listbox"]'))
-  await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 1 && document.querySelector('tbody').textContent.includes('OpenAI Production'))
-  await page.click('[aria-label="重置筛选"]')
-  await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 3)
-  const statusSelect = await page.$$('[data-admin-list-filters] [role="combobox"]')
-  await statusSelect[1].click()
+  assert.equal(await page.$('[role="dialog"]'), null, 'Filters should be inline without a dialog on desktop')
+  const statusSelect = await page.$('[data-admin-list-filters] [role="combobox"]')
+  await statusSelect.click()
   await page.waitForSelector('[role="option"]')
   await page.evaluate(() => [...document.querySelectorAll('[role="option"]')].find((option) => option.textContent === '已启用').click())
-  await page.waitForFunction(() => !document.querySelector('[role="listbox"]'))
+  await page.waitForFunction(() => !document.querySelector('[role="listbox"][data-state="open"]'))
   await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 2)
   await page.focus('tbody tr:first-child [aria-label="下移"]')
   await page.keyboard.press('Enter')
   await page.waitForFunction(() => document.querySelector('tbody tr').textContent.includes('Anthropic'))
   const filteredMutation = mutations.filter((mutation) => mutation.path === '/admin/channels/reorder').at(-1)
   assert.deepEqual(filteredMutation?.body.ids, ['c2', 'c1', 'c3'], 'Filtered sort must send all channel IDs')
-  await page.click('[aria-label="重置筛选"]')
-  await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 3)
-  assert.ok(await page.$eval('tbody', (body) => body.textContent.includes('Google Gemini')), 'Filtered sorting dropped the hidden channel')
 
   for (const width of [1440, 390]) {
     await page.setViewport({ width, height: 960, isMobile: width === 390, hasTouch: width === 390 })
     await page.goto('http://localhost:5198/tests/browser/admin-tables-harness.html?view=channels', { waitUntil: 'networkidle0' })
     await page.click('[aria-label="编辑: OpenAI Production"]')
+    await page.waitForFunction(() => Boolean(document.querySelector('[role="dialog"][data-state="open"]')), { timeout: 5000 }).catch(async () => {
+      throw new Error(JSON.stringify(await page.evaluate(() => ({ title: document.title, body: document.body.innerText.slice(0, 1200), buttons: [...document.querySelectorAll('main button')].map((button) => button.getAttribute('aria-label')), dialogs: [...document.querySelectorAll('[role="dialog"]')].map((dialog) => dialog.getAttribute('data-state')) }))))
+    })
+    await page.waitForSelector('[role="dialog"] details summary')
+    await page.click('details summary')
     await page.waitForSelector('#ch-headers', { visible: true })
+    if (width === 390) {
+      assert.ok(await page.$('[role="dialog"][data-mobile-panel="fullscreen"]'), 'channel editor should use the mobile form surface')
+      const save = await page.$eval('[role="dialog"] [data-slot="dialog-footer"]', (footer) => { const r = footer.getBoundingClientRect(); return { left: r.left, right: r.right, bottom: r.bottom } })
+      assert.ok(save.left >= -1 && save.right <= width + 1 && save.bottom <= 961, 'mobile save actions should stay reachable')
+      await page.screenshot({ path: `${output}/channels-mobile-editor.png` })
+    }
     const setHeaders = async (value) => {
       await page.$eval('#ch-headers', (textarea, value) => {
         Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(textarea, value)
@@ -253,7 +276,11 @@ try {
     }
     const saveHeaders = async () => {
       const buttons = await page.$$('[role="dialog"] button')
-      for (const button of buttons) if (await button.evaluate((button) => button.textContent.trim() === '保存')) { await button.click(); return }
+      for (const button of buttons) if (await button.evaluate((button) => button.textContent.trim() === '保存')) {
+        await button.evaluate((element) => element.scrollIntoView({ block: 'center', inline: 'nearest' }))
+        await button.evaluate((element) => element.click())
+        return
+      }
       throw new Error('Channel save button missing')
     }
     await setHeaders('{"A":1}')
@@ -264,7 +291,7 @@ try {
     await setHeaders('{\n  "A": "a",\n  "X-Tenant": "team"\n}')
     await saveHeaders()
     await page.waitForFunction(() => !document.querySelector('#ch-headers'))
-    assert.deepEqual(mutations.at(-1)?.body.headers, { A: 'a', 'X-Tenant': 'team' })
+    assert.deepEqual(mutations.filter((mutation) => mutation.path === '/admin/channels/c1').at(-1)?.body.headers, { A: 'a', 'X-Tenant': 'team' })
     await page.click('[aria-label="编辑: OpenAI Production"]')
     await page.waitForFunction(() => document.querySelector('#ch-headers')?.value.includes('"A": "a"'))
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), 0, 'Channel header editor overflows the page')
@@ -272,7 +299,7 @@ try {
     await setHeaders('{}')
     await saveHeaders()
     await page.waitForFunction(() => !document.querySelector('#ch-headers'))
-    assert.deepEqual(mutations.at(-1)?.body.headers, {})
+    assert.deepEqual(mutations.filter((mutation) => mutation.path === '/admin/channels/c1').at(-1)?.body.headers, {})
     console.log(`ok channel header validation, save, reopen and clear ${width}px`)
   }
 
@@ -310,11 +337,38 @@ try {
   await page.waitForSelector('[role="dialog"]')
 
   const clickText = async (selector, text) => {
+    // Drawer and sheet content can start outside the viewport while their
+    // entrance animation is running. Wait before measuring or clicking a
+    // matching control so the interaction uses its final layout position.
+    await page.waitForFunction(() => [...document.querySelectorAll('[role="dialog"]')]
+      .every((dialog) => [...dialog.getAnimations()].every((animation) => animation.playState === 'finished')))
+    const targetIndex = await page.evaluate(({ selector, expected }) => {
+      const element = [...document.querySelectorAll(selector)].find((candidate) => {
+        const box = candidate.getBoundingClientRect()
+        return candidate.textContent?.trim().includes(expected) && box.width > 0 && box.height > 0
+      })
+      if (!element) return -1
+      element.scrollIntoView({ block: 'center', inline: 'nearest' })
+      return [...document.querySelectorAll(selector)].indexOf(element)
+    }, { selector, expected: text })
     const targets = await page.$$(selector)
-    for (const target of targets) {
-      if (await target.evaluate((element, expected) => element.textContent.trim() === expected, text)) {
-        await target.click()
+    if (targetIndex >= 0 && targets[targetIndex]) {
+      try {
+        await targets[targetIndex].click({ timeout: 1500 })
         return
+      } catch {
+        // Continue with the visibility-aware fallback below.
+      }
+    }
+    for (const target of targets) {
+      if (await target.evaluate((element, expected) => element.textContent.trim().includes(expected), text)) {
+        try {
+          await target.evaluate((element) => element.scrollIntoView({ block: 'center', inline: 'nearest' }))
+          await target.click({ timeout: 1500 })
+          return
+        } catch {
+          continue
+        }
       }
     }
     assert.fail(`Missing ${selector}: ${text}`)

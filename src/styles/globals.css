@@ -4,6 +4,7 @@
 @import './admin-forms.css';
 @import './product-surfaces.css';
 @import './viewport-surfaces.css';
+@import './mobile-components.css';
 @import 'tailwindcss';
 
 /* Tailwind v4 needs to know what files to scan for class names. */

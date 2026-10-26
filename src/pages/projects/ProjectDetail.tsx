@@ -1116,7 +1116,7 @@ function AddFileDialog({
       if (!next) uploadController.current?.abort()
       onOpenChange(next)
     }}>
-      <DialogContent size="md">
+      <DialogContent size="md" mobilePresentation="fullscreen">
         <DialogHeader>
           <DialogTitle>{t('projects:detail.filesAddTitle', { name: projectName })}</DialogTitle>
           <DialogDescription>{t('projects:detail.filesAddDescription')}</DialogDescription>

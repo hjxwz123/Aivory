@@ -1,10 +1,12 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { RotateCcw, Search, X } from 'lucide-react'
+import { Filter, RotateCcw, Search, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tooltip } from '@/components/ui/tooltip'
+import { useMobileLayout } from '@/hooks/use-mobile-layout'
+import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 interface AdminListToolbarProps {
   search: string
@@ -18,26 +20,53 @@ interface AdminListToolbarProps {
 
 export function AdminListToolbar({ search, onSearchChange, placeholder, filters, activeFilterCount = 0, onResetFilters, actions }: AdminListToolbarProps) {
   const { t } = useTranslation('admin')
+  const mobile = useMobileLayout()
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const searchInput = (wrapperClassName: string) => <Input
+    type="search"
+    value={search}
+    onChange={(event) => onSearchChange(event.target.value)}
+    placeholder={placeholder}
+    aria-label={placeholder}
+    leadingIcon={<Search size={15} aria-hidden />}
+    wrapperClassName={wrapperClassName}
+    className="min-w-0 text-[13px] [&::-webkit-search-cancel-button]:appearance-none"
+    trailingSlot={search ? (
+      <Tooltip content={t('listToolbar.clearSearch')}>
+        <Button size="icon-sm" variant="ghost" aria-label={t('listToolbar.clearSearch')} onClick={() => onSearchChange('')}>
+          <X size={14} aria-hidden />
+        </Button>
+      </Tooltip>
+    ) : null}
+  />
+  if (mobile) return <>
+    <div data-admin-list-toolbar role="search" aria-label={placeholder} className="mt-5 grid min-w-0 gap-2">
+      {searchInput('h-11 w-full min-w-0 rounded-[8px] px-3')}
+      <div className="flex min-w-0 items-center gap-2">
+        {filters ? <Button variant="secondary" size="sm" className="h-11 shrink-0" aria-haspopup="dialog" aria-expanded={filtersOpen} onClick={() => setFiltersOpen(true)}>
+          <Filter size={15} aria-hidden />{t('listToolbar.filter')}
+          {activeFilterCount > 0 ? <span className="ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--color-accent)] px-1.5 text-xs text-white">{activeFilterCount}</span> : null}
+        </Button> : null}
+        {actions ? <div data-admin-list-actions className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2 [&_button]:min-h-11 [&_button]:max-w-full [&_button]:rounded-[8px] [&_button[data-button-size=sm]]:px-3 [&_button[data-button-size=sm]]:text-[13px]">{actions}</div> : null}
+      </div>
+    </div>
+    {filters ? <Dialog open={filtersOpen} onOpenChange={setFiltersOpen}>
+      <DialogContent mobilePresentation="sheet" size="md" aria-describedby={undefined}>
+        <DialogHeader><DialogTitle>{t('listToolbar.filter')}</DialogTitle></DialogHeader>
+        <DialogBody className="grid content-start gap-4 py-3">
+          {filters}
+        </DialogBody>
+        <DialogFooter>
+          {onResetFilters ? <Button className="mr-auto" variant="ghost" disabled={!activeFilterCount} onClick={onResetFilters}>{t('listToolbar.resetFilters')}</Button> : null}
+          <Button variant="secondary" onClick={() => setFiltersOpen(false)}>{t('common:done')}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog> : null}
+  </>
   return (
     <div data-admin-list-toolbar role="search" aria-label={placeholder} className="mt-5 max-w-full overflow-x-auto pb-1">
       <div className="flex w-max min-w-full items-center gap-2">
-        <Input
-          type="search"
-          value={search}
-          onChange={(event) => onSearchChange(event.target.value)}
-          placeholder={placeholder}
-          aria-label={placeholder}
-          leadingIcon={<Search size={15} aria-hidden />}
-          wrapperClassName="h-9 w-60 min-w-60 max-w-md flex-1 rounded-[8px] px-3 max-sm:h-11"
-          className="min-w-0 text-[13px] [&::-webkit-search-cancel-button]:appearance-none"
-          trailingSlot={search ? (
-            <Tooltip content={t('listToolbar.clearSearch')}>
-              <Button size="icon-sm" variant="ghost" aria-label={t('listToolbar.clearSearch')} onClick={() => onSearchChange('')}>
-                <X size={14} aria-hidden />
-              </Button>
-            </Tooltip>
-          ) : null}
-        />
+        {searchInput('h-9 w-60 min-w-60 max-w-md flex-1 rounded-[8px] px-3 max-sm:h-11')}
         {filters ? (
           <div data-admin-list-filters className="flex shrink-0 items-center gap-2">
             {filters}

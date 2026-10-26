@@ -23,6 +23,7 @@ import SettingsLayout from '@/pages/settings/SettingsLayout'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Sheet, SheetBody, SheetClose, SheetContent, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { useAppViewport } from '@/hooks/use-app-viewport'
 import { useCommandMenu } from '@/hooks/use-command-menu'
@@ -46,7 +47,7 @@ import {
   LONG_SPREADSHEET_LAST_ROW,
 } from './mobile-office-fixtures'
 
-type Mode = 'sheet' | 'password' | 'command' | 'filters' | 'welcome' | 'fullscreen' | 'office' | 'formula' | 'composer' | 'settings' | 'conversations' | 'mask' | 'workspace' | 'template'
+type Mode = 'sheet' | 'password' | 'command' | 'filters' | 'welcome' | 'fullscreen' | 'office' | 'formula' | 'composer' | 'settings' | 'conversations' | 'mask' | 'workspace' | 'template' | 'select'
 type OfficeFile = 'docx' | 'pptx' | 'xlsx' | 'long-xlsx' | 'invalid' | 'text'
 interface SimulatedViewport {
   left: number
@@ -57,7 +58,7 @@ interface SimulatedViewport {
 }
 
 const query = new URLSearchParams(location.search)
-const modes: Mode[] = ['sheet', 'password', 'command', 'filters', 'welcome', 'fullscreen', 'office', 'formula', 'composer', 'settings', 'conversations', 'mask', 'workspace', 'template']
+const modes: Mode[] = ['sheet', 'password', 'command', 'filters', 'welcome', 'fullscreen', 'office', 'formula', 'composer', 'settings', 'conversations', 'mask', 'workspace', 'template', 'select']
 const requestedMode = query.get('mode') as Mode | null
 const mode: Mode = requestedMode && modes.includes(requestedMode) ? requestedMode : 'sheet'
 const officeFiles: OfficeFile[] = ['docx', 'pptx', 'xlsx', 'long-xlsx', 'invalid', 'text']
@@ -65,6 +66,7 @@ const requestedFile = query.get('file') as OfficeFile | null
 let activeFile: OfficeFile = requestedFile && officeFiles.includes(requestedFile) ? requestedFile : 'docx'
 let mounted = false
 let fontsReady = false
+let selectedChoice = 'choice-1'
 const errors: string[] = []
 const objectUrls = new Set<string>()
 const TEXT_END = 'END-TEXT-LINE-240'
@@ -270,12 +272,14 @@ function ready() {
   if (mode === 'mask') return Boolean(document.querySelector('[role="dialog"] canvas'))
   if (mode === 'workspace') return Boolean(document.querySelector('[data-workspace-management-scroll] li'))
   if (mode === 'template') return Boolean(document.querySelector('[data-template-list] button, [data-template-error]'))
+  if (mode === 'select') return Boolean(document.querySelector('[data-slot="select-trigger"]'))
   return Boolean(document.querySelector('[data-slot="sheet-content"], [data-slot="dialog-content"]'))
 }
 
 const audit = {
   mode,
   get file() { return activeFile },
+  get selectedChoice() { return selectedChoice },
   get ready() { return ready() },
   get officeReady() { return officeReady() },
   errors,
@@ -392,6 +396,19 @@ function TemplateFixture() {
   </DialogContent></Dialog>
 }
 
+function SelectFixture() {
+  const [value, setValue] = useState('choice-1')
+  return <div className="w-full max-w-sm p-4">
+    <label className="mb-2 block text-sm font-medium" id="mobile-choice-label">Long model choice</label>
+    <Select value={value} onValueChange={(next) => { setValue(next); selectedChoice = next }}>
+      <SelectTrigger aria-labelledby="mobile-choice-label"><SelectValue /></SelectTrigger>
+      <SelectContent>
+        {Array.from({ length: 24 }, (_, index) => <SelectItem key={index} value={`choice-${index + 1}`}>Model {index + 1}: {'A very long provider and deployment name '.repeat(2)}</SelectItem>)}
+      </SelectContent>
+    </Select>
+  </div>
+}
+
 function Harness() {
   useAppViewport()
   useEffect(() => {
@@ -412,6 +429,7 @@ function Harness() {
     {mode === 'mask' ? <MaskFixture /> : null}
     {mode === 'workspace' ? <WorkspaceMembersDialog open onOpenChange={() => {}} /> : null}
     {mode === 'template' ? <TemplateFixture /> : null}
+    {mode === 'select' ? <SelectFixture /> : null}
     {mode === 'office' ? <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden"><main className="min-h-0 min-w-0 flex-1" aria-label="Conversation" /><ArtifactPanel /></div> : null}
     {mode === 'composer' ? <ComposerFixture /> : null}
   </div>

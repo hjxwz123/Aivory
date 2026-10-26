@@ -33,6 +33,7 @@ import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip } from '@/components/ui/tooltip'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   Dialog,
   DialogBody,
@@ -884,19 +885,24 @@ export default function AdminBackup() {
                 {backupDirectory && <code className="mt-1 block break-all text-[var(--color-fg)]">{backupDirectory}</code>}
               </p>
               <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
-                <select
+                <Select
                   value={serverArchiveName}
-                  onChange={(event) => { setServerArchiveName(event.target.value); setImportError(null); setResult(null) }}
+                  onValueChange={(value) => { setServerArchiveName(value); setImportError(null); setResult(null) }}
                   disabled={fullBackupBusy || refreshingArchives || loadingExports}
-                  aria-label={t('admin:backup.import.serverChoose')}
-                  aria-describedby="backup-server-hint"
-                  className="h-10 min-h-10 w-full min-w-0 shrink-0 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface-sunken)] px-3 text-sm text-[var(--color-fg)] focus:border-[var(--color-border-strong)] focus:outline-none disabled:opacity-50 sm:flex-1"
                 >
-                  <option value="">{t(loadingExports ? 'admin:backup.export.loading' : serverArchives.length ? 'admin:backup.import.serverChoose' : 'admin:backup.import.serverEmpty')}</option>
+                  <SelectTrigger
+                    aria-label={t('admin:backup.import.serverChoose')}
+                    aria-describedby="backup-server-hint"
+                    className="h-10 min-h-10 min-w-0 shrink-0 sm:flex-1"
+                  >
+                    <SelectValue placeholder={t(loadingExports ? 'admin:backup.export.loading' : serverArchives.length ? 'admin:backup.import.serverChoose' : 'admin:backup.import.serverEmpty')} />
+                  </SelectTrigger>
+                  <SelectContent>
                   {serverArchives.map((archive) => (
-                    <option key={archive.name} value={archive.name}>{archive.name} · {formatBytes(archive.size_bytes)}</option>
+                    <SelectItem key={archive.name} value={archive.name}>{archive.name} · {formatBytes(archive.size_bytes)}</SelectItem>
                   ))}
-                </select>
+                  </SelectContent>
+                </Select>
                 <Button size="sm" variant="secondary" loading={refreshingArchives} disabled={fullBackupBusy || loadingExports} onClick={() => void onRefreshServerArchives()} leadingIcon={<RefreshCw size={14} aria-hidden />}>
                   {t('admin:backup.import.serverRefresh')}
                 </Button>

@@ -228,7 +228,7 @@ export default function AdminAnnouncement({ embedded = false }: { embedded?: boo
                   <Button
                     type="button"
                     variant="secondary"
-                    size="sm"
+                    size="md"
                     loading={uploading}
                     leadingIcon={<Upload size={13} aria-hidden />}
                     onClick={() => fileRef.current?.click()}
