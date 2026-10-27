@@ -155,7 +155,7 @@
 | `AIVORY_RAG_EMBEDDING_RETRY_DELAY_3` | `duration` | `1000*time.Millisecond` | `rag/embedder_http.go:52` | 为每次嵌入重试退避延迟添加的随机抖动范围，用于打散并发批次的同步性。 |
 | `AIVORY_RAG_DASH_SCOPE_EMBED_CONCURRENCY` | `int` | `2` | `rag/embedder_http.go:179` | 当供应商为 DashScope 时，每个文档并发的上游嵌入批次数上限。 |
 | `AIVORY_RAG_DASH_SCOPE_GLOBAL_EMBED_CONCURRENCY` | `int` | `2` | `rag/embedder_http.go:180` | 进程级并发 DashScope 嵌入请求数上限（共享槽位信号量的容量）。 |
-| `AIVORY_RAG_DASH_SCOPE_EMBED_ATTEMPT_TIMEOUT` | `duration` | `60*time.Second` | `rag/embedder_http.go:188` | DashScope 嵌入调用的单次尝试请求超时，设在客户端 3 分钟上限之下，使卡住的调用可见地失败。 |
+| `AIVORY_RAG_DASH_SCOPE_EMBED_ATTEMPT_TIMEOUT` | `duration` | `60*time.Second` | `rag/embedder_http.go:188` | DashScope 嵌入调用的单次尝试请求超时，从取得本地并发名额后开始计时。传输层另有 30 秒响应头超时，调大此配置不会延长该限制。响应头或网络错误可以重试；单次尝试预算耗尽则立即结束该批次。 |
 | `AIVORY_RAG_EMBED_CONCURRENCY` | `int` | `4` | `rag/embedder_http.go:194` | 非 DashScope 供应商每个文档并发的上游嵌入批次数上限。 |
 | `AIVORY_RAG_MAX_ATTEMPTS` | `int` | `2` | `rag/embedder_http.go:445` | 单个嵌入批次 POST 在放弃前的最大尝试次数（瞬时失败时带退避重试）。 |
 | `AIVORY_RAG_PDF_INSPECTION_TIMEOUT` | `duration` | `8*time.Second` | `rag/parser.go:56` | 父进程对子进程 PDF 文本层检测探针强制施加的截止时间，到期即将其杀掉。 |

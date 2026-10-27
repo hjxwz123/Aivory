@@ -179,6 +179,9 @@ func TestDashScopeRequestTimeoutDoesNotRetrySameHungRequest(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "did not return a response within") {
 		t.Fatalf("err = %v, want bounded timeout", err)
 	}
+	if !strings.Contains(err.Error(), "after 1 attempt:") {
+		t.Fatalf("err = %v, want actual attempt count", err)
+	}
 	if got := atomic.LoadInt32(&hits); got != 1 {
 		t.Fatalf("request hits = %d, want no retry after a hung provider request", got)
 	}

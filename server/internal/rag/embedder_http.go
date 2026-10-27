@@ -469,6 +469,7 @@ func (e *httpEmbedder) diagnosticsBody(texts []string) string {
 // unsupported dimension) are returned immediately — retrying won't help.
 func (e *httpEmbedder) postEmbeddings(ctx context.Context, url string, body []byte) (embeddingResponse, error) {
 	maxAttempts := envcfg.Int("AIVORY_RAG_MAX_ATTEMPTS", 2)
+	attempts := 0
 	var parsed embeddingResponse
 	var lastErr error
 	var retryAfter string
@@ -488,14 +489,8 @@ func (e *httpEmbedder) postEmbeddings(ctx context.Context, url string, body []by
 			case <-timer.C:
 			}
 		}
-		reqCtx := ctx
-		cancelReq := func() {}
-		if timeout := e.requestTimeout(); timeout > 0 {
-			reqCtx, cancelReq = context.WithTimeout(ctx, timeout)
-		}
-		req, err := http.NewRequestWithContext(reqCtx, "POST", url, bytes.NewReader(body))
+		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 		if err != nil {
-			cancelReq()
 			return parsed, err
 		}
 		req.Header.Set("authorization", "Bearer "+e.apiKey)
@@ -503,18 +498,29 @@ func (e *httpEmbedder) postEmbeddings(ctx context.Context, url string, body []by
 		requestheaders.Apply(req, e.headers)
 		release, err := e.acquireProviderSlot(ctx)
 		if err != nil {
-			cancelReq()
 			return parsed, err
 		}
+		// Local queueing is bounded by the caller's context, not the provider's
+		// attempt timeout. Start that budget only after a slot is available.
+		reqCtx := ctx
+		cancelReq := func() {}
+		if timeout := e.requestTimeout(); timeout > 0 {
+			reqCtx, cancelReq = context.WithTimeout(ctx, timeout)
+			req = req.WithContext(reqCtx)
+		}
+		attempts++
 		resp, err := client.Do(req)
 		if err != nil {
+			// Capture the cause before cleanup: cancelReq itself makes Err return
+			// context.Canceled, even for a retryable header/TLS/network timeout.
+			requestErr := reqCtx.Err()
 			release()
 			cancelReq()
 			// Don't retry if the caller cancelled / timed out the context.
 			if ctx.Err() != nil {
 				return parsed, ctx.Err()
 			}
-			if reqCtx.Err() != nil {
+			if errors.Is(requestErr, context.DeadlineExceeded) {
 				lastErr = fmt.Errorf("embedding provider did not return a response within %s: %w", e.requestTimeout().Round(time.Second), err)
 				break
 			}
@@ -551,7 +557,11 @@ func (e *httpEmbedder) postEmbeddings(ctx context.Context, url string, body []by
 	if lastErr == nil {
 		lastErr = errors.New("unknown error")
 	}
-	return parsed, fmt.Errorf("embeddings request failed after %d attempts: %w", maxAttempts, lastErr)
+	attemptLabel := "attempts"
+	if attempts == 1 {
+		attemptLabel = "attempt"
+	}
+	return parsed, fmt.Errorf("embeddings request failed after %d %s: %w", attempts, attemptLabel, lastErr)
 }
 
 func totalTextChars(texts []string) int {
