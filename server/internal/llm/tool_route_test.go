@@ -221,8 +221,10 @@ func TestAutoToolRouteYesNoAndFailOpen(t *testing.T) {
 			if gotHostedTools != tc.wantTools {
 				t.Fatalf("main hosted tools present = %v, want %v", gotHostedTools, tc.wantTools)
 			}
-			if len(provider.taskRequests) != 1 || !strings.Contains(renderBlocksAsText(provider.taskRequests[0].History[0].Blocks), "CAP=web,code,file,skill") {
-				t.Fatalf("automatic classifier did not receive compact capability flags: %+v", provider.taskRequests)
+			if len(provider.taskRequests) != 1 ||
+				!strings.Contains(renderBlocksAsText(provider.taskRequests[0].History[0].Blocks), "User request: Give me the answer") ||
+				!strings.Contains(provider.taskRequests[0].SystemPrompt, "Available tools and their purposes:") {
+				t.Fatalf("automatic classifier did not receive the request and available tool descriptions: %+v", provider.taskRequests)
 			}
 		})
 	}
@@ -1087,7 +1089,7 @@ func TestToolRoutePromptUsesOnlyCompactCurrentTurnSignals(t *testing.T) {
 	}
 	request := provider.taskRequests[0]
 	prompt := request.History[0].Blocks[0].Text
-	for _, want := range []string{"CAP=web,skill", "ATT=none", "FILES=1", "INPUT=Prepare version two"} {
+	for _, want := range []string{"Uploaded images: false", "Uploaded files: false", "Attachment types: none", "Conversation files available: true", "User request: Prepare version two"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("tool-route prompt missing %q: %s", want, prompt)
 		}
@@ -1099,6 +1101,16 @@ func TestToolRoutePromptUsesOnlyCompactCurrentTurnSignals(t *testing.T) {
 	} {
 		if strings.Contains(prompt, absent) {
 			t.Fatalf("tool-route prompt leaked unavailable/private value %q: %s", absent, prompt)
+		}
+	}
+	for _, want := range []string{"aivory_web_search: Searches", "use_skill: Loads"} {
+		if !strings.Contains(request.SystemPrompt, want) {
+			t.Fatalf("tool-route instructions missing available tool purpose %q: %s", want, request.SystemPrompt)
+		}
+	}
+	for _, absent := range []string{"python_execute", "PRIVATE_FULL_SKILL_INSTRUCTIONS", "ROUTE_SECRET_FILE.py"} {
+		if strings.Contains(request.SystemPrompt, absent) {
+			t.Fatalf("tool-route instructions leaked unavailable/private value %q: %s", absent, request.SystemPrompt)
 		}
 	}
 	wantRouteParams := json.RawMessage(`{"temperature":0.9,"reasoning":{"effort":"high"}}`)

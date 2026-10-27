@@ -120,8 +120,8 @@ func TestDecisionPolicyWorkflows(t *testing.T) {
 		t.Fatal("confident search-only route retained all tools")
 	}
 	confidence = 0.7
-	if !route() {
-		t.Fatal("uncertain route narrowed tools")
+	if route() {
+		t.Fatal("confidence overrode the search-only choice")
 	}
 	confidence, choice = 0.95, "full_tools"
 	if !route() {

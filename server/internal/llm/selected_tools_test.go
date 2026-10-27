@@ -401,11 +401,11 @@ func TestAutomaticRouterReceivesOnlySelectedCandidates(t *testing.T) {
 	if len(provider.taskRequests) != 1 {
 		t.Fatalf("task requests=%d, want 1", len(provider.taskRequests))
 	}
-	prompt := provider.taskRequests[0].History[0].Blocks[0].Text
-	if !strings.Contains(prompt, "custom:mcp_train_lookup") {
-		t.Fatalf("router did not receive selected MCP capability: %s", prompt)
+	prompt := provider.taskRequests[0].SystemPrompt
+	if !strings.Contains(prompt, "mcp_train_lookup:") {
+		t.Fatalf("router did not receive selected MCP tool: %s", prompt)
 	}
-	for _, forbidden := range []string{"CAP=web", "CAP=code", "mcp_paper_search"} {
+	for _, forbidden := range []string{"aivory_web_search:", "python_execute:", "mcp_paper_search"} {
 		if strings.Contains(prompt, forbidden) {
 			t.Fatalf("router received unselected capability %q: %s", forbidden, prompt)
 		}

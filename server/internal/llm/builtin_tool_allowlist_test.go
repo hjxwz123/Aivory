@@ -424,11 +424,11 @@ func TestAutoRouterCandidatesExcludeUnavailableToolsAndSkills(t *testing.T) {
 	if len(provider.taskRequests) != 1 {
 		t.Fatalf("task requests=%d", len(provider.taskRequests))
 	}
-	prompt := provider.taskRequests[0].History[0].Blocks[0].Text
-	if !strings.Contains(prompt, "CAP=web") {
-		t.Fatalf("router lost allowed capability: %s", prompt)
+	prompt := provider.taskRequests[0].SystemPrompt
+	if !strings.Contains(prompt, "aivory_web_search: Searches") {
+		t.Fatalf("router lost allowed tool description: %s", prompt)
 	}
-	for _, forbidden := range []string{"aivory_web_search", "python_execute", "use_skill", "skill:private-skill", "Must not become a route candidate"} {
+	for _, forbidden := range []string{"python_execute", "use_skill", "skill:private-skill", "Must not become a route candidate"} {
 		if strings.Contains(prompt, forbidden) {
 			t.Fatalf("router included unavailable %q: %s", forbidden, prompt)
 		}

@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -93,20 +94,22 @@ func (o *Orchestrator) autoTurnNeedsTools(
 	}
 
 	prompt := formatToolRoutePrompt(capabilities, attachmentKinds, len(files) > 0, req.UserText)
+	toolDescriptions := toolRouteToolDescriptions(localTools, hostedNames, hostedRequests)
 	routeCtx, cancel := context.WithTimeout(ctx, toolRouteTimeout)
 	defer cancel()
 	if model := o.task.policyDecisionModel(routeCtx, "tool_route_model_id"); model != nil {
 		full, err := o.task.decisionToolScope(routeCtx, model, prompt, typesafe.Metadata{
 			UserID: req.UserID, ConversationID: req.ConversationID, MessageID: messageID, WorkspaceID: workspaceID,
-		})
+		}, toolDescriptions)
 		return err != nil || full
 	}
 	decision, err := o.task.Run(routeCtx, TaskToolRoute, prompt, RunOpts{
-		UserID:          req.UserID,
-		ConversationID:  req.ConversationID,
-		MessageID:       messageID,
-		WorkspaceID:     workspaceID,
-		MaxOutputTokens: toolRouteMaxOutputTokens,
+		UserID:                    req.UserID,
+		ConversationID:            req.ConversationID,
+		MessageID:                 messageID,
+		WorkspaceID:               workspaceID,
+		MaxOutputTokens:           toolRouteMaxOutputTokens,
+		ToolRouteToolDescriptions: toolDescriptions,
 	})
 	if err != nil {
 		return true
@@ -355,21 +358,91 @@ func toolRouteIsContinuation(input string) bool {
 	return false
 }
 
-func formatToolRoutePrompt(capabilities, attachmentKinds []string, hasFiles bool, input string) string {
-	if len(capabilities) == 0 {
-		capabilities = []string{"none"}
+func toolRouteInstructions(toolDescriptions string) string {
+	instructions := "Does fulfilling the user request require an available tool beyond web search? " +
+		"Use the attachment context to interpret the request. Existing knowledge and reasoning do not require tools; " +
+		"the presence of uploads alone does not require full tools. Judge necessary operations, not difficulty or optional benefits."
+	if toolDescriptions != "" {
+		instructions += "\nAvailable tools and their purposes:\n" + toolDescriptions
 	}
-	if len(attachmentKinds) == 0 {
-		attachmentKinds = []string{"none"}
+	return instructions
+}
+
+func toolRouteToolDescriptions(localTools []ToolDef, hostedNames []string, hostedRequests []json.RawMessage) string {
+	seen := map[string]bool{}
+	var descriptions []string
+	add := func(name, description string) {
+		name = strings.TrimSpace(name)
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		switch normalized := strings.ToLower(name); {
+		case normalized == toolnames.AivoryWebSearch, normalized == "web_search", strings.HasPrefix(normalized, "web_search_"), normalized == "google_search", normalized == "googlesearch":
+			description = "Searches the web and returns result snippets."
+		case normalized == "web_fetch", normalized == "url_context":
+			description = "Reads the full content of web pages."
+		case normalized == "fetch_image":
+			description = "Retrieves existing images from URLs."
+		case normalized == "python_execute", normalized == "code_interpreter":
+			description = "Runs Python scripts to analyze data, process uploaded files, and generate downloadable files."
+		case normalized == "shell", normalized == "bash":
+			description = "Runs shell commands and scripts to process data and create or modify files."
+		case normalized == "image_generate", normalized == "image_generation":
+			description = "Generates new images or edits supplied images."
+		case normalized == "save_memory":
+			description = "Stores durable user facts and preferences for future conversations."
+		case normalized == "use_skill", strings.HasPrefix(normalized, "skill:"):
+			description = "Loads a named skill's instructions for a specialized workflow."
+		case normalized == "file_search", strings.HasPrefix(normalized, "file_search_"):
+			description = "Searches indexed files and retrieves relevant document content."
+		case normalized == "computer_use":
+			description = "Interacts with a computer or browser to perform external actions."
+		default:
+			description = truncate(strings.Join(strings.Fields(description), " "), 180)
+			if description == "" {
+				description = "Invokes this configured external tool."
+			}
+		}
+		descriptions = append(descriptions, "- "+name+": "+description)
 	}
-	files := "0"
-	if hasFiles {
-		files = "1"
+	for _, tool := range localTools {
+		add(tool.Name, tool.Description)
 	}
-	return "CAP=" + strings.Join(capabilities, ",") +
-		"\nATT=" + strings.Join(attachmentKinds, ",") +
-		"\nFILES=" + files +
-		"\nINPUT=" + truncateToolRouteInput(input)
+	for index, name := range hostedNames {
+		var requestNames []string
+		if index < len(hostedRequests) {
+			for requestName := range unifiedToolNameSet(nil, nil, []json.RawMessage{hostedRequests[index]}) {
+				requestNames = append(requestNames, requestName)
+			}
+		}
+		if len(requestNames) == 0 {
+			add(name, "")
+			continue
+		}
+		sort.Strings(requestNames)
+		for _, requestName := range requestNames {
+			add(requestName, "")
+		}
+	}
+	return strings.Join(descriptions, "\n")
+}
+
+func formatToolRoutePrompt(_ []string, attachmentKinds []string, hasFiles bool, input string) string {
+	hasImages, hasUploadedFiles := false, false
+	for _, kind := range attachmentKinds {
+		if kind == "image" {
+			hasImages = true
+		} else {
+			hasUploadedFiles = true
+		}
+	}
+	kinds := "none"
+	if len(attachmentKinds) > 0 {
+		kinds = strings.Join(attachmentKinds, ", ")
+	}
+	return fmt.Sprintf("Uploaded images: %t\nUploaded files: %t\nAttachment types: %s\nConversation files available: %t\nUser request: %s",
+		hasImages, hasUploadedFiles, kinds, hasFiles, truncateToolRouteInput(input))
 }
 
 func truncateToolRouteInput(input string) string {
