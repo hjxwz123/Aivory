@@ -359,9 +359,10 @@ func toolRouteIsContinuation(input string) bool {
 }
 
 func toolRouteInstructions(toolDescriptions string) string {
-	instructions := "Does fulfilling the user request require an available tool beyond web search? " +
-		"Use the attachment context to interpret the request. Existing knowledge and reasoning do not require tools; " +
-		"the presence of uploads alone does not require full tools. Judge necessary operations, not difficulty or optional benefits."
+	instructions := "Choose search_only whenever a direct text response or web search can fully satisfy the user request. " +
+		"Choose full_tools only when fulfilling the requested outcome requires actually executing a non-search tool. " +
+		"Knowledge, explanations, and reasoning can be delivered directly as text. " +
+		"Judge the user's requested outcome, not the presence of tools or uploads; their availability alone does not require their use."
 	if toolDescriptions != "" {
 		instructions += "\nAvailable tools and their purposes:\n" + toolDescriptions
 	}

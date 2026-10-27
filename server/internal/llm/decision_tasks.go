@@ -135,8 +135,8 @@ func (t *TaskLLM) decisionToolScope(ctx context.Context, model *store.Model, inp
 	meta.Purpose = string(TaskToolRoute)
 	result, err := t.RunDecision(ctx, model.ID, typesafe.Request{State: input, Questions: map[string]typesafe.Question{
 		"scope": typesafe.NewChoice(toolRouteInstructions(strings.Join(toolDescriptions, "\n")), map[string]any{
-			"search_only": "No. A direct answer or web search is sufficient.",
-			"full_tools":  "Yes. An external operation beyond web search is required.",
+			"search_only": "The request can be fully satisfied with a text response using existing knowledge, reasoning, conversation content, or web search. No other tool operation is required.",
+			"full_tools":  "The requested outcome requires actually executing an available tool other than web search. A direct text response or web search alone cannot complete the requested operation.",
 		}),
 	}}, typesafe.Options{Metadata: meta, Timeout: toolRouteTimeout})
 	if err != nil {

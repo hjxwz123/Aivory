@@ -1343,7 +1343,7 @@ func defaultSystem(kind TaskKind, jsonOutput bool) string {
 			" Write the queries in the language most likely to have good results for the topic." +
 			` Reply with strict JSON only: {"queries":["...","..."]}.`
 	case TaskToolRoute:
-		return toolRouteInstructions("") + " Reply 0 if a direct answer or web search is sufficient; reply 1 only if an available tool beyond web search is required. Reply only 0 or 1."
+		return toolRouteInstructions("") + " Reply 0 for search_only or 1 for full_tools. Reply only 0 or 1."
 	case TaskVisionCaption:
 		// The reader is a text-only chat model that will never see the pixels, so
 		// the evidence has to be self-sufficient: transcription first, then the
