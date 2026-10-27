@@ -2928,7 +2928,7 @@ export function Composer({
           return Boolean(paramValues[control.key] ?? control.default ?? false)
         }
         const current = String(
-          paramValues[control.key] ?? control.default ?? control.options?.[0]?.value ?? '',
+          paramValues[control.key] ?? control.default ?? '',
         )
         return control.default !== undefined ? current !== String(control.default) : Boolean(current)
       }),

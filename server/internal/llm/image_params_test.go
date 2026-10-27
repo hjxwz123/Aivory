@@ -74,6 +74,30 @@ func TestImageParamControlsApplyDefaultsAndDropUnknownValues(t *testing.T) {
 	}
 }
 
+func TestParamControlsWithoutDefaultsRequireExplicitPicks(t *testing.T) {
+	controls := json.RawMessage(`[
+		{
+			"key":"quality",
+			"type":"select",
+			"options":[{"value":"low"},{"value":"high"}],
+			"map":{"low":{"quality":"low"},"high":{"quality":"high"}}
+		},
+		{
+			"key":"thinking",
+			"type":"toggle",
+			"map":{"on":{"thinking":true},"off":{"thinking":false}}
+		}
+	]`)
+
+	if params := MergeParamControls(nil, controls, nil); len(params) != 0 {
+		t.Fatalf("controls without defaults added upstream parameters: %#v", params)
+	}
+	params := MergeParamControls(nil, controls, map[string]any{"quality": "low", "thinking": false})
+	if params["quality"] != "low" || params["thinking"] != false {
+		t.Fatalf("explicit picks were not applied: %#v", params)
+	}
+}
+
 func TestParamControlDefaultsRespectShowIf(t *testing.T) {
 	controls := json.RawMessage(`[
 		{

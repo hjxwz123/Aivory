@@ -1676,6 +1676,33 @@ describe('stopped turn optimistic-id reconciliation', () => {
     expect(wireBodies[2].selected_tool_ids).toEqual(['builtin:web_fetch', 'mcp:rail'])
   })
 
+  it.each([undefined, {}, { quality: 'high' }])('replaces earlier parameter overrides with the current turn selection: %j', async (params) => {
+    useConversations.setState({
+      conversations: [{ ...localConversation(), lastParams: { quality: 'low' } }],
+    })
+    const requestBodies: Array<Record<string, unknown>> = []
+    apiMocks.streamSSE.mockImplementation((_path: string, body: Record<string, unknown>) => {
+      requestBodies.push(body)
+      return events(
+        { type: 'message_start', message_id: 'msg_params_assistant' },
+        { type: 'error', message: 'test terminal error' },
+      )
+    })
+
+    await useConversations.getState().sendMessage({
+      conversationId: 'conv_stop',
+      text: 'use the current parameter selection',
+      modelId: 'model_1',
+      params,
+    })
+
+    expect(useConversations.getState().conversations[0].lastParams).toEqual(params)
+    await useConversations.getState().regenerate('conv_stop', 'msg_params_assistant', 'model_1')
+
+    expect(requestBodies).toHaveLength(2)
+    expect(requestBodies.map((body) => body.params)).toEqual([params, params])
+  })
+
   it('preserves an explicit empty tool selection when regenerating', async () => {
     const sourceUser: Message = {
       id: 'msg_tool_subset_user',

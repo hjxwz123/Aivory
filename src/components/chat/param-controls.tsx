@@ -115,7 +115,9 @@ export function ParamControls({ controls, values, onChange, className }: ParamCo
           )
         }
         if (c.type === 'select') {
-          const value = String(values[c.key] ?? c.default ?? c.options?.[0]?.value ?? '')
+          // With no declared default, leave the control unselected until the
+          // user picks a value, matching the omitted parameter in the request.
+          const value = String(values[c.key] ?? c.default ?? '')
           const current = c.options?.find((o) => o.value === value)
           const active = c.default !== undefined ? value !== String(c.default) : Boolean(value)
           const currentLabel = current?.label ?? current?.value

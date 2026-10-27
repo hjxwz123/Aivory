@@ -1977,8 +1977,9 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           ...c,
           messages: [...base, uMsg, assistantMsg],
           updatedAt: Date.now(),
-          // Remember the param_controls selection so regenerate reuses it.
-          lastParams: input.params ?? c.lastParams,
+          // Remember this turn's selection, including omission, so regenerate
+          // cannot revive parameters from an earlier turn.
+          lastParams: input.params,
           // Give a brand-new conversation an immediate default title from the
           // first message (first line, clipped) — so the sidebar/header never
           // shows an empty title in the window before the title model (or the
