@@ -1,0 +1,115 @@
+.footer {
+  display: flex;
+  align-items: center;
+  inline-size: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  margin-block-start: 8px;
+}
+
+.userFooter { inline-size: fit-content; }
+
+.branch {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  color: var(--color-fg-muted);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.branchButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 24px;
+  block-size: 28px;
+  flex: none;
+  border-radius: 6px;
+  transition: color 150ms, background-color 150ms;
+}
+.branchButton:hover { color: var(--color-accent); background: var(--color-accent-soft); }
+.branchButton:focus-visible { outline: 2px solid var(--color-ring); outline-offset: 2px; }
+.branchButton:disabled { cursor: not-allowed; opacity: .4; }
+
+.count {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 3px;
+  min-inline-size: 36px;
+  padding-inline: 3px;
+  white-space: nowrap;
+  user-select: none;
+}
+.current { color: var(--color-fg); font-weight: 500; }
+
+.divider {
+  display: block;
+  flex: none;
+  inline-size: 1px;
+  block-size: 14px;
+  margin-inline: 6px;
+  background: var(--color-border);
+}
+
+.desktopActions {
+  display: inline-flex;
+  min-inline-size: 0;
+  align-items: center;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease-out;
+}
+.desktopActions > * { flex-shrink: 0; }
+.desktopActions[data-visible='true'], .footer:focus-within .desktopActions { opacity: 1; pointer-events: auto; }
+
+.mobileActions { display: flex; flex: 1; min-inline-size: 0; align-items: center; }
+.mobileAction {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  inline-size: var(--tap-min);
+  block-size: var(--tap-min);
+  border-radius: 8px;
+  color: var(--color-fg-muted);
+  transition: color 150ms, background-color 150ms;
+}
+.mobileAction:hover { color: var(--color-fg); background: var(--color-bg-muted); }
+.mobileAction:focus-visible { outline: 2px solid var(--color-ring); outline-offset: -2px; }
+.mobileTime {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  margin-inline-start: auto;
+  padding-inline-start: 6px;
+  color: var(--color-fg-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+@media (max-width: 639px) {
+  .footer { margin-block-start: 6px; }
+  .branchButton { inline-size: 34px; block-size: var(--tap-min); }
+  .count { min-inline-size: 38px; }
+}
+
+/* Keep all primary controls on one row in the narrowest phones and bubbles.
+   The duration remains available in the More panel. */
+@container (max-width: 319px) {
+  .mobileTime { display: none; }
+}
+
+@media (hover: none) {
+  .desktopActions { opacity: 1; pointer-events: auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .branchButton, .desktopActions, .mobileAction { transition: none; }
+}

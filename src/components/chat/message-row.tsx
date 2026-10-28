@@ -74,6 +74,7 @@ import { FormulaEditorDialog } from './formula-editor-dialog'
 import { ReasoningTrace } from './reasoning-trace'
 import { ReplyPending } from './reply-pending'
 import { UserMessageContent } from './user-message-content'
+import actionStyles from './message-actions.module.css'
 import { ImageGenerating } from './image-generating'
 import { ResearchPanel } from './research-panel'
 import { CitationList } from './citation'
@@ -274,8 +275,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
   const { t, i18n } = useTranslation('chat')
   const displayUserName = message.authorName ?? userName ?? t('common.you', { ns: 'common' })
   const [hovered, setHovered] = useState(false)
-  // Phone: the per-message actions live in a bottom Sheet (a clean thread reveals
-  // them on tap) instead of an always-on row of tiny icons (§ mobile redesign).
+  // Phone: keep copy/retry inline and place the remaining actions in a Sheet.
   const isPhone = useMediaQuery(mediaQuery.phone)
   const [actionSheetOpen, setActionSheetOpen] = useState(false)
   const mobileActionsRef = useRef<HTMLButtonElement>(null)
@@ -608,6 +608,9 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
   }
 
   const visible = hovered || message.liked || message.disliked || feedbackPanelOpen || feedbackSubmitted
+  const showBranch = Boolean(onBranchSwitch && !editing && (!isUser || !message.streaming) &&
+    message.branchCount && message.branchCount > 1 && typeof message.branchIndex === 'number')
+  const showActions = !readOnly && !editing && !message.streaming && messageHasActions(message)
   const attachments = message.attachments ?? []
   useEffect(() => {
     const isDeleted = (attachmentId?: string) =>
@@ -1152,68 +1155,65 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
           </div>
         )}
 
-        {/* Branch picker during streaming — the action bar below is hidden while
-            tokens arrive, but a freshly-retried answer should show its
-            `< n/m >` immediately (§4.15 R2). */}
-        {onBranchSwitch && !isUser && message.streaming && message.branchCount && message.branchCount > 1 && typeof message.branchIndex === 'number' ? (
-          <div className="mt-2 inline-flex items-center">
-            <BranchSwitcher message={message} onSwitch={onBranchSwitch} t={t} />
-          </div>
-        ) : null}
-
-        {/* Always-visible branch switcher (both roles, once settled). Sits under
-            the USER bubble after an edit-branch (§4.15 R1) and under the AI reply
-            after a retry (R2) — shown the instant the branch exists rather than
-            waiting for a hover, and kept visible in read-only (admin) triage. The
-            hover action bar below no longer carries its own copy. */}
-        {onBranchSwitch && !editing && !message.streaming && message.branchCount && message.branchCount > 1 && typeof message.branchIndex === 'number' ? (
-          <div className="mt-2 inline-flex items-center">
-            <BranchSwitcher message={message} onSwitch={onBranchSwitch} t={t} />
-          </div>
-        ) : null}
-
-        {/* Actions — always rendered after streaming completes, so the layout
-            never jumps when the user hovers in/out. Visibility is controlled
-            via opacity + pointer-events so nothing below is pushed around.
-            Also show the action bar when a message has an error but no content
-            so the user can retry the failed message. */}
-        {!readOnly && !editing && !message.streaming && messageHasActions(message) ? (
-          isPhone ? (
-            <div className="mt-1.5 flex items-center gap-2">
-              <button
-                ref={mobileActionsRef}
-                type="button"
-                onClick={() => setActionSheetOpen(true)}
-                aria-label={t('actions.more')}
-                className="inline-flex items-center justify-center size-[var(--tap-min)] -ml-2 rounded-[10px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+        {/* Branches stay visible beside the action bar, including while streaming
+            and in read-only transcripts. Hovering changes opacity, never layout. */}
+        {showBranch || showActions ? (
+          <div data-message-footer className={cn(actionStyles.footer, isUser && actionStyles.userFooter)}>
+            {showBranch ? <BranchSwitcher message={message} onSwitch={onBranchSwitch} t={t} /> : null}
+            {showActions ? (isPhone ? (
+              <div data-message-actions className={actionStyles.mobileActions}>
+                {showBranch ? <span className={actionStyles.divider} aria-hidden /> : null}
+                {message.content ? (
+                  <Tooltip content={copied ? t('actions.copied') : t('actions.copy')}>
+                    <button
+                      type="button"
+                      onClick={() => void copy(message.content)}
+                      aria-label={t('actions.copy')}
+                      className={actionStyles.mobileAction}
+                    >
+                      {copied ? <Check size={17} aria-hidden /> : <Copy size={17} aria-hidden />}
+                    </button>
+                  </Tooltip>
+                ) : null}
+                {!isUser && onRegenerate ? (
+                  <Tooltip content={t('actions.regenerate')}>
+                    <button
+                      type="button"
+                      onClick={() => onRegenerate(message.id)}
+                      aria-label={t('actions.regenerate')}
+                      className={actionStyles.mobileAction}
+                    >
+                      <RefreshCw size={17} aria-hidden />
+                    </button>
+                  </Tooltip>
+                ) : null}
+                <button
+                  ref={mobileActionsRef}
+                  type="button"
+                  onClick={() => setActionSheetOpen(true)}
+                  aria-label={t('actions.more')}
+                  className={actionStyles.mobileAction}
+                >
+                  <MoreHorizontal size={18} aria-hidden />
+                </button>
+                {!isUser && message.genMs ? (
+                  <span data-message-duration className={actionStyles.mobileTime}>
+                    <Clock size={12} aria-hidden />
+                    {formatGenMs(message.genMs)}
+                  </span>
+                ) : null}
+              </div>
+            ) : (
+              <div
+                data-message-actions
+                data-visible={Boolean(visible)}
+                className={actionStyles.desktopActions}
               >
-                <MoreHorizontal size={18} aria-hidden />
-              </button>
-              {!isUser && message.credits && message.credits > 0 ? (
-                <Tooltip content={t('actions.viewSubscription')}>
-                  <Link
-                    to="/subscription"
-                    className="inline-flex min-h-7 items-center gap-1 rounded-[6px] px-1 text-[11px] text-[var(--color-secondary)] tabular-nums interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-                  >
-                    <Coins size={11} aria-hidden />
-                    {t('actions.creditsUsed', { credits: formatCredits(message.credits) })}
-                  </Link>
-                </Tooltip>
-              ) : null}
-            </div>
-          ) : (
-          <div
-            className={cn(
-              'mt-2 inline-flex items-center gap-0.5 transition-opacity duration-[140ms] ease-out focus-within:opacity-100 focus-within:pointer-events-auto',
-              visible
-                ? 'opacity-100'
-                : 'opacity-0 pointer-events-none max-sm:opacity-100 max-sm:pointer-events-auto',
-            )}
-          >
+                {showBranch ? <span className={actionStyles.divider} aria-hidden /> : null}
                 {/* Per-reply generation time (§ 用时). It belongs with reply
                     actions rather than model identity, immediately before Copy. */}
                 {!isUser && message.genMs ? (
-                  <span className="mr-1 inline-flex items-center gap-1 text-[11px] text-[var(--color-fg-subtle)] tabular-nums">
+                  <span data-message-duration className="mr-1 inline-flex items-center gap-1 text-[11px] text-[var(--color-fg-muted)] tabular-nums">
                     <Clock size={11} aria-hidden />
                     {formatGenMs(message.genMs)}
                   </span>
@@ -1384,8 +1384,9 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
                     </Link>
                   </Tooltip>
                 ) : null}
+              </div>
+            )) : null}
           </div>
-          )
         ) : null}
         {!isUser && !editing && feedbackPanelOpen ? (
           <FeedbackPanel
@@ -1445,6 +1446,17 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
         <Sheet open={actionSheetOpen} onOpenChange={setActionSheetOpen}>
           <SheetContent side="bottom" size="sm" label={t('actions.more')} className="h-auto max-h-[85dvh]">
             <div className="flex flex-col px-2 py-2">
+              {!isUser && (message.genMs || Boolean(message.credits && message.credits > 0)) ? (
+                <div className="mb-1 flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 text-[12px] text-[var(--color-fg-muted)] tabular-nums">
+                  {message.genMs ? <span className="inline-flex items-center gap-1.5"><Clock size={13} aria-hidden />{formatGenMs(message.genMs)}</span> : null}
+                  {message.credits && message.credits > 0 ? (
+                    <Link to="/subscription" onClick={() => setActionSheetOpen(false)} className="inline-flex min-h-8 items-center gap-1.5 rounded-[6px] text-[var(--color-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]">
+                      <Coins size={13} aria-hidden />
+                      {t('actions.creditsUsed', { credits: formatCredits(message.credits) })}
+                    </Link>
+                  ) : null}
+                </div>
+              ) : null}
               {message.content ? (
                 <MsgActionRow
                   icon={copied ? <Check size={18} aria-hidden /> : <Copy size={18} aria-hidden />}
@@ -1762,7 +1774,7 @@ function MsgActionRow({
 }
 
 /**
- * BranchSwitcher — the `<  2/3  >` chip shown when the current message has
+ * BranchSwitcher — lightweight `<  2/3  >` controls when the current message has
  * sibling branches (§4.15). Clicking the arrows calls onSwitch with the
  * neighbour's id so the parent can flip conversations.active_leaf_id.
  */
@@ -1787,7 +1799,9 @@ function BranchSwitcher({
   }
   return (
     <span
-      className="mr-1 inline-flex items-center gap-0.5 rounded-[6px] bg-[var(--color-bg-muted)] px-1 py-0.5 text-[10.5px] text-[var(--color-fg-subtle)] tabular-nums"
+      data-message-branch
+      role="group"
+      className={actionStyles.branch}
       aria-label={t('actions.branch')}
     >
       <button
@@ -1795,21 +1809,23 @@ function BranchSwitcher({
         onClick={() => go(-1)}
         disabled={siblings.length === 0}
         aria-label={t('actions.prevBranch')}
-        className="inline-flex items-center justify-center size-4 max-sm:p-3 max-sm:-m-3 rounded-[4px] hover:bg-[var(--color-surface)] hover:text-[var(--color-fg)] interactive disabled:opacity-40 disabled:cursor-not-allowed"
+        className={actionStyles.branchButton}
       >
-        <ChevronLeft size={9} aria-hidden />
+        <ChevronLeft size={13} aria-hidden />
       </button>
-      <span className="px-0.5 select-none">
-        {idx + 1}/{total}
+      <span className={actionStyles.count}>
+        <span className={actionStyles.current}>{idx + 1}</span>
+        <span>/</span>
+        <span>{total}</span>
       </span>
       <button
         type="button"
         onClick={() => go(1)}
         disabled={siblings.length === 0}
         aria-label={t('actions.nextBranch')}
-        className="inline-flex items-center justify-center size-4 max-sm:p-3 max-sm:-m-3 rounded-[4px] hover:bg-[var(--color-surface)] hover:text-[var(--color-fg)] interactive disabled:opacity-40 disabled:cursor-not-allowed"
+        className={actionStyles.branchButton}
       >
-        <ChevronRight size={9} aria-hidden />
+        <ChevronRight size={13} aria-hidden />
       </button>
     </span>
   )
