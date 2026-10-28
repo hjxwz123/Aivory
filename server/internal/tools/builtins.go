@@ -38,6 +38,7 @@ import (
 
 	_ "golang.org/x/image/webp"
 
+	"aivory/server/internal/systemprompts"
 	"aivory/server/internal/config"
 	"aivory/server/internal/envcfg"
 	"aivory/server/internal/fileguard"
@@ -2004,9 +2005,9 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	providerInput := in
 	if len(inputImgs) > 0 {
 		if in.Action == "edit" {
-			providerInput.Prompt = faithfulImageEditPrompt(in.Prompt)
+			providerInput.Prompt = faithfulImageEditPrompt(in.Prompt, t.db)
 		} else {
-			providerInput.Prompt = referenceImageGenerationPrompt(in.Prompt)
+			providerInput.Prompt = referenceImageGenerationPrompt(in.Prompt, t.db)
 		}
 	}
 
@@ -2641,20 +2642,20 @@ func (t *imageGenerateTool) resolveImageOperationInputs(ctx context.Context, tc 
 	return inputs, nil
 }
 
-func referenceImageGenerationPrompt(instruction string) string {
-	return `Generate a new image using the supplied images as visual references according to the instruction below.
-Follow the user's requested relationship to the references. When asked to imitate or match a reference, closely follow its layout, composition, colors, borders, and typography while applying the requested content changes. When a reference is only for a subject or a particular detail, use it for that purpose. Preserve the requested literal text. Do not invent a different visual style that conflicts with the requested reference.
-
-Exact user instruction:
-` + strings.TrimSpace(instruction)
+func referenceImageGenerationPrompt(instruction string, databases ...*sql.DB) string {
+	var db *sql.DB
+	if len(databases) > 0 {
+		db = databases[0]
+	}
+	return systemprompts.Text(db, "image.reference") + strings.TrimSpace(instruction)
 }
 
-func faithfulImageEditPrompt(instruction string) string {
-	return `Faithfully edit the supplied source image according to the instruction below.
-Treat the first supplied image as the authoritative base canvas. Any later supplied images are references for the requested changes, not replacement canvases, unless the instruction explicitly selects a different base. Change only what the instruction explicitly requests. Preserve every other detail as closely as possible, especially the canvas and crop, composition, layout, colors, background, lighting, texture, text content, language, typography, spacing, and alignment. Do not translate, paraphrase, retype, add, remove, or restyle anything unless the instruction explicitly requires it.
-
-Exact user edit instruction:
-` + strings.TrimSpace(instruction)
+func faithfulImageEditPrompt(instruction string, databases ...*sql.DB) string {
+	var db *sql.DB
+	if len(databases) > 0 {
+		db = databases[0]
+	}
+	return systemprompts.Text(db, "image.edit") + strings.TrimSpace(instruction)
 }
 
 // loadInputImages resolves artifact ids to raw image bytes (ownership-checked)
@@ -3738,7 +3739,7 @@ func (t *useSkillTool) Execute(ctx context.Context, input []byte, tc *llm.ToolCo
 	currentPolicyAllowsBuiltin := currentSkillPolicy == nil || currentSkillPolicy.Mode == store.ResourceAccessAll
 	snapshotAllowsBuiltin := tc == nil || tc.AdminSkillIDs == nil
 	if strings.EqualFold(in.Name, llm.DocGenSkillName) && currentPolicyAllowsBuiltin && snapshotAllowsBuiltin {
-		return "Skill: " + llm.DocGenSkillName + "\n\n" + llm.DocGenRecipes, nil, nil
+		return "Skill: " + llm.DocGenSkillName + "\n\n" + systemprompts.Text(tc.DB, "docgen.recipes"), nil, nil
 	}
 	return "Skill not found: " + in.Name, nil, nil
 }

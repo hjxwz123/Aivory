@@ -2,6 +2,7 @@ package llm
 
 import (
 	"aivory/server/internal/store"
+	"aivory/server/internal/systemprompts"
 	"context"
 	"encoding/json"
 	"errors"
@@ -83,12 +84,9 @@ func (o *Orchestrator) moderateByModel(ctx context.Context, userText, userID, co
 	}
 	// When the admin has configured violation categories, screen specifically
 	// against them; otherwise fall back to the generic safety prompt.
-	system := moderationModelSystemPrompt
+	system := systemprompts.Text(o.db, "task.moderation")
 	if cats := o.moderationCategories(); len(cats) > 0 {
-		system = "You are a strict content-safety classifier for a chat assistant. Decide whether the USER message " +
-			"falls into any of these prohibited categories: " + strings.Join(cats, "; ") + ". " +
-			"If it clearly does, reply BLOCK. Otherwise reply ALLOW. " +
-			"Reply with EXACTLY one word: ALLOW or BLOCK. Output nothing else."
+		system = systemprompts.Render(systemprompts.Text(o.db, "task.moderation.categories"), "{{categories}}", strings.Join(cats, "; "))
 	}
 	verdict, err := o.task.Run(ctx, TaskModeration, userText, RunOpts{
 		ModelID:         modelID,

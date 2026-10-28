@@ -21,6 +21,7 @@ import (
 	"aivory/server/internal/queue"
 	"aivory/server/internal/rag"
 	"aivory/server/internal/store"
+	"aivory/server/internal/systemprompts"
 	"aivory/server/internal/toolnames"
 )
 
@@ -2735,6 +2736,7 @@ func maxInt(a, b int) int {
 // Run executes one turn end to end. It blocks while streaming.
 // onEvent is invoked on every SSE event so the HTTP handler can flush.
 func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(SseEvent)) (*RunResult, error) {
+	ctx = systemprompts.WithDB(ctx, o.db)
 	visibleOutput := new(atomic.Bool)
 	thinkingDuration := newThinkingDurationTracker()
 	emitWithThinkingDuration := onEvent
@@ -3259,7 +3261,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// 2c. Content moderation (§ moderation): screen the new user prompt alone
 	//     (no history) before any provider call. On block, persist a refusal and
 	//     stop — generation never runs.
-	selectedUserSkillText := formatSelectedUserSkills(selectedUserSkills)
+	selectedUserSkillText := formatSelectedUserSkills(selectedUserSkills, o.db)
 	moderationText := req.UserText + selectedUserSkillText
 	blocked, moderationMessage, moderationErr := o.moderatePrompt(ctx, model, moderationText, req.UserID, conv.ID, assistantMsg.ID)
 	if moderationErr != nil {
@@ -3693,7 +3695,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	//    is planned after the system prompt and provider tool declarations are also
 	//    ready, so its trigger can reuse the complete UnifiedChatRequest estimate
 	//    instead of maintaining a smaller, drifting accounting path.
-	ragContext := formatRAGContext(ragSnippets, req.Locale)
+	ragContext := formatRAGContext(ragSnippets, req.Locale, o.db)
 	// Search-only turns use the ordinary tool protocol, so query generation,
 	// citations, progress, and persistence need no extra task-model request.
 	// Conversation-uploaded data files staged in the sandbox (§4.5) were resolved
@@ -3823,6 +3825,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		promptModelLabel = fastModeLabel(req.Locale)
 	}
 	systemOpts := systemPromptOpts{
+		DB:                        o.db,
 		ModelSystem:               model.SystemPrompt,
 		ModelLabel:                promptModelLabel,
 		Locale:                    req.Locale,
@@ -4855,7 +4858,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		Credits: turnCredits,
 	})
 	if upgradeImageOnlyTitle {
-		if source := imageOnlyTitleSource(renderBlocksAsText(result.Blocks)); source != "" {
+		if source := imageOnlyTitleSource(renderBlocksAsText(result.Blocks), o.db); source != "" {
 			o.scheduleTitleUpgrade(conv.ID, req.UserID, source, req.Locale)
 		}
 	}

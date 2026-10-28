@@ -19,6 +19,7 @@ import (
 	"aivory/server/internal/fileguard"
 	"aivory/server/internal/rag"
 	"aivory/server/internal/store"
+	"aivory/server/internal/systemprompts"
 	"aivory/server/internal/tooldiagnostics"
 	"aivory/server/internal/toolnames"
 	"aivory/server/internal/typesafe"
@@ -93,8 +94,8 @@ func (o *Orchestrator) autoTurnNeedsTools(
 		return true
 	}
 
-	prompt := formatToolRoutePrompt(capabilities, attachmentKinds, len(files) > 0, req.UserText)
-	toolDescriptions := toolRouteToolDescriptions(localTools, hostedNames, hostedRequests)
+	prompt := formatToolRoutePrompt(capabilities, attachmentKinds, len(files) > 0, req.UserText, o.db)
+	toolDescriptions := toolRouteToolDescriptions(localTools, hostedNames, hostedRequests, o.db)
 	routeCtx, cancel := context.WithTimeout(ctx, toolRouteTimeout)
 	defer cancel()
 	if model := o.task.policyDecisionModel(routeCtx, "tool_route_model_id"); model != nil {
@@ -358,16 +359,24 @@ func toolRouteIsContinuation(input string) bool {
 	return false
 }
 
-func toolRouteInstructions(toolDescriptions string) string {
-	instructions := "Choose the tool scope needed to fulfill the user request. " +
-		"Use the available tools and attachment context to decide whether a direct answer or web search is sufficient."
+func toolRouteInstructions(toolDescriptions string, databases ...*sql.DB) string {
+	var db *sql.DB
+	if len(databases) > 0 {
+		db = databases[0]
+	}
+	instructions := systemprompts.Text(db, "decision.tool_scope.instructions")
 	if toolDescriptions != "" {
 		instructions += "\nAvailable tools and their purposes:\n" + toolDescriptions
 	}
 	return instructions
 }
 
-func toolRouteToolDescriptions(localTools []ToolDef, hostedNames []string, hostedRequests []json.RawMessage) string {
+func toolRouteToolDescriptions(localTools []ToolDef, hostedNames []string, hostedRequests []json.RawMessage, databases ...*sql.DB) string {
+	var db *sql.DB
+	if len(databases) > 0 {
+		db = databases[0]
+	}
+	overrides := systemprompts.Load(db)
 	seen := map[string]bool{}
 	var descriptions []string
 	add := func(name, description string) {
@@ -378,29 +387,29 @@ func toolRouteToolDescriptions(localTools []ToolDef, hostedNames []string, hoste
 		seen[name] = true
 		switch normalized := strings.ToLower(name); {
 		case normalized == toolnames.AivoryWebSearch, normalized == "web_search", strings.HasPrefix(normalized, "web_search_"), normalized == "google_search", normalized == "googlesearch":
-			description = "Searches the web and returns result snippets."
+			description = overrides.Text("routing.tool_purpose.search")
 		case normalized == "web_fetch", normalized == "url_context":
-			description = "Reads the full content of web pages."
+			description = overrides.Text("routing.tool_purpose.web_read")
 		case normalized == "fetch_image":
-			description = "Retrieves existing images from URLs."
+			description = overrides.Text("routing.tool_purpose.fetch_image")
 		case normalized == "python_execute", normalized == "code_interpreter":
-			description = "Runs Python scripts to analyze data, process uploaded files, and generate downloadable files."
+			description = overrides.Text("routing.tool_purpose.python")
 		case normalized == "shell", normalized == "bash":
-			description = "Runs shell commands and scripts to process data and create or modify files."
+			description = overrides.Text("routing.tool_purpose.shell")
 		case normalized == "image_generate", normalized == "image_generation":
-			description = "Generates new images or edits supplied images."
+			description = overrides.Text("routing.tool_purpose.image")
 		case normalized == "save_memory":
-			description = "Stores durable user facts and preferences for future conversations."
+			description = overrides.Text("routing.tool_purpose.memory")
 		case normalized == "use_skill", strings.HasPrefix(normalized, "skill:"):
-			description = "Loads a named skill's instructions for a specialized workflow."
+			description = overrides.Text("routing.tool_purpose.skill")
 		case normalized == "file_search", strings.HasPrefix(normalized, "file_search_"):
-			description = "Searches indexed files and retrieves relevant document content."
+			description = overrides.Text("routing.tool_purpose.file_search")
 		case normalized == "computer_use":
-			description = "Interacts with a computer or browser to perform external actions."
+			description = overrides.Text("routing.tool_purpose.computer")
 		default:
 			description = truncate(strings.Join(strings.Fields(description), " "), 180)
 			if description == "" {
-				description = "Invokes this configured external tool."
+				description = overrides.Text("routing.tool_purpose.custom")
 			}
 		}
 		descriptions = append(descriptions, "- "+name+": "+description)
@@ -427,7 +436,7 @@ func toolRouteToolDescriptions(localTools []ToolDef, hostedNames []string, hoste
 	return strings.Join(descriptions, "\n")
 }
 
-func formatToolRoutePrompt(_ []string, attachmentKinds []string, hasFiles bool, input string) string {
+func formatToolRoutePrompt(_ []string, attachmentKinds []string, hasFiles bool, input string, databases ...*sql.DB) string {
 	hasImages, hasUploadedFiles := false, false
 	for _, kind := range attachmentKinds {
 		if kind == "image" {
@@ -440,8 +449,13 @@ func formatToolRoutePrompt(_ []string, attachmentKinds []string, hasFiles bool, 
 	if len(attachmentKinds) > 0 {
 		kinds = strings.Join(attachmentKinds, ", ")
 	}
-	return fmt.Sprintf("Uploaded images: %t\nUploaded files: %t\nAttachment types: %s\nConversation files available: %t\nUser request: %s",
-		hasImages, hasUploadedFiles, kinds, hasFiles, truncateToolRouteInput(input))
+	var db *sql.DB
+	if len(databases) > 0 {
+		db = databases[0]
+	}
+	return systemprompts.Render(systemprompts.Text(db, "routing.tool_scope.input"),
+		"{{uploaded_images}}", fmt.Sprint(hasImages), "{{uploaded_files}}", fmt.Sprint(hasUploadedFiles),
+		"{{attachment_types}}", kinds, "{{conversation_files}}", fmt.Sprint(hasFiles), "{{user_request}}", truncateToolRouteInput(input))
 }
 
 func truncateToolRouteInput(input string) string {
@@ -776,13 +790,17 @@ func injectRAGIntoHistory(msgs []UnifiedMessage, text string) []UnifiedMessage {
 // the user's request. The store has already enforced the five-skill/64 KiB
 // instruction-body limits. No part of this text is included in the system
 // prompt or administrator skill index.
-func formatSelectedUserSkills(skills []store.UserSkill) string {
+func formatSelectedUserSkills(skills []store.UserSkill, databases ...*sql.DB) string {
+	var selectedSkillsDB *sql.DB
+	if len(databases) > 0 {
+		selectedSkillsDB = databases[0]
+	}
 	if len(skills) == 0 {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString("\n\n<user-selected-skills>\n")
-	b.WriteString("Apply the following explicitly selected skills once for this request. They take precedence over the same administrator skill loaded automatically.\n")
+	b.WriteString(systemprompts.Text(selectedSkillsDB, "conversation.selected_skills"))
 	for _, skill := range skills {
 		b.WriteString("\n<user-selected-skill name=\"")
 		b.WriteString(strings.NewReplacer("&", "&amp;", "\"", "&quot;", "<", "&lt;", ">", "&gt;").Replace(skill.Name))
@@ -790,7 +808,11 @@ func formatSelectedUserSkills(skills []store.UserSkill) string {
 		b.WriteString(skill.Description)
 		b.WriteString("\n\n")
 		if isGenerativeUISkill(skill.SourceSkillID, skill.Name) {
-			b.WriteString(generativeUIOutputContract)
+			var db *sql.DB
+			if len(databases) > 0 {
+				db = databases[0]
+			}
+			b.WriteString(systemprompts.Text(db, "conversation.ui_contract"))
 		}
 		b.WriteString(skill.Instructions)
 		b.WriteString("\n</user-selected-skill>\n")
@@ -867,11 +889,11 @@ func (o *Orchestrator) enqueueTitleTask(convID, userID, sourceText, locale strin
 	// separate, often language-biased model that ignores a soft "follow the user"
 	// hint, so we append an authoritative directive WRITTEN IN the target language
 	// (strongest signal); fall back to matching the message when locale is unknown.
-	sys := defaultSystem(TaskTitle, false)
-	if dir := titleLanguageDirective(locale); dir != "" {
+	sys := systemprompts.Text(o.db, "task.title")
+	if dir := titleLanguageDirective(locale, o.db); dir != "" {
 		sys += " " + dir
 	} else {
-		sys += " Write the title in the same language as the user's message."
+		sys += systemprompts.Text(o.db, "title.language.auto")
 	}
 	o.queue.Enqueue("title.generate", func(ctx context.Context) error {
 		text, err := o.task.Run(ctx, TaskTitle, sourceText, RunOpts{
@@ -926,7 +948,11 @@ func imageConversationTitle(attachments []Attachment, locale string) string {
 	}
 }
 
-func imageOnlyTitleSource(answer string) string {
+func imageOnlyTitleSource(answer string, databases ...*sql.DB) string {
+	var db *sql.DB
+	if len(databases) > 0 {
+		db = databases[0]
+	}
 	answer = strings.TrimSpace(answer)
 	if answer == "" {
 		return ""
@@ -935,7 +961,7 @@ func imageOnlyTitleSource(answer string) string {
 	if len(runes) > 1200 {
 		runes = runes[:1200]
 	}
-	return "The user sent an image without accompanying text. Label the image topic described in this assistant response:\n" + string(runes)
+	return systemprompts.Text(db, "title.image_input") + string(runes)
 }
 
 // persistGeneratedTitle couples the asynchronous title write to the realtime

@@ -17,6 +17,7 @@ package llm
 
 import (
 	"aivory/server/internal/store"
+	"aivory/server/internal/systemprompts"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -369,6 +370,7 @@ func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opt
 	if t == nil || t.db == nil {
 		return "", errors.New("task llm not initialised")
 	}
+	ctx = systemprompts.WithDB(ctx, t.db)
 	prepareStarted := time.Now()
 	prepareFinished := kind != TaskCompact
 	if kind == TaskCompact {
@@ -475,7 +477,10 @@ func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opt
 
 	system := opts.SystemPrompt
 	if toolRoute || system == "" {
-		system = defaultSystem(kind, opts.JSONOutput)
+		system = systemprompts.Load(t.db).Text(string(kind))
+		if system == "" {
+			system = defaultSystem(kind, opts.JSONOutput)
+		}
 	}
 	if toolRoute && opts.ToolRouteToolDescriptions != "" {
 		system += "\nAvailable tools and their purposes:\n" + opts.ToolRouteToolDescriptions

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"aivory/server/internal/store"
+	"aivory/server/internal/systemprompts"
 )
 
 const compactionSummaryInstruction = "Compress the conversation source below into one standalone continuation summary. " +
@@ -19,21 +20,25 @@ const compactionSummaryInstruction = "Compress the conversation source below int
 	"Use these headings in this order: Objective and success criteria; User constraints and corrections; Completed work and decisions; Artifacts and identifiers; Evidence and tool outcomes; Failures and exact errors; Active work; Next steps and open questions. " +
 	"Under each heading use compact bullets and write 'None' only when the section is genuinely empty. Do not invent information, repeat points, or include pleasantries. Reply with only the structured summary text.\n\n--- SOURCE (DATA) ---\n"
 
-func compactionTaskInputTokens(customPrompt, instruction string, outputLimit int, extraParams json.RawMessage) int {
+func compactionTaskInputTokens(customPrompt, instruction string, outputLimit int, extraParams json.RawMessage, systems ...string) int {
+	system := defaultSystem(TaskCompact, false)
+	if len(systems) > 0 {
+		system = systems[0]
+	}
 	prefix := ""
 	if customPrompt != "" {
 		prefix = customPrompt + "\n\n"
 	}
-	userPrompt := prefix + fmt.Sprintf(instruction, outputLimit)
+	userPrompt := prefix + renderCompactionInstruction(instruction, outputLimit)
 	return estimateRequestTokens(UnifiedChatRequest{
-		SystemPrompt: defaultSystem(TaskCompact, false),
+		SystemPrompt: system,
 		History:      []UnifiedMessage{{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: userPrompt}}}},
 		ExtraParams:  extraParams,
 	})
 }
 
-func compactionPayloadBudget(requestMaxTokens, outputCap int, customPrompt, instruction string, extraParams json.RawMessage) int {
-	base := compactionTaskInputTokens(customPrompt, instruction, outputCap, extraParams)
+func compactionPayloadBudget(requestMaxTokens, outputCap int, customPrompt, instruction string, extraParams json.RawMessage, systems ...string) int {
+	base := compactionTaskInputTokens(customPrompt, instruction, outputCap, extraParams, systems...)
 	budget := requestMaxTokens - outputCap - base - compactionRequestSafetyTokens
 	if budget < 1 {
 		return 0
@@ -107,7 +112,7 @@ func buildCompactionPrompt(customPrompt, instruction, source string, outputLimit
 		prompt.WriteString(customPrompt)
 		prompt.WriteString("\n\n")
 	}
-	fmt.Fprintf(&prompt, instruction, outputLimit)
+	prompt.WriteString(renderCompactionInstruction(instruction, outputLimit))
 	prompt.WriteString(source)
 	return prompt.String()
 }
@@ -184,7 +189,7 @@ func summarizeCompactionText(
 		fmt.Sprintf(" source_tokens=%d max_output_tokens=%d request_max_tokens=%d",
 			sourceTokens, outputCap, requestMaxTokens))
 	payloadBudget := compactionPayloadBudget(
-		requestMaxTokens, outputCap, customPrompt, instruction, extraParams,
+		requestMaxTokens, outputCap, customPrompt, instruction, extraParams, systemprompts.Text(task.db, "task.compact"),
 	)
 	if payloadBudget <= 0 || sourceTokens > payloadBudget {
 		task.logCompactionStage(ctx, conv.ID, "summary_plan", "failed", planStarted,
@@ -230,8 +235,14 @@ func selectCompactionPrefix(
 	newer []store.Message,
 	customPrompt string,
 	extraParams json.RawMessage,
-	summaryMaxTokens, requestMaxTokens int,
+	summaryMaxTokens, requestMaxTokens int, databases ...*sql.DB,
 ) (compactionPrefixSelection, error) {
+	var db *sql.DB
+	if len(databases) > 0 {
+		db = databases[0]
+	}
+	instruction := compactionInstruction(db)
+	system := systemprompts.Text(db, "task.compact")
 	var selected compactionPrefixSelection
 	newRounds := 0
 	outputCap := effectiveCompactionOutputCap(requestMaxTokens, summaryMaxTokens)
@@ -251,7 +262,7 @@ func selectCompactionPrefix(
 			return compactionPrefixSelection{}, err
 		}
 		payloadBudget := compactionPayloadBudget(
-			requestMaxTokens, outputCap, customPrompt, compactionSummaryInstruction, extraParams,
+			requestMaxTokens, outputCap, customPrompt, instruction, extraParams, system,
 		)
 		sourceTokens := estimateTokens(source)
 		if payloadBudget < 1 || sourceTokens > payloadBudget {

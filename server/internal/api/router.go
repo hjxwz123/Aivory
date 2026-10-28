@@ -681,6 +681,8 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("PATCH", "/api/admin/oauth-providers/:id", requireAdmin(d, updateOAuthProviderAdmin))
 	mux.handle("DELETE", "/api/admin/oauth-providers/:id", requireAdmin(d, deleteOAuthProviderAdmin))
 	mux.handle("GET", "/api/admin/settings", requireAdmin(d, adminSettingsGet))
+	mux.handle("GET", "/api/admin/system-prompts", requireAdmin(d, adminSystemPromptsGet))
+	mux.handle("PATCH", "/api/admin/system-prompts", requireAdmin(d, adminSystemPromptsSet))
 	mux.handle("GET", "/api/admin/email/preview", requireAdmin(d, adminEmailPreview))
 	mux.handle("PATCH", "/api/admin/settings", requireAdmin(d, adminSettingsSet))
 	// § AI PPT: the deployment's remaining vendor (Docmee) balance, so an admin

@@ -15,6 +15,7 @@ import (
 
 	"aivory/server/internal/envcfg"
 	"aivory/server/internal/store"
+	"aivory/server/internal/systemprompts"
 )
 
 // TaskVerify is the usage_logs `purpose` for the auditor call. It is a bare
@@ -80,14 +81,12 @@ func (o *Orchestrator) runVerify(ctx context.Context, conv *store.Conversation, 
 
 	// Untrusted-content boundary tags: both question (user) and answer (model)
 	// are data, never instructions (§4.11.7 convention).
-	prompt := "<user-question>\n" + userText + "\n</user-question>\n\n" +
-		"<assistant-answer>\n" + answer.String() + "\n</assistant-answer>\n\n" +
-		"Audit the assistant-answer against the user-question."
+	prompt := systemprompts.Render(systemprompts.Text(o.db, "verify.input"), "{{question}}", userText, "{{answer}}", answer.String())
 
 	var rep verifyReport
 	if err := o.task.RunJSON(vctx, TaskVerify, prompt, &rep, RunOpts{
 		ModelID:         modelID,
-		SystemPrompt:    verifySystemPrompt,
+		SystemPrompt:    systemprompts.Text(o.db, "verify"),
 		UserID:          senderID, // §workspaces: the SENDER pays for the audit
 		WorkspaceID:     conv.WorkspaceID,
 		ConversationID:  conv.ID,

@@ -55,6 +55,7 @@ export const ADMIN_NAV_GROUPS: readonly AdminNavGroup[] = [
         defaultLabel: 'Context & memory',
       },
       { to: '/admin/moderation', labelKey: 'admin:moderation.title', defaultLabel: 'Moderation' },
+      { to: '/admin/settings/system-prompts', labelKey: 'admin:systemPrompts.title', defaultLabel: 'System prompts' },
     ],
   },
   {

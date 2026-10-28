@@ -79,6 +79,7 @@ const AdminSystemStorage = lazy(() => import('@/pages/admin/AdminSystemStorage')
 const AdminCreditSettings = lazy(() => import('@/pages/admin/AdminCreditSettings'))
 const AdminAiPPT = lazy(() => import('@/pages/admin/AdminAiPPT'))
 const AdminBackup = lazy(() => import('@/pages/admin/AdminBackup'))
+const AdminSystemPrompts = lazy(() => import('@/pages/admin/AdminSystemPrompts'))
 const AdminModeration = lazy(() => import('@/pages/admin/AdminModeration'))
 const AdminDocuments = lazy(() => import('@/pages/admin/AdminDocuments'))
 const AdminFiles = lazy(() => import('@/pages/admin/AdminFiles'))
@@ -318,6 +319,7 @@ export default function App() {
               <Route path="ai-ppt" element={<AdminAiPPT />} />
               <Route path="oauth" element={<AdminOAuth />} />
               <Route path="moderation" element={<AdminModeration />} />
+              <Route path="settings/system-prompts" element={<AdminSystemPrompts />} />
               <Route path="announcement" element={<AdminSiteSettings />} />
               <Route path="notifications" element={<Navigate to="/admin/announcement" replace />} />
               <Route path="settings/site" element={<Navigate to="/admin/announcement" replace />} />

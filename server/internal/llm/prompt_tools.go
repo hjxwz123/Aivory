@@ -28,6 +28,7 @@ import (
 	"strings"
 
 	"aivory/server/internal/envcfg"
+	"aivory/server/internal/systemprompts"
 	"aivory/server/internal/tooldiagnostics"
 )
 
@@ -43,21 +44,16 @@ var (
 
 // PromptToolPreamble builds the text block appended to the system prompt
 // when tool_mode=prompt. It documents the protocol and lists each tool.
-func PromptToolPreamble(tools []ToolDef) string {
+func PromptToolPreamble(tools []ToolDef, configured ...string) string {
+	protocol := systemprompts.Text(nil, "tools.protocol")
+	if len(configured) > 0 {
+		protocol = configured[0]
+	}
 	if len(tools) == 0 {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("\n\n## Available tools\n")
-	b.WriteString("You can call any of the tools below by emitting EXACTLY this format and then STOPPING:\n\n")
-	b.WriteString("<tool_call>{\"name\": \"<tool>\", \"arguments\": <args>}</tool_call>\n\n")
-	b.WriteString("Important rules:\n")
-	b.WriteString("- After emitting `</tool_call>` STOP. Do not write anything else and do not invent the result.\n")
-	b.WriteString("- The orchestrator will execute the tool and reply with a `<tool_result>` block. Continue from there.\n")
-	b.WriteString("- Never repeat a tool call with the same arguments. If the available evidence is sufficient, answer immediately.\n")
-	b.WriteString("- When a tool schema offers a queries or urls array, batch independent requests that are already known.\n")
-	b.WriteString("- If you don't need a tool, just answer the user directly.\n\n")
-	b.WriteString("Tools:\n\n")
+	b.WriteString(protocol)
 	for _, t := range tools {
 		b.WriteString("### " + t.Name + "\n")
 		b.WriteString(t.Description + "\n")
@@ -248,7 +244,7 @@ func RunPromptToolLoopWithRaw(
 	toolRunner ToolRunner,
 	onEvent func(SseEvent),
 ) (string, []UnifiedBlock, Usage, []Citation, []GeneratedImage, json.RawMessage, error) {
-	preamble := PromptToolPreamble(tools)
+	preamble := PromptToolPreamble(tools, systemprompts.FromContext(ctx, "tools.protocol"))
 	sys := system + preamble
 	usage := Usage{}
 	citations := []Citation{}
@@ -267,7 +263,7 @@ func RunPromptToolLoopWithRaw(
 		roundSystem := sys
 		if finalizing {
 			runnerCtx = contextWithToolFinalization(ctx, finalizationSignal)
-			roundSystem = strings.TrimSpace(system + "\n\n" + toolFinalizationInstruction(finalizationSignal))
+			roundSystem = strings.TrimSpace(system + "\n\n" + toolFinalizationInstruction(finalizationSignal, ctx))
 		}
 		round, err := runner(runnerCtx, history, roundSystem)
 		// Hosted-tool prompt rounds are delegated to the provider's native path.
@@ -361,10 +357,8 @@ func RunPromptToolLoopWithRaw(
 					Role: "assistant", Blocks: []UnifiedBlock{{Kind: "text", Text: text}},
 				})
 				history = append(history, UnifiedMessage{
-					Role: "user",
-					Blocks: []UnifiedBlock{{Kind: "text", Text: "<tool_error>\nYour <tool_call> JSON failed to parse: " +
-						parseErr.Error() + "\nRe-emit the tool call as ONE valid JSON object: " +
-						`<tool_call>{"name": "<tool>", "arguments": {...}}</tool_call>` + "\n</tool_error>"}},
+					Role:   "user",
+					Blocks: []UnifiedBlock{{Kind: "text", Text: systemprompts.Render(systemprompts.FromContext(ctx, "tools.protocol.retry"), "{{error}}", parseErr.Error())}},
 				})
 				i-- // don't burn an iteration on the malformed round
 				continue
@@ -405,7 +399,7 @@ func RunPromptToolLoopWithRaw(
 		isError := runErr != nil
 		summaryStatus := "complete"
 		if isError {
-			output = publicToolErrorOutput(runErr)
+			output = publicToolErrorOutput(runErr, ctx)
 			summaryStatus = "error"
 		}
 		citations = append(citations, cites...)

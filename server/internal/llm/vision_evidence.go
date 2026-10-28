@@ -2,12 +2,15 @@ package llm
 
 import (
 	"context"
+	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
 
 	"aivory/server/internal/store"
+	"aivory/server/internal/systemprompts"
 )
 
 // §4.6 image outsourcing. A text-only conversation model cannot see an attached
@@ -57,21 +60,34 @@ const (
 
 // visionEvidenceStamp identifies the model + prompt revision that produced a
 // piece of evidence.
-func visionEvidenceStamp(visionModelID string) string {
-	return fmt.Sprintf("%s:v%d", strings.TrimSpace(visionModelID), visionEvidencePromptVersion)
+func visionEvidenceStamp(visionModelID string, databases ...*sql.DB) string {
+	stamp := fmt.Sprintf("%s:v%d", strings.TrimSpace(visionModelID), visionEvidencePromptVersion)
+	if len(databases) == 0 {
+		return stamp
+	}
+	overrides := systemprompts.Load(databases[0])
+	if overrides["task.vision_caption"] == "" && overrides["vision.input"] == "" {
+		return stamp
+	}
+	digest := sha256.Sum256([]byte(overrides.Text("task.vision_caption") + "\x00" + overrides.Text("vision.input")))
+	return fmt.Sprintf("%s:%x", stamp, digest[:8])
 }
 
 // visionEvidencePrompt is the user turn accompanying the image. It repeats the
 // filename only as a label; the system prompt owns the schema.
-func visionEvidencePrompt(filename, mimeType string) string {
+func visionEvidencePrompt(filename, mimeType string, databases ...*sql.DB) string {
+	var db *sql.DB
+	if len(databases) > 0 {
+		db = databases[0]
+	}
 	label := strings.TrimSpace(filename)
 	if label == "" {
 		label = "attachment"
 	}
-	prompt := fmt.Sprintf("Transcribe and describe the attached image (%s).", label)
 	if strings.TrimSpace(mimeType) != "" {
-		prompt = fmt.Sprintf("Transcribe and describe the attached image (%s, %s).", label, strings.TrimSpace(mimeType))
+		label += ", " + strings.TrimSpace(mimeType)
 	}
+	prompt := systemprompts.Render(systemprompts.Text(db, "vision.input"), "{{image_label}}", label)
 	return prompt
 }
 
@@ -257,7 +273,7 @@ func (o *Orchestrator) visionEvidenceFor(
 	if o == nil || file == nil {
 		return "", fmt.Errorf("vision evidence requires a file")
 	}
-	stamp := visionEvidenceStamp(visionModelID)
+	stamp := visionEvidenceStamp(visionModelID, o.db)
 	if file.VisionEvidence != "" && file.VisionEvidenceKey == stamp {
 		return file.VisionEvidence, nil
 	}
@@ -286,7 +302,7 @@ func (o *Orchestrator) visionEvidenceCall(
 	if len(data) == 0 {
 		return "", fmt.Errorf("vision evidence requires image bytes")
 	}
-	raw, err := o.task.Run(ctx, TaskVisionCaption, visionEvidencePrompt(filename, mimeType), RunOpts{
+	raw, err := o.task.Run(ctx, TaskVisionCaption, visionEvidencePrompt(filename, mimeType, o.db), RunOpts{
 		ModelID: visionModelID,
 		ImageBlocks: []UnifiedBlock{{
 			Kind:     "image",
@@ -364,7 +380,7 @@ func (o *Orchestrator) OutsourcedPrivateImages(ctx context.Context, userID strin
 				continue
 			}
 			if !notedNotice {
-				rewritten.Blocks = append(rewritten.Blocks, UnifiedBlock{Kind: "text", Text: visionEvidenceNotice})
+				rewritten.Blocks = append(rewritten.Blocks, UnifiedBlock{Kind: "text", Text: systemprompts.Text(o.db, "vision.evidence_notice")})
 				notedNotice = true
 			}
 			rewritten.Blocks = append(rewritten.Blocks, UnifiedBlock{Kind: "text", Text: visionEvidenceBlock(block.Title, evidence)})

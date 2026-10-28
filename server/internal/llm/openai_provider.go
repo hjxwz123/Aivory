@@ -268,7 +268,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 		if finalizing {
 			requestMessages = append([]map[string]any{}, messages...)
 			requestMessages = append(requestMessages, map[string]any{
-				"role": "system", "content": toolFinalizationInstruction(finalizationSignal),
+				"role": "system", "content": toolFinalizationInstruction(finalizationSignal, ctx),
 			})
 		}
 		body := map[string]any{
@@ -454,7 +454,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 			status := "complete"
 			if r.Err != nil {
 				status = "error"
-				out = publicToolErrorOutput(r.Err)
+				out = publicToolErrorOutput(r.Err, ctx)
 			}
 			allCitations = append(allCitations, r.Citations...)
 			onEvent(SseEvent{Type: "tool_result", Name: tc.Name, ID: tc.ID, Summary: truncate(out, toolResultSummaryTruncationOpenAI), Status: status})
@@ -1612,7 +1612,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		}
 		instructions := req.SystemPrompt
 		if finalizing {
-			instructions = strings.TrimSpace(instructions + "\n\n" + toolFinalizationInstruction(finalizationSignal))
+			instructions = strings.TrimSpace(instructions + "\n\n" + toolFinalizationInstruction(finalizationSignal, ctx))
 		}
 		if instructions != "" {
 			body["instructions"] = instructions
@@ -1905,7 +1905,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 			status := "complete"
 			if r.Err != nil {
 				status = "error"
-				out = publicToolErrorOutput(r.Err)
+				out = publicToolErrorOutput(r.Err, ctx)
 			}
 			allCitations = append(allCitations, r.Citations...)
 			onEvent(SseEvent{Type: "tool_result", Name: c.Name, ID: c.ID, Summary: truncate(out, toolResultSummaryTruncationOpenAI), Status: status})

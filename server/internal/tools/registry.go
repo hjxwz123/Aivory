@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 
+	"aivory/server/internal/systemprompts"
 	"aivory/server/internal/config"
 	"aivory/server/internal/llm"
 	"aivory/server/internal/mcp"
@@ -204,6 +205,7 @@ func (r *Registry) imageGenerationConfigured(ctx context.Context) bool {
 func (r *Registry) listRegistered(includeUnavailable bool) []llm.ToolDef {
 	sandboxEnabled := r.sandbox != nil && r.sandbox.Enabled()
 	imageGenerationEnabled := r.ImageGenerationConfigured()
+	promptOverrides := systemprompts.Load(r.db)
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := []llm.ToolDef{}
@@ -214,9 +216,13 @@ func (r *Registry) listRegistered(includeUnavailable bool) []llm.ToolDef {
 		if !includeUnavailable && t.Name() == "image_generate" && !imageGenerationEnabled {
 			continue
 		}
+		description := promptOverrides.Text("tools.description." + t.Name())
+		if description == "" {
+			description = t.Description()
+		}
 		out = append(out, llm.ToolDef{
 			Name:        t.Name(),
-			Description: t.Description(),
+			Description: description,
 			InputSchema: t.InputSchema(),
 		})
 	}

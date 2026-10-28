@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"aivory/server/internal/store"
+	"aivory/server/internal/systemprompts"
 	"github.com/google/uuid"
 )
 
@@ -154,6 +155,7 @@ func privateWorkspaceScope(ctx context.Context) string {
 // limits remain effective. The API authorizes scope before calling; message
 // bodies and conversation records are never persisted by this path.
 func (o *Orchestrator) RunPrivateInWorkspace(ctx context.Context, userID, workspaceID string, model *store.Model, history []UnifiedMessage, emit func(SseEvent)) error {
+	ctx = systemprompts.WithDB(ctx, o.db)
 	ctx = context.WithValue(ctx, privateWorkspaceScopeKey{}, workspaceID)
 	if len(history) == 0 || model == nil || !model.Enabled || model.Kind != "chat" || model.Fast {
 		return errors.New("private_model_unavailable")
@@ -210,9 +212,9 @@ func (o *Orchestrator) moderatePrivate(ctx context.Context, userID string, model
 		}
 		moderator, err := store.GetModel(ctx, o.db, modelID)
 		if err == nil && moderator.Enabled && moderator.Kind == "chat" {
-			system := moderationModelSystemPrompt
+			system := systemprompts.Text(o.db, "task.moderation")
 			if categories := o.moderationCategories(); len(categories) > 0 {
-				system += " The administrator's prohibited categories are: " + strings.Join(categories, "; ")
+				system += systemprompts.Text(o.db, "moderation.private_categories") + strings.Join(categories, "; ")
 			}
 			result, _, callErr := o.privateCall(ctx, userID, moderator, []UnifiedMessage{{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: prompt}}}}, system, "task.moderation", moderationVerdictMaxOutputTokens, func(SseEvent) {})
 			if callErr == nil {

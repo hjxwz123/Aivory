@@ -29,6 +29,7 @@ import (
 
 	"aivory/server/internal/envcfg"
 	"aivory/server/internal/store"
+	"aivory/server/internal/systemprompts"
 )
 
 // Tunable knobs — envcfg overrides; defaults preserve original behaviour.
@@ -109,12 +110,7 @@ func (w *MemoryWorker) Process(ctx context.Context, convID string) error {
 	}
 	defer rows.Close()
 	var prompt strings.Builder
-	prompt.WriteString("Extract durable facts about the user from this conversation. " +
-		"Skip transient/contextual info (current task, opinions about content, etc). " +
-		fmt.Sprintf("Return JSON array (max %d items) of:\n", memoryCandidatesExtractionCap) +
-		`{"memory_text":"<short sentence>","slot":"<noun key>","value":"<concrete value>","memory_type":"location|preference|identity|schedule|habit|goal|constraint","confidence":0..1,"status":"ACTIVE|QUERY_DEPENDENT","affected_domains":["<slot>"]}` + "\n" +
-		"Use a STABLE, canonical slot key per KIND of fact (e.g. always \"language\" for a language preference) — never invent synonymous keys, and never emit two items that mean the same thing.\n" +
-		"Use status=QUERY_DEPENDENT when the fact's currency depends on context (plans, temporary states); otherwise ACTIVE.\n\n")
+	prompt.WriteString(systemprompts.Text(w.db, "memory.extract.user"))
 	prompt.WriteString("--- conversation ---\n")
 	turns := 0
 	msgIDs := []string{}
@@ -312,12 +308,7 @@ func (w *MemoryWorker) adjudicate(ctx context.Context, userID, convID string, c 
 	for _, e := range existing {
 		fmt.Fprintf(&p, "- id=%s value=%q\n", e.ID, e.Value)
 	}
-	p.WriteString("\nFor each existing id decide whether the new fact makes it: " +
-		"`stale` (superseded by the new fact), `keep` (old still correct, new is wrong/uncertain), " +
-		"`no_conflict` (different facet — both can be true simultaneously, e.g. different roles at different jobs), " +
-		"or `unknown_current` (can't tell which is current).\n" +
-		"Reply as JSON: {\"<id1>\":\"stale|keep|no_conflict|unknown_current\", …}. " +
-		"Be conservative: when in doubt, use unknown_current — never `stale`.")
+	p.WriteString(systemprompts.Text(w.db, "memory.adjudicate.user"))
 	var verdicts map[string]string
 	if err := w.task.RunJSON(ctx, TaskMemoryAdjudicate, p.String(), &verdicts, RunOpts{
 		ModelID: w.memoryPolicyModelID(ctx, "memory_adjudicate_model_id", convID),
@@ -377,11 +368,7 @@ func (w *MemoryWorker) findSemanticDuplicate(ctx context.Context, userID, convID
 	for _, m := range mems {
 		fmt.Fprintf(&p, "- id=%s: %s\n", m.id, m.text)
 	}
-	p.WriteString("\nIf the new fact conveys the SAME information as one of the existing memories " +
-		"(semantically equivalent — same meaning, even if worded differently or filed under a different key), " +
-		"reply with that memory's id. If the new fact is genuinely NEW, or it CHANGES an existing fact to a " +
-		"DIFFERENT value, reply with an empty id. " +
-		`Reply with strict JSON only: {"duplicate_of":"<id or empty>"}.`)
+	p.WriteString(systemprompts.Text(w.db, "memory.dedup.user"))
 	var out struct {
 		DuplicateOf string `json:"duplicate_of"`
 	}
@@ -390,7 +377,7 @@ func (w *MemoryWorker) findSemanticDuplicate(ctx context.Context, userID, convID
 		UserID:          userID,
 		ConversationID:  convID,
 		MaxOutputTokens: maxOutputTokens3,
-		SystemPrompt:    "You are a deduplication checker for a user-memory store. Decide whether a new fact already exists in the saved set. Reply with strict JSON only — no prose.",
+		SystemPrompt:    systemprompts.Text(w.db, "task.memory_dedup"),
 	}); err != nil {
 		return ""
 	}

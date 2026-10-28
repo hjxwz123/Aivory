@@ -97,7 +97,7 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 		}
 		systemPrompt := req.SystemPrompt
 		if finalizing {
-			systemPrompt = strings.TrimSpace(systemPrompt + "\n\n" + toolFinalizationInstruction(finalizationSignal))
+			systemPrompt = strings.TrimSpace(systemPrompt + "\n\n" + toolFinalizationInstruction(finalizationSignal, ctx))
 		}
 		body := map[string]any{
 			"systemInstruction": map[string]any{"parts": []map[string]any{{"text": systemPrompt}}},
@@ -283,7 +283,7 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 			status := "complete"
 			if r.Err != nil {
 				status = "error"
-				out = publicToolErrorOutput(r.Err)
+				out = publicToolErrorOutput(r.Err, ctx)
 			}
 			// §6.2 tool_result MUST include the same unique id as tool_start so
 			// parallel or repeated calls to one Gemini function remain distinct.

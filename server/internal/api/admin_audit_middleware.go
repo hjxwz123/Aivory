@@ -162,7 +162,7 @@ func adminAuditClassification(r *http.Request) (eventType, action, targetType, t
 		eventType = "users"
 	case "payment-channels", "payment-methods", "payment-orders", "credit-packages", "redeem-codes", "redeem-batches":
 		eventType = "billing"
-	case "settings", "onboarding":
+	case "settings", "system-prompts", "onboarding":
 		eventType = "settings"
 	case "workspaces":
 		eventType = "workspace"
@@ -244,6 +244,9 @@ func prepareAdminAudit(d Deps, r *http.Request) {
 		return
 	}
 	s.resource = parts[2]
+	if s.resource == "system-prompts" {
+		s.resource = "settings"
+	}
 	if strings.HasSuffix(auditRoute(r), "/reorder") {
 		s.resource += "-order"
 	}

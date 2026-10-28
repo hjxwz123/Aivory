@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"aivory/server/internal/systemprompts"
 	"aivory/server/internal/envcfg"
 	"aivory/server/internal/fileguard"
 	"aivory/server/internal/oauth"
@@ -2345,7 +2346,7 @@ func normalizeSettingsArchiveRows(r io.Reader) (io.Reader, error) {
 // document that must be decoded and validated independently.
 func normalizeCompactionArchiveSetting(row map[string]json.RawMessage, key string) error {
 	switch key {
-	case "context_compaction_prompt", "context_compaction_model_id", "compaction_enabled",
+	case systemprompts.SettingKey, "context_compaction_prompt", "context_compaction_model_id", "compaction_enabled",
 		"keep_recent_rounds", "summary_max_tokens",
 		"compaction_retention_percentage", "compaction_token_target_percentage",
 		"compaction_token_trigger", "compaction_token_cap", "compaction_request_max_tokens":
@@ -2360,6 +2361,13 @@ func normalizeCompactionArchiveSetting(row map[string]json.RawMessage, key strin
 	}
 
 	switch key {
+	case systemprompts.SettingKey:
+		normalized, err := normalizeSystemPromptOverrides(json.RawMessage(raw))
+		if err != nil {
+			return fmt.Errorf("%w: %v", errInvalidCompactionConfigArchive, err)
+		}
+		setArchiveSettingValue(row, json.RawMessage(normalized))
+		return nil
 	case "context_compaction_prompt":
 		prompt, err := decodeArchiveSettingString(raw)
 		if err != nil {

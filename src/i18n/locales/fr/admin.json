@@ -3264,5 +3264,53 @@
     "closedHint": "Une fois cette option activée et enregistrée, les utilisateurs et les pages partagées publiques ne sont plus accessibles. Les administrateurs peuvent toujours se connecter à la console.",
     "message": "Message personnalisé",
     "messageHint": "Les sauts de ligne sont acceptés, dans la limite de 2 000 caractères. Laissez ce champ vide pour afficher le message par défaut dans la langue actuelle du site."
+  },
+  "systemPrompts": {
+    "title": "Prompts système",
+    "lead": "Modifiez les prompts intégrés. Laissez un champ vide et enregistrez pour utiliser la valeur par défaut.",
+    "scopeNote": "Chat and decision model paths have separate prompts, used only when that model path is selected. Conversation prompts have language variants. Model, project and skill instructions remain in their own settings.",
+    "discard": "Annuler les modifications",
+    "save": "Enregistrer ({{count}})",
+    "saved": "Prompts enregistrés. Ils seront utilisés pour les prochaines requêtes.",
+    "search": "Rechercher par nom, ID ou contenu",
+    "group": "Task category",
+    "allGroups": "Toutes les tâches",
+    "engine": "Model path",
+    "allEngines": "Tous les parcours de modèle",
+    "locale": "Langue des prompts de conversation",
+    "allLocales": "Toutes les langues",
+    "count": "{{count}} prompts affichés sur {{total}}",
+    "unsaved": "{{count}} modifications non enregistrées",
+    "list": "System prompt list",
+    "empty": "Aucun prompt correspondant",
+    "custom": "Contenu personnalisé",
+    "defaultStatus": "Valeur système par défaut",
+    "modified": "Non enregistré",
+    "format": "Format de sortie et contraintes",
+    "variables": "Variables obligatoires",
+    "override": "Prompt personnalisé",
+    "blankHint": "Laissez vide pour utiliser la valeur par défaut. Enregistrez pour appliquer.",
+    "reset": "Effacer et rétablir la valeur par défaut",
+    "copyDefault": "Copier la valeur par défaut",
+    "builtin": "Afficher la valeur par défaut",
+    "noDefault": "No additional instructions by default.",
+    "missingVariables": "Missing required placeholders: {{variables}}",
+    "tooLong": "A prompt exceeds the size limit. Shorten it before saving.",
+    "retry": "Recharger",
+    "groups": {
+      "routing": "Tool and document routing",
+      "memory": "Memory and compaction",
+      "moderation": "Moderation and verification",
+      "conversation": "Conversation, titles and presentation",
+      "rag": "Knowledge retrieval",
+      "research": "Deep research",
+      "image": "Image understanding and generation",
+      "tools": "Tool protocol and built-in skills"
+    },
+    "engines": {
+      "chat": "Chat model",
+      "decision": "Decision model",
+      "shared": "Shared"
+    }
   }
 }

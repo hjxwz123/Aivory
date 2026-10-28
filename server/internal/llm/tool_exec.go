@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"aivory/server/internal/envcfg"
+	"aivory/server/internal/systemprompts"
 	"aivory/server/internal/tooldiagnostics"
 )
 
@@ -318,14 +319,18 @@ func toolFinalizationError(signal error, cause error) error {
 	return toolBudgetFinalizationError(nil, cause)
 }
 
-func toolFinalizationInstruction(signal error) string {
+func toolFinalizationInstruction(signal error, contexts ...context.Context) string {
+	ctx := context.Background()
+	if len(contexts) > 0 {
+		ctx = contexts[0]
+	}
 	if errors.Is(signal, errSearchRoundComplete) {
-		return searchOnlyFinalInstruction
+		return systemprompts.FromContext(ctx, "tools.final.search")
 	}
 	if IsToolNoProgress(signal) {
-		return toolNoProgressInstruction
+		return systemprompts.FromContext(ctx, "tools.final.no_progress")
 	}
-	return toolBudgetFinalInstruction
+	return systemprompts.FromContext(ctx, "tools.final.budget")
 }
 
 func toolFinalizationStopReason(signal error) string {
@@ -369,18 +374,22 @@ func (e *ToolUserError) Error() string { return e.Message }
 // managed, and MCP tool failures. The original error remains available to
 // server-side logging and usage diagnostics; only explicit public error types
 // cross this boundary.
-func publicToolErrorOutput(err error) string {
+func publicToolErrorOutput(err error, contexts ...context.Context) string {
+	ctx := context.Background()
+	if len(contexts) > 0 {
+		ctx = contexts[0]
+	}
 	if err == nil {
 		return ""
 	}
 	if errors.Is(err, errSearchRoundComplete) {
-		return searchOnlyFinalInstruction
+		return systemprompts.FromContext(ctx, "tools.final.search")
 	}
 	if IsToolBudgetExceeded(err) {
-		return toolBudgetExceededOutput
+		return systemprompts.FromContext(ctx, "tools.output.budget")
 	}
 	if IsToolNoProgress(err) {
-		return toolNoProgressOutput
+		return systemprompts.FromContext(ctx, "tools.output.no_progress")
 	}
 	if errors.Is(err, context.Canceled) {
 		return publicToolCanceledMessage

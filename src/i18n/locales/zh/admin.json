@@ -3266,5 +3266,53 @@
     "closedHint": "开启并保存后，普通用户和公开分享页将暂停访问。管理员仍可登录和使用后台。",
     "message": "自定义显示文字",
     "messageHint": "支持换行，最多 2000 个字符。留空时显示网站当前语言的默认提示。"
+  },
+  "systemPrompts": {
+    "title": "提示词编辑",
+    "lead": "集中编辑系统内置提示词。留空或清空后保存，使用系统默认值。",
+    "scopeNote": "普通模型与决策模型分别配置，仅在相应模型被选用时生效。对话提示词按界面语言区分；模型专属、项目和技能提示词仍在各自配置中维护。",
+    "discard": "撤销修改",
+    "save": "保存修改（{{count}}）",
+    "saved": "提示词已保存，后续请求使用新配置",
+    "search": "搜索名称、标识或提示词内容",
+    "group": "任务分类",
+    "allGroups": "全部任务",
+    "engine": "模型路径",
+    "allEngines": "全部模型路径",
+    "locale": "对话提示词语言",
+    "allLocales": "全部语言",
+    "count": "显示 {{count}} / {{total}} 项",
+    "unsaved": "{{count}} 项未保存",
+    "list": "系统提示词列表",
+    "empty": "没有匹配的提示词",
+    "custom": "使用自定义内容",
+    "defaultStatus": "使用系统默认值",
+    "modified": "未保存",
+    "format": "返回格式与约束",
+    "variables": "必须保留的占位符",
+    "override": "自定义提示词",
+    "blankHint": "留空使用系统默认值；修改后需要保存。",
+    "reset": "清空，恢复默认",
+    "copyDefault": "将默认内容填入编辑器",
+    "builtin": "查看系统默认内容",
+    "noDefault": "默认不附加其他要求。",
+    "missingVariables": "缺少必要占位符：{{variables}}",
+    "tooLong": "有提示词超过长度上限，请缩短后再保存。",
+    "retry": "重新加载",
+    "groups": {
+      "routing": "工具与文档路由",
+      "memory": "记忆与上下文压缩",
+      "moderation": "审查与回答核验",
+      "conversation": "对话、标题与展示",
+      "rag": "知识库检索",
+      "research": "深度研究",
+      "image": "图片理解与生成",
+      "tools": "工具协议与内置技能"
+    },
+    "engines": {
+      "chat": "普通模型",
+      "decision": "决策模型",
+      "shared": "通用"
+    }
   }
 }

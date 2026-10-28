@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"aivory/server/internal/systemprompts"
 	"aivory/server/internal/envcfg"
 	"aivory/server/internal/fileguard"
 	"aivory/server/internal/mail"
@@ -1550,6 +1551,7 @@ func analyticsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 // ===== Settings =====
 
 var settingsKeys = []string{
+	systemprompts.SettingKey,
 	"default_model_id", "task_model_id", "title_model_id", "file_route_model_id", "context_compaction_model_id", "tool_route_model_id", "memory_dedup_model_id", "memory_adjudicate_model_id", "tool_mode_default", "embedding_model_id",
 	"keep_recent_rounds", "summary_max_tokens", "compaction_request_max_tokens", "context_compaction_prompt", "compaction_enabled",
 	"compaction_token_trigger", "compaction_token_cap", "compaction_token_target_percentage", "compaction_retention_percentage",
@@ -2087,6 +2089,12 @@ func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.R
 					return 0, errInvalidInput
 				}
 				v, _ = json.Marshal(strings.TrimSpace(text))
+			case systemprompts.SettingKey:
+				normalized, err := normalizeSystemPromptOverrides(v)
+				if err != nil {
+					return 0, err
+				}
+				v = normalized
 			case "context_compaction_prompt":
 				var prompt string
 				if json.Unmarshal(v, &prompt) != nil {

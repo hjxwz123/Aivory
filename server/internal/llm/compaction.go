@@ -28,6 +28,7 @@ import (
 	"aivory/server/internal/envcfg"
 	"aivory/server/internal/generationcfg"
 	"aivory/server/internal/store"
+	"aivory/server/internal/systemprompts"
 )
 
 // Compaction defaults — kept in sync with the seeded settings (store.Seed) so an
@@ -288,15 +289,7 @@ func compactionPersistError(action string, err error) error {
 }
 
 func compactionPrompt(db *sql.DB) string {
-	var prompt string
-	if raw, err := store.GetSetting(db, "context_compaction_prompt"); err == nil {
-		_ = json.Unmarshal(raw, &prompt)
-	}
-	// Settings validation cannot protect databases restored from an older backup
-	// (or edited directly), which may still contain a multi-megabyte prompt.
-	// Every summary path calls this helper, so clipping here protects initial
-	// initial summaries and incremental replacement summaries alike.
-	return clipToTokens(strings.TrimSpace(prompt), defaultCompactionPromptTokens)
+	return clipToTokens(strings.TrimSpace(systemprompts.Load(db)["compaction.custom"]), defaultCompactionPromptTokens)
 }
 
 func canonicalToolOutputBlock(name, id, output, status string) UnifiedBlock {
@@ -849,8 +842,8 @@ func compactionSummaryBlockTokenLimit(db *sql.DB, extraParams json.RawMessage) i
 	requestMaxTokens := compactionRequestMaxTokens(db)
 	maxOutputTokens := effectiveCompactionOutputCap(requestMaxTokens, defaultSummaryMaxTokens)
 	return compactionPayloadBudget(
-		requestMaxTokens, maxOutputTokens, compactionPrompt(db), compactionSummaryInstruction,
-		extraParams,
+		requestMaxTokens, maxOutputTokens, compactionPrompt(db), compactionInstruction(db),
+		extraParams, systemprompts.Text(db, "task.compact"),
 	)
 }
 
@@ -1810,7 +1803,7 @@ func maybeCompact(
 	}
 	selection, selectionErr := selectCompactionPrefix(
 		pathExisting, desiredNewer, customPrompt, compactionExtraParams,
-		summaryOutputLimit, requestMaxTokens,
+		summaryOutputLimit, requestMaxTokens, db,
 	)
 	if selectionErr != nil {
 		planFinished = true
@@ -1854,7 +1847,7 @@ func maybeCompact(
 	} else {
 		text, summaryErr = summarizeCompactionText(
 			ctx, task, conv, source, payerID, conversationModelID, customPrompt,
-			compactionSummaryInstruction, outputCap, requestMaxTokens,
+			compactionInstruction(db), outputCap, requestMaxTokens,
 		)
 	}
 	if terminalErr := terminalCompactionTaskError(ctx, summaryErr); terminalErr != nil {

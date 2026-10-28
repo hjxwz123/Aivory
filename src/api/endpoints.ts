@@ -1776,6 +1776,9 @@ export const adminApi = {
       return res.blob()
     }),
 
+  systemPrompts: () => api<import('./types').ApiSystemPromptConfig>('/admin/system-prompts'),
+  updateSystemPrompts: (overrides: Record<string, string>) =>
+    api<import('./types').ApiSystemPromptConfig>('/admin/system-prompts', { method: 'PATCH', body: { overrides } }),
   settings: () => api<Record<string, unknown>>('/admin/settings'),
   emailPreview: (purpose: import('@/lib/email-delivery').EmailPurpose, locale: string) =>
     api<{ subject: string; html: string }>(`/admin/email/preview?${new URLSearchParams({ purpose, locale })}`),

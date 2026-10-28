@@ -3264,5 +3264,53 @@
     "closedHint": "After enabling and saving, users and public shared pages cannot access the site. Administrators can still sign in and use the admin console.",
     "message": "Custom message",
     "messageHint": "Line breaks are supported, up to 2,000 characters. Leave blank to use the default message in the current site language."
+  },
+  "systemPrompts": {
+    "title": "System prompts",
+    "lead": "Edit built-in prompts in one place. Leave an override empty and save to use the system default.",
+    "scopeNote": "Chat and decision model paths have separate prompts, used only when that model path is selected. Conversation prompts have language variants. Model, project and skill instructions remain in their own settings.",
+    "discard": "Discard changes",
+    "save": "Save changes ({{count}})",
+    "saved": "Prompts saved. Subsequent requests will use the new settings.",
+    "search": "Search names, IDs or prompt text",
+    "group": "Task category",
+    "allGroups": "All tasks",
+    "engine": "Model path",
+    "allEngines": "All model paths",
+    "locale": "Conversation prompt language",
+    "allLocales": "All languages",
+    "count": "Showing {{count}} of {{total}} prompts",
+    "unsaved": "{{count}} unsaved changes",
+    "list": "System prompt list",
+    "empty": "No matching prompts",
+    "custom": "Custom override",
+    "defaultStatus": "System default",
+    "modified": "Unsaved",
+    "format": "Output format and requirements",
+    "variables": "Required placeholders",
+    "override": "Custom prompt",
+    "blankHint": "Leave empty to use the system default. Save to apply changes.",
+    "reset": "Clear to restore default",
+    "copyDefault": "Copy default into editor",
+    "builtin": "View system default",
+    "noDefault": "No additional instructions by default.",
+    "missingVariables": "Missing required placeholders: {{variables}}",
+    "tooLong": "A prompt exceeds the size limit. Shorten it before saving.",
+    "retry": "Reload",
+    "groups": {
+      "routing": "Tool and document routing",
+      "memory": "Memory and compaction",
+      "moderation": "Moderation and verification",
+      "conversation": "Conversation, titles and presentation",
+      "rag": "Knowledge retrieval",
+      "research": "Deep research",
+      "image": "Image understanding and generation",
+      "tools": "Tool protocol and built-in skills"
+    },
+    "engines": {
+      "chat": "Chat model",
+      "decision": "Decision model",
+      "shared": "Shared"
+    }
   }
 }

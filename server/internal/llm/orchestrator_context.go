@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"aivory/server/internal/store"
+	"aivory/server/internal/systemprompts"
 	"aivory/server/internal/toolnames"
 )
 
@@ -343,7 +344,7 @@ func (o *Orchestrator) resolveAttachments(ctx context.Context, userID, convID st
 						continue
 					}
 					evidence := f.VisionEvidence
-					if evidence == "" || f.VisionEvidenceKey != visionEvidenceStamp(reader) {
+					if evidence == "" || f.VisionEvidenceKey != visionEvidenceStamp(reader, o.db) {
 						if freshEvidenceUsed >= visionEvidenceMaxImagesPerTurn {
 							// Cached evidence is uncapped, so only images that would
 							// need a NEW vision call wait for a later turn. Ordered
@@ -380,7 +381,7 @@ func (o *Orchestrator) resolveAttachments(ctx context.Context, userID, convID st
 						evidence = generated
 					}
 					if !notedEvidenceNotice {
-						hist[i].Blocks = append(hist[i].Blocks, UnifiedBlock{Kind: "text", Text: visionEvidenceNotice})
+						hist[i].Blocks = append(hist[i].Blocks, UnifiedBlock{Kind: "text", Text: systemprompts.Text(o.db, "vision.evidence_notice")})
 						notedEvidenceNotice = true
 					}
 					hist[i].Blocks = append(hist[i].Blocks, UnifiedBlock{
@@ -740,6 +741,7 @@ func preloadedSkillIDs(opts *systemPromptOpts) map[string]bool {
 }
 
 type systemPromptOpts struct {
+	DB          *sql.DB
 	ModelSystem string
 	// ModelLabel is the admin-configured display name of the model. It drives the
 	// built-in identity line so the assistant identifies as this name (§ identity).
@@ -875,18 +877,22 @@ func recentHistoryStrings(msgs []store.Message, n int) []string {
 
 // titleLanguageDirective returns a "write the title in this language" instruction
 // WRITTEN IN the user's selected UI language. Empty for unknown/blank locales.
-func titleLanguageDirective(locale string) string {
+func titleLanguageDirective(locale string, databases ...*sql.DB) string {
+	var db *sql.DB
+	if len(databases) > 0 {
+		db = databases[0]
+	}
 	switch strings.ToLower(strings.TrimSpace(locale)) {
 	case "en", "en-us", "en-gb":
-		return "Write the title in English."
+		return systemprompts.Text(db, "title.language.en")
 	case "zh", "zh-cn", "zh-hans", "zh-sg":
-		return "请用简体中文写这个标题。"
+		return systemprompts.Text(db, "title.language.zh")
 	case "zh-hant", "zh-tw", "zh-hk", "zh-mo":
-		return "請用繁體中文寫這個標題。"
+		return systemprompts.Text(db, "title.language.zh-Hant")
 	case "ja", "ja-jp":
-		return "タイトルは日本語で書いてください。"
+		return systemprompts.Text(db, "title.language.ja")
 	case "fr", "fr-fr", "fr-ca":
-		return "Rédige le titre en français."
+		return systemprompts.Text(db, "title.language.fr")
 	default:
 		return ""
 	}
@@ -907,7 +913,7 @@ func composeSystemPrompt(o systemPromptOpts) string {
 	// target language, a separate "always reply in X" directive is no longer
 	// needed — and was removed. Only tool NAMES, boundary tags, markdown/paths,
 	// and admin/user DATA stay language-neutral (see prompt_l10n.go).
-	l := promptL10nFor(o.Locale)
+	l := configuredPromptL10n(o.DB, o.Locale)
 	// ① built-in identity (§ identity): the assistant identifies as the model's
 	// admin-configured display NAME — never a hardcoded product name. So a model
 	// labelled "GPT 5.5" answers "who are you?" with "I am GPT 5.5", regardless of
@@ -916,7 +922,7 @@ func composeSystemPrompt(o systemPromptOpts) string {
 	if label == "" {
 		label = "an AI assistant"
 	}
-	fmt.Fprintf(&b, l.identity, label, label)
+	b.WriteString(systemprompts.Render(l.identity, "{{model}}", label))
 
 	// ② model-level system prompt (admin-customised behaviour/persona), or the
 	// localized default style line when the admin hasn't set one.
@@ -938,7 +944,7 @@ func composeSystemPrompt(o systemPromptOpts) string {
 		dateStr = now.Format("Monday, 2006-01-02")
 	}
 	b.WriteString("\n\n")
-	b.WriteString(fmt.Sprintf(l.dateGrounding, dateStr))
+	b.WriteString(systemprompts.Render(l.dateGrounding, "{{date}}", dateStr))
 
 	// ①.5 user personalization — tone traits + custom instructions + nickname.
 	// Placed high so the assistant adopts the user's preferred style.
@@ -954,10 +960,10 @@ func composeSystemPrompt(o systemPromptOpts) string {
 			}
 		}
 		if len(phrases) > 0 {
-			fmt.Fprintf(&b, l.personaTone, strings.Join(phrases, "; "))
+			b.WriteString(systemprompts.Render(l.personaTone, "{{tone}}", strings.Join(phrases, "; ")))
 		}
 		if n := strings.TrimSpace(o.Persona.Nickname); n != "" {
-			fmt.Fprintf(&b, l.personaAddress, n)
+			b.WriteString(systemprompts.Render(l.personaAddress, "{{nickname}}", n))
 		}
 		if c := strings.TrimSpace(o.Persona.Custom); c != "" {
 			b.WriteString(c)
@@ -1048,7 +1054,7 @@ func composeSystemPrompt(o systemPromptOpts) string {
 		if has["python_execute"] {
 			if o.SkillsAllowed && !o.SkillToolAvailable && !explicitDocGen && skillModeAllowsBuiltinDocGen(o.SkillMode) {
 				b.WriteString("\n")
-				b.WriteString(DocGenRecipes)
+				b.WriteString(systemprompts.Text(o.DB, "docgen.recipes"))
 			}
 
 			// Conversation-uploaded data files persist in the sandbox across turns
@@ -1084,7 +1090,7 @@ func composeSystemPrompt(o systemPromptOpts) string {
 			}
 		}
 		if !shadowed {
-			skillIdx = append(append([]SkillIndex{}, o.Skills...), SkillIndex{Name: DocGenSkillName, When: DocGenWhen})
+			skillIdx = append(append([]SkillIndex{}, o.Skills...), SkillIndex{Name: DocGenSkillName, When: systemprompts.Text(o.DB, "docgen.when")})
 		}
 	}
 	if o.SkillsAllowed && o.SkillToolAvailable && len(skillIdx) > 0 {
@@ -1103,7 +1109,7 @@ func composeSystemPrompt(o systemPromptOpts) string {
 	if o.PresentationSkillsAllowed && len(o.PresentationSkills) > 0 {
 		b.WriteString(l.presentationHeader)
 		b.WriteString(l.presentationBody)
-		b.WriteString(generativeUIOutputContract)
+		b.WriteString(systemprompts.Text(o.DB, "conversation.ui_contract"))
 		for _, s := range o.PresentationSkills {
 			fmt.Fprintf(&b, "\n### %s\n%s\n", s.Name, s.Instructions)
 		}
@@ -1111,7 +1117,7 @@ func composeSystemPrompt(o systemPromptOpts) string {
 
 	// ④ project instructions
 	if o.ProjectInstructions != "" {
-		fmt.Fprintf(&b, l.projectHeader, o.ProjectName)
+		b.WriteString(systemprompts.Render(l.projectHeader, "{{project}}", o.ProjectName))
 		b.WriteString(o.ProjectInstructions)
 		b.WriteString("\n")
 	}
@@ -1170,13 +1176,17 @@ func composeSystemPrompt(o systemPromptOpts) string {
 // tags. Combined with the system-prompt declaration that <context>…</context>
 // is reference material (NOT instructions), this neutralizes prompt-injected
 // "ignore the user" patterns embedded in retrieved documents.
-func formatRAGContext(snips []Citation, locale string) string {
+func formatRAGContext(snips []Citation, locale string, databases ...*sql.DB) string {
 	if len(snips) == 0 {
 		return ""
 	}
 	b := strings.Builder{}
 	b.WriteString("\n\n<context-from-knowledge-base>\n")
-	b.WriteString(promptL10nFor(locale).ragIntro)
+	var db *sql.DB
+	if len(databases) > 0 {
+		db = databases[0]
+	}
+	b.WriteString(configuredPromptL10n(db, locale).ragIntro)
 	for i, c := range snips {
 		index := c.Index
 		if index <= 0 {

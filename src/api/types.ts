@@ -2160,3 +2160,23 @@ export type ApiSseEvent =
   | { type: 'verify_started'; message_id?: string }
   | { type: 'verify_finding'; message_id?: string; finding: ApiVerifyFinding }
   | { type: 'verify_done'; message_id?: string; verdict: 'clean' | 'issues' }
+
+/** Server-owned catalog. Runtime data is deliberately separate from prompt text. */
+export interface ApiSystemPrompt {
+  id: string
+  name: string
+  group: string
+  engine: 'chat' | 'decision' | 'shared'
+  locale?: string
+  default: string
+  format: string
+  notes: string
+  variables?: string[]
+  max_bytes?: number
+}
+
+export interface ApiSystemPromptConfig {
+  prompts: ApiSystemPrompt[]
+  overrides: Record<string, string>
+  max_prompt_bytes: number
+}

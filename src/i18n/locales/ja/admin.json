@@ -3262,5 +3262,53 @@
     "closedHint": "有効にして保存すると、一般ユーザーと公開共有ページのアクセスを停止します。管理者は引き続きログインして管理画面を利用できます。",
     "message": "カスタムメッセージ",
     "messageHint": "改行に対応し、最大 2000 文字です。空欄の場合は現在のサイト言語の既定メッセージを表示します。"
+  },
+  "systemPrompts": {
+    "title": "システムプロンプト",
+    "lead": "組み込みプロンプトをまとめて編集します。空欄で保存すると既定値を使用します。",
+    "scopeNote": "Chat and decision model paths have separate prompts, used only when that model path is selected. Conversation prompts have language variants. Model, project and skill instructions remain in their own settings.",
+    "discard": "変更を破棄",
+    "save": "変更を保存（{{count}}）",
+    "saved": "保存しました。次のリクエストから反映されます。",
+    "search": "名前、ID、内容を検索",
+    "group": "Task category",
+    "allGroups": "すべてのタスク",
+    "engine": "Model path",
+    "allEngines": "すべてのモデル経路",
+    "locale": "会話プロンプトの言語",
+    "allLocales": "すべての言語",
+    "count": "{{total}} 件中 {{count}} 件を表示",
+    "unsaved": "未保存 {{count}} 件",
+    "list": "System prompt list",
+    "empty": "一致するプロンプトはありません",
+    "custom": "カスタム設定",
+    "defaultStatus": "システム既定値",
+    "modified": "未保存",
+    "format": "出力形式と要件",
+    "variables": "必須プレースホルダー",
+    "override": "カスタムプロンプト",
+    "blankHint": "空欄で既定値を使用します。変更後に保存してください。",
+    "reset": "クリアして既定値に戻す",
+    "copyDefault": "既定値をエディターにコピー",
+    "builtin": "既定の内容を表示",
+    "noDefault": "No additional instructions by default.",
+    "missingVariables": "Missing required placeholders: {{variables}}",
+    "tooLong": "A prompt exceeds the size limit. Shorten it before saving.",
+    "retry": "再読み込み",
+    "groups": {
+      "routing": "Tool and document routing",
+      "memory": "Memory and compaction",
+      "moderation": "Moderation and verification",
+      "conversation": "Conversation, titles and presentation",
+      "rag": "Knowledge retrieval",
+      "research": "Deep research",
+      "image": "Image understanding and generation",
+      "tools": "Tool protocol and built-in skills"
+    },
+    "engines": {
+      "chat": "Chat model",
+      "decision": "Decision model",
+      "shared": "Shared"
+    }
   }
 }

@@ -304,7 +304,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 			setMessagesCacheBreakpoint(messages)
 			systemPrompt := req.SystemPrompt
 			if finalizing {
-				systemPrompt = strings.TrimSpace(systemPrompt + "\n\n" + toolFinalizationInstruction(finalizationSignal))
+				systemPrompt = strings.TrimSpace(systemPrompt + "\n\n" + toolFinalizationInstruction(finalizationSignal, ctx))
 			}
 			body := map[string]any{
 				"model":      req.Model.RequestID,
@@ -537,7 +537,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 			status := "complete"
 			if r.Err != nil {
 				status = "error"
-				out = publicToolErrorOutput(r.Err)
+				out = publicToolErrorOutput(r.Err, ctx)
 			}
 			allCitations = append(allCitations, r.Citations...)
 			onEvent(SseEvent{Type: "tool_result", Name: tc.Name, ID: tc.ID, Summary: truncate(out, toolResultSummaryTruncationAnthropic), Status: status})

@@ -3262,5 +3262,53 @@
     "closedHint": "開啟並儲存後，一般使用者和公開分享頁將暫停存取。管理員仍可登入和使用後台。",
     "message": "自訂顯示文字",
     "messageHint": "支援換行，最多 2000 個字元。留空時顯示網站目前語言的預設提示。"
+  },
+  "systemPrompts": {
+    "title": "提示詞編輯",
+    "lead": "集中編輯系統內建提示詞。留空或清空後儲存，使用系統預設值。",
+    "scopeNote": "普通模型与决策模型分别配置，仅在相应模型被选用时生效。对话提示词按界面语言区分；模型专属、项目和技能提示词仍在各自配置中维护。",
+    "discard": "撤銷修改",
+    "save": "儲存修改（{{count}}）",
+    "saved": "提示詞已儲存，後續請求使用新設定",
+    "search": "搜尋名稱、識別碼或提示詞內容",
+    "group": "任务分类",
+    "allGroups": "全部任務",
+    "engine": "模型路径",
+    "allEngines": "全部模型路徑",
+    "locale": "對話提示詞語言",
+    "allLocales": "全部语言",
+    "count": "顯示 {{count}} / {{total}} 項",
+    "unsaved": "{{count}} 項未儲存",
+    "list": "系統提示詞清單",
+    "empty": "沒有符合的提示詞",
+    "custom": "使用自訂內容",
+    "defaultStatus": "使用系統預設值",
+    "modified": "未儲存",
+    "format": "回傳格式與限制",
+    "variables": "必須保留的佔位符",
+    "override": "自訂提示詞",
+    "blankHint": "留空使用系統預設值；修改後需要儲存。",
+    "reset": "清空，恢復預設",
+    "copyDefault": "將預設內容填入編輯器",
+    "builtin": "查看系統預設內容",
+    "noDefault": "預設不附加其他要求。",
+    "missingVariables": "缺少必要佔位符：{{variables}}",
+    "tooLong": "有提示詞超過長度上限，請縮短後再儲存。",
+    "retry": "重新載入",
+    "groups": {
+      "routing": "工具与文档路由",
+      "memory": "记忆与上下文压缩",
+      "moderation": "审查与回答核验",
+      "conversation": "对话、标题与展示",
+      "rag": "知识库检索",
+      "research": "深度研究",
+      "image": "图片理解与生成",
+      "tools": "工具协议与内置技能"
+    },
+    "engines": {
+      "chat": "一般模型",
+      "decision": "決策模型",
+      "shared": "通用"
+    }
   }
 }
