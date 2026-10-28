@@ -359,10 +359,8 @@ func toolRouteIsContinuation(input string) bool {
 }
 
 func toolRouteInstructions(toolDescriptions string) string {
-	instructions := "Choose search_only whenever a direct text response or web search can fully satisfy the user request. " +
-		"Choose full_tools only when fulfilling the requested outcome requires actually executing a non-search tool. " +
-		"Knowledge, explanations, and reasoning can be delivered directly as text. " +
-		"Judge the user's requested outcome, not the presence of tools or uploads; their availability alone does not require their use."
+	instructions := "Choose the tool scope needed to fulfill the user request. " +
+		"Use the available tools and attachment context to decide whether a direct answer or web search is sufficient."
 	if toolDescriptions != "" {
 		instructions += "\nAvailable tools and their purposes:\n" + toolDescriptions
 	}
