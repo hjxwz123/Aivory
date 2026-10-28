@@ -4,7 +4,7 @@ export interface ReasoningDisclosureState {
 }
 
 export function createReasoningDisclosure(active: boolean): ReasoningDisclosureState {
-  return { active, expanded: active }
+  return { active, expanded: false }
 }
 
 /**
@@ -16,7 +16,7 @@ export function syncReasoningDisclosure(
   active: boolean,
 ): ReasoningDisclosureState {
   if (state.active === active) return state
-  return { active, expanded: active }
+  return { active, expanded: false }
 }
 
 export function toggleReasoningDisclosure(state: ReasoningDisclosureState): ReasoningDisclosureState {

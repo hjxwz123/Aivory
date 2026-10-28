@@ -1,0 +1,36 @@
+.preview {
+  position: relative;
+  display: grid;
+  flex: 1;
+  min-inline-size: 0;
+  overflow: hidden;
+  block-size: 1.5em;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.line {
+  grid-area: 1 / 1;
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.incoming { animation: reasoning-line-in 220ms cubic-bezier(.16, 1, .3, 1) both; }
+.outgoing { pointer-events: none; animation: reasoning-line-out 220ms cubic-bezier(.16, 1, .3, 1) both; }
+
+@keyframes reasoning-line-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes reasoning-line-out {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-5px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .incoming, .outgoing { animation: none; }
+  .outgoing { visibility: hidden; }
+}

@@ -15,6 +15,7 @@ import { PrivateMarkdown } from '@/components/chat/private-markdown'
 import { ReasoningTrace } from '@/components/chat/reasoning-trace'
 import { ImageLightbox } from '@/components/chat/image-lightbox'
 import { ReplyPending } from '@/components/chat/reply-pending'
+import { UserMessageContent } from '@/components/chat/user-message-content'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
@@ -293,7 +294,7 @@ export function PrivateMessageRow({ message, model, isLastAssistant, locked, onR
                 </div>
               </div>
             ) : null}
-            {message.text}
+            <UserMessageContent text={message.text}>{message.text}</UserMessageContent>
           </div>
         ) : (
           <div className="w-full text-[var(--color-fg)]">

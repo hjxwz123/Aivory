@@ -73,6 +73,7 @@ import {
 import { FormulaEditorDialog } from './formula-editor-dialog'
 import { ReasoningTrace } from './reasoning-trace'
 import { ReplyPending } from './reply-pending'
+import { UserMessageContent } from './user-message-content'
 import { ImageGenerating } from './image-generating'
 import { ResearchPanel } from './research-panel'
 import { CitationList } from './citation'
@@ -914,13 +915,15 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
                     change), so the clean path is blocked. */}
               </div>
             ) : null}
-            {userMessageMarkdown ? (
-              <Markdown content={message.content} blockKeyPrefix={`${message.id}-user`} className="prose-user" breaks />
-            ) : userHasMath ? (
-              <MathText content={message.content} />
-            ) : (
-              message.content
-            )}
+            <UserMessageContent text={message.content}>
+              {userMessageMarkdown ? (
+                <Markdown content={message.content} blockKeyPrefix={`${message.id}-user`} className="prose-user" breaks />
+              ) : userHasMath ? (
+                <MathText content={message.content} />
+              ) : (
+                message.content
+              )}
+            </UserMessageContent>
           </div>
         ) : (
           <div className="w-full text-[var(--color-fg)]">
@@ -934,10 +937,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
               />
             ) : null}
 
-            {/* Unified reasoning trace — extended thinking + tool rounds in one
-                live, collapsible panel (§7.1-4). Streams open with per-tool
-                pulse + elapsed counters so long searches / sandbox runs never
-                look frozen; collapses once the answer text begins. */}
+            {/* One live reasoning line; the full model/tool trace opens on demand. */}
             <ReasoningTrace
               reasoning={message.reasoning}
               thinkingMs={message.thinkingMs}
@@ -1010,9 +1010,10 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onImageEdit, 
                     className="prose-full"
                   />
                 </div>
-                {message.streaming && (message.content || !message.artifacts?.length) ? (
+                {message.streaming && message.content ? (
                   <span
                     aria-hidden
+                    data-answer-cursor
                     className="inline-block align-text-bottom w-[2px] h-[1.05em] bg-[var(--color-accent)] ml-0.5 animate-[fade-in_400ms_ease-in-out_infinite_alternate]"
                   />
                 ) : null}

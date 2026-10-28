@@ -8,6 +8,7 @@ import { MathText } from '@/components/chat/math-text'
 import { useInlineThreadDrawer } from '@/store/inline-thread'
 import { resolveArmedTurnFlags, useConversations } from '@/store/conversations'
 import { useSettings } from '@/store/settings'
+import { UserMessageContent } from './user-message-content'
 import { useWorkspaces } from '@/store/workspaces'
 import { cn } from '@/lib/utils'
 import { hasMathContent } from '@/lib/math-content'
@@ -130,20 +131,22 @@ function ThreadBody({ quote, childId, onClose }: { quote: string; childId: strin
               <div
                 key={m.id}
                 className={cn(
-                  'self-end max-w-[85%] rounded-[12px] bg-[var(--color-bg-muted)] px-3 py-2 text-[13.5px] text-[var(--color-fg)]',
+                  'self-end min-w-0 max-w-[85%] rounded-[12px] bg-[var(--color-bg-muted)] px-3 py-2 text-[13.5px] leading-relaxed text-[var(--color-fg)]',
                   userMessageMarkdown || hasMathContent(m.content) ? 'min-w-0' : 'whitespace-pre-wrap',
                 )}
               >
-                {userMessageMarkdown ? (
-                  <Markdown content={m.content} blockKeyPrefix={`${m.id}-user-inline`} className="prose-user" breaks />
-                ) : hasMathContent(m.content) ? (
-                  <MathText content={m.content} />
-                ) : (
-                  m.content
-                )}
+                <UserMessageContent text={m.content}>
+                  {userMessageMarkdown ? (
+                    <Markdown content={m.content} blockKeyPrefix={`${m.id}-user-inline`} className="prose-user" breaks />
+                  ) : hasMathContent(m.content) ? (
+                    <MathText content={m.content} />
+                  ) : (
+                    m.content
+                  )}
+                </UserMessageContent>
               </div>
             ) : (
-              <div key={m.id} className="self-start w-full text-[13.5px] text-[var(--color-fg)]">
+              <div key={m.id} className="self-start w-full min-w-0 text-[13.5px] text-[var(--color-fg)]">
                 <GenerativeReplyProvider
                   messageId={m.id}
                   onReply={handleGenerativeReply}

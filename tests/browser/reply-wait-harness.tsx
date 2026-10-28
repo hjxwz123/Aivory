@@ -67,6 +67,12 @@ function phase(name: string, age = 0) {
   fixture = { ...fixture, messages: fixture.messages.map((message) => message.id === current.id ? { ...message, ...patch } : message) }
   publish()
 }
+function reason(text: string) {
+  fixture = { ...fixture, messages: fixture.messages.map((message) => message.id === 'waiting-reply' ? {
+    ...message, reasoning: [{ kind: 'thinking', id: 'thought', text }],
+  } : message) }
+  publish()
+}
 const animation = normalizeReplyAnimationPref(query.get('animation')) ?? useSettings.getState().appearance.replyAnimation
 const settings = { onboarded: view !== 'welcome', reply_animation: animation }
 useSettings.getState().syncUserSettings(settings, 'wait-user')
@@ -87,7 +93,7 @@ if (view === 'settings') useSettingsModal.getState().openSettings('appearance')
 await i18n.changeLanguage(query.get('lang') || 'zh')
 document.documentElement.dataset.theme = query.get('theme') || 'light'
 document.documentElement.classList.toggle('dark', query.get('theme') === 'dark')
-Reflect.set(window, '__REPLY_WAIT__', { phase, send, settings: useSettings, auth: useAuth })
+Reflect.set(window, '__REPLY_WAIT__', { phase, send, reason, settings: useSettings, auth: useAuth })
 
 function PrivateRows() {
   const conversation = useConversations((state) => state.conversations[0])

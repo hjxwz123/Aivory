@@ -349,6 +349,8 @@
     }
   },
   "message": {
+    "expandAll": "すべて表示",
+    "collapse": "折りたたむ",
     "refused": "モデルはこのリクエストへの回答を控えました。",
     "stopped": "生成を停止しました。",
     "ragFullText": "ドキュメント全文を挿入しました",

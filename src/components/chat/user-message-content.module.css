@@ -1,0 +1,43 @@
+.root {
+  --user-message-preview-lines: 8;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+.viewport { min-inline-size: 0; max-inline-size: 100%; }
+.viewport[data-collapsed='true'] {
+  max-block-size: calc(var(--user-message-preview-lines) * 1lh);
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 2lh), transparent);
+}
+
+.content { display: flow-root; min-inline-size: 0; overflow-wrap: anywhere; }
+.toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  inline-size: 100%;
+  min-block-size: 32px;
+  margin-block-start: 4px;
+  border-radius: 6px;
+  color: var(--color-fg-muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: normal;
+  cursor: pointer;
+  transition: color 150ms, background-color 150ms;
+}
+.toggle:hover { color: var(--color-fg); background: color-mix(in oklch, var(--color-fg) 5%, transparent); }
+.toggle:focus-visible { outline: 2px solid var(--color-ring); outline-offset: 2px; }
+.chevron { flex-shrink: 0; transition: transform 180ms ease-out; }
+.toggle[aria-expanded='true'] .chevron { transform: rotate(180deg); }
+
+@media (max-width: 639px) {
+  .root { --user-message-preview-lines: 6; }
+  .toggle { min-block-size: 44px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toggle, .chevron { transition: none; }
+}

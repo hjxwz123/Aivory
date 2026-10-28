@@ -349,6 +349,8 @@
     }
   },
   "message": {
+    "expandAll": "Tout afficher",
+    "collapse": "Réduire",
     "refused": "Le modèle a refusé de répondre à cette demande.",
     "stopped": "Génération arrêtée.",
     "ragFullText": "Document(s) intégral/intégraux injecté(s)",

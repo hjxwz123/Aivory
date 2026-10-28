@@ -1,4 +1,4 @@
-import { type ComponentType, useEffect, useId, useState } from 'react'
+import { type ComponentType, useEffect, useId, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Lightbulb,
@@ -18,6 +18,8 @@ import { normalizeThinkingMarkdown } from '@/lib/markdown'
 import { Markdown } from './markdown'
 import { ReplyActivityMark } from './reply-pending'
 import { cn } from '@/lib/utils'
+import { reasoningPreview } from './reasoning-preview'
+import styles from './reasoning-trace.module.css'
 import {
   createReasoningDisclosure,
   syncReasoningDisclosure,
@@ -54,19 +56,15 @@ const TOOL_ICON: Record<string, ComponentType<{ size?: number; className?: strin
  * image_generate, …) into ONE collapsible trace instead
  * of a separate thinking block + a stack of tool cards.
  *
- * Live feedback (the user's ask): while streaming, the panel is open, and every
- * running tool shows a pulsing status dot plus a
- * per-second elapsed counter — so a long search / sandbox run never looks like
- * a frozen blank. No spinning loaders (CLAUDE.md §7 — shimmer/pulse only). Once
- * the answer text starts, the panel collapses to a one-line summary the user
- * can reopen.
+ * Live feedback stays in one line using the latest model/tool text. The full
+ * trace is available on demand and collapses when the answer starts.
  */
 export function ReasoningTrace({ reasoning, thinkingMs, streaming = false, settled = false }: ReasoningTraceProps) {
   const { t } = useTranslation(['chat', 'common'])
   const items = reasoning ?? []
 
   // Active = the reasoning phase is live (streaming and the answer hasn't
-  // started). Drives the pulse + auto-expand.
+  // started). Drives the live preview and activity indicator.
   const active = streaming && !settled
 
   const [disclosure, setDisclosure] = useState(() => createReasoningDisclosure(active))
@@ -88,9 +86,8 @@ export function ReasoningTrace({ reasoning, thinkingMs, streaming = false, settl
           minutes: Math.floor(roundedThinkingSeconds / 60),
           seconds: roundedThinkingSeconds % 60,
         })
-  const headline = active
-    ? t('thinking')
-    : roundedThinkingSeconds > 0
+  const preview = reasoningPreview(items, (tool) => tool.label || t(`tools.${tool.name || 'tool'}`, { defaultValue: tool.name || 'Tool' }))
+  const headline = roundedThinkingSeconds > 0
       ? t('reasoning.thoughtFor', { duration: thinkingDuration })
       : t('reasoning.title')
 
@@ -101,15 +98,16 @@ export function ReasoningTrace({ reasoning, thinkingMs, streaming = false, settl
         type="button"
         aria-expanded={expanded}
         aria-controls={contentId}
+        data-reasoning-toggle
         onClick={() => setDisclosure(toggleReasoningDisclosure)}
-        className="-ml-1 flex max-w-full min-w-0 items-center gap-1.5 rounded-[6px] px-1 py-0.5 text-left text-[var(--color-fg-muted)] interactive hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+        className={cn('-ml-1 flex max-w-full min-w-0 items-center gap-1.5 rounded-[6px] px-1 py-0.5 text-left text-[var(--color-fg-muted)] interactive hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]', active && 'w-full')}
       >
         {active ? (
           <ReplyActivityMark small />
         ) : (
           <Lightbulb size={13} aria-hidden className="shrink-0 text-[var(--color-fg-muted)]" />
         )}
-        <span className="min-w-0 truncate text-[12.5px]">{headline}</span>
+        {active ? <LiveReasoningPreview text={preview || t('reasoning.title')} /> : <span className="min-w-0 truncate text-[12.5px]">{headline}</span>}
         <ChevronRight
           size={12}
           aria-hidden
@@ -119,7 +117,7 @@ export function ReasoningTrace({ reasoning, thinkingMs, streaming = false, settl
 
       {/* `hidden` removes a collapsed trace from layout completely. Keeping the
           subtree mounted preserves expanded tool details between toggles. */}
-      <div id={contentId} hidden={!expanded}>
+      <div id={contentId} hidden={!expanded} data-reasoning-content>
         <div className="min-w-0 max-w-full">
           <div className="ml-[6px] mt-1.5 min-w-0 max-w-full space-y-2 pl-3.5">
             {items.map((it) => {
@@ -150,6 +148,25 @@ export function ReasoningTrace({ reasoning, thinkingMs, streaming = false, settl
       </div>
     </div>
   )
+}
+
+/** Sample token updates at a readable cadence rather than restarting motion per token. */
+function LiveReasoningPreview({ text }: { text: string }) {
+  const latest = useRef(text)
+  const [frame, setFrame] = useState({ text, previous: '', revision: 0 })
+  useEffect(() => { latest.current = text }, [text])
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setFrame((current) => current.text === latest.current ? current : {
+        text: latest.current, previous: current.text, revision: current.revision + 1,
+      })
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+  return <span className={styles.preview} data-reasoning-preview>
+    {frame.previous ? <span key={`old-${frame.revision}`} aria-hidden="true" className={cn(styles.line, styles.outgoing)}>{frame.previous}</span> : null}
+    <span key={frame.revision} data-reasoning-current className={cn(styles.line, frame.revision > 0 && styles.incoming)}>{frame.text}</span>
+  </span>
 }
 
 function ToolStep({ toolCall }: { toolCall: ToolCall }) {
@@ -237,7 +254,7 @@ function StatusDot({ status }: { status: ToolCall['status'] }) {
     return (
       <span
         aria-hidden
-        className="inline-block size-2 shrink-0 rounded-full bg-[var(--color-secondary)] animate-[streaming-pulse_1600ms_ease-in-out_infinite]"
+        className="inline-block size-2 shrink-0 rounded-full bg-[var(--color-accent)] animate-[streaming-pulse_1600ms_ease-in-out_infinite]"
       />
     )
   }

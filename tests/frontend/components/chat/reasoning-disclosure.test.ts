@@ -18,8 +18,8 @@ describe('reasoning disclosure state', () => {
     expect(state.expanded).toBe(true)
   })
 
-  it('starts an active reasoning phase expanded', () => {
-    expect(createReasoningDisclosure(true)).toEqual({ active: true, expanded: true })
+  it('starts an active reasoning phase collapsed for its one-line preview', () => {
+    expect(createReasoningDisclosure(true)).toEqual({ active: true, expanded: false })
   })
 
   it('preserves a manual choice across updates in the same streaming phase', () => {
@@ -29,11 +29,13 @@ describe('reasoning disclosure state', () => {
     const afterStreamingUpdate = syncReasoningDisclosure(state, true)
 
     expect(afterStreamingUpdate).toBe(state)
-    expect(afterStreamingUpdate.expanded).toBe(false)
+    expect(afterStreamingUpdate.expanded).toBe(true)
   })
 
-  it('collapses on settle and auto-expands for a later reasoning phase', () => {
+  it('collapses at phase changes and keeps later reasoning in one line', () => {
     let state = createReasoningDisclosure(true)
+    state = toggleReasoningDisclosure(state)
+    expect(state.expanded).toBe(true)
     state = syncReasoningDisclosure(state, false)
     expect(state).toEqual({ active: false, expanded: false })
 
@@ -41,6 +43,6 @@ describe('reasoning disclosure state', () => {
     expect(state.expanded).toBe(true)
 
     state = syncReasoningDisclosure(state, true)
-    expect(state).toEqual({ active: true, expanded: true })
+    expect(state).toEqual({ active: true, expanded: false })
   })
 })

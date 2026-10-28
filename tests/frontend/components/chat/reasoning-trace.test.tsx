@@ -16,6 +16,17 @@ vi.mock('react-i18next', () => ({
 }))
 
 describe('ReasoningTrace tool layout', () => {
+  it('uses real model text in the collapsed live header without a generic thinking label', () => {
+    const html = renderToStaticMarkup(createElement(ReasoningTrace, {
+      reasoning: [{ kind: 'thinking', id: 'live', text: '先比较交通方案。\n\n再确认适合下雨时调整的室内活动。' }],
+      streaming: true,
+    }))
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).toMatch(/data-reasoning-current[^>]*>再确认适合下雨时调整的室内活动。<\/span>/)
+    expect(html).not.toContain('>thinking<')
+    expect(html).toContain('data-reply-activity')
+  })
+
   it('removes a collapsed long trace from layout instead of clipping it in a zero-row grid', () => {
     const reasoning: ReasoningItem[] = [
       {
@@ -30,7 +41,7 @@ describe('ReasoningTrace tool layout', () => {
     )
 
     expect(html).toContain('aria-expanded="false"')
-    expect(html).toMatch(/aria-controls="([^"]+)"[^>]*>[\s\S]*<div id="\1" hidden="">/)
+    expect(html).toMatch(/aria-controls="([^"]+)"[^>]*>[\s\S]*<div id="\1" hidden=""[^>]*>/)
     expect(html).not.toContain('grid-rows-[0fr]')
   })
 

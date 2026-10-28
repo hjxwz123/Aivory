@@ -1,7 +1,7 @@
 .art {
-  --paper-light: color-mix(in oklch, var(--color-secondary) 12%, var(--color-bg));
-  --paper-mid: color-mix(in oklch, var(--color-secondary) 32%, var(--color-bg));
-  --paper-dark: color-mix(in oklch, var(--color-secondary) 58%, var(--color-bg));
+  --paper-light: color-mix(in oklch, var(--color-accent) 12%, var(--color-bg));
+  --paper-mid: color-mix(in oklch, var(--color-accent) 32%, var(--color-bg));
+  --paper-dark: color-mix(in oklch, var(--color-accent) 58%, var(--color-bg));
 
   position: relative;
   display: inline-flex;
@@ -10,14 +10,14 @@
   justify-content: center;
   inline-size: 56px;
   block-size: 52px;
-  color: var(--color-secondary);
+  color: var(--color-accent);
   pointer-events: none;
 }
 
 :global(.dark) .art {
-  --paper-light: color-mix(in oklch, var(--color-secondary) 48%, var(--color-fg));
-  --paper-mid: color-mix(in oklch, var(--color-secondary) 85%, var(--color-fg));
-  --paper-dark: color-mix(in oklch, var(--color-secondary) 78%, var(--color-bg));
+  --paper-light: color-mix(in oklch, var(--color-accent) 48%, var(--color-fg));
+  --paper-mid: color-mix(in oklch, var(--color-accent) 85%, var(--color-fg));
+  --paper-dark: color-mix(in oklch, var(--color-accent) 78%, var(--color-bg));
 }
 
 .art > svg { inline-size: 100%; block-size: 100%; overflow: visible; }

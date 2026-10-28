@@ -4,7 +4,7 @@ import { useSettings } from '@/store/settings'
 import { ReplyWaitAnimation } from './reply-wait-animation'
 import styles from './reply-pending.module.css'
 
-/** A small, continuous rhythm shared by waiting replies and live reasoning. */
+/** A compact spinner for live reasoning; pre-answer artwork stays customizable. */
 export function ReplyActivityMark({ small = false }: { small?: boolean }) {
   return (
     <span className={cn(styles.activity, small && styles.small)} aria-hidden="true" data-reply-activity>

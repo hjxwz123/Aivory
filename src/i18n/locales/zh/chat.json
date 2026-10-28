@@ -349,6 +349,8 @@
     }
   },
   "message": {
+    "expandAll": "展开全部",
+    "collapse": "收起",
     "refused": "模型拒绝回答此请求。",
     "stopped": "已停止生成。",
     "ragFullText": "已注入完整文档",
