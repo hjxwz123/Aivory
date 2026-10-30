@@ -60,6 +60,10 @@ type Deps struct {
 	// DocmeeHTTPClient is an optional test injection for the AI PPT token-minting
 	// call. Production leaves it nil (§ docmee_handlers.go).
 	DocmeeHTTPClient *http.Client
+	// SkillImportHTTPClient is an optional test injection for the admin skill
+	// import fetch. Production leaves it nil and skill import uses the
+	// SSRF-hardened netsafe client (§ admin_skill_import.go).
+	SkillImportHTTPClient *http.Client
 }
 
 // Env-overridable per-IP rate-limit budgets ("<N> per <window>") and the CORS
@@ -589,6 +593,8 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/admin/skills", requireAdmin(d, listSkillsAdmin))
 	mux.handle("POST", "/api/admin/skills", requireAdmin(d, createSkillAdmin))
 	mux.handle("POST", "/api/admin/skills/assets", requireAdmin(d, uploadSkillAssetAdmin))
+	mux.handle("POST", "/api/admin/skills/import-archive", requireAdmin(d, importSkillArchiveAdmin))
+	mux.handle("POST", "/api/admin/skills/import-remote", requireAdmin(d, importSkillRemoteAdmin))
 	mux.handle("PATCH", "/api/admin/skills/reorder", requireAdmin(d, reorderSkillsAdmin))
 	mux.handle("PATCH", "/api/admin/skills/:id", requireAdmin(d, updateSkillAdmin))
 	mux.handle("DELETE", "/api/admin/skills/:id", requireAdmin(d, deleteSkillAdmin))

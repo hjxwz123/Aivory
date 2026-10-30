@@ -80,3 +80,24 @@ func TestPrepareWriteRejectsSymlinkEscapes(t *testing.T) {
 		t.Fatalf("symlink target error=%v, want ErrOutsideRoot", err)
 	}
 }
+
+func TestSanitizeRelPath(t *testing.T) {
+	keep := map[string]string{
+		"build.py":                           "build.py",
+		"scripts/build.py":                   "scripts/build.py",
+		"scripts/office/helpers/__init__.py": "scripts/office/helpers/__init__.py",
+		`scripts\office\run.py`:              "scripts/office/run.py",
+	}
+	for in, want := range keep {
+		got, ok := SanitizeRelPath(in)
+		if !ok || got != want {
+			t.Fatalf("SanitizeRelPath(%q)=%q ok=%v want %q", in, got, ok, want)
+		}
+	}
+	reject := []string{"", "..", "../escape.py", "scripts/../escape.py", "/abs/path.py", "scripts//x.py", "a/../../b.py"}
+	for _, in := range reject {
+		if got, ok := SanitizeRelPath(in); ok {
+			t.Fatalf("SanitizeRelPath(%q)=%q accepted", in, got)
+		}
+	}
+}

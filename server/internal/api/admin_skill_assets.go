@@ -181,7 +181,14 @@ func validateSkillAssets(d Deps, assets json.RawMessage) (json.RawMessage, error
 		if !info.Mode().IsRegular() {
 			return nil, errors.New("assets: source must be a regular file")
 		}
-		row.Filename = sanitizeAssetName(row.Filename)
+		// Filenames keep sub-directory structure for imported skill packages
+		// (e.g. "scripts/build.py"); SanitizeRelPath guarantees the stored
+		// value can only ever address a path inside the sandbox skill dir.
+		clean, ok := fileguard.SanitizeRelPath(row.Filename)
+		if !ok {
+			clean = sanitizeAssetName(row.Filename)
+		}
+		row.Filename = clean
 		row.StoragePath = abs
 		out = append(out, row)
 	}

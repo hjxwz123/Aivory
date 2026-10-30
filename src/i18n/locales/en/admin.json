@@ -570,7 +570,9 @@
       "importMd": "Import from SKILL.md",
       "importMdHint": "Paste a SKILL.md (with frontmatter) to auto-fill.",
       "assets": "Assets (templates / scripts)",
-      "assetsUpload": "Upload asset"
+      "assetsUpload": "Upload asset",
+      "import": "Import",
+      "importHint": "Fill the form three ways; every field stays editable before saving."
     },
     "editorTitle": "Edit skill",
     "newTitle": "New skill",
@@ -587,7 +589,18 @@
       "nameExists": "A skill with this name already exists."
     },
     "disabledTag": "disabled",
-    "manage": "Manage skills"
+    "manage": "Manage skills",
+    "importTab": {
+      "paste": "Paste SKILL.md",
+      "url": "From the internet",
+      "zip": "From a ZIP file"
+    },
+    "importGo": "Import",
+    "importPickZip": "Choose a ZIP file",
+    "importFilled": "Imported \"{{name}}\" into the form",
+    "importBindHint": "After saving, bind the skill to a model in Model edit to use it in chat.",
+    "importNameExists": "A skill named \"{{name}}\" already exists — rename it before saving.",
+    "importWarnings": "Import finished with {{count}} note(s)"
   },
   "prompts": {
     "title": "Prompts",

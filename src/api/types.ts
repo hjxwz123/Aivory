@@ -1235,6 +1235,21 @@ export interface ApiSkillAsset {
   size_bytes?: number
 }
 
+/** Preview returned by the skill import endpoints (zip upload / remote URL).
+ *  The editor fills the create form with it; assets are already staged
+ *  server-side and only need to be echoed back on save. */
+export interface ApiSkillImportPreview {
+  name: string
+  description: string
+  instructions: string
+  assets: ApiSkillAsset[]
+  /** Skipped files / rewritten path references the admin should review. */
+  warnings: string[]
+  /** A skill with the same (case-insensitive) name already exists. */
+  name_exists: boolean
+  source_summary?: string
+}
+
 export interface ApiSkill {
   id: string
   name: string

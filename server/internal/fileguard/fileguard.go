@@ -53,6 +53,35 @@ func Remap(sourceRoot, targetRoot, path string) (string, error) {
 	return filepath.Join(targetAbs, rel), nil
 }
 
+// SanitizeRelPath normalises a slash-separated relative path (a skill asset's
+// stored filename, e.g. "scripts/office/helpers/__init__.py") so every segment
+// is a clean base name: separators are unified to "/", each segment is
+// basename-cleaned, and traversal / absolute / empty segments are rejected.
+// The result keeps sub-directory structure but can never escape its
+// destination directory. ok=false means the input is unusable as a path.
+func SanitizeRelPath(raw string) (string, bool) {
+	normalized := strings.ReplaceAll(strings.TrimSpace(raw), "\\", "/")
+	segments := strings.Split(normalized, "/")
+	out := make([]string, 0, len(segments))
+	for _, seg := range segments {
+		seg = strings.TrimSpace(seg)
+		base := filepath.ToSlash(filepath.Base(seg))
+		if seg == "" || base == "" || base == "." || base == ".." || base == "/" {
+			return "", false
+		}
+		if base != seg {
+			// A segment that changes under Base() contained traversal or
+			// separator content — reject rather than silently rewrite.
+			return "", false
+		}
+		out = append(out, base)
+	}
+	if len(out) == 0 {
+		return "", false
+	}
+	return strings.Join(out, "/"), true
+}
+
 // ResolveExisting returns an existing path only when both its lexical path and
 // its symlink-resolved path remain inside one of roots. Callers should open or
 // delete the returned path, not the original database value.

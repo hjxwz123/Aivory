@@ -1381,11 +1381,19 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 						if isSandboxImageInput(a.Filename, a.MimeType, "", data) {
 							continue
 						}
-						assetName := filepath.Base(a.Filename)
-						if assetName == "." || assetName == "/" || assetName == "" {
-							assetName = "asset"
+						// Imported skill packages keep sub-directory layout
+						// ("scripts/office/helpers/__init__.py"); stage the same
+						// tree so packaged Python imports work as authored. The
+						// sidecar mkdir -p's parents and confines to /workspace;
+						// SanitizeRelPath is our own traversal gate on top.
+						assetRel, ok := fileguard.SanitizeRelPath(a.Filename)
+						if !ok {
+							assetRel = filepath.Base(a.Filename)
+							if assetRel == "." || assetRel == "/" || assetRel == "" {
+								assetRel = "asset"
+							}
 						}
-						_ = t.sandbox.PutFile(ctx, sid, "/workspace/skills/"+skillDir+"/"+assetName, data)
+						_ = t.sandbox.PutFile(ctx, sid, "/workspace/skills/"+skillDir+"/"+assetRel, data)
 					}
 				}
 			}

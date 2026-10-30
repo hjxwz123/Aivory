@@ -570,7 +570,9 @@
       "importMd": "SKILL.mdからインポート",
       "importMdHint": "SKILL.md(frontmatter 付き)を貼ると自動入力。",
       "assets": "アセット（テンプレート / スクリプト）",
-      "assetsUpload": "アセットをアップロード"
+      "assetsUpload": "アセットをアップロード",
+      "import": "インポート",
+      "importHint": "3つの方法でフォームに入力します。保存前にすべて編集できます。"
     },
     "editorTitle": "スキルを編集",
     "newTitle": "新規スキル",
@@ -587,7 +589,18 @@
       "nameExists": "同じ名前のスキルが既に存在します。"
     },
     "disabledTag": "無効",
-    "manage": "スキルを管理"
+    "manage": "スキルを管理",
+    "importTab": {
+      "paste": "SKILL.md を貼り付け",
+      "url": "インターネットから",
+      "zip": "ZIP から"
+    },
+    "importGo": "インポート",
+    "importPickZip": "ZIP ファイルを選択",
+    "importFilled": "「{{name}}」をフォームに入力しました",
+    "importBindHint": "保存後、モデル編集でこのスキルをモデルに割り当てると、チャットで使えます。",
+    "importNameExists": "同名のスキル「{{name}}」が既に存在します。保存前に名前を変更してください。",
+    "importWarnings": "インポートに {{count}} 件の注意があります"
   },
   "prompts": {
     "title": "プロンプト",

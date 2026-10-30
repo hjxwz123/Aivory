@@ -570,7 +570,9 @@
       "importMd": "Importer depuis SKILL.md",
       "importMdHint": "Collez un SKILL.md (avec frontmatter) pour pré-remplir.",
       "assets": "Ressources (modèles / scripts)",
-      "assetsUpload": "Téléverser une ressource"
+      "assetsUpload": "Téléverser une ressource",
+      "import": "Importer",
+      "importHint": "Trois façons de remplir le formulaire ; tout reste modifiable avant l'enregistrement."
     },
     "editorTitle": "Modifier la compétence",
     "newTitle": "Nouvelle compétence",
@@ -587,7 +589,18 @@
       "nameExists": "Une compétence portant ce nom existe déjà."
     },
     "disabledTag": "désactivée",
-    "manage": "Gérer les compétences"
+    "manage": "Gérer les compétences",
+    "importTab": {
+      "paste": "Coller SKILL.md",
+      "url": "Depuis Internet",
+      "zip": "Depuis un ZIP"
+    },
+    "importGo": "Importer",
+    "importPickZip": "Choisir un fichier ZIP",
+    "importFilled": "« {{name}} » importé dans le formulaire",
+    "importBindHint": "Après l'enregistrement, liez la compétence à un modèle dans Édition du modèle pour l'utiliser dans le chat.",
+    "importNameExists": "Une compétence « {{name}} » existe déjà — renommez-la avant d'enregistrer.",
+    "importWarnings": "Import terminé avec {{count}} note(s)"
   },
   "prompts": {
     "title": "Invites",

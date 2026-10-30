@@ -574,7 +574,9 @@
       "importMd": "从 SKILL.md 导入",
       "importMdHint": "粘贴 SKILL.md(含 frontmatter)自动填充。",
       "assets": "资产（模板 / 脚本）",
-      "assetsUpload": "上传资产"
+      "assetsUpload": "上传资产",
+      "import": "导入",
+      "importHint": "三种方式填充表单，保存前可修改任何字段。"
     },
     "editorTitle": "编辑技能",
     "newTitle": "新建技能",
@@ -591,7 +593,18 @@
       "nameExists": "已存在同名技能。"
     },
     "disabledTag": "已禁用",
-    "manage": "管理技能"
+    "manage": "管理技能",
+    "importTab": {
+      "paste": "粘贴 SKILL.md",
+      "url": "从互联网导入",
+      "zip": "从 ZIP 导入"
+    },
+    "importGo": "导入",
+    "importPickZip": "选择 ZIP 文件",
+    "importFilled": "已导入「{{name}}」并填充表单",
+    "importBindHint": "保存后请在“模型编辑”中绑定该技能，才能在聊天中使用。",
+    "importNameExists": "已存在同名技能「{{name}}」，保存前请修改名称。",
+    "importWarnings": "导入有 {{count}} 条提醒"
   },
   "prompts": {
     "title": "提示词",
