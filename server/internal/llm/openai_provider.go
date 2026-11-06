@@ -1319,6 +1319,47 @@ func (r openAIChatReasoning) WireField() string {
 	return "reasoning_content"
 }
 
+// Chat Completions JSON belongs to an SSE event, not an individual data line.
+// Retain the line limit and also bound the combined data of a multi-line event.
+func readOpenAIChatEvent(scanner *bufio.Scanner) (string, error) {
+	var data strings.Builder
+	hasData := false
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			if hasData {
+				return strings.TrimSpace(data.String()), nil
+			}
+			continue
+		}
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		value := strings.TrimPrefix(line, "data:")
+		value = strings.TrimPrefix(value, " ")
+		separator := 0
+		if hasData {
+			separator = 1
+		}
+		if data.Len()+separator+len(value) > readOpenAIChatStreamBufMax {
+			return "", fmt.Errorf("openai chat stream event exceeds %d bytes", readOpenAIChatStreamBufMax)
+		}
+		if hasData {
+			data.WriteByte('\n')
+		}
+		data.WriteString(value)
+		hasData = true
+	}
+	// Keep accepting the final event without a blank line, as the line reader did.
+	if hasData {
+		return strings.TrimSpace(data.String()), nil
+	}
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+	return "", io.EOF
+}
+
 func readOpenAIChatStream(body io.Reader, onEvent func(SseEvent)) (string, openAIChatReasoning, []openAIToolCall, string, Usage, error) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, readOpenAIChatStreamBufInit), readOpenAIChatStreamBufMax)
@@ -1361,12 +1402,14 @@ func readOpenAIChatStream(body io.Reader, onEvent func(SseEvent)) (string, openA
 		}
 		return calls
 	}
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data:") {
-			continue
+	for {
+		payload, readErr := readOpenAIChatEvent(scanner)
+		if readErr != nil {
+			if readErr != io.EOF && !terminal {
+				return text.String(), snapshotReasoning(), snapshotCalls(), finish, usage, readErr
+			}
+			break
 		}
-		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if payload == "" {
 			continue
 		}
