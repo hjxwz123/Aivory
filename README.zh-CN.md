@@ -61,6 +61,8 @@ docker compose --env-file .env -f docker-compose.prod.yml up -d
 
 打开服务器地址进入初始化页面。第一个创建的账号会成为管理员，然后在「管理后台 → 渠道」中添加模型服务商凭据。
 
+[A2Agent](https://a2agent.me) 的 OpenAI 兼容端点已使用 `deepseek-v4-flash` 完成 Chat Completions 测试，覆盖流式文本、工具调用和工具结果续接。此测试仅代表有限的兼容性验证，不构成认证或背书。
+
 ### 个人版
 
 ```bash

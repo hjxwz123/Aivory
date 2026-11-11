@@ -61,6 +61,8 @@ docker compose --env-file .env -f docker-compose.prod.yml up -d
 
 Open the server address. The first account created through the setup page becomes the administrator. Add model provider credentials in **Admin → Channels**.
 
+The OpenAI-compatible endpoint [A2Agent](https://a2agent.me) was tested with `deepseek-v4-flash` using Chat Completions, including streaming text, tool calls and tool-result continuation. This limited compatibility check is not a certification or endorsement.
+
 ### Personal deployment
 
 ```bash
