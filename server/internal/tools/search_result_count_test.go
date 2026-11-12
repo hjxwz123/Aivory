@@ -214,7 +214,7 @@ func TestSearxngConfiguredCountKeepsDistinctImagesOnOnePage(t *testing.T) {
 	}))
 	defer srv.Close()
 	tool := &webSearchTool{searcher: &searxngSearcher{baseURL: srv.URL, resultCount: 2}}
-	_, citations, err := tool.Execute(t.Context(), []byte(`{"query":"photos","categories":["images"]}`), nil)
+	_, citations, err := tool.Execute(t.Context(), []byte(`{"query":"photos","categories":["images"],"show_images":true}`), nil)
 	if err != nil || len(citations) != 2 || requests.Load() != 1 || citations[0].ImageURL == citations[1].ImageURL ||
 		citations[0].ImageDisplay == nil || !*citations[0].ImageDisplay {
 		t.Fatalf("distinct gallery images lost: %+v, requests=%d, err=%v", citations, requests.Load(), err)

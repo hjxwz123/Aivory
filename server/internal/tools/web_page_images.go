@@ -50,7 +50,7 @@ func appendPageImage(images []webPageImage, seen map[string]bool, raw, title, so
 		return images
 	}
 	imageURL := pageImageURL(raw, sourceURL)
-	if imageURL == "" || seen[imageURL] {
+	if imageURL == "" || seen[imageURL] || decorativePageImage(imageURL, title, "") {
 		return images
 	}
 	seen[imageURL] = true
@@ -58,7 +58,21 @@ func appendPageImage(images []webPageImage, seen map[string]bool, raw, title, so
 }
 
 var pageImageTagRe = regexp.MustCompile(`(?is)<img\b[^>]*>`)
-var pageImageAttributeRe = regexp.MustCompile(`(?is)\b(src|data-src|data-original|alt|width|height)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
+var pageImageAttributeRe = regexp.MustCompile(`(?is)\b(src|data-src|data-original|alt|width|height|class|id|style)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
+
+// Readers often flatten forum headers and author cards into the article body.
+// Filter clear UI imagery in both HTML and reader Markdown, without relying on
+// a particular site's CDN filenames or downloading the image bytes.
+var decorativePageImageRe = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(?:avatars?|user[-_ ]?pic|profile[-_ ]?(?:pic|image|photo)|(?:site[-_ ]?)?logo|favicons?|gravatar)(?:$|[^a-z0-9])|头像|頭像`)
+var pageImageStyleSizeRe = regexp.MustCompile(`(?i)(?:^|;)\s*(?:width|height)\s*:\s*(\d+)(?:px)?\s*(?:!important\s*)?(?:;|$)`)
+
+func decorativePageImage(imageURL, title, identity string) bool {
+	parsed, err := url.Parse(imageURL)
+	if err != nil {
+		return false
+	}
+	return decorativePageImageRe.MatchString(title + " " + identity + " " + parsed.Hostname() + " " + parsed.Path)
+}
 
 func readablePageHTML(body string) string {
 	body = scriptStyleRe.ReplaceAllString(body, " ")
@@ -83,10 +97,20 @@ func htmlPageImages(body, sourceURL string) []webPageImage {
 			}
 			attributes[strings.ToLower(match[1])] = value
 		}
-		// Avoid including explicitly tiny tracking/decorative pixels.
+		if decorativePageImage("", attributes["alt"], attributes["class"]+" "+attributes["id"]) {
+			continue
+		}
+		// Small fixed-size images in page chrome are avatars, icons or trackers,
+		// not useful full-size visual references. Reader Markdown lacks dimensions,
+		// so it also uses the shared title/URL filter in appendPageImage.
 		tiny := false
 		for _, dimension := range []string{"width", "height"} {
-			if size, err := strconv.Atoi(attributes[dimension]); err == nil && size >= 0 && size <= 2 {
+			if size, err := strconv.Atoi(attributes[dimension]); err == nil && size >= 0 && size <= 64 {
+				tiny = true
+			}
+		}
+		for _, match := range pageImageStyleSizeRe.FindAllStringSubmatch(attributes["style"], -1) {
+			if size, err := strconv.Atoi(match[1]); err == nil && size <= 64 {
 				tiny = true
 			}
 		}

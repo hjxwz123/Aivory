@@ -55,7 +55,7 @@ func (s *searxngSearcher) searchOptionsProperties() map[string]any {
 		"categories": map[string]any{
 			"type": "array", "maxItems": 10, "uniqueItems": true,
 			"items":       map[string]any{"type": "string", "enum": searchCategories},
-			"description": "SearXNG categories for the user's intent: images for existing photos, people/portraits, places/scenery, product photos, or visual references (returned image URLs are displayed in chat); news for news reports; science for papers; it for technical/code search; videos for videos. Omit for a broad search; use general to broaden a narrow category that returned no useful results. Available categories depend on the instance.",
+			"description": "SearXNG categories for the user's intent: images for existing photos, people/portraits, places/scenery, product photos, or visual references (retrieval only; displaying a gallery separately requires show_images=true); news for news reports; science for papers; it for technical/code search; videos for videos. Omit for a broad search; use general to broaden a narrow category that returned no useful results. Available categories depend on the instance.",
 		},
 		"time_range": map[string]any{
 			"type": "string", "enum": []string{"day", "month", "year"},
