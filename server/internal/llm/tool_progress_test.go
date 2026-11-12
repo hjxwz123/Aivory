@@ -202,7 +202,8 @@ func TestImageDisplayOptionsHaveDistinctButNormalizedRequests(t *testing.T) {
 	}{
 		{"search display change", `{"query":"Kyoto"}`, `{"query":"Kyoto","show_images":true}`, false},
 		{"search default false", `{"query":"Kyoto"}`, `{"query":"Kyoto","show_images":false}`, true},
-		{"image category default true", `{"query":"Kyoto","categories":["images"]}`, `{"query":"Kyoto","categories":["images"],"show_images":true}`, true},
+		{"image category display change", `{"query":"Kyoto","categories":["images"]}`, `{"query":"Kyoto","categories":["images"],"show_images":true}`, false},
+		{"image category default false", `{"query":"Kyoto","categories":["images"]}`, `{"query":"Kyoto","categories":["images"],"show_images":false}`, true},
 		{"fetch display change", `{"url":"https://example.test/page"}`, `{"url":"https://example.test/page","show_images":true}`, false},
 		{"fetch default false", `{"url":"https://example.test/page"}`, `{"url":"https://example.test/page","show_images":false}`, true},
 	} {

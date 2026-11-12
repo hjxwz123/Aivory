@@ -51,6 +51,34 @@ Markdown Content:
 	}
 }
 
+func TestPageImagesExcludeForumAvatarsAndSiteChrome(t *testing.T) {
+	body := `<div class="author"><img src="/media/static/image/default1.png" alt="头像" style="height:52px;width:52px"></div>
+<img src="https://cdn.test/random-avatar.jpg" alt="头像">
+<img src="/brand.jpg" alt="NoobDream" style="height:20px;width:auto">
+<img src="/user.png" class="user-avatar">
+<img src="https://www.gravatar.com/avatar/123">
+<img src="/icons/favicon.png">
+<img src="/question.jpg" alt="Question 22">
+<img src="/solution.png" alt="Solution diagram">`
+	images := htmlPageImages(body, "https://forum.test/post/398235/")
+	if len(images) != 2 || images[0].Title != "Question 22" || images[1].Title != "Solution diagram" {
+		t.Fatalf("forum chrome entered page images: %+v", images)
+	}
+}
+
+func TestReaderImagesExcludeAvatarsWithoutDiscardingArticlePhotos(t *testing.T) {
+	body := `![Image 1: 头像](https://cdn.test/user.jpg)
+![Avatar](https://cdn.test/user2.jpg)
+![Site logo](https://cdn.test/brand.jpg)
+![Profile](https://www.gravatar.com/avatar/123)
+![Question 22](https://cdn.test/question.jpg)
+![A statue with a small head](https://cdn.test/statue.jpg)`
+	images := markdownPageImages(body, "https://forum.test/post/398235/")
+	if len(images) != 2 || images[0].Title != "Question 22" || images[1].URL != "https://cdn.test/statue.jpg" {
+		t.Fatalf("reader chrome entered page images: %+v", images)
+	}
+}
+
 func TestWebFetchKeepsImagesWithoutAutomaticallyShowingThem(t *testing.T) {
 	var calls atomic.Int32
 	tool := &webFetchTool{direct: roundTripFunc(func(r *http.Request) (*http.Response, error) {

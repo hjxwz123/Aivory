@@ -716,16 +716,8 @@ func canonicalSearchInput(object map[string]any) []byte {
 			canonical[field] = values
 		}
 	}
-	if showImages, ok := object["show_images"].(bool); ok {
-		defaultShow := false
-		if categories, ok := canonical["categories"].([]string); ok {
-			for _, category := range categories {
-				defaultShow = defaultShow || category == "images"
-			}
-		}
-		if showImages != defaultShow {
-			canonical["show_images"] = showImages
-		}
+	if showImages, _ := object["show_images"].(bool); showImages {
+		canonical["show_images"] = true
 	}
 	for _, field := range []string{"time_range", "language"} {
 		if value, ok := object[field].(string); ok {

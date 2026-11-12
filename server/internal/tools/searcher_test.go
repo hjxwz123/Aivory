@@ -130,7 +130,8 @@ func TestOrdinarySearchKeepsThumbnailsAndControlsGalleryDisplay(t *testing.T) {
 	}{
 		{`{"query":"Kyoto travel"}`, false},
 		{`{"query":"Kyoto travel","show_images":true}`, true},
-		{`{"query":"Kyoto travel","categories":["images"]}`, true},
+		{`{"query":"Kyoto travel","categories":["images"]}`, false},
+		{`{"query":"Kyoto travel","categories":["images"],"show_images":true}`, true},
 		{`{"query":"Kyoto travel","categories":["images"],"show_images":false}`, false},
 		{`{"queries":["Kyoto travel","Kyoto photos"]}`, false},
 	} {
