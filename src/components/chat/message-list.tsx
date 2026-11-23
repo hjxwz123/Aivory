@@ -272,8 +272,9 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey, onGenera
       const msgs = useConversations.getState().conversations.find((c) => c.id === convId)?.messages ?? []
       const idx = msgs.findIndex((m) => m.id === id)
       const edited = idx >= 0 ? msgs[idx] : undefined
-      const parentId = edited?.parentId ?? (idx > 0 ? msgs[idx - 1].id : '')
-      const carryAtts = attachments ?? edited?.attachments
+      if (!edited) return
+      const parentId = edited.parentId ?? (idx > 0 ? msgs[idx - 1].id : '')
+      const carryAtts = attachments ?? edited.attachments
       // Edit-and-resend opens a NEW branch — treat it like a fresh send and honor
       // the currently-armed composer features (deep research / verify / tool
       // policy / web search); otherwise the armed controls are silently ignored on
@@ -282,21 +283,21 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey, onGenera
       void sendMessage({
         conversationId: convId,
         text: newContent,
-        modelId: edited?.imageEdit ? edited.modelId : modelId,
+        modelId: edited.imageEdit ? edited.modelId : modelId,
         parentId,
-        editedMessageId: carryAtts?.length ? id : undefined,
+        editedMessageId: id,
         attachments: carryAtts,
         branch: true,
         // §fast-mode: a fast conversation forces the other features off and keeps
         // its existing fixed enabled tool behavior, skipping auto classification.
-        mode: fastMode || edited?.imageEdit ? undefined : armed.mode,
+        mode: fastMode || edited.imageEdit ? undefined : armed.mode,
         verify: fastMode || edited?.imageEdit ? undefined : armed.verify,
         toolMode: fastMode ? 'enabled' : armed.toolMode,
         webSearch: fastMode ? undefined : armed.webSearch,
         selectedToolIds: armed.selectedToolIds,
         optimizeImagePrompt: armed.optimizeImagePrompt,
-        imageEdit: edited?.imageEdit,
-        fast: edited?.imageEdit ? false : fastMode,
+        imageEdit: edited.imageEdit,
+        fast: edited.imageEdit ? false : fastMode,
       })
     },
     [convId, modelId, fastMode, sendMessage],

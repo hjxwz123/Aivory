@@ -1879,8 +1879,13 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     // stale local parent would corrupt the tree even though it avoids the FK. Do
     // not issue the request; the stop reconcile has already refreshed/removed the
     // unsafe row and a retry will derive the parent from canonical state.
-    if (input.branch && explicitParentIsLocal) {
-      toast.info('Conversation is still syncing. Please try editing again.')
+    const editedMessageIsStale = input.editedMessageId && (
+      !conv0?.messages.some((message) => message.id === input.editedMessageId && message.role === 'user') ||
+      isKnownLocalMessageId(conv0.messages, input.editedMessageId, generatedLocalMessageIds)
+    )
+    if (input.branch && (explicitParentIsLocal || editedMessageIsStale)) {
+      toast.info(i18n.t('chat:composer.branchEditConflict'))
+      if (!stoppedReconcile) await get().loadOne(input.conversationId)
       return
     }
     const persistedLeafBeforeTurn = previousPersistedLeaf(conv0?.messages ?? [])
@@ -2442,6 +2447,29 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     } catch (e) {
       if (!accountCurrent()) return
       if (abort.signal.aborted && streamHandoffs.delete(abort)) return
+      if (
+        input.branch && !assistantStarted && !abort.signal.aborted && e instanceof ApiError &&
+        e.status === 409 && e.message === 'message parent is no longer available in this conversation'
+      ) {
+        generatedLocalMessageIds.delete(userId)
+        generatedLocalMessageIds.delete(assistantId)
+        conversationTreeCache.delete(input.conversationId)
+        set((state) => ({
+          conversations: state.conversations.map((conversation) => {
+            if (conversation.id !== input.conversationId) return conversation
+            const messages = conversation.messages
+            // Restore the preceding path only if this rejected branch is still
+            // the visible one. A newer branch may already have been selected.
+            if (conv0 && messages.at(-2)?.id === userId && messages.at(-1)?.id === assistantId) {
+              return { ...conversation, messages: conv0.messages, lastParams: conv0.lastParams }
+            }
+            return { ...conversation, messages: messages.filter((m) => m.id !== userId && m.id !== assistantId) }
+          }),
+        }))
+        toast.info(i18n.t('chat:composer.branchEditConflict'))
+        await get().loadOne(input.conversationId)
+        return
+      }
       if (
         !abort.signal.aborted &&
         e instanceof ApiError &&

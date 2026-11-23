@@ -195,6 +195,7 @@
     "manageKnowledgeBases": "ナレッジベースを管理",
     "incompatibleKnowledgeBase": "このライブラリは現在の選択と一緒に使用できません",
     "generationInProgress": "現在の返信が完了するまで待つか、先に停止してください。",
+    "branchEditConflict": "会話が変更されました。メッセージを開き直してから編集してください。",
     "knowledgeBaseMentionLabel": "ナレッジベースを添付",
     "knowledgeBaseMentionEmpty": "一致するナレッジベースがありません",
     "permissions": {

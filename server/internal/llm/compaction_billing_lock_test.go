@@ -246,6 +246,29 @@ func TestStandaloneCompactionSettlesEachRetryOnce(t *testing.T) {
 	}
 }
 
+func TestManualCompactionRetriesExhaustedOutputAndPersistsSummary(t *testing.T) {
+	provider := &emptyThenTextTaskProvider{}
+	orchestrator, _, conv, db := compactionBillingFixture(t, provider)
+	if err := store.SetSetting(db, "summary_max_tokens", 256); err != nil {
+		t.Fatal(err)
+	}
+	result, err := orchestrator.CompactConversation(t.Context(), conv.UserID, conv.ID)
+	if err != nil || !result.Compacted {
+		t.Fatalf("compaction did not recover: result=%+v err=%v", result, err)
+	}
+	if len(provider.maxOutputTokens) != 2 || provider.maxOutputTokens[0] != 256 || provider.maxOutputTokens[1] <= 256 {
+		t.Fatalf("provider output caps = %v, want one retry at a larger cap", provider.maxOutputTokens)
+	}
+	var raw string
+	if err := db.QueryRow(`SELECT summary_blocks FROM conversations WHERE id=?`, conv.ID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	blocks := LoadSummaryBlocks(json.RawMessage(raw))
+	if len(blocks) != 1 || blocks[0].Text != `{"use_tools":false}` {
+		t.Fatalf("stored summary = %+v, want visible text from retry only", blocks)
+	}
+}
+
 func TestStandaloneCompactionStillEnforcesDailyTokenQuota(t *testing.T) {
 	provider := &blockingCompactionProvider{started: make(chan struct{}), release: make(chan struct{})}
 	close(provider.release)

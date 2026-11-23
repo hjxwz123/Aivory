@@ -86,6 +86,8 @@ func compactionErrorKind(err error) string {
 		return "compaction_persist"
 	case errors.Is(err, ErrCompactionFailed):
 		return "compaction_failed"
+	case errors.Is(err, errCompactionEmptyOutput):
+		return "empty_summary_output"
 	}
 	return fmt.Sprintf("%T", err)
 }

@@ -195,6 +195,7 @@
     "manageKnowledgeBases": "Gérer les bases de connaissances",
     "incompatibleKnowledgeBase": "Cette bibliothèque ne peut pas être utilisée avec la sélection actuelle",
     "generationInProgress": "Attendez la fin de la réponse actuelle ou arrêtez-la d’abord.",
+    "branchEditConflict": "La conversation a changé. Rouvrez le message avant de le modifier.",
     "knowledgeBaseMentionLabel": "Joindre une base de connaissances",
     "knowledgeBaseMentionEmpty": "Aucune base de connaissances correspondante",
     "permissions": {

@@ -38,6 +38,8 @@ const (
 	requestSignatureNonceTTLExtra   = time.Minute
 )
 
+var errRequestSignatureUnavailable = errors.New("request signature verification unavailable")
+
 func positiveSecuritySeconds(key string, fallback int64) int64 {
 	value := envcfg.Int64(key, fallback)
 	if value <= 0 {
@@ -96,7 +98,11 @@ func requireAuth(d Deps, h handler) http.HandlerFunc {
 				return
 			}
 			if err := verifyRequestSignature(d, token, requestKey, claims.UID, claims.SessionID, r); err != nil {
-				writeError(w, http.StatusForbidden, err)
+				status := http.StatusForbidden
+				if errors.Is(err, errRequestSignatureUnavailable) {
+					status = http.StatusServiceUnavailable
+				}
+				writeError(w, status, err)
 				return
 			}
 		}
@@ -510,11 +516,15 @@ func verifyRequestSignature(d Deps, rawToken, requestKey, userID, sessionID stri
 		return errors.New("invalid request signature")
 	}
 	if d.Cache == nil {
-		return errors.New("request signature verification unavailable")
+		return errRequestSignatureUnavailable
 	}
 	nonceTTL := time.Duration(requestSignatureReplayWindowFuture+requestSignatureReplayWindowPast)*time.Second + requestSignatureNonceTTLExtra
 	nonceKey := fmt.Sprintf("reqnonce:%s:%s:%s", userID, sessionID, nonce)
-	if !d.Cache.SetNX(nonceKey, "1", nonceTTL) {
+	inserted, err := d.Cache.SetNXResult(nonceKey, "1", nonceTTL)
+	if err != nil {
+		return fmt.Errorf("%w: %v", errRequestSignatureUnavailable, err)
+	}
+	if !inserted {
 		return errors.New("request signature replayed")
 	}
 	return nil

@@ -127,6 +127,8 @@ type compactionModelAttemptError struct {
 	retryable bool
 }
 
+var errCompactionEmptyOutput = errors.New("task llm returned empty output")
+
 func (e *compactionModelAttemptError) Error() string { return e.err.Error() }
 
 func (e *compactionModelAttemptError) Unwrap() error { return e.err }
@@ -255,8 +257,8 @@ type RunOpts struct {
 	// EmptyRetryMaxOutputTokens bounds the one retry used when a reasoning model
 	// consumes its budget without emitting visible text. Zero keeps the generic
 	// task default; a negative value disables the retry. Callers with a strict
-	// output budget should set this explicitly. Context compaction disables the
-	// retry so one operation makes at most one provider request.
+	// output budget should set this explicitly. Context compaction only retries
+	// a completion that exhausted its output limit.
 	EmptyRetryMaxOutputTokens int
 	// MaxInputTokens rejects an oversized fully assembled task request before
 	// billing admission or provider I/O. Zero leaves the generic task behavior
@@ -901,6 +903,18 @@ func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opt
 			retryMaxTok = opts.EmptyRetryMaxOutputTokens
 			retryAtSameBudget = true
 		}
+		if kind == TaskCompact {
+			// The initial request reserved maxTok. Give the retry only the space
+			// still available after accounting for the actual request payload.
+			if opts.MaxInputTokens > 0 {
+				available := opts.MaxInputTokens + maxTok - estimateRequestTokens(req) - compactionRequestSafetyTokens
+				retryMaxTok = min(retryMaxTok, available)
+			}
+			retryAtSameBudget = false
+			if resultOutputTokens(result) < maxTok && resultStopReason(result) != "length" && resultStopReason(result) != "max_tokens" {
+				retryMaxTok = -1
+			}
+		}
 		canIncreaseBudget := retryMaxTok > maxTok
 		canRepeatExplicitBudget := retryAtSameBudget && retryMaxTok == maxTok
 		if !toolRoute && !opts.emptyRetryAttempted && retryMaxTok > 0 && (canIncreaseBudget || canRepeatExplicitBudget) {
@@ -908,13 +922,16 @@ func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opt
 				t.logger.Printf("task: %s returned no visible text; retrying with max_output_tokens=%d (model=%s stop_reason=%s output_tokens=%d)",
 					kind, retryMaxTok, model.ID, resultStopReason(result), resultOutputTokens(result))
 			}
+			if kind == TaskCompact && opts.MaxInputTokens > 0 {
+				opts.MaxInputTokens -= retryMaxTok - maxTok
+			}
 			opts.MaxOutputTokens = retryMaxTok
 			opts.emptyRetryAttempted = true
 			return t.Run(ctx, kind, prompt, opts)
 		}
 		return "", wrapCompactionModelAttempt(
-			fmt.Errorf("task llm returned empty output (model=%s stop_reason=%s output_tokens=%d max_output_tokens=%d)",
-				model.ID, resultStopReason(result), resultOutputTokens(result), maxTok),
+			fmt.Errorf("%w (model=%s stop_reason=%s output_tokens=%d max_output_tokens=%d)",
+				errCompactionEmptyOutput, model.ID, resultStopReason(result), resultOutputTokens(result), maxTok),
 			// A nil provider error means the provider completed normally. A
 			// thinking-only/no-visible response is eligible for the bounded retry
 			// above on this same model, but it is not a configuration failure and

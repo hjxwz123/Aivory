@@ -25,6 +25,8 @@ type Cache interface {
 	Set(key, value string, ttl time.Duration)
 	// SetNX atomically stores a value only when the key does not already exist.
 	SetNX(key, value string, ttl time.Duration) bool
+	// SetNXResult distinguishes an existing key from a failed cache operation.
+	SetNXResult(key, value string, ttl time.Duration) (bool, error)
 	// CompareAndDelete atomically deletes key only when its current value matches.
 	// This lets a caller validate a credential before consuming exactly that value.
 	CompareAndDelete(key, expected string) bool
@@ -134,6 +136,11 @@ func (m *memory) Set(key, value string, ttl time.Duration) {
 }
 
 func (m *memory) SetNX(key, value string, ttl time.Duration) bool {
+	inserted, _ := m.SetNXResult(key, value, ttl)
+	return inserted
+}
+
+func (m *memory) SetNXResult(key, value string, ttl time.Duration) (bool, error) {
 	now := time.Now()
 	exp := int64(0)
 	if ttl > 0 {
@@ -142,10 +149,10 @@ func (m *memory) SetNX(key, value string, ttl time.Duration) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if current, ok := m.store[key]; ok && (current.exp == 0 || now.UnixNano() <= current.exp) {
-		return false
+		return false, nil
 	}
 	m.store[key] = memoryEntry{value: value, exp: exp}
-	return true
+	return true, nil
 }
 
 func (m *memory) CompareAndDelete(key, expected string) bool {
