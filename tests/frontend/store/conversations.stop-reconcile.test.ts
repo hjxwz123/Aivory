@@ -25,7 +25,7 @@ vi.mock('@/api', () => {
   class ApiError extends Error {
     status: number
 
-    constructor(message: string, status = 500) {
+    constructor(status: number, message: string) {
       super(message)
       this.status = status
     }
@@ -60,6 +60,7 @@ vi.mock('@/hooks/use-toast', () => ({
   },
 }))
 
+import { ApiError } from '@/api'
 import { toLocalMessage, useConversations } from '@/store/conversations'
 import { useComposerPrefs } from '@/store/composer-prefs'
 import { useModels } from '@/store/models'
@@ -578,6 +579,28 @@ describe('stopped turn optimistic-id reconciliation', () => {
     expect(messages.at(-2)?.attachments?.[0].id).toBe('original_image')
     expect(messages.at(-1)).toMatchObject({ content: 'edited answer', streaming: false })
     expect(messages.at(-1)?.error).toBeFalsy()
+  })
+
+  it('reloads the current server path after a rejected edit branch', async () => {
+    const original = apiMessage('msg_original', 'user', 'msg_deleted_parent', 'complete', 'old question')
+    const latest = apiMessage('msg_current', 'user', '', 'complete', 'current question')
+    resetStore([toLocalMessage(original)])
+    apiMocks.get.mockResolvedValue({
+      conversation: apiConversation(latest.id), messages: [latest], has_more: false,
+    })
+    apiMocks.streamSSE.mockImplementation(async function* () {
+      throw new ApiError(409, 'message parent is no longer available in this conversation', null)
+    })
+
+    await useConversations.getState().sendMessage({
+      conversationId: 'conv_stop', text: 'edited question', parentId: original.parent_id,
+      editedMessageId: original.id, branch: true, modelId: 'model_1',
+    })
+
+    expect(apiMocks.streamSSE).toHaveBeenCalledTimes(1)
+    expect(apiMocks.get).toHaveBeenCalledTimes(1)
+    expect(apiMocks.toastInfo).toHaveBeenCalledTimes(1)
+    expect(useConversations.getState().conversations[0].messages.map((message) => message.id)).toEqual([latest.id])
   })
 
   it('does not restore a stopped reply after its round was deleted', async () => {

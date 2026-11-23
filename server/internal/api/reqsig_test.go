@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -20,6 +21,12 @@ import (
 
 const requestProofTestDevice = "device-test-123456"
 const requestProofTestKey = "session-request-proof-key"
+
+type unavailableNonceCache struct{ cache.Cache }
+
+func (unavailableNonceCache) SetNXResult(string, string, time.Duration) (bool, error) {
+	return false, errors.New("cache connection unavailable")
+}
 
 func requestProofDigest(body []byte) string {
 	digest := sha256.Sum256(body)
@@ -268,6 +275,31 @@ func TestRequireAuthEnforcesRequestSignatureWhenConfigured(t *testing.T) {
 	h.ServeHTTP(signedRec, signed)
 	if signedRec.Code != http.StatusNoContent || !called {
 		t.Fatalf("signed status=%d called=%v body=%s", signedRec.Code, called, signedRec.Body.String())
+	}
+}
+
+func TestRequireAuthRejectsSignedRequestWhenNonceCacheIsUnavailable(t *testing.T) {
+	d := newAuthSecurityDeps(t, "request-proof-cache.db")
+	d.Config.RequestSignaturesRequired = true
+	d.Cache = unavailableNonceCache{d.Cache}
+	user, err := store.CreateUser(t.Context(), d.DB, "proof-cache@example.test", "Proof", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := issueBoundTestAccessToken(t, d.DB, d.Auth, user)
+	requestKey, err := d.Auth.RequestSigningKeyForAccess(token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	attachRequestProof(req, token, requestKey, time.Now().Unix(), "nonce-auth-cache-123456", http.MethodGet,
+		"/me", requestProofTestDevice, requestProofDigest(nil))
+	rec := httptest.NewRecorder()
+	requireAuth(d, func(_ Deps, _ http.ResponseWriter, _ *http.Request) {
+		t.Error("protected handler ran without recording the nonce")
+	}).ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable || strings.Contains(rec.Body.String(), "cache connection unavailable") {
+		t.Fatalf("status=%d body=%s, want 503 with a generic error", rec.Code, rec.Body.String())
 	}
 }
 

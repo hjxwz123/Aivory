@@ -51,17 +51,18 @@ func (r *conversationDeleteVectorRecorder) DeleteByConversation(_ context.Contex
 }
 
 func TestDeleteConversationFilePreservesAutoAddedKnowledgeBaseTwin(t *testing.T) {
-	for _, actor := range []string{"member", "owner"} {
+	for _, actor := range []string{"member", "owner", "other-member"} {
 		t.Run(actor, func(t *testing.T) {
 			ctx := context.Background()
 			db := openMigrated(t, filepath.Join(t.TempDir(), "delete-file-kb-twin.db"))
 			defer db.Close()
 			mustExec(t, db, `INSERT INTO users(id,email,password_hash,role) VALUES
 				('owner','owner@example.test','h','user'),
-				('member','member@example.test','h','user')`)
+				('member','member@example.test','h','user'),
+				('other-member','other-member@example.test','h','user')`)
 			mustExec(t, db, `INSERT INTO workspaces(id,name,owner_id,invite_token) VALUES('ws1','Shared','owner','invite')`)
 			mustExec(t, db, `INSERT INTO workspace_members(workspace_id,user_id,role) VALUES
-				('ws1','owner','owner'), ('ws1','member','member')`)
+				('ws1','owner','owner'), ('ws1','member','member'), ('ws1','other-member','member')`)
 			mustExec(t, db, `INSERT INTO conversations(id,user_id,title,workspace_id,is_public)
 				VALUES('c1','owner','Shared','ws1',1)`)
 			mustExec(t, db, `INSERT INTO channels(id,name,type) VALUES('ch1','Embedding','openai')`)
@@ -99,6 +100,15 @@ func TestDeleteConversationFilePreservesAutoAddedKnowledgeBaseTwin(t *testing.T)
 			req = req.WithContext(context.WithValue(req.Context(), userCtxKey{}, &store.User{ID: actor, Role: "user", Status: "active"}))
 			rec := httptest.NewRecorder()
 			deleteConversationFileHandler(deps, rec, req)
+			if actor == "other-member" {
+				if rec.Code != http.StatusNotFound {
+					t.Fatalf("delete of another member's file status=%d body=%s, want 404", rec.Code, rec.Body.String())
+				}
+				if _, err := store.GetFile(ctx, db, "f1", actor); err != nil {
+					t.Fatalf("file must remain readable after rejected delete: %v", err)
+				}
+				return
+			}
 			if rec.Code != http.StatusOK {
 				t.Fatalf("delete status=%d body=%s", rec.Code, rec.Body.String())
 			}

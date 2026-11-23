@@ -195,6 +195,7 @@
     "manageKnowledgeBases": "Manage knowledge bases",
     "incompatibleKnowledgeBase": "This library cannot be used with the current selection",
     "generationInProgress": "Wait for the current reply to finish, or stop it first.",
+    "branchEditConflict": "The conversation changed. Reopen the message before editing it again.",
     "knowledgeBaseMentionLabel": "Attach a knowledge base",
     "knowledgeBaseMentionEmpty": "No matching knowledge bases",
     "permissions": {

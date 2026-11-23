@@ -195,6 +195,7 @@
     "manageKnowledgeBases": "管理知识库",
     "incompatibleKnowledgeBase": "此知识库暂时不能与当前选择一起使用",
     "generationInProgress": "请等待当前回复完成，或者先停止生成。",
+    "branchEditConflict": "会话内容已变化，请重新打开消息后再编辑。",
     "knowledgeBaseMentionLabel": "附加知识库",
     "knowledgeBaseMentionEmpty": "没有匹配的知识库",
     "permissions": {

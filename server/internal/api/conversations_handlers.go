@@ -877,8 +877,12 @@ func deleteConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	deletion, err := store.DeleteConversationWithState(r.Context(), d.DB, id, u.ID)
-	if err != nil {
+	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, 404, errNotFound)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	finishConversationDeletion(r.Context(), d, r, u.ID, id, deletion)
@@ -1569,11 +1573,19 @@ func deleteConversationFileHandler(d Deps, w http.ResponseWriter, r *http.Reques
 	convID := pathParam(r, "id")
 	fileID := pathParam(r, "fileId")
 	if _, err := store.GetConversation(r.Context(), d.DB, convID, u.ID); err != nil {
-		writeError(w, 404, errNotFound)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, errNotFound)
+		} else {
+			writeError(w, http.StatusInternalServerError, err)
+		}
 		return
 	}
 	f, err := store.GetFile(r.Context(), d.DB, fileID, u.ID)
-	if err != nil || f == nil || f.ConversationID != convID {
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if f == nil || f.ConversationID != convID {
 		writeError(w, 404, errNotFound)
 		return
 	}
@@ -1592,7 +1604,11 @@ func deleteConversationFileHandler(d Deps, w http.ResponseWriter, r *http.Reques
 		storagePaths = append(storagePaths, doc.StoragePath)
 	}
 	if err := store.DeleteConversationFileAndDocuments(r.Context(), d.DB, fileID, convID, u.ID, docIDs); err != nil {
-		writeError(w, 500, err)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, errNotFound)
+		} else {
+			writeError(w, http.StatusInternalServerError, err)
+		}
 		return
 	}
 	// The delete transaction marks matching historical attachments unavailable.

@@ -1,4 +1,4 @@
-// Compaction source rendering and single-request summary-model execution.
+// Compaction source rendering and bounded summary-model execution.
 package llm
 
 import (
@@ -122,7 +122,7 @@ func runCompactionTask(
 	task *TaskLLM,
 	conv *store.Conversation,
 	payerID, conversationModelID, prompt string,
-	outputCap, requestMaxTokens int,
+	outputCap, requestMaxTokens, retryOutputCap int,
 ) (resultText string, returnErr error) {
 	taskStarted := time.Now()
 	task.logCompactionStage(ctx, conv.ID, "task_call", "started", time.Time{},
@@ -145,7 +145,7 @@ func runCompactionTask(
 		WorkspaceID:               conv.WorkspaceID,
 		ConversationID:            conv.ID,
 		MaxOutputTokens:           outputCap,
-		EmptyRetryMaxOutputTokens: -1,
+		EmptyRetryMaxOutputTokens: retryOutputCap,
 		MaxInputTokens:            maxInputTokens,
 		FallbackModelID:           conversationModelID,
 	})
@@ -162,8 +162,8 @@ func runCompactionTask(
 	return text, nil
 }
 
-// summarizeCompactionText makes exactly one summary-model request. Callers must
-// select a source that fits the configured request budget before calling it.
+// summarizeCompactionText reserves enough room for the complete source. An
+// empty completion at the output limit can use spare room for one retry.
 func summarizeCompactionText(
 	ctx context.Context,
 	task *TaskLLM,
@@ -199,7 +199,11 @@ func summarizeCompactionText(
 	task.logCompactionStage(ctx, conv.ID, "summary_plan", "completed", planStarted,
 		fmt.Sprintf(" strategy=direct payload_budget=%d selected_source_tokens=%d", payloadBudget, sourceTokens))
 	prompt := buildCompactionPrompt(customPrompt, instruction, fullSource, outputCap)
-	return runCompactionTask(ctx, task, conv, payerID, conversationModelID, prompt, outputCap, requestMaxTokens)
+	retryOutputCap := min(max(taskEmptyRetryMaxOutputTokens, 2*outputCap), outputCap+payloadBudget-sourceTokens)
+	if retryOutputCap <= outputCap {
+		retryOutputCap = -1
+	}
+	return runCompactionTask(ctx, task, conv, payerID, conversationModelID, prompt, outputCap, requestMaxTokens, retryOutputCap)
 }
 
 func renderContinuationSummarySource(prior []SummaryBlock, newer []store.Message) (string, error) {

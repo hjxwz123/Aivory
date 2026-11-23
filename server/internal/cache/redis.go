@@ -137,10 +137,14 @@ func (c *redisCache) Set(key, value string, ttl time.Duration) {
 }
 
 func (c *redisCache) SetNX(key, value string, ttl time.Duration) bool {
+	ok, err := c.SetNXResult(key, value, ttl)
+	return err == nil && ok
+}
+
+func (c *redisCache) SetNXResult(key, value string, ttl time.Duration) (bool, error) {
 	ctx, cancel := context.WithTimeout(c.ctx, redisOpTimeout)
 	defer cancel()
-	ok, err := c.rdb.SetNX(ctx, key, value, ttl).Result()
-	return err == nil && ok
+	return c.rdb.SetNX(ctx, key, value, ttl).Result()
 }
 
 func (c *redisCache) CompareAndDelete(key, expected string) bool {
