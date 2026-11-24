@@ -17,11 +17,11 @@ import (
 	"strings"
 	"time"
 
-	"aivory/server/internal/systemprompts"
 	"aivory/server/internal/envcfg"
 	"aivory/server/internal/fileguard"
 	"aivory/server/internal/oauth"
 	"aivory/server/internal/store"
+	"aivory/server/internal/systemprompts"
 )
 
 // Tunable knobs — envcfg overrides; defaults preserve original behaviour.
@@ -2327,6 +2327,20 @@ func normalizeSettingsArchiveRows(r io.Reader) (io.Reader, error) {
 			var amount float64
 			if json.Unmarshal([]byte(value), &amount) != nil || math.IsNaN(amount) || math.IsInf(amount, 0) || amount < 0 {
 				return nil, fmt.Errorf("invalid settings.credits_per_usd")
+			}
+		}
+		if present && (key == store.SystemTimeZoneKey || key == store.DailyCheckinKey) {
+			value, valuePresent, err := backupStringField(row, "value")
+			if err != nil || !valuePresent {
+				return nil, fmt.Errorf("invalid settings.%s", key)
+			}
+			if key == store.SystemTimeZoneKey {
+				_, err = store.NormalizeSystemTimeZone(json.RawMessage(value))
+			} else {
+				_, err = store.NormalizeDailyCheckin(json.RawMessage(value))
+			}
+			if err != nil {
+				return nil, fmt.Errorf("invalid settings.%s: %w", key, err)
 			}
 		}
 		if present {

@@ -2375,7 +2375,7 @@
     "limitsLead": "Per-user limits. Set a numeric limit to 0 to leave that limit unrestricted.",
     "zeroUnlimited": "0 = unlimited.",
     "dailyTokenLimit": "Daily token limit",
-    "dailyTokenLimitHint": "Maximum input plus output tokens per user per UTC day. 0 = unlimited.",
+    "dailyTokenLimitHint": "Maximum input plus output tokens per user per day in the system time zone. 0 = unlimited.",
     "maxConcurrentGenerations": "Concurrent generations per user",
     "maxConcurrentGenerationsHint": "Maximum active response streams per user. 0 = unlimited.",
     "docmee": {

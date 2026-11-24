@@ -5,16 +5,14 @@ import {
   ArrowRight,
   ChevronLeft,
   ChevronRight,
-  Clock,
   Loader2,
   ReceiptText,
   RefreshCw,
   Sparkles,
   Ticket,
-  Wallet,
 } from 'lucide-react'
 import { authApi, creditPackagesApi, groupsApi, paymentsApi, redeemApi, ApiError } from '@/api'
-import type { ApiCreditPackage, ApiCredits, ApiUserGroup, ApiUserPaymentOrder } from '@/api/types'
+import type { ApiCreditPackage, ApiUserGroup, ApiUserPaymentOrder } from '@/api/types'
 import { useAuth } from '@/store/auth'
 import { ContentHeader } from '@/components/layout/content-header'
 import { PaymentMethodDialog } from '@/components/payment/PaymentMethodDialog'
@@ -46,7 +44,7 @@ import {
   paymentOrderResumeKind,
 } from '@/lib/payment-order-state'
 import { groupPriceAmount, type BillingCycle } from '@/lib/user-group-tier'
-import { cn, formatAbsoluteDate, formatDateTime } from '@/lib/utils'
+import { cn, formatAbsoluteDate } from '@/lib/utils'
 
 type TFn = (key: string, options?: Record<string, unknown>) => string
 type CatalogTab = 'groups' | 'credit-packages'
@@ -63,16 +61,12 @@ export default function Subscription() {
   const setUser = useAuth((state) => state.setUser)
   const [groups, setGroups] = useState<ApiUserGroup[]>([])
   const [creditPackages, setCreditPackages] = useState<ApiCreditPackage[]>([])
-  const [credits, setCredits] = useState<ApiCredits | null>(null)
   const [groupsLoading, setGroupsLoading] = useState(true)
   const [packagesLoading, setPackagesLoading] = useState(true)
-  const [creditsLoading, setCreditsLoading] = useState(true)
   const [groupsLoadError, setGroupsLoadError] = useState(false)
   const [packagesLoadError, setPackagesLoadError] = useState(false)
-  const [creditsLoadError, setCreditsLoadError] = useState(false)
   const [groupsReloadKey, setGroupsReloadKey] = useState(0)
   const [packagesReloadKey, setPackagesReloadKey] = useState(0)
-  const [creditsReloadKey, setCreditsReloadKey] = useState(0)
   const [paymentOrders, setPaymentOrders] = useState<ApiUserPaymentOrder[]>([])
   const [paymentHistoryTotal, setPaymentHistoryTotal] = useState(0)
   const [paymentHistoryPage, setPaymentHistoryPage] = useState(0)
@@ -156,24 +150,6 @@ export default function Subscription() {
 
   useEffect(() => {
     let active = true
-
-    setCreditsLoading(true)
-    setCreditsLoadError(false)
-    authApi
-      .credits()
-      .then((value) => active && setCredits(value))
-      .catch(() => {
-        if (active) setCreditsLoadError(true)
-      })
-      .finally(() => active && setCreditsLoading(false))
-
-    return () => {
-      active = false
-    }
-  }, [creditsReloadKey])
-
-  useEffect(() => {
-    let active = true
     if (!purchaseAllowed) return
     const offset = paymentHistoryPage * PAYMENT_HISTORY_PAGE_SIZE
 
@@ -232,17 +208,12 @@ export default function Subscription() {
     }
 
     async function refreshEntitlements() {
-      const [meResult, creditsResult, groupsResult] = await Promise.allSettled([
+      const [meResult, groupsResult] = await Promise.allSettled([
         authApi.me(),
-        authApi.credits(),
         groupsApi.list(),
       ])
       if (cancelled) return
       if (meResult.status === 'fulfilled') setUser(meResult.value)
-      if (creditsResult.status === 'fulfilled') {
-        setCredits(creditsResult.value)
-        setCreditsLoadError(false)
-      }
       if (groupsResult.status === 'fulfilled') {
         setGroups(groupsResult.value)
         setGroupsLoadError(false)
@@ -400,7 +371,6 @@ export default function Subscription() {
       }
       if (response.user) setUser(response.user)
       groupsApi.list().then(setGroups).catch(() => undefined)
-      authApi.credits().then(setCredits).catch(() => undefined)
       setRedeemCode('')
       setConfirmOverride(null)
       setRedeemSuccess(
@@ -514,10 +484,7 @@ export default function Subscription() {
     requestPaymentOrderResume(order)
   }
 
-  const creditsOn = Boolean(credits?.enabled)
-  const showCreditsPanel = creditsLoading || creditsLoadError || creditsOn
   const hasCurrentGroup = Boolean(currentGroupName)
-  const showAccount = hasCurrentGroup || showCreditsPanel
   const showingGroups = catalogTab === 'groups'
   const catalogCount = showingGroups ? sortedGroups.length : sortedPackages.length
 
@@ -528,52 +495,30 @@ export default function Subscription() {
         <main className="mx-auto w-full max-w-[var(--layout-content-max-w)] px-4 py-4 pb-16 sm:px-8 sm:py-6 sm:pb-20">
           {groupsLoading ? (
             <AccountSkeleton t={t} />
-          ) : showAccount ? (
+          ) : hasCurrentGroup ? (
             <section className="overflow-hidden rounded-[10px] bg-[var(--color-surface)]">
-              <div
-                className={cn(
-                  hasCurrentGroup && showCreditsPanel &&
-                    'md:grid md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.7fr)]',
-                )}
-              >
-                {hasCurrentGroup ? (
-                  <div className="min-w-0 p-3.5 sm:p-4">
-                    <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-[var(--color-fg-muted)]">
-                      <span className="size-1.5 rounded-full bg-[var(--color-secondary)]" aria-hidden />
-                      {t('subscription:currentPlan')}
-                    </span>
-                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                      <h2 className="min-w-0 break-words text-[1.125rem] font-semibold leading-tight text-[var(--color-fg)] [overflow-wrap:anywhere]">{currentGroupName}</h2>
-                      {current?.is_default ? (
-                        <Badge size="sm" variant="neutral">
-                          {t('subscription:free')}
-                        </Badge>
-                      ) : null}
-                      {expiresLabel ? (
-                        <Badge size="sm" variant="sage">
-                          {expiresLabel}
-                        </Badge>
-                      ) : null}
-                    </div>
-                    {current?.description ? (
-                      <p className="mt-1 max-w-prose break-words text-[11.5px] leading-snug text-[var(--color-fg-muted)] [overflow-wrap:anywhere]">
-                        {current.description}
-                      </p>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                {creditsLoading ? (
-                  <BalanceState hasPlanHeader={hasCurrentGroup} loading t={t} />
-                ) : creditsLoadError ? (
-                  <BalanceState
-                    hasPlanHeader={hasCurrentGroup}
-                    loading={false}
-                    onRetry={() => setCreditsReloadKey((value) => value + 1)}
-                    t={t}
-                  />
-                ) : creditsOn && credits ? (
-                  <Balance credits={credits} hasPlanHeader={hasCurrentGroup} locale={i18n.resolvedLanguage} t={t} />
+              <div className="min-w-0 p-3.5 sm:p-4">
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-[var(--color-fg-muted)]">
+                  <span className="size-1.5 rounded-full bg-[var(--color-secondary)]" aria-hidden />
+                  {t('subscription:currentPlan')}
+                </span>
+                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                  <h2 className="min-w-0 break-words text-[1.125rem] font-semibold leading-tight text-[var(--color-fg)] [overflow-wrap:anywhere]">{currentGroupName}</h2>
+                  {current?.is_default ? (
+                    <Badge size="sm" variant="neutral">
+                      {t('subscription:free')}
+                    </Badge>
+                  ) : null}
+                  {expiresLabel ? (
+                    <Badge size="sm" variant="sage">
+                      {expiresLabel}
+                    </Badge>
+                  ) : null}
+                </div>
+                {current?.description ? (
+                  <p className="mt-1 max-w-prose break-words text-[11.5px] leading-snug text-[var(--color-fg-muted)] [overflow-wrap:anywhere]">
+                    {current.description}
+                  </p>
                 ) : null}
               </div>
             </section>
@@ -914,154 +859,6 @@ export default function Subscription() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
-  )
-}
-
-function Balance({
-  credits,
-  hasPlanHeader,
-  locale,
-  t,
-}: {
-  credits: ApiCredits
-  hasPlanHeader: boolean
-  locale?: string
-  t: TFn
-}) {
-  const timed = credits.timed
-  const showTimed = Boolean(timed && timed.allowance > 0 && timed.period_seconds > 0)
-  const percentage =
-    timed && timed.allowance > 0 ? Math.max(0, Math.min(100, (timed.remaining / timed.allowance) * 100)) : 0
-  const timedLabel = t('subscription:credits.timedTitle')
-  const permanentLabel = t('subscription:credits.permanentTitle')
-  const timedValue = timed ? formatCredits(timed.remaining, locale) : ''
-  const permanentValue = formatCredits(credits.permanent, locale)
-
-  return (
-    <div
-      className={cn(
-        'min-w-0 bg-[var(--color-bg-muted)] p-3 sm:p-3.5',
-        hasPlanHeader && 'md:rounded-r-[10px]',
-      )}
-    >
-      <div className={cn('grid gap-3', showTimed ? 'xl:grid-cols-2 xl:gap-4' : 'grid-cols-1')}>
-        {showTimed && timed ? (
-          <div className="min-w-0">
-            <div className="flex min-w-0 items-center justify-between gap-2">
-              <span
-                className={cn(
-                  'inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap font-medium text-[var(--color-accent)]',
-                  balanceLabelSize(timedLabel),
-                )}
-              >
-                <Clock className="shrink-0" size={13} aria-hidden />
-                {timedLabel}
-              </span>
-              <span
-                className={cn(
-                  'min-w-0 whitespace-nowrap font-semibold leading-none tabular-nums text-[var(--color-fg)]',
-                  balanceValueSize(timedValue),
-                )}
-              >
-                {timedValue}
-              </span>
-            </div>
-            <div
-              className="mt-2 h-1 w-full overflow-hidden rounded-full bg-[var(--color-accent-soft)]"
-              role="progressbar"
-              aria-label={timedLabel}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={Math.round(percentage)}
-              aria-valuetext={`${timedValue} / ${formatCredits(timed.allowance, locale)}`}
-            >
-              <div
-                className="h-full rounded-full bg-[var(--color-accent)]"
-                style={{ width: `${percentage}%` }}
-              />
-            </div>
-            {timed.resets_at > 0 ? (
-              <p className="mt-1.5 inline-flex items-center gap-1.5 text-[11px] text-[var(--color-fg-subtle)]">
-                <RefreshCw size={11} aria-hidden />
-                {t('subscription:credits.resetsOn', { date: formatDateTime(timed.resets_at * 1000) })}
-              </p>
-            ) : null}
-          </div>
-        ) : null}
-
-        <div
-          className={cn(
-            'min-w-0',
-            showTimed &&
-              'pt-3 xl:pl-4 xl:pt-0',
-          )}
-        >
-          <div className="flex min-w-0 items-center justify-between gap-2">
-            <span
-              className={cn(
-                'inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap font-medium text-[var(--color-secondary)]',
-                balanceLabelSize(permanentLabel),
-              )}
-            >
-              <Wallet className="shrink-0" size={13} aria-hidden />
-              {permanentLabel}
-            </span>
-            <span
-              className={cn(
-                'min-w-0 whitespace-nowrap font-semibold leading-none tabular-nums text-[var(--color-fg)]',
-                balanceValueSize(permanentValue),
-              )}
-            >
-              {permanentValue}
-            </span>
-          </div>
-          <p className="mt-1.5 max-w-[44ch] text-[11px] leading-snug text-[var(--color-fg-muted)]">
-            {t('subscription:credits.permanentHint')}
-          </p>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function BalanceState({
-  hasPlanHeader,
-  loading,
-  onRetry,
-  t,
-}: {
-  hasPlanHeader: boolean
-  loading: boolean
-  onRetry?: () => void
-  t: TFn
-}) {
-  return (
-    <div
-      className={cn(
-        'min-w-0 bg-[var(--color-bg-muted)] p-3.5 sm:p-4',
-        hasPlanHeader && 'md:rounded-r-[10px]',
-      )}
-      role={loading ? 'status' : 'alert'}
-    >
-      <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-[var(--color-fg-muted)]">
-        <span className="size-1.5 rounded-full bg-[var(--color-accent)]" aria-hidden />
-        {t('subscription:credits.sectionTitle')}
-      </span>
-      {loading ? (
-        <div className="mt-2 animate-pulse" aria-label={t('common:aria.loading')}>
-          <span className="sr-only">{t('common:aria.loading')}</span>
-          <div className="h-3 w-24 rounded bg-[var(--color-surface-sunken)]" />
-          <div className="mt-2 h-6 w-32 rounded bg-[var(--color-surface-sunken)]" />
-        </div>
-      ) : (
-        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[12.5px] text-[var(--color-danger)]">
-          <span>{t('subscription:credits.loadFailed')}</span>
-          <Button className="min-h-11 sm:min-h-8" size="sm" variant="secondary" onClick={onRetry}>
-            {t('common:actions.tryAgain')}
-          </Button>
-        </div>
-      )}
     </div>
   )
 }
@@ -1664,14 +1461,6 @@ function formatCredits(value: number, locale?: string): string {
   return new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(value)
 }
 
-function balanceLabelSize(label: string): string {
-  return label.length > 22 ? 'text-[10.5px]' : label.length > 14 ? 'text-[11px]' : 'text-[12px]'
-}
-
-function balanceValueSize(value: string): string {
-  return value.length > 14 ? 'text-[13px]' : value.length > 10 ? 'text-[15px]' : 'text-[1.25rem]'
-}
-
 function EmptyCatalog({ children }: { children: string }) {
   return (
     <div className="rounded-[10px] border border-dashed border-[var(--color-border)] px-4 py-8 text-center text-[13px] text-[var(--color-fg-muted)]">
@@ -1708,25 +1497,10 @@ function AccountSkeleton({ t }: { t: TFn }) {
       aria-label={t('common:aria.loading')}
     >
       <span className="sr-only">{t('common:aria.loading')}</span>
-      <div className="md:grid md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.7fr)]">
-        <div className="p-3.5 sm:p-4">
-          <div className="h-3 w-20 rounded bg-[var(--color-bg-muted)]" />
-          <div className="mt-2 h-5 w-36 rounded bg-[var(--color-bg-muted)]" />
-          <div className="mt-2 h-3 w-52 max-w-full rounded bg-[var(--color-bg-muted)]" />
-        </div>
-        <div className="bg-[var(--color-bg-muted)] p-3 sm:p-3.5">
-          <div className="grid gap-3 sm:grid-cols-2 sm:gap-4">
-            {Array.from({ length: 2 }).map((_, index) => (
-              <div key={index} className="min-w-0">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="h-3 w-24 rounded bg-[var(--color-surface-sunken)]" />
-                  <div className="h-5 w-16 rounded bg-[var(--color-surface-sunken)]" />
-                </div>
-                <div className="mt-2 h-1 w-full rounded-full bg-[var(--color-surface-sunken)]" />
-              </div>
-            ))}
-          </div>
-        </div>
+      <div className="p-3.5 sm:p-4">
+        <div className="h-3 w-20 rounded bg-[var(--color-bg-muted)]" />
+        <div className="mt-2 h-5 w-36 rounded bg-[var(--color-bg-muted)]" />
+        <div className="mt-2 h-3 w-52 max-w-full rounded bg-[var(--color-bg-muted)]" />
       </div>
     </div>
   )

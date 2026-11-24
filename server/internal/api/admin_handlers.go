@@ -13,12 +13,12 @@ import (
 	"strings"
 	"time"
 
-	"aivory/server/internal/systemprompts"
 	"aivory/server/internal/envcfg"
 	"aivory/server/internal/fileguard"
 	"aivory/server/internal/mail"
 	"aivory/server/internal/requestheaders"
 	"aivory/server/internal/store"
+	"aivory/server/internal/systemprompts"
 )
 
 // Env-overridable defaults (§ config-reference). Each falls back to the
@@ -1575,6 +1575,7 @@ var settingsKeys = []string{
 	// deployment-wide settlement currency; card_purchase_url is the only external
 	// checkout link outside the configured payment methods.
 	"credits_per_usd", "settlement_currency", "card_purchase_url",
+	store.DailyCheckinKey, store.SystemTimeZoneKey,
 	// §B6 partial: JSON array of tool names disabled platform-wide (kill-switch),
 	// e.g. ["python_execute","image_generate"].
 	"disabled_tools",
@@ -1890,6 +1891,18 @@ func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.R
 			// §4.7 numeric limits must be non-negative. Individual compaction
 			// settings below enforce their stricter runtime minimums as well.
 			switch k {
+			case store.DailyCheckinKey:
+				cfg, err := store.NormalizeDailyCheckin(v)
+				if err != nil {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(cfg)
+			case store.SystemTimeZoneKey:
+				zone, err := store.NormalizeSystemTimeZone(v)
+				if err != nil {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(zone)
 			case siteAccessSettingKey:
 				cfg, err := normalizeSiteAccess(v)
 				if err != nil {

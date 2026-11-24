@@ -19,6 +19,7 @@ import {
   ImagePlus,
   ShieldCheck,
   Layers,
+  ChartNoAxesColumnIncreasing,
   Languages,
   Loader2,
   X,
@@ -1520,7 +1521,7 @@ interface UserMenuProps {
 export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuProps) {
   const navigate = useNavigate()
   const openSettings = useOpenSettings()
-  const { t } = useTranslation(['chat', 'common', 'settings'])
+  const { t } = useTranslation(['chat', 'common', 'settings', 'usage'])
   const user = useAuth((s) => s.user)
   const downloadUrl = useDesktopDownload()
   const logout = useAuth((s) => s.logout)
@@ -1603,6 +1604,10 @@ export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuP
         <DropdownMenuItem onClick={() => navigate('/subscription')}>
           <Layers size={13} aria-hidden />
           {t('chat:userMenu.subscription', { defaultValue: 'Subscription' })}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => navigate('/usage')}>
+          <ChartNoAxesColumnIncreasing size={13} aria-hidden />
+          {t('usage:title')}
         </DropdownMenuItem>
         {domainDataStatus?.needs_action ? (
           <DropdownMenuItem onClick={showDomainData}>

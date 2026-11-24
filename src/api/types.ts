@@ -18,6 +18,8 @@ export interface ApiTimedCredits {
   period_seconds: number
   /** Unix seconds at which the current timed-credit window resets. */
   resets_at: number
+  checkin_remaining?: number
+  checkin_expires_at?: number
 }
 
 export interface ApiUser {
@@ -1593,7 +1595,7 @@ export interface ApiAdminGeneratedImagePage
   models: ApiAdminGeneratedImageModel[]
 }
 
-/** Credit balance for the subscription page (§ credits). */
+/** Personal credit balance. */
 export interface ApiCredits {
   enabled: boolean
   timed?: ApiTimedCredits
@@ -1601,6 +1603,28 @@ export interface ApiCredits {
   /** Total amount that can be spent now; never negative. */
   available?: number
   settlement_currency: string
+}
+
+export interface ApiDailyUsage {
+  date: string
+  tokens: number
+  credits: number
+}
+
+export interface ApiDailyCheckin {
+  date: string
+  credits: number
+  expires_at: number
+}
+
+export interface ApiPersonalUsage {
+  credits: ApiCredits
+  days: ApiDailyUsage[]
+  time_zone: string
+  next_day_at: number
+  checkin_enabled: boolean
+  first_checkin_date: string
+  checkin: ApiDailyCheckin | null
 }
 
 export interface ApiCreditAdjustmentNotification {

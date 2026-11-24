@@ -22,6 +22,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Field } from '@/components/ui/label'
 import { PanelFallback } from '@/components/ui/panel-fallback'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from '@/hooks/use-toast'
@@ -37,6 +38,8 @@ import { AdminPageHeader } from '@/components/admin/admin-page-header'
 import { SettingsActions, SettingsBlock, SettingsRow, SettingsSection } from '@/components/settings/settings-section'
 
 type Settings = Record<string, unknown>
+type CheckinDraft = { enabled: boolean; mode: 'fixed' | 'random'; pool: 'timed' | 'permanent'; fixed: string; min: string; max: string }
+const defaultCheckin: CheckinDraft = { enabled: false, mode: 'fixed', pool: 'permanent', fixed: '1', min: '1', max: '5' }
 
 type CreditPackageDraft = Partial<ApiCreditPackage> & {
   priceInput?: string
@@ -51,6 +54,8 @@ const OWNED_KEYS = [
   'max_concurrent_generations',
   'credit_preflight_enabled',
   'quota_exceeded_message',
+  'system_time_zone',
+  'daily_checkin',
 ] as const
 
 function nonNegativeNumber(value: number, integer = false): number {
@@ -60,8 +65,9 @@ function nonNegativeNumber(value: number, integer = false): number {
 }
 
 export default function AdminCreditSettings() {
-  const { t, i18n } = useTranslation(['admin', 'common'])
+  const { t, i18n } = useTranslation(['admin', 'common', 'usage'])
   const [draft, setDraft] = useState<Settings>({})
+  const [checkin, setCheckin] = useState(defaultCheckin)
   const [creditPackages, setCreditPackages] = useState<ApiCreditPackage[]>([])
   const [packageCurrency, setPackageCurrency] = useState('USD')
   const [loading, setLoading] = useState(true)
@@ -89,6 +95,15 @@ export default function AdminCreditSettings() {
       ])
       const currency = normalizeSettlementCurrency(settings.settlement_currency)
       setDraft({ ...settings, settlement_currency: currency })
+      const saved = settings.daily_checkin as { enabled?: boolean; mode?: string; pool?: string; fixed?: number; min?: number; max?: number } | undefined
+      if (saved) setCheckin({
+        enabled: saved.enabled === true,
+        mode: saved.mode === 'random' ? 'random' : 'fixed',
+        pool: saved.pool === 'timed' ? 'timed' : 'permanent',
+        fixed: String(saved.fixed || defaultCheckin.fixed),
+        min: String(saved.min || defaultCheckin.min),
+        max: String(saved.max || defaultCheckin.max),
+      })
       setPackageCurrency(currency)
       setCreditPackages(packages)
     } catch (error) {
@@ -139,6 +154,24 @@ export default function AdminCreditSettings() {
       return
     }
 
+    const zone = readString('system_time_zone', 'UTC').trim()
+    try {
+      if (!zone || zone === 'Local') throw new RangeError()
+      new Intl.DateTimeFormat('en', { timeZone: zone })
+    } catch {
+      toast.error(t('usage:admin.zoneError'))
+      return
+    }
+    const fixed = Number(checkin.fixed)
+    const min = Number(checkin.min)
+    const max = Number(checkin.max)
+    const validAmount = (amount: number) => amount >= 0.01 && amount <= 1_000_000 && Math.round(amount * 100) / 100 === amount
+    const validCheckin = checkin.mode === 'fixed' ? validAmount(fixed) : validAmount(min) && validAmount(max) && min <= max
+    if (checkin.enabled && !validCheckin) {
+      toast.error(t('usage:admin.rewardError'))
+      return
+    }
+
     type OwnedKey = (typeof OWNED_KEYS)[number]
     const values: Record<OwnedKey, unknown> = {
       settlement_currency: normalizeSettlementCurrency(currencyInput),
@@ -149,6 +182,13 @@ export default function AdminCreditSettings() {
       max_concurrent_generations: nonNegativeNumber(readNumber('max_concurrent_generations', 3), true),
       credit_preflight_enabled: readBool('credit_preflight_enabled', true),
       quota_exceeded_message: readString('quota_exceeded_message'),
+      system_time_zone: zone,
+      daily_checkin: {
+        ...checkin,
+        fixed: validAmount(fixed) ? fixed : 1,
+        min: validAmount(min) && validAmount(max) && min <= max ? min : 1,
+        max: validAmount(min) && validAmount(max) && min <= max ? max : 5,
+      },
     }
     const patch: Settings = {}
     for (const key of OWNED_KEYS) {
@@ -460,6 +500,62 @@ export default function AdminCreditSettings() {
                 />
               </Field>
             </SettingsBlock>
+          </SettingsSection>
+
+          <SettingsSection title={t('usage:admin.title')} description={t('usage:admin.description')}>
+            <SettingsBlock>
+              <Field label={t('usage:admin.zone')} htmlFor="system-time-zone" hint={t('usage:admin.zoneHint')}>
+                <Input
+                  id="system-time-zone"
+                  value={readString('system_time_zone', 'UTC')}
+                  placeholder="Asia/Shanghai"
+                  spellCheck={false}
+                  autoCapitalize="none"
+                  maxLength={100}
+                  onChange={(event) => setSetting('system_time_zone', event.target.value)}
+                />
+              </Field>
+            </SettingsBlock>
+            <SettingsRow label={t('usage:admin.enabled')} htmlFor="daily-checkin-enabled">
+              <Switch id="daily-checkin-enabled" checked={checkin.enabled} onCheckedChange={(enabled) => setCheckin((current) => ({ ...current, enabled }))} />
+            </SettingsRow>
+            {checkin.enabled && (
+              <SettingsBlock>
+                <div className="grid gap-5 sm:grid-cols-2">
+                  <Field label={t('usage:admin.mode')} htmlFor="daily-checkin-mode">
+                    <Select value={checkin.mode} onValueChange={(mode: CheckinDraft['mode']) => setCheckin((current) => ({ ...current, mode }))}>
+                      <SelectTrigger id="daily-checkin-mode"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="fixed">{t('usage:admin.fixed')}</SelectItem>
+                        <SelectItem value="random">{t('usage:admin.random')}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field label={t('usage:admin.pool')} htmlFor="daily-checkin-pool" hint={t('usage:admin.poolHint')}>
+                    <Select value={checkin.pool} onValueChange={(pool: CheckinDraft['pool']) => setCheckin((current) => ({ ...current, pool }))}>
+                      <SelectTrigger id="daily-checkin-pool"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="permanent">{t('usage:permanentPool')}</SelectItem>
+                        <SelectItem value="timed">{t('usage:timedPool')}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  {(checkin.mode === 'fixed' ? ['fixed'] as const : ['min', 'max'] as const).map((key) => (
+                    <Field key={key} label={t(`usage:admin.${key}Amount`)} htmlFor={`daily-checkin-${key}`}>
+                      <Input
+                        id={`daily-checkin-${key}`}
+                        type="number"
+                        min={0.01}
+                        max={1_000_000}
+                        step={0.01}
+                        value={checkin[key]}
+                        onChange={(event) => setCheckin((current) => ({ ...current, [key]: event.target.value }))}
+                      />
+                    </Field>
+                  ))}
+                </div>
+              </SettingsBlock>
+            )}
           </SettingsSection>
 
           <SettingsActions className="-mt-2 mb-8">

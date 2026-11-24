@@ -2375,7 +2375,7 @@
     "limitsLead": "Limites par utilisateur. La valeur 0 signifie illimité.",
     "zeroUnlimited": "0 = illimité.",
     "dailyTokenLimit": "Limite quotidienne de Token",
-    "dailyTokenLimitHint": "Total maximal de Token en entrée et sortie par utilisateur et par jour UTC. 0 = illimité.",
+    "dailyTokenLimitHint": "Total maximal de Token en entrée et sortie par utilisateur et par jour dans le fuseau horaire du système. 0 = illimité.",
     "maxConcurrentGenerations": "Générations simultanées par utilisateur",
     "maxConcurrentGenerationsHint": "Nombre maximal de flux de réponse actifs par utilisateur. 0 = illimité.",
     "docmee": {

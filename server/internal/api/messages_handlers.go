@@ -2279,14 +2279,6 @@ func userGroupHasFeature(ctx context.Context, d Deps, groupID, feature string) b
 	return false
 }
 
-// nextMidnightUTC returns the next UTC midnight, used to set quota key TTLs so
-// they expire at the start of the next calendar day rather than "24 hours from
-// first use" (H-13).
-func nextMidnightUTC() time.Time {
-	now := time.Now().UTC()
-	return time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, time.UTC)
-}
-
 func checkDailyMessageLimit(d Deps, userID string) bool {
 	// H-13: read the limit BEFORE incrementing the counter so a limit of 0
 	// (disabled) never burns a count, and so the check reflects the true intent.
@@ -2297,8 +2289,10 @@ func checkDailyMessageLimit(d Deps, userID string) bool {
 	if limit <= 0 {
 		return true // 0 = unlimited; don't touch the counter at all
 	}
-	key := "quota:" + userID + ":" + time.Now().UTC().Format("2006-01-02")
-	ttl := time.Until(nextMidnightUTC())
+	now := time.Now()
+	start, end := store.CalendarDay(now, store.SystemLocation(d.DB))
+	key := "quota:" + userID + ":" + start.Format("2006-01-02")
+	ttl := end.Sub(now)
 	n := d.Cache.Incr(key, ttl)
 	return int(n) <= limit
 }

@@ -485,10 +485,11 @@ func (p WorkspacePolicy) PromptAllowedByPolicy() bool { return p.AllowPrompts }
 func (p WorkspacePolicy) MCPAllowedByPolicy() bool    { return p.AllowMCP }
 
 // WorkspaceMemberMonthlyUsage returns the credits a member has consumed in
-// one workspace since the current calendar month began (UTC).
+// one workspace since the current calendar month began in the system time zone.
 func WorkspaceMemberMonthlyUsage(ctx context.Context, db *sql.DB, workspaceID, userID string) (float64, error) {
-	monthStart := time.Now().UTC().Truncate(time.Hour * 24)
-	monthStart = time.Date(monthStart.Year(), monthStart.Month(), 1, 0, 0, 0, 0, time.UTC)
+	zone := SystemLocation(db)
+	now := time.Now().In(zone)
+	monthStart := civilMidnight(now.Year(), now.Month(), 1, zone)
 	var total sql.NullFloat64
 	err := db.QueryRowContext(ctx,
 		`SELECT COALESCE(SUM(credits),0) FROM usage_stats

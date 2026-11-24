@@ -2375,7 +2375,7 @@
     "limitsLead": "ユーザー単位の上限です。0 にすると無制限になります。",
     "zeroUnlimited": "0 = 無制限。",
     "dailyTokenLimit": "1 日の Token 上限",
-    "dailyTokenLimitHint": "ユーザーごとの UTC 1 日あたり入出力 Token 合計上限。0 = 無制限。",
+    "dailyTokenLimitHint": "ユーザーごとの システムのタイムゾーンでの 1 日あたり入出力 Token 合計上限。0 = 無制限。",
     "maxConcurrentGenerations": "ユーザーごとの同時生成数",
     "maxConcurrentGenerationsHint": "ユーザーごとの同時応答ストリーム上限。0 = 無制限。",
     "docmee": {

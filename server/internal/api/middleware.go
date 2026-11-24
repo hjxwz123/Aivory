@@ -454,8 +454,8 @@ func checkDailyTokenQuota(d Deps, userID string) bool {
 	if limit <= 0 {
 		return true
 	}
-	dayStart := time.Now().Truncate(24 * time.Hour).Unix()
-	used, err := store.BillingTokensSince(context.Background(), d.DB, userID, dayStart)
+	dayStart, _ := store.CalendarDay(time.Now(), store.SystemLocation(d.DB))
+	used, err := store.BillingTokensSince(context.Background(), d.DB, userID, dayStart.Unix())
 	if err != nil {
 		return false
 	}

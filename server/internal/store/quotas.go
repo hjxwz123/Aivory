@@ -7,9 +7,12 @@ import (
 	"errors"
 	"math"
 	"time"
+
+	"aivory/server/internal/envcfg"
 )
 
 var defaultQuotaPeriodSeconds = 604800
+var dailyImageLimitResetWindow = envcfg.Dur("AIVORY_TOOLS_DAILY_IMAGE_LIMIT_RESET_WINDOW", 24*time.Hour)
 
 // ListModelQuotas returns every per-group quota row for a model.
 func ListModelQuotas(ctx context.Context, db *sql.DB, modelID string) ([]ModelGroupQuota, error) {
@@ -355,6 +358,28 @@ func ReserveFixedQuota(ctx context.Context, db *sql.DB, userID, scopeType string
 	return reservation, true, nil
 }
 
+// ReserveDailyImageQuota uses the same window for local and provider-hosted tools.
+func ReserveDailyImageQuota(ctx context.Context, db *sql.DB, userID string, requested int) (*QuotaReservation, bool, error) {
+	limit := 30
+	if raw, err := GetSetting(db, "daily_image_limit"); err == nil {
+		if json.Unmarshal(raw, &limit) != nil || limit < 0 {
+			return nil, false, ErrInvalidCreditConfig
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return nil, false, err
+	}
+	if limit <= 0 {
+		return nil, true, nil
+	}
+	now := time.Now()
+	start := now.Truncate(dailyImageLimitResetWindow)
+	end := start.Add(dailyImageLimitResetWindow)
+	if dailyImageLimitResetWindow == 24*time.Hour {
+		start, end = CalendarDay(now, SystemLocation(db))
+	}
+	return ReserveFixedQuota(ctx, db, userID, QuotaScopeDailyImage, requested, limit, start.Unix(), end.Unix())
+}
+
 // ReserveDailyTokenQuota atomically holds the estimated token budget for one
 // user-owned provider call. The reservation is finalized with provider-reported
 // tokens, so concurrent chat and internal task calls share the same hard gate.
@@ -383,9 +408,9 @@ func ReserveDailyTokenQuota(ctx context.Context, db *sql.DB, userID string, requ
 	if requested <= 0 {
 		requested = 1
 	}
-	dayStart := time.Now().UTC().Truncate(24 * time.Hour).Unix()
+	dayStart, dayEnd := CalendarDay(time.Now(), SystemLocation(db))
 	reservation, allowed, err := ReserveFixedQuota(
-		ctx, db, userID, QuotaScopeDailyToken, requested, limit, dayStart, dayStart+24*60*60,
+		ctx, db, userID, QuotaScopeDailyToken, requested, limit, dayStart.Unix(), dayEnd.Unix(),
 	)
 	if err != nil || allowed {
 		return reservation, allowed, err
@@ -393,7 +418,7 @@ func ReserveDailyTokenQuota(ctx context.Context, db *sql.DB, userID string, requ
 	return nil, false, ErrDailyTokenQuotaExceeded
 }
 
-// migrateDailyTokenQuotaLedger preserves the current UTC day's legacy token
+// migrateDailyTokenQuotaLedger preserves the current system day's legacy token
 // use when a deployment first adopts quota_ledger. The marker and baselines are
 // committed together so concurrent startup and failed migrations cannot double
 // count or leave a partially migrated day.
@@ -415,7 +440,8 @@ func migrateDailyTokenQuotaLedger(ctx context.Context, db *sql.DB) error {
 	if claimed == 0 {
 		return tx.Commit()
 	}
-	dayStart := time.Now().UTC().Truncate(24 * time.Hour).Unix()
+	start, end := CalendarDay(time.Now(), systemLocationFrom(ctx, tx))
+	dayStart := start.Unix()
 	rows, err := tx.QueryContext(ctx,
 		`SELECT s.user_id,u.group_id,COALESCE(u.quota_cycle_anchor,0),CAST(SUM(s.input_tokens+s.output_tokens) AS BIGINT)
 		   FROM usage_stats s JOIN users u ON u.id=s.user_id
@@ -452,7 +478,7 @@ func migrateDailyTokenQuotaLedger(ctx context.Context, db *sql.DB) error {
 			`INSERT INTO quota_ledger(id,user_id,scope_type,model_id,group_id,cycle_anchor,window_start,limit_type,reserved_micros,actual_micros,status,expires_at,created_at,updated_at)
 			 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			genID("qr"), u.userID, QuotaScopeDailyToken, "", u.groupID, u.anchor, dayStart, "count",
-			actualMicros, actualMicros, QuotaStatusFinalized, dayStart+24*60*60, now, now); err != nil {
+			actualMicros, actualMicros, QuotaStatusFinalized, end.Unix(), now, now); err != nil {
 			return err
 		}
 	}

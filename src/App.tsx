@@ -43,6 +43,7 @@ const ResetPassword = lazy(() => import('@/pages/auth/ResetPassword'))
 const Privacy = lazy(() => import('@/pages/legal/Privacy'))
 const Terms = lazy(() => import('@/pages/legal/Terms'))
 const Subscription = lazy(() => import('@/pages/subscription/Subscription'))
+const PersonalUsage = lazy(() => import('@/pages/usage/PersonalUsage'))
 const AiPPT = lazy(() => import('@/pages/ppt/AiPPT'))
 const SharedConversation = lazy(() => import('@/pages/share/SharedConversation'))
 const JoinWorkspace = lazy(() => import('@/pages/workspace/JoinWorkspace'))
@@ -265,6 +266,9 @@ export default function App() {
             </Route>
             <Route path="/subscription" element={<ChatLayout />}>
               <Route index element={<Subscription />} />
+            </Route>
+            <Route path="/usage" element={<ChatLayout />}>
+              <Route index element={<PersonalUsage />} />
             </Route>
             <Route element={<AuthLayout />}>
               <Route path="/desktop/authorize" element={<DesktopAuthorize />} />

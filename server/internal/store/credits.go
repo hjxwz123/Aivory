@@ -14,6 +14,7 @@ const CreditMicrosPerUnit int64 = 1_000_000
 
 const (
 	CreditLedgerTimedDebit     = "timed_debit"
+	CreditLedgerCheckinDebit   = "checkin_debit"
 	CreditLedgerPermanentDebit = "permanent_debit"
 
 	CreditReservationReserved = "reserved"
@@ -30,21 +31,24 @@ var (
 )
 
 type CreditBalance struct {
-	GroupID        string
-	CycleAnchor    int64
-	CycleStart     int64
-	ResetsAt       int64
-	PeriodSeconds  int
-	Allowance      float64
-	TimedUsed      float64
-	TimedRemaining float64
-	Permanent      float64
-	Reserved       float64
-	Available      float64
+	GroupID          string
+	CycleAnchor      int64
+	CycleStart       int64
+	ResetsAt         int64
+	PeriodSeconds    int
+	Allowance        float64
+	TimedUsed        float64
+	TimedRemaining   float64
+	CheckinRemaining float64
+	CheckinExpiresAt int64
+	Permanent        float64
+	Reserved         float64
+	Available        float64
 
 	allowanceMicros      int64
 	timedUsedMicros      int64
 	timedRemainingMicros int64
+	checkinMicros        int64
 	permanentMicros      int64
 	reservedMicros       int64
 	availableMicros      int64
@@ -140,11 +144,12 @@ func creditBalanceFrom(ctx context.Context, q interface {
 		balance.CycleAnchor = now
 	}
 	if balance.allowanceMicros > 0 && balance.PeriodSeconds > 0 {
-		balance.CycleStart, balance.ResetsAt = CreditCycleStart(balance.CycleAnchor, balance.PeriodSeconds, now)
+		balance.CycleStart, balance.ResetsAt = calendarCreditCycle(balance.CycleAnchor, balance.PeriodSeconds, now, systemLocationFrom(ctx, q))
 		if err := q.QueryRowContext(ctx,
 			`SELECT COALESCE(SUM(amount_micros),0) FROM credit_ledger
-			  WHERE user_id=? AND group_id=? AND cycle_anchor=? AND cycle_start=? AND kind=?`,
-			userID, balance.GroupID, balance.CycleAnchor, balance.CycleStart, CreditLedgerTimedDebit,
+			  WHERE user_id=? AND group_id=? AND cycle_anchor=? AND kind=?
+			    AND (cycle_start=? OR (created_at>=? AND created_at<?))`,
+			userID, balance.GroupID, balance.CycleAnchor, CreditLedgerTimedDebit, balance.CycleStart, balance.CycleStart, balance.ResetsAt,
 		).Scan(&balance.timedUsedMicros); err != nil {
 			return CreditBalance{}, err
 		}
@@ -153,6 +158,12 @@ func creditBalanceFrom(ctx context.Context, q interface {
 			balance.timedRemainingMicros = 0
 		}
 	}
+	if err := q.QueryRowContext(ctx, `SELECT COALESCE(SUM(remaining_micros),0), COALESCE(MIN(expires_at),0)
+		FROM daily_checkins WHERE user_id=? AND expires_at>? AND remaining_micros>0`, userID, now).
+		Scan(&balance.checkinMicros, &balance.CheckinExpiresAt); err != nil {
+		return CreditBalance{}, err
+	}
+	balance.CheckinRemaining = creditsFromMicros(balance.checkinMicros)
 	if err := q.QueryRowContext(ctx,
 		`SELECT COALESCE(SUM(amount_micros),0) FROM credit_reservations
 		  WHERE user_id=? AND status=? AND expires_at>?`,
@@ -160,7 +171,8 @@ func creditBalanceFrom(ctx context.Context, q interface {
 	).Scan(&balance.reservedMicros); err != nil {
 		return CreditBalance{}, err
 	}
-	spendable := balance.timedRemainingMicros
+	spendable := balance.timedRemainingMicros + min(balance.checkinMicros, math.MaxInt64-balance.timedRemainingMicros)
+	balance.TimedRemaining = creditsFromMicros(spendable)
 	if balance.permanentMicros > 0 && spendable > math.MaxInt64-balance.permanentMicros {
 		spendable = math.MaxInt64
 	} else {
@@ -175,7 +187,6 @@ func creditBalanceFrom(ctx context.Context, q interface {
 	}
 	balance.Allowance = creditsFromMicros(balance.allowanceMicros)
 	balance.TimedUsed = creditsFromMicros(balance.timedUsedMicros)
-	balance.TimedRemaining = creditsFromMicros(balance.timedRemainingMicros)
 	balance.Permanent = creditsFromMicros(balance.permanentMicros)
 	balance.Reserved = creditsFromMicros(balance.reservedMicros)
 	balance.Available = creditsFromMicros(balance.availableMicros)
@@ -215,11 +226,20 @@ func debitCreditsTx(ctx context.Context, tx *sql.Tx, userID string, amountMicros
 		balance.CycleAnchor, userID); err != nil {
 		return CreditDebit{}, err
 	}
-	timedMicros := amountMicros
-	if timedMicros > balance.timedRemainingMicros {
-		timedMicros = balance.timedRemainingMicros
+	checkinMicros := min(amountMicros, balance.checkinMicros)
+	if checkinMicros > 0 {
+		if err := debitTimedCheckinCredits(ctx, tx, userID, checkinMicros, now); err != nil {
+			return CreditDebit{}, err
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO credit_ledger(id,user_id,group_id,kind,amount,amount_micros,source_type,source_id,created_at)
+			 VALUES(?,?,?,?,?,?,?,?,?)`, genID("cl"), userID, balance.GroupID, CreditLedgerCheckinDebit,
+			creditsFromMicros(checkinMicros), checkinMicros, sourceType, sourceID, now); err != nil {
+			return CreditDebit{}, err
+		}
 	}
-	permanentMicros := amountMicros - timedMicros
+	timedMicros := min(amountMicros-checkinMicros, balance.timedRemainingMicros)
+	permanentMicros := amountMicros - checkinMicros - timedMicros
 	if timedMicros > 0 {
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO credit_ledger(id,user_id,group_id,cycle_anchor,cycle_start,kind,amount,amount_micros,source_type,source_id,created_at)
@@ -247,7 +267,7 @@ func debitCreditsTx(ctx context.Context, tx *sql.Tx, userID string, amountMicros
 		}
 	}
 	return CreditDebit{
-		Timed: creditsFromMicros(timedMicros), Permanent: creditsFromMicros(permanentMicros), Total: creditsFromMicros(amountMicros),
+		Timed: creditsFromMicros(checkinMicros + timedMicros), Permanent: creditsFromMicros(permanentMicros), Total: creditsFromMicros(amountMicros),
 	}, nil
 }
 

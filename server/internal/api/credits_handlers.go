@@ -8,39 +8,44 @@ import (
 )
 
 type timedCreditsSnapshot struct {
-	Remaining     float64 `json:"remaining"`
-	Allowance     float64 `json:"allowance"`
-	PeriodSeconds int     `json:"period_seconds"`
-	ResetsAt      int64   `json:"resets_at"`
+	Remaining        float64 `json:"remaining"`
+	Allowance        float64 `json:"allowance"`
+	PeriodSeconds    int     `json:"period_seconds"`
+	ResetsAt         int64   `json:"resets_at"`
+	CheckinRemaining float64 `json:"checkin_remaining"`
+	CheckinExpiresAt int64   `json:"checkin_expires_at"`
 }
 
 func timedCreditsFromBalance(balance store.CreditBalance) timedCreditsSnapshot {
 	return timedCreditsSnapshot{
-		Remaining:     balance.TimedRemaining,
-		Allowance:     balance.Allowance,
-		PeriodSeconds: balance.PeriodSeconds,
-		ResetsAt:      balance.ResetsAt,
+		Remaining:        balance.TimedRemaining,
+		Allowance:        balance.Allowance,
+		PeriodSeconds:    balance.PeriodSeconds,
+		ResetsAt:         balance.ResetsAt,
+		CheckinRemaining: balance.CheckinRemaining,
+		CheckinExpiresAt: balance.CheckinExpiresAt,
 	}
 }
 
-// meCreditsHandler reports the signed-in user's credit balance for the
-// subscription page: the timed pool (remaining / allowance + next refresh) and
-// the separate permanent pool.
+// meCreditsHandler reports the signed-in user's timed and permanent balances.
 func meCreditsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
-	currency := globalSettlementCurrency(d)
 	balance, err := store.GetCreditBalance(r.Context(), d.DB, u.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{
+	writeJSON(w, 200, creditsSnapshot(d, balance))
+}
+
+func creditsSnapshot(d Deps, balance store.CreditBalance) map[string]any {
+	return map[string]any{
 		"enabled":             globalCreditsPerUSD(d) > 0,
 		"timed":               timedCreditsFromBalance(balance),
 		"permanent":           balance.Permanent,
 		"available":           balance.Available,
-		"settlement_currency": currency,
-	})
+		"settlement_currency": globalSettlementCurrency(d),
+	}
 }
 
 const defaultSettlementCurrency = store.DefaultSettlementCurrency

@@ -58,6 +58,10 @@ func domainRequestAllowed(d Deps, r *http.Request, workspaceID string) bool {
 		return true
 	case "/api/workspaces":
 		return r.Method == http.MethodGet
+	case "/api/me/usage/daily", "/api/me/checkin/history":
+		return r.Method == http.MethodGet
+	case "/api/me/checkin":
+		return r.Method == http.MethodPost
 	}
 	if path == "/api/me/domain-data" || strings.HasPrefix(path, "/api/me/domain-data/") {
 		return true

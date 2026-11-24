@@ -124,6 +124,18 @@ CREATE INDEX IF NOT EXISTS idx_credit_ledger_timed
 CREATE INDEX IF NOT EXISTS idx_credit_ledger_user_time
   ON credit_ledger(user_id, created_at);
 
+CREATE TABLE IF NOT EXISTS daily_checkins (
+  user_id          TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  day              TEXT NOT NULL,
+  claimed_at       BIGINT NOT NULL,
+  amount_micros    BIGINT NOT NULL CHECK(amount_micros > 0),
+  remaining_micros BIGINT NOT NULL DEFAULT 0 CHECK(remaining_micros BETWEEN 0 AND amount_micros),
+  expires_at       BIGINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (user_id, day)
+);
+CREATE INDEX IF NOT EXISTS idx_daily_checkins_user_claim ON daily_checkins(user_id, claimed_at);
+CREATE INDEX IF NOT EXISTS idx_daily_checkins_user_expiry ON daily_checkins(user_id, expires_at);
+
 CREATE TABLE IF NOT EXISTS credit_reservations (
   id              TEXT PRIMARY KEY,
   user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

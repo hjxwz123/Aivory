@@ -2375,7 +2375,7 @@
     "limitsLead": "按使用者限制；數值設為 0 表示不限制。",
     "zeroUnlimited": "0 = 不限制。",
     "dailyTokenLimit": "每日 Token 上限",
-    "dailyTokenLimitHint": "每位使用者每個 UTC 日的輸入與輸出 Token 總上限。0 = 不限制。",
+    "dailyTokenLimitHint": "每位使用者每個系統時區日的輸入與輸出 Token 總上限。0 = 不限制。",
     "maxConcurrentGenerations": "每位使用者並行生成數",
     "maxConcurrentGenerationsHint": "每位使用者同時進行的回應串流上限。0 = 不限制。",
     "docmee": {

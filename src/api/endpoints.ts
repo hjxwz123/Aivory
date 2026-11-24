@@ -72,6 +72,8 @@ import type {
   ApiCreditPackage,
   ApiCreditAdjustmentNotification,
   ApiCredits,
+  ApiDailyCheckin,
+  ApiPersonalUsage,
   ApiDocument,
   ApiKnowledgeBase,
   ApiAdminKnowledgeBase,
@@ -285,8 +287,13 @@ export const authApi = {
     if (!res.ok) throw new ApiError(res.status, `preview failed (${res.status})`, null)
     return res.blob()
   },
-  /** Credit balance (timed pool + permanent pool) for the subscription page. */
+  /** Credit balance (timed pool + permanent pool). */
   credits: () => api<ApiCredits>('/me/credits'),
+  dailyUsage: (signal?: AbortSignal) => api<ApiPersonalUsage>('/me/usage/daily', { signal }),
+  dailyCheckin: (date: string, signal?: AbortSignal) => api<{ checkin: ApiDailyCheckin; awarded: boolean; credits: ApiCredits }>(
+    '/me/checkin?' + new URLSearchParams({ date }), { method: 'POST', signal },
+  ),
+  checkinHistory: (month: string, signal?: AbortSignal) => api<ApiDailyCheckin[]>('/me/checkin/history?' + new URLSearchParams({ month }), { signal }),
   /** Atomically claim the oldest permanent-credit adjustment notice. */
   claimCreditAdjustmentNotification: () =>
     api<{ notification: ApiCreditAdjustmentNotification | null }>('/me/credit-adjustments/claim', { method: 'POST' }),

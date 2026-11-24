@@ -46,7 +46,7 @@ var backupTableOrder = []string{
 	"workspace_invites", "workspace_policies", "workspace_announcements", "workspace_audit_logs", "admin_audit_logs",
 	"site_notifications", "site_notification_states", "pending_storage_cleanup", "pending_sandbox_cleanup",
 	"avatar_objects", "pending_vector_cleanup", "document_vector_writes",
-	"resource_lifecycle_migrations",
+	"resource_lifecycle_migrations", "daily_checkins",
 }
 
 // configTableOrder is the non-user, non-conversation admin configuration slice.
@@ -401,6 +401,7 @@ var tablePrimaryKeys = map[string][]string{
 	"workspace_kb_member_permissions": {"kb_id", "user_id"},
 	"user_groups":                     {"id"},
 	"credit_ledger":                   {"id"},
+	"daily_checkins":                  {"user_id", "day"},
 	"credit_reservations":             {"id"},
 	"quota_ledger":                    {"id"},
 	"billing_usage":                   {"id"},

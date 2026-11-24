@@ -91,6 +91,32 @@ func TestDeletingUsageLogsDoesNotRestoreModelOrDailyQuota(t *testing.T) {
 	}
 }
 
+func TestDailyImageQuotaUsesSystemDay(t *testing.T) {
+	db, ctx := openCreditsTestDB(t)
+	seedCreditGroupsAndUser(t, ctx, db, 0, 0)
+	zone, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SetSetting(db, SystemTimeZoneKey, zone.String()); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetSetting(db, "daily_image_limit", 1); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := CalendarDay(time.Now(), zone)
+	reservation, allowed, err := ReserveDailyImageQuota(ctx, db, "u1", 1)
+	after, _ := CalendarDay(time.Now(), zone)
+	if err != nil || !allowed || reservation == nil ||
+		(reservation.WindowStart != before.Unix() && reservation.WindowStart != after.Unix()) {
+		t.Fatalf("daily image reservation = %+v, allowed=%v, err=%v", reservation, allowed, err)
+	}
+	_, end := CalendarDay(time.Unix(reservation.WindowStart, 0), zone)
+	if reservation.ExpiresAt != end.Unix() {
+		t.Fatalf("reservation expires at %v, want %v", time.Unix(reservation.ExpiresAt, 0), end)
+	}
+}
+
 func TestConcurrentModelQuotaReservationsAdmitOnlyLimit(t *testing.T) {
 	db, ctx := openCreditsTestDB(t)
 	for _, query := range []string{

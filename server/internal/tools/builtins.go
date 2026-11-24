@@ -68,7 +68,6 @@ var (
 	pythonExecuteUploadStagingFileSize     = envcfg.Int64("AIVORY_TOOLS_PYTHON_EXECUTE_UPLOAD_STAGING_FILE_SIZE", 40*1024*1024)
 	pythonExecuteStdoutStderrTruncationCap = envcfg.Int("AIVORY_TOOLS_PYTHON_EXECUTE_STDOUT_STDERR_TRUNCATION_CAP", 32*1024)
 	inSize                                 = envcfg.Str("AIVORY_TOOLS_IN_SIZE", "")
-	dailyImageLimitResetWindow             = envcfg.Dur("AIVORY_TOOLS_DAILY_IMAGE_LIMIT_RESET_WINDOW", 24*time.Hour)
 	// 0 selects the provider/model-specific limit. A positive value remains an
 	// operator override for gateways with a stricter custom boundary.
 	imageImageInputImageCap     = envcfg.Int("AIVORY_TOOLS_IMAGE_IMAGE_INPUT_IMAGE_CAP", 0)
@@ -2443,22 +2442,7 @@ func normalizeForModeration(s string) string {
 
 // checkDailyImageLimit atomically reserves the per-user daily image quota.
 func (t *imageGenerateTool) checkDailyImageLimit(ctx context.Context, userID string, n int) (*store.QuotaReservation, error) {
-	limit := 30
-	if raw, err := store.GetSetting(t.db, "daily_image_limit"); err == nil {
-		if json.Unmarshal(raw, &limit) != nil || limit < 0 {
-			return nil, store.ErrInvalidCreditConfig
-		}
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		return nil, err
-	}
-	if limit <= 0 {
-		return nil, nil
-	}
-	dayStart := time.Now().Truncate(dailyImageLimitResetWindow).Unix()
-	reservation, allowed, err := store.ReserveFixedQuota(
-		ctx, t.db, userID, store.QuotaScopeDailyImage, n, limit, dayStart,
-		dayStart+int64(dailyImageLimitResetWindow/time.Second),
-	)
+	reservation, allowed, err := store.ReserveDailyImageQuota(ctx, t.db, userID, n)
 	if err != nil {
 		return nil, err
 	}

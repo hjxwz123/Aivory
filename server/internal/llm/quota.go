@@ -19,10 +19,7 @@ const defaultImageDocumentFlatTokenAllowance = 1024
 // refusal from storage/configuration failures in the same admission check.
 var ErrDailyImageLimitReached = errors.New("daily image limit reached")
 
-var (
-	dailyImageLimitResetWindow      = envcfg.Dur("AIVORY_TOOLS_DAILY_IMAGE_LIMIT_RESET_WINDOW", 24*time.Hour)
-	imageDocumentFlatTokenAllowance = envcfg.Int("AIVORY_LLM_IMAGE_DOCUMENT_FLAT_TOKEN_ALLOWANCE", defaultImageDocumentFlatTokenAllowance)
-)
+var imageDocumentFlatTokenAllowance = envcfg.Int("AIVORY_LLM_IMAGE_DOCUMENT_FLAT_TOKEN_ALLOWANCE", defaultImageDocumentFlatTokenAllowance)
 
 func effectiveImageDocumentFlatTokenAllowance() int {
 	if imageDocumentFlatTokenAllowance <= 0 {
@@ -425,23 +422,7 @@ func (o *Orchestrator) ReleaseImageBilling(ctx context.Context, reservation *Ima
 // checkDailyImageLimit mirrors image_generate's deployment-wide daily boundary
 // for provider-hosted image tools, which never enter the local tool executor.
 func (o *Orchestrator) checkDailyImageLimit(ctx context.Context, userID string, n int) (*store.QuotaReservation, error) {
-	limit := 30
-	if raw, err := store.GetSetting(o.db, "daily_image_limit"); err == nil {
-		if json.Unmarshal(raw, &limit) != nil || limit < 0 {
-			return nil, store.ErrInvalidCreditConfig
-		}
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		return nil, err
-	}
-	if limit <= 0 {
-		return nil, nil
-	}
-	n = ClampImageGenerationCount(n)
-	dayStart := time.Now().Truncate(dailyImageLimitResetWindow).Unix()
-	reservation, allowed, err := store.ReserveFixedQuota(
-		ctx, o.db, userID, store.QuotaScopeDailyImage, n, limit, dayStart,
-		dayStart+int64(dailyImageLimitResetWindow/time.Second),
-	)
+	reservation, allowed, err := store.ReserveDailyImageQuota(ctx, o.db, userID, ClampImageGenerationCount(n))
 	if err != nil {
 		return nil, err
 	}

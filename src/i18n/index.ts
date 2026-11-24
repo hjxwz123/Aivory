@@ -15,6 +15,7 @@ import enKb from './locales/en/kb.json'
 import enFiles from './locales/en/files.json'
 import enMemory from './locales/en/memory.json'
 import enSubscription from './locales/en/subscription.json'
+import enUsage from './locales/en/usage.json'
 import enWelcome from './locales/en/welcome.json'
 import enLibrary from './locales/en/library.json'
 import enPpt from './locales/en/ppt.json'
@@ -32,6 +33,7 @@ import zhKb from './locales/zh/kb.json'
 import zhFiles from './locales/zh/files.json'
 import zhMemory from './locales/zh/memory.json'
 import zhSubscription from './locales/zh/subscription.json'
+import zhUsage from './locales/zh/usage.json'
 import zhWelcome from './locales/zh/welcome.json'
 import zhLibrary from './locales/zh/library.json'
 import zhPpt from './locales/zh/ppt.json'
@@ -49,6 +51,7 @@ import zhHantKb from './locales/zh-Hant/kb.json'
 import zhHantFiles from './locales/zh-Hant/files.json'
 import zhHantMemory from './locales/zh-Hant/memory.json'
 import zhHantSubscription from './locales/zh-Hant/subscription.json'
+import zhHantUsage from './locales/zh-Hant/usage.json'
 import zhHantWelcome from './locales/zh-Hant/welcome.json'
 import zhHantLibrary from './locales/zh-Hant/library.json'
 import zhHantPpt from './locales/zh-Hant/ppt.json'
@@ -66,6 +69,7 @@ import jaKb from './locales/ja/kb.json'
 import jaFiles from './locales/ja/files.json'
 import jaMemory from './locales/ja/memory.json'
 import jaSubscription from './locales/ja/subscription.json'
+import jaUsage from './locales/ja/usage.json'
 import jaWelcome from './locales/ja/welcome.json'
 import jaLibrary from './locales/ja/library.json'
 import jaPpt from './locales/ja/ppt.json'
@@ -83,6 +87,7 @@ import frKb from './locales/fr/kb.json'
 import frFiles from './locales/fr/files.json'
 import frMemory from './locales/fr/memory.json'
 import frSubscription from './locales/fr/subscription.json'
+import frUsage from './locales/fr/usage.json'
 import frWelcome from './locales/fr/welcome.json'
 import frLibrary from './locales/fr/library.json'
 import frPpt from './locales/fr/ppt.json'
@@ -91,7 +96,7 @@ import { SUPPORTED_LANGUAGES, normalizeLanguage } from './language'
 export { SUPPORTED_LANGUAGES, normalizeLanguage, type LanguageCode } from './language'
 
 export const DEFAULT_NS = 'common'
-export const NAMESPACES = ['common', 'nav', 'landing', 'chat', 'auth', 'settings', 'errors', 'projects', 'admin', 'kb', 'files', 'memory', 'subscription', 'welcome', 'library', 'ppt'] as const
+export const NAMESPACES = ['common', 'nav', 'landing', 'chat', 'auth', 'settings', 'errors', 'projects', 'admin', 'kb', 'files', 'memory', 'subscription', 'usage', 'welcome', 'library', 'ppt'] as const
 
 const resources = {
   en: {
@@ -107,6 +112,7 @@ const resources = {
       files: enFiles,
     memory: enMemory,
     subscription: enSubscription,
+    usage: enUsage,
     welcome: enWelcome,
     library: enLibrary,
     ppt: enPpt,
@@ -124,6 +130,7 @@ const resources = {
       files: zhFiles,
     memory: zhMemory,
     subscription: zhSubscription,
+    usage: zhUsage,
     welcome: zhWelcome,
     library: zhLibrary,
     ppt: zhPpt,
@@ -141,6 +148,7 @@ const resources = {
       files: zhHantFiles,
     memory: zhHantMemory,
     subscription: zhHantSubscription,
+    usage: zhHantUsage,
     welcome: zhHantWelcome,
     library: zhHantLibrary,
     ppt: zhHantPpt,
@@ -158,6 +166,7 @@ const resources = {
       files: jaFiles,
     memory: jaMemory,
     subscription: jaSubscription,
+    usage: jaUsage,
     welcome: jaWelcome,
     library: jaLibrary,
     ppt: jaPpt,
@@ -175,6 +184,7 @@ const resources = {
       files: frFiles,
     memory: frMemory,
     subscription: frSubscription,
+    usage: frUsage,
     welcome: frWelcome,
     library: frLibrary,
     ppt: frPpt,
