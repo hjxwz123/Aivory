@@ -1,14 +1,26 @@
+@property --aivory-user-message-fade {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
 .root {
-  --user-message-preview-lines: 8;
+  --user-message-preview-lines: 6;
   min-inline-size: 0;
   max-inline-size: 100%;
 }
 
 .viewport { min-inline-size: 0; max-inline-size: 100%; }
+.viewport[data-collapsible='true'] {
+  max-block-size: var(--user-message-full-height);
+  overflow: clip;
+  --aivory-user-message-fade: 0px;
+  mask-image: linear-gradient(to bottom, #000 calc(100% - var(--aivory-user-message-fade)), transparent);
+  transition: max-block-size var(--duration-slow) var(--ease-out), --aivory-user-message-fade var(--duration-base) ease;
+}
 .viewport[data-collapsed='true'] {
   max-block-size: calc(var(--user-message-preview-lines) * 1lh);
-  overflow: hidden;
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 2lh), transparent);
+  --aivory-user-message-fade: 1.4lh;
 }
 
 .content { display: flow-root; min-inline-size: 0; overflow-wrap: anywhere; }
@@ -34,10 +46,10 @@
 .toggle[aria-expanded='true'] .chevron { transform: rotate(180deg); }
 
 @media (max-width: 639px) {
-  .root { --user-message-preview-lines: 6; }
+  .root { --user-message-preview-lines: 4; }
   .toggle { min-block-size: 44px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .toggle, .chevron { transition: none; }
+  .viewport[data-collapsible='true'], .toggle, .chevron { transition: none; }
 }

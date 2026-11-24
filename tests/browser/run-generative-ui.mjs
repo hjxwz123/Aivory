@@ -54,6 +54,23 @@ try {
   await page.goto(`${origin}/tests/browser/generative-ui-harness.html`)
   await page.waitForSelector('[data-case="markup-library"] [role="tab"]')
 
+  for (const name of ['component-prose', 'private-component-prose']) {
+    const scope = `[data-case="${name}"]`
+    const selected = `${scope} [role="tabpanel"]:not([hidden])`
+    const result = () => page.$eval(`${selected} article`, node => node.textContent.trim())
+    assert.match(await result(), /^❌ 四个角仍露在圆外！/)
+    await page.focus(`${selected} input[type="range"]`)
+    await page.keyboard.press('ArrowRight')
+    await page.waitForFunction(selector => document.querySelector(selector)?.textContent.includes('✅ 完全覆盖！'), {}, `${selected} article`)
+    assert.match(await result(), /^✅ 完全覆盖！/)
+    await page.keyboard.press('ArrowLeft')
+    await page.waitForFunction(selector => document.querySelector(selector)?.textContent.includes('❌ 四个角仍露在圆外！'), {}, `${selected} article`)
+    await page.click(`${scope} [role="tab"]:nth-child(2)`)
+    assert.equal(await page.$eval(`${selected} article strong`, node => node.textContent), '“对角线”')
+    assert.deepEqual(await page.$$eval(`${selected} ul li`, nodes => nodes.map(node => node.textContent)), ['比较直径', '查看四个顶点'])
+    assert.deepEqual(await page.$$eval(`${selected} pre code`, nodes => nodes.map(node => node.textContent.trim())), ['{diam}'])
+  }
+
   for (const scope of ['[data-case="nested-components"]', '[data-case="nested-private"]']) {
     assert.equal(await page.$$eval(`${scope} [data-generative-markup]`, nodes => nodes.length), 1)
     assert.equal(await page.$eval(`${scope} td article table td:last-child`, node => node.textContent), '12')

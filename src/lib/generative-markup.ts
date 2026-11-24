@@ -26,10 +26,10 @@ const fallbackBlocks = new Set('html body div main article aside header footer n
 const validName = (name: string) => /^[a-zA-Z_][\w]{0,39}$/.test(name) && !['true', 'false', 'null', '__proto__', 'prototype', 'constructor', 'window', 'document', 'globalThis', 'eval', 'Function'].includes(name)
 export const isMarkupName = validName
 
-function quoted(source: string, start: number): { value: string; end: number } {
+function quoted(source: string, start: number, limit = source.length): { value: string; end: number } {
   const quote = source[start]
   let value = '', i = start + 1
-  for (; i < source.length; i++) {
+  for (; i < limit; i++) {
     const c = source[i]
     if (c === quote) return { value, end: i + 1 }
     if (c === '\\') {
@@ -46,11 +46,15 @@ function quoted(source: string, start: number): { value: string; end: number } {
 }
 
 /** Braces and arrows inside quoted attributes do not terminate a tag. */
-function braces(source: string, start: number): { value: string; end: number } {
+function braces(source: string, start: number, prose = false): { value: string; end: number } {
   let depth = 1, i = start + 1
-  for (; i < source.length; i++) {
-    if ('"\'`'.includes(source[i])) { i = quoted(source, i).end - 1; continue }
-    if (source[i] === '{') depth++
+  const limit = prose ? Math.min(source.length, start + 4002) : source.length
+  for (; i < limit; i++) {
+    if ('"\'`'.includes(source[i])) { i = quoted(source, i, limit).end - 1; continue }
+    if (source[i] === '{') {
+      if (prose) throw new Error('nested expression')
+      depth++
+    }
     if (source[i] === '}' && --depth === 0) return { value: source.slice(start + 1, i), end: i + 1 }
   }
   throw new Error('unfinished expression')
@@ -351,9 +355,7 @@ const inlineComponents = new Set('text span small strong b em i code kbd mark br
 const proseMath = /\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|(?<!\\)\$(?!\s)[^$\n]+?\$|\\\([\s\S]*?\\\)/g
 const escapeMarkup = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
-/** Apply interpolation only to prose, preserving literal code, escapes and LaTeX. */
-export function mapMarkupExpressions(source: string, replace: (expression: string, name?: string) => string | undefined, markdown = true): string {
-  if (!source.includes('{')) return source
+function markdownCodeRanges(source: string, inline: boolean): [number, number][] {
   const protectedRanges: [number, number][] = []
   const protect = (raw: string, tokens: Token[], base: number, depth = 0) => {
     if (depth > 24) { protectedRanges.push([base, base + raw.length]); return }
@@ -366,7 +368,9 @@ export function mapMarkupExpressions(source: string, replace: (expression: strin
       else if ('tokens' in token && token.tokens) protect(token.raw, token.tokens, base + start, depth + 1)
     }
   }
-  if (markdown) {
+  if (inline) {
+    protect(source, marked.Lexer.lexInline(source), 0)
+  } else {
     let offset = 0
     for (const token of marked.lexer(source)) {
       const start = source.indexOf(token.raw, offset)
@@ -375,12 +379,69 @@ export function mapMarkupExpressions(source: string, replace: (expression: strin
       if (token.type === 'code') protectedRanges.push([start, offset])
       else protect(token.raw, marked.Lexer.lexInline(token.raw), start)
     }
-    for (const match of source.matchAll(proseMath)) protectedRanges.push([match.index!, match.index! + match[0].length])
   }
-  return source.replace(/\{\{\s*(\w+)\s*\}\}|\{([^{}\n]+)\}/g, (match, name: string, expression: string, offset: number) => {
+  for (const match of source.matchAll(proseMath)) protectedRanges.push([match.index!, match.index! + match[0].length])
+  return protectedRanges
+}
+
+/** Remove the component's shared indentation and preserve relative list/code indentation. */
+export function dedentMarkupProse(source: string): string {
+  if (!source.includes('\n')) return source
+  const lines = source.split('\n')
+  // The first line can begin immediately after an opening tag.
+  let margin = Infinity
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].trim()) margin = Math.min(margin, lines[i].match(/^[ \t]*/)![0].length)
+  }
+  if (!margin || !Number.isFinite(margin)) return source
+  return lines.map(line => line.slice(Math.min(margin, line.match(/^[ \t]*/)![0].length))).join('\n')
+}
+
+export function hasBlockMarkupProse(source: string): boolean {
+  if (!source.includes('\n')) return false
+  const tokens = marked.lexer(dedentMarkupProse(source)).filter(token => token.type !== 'space')
+  return tokens.length > 1 || tokens.some(token => token.type !== 'paragraph' && token.type !== 'text')
+}
+
+/** Add the Markdown boundary required beside CJK prose and quoted emphasis. */
+export function spaceMarkupEmphasis(source: string, inline: boolean): string {
+  const emphasis = /(?<![\\*])\*\*(?![\s*])([^\n]+?)(?<![\s*])\*\*(?!\*)/gu
+  const cjk = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u
+  const punctuation = /[\p{P}\x60]/u
+  if (!source.includes('**') || !cjk.test(source)) return source
+  const protectedRanges = markdownCodeRanges(source, inline)
+  return source.replace(emphasis, (match, inner: string, offset: number) => {
     if (protectedRanges.some(([start, end]) => offset >= start && offset < end)) return match
-    return replace(expression, name) ?? match
+    const before = source[offset - 1] ?? '', after = source[offset + match.length] ?? ''
+    const left = cjk.test(before) && punctuation.test(inner[0]) ? ' ' : ''
+    const right = cjk.test(after) && punctuation.test(inner.at(-1) ?? '') ? ' ' : ''
+    return left + match + right
   })
+}
+
+/** Apply interpolation only to prose, preserving literal code, escapes and LaTeX. */
+export function mapMarkupExpressions(source: string, replace: (expression: string, name?: string) => string | undefined, markdown: boolean | 'inline' = true): string {
+  if (!source.includes('{')) return source
+  const ranges = markdown ? markdownCodeRanges(source, markdown === 'inline') : []
+  const openings = /\{\{\s*(\w+)\s*\}\}|\{/g
+  let result = '', cursor = 0
+  for (let match = openings.exec(source); match; match = openings.exec(source)) {
+    const start = match.index
+    if (ranges.some(([from, to]) => start >= from && start < to)) continue
+    let end = openings.lastIndex
+    let expression = ''
+    if (!match[1]) {
+      try {
+        ({ value: expression, end } = braces(source, start, true))
+      } catch { continue }
+      openings.lastIndex = end
+    }
+    const value = replace(expression, match[1])
+    if (value === undefined) continue
+    result += source.slice(cursor, start) + value
+    cursor = end
+  }
+  return result + source.slice(cursor)
 }
 
 function componentFence(source: string): string {
@@ -432,7 +493,7 @@ function formatProseRun(nodes: MarkupNode[]): MarkupNode[] {
     if (depth < 24 && token.type === 'link') return [{ tag: 'link', attrs: { href: { literal: token.href } }, children: convert(token.tokens ?? [], depth + 1) }]
     return restore(token.raw)
   })
-  return convert(marked.Lexer.lexInline(source))
+  return convert(marked.Lexer.lexInline(spaceMarkupEmphasis(source, true)))
 }
 
 /** Preserve the prose container around inline tags, splitting around block components. */

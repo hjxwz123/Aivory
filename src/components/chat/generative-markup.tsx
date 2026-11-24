@@ -2,7 +2,7 @@ import { createElement, Fragment, useId, useMemo, useRef, useState, type CSSProp
 import { ArrowUpDown, ImageOff, Loader2, Star } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { blockMarkdownToHtml, inlineMarkdownToHtml, type CiteRef } from '@/lib/markdown'
-import { evaluateMarkupExpression, mapMarkupExpressions, markupAttribute, markupBinding, markupElements, markupReply, markupText, type MarkupDocument, type MarkupElement, type MarkupNode, type MarkupValue } from '@/lib/generative-markup'
+import { dedentMarkupProse, evaluateMarkupExpression, hasBlockMarkupProse, mapMarkupExpressions, markupAttribute, markupBinding, markupElements, markupReply, markupText, spaceMarkupEmphasis, type MarkupDocument, type MarkupElement, type MarkupNode, type MarkupValue } from '@/lib/generative-markup'
 import { markupPreset } from '@/lib/generative-markup-presets'
 import { markupTableParts, markupTableSpan } from '@/lib/generative-markup-table'
 import { isArtifactUrl } from '@/lib/artifact-links'
@@ -148,19 +148,24 @@ export function GenerativeMarkup({ document: doc, live, cites = [], renderBlock 
     try { if (await reply.submit(text)) setSent(true); else setFailed(true) } catch { setFailed(true) }
     finally { sending.current = false; setPending(false) }
   }
-  const expressionText = (text: string, markdown: boolean) => mapMarkupExpressions(text, (expression, name) => {
+  const expressionText = (text: string, markdown: boolean | 'inline') => mapMarkupExpressions(text, (expression, name) => {
     const value = name ? (Object.hasOwn(state, name) ? state[name] : undefined) : evaluateMarkupExpression(expression, state)
     if (value === undefined) return undefined
     const result = scalar(value)
-    return markdown ? result.replace(/[\\`*_[\]<>~]/g, '\\$&') : result
+    return markdown ? result.replace(/[\\`*_[\]<>~!#&$|{}]/g, '\\$&') : result
   }, markdown)
   const a = (node: MarkupElement, name: string) => markupAttribute(node, name, state)
   function render(nodes: MarkupNode[], path = 'root', inline = false): ReactNode {
     return nodes.map((node, i) => {
       const key = `${path}-${i}`
-      if (typeof node === 'string') return node.trim() ? inline
-        ? <span key={key} dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(expressionText(node, true), cites) }} />
-        : <div key={key} className="gui-markup-prose" dangerouslySetInnerHTML={{ __html: blockMarkdownToHtml(expressionText(node, true), cites) }} /> : inline ? node : null
+      if (typeof node === 'string') {
+        if (!node.trim()) return inline ? node : null
+        const prose = path === 'root' ? node : dedentMarkupProse(node)
+        const text = spaceMarkupEmphasis(expressionText(prose, inline ? 'inline' : true), inline)
+        return inline
+          ? <span key={key} dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(text, cites) }} />
+          : <div key={key} className="gui-markup-prose" dangerouslySetInnerHTML={{ __html: blockMarkdownToHtml(text, cites) }} />
+      }
       const tag = node.tag, style = layoutStyle(node, state), binding = markupBinding(node, doc.setters)
       const value = binding ? state[binding] : a(node, 'value')
       const children = (asInline = false) => render(node.children, key, asInline)
@@ -179,11 +184,16 @@ export function GenerativeMarkup({ document: doc, live, cites = [], renderBlock 
           return <div {...props} className={`gui-markup-layout gui-markup-${tag}`} data-wrap={a(node, 'wrap') === false ? 'false' : undefined} data-background={['muted', 'surface'].includes(scalar(a(node, 'background'))) ? scalar(a(node, 'background')) : undefined}>{children()}</div>
         case 'spacer': return <div {...props} aria-hidden className="gui-markup-spacer" />
         case 'divider': case 'separator': return <hr {...props} className="gui-markup-divider" />
-        case 'text': case 'span': case 'small': return <span {...props} className="gui-markup-text">{children(true)}</span>
+        case 'text': case 'p': {
+          const block = node.children.some(child => typeof child === 'string' && hasBlockMarkupProse(child))
+          if (block) return <div {...props} className={tag === 'text' ? 'gui-markup-text' : undefined}>{children()}</div>
+          return createElement(tag === 'text' ? 'span' : 'p', { ...props, className: tag === 'text' ? 'gui-markup-text' : undefined }, children(true))
+        }
+        case 'span': case 'small': return <span {...props} className="gui-markup-text">{children(true)}</span>
         case 'heading': return createElement(`h${Math.round(bounded(Number(a(node, 'level')), 1, 6, 3))}`, { ...props, className: 'gui-markup-heading' }, children(true))
         case 'h1': case 'h2': case 'h3': case 'h4': case 'h5': case 'h6': return createElement(tag, { ...props, className: 'gui-markup-heading' }, children(true))
         case 'code': case 'pre': return createElement(tag, props, markupText(node.children, false))
-        case 'p': case 'strong': case 'b': case 'em': case 'i': case 'kbd': case 'mark': case 'blockquote': return createElement(tag, props, children(true))
+        case 'strong': case 'b': case 'em': case 'i': case 'kbd': case 'mark': case 'blockquote': return createElement(tag, props, children(true))
         case 'br': return <br key={key} />
         case 'card': return <article {...props} className="gui-markup-card">{a(node, 'title') && <h3 className="gui-markup-heading">{scalar(a(node, 'title'))}</h3>}{children()}</article>
         case 'card-header': case 'card-content': case 'card-footer': return <div {...props} className={`gui-markup-${tag}`}>{children()}</div>

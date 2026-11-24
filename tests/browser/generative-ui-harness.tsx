@@ -20,6 +20,32 @@ import { recoveredComponents } from '../frontend/fixtures/generative-robustness'
 import type { ArtifactRef } from '@/types/chat'
 
 const fence = (lang: string, code: string) => `\`\`\`${lang}\n${code}\n\`\`\``
+const componentProse = fence('aivory-ui', `{@body const [diam,setDiam] = DIL.useState(16)}
+<tabs>
+  <tab title="覆盖">
+    <slider label="直径" min={16} max={18} value={diam} onChange={setDiam}/>
+    <card>
+      {diam < 17
+        ? "❌ 四个角仍露在圆外！因为直径小于对角线 16.97 inches，无法完全覆盖正方形开口。"
+        : "✅ 完全覆盖！直径大于对角线 16.97 inches，正方形的四个顶点均在圆内部。"}
+    </card>
+  </tab>
+  <tab title="说明">
+    <card>
+      正方形的**“对角线”**决定是否完全覆盖。
+    </card>
+    <text>
+      **比较方式**
+
+      - 比较直径
+      - 查看四个顶点
+
+      \`\`\`text
+      {diam}
+      \`\`\`
+    </text>
+  </tab>
+</tabs>`)
 const quotedNews = `{"version":1,"title":"News","blocks":[{"type":"tabs","items":[{"title":"Domestic","blocks":[{"type":"text","text":"新增"学校食品安全""网络食品经营"专节。"}]},{"title":"International","blocks":[{"type":"text","text":"美国表示"强烈谴责"。"}]}]}]}`
 const preview = new URLSearchParams(globalThis.location.search).has('preview')
 const maps = new URLSearchParams(globalThis.location.search).has('maps')
@@ -148,6 +174,8 @@ function Harness() {
     <section data-case="complex-table-private"><PrivateMarkdown allowGenerativeUI text={complexTable} /></section>
     <section data-case="markup-library"><Markdown allowGenerativeUI content={markup} /></section>
     <section data-case="markup-private"><PrivateMarkdown allowGenerativeUI text={markupLibrary} /></section>
+    <section data-case="component-prose"><Markdown allowGenerativeUI content={componentProse} /></section>
+    <section data-case="private-component-prose"><PrivateMarkdown allowGenerativeUI text={componentProse} /></section>
     <section data-case="markup-reply"><GenerativeReplyProvider messageId="markup-message" status="ready" onReply={async (messageId, text) => { Reflect.set(window, '__MARKUP_REPLY__', { messageId, text }); Reflect.set(window, '__MARKUP_ATTEMPTS__', ++markupAttempts); await new Promise(resolve => setTimeout(resolve, 150)); return markupAttempts > 1 }}><Markdown allowGenerativeUI content={markupReplyExample} /></GenerativeReplyProvider></section>
     <section data-case="markup-form"><GenerativeReplyProvider messageId="markup-form-message" status="ready" onReply={async (messageId, text) => { Reflect.set(window, '__MARKUP_FORM__', { messageId, text }); return true }}><Markdown allowGenerativeUI content={fence('aivory-ui', markupForm)} /></GenerativeReplyProvider></section>
     <section data-case="markup-readonly"><Markdown allowGenerativeUI content={markupReplyExample} /></section>

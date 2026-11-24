@@ -164,7 +164,7 @@ export function splitMathContent(source: string): MathContentSegment[] {
       // Single-dollar math is a legacy input format, so require Markdown-like
       // word boundaries. Without the closing boundary, common shell text such
       // as `Use $PATH:$HOME` is misread as a formula and gets rewritten.
-      if (!isWordCharacter(previous) && next && !/\s|\d/.test(next)) {
+      if (!isWordCharacter(previous) && next && !/\s/.test(next)) {
         let close = index + 1
         while ((close = source.indexOf('$', close)) >= 0) {
           if (!isEscaped(source, close) && source[close + 1] !== '$') break
@@ -174,7 +174,12 @@ export function splitMathContent(source: string): MathContentSegment[] {
           const beforeClose = source[close - 1] ?? ''
           const afterClose = source[close + 1] ?? ''
           const value = source.slice(index + 1, close).trim()
-          if (value && !/\s/.test(beforeClose) && !isWordCharacter(afterClose)) {
+          const startsWithDigit = /^\d/.test(value)
+          const hasMathSyntax = /[\\_^{}=+*/<>]/.test(value)
+          if (
+            value && !/\s/.test(beforeClose) && !isWordCharacter(afterClose) &&
+            (!startsWithDigit || hasMathSyntax)
+          ) {
             flushText(index)
             const end = close + 1
             segments.push({ type: 'inline-math', value, raw: source.slice(index, end) })

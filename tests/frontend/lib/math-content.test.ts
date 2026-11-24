@@ -25,6 +25,16 @@ describe('splitMathContent', () => {
     ])
   })
 
+  it('parses numeric-leading equations while keeping plain dollar amounts literal', () => {
+    const source = 'Ticket: $20/\\text{张}$; threshold is $0 < X \\le 1,100$; fee is $100.'
+    const segments = splitMathContent(source)
+
+    expect(segments.filter((segment) => segment.type !== 'text')).toEqual([
+      { type: 'inline-math', value: '20/\\text{张}', raw: '$20/\\text{张}$' },
+      { type: 'inline-math', value: '0 < X \\le 1,100', raw: '$0 < X \\le 1,100$' },
+    ])
+  })
+
   it('keeps shell variables and embedded dollar pairs literal', () => {
     for (const source of [
       'Use $PATH:$HOME to configure the command.',

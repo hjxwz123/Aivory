@@ -153,21 +153,34 @@ try {
       return { height: viewport.clientHeight, scroll: viewport.scrollHeight, lines: parseFloat(getComputedStyle(viewport).lineHeight), buttonHeight: node.getBoundingClientRect().height }
     })
     assert.ok(folded.scroll > folded.height * 2)
-    assert.ok(folded.height <= folded.lines * (width < 640 ? 6 : 8) + 1)
+    assert.ok(folded.height <= folded.lines * (width < 640 ? 4 : 6) + 1)
     if (width < 640) assert.ok(folded.buttonHeight >= 44)
     if (view === 'main') {
       await page.$eval(selector, (node) => node.closest('[data-user-message-content]').scrollIntoView({ block: 'center' }))
       await screenshot(`question-collapsed-${theme}-${width}`)
     }
-    await page.click(selector)
+    const hasHeightAnimation = () => page.$eval(selector, async (node) => {
+      const viewport = document.getElementById(node.getAttribute('aria-controls'))
+      node.click()
+      await new Promise((resolve) => requestAnimationFrame(resolve))
+      return viewport.getAnimations().some((animation) => ['max-block-size', 'max-height'].includes(animation.transitionProperty))
+    })
+    const reducedMotion = await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)
+    assert.equal(await hasHeightAnimation(), !reducedMotion)
     assert.equal(await page.$eval(selector, (node) => node.getAttribute('aria-expanded')), 'true')
     assert.equal(await page.$eval(selector, (node) => document.getElementById(node.getAttribute('aria-controls')).textContent), text)
-    assert.ok(await page.$eval(selector, (node) => {
+    await page.waitForFunction((selector) => {
+      const node = document.querySelector(selector)
       const viewport = document.getElementById(node.getAttribute('aria-controls'))
       return viewport.clientHeight >= viewport.scrollHeight - 1
-    }))
-    await page.click(selector)
+    }, {}, selector)
+    assert.equal(await hasHeightAnimation(), !reducedMotion)
     assert.equal(await page.$eval(selector, (node) => node.getAttribute('aria-expanded')), 'false')
+    await page.waitForFunction((selector, height) => {
+      const node = document.querySelector(selector)
+      const viewport = document.getElementById(node.getAttribute('aria-controls'))
+      return viewport.clientHeight <= height + 1
+    }, {}, selector, folded.height)
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
     // A new short question must not inherit the old message's disclosure state.
     await page.evaluate(() => window.__REPLY_WAIT__.send('给我一个简短的建议。'))
@@ -239,6 +252,9 @@ try {
     }
   }
   await longQuestion('main', 'light', 1280)
+  await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }])
+  await longQuestion('main', 'light', 1280)
+  await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }])
   checks++
 
   await page.evaluate(() => window.__REPLY_WAIT__.settings.getState().setAppearance({ userMessageMarkdown: true }))
