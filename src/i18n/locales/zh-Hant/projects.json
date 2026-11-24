@@ -134,11 +134,11 @@
   },
   "accent": {
     "violet": "紫羅蘭",
-    "sage": "灰綠",
+    "sage": "淺紫",
     "amber": "琥珀",
     "rose": "玫瑰",
     "slate": "石板",
-    "teal": "青綠"
+    "teal": "海藍"
   },
   "badge": {
     "in": "屬於 {{name}}"

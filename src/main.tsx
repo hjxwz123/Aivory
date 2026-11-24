@@ -23,9 +23,9 @@ const aivoryConsoleMark = [
 
 console.info(
   `%c${aivoryConsoleMark}%c\n\n%cWELCOME TO AIVORY%c\n%cClear thinking starts here.`,
-  'color: #5eead4; background: #042f2e; font: 700 15px/1.12 Geist Mono, monospace; padding: 12px 16px; border: 1px solid #0f766e; border-radius: 6px;',
+  'color: #c4b5fd; background: #211636; font: 700 15px/1.12 Geist Mono, monospace; padding: 12px 16px; border: 1px solid #6d4faa; border-radius: 6px;',
   '',
-  'color: #0f766e; font: 700 15px Geist, sans-serif;',
+  'color: #6d4faa; font: 700 15px Geist, sans-serif;',
   '',
   'color: #64748b; font: 13px Geist, sans-serif;',
 )

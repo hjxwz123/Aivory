@@ -51,7 +51,7 @@ vi.mock('@/store/settings', () => ({
   ),
 }))
 vi.mock('@/store/composer-prefs', () => ({ useComposerPrefs: { getState: () => ({ setDefaultToolMode: mocks.sync, resetForNewConversation: mocks.sync }) } }))
-vi.mock('@/store/accent', () => ({ useAccent: { getState: () => ({ applyAccent: mocks.sync }) } }))
+vi.mock('@/store/accent', () => ({ useAccent: { getState: () => ({ applyProfile: mocks.sync }) } }))
 vi.mock('@/store/theme', () => ({ useTheme: Object.assign(
   (select: (state: unknown) => unknown) => select({ resolved: 'light' }),
   { getState: () => ({ applyPref: mocks.sync }) },

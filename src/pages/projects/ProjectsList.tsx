@@ -203,6 +203,7 @@ export default function ProjectsList() {
         ) : (
           <EmptyState
             className="mt-8"
+            illustrated={projects.length === 0}
             icon={projects.length > 0 ? <Search size={20} aria-hidden /> : <FolderKanban size={20} aria-hidden />}
             title={t(projects.length > 0 ? query.trim() ? 'projects:list.noMatchesTitle' : 'projects:list.noPinnedTitle' : 'projects:list.emptyTitle')}
             description={t(projects.length > 0 ? query.trim() ? 'projects:list.noMatchesBody' : 'projects:list.noPinnedBody' : 'projects:list.emptyBody')}

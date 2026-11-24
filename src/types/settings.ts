@@ -21,6 +21,21 @@ export function normalizeReplyAnimationPref(value: unknown): ReplyAnimationPref 
 }
 
 export const ACCENT_PRESETS: readonly AccentPref[] = ['violet', 'lagoon', 'ember', 'moss', 'indigo', 'rose', 'mono']
+export const HOME_SCENES = ['plain', 'pottery', 'vinyl', 'observatory', 'postroom', 'bathysphere', 'darkroom'] as const
+export type HomeScene = (typeof HOME_SCENES)[number]
+export type IllustratedScene = Exclude<HomeScene, 'plain'>
+export const SCENE_ACCENTS: Record<IllustratedScene, AccentPref> = {
+  pottery: 'ember',
+  vinyl: 'indigo',
+  observatory: 'violet',
+  postroom: 'rose',
+  bathysphere: 'lagoon',
+  darkroom: 'mono',
+}
+
+export function normalizeHomeScene(value: unknown): HomeScene {
+  return HOME_SCENES.find(scene => scene === value) ?? 'plain'
+}
 export const FONT_PRESETS: readonly FontPref[] = ['default', 'humanist', 'rounded', 'serif']
 
 /** Accept persisted values from before the distinct typeface presets shipped. */

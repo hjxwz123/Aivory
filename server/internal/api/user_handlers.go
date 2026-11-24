@@ -193,6 +193,7 @@ var settingsAllowlist = map[string]bool{
 	"persona_traits":        true,
 	"response_length":       true,
 	"accent_color":          true,
+	"home_scene":            true,
 	"font_family":           true,
 	"image_model_id":        true,
 	"default_model_id":      true,
@@ -231,6 +232,14 @@ func updateMeSettingsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if value, exists := patch["reply_animation"]; exists {
 		animation, valid := value.(string)
 		if !valid || (animation != "paper-plane" && animation != "origami" && animation != "ink" && animation != "sprout" && animation != "orbit" && animation != "prism") {
+			writeError(w, http.StatusBadRequest, errInvalidInput)
+			return
+		}
+	}
+	if value, exists := patch["home_scene"]; exists {
+		switch value {
+		case "plain", "pottery", "vinyl", "observatory", "postroom", "bathysphere", "darkroom":
+		default:
 			writeError(w, http.StatusBadRequest, errInvalidInput)
 			return
 		}

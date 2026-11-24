@@ -263,6 +263,17 @@
     }
   },
   "appearance": {
+    "homeScene": {
+      "postroom": "午后邮局",
+      "bathysphere": "深海探舱",
+      "darkroom": "银盐暗房",
+      "title": "插画主题",
+      "plain": "素色",
+      "pottery": "陶艺工坊",
+      "vinyl": "蓝调唱片",
+      "observatory": "星轨观测台",
+      "paired": "随插画主题 · {{color}}"
+    },
     "title": "外观",
     "subtitle": "调整 Aivory 看向你的方式。",
     "theme": "主题",
@@ -278,7 +289,7 @@
       "violet": "紫罗兰",
       "lagoon": "湖蓝",
       "ember": "余烬",
-      "moss": "青苔",
+      "moss": "暮蓝",
       "indigo": "靛青",
       "rose": "玫粉",
       "mono": "单色"

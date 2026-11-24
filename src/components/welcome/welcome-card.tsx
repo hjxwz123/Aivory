@@ -38,9 +38,9 @@ const CHAT_WIDTH_OPTS: ChatWidthPref[] = ['comfortable', 'full']
 // swatches read as the same colors regardless of the document's data-accent.
 const ACCENT_PREVIEW: Record<AccentPref, string> = {
   violet: 'oklch(58% 0.225 290)',
-  lagoon: 'oklch(58% 0.130 200)',
+  lagoon: 'oklch(58% 0.130 230)',
   ember: 'oklch(62% 0.170 40)',
-  moss: 'oklch(54% 0.125 145)',
+  moss: 'oklch(54% 0.125 275)',
   indigo: 'oklch(54% 0.180 260)',
   rose: 'oklch(60% 0.180 5)',
   mono: 'linear-gradient(135deg, oklch(26% 0 0) 0 50%, oklch(96% 0 0) 50% 100%)',
@@ -71,6 +71,7 @@ export function WelcomeCard() {
   const lang = useLanguage((s) => s.lang)
   const setLang = useLanguage((s) => s.setLang)
   const accent = useAccent((s) => s.accent)
+  const scene = useAccent((s) => s.scene)
   const setAccent = useAccent((s) => s.setAccent)
   const themePref = useTheme((s) => s.pref)
   const setPref = useTheme((s) => s.setPref)
@@ -169,7 +170,7 @@ export function WelcomeCard() {
       await markOnboarded({
         language: lang,
         theme: themePref,
-        accent_color: accent,
+        ...(scene === 'plain' ? { accent_color: accent } : {}),
         chat_width: chatWidth,
         reply_animation: replyAnimation,
         memory_enabled: memoryAvailable ? memory : false,
@@ -253,6 +254,7 @@ export function WelcomeCard() {
                 type="button"
                 aria-label={t(`settings:appearance.accent.${p}`)}
                 aria-pressed={accent === p}
+                disabled={scene !== 'plain'}
                 onClick={() => setAccent(p)}
                 className={cn(
                   'relative size-9 rounded-full transition-transform interactive',

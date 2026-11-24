@@ -15,6 +15,7 @@ import { ButtonDensityContext } from '@/contexts/button-density'
 import { useSurfaceViewport } from '@/hooks/use-app-viewport'
 import { useMobileLayout } from '@/hooks/use-mobile-layout'
 import { MobilePanelSurface } from '@/components/ui/mobile-panel'
+import { SceneOrnament } from '@/components/chat/home-scene'
 import styles from './settings-layout.module.css'
 
 const tabDefs = [
@@ -168,7 +169,8 @@ export default function SettingsDialog() {
                   'sm:w-48',
                 )}
               >
-                <div className={cn(styles.railHeader, 'flex items-center justify-between gap-2 px-4 pb-2 pt-4 sm:pb-3')}>
+                <div data-scene-settings-header className={cn(styles.railHeader, 'relative flex items-center justify-between gap-2 px-4 pb-2 pt-4 sm:pb-3')}>
+                  <SceneOrnament surface="dialog" />
                   <DialogTitle>{t('settings:title')}</DialogTitle>
                   <DialogPrimitive.Close
                     aria-label={t('common:aria.close', { defaultValue: 'Close' })}

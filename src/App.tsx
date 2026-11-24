@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useOpenSettings } from '@/hooks/use-open-settings'
 import { useAppViewport } from '@/hooks/use-app-viewport'
@@ -11,6 +11,9 @@ import { SetPasswordGate } from '@/components/welcome/set-password-gate'
 import { AuthGate } from '@/components/auth/auth-gate'
 import { useSiteStatus } from '@/store/site-status'
 import { useAuth } from '@/store/auth'
+import { useAccent } from '@/store/accent'
+import { useTheme } from '@/store/theme'
+import { SceneAppearanceContext } from '@/contexts/scene-appearance'
 import SettingsDialog from '@/pages/settings/SettingsLayout'
 import { useCommandMenu } from '@/hooks/use-command-menu'
 import { useHotkeys } from '@/hooks/use-hotkeys'
@@ -197,6 +200,13 @@ function SettingsRedirect() {
 }
 
 export default function App() {
+  const scene = useAccent(state => state.scene)
+  const dark = useTheme(state => state.resolved === 'dark')
+  const appearance = useMemo(() => ({ scene, dark }), [scene, dark])
+  return <SceneAppearanceContext.Provider value={appearance}><AppContent /></SceneAppearanceContext.Provider>
+}
+
+function AppContent() {
   useAppViewport()
   const siteClosed = useSiteStatus((s) => s.closed)
   const siteLoaded = useSiteStatus((s) => s.loaded)

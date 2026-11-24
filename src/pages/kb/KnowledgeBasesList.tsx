@@ -267,6 +267,7 @@ export default function KnowledgeBasesList() {
             ) : rows.length === 0 ? (
               <EmptyState
                 className="mt-6"
+                illustrated
                 icon={<Database size={20} aria-hidden />}
                 title={t('kb:emptyTitle')}
                 description={t('kb:emptyBody')}

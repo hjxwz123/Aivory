@@ -263,6 +263,17 @@
     }
   },
   "appearance": {
+    "homeScene": {
+      "postroom": "Courrier de l’après-midi",
+      "bathysphere": "Expédition sous-marine",
+      "darkroom": "Chambre noire",
+      "title": "Thème illustré",
+      "plain": "Uni",
+      "pottery": "Atelier de poterie",
+      "vinyl": "Disques bleus",
+      "observatory": "Observatoire",
+      "paired": "Couleur du thème · {{color}}"
+    },
     "title": "Apparence",
     "subtitle": "Réglez la façon dont Aivory vous apparaît.",
     "theme": "Thème",
@@ -278,7 +289,7 @@
       "violet": "Violet",
       "lagoon": "Lagon",
       "ember": "Braise",
-      "moss": "Mousse",
+      "moss": "Crépuscule",
       "indigo": "Indigo",
       "rose": "Rose",
       "mono": "Mono"

@@ -1,8 +1,10 @@
 import type { HTMLAttributes, ReactNode } from 'react'
 import { cn } from '@/lib/utils'
+import { SceneOrnament } from '@/components/chat/home-scene'
 
 export interface EmptyStateProps extends Omit<HTMLAttributes<HTMLDivElement>, 'title'> {
   icon?: ReactNode
+  illustrated?: boolean
   title: ReactNode
   titleClassName?: string
   description?: ReactNode
@@ -12,7 +14,7 @@ export interface EmptyStateProps extends Omit<HTMLAttributes<HTMLDivElement>, 't
   tone?: 'neutral' | 'danger'
 }
 
-export function EmptyState({ icon, title, titleClassName, description, action, size = 'page', tone = 'neutral', className, ...rest }: EmptyStateProps) {
+export function EmptyState({ icon, illustrated, title, titleClassName, description, action, size = 'page', tone = 'neutral', className, ...rest }: EmptyStateProps) {
   return (
     <div
       className={cn(
@@ -28,12 +30,14 @@ export function EmptyState({ icon, title, titleClassName, description, action, s
       {icon ? (
         <div className={cn(
           'inline-flex shrink-0 items-center justify-center rounded-full [&_svg]:shrink-0',
+          illustrated && 'relative',
           size === 'page' && 'mb-5 size-12 [&_svg]:size-5',
           size === 'panel' && 'mb-4 size-10 [&_svg]:size-5',
           size === 'table' && 'mb-3 size-8 [&_svg]:size-4',
           tone === 'danger' ? 'bg-[var(--color-danger-soft)] text-[var(--color-danger)]' : 'bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]',
         )}>
           {icon}
+          {illustrated && <SceneOrnament surface="empty" />}
         </div>
       ) : null}
       {/* No font-serif: in-app headings follow the Appearance → Font setting

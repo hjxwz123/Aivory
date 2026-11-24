@@ -470,6 +470,7 @@ export default function UserFiles() {
                 <EmptyState
                   size="table"
                   className="my-auto"
+                  illustrated={!filtersActive}
                   icon={filtersActive ? <Search size={21} aria-hidden /> : <FolderOpen size={21} aria-hidden />}
                   title={filtersActive ? t('files:list.emptyFilteredTitle') : t('files:empty.title')}
                   description={filtersActive ? t('files:list.emptyFilteredBody') : t('files:empty.body')}

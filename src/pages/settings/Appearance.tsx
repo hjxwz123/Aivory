@@ -6,7 +6,8 @@ import { useTheme } from '@/store/theme'
 import { useAccent } from '@/store/accent'
 import { useLanguage } from '@/store/language'
 import { SUPPORTED_LANGUAGES } from '@/i18n'
-import { type AccentPref, ACCENT_PRESETS, type ChatWidthPref, type FontPref, FONT_PRESETS } from '@/types/settings'
+import { type AccentPref, ACCENT_PRESETS, HOME_SCENES, SCENE_ACCENTS, type ChatWidthPref, type FontPref, FONT_PRESETS } from '@/types/settings'
+import { HomeSceneCanvas } from '@/components/chat/home-scene'
 import {
   Select,
   SelectContent,
@@ -38,9 +39,9 @@ const CHAT_WIDTH_STOPS: readonly ChatWidthPref[] = ['narrow', 'comfortable', 'wi
  */
 const ACCENT_PREVIEW: Record<AccentPref, string> = {
   violet: 'oklch(58% 0.225 290)',
-  lagoon: 'oklch(58% 0.130 200)',
+  lagoon: 'oklch(58% 0.130 230)',
   ember:  'oklch(62% 0.170 40)',
-  moss:   'oklch(54% 0.125 145)',
+  moss:   'oklch(54% 0.125 275)',
   indigo: 'oklch(54% 0.180 260)',
   rose:   'oklch(60% 0.180 5)',
   // Split swatch: ink ↔ near-white, signalling the monochrome theme that
@@ -62,6 +63,10 @@ export default function Appearance() {
   const setPref = useTheme((s) => s.setPref)
   const syncSystem = useTheme((s) => s.syncSystem)
   const accent = useAccent((s) => s.accent)
+  const scene = useAccent((s) => s.scene)
+  const plainAccent = useAccent((s) => s.plainAccent)
+  const setScene = useAccent((s) => s.setScene)
+  const sceneSaving = useAccent((s) => s.pendingOwner !== null)
   const setAccent = useAccent((s) => s.setAccent)
   const appearance = useSettings((s) => s.appearance)
   const setAppearance = useSettings((s) => s.setAppearance)
@@ -128,7 +133,37 @@ export default function Appearance() {
             <ThemeChip current={pref} value="system" onClick={() => setPref('system')} icon={<Monitor size={14} aria-hidden />} label={t('appearance.system')} />
           </div>
         </SettingsRow>
-        <SettingsRow label={t('appearance.accentColor')} description={t('appearance.accentColorBody')}>
+        <fieldset disabled={sceneSaving} className="min-w-0 py-3.5">
+          <legend className="float-left mb-2 w-full text-sm font-medium text-[var(--color-fg)]">{t('appearance.homeScene.title')}</legend>
+          <div className="clear-both grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {HOME_SCENES.map((option) => {
+              const selected = scene === option
+              const color = ACCENT_PREVIEW[option === 'plain' ? plainAccent : SCENE_ACCENTS[option]]
+              return <label key={option} className="group relative min-w-0 cursor-pointer">
+                <input type="radio" name="home-scene" value={option} checked={selected}
+                  onChange={() => void setScene(option).catch(() => toast.error(t('common:actions.failed')))}
+                  className="peer sr-only" />
+                <span className={cn('relative block aspect-[1.65] overflow-hidden rounded-lg border bg-[var(--color-bg)] peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-[var(--color-ring)]',
+                  selected ? 'border-[var(--color-accent)] ring-1 ring-[var(--color-accent)]' : 'border-[var(--color-border)] group-hover:border-[var(--color-fg-muted)]')}>
+                  {option === 'plain'
+                    ? <span aria-hidden className="absolute inset-0 flex flex-col items-center justify-center gap-1.5">
+                        <span className="h-1 w-[36%] rounded-full bg-[var(--color-fg-muted)] opacity-45" />
+                        <span className="h-[18%] w-3/5 rounded border border-[var(--color-border)] bg-[var(--color-surface)]" />
+                      </span>
+                    : <HomeSceneCanvas scene={option} preview />}
+                  {selected && <span className="absolute right-1.5 top-1.5 grid size-4 place-items-center rounded-full bg-[var(--color-accent)] text-[var(--color-accent-fg)]"><Check size={11} strokeWidth={3} aria-hidden /></span>}
+                </span>
+                <span className="mt-1.5 flex items-center justify-center gap-1.5 text-xs text-[var(--color-fg)]">
+                  <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ background: color }} />{t(`appearance.homeScene.${option}`)}
+                </span>
+              </label>
+            })}
+          </div>
+        </fieldset>
+        <SettingsRow label={t('appearance.accentColor')} description={scene === 'plain' ? t('appearance.accentColorBody') : undefined}>
+          {scene !== 'plain' ? <div className="flex items-center gap-2 text-sm text-[var(--color-fg-muted)]">
+            <span className="size-3 rounded-full" style={{ background: ACCENT_PREVIEW[accent] }} />{t('appearance.homeScene.paired', { color: t(`appearance.accent.${accent}`) })}
+          </div> : (
           <div className="flex items-center gap-2 flex-wrap">
             {ACCENT_PRESETS.map((preset) => (
               <AccentSwatch
@@ -140,7 +175,7 @@ export default function Appearance() {
                 color={ACCENT_PREVIEW[preset]}
               />
             ))}
-          </div>
+          </div>)}
         </SettingsRow>
         <SettingsRow label={t('appearance.language')} description={t('appearance.languageBody')}>
           <Select value={lang} onValueChange={onChangeLanguage}>

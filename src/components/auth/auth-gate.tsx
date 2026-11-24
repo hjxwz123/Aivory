@@ -20,7 +20,7 @@ import { useTheme } from '@/store/theme'
 import { persistUserSettings } from '@/lib/user-settings'
 import { resolveDefaultToolMode } from '@/lib/tool-mode'
 import { invalidateAccessState } from '@/lib/access-events'
-import { ACCENT_PRESETS, type AccentPref, type ThemePref } from '@/types/settings'
+import type { ThemePref } from '@/types/settings'
 import { apiUrl } from '@/api'
 import { oauthStartPath } from '@/lib/oauth'
 import { isChatShellPath } from '@/lib/app-paths'
@@ -128,6 +128,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (status === 'authenticated' && user) {
       syncUserSettings(user.settings ?? {}, user.id)
+      useAccent.getState().applyProfile(user.id, user.settings?.home_scene, user.settings?.accent_color)
     } else if (status === 'unauthenticated') {
       useSettings.getState().cancelCodeBlockWrapSave()
       useSettings.getState().cancelReplyAnimationSave()
@@ -148,10 +149,6 @@ export function AuthGate({ children }: { children: ReactNode }) {
     const theme = user.settings.theme
     if (theme === 'light' || theme === 'dark' || theme === 'system') {
       useTheme.getState().applyPref(theme as ThemePref)
-    }
-    const accent = user.settings.accent_color
-    if (typeof accent === 'string' && (ACCENT_PRESETS as readonly string[]).includes(accent)) {
-      useAccent.getState().applyAccent(accent as AccentPref)
     }
     // The deployment-wide administrator policy is the only global default.
     // Historical account-level tool settings are intentionally ignored.

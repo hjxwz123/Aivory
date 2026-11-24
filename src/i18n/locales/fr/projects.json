@@ -134,11 +134,11 @@
   },
   "accent": {
     "violet": "Violet",
-    "sage": "Sauge",
+    "sage": "Lavande",
     "amber": "Ambre",
     "rose": "Rose",
     "slate": "Ardoise",
-    "teal": "Sarcelle"
+    "teal": "Océan"
   },
   "badge": {
     "in": "Dans {{name}}"

@@ -281,7 +281,7 @@ function ConvergingParticles() {
     function draw() {
       ctx!.clearRect(0, 0, w, h)
       const accent = style.getPropertyValue('--color-accent').trim() || '#6a4de6'
-      const secondary = style.getPropertyValue('--color-secondary').trim() || '#5aa17f'
+      const secondary = style.getPropertyValue('--color-secondary').trim() || '#896eaf'
       ctx!.globalCompositeOperation = 'lighter'
 
       for (const p of particles) {

@@ -33,7 +33,7 @@ export function LogoMark({ size = 24, className, tone = 'system' }: LogoMarkProp
     >
       <defs>
         <linearGradient id={gradientId} x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor={tone === 'lockup' ? '#5a7b72' : 'var(--color-accent)'} />
+          <stop offset="0" stopColor={tone === 'lockup' ? '#776393' : 'var(--color-accent)'} />
           {tone === 'lockup' && <stop offset="0.5" stopColor="#466b78" />}
           <stop
             offset="1"

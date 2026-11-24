@@ -122,6 +122,33 @@ async function checkScrollable(selector, label) {
   await checkDocument(label)
 }
 
+async function checkIllustratedSidebar() {
+  const sidebar = 'aside[data-variant="desktop"]'
+  const measure = () => page.$eval(sidebar, (aside) => {
+    const files = aside.querySelector('a[href="/files"]')
+    const history = aside.querySelector('.scrollbar-thin')
+    const menus = [...files.parentElement.querySelectorAll('button, a')]
+    return {
+      menuTops: menus.map((item) => item.getBoundingClientRect().top),
+      historyTop: history.getBoundingClientRect().top,
+      historyHeight: history.clientHeight,
+      scrollHeight: history.scrollHeight,
+    }
+  })
+  const plain = await measure()
+  try {
+    for (const scene of ['observatory', 'vinyl', 'pottery', 'postroom', 'bathysphere', 'darkroom']) {
+      user.settings.home_scene = scene
+      await page.reload({ waitUntil: 'networkidle0' })
+      await page.waitForSelector(`[data-home-scene="${scene}"]`)
+      await page.waitForSelector(`${sidebar} [data-scene-band="sidebar"]`, { visible: true })
+      assert.deepEqual(await measure(), plain, `${scene}: sidebar decoration moved the menu or resized history`)
+    }
+  } finally {
+    delete user.settings.home_scene
+  }
+}
+
 try {
   for (const viewport of [
     { width: 1440, height: 900 }, { width: 1024, height: 500 },
@@ -160,6 +187,7 @@ try {
       await page.goto(`${baseUrl}${route}`, { waitUntil: 'networkidle0' })
       await page.waitForSelector(route === '/' ? '[contenteditable="true"]' : 'main')
       await checkDocument(`${route} ${viewport.width}x${viewport.height}`)
+      if (route === '/' && viewport.width === 1440) await checkIllustratedSidebar()
       if (route === '/admin/channels') await checkScrollable('main > .overflow-y-auto', 'admin channels')
       if (route === '/' && viewport.width === 390) {
         await page.screenshot({ path: path.join(tmpdir(), 'aivory-layout-chat-phone.png') })

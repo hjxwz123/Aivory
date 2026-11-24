@@ -69,6 +69,7 @@ import { useAnimatedAutoHeight } from '@/hooks/use-animated-auto-height'
 import { pulseComposerShell } from '@/lib/composer-pulse'
 import { useModels } from '@/store/models'
 import { useAuth } from '@/store/auth'
+import { SceneOrnament } from './home-scene'
 import { useComposerPrefs } from '@/store/composer-prefs'
 import { useQueuedTurns } from '@/store/queued-turns'
 import { useSandboxFiles } from '@/store/sandbox-files'
@@ -196,6 +197,8 @@ interface ComposerProps {
   placeholder?: string
   /** When true, render compact (used inside landing hero CTA). */
   compact?: boolean
+  /** Show the selected illustration on a new-conversation composer. */
+  illustrated?: boolean
   /** Autofocus on mount. */
   autoFocus?: boolean
   /**
@@ -733,6 +736,7 @@ export function Composer({
   initialValue = '',
   placeholder,
   compact = false,
+  illustrated = false,
   autoFocus = false,
   fillRequest,
   menuSide = 'top',
@@ -3510,6 +3514,7 @@ export function Composer({
         'rounded-popup border-0 bg-[var(--color-surface)]',
       )}
     >
+      {illustrated && <SceneOrnament surface="composer" />}
       {/* Full-screen drag-and-drop overlay — shown while a file is dragged
           anywhere over the window. Portalled to <body> so it stays viewport-fixed
           even when an ancestor (e.g. ChatHome's GSAP-animated wrapper) carries an

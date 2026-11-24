@@ -384,6 +384,7 @@ export default function ChatHome() {
   }
   const composer = (
     <Composer
+      illustrated
       modelId={modelId}
       onModelChange={setPickedModelId}
       fast={fast}

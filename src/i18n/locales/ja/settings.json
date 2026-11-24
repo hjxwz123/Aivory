@@ -263,6 +263,17 @@
     }
   },
   "appearance": {
+    "homeScene": {
+      "postroom": "午後の郵便局",
+      "bathysphere": "深海探査艇",
+      "darkroom": "銀塩暗室",
+      "title": "イラストテーマ",
+      "plain": "無地",
+      "pottery": "陶芸工房",
+      "vinyl": "藍色のレコード",
+      "observatory": "星の観測室",
+      "paired": "テーマカラー · {{color}}"
+    },
     "title": "外観",
     "subtitle": "Aivory の見た目を調整します。",
     "theme": "テーマ",
@@ -278,7 +289,7 @@
       "violet": "バイオレット",
       "lagoon": "ラグーン",
       "ember": "エンバー",
-      "moss": "モス",
+      "moss": "ダスク",
       "indigo": "インディゴ",
       "rose": "ローズ",
       "mono": "モノクロ"

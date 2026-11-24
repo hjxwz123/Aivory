@@ -2,6 +2,7 @@ import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { X } from 'lucide-react'
 import { createContext, forwardRef, useContext, useEffect, useLayoutEffect, useRef, type ComponentPropsWithoutRef, type ElementRef, type HTMLAttributes } from 'react'
 import { useTranslation } from 'react-i18next'
+import { SceneOrnament } from '@/components/chat/home-scene'
 import { cn } from '@/lib/utils'
 import { useQuietSurface } from '@/contexts/quiet-surface'
 import { useButtonDensity } from '@/contexts/button-density'
@@ -231,7 +232,7 @@ export const DialogContent = forwardRef<
             aria-label={t('aria.close')}
             disabled={closeDisabled}
             className={cn(
-              'absolute right-3 top-3 inline-flex items-center justify-center size-8 rounded-[8px]',
+              'absolute right-3 top-3 z-10 inline-flex items-center justify-center size-8 rounded-[8px]',
               'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)]',
               'transition-colors duration-150',
               'focus-visible:outline-none focus-visible:text-[var(--color-fg)] focus-visible:bg-[var(--color-bg-muted)]',
@@ -249,9 +250,12 @@ export const DialogContent = forwardRef<
   )
 })
 
-export function DialogHeader({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
+export function DialogHeader({ className, children, ...rest }: HTMLAttributes<HTMLDivElement>) {
   const presentation = useContext(dialogPresentationContext)
-  return <div data-slot="dialog-header" className={cn('shrink-0 min-w-0 px-6 pt-4 pb-3', presentation === 'drawer' && 'pr-14', className)} {...rest} />
+  return <div data-slot="dialog-header" className={cn('relative shrink-0 min-w-0 px-6 pt-4 pb-3', presentation === 'drawer' && 'pr-14', className)} {...rest}>
+    <SceneOrnament surface="dialog" />
+    {children}
+  </div>
 }
 
 export function DialogBody({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {

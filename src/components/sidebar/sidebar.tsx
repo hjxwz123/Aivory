@@ -84,6 +84,7 @@ import { DEFAULT_PROJECT_NAVIGATION, useSidebarProjects } from '@/store/sidebar-
 import { useModels } from '@/store/models'
 import { useSettings } from '@/store/settings'
 import { useAuth } from '@/store/auth'
+import { SceneOrnament } from '@/components/chat/home-scene'
 import { useNotificationCenter } from '@/store/notification-center'
 import { useAiPPT } from '@/store/aippt'
 import { useLanguage } from '@/store/language'
@@ -685,11 +686,11 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             inert={historyPending}
             aria-hidden={historyPending || undefined}
             className={cn(
-              'relative h-full overflow-y-auto scrollbar-thin transition-opacity duration-200 motion-reduce:transition-none',
+              'relative flex h-full flex-col overflow-y-auto scrollbar-thin transition-opacity duration-200 motion-reduce:transition-none',
               historyPending && 'opacity-0 pointer-events-none',
             )}
           >
-            <div ref={listContentRef} className="pb-2">
+            <div ref={listContentRef} className="shrink-0 pb-2">
             {canUseKnowledgeBases ? <section className="pt-2" data-sidebar-projects>
               <div className="flex items-center gap-1 pr-3.5">
                 <SidebarSectionLabel className="min-w-0 flex-1 px-2.5">
@@ -930,6 +931,9 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
                 {t('sidebar.empty')}
               </p>
             ))}
+            </div>
+            <div aria-hidden="true" className="sidebar-art-space">
+              <SceneOrnament surface="sidebar" />
             </div>
           </div>
           {/* Edge fades only appear while more rows sit beyond that edge, so a

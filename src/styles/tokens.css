@@ -8,7 +8,7 @@
  * - Cold porcelain background with a faint lilac cast; never #fff.
  * - Deep indigo ink. High contrast, hi-fi reading surface.
  * - Primary accent: electric violet — saturated, modern, ownable.
- * - Secondary accent: sage moss — used only for AI-state moments.
+ * - Secondary accent: muted violet for AI states.
  * - Display type: Fraunces (variable, soft optical sizing) — distinct from
  *   Source Serif/New York. Body type: Geist Sans (geometric, neutral).
  * ============================================================================ */
@@ -60,13 +60,13 @@
   --color-accent-soft: oklch(94% 0.045 290);
   --color-accent-fg: oklch(99% 0.004 280);
 
-  /* Secondary accent — moss/sage for AI moments */
-  --color-secondary: oklch(60% 0.085 150);
-  --color-secondary-soft: oklch(94% 0.035 150);
+  /* Secondary accent — muted violet for AI states */
+  --color-secondary: oklch(60% 0.085 305);
+  --color-secondary-soft: oklch(94% 0.035 305);
 
   /* Semantic */
-  --color-success: oklch(60% 0.135 160);
-  --color-success-soft: oklch(94% 0.045 160);
+  --color-success: var(--color-accent);
+  --color-success-soft: var(--color-accent-soft);
   --color-warning: oklch(74% 0.16 70);
   --color-warning-soft: oklch(95% 0.05 70);
   --color-danger: oklch(58% 0.215 18);
@@ -100,7 +100,7 @@
   --color-syntax-string: oklch(48% 0.090 25);
   --color-syntax-keyword: oklch(40% 0.110 305);
   --color-syntax-number: oklch(45% 0.110 95);
-  --color-syntax-type: oklch(40% 0.090 200);
+  --color-syntax-type: oklch(40% 0.090 230);
   --color-syntax-fn: oklch(40% 0.095 245);
   --color-kbd-bg: oklch(97% 0.008 280);
   --color-kbd-border: oklch(84% 0.014 270);
@@ -237,10 +237,10 @@
   --color-project-violet-bar: oklch(58% 0.225 290);
   --color-project-violet-text: oklch(38% 0.150 290);
 
-  /* sage */
-  --color-project-sage-tint: oklch(94% 0.035 150);
-  --color-project-sage-bar: oklch(60% 0.085 150);
-  --color-project-sage-text: oklch(36% 0.070 150);
+  /* Lavender (stored as sage) */
+  --color-project-sage-tint: oklch(94% 0.035 305);
+  --color-project-sage-bar: oklch(60% 0.085 305);
+  --color-project-sage-text: oklch(36% 0.070 305);
 
   /* amber */
   --color-project-amber-tint: oklch(95% 0.045 75);
@@ -257,10 +257,10 @@
   --color-project-slate-bar: oklch(52% 0.040 270);
   --color-project-slate-text: oklch(32% 0.030 270);
 
-  /* teal */
-  --color-project-teal-tint: oklch(94% 0.040 200);
-  --color-project-teal-bar: oklch(60% 0.110 200);
-  --color-project-teal-text: oklch(36% 0.080 200);
+  /* Ocean blue (stored as teal) */
+  --color-project-teal-tint: oklch(94% 0.040 230);
+  --color-project-teal-bar: oklch(60% 0.110 230);
+  --color-project-teal-text: oklch(36% 0.080 230);
 
   /* Sidebar — visually distinct panel, higher contrast than content area */
   --color-sidebar-bg: oklch(93.5% 0.022 var(--accent-hue));
@@ -450,11 +450,11 @@
   --color-accent-soft: oklch(28% 0.090 290);
   --color-accent-fg: oklch(15% 0.025 275);
 
-  --color-secondary: oklch(74% 0.105 150);
-  --color-secondary-soft: oklch(28% 0.050 150);
+  --color-secondary: oklch(74% 0.105 305);
+  --color-secondary-soft: oklch(28% 0.050 305);
 
-  --color-success: oklch(74% 0.135 160);
-  --color-success-soft: oklch(28% 0.060 160);
+  --color-success: var(--color-accent);
+  --color-success-soft: var(--color-accent-soft);
   --color-warning: oklch(80% 0.14 80);
   --color-warning-soft: oklch(28% 0.05 80);
   --color-danger: oklch(70% 0.20 18);
@@ -481,7 +481,7 @@
   --color-syntax-string: oklch(80% 0.110 25);
   --color-syntax-keyword: oklch(76% 0.140 305);
   --color-syntax-number: oklch(82% 0.140 95);
-  --color-syntax-type: oklch(78% 0.110 200);
+  --color-syntax-type: oklch(78% 0.110 230);
   --color-syntax-fn: oklch(78% 0.120 245);
   --color-kbd-bg: oklch(23% 0.030 275);
   --color-kbd-border: oklch(36% 0.035 275);
@@ -491,9 +491,9 @@
   --color-project-violet-bar: oklch(72% 0.215 290);
   --color-project-violet-text: oklch(82% 0.180 290);
 
-  --color-project-sage-tint: oklch(28% 0.050 150);
-  --color-project-sage-bar: oklch(74% 0.105 150);
-  --color-project-sage-text: oklch(82% 0.090 150);
+  --color-project-sage-tint: oklch(28% 0.050 305);
+  --color-project-sage-bar: oklch(74% 0.105 305);
+  --color-project-sage-text: oklch(82% 0.090 305);
 
   --color-project-amber-tint: oklch(28% 0.060 75);
   --color-project-amber-bar: oklch(78% 0.135 75);
@@ -507,9 +507,9 @@
   --color-project-slate-bar: oklch(70% 0.030 275);
   --color-project-slate-text: oklch(84% 0.020 275);
 
-  --color-project-teal-tint: oklch(26% 0.060 200);
-  --color-project-teal-bar: oklch(74% 0.110 200);
-  --color-project-teal-text: oklch(84% 0.100 200);
+  --color-project-teal-tint: oklch(26% 0.060 230);
+  --color-project-teal-bar: oklch(74% 0.110 230);
+  --color-project-teal-text: oklch(84% 0.100 230);
 
   /* Sidebar — deep dark panel in dark mode (ChatGPT-style contrast) */
   --color-sidebar-bg: oklch(10.5% 0.018 var(--accent-hue));
@@ -558,20 +558,20 @@
   --color-ring: oklch(72% 0.215 290 / 0.50);
 }
 
-/* --- Lagoon — cool teal --------------------------------------------------- */
+/* --- Lagoon — ocean blue --------------------------------------------------- */
 :root[data-accent="lagoon"] {
-  --accent-hue: 200;
-  --color-accent: oklch(58% 0.130 200);
-  --color-accent-hover: oklch(52% 0.140 200);
-  --color-accent-soft: oklch(94% 0.035 200);
-  --color-ring: oklch(58% 0.130 200 / 0.55);
+  --accent-hue: 230;
+  --color-accent: oklch(58% 0.130 230);
+  --color-accent-hover: oklch(52% 0.140 230);
+  --color-accent-soft: oklch(94% 0.035 230);
+  --color-ring: oklch(58% 0.130 230 / 0.55);
 }
 
 .dark[data-accent="lagoon"] {
-  --color-accent: oklch(74% 0.130 200);
-  --color-accent-hover: oklch(80% 0.130 200);
-  --color-accent-soft: oklch(28% 0.060 200);
-  --color-ring: oklch(74% 0.130 200 / 0.50);
+  --color-accent: oklch(74% 0.130 230);
+  --color-accent-hover: oklch(80% 0.130 230);
+  --color-accent-soft: oklch(28% 0.060 230);
+  --color-ring: oklch(74% 0.130 230 / 0.50);
 }
 
 /* --- Ember — warm amber-red ---------------------------------------------- */
@@ -590,20 +590,20 @@
   --color-ring: oklch(74% 0.165 40 / 0.50);
 }
 
-/* --- Moss — calm sage green ---------------------------------------------- */
+/* --- Dusk — soft periwinkle ---------------------------------------------- */
 :root[data-accent="moss"] {
-  --accent-hue: 145;
-  --color-accent: oklch(54% 0.125 145);
-  --color-accent-hover: oklch(48% 0.135 145);
-  --color-accent-soft: oklch(94% 0.040 145);
-  --color-ring: oklch(54% 0.125 145 / 0.55);
+  --accent-hue: 275;
+  --color-accent: oklch(54% 0.125 275);
+  --color-accent-hover: oklch(48% 0.135 275);
+  --color-accent-soft: oklch(94% 0.040 275);
+  --color-ring: oklch(54% 0.125 275 / 0.55);
 }
 
 .dark[data-accent="moss"] {
-  --color-accent: oklch(72% 0.130 145);
-  --color-accent-hover: oklch(78% 0.130 145);
-  --color-accent-soft: oklch(28% 0.060 145);
-  --color-ring: oklch(72% 0.130 145 / 0.50);
+  --color-accent: oklch(72% 0.130 275);
+  --color-accent-hover: oklch(78% 0.130 275);
+  --color-accent-soft: oklch(28% 0.060 275);
+  --color-ring: oklch(72% 0.130 275 / 0.50);
 }
 
 /* --- Indigo — deep editorial blue ---------------------------------------- */
@@ -656,9 +656,7 @@
   --color-tool-selection-border: color-mix(in oklch, var(--color-accent) 18%, var(--color-border-subtle));
 
   /* Neutral surfaces — chroma 0 (keep the base L values) */
-  --color-bg: oklch(98.4% 0 0);
   --color-bg-muted: oklch(96.5% 0 0);
-  --color-surface: oklch(99.2% 0 0);
   --color-surface-raised: oklch(99.6% 0 0);
   --color-surface-sunken: oklch(95% 0 0);
   --color-overlay: oklch(18% 0 0 / 0.42);
@@ -693,9 +691,7 @@
   --color-accent-fg: oklch(18% 0 0);
   --color-ring: oklch(80% 0 0 / 0.50);
 
-  --color-bg: oklch(15% 0 0);
   --color-bg-muted: oklch(18% 0 0);
-  --color-surface: oklch(20% 0 0);
   --color-surface-raised: oklch(23% 0 0);
   --color-surface-sunken: oklch(13% 0 0);
   --color-overlay: oklch(8% 0 0 / 0.66);
@@ -718,4 +714,17 @@
 
   --color-sidebar-bg: oklch(10.5% 0 0);
   --color-sidebar-border: oklch(24% 0 0);
+}
+
+/* Illustrated themes use the neutral page and input colors while reading a conversation. */
+:root[data-accent="mono"],
+:root[data-illustration] [data-chat-transcript] {
+  --color-bg: oklch(98.4% 0 0);
+  --color-surface: oklch(99.2% 0 0);
+}
+
+.dark[data-accent="mono"],
+.dark[data-illustration] [data-chat-transcript] {
+  --color-bg: oklch(15% 0 0);
+  --color-surface: oklch(20% 0 0);
 }

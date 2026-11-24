@@ -1,0 +1,158 @@
+.scene-ornament {
+  display: block;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+
+.scene-ornament[data-scene-band='dialog'] {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  z-index: 1;
+  width: min(46%, 15rem);
+  height: 12px;
+  transform: translateX(-50%);
+  mask-image: linear-gradient(to right, transparent, black 9%, black 91%, transparent);
+}
+
+.scene-ornament[data-scene-band='composer'] {
+  position: absolute;
+  z-index: 1;
+}
+[data-illustration='pottery'] [data-scene-band='composer'] {
+  inset: 10% auto 10% 0;
+  width: 12px;
+  mask-image: linear-gradient(transparent, black 15%, black 82%, transparent);
+}
+[data-illustration='vinyl'] [data-scene-band='composer'] {
+  top: 0;
+  right: 7%;
+  width: 102px;
+  height: 10px;
+}
+[data-illustration='observatory'] [data-scene-band='composer'] {
+  top: 0;
+  left: 12%;
+  width: 145px;
+  height: 14px;
+}
+[data-illustration='postroom'] [data-scene-band='composer'] {
+  top: 0;
+  right: 0;
+  width: 118px;
+  height: 30px;
+  border-start-end-radius: inherit;
+}
+[data-illustration='bathysphere'] [data-scene-band='composer'] {
+  top: 50%;
+  right: 0;
+  width: 12px;
+  height: min(55%, 72px);
+  transform: translateY(-50%);
+}
+[data-illustration='darkroom'] [data-scene-band='composer'] {
+  inset: 0;
+  border-radius: inherit;
+}
+
+.sidebar-art-space {
+  /* Only unused scrollport space can host the illustration. */
+  flex: 1 0 0;
+  min-height: 0;
+  position: relative;
+  overflow: clip;
+  container: sidebar-art / size;
+}
+.scene-ornament[data-scene-band='sidebar'] {
+  position: absolute;
+  bottom: 6px;
+  height: 64px;
+  max-width: calc(100% - 20px);
+  display: none;
+}
+@container sidebar-art (min-height: 76px) {
+  .scene-ornament[data-scene-band='sidebar'] { display: block; }
+}
+[data-illustration='pottery'] [data-scene-band='sidebar'] {
+  width: 215px;
+  inset-inline-start: 12px;
+}
+[data-illustration='vinyl'] [data-scene-band='sidebar'],
+[data-illustration='observatory'] [data-scene-band='sidebar'] {
+  width: 186px;
+  height: 58px;
+}
+[data-illustration='vinyl'] [data-scene-band='sidebar'] {
+  inset-inline-start: 12px;
+}
+[data-illustration='observatory'] [data-scene-band='sidebar'] {
+  inset-inline-end: 16px;
+}
+[data-illustration='postroom'] [data-scene-band='sidebar'] {
+  width: 200px;
+  inset-inline-end: 10px;
+}
+[data-illustration='bathysphere'] [data-scene-band='sidebar'],
+[data-illustration='darkroom'] [data-scene-band='sidebar'] {
+  width: min(92%, 246px);
+  inset-inline: 0;
+  margin-inline: auto;
+}
+.scene-ornament[data-scene-band='empty'] {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 10rem;
+  height: 2.25rem;
+  transform: translate(-50%, -50%);
+}
+[data-illustration='pottery'] .chat-composer-shell:has(> [data-scene-band='composer']) {
+  background-image: linear-gradient(100deg, color-mix(in srgb, var(--color-accent) 7%, transparent), transparent 40%);
+}
+[data-illustration='postroom'] .chat-composer-shell:has(> [data-scene-band='composer']) {
+  background-image: linear-gradient(172deg, color-mix(in srgb, var(--color-accent) 5%, transparent), transparent 46%);
+}
+[data-illustration='bathysphere'] .chat-composer-shell:has(> [data-scene-band='composer']) {
+  background-image: linear-gradient(to left, color-mix(in srgb, var(--color-accent) 6%, transparent), transparent 23%);
+}
+html[data-illustration] [data-slot='dialog-header'],
+html[data-illustration] [data-scene-settings-header] {
+  background-image: linear-gradient(165deg, color-mix(in srgb, var(--color-accent) 7%, transparent), transparent 64%);
+}
+html[data-illustration] .home-suggestion {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 23%, transparent);
+}
+html[data-illustration] .home-suggestion > svg {
+  border-radius: 50%;
+  background: var(--color-accent-soft);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+  color: var(--color-accent);
+}
+:is([data-home-scene='observatory'], [data-home-scene='postroom'], [data-home-scene='bathysphere']) {
+  --landscape-caption: color-mix(in srgb, var(--color-surface) 84%, transparent);
+
+  & .home-recent-slot > * {
+    position: relative;
+    isolation: isolate;
+  }
+  & .home-recent-slot > *::before {
+    content: '';
+    position: absolute;
+    z-index: -1;
+    inset: -5px 0;
+    border-radius: 12px;
+    background: var(--landscape-caption);
+    pointer-events: none;
+  }
+  & .home-disclaimer > span {
+    border-radius: 8px;
+    color: var(--color-fg-muted);
+    background-color: var(--landscape-caption);
+    box-shadow: 0 0 0 3px var(--landscape-caption);
+    box-decoration-break: clone;
+  }
+}
+@media (forced-colors: active) {
+  .scene-ornament, canvas[data-scene-art] { visibility: hidden; }
+}

@@ -263,6 +263,17 @@
     }
   },
   "appearance": {
+    "homeScene": {
+      "postroom": "Afternoon post",
+      "bathysphere": "Deep-sea expedition",
+      "darkroom": "Silver darkroom",
+      "title": "Illustrated theme",
+      "plain": "Plain",
+      "pottery": "Pottery studio",
+      "vinyl": "Blue Note",
+      "observatory": "Star atlas",
+      "paired": "Theme accent · {{color}}"
+    },
     "title": "Appearance",
     "subtitle": "Tune the way Aivory looks at you.",
     "theme": "Theme",
@@ -278,7 +289,7 @@
       "violet": "Violet",
       "lagoon": "Lagoon",
       "ember": "Ember",
-      "moss": "Moss",
+      "moss": "Dusk",
       "indigo": "Indigo",
       "rose": "Rose",
       "mono": "Mono"

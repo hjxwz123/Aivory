@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEv
 import { flushSync } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { ArrowUp, Camera, ImagePlus, Menu, ShieldOff, Square, X } from 'lucide-react'
+import { ArrowUp, Camera, EyeOff, ImagePlus, Menu, Square, X } from 'lucide-react'
 import { modelsApi } from '@/api'
 import type { ApiModel } from '@/api/types'
 import { streamSSE } from '@/api/client'
@@ -10,6 +10,8 @@ import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tooltip } from '@/components/ui/tooltip'
 import { HOME_SWAP_STATE, HomeLayout } from '@/components/chat/home-layout'
+import { SceneOrnament } from '@/components/chat/home-scene'
+import { PrivateModeToggle } from '@/components/chat/private-mode-toggle'
 import { PrivateMessageRow, type PrivateDisplayMessage } from '@/components/chat/private-message-row'
 import { PRIVATE_IMAGE_TYPES, privateImageURL, readPrivateImage, validatePrivateHistory, type PrivateImage, type PrivateMessage } from '@/lib/private-chat'
 import { prepareImageForUpload } from '@/lib/image-upload'
@@ -368,8 +370,10 @@ export default function PrivateChat() {
   // Sized like the ordinary composer (editor 72px + 50px toolbar), so entering
   // or leaving private mode swaps the input without moving anything around it.
   const canSend = allowed && !!model && !readingImages && (!!draft.trim() || images.length > 0)
+  const showHome = messages.length === 0
   const composer = (
     <form ref={formRef} onSubmit={(event) => void send(event)} data-vt-composer="" className="chat-composer-shell relative isolate min-w-0 w-full rounded-popup border-0 bg-[var(--color-surface)]">
+      {showHome && <SceneOrnament surface="composer" />}
       {images.length > 0 && <div className="flex gap-2 overflow-x-auto px-3 pb-1 pt-3">{images.map((image, index) => (
         <div key={index} className="relative shrink-0">
           <img src={privateImageURL(image)} alt={t('private.image', { index: index + 1 })} className="size-16 rounded-[8px] object-cover" />
@@ -386,22 +390,28 @@ export default function PrivateChat() {
         {/* The rest of the screen matches the ordinary home, so the mode is
             named here, inside the one surface that differs. */}
         <Tooltip content={t('private.footer')}>
-          <span className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full bg-[var(--color-accent-soft)] pl-2 pr-2.5 text-[12px] font-medium text-[var(--color-accent)]">
-            <ShieldOff size={12} aria-hidden />
+          <span className="inline-flex h-7 shrink-0 items-center gap-1.5 px-1.5 text-[12px] font-medium text-[var(--color-fg-muted)]">
+            <EyeOff size={13} aria-hidden />
             {t('private.badge')}
           </span>
         </Tooltip>
-        <div className="min-w-0 max-w-[min(70%,20rem)] flex-1">
-          <Select value={modelId} onValueChange={(value) => {
-            if (!models.some((item) => item.id === value)) return
-            setModelId(value)
-            setImages([])
-            setError('')
-          }} disabled={streaming || readingImages || loadingModels || models.length === 0}>
-            <SelectTrigger aria-label={t('private.model')} className="h-9 min-w-0 border-0 bg-transparent px-2 text-xs shadow-none [&>span:first-child]:min-w-0 [&>span:first-child]:truncate"><SelectValue placeholder={t(loadingModels ? 'private.loadingModels' : 'private.noModels')} /></SelectTrigger>
-            <SelectContent>{models.map((item) => <SelectItem key={item.id} value={item.id} disabled={hasImageHistory && !item.vision && !visionOutsource}>{item.label}</SelectItem>)}</SelectContent>
-          </Select>
-        </div>
+        <Select value={modelId} onValueChange={(value) => {
+          if (!models.some((item) => item.id === value)) return
+          setModelId(value)
+          setImages([])
+          setError('')
+        }} disabled={streaming || readingImages || loadingModels || models.length === 0}>
+          <SelectTrigger
+            aria-label={t('private.model')}
+            title={model?.label}
+            className="h-9 w-auto max-w-48 justify-start gap-1.5 border-0 bg-transparent px-2 text-[13px] font-medium text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] focus:bg-transparent focus-visible:underline underline-offset-4 data-[state=open]:text-[var(--color-fg)] data-[state=open]:[&>svg]:rotate-180"
+          >
+            <SelectValue placeholder={t(loadingModels ? 'private.loadingModels' : 'private.noModels')} />
+          </SelectTrigger>
+          <SelectContent align="start" className="lg:max-w-[min(20rem,var(--radix-select-content-available-width))]">
+            {models.map((item) => <SelectItem key={item.id} value={item.id} className="underline-offset-4 data-[highlighted]:bg-transparent data-[highlighted]:underline" disabled={hasImageHistory && !item.vision && !visionOutsource}>{item.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
         {(model?.vision || visionOutsource) && canUpload && <>
           <input ref={fileRef} type="file" accept={PRIVATE_IMAGE_TYPES.join(',')} multiple className="hidden" onChange={(event) => void pickImages(event)} aria-label={t('private.addImage')} />
           {showCamera ? <input ref={cameraFileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(event) => void pickImages(event, true)} aria-label={t('private.takePhoto')} /> : null}
@@ -427,31 +437,21 @@ export default function PrivateChat() {
   const headerActions = (
     <>
       <Button variant="ghost" size="sm" onClick={clear} disabled={!messages.length && !draft && !images.length && !readingImages}>{t('private.clear')}</Button>
-      <Tooltip content={t('private.exit')}>
-        <button
-          type="button"
-          aria-label={t('private.exit')}
-          aria-pressed
-          onClick={() => {
-            clear()
-            void runViewTransition('private', () => flushSync(() => navigate('/', { state: HOME_SWAP_STATE })))
-          }}
-          className="inline-flex size-11 items-center justify-center rounded-[10px] bg-[var(--color-accent-soft)] text-[var(--color-accent)] interactive hover:text-[var(--color-accent-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-        >
-          <ShieldOff size={19} aria-hidden />
-        </button>
-      </Tooltip>
+      <PrivateModeToggle active onClick={() => {
+        clear()
+        void runViewTransition('private', () => flushSync(() => navigate('/', { state: HOME_SWAP_STATE })))
+      }} />
     </>
   )
 
   // A fresh private conversation is the ordinary home screen with the private
   // composer in place of the regular one.
-  if (messages.length === 0) {
+  if (showHome) {
     return <HomeLayout variant="private" composer={composer} notice={errorNotice} onSuggestion={fillDraft} />
   }
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--color-bg)] text-[var(--color-fg)]">
+    <div data-chat-transcript="" className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--color-bg)] text-[var(--color-fg)]">
       {isDesktop ? (
         <header className="flex items-center gap-3 h-[var(--layout-topbar-h)] px-4 sm:px-6 bg-[var(--color-bg)]/85 backdrop-blur-sm">
           <div className="flex-1 min-w-0 flex flex-col">

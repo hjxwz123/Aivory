@@ -577,6 +577,7 @@ export default function ProjectDetail() {
                   {t('projects:detail.newChat')}
                 </p>
                 <Composer
+                  illustrated
                   modelId={effectiveProjectModelId}
                   fast={projectFast}
                   onFastChange={setPickedFast}

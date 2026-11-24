@@ -4,7 +4,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { gsap } from 'gsap'
 import { useGSAP } from '@gsap/react'
-import { ArrowRight, ChevronDown, Download, Menu, MessageSquare, RefreshCw, ShieldOff } from 'lucide-react'
+import { ArrowRight, ChevronDown, Download, Menu, MessageSquare, RefreshCw } from 'lucide-react'
 import { Tooltip } from '@/components/ui/tooltip'
 import { UserMenu } from '@/components/sidebar/sidebar'
 import { MyGallery } from '@/components/chat/my-gallery'
@@ -19,6 +19,9 @@ import { mediaQuery } from '@/lib/design-tokens'
 import { cn, formatTimeAgo } from '@/lib/utils'
 import { runViewTransition } from '@/lib/view-transition'
 import { useDesktopDownload } from '@/hooks/use-desktop-download'
+import { useAccent } from '@/store/accent'
+import { HomeSceneCanvas } from './home-scene'
+import { PrivateModeToggle } from './private-mode-toggle'
 
 gsap.registerPlugin(useGSAP)
 
@@ -255,7 +258,7 @@ function HomeSuggestions({ onPick, layout }: { onPick: (prompt: string) => void;
             type="button"
             onClick={() => onPick(t(suggestion.promptKey))}
             className={cn(
-              'home-card group/suggestion inline-flex h-9 shrink-0 items-center gap-2 rounded-full bg-[var(--color-surface)] pl-3 pr-3.5 text-[13px] text-[var(--color-fg-muted)]',
+              'home-card home-suggestion group/suggestion inline-flex h-9 shrink-0 items-center gap-2 rounded-full bg-[var(--color-surface)] pl-3 pr-3.5 text-[13px] text-[var(--color-fg-muted)]',
               // No `interactive` here: its opacity/transform transitions would
               // fight the GSAP entrance that animates those same properties.
               'transition-[color,border-color,background-color] duration-[var(--duration-fast)] ease-[var(--ease-out)] hover:text-[var(--color-fg)]',
@@ -399,6 +402,7 @@ interface HomeLayoutProps {
  */
 export function HomeLayout({ variant, composer, notice, onSuggestion }: HomeLayoutProps) {
   const { t } = useTranslation('chat')
+  const scene = useAccent(s => s.scene)
   const navigate = useNavigate()
   const location = useLocation()
   const user = useAuth((s) => s.user)
@@ -468,13 +472,13 @@ export function HomeLayout({ variant, composer, notice, onSuggestion }: HomeLayo
     </h1>
   )
 
-  const privateLabel = privateMode ? t('private.exit') : t('private.enter')
-
   return (
     <div
       ref={root}
+      data-home-scene={scene}
       className="relative min-h-0 flex-1 flex flex-col overflow-y-auto overflow-x-hidden"
     >
+      {scene !== 'plain' && <HomeSceneCanvas scene={scene} />}
       <div className="absolute inset-x-3 top-1 z-20 flex items-center justify-between gap-2 max-sm:inset-x-2">
         <div className="flex min-w-0 items-center gap-1">
           {/* Mobile home: a compact, direct way to reach the navigation drawer. */}
@@ -505,34 +509,21 @@ export function HomeLayout({ variant, composer, notice, onSuggestion }: HomeLayo
             mobile, the account avatar that opens the sidebar footer's menu. */}
         <div className="flex shrink-0 items-center gap-2">
           {canUsePrivateChat && (
-            <Tooltip content={privateLabel}>
-              <button
-                type="button"
-                aria-label={privateLabel}
-                aria-pressed={privateMode}
-                // Only the composer differs between the two screens, so the swap
-                // runs as a view transition that cross-fades it in place.
-                onClick={() => {
-                  void runViewTransition('private', () =>
-                    flushSync(() => navigate(privateMode ? '/' : '/private-chat', { state: HOME_SWAP_STATE })),
-                  )
-                }}
-                className={cn(
-                  'inline-flex size-11 items-center justify-center rounded-[10px] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                  privateMode
-                    ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)] hover:bg-[var(--color-accent-soft)] hover:text-[var(--color-accent-hover)]'
-                    : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-                )}
-              >
-                <ShieldOff size={19} aria-hidden />
-              </button>
-            </Tooltip>
+            <PrivateModeToggle
+              active={privateMode}
+              onClick={() => {
+                void runViewTransition('private', () =>
+                  flushSync(() => navigate(privateMode ? '/' : '/private-chat', { state: HOME_SWAP_STATE })),
+                )
+              }}
+            />
           )}
           <div className="lg:hidden"><UserMenu placement="header" /></div>
         </div>
       </div>
       {/* Desktop-only ambient depth; the phone layout stays deliberately direct. */}
       <div
+        style={scene !== 'plain' ? { display: 'none' } : undefined}
         className="home-glow pointer-events-none absolute left-1/2 top-[14%] -z-0 hidden size-[34rem] max-w-[88vw] -translate-x-1/2 rounded-full bg-[var(--color-accent)] opacity-[0.07] blur-[90px] sm:block"
         aria-hidden
       />
@@ -591,8 +582,8 @@ export function HomeLayout({ variant, composer, notice, onSuggestion }: HomeLayo
               <div className="mt-5 mx-auto w-full max-w-[44rem]">
                 {onSuggestion ? <HomeSuggestions layout="wrap" onPick={onSuggestion} /> : null}
                 <HomeRecentConversations />
-                <p className="mt-8 text-center text-xs text-[var(--color-fg-subtle)]">
-                  {t('empty.disclaimer')}
+                <p className="home-disclaimer mt-8 text-center text-xs text-[var(--color-fg-subtle)]">
+                  <span>{t('empty.disclaimer')}</span>
                 </p>
               </div>
             )}

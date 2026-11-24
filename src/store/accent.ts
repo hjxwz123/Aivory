@@ -1,51 +1,69 @@
-/**
- * Accent preset store — sits alongside `useTheme` and toggles a `data-accent`
- * attribute on <html> so tokens.css can swap accent vars at runtime.
- *
- * Models the same shape as theme.ts (zustand + localStorage + applyOnBoot)
- * so the Settings page can read/write it identically. The FOUC <script> in
- * index.html re-applies the stored accent before React boots — that's what
- * stops a one-frame flash of the violet default on every reload.
- */
 import { create } from 'zustand'
-import { type AccentPref, ACCENT_PRESETS } from '@/types/settings'
+import { ACCENT_PRESETS, normalizeHomeScene, SCENE_ACCENTS, type AccentPref, type HomeScene } from '@/types/settings'
 import { persistUserSettings } from '@/lib/user-settings'
+import { useAuth } from '@/store/auth'
 
-const STORAGE_KEY = 'aivory.accent'
-const DEFAULT_ACCENT: AccentPref = 'violet'
-
-function getStored(): AccentPref {
-  if (typeof window === 'undefined') return DEFAULT_ACCENT
-  const v = localStorage.getItem(STORAGE_KEY)
-  if (v && (ACCENT_PRESETS as readonly string[]).includes(v)) return v as AccentPref
-  return DEFAULT_ACCENT
+function normalizeAccent(value: unknown): AccentPref {
+  return ACCENT_PRESETS.find(accent => accent === value) ?? 'violet'
 }
 
-function applyAccent(accent: AccentPref) {
-  document.documentElement.dataset.accent = accent
+function readCache(key: string): string | null {
+  try { return localStorage.getItem(key) } catch { return null }
+}
+
+function applyColors(scene: HomeScene, plainAccent: AccentPref) {
+  const accent = scene === 'plain' ? plainAccent : SCENE_ACCENTS[scene]
+  if (typeof document !== 'undefined') {
+    document.documentElement.dataset.accent = accent
+    if (scene === 'plain') delete document.documentElement.dataset.illustration
+    else document.documentElement.dataset.illustration = scene
+    try {
+      localStorage.setItem('aivory.home-scene', scene)
+      localStorage.setItem('aivory.plain-accent', plainAccent)
+      // The preboot script reads the effective color before React mounts.
+      localStorage.setItem('aivory.accent', accent)
+    } catch { /* Preferences still apply for this session. */ }
+  }
+  return { scene, plainAccent, accent }
 }
 
 interface AccentStore {
   accent: AccentPref
-  applyAccent: (accent: AccentPref) => void
+  plainAccent: AccentPref
+  scene: HomeScene
+  pendingOwner: string | null
+  applyProfile: (userId: string, scene: unknown, accent: unknown) => void
   setAccent: (accent: AccentPref) => void
+  setScene: (scene: HomeScene) => Promise<void>
 }
 
-export const useAccent = create<AccentStore>((set) => {
-  const initial = getStored()
-  if (typeof document !== 'undefined') applyAccent(initial)
-  return {
-    accent: initial,
-    applyAccent(accent) {
-      localStorage.setItem(STORAGE_KEY, accent)
-      applyAccent(accent)
-      set({ accent })
-    },
-    setAccent(accent) {
-      localStorage.setItem(STORAGE_KEY, accent)
-      applyAccent(accent)
-      set({ accent })
-      void persistUserSettings({ accent_color: accent }).catch(() => {})
-    },
-  }
-})
+export const useAccent = create<AccentStore>((set, get) => ({
+  ...applyColors(normalizeHomeScene(readCache('aivory.home-scene')), normalizeAccent(readCache('aivory.plain-accent') ?? readCache('aivory.accent'))),
+  pendingOwner: null,
+  applyProfile(userId, scene, accent) {
+    if (get().pendingOwner === userId) return
+    set({ ...applyColors(normalizeHomeScene(scene), normalizeAccent(accent)), pendingOwner: null })
+  },
+  setAccent(accent) {
+    if (get().scene !== 'plain' || get().pendingOwner !== null) return
+    set(applyColors('plain', accent))
+    void persistUserSettings({ accent_color: accent }).catch(() => {})
+  },
+  async setScene(scene) {
+    const { scene: previous, plainAccent, pendingOwner } = get()
+    if (pendingOwner !== null || previous === scene) return
+    const owner = useAuth.getState().user?.id ?? ''
+    set({ ...applyColors(scene, plainAccent), pendingOwner: owner })
+    try {
+      const saved = await persistUserSettings({ home_scene: scene })
+      if (owner && saved?.home_scene !== scene) throw new Error('Home theme was not saved')
+    } catch (error) {
+      if (get().pendingOwner === owner && (useAuth.getState().user?.id ?? '') === owner) {
+        set(applyColors(previous, plainAccent))
+        throw error
+      }
+    } finally {
+      if (get().pendingOwner === owner) set({ pendingOwner: null })
+    }
+  },
+}))

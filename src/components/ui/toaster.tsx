@@ -1,5 +1,5 @@
 import * as ToastPrimitive from '@radix-ui/react-toast'
-import { CheckCircle2, AlertTriangle, Info, XCircle, X } from 'lucide-react'
+import { Sparkles, AlertTriangle, Info, XCircle, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useToastStore } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
@@ -10,8 +10,8 @@ const variantStyles = {
     accent: 'text-[var(--color-info)] bg-[var(--color-info-soft)]',
   },
   success: {
-    icon: CheckCircle2,
-    accent: 'text-[var(--color-success)] bg-[var(--color-success-soft)]',
+    icon: Sparkles,
+    accent: 'text-[var(--color-accent)] bg-[var(--color-accent-soft)]',
   },
   warning: {
     icon: AlertTriangle,
@@ -48,6 +48,7 @@ export function Toaster() {
               'flex items-start gap-3 w-[min(360px,calc(100vw-2rem))]',
               'rounded-popup bg-[var(--color-surface-raised)]',
               'p-3.5 shadow-[var(--shadow-lg)]',
+              toast.variant === 'success' && 'ring-1 ring-inset ring-[var(--color-border-subtle)]',
               'data-[state=open]:animate-[slide-up_var(--duration-base)_var(--ease-out)]',
               'data-[state=closed]:animate-[fade-out_var(--duration-fast)_var(--ease-in)]',
               'data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)]',
@@ -55,7 +56,7 @@ export function Toaster() {
               'data-[swipe=end]:animate-[fade-out_var(--duration-fast)_var(--ease-in)]',
             )}
           >
-            <span className={cn('inline-flex shrink-0 size-7 rounded-full items-center justify-center', accent)}>
+            <span className={cn('inline-flex shrink-0 size-7 items-center justify-center', toast.variant === 'success' ? 'rounded-lg' : 'rounded-full', accent)}>
               <Icon size={14} aria-hidden />
             </span>
             <div className="flex-1 min-w-0">
