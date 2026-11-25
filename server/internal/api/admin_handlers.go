@@ -1638,7 +1638,7 @@ var settingsKeys = []string{
 	// credits via credits_per_usd (0 = free; see audio_billing.go).
 	"audio_transcribe_price_per_second",
 	// §4.4 web search backend — admin-configurable, live-reloaded each call.
-	// Provider ∈ {"", "serper", "brave", "tavily", "anysearch", "youcom" (alias "you"), "searxng", "duckduckgo"
+	// Provider ∈ {"", "serper", "brave", "tavily", "anysearch", "youcom" (alias "you"), "keenable", "searxng", "duckduckgo"
 	// (alias "ddg"), "yuanbao", "deepseek", "auto"}. SearXNG is the self-hosted option and only
 	// needs base_url (no api_key); DuckDuckGo is the free option and needs no config
 	// at all; Yuanbao is a Tencent Cloud API 3.0 service and needs the
@@ -2217,7 +2217,7 @@ func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.R
 				}
 				provider = strings.ToLower(strings.TrimSpace(provider))
 				switch provider {
-				case "", "auto", "serper", "brave", "tavily", "anysearch", "youcom", "you", "searxng", "duckduckgo", "ddg", "yuanbao", "deepseek":
+				case "", "auto", "serper", "brave", "tavily", "anysearch", "youcom", "you", "keenable", "searxng", "duckduckgo", "ddg", "yuanbao", "deepseek":
 				default:
 					return 0, errInvalidInput
 				}

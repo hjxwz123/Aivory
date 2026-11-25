@@ -220,7 +220,7 @@ func TestSearchProviderSettingAcceptsKnownProvidersAndRejectsUnknown(t *testing.
 		}
 		return stored
 	}
-	for _, provider := range []string{"serper", "brave", "tavily", "anysearch", "youcom", "you", "searxng", "duckduckgo", "ddg", "yuanbao", "auto", ""} {
+	for _, provider := range []string{"serper", "brave", "tavily", "anysearch", "youcom", "you", "keenable", "searxng", "duckduckgo", "ddg", "yuanbao", "auto", ""} {
 		if rec := patch(provider); rec.Code != http.StatusOK {
 			t.Fatalf("valid provider %q: status=%d body=%s", provider, rec.Code, rec.Body.String())
 		}

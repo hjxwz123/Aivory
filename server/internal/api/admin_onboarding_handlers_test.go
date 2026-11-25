@@ -96,7 +96,7 @@ func TestOnboardingSearchReadyTreatsDuckDuckGoAsKeyless(t *testing.T) {
 
 	// DuckDuckGo is the keyless channel: no key and no base URL still counts as
 	// configured. auto deliberately stays opt-in, so it must not.
-	for _, provider := range []string{"duckduckgo", "ddg", "anysearch", "youcom", "you"} {
+	for _, provider := range []string{"duckduckgo", "ddg", "anysearch", "youcom", "you", "keenable"} {
 		if err := store.SetSetting(db, "search_provider", provider); err != nil {
 			t.Fatal(err)
 		}

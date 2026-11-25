@@ -417,6 +417,7 @@ export default function AdminTools() {
                       <SelectItem value="tavily">{t('admin:settings.fields.searchTavily')}</SelectItem>
                       <SelectItem value="anysearch">{t('admin:settings.fields.searchAnysearch')}</SelectItem>
                       <SelectItem value="youcom">You.com</SelectItem>
+                      <SelectItem value="keenable">Keenable</SelectItem>
                       <SelectItem value="yuanbao">{t('admin:settings.fields.searchYuanbao')}</SelectItem>
                       <SelectItem value="deepseek">DeepSeek</SelectItem>
                     </SelectContent>
@@ -506,9 +507,9 @@ export default function AdminTools() {
                   </>
                 )}
 
-                {['serper', 'brave', 'tavily', 'anysearch', 'youcom', 'deepseek'].includes(searchProvider) && (
+                {['serper', 'brave', 'tavily', 'anysearch', 'youcom', 'keenable', 'deepseek'].includes(searchProvider) && (
                   <Field
-                    label={t(['anysearch', 'youcom'].includes(searchProvider)
+                    label={t(['anysearch', 'youcom', 'keenable'].includes(searchProvider)
                       ? 'admin:settings.fields.searchApiKeyOptional'
                       : 'admin:settings.fields.searchApiKey')}
                     htmlFor="search-key"

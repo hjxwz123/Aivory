@@ -63,6 +63,10 @@ func (s *settingsSearcher) backend() Searcher {
 		// A present empty search_api_key must override both environment keys.
 		fallbackKey = strings.TrimSpace(os.Getenv("YDC_API_KEY"))
 	}
+	if strings.EqualFold(provider, "keenable") && strings.TrimSpace(fallbackKey) == "" {
+		// Same rule for Keenable's own environment key.
+		fallbackKey = strings.TrimSpace(os.Getenv("KEENABLE_API_KEY"))
+	}
 	apiKey := s.settingString("search_api_key", fallbackKey)
 	secretID := s.settingString("search_secret_id", s.fallbackSecretID)
 	secretKey := s.settingString("search_secret_key", s.fallbackSecretKey)

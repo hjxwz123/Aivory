@@ -25,7 +25,7 @@ type Searcher interface {
 // key, DeepSeek an API key, SearXNG a base URL, and Yuanbao a Tencent Cloud SecretId/SecretKey pair.
 // DuckDuckGo needs no configuration; AnySearch supports anonymous requests
 // through its fixed official endpoint. You.com uses the resolved API key when
-// present and its keyless endpoint otherwise.
+// present and its keyless endpoint otherwise. Keenable does the same.
 func newSearcher(provider, apiKey, baseURL, secretID, secretKey string, selectedEngines ...[]string) Searcher {
 	switch strings.ToLower(provider) {
 	case "serper":
@@ -59,6 +59,9 @@ func newSearcher(provider, apiKey, baseURL, secretID, secretKey string, selected
 	case "youcom", "you":
 		// Opt-in only (never chosen by auto). Keyless when no key is set.
 		return newYouComSearcher(apiKey)
+	case "keenable":
+		// Opt-in only (never chosen by auto). Keyless when no key is set.
+		return newKeenableSearcher(apiKey)
 	case "searxng":
 		if baseURL == "" {
 			return nil
