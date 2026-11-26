@@ -109,6 +109,10 @@ type mcpToolRegistry interface {
 	ListMCP(modelID string, userID string, workspaceID string) []MCPToolDef
 }
 
+type documentGrepToolRegistry interface {
+	DocumentGrepToolDefs() []ToolDef
+}
+
 // providerArtifactRegistry is optionally implemented by the concrete tools
 // registry. It lets provider-hosted tools persist binary output through the same
 // storage path and OnArtifact callback as local tools.
@@ -203,9 +207,13 @@ type ToolContext struct {
 	toolBudgetPauses    int
 	toolStateMu         sync.Mutex
 	toolState           *toolExecutionState
-	// citationIndexes is non-nil only when a KB is attached. This preserves the
-	// exact legacy tool output for every no-KB conversation.
+	// citationIndexes is non-nil only when a KB is attached (or Grep-mode docs
+	// are active). This preserves the exact legacy tool output for every other
+	// conversation.
 	citationIndexes *citationIndexAllocator
+	// GrepScope holds the pre-authorized document corpus for doc_list /
+	// doc_grep / doc_read when global document_retrieval_mode is "grep".
+	GrepScope *rag.GrepScope
 }
 
 func (tc *ToolContext) requestToolExecutionState() *toolExecutionState {
@@ -346,6 +354,9 @@ var perTurnToolLimits = map[string]int{
 	"fetch_image":             envcfg.Int("AIVORY_LLM_PER_TURN_TOOL_LIMITS_FETCH_IMAGE", 16),
 	"image_generate":          envcfg.Int("AIVORY_LLM_PER_TURN_TOOL_LIMITS_IMAGE_GENERATE", 8),
 	"python_execute":          envcfg.Int("AIVORY_LLM_PER_TURN_TOOL_LIMITS_PYTHON_EXECUTE", 16), // §F10: cap sandbox executions/turn (each up to 120s) to bound abuse/DoS
+	toolnames.DocList:         envcfg.Int("AIVORY_LLM_PER_TURN_TOOL_LIMITS_DOC_LIST", 8),
+	toolnames.DocGrep:         envcfg.Int("AIVORY_LLM_PER_TURN_TOOL_LIMITS_DOC_GREP", 16),
+	toolnames.DocRead:         envcfg.Int("AIVORY_LLM_PER_TURN_TOOL_LIMITS_DOC_READ", 16),
 }
 
 // deepResearchToolLimits are the much higher per-turn caps used while the Deep
@@ -386,6 +397,9 @@ func configuredFastToolLimits() map[string]int {
 		"fetch_image":             envcfg.Int("AIVORY_LLM_FAST_TOOL_LIMITS_FETCH_IMAGE", 0),
 		"image_generate":          envcfg.Int("AIVORY_LLM_FAST_TOOL_LIMITS_IMAGE_GENERATE", 2),
 		"python_execute":          envcfg.Int("AIVORY_LLM_FAST_TOOL_LIMITS_PYTHON_EXECUTE", 0),
+		toolnames.DocList:         envcfg.Int("AIVORY_LLM_FAST_TOOL_LIMITS_DOC_LIST", 4),
+		toolnames.DocGrep:         envcfg.Int("AIVORY_LLM_FAST_TOOL_LIMITS_DOC_GREP", 8),
+		toolnames.DocRead:         envcfg.Int("AIVORY_LLM_FAST_TOOL_LIMITS_DOC_READ", 8),
 	}
 }
 
@@ -3363,6 +3377,21 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		availableSkillIdx, availableSkillFull, presentationSkills = loadTurnModelSkills(ctx, o.db, model.ID, req.ToolAccessPolicy, req.DisabledModelSkillIDs, selectedUserSkills)
 	}
 
+	ragScoped := len(kbIDs) > 0 || len(allowedDocumentIDs) > 0
+	isGrepMode := o.rag != nil && ragScoped && req.Mode != ModeDeepResearch &&
+		store.DocumentRetrievalMode(o.db) == store.DocumentRetrievalModeGrep
+	var (
+		grepScope       *rag.GrepScope
+		grepScopeErr    error
+		docGrepToolDefs []ToolDef
+	)
+	if isGrepMode {
+		grepScope, grepScopeErr = o.rag.LoadGrepScope(ctx, conv.ID, kbIDs, allowedDocumentIDs, currentDocumentIDs)
+		if grepScopeErr != nil && o.logger != nil {
+			o.logger.Printf("grep: load document scope failed (conv=%s): %v", conv.ID, grepScopeErr)
+		}
+	}
+
 	// 5. Resolve tools for this model BEFORE composing the system prompt so the
 	//    tool-guidance segment (and the §4.13 prompt preamble) match the real,
 	//    enabled tool list instead of a hardcoded set.
@@ -3421,6 +3450,17 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		}
 		systemToolDefs = append(systemToolDefs, builtinDefs...)
 		toolDefs = append(builtinDefs, flattenMCPToolDefs(mcpDefs)...)
+		if isGrepMode && grepScope != nil && grepScope.HasUnpinned {
+			if docReg, ok := o.tools.(documentGrepToolRegistry); ok {
+				docGrepToolDefs = filterBuiltinToolsByAccess(o.filterDisabledTools(docReg.DocumentGrepToolDefs()), req.ToolAccessPolicy)
+				docGrepToolDefs = filterBuiltinToolsByWorkspacePolicy(docGrepToolDefs, workspacePolicy)
+				if fastMode {
+					docGrepToolDefs = filterToolDefsByName(docGrepToolDefs, fastModeDisabledToolSet())
+				}
+				systemToolDefs = append(systemToolDefs, docGrepToolDefs...)
+				toolDefs = append(toolDefs, docGrepToolDefs...)
+			}
+		}
 	}
 	searchOnly := req.ToolMode == ToolModeDisabled
 	if req.ToolMode == ToolModeAuto {
@@ -3430,9 +3470,18 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		if len(toolDefs) == 0 && len(hostedToolRequests) == 0 {
 			searchOnly = true
 		} else {
+			routeFiles := sandboxFiles
+			if len(docGrepToolDefs) > 0 && grepScope != nil {
+				routeFiles = append([]ProjectFileSummary(nil), sandboxFiles...)
+				for _, doc := range grepScope.Documents {
+					if !doc.Pinned {
+						routeFiles = append(routeFiles, ProjectFileSummary{Name: doc.Filename, Kind: doc.Source})
+					}
+				}
+			}
 			searchOnly = !o.autoTurnNeedsTools(
 				ctx, req, history, toolDefs, hostedToolNames, hostedToolRequests,
-				sandboxFiles, availableSkillIdx, len(selectedUserSkills) > 0,
+				routeFiles, availableSkillIdx, len(selectedUserSkills) > 0,
 				conv.WorkspaceID, assistantMsg.ID,
 			)
 		}
@@ -3532,13 +3581,52 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	ragSnippets := []Citation{}
 	ragMode := store.NormalizeConversationRAGMode(conv.RAGMode)
 	hasAttachedKnowledgeBase := len(kbIDs) > 0
+	grepToolsActive := isGrepMode && grepScope != nil && grepScope.HasUnpinned && toolsEnabled && !searchOnly && toolDefsContain(toolDefs, toolnames.DocGrep)
 	// Chat uploads are rejected by the HTTP handler until their document_id is
 	// status='ready'. Do not wait-and-skip here: skipping pending docs is exactly
 	// what made the model fall back to python-side PDF parsing.
 	// §4.11-B: run inline RAG when a KB is bound OR the conversation itself has an
 	// ingested upload (chat-attached files are conversation-scoped, not in a KB).
-	ragScoped := len(kbIDs) > 0 || len(allowedDocumentIDs) > 0
-	if o.rag != nil && ragScoped && req.Mode != ModeDeepResearch {
+	if isGrepMode && grepScope != nil {
+		var grepSnippets []rag.Snippet
+		grepSnippets = append(grepSnippets, grepScope.PinnedSnippets...)
+		if !grepToolsActive && grepScope.HasUnpinned {
+			fallbackSnips := rag.FallbackGrep(grepScope, req.UserText)
+			offset := len(grepSnippets)
+			for i := range fallbackSnips {
+				fallbackSnips[i].Index = offset + i + 1
+			}
+			grepSnippets = append(grepSnippets, fallbackSnips...)
+		}
+		for _, s := range grepSnippets {
+			c := Citation{ID: s.ID, Index: s.Index, Title: s.Title, URL: s.URL, Snippet: s.Snippet, Source: s.Source}
+			ragSnippets = append(ragSnippets, c)
+			if !hasAttachedKnowledgeBase || c.Source == "document" {
+				cc := c
+				onEvent(SseEvent{Type: "citation", Citation: &cc})
+			}
+		}
+		if ctx.Err() == nil && !grepToolsActive {
+			sourceCount := len(ragSnippets)
+			if hasAttachedKnowledgeBase {
+				status := string(rag.IterativeRetrievalNoHit)
+				if grepScopeErr != nil {
+					status = string(rag.IterativeRetrievalError)
+				} else if sourceCount > 0 {
+					status = string(rag.IterativeRetrievalFound)
+				}
+				onEvent(SseEvent{Type: "rag", Status: status, SourceCount: &sourceCount})
+			} else if len(grepScope.Documents) > 0 {
+				status := "document_no_hit"
+				if grepScopeErr != nil {
+					status = "document_error"
+				} else if sourceCount > 0 {
+					status = "document_found"
+				}
+				onEvent(SseEvent{Type: "rag", Status: status, SourceCount: &sourceCount})
+			}
+		}
+	} else if o.rag != nil && ragScoped && req.Mode != ModeDeepResearch {
 		ragBaseCtx := rag.WithBillingMessageID(ctx, assistantMsg.ID)
 		ragBaseCtx = rag.WithBillingWorkspaceID(ragBaseCtx, conv.WorkspaceID)
 		ragCtx, cancelRAG := context.WithTimeout(ragBaseCtx, ragQueryTimeout)
@@ -3696,6 +3784,11 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	//    ready, so its trigger can reuse the complete UnifiedChatRequest estimate
 	//    instead of maintaining a smaller, drifting accounting path.
 	ragContext := formatRAGContext(ragSnippets, req.Locale, o.db)
+	if grepToolsActive {
+		if grepHint := formatGrepScopeContext(grepScope); grepHint != "" {
+			ragContext += grepHint
+		}
+	}
 	// Search-only turns use the ordinary tool protocol, so query generation,
 	// citations, progress, and persistence need no extra task-model request.
 	// Conversation-uploaded data files staged in the sandbox (§4.5) were resolved
@@ -4220,8 +4313,14 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			SelectedAdminSkillIDs:  selectedAdminSkillIDs(selectedUserSkills),
 			DisabledAdminSkillIDs:  disabledModelSkillIDSet(req.DisabledModelSkillIDs),
 			PreloadedAdminSkillIDs: preloadedSkillIDs(&systemOpts),
+			GrepScope: func() *rag.GrepScope {
+				if grepToolsActive {
+					return grepScope
+				}
+				return nil
+			}(),
 			citationIndexes: func() *citationIndexAllocator {
-				if !hasAttachedKnowledgeBase {
+				if !hasAttachedKnowledgeBase && !grepToolsActive {
 					return nil
 				}
 				return &citationIndexAllocator{next: maxCitationIndex(ragSnippets)}

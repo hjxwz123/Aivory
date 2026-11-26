@@ -672,10 +672,12 @@ func (s *Service) resolveEmbedderForKB(ctx context.Context, kbID string) (Embedd
 		return nil, "", 0, fmt.Errorf("kb lookup: %w", err)
 	}
 	if modelID == "" {
-		// Legacy KBs created before the lock landed — fall through to global
-		// resolution, but log so admins can fix it.
+		// Legacy or Grep-mode KBs created without a locked embedding_model_id
+		// fall through to global resolution when RAG is active.
 		em, name, ddim := s.resolveEmbedder(ctx)
-		s.logger.Printf("rag: KB %s has no locked embedding_model_id; using global %s", kbID, name)
+		if s.logger != nil {
+			s.logger.Printf("rag: KB %s has no locked embedding_model_id; using global %s", kbID, name)
+		}
 		return em, name, ddim, nil
 	}
 	m, err := store.GetModel(ctx, s.db, modelID)

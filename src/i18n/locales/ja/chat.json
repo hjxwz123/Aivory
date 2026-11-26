@@ -402,7 +402,11 @@
     "image_generate": "画像生成",
     "use_skill": "スキルを使用",
     "save_memory": "メモリに保存",
-    "deep_research": "ディープリサーチ"
+    "deep_research": "ディープリサーチ",
+    "doc_list": "ドキュメント一覧",
+    "doc_grep": "ドキュメント検索",
+    "doc_read": "ドキュメント読み取り",
+    "tool": "ツール"
   },
   "toolDescriptions": {
     "web_search": "ウェブから最新情報を検索します",
@@ -414,7 +418,10 @@
     "python_execute": "Python を実行して分析、計算、ファイル処理を行います",
     "image_generate": "設定済みの画像モデルで画像を生成または編集します",
     "use_skill": "利用可能なスキルの詳細な指示を読み込みます",
-    "save_memory": "今後の会話に役立つ情報を保存します"
+    "save_memory": "今後の会話に役立つ情報を保存します",
+    "doc_list": "利用可能なドキュメントと目次を一覧表示します",
+    "doc_grep": "キーワードまたは正規表現でドキュメントを検索します",
+    "doc_read": "ドキュメントの指定された行範囲を読み取ります"
   },
   "sources": {
     "images": "画像検索結果",

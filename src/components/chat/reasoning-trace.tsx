@@ -12,6 +12,8 @@ import {
   Check,
   Download,
   AlertTriangle,
+  Files,
+  FileText,
 } from 'lucide-react'
 import type { ReasoningItem, ToolCall } from '@/types/chat'
 import { normalizeThinkingMarkdown } from '@/lib/markdown'
@@ -48,6 +50,9 @@ const TOOL_ICON: Record<string, ComponentType<{ size?: number; className?: strin
   use_skill: BookOpen,
   image_generate: ImageIcon,
   save_memory: Sparkles,
+  doc_list: Files,
+  doc_grep: Search,
+  doc_read: FileText,
 }
 
 /**
@@ -86,7 +91,12 @@ export function ReasoningTrace({ reasoning, thinkingMs, streaming = false, settl
           minutes: Math.floor(roundedThinkingSeconds / 60),
           seconds: roundedThinkingSeconds % 60,
         })
-  const preview = reasoningPreview(items, (tool) => tool.label || t(`tools.${tool.name || 'tool'}`, { defaultValue: tool.name || 'Tool' }))
+  const preview = reasoningPreview(items, (tool) => {
+    const safeToolName = typeof tool.name === 'string' && tool.name.trim() ? tool.name.trim() : 'tool'
+    return t(`tools.${safeToolName}`, {
+      defaultValue: tool.label || (safeToolName === 'tool' ? 'Tool' : safeToolName),
+    })
+  })
   const headline = roundedThinkingSeconds > 0
       ? t('reasoning.thoughtFor', { duration: thinkingDuration })
       : t('reasoning.title')
@@ -177,7 +187,9 @@ function ToolStep({ toolCall }: { toolCall: ToolCall }) {
   const elapsed = useElapsed(toolCall)
   const timingKnown = elapsed !== null
   const Icon = TOOL_ICON[safeName] ?? Sparkles
-  const displayName = label || t(`tools.${safeName}`, { defaultValue: safeName === 'tool' ? 'Tool' : safeName })
+  const displayName = t(`tools.${safeName}`, {
+    defaultValue: label || (safeName === 'tool' ? 'Tool' : safeName),
+  })
   const subtitle = pickSubtitle(safeName, input)
   const code =
     safeName === 'python_execute' && typeof (input as Record<string, unknown>)?.code === 'string'
@@ -297,5 +309,11 @@ function pickSubtitle(name: string, input: ToolCall['input']): string | null {
   if (name === 'web_fetch' && typeof inp.url === 'string') return inp.url
   if (name === 'use_skill' && typeof inp.name === 'string') return inp.name
   if (name === 'image_generate' && typeof inp.prompt === 'string') return inp.prompt
+  if (name === 'doc_grep' && typeof inp.pattern === 'string') return inp.pattern
+  if (name === 'doc_read' && typeof inp.document_id === 'string') {
+    const start = typeof inp.start_line === 'number' ? inp.start_line : 1
+    const count = typeof inp.line_count === 'number' ? inp.line_count : undefined
+    return count ? `${inp.document_id} (L${start}-L${start + count - 1})` : `${inp.document_id} (L${start}+)`
+  }
   return null
 }

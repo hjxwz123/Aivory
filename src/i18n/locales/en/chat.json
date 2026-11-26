@@ -407,7 +407,11 @@
     "image_generate": "Image generation",
     "use_skill": "Use skill",
     "save_memory": "Save memory",
-    "deep_research": "Deep research"
+    "deep_research": "Deep research",
+    "doc_list": "List documents",
+    "doc_grep": "Search documents",
+    "doc_read": "Read document",
+    "tool": "Tool"
   },
   "toolDescriptions": {
     "web_search": "Search the latest information on the web",
@@ -419,7 +423,10 @@
     "python_execute": "Run Python for analysis, calculations, and files",
     "image_generate": "Generate or edit images with the configured image model",
     "use_skill": "Load the instructions of an available skill",
-    "save_memory": "Remember useful information for future conversations"
+    "save_memory": "Remember useful information for future conversations",
+    "doc_list": "List available documents and outlines",
+    "doc_grep": "Search document contents by keyword or regex",
+    "doc_read": "Read specific line ranges of a document"
   },
   "sources": {
     "images": "Image search results",

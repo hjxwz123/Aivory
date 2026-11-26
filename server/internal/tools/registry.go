@@ -28,6 +28,7 @@ import (
 	"aivory/server/internal/sandbox"
 	"aivory/server/internal/store"
 	"aivory/server/internal/tooldiagnostics"
+	"aivory/server/internal/toolnames"
 )
 
 // Tool is the contract every self-built tool implements.
@@ -160,6 +161,9 @@ func NewRegistry(db *sql.DB, cfg config.Config, logger *log.Logger) *Registry {
 	r.Register(&imageGenerateTool{db: db, uploadDir: cfg.UploadDir, artifactDir: cfg.ArtifactDir, logger: logger})
 	r.Register(&useSkillTool{db: db})
 	r.Register(&saveMemoryTool{db: db})
+	r.Register(&docListTool{})
+	r.Register(&docGrepTool{})
+	r.Register(&docReadTool{})
 	return r
 }
 
@@ -210,6 +214,9 @@ func (r *Registry) listRegistered(includeUnavailable bool) []llm.ToolDef {
 	defer r.mu.RUnlock()
 	out := []llm.ToolDef{}
 	for _, t := range r.tools {
+		if toolnames.IsDocumentTool(t.Name()) {
+			continue
+		}
 		if !includeUnavailable && t.Name() == "python_execute" && !sandboxEnabled {
 			continue
 		}
@@ -227,6 +234,32 @@ func (r *Registry) listRegistered(includeUnavailable bool) []llm.ToolDef {
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// DocumentGrepToolDefs returns the internal Grep-mode document inspection tool
+// definitions. They are injected dynamically by the orchestrator only when the
+// global document retrieval mode is "grep" and the turn has documents in scope.
+func (r *Registry) DocumentGrepToolDefs() []llm.ToolDef {
+	promptOverrides := systemprompts.Load(r.db)
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]llm.ToolDef, 0, 3)
+	for _, name := range []string{toolnames.DocList, toolnames.DocGrep, toolnames.DocRead} {
+		t, ok := r.tools[name]
+		if !ok {
+			continue
+		}
+		description := promptOverrides.Text("tools.description." + t.Name())
+		if description == "" {
+			description = t.Description()
+		}
+		out = append(out, llm.ToolDef{
+			Name:        t.Name(),
+			Description: description,
+			InputSchema: t.InputSchema(),
+		})
+	}
 	return out
 }
 

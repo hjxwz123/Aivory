@@ -212,10 +212,16 @@ func createKBHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// The store re-evaluates this standalone-KB cap while holding the creator
 	// row lock and inserts in the same transaction. 0 remains unlimited.
 	_, maxKBs := groupCapFor(d, r, u.ID, u.GroupID)
-	m, err := configuredEmbeddingModel(r.Context(), d)
-	if err != nil {
-		writeError(w, http.StatusConflict, errKnowledgeBaseUnavailable)
-		return
+	var embedModelID string
+	var embedDim int
+	if store.DocumentRetrievalMode(d.DB) != store.DocumentRetrievalModeGrep {
+		m, err := configuredEmbeddingModel(r.Context(), d)
+		if err != nil {
+			writeError(w, http.StatusConflict, errKnowledgeBaseUnavailable)
+			return
+		}
+		embedModelID = m.ID
+		embedDim = m.Dim
 	}
 	// §workspace RBAC: workspace KBs default to workspace-shared; the creator
 	// may opt into private at creation. Guests cannot create at all (the
@@ -228,8 +234,8 @@ func createKBHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		UserID:           u.ID,
 		Name:             req.Name,
 		Description:      req.Description,
-		EmbeddingModelID: m.ID,
-		EmbeddingDim:     m.Dim,
+		EmbeddingModelID: embedModelID,
+		EmbeddingDim:     embedDim,
 		WorkspaceID:      req.WorkspaceID,
 		IsPublic:         isPublic,
 	}, maxKBs)

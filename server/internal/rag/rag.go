@@ -770,6 +770,19 @@ func (s *Service) runPipeline(ctx context.Context, docID string, cache *parseCac
 		}
 	}
 
+	if err := s.saveDocumentText(ctx, d, content); err != nil {
+		return err
+	}
+	if store.DocumentRetrievalMode(s.db) == store.DocumentRetrievalModeGrep {
+		if err := store.UpdateDocumentStatus(ctx, s.db, docID, "ready", "", 0); err != nil {
+			return err
+		}
+		if s.logger != nil {
+			s.logger.Printf("rag: grep ingest ready doc=%s file=%q lines=%d total=%s", docID, d.Filename, countLines(content), time.Since(pipelineStart).Round(time.Millisecond))
+		}
+		return nil
+	}
+
 	// Chunk hierarchically (§4.11-C-2 small-to-big): parents carry section
 	// context (not embedded), children carry the vectors.
 	stageStart := time.Now()
@@ -1227,7 +1240,7 @@ func (s *Service) retrieve(ctx context.Context, userID, convID string, kbIDs []s
 			s.logRetrievalStage(ctx, convID, "retrieve_scope", "started", time.Time{},
 				fmt.Sprintf(" knowledge_bases=%d document_ids=%d", len(kbIDs), len(opts.documentIDs)))
 			scopeLoaded = true
-			scopeCache, scopeErr = store.ListChunksInScope(ctx, s.db, kbIDs, convID)
+			scopeCache, scopeErr = s.listChunksInScopeWithFallback(ctx, kbIDs, convID)
 			if scopeErr == nil {
 				scopeCache = filterChunksByDocuments(scopeCache, opts.documentIDs, opts.restrictDocuments)
 			}
@@ -1609,11 +1622,66 @@ func (s *Service) keywordOnlyUnembedded(ctx context.Context, kbIDs []string, con
 	if len(terms) == 0 {
 		return nil
 	}
-	rows, err := store.ListChunksInScope(ctx, s.db, kbIDs, convID)
+	rows, err := s.listChunksInScopeWithFallback(ctx, kbIDs, convID)
 	if err != nil {
 		return nil
 	}
 	return relationalKeywordCandidates(rows, terms, true)
+}
+
+// listChunksInScopeWithFallback loads stored chunks and synthesizes unembedded
+// paragraph chunks from document_texts for ready documents ingested while Grep
+// mode was active, so switching back to RAG never hides those documents.
+func (s *Service) listChunksInScopeWithFallback(ctx context.Context, kbIDs []string, convID string) ([]store.Chunk, error) {
+	chunks, err := store.ListChunksInScope(ctx, s.db, kbIDs, convID)
+	if err != nil {
+		return nil, err
+	}
+	hasChunk := make(map[string]bool, len(chunks))
+	for _, c := range chunks {
+		hasChunk[c.DocumentID] = true
+	}
+	readyDocs, rerr := store.ListReadyDocumentsInScope(ctx, s.db, kbIDs, convID)
+	if rerr != nil || len(readyDocs) == 0 {
+		return chunks, nil
+	}
+	missing := false
+	for _, d := range readyDocs {
+		if !hasChunk[d.ID] {
+			missing = true
+			break
+		}
+	}
+	if !missing {
+		return chunks, nil
+	}
+	texts, terr := store.ListDocumentTextsInScope(ctx, s.db, kbIDs, convID)
+	if terr != nil || len(texts) == 0 {
+		return chunks, nil
+	}
+	for _, dt := range texts {
+		if hasChunk[dt.DocumentID] || strings.TrimSpace(dt.Content) == "" {
+			continue
+		}
+		parents := chunkHierarchical(dt.Content)
+		seq := 0
+		for _, p := range parents {
+			for _, child := range p.Children {
+				chunks = append(chunks, store.Chunk{
+					ID:             fmt.Sprintf("textchunk:%s:%d", dt.DocumentID, seq),
+					DocumentID:     dt.DocumentID,
+					KBID:           dt.KBID,
+					ConversationID: dt.ConversationID,
+					Seq:            seq,
+					ChunkType:      "text",
+					Content:        child,
+					Filename:       dt.Filename,
+				})
+				seq++
+			}
+		}
+	}
+	return chunks, nil
 }
 
 // relationalKeywordCandidates searches the relational chunk text when a
@@ -2977,7 +3045,7 @@ func (s *Service) routeAndRetrieve(ctx context.Context, userID, convID string, k
 	routeScopeStarted := time.Now()
 	s.logRetrievalStage(ctx, convID, "route_scope", "started", time.Time{},
 		fmt.Sprintf(" knowledge_bases=%d", len(kbIDs)))
-	scope, scopeErr := store.ListChunksInScope(ctx, s.db, kbIDs, convID)
+	scope, scopeErr := s.listChunksInScopeWithFallback(ctx, kbIDs, convID)
 	if scopeErr != nil && retrieveOpts.strict {
 		s.logRetrievalStage(ctx, convID, "route_scope", "failed", routeScopeStarted,
 			fmt.Sprintf(" error_kind=%q", retrievalStageErrorKind(scopeErr)))

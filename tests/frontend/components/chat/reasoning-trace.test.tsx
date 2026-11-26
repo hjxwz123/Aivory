@@ -4,10 +4,13 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ReasoningItem } from '@/types/chat'
 import { ReasoningTrace } from '@/components/chat/reasoning-trace'
 
+const mockToolTranslations: Record<string, string> = {}
+
 vi.mock('react-i18next', () => ({
   initReactI18next: { type: '3rdParty', init: vi.fn() },
   useTranslation: () => ({
     t: (key: string, options?: { defaultValue?: string; count?: number; duration?: string }) => {
+      if (key in mockToolTranslations) return mockToolTranslations[key]
       if (key === 'reasoning.durationSeconds') return `${options?.count} seconds`
       if (key === 'reasoning.thoughtFor') return `Thought for ${options?.duration}`
       return options?.defaultValue ?? key
@@ -152,5 +155,70 @@ describe('ReasoningTrace tool layout', () => {
     )
 
     expect(html).toMatch(/lower right\.<\/p><p[^>]*><strong>Updating hardware visuals<\/strong><\/p>/)
+  })
+
+  it('prefers localized i18n tool labels over fallback english labels for document tools', () => {
+    mockToolTranslations['tools.doc_list'] = '查看文档列表'
+    mockToolTranslations['tools.doc_grep'] = '搜索文档内容'
+    mockToolTranslations['tools.doc_read'] = '读取文档内容'
+    try {
+      const reasoning: ReasoningItem[] = [
+        {
+          kind: 'tool',
+          id: 'step-doc-list',
+          tool: {
+            id: 'tool-doc-list',
+            name: 'doc_list',
+            label: 'Listing documents',
+            status: 'complete',
+            startedAt: 1_700_000_000_000,
+            endedAt: 1_700_000_001_000,
+          },
+        },
+        {
+          kind: 'tool',
+          id: 'step-doc-grep',
+          tool: {
+            id: 'tool-doc-grep',
+            name: 'doc_grep',
+            label: 'Searching documents',
+            input: { pattern: 'ZEBRA_GREP_TOKEN_9472' },
+            status: 'complete',
+            startedAt: 1_700_000_001_000,
+            endedAt: 1_700_000_002_000,
+          },
+        },
+        {
+          kind: 'tool',
+          id: 'step-doc-read',
+          tool: {
+            id: 'tool-doc-read',
+            name: 'doc_read',
+            label: 'Reading document',
+            input: { document_id: 'doc_123', start_line: 10, line_count: 5 },
+            status: 'complete',
+            startedAt: 1_700_000_002_000,
+            endedAt: 1_700_000_003_000,
+          },
+        },
+      ]
+
+      const liveHtml = renderToStaticMarkup(
+        createElement(ReasoningTrace, { reasoning, streaming: true, settled: false }),
+      )
+
+      expect(liveHtml).toContain('查看文档列表')
+      expect(liveHtml).toContain('搜索文档内容')
+      expect(liveHtml).toContain('读取文档内容')
+      expect(liveHtml).toContain('ZEBRA_GREP_TOKEN_9472')
+      expect(liveHtml).toContain('doc_123 (L10-L14)')
+      expect(liveHtml).not.toContain('Listing documents')
+      expect(liveHtml).not.toContain('Searching documents')
+      expect(liveHtml).not.toContain('Reading document')
+    } finally {
+      delete mockToolTranslations['tools.doc_list']
+      delete mockToolTranslations['tools.doc_grep']
+      delete mockToolTranslations['tools.doc_read']
+    }
   })
 })

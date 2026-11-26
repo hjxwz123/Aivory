@@ -1680,6 +1680,9 @@ var settingsKeys = []string{
 	// embed + retrieve).
 	"rag_full_text_threshold", "rag_top_k", "rag_dynamic_topk", "rag_similarity_threshold",
 	"rag_code_full_text_max_lines",
+	"document_retrieval_mode",
+	"grep_full_text_threshold", "grep_code_full_text_max_lines",
+	"grep_max_matches", "grep_context_lines", "grep_read_max_lines", "grep_read_max_chars",
 	// Optional OpenAI-compatible reranking service. This has its own endpoint,
 	// credential and model name; it deliberately does not reuse a model channel.
 	"rag_rerank_enabled", "rag_rerank_api_url", "rag_rerank_api_key", "rag_rerank_model",
@@ -2285,6 +2288,52 @@ func applyAdminSettingsPatch(ctx context.Context, d Deps, body map[string]json.R
 					return 0, errInvalidInput
 				}
 				v, _ = json.Marshal(enabled)
+			case "document_retrieval_mode":
+				var mode string
+				if json.Unmarshal(v, &mode) != nil {
+					return 0, errInvalidInput
+				}
+				trimmed := strings.ToLower(strings.TrimSpace(mode))
+				if trimmed != store.DocumentRetrievalModeRAG && trimmed != store.DocumentRetrievalModeGrep {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(trimmed)
+			case "grep_full_text_threshold":
+				var n int
+				if json.Unmarshal(v, &n) != nil || n < 0 || n > 200000 {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(n)
+			case "grep_code_full_text_max_lines":
+				var n int
+				if json.Unmarshal(v, &n) != nil || n < 0 || n > 20000 {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(n)
+			case "grep_max_matches":
+				var n int
+				if json.Unmarshal(v, &n) != nil || n < 1 || n > 100 {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(n)
+			case "grep_context_lines":
+				var n int
+				if json.Unmarshal(v, &n) != nil || n < 0 || n > 20 {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(n)
+			case "grep_read_max_lines":
+				var n int
+				if json.Unmarshal(v, &n) != nil || n < 10 || n > 1000 {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(n)
+			case "grep_read_max_chars":
+				var n int
+				if json.Unmarshal(v, &n) != nil || n < 1000 || n > 64000 {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(n)
 			case "rag_rerank_api_url":
 				var baseURL string
 				if json.Unmarshal(v, &baseURL) != nil {

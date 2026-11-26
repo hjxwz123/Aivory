@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"aivory/server/internal/rag"
 	"aivory/server/internal/store"
 	"aivory/server/internal/systemprompts"
 	"aivory/server/internal/toolnames"
@@ -1002,8 +1003,11 @@ func composeSystemPrompt(o systemPromptOpts) string {
 			// usage is already mandated by the "## Skills available" section.
 			b.WriteString("\n\n")
 			b.WriteString(l.toolHeader)
-			if has[toolnames.AivoryWebSearch] {
+			if has[toolnames.AivoryWebSearch] || has[toolnames.DocGrep] {
 				b.WriteString(l.toolCite)
+			}
+			if has[toolnames.DocGrep] {
+				b.WriteString("- When documents are attached or in knowledge bases, use doc_list to inspect available document_id values and headings, doc_grep to search keywords/patterns with line numbers, and doc_read to read exact line ranges before answering.\n")
 			}
 			b.WriteString(l.toolMultiRound)
 		} else {
@@ -1016,6 +1020,9 @@ func composeSystemPrompt(o systemPromptOpts) string {
 				{"python_execute", l.toolPython},
 				{"image_generate", l.toolImage},
 				{"save_memory", l.toolSaveMemory},
+				{toolnames.DocList, "- Use doc_list({}) to list accessible document_id values, filenames, line counts, and headings.\n"},
+				{toolnames.DocGrep, "- Use doc_grep({\"pattern\":\"...\",\"regex\":false,\"document_ids\":[...]}) to search documents and locate matching line numbers.\n"},
+				{toolnames.DocRead, "- Use doc_read({\"document_id\":\"...\",\"start_line\":1,\"line_count\":200}) to read exact lines from a document.\n"},
 			}
 			wrote := false
 			for _, g := range guidance {
@@ -1195,6 +1202,26 @@ func formatRAGContext(snips []Citation, locale string, databases ...*sql.DB) str
 		fmt.Fprintf(&b, "[%d] %s\n%s\n\n", index, c.Title, c.Snippet)
 	}
 	b.WriteString("</context-from-knowledge-base>\n")
+	return b.String()
+}
+
+// formatGrepScopeContext injects a lightweight document index into the turn's
+// message layer so the model knows which unpinned documents exist and can call
+// doc_list / doc_grep / doc_read without bloating the cacheable system prefix.
+func formatGrepScopeContext(scope *rag.GrepScope) string {
+	if scope == nil || !scope.HasUnpinned {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\n<available-documents-for-grep>\n")
+	b.WriteString("The following authorized documents are not injected in full. Use doc_grep to search for keywords/patterns, doc_read to inspect specific line ranges, and doc_list to view section headings. Cite findings with [n].\n")
+	for _, doc := range scope.Documents {
+		if doc.Pinned {
+			continue
+		}
+		fmt.Fprintf(&b, "- doc_id=%s | filename=%q | source=%s | lines=%d\n", doc.DocumentID, doc.Filename, doc.Source, doc.LineCount)
+	}
+	b.WriteString("</available-documents-for-grep>\n")
 	return b.String()
 }
 

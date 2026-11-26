@@ -38,7 +38,7 @@ var backupTableOrder = []string{
 	"models", "model_channel_bindings", "model_group_quotas", "model_tags", "image_styles",
 	"redeem_codes", "redeem_redemptions",
 	"model_skills", "knowledge_bases", "knowledge_base_shares", "workspace_kb_member_permissions", "projects", "conversations", "conversation_compaction_leases", "conversation_generation_leases", "messages", "message_feedback", "user_feedback",
-	"conversation_shares", "html_preview_shares", "files", "documents", "chunks", "vector_points", "memories",
+	"conversation_shares", "html_preview_shares", "files", "documents", "document_texts", "chunks", "vector_points", "memories",
 	// AI PPT decks reference users and (via file_id, without a FK) the mirrored
 	// file above, so they restore after both.
 	"aippt_decks",
@@ -440,6 +440,7 @@ var tablePrimaryKeys = map[string][]string{
 	"html_preview_shares":             {"id"},
 	"files":                           {"id"},
 	"documents":                       {"id"},
+	"document_texts":                  {"document_id"},
 	"chunks":                          {"id"},
 	"vector_points":                   {"chunk_id", "dimension"},
 	"memories":                        {"id"},
