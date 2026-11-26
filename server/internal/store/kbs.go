@@ -453,6 +453,9 @@ func ValidateKBEmbeddingCompatibility(ctx context.Context, db *sql.DB, ids []str
 	if len(ids) < 2 {
 		return nil
 	}
+	if DocumentRetrievalMode(db) == DocumentRetrievalModeGrep {
+		return nil
+	}
 	ph := make([]string, len(ids))
 	args := make([]any, 0, len(ids))
 	for i, id := range ids {

@@ -402,7 +402,11 @@
     "image_generate": "图片生成",
     "use_skill": "使用技能",
     "save_memory": "保存记忆",
-    "deep_research": "深度研究"
+    "deep_research": "深度研究",
+    "doc_list": "查看文档列表",
+    "doc_grep": "搜索文档内容",
+    "doc_read": "读取文档内容",
+    "tool": "工具"
   },
   "toolDescriptions": {
     "web_search": "实时检索全网最新资讯",
@@ -414,7 +418,10 @@
     "python_execute": "运行 Python 进行分析、计算和文件处理",
     "image_generate": "使用已配置的图片模型生成或编辑图片",
     "use_skill": "按需载入可用技能的完整说明",
-    "save_memory": "保存对后续对话有帮助的信息"
+    "save_memory": "保存对后续对话有帮助的信息",
+    "doc_list": "列出可用文档及其结构大纲",
+    "doc_grep": "按关键词或正则表达式搜索文档内容",
+    "doc_read": "按行号范围读取文档指定内容"
   },
   "sources": {
     "images": "图片搜索结果",

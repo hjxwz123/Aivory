@@ -784,6 +784,7 @@ func Migrate(db *sql.DB) error {
 		"projects":                        {"workspace_id", "is_public"},
 		"knowledge_bases":                 {"workspace_id", "is_public"},
 		"chunks":                          {"image_ref"},
+		"document_texts":                  {"document_id", "kb_id", "conversation_id", "content", "line_count", "char_count", "token_estimate", "outline_json", "updated_at"},
 		"files":                           {"draft", "branch_message_id"},
 		"documents":                       {"ingest_updated_at", "uploaded_by_user_id"},
 		"knowledge_base_shares":           {"kb_id", "user_id", "role", "created_at", "updated_at"},
@@ -811,6 +812,9 @@ func Migrate(db *sql.DB) error {
 		if _, err := db.Exec(fmt.Sprintf(`SELECT %s FROM %s WHERE 1=0`, strings.Join(cols, ", "), table)); err != nil {
 			return fmt.Errorf("schema column check failed for %q (an additive migration may have silently failed): %w", table, err)
 		}
+	}
+	if err := migrateKnowledgeBasesOptionalEmbedding(db); err != nil {
+		return fmt.Errorf("migrate optional knowledge-base embedding: %w", err)
 	}
 	// Preserve the historical combined skill/prompt creation switch when an
 	// existing database first acquires the granular columns. The MCP creation

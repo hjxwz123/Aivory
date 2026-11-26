@@ -208,38 +208,44 @@ func createProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if req.IsPublic != nil {
 		isPublic = *req.IsPublic
 	}
-	embed, err := configuredEmbeddingModel(r.Context(), d)
-	if err != nil {
-		// Allow project without KB if no embedding model.
-		p, err := store.CreateProjectWithLimit(r.Context(), d.DB, store.Project{
-			UserID: u.ID, Name: req.Name, Description: req.Description, Instructions: req.Instructions,
-			Accent: req.Accent, Emoji: req.Emoji, WorkspaceID: req.WorkspaceID, IsPublic: isPublic,
-		}, maxProjects)
+	var embedModelID string
+	var embedDim int
+	if store.DocumentRetrievalMode(d.DB) != store.DocumentRetrievalModeGrep {
+		embed, err := configuredEmbeddingModel(r.Context(), d)
 		if err != nil {
-			if errors.Is(err, store.ErrNotFound) && req.WorkspaceID != "" {
-				writeError(w, http.StatusForbidden, errWorkspaceProjectCreationPermission)
+			// Allow project without KB if no embedding model.
+			p, err := store.CreateProjectWithLimit(r.Context(), d.DB, store.Project{
+				UserID: u.ID, Name: req.Name, Description: req.Description, Instructions: req.Instructions,
+				Accent: req.Accent, Emoji: req.Emoji, WorkspaceID: req.WorkspaceID, IsPublic: isPublic,
+			}, maxProjects)
+			if err != nil {
+				if errors.Is(err, store.ErrNotFound) && req.WorkspaceID != "" {
+					writeError(w, http.StatusForbidden, errWorkspaceProjectCreationPermission)
+					return
+				}
+				if errors.Is(err, store.ErrProjectLimitExceeded) {
+					writeError(w, http.StatusForbidden, errProjectLimit)
+					return
+				}
+				if errors.Is(err, store.ErrProjectNameExists) {
+					writeError(w, 409, err)
+					return
+				}
+				writeError(w, 500, err)
 				return
 			}
-			if errors.Is(err, store.ErrProjectLimitExceeded) {
-				writeError(w, http.StatusForbidden, errProjectLimit)
-				return
-			}
-			if errors.Is(err, store.ErrProjectNameExists) {
-				writeError(w, 409, err)
-				return
-			}
-			writeError(w, 500, err)
+			writeJSON(w, 201, userProject(*p))
 			return
 		}
-		writeJSON(w, 201, userProject(*p))
-		return
+		embedModelID = embed.ID
+		embedDim = embed.Dim
 	}
 	p, err := store.CreateProjectWithLibraryAndLimit(r.Context(), d.DB, store.Project{
 		UserID: u.ID, Name: req.Name, Description: req.Description, Instructions: req.Instructions,
 		Accent: req.Accent, Emoji: req.Emoji, WorkspaceID: req.WorkspaceID, IsPublic: isPublic,
 	}, store.KnowledgeBase{
 		UserID: u.ID, Name: req.Name + " — project library",
-		EmbeddingModelID: embed.ID, EmbeddingDim: embed.Dim,
+		EmbeddingModelID: embedModelID, EmbeddingDim: embedDim,
 		WorkspaceID: req.WorkspaceID, IsPublic: isPublic,
 	}, maxProjects)
 	if err != nil {

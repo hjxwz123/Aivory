@@ -402,7 +402,11 @@
     "image_generate": "Génération d’images",
     "use_skill": "Utiliser une compétence",
     "save_memory": "Enregistrer en mémoire",
-    "deep_research": "Recherche approfondie"
+    "deep_research": "Recherche approfondie",
+    "doc_list": "Lister les documents",
+    "doc_grep": "Rechercher dans les documents",
+    "doc_read": "Lire un document",
+    "tool": "Outil"
   },
   "toolDescriptions": {
     "web_search": "Rechercher les informations les plus récentes sur le web",
@@ -414,7 +418,10 @@
     "python_execute": "Exécuter Python pour l’analyse, le calcul et les fichiers",
     "image_generate": "Générer ou modifier des images avec le modèle configuré",
     "use_skill": "Charger les instructions d’une compétence disponible",
-    "save_memory": "Mémoriser des informations utiles pour les prochaines conversations"
+    "save_memory": "Mémoriser des informations utiles pour les prochaines conversations",
+    "doc_list": "Lister les documents disponibles et leurs plans",
+    "doc_grep": "Rechercher dans les documents par mot-clé ou expression régulière",
+    "doc_read": "Lire une plage de lignes précise d’un document"
   },
   "sources": {
     "images": "Résultats de recherche d’images",

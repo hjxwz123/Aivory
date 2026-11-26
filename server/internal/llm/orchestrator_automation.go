@@ -214,7 +214,8 @@ func toolRouteKnownCapabilities(name string) []string {
 		return []string{"web"}
 	case name == "python_execute", name == "code_interpreter", name == "shell", name == "bash":
 		return []string{"code", "file"}
-	case name == "file_search", strings.HasPrefix(name, "file_search_"):
+	case name == "file_search", strings.HasPrefix(name, "file_search_"),
+		name == toolnames.DocList, name == toolnames.DocGrep, name == toolnames.DocRead:
 		return []string{"file"}
 	case name == "image_generate", name == "image_generation":
 		return []string{"image"}

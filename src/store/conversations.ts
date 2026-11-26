@@ -3935,30 +3935,27 @@ function safeToolName(name: unknown): string {
   return typeof name === 'string' && name.trim() ? name.trim() : 'tool'
 }
 
+const TOOL_FALLBACK_LABELS: Record<string, string> = {
+  web_search: 'Searching the web',
+  aivory_web_search: 'Searching the web',
+  web_fetch: 'Reading a web page',
+  fetch_image: 'Downloading image',
+  python_execute: 'Running Python',
+  code_interpreter: 'Running code interpreter',
+  image_generate: 'Generating an image',
+  image_generation: 'Generating an image',
+  use_skill: 'Loading a skill',
+  save_memory: 'Saving memory',
+  deep_research: 'Deep research',
+  doc_list: 'Listing documents',
+  doc_grep: 'Searching documents',
+  doc_read: 'Reading document',
+  tool: 'Tool',
+}
+
 function prettyToolLabel(name: string): string {
-  switch (name) {
-    case 'web_search':
-    case 'aivory_web_search':
-      return 'Searching the web'
-    case 'web_fetch':
-      return 'Reading a web page'
-    case 'python_execute':
-      return 'Running Python'
-    case 'code_interpreter':
-      return 'Running code interpreter'
-    case 'image_generate':
-      return 'Generating an image'
-    case 'image_generation':
-      return 'Generating an image'
-    case 'use_skill':
-      return 'Loading a skill'
-    case 'save_memory':
-      return 'Saving memory'
-    case 'tool':
-      return 'Tool'
-    default:
-      return name
-  }
+  const fallback = TOOL_FALLBACK_LABELS[name] ?? name
+  return i18n.t(`chat:tools.${name}`, { defaultValue: fallback })
 }
 
 function errorMessage(e: unknown, fallback = 'Something went wrong'): string {

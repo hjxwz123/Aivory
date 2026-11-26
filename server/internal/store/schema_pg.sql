@@ -598,8 +598,8 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
   user_id            TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name               TEXT NOT NULL,
   description        TEXT NOT NULL DEFAULT '',
-  embedding_model_id TEXT NOT NULL REFERENCES models(id),
-  embedding_dim      INTEGER NOT NULL,
+  embedding_model_id TEXT NOT NULL DEFAULT '',
+  embedding_dim      INTEGER NOT NULL DEFAULT 0,
   project_id         TEXT,
   created_at         BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint),
   -- §workspace RBAC: 1 = shared with the workspace; 0 = private to the
@@ -864,6 +864,20 @@ CREATE TABLE IF NOT EXISTS vector_points (
   PRIMARY KEY (chunk_id, dimension)
 );
 CREATE INDEX IF NOT EXISTS idx_vector_points_dimension ON vector_points(dimension);
+
+CREATE TABLE IF NOT EXISTS document_texts (
+  document_id     TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+  kb_id           TEXT,
+  conversation_id TEXT,
+  content         TEXT NOT NULL,
+  line_count      INTEGER NOT NULL DEFAULT 0,
+  char_count      INTEGER NOT NULL DEFAULT 0,
+  token_estimate  INTEGER NOT NULL DEFAULT 0,
+  outline_json    TEXT NOT NULL DEFAULT '[]',
+  updated_at      BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
+);
+CREATE INDEX IF NOT EXISTS idx_document_texts_kb ON document_texts(kb_id);
+CREATE INDEX IF NOT EXISTS idx_document_texts_conv ON document_texts(conversation_id);
 
 CREATE TABLE IF NOT EXISTS memories (
   id                 TEXT PRIMARY KEY,
